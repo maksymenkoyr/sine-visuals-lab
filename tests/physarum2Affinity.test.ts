@@ -29,6 +29,7 @@ import {
   tablesMatch,
   quantize,
   randomSmell,
+  rollOwn,
   randomTouch,
   nudgeTable,
   pushHistory,
@@ -404,10 +405,32 @@ describe("randomSmell", () => {
 
   it("the diagonal lies in OWN_TRAIL_RANDOM when not kept", () => {
     const rnd = mulberry32(2);
-    const out = randomSmell(SAMPLE_TABLE, false, rnd);
-    for (let i = 0; i < 4; i++) {
-      expect(out[i]![i]).toBeGreaterThanOrEqual(OWN_TRAIL_RANDOM[0]);
-      expect(out[i]![i]).toBeLessThanOrEqual(OWN_TRAIL_RANDOM[1]);
+    for (let n = 0; n < 100; n++) {
+      const out = randomSmell(SAMPLE_TABLE, false, rnd);
+      for (let i = 0; i < 4; i++) {
+        expect(out[i]![i]).toBeGreaterThanOrEqual(OWN_TRAIL_RANDOM[0] - 1e-9);
+        expect(out[i]![i]).toBeLessThanOrEqual(OWN_TRAIL_RANDOM[1] + 1e-9);
+        expect(onQuantumGrid(out[i]![i]!)).toBe(true);
+      }
+    }
+  });
+
+  // 2026-10-03: the own trail used to roll evenly in value, which put nearly
+  // every thumb in the fader's top stretch, where the default already sits.
+  it("own-trail rolls spread over the fader's height, not bunched at the top", () => {
+    for (const range of [OWN_TRAIL_RANDOM, RIVAL_OWN_RANDOM]) {
+      const rnd = mulberry32(7);
+      const lo = padPos(range[0]);
+      const hi = padPos(range[1]);
+      const mid = (lo + hi) / 2;
+      let below = 0;
+      const rolls = 2000;
+      for (let n = 0; n < rolls; n++) if (padPos(rollOwn(range, rnd)) < mid) below++;
+      // Even in fader position: about half the thumbs land in the lower half.
+      expect(below / rolls).toBeGreaterThan(0.4);
+      expect(below / rolls).toBeLessThan(0.6);
+      // And the span covers a real stretch of the fader's positive half.
+      expect(hi - lo).toBeGreaterThan(20);
     }
   });
 

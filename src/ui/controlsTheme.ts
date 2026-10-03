@@ -1066,6 +1066,30 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
 .vc-pop-actions { display: flex; gap: 8px; }
 
+/* The one Random under the boxes (itemBoxes.ts's header, "One Random"): a
+ * full-width violet button whose die spins once per roll. */
+.vc-roll {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+  margin: 10px 0 8px; padding: 9px 12px; cursor: pointer; color: ${SCENE_VIOLET};
+  background: linear-gradient(135deg, rgba(195, 165, 249, 0.16), rgba(195, 165, 249, 0.04));
+  border: 1px solid rgba(195, 165, 249, 0.55); border-radius: 8px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.vc-roll[hidden] { display: none; }
+.vc-roll:hover, .vc-roll:focus-visible {
+  color: #fff; border-color: ${SCENE_VIOLET};
+  background: linear-gradient(135deg, rgba(195, 165, 249, 0.3), rgba(195, 165, 249, 0.08));
+}
+.vc-roll-die { width: 22px; height: 22px; flex-shrink: 0; }
+.vc-roll-text { display: grid; justify-items: start; gap: 2px; text-align: left; }
+.vc-roll-text b { font: 500 13px/1 ${FONT_LABEL}; letter-spacing: 0.08em; text-transform: uppercase; }
+.vc-roll-text span { font: 400 10px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.03em; }
+.vc-roll-spin .vc-roll-die { animation: vc-roll-spin 0.45s cubic-bezier(0.3, 1.4, 0.6, 1); }
+@keyframes vc-roll-spin { from { transform: rotate(-200deg) scale(0.7); } to { transform: rotate(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-roll-spin .vc-roll-die { animation-duration: 0.01s; }
+}
+
 /* ---- src/ui/widgets/strainConsole.ts ----
  * The Strain Console card: one row per setting with a lane per strain and its
  * Link chip, the real setting row mounted under the lanes for the
@@ -1115,7 +1139,7 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-sc-wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .vc-sc-syn-left { display: grid; justify-items: center; gap: 4px; }
-/* The console's mix row (Random / Back / presets) and its colour row under
+/* The console's mix row (Back / presets) and its colour row under
  * the wheel — strainConsole.ts's own header; the buttons reuse the Pairs mix
  * row's .vc-mix-row and .vc-exp-pill styles below. */
 .vc-sc-mix { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
@@ -1258,7 +1282,7 @@ body.vc-keys-reveal [data-keycap]::after {
   font: 400 11.5px/1.35 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75); white-space: normal;
 }
 
-/* Random / Nudge / Keep own trails / Back (pairPads.ts's own header, "The mix
+/* Nudge / Keep own trails / Rivals / Back (pairPads.ts's own header, "The mix
  * row"). Back starts disabled (an empty history) via the plain disabled
  * state; Keep own trails toggles via aria-pressed, styled the same violet
  * as a pressed .vc-exp-pill below. */

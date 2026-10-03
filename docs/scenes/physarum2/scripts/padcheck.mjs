@@ -319,7 +319,7 @@ async function clickPreset(name) {
   await page.waitForTimeout(200);
 }
 async function clickMixButton(label) {
-  await page.locator(".vc-mix-row button", { hasText: label }).first().click();
+  await page.locator(".vc-pair .vc-mix-row button", { hasText: label }).first().click();
   await page.waitForTimeout(200);
 }
 
@@ -350,19 +350,23 @@ const postBack = await readAllTables();
 report("back-restores-pre-war-smell", tablesClose(preWar.smell, postBack.smell, 0.011), JSON.stringify({ pre: preWar.smell, post: postBack.smell }));
 report("back-restores-pre-war-touch", tablesClose(preWar.touch, postBack.touch, 0.011), JSON.stringify({ pre: preWar.touch, post: postBack.touch }));
 
-// Random on Touch: the Smell table is untouched, every rolled Touch value is
-// quantised, and the 12-cell roll landed at least one zero and one non-zero
-// (the exact ~35% zero share is the unit test's job, physarum2Affinity.test.ts).
-await page.locator(".vc-pair-layer-touch").click();
+// The Strains card's one Random (itemBoxes.ts, 2026-10-03): Smell and Touch
+// both move, every rolled Touch value is quantised, and the 12-cell Touch
+// roll landed at least one zero and one non-zero (the exact ~35% zero share
+// is the unit test's job, physarum2Affinity.test.ts). The Pairs card's Back
+// then undoes just its half.
+const preRandom = await readAllTables();
+await page.locator(".vc-roll").click();
 await page.waitForTimeout(200);
-const preRandomTouch = await readAllTables();
-await clickMixButton("Random touch");
-const postRandomTouch = await readAllTables();
-report("random-touch-leaves-smell-unchanged", tablesClose(preRandomTouch.smell, postRandomTouch.smell, 1e-6), "");
-const touchVals = Object.values(postRandomTouch.touch);
+const postRandom = await readAllTables();
+report("random-moves-smell", !tablesClose(preRandom.smell, postRandom.smell, 1e-6), "");
+const touchVals = Object.values(postRandom.touch);
 const onGrid = touchVals.every((v) => Math.abs(v / 0.05 - Math.round(v / 0.05)) < 1e-6);
 report("random-touch-on-0.05-grid", onGrid, JSON.stringify(touchVals));
 report("random-touch-has-zero-and-nonzero", touchVals.some((v) => v === 0) && touchVals.some((v) => v !== 0), JSON.stringify(touchVals));
+await clickMixButton("Back");
+const postRandomBack = await readAllTables();
+report("back-undoes-random-smell", tablesClose(preRandom.smell, postRandomBack.smell, 0.011), "");
 
 // Nudge with Keep own trails on Smell: every diagonal (own-trail) cell is
 // unchanged; at least one off-diagonal cell moved (Nudge actually ran).
@@ -378,7 +382,7 @@ async function readOwnTrailValues() {
 }
 await page.locator(".vc-pair-layer-smell").click();
 await page.waitForTimeout(200);
-const keepOwnBtn = page.locator(".vc-mix-row button", { hasText: "Keep own trails" });
+const keepOwnBtn = page.locator(".vc-pair .vc-mix-row button", { hasText: "Keep own trails" });
 if ((await keepOwnBtn.getAttribute("aria-pressed")) !== "true") await keepOwnBtn.click();
 await page.waitForTimeout(150);
 const preNudgeDiag = await readOwnTrailValues();

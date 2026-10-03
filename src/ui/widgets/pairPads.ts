@@ -114,16 +114,21 @@ import { setHintText } from "../hintSwatches.ts";
  * applies on both axes: right/up always reads more of whatever the axis
  * names, never less.
  *
- * **The mix row (Phase 3).** Random/Nudge/Keep own trails/Back and every
- * preset pill share one rule: **push before you write**. Each first snapshots
- * both live tables (`snapshot()`) onto `PairState.history` (a module-level
- * stack, same survives-a-rebuild convention as the culture cache below), then
- * writes the new values through `writeTable`, which skips any cell whose
- * stored value already matches — Random/Nudge/Back/a preset would otherwise
- * persist all 12 (Touch) or 16 (Smell) settings to localStorage on every
- * click regardless of how many cells actually moved (`sceneSettings.ts`'s own
- * per-`ctx.set` persist). Random and Nudge only ever touch the layer on
- * screen; a preset and Back write both tables. Keep own trails and Rivals
+ * **The mix row (Phase 3).** Nudge/Keep own trails/Rivals/Back, every
+ * preset pill and `randomize` share one rule: **push before you write**.
+ * Each first snapshots both live tables (`snapshot()`) onto
+ * `PairState.history` (a module-level stack, same survives-a-rebuild
+ * convention as the culture cache below), then writes the new values through
+ * `writeTable`, which skips any cell whose stored value already matches —
+ * Random/Nudge/Back/a preset would otherwise persist all 12 (Touch) or 16
+ * (Smell) settings to localStorage on every click regardless of how many
+ * cells actually moved (`sceneSettings.ts`'s own per-`ctx.set` persist).
+ * Nudge only ever touches the layer on screen; `randomize`, a preset and
+ * Back write both tables. Random itself has no button here (2026-10-03, the
+ * user: "group this all in one cool random button. random smell, touch, per
+ * strain card"): the Strains card's one Random (itemBoxes.ts) calls
+ * `randomize` and the Strain Console's own, so this card's Back still undoes
+ * just its half of a roll. Keep own trails and Rivals
  * (2026-10-02: Random's lean toward a territorial table, on by default — see
  * `randomSmell`) are plain toggles (Smell only, hidden on Touch like the
  * own-trail strip itself) with no history entry of their own — flipping one
@@ -206,6 +211,10 @@ export interface PairPadsSpec {
 }
 
 export interface PairPadsHandle {
+  /** The Strains card's Random (itemBoxes.ts): rolls Smell (`randomSmell`,
+   *  under this card's Keep own trails and Rivals toggles) and Touch
+   *  (`randomTouch`) together, as one entry on this card's Back. */
+  randomize(): void;
   /** Reads live values, redraws changed pads' markers/header/status, and
    *  (every other call, visible pads only) steps + redraws each pad's live
    *  culture — called from `itemBoxes.ts`'s `ctx.onTick`. */
@@ -940,15 +949,12 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
   }
 
-  // --- Row 4: mix row (Phase 3: Random / Nudge / Keep own trails / Back) +
+  // --- Row 4: mix row (Phase 3: Nudge / Keep own trails / Rivals / Back) +
   // presets --------------------------------------------------------------
   const mixSectionRow = buildRow(ctx, rowSpec(stateKey, "mix", "Affinity mix"), words.ui.mixTitle, words.ui.mixHint);
 
   const mixRow = document.createElement("div");
   mixRow.className = "vc-mix-row";
-  const randomBtn = document.createElement("button");
-  randomBtn.type = "button";
-  randomBtn.textContent = words.ui.random[state.layer];
   const nudgeBtn = document.createElement("button");
   nudgeBtn.type = "button";
   nudgeBtn.textContent = words.ui.nudge;
@@ -964,7 +970,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   backBtn.type = "button";
   backBtn.disabled = true;
   backBtn.textContent = words.ui.back;
-  mixRow.append(randomBtn, nudgeBtn, keepOwnBtn, rivalsBtn, backBtn);
+  mixRow.append(nudgeBtn, keepOwnBtn, rivalsBtn, backBtn);
   mixSectionRow.body.appendChild(mixRow);
 
   /** Reflects `state.history`/`state.keepOwn`/`state.rivals` onto the mix
@@ -980,13 +986,13 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     state!.history = pushHistory(state!.history, snapshot());
   }
 
-  randomBtn.addEventListener("click", () => {
+  function randomize(): void {
     pushSnapshot();
-    if (state!.layer === "smell") writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random, state!.rivals));
-    else writeTable("touch", randomTouch(count, Math.random));
+    writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random, state!.rivals));
+    if (hasTouch) writeTable("touch", randomTouch(count, Math.random));
     refreshAll();
     refreshMixRow();
-  });
+  }
   nudgeBtn.addEventListener("click", () => {
     pushSnapshot();
     writeTable(state!.layer, nudgeTable(tableOf(state!.layer), state!.layer, state!.keepOwn, Math.random));
@@ -1100,7 +1106,6 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     keepOwnBtn.style.display = layer === "smell" ? "" : "none";
     rivalsBtn.style.display = layer === "smell" ? "" : "none";
     setHintText(layerRow.hintEl, words.layers[layer].how);
-    randomBtn.textContent = words.ui.random[layer];
     focusIdx = -1;
     for (const pad of pads) {
       drawPadChrome(pad);
@@ -1396,5 +1401,5 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     spotOn = false;
   }
 
-  return { tick, dispose };
+  return { randomize, tick, dispose };
 }
