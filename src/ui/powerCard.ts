@@ -31,7 +31,10 @@ import {
  * governor can reach that isn't "GPU load": paced by something outside the
  * page (a browser energy-saver mode, an OS refresh-rate cap), where it has
  * deliberately stood down rather than cutting quality for nothing (see
- * governor.ts's "Authority probe").
+ * governor.ts's "Authority probe"). The Readouts list also shows what the
+ * page is costing the device (main-thread load, GPU time, JS memory) — where
+ * those come from and what they leave out is src/render/resourceMeter.ts's
+ * header.
  *
  * Shape, top to bottom: the status line right under the title (the Bands
  * column's own live-dot · source line is the model — small caps mono with
@@ -105,6 +108,12 @@ export interface PowerStatus {
    *  resizeCanvasToDisplaySize). */
   bufferWidth: number;
   bufferHeight: number;
+  /** What this page is costing the device (render/resourceMeter.ts's
+   *  ResourceSnapshot); each is null where it can't be measured — the output
+   *  window doesn't report them, and GPU time/heap are Chrome-only. */
+  cpuLoad: number | null;
+  gpuMs: number | null;
+  heapMb: number | null;
 }
 
 export interface PowerCardDeps {
@@ -780,7 +789,13 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const fps = createReadoutLine("FPS");
   const res = createReadoutLine("Resolution");
   const detail = createReadoutLine("Detail");
-  readouts.append(fps.el, res.el, detail.el);
+  const cpu = createReadoutLine("Main thread");
+  const gpu = createReadoutLine("GPU time");
+  const heap = createReadoutLine("JS memory");
+  cpu.el.title = "How busy this page kept the browser's main thread, as a share of one core. Not the whole computer's CPU";
+  gpu.el.title = "How long the scene's drawing took on the GPU, per frame. Chrome only; leaves out the browser compositing and the Panel blur";
+  heap.el.title = "JavaScript memory in use by this page. Chrome only; graphics memory can't be read from a web page";
+  readouts.append(fps.el, res.el, detail.el, cpu.el, gpu.el, heap.el);
 
   // Seed <html>'s glass class from the saved choice before the panel first shows.
   applyGlassBlur();
@@ -817,6 +832,9 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
     detail.set(status.level === null ? [text("--")] : [digits(String(Math.round(status.fraction * 100))), join("%")]);
+    cpu.set(status.cpuLoad === null ? [text("--")] : [digits(String(Math.round(status.cpuLoad * 100))), join("%")]);
+    gpu.set(status.gpuMs === null ? [text("--")] : [digits(status.gpuMs.toFixed(1)), join("ms")]);
+    heap.set(status.heapMb === null ? [text("--")] : [digits(String(Math.round(status.heapMb))), join("MB")]);
   }
   refresh();
 

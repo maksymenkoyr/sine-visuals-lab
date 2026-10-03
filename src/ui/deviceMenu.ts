@@ -2106,6 +2106,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           standingDown: s?.standingDown ?? false,
           bufferWidth: s?.bufferWidth ?? 0,
           bufferHeight: s?.bufferHeight ?? 0,
+          // The output window does not report these (net/outputSync.ts).
+          cpuLoad: null,
+          gpuMs: null,
+          heapMb: null,
         };
       },
     },
