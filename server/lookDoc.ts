@@ -61,6 +61,9 @@ export interface LookLimits {
    *  flight, one per LOOK_PUBLISH_MS at most) stays well inside it. */
   readonly patchBurst: number;
   readonly patchesPerSec: number;
+  /** The longest glide a patch may ask a screen to arrive over — the same
+   *  ceiling as src/net/outputGlide.ts's GLIDE_MAX_MS (a test keeps them equal). */
+  readonly maxGlideMs: number;
 }
 
 export const LOOK_LIMITS: LookLimits = {
@@ -75,6 +78,7 @@ export const LOOK_LIMITS: LookLimits = {
   maxAdoptBodyBytes: 512,
   patchBurst: 40,
   patchesPerSec: 20,
+  maxGlideMs: 30_000,
 };
 
 export interface LookDoc {
@@ -88,6 +92,12 @@ export interface LookPatch {
   palette?: string;
   set?: Record<string, string>;
   del?: string[];
+  /** The laptop's Play held down: a screen arrives at the look this patch
+   *  makes over this many ms instead of switching (src/net/outputGlide.ts says
+   *  what moves smoothly). It describes how to show the change, not the look,
+   *  so it is never stored, and applyLookPatch's `effective` leaves it out —
+   *  the room relays it beside the patch it came with. */
+  glideMs?: number;
 }
 
 /** `size` is every limit in LOOK_LIMITS, including the patch budget: a
@@ -216,6 +226,13 @@ export function sanitizeLookPatch(raw: unknown): Sanitized {
 
   if (patch.set && patch.del) {
     for (const k of patch.del) if (hasOwn(patch.set, k)) return { ok: false, reason: "shape" };
+  }
+
+  // A glide that is not a plain positive number is no glide: the change still
+  // applies, it just switches. Longer than the ceiling is the ceiling.
+  const glide = raw.glideMs;
+  if (typeof glide === "number" && Number.isFinite(glide) && glide > 0) {
+    patch.glideMs = Math.min(glide, LOOK_LIMITS.maxGlideMs);
   }
   return { ok: true, patch };
 }

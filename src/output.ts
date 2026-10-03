@@ -143,7 +143,7 @@ let glide: Glide | null = null;
  *  are exactly as they were until the glide lands through applyState(). */
 function stepGlide(nowMs: number): void {
   if (!glide) return;
-  const { state, done } = glide.at(nowMs);
+  const { state, done } = glide.lookAt(nowMs);
   if (done) {
     glide = null;
     applyState(state);

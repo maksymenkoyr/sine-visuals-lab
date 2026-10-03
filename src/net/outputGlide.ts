@@ -25,7 +25,7 @@ import type { OutputParams, OutputState } from "./outputSync.ts";
  * caller (outputBridge.ts's go) sends that instantly, and createGlide
  * returns null for it as a second line of defence.
  *
- * Pure: no DOM, no clock of its own — `at(nowMs)` is the look to show then.
+ * Pure: no DOM, no clock of its own — `lookAt(nowMs)` is the look to show then.
  */
 
 /** Longest glide the hold gesture may ask for. */
@@ -55,7 +55,7 @@ export interface GlideStep {
 }
 
 export interface Glide {
-  at(nowMs: number): GlideStep;
+  lookAt(nowMs: number): GlideStep;
 }
 
 type SceneStore = Record<string, Record<string, unknown>>;
@@ -141,7 +141,7 @@ export function createGlide(
   if (settings.length === 0 && dials.length === 0 && !paramsDiffer) return null;
 
   return {
-    at(nowMs) {
+    lookAt(nowMs) {
       const t = Math.min(1, Math.max(0, (nowMs - startMs) / dur));
       if (t >= 1) return { state: to, done: true };
       const e = smoothstep(t);

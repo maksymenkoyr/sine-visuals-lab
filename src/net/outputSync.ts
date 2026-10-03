@@ -12,13 +12,16 @@ import { VOLATILE_PREFIXES } from "./syncedStores.ts";
  * transport: src/net/outputBridge.ts rides these messages on a
  * BroadcastChannel, and the pop-out still does. The room connection
  * (net/room.ts) carries a different, narrower thing — the room's look
- * document, kept in step by net/lookSync.ts — not these messages.
+ * document, kept in step by net/lookSync.ts — not these messages. A TV in the
+ * laptop's room is cued and played by the same `createCueController`, with the
+ * look delivered as a room `lookPatch` (net/roomBridge.ts).
  *
  * Why not tv.ts as-is. The paired TV (src/tv.ts) renders the host's raw
  * feature frames with the room's look (server/lookDoc.ts): a scene id, a
  * palette id and the storage keys net/syncedStores.ts's `isRoomKey` accepts,
- * resolved against the TV's OWN anim profile. That look follows its phone
- * continuously and has no notion of a look being *held*. A same-machine
+ * resolved against the TV's OWN anim profile. A phone's edits reach
+ * it continuously; a look being *held* is the laptop's Cue and Play, which
+ * decide what the room is sent (net/roomBridge.ts). A same-machine
  * output also wants the main window's other keys and its resolved
  * Sensitivity/Expansion/Smoothing, and needs the state held while Cue is on,
  * so the output page is a renderer in tv.ts's mould (same scene/anim/drive

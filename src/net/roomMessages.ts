@@ -14,8 +14,10 @@
  *   (by its roster id) to change; delivered to it as `command`.
  * - `lookGet` — a controller or TV asks for the current look; answered with `look`.
  * - `lookPatch { n, ...patch }` — a controller edits the look (server/lookDoc.ts
- *   has the patch semantics). Only a controller may; `n` numbers the patch so
- *   the sender can match the reply.
+ *   has the patch semantics). Only a controller or the laptop (the host,
+ *   publishing with Cue and Play, net/roomBridge.ts) may; `n` numbers the patch
+ *   so the sender can match the reply. A patch may carry `glideMs`: screens
+ *   arrive at the look it makes over that long instead of switching.
  * - `endRoom` — the host of a claimed room ends it (the laptop's Reset). The
  *   room wipes its claim and look, sends every socket `ended`, and closes each
  *   with the denial code, so every device forgets the room as it would a dead
@@ -28,8 +30,10 @@
  * - `look { rev, doc }` — the whole look. Pushed when a controller or TV joins a
  *   claimed room, and as the reply to `lookGet`. `doc` is null until the first
  *   patch has ever applied.
- * - `lookPatch { rev, ...patch }` — what another controller changed, only the
- *   entries that actually differed, to every controller and TV but the sender.
+ * - `lookPatch { rev, ...patch }` — what another controller (or the laptop)
+ *   changed, only the entries that actually differed, to every controller and
+ *   TV but the sender, with the `glideMs` it came with. The laptop is sent no
+ *   relays: it is the one place a look is made.
  *   `rev` is the room's revision after it; a receiver that sees a hole asks
  *   for `lookGet` (src/net/lookSync.ts owns that rule).
  * - `lookAck { n, rev }` / `lookReject { n, reason }` — the replies to the

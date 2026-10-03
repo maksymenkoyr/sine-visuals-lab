@@ -410,14 +410,12 @@ describe("message gating", () => {
     expect(tv.sent).toEqual([]);
   });
 
-  it("answers lookPatch from a host or renderer with lookReject role, and drops lookGet from a host", async () => {
+  it("answers lookPatch from a renderer with lookReject role, and drops lookGet from a host", async () => {
     const room = new Room();
     const host = await room.claimed();
     const tv = await room.renderer();
     room.say(tv, { type: "lookPatch", n: 3, set: { "vibe.x": "1" } });
-    room.say(host, { type: "lookPatch", n: 4, set: { "vibe.x": "1" } });
     expect(tv.msgs("lookReject")).toEqual([{ type: "lookReject", n: 3, reason: "role" }]);
-    expect(host.msgs("lookReject")).toEqual([{ type: "lookReject", n: 4, reason: "role" }]);
     room.say(host, { type: "lookGet" });
     expect(host.msgs("look")).toEqual([]);
     const phone = await room.controller();
@@ -434,6 +432,43 @@ describe("message gating", () => {
     expect(tv.sent).toEqual([]);
     expect(host.sent).toEqual([]);
     expect(room.host.store.size).toBe(0);
+  });
+});
+
+describe("the host's look", () => {
+  it("is applied, acked to the laptop and relayed to a TV and a phone, glide beside it", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv = await room.renderer();
+    const phone = await room.controller();
+    room.say(host, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1" }, glideMs: 4000 });
+    expect(host.msgs("lookAck")).toEqual([{ type: "lookAck", n: 1, rev: 1 }]);
+    const expected = { type: "lookPatch", rev: 1, scene: "mesh", set: { "vibe.a": "1" }, glideMs: 4000 };
+    expect(tv.msgs("lookPatch")).toEqual([expected]);
+    expect(phone.msgs("lookPatch")).toEqual([expected]);
+    expect(host.msgs("lookPatch")).toEqual([]);
+  });
+
+  it("never stores a glide: a TV that joins later gets the look, no glide", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    room.say(host, { type: "lookPatch", n: 1, scene: "mesh", glideMs: 4000 });
+    const tv = await room.renderer();
+    expect(tv.msgs("look")[0].doc).toEqual({ scene: "mesh", palette: "", storage: {} });
+  });
+
+  it("drops a glide that is not a positive number, and caps a long one", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv = await room.renderer();
+    room.say(host, { type: "lookPatch", n: 1, set: { "vibe.a": "1" }, glideMs: -5 });
+    room.say(host, { type: "lookPatch", n: 2, set: { "vibe.a": "2" }, glideMs: "soon" });
+    room.say(host, { type: "lookPatch", n: 3, set: { "vibe.a": "3" }, glideMs: 9e9 });
+    expect(tv.msgs("lookPatch")).toEqual([
+      { type: "lookPatch", rev: 1, set: { "vibe.a": "1" } },
+      { type: "lookPatch", rev: 2, set: { "vibe.a": "2" } },
+      { type: "lookPatch", rev: 3, set: { "vibe.a": "3" }, glideMs: 30_000 },
+    ]);
   });
 });
 

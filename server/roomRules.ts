@@ -3,9 +3,10 @@
  * sockets in sight so tests can drive every case (server/roomCore.ts applies
  * them to live sockets; server/room.ts is the Cloudflare adapter around that).
  *
- * Roles. The laptop is the `host`: it plays and analyses the music and is the
- * only role whose binary frames are relayed. A phone is a `controller`: it
- * edits the room's look (server/lookDoc.ts) and may also watch frames. A TV is
+ * Roles. The laptop is the `host`: it plays and analyses the music, is the
+ * only role whose binary frames are relayed, and publishes its own look to the
+ * room's screens (Cue and Play). A phone is a `controller`: it edits the
+ * room's look (server/lookDoc.ts) and may also watch frames. A TV is
  * a `renderer`: it draws from the host's frames and the look.
  *
  * The host key and the room key are separate on purpose. The host key never
@@ -192,7 +193,7 @@ export type SendKind = "binary" | "ping" | "hello" | "setDevice" | "lookGet" | "
  *  `setDevice`: in a claimed room a renderer may not command other devices. The look
  *  kinds are looked at by role alone — a legacy room has no look, so the
  *  core ignores them there before it ever asks, and a `lookPatch` that this
- *  refuses (host, renderer) is answered with a `lookReject` rather than
+ *  refuses (renderer) is answered with a `lookReject` rather than
  *  dropped, which is the core's job too. */
 export function canSend(keyed: boolean, role: RoomRole, kind: SendKind): boolean {
   switch (kind) {
@@ -206,7 +207,9 @@ export function canSend(keyed: boolean, role: RoomRole, kind: SendKind): boolean
     case "lookGet":
       return role !== "host";
     case "lookPatch":
-      return role === "controller";
+      // A phone edits the look live; the laptop publishes it with Cue and Play
+      // (src/net/roomBridge.ts). A TV only shows it.
+      return role === "controller" || role === "host";
     case "endRoom":
       // Only a claimed room's host: in a legacy room anyone may sit in the
       // host seat, so nobody there can end it for the others.
