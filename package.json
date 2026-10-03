@@ -21,7 +21,8 @@
     "test:watch": "vitest",
     "eval:tempo": "vitest run tests/tempoEval.test.ts",
     "usage": "node tools/usage.mjs",
-    "doc-check": "node tools/doc-check.mjs"
+    "doc-check": "node tools/doc-check.mjs",
+    "pr-shots": "node tools/pr-shots.mjs"
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",
