@@ -126,7 +126,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.35,
+    default: 0.12,
     drive: { default: "feature.onset" },
   },
   {
