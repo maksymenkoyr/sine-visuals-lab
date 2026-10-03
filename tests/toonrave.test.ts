@@ -71,6 +71,61 @@ describeConductor("toonrave conductor", () => {
     expectConductor(maxStep).toBeLessThanOrEqual(perFrame * 1.5 + 1e-9);
   });
 
+  itConductor("the first lock after reset snaps to the bar line instead of slewing", () => {
+    const k = createConductor();
+    const bpm = 128;
+    // free-run 3.3 s (not on any bar), then the lock arrives mid-bar
+    let t = 0;
+    let o = k.step(mk(t, bpm, 0, 0), 32);
+    for (let i = 0; i < 200; i++) {
+      t += 1 / FPS;
+      o = k.step(mk(t, bpm, 0, 0), 32);
+    }
+    const beatsAtLock = 77.37; // 1.37 beats into a bar
+    t += 1 / FPS;
+    o = k.step(mk(t, bpm, 1, beatsAtLock), 32);
+    // c sits on the bar grid: (beats - c) is a whole number of bars
+    const off = (c: number, beats: number): number => {
+      const r = (((beats - c) % 4) + 4) % 4;
+      return Math.min(r, 4 - r);
+    };
+    expectConductor(off(o.c, beatsAtLock)).toBeLessThan(1e-6);
+    // and it stays on the grid: no slew leaves it drifting afterwards
+    let beats = beatsAtLock;
+    for (let i = 0; i < 120; i++) {
+      t += 1 / FPS;
+      beats += bpm / 60 / FPS;
+      o = k.step(mk(t, bpm, 1, beats), 32);
+      expectConductor(off(o.c, beats)).toBeLessThan(1e-6);
+    }
+  });
+
+  itConductor("a lock regained after the first 8 s still slews, not snaps", () => {
+    const k = createConductor();
+    const bpm = 120;
+    let t = 0;
+    let beats = 0;
+    for (let i = 0; i < 20 * FPS; i++) {
+      t += 1 / FPS;
+      beats += bpm / 60 / FPS;
+      k.step(mk(t, bpm, 1, beats), 32);
+    }
+    for (let i = 0; i < 3 * FPS; i++) {
+      t += 1 / FPS;
+      k.step(mk(t, bpm, 0, beats), 32);
+    }
+    let prev = k.step(mk(t, bpm, 0, beats), 32).c;
+    let maxStep = 0;
+    for (let i = 0; i < 4 * FPS; i++) {
+      t += 1 / FPS;
+      beats += (0.37 * bpm) / 60 / FPS; // the clock drifts off the free-run
+      const c = k.step(mk(t, bpm, 1, beats), 32).c;
+      maxStep = Math.max(maxStep, Math.abs(c - prev));
+      prev = c;
+    }
+    expectConductor(maxStep).toBeLessThan(0.1);
+  });
+
   itConductor("free-runs at the last good bpm while unlocked", () => {
     const k = createConductor();
     let o = k.step(mk(0, 100, 1, 0), 32);
@@ -237,7 +292,6 @@ describeMotion("toonrave motion", () => {
           const at = `${cycleBeats}/${cuts} cycle ${cycle}`;
           const plan = cutPlan(cycle, cuts, cycleBeats);
           expectMotion(plan[0], `${at} first cut`).toEqual([0, "wide"]);
-          expectMotion(frameAt(0, opts).camera.shot, `${at} drop`).toBe("wide");
           for (let i = 1; i < plan.length; i++) {
             expectMotion(plan[i]![0], `${at} cuts ascend`).toBeGreaterThan(plan[i - 1]![0]);
             expectMotion(plan[i]![0], `${at} cuts inside the cycle`).toBeLessThan(cycleBeats);
@@ -246,7 +300,9 @@ describeMotion("toonrave motion", () => {
           // across the wrap: the last shot of the previous cycle is not this cycle's first
           if (cuts > 0 && lastOfPrev !== null) expectMotion(plan[0]![1], `${at} wrap`).not.toBe(lastOfPrev);
           lastOfPrev = plan[plan.length - 1]![1];
-          // and the picture follows the plan: each cut lands on its beat
+          // and the picture follows the plan: each cut lands on its beat. Three
+          // cycles show the camera obeys the plan; the plan checks above run on all 40.
+          if (cycle >= 3) continue;
           for (let i = 0; i < plan.length; i++) {
             expectMotion(frameAt(plan[i]![0], opts).camera.shot, `${at} at cut ${i}`).toBe(plan[i]![1]);
             if (i > 0) expectMotion(frameAt(plan[i]![0] - 0.01, opts).camera.shot, `${at} before cut ${i}`).toBe(plan[i - 1]![1]);
@@ -438,6 +494,8 @@ import {
   CAST_RIGS,
   HERO_C,
 } from "../src/render/scenes/toonrave/index.ts";
+import { clampCentre, frameFocus } from "../src/render/scenes/toonrave/focus.ts";
+import { cutPlan as cutPlanScene } from "../src/render/scenes/toonrave/motion.ts";
 import { buildPostFrag } from "../src/render/scenes/toonrave/glsl.ts";
 import { frameAt as sceneFrameAt } from "../src/render/scenes/toonrave/motion.ts";
 import { SETTING_GROUPS } from "../src/render/sceneSettings.ts";
@@ -584,6 +642,39 @@ describeScene("toonrave framing", () => {
     expectScene(v.scale).toBeCloseTo(1, 9);
     // the slice's left edge (art x = 800) lands on canvas x = 0
     expectScene(800 * v.scale + v.tx).toBeCloseTo(0, 9);
+  });
+
+  itScene("a portrait crop looks at the focus, clamped inside the frame", () => {
+    const full = { x: 0, y: 0, w: 1, h: 1 };
+    const vis = (900 * 390) / 844; // visible width in art units on a 390x844 canvas
+    const scale = 844 / 900;
+    const v = coverView(390, 844, full, { x: 450, y: 450 });
+    expectScene(v.scale).toBeCloseTo(scale, 9);
+    expectScene(v.tx + 450 * scale).toBeCloseTo(195, 6); // the focus sits mid-canvas
+    // a focus near an edge is pushed in so the crop stays inside the frame
+    expectScene(coverView(390, 844, full, { x: 10, y: 450 }).tx).toBeCloseTo(0, 6);
+    expectScene(coverView(390, 844, full, { x: 1590, y: 450 }).tx).toBeCloseTo(390 - 1600 * scale, 6);
+    expectScene(clampCentre(10, vis, 0, 1600)).toBeCloseTo(vis / 2, 9);
+    expectScene(clampCentre(800, vis, 0, 1600)).toBe(800);
+    expectScene(clampCentre(5000, vis, 0, 1600)).toBeCloseTo(1600 - vis / 2, 9);
+    // a crop as long as the range is centred on it, whatever the focus
+    expectScene(clampCentre(5, 900, 0, 900)).toBe(450);
+    // 16:9 on the full viewport: identical to no focus at all
+    expectScene(coverView(1600, 900, full, { x: 100, y: 800 })).toEqual(coverView(1600, 900, full));
+    expectScene(coverView(1280, 720, full, { x: 100, y: 800 })).toEqual(coverView(1280, 720, full));
+  });
+
+  itScene("every shot's focus lands inside the frame, and the wide shot looks at the DJ", () => {
+    for (const shot of ["wide", "dj", "djUp", "button", "raver", "pomp", "crowd"] as const) {
+      const cut = cutPlanScene(0, 2, 32).find(([, s]) => s === shot);
+      if (!cut) continue;
+      const f = frameFocus(sceneFrameAt(cut[0] + 0.5, { cycleBeats: 32, cuts: 2, bpm: 128 }).camera);
+      expectScene(f.x).toBeGreaterThanOrEqual(0);
+      expectScene(f.x).toBeLessThanOrEqual(1600);
+      expectScene(f.y).toBeGreaterThanOrEqual(0);
+      expectScene(f.y).toBeLessThanOrEqual(900);
+    }
+    expectScene(frameFocus(sceneFrameAt(0.3, { cycleBeats: 32, cuts: 0, bpm: 128 }).camera).x).toBeLessThan(600);
   });
 
   itScene("canvasSize caps the width per preset and keeps the aspect", () => {

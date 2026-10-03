@@ -12,7 +12,8 @@
  * for the next bar line, anchors there on a beat that is a multiple of 4, and
  * eases the leftover phase difference out (the "slew") by speeding up or
  * slowing down by at most half a frame's worth of beats per frame, so c stays
- * continuous.
+ * continuous. The first lock after reset(), and any lock within the first
+ * SNAP_WINDOW_SEC of rendering, instead anchors at once and snaps c to the grid.
  *
  * dropFired starts a new cycle on the nearest whole beat (c becomes 0 there),
  * but only if at least MIN_DROP_GAP_BEATS have passed since the last drop
@@ -51,6 +52,8 @@ export const MIN_DROP_GAP_BEATS = 8 * BEATS_PER_BAR;
 const MAX_DT_SEC = 0.5;
 /** Share of a frame's beats the slew may add or remove per frame. */
 const SLEW_RATE = 0.5;
+/** Lock acquisitions in this many seconds after the first frame snap, not slew. */
+const SNAP_WINDOW_SEC = 8;
 
 const mod = (x: number, n: number): number => ((x % n) + n) % n;
 
@@ -65,6 +68,8 @@ export function createConductor(): Conductor {
   let prevTime = 0;
   let prevC = 0;
   let sinceDrop = Infinity;
+  let everLocked = false;
+  let startTime = 0;
 
   const reset = (): void => {
     started = false;
@@ -77,6 +82,8 @@ export function createConductor(): Conductor {
     prevTime = 0;
     prevC = 0;
     sinceDrop = Infinity;
+    everLocked = false;
+    startTime = 0;
   };
 
   const step = (inp: ConductorInput, cycleBeats: number): ConductorOut => {
@@ -93,6 +100,7 @@ export function createConductor(): Conductor {
 
     if (!started) {
       started = true;
+      startTime = inp.timeSec;
       if (locked) {
         anchored = true;
         anchor = Math.floor(inp.beats / BEATS_PER_BAR) * BEATS_PER_BAR;
@@ -136,13 +144,18 @@ export function createConductor(): Conductor {
         const crossed =
           Math.floor(inp.beats / BEATS_PER_BAR) >
           Math.floor(prevBeats / BEATS_PER_BAR);
-        if (crossed) {
+        // The first lock after reset, or any lock in the first SNAP_WINDOW_SEC:
+        // re-anchor at once and snap (no slew), so the first cycle's cuts sit
+        // on the app's bar lines.
+        const snap = !everLocked || inp.timeSec - startTime < SNAP_WINDOW_SEC;
+        if (crossed || snap) {
           const aligned0 = BEATS_PER_BAR * Math.round(free / BEATS_PER_BAR);
           anchor =
             Math.floor(inp.beats / BEATS_PER_BAR) * BEATS_PER_BAR - aligned0;
           const aligned = mod(inp.beats - anchor, n);
-          slew = mod(free - aligned + n / 2, n) - n / 2;
+          slew = snap ? 0 : mod(free - aligned + n / 2, n) - n / 2;
           anchored = true;
+          if (snap) c = aligned;
         }
       }
     }
@@ -156,6 +169,7 @@ export function createConductor(): Conductor {
       if (c < prevC && adv > 0) sinceDrop = c;
     }
 
+    if (anchored) everLocked = true;
     prevBeats = inp.beats;
     prevTime = inp.timeSec;
     prevC = c;

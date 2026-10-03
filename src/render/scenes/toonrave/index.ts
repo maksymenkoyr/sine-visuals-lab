@@ -43,7 +43,8 @@ import { buildSceneSvg } from "./art/scene.ts";
 import { buildPostFrag } from "./glsl.ts";
 import { compileScene, drawProgram, type DrawProgram, type View } from "./svgDraw.ts";
 import { createConductor } from "./conductor.ts";
-import { frameAt, FRAME_W, FRAME_H, type FrameState, type Mat, type MotionOpts } from "./motion.ts";
+import { clampCentre, frameFocus } from "./focus.ts";
+import { frameAt,FRAME_W, FRAME_H, type FrameState, type Mat, type MotionOpts } from "./motion.ts";
 
 const ID = "toonrave";
 
@@ -216,12 +217,16 @@ export function shapeState(state: FrameState, amounts: LookAmounts): FrameState 
  *  is responsible for (a Panorama slice of the room; the whole art at the full
  *  viewport) covers the canvas: scaled to fill, centred on the slice, the overflow
  *  cropped. A slice that reaches past the art shows the flat background there. */
-export function coverView(w: number, h: number, viewport: Viewport): View {
+export function coverView(w: number, h: number, viewport: Viewport, focus?: { x: number; y: number }): View {
   const sw = Math.max(1e-6, viewport.w) * FRAME_W;
   const sh = Math.max(1e-6, viewport.h) * FRAME_H;
   const scale = Math.max(w / sw, h / sh);
-  const cx = viewport.x * FRAME_W + sw / 2;
-  const cy = viewport.y * FRAME_H + sh / 2;
+  const x0 = viewport.x * FRAME_W;
+  const y0 = viewport.y * FRAME_H;
+  // With a focus the crop looks at it, kept inside the slice; a crop as big as
+  // the slice (16:9 on 16:9) is centred exactly as before.
+  const cx = focus ? clampCentre(focus.x, w / scale, x0, sw) : x0 + sw / 2;
+  const cy = focus ? clampCentre(focus.y, h / scale, y0, sh) : y0 + sh / 2;
   return { scale, tx: w / 2 - cx * scale, ty: h / 2 - cy * scale };
 }
 
@@ -252,6 +257,7 @@ function createToonRaveScene(): Scene {
   const conductor = createConductor();
   let lastTime: number | null = null;
   let lastC = 0;
+  let lastBars = 0; // dev peek only
   let cycle = 0;
   let reduced = false;
   let frozenC: number | null = null;
@@ -301,7 +307,11 @@ function createToonRaveScene(): Scene {
       texH = 0;
 
       if (import.meta.env.DEV && typeof window !== "undefined") {
-        (window as unknown as { __toonrave?: unknown }).__toonrave = { freeze };
+        (window as unknown as { __toonrave?: unknown }).__toonrave = {
+          freeze,
+          // the cycle position and the app's bar count, for checking cuts against the bar line
+          peek: () => ({ c: lastC, bars: lastBars }),
+        };
       }
     },
 
@@ -346,6 +356,7 @@ function createToonRaveScene(): Scene {
       );
       if (out.c < lastC - cycleBeats / 2) cycle++;
       lastC = out.c;
+      lastBars = anim.beats / 4;
       const frozen = frozenC !== null;
       const c = frozen ? (frozenC as number) : out.c;
 
@@ -367,7 +378,7 @@ function createToonRaveScene(): Scene {
         canvas.width = size.w;
         canvas.height = size.h;
       }
-      drawProgram(c2d, compiled, state, coverView(size.w, size.h, viewport));
+      drawProgram(c2d, compiled, state, coverView(size.w, size.h, viewport, frameFocus(state.camera)));
 
       // Upload it. Flipping V is the shader's job, so no pixelStorei changes here.
       gl.activeTexture(gl.TEXTURE0);
