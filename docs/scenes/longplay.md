@@ -80,6 +80,74 @@ main.
   1.9 and 6.7 px; glow e-fold ~12 px; 63 hard cuts in 40 s (median 333 ms);
   activity flashes on onsets z +0.47; paint ring grows centre → edge in ~5 s
   (slit-scan). Ours: onset 88%, tempo ×1 82%.
+- **Views not built yet** — what each measured as, and how to build it.
+  "Seen" means its `look.png` was checked by eye; the others have only
+  their numbers and a 15-second survey thumbnail, so open their
+  `look.png` (and `slitscan.png` if motion matters) before designing.
+  Every one is mirrored left/right unless noted, strokes ≈1.9 px, near-black
+  ground.
+  - **Wings** (`alt-wings`, seen): magenta 300° 76–90% / violet 270°;
+    dense fibrous wire mesh shaped like two mirrored wings or a ribcage
+    (2-fold 0.96–0.99), made of thousands of short vertical bars and dots
+    (≈1 100–1 800 objects, lit 5–17% of pixels); glow e-fold 12–30 px; slow
+    backward fly-through (0.06–0.25 half-heights/s). No hard cuts and no
+    onset flash; brightness and colour change at phrase starts (z +0.47,
+    +0.80). Build: an anisotropic noise field (stretched vertically),
+    mirrored, drawn as fine contour strokes with a soft magenta halo,
+    receding slowly; phrase start lifts and shifts hue. Our tempo read
+    ×4/3 here.
+  - **Circuit** (`alt-circuit`): blue 240° 86–99%, ground dark navy
+    (`#010149`-ish, not black); a top-down circuit-board/city grid of short
+    bars (729–864 bars of ≈900–1 200 objects), mirrored 2-fold 0.92–0.98,
+    rings of structure at r 0.67–0.75 and 1.06–1.34; glow 9–11 px; slow
+    mixed drift 0.06–0.09 half-heights/s. No hard cuts. Activity follows
+    the high band (r +0.36), brightness too (r +0.27); zoom direction
+    reverses on bar/phrase starts. Build: a rectilinear trace grid (cells
+    with random trace segments + pads), mirrored, flying slowly with zoom
+    that flips direction every phrase; `high` drives trace brightness.
+  - **Chip** (`alt-chip`, seen): a CPU-die square tunnel — nested squares
+    with greeble "pins" around a white-hot core; red/rose/magenta in the
+    bright phase (8-fold 0.91, glow ≈30 px), dimming to small cyan 180°
+    bracket shapes (4-fold) between bursts. Zooms in +1.6 log/s, 118 hard
+    cuts in 40 s (median hold 67 ms); brightness and colour jump at phrase
+    starts (z +1.51, +1.06). Build: Tunnel's flight math plus a die
+    texture (rect greebles on the square's sides, hashed per ring), a
+    bright phase on phrase starts decaying to the cyan brackets.
+  - **Acid** (`alt-rings`, seen): concentric neon rings (green 120–150°,
+    magenta, blue, cyan) under a full-screen grid of scrolling digits with
+    horizontal scanlines; a posterised white blob at the centre; 2-fold
+    0.99. No hard cuts, no onset flash, nothing tracks a band. Build: thick
+    concentric bands with a hue per band, a text-grid layer of digit glyphs
+    (look for an existing glyph helper in the public scenes first), scanline mask. Our onsets fired 3× the reference's here and
+    tempo locked only 20% — keep it timer-driven.
+  - **Marble** (`alt-terrain`): azure 210° / cyan / spring-green 150°,
+    with blue/violet; a colourful edge-lit terrain texture, 8-fold in parts
+    (0.75–0.82) else 2-fold 0.95; glow 2–9 px; 227 hard cuts in 40 s
+    (median 67 ms — very glitchy); brightness flashes on onsets (z +0.35,
+    within a frame); activity follows loudness (r +0.43). Build: a domain-
+    warped fbm coloured by a multi-stop ramp, edge-detected (contours),
+    optional 8-fold kaleido fold toggled per phrase.
+  - **Star** (`alt-kaleido` + `alt-x-kaleido`): blue 240° / azure 210°,
+    white highlights; a radial kaleidoscope star/flower, 2-fold 0.91–0.97
+    with 8-fold petals; zooms out continuously (−0.53 log/s, ×1.7/s;
+    −0.40 in x-kaleido); no hard cuts; zoom reverses at bar/phrase starts.
+    Build on `src/render/scenes/kaleido/` (its fold and infinite-zoom
+    code) rather than a copy — extend, don't duplicate.
+  - **Earth** (`alt-earth`): blue 240° / azure 210°, ground navy
+    (`#03002f`); a planet's limb with city lights and a sun, behind dense
+    horizontal scanlines; 2-fold 0.94–1.00. No hard cuts, no onset flash;
+    picture regime changed at 4/4 audio section boundaries. Build: a lit
+    sphere limb (rim glow), noise-placed city-light dots on the night side,
+    a sun flare, a scanline mask. Our tempo read ×4/3 here.
+  - **Ink** (`alt-ink`): red 0° / orange / yellow, ground dark red
+    (`#2e0000`); red ink washes with the square tunnel over them; 70 hard
+    cuts in 30 s; brightness pulsed on the beat (contrast 1.51σ) and
+    flashing on onsets; activity follows the low band (r +0.44). Close to
+    Tunnel + Bloom's ink — likely a Tunnel option (ink wash layer driven by
+    `low`) rather than its own view.
+  - **Reactor Blue** (`alt-hudblue`): Reactor in cyan 180° 64–78%, 144 hard
+    cuts in 40 s, brightness on phrase starts (z +0.92) — a palette option
+    on Reactor, not a new view.
 - **Our analyser over all 14 windows**: onsets within 60 ms of 87–99% of the
   reference's; tempo held ×1 in most windows but ≈173 bpm (×4/3) on wings,
   earth and rings; `section` showed no rise near any audio section boundary.
@@ -127,9 +195,15 @@ main.
 
 ## Known issues and next steps
 
-- Pro views still to build from the measured bundles: Wings, Circuit, Chip,
-  Acid (rings + digit grid), Marble, Star (build on Kaleidoscope's fold
-  code — extend, don't duplicate), Earth, Ink.
+- Pro views still to build — each one's measured picture and build sketch
+  is under Measurements, "Views not built yet". Suggested order: Wings,
+  Circuit, Chip (straightforward), then Marble, Earth, Acid, Star (Star
+  builds on Kaleidoscope's code). Ink and
+  Reactor Blue are better as options on Tunnel and Reactor. Per view: add
+  `views/<name>.ts` (`viewColor` + `FLASH_W`/`STROBE_W`), add it to `VIEWS`
+  with `pro: true`, shoot with `scripts/shot.mjs`, compare with
+  `tools/ref-shoot.mjs` against its bundle (`--settings '{"view":N,"auto":0}'`),
+  keep our half with `tools/ref-keep.py <bundle> longplay`.
 - Reactor's colour range is narrower than the reference's (no blue side
   blobs, weaker orange arrows); a blue Reactor (`alt-hudblue`) could be a
   palette option or its own Pro view.
