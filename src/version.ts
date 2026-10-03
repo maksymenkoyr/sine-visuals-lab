@@ -83,17 +83,32 @@ export const BUILD_INFO: BuildInfo =
 const shortSha = (commit: string): string => commit.slice(0, 7);
 
 /**
- * The corner label's text: the version number and nothing else — `"0.3.0"`
- * on stable, `"0.3.12 - beta"` on insider (the owner's own word for an
- * Insiders build's version). Everything else — the channel, the PR, the
- * commit, when it was built — lives in versionHint(). A build with no version
- * shows just its channel: `"preview"`, `"dev"`, or (a manual `SVL_CHANNEL=…`
- * build with no `SVL_VERSION`) `"stable"` / `"beta"`.
+ * Whether a version is still in beta: its MAJOR is 0, the pre-1.0 stretch
+ * that ends when package.json's major is raised by hand
+ * (tools/appVersionLib.mjs). Insiders builds are beta at every major; this
+ * is the question only Stable has to ask.
+ */
+const isBetaVersion = (version: string): boolean => version.split(".")[0] === "0";
+
+/**
+ * The corner label's text: the version number and the word the owner uses
+ * for a build that can still change under you — `"0.3.0 - beta"` on stable
+ * while its major is 0 (isBetaVersion), plain `"1.0.0"` once it isn't, and
+ * `"0.3.12 - beta"` on insider at every major. Everything else — the
+ * channel, the PR, the commit, when it was built — lives in versionHint().
+ * A build with no version shows just its channel: `"preview"`, `"dev"`, or
+ * (a manual `SVL_CHANNEL=…` build with no `SVL_VERSION`) `"stable"` /
+ * `"beta"`.
+ *
+ * release.yml titles each Stable GitHub Release with this same label
+ * (`node tools/app-version.mjs label stable <version>`), the way deploy.yml
+ * titles an Insiders one, so the release list reads like the footer.
  */
 export function versionLabel(info: BuildInfo): string {
   switch (info.channel) {
     case "stable":
-      return info.version ?? "stable";
+      if (!info.version) return "stable";
+      return isBetaVersion(info.version) ? `${info.version} - beta` : info.version;
     case "insider":
       return info.version ? `${info.version} - beta` : "beta";
     case "preview":
@@ -152,6 +167,7 @@ export function versionHint(info: BuildInfo): string[] {
     case "stable":
       lines.push("Stable — updates only on a release");
       if (info.version) lines.push("Each release bumps the middle number");
+      if (info.version && isBetaVersion(info.version)) lines.push("Beta = the app is still before version 1.0");
       break;
     case "insider":
       lines.push("Beta = Insiders: updates every merge");

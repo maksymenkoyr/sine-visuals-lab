@@ -7,6 +7,11 @@
 // own checkout) and deploy.yml (insider, on main). Both need a full-history
 // checkout (`fetch-depth: 0`) so the release tags and origin/production are
 // there to read.
+//
+// `node tools/app-version.mjs label stable 0.3.0` prints that version's
+// footer label instead (`0.3.0 - beta` — src/version.ts's versionLabel owns
+// the text), which release.yml uses as the GitHub Release's title so the
+// release list and the site's footer can't read differently. It needs no git.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { formatVersion, insiderVersion, latestRelease, nextStable } from "./appVersionLib.mjs";
@@ -17,7 +22,15 @@ const lines = (text) => (text ? text.split("\n") : []);
 const pkgMajor = Number(JSON.parse(readFileSync("package.json", "utf8")).version.split(".")[0]);
 const channel = process.argv[2];
 
-if (channel === "stable") {
+if (channel === "label") {
+  const [, , , labelChannel, version] = process.argv;
+  if ((labelChannel !== "stable" && labelChannel !== "insider") || !/^\d+\.\d+\.\d+$/.test(version ?? "")) {
+    console.error("usage: node tools/app-version.mjs label stable|insider X.Y.Z");
+    process.exit(2);
+  }
+  const { versionLabel } = await import("../src/version.ts");
+  console.log(versionLabel({ channel: labelChannel, version }));
+} else if (channel === "stable") {
   // HEAD is the production commit being released. A re-run of the same
   // commit keeps the version it was already tagged with.
   const own = latestRelease(lines(git("tag", "--points-at", "HEAD")));
@@ -37,6 +50,6 @@ if (channel === "stable") {
   const patch = Number(git("rev-list", "--count", "--first-parent", `${base}..HEAD`));
   console.log(formatVersion(insiderVersion(latest, patch, pkgMajor)));
 } else {
-  console.error("usage: node tools/app-version.mjs stable|insider");
+  console.error("usage: node tools/app-version.mjs stable|insider | label stable|insider X.Y.Z");
   process.exit(2);
 }

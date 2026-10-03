@@ -6,7 +6,9 @@
  *
  *  - MAJOR is set by hand: it's the major of package.json's own `version`.
  *    Bump that (to N.0.0) and the next Stable release becomes N.0.0; until
- *    then Insiders keeps counting on the old major.
+ *    then Insiders keeps counting on the old major. Major 0 is also what
+ *    keeps "- beta" on Stable's own label (src/version.ts's versionLabel),
+ *    and the first release of major 1 is the one that drops it.
  *  - MINOR counts Stable releases: every merge of main into the `production`
  *    branch (.github/workflows/release.yml) is the previous release's minor
  *    + 1 with PATCH 0, and gets tagged `vX.Y.0`.

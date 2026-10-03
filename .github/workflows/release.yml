@@ -17,7 +17,12 @@
 # Each release bumps the minor version and resets the patch (0.3.12 on
 # Insiders → 0.4.0 here); the major only moves when package.json's major has
 # been raised by hand. The release commit is tagged `vX.Y.0` and gets a
-# GitHub Release written by tools/release-notes.mjs (tools/releaseNotesLib.mjs
+# GitHub Release titled with the site's own version label (src/version.ts's
+# versionLabel: "0.3.0 - beta" until the major leaves 0, so the release list
+# reads like the footer). It is never flagged pre-release, however beta its
+# title: that flag is what keeps Insiders builds (deploy.yml) off "Latest",
+# which is how the list tells the two channels apart. Its notes are written by
+# tools/release-notes.mjs (tools/releaseNotesLib.mjs
 # owns what it says): the release pull request's "## Highlights", then the
 # pull requests since the previous release grouped by the part of the app
 # they changed (each of which gets a "Released to Stable as X" comment back),
@@ -77,12 +82,27 @@ jobs:
           # and a first-release note (read before this release's tag exists).
           if git tag --merged HEAD | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then first=false; else first=true; fi
           { echo "version=$version"; echo "tag=v$version"; echo "first=$first"; } >> "$GITHUB_OUTPUT"
-          echo "### Stable $version" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+
+      # The footer's label for this version (e.g. "0.3.0 - beta"): the
+      # Release's title, and how Cloudflare's list and the PR comments name
+      # it. The tag stays the bare vX.Y.Z — tools/appVersionLib.mjs counts
+      # releases from strict tags. After setup-node, not in the step above:
+      # the label comes from src/version.ts, which only the pinned Node's
+      # TypeScript stripping can load, not the runner's default Node.
+      - name: Title the release
+        id: title
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          set -euo pipefail
+          title=$(node tools/app-version.mjs label stable "$VERSION")
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "### Stable $title" >> "$GITHUB_STEP_SUMMARY"
 
       - run: npm ci
 
@@ -123,19 +143,20 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Labels this deploy in Cloudflare's Deployments list with the
           # version the site shows.
-          command: deploy --tag ${{ steps.pick.outputs.tag }} --message "Stable ${{ steps.pick.outputs.version }}, commit ${{ github.sha }}"
+          command: deploy --tag ${{ steps.pick.outputs.tag }} --message "Stable ${{ steps.title.outputs.title }}, commit ${{ github.sha }}"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.pick.outputs.tag }}
+          TITLE: ${{ steps.title.outputs.title }}
           FIRST: ${{ steps.pick.outputs.first }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG is already released; redeployed it without a new Release."
           elif [ "$FIRST" = "true" ]; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "First release on the stable channel."
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes "First release on the stable channel."
           else
             # The release pull request this merge commit came from: its body's
             # "## Highlights" opens the notes. None (a direct push) just
@@ -145,7 +166,7 @@ jobs:
               gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/release-pr.md" || true
             fi
             node tools/release-notes.mjs --tag "$TAG" --version-json dist/version.json --pr-body "$RUNNER_TEMP/release-pr.md" > "$RUNNER_TEMP/notes.md"
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md"
             # The other direction of the release notes' PR list: tell each
             # shipped PR which release carried it (deploy.yml does the same
             # for Insiders). PRs are the `(#N)` every squash-merged commit on
@@ -156,7 +177,7 @@ jobs:
             git log --no-merges --format=%s ${prev:+"$prev..HEAD"} \
               | { grep -oE '\(#[0-9]+\)$' || true; } | tr -d '(#)' | sort -un | while read -r pr; do
                 gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" \
-                  --body "Released to Stable as **${TAG#v}** — [$TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG)" \
+                  --body "Released to Stable as **$TITLE** — [$TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG)" \
                   || echo "::warning::could not comment on #$pr"
               done
           fi

@@ -1,5 +1,28 @@
 import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { formatVersion, insiderVersion, latestRelease, nextStable, parseTag } from "../tools/appVersionLib.mjs";
+
+// release.yml titles each Stable GitHub Release with this command's output, so
+// the glue itself is under test: a version.ts that Node's type stripping can no
+// longer load would otherwise only fail at release time.
+describe("app-version.mjs label", () => {
+  const cli = fileURLToPath(new URL("../tools/app-version.mjs", import.meta.url));
+  const label = (...args: string[]): string =>
+    // stderr piped, so the usage line a refused call prints stays out of the test output
+    execFileSync(process.execPath, [cli, "label", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+  it("prints the footer label for a version", () => {
+    expect(label("stable", "0.2.0")).toBe("0.2.0 - beta");
+    expect(label("stable", "1.0.0")).toBe("1.0.0");
+    expect(label("insider", "0.1.71")).toBe("0.1.71 - beta");
+  });
+
+  it("refuses an unknown channel or a malformed version", () => {
+    expect(() => label("stable", "v0.2.0")).toThrow();
+    expect(() => label("preview", "0.2.0")).toThrow();
+  });
+});
 
 describe("parseTag", () => {
   it("reads strict vX.Y.Z tags only", () => {
