@@ -22,7 +22,9 @@ different mode takes over. Featured, on main.
   by its band energy less `SURPRISE_SHARE` of that energy's own running
   average over `BASELINE_SEC`), `grainTextureSide`,
   `grainGain`, `drawnGrainCount` (the fixed-sand-budget logic — see
-  "Known issues" for why it exists).
+  "Known issues" for why it exists), and the grain-weight helpers
+  `grainWeightAt`/`grainSizeFactor`/`grainSizeMoment`, which mirror
+  `grainWeight`/`grainSizeFactor` in `CHLADNI_GLSL`.
 - Three GLSL programs sharing `CHLADNI_GLSL` (the plate function, its
   gradient, and the position packing) so they can't drift apart: `SIM_FRAG`
   (steps grain positions), `BG_FRAG` (the plate surface + glow), `POINT_VERT`
@@ -51,6 +53,15 @@ measured from a reference clip.
 - 2026-08-30 (#47): after re-anchoring `grainGain` to the high-quality
   tier's grain count and raising its clamp ceiling, `high` and `low`
   quality presets read comparably bright headlessly.
+
+- 2026-10-04 (grain weight): headless shots at 1280×720 on the Metal GPU,
+  synthetic 120 BPM, 10 s per bed. Mean luma / share of brightness in the
+  brightest 10% of pixels: fine powder (weight 0, mix 0) 19 / 0.50, the
+  powder gathered in compact heaps on the antinodes; heavy grit (1, 0) 35 /
+  0.53, crisp lines; full mix (0.5, 1) 49 / 0.45, grit lines with pale dust
+  in the cells. Default bed, four frames 4 s apart before → after: top-10%
+  share 0.32–0.59 → 0.32–0.49, mean luma 30–63 → 46–68 — the spread is the
+  figure changing, not the change.
 
 - 2026-10-02: offline probe of the real `FeatureExtractor` into
   `createPlateResponse` at default settings, on a synthetic bass/chords/lead/
@@ -178,6 +189,22 @@ measured from a reference clip.
   42→52 (1.24×, mostly the sand pattern changing) before and 46→68 (1.48×)
   after, with on-beat frames reading white-hot.
 
+- 2026-10-04 — Grain weight and Size mix (Form, after Sand amount), asked for
+  as "simulation of size/weight of sand grain" to make the plate complete.
+  Each grain's weight comes from the same per-grain hash that used to only
+  jitter its drawn size, so how big a grain looks and how it moves are one
+  property. Heavier grains hop further, lift at a lower plate acceleration
+  and walk to the lines more readily; light grains are carried by a drift up
+  the gradient of the plate's squared motion — the air streaming that heaps
+  fine powder on the antinodes (Faraday, 1831) — so a mixed bed sorts itself.
+  All weight factors are 1 at `WEIGHT_REF`, the default, which is the plate
+  as it was; the default Size mix reproduces the old ±25% size scatter. The
+  streaming fades out by `GRAIN_HEAVY`, below the default weight, so the
+  default bed is sand with only its lightest grains slightly carried. Powder
+  is drawn chalkier so its heaps read as dust rather than thrown sand.
+  `drawnGrainCount` takes the bed's mean squared size (`grainSizeMoment`), so
+  a powder bed draws more grains under the coverage cap than a grit bed.
+
 ## Tuning notes
 
 - Pattern complexity sets the plate's effective size (`FUNDAMENTAL_HZ_SMALL`
@@ -211,6 +238,11 @@ measured from a reference clip.
   (`MAX_BED_COVERAGE`, grown by the amount above 1) binds second — and neither touches `grainGain`, so
   a reduced bed reads sparser at unchanged per-grain brightness; judge it
   against Grain brightness, which is the dial that compensates by taste.
+- Grain weight and Size mix are manual (no `auto`), like Grain size. The
+  streaming speed is `STREAM_RATE`; the hop, lift and pull slopes are
+  `HOP_PER_WEIGHT`, `LIFT_PER_WEIGHT` and `pullScale` in `SIM_FRAG`. Judge
+  powder at weight 0, mix 0 (heaps should sit still on the antinodes, not
+  smear between them) and a sorted bed at weight 0.5, mix 1.
 - The auto→manual sign-off pattern used at ship time: drag one setting,
   confirm every weighted setting reads `auto` and the dragged one flips to
   `manual` — see PR #38's verification notes.
@@ -223,14 +255,17 @@ measured from a reference clip.
   belongs in `src/audio/features.ts` and needs `npm run eval:tempo` before
   and after.
 
-- Grains never collide (no notion of grain radius), so `drawnGrainCount`'s
+- Grains never collide (they have a size and weight now, but no radius in
+  the sim), so `drawnGrainCount`'s
   fixed-sand-budget approach is a workaround for a fixed grain count
   painting over itself at large Grain size, not a physical fix — it's
   documented as the accepted trade-off in the file header, not an open bug.
 - The grain pool is allocated at `SAND_AMOUNT_MAX` times the tier count
   whatever the setting (texture memory, not sim cost — the sim is scissored);
   drawing the top of the range on the `high` tier is heavy on weak GPUs.
-- No further follow-ups are recorded beyond the pivots above.
+- Faraday heaps on a real plate circulate (powder rolls up and over the
+  heap); here they only gather. A swirl around each heap is the next step if
+  powder should look alive rather than parked.
 
 ## Materials
 
@@ -239,7 +274,10 @@ measured from a reference clip.
 - Working scripts: `docs/scenes/chladni/scripts/` — `sand-amount-shot.mjs`
   (headless before/after shots of the Sand amount setting via
   `window.__viz.setParams`) and `figure-sequence-shot.mjs` (a timed run of
-  shots, to compare whether the plate moves between figures or sits on one).
+  shots, to compare whether the plate moves between figures or sits on one)
+  and `grain-weight-shot.mjs` (Metal-GPU shots of named Grain weight / Size
+  mix beds after each has sorted; on a checkout without those settings every
+  shot is the default bed, the "before" side).
   Captured screenshots are session output, not
   kept in the repo.
 

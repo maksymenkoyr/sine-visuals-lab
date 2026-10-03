@@ -8,6 +8,11 @@ import {
   grainTextureSide,
   grainGain,
   drawnGrainCount,
+  grainWeightAt,
+  grainSizeFactor,
+  grainSizeMoment,
+  WEIGHT_REF,
+  SIZE_MIX_DEFAULT,
   MAX_BED_COVERAGE,
   SAND_AMOUNT_MAX,
   MODE_TABLE,
@@ -135,7 +140,7 @@ describe("bed coverage", () => {
     const platePx2 = 1920 * 1080;
     for (const grainPx of [10, 20, 30, 50]) {
       const drawn = drawnGrainCount(count, grainPx, platePx2);
-      const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+      const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT);
       if (drawn < count) {
         expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE + 1e-6);
       }
@@ -167,7 +172,7 @@ describe("sand amount", () => {
       for (const grainPx of [10, 40]) {
         const drawn = drawnGrainCount(count, grainPx, platePx2, amount);
         if (amount <= 1) expect(drawn).toBeLessThanOrEqual(drawnGrainCount(count, grainPx, platePx2, 1));
-        const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+        const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT);
         if (drawn > 0) {
           expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE * Math.max(1, amount) + 1e-6);
         }
@@ -326,5 +331,40 @@ describe("plate response", () => {
     const held = { n: first[0].n, m: first[0].m };
     const second = run(r, tone(17), 2, inputs({ complexity: 0.5 }));
     expect(second[0]).not.toMatchObject(held);
+  });
+});
+
+describe("grain weight", () => {
+  it("spreads the bed's weight by Size mix around Grain weight, clamped to [0, 1]", () => {
+    expect(grainWeightAt(0, 0.5, 0)).toBe(0.5);
+    expect(grainWeightAt(1, 0.5, 0)).toBe(0.5);
+    expect(grainWeightAt(0, 0.5, 1)).toBe(0);
+    expect(grainWeightAt(1, 0.5, 1)).toBe(1);
+    expect(grainWeightAt(0, 0.1, 1)).toBe(0);
+    expect(grainWeightAt(1, 0.9, 1)).toBe(1);
+  });
+
+  it("draws a grain of the reference weight at exactly Grain size, heavier ones bigger", () => {
+    expect(grainSizeFactor(WEIGHT_REF)).toBe(1);
+    expect(grainSizeFactor(0)).toBeLessThan(0.5);
+    expect(grainSizeFactor(1)).toBeGreaterThan(1);
+  });
+
+  it("an unmixed bed's area moment is its one grain's size squared", () => {
+    for (const w of [0, 0.3, WEIGHT_REF, 1]) {
+      expect(grainSizeMoment(w, 0)).toBeCloseTo(grainSizeFactor(w) ** 2, 9);
+    }
+  });
+
+  it("the default bed covers about what the old ±25% size scatter did", () => {
+    expect(grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT)).toBeCloseTo(1 + 0.5 ** 2 / 12, 1);
+  });
+
+  it("a powder bed fits more grains under the coverage cap than a grit bed", () => {
+    const count = qualitySettings("high").maxParticles * SAND_AMOUNT_MAX;
+    const platePx2 = 1280 * 720;
+    const powder = drawnGrainCount(count, 6, platePx2, SAND_AMOUNT_MAX, grainSizeMoment(0, 0));
+    const grit = drawnGrainCount(count, 6, platePx2, SAND_AMOUNT_MAX, grainSizeMoment(1, 0));
+    expect(powder).toBeGreaterThan(grit);
   });
 });

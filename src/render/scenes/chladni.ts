@@ -65,6 +65,21 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // at a random spot — a real plate spills sand; refilling keeps the count
 // constant. Silence drives nothing, so the figure freezes in place.
 //
+// Grain weight. Every grain has its own weight, from fine powder (0) to heavy
+// grit (1): the bed's Grain weight spread by Size mix over a fixed per-grain
+// draw (grainWeightAt), and the same weight sets both how big the grain is
+// drawn (grainSizeFactor) and how it moves, so what you see is what sorts.
+// Heavier grains bounce further and lift off at a lower plate acceleration
+// (fine powder clings to the plate); their bounces are what walk them to the
+// lines. Light grains barely hop, and instead the air does the moving: a
+// vibrating plate sets the air over it streaming toward the antinodes, which
+// carries fine powder there into heaps (Faraday, 1831, with lycopodium). The
+// streaming is modelled as a drift up the gradient of the plate's squared
+// motion, faded out by weight (grainLightness), so a mixed bed sorts itself —
+// grit draws the lines, dust gathers in the cells between them. At
+// WEIGHT_REF every weight factor is exactly 1, which is the plate as it was
+// before grains had a weight.
+//
 // Grains never interact — the sim has no notion of a grain's radius, so
 // nothing stops two from occupying the same spot. Rendered at a fixed count,
 // a big Grain size therefore just paints over itself: covered area grows
@@ -283,9 +298,44 @@ export const SAND_AMOUNT_MAX = 5;
  *  reading — see the file header. */
 export const MAX_BED_COVERAGE = 0.55;
 
-/** E[(0.75 + 0.5u)^2] for u ~ Uniform(0,1): the size-jitter POINT_VERT
- *  applies per grain, folded into the average covered area per grain. */
-const SIZE_JITTER_M2 = 1 + 0.5 ** 2 / 12;
+/** The grain weight at which every weight factor in SIM_FRAG is 1 and a grain
+ *  is drawn at exactly Grain size — the plate as it was before grains had a
+ *  weight, and Grain weight's default. See the file header. */
+export const WEIGHT_REF = 0.7;
+/** Drawn size doubles every 1/SIZE_PER_WEIGHT of weight: dust is about a
+ *  third the size of the heaviest grit. */
+export const SIZE_PER_WEIGHT = 1.6;
+/** Size mix's default: about the ±25% size scatter grains had before they
+ *  had a weight. */
+export const SIZE_MIX_DEFAULT = 0.45;
+/** Grains at least this heavy are too heavy for the air streaming to carry
+ *  (grainLightness in CHLADNI_GLSL). Below WEIGHT_REF, so the default bed
+ *  is all sand except its lightest few grains. */
+const GRAIN_HEAVY = 0.6;
+
+/** One grain's weight in [0,1] (0 = fine powder, 1 = heavy grit), from its
+ *  fixed per-grain draw `u` in [0,1]: the bed's Grain weight, spread by Size
+ *  mix (1 = half the range either side). Mirrors grainWeight in CHLADNI_GLSL. */
+export function grainWeightAt(u: number, weight: number, mix: number): number {
+  return Math.max(0, Math.min(1, weight + mix * (u - 0.5)));
+}
+
+/** Drawn size of a grain of weight `w` relative to Grain size. Mirrors
+ *  grainSizeFactor in CHLADNI_GLSL. */
+export function grainSizeFactor(w: number): number {
+  return 2 ** (SIZE_PER_WEIGHT * (w - WEIGHT_REF));
+}
+
+/** E[grainSizeFactor^2] over the bed's grains (u ~ Uniform(0,1)) — the mean
+ *  covered area per grain relative to one drawn at Grain size, for
+ *  drawnGrainCount. A midpoint sum, since the clamp in grainWeightAt has no
+ *  tidy closed form. */
+export function grainSizeMoment(weight: number, mix: number): number {
+  const SAMPLES = 32;
+  let sum = 0;
+  for (let i = 0; i < SAMPLES; i++) sum += grainSizeFactor(grainWeightAt((i + 0.5) / SAMPLES, weight, mix)) ** 2;
+  return sum / SAMPLES;
+}
 
 /** How many of `count` grains to draw so the bed stays under
  *  MAX_BED_COVERAGE: bigger grains mean fewer of them, as with a fixed
@@ -297,12 +347,20 @@ const SIZE_JITTER_M2 = 1 + 0.5 ** 2 / 12;
  *  quality tier's grain count and `amount` (the Sand amount setting,
  *  clamped to [0, SAND_AMOUNT_MAX]) scales it; the coverage cap then
  *  applies, itself scaled by the amount above 1 so more sand really means a
- *  denser bed. 0 draws nothing (a bare plate). */
-export function drawnGrainCount(count: number, grainPx: number, platePx2: number, amount = 1): number {
+ *  denser bed. 0 draws nothing (a bare plate). `sizeM2` is the bed's mean
+ *  squared size factor (grainSizeMoment), so a bed of dust fits more grains
+ *  than one of grit. */
+export function drawnGrainCount(
+  count: number,
+  grainPx: number,
+  platePx2: number,
+  amount = 1,
+  sizeM2 = grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT),
+): number {
   const a = Math.max(0, Math.min(SAND_AMOUNT_MAX, amount));
   const desired = Math.round(count * a);
   if (desired === 0) return 0;
-  const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * SIZE_JITTER_M2;
+  const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * sizeM2;
   const fits = Math.floor((MAX_BED_COVERAGE * Math.max(1, a) * platePx2) / Math.max(1e-6, areaPerGrain));
   return Math.max(1, Math.min(desired, fits));
 }
@@ -390,6 +448,27 @@ const SETTINGS: SceneSetting[] = [
     max: SAND_AMOUNT_MAX,
     step: 0.05,
     default: 1,
+  },
+  {
+    key: "grainWeight",
+    label: "Grain weight",
+    description: "Left fine powder, right heavy grit: heavy grains bounce to the still lines, light ones drift with the air into heaps where the plate moves most",
+    // Manual like Grain size — what the plate is sprinkled with, a taste dial.
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: WEIGHT_REF,
+  },
+  {
+    key: "sizeMix",
+    label: "Size mix",
+    description: "Left every grain alike, right a mix from dust to grit, which the plate sorts: grit draws the lines, dust gathers between them",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: SIZE_MIX_DEFAULT,
   },
   {
     key: "shake",
@@ -547,6 +626,23 @@ vec4 packPos(vec2 p) {
 }
 
 ${FLOAT_HASH_GLSL}
+
+// A grain's weight, 0 = fine powder .. 1 = heavy grit, from a fixed per-grain
+// draw keyed by its texel — the sim and the point pass read the same one, so
+// a grain's size and its physics are one property. Mirrors grainWeightAt.
+float grainWeight(vec2 texel) {
+  float u = hash22(texel * 0.731 + 3.17).x;
+  return clamp(uGrainWeight + uSizeMix * (u - 0.5), 0.0, 1.0);
+}
+// Drawn size relative to Grain size. Mirrors grainSizeFactor.
+float grainSizeFactor(float w) {
+  return exp2(${SIZE_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)}));
+}
+// How much the air streaming carries a grain: all of fine powder, none of
+// anything at least as heavy as GRAIN_HEAVY.
+float grainLightness(float w) {
+  return 1.0 - smoothstep(0.0, ${GRAIN_HEAVY.toFixed(2)}, w);
+}
 `;
 
 // Plate acceleration (amplitude x drive, g-ish units) at the knee between a
@@ -563,6 +659,15 @@ const PULL_BIAS = 0.3;
 // A step may never cross more than this fraction of one nodal cell, so high
 // modes can't overshoot a line and oscillate.
 const STEP_CELL_FRACTION = 0.25;
+// Grain weight (see the file header), each a change per unit of weight away
+// from WEIGHT_REF, where all three factors are 1. Air drag cuts a light
+// grain's hop short; fine powder clings, so it needs a harder plate to lift.
+const HOP_PER_WEIGHT = 1.0;
+const LIFT_PER_WEIGHT = 1.0;
+// Air streaming toward the antinodes: a fully light grain's drift, in plate
+// units per second, per unit of drive^2 times the gradient of the plate's
+// squared motion across one nodal cell.
+const STREAM_RATE = 0.3;
 // Treble glow (see POINT_VERT / POINT_FRAG): hats make the sand glint. One
 // grain in GLINT_ONE_IN carries a halo of HALO_PX pixels (at 720p) — a
 // fixed pixel radius, not a multiple of the grain size, so the halo is a
@@ -602,14 +707,21 @@ void main() {
   float f = field(p);
   float a = abs(f) * 0.5;
 
+  // This grain's weight (see file header): how far it hops, how hard the
+  // plate must shake to lift it, and how readily its bounces walk it to a line.
+  float w = grainWeight(vec2(texel));
+  float hopScale = 1.0 + ${HOP_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)});
+  float lift = ${LIFT_THRESHOLD.toFixed(2)} * (1.0 - ${LIFT_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)}));
+  float pullScale = w / ${WEIGHT_REF.toFixed(2)};
+
   // Local plate acceleration, and a soft lift: accel^2 / T below the knee
   // (a rattle in place), accel - T above it (a free bounce).
   float accel = a * drive;
-  float bounce = accel * accel / (accel + ${LIFT_THRESHOLD.toFixed(2)});
+  float bounce = accel * accel / (accel + lift);
 
   // Random bounce. sqrt(dt) so the random walk diffuses at the same rate at
   // any frame pace; the step is HOP_RATE-sized at the 60 fps reference.
-  float step = ${HOP_RATE.toFixed(2)} * bounce * sqrt(uSimDt * 60.0) / 60.0;
+  float step = ${HOP_RATE.toFixed(2)} * hopScale * bounce * sqrt(uSimDt * 60.0) / 60.0;
   vec2 hop = (hash22(seed) - 0.5) * 2.0 * step;
 
   // Drift toward the line, second-order in the bounce: nothing where the
@@ -618,11 +730,20 @@ void main() {
   // overshoot a line.
   vec2 g = fieldGrad(p);
   vec2 dir = g / (length(g) + 1e-4) * sign(f);
-  float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / max(uMaxOrder, 1.0);
-  float bias = ${PULL_BIAS.toFixed(2)} * uSettle * smoothstep(0.0, 3.0 * ${LIFT_THRESHOLD.toFixed(2)}, accel);
-  float pull = min(stepCap, ${HOP_RATE.toFixed(2)} * bounce * bias * uSimDt);
+  float cells = max(uMaxOrder, 1.0);
+  float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / cells;
+  float bias = ${PULL_BIAS.toFixed(2)} * uSettle * pullScale * smoothstep(0.0, 3.0 * lift, accel);
+  float pull = min(stepCap, ${HOP_RATE.toFixed(2)} * hopScale * bounce * bias * uSimDt);
 
-  p += hop - dir * pull;
+  // Air streaming carries light grains the other way, up the gradient of
+  // the plate's squared motion — d(a^2)/dp = (f / 2) g — so it vanishes on
+  // the lines and at the antinode tops, where the powder heaps. Measured
+  // per nodal cell so a fine lattice streams as fast as a coarse one.
+  vec2 stream = ${STREAM_RATE.toFixed(2)} * grainLightness(w) * drive * drive * 0.5 * f * g / cells * uSimDt;
+  float streamLen = length(stream);
+  if (streamLen > stepCap) stream *= stepCap / streamLen;
+
+  p += hop - dir * pull + stream;
 
   // Off the edge: spilled. Respawn somewhere on the plate.
   if (abs(p.x) > 1.0 || abs(p.y) > 1.0) {
@@ -694,9 +815,11 @@ void main() {
   vec2 room = 0.5 + p * plateHalf();
   vec2 dev = (room - uViewport.xy) / uViewport.zw;
   gl_Position = vec4(dev * 2.0 - 1.0, 0.0, 1.0);
-  // No two grains of sand are alike: a fixed per-grain size and shade so a
-  // pile reads as grains rather than a smooth blob.
+  // No two grains of sand are alike: a fixed per-grain size (its weight —
+  // grainWeight reads .x of this same hash) and shade so a pile reads as
+  // grains rather than a smooth blob.
   vec2 jitter = hash22(vec2(texel) * 0.731 + 3.17);
+  float w = grainWeight(vec2(texel));
   vShade = 0.8 + 0.4 * jitter.y;
   // Each grain is a faceted shard (3 or 4 sides, POINT_FRAG), not a disc —
   // real sand is angular. Random facet count and rotation per grain, same
@@ -714,7 +837,7 @@ void main() {
   // 0.41x, a square 0.64x); grow the size by the matching factor so a faceted
   // bed reads as bright as the round one it replaced.
   float shardGrow = vFacets < 3.5 ? 1.556 : 1.253;
-  float size = uGrainSize * shardGrow * (0.75 + 0.5 * jitter.x) * resScale;
+  float size = uGrainSize * shardGrow * grainSizeFactor(w) * resScale;
   vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
   vScale = vSizePx / size;
   gl_PointSize = vSizePx;
@@ -726,7 +849,10 @@ void main() {
   // thrown grains run up to its brightest end.
   vec3 col = palRamp(0.55 + 0.45 * vAmp);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
-  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
+  // Fine powder is chalkier still, so its heaps on the antinodes (where the
+  // ramp runs brightest) read as dust rather than as thrown sand.
+  float chalk = max(0.15 * (1.0 - vAmp), 0.5 * grainLightness(w));
+  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), chalk);
   float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 2.0);
   vCol = col * bright;
   // The halo's tint and its area normalisation (see POINT_FRAG), without the
@@ -915,7 +1041,11 @@ function createChladniScene(): Scene {
         ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
         : gl.drawingBufferWidth * gl.drawingBufferHeight;
       const sandAmount = resolveSceneSetting(ID, settingFor("sandAmount"));
-      const drawn = drawnGrainCount(grainCount, grainPx, platePx2, sandAmount);
+      const sizeM2 = grainSizeMoment(
+        resolveSceneSetting(ID, settingFor("grainWeight")),
+        resolveSceneSetting(ID, settingFor("sizeMix")),
+      );
+      const drawn = drawnGrainCount(grainCount, grainPx, platePx2, sandAmount, sizeM2);
 
       // Sim pass: step the drawn prefix from posTex[read] into posTex[write].
       // The scissor keeps it to the rows that prefix occupies (the sim
