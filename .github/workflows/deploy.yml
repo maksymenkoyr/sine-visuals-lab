@@ -1,15 +1,15 @@
-# Checks every pull request; builds and deploys the Insider channel on every push
+# Checks every pull request; builds and deploys the Insiders channel on every push
 # to main; deploys a throwaway preview Worker for every open pull request.
 #
-# Insider (wrangler.toml's `[env.insider]`, the Worker `audio-viz-room-insider` on
-# insider.sinevisualslab.com) is the channel that tracks main automatically —
+# Insiders (wrangler.toml's `[env.insider]`, the Worker `audio-viz-room-insider` on
+# insiders.sinevisualslab.com) is the channel that tracks main automatically —
 # every push here ships there within minutes, no one has to decide to release
 # it. The **Stable** channel (the top-level Worker, sinevisualslab.com and
 # www) is deliberately not touched by this workflow at all: it only changes
 # when main is merged into the `production` branch, which runs
 # `.github/workflows/release.yml` — see that workflow's own header for why a
 # separate, deliberate step, and src/version.ts for what the two channels
-# mean to a visitor. Each Insider build's version is the last release's
+# mean to a visitor. Each Insiders build's version is the last release's
 # MAJOR.MINOR with the patch counting merges since
 # (tools/appVersionLib.mjs).
 #
@@ -54,7 +54,7 @@ jobs:
       contents: read
       # For the sticky preview-URL comment.
       pull-requests: write
-    # Serialize Insider deploys so two merges landing close together can't race
+    # Serialize Insiders deploys so two merges landing close together can't race
     # each other onto the Worker; previews serialize per PR instead, so a burst
     # of pushes settles on the last one without blocking other PRs.
     concurrency:
@@ -66,11 +66,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Full history and every branch (including origin/production) for
-          # every event, not just a push to main: an Insider build counts its
+          # every event, not just a push to main: an Insiders build counts its
           # own patch version from them (tools/app-version.mjs), and now a PR
           # build needs them too — every scene's own version
           # (tools/sceneVersionLib.mjs) is counted the same way, so a preview
-          # build carries them just like Insider does.
+          # build carries them just like Insiders does.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -82,13 +82,13 @@ jobs:
 
       # The gates named in AGENTS.md. typecheck covers both tsconfigs, so the
       # Worker source is checked before it ships. They gate every deploy this
-      # workflow makes (Insider and every preview) — Stable's own gates are
+      # workflow makes (Insiders and every preview) — Stable's own gates are
       # release.yml's own npm ci/typecheck/test steps, run again there against
       # the production commit being released.
       - run: npm run typecheck
       - run: npm run test
 
-      - name: Pick the Insider version
+      - name: Pick the Insiders version
         id: version
         if: github.event_name == 'push'
         # Assigned first so a failure fails the step (an `echo "$(…)"` would
@@ -96,7 +96,7 @@ jobs:
         run: |
           version=$(node tools/app-version.mjs insider)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "### Insider $version - beta" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Insiders $version - beta" >> "$GITHUB_STEP_SUMMARY"
 
       # SVL_CHANNEL picks src/version.ts's channel: "preview" on a pull
       # request, "insider" on a push to main — there's no third case this
@@ -135,7 +135,7 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
           '
 
-      - name: Deploy to Insider
+      - name: Deploy to Insiders
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
@@ -143,7 +143,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # --tag/--message label this deploy in Cloudflare's own Deployments
           # list with the same version the site shows.
-          command: deploy --env insider --tag v${{ steps.version.outputs.version }}-beta --message "Insider ${{ steps.version.outputs.version }} - beta, commit ${{ github.sha }}"
+          command: deploy --env insider --tag v${{ steps.version.outputs.version }}-beta --message "Insiders ${{ steps.version.outputs.version }} - beta, commit ${{ github.sha }}"
 
       - name: Deploy PR preview
         id: preview
@@ -215,7 +215,7 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
-  # Publishes each Insider build as a GitHub pre-release `vX.Y.Z-beta` on the
+  # Publishes each Insiders build as a GitHub pre-release `vX.Y.Z-beta` on the
   # commit it shipped (creating that tag), and comments the version on the pull
   # request that commit landed through — so the version shows where people
   # look: the repo page's Releases sidebar, the commit's own page (GitHub lists
@@ -234,7 +234,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Publish the Insider pre-release
+      - name: Publish the Insiders pre-release
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -260,8 +260,8 @@ jobs:
           else
             notes="$(gh api "repos/$REPO/commits/$SHA" -q '.commit.message | split("\n")[0]')"
           fi
-          notes="$notes"$'\n\n'"Live on Insider: https://insider.sinevisualslab.com — commit $SHA"
-          # Newest earlier Insider build, for a compare link; none is fine.
+          notes="$notes"$'\n\n'"Live on Insiders: https://insiders.sinevisualslab.com — commit $SHA"
+          # Newest earlier Insiders build, for a compare link; none is fine.
           prev=$(gh api "repos/$REPO/releases?per_page=10" -q "[.[] | select(.prerelease and .tag_name != \"$TAG\")][0].tag_name // empty" 2>/dev/null || true)
           if [ -n "$prev" ]; then notes="$notes"$'\n\n'"**Full Changelog**: https://github.com/$REPO/compare/$prev...$TAG"; fi
           gh release create "$TAG" --repo "$REPO" --target "$SHA" --prerelease \
@@ -269,7 +269,7 @@ jobs:
           echo "Published $TAG" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$pr" ]; then
             gh pr comment "$pr" --repo "$REPO" \
-              --body "Shipped to Insider as **$VERSION - beta** — [$TAG](https://github.com/$REPO/releases/tag/$TAG)"
+              --body "Shipped to Insiders as **$VERSION - beta** — [$TAG](https://github.com/$REPO/releases/tag/$TAG)"
           fi
 
   # Tear the preview Worker down (and its Room namespace with it) once the PR

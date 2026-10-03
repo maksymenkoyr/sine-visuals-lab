@@ -1,6 +1,6 @@
 # Ships the **Stable** release channel — the top-level Worker
 # (`audio-viz-room`, wrangler.toml's top level) on sinevisualslab.com and www.
-# Every other deploy in this repo is automatic (deploy.yml ships Insider on
+# Every other deploy in this repo is automatic (deploy.yml ships Insiders on
 # every push to main, and a preview on every PR push); this one runs only when
 # main is merged into the `production` branch, because shipping to everyone is
 # a decision, not a side effect of merging.
@@ -15,7 +15,7 @@
 # after it.
 #
 # Each release bumps the minor version and resets the patch (0.3.12 on
-# Insider → 0.4.0 here); the major only moves when package.json's major has
+# Insiders → 0.4.0 here); the major only moves when package.json's major has
 # been raised by hand. The release commit is tagged `vX.Y.0` and gets a
 # GitHub Release written by tools/release-notes.mjs (tools/releaseNotesLib.mjs
 # owns what it says): the release pull request's "## Highlights", then the
@@ -148,7 +148,7 @@ jobs:
             gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
             # The other direction of the release notes' PR list: tell each
             # shipped PR which release carried it (deploy.yml does the same
-            # for Insider). PRs are the `(#N)` every squash-merged commit on
+            # for Insiders). PRs are the `(#N)` every squash-merged commit on
             # main ends with, between the previous strict release tag and this
             # commit. Best-effort: a failed comment never fails a release
             # that is already live.

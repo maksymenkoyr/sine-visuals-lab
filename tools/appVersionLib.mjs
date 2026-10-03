@@ -6,11 +6,11 @@
  *
  *  - MAJOR is set by hand: it's the major of package.json's own `version`.
  *    Bump that (to N.0.0) and the next Stable release becomes N.0.0; until
- *    then Insider keeps counting on the old major.
+ *    then Insiders keeps counting on the old major.
  *  - MINOR counts Stable releases: every merge of main into the `production`
  *    branch (.github/workflows/release.yml) is the previous release's minor
  *    + 1 with PATCH 0, and gets tagged `vX.Y.0`.
- *  - PATCH counts merges to main since the last release: an Insider build
+ *  - PATCH counts merges to main since the last release: an Insiders build
  *    (.github/workflows/deploy.yml) is the latest release's X.Y, with PATCH =
  *    the number of first-parent commits on main since the commit that
  *    release merged in — one per squash-merged PR.
@@ -64,7 +64,7 @@ export function nextStable(latest, pkgMajor) {
   return { major: latest.major, minor: latest.minor + 1, patch: 0 };
 }
 
-/** An Insider build's version: the latest release's X.Y, `patch` merges on. */
+/** An Insiders build's version: the latest release's X.Y, `patch` merges on. */
 export function insiderVersion(latest, patch, pkgMajor) {
   return latest ? { major: latest.major, minor: latest.minor, patch } : { major: pkgMajor, minor: 0, patch };
 }

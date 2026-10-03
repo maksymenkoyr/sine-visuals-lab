@@ -56,7 +56,7 @@ scene record's "Measurements" and dated "Decisions and pivots".
 | Any existing scene | `docs/scenes/<id>.md`, its record |
 | The tempo tracker (`src/audio/features.ts`, `src/audio/tempoAnalyzer.ts`, `src/render/beatClock.ts`, `src/render/tempoSettle.ts`, `src/render/metronome.ts`) | `tests/tempoEval.test.ts` header — run `npm run eval:tempo` before and after |
 | A paid scene, or anything under `src/render/scenes/private/` | `src/render/scenes/privateScenes.ts` header |
-| The version label, the Stable/Insider channels, or releasing | `src/version.ts` header |
+| The version label, the Stable/Insiders channels, or releasing | `src/version.ts` header |
 | A scene's own version | `tools/sceneVersionLib.mjs` header |
 | A `?url` import, or any file the page fetches from its own origin after load | `src/pinnedAssets.ts` header |
 

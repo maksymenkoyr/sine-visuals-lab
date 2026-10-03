@@ -39,8 +39,8 @@ npm run dev:worker    # Cloudflare Worker backend, for phone/TV room pairing
 ```
 
 `npm run build` produces a static bundle (`tsc -b && vite build`). Two
-deployed channels: pushing to `main` ships the **Insider** channel
-(insider.sinevisualslab.com) automatically, on every push — see
+deployed channels: pushing to `main` ships the **Insiders** channel
+(insiders.sinevisualslab.com) automatically, on every push — see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
 channel (sinevisualslab.com)
 only updates when `main` is merged into the `production` branch

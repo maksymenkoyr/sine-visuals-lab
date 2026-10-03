@@ -140,7 +140,7 @@ function releaseList(git, mergedRef) {
   const releases = [];
   for (const tag of raw ? raw.split("\n").filter(Boolean) : []) {
     const version = parseTag(tag);
-    if (!version) continue; // an Insider -beta tag, or anything non-strict
+    if (!version) continue; // an Insiders -beta tag, or anything non-strict
     const sha = git("rev-list", "-n", "1", tag);
     releases.push({ tag, version, sha });
   }

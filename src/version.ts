@@ -18,8 +18,9 @@ import { SOURCE_URL } from "./brand.ts";
  *    there's something worth shipping to everyone; a release is also the
  *    only moment a phone/TV paired on stable drops, since deploying restarts
  *    the Room Durable Objects (server/room.ts).
- *  - **insider** — `wrangler.toml`'s `[env.insider]`, the Worker
- *    `audio-viz-room-insider` on insider.sinevisualslab.com. Every push to
+ *  - **insider** (shown to people as "Insiders") — `wrangler.toml`'s
+ *    `[env.insider]`, the Worker `audio-viz-room-insider` on
+ *    insiders.sinevisualslab.com. Every push to
  *    `main` deploys here (`.github/workflows/deploy.yml`), so it's always
  *    current with the tip of `main` and never needs a person to decide to
  *    ship it. Each build is published as a GitHub pre-release
@@ -29,7 +30,7 @@ import { SOURCE_URL } from "./brand.ts";
  *  - **dev** — `npm run dev` / `npm run build` with no `SVL_CHANNEL` set:
  *    whatever's on disk, dirty or not.
  *
- * Stable and Insider carry a MAJOR.MINOR.PATCH version: every merge to main
+ * Stable and Insiders carry a MAJOR.MINOR.PATCH version: every merge to main
  * bumps the patch, every Stable release bumps the minor, and the major is
  * set by hand in package.json — tools/appVersionLib.mjs's header owns the
  * rules, and CI passes the result in as `SVL_VERSION`.
@@ -84,7 +85,7 @@ const shortSha = (commit: string): string => commit.slice(0, 7);
 /**
  * The corner label's text: the version number and nothing else — `"0.3.0"`
  * on stable, `"0.3.12 - beta"` on insider (the owner's own word for an
- * Insider build's version). Everything else — the channel, the PR, the
+ * Insiders build's version). Everything else — the channel, the PR, the
  * commit, when it was built — lives in versionHint(). A build with no version
  * shows just its channel: `"preview"`, `"dev"`, or (a manual `SVL_CHANNEL=…`
  * build with no `SVL_VERSION`) `"stable"` / `"beta"`.
@@ -103,15 +104,15 @@ export function versionLabel(info: BuildInfo): string {
 
 /**
  * The masthead badge (src/ui/gallery.ts) that tells a visitor they're not on
- * stable — its text and the lines of its hover/tap hint. Insider only: a PR
+ * stable — its text and the lines of its hover/tap hint. Insiders only: a PR
  * preview's own URL and comment already say what it is, and a `dev` badge
  * would sit in every local screenshot.
  */
 export function channelBadge(info: BuildInfo): { label: string; hint: readonly string[] } | null {
   if (info.channel !== "insider") return null;
   return {
-    label: "Insider",
-    hint: ["Insider build: every change lands here first.", "Can be rough. Stable is at sinevisualslab.com"],
+    label: "Insiders",
+    hint: ["Insiders build: every change lands here first.", "Can be rough. Stable is at sinevisualslab.com"],
   };
 }
 
@@ -153,7 +154,7 @@ export function versionHint(info: BuildInfo): string[] {
       if (info.version) lines.push("Each release bumps the middle number");
       break;
     case "insider":
-      lines.push("Beta = Insider: updates every merge");
+      lines.push("Beta = Insiders: updates every merge");
       if (info.version) lines.push("Each merge bumps the last number");
       if (info.pr) lines.push(`#${info.pr} — last pull request merged`);
       break;
