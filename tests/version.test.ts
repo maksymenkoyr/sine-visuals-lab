@@ -68,7 +68,7 @@ describe("versionHint", () => {
 
   it("explains the numbers, PR and commit on insider", () => {
     expect(versionHint(withCommit({ channel: "insider", version: "0.3.12", pr: 183 }))).toEqual([
-      "Beta = Insider: updates every merge",
+      "Beta = Insiders: updates every merge",
       "Each merge bumps the last number",
       "#183 — last pull request merged",
       "da38a37 — the commit it was built from",
@@ -96,7 +96,7 @@ describe("versionHint", () => {
 
 describe("channelBadge", () => {
   it("badges insider only", () => {
-    expect(channelBadge({ ...base, channel: "insider" })?.label).toBe("Insider");
+    expect(channelBadge({ ...base, channel: "insider" })?.label).toBe("Insiders");
     for (const channel of ["stable", "preview", "dev"] as const) {
       expect(channelBadge({ ...base, channel })).toBeNull();
     }

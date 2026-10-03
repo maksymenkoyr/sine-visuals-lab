@@ -90,7 +90,7 @@ export function hideTooltip(): void {
 
 /**
  * Gives `target` this tooltip as a standing hint — the version label and
- * Insider badge in the gallery (src/ui/gallery.ts) and the version label in
+ * Insiders badge in the gallery (src/ui/gallery.ts) and the version label in
  * a scene (src/app.ts, whose content changes on every scene switch — see
  * `boundHints` below for why that's a plain update, not a second bind). On
  * hover or focus for a mouse/keyboard, on tap for touch — where pointerleave

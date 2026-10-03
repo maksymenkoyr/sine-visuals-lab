@@ -90,7 +90,7 @@ const ROBOTS_META_RE = /<meta[^>]+name\s*=\s*["']robots["']/i;
  * src/version.ts) for both `vite dev` and `vite build`, emits `version.json`
  * into a build's dist/ so `curl https://www.sinevisualslab.com/version.json`
  * answers "what's live" without opening the page, and marks every non-stable
- * build `noindex` so Insider and PR previews never compete with www in search
+ * build `noindex` so Insiders and PR previews never compete with www in search
  * (index.html's canonical already points at www — see that file's own
  * comment; this just makes it explicit for a host that isn't canonical at
  * all). `version.json` also carries `scenes` (every registered scene's own

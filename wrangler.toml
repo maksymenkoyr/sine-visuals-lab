@@ -31,7 +31,8 @@ new_sqlite_classes = ["Room"]
 directory = "./dist"
 binding = "ASSETS"
 # Only the homepage runs the Worker first, so it can 301 the bare domain to
-# www (server/worker.ts); everything else is still served straight from dist/.
+# www, and Insiders' old insider. hosts to insiders. (server/worker.ts);
+# everything else is still served straight from dist/.
 run_worker_first = ["/"]
 
 # Custom Domains, not route patterns: this Worker serves the site as well as the
@@ -53,26 +54,37 @@ pattern = "www.sinevisualslab.com"
 custom_domain = true
 
 # ---------------------------------------------------------------------------
-# The **Insider** channel — `wrangler deploy --env insider`, run by
+# The **Insiders** channel — `wrangler deploy --env insider`, run by
 # .github/workflows/deploy.yml on every push to main. Worker name is
 # wrangler's own `<name>-<env>` default (`audio-viz-room-insider`, unset here on
 # purpose, same as [env.preview] below never setting one); the Worker serves
-# insider.sinevisualslab.com, always built from whatever just landed on main, so
+# insiders.sinevisualslab.com, always built from whatever just landed on main, so
 # there's a place to see (and pair a phone/TV against) the tip of main without
 # waiting for a release.
+#
+# The env keeps its original singular name: renaming it would deploy a second
+# Worker (`<name>-<env>`) with a fresh Room namespace, and that Worker couldn't
+# claim these domains while the old one still held them. Only the names people
+# see say "Insiders".
 #
 # Same two things [env.preview] has to spell out, for the same reasons — see
 # that section's comment for `durable_objects`; `routes` here is this
 # environment's *own* domain rather than an override, since (unlike preview)
-# Insider does want a stable custom domain of its own. It answers on www. too,
+# Insiders does want a stable custom domain of its own. It answers on www. too,
 # as Stable does, for anyone who types the www habitually — a custom domain gets
 # its own certificate, which the zone's Universal SSL (one level deep) wouldn't.
+# The channel's first domains, insider. and www.insider., stay attached so links
+# already shared keep working: their homepage 301s to insiders. (server/worker.ts),
+# and every other path is served as before, so a tab already open there never
+# loses its files.
 [env.insider]
 routes = [
+  { pattern = "insiders.sinevisualslab.com", custom_domain = true },
+  { pattern = "www.insiders.sinevisualslab.com", custom_domain = true },
   { pattern = "insider.sinevisualslab.com", custom_domain = true },
   { pattern = "www.insider.sinevisualslab.com", custom_domain = true },
 ]
-# Insider's traffic is the owner's own testing, like a preview's — not visitors'.
+# Insiders traffic is the owner's own testing, like a preview's — not visitors'.
 analytics_engine_datasets = []
 
 [[env.insider.durable_objects.bindings]]

@@ -7,6 +7,10 @@ export { Room };
 // Uppercase letters + digits, minus visually ambiguous ones (0/O, 1/I/L).
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const APEX_HOST = "sinevisualslab.com";
+// The Insiders channel's first hosts, from when it was called Insider; still
+// attached to that Worker (wrangler.toml's [env.insider]) only to send the
+// homepage on to insiders.
+const OLD_INSIDERS_HOSTS = new Set([`insider.${APEX_HOST}`, `www.insider.${APEX_HOST}`]);
 const ROOM_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/ws$/;
 const ADOPT_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/adopt$/;
 
@@ -47,8 +51,12 @@ export default {
     if (url.pathname === "/") {
       // The Host header, not url.hostname: `wrangler dev` rewrites request.url
       // to the first route in wrangler.toml, which is the apex.
-      if (request.headers.get("Host") === APEX_HOST) {
+      const host = request.headers.get("Host");
+      if (host === APEX_HOST) {
         return Response.redirect(`https://www.${APEX_HOST}/${url.search}`, 301);
+      }
+      if (host !== null && OLD_INSIDERS_HOSTS.has(host)) {
+        return Response.redirect(`https://insiders.${APEX_HOST}/${url.search}`, 301);
       }
       return env.ASSETS.fetch(request);
     }
