@@ -37,6 +37,11 @@ export function createFullscreenScene(
      *  JS-side state (a ripple pool, a scene-owned drift accumulator) that
      *  don't belong on every scene's common uniform set. */
     extraUniformDecls?: string;
+    /** Called at the end of every init(), i.e. each time a host mounts the
+     *  scene. `extraUniforms` closures live as long as the scene module, so
+     *  state that should start over on a mount (an intro ramp's clock) is
+     *  reset here. */
+    onInit?: () => void;
     /** Computes this frame's extra uniform values, called once per render
      *  after the common/setting uniforms are bound. A bare Float32Array
      *  uploads via setFv (a `float[]`, same path as uBands); wrap it as
@@ -95,6 +100,7 @@ ${fragBody}
     init(ctx: SceneContext) {
       prog = createProgram(ctx.gl, fragSrc);
       vao = createFullscreenQuad(ctx.gl);
+      opts.onInit?.();
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {

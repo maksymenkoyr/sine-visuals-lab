@@ -1,4 +1,4 @@
-import type { QualityPreset } from "./quality.ts";
+import { isQualityPreset, type QualityPreset } from "./quality.ts";
 
 /**
  * User override for which quality preset drives rendering, global per device
@@ -19,6 +19,9 @@ import type { QualityPreset } from "./quality.ts";
  *   than the benchmark, or wants to trade sharpness for headroom, sets this
  *   directly.
  *
+ * Private to its window (net/syncedStores.ts's PRIVATE_KEYS): the pop-out
+ * output has its own quality choice (src/render/outputPower.ts).
+ *
  * Same in-memory-cache-over-localStorage pattern as powerMode.ts: the cache
  * is the source of truth for get/set within a session, seeded once from
  * localStorage, so behavior stays correct even where localStorage is
@@ -30,8 +33,9 @@ export type QualityChoice = "auto" | QualityPreset;
 const STORAGE_KEY = "vibe.quality";
 export const QUALITY_CHOICE_DEFAULT: QualityChoice = "high";
 
-function isQualityChoice(value: string): value is QualityChoice {
-  return value === "auto" || value === "high" || value === "mid" || value === "low" || value === "floor";
+/** Also what outputPower.ts validates its two stored choices with. */
+export function isQualityChoice(value: string): value is QualityChoice {
+  return value === "auto" || isQualityPreset(value);
 }
 
 function loadInitial(): QualityChoice {

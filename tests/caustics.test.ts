@@ -14,7 +14,6 @@ import {
   focusSharp,
   fogFloorCut,
   fogRestingSharp,
-  loudSwellDrive,
   sparkleBrightGain,
   sparkleDensityExponent,
   sparkleGrainFreq,
@@ -33,14 +32,12 @@ function base(overrides: Partial<DriftInputs> = {}): DriftInputs {
     driftLevel: 0,
     levelValue: 0,
     pumpVel: 0,
-    dropReactivity: 0,
-    sectionIntensity: 0,
     ...overrides,
   };
 }
 
 describe("caustics drift rate", () => {
-  it("drift=0.5 with silence and no reactivity reproduces the scene's original speed (1.0/sec, matching flowClock's base rate)", () => {
+  it("drift=0.5 with silence and nothing else contributing reproduces the scene's original speed (1.0/sec, matching flowClock's base rate)", () => {
     // This is the regression test: the old DRIFT_BASE_RATE (0.15) doubled up
     // with a 0.15 already baked into the shader's flow term, so the old
     // default (drift=1) actually ran at ~0.15/sec — 6.7x too slow. At the
@@ -48,16 +45,16 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 0.5 }))).toBeCloseTo(1.0, 10);
   });
 
-  it("drift=1 with silence and no reactivity is exactly double the original speed", () => {
+  it("drift=1 with silence and nothing else contributing is exactly double the original speed", () => {
     expect(driftRatePerSec(base({ drift: 1 }))).toBeCloseTo(2.0, 10);
   });
 
-  it("drift=0 freezes the base wander term, regardless of drop reactivity", () => {
+  it("drift=0 freezes the base wander term", () => {
     // Speed boost and Speed pump are additive terms, not multipliers on the base
     // (see the two tests right below), so this only pins the *base* term's
     // own dependence on drift — with driftLevel/pumpVel left at 0 too, the
     // whole rate is 0.
-    expect(driftRatePerSec(base({ drift: 0, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
+    expect(driftRatePerSec(base({ drift: 0 }))).toBe(0);
   });
 
   it("Speed boost and Speed pump both still move the rate with Drift speed parked at 0 — the whole point of being additive rather than multiplicative", () => {
@@ -75,23 +72,16 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 0 }))).toBe(0);
   });
 
-  it("Drop reactivity boosts drift with sectionIntensity even with Speed boost/Speed pump at 0", () => {
-    // base = DRIFT_BASE_RATE(2) * drift(0.5) * (1 + 1*1*0.8) = 1.8
-    expect(driftRatePerSec(base({ drift: 0.5, dropReactivity: 1, sectionIntensity: 1 }))).toBeCloseTo(1.8, 10);
-  });
-
-  it("every term maxed at once (base 3.6, level 3, pump capped at PUMP_VEL_CAP=8) sums to 14.6 — comfortably under DRIFT_RATE_MAX, which is now a generous backstop rather than a value the additive design tries to reach", () => {
+  it("every term maxed at once (base 2, level 3, pump capped at PUMP_VEL_CAP=8) sums to 13 — comfortably under DRIFT_RATE_MAX, which is now a generous backstop rather than a value the additive design tries to reach", () => {
     const rate = driftRatePerSec(
       base({
         drift: 1,
         driftLevel: 1,
         levelValue: 1,
         pumpVel: 8,
-        dropReactivity: 1,
-        sectionIntensity: 1,
       }),
     );
-    expect(rate).toBeCloseTo(14.6, 10);
+    expect(rate).toBeCloseTo(13, 10);
   });
 
   it("still clamps to DRIFT_RATE_MAX (20) if pumpVel is ever larger than advancePump's own cap would allow", () => {
@@ -101,8 +91,6 @@ describe("caustics drift rate", () => {
         driftLevel: 1,
         levelValue: 1,
         pumpVel: 1000,
-        dropReactivity: 1,
-        sectionIntensity: 1,
       }),
     );
     expect(rate).toBe(20);
@@ -115,8 +103,6 @@ describe("caustics drift rate", () => {
         driftLevel: Math.random(),
         levelValue: Math.random(),
         pumpVel: Math.random() * 10,
-        dropReactivity: Math.random(),
-        sectionIntensity: Math.random(),
       };
       const rate = driftRatePerSec(s);
       expect(Number.isFinite(rate)).toBe(true);
@@ -131,7 +117,9 @@ describe("caustics drift rate", () => {
 // rather than reading it absolutely, so the dial behaves the same on a quiet
 // room and a loud one. The gain-invariance property below is the one that
 // makes a legacy wire sender (protocol.ts defaults level to 0.5) and silence
-// degrade safely to neutral instead of pinning loud or quiet.
+// degrade safely to neutral instead of pinning loud or quiet. Rate-only since
+// the swell channel (loudSwellDrive → uLoudSwell) was deleted — this feeds
+// driftRatePerSec's levelValue, never the aperture or floor.
 describe("caustics loudness calibration (advanceLoudSwell)", () => {
   const settle = (level: number, ticks = 3000, dt = 1 / 60): number => {
     const st = createLoudSwellState();
@@ -192,31 +180,6 @@ describe("caustics loudness calibration (advanceLoudSwell)", () => {
   it("the first call seeds calibration from that sample and returns neutral, rather than reporting a false full range", () => {
     const st = createLoudSwellState();
     expect(advanceLoudSwell(st, 1 / 60, 0.9)).toBeCloseTo(0.5, 10);
-  });
-});
-
-// loudSwellDrive is uLoudSwell's source — the shader's aperture/floor-glow
-// channel. Small at the slider's default so that channel stays a no-op until
-// someone actually drags Speed boost up.
-describe("caustics loudness swell drive (loudSwellDrive)", () => {
-  it("is 0 at loudSwell=0.5 (neutral) for any driftLevel", () => {
-    for (const driftLevel of [0, 0.4, 0.7, 1]) {
-      expect(loudSwellDrive(driftLevel, 0.5)).toBeCloseTo(0, 10);
-    }
-  });
-
-  it("stays within [-1, 1] across a broad random sweep", () => {
-    for (let i = 0; i < 500; i++) {
-      const d = loudSwellDrive(Math.random(), Math.random());
-      expect(Number.isFinite(d)).toBe(true);
-      expect(d).toBeGreaterThanOrEqual(-1);
-      expect(d).toBeLessThanOrEqual(1);
-    }
-  });
-
-  it("stays small in magnitude at the Speed boost default (0.4), even at a fully loud or fully quiet extreme", () => {
-    expect(Math.abs(loudSwellDrive(0.4, 1))).toBeLessThan(0.2);
-    expect(Math.abs(loudSwellDrive(0.4, 0))).toBeLessThan(0.2);
   });
 });
 
@@ -343,11 +306,14 @@ describe("caustics sparkle sub-param mapping", () => {
 // focusSharp is the single function this scene's git history keeps breaking
 // one invariant of at a time (see the FOCUS_SNAP_RATIO comment): a fixed
 // ceiling that made every focus setting snap to the same peak (so the
-// slider stopped moving the actual snap), or a floor that scaled together
+// slider stopped moving the actual swing), or a floor that scaled together
 // with the peak (so the slider read as "merely thinner lines", not more
-// snap). These pin all three properties simultaneously.
-describe("caustics focus snap / fog", () => {
-  it("uFocus = 0 means no snap at all, at any beatPulse", () => {
+// pulse). The pulse itself was reversed when the slider was renamed Fog
+// pulse (a beat now hazes *down* toward Fog's soft end, the reciprocal of
+// the old Focus snap's multiply), but these invariants are the same three,
+// stated for the new direction.
+describe("caustics Fog pulse / fog", () => {
+  it("uFocus = 0 means no pulse at all, at any beatPulse", () => {
     for (const fog of [0, 0.4, 1]) {
       const rest = focusSharp(fog, 0, 0);
       for (const beatPulse of [0.3, 0.7, 1]) {
@@ -365,30 +331,33 @@ describe("caustics focus snap / fog", () => {
     }
   });
 
-  it("sharp is non-decreasing in uFocus at any fixed fog/beatPulse (the historical inversion regression)", () => {
+  it("sharp is non-increasing in uFocus at any fixed fog/beatPulse (more pulse = more haze)", () => {
     for (const fog of [0, 0.4, 0.7, 1]) {
       for (const beatPulse of [0, 0.3, 0.7, 1]) {
         let prev = focusSharp(fog, 0, beatPulse);
         for (let focus = 0.1; focus <= 1; focus += 0.1) {
           const s = focusSharp(fog, focus, beatPulse);
-          expect(s).toBeGreaterThanOrEqual(prev - 1e-9);
+          expect(s).toBeLessThanOrEqual(prev + 1e-9);
           prev = s;
         }
       }
     }
   });
 
-  it("stays filamentary at the defaults, matching the scene's original swing (~2x, never collapsing to pure fog)", () => {
+  it("a full beat at the defaults hazes by the scene's original swing (~1.91x softer), without collapsing to pure fog", () => {
     const rest = focusSharp(0.4, 0.7, 0);
-    const peak = focusSharp(0.4, 0.7, 1);
+    const pulsed = focusSharp(0.4, 0.7, 1);
     expect(rest).toBeGreaterThan(8);
-    expect(peak / rest).toBeCloseTo(1.91, 1);
+    expect(rest / pulsed).toBeCloseTo(1.91, 1);
+    expect(pulsed).toBeGreaterThan(4);
   });
 
-  it("never exceeds FOCUS_SHARP_MAX (the anti pixel-ladder ceiling) regardless of inputs", () => {
+  it("never exceeds the resting sharpness, and never reaches zero, regardless of inputs", () => {
     for (let i = 0; i < 200; i++) {
-      const s = focusSharp(Math.random(), Math.random(), Math.random());
-      expect(s).toBeLessThanOrEqual(18 + 1e-9);
+      const fog = Math.random();
+      const s = focusSharp(fog, Math.random(), Math.random());
+      expect(s).toBeLessThanOrEqual(fogRestingSharp(fog) + 1e-9);
+      expect(s).toBeGreaterThan(0);
     }
   });
 

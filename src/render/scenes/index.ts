@@ -1,5 +1,6 @@
 import { listScenes, registerScene } from "../scene.ts";
 import { collectPrivateScenes } from "./privateScenes.ts";
+import { coilScene } from "./coil/index.ts";
 import { tesseraScene } from "./tessera/index.ts";
 import { spectrumScene } from "./spectrum.ts";
 import { particlesScene } from "./particles.ts";
@@ -38,6 +39,7 @@ import { gatesScene } from "./gates/index.ts";
 // `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(coilScene);
 registerScene(silkScene);
 registerScene(slatsScene);
 registerScene(physarumScene);
@@ -69,6 +71,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "coil",
   "silk",
   "slats",
   "physarum",
@@ -115,6 +118,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  coilScene,
   skyScene,
   silkScene,
   tesseraScene,

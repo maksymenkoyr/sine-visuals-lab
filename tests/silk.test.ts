@@ -3,8 +3,6 @@ import {
   advanceSilk,
   createSilkState,
   swellAmplitude,
-  tailDecayStep,
-  stepsToZero,
   fillEchoFlows,
   hash01,
   ECHO_MAX,
@@ -20,8 +18,7 @@ import { NOISE_PERIOD } from "../src/render/noiseHash.ts";
 // Silk's sequencer is the whole sync story (see driver.ts's header): a
 // wandering camera-like zoom, a morph clock, a bar/phrase swell and a
 // slowly-travelling regime — nothing here is discrete except the bar/drop
-// triggers of those smooth envelopes. These tests pin the 8-bit decay
-// math (the "trails freeze above zero" bug this scene works around), the
+// triggers of those smooth envelopes. These tests pin the
 // envelope shapes, and — above all — that nothing the driver outputs ever
 // jumps like a cut.
 
@@ -60,41 +57,6 @@ describe("swellAmplitude", () => {
 
   it("never goes negative", () => {
     expect(swellAmplitude(-1, false)).toBe(0);
-  });
-});
-
-describe("tailDecayStep / stepsToZero — the 8-bit floor", () => {
-  it("without a floor, a step near the freeze point gives back the same 8-bit code", () => {
-    // decay 0.86 (the scene's own default `echo`), sqrt(0.86) ~= 0.927 —
-    // a code of 10/255 decays to 9.28/255, which *rounds back to* 9 or 10
-    // depending on exact code, but somewhere below ~14/255 rounding wins
-    // outright: prove at least one such fixed point exists with no floor.
-    let frozen = -1;
-    for (let code = 1; code <= 40; code++) {
-      const next = Math.round((code / 255) * Math.sqrt(0.86) * 255);
-      if (next === code) {
-        frozen = code;
-        break;
-      }
-    }
-    expect(frozen).toBeGreaterThan(0);
-  });
-
-  it("with the floor, every starting code reaches exactly 0 in a bounded number of steps", () => {
-    for (const decay of [0.7, 0.8, 0.86, 0.9, 0.95]) {
-      for (const code of [1, 5, 10, 40, 128, 255]) {
-        const steps = stepsToZero(code, decay, 1 / 255);
-        expect(steps, `decay=${decay} code=${code}`).toBeLessThan(255);
-      }
-    }
-  });
-
-  it("without a floor (floor=0), a small code never reaches 0", () => {
-    expect(stepsToZero(1, 0.9, 0, 500)).toBe(Infinity);
-  });
-
-  it("tailDecayStep never goes negative", () => {
-    expect(tailDecayStep(0.001, 0.9, 1 / 255)).toBe(0);
   });
 });
 
@@ -249,5 +211,27 @@ describe("advanceSilk", () => {
     // Same mid, same dt, an onset fires: brightS should barely move — it
     // only ever tracks midS, which itself didn't move this tick.
     expect(Math.abs(withOnset.brightS - before.brightS)).toBeLessThan(0.01);
+  });
+
+  it("a Fold pin takes effect without waiting for a regime change", () => {
+    const st = createSilkState();
+    // No beats, no drops: the regime can never change on its own here.
+    for (let i = 0; i < 30; i++) advanceSilk(st, quiet(1 / 60), OPTS);
+    const idx = st.regimeIdx;
+    for (const [foldOpt, want] of [[2, 1], [1, 0], [2, 1]] as const) {
+      const opts = { ...OPTS, foldOpt };
+      let prev = advanceSilk(st, quiet(1 / 60), opts).foldMix;
+      const dir = Math.sign(want - prev);
+      const steps = Math.ceil(((REGIME_TRAVEL_SEC * 2 + 0.1) * 60));
+      for (let i = 0; i < steps; i++) {
+        const fm = advanceSilk(st, quiet(1 / 60), opts).foldMix;
+        // Glides (no jump bigger than a smootherstep step) and never reverses.
+        expect(Math.abs(fm - prev)).toBeLessThan(0.1);
+        expect((fm - prev) * dir).toBeGreaterThanOrEqual(-1e-9);
+        prev = fm;
+      }
+      expect(prev).toBeCloseTo(want, 6);
+    }
+    expect(st.regimeIdx).toBe(idx);
   });
 });

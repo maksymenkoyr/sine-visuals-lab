@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildGridPositions,
   buildGridTriangles,
+  rowsToPush,
   createSpectrumHistory,
   gridDimsForQuality,
   historyRowFor,
@@ -70,6 +71,24 @@ describe("meshGrid grid geometry", () => {
       expect(idx).toBeLessThan(cols * rows);
     }
   });
+
+  it("keeps the row-major, two-triangles-per-cell winding and handles degenerate sizes", () => {
+    const cols = 5;
+    const rows = 3;
+    const tris = buildGridTriangles(cols, rows);
+    expect(Array.from(tris.slice(0, 6))).toEqual([0, 1, 5, 1, 6, 5]);
+    // Reference built with the plain push loop the typed-array fill replaced.
+    const ref: number[] = [];
+    for (let row = 0; row < rows - 1; row++) {
+      for (let col = 0; col < cols - 1; col++) {
+        const a = row * cols + col;
+        ref.push(a, a + 1, a + cols, a + 1, a + cols + 1, a + cols);
+      }
+    }
+    expect(Array.from(tris)).toEqual(ref);
+    expect(buildGridTriangles(1, 4).length).toBe(0);
+    expect(buildGridTriangles(4, 1).length).toBe(0);
+  });
 });
 
 describe("meshGrid spectrum mapping", () => {
@@ -118,5 +137,65 @@ describe("meshGrid spectrum history", () => {
     expect(historyRowFor(10, 0.5, 0.4, 20)).toBeCloseTo(6);
     // Wrap case: newestRow=2, back=5 -> -3 -> wraps to frames-3.
     expect(historyRowFor(2, 1, 0.5, 10)).toBeCloseTo(7);
+  });
+});
+
+describe("meshGrid history rows per second", () => {
+  const run = (dts: number[], acc = 0.5) => {
+    let total = 0;
+    const per: number[] = [];
+    for (const dt of dts) {
+      const r = rowsToPush(acc, dt, 60, 200);
+      acc = r.acc;
+      total += r.n;
+      per.push(r.n);
+    }
+    return { total, per };
+  };
+
+  it("pushes one row per frame at 60 fps, even with timestamp jitter", () => {
+    const steady = run(Array(60).fill(1 / 60));
+    expect(steady.total).toBe(60);
+    expect(steady.per.every((n) => n === 1)).toBe(true);
+    const jitter = run(Array.from({ length: 60 }, (_, i) => (1 + (i % 2 ? 0.2 : -0.2)) / 60));
+    expect(jitter.per.every((n) => n === 1)).toBe(true);
+  });
+
+  it("covers the same time at 30 fps, and at an uneven gated cadence", () => {
+    const half = run(Array(30).fill(1 / 30));
+    expect(half.total).toBe(60);
+    expect(half.per.every((n) => n === 2)).toBe(true);
+    // 75 Hz panel gated to every other tick: 1/37.5 s per render.
+    const gated = run(Array(75).fill(1 / 37.5));
+    expect(gated.total).toBeGreaterThanOrEqual(119);
+    expect(gated.total).toBeLessThanOrEqual(120);
+  });
+
+  it("needs a wall-clock dt: an audio-buffer clock stutters, the render interval does not", () => {
+    // 60 fps renders timed against an AudioContext clock that only moves in
+    // 1024-sample (21.3 ms) steps at 48 kHz, as on many phones and Bluetooth
+    // outputs: the deltas are 0 or two buffers' worth, so rows push unevenly.
+    const buf = 1024 / 48000;
+    const audioDts: number[] = [];
+    let prev = 0;
+    for (let i = 1; i <= 120; i++) {
+      const t = Math.floor((i / 60) / buf) * buf;
+      audioDts.push(t - prev);
+      prev = t;
+    }
+    expect(run(audioDts).per.some((n) => n !== 1)).toBe(true);
+    // The render's own interval (anim.dtSec) is what the scene feeds in.
+    const wall = run(Array(120).fill(1 / 60));
+    expect(wall.per.every((n) => n === 1)).toBe(true);
+  });
+
+  it("caps a stall at the ring size, pushes nothing for no time, and keeps the carry", () => {
+    expect(rowsToPush(0.5, 0.25, 60, 10).n).toBe(10);
+    expect(rowsToPush(0.5, 0.25, 60, 200).n).toBe(15);
+    expect(rowsToPush(0.5, 0, 60, 200)).toEqual({ n: 0, acc: 0.5 });
+    expect(rowsToPush(0.5, -1, 60, 200).n).toBe(0);
+    const r = rowsToPush(0.25, 1 / 120, 60, 200); // 0.25 + 0.5 rows: none yet
+    expect(r.n).toBe(0);
+    expect(r.acc).toBeCloseTo(0.75, 9);
   });
 });

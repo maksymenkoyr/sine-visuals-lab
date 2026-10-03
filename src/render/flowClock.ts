@@ -25,3 +25,46 @@ export function createFlowClock(): FlowClock {
     },
   };
 }
+
+/** A phase that moves at a live setting's rate, for a scene that has a clock
+ *  phase (the one `createFlowClock` makes, via `anim.flowPhase`) and a
+ *  user-facing speed setting on top of it. Multiplying the clock's absolute
+ *  phase by the setting (`flowPhase * speed`) is the teleporting pattern
+ *  described at the top of this file: one slider step, or a tiny Auto drift,
+ *  shifts the result by `flowPhase * dSpeed`. This accumulates the clock's
+ *  per-frame *step* times the current rate instead, so the setting only ever
+ *  changes the speed going forward. */
+export interface ScaledPhase {
+  /** Feeds the clock's current phase and the setting's current rate; returns
+   *  the accumulated phase. Call once per render tick. The first call, and any
+   *  step that goes backwards or is longer than `MAX_SCALED_STEP` (the clock
+   *  was swapped or recreated, or the tab was hidden for a while), advance by
+   *  nothing, so the result never pops. */
+  advance(phase: number, rate: number): number;
+  reset(): void;
+}
+
+/** The longest clock step (in phase units, about a second of flow) that still
+ *  counts as motion. A scene object can be driven by several clocks (a
+ *  gallery tile and the main view each have their own), and switching between
+ *  them makes the phase jump by an arbitrary amount in either direction. */
+export const MAX_SCALED_STEP = 1;
+
+export function createScaledPhase(): ScaledPhase {
+  let acc = 0;
+  let last: number | null = null;
+  return {
+    advance(phase: number, rate: number): number {
+      if (last !== null && Number.isFinite(phase)) {
+        const d = phase - last;
+        if (d > 0 && d < MAX_SCALED_STEP) acc += d * Math.max(0, rate);
+      }
+      if (Number.isFinite(phase)) last = phase;
+      return acc;
+    },
+    reset(): void {
+      acc = 0;
+      last = null;
+    },
+  };
+}

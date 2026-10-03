@@ -42,7 +42,6 @@ const FROZEN = {
   focus: 0,
   sparkle: 0,
   injection: 0,
-  dropReactivity: 0,
   centroidHue: 0,
 };
 

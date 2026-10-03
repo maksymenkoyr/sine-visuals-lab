@@ -1,5 +1,6 @@
 import type { PanelSection } from "../../render/scene.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
+import type { CardSpec } from "../controlsKit.ts";
 
 /**
  * Where a scene's `Scene.panel` sections (src/render/scene.ts,
@@ -13,12 +14,12 @@ import type { SceneSetting } from "../../render/sceneSettings.ts";
  *
  * `appendRow` is the one bridge into deviceMenu's real row-building code
  * (`appendSettingRow`): a widget that wants an ordinary slider/patch-bay row
- * for one of its item settings gets the *actual* row — drive chip, Receives
- * patch, jack, cables, pin — by calling this instead of building its own
+ * for one of its item settings gets the *actual* row — drive chip, wire
+ * panel, jack, cables, pin — by calling this instead of building its own
  * look-alike. `get`/`set` go through the exact same store path a slider
  * drag uses (deviceMenu's `onSceneSettingChange`), so a widget's own custom
- * controls (Physarum 2's Affinity segmented rows) read/write storage,
- * Looks and reset identically to a plain row, just with different UI.
+ * controls (Physarum 2's Affinity pads) read/write storage, Looks and reset
+ * identically to a plain row, just with different UI.
  *
  * `ctx.rerender()` re-runs the *whole* Scene card (deviceMenu.ts's
  * `renderSceneSettings`) — the same rebuild a scene switch, a Look apply, a
@@ -48,13 +49,15 @@ import type { SceneSetting } from "../../render/sceneSettings.ts";
  * itself (localStorage, try/catch — see itemBoxes.ts) rather than relying on
  * anything here to carry it across.
  *
- * `onTick`/`onDispose` exist for the rarer widget that keeps its own
- * per-frame state or a resource outside the rebuilt DOM subtree (a
- * ResizeObserver on `window`, say): `onTick` callbacks join the device
- * menu's own unthrottled per-tick pass (deviceMenu.ts's `sceneRowHandles`
- * loop), and every registered `onDispose` runs right before the next full
- * Scene-card rebuild. Phase 1/2 widgets (itemBoxes) don't need either —
- * their own rows already tick through the handles `appendRow` registers.
+ * `onTick`/`onDispose` are for a widget that keeps its own per-frame state or
+ * a resource outside the rebuilt DOM subtree (a ResizeObserver on `window`, a
+ * listener on the main canvas): `onTick` callbacks join the device menu's own
+ * unthrottled per-tick pass (deviceMenu.ts's `sceneRowHandles` loop), and
+ * every registered `onDispose` runs right before the next full Scene-card
+ * rebuild. itemBoxes.ts uses both — `onTick` to step and draw its live
+ * previews and refresh its readouts, `onDispose` to remove its canvas and
+ * window listeners — on top of its rows, which tick through the handles
+ * `appendRow` registers.
  */
 
 /** One other selected item's own same-param setting — see `appendRow`'s own
@@ -79,8 +82,11 @@ export interface WidgetCtx {
   /** `specs` filtered to one item family, optionally narrowed to one
    *  item's index — src/render/sceneItems.ts's `SceneSetting.item` tag. */
   specsFor(family: string, index?: number): SceneSetting[];
-  /** The setting's current stored value — resolveSceneSettingValue's
-   *  auto-aware live reading, same as a row's own live readout. */
+  /** The setting's current *stored* value (`getSceneSetting` — not
+   *  auto-tune-resolved: a widget reading a setting the Scene master or Auto
+   *  can scale, like Cross-smell, sees the manual number, not what the GPU
+   *  actually runs — see physarum2Affinity.ts's pair cultures for a caller
+   *  that has to live with this). */
   get(spec: SceneSetting): number;
   /** Writes through the exact path a slider drag uses. */
   set(spec: SceneSetting, value: number): void;
@@ -104,14 +110,14 @@ export interface WidgetCtx {
   /** Passthrough to the active scene's own `command()` (scene.ts) — a no-op
    *  for a scene with none. */
   command(name: string, args: Record<string, number>): void;
-  /** Mounts `spec` as a real device-menu row (drive chip, Receives patch,
+  /** Mounts `spec` as a real device-menu row (drive chip, wire panel,
    *  jack, cables, A/T, reset — deviceMenu.ts's own `appendSettingRow`)
    *  into `container`. `opts.linked` is the multi-item-selection bridge
    *  (itemBoxes.ts's own multi-strain edit, 2026-09-27): every OTHER item
    *  currently selected alongside `spec`'s own item, sharing the same
    *  `spec.item.param`. When given, deviceMenu applies any edit this row
    *  makes — a value (slider drag, typed value, reset arrow, T mute), an
-   *  Auto toggle, or a drive/patch change (anything in the Receives panel,
+   *  Auto toggle, or a drive/patch change (anything in the wire panel,
    *  jack/cable wiring, reset to scene default) — to every linked setting
    *  too, and shows a divergent-value tick per linked item on a numeric
    *  row's slider track (and a "Mixed — …" drive summary) for as long as
@@ -119,9 +125,9 @@ export interface WidgetCtx {
    *  short name (e.g. "PP-A1") — needed only to name it in that "Mixed —
    *  …" line alongside `linked`'s own labels; harmless to omit when
    *  `linked` is empty/omitted, which makes this an ordinary single-item
-   *  row exactly as before. See itemSelection.ts for the pure toggle/
-   *  primary/mixed-text rules a caller like itemBoxes.ts builds `opts`
-   *  from. */
+   *  row exactly as before. No widget supplies `linked` today (itemBoxes.ts
+   *  dropped its multi-item selection); itemSelection.ts's
+   *  `formatMixedSummary` is the one rule of that path still in use. */
   appendRow(container: HTMLElement, spec: SceneSetting, opts?: { ownLabel?: string; linked?: readonly LinkedSetting[] }): void;
   /** Mounts several rows (each the same shape `appendRow` takes — a spec
    *  plus its own optional `ownLabel`/`linked`) into `container` as one
@@ -140,6 +146,62 @@ export interface WidgetCtx {
     container: HTMLElement,
     rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[],
   ): { dispose(): void };
+  /** Mounts a whole extra card (controlsKit.ts's `createCard`) as a sibling
+   *  of the Scene card, right after it in the controls column — for a widget
+   *  section that reads as its own block rather than more rows inside the
+   *  Scene card (Physarum 2's Affinity pads, 2026-09-28: the user wanted "air"
+   *  and the card's own hover/pin behaviour, not a `groupHeading` inside the
+   *  Scene card body). Built fresh on every call, exactly once per widget
+   *  mount, the same as the widget's own DOM built straight into the
+   *  `container` a plain `registerWidget` builder gets — deviceMenu.ts clears
+   *  every card a widget mounted this way at the top of the next
+   *  `renderSceneSettings()` (a scene switch, a Look apply, a card Reset),
+   *  so nothing needs its own `ctx.onDispose` just to avoid leaking across a
+   *  rebuild. The returned `body` is where the widget appends its own
+   *  content, exactly like the `container` a `registerWidget` builder or
+   *  `appendRow` receives. `spec.foldId` behaves exactly as it does for any
+   *  other card — pick one that can't collide with another mounted card on
+   *  the same scene (e.g. `${sceneId}-${family}-affinity`, not the bare
+   *  scene id) since panelFolds.ts's persistence is keyed by that string
+   *  alone. The card's title is marked as a keyboard block (deviceMenu.ts's
+   *  markBlock) automatically, the same as the Scene card's own title or a
+   *  group heading — no separate call needed. */
+  mountCard(spec: CardSpec): { el: HTMLElement; body: HTMLElement };
+  /** Makes `rowEl` pinnable/soloable exactly like an ordinary non-drive
+   *  Scene-card row (a toggle or enum picker with no `spec.drive`): hovering
+   *  or focusing anything inside it wakes it (the plain `.vc-row` CSS this
+   *  file's callers already give their rows), and a press anywhere on it —
+   *  `rowEl` is passed as its own "value control", so `isCardPress`
+   *  (deviceMenu.ts) never excludes a pad, a fader or a button inside it —
+   *  pins it: the `.vc-drive-pinned` ring, Escape to unpin, Tab-while-pinned,
+   *  and Solo (which shows only the pinned row, or the Scene card when
+   *  nothing is) all fall out of the exact same bookkeeping a real setting's
+   *  row gets, because this reuses that bookkeeping's own non-drive branch
+   *  rather than a second, parallel pin system (deviceMenu.ts's
+   *  `registerPinnableRow`, factored out of `appendSettingRow`'s own
+   *  `registerPinRow` for this).
+   *
+   *  `spec` is the pin's identity — deviceMenu.ts's `pinned`/`pinRowHandles`
+   *  are keyed by `(sceneId, spec.key)`, a real `SceneSetting`, but a row
+   *  built this way often doesn't edit one single setting (Physarum 2's
+   *  pairs row edits up to sixteen `att`/`touch` cells from one drag; the mix
+   *  row's Random/Nudge/Back touch a whole table at once) — there's no
+   *  single real spec that would honestly name "this row". The fix used here
+   *  is a **synthetic `SceneSetting`**: a plain object with a unique `key`
+   *  and otherwise-unused filler fields (`label`/`min`/`max`/`step`/
+   *  `default`), never returned by `ctx.specsFor`/`ctx.specs`, never read by
+   *  `ctx.get`/`ctx.set`, never uploaded to a uniform or written into a Look.
+   *  It's safe precisely because every consumer of `pinned.spec` elsewhere in
+   *  deviceMenu.ts already has to tolerate a spec with no `.drive` and no
+   *  `.item` — an ordinary toggle/enum row is exactly that today — so a
+   *  synthetic spec is indistinguishable from that existing case: patch/jack/
+   *  cable code reads `spec.drive` (absent, so "no patch"), the per-tick
+   *  external-change poll is already gated on `pinned?.spec.drive`, and nothing
+   *  else dereferences a field this object doesn't have. A widget makes its
+   *  own synthetic spec with a small helper (pairPads.ts's `rowSpec`) rather
+   *  than this file minting one, since only the widget knows a key that's
+   *  unique within its own mount. */
+  registerCard(rowEl: HTMLElement, spec: SceneSetting): void;
   /** Registers `fn` to run on every device-menu tick (unthrottled) while
    *  this section is mounted — cleared automatically on the next rebuild. */
   onTick(fn: () => void): void;

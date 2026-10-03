@@ -451,6 +451,17 @@ export const paletteChipStyle = `
   padding: 4px 8px; cursor: pointer;
 `;
 export const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
+// The Palette card: one row per palette group, each chip led by a strip of
+// that palette's ramp.
+export const paletteGroupsStyle = `display: grid; gap: 6px;`;
+export const paletteGroupRowStyle = `display: flex; flex-wrap: wrap; align-items: center; gap: 4px;`;
+export const paletteGroupLabelStyle = `
+  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(255,255,255,0.4); width: 56px; flex: none;
+`;
+export const paletteSwatchChipStyle = `${paletteChipStyle} display: inline-flex; align-items: center; gap: 6px; padding-left: 5px;`;
+export const paletteSwatchChipLitStyle = `${paletteChipLitStyle} display: inline-flex; align-items: center; gap: 6px; padding-left: 5px;`;
+export const paletteSwatchStyle = `width: 18px; height: 8px; border-radius: 1px; flex: none;`;
 const pickerStatusStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.4); white-space: nowrap;`;
 
 export interface PickerRow {

@@ -83,6 +83,13 @@ addition. `/ref` bundles:
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Cell size description corrected: higher already meant bigger cells (and
   bigger Beads tiles), and the old text said the reverse.
+- 2026-10-02, review fixes: the sim loop re-uploaded the whole common
+  uniform set (settings, drives, palette) on every step; it is now uploaded
+  once before the loop (nothing it carries changes between steps), a
+  CPU-side saving that renders the identical picture. The silent-fallback
+  reseed timer advances by `dt * iterations`, i.e. in sim time, which is how
+  it was tuned; only the `FALLBACK_RESEED_SEC` comment and the header said
+  wall time, and now say sim time. The behaviour is unchanged.
 
 ## Tuning notes
 

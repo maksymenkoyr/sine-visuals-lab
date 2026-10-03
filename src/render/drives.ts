@@ -7,6 +7,7 @@ import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
+import type { HitLane } from "../audio/hitStrength.ts";
 import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveThresholdState } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
@@ -155,8 +156,8 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * setting and nothing else changes: `value()`/`valueOf()` return the
  * caller's own `rest` argument (default 0) in that case, skipping `gain`
  * and the generic gate entirely, rather than reading `combine()`'s honest 0
- * for an empty sum. A caller whose neutral silence isn't 0 (Caustics'
- * `driftLevel` swell, physarum2's `nutrient`) passes its own `rest`; every
+ * for an empty sum. A caller whose neutral silence isn't 0 (physarum2's
+ * `nutrient`) passes its own `rest`; every
  * other caller's implicit 0 is exactly right for a hit-only setting (Beat
  * flash, Beat ripple) that simply has nothing to react to. `uniformPair()`
  * has no `rest` of its own — an unplugged patch still uploads `{drive: 0,
@@ -481,8 +482,9 @@ function clamp01(x: number): number {
  *  (unexported) wrap01, reproduced here rather than imported since it's a
  *  one-line generic helper, not a beat-clock-specific one: `x % 1` alone
  *  wraps negative inputs to (-1, 0], which every-N-beats' own division
- *  (below) never actually hits (anim.beats only grows), but a copy that
- *  doesn't quietly rely on that stays correct if it ever does. */
+ *  (below) practically never hits (anim.beats only grows, bar the beat
+ *  trim's occasional hair-sized nudge back), but a copy that doesn't
+ *  quietly rely on that stays correct if it ever does. */
 function wrap01(x: number): number {
   const w = x % 1;
   return w < 0 ? w + 1 : w;
@@ -862,6 +864,25 @@ function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: n
   tr.line = tr.floor + clamp01(t) * (tr.peak - tr.floor);
 }
 
+/** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
+ *  Fixed/Loud release — the lane whose pulse heightDecayPerSec below borrows
+ *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
+ *  section swell, not a hit's ring-out, so no Length row stretches it. */
+function heightTailLane(choice: DriveSourceChoice): HitLane | null {
+  switch (choice) {
+    case "anim.lowOnset":
+      return "low";
+    case "anim.midOnset":
+      return "mid";
+    case "anim.highOnset":
+      return "high";
+    case "anim.dropOnset":
+      return null;
+    default:
+      return "beat"; // Any hit and the metronome, timed like beatPulse
+  }
+}
+
 /** Fixed/Loud's own release rate for a hit-kind source — reused directly
  *  from the module that owns the Graded pulse it stands in for (see this
  *  file's header). Only ever called for an edge-kind catalogue entry or a
@@ -1075,11 +1096,11 @@ export function createDriveEngine(): DriveEngine {
             if (!st.grid) st.grid = createGridPulse();
             const gridBeats = beatGridBeats(choice.grid);
             const fired = st.grid.advance(anim.beats, anim.tempoLock, gridBeats, anim.onset);
-            st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC);
+            st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail.beat);
             if (fired) st.gridPulse = 1;
             st.gridFiredPending ||= fired;
             if (wantsHeight) {
-              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC);
+              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail.beat);
               if (fired) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : driveEnergy);
             }
           } else if (isLineChoice(choice)) {
@@ -1091,7 +1112,8 @@ export function createDriveEngine(): DriveEngine {
             st.lineExcess.set(result.excess);
             // Height ignored — see this file's header.
           } else if (SIGNALS[choice].kind === "edge" && wantsHeight) {
-            const rate = heightDecayPerSec(choice);
+            const lane = heightTailLane(choice);
+            const rate = heightDecayPerSec(choice) * (lane === null ? 1 : anim.hitTail[lane]);
             st.heightEnv *= Math.exp(-dtSec * rate);
             const edge = SIGNALS[choice].edge!(anim);
             if (edge) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : loudLevel(choice, anim, driveEnergy));

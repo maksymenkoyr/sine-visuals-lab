@@ -17,7 +17,7 @@
 // azimuthal-pitch factor); latticeLayout instead grows the slot count with
 // radius so every ring's own azimuthal box pitch stays close to the fixed
 // meridional pitch -- a dense, roughly isotropic field at any radius, the
-// reference's own measured box density (swift-weaving-parnas.md).
+// reference's own measured box density (docs/scenes/tessera.md, Round 2).
 //
 // Why the end-cap strips exist (round 2 fix): a wall's own long face is a
 // flat quad whose plane contains the box's length axis N, so a camera
@@ -118,7 +118,7 @@ const LATTICE_CONST_GLSL = `
 /** The dim background: sparse hash dots and four faint axis rays, held in
  *  the ball's own rotating frame (rotated by -uRoll before hashing) so they
  *  read as fixed against the spinning lattice rather than swimming past it
- *  -- the same trick shards.ts's star field uses with uRollBg. Covers the
+ *  -- the same trick shards/glsl.ts's star field uses with uRollBg. Covers the
  *  whole frame every tick (previewRenderer.ts: the gallery never clears). */
 export function bgFrag(commonUniforms: string, settingsUniforms: string, roomUv: string): string {
   return `#version 300 es
@@ -374,13 +374,15 @@ void main() {
   vec3 view = vec3(dot(rel, uCamRight), dot(rel, uCamUp), dot(rel, uCamFwd));
   float aspect = roomAspect();
   float NEARZ = 0.08;
-  // Far past anything the scene ever draws (SHELL_RADIUS is 2.6) -- with a
-  // 16-bit depth renderbuffer that wasted most of its precision on empty
-  // space no geometry ever reaches, and at high Fill values hundreds of
-  // near-touching, near-coplanar tube walls a few hundredths of a unit apart
-  // lose the z-fight, dropping out into a sparse, thin-looking result. A far
-  // plane that actually bounds the geometry gives the same 16 bits far more
-  // to work with.
+  // Comfortably past anything the scene ever draws (SHELL_RADIUS in
+  // lattice.ts plus the far camera at CAM_FAR sum to well under it). History:
+  // with a 16-bit depth renderbuffer a far plane well past the geometry
+  // wasted most of the precision on empty space no geometry ever reaches, and
+  // at high Fill values hundreds of near-touching, near-coplanar tube walls a
+  // few hundredths of a unit apart lose the z-fight, dropping out into a
+  // sparse, thin-looking result. A far plane that actually bounds the
+  // geometry fixed that; index.ts now allocates a 24-bit depth renderbuffer
+  // as well, which keeps the margin generous.
   float FARZ = 8.0;
   // Tessera's Dolly deliberately brings the camera close to the ball
   // surface, and a loud passage's length reactivity can push a near-pole
@@ -391,7 +393,13 @@ void main() {
   // for the same reason).
   float clampedZ = max(view.z, NEARZ);
   float zc = (clampedZ * (FARZ + NEARZ) - 2.0 * FARZ * NEARZ) / (FARZ - NEARZ);
-  gl_Position = vec4(view.x * uFocal / aspect, view.y * uFocal, zc, clampedZ);
+  vec4 clip = vec4(view.x * uFocal / aspect, view.y * uFocal, zc, clampedZ);
+  // aspect is the whole room's, so this projects the room; crop it to this
+  // device's slice (meshGrid.ts's remap). The identity at the full viewport.
+  vec2 uv01 = (clip.xy / clip.w) * 0.5 + 0.5;
+  uv01 = (uv01 - uViewport.xy) / uViewport.zw;
+  clip.xy = (uv01 * 2.0 - 1.0) * clip.w;
+  gl_Position = clip;
 }
 `;
 }

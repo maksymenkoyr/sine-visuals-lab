@@ -12,9 +12,9 @@ import {
   pickClip,
   type PlayerParams,
 } from "../src/render/scenes/dancers/player.ts";
-import { sampleClip, type ClipMeta } from "../src/render/scenes/dancers/clipFormat.ts";
+import { buildLibrary, sampleClip, type ClipMeta } from "../src/render/scenes/dancers/clipFormat.ts";
 import { createPose } from "../src/render/scenes/dancers/rig.ts";
-import { makeLibrary } from "./dancersClips.helper.ts";
+import { makeClip, makeLibrary } from "./dancersClips.helper.ts";
 
 const clip = (beats: number, nativeBpm: number): ClipMeta => ({
   name: "c", family: "test", beats, nativeBpm, frames: beats * 16, energy: 0.5, bigness: 0.5, mirrorOf: -1, source: "",
@@ -139,6 +139,45 @@ describe("dancers clip player", () => {
     const a = snaps.get(1)!;
     const b = snaps.get(5)!;
     for (let i = 0; i < a.length; i++) expect(b[i]).toBeCloseTo(a[i], 5);
+  });
+
+  it("keeps a clip's loop length for as long as it plays, so a wobbling or dropped bpm never jumps the pose", () => {
+    // Native 100 bpm: 130 is the normal loop (2 bars), 140 crosses
+    // HALF_TIME_RATIO, and 0 (a break) falls back to the native bars.
+    const lib = buildLibrary([makeClip({ name: "solo", beats: 8, nativeBpm: 100 })]);
+    const maxStep = (bpmAt: (bars: number) => number): number => {
+      const player = createClipPlayer(lib, 1);
+      let prev: Float32Array | null = null;
+      let maxDelta = 0;
+      const out = createPose();
+      // Three bars stays inside the HOLD_LOOPS hold (4 bars for this clip),
+      // so no re-pick happens.
+      for (let i = 0; i < 3 * 60; i++) {
+        const bars = i / 60;
+        player.advance(bars % 1, params({ bpm: bpmAt(bars) }), out);
+        if (prev) for (let k = 0; k < out.length; k++) maxDelta = Math.max(maxDelta, Math.abs(out[k] - prev[k]));
+        prev = Float32Array.from(out);
+      }
+      return maxDelta;
+    };
+    const steady = maxStep(() => 130);
+    // 140 for one frame, 0 for another, then back — and a long stretch at 140.
+    const wobble = maxStep((b) => (Math.abs(b - 1.25) < 1e-9 ? 140 : Math.abs(b - 1.5) < 1e-9 ? 0 : b > 2 ? 140 : 130));
+    expect(wobble).toBeLessThan(steady * 1.01 + 1e-6);
+  });
+
+  it("re-reads the loop length when the same clip is picked again after its hold", () => {
+    const lib = buildLibrary([makeClip({ name: "solo", beats: 3, nativeBpm: 100 })]);
+    const player = createClipPlayer(lib, 1);
+    const out = createPose();
+    // 100 bpm: a 0.75-bar loop, held round(1.5) = 2 bars. Then 140 bpm
+    // (half-time): a 1.5-bar loop, picked up again at bar 2.
+    for (let i = 0; i <= 2 * 60 + 15; i++) player.advance((i % 60) / 60, params({ bpm: i < 2 * 60 ? 100 : 140 }), out);
+    // The loop restarted on the bar-2 downbeat, so a quarter bar later it is
+    // 0.25 / 1.5 of the way round (continuing from bar 0 would give 0.5).
+    const want = createPose();
+    sampleClip(lib.clips[0], 0.25 / 1.5, want);
+    for (let k = 0; k < want.length; k++) expect(out[k]).toBeCloseTo(want[k], 5);
   });
 
   it("crossfades a handover over FADE_BARS without a jump", () => {

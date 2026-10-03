@@ -56,8 +56,6 @@ export const STRIP_MID = "#c0a2f5";
 export const STRIP_HIGH = "#f6b15b";
 /** The "audio is flowing" dot in the spectrum card header. */
 export const LIVE_DOT = "#83dc97";
-/** Rule under the spectrum card header. */
-export const HAIRLINE = "#efb062";
 /** The warning ramp: the Input card's level wash as it nears clipping, and
  *  the meters' clip/drop flashes (src/ui/audioMeters.ts). yellow-500 / red-500. */
 export const HOT_YELLOW = "#eab308";
@@ -103,12 +101,20 @@ export function withAlpha(hex: string, alpha: number): string {
   return `${hex}${a}`;
 }
 
-// Glass that darkens and desaturates whatever scene is behind it, so text
-// holds its contrast over bright caustics without an opaque backdrop.
-export const GLASS_FILTER = "blur(20px) saturate(.6) brightness(.5) contrast(1.08)";
+// Glass: the panel's surfaces either blur the scene behind them (lighter tint,
+// the default) or sit on a darker flat tint with no filter. Both are CSS
+// custom properties set from the `vc-glass-blur` class on <html> (the
+// stylesheet below; the preference is src/ui/glassPref.ts, which also holds
+// what the blur costs): a backdrop-filter re-processes the WebGL canvas
+// behind it every frame, so it is a real GPU cost.
+// Every glass surface takes both properties inline — GLASS_BG for the
+// `background`, GLASS_FILTER for the (-webkit-)backdrop-filter — so the
+// switch is one class toggle.
+export const GLASS_BG = "var(--vc-glass-bg)";
+export const GLASS_FILTER = "var(--vc-glass-filter)";
 export const glassCardStyle = `
   position: relative; overflow: hidden;
-  background: rgba(8, 11, 10, 0.2);
+  background: ${GLASS_BG};
   -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255, 255, 255, 0.13); border-top-color: rgba(255, 255, 255, 0.22);
   border-radius: 3px;
@@ -122,6 +128,14 @@ export const scanlineStyle = `
 const STYLE_ID = "vc-controls-styles";
 
 const stylesheet = `
+:root {
+  --vc-glass-bg: rgba(8, 11, 10, 0.82);
+  --vc-glass-filter: none;
+}
+:root.vc-glass-blur {
+  --vc-glass-bg: rgba(8, 11, 10, 0.2);
+  --vc-glass-filter: blur(20px) saturate(.6) brightness(.5) contrast(1.08);
+}
 @font-face {
   font-family: 'DSEG7-Classic';
   src: url(${dseg7Url}) format('woff2');
@@ -417,8 +431,8 @@ body.vc-keys-reveal [data-keycap]::after {
  * depending on whether that's a single action (wireKeysRow). */
 .vc-keys {
   display: none; flex-direction: column; gap: 1px; padding: 8px 6px;
-  background: rgba(8, 11, 10, 0.72);
-  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  background: var(--vc-glass-bg);
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
   font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
 }
@@ -857,6 +871,42 @@ body.vc-keys-reveal [data-keycap]::after {
  * .vc-cable-cond's 9/6 or .vc-cable-preview's 3/3 so it reads as its own,
  * quieter thing rather than a variant of either. */
 .vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
+/* Pressing a cable unplugs it (src/ui/cableLayer.ts's onPress, wired by
+ * src/ui/deviceMenu.ts's cableGroupFor). The layer above stays
+ * pointer-events:none, so this transparent hit stroke over the cable's own
+ * .vc-cable-g group is the only part that answers the pointer — its width,
+ * not the visible core's, is what makes a thin cable easy to press — and
+ * pressing is jack.ts-style click (its mousedown never moves focus). The
+ * same stroke carries the hover lift: a neon-ish glow in the cable's own
+ * colour (the group carries that colour as its CSS "color", so the
+ * drop-shadow below resolves per cable via currentColor — a tight bloom
+ * plus a wider halo, eased in on both), the core thicker and at full
+ * opacity, the glow layer brighter and wider, the flow beads lifted
+ * toward white and just wider than that core — at the resting width and
+ * colour they'd sink into the thicker core and the bloom, and the cable
+ * would stop showing its signal flowing exactly while it's being looked
+ * at — the muted flat path brighter still. The bead lift is motion-only:
+ * under reduced motion the flow layer is a solid line (see above), and
+ * whitening it would just recolour the cable. Preview/scene-mix cables
+ * never grow a hit stroke (no per-source press), so they stay purely
+ * decorative and never light up like this. */
+.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
+.vc-cable-g { transition: filter 0.15s ease; }
+.vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
+.vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
+.vc-cable-flow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
+.vc-cable-muted { transition: opacity 0.12s ease; }
+.vc-cable-g:hover { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
+.vc-cable-g:hover .vc-cable-core { stroke-width: 3; opacity: 1; }
+.vc-cable-g:hover .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
+.vc-cable-g:hover .vc-cable-flow { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .vc-cable-g:hover .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
+}
+.vc-cable-g:hover .vc-cable-muted { opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted { transition: none; }
+}
 
 /* "Pick a setting first" — a jack clicked with nothing pinned and nothing
  * ever previewed (deviceMenu.ts's showToast). */
@@ -966,22 +1016,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-src-status[data-warn="amber"] { color: ${HOT_YELLOW}; }
 .vc-src-status[data-warn="red"] { color: ${HOT_RED}; }
 
-/* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
- * A scene-declared item widget's own boxes, affinity rows and web — styled
- * with this file's own tokens/fonts rather than a widget-local stylesheet,
- * same convention as every other panel piece. Always a two-column grid,
- * regardless of item count or panel width, so a box stays wide enough for
- * its code + placeholder swatch even in the narrow (phone) stacked layout —
- * see itemBoxes.ts's header on why Phase 3's live preview lands in
- * .vc-item-preview without a layout change. */
-/* The "All" chip + "Editing …" line above the boxes (itemBoxes.ts's
- * multi-selection, 2026-09-27). */
-.vc-item-selbar {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
-}
-.vc-item-editing {
-  font: 400 10px/1.3 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.02em;
-}
+/* ---- src/ui/widgets/itemBoxes.ts + strainConsole.ts + pairPads.ts ----
+ * A scene-declared item widget's own boxes, its Strain Console (lanes)
+ * and (for a pairwise family) the Pairs pads — styled with this file's own tokens/fonts rather than a
+ * widget-local stylesheet, same convention as every other panel piece.
+ * Always a two-column grid, regardless of item count or panel width, so a
+ * box stays wide enough for its code + placeholder swatch even in the narrow
+ * (phone) stacked layout — see itemBoxes.ts's header on why Phase 3's live
+ * preview lands in .vc-item-preview without a layout change. */
 .vc-item-boxes {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;
 }
@@ -1003,29 +1045,6 @@ body.vc-keys-reveal [data-keycap]::after {
   font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* The per-box "in the edit group" checkbox (itemBoxes.ts's Solo paragraph,
- * 2026-09-27b) — a real <button role="checkbox">, sized to a >=24px touch
- * target even though its drawn glyph is much smaller, sitting in the box's
- * own header row (its "corner") after the code label. --c is the box's own
- * colour custom property, inherited straight from .vc-item-box since the
- * checkbox is a DOM descendant of it. */
-.vc-item-check {
-  flex: none; width: 24px; height: 24px; padding: 0; margin: -3px -3px -3px 0;
-  border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.04);
-  cursor: pointer; display: grid; place-items: center; transition: background 0.12s ease, border-color 0.12s ease;
-}
-.vc-item-check::after {
-  content: ""; width: 8px; height: 8px; border-radius: 2px; background: transparent; transition: background 0.12s ease;
-}
-.vc-item-check[aria-checked="true"] {
-  border-color: var(--c, ${SCENE_VIOLET});
-  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 22%, transparent);
-}
-.vc-item-check[aria-checked="true"]::after {
-  background: var(--c, ${SCENE_VIOLET});
-  box-shadow: 0 0 5px var(--c, ${SCENE_VIOLET});
-}
-.vc-item-check:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 /* A live preview (Phase 3) is a <canvas> in this same slot; an item family
  * with no preview source keeps the plain sized placeholder <div> — either
  * way the box's layout is untouched. */
@@ -1034,8 +1053,6 @@ body.vc-keys-reveal [data-keycap]::after {
   background: color-mix(in srgb, var(--c, #fff) 10%, rgba(0, 0, 0, 0.35));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.vc-item-rows { display: grid; }
-
 /* Phase 3's per-box readouts (POP/TERR/VIG) and the population bar +
  * Rebalance/Pipette row beneath the boxes — src/ui/widgets/itemBoxes.ts. */
 .vc-item-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 4px; }
@@ -1048,6 +1065,90 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.65); }
 .vc-poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
 .vc-pop-actions { display: flex; gap: 8px; }
+
+/* The one Random under the boxes (itemBoxes.ts's header, "One Random"): a
+ * full-width violet button whose die spins once per roll. */
+.vc-roll {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+  margin: 10px 0 8px; padding: 9px 12px; cursor: pointer; color: ${SCENE_VIOLET};
+  background: linear-gradient(135deg, rgba(195, 165, 249, 0.16), rgba(195, 165, 249, 0.04));
+  border: 1px solid rgba(195, 165, 249, 0.55); border-radius: 8px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.vc-roll[hidden] { display: none; }
+.vc-roll:hover, .vc-roll:focus-visible {
+  color: #fff; border-color: ${SCENE_VIOLET};
+  background: linear-gradient(135deg, rgba(195, 165, 249, 0.3), rgba(195, 165, 249, 0.08));
+}
+.vc-roll-die { width: 22px; height: 22px; flex-shrink: 0; }
+.vc-roll-text { display: grid; justify-items: start; gap: 2px; text-align: left; }
+.vc-roll-text b { font: 500 13px/1 ${FONT_LABEL}; letter-spacing: 0.08em; text-transform: uppercase; }
+.vc-roll-text span { font: 400 10px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.03em; }
+.vc-roll-spin .vc-roll-die { animation: vc-roll-spin 0.45s cubic-bezier(0.3, 1.4, 0.6, 1); }
+@keyframes vc-roll-spin { from { transform: rotate(-200deg) scale(0.7); } to { transform: rotate(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-roll-spin .vc-roll-die { animation-duration: 0.01s; }
+}
+
+/* ---- src/ui/widgets/strainConsole.ts ----
+ * The Strain Console card: one row per setting with a lane per strain and its
+ * Link chip, the real setting row mounted under the lanes for the
+ * last lane touched, and Stain Synergy with its hue wheel. */
+.vc-sc-track:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+.vc-sc-detail[hidden] { display: none; }
+.vc-sc-lanes { display: grid; gap: 6px; }
+.vc-sc-row {
+  display: grid; gap: 6px; padding: 8px 10px; margin-inline: -10px; border-radius: 6px;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.vc-sc-row:hover, .vc-sc-row:focus-within {
+  background: rgba(195, 165, 249, 0.06); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4), 0 0 14px rgba(195, 165, 249, 0.18);
+}
+.vc-sc-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.vc-sc-row-title { font: 400 14px/1.2 ${FONT_LABEL}; color: #fff; }
+.vc-sc-row:hover .vc-sc-row-title, .vc-sc-row:focus-within .vc-sc-row-title { color: ${SCENE_VIOLET}; }
+.vc-sc-chip {
+  padding: 3px 8px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.24); background: rgba(255, 255, 255, 0.04);
+  font: 400 10px/1 ${FONT_MONO}; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.64); cursor: pointer;
+}
+.vc-sc-chip:hover { color: #fff; }
+.vc-sc-chip[aria-pressed="true"] { color: #fff; border-color: ${SCENE_VIOLET}; background: rgba(195, 165, 249, 0.14); }
+.vc-sc-lane-list { display: grid; gap: 3px; }
+.vc-sc-lane { display: grid; grid-template-columns: 30px minmax(0, 1fr) 44px; align-items: center; gap: 8px; height: 16px; }
+.vc-sc-lane-code { font: 400 10px/1 ${FONT_MONO}; white-space: nowrap; overflow: hidden; }
+.vc-sc-lane-val { font: 400 11px/1 ${FONT_MONO}; text-align: right; color: rgba(255, 255, 255, 0.64); font-variant-numeric: tabular-nums; }
+.vc-sc-track { position: relative; height: 16px; cursor: pointer; touch-action: none; outline: none; }
+.vc-sc-rail { position: absolute; left: 0; right: 0; top: 7px; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.14); }
+.vc-sc-fill { position: absolute; left: 0; top: 7px; height: 2px; border-radius: 1px; }
+.vc-sc-thumb {
+  position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+  border: 2px solid #0b0f10; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+/* A hue lane's rail is the strain's own hue across the Stain range. */
+.vc-sc-rail[style*="gradient"] { height: 4px; top: 6px; opacity: 0.7; }
+
+.vc-sc-detail { display: grid; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vc-sc-detail-head { font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.08em; }
+
+.vc-sc-syn { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vc-sc-wheel { position: relative; width: 64px; height: 64px; }
+.vc-sc-wheel-ring {
+  position: absolute; inset: 0; border-radius: 50%; opacity: 0.55;
+  background: conic-gradient(hsl(0 90% 58%), hsl(60 90% 58%), hsl(120 90% 58%), hsl(180 90% 58%), hsl(240 90% 58%), hsl(300 90% 58%), hsl(360 90% 58%));
+  -webkit-mask: radial-gradient(circle, transparent 60%, #000 61%); mask: radial-gradient(circle, transparent 60%, #000 61%);
+}
+.vc-sc-wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.vc-sc-syn-left { display: grid; justify-items: center; gap: 4px; }
+/* The console's mix row (Back / presets) and its colour row under
+ * the wheel — strainConsole.ts's own header; the buttons reuse the Pairs mix
+ * row's .vc-mix-row and .vc-exp-pill styles below. */
+.vc-sc-mix { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vc-sc-mix .vc-mix-row { margin-bottom: 8px; }
+.vc-sc-syn > .vc-mix-row { grid-column: 1 / -1; margin-bottom: 0; }
+.vc-sc-harmony { font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); min-height: 10px; text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-sc-row { transition: none; }
+}
 
 /* The pipette's tap-point flash — position/left/top set inline per tap
  * (document-body-absolute so it isn't clipped by the panel's own scroll
@@ -1062,32 +1163,137 @@ body.vc-keys-reveal [data-keycap]::after {
   .vc-pipette-ring { animation: none; opacity: 0; transition: opacity 0.5s ease-out; }
 }
 
-.vc-relweb-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
-.vc-relweb { width: 100%; max-width: 220px; }
-.vc-relweb-label {
-  font: 500 10px/1 ${FONT_LABEL}; fill: #04050a; text-transform: uppercase; letter-spacing: 0.03em;
+/* ---- src/ui/widgets/pairPads.ts ----
+ * The Pairs widget: the Smell/Touch switch, the own-trail strip's vertical
+ * faders, the six pads (a live culture canvas under an SVG overlay) and the
+ * mix row/presets below them, one plain .vc-row (this file's own wake-on-
+ * hover/focus + .vc-drive-pinned grammar) per section since 2026-09-28's own
+ * card mount (pairPads.ts's file header, "Its own card, four rows") — no
+ * rules of its own needed for that part, since every row already gets it for
+ * free. Replaces the old .vc-relweb*/.vc-relrow* rules above this comment's
+ * own predecessor (relationWeb.ts/relationRows.ts, deleted the same day this
+ * widget landed). */
+.vc-pair-layers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.vc-pair-layer {
+  display: grid; gap: 2px; text-align: left; padding: 8px 10px; cursor: pointer; font: inherit; color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; background: rgba(255, 255, 255, 0.02);
 }
-.vc-relweb-node { cursor: pointer; }
-.vc-relweb-node:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
-.vc-relweb-sel { opacity: 1; }
-.vc-relweb-dim { opacity: 0.3; }
+.vc-pair-layer b { font: 600 13px/1.2 ${FONT_LABEL}; letter-spacing: 0.02em; }
+.vc-pair-layer span { font-size: 11.5px; line-height: 1.3; color: rgba(255, 255, 255, 0.4); }
+/* --lc (the layer's own accent) comes from PAIR_LOOK's smell/touch pos
+ * colour, set once per button since it never changes after mount. */
+.vc-pair-layer-smell { --lc: 140, 230, 160; }
+.vc-pair-layer-touch { --lc: 89, 187, 251; }
+.vc-pair-layer[aria-checked="true"] {
+  border-color: rgb(var(--lc)); box-shadow: inset 0 0 0 1px rgb(var(--lc)), 0 0 18px -8px rgb(var(--lc));
+  background: rgba(var(--lc), 0.06);
+}
+.vc-pair-layer[aria-checked="true"] b { color: rgb(var(--lc)); }
+.vc-pair-label {
+  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45);
+  margin: 10px 0 6px;
+}
 
-.vc-relrows { display: grid; gap: 2px; margin-bottom: 8px; }
-.vc-relrow { display: grid; gap: 7px; padding: 8px 2px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
-.vc-relrow:first-child { border-top: 0; }
-.vc-relrow-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.vc-relrow-label { font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; }
-.vc-relrow-value {
-  font: 400 12px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; flex: none;
+.vc-own-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 4px; }
+.vc-own { display: grid; justify-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; }
+.vc-own-code { font: 500 11px/1 ${FONT_MONO}; }
+.vc-own-val { font: 400 10.5px/1.25 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); text-align: center; }
+.vc-own-note { margin: 0 0 10px; font-size: 12px; color: rgba(255, 255, 255, 0.4); padding: 8px 10px; border: 1px dashed rgba(255, 255, 255, 0.14); border-radius: 6px; }
+/* The own-trail fader — a vertical version of the same slider grammar a pad
+ * axis draws with (--c is the strain's own colour, set on .vc-own). */
+.vc-vfader { position: relative; width: 26px; height: 92px; margin: 0 auto; touch-action: none; cursor: pointer; outline: none; }
+.vc-vfader:focus-visible { outline: 1px solid ${SCENE_VIOLET}; outline-offset: 3px; }
+.vc-vfader-track {
+  position: absolute; left: 11px; width: 4px; top: 0; bottom: 0; border-radius: 2px;
+  background: linear-gradient(0deg, rgba(239, 106, 106, 0.55), rgba(239, 106, 106, 0.14) 42%, rgba(255, 255, 255, 0.14) 50%, rgba(140, 230, 160, 0.14) 58%, rgba(140, 230, 160, 0.55));
 }
-/* A row where the selected strains disagree (itemBoxes.ts's multi-selection,
- * 2026-09-27) — a small pill, not a colour change on the row itself, so it
- * reads as "extra information" rather than an error state. */
-.vc-relrow-mixed {
-  font: 500 9px/1 ${FONT_MONO}; letter-spacing: 0.06em; text-transform: uppercase;
-  color: ${BANDS_AMBER}; border: 1px solid color-mix(in srgb, ${BANDS_AMBER} 55%, transparent);
-  border-radius: 8px; padding: 2px 6px; flex: none;
+.vc-vfader-fill { position: absolute; left: 11px; width: 4px; border-radius: 2px; background: var(--c, ${SCENE_VIOLET}); opacity: 0.7; }
+.vc-vfader-thumb {
+  position: absolute; left: 5px; width: 16px; height: 16px; margin: 0 0 -8px 0; border-radius: 50%;
+  background: #0b0f10; border: 2px solid var(--c, ${SCENE_VIOLET}); box-shadow: 0 0 12px -2px var(--c, ${SCENE_VIOLET});
 }
+
+.vc-pair-status { min-height: 2.6em; margin: 0 0 10px; font-size: 12.5px; color: rgba(255, 255, 255, 0.6); }
+
+/* gap 18px, up from the original 12px — the user asked for "gaps" between
+ * the pads once they saw them next to the Signal/Gate cards' own airier row
+ * spacing (2026-09-28). */
+.vc-pads { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 12px; }
+.vc-pad { display: grid; gap: 5px; }
+.vc-pad-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 400 11px/1 ${FONT_MONO}; }
+.vc-pad-body { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 3px; }
+.vc-pad-xcap, .vc-pad-ycap {
+  display: flex; gap: 6px; font: 400 9.5px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.4); white-space: nowrap; overflow: hidden;
+}
+.vc-pad-ycap { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: space-between; }
+.vc-pad-xcap { grid-column: 2; justify-content: space-between; }
+.vc-pad-sign { font-size: 9.5px; line-height: 1; color: rgba(255, 255, 255, 0.55); }
+.vc-pad-sq {
+  position: relative; grid-column: 2; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.12); touch-action: none; cursor: crosshair;
+}
+.vc-pad-sq:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+/* Letting go of a drag shows the settled result at once (pairPads.ts's
+ * "Clearer pads" header): a violet ring and soft glow for a moment. */
+.vc-pad-sq.vc-pad-settled { border-color: ${SCENE_VIOLET}; box-shadow: 0 0 0 1px ${SCENE_VIOLET}, 0 0 14px color-mix(in srgb, ${SCENE_VIOLET} 55%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .vc-pad-sq { transition: box-shadow 0.25s ease, border-color 0.25s ease; }
+}
+/* A pointer press focuses the pad/fader for its keys without the ring (pairPads.ts's pointerFocus). */
+.vc-pad-sq.vc-pf:focus-visible, .vc-vfader.vc-pf:focus-visible { outline: none; }
+.vc-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.85; }
+.vc-pad-sq svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.vc-pad-axis { stroke: rgba(255, 255, 255, 0.2); vector-effect: non-scaling-stroke; }
+.vc-pad-tick { stroke: rgba(255, 255, 255, 0.3); vector-effect: non-scaling-stroke; }
+.vc-pad-guide { stroke: rgba(255, 255, 255, 0.35); stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.vc-pad-corner { font: 6.2px ${FONT_MONO}; fill: rgba(255, 255, 255, 0.45); letter-spacing: 0.06em; }
+.vc-pad-ring { vector-effect: non-scaling-stroke; }
+.vc-pad-ring-white { stroke: rgba(255, 255, 255, 0.9); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+.vc-pad-beh { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The four corner pictures on a Smell pad (apart / together / who chases whom),
+ * HTML rather than part of the stretched svg so they keep their proportions.
+ * No z-index: DOM order (canvas, pictures, svg) keeps them over the culture
+ * and under the marker. */
+.vc-pad-ic {
+  position: absolute; display: flex; padding: 2px 3px; border-radius: 4px; background: rgba(0, 0, 0, 0.55);
+  opacity: 0.7; pointer-events: none; transition: opacity 0.15s ease;
+}
+.vc-pad-ic svg { width: 22px; height: 12px; display: block; }
+.vc-pad-sq:hover .vc-pad-ic { opacity: 1; }
+.vc-pad-ic-tl { top: 4px; left: 4px; }
+.vc-pad-ic-tr { top: 4px; right: 4px; }
+.vc-pad-ic-bl { bottom: 4px; left: 4px; }
+.vc-pad-ic-br { bottom: 4px; right: 4px; }
+
+/* The sentence by the cursor while a pad is hovered or dragged (pairPads.ts's
+ * cursor hint): what each direction is set to, and the numbers. Above the
+ * panel and its tooltips (z-index 40). */
+.vc-pad-hint {
+  position: fixed; z-index: 45; pointer-events: none; max-width: 280px;
+  background: rgba(8, 11, 10, 0.94); border: 1px solid rgba(255, 255, 255, 0.24); border-radius: 8px;
+  padding: 7px 9px; font: 400 12px/1.5 ${FONT_MONO}; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+.vc-pad-hint[hidden] { display: none; }
+.vc-pad-hint-ln { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
+.vc-pad-hint-v { color: rgba(255, 255, 255, 0.5); }
+.vc-pad-hint-note {
+  margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, 0.18);
+  font: 400 11.5px/1.35 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75); white-space: normal;
+}
+
+/* Nudge / Keep own trails / Rivals / Back (pairPads.ts's own header, "The mix
+ * row"). Back starts disabled (an empty history) via the plain disabled
+ * state; Keep own trails toggles via aria-pressed, styled the same violet
+ * as a pressed .vc-exp-pill below. */
+.vc-mix-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.vc-mix-row button {
+  font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7);
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 6px 10px; cursor: pointer;
+}
+.vc-mix-row button:hover:not(:disabled) { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vc-mix-row button:disabled { color: rgba(255, 255, 255, 0.25); border-color: rgba(255, 255, 255, 0.1); cursor: not-allowed; }
+.vc-mix-row button[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
 
 .vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vc-exp-pill {

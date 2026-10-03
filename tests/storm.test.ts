@@ -10,8 +10,11 @@ import {
   SHAPE_VARIANTS,
   STRIKE_LEN_MAX,
   advanceMorphPhase,
+  advanceRatePhase,
+  filamentFlowRate,
   buildBoltTree,
   buildCloud,
+  buildFilamentIndices,
   buildFilamentVertices,
   buildFlowVolume,
   buildLobeSets,
@@ -38,6 +41,7 @@ import {
   strikeEnvelope,
   type Lobe,
 } from "../src/render/scenes/storm.ts";
+import { buildBoltTree as sharedBuildBoltTree, createRng as sharedCreateRng, strikeEnvelope as sharedStrikeEnvelope } from "../src/render/bolt.ts";
 
 describe("storm strike envelope", () => {
   it("is exactly 1 at the instant of the strike", () => {
@@ -199,6 +203,11 @@ describe("storm strike pool", () => {
 });
 
 describe("storm bolt tree", () => {
+  it("shares bolt.ts's rng and strike envelope rather than keeping copies", () => {
+    expect(createRng).toBe(sharedCreateRng);
+    expect(strikeEnvelope).toBe(sharedStrikeEnvelope);
+  });
+
   const ends: [number[], number[]] = [[-0.4, 0.1, 0.2], [0.5, -0.2, -0.1]];
   const STRIDE = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
 
@@ -336,11 +345,98 @@ describe("storm bolt tree", () => {
     expect(a).not.toEqual(c);
   });
 
+  it("pins the clamped tree for a fixed seed, so sharing bolt.ts's generator cannot change Storm's bolts", () => {
+    // Long endpoints near the rim, so forks are clamped back into the cloud
+    // and the clamp path itself is what the checksum covers.
+    const a = [-1.3, 0.2, 0.1];
+    const b = [1.3, -0.3, 0.2];
+    const tree = buildBoltTree(createRng(11), a, b);
+    let sum = 0;
+    for (let i = 0; i < tree.length; i++) sum += tree[i] * (1 + (i % 7));
+    expect(sum).toBeCloseTo(1164.3699851385318, 3);
+    // The first branch's opening vertices (the main channel is path vertices
+    // 0..BOLT_SEGMENTS, each written twice).
+    const o = (BOLT_SEGMENTS + 1) * 2 * BOLT_VERT_FLOATS;
+    expect(Array.from(tree.subarray(o, o + 24))).toEqual([
+      -0.32719096541404724, 0.015622271224856377, 0.21007704734802246, 0.9327986240386963, 0.33810946345329285,
+      -0.12477482855319977, 0, 1, -0.32719096541404724, 0.015622271224856377, 0.21007704734802246, 0.9327986240386963,
+      0.33810946345329285, -0.12477482855319977, -0, 1, -0.09174876660108566, 0.10096248984336853, 0.17858336865901947,
+      0.8377426862716675, 0.5221088528633118, 0.15996721386909485, 0.47314751148223877, 1,
+    ]);
+    // ...and it is the clamp that makes this differ from bolt.ts's bare tree.
+    expect(Array.from(sharedBuildBoltTree(createRng(11), a, b))).not.toEqual(Array.from(tree));
+  });
+
   it("writes into a shared buffer at the offset it is given, touching nothing else", () => {
     const out = new Float32Array(STRIDE * 2);
     buildBoltTree(createRng(2), ends[0], ends[1], out, STRIDE);
     expect(Array.from(out.subarray(0, STRIDE)).every((v) => v === 0)).toBe(true);
     expect(vertAt(out, 0, STRIDE).p[0]).toBeCloseTo(ends[0][0], 6);
+  });
+});
+
+describe("storm rate phase", () => {
+  const DT = 1 / 60;
+
+  it("at a constant rate is the direct clock * rate product, frame after frame", () => {
+    let acc: number | null = null;
+    let prev: number | null = null;
+    let clock = 700; // a scene opened a while after page load
+    for (let i = 0; i < 600; i++) {
+      acc = advanceRatePhase(acc, prev, clock, 0.14);
+      prev = clock;
+      expect(acc).toBeCloseTo(clock * 0.14, 9);
+      clock += DT * 1.3; // the flow clock runs a little fast under audio
+    }
+  });
+
+  it("a rate change at a large clock moves the phase by one frame's worth, not by clock * delta-rate", () => {
+    let acc: number | null = advanceRatePhase(null, null, 1000, 0.14);
+    const before = acc;
+    acc = advanceRatePhase(acc, 1000, 1000 + DT, 0.7); // Swirl dragged up five-fold
+    expect(acc - before).toBeCloseTo(DT * 0.7, 9);
+    // The direct product would have jumped by 1000 * (0.7 - 0.14) = 560.
+    expect(Math.abs(acc - before)).toBeLessThan(0.05);
+  });
+
+  it("a glide of the rate integrates to a smooth phase", () => {
+    let acc: number | null = null;
+    let prev: number | null = null;
+    let last = 0;
+    let maxStep = 0;
+    for (let i = 0; i < 300; i++) {
+      const clock = 500 + i * DT;
+      acc = advanceRatePhase(acc, prev, clock, 0.4 + (0.4 * i) / 300);
+      prev = clock;
+      if (i > 0) maxStep = Math.max(maxStep, Math.abs(acc - last));
+      last = acc;
+    }
+    expect(maxStep).toBeLessThan(DT * 0.8 + 1e-9);
+  });
+
+  it("re-seeds to clock * rate from a null seed or a backwards clock", () => {
+    expect(advanceRatePhase(null, null, 12, 0.5)).toBe(6);
+    expect(advanceRatePhase(3, null, 12, 0.5)).toBe(6);
+    expect(advanceRatePhase(99, 50, 12, 0.5)).toBe(6);
+  });
+
+  it("holds still at rate 0 and stays finite on non-finite input", () => {
+    expect(advanceRatePhase(4, 10, 20, 0)).toBe(4);
+    expect(Number.isFinite(advanceRatePhase(Number.NaN, 10, 20, 1))).toBe(true);
+    expect(Number.isFinite(advanceRatePhase(4, 10, Number.NaN, 1))).toBe(true);
+    expect(Number.isFinite(advanceRatePhase(4, 10, 20, Number.NaN))).toBe(true);
+  });
+
+  it("the Flow setting maps to a crawl rate that only ever grows with it", () => {
+    let prev = filamentFlowRate(0);
+    expect(prev).toBeGreaterThan(0);
+    for (let f = 0.05; f <= 1.0001; f += 0.05) {
+      const r = filamentFlowRate(f);
+      expect(r).toBeGreaterThan(prev);
+      prev = r;
+    }
+    expect(filamentFlowRate(2)).toBe(filamentFlowRate(1));
+    expect(filamentFlowRate(Number.NaN)).toBe(filamentFlowRate(0));
   });
 });
 
@@ -627,26 +723,59 @@ describe("storm filament strands", () => {
     expect(filamentStrandCount(50_000)).toBeGreaterThan(filamentStrandCount(12_000));
   });
 
-  it("emits each strand as consecutive line pairs sharing one seed point", () => {
+  it("emits steps + 1 vertices per strand, one per point along the trace, sharing one seed point", () => {
     const strands = 3;
     const steps = 4;
     const cloud = buildCloud(strands);
     const v = buildFilamentVertices(cloud.positions, cloud.seeds, strands, steps);
-    expect(v.positions.length).toBe(strands * steps * 2 * 3);
-    expect(v.seeds.length).toBe(strands * steps * 2);
+    expect(v.positions.length).toBe(strands * (steps + 1) * 3);
+    expect(v.seeds.length).toBe(strands * (steps + 1));
+    expect(v.steps.length).toBe(strands * (steps + 1));
     for (let s = 0; s < strands; s++) {
-      for (let j = 0; j < steps; j++) {
-        const o = (s * steps + j) * 2;
-        // The pair straddles one step of the trace...
+      for (let j = 0; j <= steps; j++) {
+        const o = s * (steps + 1) + j;
+        // The step index runs 0..steps along the strand...
         expect(v.steps[o]).toBe(j);
-        expect(v.steps[o + 1]).toBe(j + 1);
         // ...and every vertex of the strand carries the same seed, since the
         // shader is what turns a step index into a position.
         expect(v.seeds[o]).toBe(cloud.seeds[s]);
         expect(v.positions[o * 3]).toBe(cloud.positions[s * 3]);
-        expect(v.positions[(o + 1) * 3 + 2]).toBe(cloud.positions[s * 3 + 2]);
+        expect(v.positions[o * 3 + 2]).toBe(cloud.positions[s * 3 + 2]);
       }
     }
+  });
+
+  it("indexes each strand as consecutive segments (j, j+1) within its own vertices", () => {
+    const strands = 5;
+    const steps = 4;
+    const idx = buildFilamentIndices(strands, steps);
+    expect(idx.length).toBe(strands * steps * 2);
+    let max = 0;
+    for (let s = 0; s < strands; s++) {
+      for (let j = 0; j < steps; j++) {
+        const o = (s * steps + j) * 2;
+        expect(idx[o]).toBe(s * (steps + 1) + j);
+        expect(idx[o + 1]).toBe(idx[o] + 1);
+        max = Math.max(max, idx[o + 1]);
+      }
+    }
+    expect(max).toBeLessThan(strands * (steps + 1));
+  });
+
+  it("a prefix of whole strands' indices only touches those strands' vertices", () => {
+    const steps = 10;
+    const idx = buildFilamentIndices(40, steps);
+    for (const k of [1, 7, 23]) {
+      const prefix = idx.subarray(0, k * steps * 2);
+      expect(Math.max(...prefix)).toBe(k * (steps + 1) - 1);
+    }
+  });
+
+  it("uses the shipped step count by default, and 32-bit indices reach the strand ceiling", () => {
+    const strands = filamentStrandCount(1e9);
+    const idx = buildFilamentIndices(strands);
+    expect(idx).toBeInstanceOf(Uint32Array);
+    expect(Math.max(...idx.subarray(idx.length - 20))).toBeGreaterThan(65535);
   });
 });
 

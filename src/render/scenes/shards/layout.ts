@@ -10,9 +10,11 @@
 // arrangement on every beat with no rank preference, and between cuts
 // extending outward along their own axes while the camera rolls slowly
 // clockwise. The clip has no timer cuts, and neither does this scene: there
-// is no cut without a trigger, so silence freezes the picture (index.ts's
+// is no cut without a trigger, so silence stops the cuts (index.ts's
 // CUT_LISTENER, driven by beatListener.ts, has no free-run option by
-// design — see that file's own header).
+// design — see that file's own header) and the picture eases to a hold: the
+// between-cut growth and recede are capped (GROW_MAX, DOLLY_MAX_FACTOR), so
+// a cut-free stretch drifts a little and then stops rather than running on.
 //
 // One primitive draws everything: a triangular prism — a triangle in the
 // (axis, across) plane, extruded ±thickness/2 along its normal. PRISM_VERTS
@@ -95,6 +97,9 @@ export interface Camera {
   pitch: number;
   roll: number;
   dist: number;
+  /** The distance this viewpoint was rolled at — the recede between cuts is
+   *  capped relative to it (DOLLY_MAX_FACTOR). */
+  dist0: number;
   /** Look-at offset from the cluster origin, so the cluster sits off-centre
    *  and is cut by the frame edges the way the reference's is. */
   tx: number;
@@ -275,11 +280,16 @@ export function buildCluster(rng: Rng, opts: ClusterOptions): Shard[] {
  *  short side at 60° vertical FOV (glsl.ts's FOCAL); the look-at offset and
  *  pitch keep it off-centre like the reference. */
 export function randomCamera(rng: Rng): Camera {
+  const yaw = rng() * TAU;
+  const pitch = (rng() * 2 - 1) * 0.6;
+  const roll = rng() * TAU;
+  const dist = 1.9 + 1.0 * rng();
   return {
-    yaw: rng() * TAU,
-    pitch: (rng() * 2 - 1) * 0.6,
-    roll: rng() * TAU,
-    dist: 1.9 + 1.0 * rng(),
+    yaw,
+    pitch,
+    roll,
+    dist,
+    dist0: dist,
     tx: (rng() * 2 - 1) * 0.5,
     ty: (rng() * 2 - 1) * 0.35,
     rollRate: -(0.025 + 0.035 * rng()),
@@ -515,6 +525,22 @@ function applyCut(state: ShardState, kind: CutKind, opts: AdvanceOptions): void 
   state.cuts[kind]++;
 }
 
+/** Between-cut caps (advanceShards). Chosen well past anything a normal gap
+ *  between cuts reaches — the camera takes several seconds even at the
+ *  fastest Dolly to recede to DOLLY_MAX_FACTOR x its start distance, and a
+ *  blade takes several seconds at the top Extend rate to grow GROW_MAX x its
+ *  own length — so on the beat the caps never show. */
+export const DOLLY_MAX_FACTOR = 2.5;
+export const GROW_MAX = 4;
+
+/** Aspect of the whole room-space canvas, not this device's slice of it: a
+ *  slice w x h (fractions of the room) of a drawing buffer bw x bh is a
+ *  room (bw / w) x (bh / h) px. Same formula as meshGrid.ts's roomAspect()
+ *  in GLSL; 1 slice = the buffer's own aspect. */
+export function roomAspect(bufferW: number, bufferH: number, slice: { w: number; h: number }): number {
+  return (bufferW * slice.h) / Math.max(1e-6, bufferH * slice.w);
+}
+
 /** One frame. `hit` is this frame's beatListener.ts reading (index.ts's
  *  CUT_LISTENER, already resolved against hold/refractory) — no cut without
  *  a trigger, so silence freezes the picture (see the file header). `fired`
@@ -558,11 +584,18 @@ export function advanceShards(
   }
 
   // Between cuts: shards extend along their axis, faster on bass; the
-  // camera rolls clockwise and recedes a little.
+  // camera rolls clockwise and recedes a little. Growth and recede stop at
+  // a cap, so a long cut-free stretch (silence, or Cut on = Bass hits on a
+  // track with no kick) settles into a hold instead of the cluster shrinking
+  // to a speck and the blades running on for minutes. Roll is a rotation and
+  // harmless, so it is left to turn.
   const rate = opts.extend * (0.3 + low);
-  for (const s of state.shards) s.grow += s.extend * rate * dt;
+  for (const s of state.shards) s.grow = Math.min(s.grow + s.extend * rate * dt, GROW_MAX);
   state.camera.roll += state.camera.rollRate * opts.spin * dt;
-  state.camera.dist += state.camera.dollyRate * opts.dolly * dt;
+  state.camera.dist = Math.min(
+    state.camera.dist + state.camera.dollyRate * opts.dolly * dt,
+    state.camera.dist0 * DOLLY_MAX_FACTOR,
+  );
   return applied;
 }
 

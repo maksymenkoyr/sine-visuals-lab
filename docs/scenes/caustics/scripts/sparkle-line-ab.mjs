@@ -4,7 +4,7 @@
 // Rescued from a working session on 2026-09-22.
 // usage: node sparkle-line-ab.mjs [port] [outDir]
 // May need adjusting to current code — setting names (sparkleLine, sparkle,
-// sparkleBright, flash, drift, ripple, dropReactivity) may have changed.
+// sparkleBright, flash, drift, ripple) may have changed.
 const { chromium } = await import(new URL("../../../../node_modules/playwright/index.mjs", import.meta.url));
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +63,7 @@ async function lum(buf) {
   }, buf.toString("base64"));
 }
 
-const base = { sparkle: 1, sparkleBright: 1, flash: 0, drift: 0, ripple: 0, dropReactivity: 0 };
+const base = { sparkle: 1, sparkleBright: 1, flash: 0, drift: 0, ripple: 0 };
 const results = {};
 for (const [name, sparkleLine] of [["sparkleLine-0", 0], ["sparkleLine-1", 1]]) {
   await page.evaluate(

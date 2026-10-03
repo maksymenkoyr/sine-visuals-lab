@@ -250,12 +250,8 @@ void main() {
   float t = 0.45;
   bool hit = false;
   vec3 pos = ro;
-  int hitMat = 0;
   float hitEdge = 1.0e5;
   float hitRed = 0.0;
-  // Closest approach to an edge-bearing surface along the ray, as an angle:
-  // the halo a missed edge still throws (the measured glow around strokes).
-  float nearMiss = 1.0e5;
 
   for (int i = 0; i < MAX_MARCH_STEPS; i++) {
     if (i >= steps) break;
@@ -264,11 +260,9 @@ void main() {
     float edgeD;
     float red;
     float d = mapFull(pos, mat, edgeD, red);
-    nearMiss = min(nearMiss, d / t);
     float eps = 0.0015 + t * 0.0015;
     if (d < eps) {
       hit = true;
-      hitMat = mat;
       hitEdge = edgeD;
       hitRed = red;
       break;

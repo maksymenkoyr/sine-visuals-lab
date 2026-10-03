@@ -1,8 +1,10 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
+import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { applyGlassBlur, getGlassBlur, setGlassBlur } from "./glassPref.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -10,6 +12,7 @@ import {
   digitsStyle,
   digitsTextStyle,
   groupHeadingStyle,
+  readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
   spacer,
@@ -32,14 +35,25 @@ import {
  *
  * Shape, top to bottom: the status line right under the title (the Bands
  * column's own live-dot · source line is the model — small caps mono with
- * a coloured dot, hover/tap for the long explanation), then two controls —
- * Quality (src/render/qualityPref.ts) and Energy saving, both rows in the
- * panel's grammar with a chip group where a slider would sit — then a
- * "Readouts" group of diagnostics. Those are deliberately not rows: a row's
+ * a coloured dot, hover/tap for the long explanation), then the controls —
+ * Quality (src/render/qualityPref.ts), Resolution and Energy saving; the
+ * chip rows are in the panel's grammar with a chip group where a slider
+ * would sit, and Resolution is the one real slider — then a "Readouts"
+ * group of diagnostics. Those are deliberately not rows: a row's
  * 14.5px label is for something you act on, and four of them made this card
  * read as a settings form. They're a small mono caption beside a
  * seven-segment value, the same register as the band captions under the
  * spectrum strip.
+ *
+ * The same card is built twice (deviceMenu.ts), differing only in the deps and
+ * options it is given: the main window's, which reads "Preview" and gains the
+ * Preview size and Resolution rows while a pop-out output is open
+ * (src/render/outputPower.ts), and the "Output" card that edits and reads
+ * back that window's own settings. Resolution is a plain scale on the
+ * drawing buffer, multiplied into the quality's own scale where the window
+ * resizes its canvas; the Resolution readout below shows the pixels that
+ * come out. Its slider is a `.vc-slider` but sits outside the panel's Tab
+ * ring (deviceMenu.ts's ringElements), as the chips do.
  *
  * Read-only except the mode chips; every value comes from
  * PowerCardDeps.getPowerStatus(), polled at the panel's existing ~10Hz
@@ -99,6 +113,30 @@ export interface PowerCardDeps {
   getQualityChoice: () => QualityChoice;
   onQualityChoiceChange: (choice: QualityChoice) => void;
   getPowerStatus: () => PowerStatus;
+  /** True while the card describes the main window's preview of a pop-out
+   *  output (app.ts's previewActive) rather than the device itself: shows the
+   *  Preview size row. The three below are only read then. */
+  isPreview?: () => boolean;
+  /** False when the preview has no box to resize (a phone controller's preview
+   *  is the whole page), which hides the Size row; absent means it can. */
+  canResizePreview?: () => boolean;
+  getPreviewSize?: () => PreviewSize;
+  onPreviewSizeChange?: (size: PreviewSize) => void;
+  /** The Resolution slider's value, a fraction from RESOLUTION_MIN to
+   *  RESOLUTION_MAX. The row shows when both are given, and — if `isPreview`
+   *  is — only while previewing. */
+  getResolution?: () => number;
+  onResolutionChange?: (value: number) => void;
+}
+
+/** What tells one Power card from another: the main window's (defaults) and
+ *  the Output card, which drives the pop-out window's own settings. */
+export interface PowerCardOptions {
+  title?: string;
+  /** Key for the card's remembered fold state. */
+  foldId?: string;
+  /** Names the folded square for assistive tech and its tooltip, like the title. */
+  glyphLabel?: string;
 }
 
 export interface PowerCard {
@@ -106,6 +144,10 @@ export interface PowerCard {
   title: HTMLElement;
   /** Pulls a fresh PowerStatus and updates the chips/status/readouts. */
   refresh(): void;
+  /** Renames the card ("Preview" while an output is open), keeping the Beta badge. */
+  setTitle(text: string): void;
+  /** Shows or hides the whole card. */
+  setVisible(on: boolean): void;
 }
 
 const IDLE_DOT = "rgba(255,255,255,0.3)";
@@ -152,15 +194,185 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // refresh() runs every auto-refresh tick (deviceMenu.ts), and the chips'
+  // cssText and the hint's rebuilt children are the same until the mode
+  // changes — only write when it does.
+  let last: PowerMode | null = null;
   return {
     el,
     refresh(mode: PowerMode): void {
+      if (mode === last) return;
+      last = mode;
       for (const { mode: m, btn } of buttons) {
         btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
       }
       setHintText(hint, MODE_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
     },
   };
+}
+
+const BLUR_OPTIONS: { on: boolean; text: string; title: string }[] = [
+  { on: false, text: "Off", title: "Flat dark panels — lightest on the GPU" },
+  { on: true, text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
+];
+
+/** Panel blur (glassPref.ts): the one row here that changes how the panel
+ *  itself looks rather than how the scene renders — it lives in this card
+ *  because what it trades is GPU time, same as Quality and Energy saving. */
+function createBlurRow(accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Panel blur";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = BLUR_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.title = opt.title;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => {
+      setGlassBlur(opt.on);
+      refresh();
+    });
+    return { on: opt.on, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, list, hint);
+
+  function refresh(): void {
+    const on = getGlassBlur();
+    for (const b of buttons) b.btn.style.cssText = b.on === on ? modeChipLitStyle : modeChipStyle;
+    setHintText(hint, BLUR_OPTIONS.find((o) => o.on === on)?.title ?? "");
+  }
+  refresh();
+  return { el, refresh };
+}
+
+const SIZE_OPTIONS: { size: PreviewSize; text: string }[] = [
+  { size: "third", text: "1/3" },
+  { size: "half", text: "1/2" },
+  { size: "full", text: "Full" },
+];
+const SIZE_HINT = "Preview drawn at a third, half or the full window size while the output is open";
+
+/** The Preview size row, shown only while the card describes a preview:
+ *  createModeRow's shape (label, chips, hint), small to large left to right. */
+function createSizeRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Preview size";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = SIZE_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => deps.onPreviewSizeChange?.(opt.size));
+    return { size: opt.size, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  setHintText(hint, SIZE_HINT);
+
+  el.append(head, list, hint);
+
+  // Only write when the size changes — see createModeRow's `last`.
+  let last: PreviewSize | null = null;
+  return {
+    el,
+    refresh(size: PreviewSize): void {
+      if (size === last) return;
+      last = size;
+      for (const { size: s, btn } of buttons) {
+        btn.style.cssText = s === size ? modeChipLitStyle : modeChipStyle;
+      }
+    },
+  };
+}
+
+const RESOLUTION_HINT =
+  "Pixels drawn, as a share of the full count: 50% draws a quarter of them. Applies on top of Quality, and the Resolution readout below shows the result";
+const resolutionOutStyle = `${readoutStyle} min-width: 38px; justify-content: flex-end;`;
+
+/** The Resolution row: label and a seven-segment percentage over a plain
+ *  slider, where the other rows have chips — it is a continuous scale, not a
+ *  pick. Right = more pixels, up to the full count at the right end. The row
+ *  commits on every drag frame (no rebuild, so the slider being dragged is
+ *  never torn out). */
+function createResolutionRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Resolution";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const out = document.createElement("div");
+  out.style.cssText = resolutionOutStyle;
+  const outDigits = document.createElement("span");
+  outDigits.style.cssText = digitsStyle;
+  const outUnit = document.createElement("span");
+  outUnit.textContent = "%";
+  outUnit.style.cssText = unitStyle;
+  out.append(outDigits, outUnit);
+  head.append(label, out);
+
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.className = "vc-slider";
+  slider.min = String(Math.round(RESOLUTION_MIN * 100));
+  slider.max = String(Math.round(RESOLUTION_MAX * 100));
+  slider.step = "5";
+  slider.setAttribute("aria-label", "Resolution");
+  slider.setAttribute("aria-description", RESOLUTION_HINT);
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  setHintText(hint, RESOLUTION_HINT);
+
+  el.append(head, slider, hint);
+
+  const show = (fraction: number): void => {
+    const pct = Math.round(fraction * 100);
+    slider.value = String(pct);
+    const lo = Number(slider.min);
+    slider.style.setProperty("--vc-fill", `${((pct - lo) / (Number(slider.max) - lo)) * 100}%`);
+    outDigits.textContent = String(pct);
+  };
+  slider.addEventListener("input", () => {
+    const fraction = Number(slider.value) / 100;
+    show(fraction);
+    deps.onResolutionChange?.(fraction);
+  });
+
+  return { el, refresh: show };
 }
 
 // Quality row's chip group wraps rather than squeezing five chips onto one
@@ -218,9 +430,15 @@ function createQualityRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // Everything below is a function of these two — only write when either
+  // changes (see createModeRow's `last`).
+  let lastKey = "";
   return {
     el,
     refresh(choice: QualityChoice, recommended: QualityPreset): void {
+      const key = `${choice}|${recommended}`;
+      if (key === lastKey) return;
+      lastKey = key;
       for (const { choice: c, btn } of buttons) {
         const selected = c === choice;
         const isRecommended = c === recommended;
@@ -332,14 +550,28 @@ function createStatusRow(accent: string) {
 
   el.append(line, hint);
 
+  // Each write only when its own value moved (see createModeRow's `last`);
+  // the hint rebuilds its child nodes, so it matters most.
+  let lastText: string | null = null;
+  let lastDetail: string | null = null;
+  let lastDot: string | null = null;
   return {
     el,
     refresh(status: PowerStatus): void {
       const described = describeStatus(status, accent);
-      text.textContent = described.text;
-      el.title = described.detail;
-      dot.style.backgroundColor = described.dot;
-      setHintText(hint, described.detail);
+      if (described.text !== lastText) {
+        lastText = described.text;
+        text.textContent = described.text;
+      }
+      if (described.detail !== lastDetail) {
+        lastDetail = described.detail;
+        el.title = described.detail;
+        setHintText(hint, described.detail);
+      }
+      if (described.dot !== lastDot) {
+        lastDot = described.dot;
+        dot.style.backgroundColor = described.dot;
+      }
     },
   };
 }
@@ -394,7 +626,10 @@ function createReadoutLine(caption: string) {
   };
 }
 
-export function createPowerCard(deps: PowerCardDeps): PowerCard {
+export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}): PowerCard {
+  const title = opts.title ?? "Power";
+  const foldId = opts.foldId ?? "power";
+  const glyphLabel = opts.glyphLabel ?? title;
   // Only read at the moment of a fold click, so a viewport/preference change
   // between clicks always takes effect on the next one — no resize listener
   // needed, matchMedia's own .matches is always current.
@@ -493,7 +728,7 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
     }
   }
 
-  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power", defaultFolded: true, foldTransition });
+  const card = createCard({ title, accent: POWER_TEAL, foldId, defaultFolded: true, foldTransition });
   cardEl = card.el;
   cardEl.classList.add("vc-power-card");
   pad = cardEl.querySelector<HTMLElement>(".vc-card-pad")!;
@@ -505,8 +740,8 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   square = document.createElement("button");
   square.type = "button";
   square.className = "vc-power-square";
-  square.setAttribute("aria-label", "Expand Power");
-  square.title = "Expand Power";
+  square.setAttribute("aria-label", `Expand ${glyphLabel}`);
+  square.title = `Expand ${glyphLabel}`;
   square.setAttribute("aria-controls", card.body.id);
   square.innerHTML =
     '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
@@ -532,6 +767,10 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   hairline.style.cssText = hairlineStyle;
   const qualityRow = createQualityRow(deps, POWER_TEAL);
   const modeRow = createModeRow(deps, POWER_TEAL);
+  const sizeRow = createSizeRow(deps, POWER_TEAL);
+  sizeRow.el.style.display = "none";
+  const resolutionRow = createResolutionRow(deps, POWER_TEAL);
+  resolutionRow.el.style.display = "none";
 
   const readoutsHeading = document.createElement("div");
   readoutsHeading.textContent = "Readouts";
@@ -543,12 +782,37 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
-  card.body.append(statusRow.el, hairline, qualityRow.el, spacer(), modeRow.el, readoutsHeading, readouts);
+  // Seed <html>'s glass class from the saved choice before the panel first shows.
+  applyGlassBlur();
+  const blurRow = createBlurRow(POWER_TEAL);
+
+  card.body.append(
+    statusRow.el,
+    hairline,
+    qualityRow.el,
+    resolutionRow.el,
+    spacer(),
+    sizeRow.el,
+    modeRow.el,
+    spacer(),
+    blurRow.el,
+    readoutsHeading,
+    readouts,
+  );
 
   function refresh(): void {
     const status = deps.getPowerStatus();
     statusRow.refresh(status);
     qualityRow.refresh(status.choice, status.recommended);
+    const preview = deps.isPreview?.() ?? false;
+    const sizeShown = preview && (deps.canResizePreview?.() ?? true);
+    sizeRow.el.style.display = sizeShown ? "" : "none";
+    if (sizeShown && deps.getPreviewSize) sizeRow.refresh(deps.getPreviewSize());
+    // The Output card has no isPreview and always shows its row; the main
+    // card's follows the preview, like the size row above.
+    const resolutionShown = !!deps.getResolution && (deps.isPreview ? preview : true);
+    resolutionRow.el.style.display = resolutionShown ? "" : "none";
+    if (resolutionShown) resolutionRow.refresh(deps.getResolution!());
     modeRow.refresh(status.mode);
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
@@ -556,5 +820,21 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   }
   refresh();
 
-  return { el: card.el, title: card.title, refresh };
+  function setTitle(text: string): void {
+    const node = card.title.firstChild;
+    if (node && node.nodeType === Node.TEXT_NODE) {
+      if ((node as Text).data !== text) (node as Text).data = text;
+    }
+    const label = `Expand ${opts.glyphLabel ?? text}`;
+    if (square.title !== label) {
+      square.title = label;
+      square.setAttribute("aria-label", label);
+    }
+  }
+
+  function setVisible(on: boolean): void {
+    card.el.style.display = on ? "" : "none";
+  }
+
+  return { el: card.el, title: card.title, refresh, setTitle, setVisible };
 }

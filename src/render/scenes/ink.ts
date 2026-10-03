@@ -1,6 +1,7 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
+import { createScaledPhase } from "../flowClock.ts";
 
 /**
  * Ink Synth — black ink on white paper, drawn as thousands of fine contour
@@ -31,7 +32,8 @@ import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
  *   under a couple of pixels.
  * - Spirals: VORTEX_COUNT swirl warps sitting on the arms, positions,
  *   strengths and radii from the parameter vector, plus two sliding sine
- *   warps whose phase runs on uFlowPhase × `flow`. Interpolating the
+ *   warps whose phase runs at the `flow` rate (the clock's phase step times
+ *   `flow`, accumulated — createScaledPhase in flowClock.ts). Interpolating the
  *   vector between rolls is what makes spirals wind and slide the way the
  *   reference's motion tracks showed (fringes along every line, static
  *   skeleton, no cuts).
@@ -50,7 +52,7 @@ import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
  *
  * Precision, or why the flow phase never reaches the shader raw: the
  * marbling warps and the organic stroke term are value noise, and the flow
- * phase (uFlowPhase × `flow`, ever-growing) used to be added to their
+ * phase (accumulated at the `flow` rate, ever-growing) used to be added to their
  * coordinates in the shader, so the noise hash's input climbed with session
  * length. On mobile GPUs that broke the field along noise-cell boundaries
  * into straight and slanted seams — the octave rotation in fbm sets the
@@ -252,6 +254,10 @@ export function createParamDrift(rng: Rng = Math.random): ParamDrift {
   let t = 0;
   let lastBarPhase = 0;
   let wasLocked = false;
+  // Where in the bar the lock was acquired, until the next bar wrap: the
+  // ease then runs from the picture as it was then (prev) to the target over
+  // the rest of the bar, instead of starting at barPhase's own value.
+  let anchor = 0;
   let nodes = 0;
 
   const node = (morph: number, recolour: boolean, ribbon: number): void => {
@@ -277,14 +283,28 @@ export function createParamDrift(rng: Rng = Math.random): ParamDrift {
     },
     advance(dtSec, barPhase, tempoLock, morph, recolour = false, ribbon = 0.7) {
       const locked = tempoLock > 0.5;
+      // Crossing the lock threshold swaps what drives t (the timer vs.
+      // barPhase), which would move t — and, through smoothstep, most of the
+      // prev-to-next difference — in one frame. Re-anchor instead: the ease
+      // restarts from the picture as it is now, toward the same target.
+      if (locked !== wasLocked) {
+        prev.set(cur);
+        anchor = locked ? barPhase : 0;
+        if (!locked) t = 0;
+      }
       if (locked) {
-        if (wasLocked && barPhase < lastBarPhase - 0.5) node(morph, recolour, ribbon);
-        else if (recolour) recolourNow();
-        t = barPhase;
+        if (wasLocked && barPhase < lastBarPhase - 0.5) {
+          node(morph, recolour, ribbon);
+          anchor = 0;
+        } else if (recolour) recolourNow();
+        t = anchor > 0 ? Math.max(0, Math.min(1, (barPhase - anchor) / Math.max(1e-3, 1 - anchor))) : barPhase;
       } else {
-        t += dtSec / NODE_FALLBACK_SEC;
+        t += (Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 0) / NODE_FALLBACK_SEC;
         if (t >= 1) {
-          t -= 1;
+          // One roll however long the gap (a hidden tab hands in minutes of
+          // dt): subtracting just 1 would leave t >= 1 and re-roll every
+          // frame, a hard cut each time, until it drained.
+          t -= Math.floor(t);
           node(morph, recolour, ribbon);
         } else if (recolour) recolourNow();
       }
@@ -606,14 +626,17 @@ export const inkScene = createFullscreenScene("ink", "Ink Synth", FRAG, {
   extraUniformDecls: `uniform float uParams[${PARAM_COUNT}];\nuniform float uStretchEnv;\nuniform float uNoiseFlow[${NOISE_FLOW_LEN}];\nuniform float uSinPhase[${SIN_FLOW_RATES.length}];`,
   extraUniforms: (() => {
     const drift = createParamDrift();
+    const flow = createScaledPhase();
     const flowBuf = new Float32Array(NOISE_FLOW_LEN);
     const sinBuf = new Float32Array(SIN_FLOW_RATES.length);
     let stretchEnv = 0;
     let prevDropOnset = false;
     return (_frame, anim, getSetting, drives) => {
-      // The flow phase, at the Flow setting's rate — reduced here, in
-      // float64, before anything reaches the shader (file header).
-      const ph = anim.flowPhase * getSetting("flow");
+      // The flow phase, accumulated at the Flow setting's rate (multiplying
+      // the whole phase by it would teleport the field on every Flow change)
+      // — reduced here, in float64, before anything reaches the shader (file
+      // header).
+      const ph = flow.advance(anim.flowPhase, getSetting("flow"));
       stretchEnv = advanceStretch(stretchEnv, anim.dtSec, drives.fired("stretch", anim.onset));
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;

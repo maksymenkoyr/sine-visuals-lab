@@ -80,6 +80,14 @@ export interface TempoCombOptions {
   bpmMax: number;
 }
 
+// Scratch reused across calls (grown on demand) so the per-onset estimate
+// allocates nothing in the steady state — see estimateTempo. The estimator is
+// synchronous and never re-entered, so sharing them is safe.
+let gaps = new Float64Array(0);
+let weights = new Float64Array(0);
+let periods = new Float64Array(0);
+let scores = new Float64Array(0);
+
 /** Returns a refined bpm, or null when there isn't enough evidence yet (fewer
  *  than three onsets) or no candidate period scored above zero — in either
  *  case the caller should leave its own held bpm exactly as it was, not
@@ -89,21 +97,31 @@ export function estimateTempo(onsets: TempoOnsetVote[], now: number, currentBpm:
   const n = onsets.length;
   if (n < 3) return null;
 
-  const gaps: number[] = [];
-  const weights: number[] = [];
+  // Pair gaps and weights go into module-level scratch (this runs on the
+  // audio thread once per picked onset in tempoAnalyzer.ts, so it must not
+  // allocate a pair of growing arrays every call).
+  const pairCap = (n * (n - 1)) / 2;
+  if (gaps.length < pairCap) {
+    gaps = new Float64Array(pairCap);
+    weights = new Float64Array(pairCap);
+  }
+  let pairs = 0;
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       const gap = onsets[j]!.time - onsets[i]!.time;
       if (gap > MAX_PAIR_GAP_SEC) break; // ascending, so later j are further still
-      gaps.push(gap);
+      gaps[pairs] = gap;
       const recency = opts.recencySec > 0 ? Math.exp(-(now - onsets[j]!.time) / opts.recencySec) : 1;
-      weights.push(Math.min(onsets[i]!.weight, onsets[j]!.weight) * recency);
+      weights[pairs] = Math.min(onsets[i]!.weight, onsets[j]!.weight) * recency;
+      pairs++;
     }
   }
 
+  // Scores one candidate period over every pair. Only the hysteresis check
+  // below uses this; the grid search scatters instead (see there).
   const combScore = (period: number): number => {
     let score = 0;
-    for (let g = 0; g < gaps.length; g++) {
+    for (let g = 0; g < pairs; g++) {
       const k = Math.round(gaps[g]! / period);
       if (k < 1) continue;
       const err = Math.abs(gaps[g]! - k * period);
@@ -118,13 +136,53 @@ export function estimateTempo(onsets: TempoOnsetVote[], now: number, currentBpm:
 
   const periodMin = 60 / opts.bpmMax;
   const periodMax = 60 / opts.bpmMin;
+  const step = opts.periodStepSec;
+  // The candidate periods, built by repeated addition so every value is the
+  // same float the plain `for (period...; period += step)` walk would visit.
+  let count = 0;
+  for (let period = periodMin; period <= periodMax + 1e-9; period += step) {
+    if (count === periods.length) {
+      const grown = new Float64Array(Math.max(256, count * 2));
+      grown.set(periods);
+      periods = grown;
+    }
+    periods[count++] = period;
+  }
+  if (scores.length < count) scores = new Float64Array(periods.length);
+  scores.fill(0, 0, count);
+
+  // Scatter instead of scanning every pair for every period: a pair only
+  // scores for the few periods near gap/k, so for each whole multiple k that
+  // gap could be of a period in range, visit just those candidates. Pairs run
+  // in ascending order, so each period's sum accumulates in exactly the order
+  // the per-period scan used, and the checks below are combScore's own —
+  // the result is bit-identical, at a fraction of the work.
+  const tol = opts.tolSec;
+  const last = count - 1;
+  for (let g = 0; g < pairs; g++) {
+    const gap = gaps[g]!;
+    const w = weights[g]!;
+    const kMin = Math.max(1, Math.floor(gap / periodMax));
+    const kMax = Math.ceil(gap / periodMin) + 1;
+    for (let k = kMin; k <= kMax; k++) {
+      const lo = Math.max(0, Math.floor(((gap - tol) / k - periodMin) / step) - 1);
+      const hi = Math.min(last, Math.ceil(((gap + tol) / k - periodMin) / step) + 1);
+      for (let i = lo; i <= hi; i++) {
+        const period = periods[i]!;
+        if (Math.round(gap / period) !== k) continue;
+        const err = Math.abs(gap - k * period);
+        if (err >= tol) continue;
+        scores[i] = scores[i]! + ((1 - err / tol) * w) / k;
+      }
+    }
+  }
   let bestPeriod = 0;
   let bestScore = 0;
-  for (let period = periodMin; period <= periodMax + 1e-9; period += opts.periodStepSec) {
-    const score = combScore(period);
+  for (let i = 0; i < count; i++) {
+    const score = scores[i]! * tempoPrior(60 / periods[i]!);
     if (score > bestScore) {
       bestScore = score;
-      bestPeriod = period;
+      bestPeriod = periods[i]!;
     }
   }
   if (bestPeriod === 0) return null;
@@ -143,7 +201,7 @@ export function estimateTempo(onsets: TempoOnsetVote[], now: number, currentBpm:
   // gap that fits the winner.
   let sum = 0;
   let total = 0;
-  for (let g = 0; g < gaps.length; g++) {
+  for (let g = 0; g < pairs; g++) {
     const k = Math.round(gaps[g]! / bestPeriod);
     if (k < 1 || Math.abs(gaps[g]! - k * bestPeriod) >= opts.refineTolSec) continue;
     sum += (gaps[g]! / k) * weights[g]!;

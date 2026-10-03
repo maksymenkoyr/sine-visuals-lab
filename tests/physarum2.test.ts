@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   physarum2TrailSide,
   stepAccumulator,
+  advanceCrawlPump,
+  createCrawlPumpState,
+  crawlStepRate,
   physarum2Scene,
   STRAINS,
   SPECIES_COUNT,
@@ -32,13 +35,34 @@ import {
   screenToFieldUv,
   STRAIN_BAND_SIGNALS,
   NUTRIENT_REST,
+  LIFE_DEFAULT,
+  lifeToDecayMul,
+  ANGLE_MIN_DEG,
+  ANGLE_MAX_DEG,
+  SWITCHING_DEFAULT,
+  populationFromBlocks,
+  levelPeaks,
+  levelGainsFull,
+  levelGain,
+  LEVEL_GAIN_MIN,
+  LEVEL_GAIN_MAX,
+  LEVEL_PEAK_FLOOR,
+  LEVEL_DEFAULT,
+  fillStartInk,
+  START_INK_DEFAULT,
+  MOTION_PARAMS,
+  MOTION_PRESETS,
+  easeSpot,
+  SPOT_EASE_MS,
   type StrainRawValues,
   type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
 import { FULL_VIEWPORT, type Viewport } from "../src/render/scene.ts";
-import { computeAutoTarget } from "../src/render/autoTune.ts";
+import { computeAutoTarget, setAutoEnabled } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { qualitySettings } from "../src/render/quality.ts";
+import { getSceneSetting, resetSceneSettings, setSceneSetting } from "../src/render/sceneSettings.ts";
+import { applyLook, captureLook, decodeLook, encodeLook } from "../src/render/sceneLooks.ts";
 
 describe("physarum2TrailSide", () => {
   it("holds agent density per texel roughly constant across the quality presets' agent counts", () => {
@@ -244,6 +268,70 @@ describe("per-strain settings", () => {
     expect(panel[0]!.widget).toBe("itemBoxes");
     expect(panel[0]!.items).toBe("strain");
   });
+
+  it("generates exactly the off-diagonal touch<i><j> keys — no touchii", () => {
+    for (let i = 0; i < SPECIES_COUNT; i++) {
+      for (let j = 0; j < SPECIES_COUNT; j++) {
+        const spec = settings.find((s) => s.key === `touch${i}${j}`);
+        if (i === j) {
+          expect(spec, `touch${i}${j} should not exist`).toBeUndefined();
+        } else {
+          expect(spec, `missing touch${i}${j}`).toBeDefined();
+          expect(spec!.default).toBe(0);
+          expect(spec!.min).toBe(-1.5);
+          expect(spec!.max).toBe(1.5);
+          expect(spec!.item).toEqual({ family: "strain", index: i, param: "touch", other: j });
+        }
+      }
+    }
+  });
+
+  it("att and touch are all exempt from the scene master and have no auto/drive", () => {
+    for (const spec of settings) {
+      if (spec.item?.param === "att" || spec.item?.param === "touch") {
+        expect(spec.masterScale, `${spec.key} masterScale`).toBe(false);
+        expect(spec.auto, `${spec.key} auto`).toBeUndefined();
+        expect(spec.drive, `${spec.key} drive`).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe("physarum2 Looks back-compat (att/touch)", () => {
+  const ID = "physarum2";
+  const specs = physarum2Scene.settings ?? [];
+
+  it("an old Look with no touch keys resets every touch key to 0", () => {
+    // Dirty every touch value first, so a Look that says nothing about touch
+    // must still be authoritative (applyLook puts an absent key back to its
+    // default, not leaving it untouched) — see sceneLooks.ts's header.
+    for (const spec of specs) {
+      if (spec.item?.param === "touch") setSceneSetting(ID, spec, -0.9);
+    }
+    applyLook({ name: "old", sceneId: ID, manual: { att01: 0.5 } }, specs);
+    for (const spec of specs) {
+      if (spec.item?.param === "touch") expect(getSceneSetting(ID, spec)).toBe(0);
+    }
+    resetSceneSettings(ID, specs);
+  });
+
+  it("a captured/encoded/decoded Look round-trips a touch value", () => {
+    const touch01 = specs.find((s) => s.key === "touch01")!;
+    // The previous test's applyLook put every key not in its manual (every
+    // touch key included) back into auto — captureLook only captures a
+    // key's manual value while it's NOT auto, so this test's own dirty step
+    // must explicitly turn auto back off first.
+    setAutoEnabled(ID, touch01.key, false);
+    setSceneSetting(ID, touch01, -0.9);
+    const look = captureLook("mine", ID, specs);
+    const code = encodeLook(look);
+    const decoded = decodeLook(code)!;
+    expect(decoded).not.toBeNull();
+    resetSceneSettings(ID, specs);
+    applyLook(decoded, specs);
+    expect(getSceneSetting(ID, touch01)).toBe(-0.9);
+    resetSceneSettings(ID, specs);
+  });
 });
 
 describe("physarum2's auto settings reproduce their default at NEUTRAL", () => {
@@ -284,14 +372,56 @@ describe("Phase 3 settings: Dose (relabelled seed), Spread, Auto-inject from", (
     expect(spec.max).toBe(SPECIES_COUNT);
   });
 
-  it("Dose/Spread/Auto-inject from all sit in one contiguous Motion run with Crawl speed", () => {
+  it("Dose/Switching/Spread/Auto-inject from all sit in one contiguous Motion run with Crawl speed", () => {
     const motionKeys = settings.filter((s) => s.group === "Motion").map((s) => s.key);
-    expect(motionKeys).toEqual(["speed", "seed", "seedSpread", "seedFrom"]);
+    expect(motionKeys).toEqual(["speed", "speedBoost", "speedPump", "seed", "switching", "seedSpread", "seedFrom"]);
+  });
+});
+
+describe("Crawl speed / Speed boost / Speed pump", () => {
+  it("advanceCrawlPump: a push accelerates, then the extra speed coasts back to zero", () => {
+    const st = createCrawlPumpState();
+    for (let i = 0; i < 12; i++) advanceCrawlPump(st, 1 / 60, 1, 1);
+    const peak = st.vel;
+    expect(peak).toBeGreaterThan(0);
+    for (let i = 0; i < 60 * 15; i++) advanceCrawlPump(st, 1 / 60, 0, 1);
+    expect(st.vel).toBeLessThan(peak * 0.001);
+  });
+
+  it("advanceCrawlPump: no amount or no input never moves it, and a dense run stays capped", () => {
+    const a = createCrawlPumpState();
+    advanceCrawlPump(a, 1 / 60, 1, 0);
+    advanceCrawlPump(a, 1 / 60, 0, 1);
+    expect(a.vel).toBe(0);
+    const b = createCrawlPumpState();
+    for (let i = 0; i < 60 * 60; i++) advanceCrawlPump(b, 1 / 60, 1, 1);
+    expect(b.vel).toBeLessThanOrEqual(60);
+    const bad = createCrawlPumpState();
+    advanceCrawlPump(bad, NaN, NaN, NaN);
+    expect(bad.vel).toBe(0);
+  });
+
+  it("crawlStepRate: the base alone is the old 30..120 map", () => {
+    expect(crawlStepRate({ speed: 0, boost: 0, level: 0, pumpVel: 0 })).toBe(30);
+    expect(crawlStepRate({ speed: 0.5, boost: 0, level: 1, pumpVel: 0 })).toBe(75);
+    expect(crawlStepRate({ speed: 1, boost: 0, level: 0, pumpVel: 0 })).toBe(120);
+  });
+
+  it("crawlStepRate: boost and pump add on top, even with the base at its slowest", () => {
+    const base = crawlStepRate({ speed: 0, boost: 0, level: 0, pumpVel: 0 });
+    expect(crawlStepRate({ speed: 0, boost: 1, level: 1, pumpVel: 0 })).toBeGreaterThan(base);
+    expect(crawlStepRate({ speed: 0, boost: 0, level: 0, pumpVel: 20 })).toBe(base + 20);
+    // an unplugged boost jack (level 0) adds nothing at any slider value
+    expect(crawlStepRate({ speed: 0.5, boost: 1, level: 0, pumpVel: 0 })).toBe(75);
+  });
+
+  it("crawlStepRate: never exceeds the cap", () => {
+    expect(crawlStepRate({ speed: 1, boost: 1, level: 1, pumpVel: 60 })).toBeLessThanOrEqual(150);
   });
 });
 
 describe("resolveStrainEffective — the one strain-motion mapping (shared by the GPU packing and the specimen-box previews)", () => {
-  const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+  const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 22, life: LIFE_DEFAULT };
   const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
 
   it("at zero raw values and zero drive, reproduces the sliders' own MIN and the strain's unshifted colour", () => {
@@ -342,6 +472,85 @@ describe("resolveStrainEffective — the one strain-motion mapping (shared by th
       const eff = resolveStrainEffective(0, raw, drive);
       expect(eff.feed).toBeCloseTo(1, 9);
     }
+  });
+});
+
+describe("Strain Console settings: Sensor angle, Trail life, Switching, Synergy", () => {
+  const settings = physarum2Scene.settings ?? [];
+
+  it("Sensor angle is a per-strain slider in degrees whose default is the strain's own fixed angle", () => {
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      const spec = settings.find((s) => s.key === `angle${k}`)!;
+      expect(spec.item).toEqual({ family: "strain", index: k, param: "angle" });
+      expect(spec.min).toBe(ANGLE_MIN_DEG);
+      expect(spec.max).toBe(ANGLE_MAX_DEG);
+      expect(spec.default * (Math.PI / 180)).toBeCloseTo(STRAINS[k]!.sensorAngleRad, 2);
+    }
+  });
+
+  it("the effective sensor angle is the stored one in radians (clamped to the slider's range)", () => {
+    const raw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 60, life: LIFE_DEFAULT };
+    const drive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+    expect(resolveStrainEffective(0, raw, drive).sensorAngleRad).toBeCloseTo(60 * (Math.PI / 180), 9);
+    expect(resolveStrainEffective(0, { ...raw, angle: 999 }, drive).sensorAngleRad).toBeCloseTo(ANGLE_MAX_DEG * (Math.PI / 180), 9);
+  });
+
+  it("Trail life defaults to the shared decay exactly and right = a longer-lived trail", () => {
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      const spec = settings.find((s) => s.key === `life${k}`)!;
+      expect(spec.item).toEqual({ family: "strain", index: k, param: "life" });
+      expect(spec.default).toBe(LIFE_DEFAULT);
+    }
+    expect(lifeToDecayMul(LIFE_DEFAULT)).toBe(1);
+    expect(lifeToDecayMul(1)).toBeLessThan(1);
+    expect(lifeToDecayMul(0)).toBeGreaterThan(1);
+    expect(lifeToDecayMul(0.7)).toBeLessThan(lifeToDecayMul(0.4));
+  });
+
+  it("Switching is a Motion slider on by default; Synergy is a Look slider off by default (the stored stains are the look)", () => {
+    const sw = settings.find((s) => s.key === "switching")!;
+    expect(sw.group).toBe("Motion");
+    expect(sw.default).toBe(SWITCHING_DEFAULT);
+    const sy = settings.find((s) => s.key === "synergy")!;
+    expect(sy.group).toBe("Look");
+    expect(sy.default).toBe(0);
+  });
+});
+
+describe("populationFromBlocks (Headcount's GPU count)", () => {
+  it("averages the blocks' strain fractions and normalises to shares summing to 1", () => {
+    // Two blocks: the first all strain 0, the second half strain 1 / half strain 2.
+    const buf = [255, 0, 0, 0, 0, 128, 127, 0];
+    const pop = populationFromBlocks(buf, 2, 4);
+    expect(pop.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+    expect(pop[0]).toBeCloseTo(0.5, 2);
+    expect(pop[1]).toBeCloseTo(0.25, 2);
+    expect(pop[2]).toBeCloseTo(0.25, 2);
+    expect(pop[3]).toBe(0);
+  });
+
+  it("falls back to an equal split for an empty buffer", () => {
+    expect(populationFromBlocks([0, 0, 0, 0], 1, 4)).toEqual(equalPopulation(4));
+  });
+
+  it("gives the same shares from a fine, ragged-edged target as from a coarse one", () => {
+    // The same agent field counted into a coarse and a fine grid of blocks:
+    // strain 0 fills the left half, strain 1 a quarter, strain 2 the rest.
+    // The fine grid's right-hand cells lie past the agent grid and write 0
+    // (POP_FRAG skips texels outside it), like the ragged edge at small counts.
+    const fill = (side: number, usedSide: number): Uint8Array => {
+      const buf = new Uint8Array(side * side * 4);
+      for (let y = 0; y < usedSide; y++)
+        for (let x = 0; x < usedSide; x++) {
+          const k = x < usedSide / 2 ? 0 : y < usedSide / 2 ? 1 : 2;
+          buf[(y * side + x) * 4 + k] = 255;
+        }
+      return buf;
+    };
+    const coarse = populationFromBlocks(fill(32, 32), 32 * 32, 4);
+    const fine = populationFromBlocks(fill(128, 100), 128 * 128, 4);
+    for (let k = 0; k < 4; k++) expect(fine[k]).toBeCloseTo(coarse[k]!, 2);
+    expect(fine[0]).toBeCloseTo(0.5, 2);
   });
 });
 
@@ -480,5 +689,141 @@ describe("screen -> field mapping (roomAspectJs/coverUvJs/uncoverUvJs)", () => {
     const actual = screenToFieldUv(uv, viewport, 800, 600);
     expect(actual.x).toBeCloseTo(expected.x, 9);
     expect(actual.y).toBeCloseTo(expected.y, 9);
+  });
+});
+
+describe("Auto level (levelPeaks / levelGainsFull / levelGain)", () => {
+  it("levelPeaks reads, per channel, the value the top share of blocks reach", () => {
+    const cells = 100;
+    const buf = new Uint8Array(cells * 4);
+    for (let i = 0; i < cells; i++) {
+      buf[i * 4] = i; // channel 0: 0..99 — top 5% reach 95
+      buf[i * 4 + 1] = i < 3 ? 250 : 10; // channel 1: three hot blocks, the rest 10
+      buf[i * 4 + 2] = 0; // channel 2: empty
+      buf[i * 4 + 3] = 200; // channel 3: flat
+    }
+    const peaks = levelPeaks(buf, cells, 4, 0.05);
+    expect(peaks[0]).toBeCloseTo(95 / 255, 9);
+    // Three hot blocks are fewer than the top 5%: a lone hot spot doesn't set the level.
+    expect(peaks[1]).toBeCloseTo(10 / 255, 9);
+    expect(peaks[2]).toBe(0);
+    expect(peaks[3]).toBeCloseTo(200 / 255, 9);
+  });
+
+  it("levelGainsFull evens equal peaks to exactly 1 and leaves the geometric mean unchanged", () => {
+    for (const v of levelGainsFull([0.4, 0.4, 0.4, 0.4])) expect(v).toBeCloseTo(1, 12);
+    const g = levelGainsFull([0.2, 0.4, 0.4, 0.8]);
+    expect(g[0]).toBeGreaterThan(1);
+    expect(g[3]).toBeLessThan(1);
+    expect(g[0]! * g[1]! * g[2]! * g[3]!).toBeCloseTo(1, 9);
+    // Every strain's peak lands on the same level.
+    const levelled = [0.2, 0.4, 0.4, 0.8].map((p, k) => p * g[k]!);
+    for (const v of levelled) expect(v).toBeCloseTo(levelled[0]!, 9);
+  });
+
+  it("clamps the gain, and floors an empty strain's peak so it can't blow up its grain", () => {
+    const g = levelGainsFull([0, 0.9, 0.9, 0.9]);
+    for (const v of g) {
+      expect(v).toBeGreaterThanOrEqual(LEVEL_GAIN_MIN);
+      expect(v).toBeLessThanOrEqual(LEVEL_GAIN_MAX);
+    }
+    for (const v of levelGainsFull([NaN, LEVEL_PEAK_FLOOR, LEVEL_PEAK_FLOOR, LEVEL_PEAK_FLOOR])) expect(v).toBeCloseTo(1, 12);
+  });
+
+  it("levelGain is exactly 1 at level 0 and the full gain at 1", () => {
+    expect(levelGain(2.7, 0)).toBe(1);
+    expect(levelGain(2.7, 1)).toBeCloseTo(2.7, 12);
+    expect(levelGain(4, 0.5)).toBeCloseTo(2, 12);
+  });
+});
+
+describe("Start ink (fillStartInk)", () => {
+  it("is all zero at 0 — the old black start", () => {
+    const buf = new Uint8Array(64 * 4).fill(7);
+    fillStartInk(buf, 4, 0, () => 0.99);
+    expect(buf.every((v) => v === 0)).toBe(true);
+  });
+  it("fills only the live channels, more at a higher setting", () => {
+    let x = 1;
+    const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
+    const lo = new Uint8Array(1024 * 4);
+    const hi = new Uint8Array(1024 * 4);
+    fillStartInk(lo, 3, 0.2, rnd);
+    fillStartInk(hi, 3, 1, rnd);
+    const mean = (b: Uint8Array) => b.reduce((a, v) => a + v, 0) / b.length;
+    expect(mean(hi)).toBeGreaterThan(mean(lo) * 2);
+    for (let i = 3; i < hi.length; i += 4) expect(hi[i]).toBe(0);
+  });
+});
+
+describe("Fogleman's extras: settings and motion presets", () => {
+  const specs = physarum2Scene.settings!;
+  const spec = (key: string) => specs.find((s) => s.key === key)!;
+
+  it("Wander, Start ink and Auto level are plain rows with the documented defaults", () => {
+    expect(spec("wander").default).toBe(0);
+    expect(spec("wander").group).toBe("Form");
+    expect(spec("startInk").default).toBe(START_INK_DEFAULT);
+    expect(spec("level").default).toBe(LEVEL_DEFAULT);
+    expect(spec("level").group).toBe("Look");
+    for (const key of ["wander", "startInk", "level"]) {
+      expect(spec(key).item).toBeUndefined();
+      expect(spec(key).min).toBe(0);
+      expect(spec(key).max).toBe(1);
+    }
+  });
+
+  it("every motion preset sets every motion param for every strain, inside each slider's range", () => {
+    for (const preset of MOTION_PRESETS) {
+      expect(preset.name.length).toBeGreaterThan(0);
+      expect(preset.hint.length).toBeGreaterThan(0);
+      for (const p of MOTION_PARAMS) {
+        const values = preset.values[p];
+        expect(values.length).toBe(SPECIES_COUNT);
+        values.forEach((v, k) => {
+          const s = spec(`${p}${k}`);
+          expect(v).toBeGreaterThanOrEqual(s.min);
+          expect(v).toBeLessThanOrEqual(s.max);
+        });
+      }
+    }
+    expect(new Set(MOTION_PRESETS.map((p) => p.name)).size).toBe(MOTION_PRESETS.length);
+  });
+
+  it("the Lab preset is the shipped default motion", () => {
+    const lab = MOTION_PRESETS.find((p) => p.name === "Lab")!;
+    for (const p of MOTION_PARAMS) {
+      lab.values[p].forEach((v, k) => expect(v).toBeCloseTo(spec(`${p}${k}`).default, 9));
+    }
+  });
+});
+
+describe("easeSpot (the spotlight glide)", () => {
+  it("moves toward the target, from either side, and never overshoots", () => {
+    const cases: [number, number][] = [
+      [1, 0.15],
+      [0.15, 1],
+    ];
+    for (const [cur, target] of cases) {
+      let v = cur;
+      for (let i = 0; i < 60; i++) {
+        const next = easeSpot(v, target, 16);
+        expect(Math.abs(next - target)).toBeLessThanOrEqual(Math.abs(v - target) + 1e-12);
+        expect((next - target) * (cur - target)).toBeGreaterThanOrEqual(0);
+        v = next;
+      }
+    }
+  });
+
+  it("dt 0 changes nothing, and a large dt lands on the target", () => {
+    expect(easeSpot(1, 0.15, 0)).toBe(1);
+    expect(easeSpot(1, 0.15, -5)).toBe(1);
+    expect(easeSpot(1, 0.15, SPOT_EASE_MS * 40)).toBeCloseTo(0.15, 6);
+  });
+
+  it("is frame-rate independent: two half steps equal one whole step", () => {
+    const whole = easeSpot(1, 0.15, 100);
+    const halves = easeSpot(easeSpot(1, 0.15, 50), 0.15, 50);
+    expect(halves).toBeCloseTo(whole, 9);
   });
 });

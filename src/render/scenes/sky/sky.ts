@@ -5,6 +5,7 @@ import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
+import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../../noiseHash.ts";
 import { createBeatListener, type HoldBeats } from "../../beatListener.ts";
 import {
   createFluidSim,
@@ -16,7 +17,7 @@ import {
   type FluidSim,
   type SimFormat,
   type Splat,
-} from "./skyFluidSim.ts";
+} from "../fluidSim.ts";
 
 // Sky: a real 2D fluid sim driving cloud cover, with two vision illusions
 // layered on top — floaters (in waves) and Haidinger's brush. Picked from
@@ -28,13 +29,10 @@ import {
 // deliberately NOT built here either, not even as disabled settings — a
 // later pass's scope, not this one's.
 //
-// The fluid sim (skyFluidSim.ts) is a copy of Neon Fluid's fluidSim.ts, the
-// stable-fluids solver — copied while that scene was still on an unmerged
-// branch, and still separate because Sky raises its SPLAT_SLOTS (Neon
-// Fluid's 4 → 12, one per cloud drifter). The two are otherwise identical;
-// folding them into one module with the slot count as a parameter is an
-// open follow-up. This scene runs
-// it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
+// The fluid sim is Neon Fluid's stable-fluids solver, fluidSim.ts, shared:
+// Sky passes its own splat-slot count (SKY_SPLAT_SLOTS, one per cloud
+// drifter) and turns the edge pass off, since only dyeTexture() is read.
+// This scene runs it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
 // path that needs no adaptation. Cloud drift's own clock is deliberately
 // NOT audio-reactive: DRIFTER_SEEDS.length slow, gently
 // meandering ambient splats (driftCenter, a real-time clock, never warped by
@@ -57,7 +55,7 @@ import {
 //
 // Display is one hand-rolled pass (not createFullscreenScene, which only
 // supports a single pass with no texture of its own to sample) reading the
-// sim's dyeTexture() through skyFluidSim's own simIoGlsl(format) codec —
+// sim's dyeTexture() through fluidSim.ts's simIoGlsl(format) codec —
 // the same reason petri.ts hand-rolls its display pass. Compositing order,
 // sky gradient at the bottom, illusions on top:
 //   sky gradient -> cloud (contrast-shaped extinction blend off dye
@@ -194,13 +192,17 @@ const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilis
 // --- Ambient cloud drift (not audio-reactive — see file header). Many small
 // sources, each wandering around its own home spot spread across the whole
 // frame (driftCenter) and puffing on and off (drifterPuff), so the cover
-// reads as separate airy puffs scattered over the sky. Three big sources
-// orbiting the centre, fed continuously, merged into one central blob. ---
-const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+// reads as separate airy puffs scattered over the sky. ---
+export const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/** Splat slots Sky asks fluidSim.ts for (Neon Fluid's default is 4): one
+ *  cloud source per DRIFTER_SEEDS entry, with headroom — every drifter past
+ *  this count would be silently dropped by the sim. tests/sky.test.ts checks
+ *  DRIFTER_SEEDS fits. */
+export const SKY_SPLAT_SLOTS = 12;
 const DRIFT_TANGENT_EPS = 0.08; // finite-difference step used only to find the drift's own heading
 const DRIFTER_SIGMA_MIN = 0.045; // splat radius range, sim uv — varied per seed so puffs aren't all one size
 const DRIFTER_SIGMA_MAX = 0.085;
-const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
+const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see fluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
 const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, before Cloud cover scales it
 const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
 
@@ -487,6 +489,56 @@ export interface WavePool {
   readonly bursts: readonly WaveBurst[];
 }
 
+/** Period of the seeds the shader hashes (a stamp's uBurstSeed, a sweep's
+ *  uSweepSeed). The shader's fract-based hash21 multiplies the seed by about
+ *  123 before taking fract(), and fp32 keeps only 23 bits of that product, so
+ *  an ever-growing seed leaves it fewer and fewer fractional bits (one stamp
+ *  per beat runs it dry within hours of a gig) and every streak or sweep
+ *  ends up with nearly the same hash. Wrapping what reaches the GPU keeps
+ *  256 * 123 ~ 3.2e4, which still leaves about 8 fractional bits; the JS
+ *  counters themselves (stepBrush, pickSwarmCenter) never wrap. */
+export const SHADER_SEED_PERIOD = 256;
+
+/** x reduced into [0, SHADER_SEED_PERIOD), in float64 — safe for fractions
+ *  and negatives. */
+export function wrapShaderSeed(x: number): number {
+  const w = x - Math.floor(x / SHADER_SEED_PERIOD) * SHADER_SEED_PERIOD;
+  return Number.isFinite(w) ? w : 0;
+}
+
+// --- Cloud bump drift. The bump and wisp fbm domains drift at
+// CLOUD_BUMP_MORPH room-uv units per second — churn beyond plain advection.
+// The drift offset is added to every octave's own noise coordinate by the JS
+// side (cloudNoiseFlows), already wrapped into the lattice period, so the GPU
+// never sees the ever-growing session time (noiseHash.ts's header). ---
+const CLOUD_BUMP_MORPH = 0.05;
+const CLOUD_FBM_OCTAVES = 3; // fbm2 below loops this many octaves
+const CLOUD_FBM_LACUNARITY = 2.02;
+/** uCloudFlow layout: per fbm octave, a vec4 [bump x, bump y, wisp x, wisp y]. */
+export const CLOUD_FLOW_LEN = CLOUD_FBM_OCTAVES * 4;
+
+/** Fills `out` with the drift offset each fbm octave of the cloud bump and
+ *  wisp fields adds to its noise coordinate, wrapped into the lattice period.
+ *  The shader used to add one offset to the coordinate before the octave
+ *  loop, so octave k saw it scaled by CLOUD_FBM_LACUNARITY^k; the same scale
+ *  is applied here in float64, and only then wrapped, in that octave's own
+ *  lattice frame, where the wrap is a whole number of periods and so
+ *  invisible. The bump drifts +x/+y at a fixed ratio, the wisp -x at 1.7
+ *  times the bump's rate. */
+export function cloudNoiseFlows(timeSec: number, out: Float32Array = new Float32Array(CLOUD_FLOW_LEN)): Float32Array {
+  const t = Number.isFinite(timeSec) ? timeSec : 0;
+  let scale = 1;
+  for (let k = 0; k < CLOUD_FBM_OCTAVES; k++) {
+    const o = k * 4;
+    out[o] = wrapFlow(t * CLOUD_BUMP_MORPH * scale);
+    out[o + 1] = wrapFlow(t * CLOUD_BUMP_MORPH * 0.6 * scale);
+    out[o + 2] = wrapFlow(-t * CLOUD_BUMP_MORPH * 1.7 * scale);
+    out[o + 3] = 0;
+    scale *= CLOUD_FBM_LACUNARITY;
+  }
+  return out;
+}
+
 export function createWavePool(): WavePool {
   const bursts: WaveBurst[] = [];
   for (let i = 0; i < MAX_WAVE_BURSTS; i++) {
@@ -541,7 +593,7 @@ export function createWavePool(): WavePool {
         const b = bursts[i];
         t0Buf[i] = b.t0;
         ampBuf[i] = b.strength;
-        seedBuf[i] = b.seed;
+        seedBuf[i] = wrapShaderSeed(b.seed);
         xBuf[i] = b.x;
         yBuf[i] = b.y;
         lifeBuf[i] = b.life;
@@ -670,6 +722,9 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.01,
     default: 0.71,
+    // A position on a 24-hour clock, not an amount: the Master and Expansion
+    // dials must not move the sun (see SceneSetting.masterScale).
+    masterScale: false,
   },
   {
     key: "cloudBrightness",
@@ -761,6 +816,7 @@ uniform float uBrushPhase;
 uniform float uBurstT0[${MAX_WAVE_BURSTS}];
 uniform float uBurstAmp[${MAX_WAVE_BURSTS}];
 uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
+uniform vec4 uCloudFlow[${CLOUD_FBM_OCTAVES}]; // per fbm octave: bump xy, wisp xy (cloudNoiseFlows)
 uniform float uBurstX[${MAX_WAVE_BURSTS}];
 uniform float uBurstY[${MAX_WAVE_BURSTS}];
 uniform float uBurstLife[${MAX_WAVE_BURSTS}]; // each wave's own life, from Floater sustain when it fired
@@ -855,7 +911,6 @@ const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, op
 const float CLOUD_WISP_SCALE = 2.9; // second, finer bump octave, relative to CLOUD_BUMP_SCALE — frays the edges into wisps
 const float CLOUD_WISP_AMOUNT = 0.35;
 const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
-const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
 const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
 // Two shadow taps toward the light (the sun, from
 // whichever side of the frame it sits on; see main) — storm.ts's Gas
@@ -909,6 +964,11 @@ const vec2 STREAK_L_MAX = vec2(0.6, 0.13); // the long, thin reference streak ru
 const float STREAK_SLANT_MIN = 0.12;
 const float STREAK_SLANT_MAX = 0.45; // radians up to the right; the reference rises ~20 degrees
 const float STREAK_RAG = 0.45;
+// Squared cull radius in units of a stamp's own L.x: density is 1 - |e|^2 + rag
+// at best (rag within +-STREAK_RAG/2, the envelope only lowers it), so beyond
+// this a stamp can neither draw nor win (<= CELL_T_FRINGE). The 0.02 is a
+// float margin. Valid because L.x >= L.y, which makes |e|^2 >= |d|^2 / L.x^2.
+const float STREAK_CULL2 = 1.0 + 0.5 * STREAK_RAG - CELL_T_FRINGE + 0.02;
 const float STREAK_HOT_CHANCE = 0.5; // fraction of streaks with a dot hotspot (one reference has one, the other none)
 const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives a couple of seconds by default (Floater sustain)
 const int FLOATER_SEGMENTS = 10; // path points per strand (head at index 0), see floaterPath
@@ -955,6 +1015,8 @@ float skyLift(float amount, float drive) {
   return clamp(amount + (1.0 - amount) * SKY_DRIVE_LIFT_C * drive, 0.0, 1.0);
 }
 
+${NOISE_HASH_GLSL}
+
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
 // standing rule against porting), not shared with any other scene's.
@@ -968,29 +1030,32 @@ vec2 hash22(vec2 p) {
   return vec2(hash21(p), hash21(p + 19.19));
 }
 
-// Value-noise fbm for the cloud's bump texture only — this scene's own,
-// independently written (not shared with ink.ts/moire.ts/kaleido's own fbm
-// functions; see the file header on the per-scene-copy pattern this repo
-// already uses for noise).
+// Value-noise fbm for the cloud's bump texture and the streaks' row fray —
+// this scene's own, independently written (not shared with ink.ts/moire.ts/
+// kaleido's own fbm functions; see the file header on the per-scene-copy
+// pattern this repo already uses for noise). The lattice is hashed from the
+// integer cell index (NOISE_HASH_GLSL, periodic in NOISE_PERIOD cells), and
+// the drifting cloud fields are offset per octave from JS (cloudNoiseFlows),
+// never by the raw session time: see noiseHash.ts's header for why.
 float vnoise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
+  float a = hashCell(i, ${NOISE_MASK}, 0u);
+  float b = hashCell(i + vec2(1.0, 0.0), ${NOISE_MASK}, 0u);
+  float c = hashCell(i + vec2(0.0, 1.0), ${NOISE_MASK}, 0u);
+  float d = hashCell(i + vec2(1.0, 1.0), ${NOISE_MASK}, 0u);
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-float fbm2(vec2 p) {
-  float sum = 0.0;
-  float amp = 0.5;
-  for (int i = 0; i < 3; i++) {
-    sum += amp * vnoise(p);
-    p *= 2.02;
-    amp *= 0.5;
-  }
+// o0..o2 are each octave's drift offset in its own lattice frame
+// (uCloudFlow, from cloudNoiseFlows), added after that octave's scaling.
+float fbm2(vec2 p, vec2 o0, vec2 o1, vec2 o2) {
+  float sum = 0.5 * vnoise(p + o0);
+  p *= ${CLOUD_FBM_LACUNARITY.toFixed(2)};
+  sum += 0.25 * vnoise(p + o1);
+  p *= ${CLOUD_FBM_LACUNARITY.toFixed(2)};
+  sum += 0.125 * vnoise(p + o2);
   return sum;
 }
 
@@ -999,8 +1064,8 @@ float fbm2(vec2 p) {
 // off the clouds" fade, so both agree exactly on where cloud is.
 float cloudBumpedAt(vec2 uv) {
   float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
-  float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
-  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
+  float bump = fbm2(uv * CLOUD_BUMP_SCALE, uCloudFlow[0].xy, uCloudFlow[1].xy, uCloudFlow[2].xy);
+  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE, uCloudFlow[0].zw, uCloudFlow[1].zw, uCloudFlow[2].zw);
   return density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
 }
 
@@ -1295,14 +1360,19 @@ void main() {
   // dens > CELL_T_FRINGE block) are drawn until the amount comes back.
   float densityAmt = uFloaterDensity * floaterDensityDrive(1.0);
   bool floatersOn = densityAmt > 0.0;
+  // The stamp-independent half of streakDensity's size, hoisted out of the loop.
+  float sizeBase = clamp(uFloaterDensity * 1.3 * floaterDensityDrive(1.0), 0.1, 1.0);
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
     if (!floatersOn) break;
     float age = uTime - uBurstT0[b];
     float life = uBurstLife[b];
     if (age < 0.0 || age > life) continue;
     vec2 centre = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
-    // Rag can push density past the ellipse by at most ~5%, never further.
-    if (length(cellC - centre) > STREAK_L_MAX.x * 1.1) continue;
+    // Cull against this stamp's own long half-axis, not the largest any stamp
+    // could have: most of the frame is out of reach of a given streak.
+    float stampLx = mix(STREAK_L_MIN.x, STREAK_L_MAX.x, sizeBase * clamp(uBurstAmp[b], 0.0, 1.0));
+    vec2 dc = cellC - centre;
+    if (dot(dc, dc) > stampLx * stampLx * STREAK_CULL2) continue;
     float h;
     float sl;
     float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, life, sl, h);
@@ -1385,6 +1455,7 @@ function createSkyScene(): Scene {
   const beatListener = createBeatListener({ source: "beat", hold: ONE_BEAT_HOLD });
   const sweepT0 = new Float32Array(MAX_SWEEPS).fill(WAVE_DEAD_T0);
   const sweepSeed = new Float32Array(MAX_SWEEPS);
+  const cloudFlow = new Float32Array(CLOUD_FLOW_LEN);
   let sweepsFired = 0;
   // The floater brush's own state — the invisible spawn point that steps
   // across the sky once per stamp (stepBrush). Unrelated to Haidinger's
@@ -1410,7 +1481,7 @@ function createSkyScene(): Scene {
         Math.max(1, gl.drawingBufferHeight),
         MIRROR_OFF,
       );
-      sim = createFluidSim(gl, quadVao, initSize, format);
+      sim = createFluidSim(gl, quadVao, initSize, format, { splatSlots: SKY_SPLAT_SLOTS, edge: false });
       displayProg = createProgram(gl, buildDisplayFrag(format));
       dyeLoc = gl.getUniformLocation(displayProg.program, "uDye");
       wavePool = createWavePool();
@@ -1502,7 +1573,7 @@ function createSkyScene(): Scene {
       if (drives.fired("lightWaves", beatFired)) {
         const slot = sweepSlot(sweepsFired);
         sweepT0[slot] = anim.timeSec;
-        sweepSeed[slot] = sweepsFired * 1.618 + 3.0;
+        sweepSeed[slot] = wrapShaderSeed(sweepsFired) * 1.618 + 3.0;
         sweepsFired++;
       }
       const floaterAmount = resolveSceneSetting(ID, settingFor("floaterDensity")) * drives.value("floaterDensity", 1);
@@ -1556,6 +1627,7 @@ function createSkyScene(): Scene {
       wavePool.upload(displayProg);
       displayProg.setFv("uSweepT0", sweepT0);
       displayProg.setFv("uSweepSeed", sweepSeed);
+      displayProg.setV4v("uCloudFlow", cloudNoiseFlows(anim.timeSec, cloudFlow));
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
       gl.uniform1i(dyeLoc, 0);

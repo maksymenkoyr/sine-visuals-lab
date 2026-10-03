@@ -26,7 +26,7 @@ page.on("pageerror", (e) => console.log("PAGEERROR", e.message.slice(0, 2000)));
 page.on("console", (m) => { if (m.type() === "error" && !/8787|ERR_CONNECTION_REFUSED|403/.test(m.text())) console.log("CONSOLE", m.text().slice(0, 600)); });
 await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=${bpm}&quality=${quality}#/v/${scene}`, { waitUntil: "load" });
 await page.waitForTimeout(1500);
-if (settings) await page.evaluate((s) => window.__viz?.setParams({ scene, autoPin: true, settings: JSON.parse(s) }), settings);
+if (settings) await page.evaluate(({ s, sc }) => window.__viz?.setParams({ scene: sc, autoPin: true, settings: JSON.parse(s) }), { s: settings, sc: scene });
 else await page.evaluate(() => window.__viz?.setParams({ autoPin: false, settings: {} }));
 await page.waitForTimeout(800);
 for (let b = 0; b < beats; b++) {

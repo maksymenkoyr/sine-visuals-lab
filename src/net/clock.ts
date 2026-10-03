@@ -64,10 +64,6 @@ export class ClockSync {
     this.offset = pickBestOffset(this.samples);
   }
 
-  get sampleCount(): number {
-    return this.samples.length;
-  }
-
   /** Best current estimate of the room's (server) wall-clock time, in ms. */
   roomNow(): number {
     return Date.now() + this.offset;

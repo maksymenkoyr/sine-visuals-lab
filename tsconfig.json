@@ -21,9 +21,11 @@
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
   "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "vite-scene-links-plugin.ts", "vite-legal-notices-plugin.ts", "vite-build-info-plugin.ts", "vite-scene-versions-plugin.ts", "sceneDefaultsPatch.ts"],
-  // The one Worker file the client and tests import: the usage-count wire
-  // format. It's plain TS with no Workers or DOM types, so both projects can
-  // compile it; "files" entries aren't subject to "exclude".
-  "files": ["server/usage.ts"],
+  // The Worker files the client and tests import: the usage-count wire
+  // format, and the pure room rules (look document, join/send rules, rate
+  // limiter, and the room core the tests drive with fake sockets). They're
+  // plain TS with no Workers or DOM types, so both projects can compile them;
+  // "files" entries aren't subject to "exclude".
+  "files": ["server/usage.ts", "server/lookDoc.ts", "server/roomRules.ts", "server/rateLimit.ts", "server/roomCore.ts", "server/roomDevices.ts"],
   "exclude": ["server"]
 }

@@ -78,6 +78,14 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   to a different scene entirely — resolved by renaming the scene-local
   uniform; any new scene-local uniform needs to avoid every setting key's
   generated name.
+- 2026-10-02, review fixes: every non-final journey leg boundary drew one
+  frame of the next leg's finished picture (the dot, or the sheet), because
+  `finishLeg` swapped the forms but left `ANIM.PROGRESS` at 1; it now restarts
+  at 0 there, and `render()` restarts the previous-frame progress too so the
+  streak pass doesn't read the old leg's progress against the new forms. The
+  ripple clock was `flowPhase * Wave speed`, which teleports the ripples
+  whenever Wave speed (or its Auto drift) moves; it is now accumulated with
+  `createScaledPhase`, so Wave speed only changes the ripple rate.
 
 ## Tuning notes
 

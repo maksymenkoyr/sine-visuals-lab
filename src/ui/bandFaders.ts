@@ -7,7 +7,6 @@ import {
   faderCenterHz,
   faderPosToGain,
   gainToFaderPos,
-  isDefaultGains,
 } from "../audio/bandGains.ts";
 import { formatHz } from "../audio/bandScale.ts";
 import { createSpectrumStrip, STRIP_PLOT_HEIGHT_PX, type SpectrumStrip } from "./spectrumStrip.ts";
@@ -54,7 +53,6 @@ export interface BandFaders {
   faders: HTMLElement[];
   setGains(gains: ArrayLike<number>): void;
   setEdgesHz(edges: Float32Array): void;
-  isDefault(): boolean;
   /** Back to 1×. */
   reset(fader: number): void;
   /** Mute to Off / restore — see the header. */
@@ -251,7 +249,6 @@ export function createBandFaders(opts: BandFadersOpts): BandFaders {
       strip.setEdgesHz(edges);
       labelFaders();
     },
-    isDefault: () => isDefaultGains(gains),
     reset(i: number): void {
       commit(i, BAND_GAIN_DEFAULT);
     },

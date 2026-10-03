@@ -3,6 +3,7 @@ import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
+import { createScaledPhase } from "../flowClock.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
@@ -514,6 +515,11 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
       formB = next.to;
       stag = next.stagger;
       legProgress = 0;
+      // The new leg starts at its own beginning (every leg's `from` is the
+      // previous leg's `to`, so this is the picture the old leg ended on).
+      // Left at 1, the frame that swaps the forms would draw the new leg's
+      // finished state for one frame.
+      anim[ANIM.PROGRESS] = 0;
       flipBase = [anim[ANIM.ROT_XW], anim[ANIM.ROT_ZW]];
       spinBase = anim[ANIM.SPIN];
     } else {
@@ -603,7 +609,7 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
 
 // Every table below reproduces its plain `default` when all dials sit at
 // NEUTRAL (musicProfile.ts) — nothing is hand-biased. `pulse` is kept small:
-// it floors near 0.9 on any locked-tempo track (see the Focus snap comment in
+// it floors near 0.9 on any locked-tempo track (see the Fog pulse comment in
 // caustics.ts), so a large pulse weight is a constant offset in disguise.
 const SETTINGS: SceneSetting[] = [
   {
@@ -1154,6 +1160,9 @@ export const ambienceScene: Scene = (() => {
   const animPrev = new Float32Array(ANIM_N);
   let lastTime: number | null = null;
   let lastDt = 1 / 60;
+  // The ripple clock at Wave speed, accumulated rather than multiplied (see
+  // flowClock.ts's createScaledPhase).
+  const wavePhase = createScaledPhase();
   let dimsFor = -1;
   let dims3: number[] = [1, 1, 1];
   let dims4: number[] = [1, 1, 1, 1];
@@ -1184,6 +1193,7 @@ export const ambienceScene: Scene = (() => {
       animPrev.set(choreo.anim);
       lastTime = null;
       lastDt = 1 / 60;
+      wavePhase.reset();
       dimsFor = -1;
     },
 
@@ -1217,6 +1227,9 @@ export const ambienceScene: Scene = (() => {
 
       // Last frame's animation state feeds the streaks; then advance.
       animPrev.set(choreo.anim);
+      const fa = choreo.formA();
+      const fb = choreo.formB();
+      const st = choreo.stagger();
       choreo.advance(
         dt,
         anim.barPhase,
@@ -1229,9 +1242,15 @@ export const ambienceScene: Scene = (() => {
         },
         { drop: anim.dropOnset },
       );
+      // A journey just moved on to its next leg: last frame's progress
+      // belongs to the old leg's forms, and the streak pass would read it
+      // against the new ones, so it restarts with the new leg too.
+      if (choreo.formA() !== fa || choreo.formB() !== fb || choreo.stagger() !== st) {
+        animPrev[ANIM.PROGRESS] = choreo.anim[ANIM.PROGRESS];
+      }
       // The ripple clock: the audio-warped flow phase at Wave speed. Kept in
       // the animation array so the streak sees last frame's phase too.
-      choreo.anim[ANIM.FLOW] = anim.flowPhase * resolveSceneSetting(ID, settingFor("waveSpeed"));
+      choreo.anim[ANIM.FLOW] = wavePhase.advance(anim.flowPhase, resolveSceneSetting(ID, settingFor("waveSpeed")));
 
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -1280,6 +1299,7 @@ export const ambienceScene: Scene = (() => {
       pool = null;
       choreo = null;
       lastTime = null;
+      wavePhase.reset();
     },
   };
 })();

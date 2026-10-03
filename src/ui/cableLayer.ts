@@ -23,6 +23,22 @@
  * same physical jack can carry both a pinned and a preview cable at once
  * without their flow offsets colliding.
  *
+ * A source carrying its own onPress (CableSourceSpec below) is pressable:
+ * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke
+ * over it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
+ * pointer-events:none, so only that stroke answers the pointer, and its
+ * width is what makes a thin cable easy to press), and a click on the
+ * stroke calls onPress — deviceMenu.ts wires it to the same patch toggle
+ * the source line's own × button takes, so pressing a cable unplugs it.
+ * The group also carries the hover lift (controlsTheme.ts's
+ * .vc-cable-g:hover rules — a neon-ish bloom in the cable's own colour,
+ * a thicker core, a brighter glow, and the flow beads lightened so the
+ * signal still visibly runs inside it) and holds that colour as its CSS
+ * `color` so the bloom's currentColor resolves per cable.
+ * deviceMenu.ts only ever sets onPress on the pinned group's real patch
+ * sources: a preview cable and a display-only scene mix are decoration,
+ * not something a press should edit.
+ *
  * Every cable leaves its jack and enters its port through a short straight
  * CABLE_STUB_PX run before the bezier takes over (cablePathD) — a real
  * patch cable doesn't leave a socket at an angle. The bezier's own travel
@@ -88,6 +104,13 @@ export interface CableSourceSpec {
   /** Read every tick — flow speed rides this source's own live value.
    *  Unused for a preview cable (it never animates). */
   getValue: () => number;
+  /** Pressing this cable's hit stroke unplugs the source — see this
+   *  file's header. When set, the cable is wrapped in a `.vc-cable-g`
+   *  group with a `.vc-cable-hit` stroke over it that answers the
+   *  pointer; when absent the paths stay plain and click-transparent.
+   *  deviceMenu.ts's cableGroupFor only ever sets it on the pinned
+   *  group's real patch sources. */
+  onPress?: () => void;
   /** This source was just toggled on — draws on over ~250ms
    *  (controlsTheme.ts's vc-cable-new rule) instead of appearing instantly.
    *  Only ever true on the pinned group — a preview is never mid-edit. */
@@ -115,7 +138,12 @@ export interface CableLayer {
 }
 
 const NS = "http://www.w3.org/2000/svg";
-const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// One MediaQueryList for the file, made on first use (matchMedia() parses the
+// query and allocates a list per call, and tick() asks every frame). `.matches`
+// on a held list is live, so an OS setting change is still picked up; the lazy
+// init keeps `window` untouched at import time.
+let reduceMotionMQ: MediaQueryList | null = null;
+const reduceMotion = () => (reduceMotionMQ ??= window.matchMedia("(prefers-reduced-motion: reduce)")).matches;
 
 /** How far a cable runs straight out of its jack (and straight into its
  *  port) before the bezier bend starts — see this file's header. */
@@ -144,14 +172,18 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *   - a jack inside a folded card has no layout box at all
  *     (`.vc-card-body{display:none}`) — same "no client rects" probe
  *     ringElements() (deviceMenu.ts) already uses — so the cable ends at
- *     that card's own header instead;
+ *     that card's own header instead (and, if the header has no box either
+ *     — the column itself is hidden — there is no endpoint and no cable);
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
  *     `.vc-controls-col`) — the cable ends at the column's visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   if (el.getClientRects().length === 0) {
     const header = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head");
-    if (!header) return null;
+    // The header has no box either when the whole column is hidden (M, or
+    // every card folded away) — its rect would be all zeros and the cable
+    // would run to the viewport's top-left corner, so draw nothing instead.
+    if (!header || header.getClientRects().length === 0) return null;
     const r = header.getBoundingClientRect();
     return { x: r.right - 8, y: r.top + r.height / 2 };
   }
@@ -211,6 +243,37 @@ function pathEl(cls: string, d: string, color: string): SVGPathElement {
   return p;
 }
 
+/** One drawn cable's own wrapper group — see this file's header. Holds
+ *  the glow/core/flow (or flat) paths and, for a pressable source, the
+ *  hit stroke that answers the pointer; `.vc-cable-g:hover` (the hover
+ *  lift) keys off the group being hovered, which the hit stroke's own
+ *  hit-testing propagates to. The cable's own colour also rides the
+ *  group as CSS `color`, so the hover bloom's currentColor drop-shadow
+ *  (controlsTheme.ts) resolves per cable without that rule ever naming
+ *  a colour. */
+function groupEl(color: string): SVGGElement {
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("class", "vc-cable-g");
+  g.style.color = color;
+  return g;
+}
+
+/** The transparent press target over one pressable cable — see this
+ *  file's header. mousedown is dropped like jack.ts does its own, so a
+ *  press never moves focus off whatever row was focused (focus opening/
+ *  closing a row's hint would slide the port out from under the held
+ *  button); Tab still never reaches the layer (aria-hidden). */
+function attachPress(g: SVGGElement, onPress: (() => void) | undefined, d: string): void {
+  if (!onPress) return;
+  const hit = pathEl("vc-cable-hit", d, "transparent");
+  hit.addEventListener("mousedown", (e) => e.preventDefault());
+  hit.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onPress();
+  });
+  g.append(hit);
+}
+
 interface Resolved {
   src: CableSourceSpec;
   pt: { x: number; y: number };
@@ -267,7 +330,10 @@ export function createCableLayer(): CableLayer {
         // to carry — overriding cond/soft outright (this file's own
         // CableSourceSpec.muted doc).
         if (src.muted) {
-          svg.append(pathEl("vc-cable-muted", d, src.color));
+          const g = groupEl(src.color);
+          g.append(pathEl("vc-cable-muted", d, src.color));
+          attachPress(g, src.onPress, d);
+          svg.append(g);
           continue;
         }
         const soft = src.soft ? " vc-cable-soft" : "";
@@ -285,7 +351,10 @@ export function createCableLayer(): CableLayer {
         }
         const off = offsets.get(key) ?? 0;
         flow.setAttribute("stroke-dashoffset", off.toFixed(2));
-        svg.append(glow, core, flow);
+        const g = groupEl(src.color);
+        g.append(glow, core, flow);
+        attachPress(g, src.onPress, d);
+        svg.append(g);
         flows.push({ el: flow, key, getValue: src.getValue });
       }
     }

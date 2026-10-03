@@ -1,6 +1,6 @@
 /**
- * The product's public identity — the single home for the name and the
- * source-repository URL. Everything user-facing that states either one
+ * The product's public identity — the single home for the name, the
+ * source-repository URL and the social profile. Everything user-facing that states either one
  * (gallery masthead and footer, TV corner link, HTML <title>s) must trace back here.
  *
  * SOURCE_URL is not cosmetic: AGPL-3.0 §13 requires every page served to
@@ -17,3 +17,6 @@
  */
 export const PRODUCT_NAME = "Sine Visuals Lab";
 export const SOURCE_URL = "https://github.com/maksymenkoyr/sine-visuals-lab";
+/** The project's Instagram — linked from the gallery footer and listed in
+ *  index.html's Organization `sameAs` (keep the two in step). */
+export const INSTAGRAM_URL = "https://www.instagram.com/sinevisualslab/";

@@ -2,7 +2,7 @@
 
 A morphing storm cloud struck by lightning on every beat: a jagged branched
 bolt fires on the beat in every mode, and the cloud itself is lit from
-inside by the same strike. Five render modes (`MODES`) share one strike
+inside by the same strike. The render modes in `MODES` share one strike
 pool and one shape — Filaments (hair-thin curl-noise strands, the default),
 Mesh (a wireframe surface-nets lattice), Gas (the raymarched volumetric
 cloud), Voxel (the same march quantized/posterized), Points (a calm additive
@@ -12,10 +12,11 @@ point cloud). Draft scene, on main.
 
 - `src/render/scenes/storm.ts` — the whole scene (~3800 lines). The file
   header is the primary source: cloud density model (baked lobe silhouettes
-  eroded by tileable perlin-worley 3D noise), the strike pool and bolt-tree
-  geometry, the per-mode geometry passes, `gasType` recipes (`GAS_RECIPES`),
-  the Voronoi "dark sections" system (`cellIndexAt`/`sectionGain`), and the
-  morph-phase accumulator (`advanceMorphPhase`) that walks the cloud across
+  eroded by tileable perlin-worley 3D noise), the strike pool and the
+  bolt-tree geometry (the shared generator is `src/render/bolt.ts`), the
+  per-mode geometry passes, `gasType` recipes (`GAS_RECIPES`), the Voronoi
+  "dark sections" system (`cellIndexAt`/`sectionGain`), and the morph-phase
+  accumulator (`advanceMorphPhase`) that walks the cloud across
   its baked shape variants (`SHAPE_VARIANTS`).
 - Shares `PALETTE_GLSL`, `COMMON_UNIFORMS_GLSL`, `ROOM_UV_GLSL`,
   `SAMPLE_BANDS_GLSL` from `sceneCommon.ts` and `resolveSceneSetting` from
@@ -132,6 +133,45 @@ Studied, not copied, across two look references:
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Detail (`grain`) renamed Grain, and its description now leads with
   coarseness: higher already meant bigger voxels and points. Label only.
+- 2026-09-29 — Drop reactivity removed entirely (user call, same day on
+  Caustics): the `dropStorm` setting, its `anim.dropOnset` drive, the
+  `STRIKE_DROP_BURST` refractory-bypassing strike burst in `render()` and
+  the whole-frame drop flash at `VOLUME_FRAG`'s two `uDropStorm` sites are
+  all gone. A drop no longer fires its own burst or frame flash; ordinary
+  bass/beat strikes (`strike`'s Scene union) and the morph's drop-rise kick
+  (`beatAmp`) still read the raw anim signals. The earlier
+  `dropOnset`-as-level machine-gun bug above is now unreachable from this
+  scene. Stored values, auto flags and Look codes carrying the old key are
+  ignored by every reader — they iterate live specs — so no migration.
+- 2026-10-02 — the bolt generator is shared instead of copied: `storm.ts`
+  now imports `createRng`, `strikeEnvelope` and the tree builder from
+  `src/render/bolt.ts` (which Fluid's lightning already used) and keeps only
+  its own `buildBoltTree` wrapper, which passes a `clampTip` hook so forks
+  are still pulled back inside the cloud ellipsoid. Bolt shapes are
+  unchanged: a test pins one seeded tree. A change to bolt shape, width or
+  envelope math now lands in `bolt.ts` and reaches both scenes.
+- 2026-10-02 — Filaments draws each strand as `FIL_STEPS + 1` shared vertices
+  plus an index list (`buildFilamentIndices`, `drawElements` with 32-bit
+  indices) instead of a duplicated vertex per segment end, so every interior
+  point's flow trace, `sectionGain` and `strikeLight` run once rather than
+  twice. Cloud density still thins by whole strands (the indices are
+  strand-major). Pixel-identical against the old draw on a seeded
+  `tools/gpu-bench` frame. Also corrected two stale comments: the Mesh
+  re-mesh cadence is paced by `MESH_MIN_INTERVAL` (several a second at the
+  default Morph speed, not "about once a second"), and Filaments has no gas
+  march behind it, so only `gas.freq` reaches the strands.
+- 2026-10-02 — Swirl and Flow no longer multiply the page-lifetime flow clock.
+  The cloud's turn was `uFlowPhase * uSwirl * 0.35` and the tangle's field
+  offset was `uFlowPhase * 0.05 * flowRate()`, so after a few minutes a small
+  Swirl or Flow step (or an Auto drift, or a Play glide) jumped the picture by
+  turns. The scene now integrates each as a rate (`advanceRatePhase`, the same
+  idea as `advanceMorphPhase`) and the shaders read `uSwirlAngle`,
+  `uFlowCrawl` and `uFlowWobble`. At constant settings the picture is
+  unchanged; measured at a 24 s clock, a Swirl 0.40 to 0.45 step moved the
+  cloud's turn by 0.03 rad where it used to move it by 0.45 rad (and it grew
+  with uptime). The gas march's own `uFlowPhase * 0.06` scroll is untouched:
+  its multiplier is the gas type's recipe, a discrete choice rather than a
+  live slider.
 
 ## Tuning notes
 

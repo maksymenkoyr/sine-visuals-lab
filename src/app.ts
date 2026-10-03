@@ -1,3 +1,7 @@
+// FIRST import, before any store evaluates: on a phone opened as a room
+// controller it puts the in-memory look overlay over localStorage — see the
+// header of net/controllerStorageBoot.ts. A no-op for every other page.
+import "./net/controllerStorageBoot.ts";
 import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
 import {
@@ -38,18 +42,20 @@ import {
   type MicPermission,
   type SourceState,
 } from "./audio/sourcePref.ts";
-import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
+import { createGL, refreshCssSize, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import {
   detectQuality,
   parseQualityPreset,
+  presetAllows,
+  presetRank,
   qualitySettings,
   type QualityPreset,
   type QualitySettings,
 } from "./render/quality.ts";
-import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
-import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
+import { getPalette, paletteRampHex, PALETTES, type Palette } from "./render/palette.ts";
 import {
   applySensitivity,
   getExpansion,
@@ -90,9 +96,11 @@ import {
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import {
+  getSceneExpansion,
   getSceneMaster,
   getSceneSetting,
   resetSceneSettings,
+  setSceneExpansion,
   setSceneMaster,
   setSceneSetting,
   settingDefault,
@@ -115,6 +123,7 @@ import {
   listLooks,
   primeUndo,
   saveLook,
+  saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
@@ -142,6 +151,22 @@ import { isMicAuto, setMicAuto } from "./audio/micAuto.ts";
 import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
+import {
+  getOutputPowerMode,
+  getOutputQualityChoice,
+  getOutputResolution,
+  getPreviewQualityChoice,
+  getPreviewResolution,
+  getPreviewSize,
+  PREVIEW_SIZE_FRACTION,
+  setOutputPowerMode,
+  setOutputQualityChoice,
+  setOutputResolution,
+  setPreviewQualityChoice,
+  setPreviewResolution,
+  setPreviewSize,
+  type PreviewSize,
+} from "./render/outputPower.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
 import {
   applyBandGains,
@@ -153,6 +178,7 @@ import {
 } from "./audio/bandGains.ts";
 import {
   advanceAutoTune,
+  tickAutoTune,
   resolveSceneSetting,
   resolveSensitivity,
   resolveExpansion,
@@ -167,19 +193,45 @@ import {
   seedAuto,
 } from "./render/autoTune.ts";
 import {
+  ControllerConnection,
   createRoomCode,
   HostConnection,
   RendererConnection,
+  type RosterEntry,
   type VisualSample,
 } from "./net/room.ts";
-import { createJoinScreen } from "./ui/joinScreen.ts";
+import { WORKER_ORIGIN } from "./net/config.ts";
+import { earsChange, listensOwn } from "./net/ears.ts";
+import { recordsFromRoster } from "./net/roomMessages.ts";
+import { applyDeviceSet, followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
+import { realStorage } from "./net/realStorage.ts";
+import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
+import { createMainPlay, type MainPlay } from "./net/mainPlay.ts";
+import { planBoot } from "./net/bootPlan.ts";
+import { tvRedirectTarget } from "./net/tvRedirect.ts";
+import { clearSession, readSession, writeSession, type HostRoomSession } from "./net/sessions.ts";
+import { planHostRoom } from "./net/hostRoom.ts";
+import { postAdopt } from "./net/adopt.ts";
+import { createControllerLook, type ControllerLook } from "./net/controllerLook.ts";
+import { controllerBadgeText, controllerPreview } from "./net/controllerPreview.ts";
+import { ROSTER_WAIT_MS, hasNewRenderer, rendererIds, waitForRoster } from "./net/screenJoin.ts";
+import { newKey } from "./net/pairing.ts";
+import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
-import { createControlPanel } from "./ui/controlPanel.ts";
+import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
+import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
+import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
+import { thisDevice } from "./net/deviceKind.ts";
+import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
+import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
+import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
@@ -187,7 +239,7 @@ import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
-type AnyConn = HostConnection | RendererConnection;
+type AnyConn = HostConnection | RendererConnection | ControllerConnection;
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hud = document.getElementById("hud") as HTMLDivElement;
@@ -198,6 +250,12 @@ const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
+const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
+const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
+const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
+const outStateEl = document.getElementById("outState") as HTMLSpanElement;
+const takeBtn = document.getElementById("takeBtn") as HTMLButtonElement;
+const outBarEl = document.getElementById("outBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -205,11 +263,8 @@ const audioPromptMicLabel = document.getElementById("audioPromptMicLabel") as HT
 const audioPromptDisplayBtn = document.getElementById("audioPromptDisplayBtn") as HTMLButtonElement;
 const audioPromptGuide = document.getElementById("audioPromptGuide") as HTMLParagraphElement;
 
-const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 /** No new frame in this long -> the host is gone even if our own socket to the relay is still open. */
 const STALE_TIMEOUT_MS = 3000;
-const presetAllows = (s: Scene, p: QualityPreset): boolean =>
-  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
 
 let mode: Mode = "solo";
 let roomCode: string | null = null;
@@ -217,16 +272,38 @@ let hostConn: HostConnection | null = null;
 let rendererConn: RendererConnection | null = null;
 let rendererHasData = false;
 let soloFallbackTriggered = false;
+/** A page that joined a room by its QR (a phone or an iPad; net/lookSync.ts has
+ *  the protocol, boot() the pairing). It is deliberately still `mode ===
+ *  "renderer"`, so a fourth mode doesn't fall into checks written for three.
+ *  It says how the page joined, not whether it listens: that is `ownInput()`
+ *  (the room's `ears` record, src/net/ears.ts), and a controller follows the
+ *  laptop until somebody sets it to its own input. What differs for a
+ *  controller is gated on this flag alone, so a solo, host or legacy-renderer
+ *  page never takes a controller branch. */
+let isController = false;
+let controllerConn: ControllerConnection | null = null;
+/** The scene and palette ids this device holds for its room's look, even when
+ *  it cannot show them (net/controllerLook.ts: a phone can be handed a scene it
+ *  is too weak for). Set once the page joins a keyed room (`startMainPlay`);
+ *  null in a solo or legacy room, which is what keeps the notes in applyScene /
+ *  applyPalette / enterViz inert there. */
+let controllerLook: ControllerLook | null = null;
+/** This device's side of the room's Main (net/mainPlay.ts); null outside a
+ *  keyed room. The bar's Play and Take Main go through it (net/roomBridge.ts). */
+let mainPlay: MainPlay | null = null;
+/** Controller only: the laptop has stopped sending frames (the room badge says
+ *  so). Set by currentVisual() from net/controllerPreview.ts. */
+let laptopWaiting = false;
 
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Time-domain sibling of bandAnalyser — the waveform for the controls
- *  panel's Signal card, its Waveform row (src/ui/audioMeters.ts). Never
+ *  panel's Dynamics card, its Waveform row (src/ui/audioMeters.ts). Never
  *  touches FeatureExtractor or the wire frame: this is display-only data
  *  local to this device, not a render-driving signal. See
  *  waveformAnalyser.ts's header for why. */
 let waveformAnalyser: WaveformAnalyser | null = null;
-/** K-weighted loudness tap for the panel's Signal card, its Loudness row
+/** K-weighted loudness tap for the panel's Dynamics card, its Loudness row
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
@@ -252,9 +329,9 @@ let measureAnalyser: WaveformAnalyser | null = null;
  *  support it. Disposed and cleared in onCaptureEnded/attachCapture's own
  *  re-attach, same lifecycle as bandAnalyser above. */
 let tempoSource: TempoSource | null = null;
-/** Rebuilt (not just reset) on every swapAudioSource() — see that function's
- *  comment for why a fresh extractor, not a reset(), is what a source swap
- *  needs. */
+/** Rebuilt (not just reset) on every attachCapture() — see that function's
+ *  comment for why a fresh extractor, not a reset(), is what a new capture
+ *  needs. The initial one only serves the ticks before any capture exists. */
 let extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
  *  never re-prompts. Cleared back to null on failure, or when the capture's
@@ -276,6 +353,23 @@ let swapPromise: Promise<void> | null = null;
 let syntheticFeed: SyntheticFeed | null = null;
 let syntheticStartMs = 0;
 
+/** An ears choice this page has just made (the Room view's tap) that the room
+ *  has not echoed back yet: it decides `ownInput()` meanwhile. Cleared by the
+ *  roster that carries it, by a refusal, or after PENDING_EARS_MS. */
+let pendingEars: Ears | null = null;
+let pendingEarsTimer = 0;
+const PENDING_EARS_MS = 5000;
+/** What `ownInput()` answered when the page last acted on it (`syncEars`). */
+let ownWas = true;
+
+/** Whether this page analyses its own input right now, or draws from another
+ *  device's frames: the one answer behind every "does this page open a
+ *  microphone, show the start prompt, send frames" decision. src/net/ears.ts
+ *  has the rule. */
+function ownInput(): boolean {
+  return listensOwn(mode, activeConn()?.self ?? null, pendingEars);
+}
+
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
@@ -294,9 +388,48 @@ let qualityChoice: QualityChoice = getQualityChoice();
 /** Auto follows the boot benchmark; any other choice pins that preset
  *  instead — see src/render/qualityPref.ts. */
 const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detectedPreset : qualityChoice);
+/** While a pop-out output window is open this window is only a preview
+ *  (net/outputSync.ts's Cue / Go), so it renders cheaper: its own quality
+ *  choice and a smaller box, both from src/render/outputPower.ts. The output's
+ *  own quality and energy saving live there too and travel to it as a
+ *  `power` message. */
+let previewChoice: QualityChoice = getPreviewQualityChoice();
+let previewSize: PreviewSize = getPreviewSize();
+let previewResolution = getPreviewResolution();
+let outputPower: OutputPower = {
+  quality: getOutputQualityChoice(),
+  mode: getOutputPowerMode(),
+  resolution: getOutputResolution(),
+};
+/** True while an output window is open and a scene is showing: recomputed
+ *  every tick (render loop, right after outputBridge.update). A phone
+ *  controller is always previewing whatever it shows — the room's TV is the
+ *  real picture — so for it this is just "a scene is showing". */
+let previewActive = false;
+/** The preset this window actually renders at. effectivePreset() is the
+ *  DEVICE's preset and stays the one every scene-availability check uses, so
+ *  the preview's lower quality never hides a scene from the gallery; this is
+ *  only what the mounted scene is drawn with. While previewing, the preview
+ *  choice, raised to the scene's own `minQuality` floor. A dev pin wins, so
+ *  headless `?quality=` captures stay reproducible. */
+function renderPreset(): QualityPreset {
+  if (!previewActive || pinned) return effectivePreset();
+  const wanted = previewChoice === "auto" ? detectedPreset : previewChoice;
+  const floor = scene.minQuality;
+  return floor && presetRank(floor) > presetRank(wanted) ? floor : wanted;
+}
+/** The scale this window's canvas is resized by: the quality's own, times the
+ *  preview's Resolution while an output is open (render/outputPower.ts). */
+function renderScale(): number {
+  return quality.renderScale * (previewActive ? previewResolution : 1);
+}
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
+/** True from the main canvas's `webglcontextlost` until the page reloads on
+ *  the restore (see boot()): drawScene() draws nothing, and the picture
+ *  readback isn't rebuilt against a dead context. */
+let glLost = false;
 
 /** The Master card's Picture block and tools/master-sweep.mjs share this one
  *  measurement path — see src/render/pictureMeter.ts for what each measure
@@ -311,7 +444,7 @@ const pictureAverager = createPictureAverager();
 /** DEV-only override (tuning/debug.ts's `picture.force`): sample the picture
  *  even with the panel closed, for a headless sweep that never opens it. */
 let pictureForced = false;
-/** Last time samplePicture() kicked off a new capture — paced to
+/** Last time capturePicture() kicked off a new capture — paced to
  *  PICTURE_SAMPLE_INTERVAL_MS independently of the render loop's own rate,
  *  which usually runs faster. */
 let lastPictureKickMs = -Infinity;
@@ -320,9 +453,10 @@ let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
 let immersive: ImmersiveMode | null = null;
 let inViz = false;
-/** `?room=CODE` (no role=host) — a mic-less renderer joining someone else's
+/** `?room=CODE` (no role) — a mic-less renderer joining someone else's
  *  room. The scene is dictated by the host, so there's nothing to browse:
- *  the gallery is never built and routing is skipped entirely. */
+ *  the gallery is never built and routing is skipped entirely. A phone
+ *  controller is the opposite: it browses and picks, so it never sets this. */
 let bypassGallery = false;
 /** This tick's feature frame, shared by the fullscreen scene render and (via
  *  gallery.liveFrame) the gallery preview tiles once real audio is running. */
@@ -336,7 +470,7 @@ let lastVis: FeatureFrame | null = null;
 let lastRawBands: Float32Array | null = null;
 /** This tick's waveform samples, straight off waveformAnalyser — same
  *  solo/host-only availability as lastRawBands above, for the same reason
- *  (no local mic on a renderer device). Feeds the Signal card's Waveform row. */
+ *  (no local mic on a renderer device). Feeds the Dynamics card's Waveform row. */
 let lastMono: Float32Array | null = null;
 /** This tick's deep waveform samples, straight off measureAnalyser — DEV
  *  only, see that variable's own comment. Same buffer identity every read;
@@ -365,14 +499,14 @@ let lastFluxRatio: number | null = null;
  *  see beatClock.ts's own file header for why those never get this feed). */
 let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
-// Signal card's Gate row (audioMeters.ts). `fired` is the local extractor's
+// Dynamics card's Gate row (audioMeters.ts). `fired` is the local extractor's
 // own frame's onset (not the jitter-buffered `lastVis`), so it and
 // `suppressed` always describe the same tick's decision — see the two
 // currentVisual() branches below where this is set. Same solo/host-only
 // availability as lastBeatDiag above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
- *  availability as lastMono, for the Signal card's Loudness row. */
+ *  availability as lastMono, for the Dynamics card's Loudness row. */
 let lastLufs: LufsReading | null = null;
 /** This tick's src/audio/inputHealth.ts reading — same solo/host-only
  *  availability as lastGate above and for the same reason. Read by the
@@ -418,6 +552,18 @@ let hudHideTimer: number | undefined;
  *  prod build (just two numbers/an object reference, no allocation beyond
  *  what animClock.advance already does), so no DEV guard needed here. */
 let lastAnim: AnimFrame | null = null;
+
+/** The pop-out output window (net/outputBridge.ts), created at boot. The two
+ *  numbers are this window's last resolved Sensitivity/Expansion, which the
+ *  bridge streams along with each frame (net/outputSync.ts's `p`). */
+let outputBridge: OutputBridge | null = null;
+/** A keyed room's Main as an output (net/roomBridge.ts): PLAY sends this
+ *  device's look to every Main screen, like the pop-out's. Null outside a keyed
+ *  room. */
+let roomBridge: RoomBridge | null = null;
+let outputControls: OutputControls | null = null;
+let outputSens = 1;
+let outputExp = 1;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
 
@@ -460,25 +606,43 @@ function applyPowerMode(mode: PowerMode): void {
   governor?.setEnabled(mode === "auto");
 }
 
-/** Applies a quality-choice change (src/render/qualityPref.ts) to the live
- *  session: mutates the shared `quality` object in place — rather than
+/** Applies a change of what this window renders at (src/render/qualityPref.ts,
+ *  or the preview's own while an output is open — see renderPreset()) to the
+ *  live session: mutates the shared `quality` object in place — rather than
  *  reassigning it — so mainHost's SceneContext, the gallery, and the
  *  governor's own closure (which snapshots it as `baseline` at construction)
  *  all pick it up without a remount. The governor itself is rebuilt rather
  *  than re-baselined: its targetFrameMs also depends on the preset (the
  *  floor preset caps at RENDER_FPS_CAP_FLOOR), and a rebuild resets its
  *  measurement state for free — the same clean-slate rule setEnabled(true)
- *  already follows. No-op on the numeric knobs while pinned (a dev
- *  `?quality=`/`?tier=` override): see boot()'s comment on `pinned`. */
-function applyQualityChoice(choice: QualityChoice): void {
-  qualityChoice = choice;
-  Object.assign(quality, qualitySettings(effectivePreset()));
+ *  already follows. Does nothing when the resolved preset is the one already
+ *  in force, so the governor's measurement is left alone. No-op on the
+ *  numeric knobs while pinned (a dev `?quality=`/`?tier=` override): see
+ *  boot()'s comment on `pinned`.
+ *
+ *  `remount` re-inits the mounted scene (geometry is sized at init), for the
+ *  preview starting or stopping under a scene that is already showing, and for
+ *  an explicit Quality choice (the scene's buffers follow quality.maxParticles). */
+function applyRenderQuality(remount = false): void {
+  const preset = renderPreset();
+  if (preset === quality.preset) return;
+  Object.assign(quality, qualitySettings(preset));
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
+  if (remount && inViz && mainHost) mountOrBail(scene, scene);
+}
+
+/** The preview's box (index.html's `body.output-preview #gl`): on while an
+ *  output is open and the size isn't Full. A phone controller previews cheaply
+ *  (renderPreset) but keeps the whole screen: a half-size picture on a phone
+ *  is no preview at all. */
+function applyPreviewBox(): void {
+  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full" && !isController);
+  document.body.style.setProperty("--preview-frac", String(PREVIEW_SIZE_FRACTION[previewSize]));
 }
 
 function activeConn(): AnyConn | null {
-  return hostConn ?? rendererConn;
+  return hostConn ?? controllerConn ?? rendererConn;
 }
 
 function showHud(text: string, persist = false): void {
@@ -492,16 +656,99 @@ function showHud(text: string, persist = false): void {
   }
 }
 
-async function requestWakeLock(): Promise<void> {
-  try {
-    await navigator.wakeLock?.request("screen");
-  } catch {
-    // Not fatal — some browsers/contexts deny it; screen may just dim.
+/** Space = Cue (held), Option = Play (tap sends at once, hold glides) — the why, and
+ *  what a glide touches, is src/ui/outputKeys.ts's header. Capture phase, so a
+ *  focused button or checkbox never also sees the Space. Option plays whenever
+ *  the bar is up (a pop-out is open, or another device is in the keyed room);
+ *  Space is Cue and only claimed while a pop-out can cue, leaving Space to the
+ *  page as before everywhere else. */
+function wireOutputKeys(controls: OutputControls): void {
+  const playKey = createPlayKey();
+  let chargeRaf = 0;
+  let spaceHeld = false;
+
+  function chargeTick(): void {
+    const ms = playKey.holdMs(performance.now());
+    if (ms === null) {
+      chargeRaf = 0;
+      controls.charge(null);
+      return;
+    }
+    // Inside the tap window nothing shows yet: a tap must not flicker a charge.
+    controls.charge(ms >= PLAY_TAP_MAX_MS ? ms : null);
+    chargeRaf = requestAnimationFrame(chargeTick);
   }
+
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      // Option is allowed here: Play is pressed while Cue is held, and Space's
+      // auto-repeat then carries altKey — it must stay a Cue, not cancel the Play.
+      if (
+        e.code === "Space" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        inViz &&
+        !isTypingTarget(e.target) &&
+        controls.cueActive()
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        spaceHeld = true;
+        if (e.repeat) return;
+        noteKeyUse("cue");
+        controls.holdCue(true);
+        return;
+      }
+      if (e.key === "Alt") {
+        if (e.repeat || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        if (!inViz || isTypingTarget(e.target) || !controls.active()) return;
+        playKey.down(performance.now());
+        if (!chargeRaf) chargeRaf = requestAnimationFrame(chargeTick);
+        return;
+      }
+      playKey.cancel(); // any other key while Option is down: a chord, not a Play
+    },
+    true,
+  );
+
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      if (e.code === "Space" && spaceHeld) {
+        spaceHeld = false;
+        controls.holdCue(false);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (e.code === "KeyK") controls.holdCue(false);
+      if (e.key !== "Alt") return;
+      const hold = playKey.up(performance.now());
+      if (hold === null || !controls.active()) return;
+      const glideMs = glideMsForHold(hold);
+      const result = controls.go(glideMs ?? undefined);
+      noteKeyUse("go");
+      if (result === "glide" && glideMs !== null) showHud(`Play: gliding over ${(glideMs / 1000).toFixed(1)} s`);
+      else if (glideMs !== null) showHud("Play: sent at once — a glide only runs within one scene");
+      else showHud("Play: sent to output");
+    },
+    true,
+  );
+
+  window.addEventListener("pointerdown", () => playKey.cancel(), true);
+  const drop = (): void => {
+    playKey.reset();
+    spaceHeld = false;
+    controls.holdCue(false); // the key-up will never arrive: the master goes back
+  };
+  window.addEventListener("blur", drop);
+  document.addEventListener("visibilitychange", drop);
 }
 
 function availableScenes(): Scene[] {
-  return listScenes().filter((s) => presetAllows(s, quality.preset));
+  return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
 
 /** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
@@ -552,13 +799,46 @@ function updateSceneVersionLabel(next: Scene): void {
   bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
 }
 
+/** Puts `next` on the main host (clearing whatever was mounted first), or, if
+ *  its init() throws (a shader this GPU won't compile, a float target it
+ *  lacks), says so and leaves it: back to the gallery, or to `prev` when there
+ *  is no gallery (a `?room=` renderer). Returns whether `next` is running.
+ *  Callers keep `scene` pointing at `next` until this answers, and must stop
+ *  when it returns false: `scene` has been put back and the HUD explains. */
+function mountOrBail(next: Scene, prev: Scene): boolean {
+  const host = mainHost!;
+  host.unmountAll();
+  try {
+    host.mount(next);
+    return true;
+  } catch (err) {
+    console.error(`"${next.name}" failed to start:`, err);
+  }
+  showHud(`${next.name} can't run on this device`, true);
+  scene = prev;
+  if (!bypassGallery) {
+    navigate({ kind: "gallery" }, "replace");
+  } else if (prev !== next) {
+    try {
+      host.mount(prev);
+    } catch (err) {
+      console.error(`"${prev.name}" failed to restart:`, err);
+    }
+  }
+  return false;
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
   if (!mainHost) return;
-  mainHost.unmountAll();
-  mainHost.mount(next);
+  const prev = scene;
   scene = next;
+  controllerLook?.noteScene(next.id);
+  // Before the mount, which sizes geometry from `quality`: the new scene's
+  // minQuality may differ from the last one's while previewing.
+  if (previewActive) applyRenderQuality();
+  if (!mountOrBail(next, prev)) return;
   updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
@@ -567,14 +847,9 @@ function applyScene(next: Scene): void {
 
 function applyPalette(next: Palette): void {
   palette = next;
+  controllerLook?.notePalette(next.id);
   showHud(`palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
-}
-
-/** Panorama slice assignment, driven by the room panel — not offered in the on-device menu. */
-function applyViewport(next: Viewport): void {
-  viewport = next;
-  activeConn()?.sendHello(scene.id, palette.id, viewport);
 }
 
 function fatalError(message: string): void {
@@ -716,7 +991,10 @@ let inputPreview: InputPreview | null = null;
 let inputPreviewActive = false;
 
 function syncInputPreview(): void {
-  if (!inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
+  // A page that follows another device listens to nothing — opening the panel
+  // must not light its mic indicator by previewing the inputs it once had
+  // permission for.
+  if (!ownInput() || !inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
     inputPreview?.stop();
     inputPreview = null;
     return;
@@ -768,7 +1046,7 @@ function chooseInputDevice(deviceId: string): void {
   // unrelated refresh triggers.
   refreshAudioPromptButtons();
   gallery?.syncSource();
-  if (mode === "renderer" || syntheticFeed) return;
+  if (!ownInput() || syntheticFeed) return;
   if (!bandAnalyser) {
     setAudioSourceChoice("mic");
     void ensureAudio("mic");
@@ -792,6 +1070,17 @@ function captureAudioSource(kind: CaptureSourceKind): AudioSource {
  *  from one input to the next. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
+  // A fresh extractor, not a reset(): FeatureExtractor has none, and two
+  // things must not carry over from the previous capture. Its clocks
+  // (lastPulseTime, lastOnsetTime, peakHoldUntil, ...) are absolute
+  // AudioContext.currentTime values, and a new context restarts near 0 — the
+  // old extractor would sit "in the future" and fire no onset, pulse or band
+  // decay until the new clock caught up (a mic reopened after a pulled cable
+  // mid-set; a share started after the last one ended). And its adaptive
+  // AGC's envelope would blow the visuals out for its ~1.25s re-adaptation
+  // window on the big level jump a mic-to-screen swap usually is (a room mic
+  // is far quieter than captured system audio).
+  extractor = new FeatureExtractor();
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
@@ -848,7 +1137,7 @@ function attachCapture(handle: CaptureHandle): void {
  *  synthetic feed is automation, so it never counts. */
 function reportUsage(): void {
   if (!inViz) return;
-  if (mode === "renderer") reportSceneRunning(scene.id, "remote");
+  if (!ownInput()) reportSceneRunning(scene.id, "remote");
   else if (capture) reportSceneRunning(scene.id, captureAudioSource(capture.kind) === "display" ? "display" : "mic");
 }
 
@@ -861,8 +1150,9 @@ function reportUsage(): void {
  *  itself while its permission still stands: reopening it prompts nobody, and
  *  it's what keeps a set going when a cable is pulled — startMic lands on
  *  whatever input is left, and onInputDevicesChanged moves back once the
- *  chosen one returns. */
-function onCaptureEnded(handle: CaptureHandle): void {
+ *  chosen one returns. The Stop button is the deliberate form of this and
+ *  passes `reopen = false`: it must release the mic, not reopen it. */
+function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   if (capture !== handle) return; // already superseded by a swap
   handle.stop();
   capture = null;
@@ -880,7 +1170,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   updateMicPrompt();
   gallery?.syncSource();
   syncInputPreview(); // nothing live now, so the preview can cover every device again
-  if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
+  if (reopen && handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial points
@@ -909,15 +1199,27 @@ function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
  *  working while browsing — and is torn down only by an explicit
  *  swapAudioSource() or the capture's own track ending (onCaptureEnded above). */
 function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
-  if (syntheticFeed) return Promise.resolve();
+  // A page that follows another device hears through that device's frames; the
+  // gallery's tile taps and source picker reach here too, and must not open
+  // its mic.
+  if (syntheticFeed || !ownInput()) return Promise.resolve();
   if (audioPromise) return audioPromise;
   const choice = explicit ?? autoStartSource();
   if (choice === null) {
     updateMicPrompt(); // nothing started — the prompt is the way in
     return Promise.resolve();
   }
+  stoppedByUser = false;
   const attempt = (async () => {
-    attachCapture(await startCapture(choice));
+    const handle = await startCapture(choice);
+    // The page switched to a feed's frames while the prompt or the share
+    // picker was open: let this input go instead of listening to it.
+    if (!ownInput()) {
+      handle.stop();
+      audioPromise = null;
+      return;
+    }
+    attachCapture(handle);
     captureFailed = false;
   })();
   audioPromise = attempt.catch((err) => {
@@ -930,6 +1232,122 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
   return audioPromise;
 }
 
+/** True from the Stop button until something starts listening again, so a
+ *  screen joining (`feedFollowers`) never reopens a mic that was just closed. */
+let stoppedByUser = false;
+/** Boot has read the mic permission and routed the page (`feedFollowers`). */
+let screensReady = false;
+
+/** The roster changed. A device that follows this one shows only what this
+ *  page hears, so with a follower there and nothing listening, start the
+ *  source that needs no prompt (the mic, already allowed: autoStartSource),
+ *  on the gallery too: a laptop that reloaded there would otherwise leave its
+ *  TV waiting until somebody opened a scene. Any other source needs a tap,
+ *  which the gallery's source picker and a scene's start prompt already ask
+ *  for (and the TV says so too, net/tvPhase.ts `waitingLine`). In a claimed
+ *  room a follower is whoever the records say draws from this device and is
+ *  online; in a legacy room, which has no records, any screen there is. */
+function feedFollowers(roster: RosterEntry[]): void {
+  if (!screensReady || !ownInput() || capture || audioPromise || captureFailed || stoppedByUser || syntheticFeed) return;
+  const conn = activeConn();
+  if (!conn) return;
+  const { records, online } = recordsFromRoster(roster);
+  const followed =
+    conn.keyed && records.has(conn.deviceId)
+      ? followersOf(records, conn.deviceId).some((id) => online.has(id))
+      : roster.some((d) => d.role === "renderer" && d.online);
+  if (followed && autoStartSource() !== null) void ensureAudio();
+}
+
+/** Remember an ears choice this page has just made, until the room echoes it
+ *  (or refuses it, or PENDING_EARS_MS passes), and act on whatever changes. */
+function setPendingEars(ears: Ears | null): void {
+  window.clearTimeout(pendingEarsTimer);
+  pendingEars = ears;
+  if (ears !== null) {
+    pendingEarsTimer = window.setTimeout(() => {
+      pendingEars = null;
+      syncEars();
+    }, PENDING_EARS_MS);
+  }
+}
+
+/** The name of the device this page draws from, for the "Listening through"
+ *  line: the one it follows, the owner when it follows `null`. */
+function feedNameFor(conn: AnyConn): string {
+  const roster = conn.currentRoster;
+  const id = conn.self?.follow ?? ownerId(recordsFromRoster(roster).records);
+  return roster.find((d) => d.deviceId === id)?.name ?? "the room";
+}
+
+/** Acts when `ownInput()` has changed since the page last looked (the room
+ *  moved this device between its own input and a feed, or the user just did):
+ *  lets go of the microphone or opens it, starts the connection's frames over
+ *  so a feed's and its own never mix in one buffer, and repaints what depends
+ *  on it. Safe to call at any time; it does nothing when the answer is the
+ *  same. */
+function syncEars(): void {
+  const now = ownInput();
+  // Frames from a feed are dropped while this page is its own feed (net/room.ts).
+  activeConn()?.setAcceptFrames(!now);
+  // The "waiting for laptop" badge is about a feed this page no longer follows.
+  if (now && controllerConn) setLaptopWaiting(false);
+  // index.html: no sound-source picker on the gallery while this page follows.
+  document.body.classList.toggle("follows-room", !now);
+  const change = earsChange(ownWas, now);
+  ownWas = now;
+  if (change === "none") return;
+  const conn = activeConn();
+  conn?.resetFrames();
+  if (change === "stop-own") {
+    // The Stop button's teardown, but not the user's own Stop: a later switch
+    // back to own input may start the source again by itself. A capture that
+    // is still opening lets itself go when it lands (ensureAudio).
+    if (capture) onCaptureEnded(capture, false);
+    updateMicPrompt();
+    gallery?.syncSource();
+    syncInputPreview();
+    showHud(`Listening through ${conn ? feedNameFor(conn) : "the room"}`);
+  } else {
+    // Silent when the mic is already allowed; otherwise the start prompt is
+    // the "tap to use the microphone" (an iPad needs the tap).
+    if (inViz) void ensureAudio();
+    updateMicPrompt();
+    gallery?.syncSource();
+    syncInputPreview();
+    if (conn) feedFollowers(conn.currentRoster);
+    showHud("Listening to this device");
+  }
+}
+
+/** Follows this connection's roster and refusals: the room's record is what
+ *  settles a pending choice, and any change of the answer is acted on. */
+function wireEars(conn: AnyConn): void {
+  conn.onRosterChange((roster) => {
+    if (pendingEars !== null && conn.self?.ears === pendingEars) setPendingEars(null);
+    syncEars();
+    feedFollowers(roster);
+  });
+  conn.onDeviceReject((m) => {
+    if (pendingEars === null) return;
+    if (m.targetId !== null && m.targetId !== conn.deviceId) return;
+    setPendingEars(null);
+    showHud(rejectText(m.reason));
+    syncEars();
+  });
+  // A removed device or a closed room ends this page's own capture: nothing is
+  // left to feed, and the browser's mic indicator must go out.
+  conn.onState((s) => {
+    if (s === "denied" && capture) {
+      stoppedByUser = true;
+      onCaptureEnded(capture, false);
+    }
+  });
+  ownWas = ownInput();
+  conn.setAcceptFrames(!ownWas);
+  document.body.classList.toggle("follows-room", !ownWas);
+}
+
 /** Hot-swaps the live capture to a different source — the panel's Source
  *  row. Starts the new capture BEFORE touching the old one: if the user
  *  cancels the share picker, this rejects, and the old capture must still be
@@ -939,7 +1357,7 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
  *  `restart` reopens even the source already live — the mic moving to a
  *  different input device (chooseInputDevice, onInputDevicesChanged). */
 function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void> {
-  if (!bandAnalyser || syntheticFeed || mode === "renderer") return Promise.resolve();
+  if (!bandAnalyser || syntheticFeed || !ownInput()) return Promise.resolve();
   if (capture?.kind === next && !restart) return Promise.resolve();
   // A restart queues behind a swap in flight rather than dropping: a second
   // device picked mid-swap is the one that has to end up live.
@@ -947,14 +1365,12 @@ function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void
   const previous = capture;
   const attempt = (async () => {
     const handle = await startCapture(next);
+    if (!ownInput()) {
+      handle.stop(); // switched to a feed's frames while the picker was open
+      return;
+    }
     previous?.stop();
     attachCapture(handle); // also repaints the stop button, so its label names the new source
-    // A fresh extractor, not a reset(): FeatureExtractor has none, and
-    // letting its adaptive AGC's envelope carry over would blow the visuals
-    // out for its ~1.25s re-adaptation window on the big level jump a
-    // mic-to-screen swap usually is (a room mic is far quieter than captured
-    // system audio).
-    extractor = new FeatureExtractor();
     setAudioSourceChoice(next);
     captureFailed = false;
   })();
@@ -1021,7 +1437,7 @@ function updateMicPrompt(): void {
   // Hidden while a fresh attempt is in flight (audioPromise set but not yet
   // settled) so we don't double-prompt; shown before any attempt or after
   // one has failed.
-  const needsAudio = inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
+  const needsAudio = inViz && ownInput() && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
   audioPrompt.style.display = needsAudio ? "flex" : "none";
   // Nothing is ever live while this prompt is showing (needsAudio above
   // requires !bandAnalyser), so neither button gets emphasis here — both are
@@ -1030,7 +1446,8 @@ function updateMicPrompt(): void {
 
 /** Renderer lost (or never reached) its room — fall back to this device's own mic, per the plan's Solo model. */
 async function fallBackToSolo(reason: string): Promise<void> {
-  if (soloFallbackTriggered) return;
+  // A controller never becomes a solo mic: it reconnects, or is told to re-pair.
+  if (soloFallbackTriggered || isController) return;
   soloFallbackTriggered = true;
   showHud(`room ${reason} — switching to solo mic`);
 
@@ -1057,10 +1474,6 @@ function startRendererDisconnectWatch(): void {
     // host ever broadcast into it) — either way, no data ever arrived.
     if (mode === "renderer" && !rendererHasData) void fallBackToSolo("has no active host");
   }, 5000);
-}
-
-function menuItems(items: { id: string; name: string }[]) {
-  return items.map((i) => ({ id: i.id, name: i.name }));
 }
 
 // A named top-level function (rather than inline in the DeviceMenuDeps
@@ -1102,19 +1515,20 @@ const micAutoMembers = {
 
 function wireDeviceMenu(): void {
   deviceMenu = createDeviceMenu({
-    getPalettes: () => menuItems(PALETTES),
+    getPalettes: () => PALETTES.map((p) => ({ id: p.id, name: p.name, group: p.group, swatch: paletteRampHex(p, 6) })),
     currentSceneId: () => scene.id,
     currentPaletteId: () => palette.id,
     // What the column head's status line (above the Bands card) reports as
-    // the audio source. A
-    // renderer has no local analyser — its bands arrive over the room.
+    // the audio source. A page that follows another device has no local
+    // analyser — its bands arrive over the room.
     getAudioStatus: () => ({
-      source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
+      source: !ownInput() ? "remote" : syntheticFeed ? "synthetic" : capture ? captureAudioSource(capture.kind) : "none",
       sampleRate: capture?.context.sampleRate ?? null,
     }),
-    // The Input card's Source row. Null (row hidden) on a renderer or the
-    // synthetic feed — see DeviceMenuDeps.getSourceState's doc comment.
-    getSourceState: () => (mode === "renderer" || syntheticFeed ? null : currentSourceState()),
+    // The Input card's Source row. Null (row hidden) on a page that follows
+    // another device or the synthetic feed — see DeviceMenuDeps.getSourceState's
+    // doc comment.
+    getSourceState: () => (!ownInput() || syntheticFeed ? null : currentSourceState()),
     // No capture yet (e.g. the start prompt is up because autoStartSource()
     // refused to auto-open a display picker) — the chip tap itself IS the
     // explicit gesture, so start fresh rather than hot-swap: swapAudioSource
@@ -1122,7 +1536,7 @@ function wireDeviceMenu(): void {
     // synchronous up to ensureAudio so a display choice keeps the tap's
     // transient activation.
     onAudioSourceChange: (choice) => {
-      if (!bandAnalyser && mode !== "renderer" && !syntheticFeed) {
+      if (!bandAnalyser && ownInput() && !syntheticFeed) {
         setAudioSourceChoice(choice);
         void ensureAudio(choice);
       } else void swapAudioSource(choice);
@@ -1245,6 +1659,8 @@ function wireDeviceMenu(): void {
       ),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
+    getSceneExpansion: () => getSceneExpansion(),
+    onSceneExpansionChange: (value) => setSceneExpansion(value),
     // The Master card's Picture block — null whenever the meter's gone stale
     // (the panel was just opened, so nothing has pushed a reading into it
     // yet, or the sampling loop is gapped for longer than a full reset — see
@@ -1282,14 +1698,59 @@ function wireDeviceMenu(): void {
       setPowerMode(mode);
       applyPowerMode(mode);
     },
-    getQualityChoice: () => qualityChoice,
+    // While an output is open the card is the preview's: its Quality chips
+    // bind to the preview's own choice, not the device's.
+    getQualityChoice: () => (previewActive ? previewChoice : qualityChoice),
     onQualityChoiceChange: (choice) => {
-      setQualityChoice(choice);
-      applyQualityChoice(choice);
+      if (previewActive) {
+        setPreviewQualityChoice(choice);
+        previewChoice = choice;
+      } else {
+        setQualityChoice(choice);
+        qualityChoice = choice;
+      }
+      // Remount: a scene sizes its particle/agent buffers at init() from
+      // quality.maxParticles, and the governor never moves that count, so
+      // without it a Low pick keeps the High preset's agent count until the
+      // next scene switch.
+      applyRenderQuality(true);
+    },
+    isPreview: () => previewActive,
+    // applyPreviewBox() leaves a phone controller's preview full page.
+    canResizePreview: () => !isController,
+    getPreviewSize: () => previewSize,
+    onPreviewSizeChange: (size) => {
+      setPreviewSize(size);
+      previewSize = size;
+      applyPreviewBox();
+    },
+    getPreviewResolution: () => previewResolution,
+    onPreviewResolutionChange: (value) => {
+      setPreviewResolution(value);
+      previewResolution = getPreviewResolution();
+    },
+    getOutputPowerStatus: () => outputBridge?.outputStatus() ?? null,
+    getOutputQualityChoice: () => outputPower.quality,
+    onOutputQualityChoiceChange: (choice) => {
+      setOutputQualityChoice(choice);
+      outputPower = { ...outputPower, quality: choice };
+      outputBridge?.sendPower();
+    },
+    getOutputResolution: () => outputPower.resolution,
+    onOutputResolutionChange: (value) => {
+      setOutputResolution(value);
+      outputPower = { ...outputPower, resolution: getOutputResolution() };
+      outputBridge?.sendPower();
+    },
+    getOutputPowerMode: () => outputPower.mode,
+    onOutputPowerModeChange: (mode) => {
+      setOutputPowerMode(mode);
+      outputPower = { ...outputPower, mode };
+      outputBridge?.sendPower();
     },
     getPowerStatus: () => ({
       mode: powerMode,
-      choice: qualityChoice,
+      choice: previewActive ? previewChoice : qualityChoice,
       recommended: detectedPreset,
       fps: lastFps,
       level: governor?.level ?? null,
@@ -1310,62 +1771,403 @@ function wireDeviceMenu(): void {
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
 }
 
-/** Any device can drive the room, not just the host — this wires the panel,
- *  incoming remote commands, and the roster announcement for whichever
- *  connection (host or renderer) is currently active. Works from the
- *  gallery too: room control is a room capability, not a viz capability. */
-function wireRoomControls(conn: AnyConn): void {
-  const panel = createControlPanel({
+/** Any device can drive the room, not just the host: this builds the Room view
+ *  (src/ui/roomView.ts) for whichever connection (host, controller or
+ *  renderer) is currently active, wires the #panelBtn that opens it, and
+ *  announces this device's scene to the room. Only a keyed connection gets
+ *  the button: an unclaimed room has no records to edit. Works from the
+ *  gallery too: room control is a room capability, not a viz capability.
+ *  Returns the view so the
+ *  keyed host's room badge can open it as well. */
+function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner: boolean): RoomView {
+  const view = createRoomView({
+    selfId: conn.deviceId,
+    isOwner: owner,
+    roomCode: () => roomCode,
     getRoster: () => conn.currentRoster,
     onRosterChange: (cb) => conn.onRosterChange(cb),
-    setDevice: (targetId, cmd) => conn.sendSetDevice(targetId, cmd),
-    scenes: menuItems(availableScenes()),
-    palettes: menuItems(PALETTES),
-    selfDeviceId: conn.deviceId,
-  });
-  panelBtn.style.display = "block";
-  panelBtn.addEventListener("click", () => panel.toggle());
-
-  conn.onCommand((cmd) => {
-    if (cmd.scene) {
-      const s = getScene(cmd.scene);
-      if (s && presetAllows(s, quality.preset)) {
-        if (inViz) applyScene(s);
-        else {
-          // Commanded while idle on the gallery (e.g. a mosaic/panorama
-          // layout assigned from another device's room panel) — this
-          // device's job is to actually render its slice, so jump in.
-          void enterViz(s);
-          navigate({ kind: "viz", sceneId: s.id }, "push");
+    onDeviceReject: (cb) => conn.onDeviceReject(cb),
+    setDevice: (targetId, patch) => {
+      conn.sendDeviceSet(targetId, patch);
+    },
+    // This device's own ears act inside the tap, before the room echoes them:
+    // iPad Safari opens the microphone only inside a gesture.
+    onSelfEars: (patch) => {
+      // A choice the room will refuse (a feed can't follow itself) changes
+      // nothing here: acting early would drop the capture and the room's
+      // refusal would not bring it back. The Room view sends Follow with a
+      // feed it can name (roomView.ts followPatch); a `follow` alone means
+      // following.
+      const { records } = recordsFromRoster(conn.currentRoster);
+      if (!applyDeviceSet(records, conn.deviceId, patch).ok) return;
+      const ears: Ears = patch.ears ?? "follow";
+      setPendingEars(ears);
+      syncEars();
+      if (ears === "own") void ensureAudio("mic");
+    },
+    forgetDevice: owner
+      ? (targetId) => {
+          conn.forgetDevice(targetId);
         }
-      }
-    }
-    if (cmd.palette) applyPalette(getPalette(cmd.palette));
-    if (cmd.viewport) applyViewport(cmd.viewport);
+      : undefined,
+    invite,
+    adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+    finish: owner
+      ? { label: "Reset room", confirm: "Click again: every device pairs again", run: resetRoom }
+      : isController
+        ? {
+            label: "Leave room",
+            run: () => {
+              clearSession("controller", realStorage);
+              location.assign("/");
+            },
+          }
+        : { label: "Leave room", run: () => location.assign("/") },
   });
+  // Only a keyed room has records to change: an unclaimed (legacy) room
+  // ignores `deviceSet` without a reply, so its controls would do nothing.
+  if (conn.keyed) {
+    panelBtn.style.display = "block";
+    panelBtn.addEventListener("click", () => view.toggle());
+  }
 
   conn.sendHello(scene.id, palette.id, viewport);
+  return view;
+}
+
+/** A full-screen, plain-words stop for a page that cannot go on: a phone that
+ *  has to scan again, or whose room has gone. Not showHud — that is small,
+ *  dim and fades, and there is nothing behind this worth looking at. */
+function showPairingNotice(title: string, body: string): void {
+  const root = document.createElement("div");
+  root.style.cssText = `
+    position: fixed; inset: 0; z-index: 40; /* above the Room view (33): a removed phone may have it open */
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; background: #000; color: #fff;
+    font-family: system-ui, sans-serif; text-align: center; padding: 24px;
+  `;
+  const heading = document.createElement("div");
+  heading.style.cssText = "font-weight: 600; font-size: 22px;";
+  heading.textContent = title;
+  const text = document.createElement("div");
+  text.style.cssText = "opacity: 0.7; font-size: 16px; max-width: 28em;";
+  text.textContent = body;
+  root.append(heading, text);
+  document.body.appendChild(root);
+}
+
+/** Two tabs on one laptop share one localStorage, so without this a second tab
+ *  would resume the first one's room and fight it for the host seat. The first
+ *  tab to ask keeps the lock for as long as it lives (the grant ends when the
+ *  promise the callback returns settles, and that one never does). False where
+ *  Web Locks are missing or another tab holds it; src/net/hostRoom.ts then
+ *  starts a new room. */
+function takeHostRoomLock(): Promise<boolean> {
+  if (!navigator.locks) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    try {
+      void navigator.locks
+        .request("svl-host-room", { ifAvailable: true }, (lock) => {
+          resolve(lock !== null);
+          return lock ? new Promise<void>(() => {}) : undefined;
+        })
+        .catch(() => resolve(false));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/** The laptop's own keyed room: the one this tab had before if it may resume it
+ *  (hostRoom.ts has the rule), else a fresh code with fresh keys. Only the tab
+ *  holding the lock saves a new room, so a second tab can't take the first
+ *  one's reload away from it. */
+async function openHostRoom(): Promise<HostRoomSession> {
+  const lockHeld = await takeHostRoomLock();
+  const plan = planHostRoom(readSession("host", realStorage), Date.now(), lockHeld);
+  if (plan.kind === "resume") return plan.session;
+  const session: HostRoomSession = { room: await createRoomCode(), hostKey: newKey(), roomKey: newKey(), ts: Date.now() };
+  if (lockHeld) writeSession("host", session, realStorage);
+  return session;
+}
+
+/** This device's side of the room's Main (net/mainPlay.ts), for every member
+ *  of a keyed room: the laptop that hosts it, a phone or tablet controller, a
+ *  keyed spectator. What this device's panel changes is its preview and goes
+ *  nowhere until the bar's Play sends it; what the room says comes back through
+ *  the connection's look messages and, when this device follows Main, is
+ *  shown through `apply` below.
+ *
+ *  What the device reads and writes is net/controllerLook.ts, which remembers
+ *  the room's scene and palette ids even when this device can't show them (a
+ *  phone), so Play never sends a fallback over the room's choice. `apply` is
+ *  what following Main means here: the room-scope storage first (on the laptop
+ *  that is the real localStorage), then the palette, then the scene, as the TV's
+ *  `applyDoc` does; the laptop then hands the result on to its pop-out. The
+ *  window itself switches at once even when Main was played with a hold: only a
+ *  TV and the pop-out walk a glide (net/outputGlide.ts). */
+function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
+  const look = createControllerLook({
+    paletteId: () => palette.id,
+    canShowPalette: (id) => PALETTES.some((p) => p.id === id),
+    showPalette: (id) => applyPalette(getPalette(id)),
+    showScene(id) {
+      const next = getScene(id);
+      if (next && next.id !== scene.id && presetAllows(next, effectivePreset())) {
+        if (inViz) applyScene(next);
+        else scene = next;
+      }
+    },
+    captureStorage: () => captureRoomStorage(localStorage),
+    applyStorage: (storage) => applyRoomStorage(storage, localStorage),
+  });
+  controllerLook = look;
+  const play = createMainPlay({
+    send: (msg) => conn.sendLook(msg),
+    capture: look.io.read,
+    apply(doc, glideMs) {
+      look.io.write(doc);
+      // The pop-out is one more Main screen of the laptop: it follows too, and
+      // walks the glide this window cannot.
+      if (outputBridge?.status().open) outputBridge.go(glideMs);
+    },
+    // Null until the roster has this device: the room sends the snapshot first.
+    screen: () => conn.self?.screen ?? null,
+    isOwner,
+    nameOf: (id) => conn.currentRoster.find((d) => d.deviceId === id)?.name ?? null,
+  });
+  play.onNeedSnapshot(() => conn.requestLook());
+  conn.onLook((m) => {
+    if (m.type === "look") play.onSnapshot(m.rev, m.doc);
+    else if (m.type === "lookPatch") play.onPatch(m.rev, m);
+    else if (m.type === "lookAck") play.onAck(m.n, m.rev);
+    else {
+      play.onReject(m.n, m.reason);
+      showHud(m.reason === "size" ? "Settings too large to send to Main" : "Not allowed to change this room", true);
+    }
+  });
+  conn.onState((s) => {
+    if (s !== "open") play.onDisconnect();
+  });
+  conn.onRosterChange(() => play.onScreenKnown());
+  mainPlay = play;
+  return play;
+}
+
+/** How long the phone waits for a TV it has just handed to the room to show up
+ *  in the roster before saying it didn't. */
+const SCREEN_JOIN_WAIT_MS = 10_000;
+
+/** The stop for a phone that has met a TV before the laptop. */
+function showScanLaptopNotice(): void {
+  showPairingNotice(
+    "Now scan the QR on the laptop",
+    "The screen is waiting. On the laptop, click the room code at the top right to show the QR.",
+  );
+}
+
+/** The key of the room this device hosts or controls, for handing a screen to
+ *  it by a typed code (`adoptTvByCode`). Null where the device has no keyed room. */
+let ownRoomKey: string | null = null;
+
+/** A code typed into a Room field, tried as a waiting TV's: the same adopt a
+ *  phone sends after scanning, minus the nonce a typed code can't carry. This
+ *  room's own code (what a TV already in it shows in its corner) never is. */
+function adoptTvByCode(slot: string): Promise<AddScreenOutcome> {
+  if (!roomCode || !ownRoomKey) return Promise.resolve("no-screen");
+  if (slot === roomCode) return Promise.resolve("own-room");
+  return postAdopt(WORKER_ORIGIN, slot, { room: roomCode, k: ownRoomKey });
+}
+
+/** Set while the laptop's Reset is ending its room, so the room's denial of
+ *  this socket (the end of every room) isn't reported as a refusal. */
+let resettingRoom = false;
+
+/** The room view's Reset room: ends this laptop's room for everyone and starts
+ *  a new one. The room closes every socket as denied (server/roomCore.ts
+ *  `end`), so a paired TV goes back to its pairing QR, ready for this laptop
+ *  to type its code, and a phone says the room is closed. The page reloads
+ *  into the new room (the saved one is forgotten first, so hostRoom.ts
+ *  creates); the route stays, so a scene that was showing comes back. */
+function resetRoom(): void {
+  if (resettingRoom) return;
+  resettingRoom = true;
+  clearSession("host", realStorage);
+  const reload = (): void => location.reload();
+  const conn = hostConn;
+  if (!conn || !conn.endRoom()) {
+    reload();
+    return;
+  }
+  showHud("Resetting the room…");
+  conn.onState((s) => {
+    if (s === "denied" || s === "closed") reload();
+  });
+  // The room's close normally lands at once; a lost one must not strand the page.
+  window.setTimeout(reload, 2000);
+}
+
+/** Hands the TV waiting in `slot` to this phone's room (net/adopt.ts), then
+ *  reports in plain words: the room's roster is what proves the TV arrived.
+ *  The request goes out only once the room has delivered its first roster
+ *  (net/screenJoin.ts has why): the renderers in it were there before, so only
+ *  a screen that appears after it is the new one. `needHost` is for a TV
+ *  scanned before the laptop, which uses the room of a saved session, and that
+ *  room may be one the laptop has left: the request then also waits for the
+ *  laptop to be in the roster, and without it keeps the TV for the laptop's QR
+ *  (the `pending` session) instead of sending it into a dead room. */
+async function adoptScreen(
+  conn: ControllerConnection,
+  room: string,
+  key: string,
+  slot: string,
+  nonce: string,
+  needHost: boolean,
+): Promise<void> {
+  const wait = await waitForRoster(conn, { needHost, timeoutMs: ROSTER_WAIT_MS });
+  if (wait.kind !== "ready") {
+    writeSession("pending", { slot, nonce, ts: Date.now() }, realStorage);
+    // A refused join has already stopped the page with its own notice (startController).
+    if (wait.kind === "no-host") showScanLaptopNotice();
+    return;
+  }
+  const known = rendererIds(wait.roster);
+  let arrived = false;
+  let onArrive: (() => void) | null = null;
+  const stopWatching = conn.onRosterChange((roster) => {
+    if (arrived || !hasNewRenderer(roster, known)) return;
+    arrived = true;
+    stopWatching();
+    if (onArrive) onArrive();
+  });
+
+  const outcome = await postAdopt(WORKER_ORIGIN, slot, { room, k: key, n: nonce });
+  if (outcome !== "ok") {
+    stopWatching();
+    showHud(
+      outcome === "no-screen"
+        ? "That screen isn't waiting.\nCheck it still shows the code,\nthen scan it again."
+        : outcome === "throttled"
+          ? "Too many tries.\nWait a minute, then scan the screen again."
+          : "Couldn't reach the room.\nScan the screen again.",
+      true,
+    );
+    return;
+  }
+  if (arrived) {
+    showHud("Screen joined");
+    return;
+  }
+  onArrive = () => showHud("Screen joined");
+  window.setTimeout(() => {
+    if (arrived) return;
+    stopWatching();
+    showHud("The screen didn't answer.\nScan its code again.", true);
+  }, SCREEN_JOIN_WAIT_MS);
+}
+
+/** Boots this page as a room's phone controller; the rest of boot() is the same
+ *  as for any device. Connects with the room key, remembers it for reloads,
+ *  takes the secrets out of the address bar, starts the look protocol and, when
+ *  a TV's QR is in play (this page's own link, or one scanned earlier and
+ *  saved), hands that TV to the room. */
+function startController(
+  target: { room: string; key: string; keyFromUrl: boolean },
+  adopt: { slot: string; nonce: string } | null,
+  /** The link carried a TV QR that didn't parse: the query still gets this
+   *  controller's room and role, as for any other TV link, so a reload resumes. */
+  tvLinkWasBad = false,
+): void {
+  mode = "renderer";
+  isController = true;
+  roomCode = target.room;
+  ownRoomKey = target.key;
+  document.body.classList.add("controller"); // index.html: the badge's place and cursor
+  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device: thisDevice() });
+  controllerConn = conn;
+
+  if (target.keyFromUrl) {
+    writeSession("controller", { room: target.room, key: target.key, ts: Date.now() }, realStorage);
+  }
+  if (target.keyFromUrl || adopt || tvLinkWasBad) {
+    // The room and role stay (a reload resumes from the saved session, and
+    // the query must come before the hash); the key and a TV link's nonce
+    // don't stay in the address bar, the history or a screenshot of either.
+    const kept = new URLSearchParams(location.search);
+    kept.delete("k");
+    kept.delete("adopt");
+    kept.delete("n");
+    kept.set("room", target.room);
+    kept.set("role", "controller");
+    history.replaceState(null, "", `${location.pathname}?${kept.toString()}${location.hash}`);
+  }
+
+  paintControllerBadge();
+  roomCodeEl.style.display = "block";
+  conn.onState((s) => {
+    paintControllerBadge();
+    if (s === "denied") {
+      clearSession("controller", realStorage);
+      if (conn.endedReason === "removed") {
+        showPairingNotice("Removed from the room", "Scan the QR on the laptop again to rejoin.");
+      } else {
+        showPairingNotice("This room is closed", "Scan the QR on the laptop again to reconnect.");
+      }
+    }
+  });
+  startMainPlay(conn, false);
+
+  // A TV scanned before the laptop is waiting in storage; this page's own link,
+  // if it has one, is the newer of the two. A link that carries a TV's QR is
+  // the one case where the room is a saved session's rather than the laptop's
+  // own QR, so only that one has to check the laptop is still in it.
+  const pending = readSession("pending", realStorage);
+  if (pending) clearSession("pending", realStorage);
+  const request = adopt ?? (pending ? { slot: pending.slot, nonce: pending.nonce } : null);
+  if (request) void adoptScreen(conn, target.room, target.key, request.slot, request.nonce, adopt !== null);
+}
+
+/** The phone controller's room badge: the room, plus whether the connection is
+ *  down or the laptop has stopped sending (net/controllerPreview.ts has the words). */
+function paintControllerBadge(): void {
+  if (!controllerConn || !roomCode) return;
+  roomCodeEl.textContent = controllerBadgeText(roomCode, controllerConn.state, laptopWaiting);
+}
+
+function setLaptopWaiting(waiting: boolean): void {
+  if (waiting === laptopWaiting) return;
+  laptopWaiting = waiting;
+  paintControllerBadge();
 }
 
 async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
+  document.body.classList.remove("in-gallery");
   inViz = true;
   canvas.style.display = "block";
+  // The resize observer's cache still says 0x0 from while the canvas was
+  // hidden; without this the first frame would be a 1x1 buffer (gl.ts).
+  refreshCssSize(canvas);
 
-  mainHost!.unmountAll();
-  mainHost!.mount(next);
+  const prev = scene;
   scene = next;
+  controllerLook?.noteScene(next.id);
+  // Before the mount (see applyScene); previewActive is still false on a
+  // fresh entry and turns on at the next tick, which remounts if needed.
+  if (previewActive) applyRenderQuality();
+  if (!mountOrBail(next, prev)) return;
   updateSceneVersionLabel(next);
 
-  showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+  showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) backBtn.style.display = "block";
   sceneVersion.style.display = "inline";
+  outputControls?.setVisible(true);
 
-  if (mode !== "renderer") void ensureAudio();
+  if (ownInput()) void ensureAudio();
   updateMicPrompt();
   reportUsage();
   void requestWakeLock();
@@ -1383,6 +2185,7 @@ function exitToGallery(): void {
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
   sceneVersion.style.display = "none";
+  outputControls?.setVisible(false);
   hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
@@ -1397,11 +2200,12 @@ function applyRoute(route: Route): void {
     // return trip from a viz — exitToGallery() calls gallery.show() itself.
     if (inViz) exitToGallery();
     else gallery?.show();
+    document.body.classList.add("in-gallery"); // index.html: the room badge moves out of the gallery's header
     return;
   }
   if (inViz && route.sceneId === scene.id) return; // our own applyScene() echo
   const s = getScene(route.sceneId);
-  if (!s || !presetAllows(s, quality.preset)) {
+  if (!s || !presetAllows(s, effectivePreset())) {
     showHud(s ? "scene unavailable on this device" : "unknown scene", true);
     navigate({ kind: "gallery" }, "replace");
     return;
@@ -1410,6 +2214,13 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // A TV opening the plain site belongs on the paired display page; leave
+  // before anything starts (net/tvRedirect.ts).
+  const tvTarget = tvRedirectTarget(location.search, navigator.userAgent);
+  if (tvTarget !== null) {
+    location.replace(tvTarget);
+    return;
+  }
   // Injects the panel's stylesheet before anything else so its DSEG7
   // @font-face rule (controlsTheme.ts) is already in document.fonts by the
   // time pinEverything()'s sweep runs below — otherwise the font would only
@@ -1460,11 +2271,72 @@ async function boot(): Promise<void> {
     fatalError("WebGL2 unsupported on this device");
     return;
   }
+  // A GPU reset or a backgrounded phone can take the context away. gl.ts's
+  // watchContextLoss() is what lets the browser give it back; every scene's
+  // programs and buffers died with it, so the restore reloads the page (the
+  // route is in the hash, and a granted mic restarts on its own).
+  watchContextLoss(
+    canvas,
+    () => {
+      glLost = true;
+      showHud("graphics reset — reloading", true);
+    },
+    () => location.reload(),
+  );
 
   const params = new URLSearchParams(location.search);
-  const joinCode = params.get("room");
-  const wantsHostRole = params.get("role") === "host";
-  bypassGallery = !!joinCode && !wantsHostRole;
+  // What this page load means (net/bootPlan.ts decides from the query alone;
+  // the saved controller session stands in for a key the address bar no
+  // longer carries after a reload).
+  const controllerSession = readSession("controller", realStorage);
+  const planned = planBoot(location.search, controllerSession);
+  // A TV link that doesn't parse says so and boots as the link reads without
+  // it (net/bootPlan.ts has what that is); it never makes this phone a host.
+  const badAdoptLink = planned.kind === "bad-adopt-link";
+  const plan = planned.kind === "bad-adopt-link" ? planned.then : planned;
+  if (badAdoptLink) {
+    // Out of the address bar before anything reads it again, so a reload does
+    // not repeat the message; a controller resume rewrites the whole query
+    // itself (startController).
+    const kept = new URLSearchParams(location.search);
+    kept.delete("adopt");
+    kept.delete("n");
+    const query = kept.toString();
+    history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+  }
+  if (plan.kind === "need-pairing") {
+    // Never quietly become a second host and ask for the mic.
+    showPairingNotice("Scan the QR on the laptop again", "On the laptop, click the room code at the top right to show it.");
+    return;
+  }
+  let controllerTarget: { room: string; key: string; keyFromUrl: boolean } | null = null;
+  let adoptRequest: { slot: string; nonce: string } | null = null;
+  if (plan.kind === "controller") {
+    controllerTarget = plan;
+  } else if (plan.kind === "adopt") {
+    if (!controllerSession) {
+      // Scanned the TV before the laptop: keep the TV's slot and nonce just
+      // long enough for the laptop's QR to finish the pairing.
+      writeSession("pending", { slot: plan.slot, nonce: plan.nonce, ts: Date.now() }, realStorage);
+      showScanLaptopNotice();
+      return;
+    }
+    controllerTarget = { room: controllerSession.room, key: controllerSession.key, keyFromUrl: false };
+    adoptRequest = { slot: plan.slot, nonce: plan.nonce };
+  }
+  bypassGallery = plan.kind === "renderer";
+  // A ?room= that isn't a code the Worker could have issued (a stray '#' or
+  // other odd character, say) is ignored and the page loads normally rather
+  // than aborting boot; say so for whoever is looking at the console.
+  if (plan.kind !== "adopt" && params.get("room") && !("room" in plan)) {
+    console.warn("Ignoring a malformed ?room= code:", params.get("room"));
+  }
+  // The new room's request goes out now so its round trip overlaps
+  // detectQuality()'s benchmark below instead of following it; it's awaited
+  // (with the solo fallback) where the room is wired. The catch here only
+  // silences the unhandled-rejection warning while nothing awaits it yet.
+  const hostRoomPromise = plan.kind === "host-new" ? openHostRoom() : null;
+  hostRoomPromise?.catch(() => {});
 
   if (params.get("audio") === "synthetic") {
     const bpm = Number(params.get("bpm"));
@@ -1486,24 +2358,64 @@ async function boot(): Promise<void> {
   const devPin = import.meta.env.DEV ? parseQualityPreset(params) : null;
   pinned = devPin !== null;
   detectedPreset = devPin ?? (await detectQuality());
-  quality = qualitySettings(effectivePreset());
+  quality = qualitySettings(renderPreset());
   mainHost = createSceneHost(gl, quality);
-  if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
+  if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
 
-  if (bypassGallery) {
+  // The laptop's room key, when it hosts a keyed room: what its QR carries.
+  let hostRoomKey: string | null = null;
+  if (controllerTarget) {
+    // The laptop's QR (or a TV's, with a controller session already saved) —
+    // a phone that edits the room's look and previews it from the host's frames.
+    startController(controllerTarget, adoptRequest, badAdoptLink);
+  } else if (plan.kind === "renderer") {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
+    // With the room's key (the laptop's watch-only link) the room is claimed, so it
+    // is kept alive across drops; a keyless one stays the old one-shot socket.
     mode = "renderer";
-    roomCode = joinCode!.toUpperCase();
-    rendererConn = new RendererConnection(roomCode);
-    startRendererDisconnectWatch();
+    roomCode = plan.room;
+    rendererConn = new RendererConnection(
+      roomCode,
+      plan.key ? { auth: { roomKey: plan.key }, reconnect: true, device: thisDevice() } : { device: thisDevice() },
+    );
+    // Only the old keyless join falls back to a mic of its own; a keyed
+    // member stays in the room and may be set to its own input there.
+    if (!plan.key) startRendererDisconnectWatch();
+  } else if (plan.kind === "solo") {
+    // A TV link that didn't parse, on a phone with no controller session:
+    // the page on its own, not a new room.
+    mode = "solo";
+    roomCode = null;
   } else {
     // No code -> create a fresh room and host it (the classic "open the site" flow).
     // ?room=CODE&role=host -> become host of a code someone else (a TV) already created.
     try {
-      roomCode = joinCode ? joinCode.toUpperCase() : await createRoomCode();
-      hostConn = new HostConnection(roomCode);
+      if (plan.kind === "host-join") {
+        roomCode = plan.room;
+        hostConn = new HostConnection(roomCode, { device: thisDevice() });
+        // A code alone opens only an old unclaimed room; a laptop's is keyed.
+        hostConn.onState((s) => {
+          if (s === "denied") showHud(`Room ${plan.room} needs its QR, a code alone can't join it.\nClick the room code to leave it.`, true);
+        });
+      } else {
+        // The classic flow's room is claimed by this laptop and keyed (openHostRoom).
+        const hostRoom = await hostRoomPromise!;
+        roomCode = hostRoom.room;
+        hostRoomKey = hostRoom.roomKey;
+        ownRoomKey = hostRoom.roomKey;
+        hostConn = new HostConnection(roomCode, {
+          auth: { hostKey: hostRoom.hostKey, roomKey: hostRoom.roomKey },
+          reconnect: true,
+          device: thisDevice(),
+        });
+        hostConn.onState((s) => {
+          if (s !== "denied" || resettingRoom) return;
+          clearSession("host", realStorage);
+          showHud("The room refused this laptop — reload to start a new one", true);
+        });
+      }
       mode = "host";
     } catch (err) {
       console.warn("Room server unreachable, running solo:", err);
@@ -1512,26 +2424,102 @@ async function boot(): Promise<void> {
     }
   }
 
-  if (mode === "host" && roomCode) {
+  if (badAdoptLink) showHud("That screen link isn't valid.\nScan the QR on the TV again.", true);
+
+  // A phone controller paints its own badge (paintControllerBadge: connection
+  // state, no click); every other room member gets the room view below.
+  if ((mode === "host" || mode === "renderer") && roomCode && !isController) {
     roomCodeEl.textContent = `room: ${roomCode}`;
     roomCodeEl.style.display = "block";
-    const invite = createJoinScreen("renderer");
-    invite.setCode(roomCode);
-    roomCodeEl.addEventListener("click", () => {
-      invite.show();
-      window.setTimeout(() => invite.hide(), 8000);
-    });
+    // A keyed host's badge opens the Room view (wired below, once the
+    // connection exists). Every other room member keeps the pairing overlay:
+    // this room's QR + code, and the field to type another room's code
+    // (joinScreen.ts `createRoomCodeEntry`). It stays open until dismissed, it
+    // holds a text field. A keyed spectator can pass on the key it was invited
+    // with; the old room a phone hosts for a TV has no key to put in a link.
+    // Its last button leaves for a room of their own.
+    if (!hostRoomKey) {
+      const roomKey = plan.kind === "renderer" ? plan.key : undefined;
+      const invite = createJoinScreen("renderer", document.body, {
+        dismissible: true,
+        adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+        reset: { label: "Leave this room", run: () => location.assign("/") },
+      });
+      invite.setCode(roomCode, roomKey ? { key: roomKey } : undefined);
+      roomCodeEl.addEventListener("click", () => invite.show());
+    }
   }
+
+  // Every member of a keyed room plays to and follows its Main (a controller
+  // started its own in startController). The laptop that claimed the room is
+  // its owner; a keyed spectator joined a room that someone else owns.
+  const joined = activeConn();
+  if (joined && joined.keyed && !isController) startMainPlay(joined, joined === hostConn);
 
   wireDeviceMenu();
   const conn = activeConn();
-  if (conn) wireRoomControls(conn);
+  if (conn) wireEars(conn);
+  // Same link as the room-code badge's overlay: the controller link for the
+  // laptop's keyed room, the plain/watch link for any other room member.
+  if (conn) {
+    const inviteKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
+    const roomView = wireRoomControls(
+      conn,
+      () => {
+        if (!roomCode) return null;
+        // A controller page invites more devices with its own room key (an
+        // iPad can be the second remote); it has no key in a legacy room.
+        if (isController) return ownRoomKey ? { kind: "controller", code: roomCode, info: { key: ownRoomKey } } : null;
+        return { kind: hostRoomKey ? "controller" : "renderer", code: roomCode, info: inviteKey ? { key: inviteKey } : undefined };
+      },
+      hostRoomKey !== null,
+    );
+    // The badge is the way into the Room view from the gallery too (it sits
+    // above it; #panelBtn lives in the scene row), on the laptop and on a
+    // device that joined by the QR alike.
+    if (hostRoomKey || isController) roomCodeEl.addEventListener("click", () => roomView.toggle());
+  }
 
   immersive = createImmersiveMode({
     button: fsBtn,
     isMenuOpen: () => deviceMenu?.isOpen() ?? false,
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
+
+  // The bar (CUE / PLAY / state line). A laptop has the pop-out window, which
+  // has a Cue and a Play of its own; a keyed room's Main is one more output next
+  // to it (net/roomBridge.ts), and a controller has only that one (its POP OUT
+  // button stays hidden, index.html). A device in no keyed room has only the
+  // pop-out; everything else that touches these is null-safe.
+  const play = mainPlay;
+  const joinedConn = activeConn();
+  if (!isController) {
+    outputBridge = createOutputBridge({
+      transport: createBroadcastTransport<ToOutput, ToMain>(),
+      look: () => ({ scene: scene.id, palette: palette.id }),
+      power: () => outputPower,
+    });
+  }
+  if (play && joinedConn) {
+    roomBridge = createRoomBridge({
+      play,
+      present: () => joinedConn.currentRoster.some((d) => d.online && d.deviceId !== joinedConn.deviceId),
+      showRoom: () => roomCodeEl.click(),
+    });
+  }
+  const controlsBridge = outputBridge && roomBridge ? combineBridges([outputBridge, roomBridge]) : (outputBridge ?? roomBridge);
+  if (controlsBridge) {
+    outputControls = createOutputControls(controlsBridge, {
+      popBtn: outBtn,
+      cueBtn,
+      goBtn,
+      takeBtn,
+      stateEl: outStateEl,
+      barEl: outBarEl,
+    });
+    outputControls.setVisible(inViz);
+    wireOutputKeys(outputControls);
+  }
 
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
@@ -1543,7 +2531,11 @@ async function boot(): Promise<void> {
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.key === "f" || e.key === "F") {
+    // F and S are letters, so they must not fire while one is being typed —
+    // a look named "Fast", or a pasted share code, in the Looks card's inputs
+    // (a range slider keeping focus still counts as not typing).
+    const typing = isTypingTarget(e.target);
+    if ((e.key === "f" || e.key === "F") && !typing) {
       noteKeyUse("fullscreen");
       immersive?.toggle();
     }
@@ -1551,7 +2543,7 @@ async function boot(): Promise<void> {
     // (enterViz/exitToGallery below), so the key and the gear it mirrors
     // appear and disappear together. Reuses the same toggle() the gear's
     // click handler calls, rather than reimplementing open/close here.
-    if ((e.key === "s" || e.key === "S") && inViz) {
+    if ((e.key === "s" || e.key === "S") && inViz && !typing) {
       noteKeyUse("panel");
       deviceMenu?.toggle();
     }
@@ -1571,8 +2563,21 @@ async function boot(): Promise<void> {
     // key), not e.key like f/s above, so a Cyrillic or German layout still
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
-    if (inViz && !isTypingTarget(e.target)) {
-      if (e.code === "KeyB") {
+    if (inViz && !typing) {
+      // Output window: K is Cue (hold it), G plays (an instant send) — plain-
+      // letter twins of Space and Option, which wireOutputKeys below owns.
+      // No-ops unless an output window is open.
+      if (e.code === "KeyG" && outputControls?.go()) {
+        e.preventDefault();
+        noteKeyUse("go");
+        showHud("Play: sent to output");
+      } else if (e.code === "KeyK") {
+        // Held like Space: wireOutputKeys's keyup lets go.
+        if (outputControls?.holdCue(true)) {
+          e.preventDefault();
+          if (!e.repeat) noteKeyUse("cue");
+        }
+      } else if (e.code === "KeyB") {
         e.preventDefault();
         noteKeyUse("beat-one");
         if (e.shiftKey) {
@@ -1609,7 +2614,9 @@ async function boot(): Promise<void> {
   // start prompt back so listening resumes only on a tap. The room
   // connection is untouched, same as there.
   stopBtn.addEventListener("click", () => {
-    if (capture) onCaptureEnded(capture);
+    if (!capture) return;
+    stoppedByUser = true;
+    onCaptureEnded(capture, false);
   });
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
@@ -1622,7 +2629,7 @@ async function boot(): Promise<void> {
     gallery = createGallery({
       scenes: () =>
         listScenes().map((s) => {
-          const enabled = presetAllows(s, quality.preset);
+          const enabled = presetAllows(s, effectivePreset());
           return {
             scene: s,
             enabled,
@@ -1674,7 +2681,7 @@ async function boot(): Promise<void> {
       } else if (!targetScene) {
         setTimeout(() => showHud("that look is for an unknown scene", true), 0);
       } else {
-        saveLook(look);
+        saveSharedLook(look);
         const specs = targetScene.settings ?? [];
         primeUndo(look.sceneId, specs);
         applyLook(look, specs);
@@ -1687,6 +2694,11 @@ async function boot(): Promise<void> {
     onRouteChange(applyRoute);
     applyRoute(currentRoute());
   }
+  // The mic permission is known and the page routed: a screen already in the
+  // room (a laptop that reloaded with its TV paired) can be fed now.
+  screensReady = true;
+  const feedConn = activeConn();
+  if (feedConn) feedFollowers(feedConn.currentRoster);
 
   // Dynamic import behind a literal DEV check: Vite replaces
   // import.meta.env.DEV with `false` in a production build, so this branch
@@ -1703,7 +2715,7 @@ async function boot(): Promise<void> {
         fps: lastFps,
         vis: lastVis,
         anim: lastAnim,
-        renderScale: quality.renderScale,
+        renderScale: renderScale(),
         govLevel: governor?.level ?? 0,
         deepMono: lastDeepMono,
         sampleRate: capture?.context.sampleRate ?? null,
@@ -1723,10 +2735,33 @@ async function boot(): Promise<void> {
       scenes: () =>
         listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
     });
+    // For headless room tests (tools/ and the e2e runs): what this page is
+    // doing about its ears right now, read live off the connection. Added to
+    // the object initTuning just published, so it exists in dev builds only.
+    const viz = (window as unknown as { __viz?: Record<string, unknown> }).__viz;
+    if (viz) {
+      viz.room = () => {
+        const c = activeConn();
+        return {
+          ownInput: ownInput(),
+          delayMs: c ? c.pictureDelayMs() : 0,
+          msSinceLastFrame: c ? c.msSinceLastFrame : Infinity,
+          hasCapture: capture !== null,
+          selfEars: c?.self?.ears ?? null,
+          deviceId: c ? c.deviceId : null,
+        };
+      };
+    }
   }
 
   lastRafMs = performance.now();
   requestAnimationFrame(loop);
+  // A hidden tab gets no animation frames, which would starve the pop-out
+  // output (and a paired TV) of the frames this loop sends — see
+  // net/backgroundTick.ts.
+  startBackgroundTick(() => {
+    if (shouldTickInBackground(document.hidden, (outputBridge?.status().open ?? false) || hostConn !== null || (activeConn() !== null && ownInput()))) tick();
+  });
 }
 
 /** Maps this tick's raw dB bands straight to [0,1] via the analyser's fixed
@@ -1758,6 +2793,61 @@ function buildInputMeasure(tap: InputHealthTap, mono: Float32Array, sampleRate: 
   };
 }
 
+/** Nothing local to read this tick (synthetic feed, no capture yet, or a
+ *  renderer with no mic): every reading the meters take from this device's own
+ *  extractor and analysers goes back to null, so a card never keeps showing a
+ *  stale value from the previous mode. One place, so a new reading is added
+ *  here once rather than at each of currentVisual()'s early-out sites. */
+function clearLocalReadings(): void {
+  lastRawBands = null;
+  lastMono = null;
+  lastDeepMono = null;
+  lastLufs = null;
+  lastFixedEnergy = null;
+  lastBeatDiag = null;
+  lastFluxRatio = null;
+  lastGate = null;
+  lastInputHealth = null;
+}
+
+/** One tick's read of this device's own live capture — the bands, scope,
+ *  input health and LUFS readings, the extractor's frame, and the meters'
+ *  diagnostics off it — shared by currentVisual()'s solo and host branches,
+ *  which differ only in what they do with the tempo source and the frame
+ *  afterwards. `now` is the capture's own AudioContext clock. */
+function readLocalCapture(
+  bandAnalyser: BandAnalyser,
+  capture: CaptureHandle,
+  rateScale: number,
+): { f: FeatureFrame; now: number } {
+  const now = capture.context.currentTime;
+  const dbBands = bandAnalyser.readBandsDb();
+  lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
+  lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+  lastInputHealth =
+    inputHealthTap && lastMono
+      ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+      : null;
+  lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
+  lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
+  const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+  lastFixedEnergy = extractor.fixedEnergy;
+  lastBeatDiag = extractor.onsetDiag;
+  lastFluxRatio = extractor.fluxRatio;
+  // `fired` is this local extractor's own frame's onset, not the
+  // jitter-buffered visual frame currentVisual() returns for host mode
+  // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
+  // describe the same tick's decision.
+  lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
+  // Feeds next tick's resolveAutoGain(), not this one's — see
+  // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
+  feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
+  // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
+  // doc comment.
+  feedSilenceGateMeasurement(f.level, extractor.dtSec);
+  return { f, now };
+}
+
 /** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
  *  computed once per tick by loop() and reused for animClock.advance() below
  *  — resolveSmoothing() slews its auto value, so calling it a second time
@@ -1769,46 +2859,23 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // tempoSource) sets this back — see its own doc comment on the module
   // state above for why host/renderer/TV never do.
   lastTempoHits = undefined;
-  if (syntheticFeed) {
-    lastRawBands = null;
-    // Synthetic frames are generated directly, not sampled from a real
-    // signal — there's nothing for the scope to trace, so its card
-    // correctly stays hidden here (see audioMeters.ts).
-    lastMono = null;
-    lastDeepMono = null;
-    lastLufs = null;
-    lastFixedEnergy = null;
-    lastBeatDiag = null;
-    lastFluxRatio = null;
-    lastGate = null;
-    lastInputHealth = null;
-    return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
-  }
+  const conn = activeConn();
 
-  if (mode === "solo") {
-    if (!bandAnalyser || !capture) {
-      lastRawBands = null;
-      lastMono = null;
-      lastDeepMono = null;
-      lastLufs = null;
-      lastFixedEnergy = null;
-      lastBeatDiag = null;
-      lastFluxRatio = null;
-      lastGate = null;
-      lastInputHealth = null;
+  if (mode === "solo" || !conn) {
+    // Solo. (A page that has a room mode but no connection is mid-fallback
+    // from a lost room, and has nothing yet.)
+    if (syntheticFeed && mode === "solo") {
+      // Synthetic frames are generated directly, not sampled from a real
+      // signal — there's nothing for the scope to trace, so its card
+      // correctly stays hidden here (see audioMeters.ts).
+      clearLocalReadings();
+      return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
+    }
+    if (mode !== "solo" || !bandAnalyser || !capture) {
+      clearLocalReadings();
       return null;
     }
-    const now = capture.context.currentTime;
-    const dbBands = bandAnalyser.readBandsDb();
-    lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    lastInputHealth =
-      inputHealthTap && lastMono
-        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
-        : null;
-    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    const { f, now } = readLocalCapture(bandAnalyser, capture, rateScale);
     // The fixed-hop tempo source, when live, overrides the render-tick
     // tracker's own bpm — see tempoAnalyzer.ts's header for why its numbers
     // are better — and its drained onsets become this tick's tempoHits for
@@ -1825,83 +2892,63 @@ function currentVisual(rateScale: number): FeatureFrame | null {
         weight: o.strength * (1 + PHASE_BASS * o.bass),
       }));
     }
-    lastFixedEnergy = extractor.fixedEnergy;
-    lastBeatDiag = extractor.onsetDiag;
-    lastFluxRatio = extractor.fluxRatio;
-    // `fired` is this local extractor's own frame's onset, not the
-    // jitter-buffered visual frame currentVisual() returns for host mode
-    // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
-    // describe the same tick's decision.
-    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
-    // Feeds next tick's resolveAutoGain(), not this one's — see
-    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
-    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
-    // doc comment.
-    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     return f;
   }
 
-  if (mode === "host") {
-    if (!bandAnalyser || !capture || !hostConn) {
-      lastRawBands = null;
-      lastMono = null;
-      lastDeepMono = null;
-      lastLufs = null;
-      lastFixedEnergy = null;
-      lastBeatDiag = null;
-      lastFluxRatio = null;
-      lastGate = null;
-      lastInputHealth = null;
+  // In a room and listening to this device's own input (any role: the
+  // laptop, or an iPad or phone set to its own input): the frame goes through
+  // the connection — onto the wire when someone follows this device — and
+  // what is drawn is the connection's own delayed sample, so this page and
+  // the devices that follow it show the same instant.
+  if (ownInput()) {
+    if (syntheticFeed) {
+      // The synthetic feed stands in for the mic, so a room test can have a
+      // laptop or an iPad feed followers without any audio hardware.
+      clearLocalReadings();
+      conn.sendFrame(syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000));
+      return sampleToVisual(conn.sample());
+    }
+    if (!bandAnalyser || !capture) {
+      clearLocalReadings();
       return null;
     }
-    const now = capture.context.currentTime;
-    const dbBands = bandAnalyser.readBandsDb();
-    lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    lastInputHealth =
-      inputHealthTap && lastMono
-        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
-        : null;
-    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
-    // Overwritten before hostConn.sendFrame() below, same as solo mode
-    // above, so the TV and any renderer get the fixed-hop tempo over the
-    // unchanged wire — see currentVisual()'s solo branch for the full
-    // comment. No tempoHits here: this device's own visual timeline (what
-    // sampleToVisual(hostConn.sample()) returns below) is the jitter
-    // buffer's room time, which this capture's local AudioContext onset
-    // times wouldn't line up with — see beatClock.ts's file header.
+    const { f } = readLocalCapture(bandAnalyser, capture, rateScale);
+    // Overwritten before conn.sendFrame() below, same as solo mode above, so
+    // every follower gets the fixed-hop tempo over the unchanged wire — see
+    // currentVisual()'s solo branch for the full comment. No tempoHits here:
+    // this device's own visual timeline (what sampleToVisual(conn.sample())
+    // returns below) is the jitter buffer's room time, which this capture's
+    // local AudioContext onset times wouldn't line up with — see
+    // beatClock.ts's file header.
     if (tempoSource) {
       f.bpm = tempoSource.bpm;
       tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
     }
-    lastFixedEnergy = extractor.fixedEnergy;
-    lastBeatDiag = extractor.onsetDiag;
-    lastFluxRatio = extractor.fluxRatio;
-    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
-    // Feeds next tick's resolveAutoGain(), not this one's — see
-    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
-    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
-    // doc comment.
-    feedSilenceGateMeasurement(f.level, extractor.dtSec);
-    hostConn.sendFrame(f);
-    return sampleToVisual(hostConn.sample());
+    conn.sendFrame(f);
+    return sampleToVisual(conn.sample());
   }
 
-  // renderer — no local mic, so no raw signal to show.
-  lastRawBands = null;
-  lastMono = null;
-  lastDeepMono = null;
-  lastLufs = null;
-  lastFixedEnergy = null;
-  lastBeatDiag = null;
-  lastFluxRatio = null;
-  lastGate = null;
-  lastInputHealth = null;
-  if (rendererConn) {
+  // Following another device — no local input, so no raw signal to show.
+  clearLocalReadings();
+  // A page that joined by the QR keeps its preview path: it has nothing to
+  // fall back to (no solo mic), and its own socket reconnects (net/room.ts). A
+  // feed that stops sending is a different matter, since the socket stays
+  // open; the preview goes silent and the badge says it is waiting
+  // (net/controllerPreview.ts), never fallBackToSolo as the legacy renderer
+  // below does.
+  if (controllerConn) {
+    const preview = controllerPreview(
+      controllerConn.sample(),
+      controllerConn.msSinceLastFrame,
+      controllerConn.state,
+      STALE_TIMEOUT_MS,
+    );
+    setLaptopWaiting(preview.waiting);
+    return sampleToVisual(preview.sample);
+  }
+  // The old keyless spectator: no records, so no feed to switch to — when the
+  // host goes quiet it takes a mic of its own.
+  if (rendererConn && !rendererConn.keyed) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
     if (rendererHasData && rendererConn.msSinceLastFrame > STALE_TIMEOUT_MS) {
@@ -1909,7 +2956,8 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     }
     return sampleToVisual(s);
   }
-  return null;
+  // A laptop or a keyed spectator set to follow another device.
+  return sampleToVisual(conn.sample());
 }
 
 function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
@@ -1928,15 +2976,22 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
 
 function loop(): void {
   requestAnimationFrame(loop);
+  tick();
+}
 
+/** One pass of the loop: sample the audio, advance the clocks and drives, feed
+ *  the pop-out output and any paired TV, then draw. Run by `loop` on every
+ *  animation frame, and — while this tab is hidden and has no frames of its
+ *  own — by net/backgroundTick.ts's worker clock, with the DOM and GL work
+ *  skipped (`document.hidden` below), so the output keeps getting frames. */
+function tick(): void {
   const nowRafMs = performance.now();
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
-  // Resolved exactly once per tick and reused everywhere below (extractor,
-  // anim clock, the meters) — resolveSmoothing() slews its own auto value
-  // via a mutated module-level map (autoTune.ts's `slewed`), so calling it
-  // a second time this tick would double-apply that slew.
+  // Resolved once per tick and reused everywhere below (extractor, anim
+  // clock, the meters) — a second call would be harmless (autoTune.ts steps
+  // each auto value once per tick, on its own clock), just wasted work.
   const smoothing = resolveSmoothing(scene.id);
   const rateScale = smoothingRateScale(smoothing);
 
@@ -1945,8 +3000,24 @@ function loop(): void {
   // just sitting on the gallery with nothing on screen.
   lastVis = currentVisual(rateScale);
 
+  // The pop-out output (net/outputBridge.ts) keeps streaming even while this
+  // window sits on the gallery, so a stray Esc never blanks the projector —
+  // which is why the band-gained frame is built before the inViz return.
+  const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
+  outputBridge?.update(nowRafMs);
+  roomBridge?.update(nowRafMs);
+  // The preview transition sits outside the bridge check because a phone
+  // controller has no bridge yet still previews, whenever a scene is showing.
+  const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  if (nextActive !== previewActive) {
+    previewActive = nextActive;
+    applyRenderQuality(true);
+    applyPreviewBox();
+  }
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+
   if (!inViz) {
-    gallery?.tick(nowRafMs);
+    if (!document.hidden) gallery?.tick(nowRafMs);
     return;
   }
 
@@ -1958,8 +3029,6 @@ function loop(): void {
   // ungained — it still feeds hostConn.sendFrame, which shouldn't hear a
   // purely local gain tweak — and is also what the strip draws as the ghost
   // behind a faded bar.
-  const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
-
   // Anim clock now advances here, ahead of deviceMenu.update() below — the
   // listening post's transport/bands/section/dial meters (audioMeters.ts)
   // read this tick's AnimFrame, not just the raw FeatureFrame. Only advances
@@ -1977,7 +3046,7 @@ function loop(): void {
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
   // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
-  // own peak feeds AnimFrame.wavePeak (the Signal card's Waveform readout and
+  // own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
   // its drive jack); null on any device with no local mic.
   const anim = gained
     ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
@@ -1989,8 +3058,7 @@ function loop(): void {
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
-  // see the comment on `smoothing` above for why a second resolve*() call
-  // this tick would double-apply the auto slew.
+  // see the comment on `smoothing` above.
   let sensitivity = 1;
   let expansion = 1;
 
@@ -2003,6 +3071,8 @@ function loop(): void {
 
     sensitivity = resolveSensitivity(scene.id);
     expansion = resolveExpansion(scene.id);
+    outputSens = sensitivity;
+    outputExp = expansion;
     // The drive engine's own per-tick advance (src/render/drives.ts's
     // header) — grid pulses and a setting's own drawn-line peak-hold need
     // every rAF tick, not just a render tick, same reasoning as
@@ -2022,7 +3092,17 @@ function loop(): void {
   // a drive row's live pill/overlay — it only ever reads uniformPair()/
   // excess(), never fired(), so it can't steal a grid setting's pending edge
   // out from under the scene that's about to render it (see drives.ts).
-  const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
+  // Nobody is looking at this tab, so it has no meters or picture to update
+  // (the only way here without an animation frame is the background clock).
+  // The idle demo still runs, since it is what the output shows with no input.
+  if (document.hidden) {
+    if ((!lastVis || !anim) && idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
+    return;
+  }
+
+  // Only built while the panel is open: update() returns before it touches
+  // `drives` when closed, and forScene() allocates a Map and a dozen closures.
+  const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) {
@@ -2044,20 +3124,29 @@ function drawScene(
   latch: RenderLatch,
   engine: DriveEngine,
 ): void {
-  if (!shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs())) return;
+  if (glLost) return;
+  const intervalMs = renderIntervalMs();
+  if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
     if (renderDtMs > 0) lastFps = 1000 / renderDtMs;
   }
   lastRenderFpsMs = nowRafMs;
-  lastRenderMs = nowRafMs;
+  lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
 
-  const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
+  const resized = resizeCanvasToDisplaySize(canvas, renderScale());
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
   const displayFrame = applySensitivity(gained, sensitivity, expansion);
   const latchedAnim = latch.consume(anim, nowRafMs);
   const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
+  // Drain the previous capture *before* this frame's draws are queued: the
+  // readback is a synchronous round trip in Chrome, so asking for it after
+  // scene.render would make the main thread wait for the whole frame's GPU
+  // work (a 12-16 ms stall per call with the panel open). Its fence has had
+  // a full frame to signal by now.
+  const picturePolled = pictureWanted();
+  if (picturePolled) pollPicture();
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
   // Right after the scene has drawn — and nowhere else — because the
   // default framebuffer (preserveDrawingBuffer is false, gl.ts) only holds
@@ -2066,7 +3155,7 @@ function drawScene(
   // behind pictureWanted() since it costs a few blits and a tiny readback,
   // worth paying only while the Master card's Picture block is actually
   // visible or a headless sweep asked for it (pictureForced).
-  if (pictureWanted()) samplePicture(nowRafMs);
+  if (picturePolled) capturePicture(nowRafMs);
   governor?.recordFrame(nowRafMs);
 }
 
@@ -2078,22 +3167,32 @@ function pictureWanted(): boolean {
   return pictureForced || (deviceMenu?.isOpen() ?? false);
 }
 
-/** Drains whatever thumbnail finished since the last tick into the meter/
- *  averager, then — no more than PICTURE_SAMPLE_INTERVAL_MS apart — kicks off
- *  the next one. The readback itself is created lazily, on mainHost's own GL
- *  context, the first tick this is actually called. */
-function samplePicture(nowRafMs: number): void {
+/** The readback is created lazily, on mainHost's own GL context, the first
+ *  tick a sample is actually asked for. */
+function ensurePictureReadback(): PictureReadback {
   if (!pictureReadback) pictureReadback = createPictureReadback(mainHost!.ctx.gl);
-  const t = pictureReadback.poll();
+  return pictureReadback;
+}
+
+/** Drains whatever thumbnail finished since the last tick into the meter/
+ *  averager. Runs before the scene draws (see drawScene); the readback's
+ *  result buffer is reused, so the push happens immediately. */
+function pollPicture(): void {
+  const t = ensurePictureReadback().poll();
   if (t) {
     const r = pictureMeter.push(t.px, t.w, t.h, t.atMs);
     pictureAverager.add(r);
   }
+}
+
+/** Kicks off the next thumbnail, no more than PICTURE_SAMPLE_INTERVAL_MS
+ *  apart. Runs right after the scene draws, in the same task. */
+function capturePicture(nowRafMs: number): void {
   // Half a 60 fps frame of slack: rAF timestamps jitter, and without it a
   // 60 fps render lands just short of the interval on its fourth frame and
   // samples every fifth instead (12 Hz, not 15).
   if (nowRafMs - lastPictureKickMs >= PICTURE_SAMPLE_INTERVAL_MS - 8) {
-    pictureReadback.capture(canvas.width, canvas.height, nowRafMs);
+    ensurePictureReadback().capture(canvas.width, canvas.height, nowRafMs);
     lastPictureKickMs = nowRafMs;
   }
 }
@@ -2104,7 +3203,7 @@ function samplePicture(nowRafMs: number): void {
  *  share picker is open, so the demo keeps playing until real audio takes
  *  over rather than blinking to black in between. */
 function idlePreviewActive(): boolean {
-  return inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser;
+  return inViz && ownInput() && !syntheticFeed && !bandAnalyser;
 }
 
 /** One tick of the demo groove behind the start prompt — the same pipeline
@@ -2114,8 +3213,12 @@ function idlePreviewActive(): boolean {
  *  Input card still apply, so tweaking a look before picking a source shows
  *  the result. */
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
+  // Clock only — no profile, so the demo still can't train it, but the auto
+  // Sensitivity/Expansion below keep gliding instead of freezing at one step.
+  tickAutoTune(dtSec);
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
+  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
   const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);

@@ -46,7 +46,7 @@ page.on("pageerror", (e) => console.log("[pageerror]", String(e).slice(0, 600)))
 await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=${bpm}&quality=${quality}#/v/${scene}`);
 await page.waitForTimeout(1500);
 if (settings) {
-  await page.evaluate((s) => window.__viz.setParams({ autoPin: true, settings: JSON.parse(s) }), settings);
+  await page.evaluate(({ s, scene }) => window.__viz.setParams({ scene, autoPin: true, settings: JSON.parse(s) }), { s: settings, scene });
 }
 await page.waitForTimeout(warm);
 for (let i = 0; i < frames; i++) {

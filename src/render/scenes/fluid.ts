@@ -614,7 +614,7 @@ export function foldZoom(st: FoldState, breathe: number): number {
 
 /** Eases FoldState's linear-in-time `mix` (0..1) into a smoothstep ramp for
  *  the display shader's uFoldMix — see main()'s one-flow coordinate warp
- *  (`s = mix(sA, sB, uFoldMix)`). A linear mix warps at a constant rate that
+ *  (the sample coordinate mixes fold A's into fold B's by uFoldMix). A linear mix warps at a constant rate that
  *  visibly kinks at the start/end of the warp; smoothstep's ease-in/ease-out
  *  reads as one continuous flow instead. */
 export function foldMixEased(m: number): number {
@@ -1316,9 +1316,18 @@ void main() {
   // itself warps continuously from fold A to fold B. uFoldMix is the eased
   // ramp (see foldMixEased in fluid.ts) uploaded by render(); a manual pick
   // uploads A === B so the mix is a no-op either way.
-  vec2 sA = simUv(uv, int(uFoldA + 0.5), uFoldWedgesA);
-  vec2 sB = simUv(uv, int(uFoldB + 0.5), uFoldWedgesB);
-  vec2 s = mix(sA, sB, uFoldMix);
+  // Only the folds the mix actually weighs are evaluated: a manual pick is
+  // mix 0 (A === B), Auto sits at exactly 1 outside the short warp, and each
+  // fold costs a rotation and a mod (Radial adds atan, cos and sin) on every
+  // pixel.
+  vec2 s;
+  if (uFoldMix <= 0.0) {
+    s = simUv(uv, int(uFoldA + 0.5), uFoldWedgesA);
+  } else if (uFoldMix >= 1.0) {
+    s = simUv(uv, int(uFoldB + 0.5), uFoldWedgesB);
+  } else {
+    s = mix(simUv(uv, int(uFoldA + 0.5), uFoldWedgesA), simUv(uv, int(uFoldB + 0.5), uFoldWedgesB), uFoldMix);
+  }
 
   vec2 dye = decodeDye(texture(uDye, s));
   float edge = mix(texture(uEdge, s).r, textureLod(uEdge, s, 1.0).r, uLineSoft);
@@ -1423,8 +1432,11 @@ void main() {
 
   // Bass shockwave (light settings (Post group)): a ring pool expanding from the emitter —
   // see triggerShock/advanceShocks in fluid.ts for how uShockAge/uShockAmp
-  // are filled each frame.
-  float shockR = length((uv - uEmitScreen) * vec2(uDomainAspect, 1.0));
+  // are filled each frame. Top-bottom has two emitter copies (one per half;
+  // uEmitScreen is the upper one), so fold y onto it: the ring then expands
+  // from both plumes, and the blob below uses the same folded position.
+  vec2 uvEmit = int(uFoldA + 0.5) == ${MIRROR_TB} ? vec2(uv.x, 0.5 + abs(uv.y - 0.5)) : uv;
+  float shockR = length((uvEmit - uEmitScreen) * vec2(uDomainAspect, 1.0));
   float shock = 0.0;
   for (int i = 0; i < ${SHOCK_SLOTS}; i++) {
     float radius = uShockAge[i] * ${SHOCK_SPEED.toFixed(2)};
@@ -1472,10 +1484,9 @@ void main() {
   // Purple emitter blob at the emitter's screen position — the identity of
   // the emitter, kept visible even in Off (where there's nothing to mirror
   // it from).
-  // Top-bottom has two emitter copies (one per half); fold y so one blob
-  // position covers both.
-  vec2 uvBlob = int(uFoldA + 0.5) == 2 ? vec2(uv.x, 0.5 + abs(uv.y - 0.5)) : uv;
-  vec2 d = (uvBlob - uEmitScreen) * vec2(uDomainAspect, 1.0);
+  // Top-bottom's two emitter copies share the folded uvEmit (see the
+  // shockwave above).
+  vec2 d = (uvEmit - uEmitScreen) * vec2(uDomainAspect, 1.0);
   col += NEON_PURPLE * exp(-dot(d, d) / (${EMIT_BLOB_RADIUS.toFixed(3)} * ${EMIT_BLOB_RADIUS.toFixed(3)})) * (${EMIT_BLOB_BASE.toFixed(2)} + ${EMIT_BLOB_PULSE.toFixed(2)} * uLowPulse);
 
   // Hue-preserving tone map (Look group): the old per-channel

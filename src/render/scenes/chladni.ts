@@ -1,7 +1,6 @@
 import { NUM_BANDS } from "../../audio/types.ts";
 import { MIN_HZ, MAX_HZ_CAP } from "../../audio/bandScale.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
-import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
@@ -35,6 +34,10 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // physically the plate's size), is excited by the band energy under a
 // resonance window at that frequency (Resonance sets the window's
 // sharpness), and rings with a fast attack and a Ring-controlled release.
+// One departure from a real plate: the excitation is that band energy less
+// most of its own running average, because music is always loudest in the
+// bass (and a room mic adds a floor of its own), and a plate that answered
+// absolute energy showed its lowest mode nearly all the time.
 // The strongest few modes by response are summed in the shader, weighted
 // by that response, so mode changes are the plate's own dynamics rather
 // than a scripted crossfade.
@@ -174,6 +177,10 @@ const ATTACK_SEC_MIN = 0.03;
  *  last active set holds, so silence freezes the figure rather than
  *  collapsing it to nothing. */
 const RESPONSE_FLOOR = 1e-9;
+/** Each mode is excited by its band energy minus SURPRISE_SHARE of that
+ *  energy's own running average over BASELINE_SEC — see createPlateResponse. */
+const BASELINE_SEC = 4;
+const SURPRISE_SHARE = 0.8;
 
 export function ringSeconds(ring: number): number {
   return RING_SEC_MIN + Math.max(0, Math.min(1, ring)) * (RING_SEC_MAX - RING_SEC_MIN);
@@ -190,6 +197,7 @@ export interface PlateResponse {
 
 export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): PlateResponse {
   const amplitudes = new Float32Array(table.length);
+  const baseline = new Float32Array(table.length).fill(NaN);
   const sharpened = new Float32Array(table.length);
   const order = table.map((_, i) => i);
   const active: ActiveMode[] = [];
@@ -224,7 +232,16 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
           const w = Math.exp(-0.5 * d * d);
           num += w * Math.max(0, bands[i]);
         }
-        const excitation = num / den;
+        const raw = num / den;
+        // Measured against this mode's own running average, so a constant
+        // spectral tilt — the music's bass-heavy balance, or a mic's noise
+        // floor — can't hand one mode the plate for good: what wins is the
+        // mode whose part of the spectrum is busier than usual right now. A
+        // held tone keeps 1 - SURPRISE_SHARE of its level, so it still holds
+        // its figure rather than fading to nothing.
+        if (Number.isNaN(baseline[k])) baseline[k] = raw;
+        baseline[k] += (raw - baseline[k]) * (1 - Math.exp(-dt / BASELINE_SEC));
+        const excitation = Math.max(0, raw - SURPRISE_SHARE * baseline[k]);
         const tau = excitation > amplitudes[k] ? attack : release;
         amplitudes[k] += (excitation - amplitudes[k]) * (1 - Math.exp(-dt / tau));
         sharpened[k] = Math.pow(amplitudes[k], sharpen);
@@ -623,7 +640,6 @@ out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
-${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${CHLADNI_GLSL}
 
@@ -637,7 +653,9 @@ void main() {
 
   float a = amp(p);
   vec3 plate = vec3(0.030, 0.031, 0.036);
-  vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
+  // The middle of the room palette's ramp: bright enough to read on the
+  // plate, darker than the grains that sit on top of it.
+  vec3 glow = palRamp(0.35 + 0.3 * a) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
   // The rim only exists on the square plate; the full-frame plate has no edge to show.
   float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
   vec3 col = (plate + glow + rim * 0.10) * inside;
@@ -653,6 +671,7 @@ ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSide;
+uniform float uGrainGain;
 ${CHLADNI_GLSL}
 out float vAmp;
 out float vGlow;
@@ -661,6 +680,8 @@ out float vScale;
 out float vShade;
 out float vFacets;
 out float vRot;
+out vec3 vCol;
+out vec3 vHaloCol;
 
 void main() {
   int side = int(uSide);
@@ -694,6 +715,21 @@ void main() {
   vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
   vScale = vSizePx / size;
   gl_PointSize = vSizePx;
+  // Everything about a grain's colour is per grain, so it is worked out here
+  // once rather than by every fragment of its sprite — a glint's sprite is
+  // mostly halo ring, and those fragments need only vHaloCol.
+  // Grains take the bright half of the room palette's ramp, which every
+  // palette keeps bright (see palette.ts): settled grains sit in its middle,
+  // thrown grains run up to its brightest end.
+  vec3 col = palRamp(0.55 + 0.45 * vAmp);
+  // Settled sand is chalkier than the palette; thrown grains keep its full hue.
+  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
+  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.8);
+  vCol = col * bright;
+  // The halo's tint and its area normalisation (see POINT_FRAG), without the
+  // falloff across the sprite: the fragment only multiplies that in.
+  float haloNorm = ${HALO_GAIN.toFixed(1)} * resScale * resScale / (vSizePx * vSizePx);
+  vHaloCol = mix(col, vec3(1.0), 0.45) * haloNorm * bright;
 }
 `;
 
@@ -706,12 +742,12 @@ in float vScale;
 in float vShade;
 in float vFacets;
 in float vRot;
+in vec3 vCol; // the grain's colour times its brightness (POINT_VERT)
+in vec3 vHaloCol; // the halo's colour times its brightness and area normalisation
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
-uniform float uGrainGain;
-${PALETTE_GLSL}
 const float PI = 3.14159265;
 
 void main() {
@@ -721,6 +757,19 @@ void main() {
   // The sprite was enlarged by vScale for the halo; the grain itself keeps
   // its own size at the centre, so measure the core in grain radii.
   float r = sqrt(r2) * vScale;
+  // Treble glow: a soft halo across the enlarged sprite, tinted toward
+  // white, falling to zero at the sprite edge. Normalised by sprite area
+  // (in 720p pixels) so the bloom a line reaches depends on how many grains
+  // glint there, not on grain size or resolution.
+  float halo = 1.0 - 4.0 * r2;
+  halo = halo * halo * vGlow;
+  // Outside the grain's own radius the shard below contributes nothing (rn >=
+  // r always, so core is exactly 0 from r = 0.5 out): only the halo is left,
+  // and that is most of a glint's sprite.
+  if (r >= 0.5) {
+    outColor = vec4(vHaloCol * halo, 0.0);
+    return;
+  }
   // A hard-edged faceted shard (3 or 4 sides, random rotation, see
   // POINT_VERT): a regular-polygon distance field, radius in the facet's own
   // direction rather than the disc's. rn >= r always (the polygon is
@@ -736,10 +785,6 @@ void main() {
   // facets don't come out aliased relative to a square's.
   float edge = min(vScale / (cos(k) * max(vSizePx, 1.0)), 0.22);
   float core = 1.0 - smoothstep(0.5 - edge, 0.5, rn);
-  // Settled grains sit on the base tone; thrown grains run up the palette.
-  vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
-  // Settled sand is chalkier than the palette; thrown grains keep its full hue.
-  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
   // At Grain size's chunky end, overlapping grains of the same hue would
   // merge into one flat patch (no grain-grain collision keeps them from
   // spreading apart — see file header): shade each facet distinctly and
@@ -752,22 +797,11 @@ void main() {
   float facetShade = 0.75 + 0.45 * fract(sin(facetIndex * 12.9898 + vRot * 78.233) * 43758.5453);
   float rim = smoothstep(0.5 - edge * 4.0, 0.5 - edge * 0.6, rn) * chunky;
   float chunkShade = mix(1.0, facetShade, chunky) * (1.0 - 0.35 * rim);
-  vec3 grainCol = col * chunkShade;
-  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.8);
-  // Treble glow: a soft halo across the enlarged sprite, tinted toward
-  // white, falling to zero at the sprite edge. Normalised by sprite area
-  // (in 720p pixels) so the bloom a line reaches depends on how many grains
-  // glint there, not on grain size or resolution.
-  float halo = 1.0 - 4.0 * r2;
-  halo = halo * halo * vGlow;
-  float resScale = max(1.0, uResolution.y / 720.0);
-  float haloNorm = ${HALO_GAIN.toFixed(1)} * resScale * resScale / (vSizePx * vSizePx);
-  vec3 haloCol = mix(col, vec3(1.0), 0.45) * halo * haloNorm * bright;
   // Premultiplied alpha: the grain is opaque (alpha = core) and occludes
   // whatever lies under it, like real sand; the halo carries no alpha, so
   // it adds. Overlapping big grains stay hard-edged instead of summing
   // into a smear.
-  outColor = vec4(grainCol * bright * core + haloCol, core);
+  outColor = vec4(vCol * chunkShade * core + vHaloCol * halo, core);
 }
 `;
 

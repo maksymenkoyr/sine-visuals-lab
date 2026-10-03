@@ -30,12 +30,6 @@ const UNLOCKED_BAR_BEATS = 4;
 const SWELL_ATTACK_SEC = 0.03;
 const SWELL_RELEASE_SEC = 0.25;
 const SWELL_STACK_CAP = 1.5;
-/** Flow accumulator: units per second at Drift = 0 and 1, and the extra
- *  factor the bass adds. */
-const FLOW_RATE_MIN = 0.05;
-const FLOW_RATE_MAX = 0.8;
-const FLOW_BASS_GAIN = 0.8;
-
 /** Camera wander: zoomT/panT are seconds of travel fed through smooth
  *  bounded functions — never a switch. `wander` sums two incommensurate
  *  sines (period ratio the golden ratio, so it never settles into a short
@@ -82,15 +76,6 @@ const FLY_LOW_GAIN = 0.6;
  *  plain forward accumulator, never reversed, so the whole picture keeps
  *  turning rather than wandering back and forth. */
 const ROLL_RATE = 0.22;
-
-/** A tiny deterministic hash, seed × k -> [0, 1). Exported for
- *  tests/crystal.test.ts. Nothing here needs per-frame randomness anymore
- *  (the old flicker dropout that used to consume it is gone) — kept as a
- *  small pure utility rather than deleted along with the feature. */
-export function hash01(seed: number, k: number): number {
-  const x = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453;
-  return x - Math.floor(x);
-}
 
 /** Sum of two incommensurate sines, bounded within ±1 for any t — the
  *  shape the camera's log-zoom rides so it never settles into a short
@@ -148,7 +133,6 @@ export interface CrystalState {
   /** Beat swell's two exponentials (release minus attack). */
   rel: number;
   att: number;
-  flowPos: number;
   /** Camera wander: seconds of travel, and the beat surge's velocity
    *  (added to the zoom's travel speed, decaying). */
   zoomT: number;
@@ -176,7 +160,6 @@ export function createCrystalState(): CrystalState {
     prevDropOnset: false,
     rel: 0,
     att: 0,
-    flowPos: 0,
     zoomT: 0,
     zoomVel: 0,
     panT: 0,
@@ -234,7 +217,6 @@ export interface CrystalOut {
   red: number;
   edges: number;
   swell: number;
-  flowPos: number;
   /** v4: distance flown down the corridor, world units. */
   travel: number;
   /** v4: camera roll about the view axis, radians. */
@@ -307,9 +289,6 @@ export function advanceCrystal(st: CrystalState, input: CrystalInputs, opts: Cry
   st.att *= Math.exp(-dt * SWELL_KA);
   const swell = Math.max(0, st.rel - st.att) / SWELL_PEAK;
 
-  const flowRate = (FLOW_RATE_MIN + (FLOW_RATE_MAX - FLOW_RATE_MIN) * opts.speed) * (1 + FLOW_BASS_GAIN * input.low);
-  st.flowPos += dt * flowRate;
-
   const amt = Math.max(0, opts.flareAmt);
   return {
     logZoom,
@@ -320,7 +299,6 @@ export function advanceCrystal(st: CrystalState, input: CrystalInputs, opts: Cry
     red: red * amt,
     edges: edges * amt,
     swell,
-    flowPos: st.flowPos,
     travel: st.travel,
     roll: st.roll,
   };

@@ -3,6 +3,7 @@ import { formatHz } from "../audio/bandScale.ts";
 import type { BandSplit } from "../audio/bandSplit.ts";
 import { BAND_FADER_COUNT, BAND_GAIN_MIN, FADER_CENTER_POS, faderWeights, gainToFaderPos } from "../audio/bandGains.ts";
 import { bandIndexCentroid } from "../render/spectralCentroid.ts";
+import { createCanvasSizer } from "./canvasSizer.ts";
 import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STRIP_MID, withAlpha } from "./controlsTheme.ts";
 
 /**
@@ -105,7 +106,7 @@ export interface SpectrumStrip {
 /** Fader travel, in CSS px — tall enough to drag with a thumb. The faders'
  *  hit areas in bandFaders.ts are sized from this. */
 export const STRIP_PLOT_HEIGHT_PX = 120;
-export const STRIP_AXIS_HEIGHT_PX = 16;
+const STRIP_AXIS_HEIGHT_PX = 16;
 const BAR_GAP_PX = 2;
 const BAR_RADIUS_PX = 1;
 const PEAK_FALL_PER_SEC = 1.2; // slow decay so a transient kick is still visible a few frames later
@@ -161,24 +162,11 @@ export function createSpectrumStrip(): SpectrumStrip {
 
   // devicePixelRatio-scaled backing store, resized whenever the card's
   // layout width changes (the panel's column widths differ between the
-  // two-column and stacked layouts — see controlsTheme.ts).
-  let cssWidth = 0;
-  /** False while the canvas has no layout (the panel is closed, display:
-   *  none) — a draw then would size the backing store to a pixel and get
-   *  stretched across the card when it opens. */
-  function ensureSize(): boolean {
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === cssWidth) return true;
-    cssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round((STRIP_PLOT_HEIGHT_PX + STRIP_AXIS_HEIGHT_PX) * dpr);
-    canvas.style.height = `${STRIP_PLOT_HEIGHT_PX + STRIP_AXIS_HEIGHT_PX}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return true;
-  }
+  // two-column and stacked layouts — see controlsTheme.ts). ensure() is false
+  // while the canvas has no layout (the panel is closed, display: none) — a
+  // draw then would size the backing store to a pixel and get stretched
+  // across the card when it opens. See canvasSizer.ts.
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: STRIP_PLOT_HEIGHT_PX + STRIP_AXIS_HEIGHT_PX });
 
   // Bands are drawn evenly spaced (not log-positioned by Hz) so every bar
   // gets a readable width — the log spacing is already baked into what each
@@ -317,7 +305,13 @@ export function createSpectrumStrip(): SpectrumStrip {
     const t = bandIndexCentroid(bands);
     if (t === null) return;
 
-    const x = t * width;
+    // t runs 0..1 over band indices 0..NUM_BANDS-1, so it names the *centre*
+    // of a bar: index i is drawn from xForEdgeIndex(i) and is barWidth (the
+    // slot minus BAR_GAP_PX) wide, so its centre sits half a slot in, less
+    // half the gap. Mapping t straight to the strip width would land half a
+    // slot left of the bars' balance point at the low end and half a slot
+    // right at the high end.
+    const x = xForEdgeIndex(t * (NUM_BANDS - 1) + 0.5, width) - BAR_GAP_PX / 2;
     ctx.strokeStyle = withAlpha(AUTO_SKY, 0.85);
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -353,8 +347,8 @@ export function createSpectrumStrip(): SpectrumStrip {
   }
 
   function draw(nowMs: number): void {
-    if (!ensureSize()) return;
-    const width = cssWidth;
+    if (!sizer.ensure()) return;
+    const width = sizer.width;
     const plotHeight = STRIP_PLOT_HEIGHT_PX;
     ctx.clearRect(0, 0, width, plotHeight + STRIP_AXIS_HEIGHT_PX);
 

@@ -50,7 +50,10 @@
             "alternateName": "sinevisualslab",
             "url": "https://www.sinevisualslab.com/",
             "logo": "https://www.sinevisualslab.com/icon-512.png",
-            "sameAs": ["https://github.com/maksymenkoyr/sine-visuals-lab"]
+            "sameAs": [
+              "https://github.com/maksymenkoyr/sine-visuals-lab",
+              "https://www.instagram.com/sinevisualslab/"
+            ]
           },
           {
             "@type": "WebSite",
@@ -98,6 +101,19 @@
         height: 100%;
         touch-action: none;
       }
+      /* While a pop-out output is open the scene here is only a preview
+       * (app.ts's applyPreviewBox): a centred box at a fraction of the
+       * window, same aspect. The drawing buffer follows the CSS size, so a
+       * smaller box is fewer pixels rendered. */
+      body.output-preview #gl {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: calc(100% * var(--preview-frac, 0.5));
+        height: calc(100% * var(--preview-frac, 0.5));
+        transform: translate(-50%, -50%);
+        outline: 1px solid rgba(255, 255, 255, 0.25);
+      }
       #hud {
         position: fixed;
         left: 12px;
@@ -116,7 +132,10 @@
         color: #fffc;
         font: 600 13px/1.4 ui-monospace, monospace;
         letter-spacing: 0.05em;
-        z-index: 5;
+        /* Over the gallery (src/ui/gallery.ts, 15) as well as a scene: the
+         * room carries on while browsing, so its way in must too. Under the
+         * room view it opens (src/ui/joinScreen.ts, 20). */
+        z-index: 16;
         background: #0008;
         padding: 4px 10px;
         border-radius: 999px;
@@ -263,6 +282,179 @@
         letter-spacing: 0.14em;
         color: rgba(255, 255, 255, 0.8);
         white-space: nowrap;
+      }
+      /* Pop-out output controls (src/ui/outputControls.ts), top centre and big:
+       * CUE orange, PLAY green. The state line under them reads as plain text.
+       * Fills: Cue on = solid orange; a key/click flashes its button
+       * (.pressed); a held Option charges PLAY left to right (.charging) and
+       * a glide in flight fills it again (.gliding), both through --charge.
+       * The bar fades with the rest of the chrome when idle, except while it
+       * has something to say (.attn: cue on, holding for Play, output apart,
+       * charging, gliding). */
+      #outBar {
+        position: fixed;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 6;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        transition: opacity 0.4s;
+        pointer-events: none;
+      }
+      #outKeys {
+        display: flex;
+        gap: 14px;
+      }
+      .outKey {
+        --c: #3ddc84;
+        position: relative;
+        overflow: hidden;
+        display: none;
+        pointer-events: auto;
+        min-width: 176px;
+        height: 62px;
+        padding: 0 26px;
+        border-radius: 12px;
+        border: 2px solid var(--c);
+        background: rgba(8, 11, 10, 0.55);
+        -webkit-backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        color: var(--c);
+        font-family: "Share Tech Mono", ui-monospace, monospace;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s, box-shadow 0.12s, transform 0.08s;
+      }
+      #cueBtn {
+        --c: #ff9f1c;
+      }
+      .outKey b {
+        position: relative;
+        display: block;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        line-height: 1.1;
+      }
+      .outKey small {
+        position: relative;
+        display: block;
+        margin-top: 4px;
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        opacity: 0.7;
+      }
+      .outKey::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--c);
+        opacity: 0;
+        transform-origin: left center;
+        transform: scaleX(var(--charge, 0));
+        transition: opacity 0.12s;
+      }
+      .outKey:hover {
+        box-shadow: 0 0 14px var(--c);
+      }
+      #cueBtn[aria-pressed="true"] {
+        background: var(--c);
+        color: #140c00;
+        box-shadow: 0 0 22px var(--c);
+      }
+      .outKey.pressed {
+        background: var(--c);
+        color: #06130b;
+        box-shadow: 0 0 28px var(--c);
+        transform: scale(0.96);
+      }
+      .outKey.charging::before,
+      .outKey.gliding::before {
+        opacity: 0.9;
+      }
+      .outKey.charging,
+      .outKey.gliding {
+        color: #fff;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+      }
+      #goBtn.differs:not(.charging):not(.gliding) {
+        animation: outPulse 1.4s ease-in-out infinite;
+      }
+      @keyframes outPulse {
+        50% {
+          box-shadow: 0 0 20px var(--c);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #goBtn.differs:not(.charging):not(.gliding) {
+          animation: none;
+        }
+      }
+      #outState {
+        display: none;
+        font: 400 12px/1.2 "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.14em;
+        color: rgba(255, 255, 255, 0.55);
+        white-space: nowrap;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+        /* The keys' own glass behind the words, so the amber line stays
+         * readable over a bright scene (yellow, lime) as well as a dark one. */
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: rgba(8, 11, 10, 0.6);
+      }
+      #outState.differs {
+        color: #ff9f1c;
+      }
+      #outState.charging {
+        color: #3ddc84;
+      }
+      /* TAKE MAIN: shown under the state line while Main changed under unplayed
+       * edits (src/ui/outputControls.ts). Reads as bar text, but is a button. */
+      #takeBtn {
+        display: none;
+        pointer-events: auto;
+        padding: 3px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: rgba(8, 11, 10, 0.6);
+        font: 400 12px/1.2 "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.14em;
+        color: #ff9f1c;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+        cursor: pointer;
+      }
+      #takeBtn:hover,
+      #takeBtn:focus-visible {
+        color: #fff;
+      }
+      /* A phone's controller has no pop-out to open, and its bar goes under the
+       * scene row and the room badge: the bar's keys would sit on the row's
+       * buttons at a phone's width. */
+      body.controller #outBtn {
+        display: none !important;
+      }
+      body.controller #outBar {
+        top: 100px;
+      }
+      body.chrome-idle #outBar:not(.attn) {
+        opacity: 0;
+        pointer-events: none;
+      }
+      @media (max-width: 520px) {
+        .outKey {
+          min-width: 120px;
+          height: 52px;
+          padding: 0 12px;
+        }
+        .outKey b {
+          font-size: 18px;
+        }
       }
       #stopBtn::before {
         content: "";
@@ -428,6 +620,12 @@
         color: inherit;
         cursor: pointer;
       }
+      /* The display: flex above beats the [hidden] attribute's UA rule, so
+       * without this the Screen button shows even where
+       * refreshAudioPromptButtons (src/app.ts) hides it. */
+      #audioPrompt button[hidden] {
+        display: none;
+      }
       #audioPrompt button:hover {
         border-color: rgba(255, 255, 255, 0.4);
       }
@@ -452,6 +650,29 @@
         text-align: center;
         font: 400 12px/1.45 system-ui, sans-serif;
         color: rgba(255, 255, 255, 0.72);
+      }
+
+      /* A page that follows another device (app.ts's syncEars toggles
+       * .follows-room: a phone or TV by default, any device the Room view sets
+       * to Follow) listens to nothing itself, so the gallery's sound-source
+       * picker would offer a microphone it never opens. */
+      body.follows-room .gal-source {
+        display: none;
+      }
+      /* A phone opened as a room's controller (app.ts's isController) gets its
+       * "remote · CODE" badge dropped under the scene row instead of sharing
+       * it: on a phone's width the row's version label runs into it. */
+      body.controller #roomCode {
+        top: 60px;
+        cursor: pointer;
+      }
+      /* On the gallery (src/app.ts toggles .in-gallery) the badge floats in
+       * the bottom corner instead: on a phone the gallery's own header (the
+       * mark, the source picker) fills the top. */
+      body.in-gallery #roomCode {
+        top: auto;
+        bottom: 16px;
+        right: 16px;
       }
 
       /* The page's h1 and product blurb are for crawlers and screen readers
@@ -483,8 +704,20 @@
     <div id="sceneNav">
       <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249; GALLERY</button>
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
-      <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
+      <button id="panelBtn" class="iconBtn" title="This room's devices">&#9638; ROOM</button>
+      <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
       <span id="sceneVersion" tabindex="0"></span>
+    </div>
+    <!-- Output controls (src/ui/outputControls.ts), top centre: shown only
+         while an output window is open or another device is in the room (Play
+         to the Main screens). -->
+    <div id="outBar">
+      <div id="outKeys">
+        <button id="cueBtn" class="outKey" aria-pressed="false" title="Hold to hear the preview on the output — let go and it goes back; PLAY sends it for good (hold Space)" data-key="cue" data-keycap="Space"><b>CUE</b><small>SPACE</small></button>
+        <button id="goBtn" class="outKey" title="Send this scene and its settings to the output — tap Option to send at once, hold it to glide there (Option)" data-key="go" data-keycap="⌥"><b>PLAY</b><small>OPTION</small></button>
+      </div>
+      <span id="outState"></span>
+      <button id="takeBtn" type="button" title="Drop your unplayed changes and show what is on the Main screens now">TAKE MAIN</button>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">

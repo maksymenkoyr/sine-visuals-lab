@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { createStrainPreview, type StrainPreviewMotion } from "../src/render/scenes/physarum2Preview.ts";
+import {
+  createStrainPreview,
+  createPairCulture,
+  trailQuantile,
+  pairOverlap,
+  pairContactPixelsInto,
+  type StrainPreviewMotion,
+  type PairCultureInputs,
+} from "../src/render/scenes/physarum2Preview.ts";
 
 // A representative "coarse cells / spots" motion — sensor angle/reach/turn
 // on the wide, sharp-turning end of the range physarum2.ts's own STRAINS/
@@ -31,6 +39,18 @@ describe("physarum2Preview: createStrainPreview", () => {
       b.step(SPOTTY_MOTION);
     }
     expect(a.pixels([1, 1, 1])).toEqual(b.pixels([1, 1, 1]));
+  });
+
+  it("pixelsInto writes exactly what pixels returns, and overwrites a dirty buffer fully", () => {
+    const preview = createStrainPreview({ size: 24, agents: 300, seed: 5 });
+    runSteps(preview, SPOTTY_MOTION, 30);
+    const rgb: [number, number, number] = [0.9, 0.4, 0.2];
+    const buf = new Uint8ClampedArray(24 * 24 * 4).fill(77);
+    preview.pixelsInto(buf, rgb);
+    expect(buf).toEqual(preview.pixels(rgb));
+    runSteps(preview, SPOTTY_MOTION, 5);
+    preview.pixelsInto(buf, rgb);
+    expect(buf).toEqual(preview.pixels(rgb));
   });
 
   it("a different seed diverges (not a hidden shared/global RNG)", () => {
@@ -107,5 +127,226 @@ describe("physarum2Preview: createStrainPreview", () => {
     const denseSum = values.slice(0, top2pct).reduce((a, b) => a + b, 0);
     const denseShare = total > 0 ? denseSum / total : 0;
     expect(denseShare).toBeLessThan(0.4);
+  });
+});
+
+describe("physarum2Preview: createPairCulture", () => {
+  const PAIR_MOTION: readonly [StrainPreviewMotion, StrainPreviewMotion] = [
+    { sensorAngle: 60 * DEG, reach: 4, turn: 40 * DEG, step: 1.2, deposit: 0.03 },
+    { sensorAngle: 60 * DEG, reach: 4, turn: 40 * DEG, step: 1.2, deposit: 0.03 },
+  ];
+  // Strain 0 chases strain 1's trail (asymmetric smell), so it actually
+  // lands on strain 1's ink repeatedly instead of the two populations
+  // wandering independently — Touch only has anything to feed/eat where the
+  // eater's own path crosses the other's trail.
+  function inputs(touch01: number, touch10 = 0, diag = 0): PairCultureInputs {
+    return {
+      motion: PAIR_MOTION,
+      smell: [
+        [0.2, 0.9],
+        [0, 1],
+      ],
+      touch: [
+        [diag, touch01],
+        [touch10, diag],
+      ],
+    };
+  }
+  function runSteps(c: ReturnType<typeof createPairCulture>, n: number, inp: PairCultureInputs): void {
+    for (let i = 0; i < n; i++) c.step(inp);
+  }
+
+  it("is fully deterministic for a fixed seed", () => {
+    const a = createPairCulture({ size: 24, agents: 300, seed: 42 });
+    const b = createPairCulture({ size: 24, agents: 300, seed: 42 });
+    const inp = inputs(0);
+    runSteps(a, 30, inp);
+    runSteps(b, 30, inp);
+    const bufA = new Uint8ClampedArray(24 * 24 * 4);
+    const bufB = new Uint8ClampedArray(24 * 24 * 4);
+    a.pixelsInto(bufA, [
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    b.pixelsInto(bufB, [
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    expect(bufA).toEqual(bufB);
+  });
+
+  it("pixelsInto has the right shape and alpha 255", () => {
+    const size = 20;
+    const c = createPairCulture({ size, agents: 200, seed: 3 });
+    runSteps(c, 10, inputs(0));
+    const buf = new Uint8ClampedArray(size * size * 4);
+    c.pixelsInto(buf, [
+      [1, 1, 1],
+      [1, 1, 1],
+    ]);
+    expect(buf.length).toBe(size * size * 4);
+    for (let i = 3; i < buf.length; i += 4) expect(buf[i]).toBe(255);
+  });
+
+  it("seedColony with share 0 changes nothing", () => {
+    const a = createPairCulture({ size: 24, agents: 300, seed: 9 });
+    const b = createPairCulture({ size: 24, agents: 300, seed: 9 });
+    runSteps(a, 20, inputs(0));
+    runSteps(b, 20, inputs(0));
+    a.seedColony(0, 0.1);
+    runSteps(a, 10, inputs(0));
+    runSteps(b, 10, inputs(0));
+    expect(a.totals()).toEqual(b.totals());
+  });
+
+  it("seedColony with share 1 gathers every agent into one small disc", () => {
+    const size = 32;
+    const lit = (c: ReturnType<typeof createPairCulture>): number => {
+      const buf = new Uint8ClampedArray(size * size * 4);
+      c.pixelsInto(buf, [
+        [1, 1, 1],
+        [1, 1, 1],
+      ]);
+      let n = 0;
+      for (let i = 0; i < buf.length; i += 4) if (buf[i]! > 0) n++;
+      return n;
+    };
+    const spread = createPairCulture({ size, agents: 800, seed: 13 });
+    runSteps(spread, 1, inputs(0));
+    const seeded = createPairCulture({ size, agents: 800, seed: 13 });
+    seeded.seedColony(1, 0.05);
+    runSteps(seeded, 1, inputs(0));
+    expect(lit(seeded)).toBeLessThan(lit(spread) * 0.3);
+  });
+
+  it("eating (touch01 = -1.5) leaves strain 1's total well below the no-touch run", () => {
+    const base = createPairCulture({ size: 32, agents: 800, seed: 11 });
+    runSteps(base, 60, inputs(0));
+    const [, base1] = base.totals();
+
+    const eaten = createPairCulture({ size: 32, agents: 800, seed: 11 });
+    runSteps(eaten, 60, inputs(-1.5));
+    const [, eaten1] = eaten.totals();
+
+    expect(eaten1).toBeLessThan(base1 * 0.8);
+  });
+
+  it("feeding (touch01 = +1.5) raises strain 1's total above the no-touch run", () => {
+    const base = createPairCulture({ size: 32, agents: 800, seed: 11 });
+    runSteps(base, 60, inputs(0));
+    const [, base1] = base.totals();
+
+    const fed = createPairCulture({ size: 32, agents: 800, seed: 11 });
+    runSteps(fed, 60, inputs(1.5));
+    const [, fed1] = fed.totals();
+
+    expect(fed1).toBeGreaterThan(base1);
+  });
+
+  it("Trail life (decayMul) ages each strain's own channel: a long-lived strain 0 keeps more ink", () => {
+    const withLife = (m0: number | undefined): PairCultureInputs => ({
+      ...inputs(0),
+      motion: [{ ...PAIR_MOTION[0], decayMul: m0 }, PAIR_MOTION[1]],
+    });
+    const total0 = (m0: number | undefined): number => {
+      const c = createPairCulture({ size: 32, agents: 800, seed: 21 });
+      runSteps(c, 40, withLife(m0));
+      return c.totals()[0];
+    };
+    expect(total0(0.35)).toBeGreaterThan(total0(1) * 1.5);
+    expect(total0(2.8)).toBeLessThan(total0(1));
+  });
+
+  it("an omitted decayMul is the shared decay, byte for byte", () => {
+    const run = (m0: number | undefined): Uint8ClampedArray => {
+      const c = createPairCulture({ size: 24, agents: 300, seed: 8 });
+      const inp: PairCultureInputs = { ...inputs(0.4), motion: [{ ...PAIR_MOTION[0], decayMul: m0 }, PAIR_MOTION[1]] };
+      runSteps(c, 30, inp);
+      const out = new Uint8ClampedArray(24 * 24 * 4);
+      c.pixelsInto(out, [[1, 0.5, 0.2], [0.2, 0.5, 1]]);
+      return out;
+    };
+    expect(run(undefined)).toEqual(run(1));
+  });
+
+  it("a non-zero touch diagonal changes nothing", () => {
+    const a = createPairCulture({ size: 24, agents: 300, seed: 5 });
+    runSteps(a, 30, inputs(0, 0, 0));
+    const b = createPairCulture({ size: 24, agents: 300, seed: 5 });
+    runSteps(b, 30, inputs(0, 0, 0.9));
+    expect(a.totals()).toEqual(b.totals());
+  });
+});
+
+describe("physarum2Preview: contact pictures", () => {
+  const SIZE = 6;
+  const RED = [1, 0, 0] as const;
+  const BLUE = [0, 0, 1] as const;
+  const maps = (): [Float32Array, Float32Array] => [new Float32Array(SIZE * SIZE), new Float32Array(SIZE * SIZE)];
+  const px = (out: Uint8ClampedArray, cell: number): number[] => [out[cell * 4]!, out[cell * 4 + 1]!, out[cell * 4 + 2]!, out[cell * 4 + 3]!];
+
+  it("a cell only strain A touches takes A's hue, B's takes B's, an empty cell is black", () => {
+    const t = maps();
+    t[0][0] = 1;
+    t[1][1] = 1;
+    const out = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pairContactPixelsInto(t, SIZE, out, [RED, BLUE], [1, 1]);
+    const a = px(out, 0);
+    expect(a[0]).toBe(255);
+    expect(a[1]).toBe(0);
+    expect(a[2]).toBe(0);
+    const b = px(out, 1);
+    expect(b[0]).toBe(0);
+    expect(b[2]).toBe(255);
+    expect(px(out, 2)).toEqual([0, 0, 0, 255]);
+  });
+
+  it("equal strength in both strains turns the cell near white", () => {
+    const t = maps();
+    t[0][3] = 1;
+    t[1][3] = 1;
+    const out = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pairContactPixelsInto(t, SIZE, out, [RED, BLUE], [1, 1]);
+    const [r, g, b] = px(out, 3);
+    expect(r).toBeGreaterThan(240);
+    expect(g).toBeGreaterThan(240);
+    expect(b).toBeGreaterThan(240);
+  });
+
+  it("each channel is scaled to its own exposure", () => {
+    const t = maps();
+    t[0][0] = 0.5;
+    t[1][1] = 0.5;
+    const out = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pairContactPixelsInto(t, SIZE, out, [RED, BLUE], [0.5, 1]);
+    // A is at its own bright end (full), B at half of its.
+    expect(px(out, 0)[0]).toBe(255);
+    expect(px(out, 1)[2]!).toBeLessThan(255);
+  });
+
+  it("pairOverlap: identical maps 1, disjoint 0, empty 0", () => {
+    const same = maps();
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      same[0][i] = 1 + (i % 3);
+      same[1][i] = 1 + (i % 3);
+    }
+    expect(pairOverlap(same, SIZE, 3)).toBeCloseTo(1, 9);
+    const apart = maps();
+    apart[0][0] = 1; // block (0,0)
+    apart[1][SIZE * SIZE - 1] = 1; // block (1,1)
+    expect(pairOverlap(apart, SIZE, 3)).toBe(0);
+    expect(pairOverlap(maps(), SIZE, 3)).toBe(0);
+    const oneEmpty = maps();
+    oneEmpty[0][0] = 1;
+    expect(pairOverlap(oneEmpty, SIZE, 3)).toBe(0);
+  });
+
+  it("trailQuantile reads a sorted sample, and 0 for an empty map", () => {
+    const t = new Float32Array(100);
+    for (let i = 0; i < 100; i++) t[i] = i;
+    expect(trailQuantile(t, 0.98, 1)).toBe(98);
+    expect(trailQuantile(t, 0, 1)).toBe(0);
+    expect(trailQuantile(t, 1, 1)).toBe(99);
+    expect(trailQuantile(new Float32Array(0), 0.98)).toBe(0);
   });
 });

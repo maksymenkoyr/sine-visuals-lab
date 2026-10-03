@@ -1,5 +1,5 @@
-import type { AnimFrame } from "../render/animClock.ts";
-import { SIGNALS, type MeterCardId, type MeterRowId } from "../render/signals.ts";
+import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts";
+import { SIGNALS, surgeAtThreshold, type MeterCardId, type MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, jackKey } from "./driveSources.ts";
@@ -25,8 +25,15 @@ import {
   HIT_LOUDNESS_DEFAULT,
   HIT_LOUDNESS_MAX,
   HIT_LOUDNESS_MIN,
+  HIT_TAIL_DEFAULT,
+  HIT_TAIL_MAX,
+  HIT_TAIL_MIN,
+  HIT_LANES,
+  type HitLane,
   type HitParts,
   type HitShape,
+  type HitShapePatch,
+  type HitTails,
 } from "../audio/hitStrength.ts";
 import {
   AUTO_SKY,
@@ -39,13 +46,17 @@ import {
   withAlpha,
 } from "./controlsTheme.ts";
 import {
+  chipBtnLitStyle,
+  chipBtnStyle,
   createAdvancedSection,
   createCard,
   createChipButton,
   createTraceLegend,
   digitsStyle,
   digitsTextStyle,
+  groupHeading,
   groupHeadingFirstStyle,
+  groupHeadingStyle,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -61,6 +72,7 @@ import {
 // both modules have finished loading).
 import { createControlRow } from "./deviceMenu.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { createCanvasSizer } from "./canvasSizer.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -119,13 +131,19 @@ import { setHintText } from "./hintSwatches.ts";
  *    (src/audio/hitStrength.ts's HitParts) — exactly full height at
  *    Dimension 0, so nothing on screen changes until that slider actually
  *    moves. A "Show shape" disclosure (createAdvancedSection, closed by
- *    default) folds away the sliders that shape a hit's strength
- *    (Dimension/Knee/Loudness mix/Floor) plus a Curve (hitStandout(ratio,
- *    knee) plotted live, a dot per lane at that lane's own last-hit ratio)
- *    — while it's open, the hits history also marks each fired column's
- *    stand-out and loudness parts as two small dots and draws a dashed
- *    Floor guide, so dragging any of those sliders shows exactly what it
- *    did to a real hit rather than just a number moving.
+ *    default) folds away two groups. Height: the sliders that shape a hit's
+ *    strength (Dimension/Knee/Loudness mix/Floor) plus a Curve
+ *    (hitStandout(ratio, knee) plotted live, a dot per lane at that lane's
+ *    own last-hit ratio). Length: one row per lane for how long its pulse
+ *    rings out (hitStrength.ts's `shape.tail`, shown as the ms it takes to
+ *    fade), Linked by default so one drag moves every lane, under an
+ *    Envelope monitor (createTailEnvelope) of each lane's fall over four
+ *    beats, with Smoothing's stretch as its readout. While Shape is open,
+ *    the hits history also marks each fired column's stand-out and
+ *    loudness parts as two small dots, draws a dashed Floor guide, and
+ *    shades each lane's own pulse under its ticks (its tail), so dragging
+ *    any of those sliders shows exactly what it did to a real hit rather
+ *    than just a number moving.
  *  - Tempo: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
  *    follows beatClock's tempoLock, so an unlocked guess reads as
@@ -133,7 +151,8 @@ import { setHintText } from "./hintSwatches.ts";
  *    digits dim the same way. Beneath that, a Timing strip
  *    (createTimingStrip): Grid (the tracker's own predicted beat, a tick
  *    as tall as the lock on every beatPhase wrap), Metronome (metronome.ts's
- *    own steady tick, taller on the bar) and Heard (every raw detected
+ *    own steady tick, bright on the bar its jack sends, faint on the beats
+ *    between) and Heard (every raw detected
  *    beat) share one time axis, so a detection landing under a grid tick
  *    reads as locked, one between ticks reads as a double, and a tick with
  *    nothing under it reads as a miss. Last, Wave: beatWave/barWave's own
@@ -186,8 +205,8 @@ import { setHintText } from "./hintSwatches.ts";
  * Song+Drop pair and Centroid, on the Brightness row (Character), the BPM
  * block's own Metronome+Tempo pair, Lock, the Timing strip's own
  * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
- * (Tempo), and one per hits-history lane plus a second
- * Beat-lane jack for Onset surge (createHitsHistory's own laneMounts, Hits)
+ * (Tempo), and one per hits-history lane plus one for the Surge lane
+ * under them, Onset surge's own (createHitsHistory's own laneMounts, Hits)
  * — plus the Bands card's own level rows (BAND_LEVEL_CHOICES, deviceMenu.ts)
  * and its Frequencies corner, built directly
  * in deviceMenu.ts. Every jack's click/hover/fill/usage state is
@@ -214,11 +233,11 @@ export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono`/`rawBands` null on any device
-   *  without a local analyser (the Signal card's Waveform row hidden;
+   *  without a local analyser (the Dynamics card's Waveform row hidden;
    *  Energy reads idle under RAW — see file header); `fixedEnergy` null on
    *  any device without a local FeatureExtractor (the History trace drops
    *  its reference line); `lufs` null on any device without a local
-   *  lufsAnalyser (the Signal card's Loudness row and header Reset chip
+   *  lufsAnalyser (the Dynamics card's Loudness row and header Reset chip
    *  hidden). A folded card skips its computation and DOM writes for the
    *  frame — folding buys back the layout/canvas cost, not just the screen
    *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
@@ -235,7 +254,7 @@ export interface AudioMeters {
    *  (the hits history's Beat lane draws no ratio trace there, same as
    *  synthetic). `gate` is this device's own SilenceGateReading
    *  (src/audio/silenceGate.ts) — null on the same devices as `fixedEnergy`
-   *  (the Signal card's Gate row reads idle; its trace still plots
+   *  (the Dynamics card's Gate row reads idle; its trace still plots
    *  `frame.level` against the two marks, since that part doesn't need a
    *  local extractor). */
   update(
@@ -275,10 +294,10 @@ export interface AudioMeters {
 }
 
 export interface AudioMetersDeps {
-  /** The Signal card's Reset chip (its header, beside Loudness): start the
+  /** The Dynamics card's Reset chip (its header, beside Loudness): start the
    *  integrated reading over. */
   onLufsReset: () => void;
-  /** The Signal card's Gate row's trace guides and the Hits card's hits
+  /** The Dynamics card's Gate row's trace guides and the Hits card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
    *  Silence below/Sound above rows edit (src/audio/silenceGate.ts). Read
    *  fresh every draw()/text tick so dragging a mark in the Input card
@@ -289,7 +308,7 @@ export interface AudioMetersDeps {
    *  above, not per scene: how a hit's stand-out and loudness blend into
    *  its pulse height is a taste about detection itself, not one scene's
    *  look, so it carries across scene switches the same way. */
-  hitShape: { get: () => HitShape; set: (partial: Partial<HitShape>) => void };
+  hitShape: { get: () => HitShape; set: (partial: HitShapePatch) => void };
   /** Every jack's behaviour and live state — see jack.ts's own header for
    *  why this file never touches a DriveSetting directly. Every predicate
    *  is keyed by the DriveSourceChoice a jack represents (driveSources.ts's
@@ -430,7 +449,7 @@ const tempoDotStyle = `
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-// The Signal card's Loudness row. The bar spans LUFS_SCALE_MIN..MAX — a
+// The Dynamics card's Loudness row. The bar spans LUFS_SCALE_MIN..MAX — a
 // broadcast meter's range, with the two targets people actually aim at
 // marked: EBU R128's −23 for broadcast, and the level streaming services
 // normalise to (LUFS_TARGET_STREAMING), above which the bar and digits go
@@ -461,7 +480,7 @@ const TEMPO_TITLE =
 // anim.metronomeBpm; the RAW chip / Smoothing Off bypass that settle and
 // show the raw estimate instead (see this file's own header).
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
-// The Signal card's history trace: level, energy, and the fixed-mapping
+// The Dynamics card's history trace: level, energy, and the fixed-mapping
 // reference over the last HISTORY_SPAN_SEC, one column per CSS pixel so the
 // card's width always spans exactly that long. Each column keeps the max of
 // what it saw, so a beat's peak survives however many frames a column
@@ -488,7 +507,7 @@ const BEAT_TRACE_HEIGHT_CSS_PX = 28;
 // blue as the auto-gain/auto-tune system, distinct from BEAT_COLOR so
 // "detected" (red) and "predicted" (blue) never read as the same line.
 const BEAT_GRID_COLOR = AUTO_SKY;
-// The Signal card's own Gate row (src/audio/silenceGate.ts): a second trace,
+// The Dynamics card's own Gate row (src/audio/silenceGate.ts): a second trace,
 // inserted under the Gate row's meter the way the Character card's Centroid
 // row inserts its own, so it reads a little more crowded than the row above
 // it and gets a bit more height. GATE_DIMMER_COLOR reuses the same blue as
@@ -560,26 +579,21 @@ function createColumnRing(seriesCount: number, heightPx: number) {
   // A burst's filler once past COLUMN_CARRY_MS — never mutated.
   const blank: number[] = new Array(seriesCount).fill(Number.NaN);
   let colStartMs: number | null = null;
-  let cssWidth = 0;
   // Follows the width so the trace always spans exactly HISTORY_SPAN_SEC.
   let columnMs = 1000;
 
-  function ensureSize(): boolean {
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === cssWidth) return true;
-    cssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(heightPx * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    bufs = [];
-    for (let i = 0; i < seriesCount; i++) bufs.push(new Float32Array(w).fill(Number.NaN));
-    head = 0;
-    columnMs = (HISTORY_SPAN_SEC * 1000) / w;
-    return true;
-  }
+  // The history is one column per CSS pixel, so a width change rebuilds
+  // (clears) it; a devicePixelRatio-only change keeps it — see canvasSizer.ts.
+  const sizer = createCanvasSizer(canvas, ctx, {
+    heightCssPx: heightPx,
+    onWidthChange(w) {
+      bufs = [];
+      for (let i = 0; i < seriesCount; i++) bufs.push(new Float32Array(w).fill(Number.NaN));
+      head = 0;
+      columnMs = (HISTORY_SPAN_SEC * 1000) / w;
+    },
+  });
+  const ensureSize = sizer.ensure;
 
   function commitColumn(vals: number[]): void {
     for (let i = 0; i < seriesCount; i++) bufs[i][head] = vals[i];
@@ -592,7 +606,7 @@ function createColumnRing(seriesCount: number, heightPx: number) {
     /** CSS pixel width the ring is currently sized to (0 before first
      *  layout). */
     get width(): number {
-      return cssWidth;
+      return sizer.width;
     },
     /** Number of closed columns — equals width, one per CSS pixel. */
     get length(): number {
@@ -645,7 +659,7 @@ function createColumnRing(seriesCount: number, heightPx: number) {
   };
 }
 
-/** A rolling line-trace view over createColumnRing — the Signal card's
+/** A rolling line-trace view over createColumnRing — the Dynamics card's
  *  History (three series: level, energy, the fixed-mapping reference), the
  *  Character card's Centroid trace (one series, no legend), the Signal
  *  card's Gate trace (its own series plus `guides`) and, exported for it, the Master
@@ -688,7 +702,7 @@ export function createTraceStrip(series: TraceStripSeries[], heightPx: number, g
     canvas,
     push: ring.push,
     /** Redraws every series in the order given to createTraceStrip — the
-     *  last one lands on top, same as the Signal card putting Level over
+     *  last one lands on top, same as the Dynamics card putting Level over
      *  Energy over the fixed-mapping reference. With no `guides`, draws the
      *  plain fixed mid-height line every trace has always had; with `guides`,
      *  draws those instead (a mid-height line would read as an unlabeled
@@ -979,9 +993,12 @@ function createTempoBlock(accent: string) {
 // onset) and Low/Mid/High (bandEnergy.ts's per-group onsets), one canvas,
 // one column per CSS pixel over HISTORY_SPAN_SEC (createColumnRing above).
 // A history, not just an instant reading, so a tuning session can see *why*
-// a hit did or didn't count.
+// a hit did or didn't count. A fifth, trace-only Surge lane sits under them
+// (not part of HITS_LANES: it has no hits, strengths or fires of its own) —
+// the Onset surge drive source (signals.ts's "feature.flux") drawn as a
+// setting would read it.
 const HITS_LANE_HEIGHT_PX = 16;
-const HITS_LANE_COUNT = 4; // Beat, Low, Mid, High
+const HITS_LANE_COUNT = 5; // Beat, Low, Mid, High, Surge
 const HITS_HEIGHT_PX = HITS_LANE_HEIGHT_PX * HITS_LANE_COUNT;
 // A lane's ratio trace runs to HITS_RATIO_MAX — 1 (the firing line) sits
 // inside the track with headroom above it, rather than pinning the lane to
@@ -990,7 +1007,8 @@ const HITS_RATIO_MAX = ONSET_METER_MAX;
 // Per-column series layout in the ring: [ratio, event code, strength,
 // standout, loudness] per lane (hitsLaneIdx below), plus one shared
 // ground-shade series (1 - anim.gateDimmer; the room isn't per-lane, so one
-// series covers all four). Event code is fired=3 > blocked=2 > gated=1 > 0
+// series covers every lane), plus one Surge series (the Onset surge signal's
+// own 0..1 reading) between the lanes' fields and the ground. Event code is fired=3 > blocked=2 > gated=1 > 0
 // — see CODE_OF_VERDICT below — so a max-hold column resolves the right
 // priority on its own when a burst of rAF ticks closes into one column.
 // strength/standout/loudness (src/audio/hitStrength.ts's HitParts) are only
@@ -1008,20 +1026,29 @@ const HITS_LANES: readonly HitsLane[] = [
   { label: "High", color: STRIP_HIGH },
 ];
 // Same order as HITS_LANES — the drive source each lane's own jack plugs
-// in. The Beat lane also carries a second choice (Onset surge,
-// "feature.flux") on its own second jack — see createHitsHistory's own
-// laneMounts.
+// in. The Surge lane under them is Onset surge's own ("feature.flux") —
+// see createHitsHistory's own laneMounts.
 const HITS_LANE_CHOICES: readonly DriveSourceChoice[] = ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"];
-const HITS_FIELDS_PER_LANE = 5; // ratio, code, strength, standout, loudness
+const SURGE_CHOICE: DriveSourceChoice = "feature.flux";
+const HITS_FIELDS_PER_LANE = 6; // ratio, code, strength, standout, loudness, pulse
 
-/** Where lane `li`'s own five fields sit in the ring's per-column series —
+/** Where lane `li`'s own fields sit in the ring's per-column series —
  *  factored out so createHitsHistory's own update()/draw() don't hand-roll
  *  the same `* HITS_FIELDS_PER_LANE` arithmetic in two places. */
-function hitsLaneIdx(li: number): { ratio: number; code: number; strength: number; standout: number; loudness: number } {
+function hitsLaneIdx(li: number): {
+  ratio: number;
+  code: number;
+  strength: number;
+  standout: number;
+  loudness: number;
+  pulse: number;
+} {
   const base = li * HITS_FIELDS_PER_LANE;
-  return { ratio: base, code: base + 1, strength: base + 2, standout: base + 3, loudness: base + 4 };
+  return { ratio: base, code: base + 1, strength: base + 2, standout: base + 3, loudness: base + 4, pulse: base + 5 };
 }
-const HITS_GROUND_IDX = HITS_LANES.length * HITS_FIELDS_PER_LANE;
+const HITS_SURGE_LANE = HITS_LANES.length;
+const HITS_SURGE_IDX = HITS_LANES.length * HITS_FIELDS_PER_LANE;
+const HITS_GROUND_IDX = HITS_SURGE_IDX + 1;
 const HITS_SERIES_COUNT = HITS_GROUND_IDX + 1;
 // Ground shading is a wash, not a primary reading — capped well under full
 // white so a shut gate (1 - gateDimmer == 1) reads as a dim tint rather
@@ -1056,6 +1083,7 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
     group("Low", GROUP_TUNING.low),
     group("Mid", GROUP_TUNING.mid),
     group("High", GROUP_TUNING.high),
+    "Surge: how close Beat is to firing, as a setting fed by Onset surge sees it; the line is where Beat fires.",
     gate,
   ].join(" ");
 }
@@ -1090,7 +1118,7 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
  *  synthetic/renderer"); Low/Mid/High from `anim.lowOnset`/`midOnset`/
  *  `highOnset` and `anim.hits.low/mid/high` (always available once `anim`
  *  exists, local or remote — bandEnergy.ts runs everywhere); ground shading
- *  from `1 - anim.gateDimmer` — the same dimmer the Signal card's Gate row
+ *  from `1 - anim.gateDimmer` — the same dimmer the Dynamics card's Gate row
  *  shows — so a half-open gate reads lighter than a shut one. A fired
  *  column's strength/standout/loudness come from `anim.hitStrength.*`
  *  (src/audio/hitStrength.ts) — see this function's own draw() for how
@@ -1116,7 +1144,11 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   row.el.children[1].replaceWith(vizWrap);
   row.setReadout(String(HISTORY_SPAN_SEC));
 
-  const legend = createTraceLegend(HITS_LANES.map((l) => ({ color: l.color, label: l.label })));
+  const surgeColor = driveSourceColor(SURGE_CHOICE);
+  const legend = createTraceLegend([
+    ...HITS_LANES.map((l) => ({ color: l.color, label: l.label })),
+    { color: surgeColor, label: "Surge" },
+  ]);
   vizWrap.after(legend.el);
 
   // One jack per lane, at that lane's own vertical centre on the right
@@ -1137,26 +1169,41 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
     vizWrap.appendChild(glow);
     return { choice, glowEl: glow };
   });
-  // The Beat lane's second jack: the broadband detector's own
-  // approach-to-firing reading (Onset surge, "feature.flux") — the old
-  // Onset row's own jack, moved here now that row is gone. Shares the Beat
-  // lane's glow rather than growing a second one: refreshPatchView groups
-  // laneMounts by glowEl, so two choices on one glow just means "whichever
-  // of the two is live wins" instead of the lane getting a second strip.
-  const fluxJack = mountJack("feature.flux", vizWrap, row.el);
-  fluxJack.el.style.position = "absolute";
-  fluxJack.el.style.right = "17px";
-  fluxJack.el.style.top = `${(HITS_LANE_HEIGHT_PX - 13) / 2}px`;
-  laneMounts.push({ choice: "feature.flux", glowEl: laneMounts[0]!.glowEl });
+  // The Surge lane's jack: the broadband detector's own approach-to-firing
+  // reading (Onset surge, "feature.flux") — the old Onset row's own jack,
+  // moved here now that row is gone, and onto a lane of its own so the
+  // trace a patched setting reads is the one under it.
+  const surgeJack = mountJack(SURGE_CHOICE, vizWrap, row.el);
+  surgeJack.el.style.position = "absolute";
+  surgeJack.el.style.right = "2px";
+  surgeJack.el.style.top = `${HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX + (HITS_LANE_HEIGHT_PX - 13) / 2}px`;
+  const surgeGlow = document.createElement("div");
+  surgeGlow.className = "vc-lane-glow";
+  surgeGlow.style.top = `${HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX}px`;
+  surgeGlow.style.height = `${HITS_LANE_HEIGHT_PX}px`;
+  surgeGlow.style.setProperty("--c", surgeColor);
+  vizWrap.appendChild(surgeGlow);
+  laneMounts.push({ choice: SURGE_CHOICE, glowEl: surgeGlow });
 
   // Fire timestamps per lane, for the legend's "N fires in the last span"
-  // note — pruned to HISTORY_SPAN_SEC on read, same window the trace shows.
+  // note — pruned to HISTORY_SPAN_SEC, same window the trace shows. Pruned
+  // when a fire is logged as well as on read: the legend (the only reader)
+  // is skipped while the Shape disclosure is open, and a log that is only
+  // pruned on read would grow for as long as Shape stays open.
   const fireLog: number[][] = HITS_LANES.map(() => []);
-  function firesInSpan(lane: number, nowMs: number): number {
+  function pruneFires(lane: number, nowMs: number): number[] {
     const log = fireLog[lane];
     const cutoff = nowMs - HISTORY_SPAN_SEC * 1000;
-    while (log.length && log[0] < cutoff) log.shift();
-    return log.length;
+    let stale = 0;
+    while (stale < log.length && log[stale] < cutoff) stale++;
+    if (stale > 0) log.splice(0, stale);
+    return log;
+  }
+  function logFire(lane: number, nowMs: number): void {
+    pruneFires(lane, nowMs).push(nowMs);
+  }
+  function firesInSpan(lane: number, nowMs: number): number {
+    return pruneFires(lane, nowMs).length;
   }
 
   function laneTop(laneIdx: number): number {
@@ -1193,6 +1240,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
     // the old Hits row's own divider, redrawn on canvas.
     ctx.fillStyle = "rgba(255,255,255,0.12)";
     ctx.fillRect(0, HITS_LANE_HEIGHT_PX - 0.5, w, 1);
+    ctx.fillRect(0, HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX - 0.5, w, 1);
 
     // 2. A hairline per lane at ratio == 1 — the firing line.
     ctx.fillStyle = "rgba(255,255,255,0.18)";
@@ -1221,6 +1269,67 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
         pen = true;
       }
       ctx.stroke();
+    }
+
+    // 3b. The Surge lane: a filled trace of the Onset surge signal (already
+    // 0..1), with a hairline where Beat fires on that scale — the same
+    // line the lanes above carry at ratio == 1.
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(0, Math.round(laneYFrac(HITS_SURGE_LANE, surgeAtThreshold)) - 0.5, w, 1);
+    const surgeBase = laneTop(HITS_SURGE_LANE) + HITS_LANE_HEIGHT_PX - 1;
+    ctx.strokeStyle = surgeColor;
+    ctx.fillStyle = withAlpha(surgeColor, 0.18);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let surgePen = false;
+    let surgeStart = 0;
+    let surgeLastX = 0;
+    const closeSurge = (): void => {
+      ctx.stroke();
+      if (!surgePen) return;
+      ctx.lineTo(surgeLastX, surgeBase);
+      ctx.lineTo(surgeStart, surgeBase);
+      ctx.closePath();
+      ctx.fill();
+    };
+    for (let x = 0; x <= len; x++) {
+      const v = x === len ? ring.live(HITS_SURGE_IDX) : ring.at(x, HITS_SURGE_IDX);
+      if (Number.isNaN(v)) {
+        if (surgePen) {
+          closeSurge();
+          ctx.beginPath();
+          surgePen = false;
+        }
+        continue;
+      }
+      const px = x === len ? w - 1 : x;
+      const y = laneYFrac(HITS_SURGE_LANE, v);
+      if (surgePen) ctx.lineTo(px, y);
+      else {
+        ctx.moveTo(px, y);
+        surgeStart = px;
+      }
+      surgeLastX = px;
+      surgePen = true;
+    }
+    if (surgePen) closeSurge();
+
+    // 3c. Shape open only: each lane's own decaying pulse — the very value a
+    // scene reads, so a Length row's (and Smoothing's) effect on real hits
+    // shows as each tick's tail, and a tail still up when the next hit
+    // lands shows as overlap. Under the ticks, so they stay on top.
+    if (shapeOpen) {
+      for (let li = 0; li < HITS_LANES.length; li++) {
+        const idx = hitsLaneIdx(li);
+        ctx.fillStyle = withAlpha(HITS_LANES[li].color, 0.22);
+        const bottom = laneTop(li) + HITS_LANE_HEIGHT_PX;
+        for (let x = 0; x <= len; x++) {
+          const v = x === len ? ring.live(idx.pulse) : ring.at(x, idx.pulse);
+          if (!(v > 0)) continue; // NaN or 0
+          const yTop = laneYFrac(li, v);
+          ctx.fillRect(x === len ? w - 1 : x, yTop, 1, bottom - yTop);
+        }
+      }
     }
 
     // 4. The event tick: fired is a bar up to that hit's own graded
@@ -1313,31 +1422,41 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
           verdict: OnsetVerdict,
           fired: boolean,
           parts: HitParts,
+          pulse: number,
         ): void => {
           const idx = hitsLaneIdx(li);
           vals[idx.ratio] = ratio;
           vals[idx.code] = CODE_OF_VERDICT[verdict];
+          vals[idx.pulse] = pulse;
           if (!fired) return;
           vals[idx.strength] = parts.strength;
           vals[idx.standout] = parts.standout;
           vals[idx.loudness] = parts.loudness;
         };
-        setLane(0, beatDiag ? beatDiag.ratio : null, beatVerdict, beatFired, anim.hitStrength.beat);
-        setLane(1, anim.hits.low.ratio, lowVerdict, anim.lowOnset, anim.hitStrength.low);
-        setLane(2, anim.hits.mid.ratio, midVerdict, anim.midOnset, anim.hitStrength.mid);
-        setLane(3, anim.hits.high.ratio, highVerdict, anim.highOnset, anim.hitStrength.high);
+        setLane(0, beatDiag ? beatDiag.ratio : null, beatVerdict, beatFired, anim.hitStrength.beat, anim.beatPulse);
+        setLane(1, anim.hits.low.ratio, lowVerdict, anim.lowOnset, anim.hitStrength.low, anim.lowPulse);
+        setLane(2, anim.hits.mid.ratio, midVerdict, anim.midOnset, anim.hitStrength.mid, anim.midPulse);
+        setLane(3, anim.hits.high.ratio, highVerdict, anim.highOnset, anim.hitStrength.high, anim.highPulse);
+        // Like the Beat ratio trace, only there with a local detector
+        // (beatDiag) — anim.beatRatio is 0 on a TV/renderer, which would
+        // draw a flat line that looks like silence rather than "no reading".
+        vals[HITS_SURGE_IDX] = frame && beatDiag ? SIGNALS["feature.flux"].read(frame, anim) : null;
         vals[HITS_GROUND_IDX] = 1 - anim.gateDimmer;
         ring.push(vals, nowMs);
-        if (beatFired) fireLog[0].push(nowMs);
-        if (anim.lowOnset) fireLog[1].push(nowMs);
-        if (anim.midOnset) fireLog[2].push(nowMs);
-        if (anim.highOnset) fireLog[3].push(nowMs);
+        if (beatFired) logFire(0, nowMs);
+        if (anim.lowOnset) logFire(1, nowMs);
+        if (anim.midOnset) logFire(2, nowMs);
+        if (anim.highOnset) logFire(3, nowMs);
       } else {
         ring.push(new Array(HITS_SERIES_COUNT).fill(null), nowMs);
       }
       draw(shapeOpen, floor);
 
       if (text) {
+        legend.setNote(
+          HITS_SURGE_LANE,
+          anim && frame && beatDiag ? `${Math.round(SIGNALS["feature.flux"].read(frame, anim) * 100)}%` : "--",
+        );
         if (shapeOpen) {
           const parts = anim
             ? [anim.hitStrength.beat, anim.hitStrength.low, anim.hitStrength.mid, anim.hitStrength.high]
@@ -1383,6 +1502,15 @@ const TIMING_HEIGHT_PX = TIMING_LANE_HEIGHT_PX * TIMING_LANE_COUNT;
 // lighter, not more transparent: a dimmed AUTO_SKY on the dark card was too
 // faint to tell a beat tick from a bar tick.
 const TIMING_METRO_COLOR = "#cfe8ff";
+// The Metronome lane's jack sends Metronome bar (signals.ts's
+// anim.metronomeBar), one pulse per bar, so the bar tick is the lane's own
+// reading at full height and full colour; the beats between are context for
+// lining Heard up against, kept short and faint so they don't read as pulses
+// the jack sends too (a patched setting's "What it receives" graph shows one
+// bump per bar, and a lane of equal ticks under that jack contradicted it).
+const TIMING_METRO_BEAT_COLOR = withAlpha(TIMING_METRO_COLOR, 0.35);
+const TIMING_METRO_BEAT_HEIGHT = 0.45;
+const TIMING_METRO_LANE = 1;
 interface TimingLane {
   label: string;
   color: string;
@@ -1397,8 +1525,9 @@ const TIMING_LANES: readonly TimingLane[] = [
  *  row's own prevBeatPhase logic, moved here) a tick as tall as tempoLock,
  *  else nothing — an unconfident tracker draws a short tick, same
  *  "unconfident reads as unconfident" convention the tempo dot uses. Metro:
- *  metronome.ts's own even tick (metronomeBeat), taller on the bar
- *  (metronomeBar). Heard: `frame.onset`, the exact edge the Hits card's
+ *  metronome.ts's own even tick: full and bright on the bar (metronomeBar,
+ *  what this lane's jack sends), short and faint on the other beats
+ *  (metronomeBeat). Heard: `frame.onset`, the exact edge the Hits card's
  *  Beat lane marks as fired. A detection landing under a grid tick reads as
  *  locked; one between ticks reads as a double; a grid tick with nothing
  *  under it reads as a miss. */
@@ -1408,7 +1537,7 @@ function createTimingStrip(mountJack: MountJack) {
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above, taller on the bar; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
+      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above: faint on each beat, bright on the bar, and only the bar goes out its jack; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX);
@@ -1462,15 +1591,18 @@ function createTimingStrip(mountJack: MountJack) {
     }
 
     // Ticks bottom-up per lane, height proportional to the column's own
-    // value — NaN (or 0) draws nothing.
+    // value — NaN (or 0) draws nothing. A Metronome beat (anything under the
+    // bar's 1) is the faint context tick, not the lane's own reading.
     for (let x = 0; x <= len; x++) {
       const px = x === len ? w - 1 : x;
       for (let li = 0; li < TIMING_LANES.length; li++) {
-        const v = x === len ? ring.live(li) : ring.at(x, li);
-        if (!(v > 0)) continue;
+        const raw = x === len ? ring.live(li) : ring.at(x, li);
+        if (!(raw > 0)) continue;
+        const metroBeat = li === TIMING_METRO_LANE && raw < 1;
+        const v = metroBeat ? TIMING_METRO_BEAT_HEIGHT : raw;
         const top = li * TIMING_LANE_HEIGHT_PX;
         const h = Math.max(1, v * (TIMING_LANE_HEIGHT_PX - 1));
-        ctx.fillStyle = TIMING_LANES[li].color;
+        ctx.fillStyle = metroBeat ? TIMING_METRO_BEAT_COLOR : TIMING_LANES[li].color;
         ctx.fillRect(px, top + (TIMING_LANE_HEIGHT_PX - h), 1, h);
       }
     }
@@ -1520,27 +1652,147 @@ const HIT_CURVE_HEIGHT_CSS_PX = 56;
  *  tick's inputs and redraws from scratch (a canvas clear plus a few dozen
  *  line segments is cheap — see file header's "fills move every frame"
  *  rule). */
+// ---- The Shape section's Length group ----
+
+// A row's ms is the time a pulse takes to fall to e^-3 (about 5%) of its
+// height, i.e. 3 / rate — round numbers at the base rates, and about where
+// a pulse stops reading on screen.
+const TAIL_FADE_TIME_CONSTANTS = 3;
+/** Each lane's base pulse decay rate, per second — read from the modules
+ *  that own them, never re-typed, the same rule as drives.ts's
+ *  heightDecayPerSec. */
+const LANE_DECAY_PER_SEC: Readonly<Record<HitLane, number>> = {
+  beat: BEAT_PULSE_DECAY_PER_SEC,
+  low: GROUP_TUNING.low.pulseDecayRate,
+  mid: GROUP_TUNING.mid.pulseDecayRate,
+  high: GROUP_TUNING.high.pulseDecayRate,
+};
+/** How long `lane`'s pulse takes to fade at tail multiple `tail`, in ms,
+ *  before Smoothing. */
+function laneFadeMs(lane: HitLane, tail: number): number {
+  return ((TAIL_FADE_TIME_CONSTANTS / LANE_DECAY_PER_SEC[lane]) * 1000) * tail;
+}
+const TAIL_ROW_TAIL = "Right: longer, still fading when the next hit lands. Left: a short flick.";
+const TAIL_ROW_HINTS: Readonly<Record<HitLane, string>> = {
+  beat: `How long a Beat pulse takes to fade — also the metronome's and a beat grid's pulses, and Beat wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+  low: `How long a Low pulse takes to fade, and Bass hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+  mid: `How long a Mid pulse takes to fade, and Mid hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+  high: `How long a High pulse takes to fade, and Treble hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+};
+
+// Whether the Length rows move together — how you like to drag them, not
+// how anything looks, so it stays on this device (syncedStores.ts's
+// PRIVATE_KEYS). Absent = linked.
+const TAILS_LINKED_KEY = "vibe.hitTailLinked";
+function loadTailsLinked(): boolean {
+  try {
+    return localStorage.getItem(TAILS_LINKED_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function saveTailsLinked(linked: boolean): void {
+  try {
+    if (linked) localStorage.removeItem(TAILS_LINKED_KEY);
+    else localStorage.setItem(TAILS_LINKED_KEY, "0");
+  } catch {
+    // Not fatal — the choice just won't persist across reloads.
+  }
+}
+
+const TAIL_ENVELOPE_HEIGHT_CSS_PX = 64;
+const TAIL_ENVELOPE_BEATS = 4;
+// No tempo yet (or none at all): draw the beat lines at this.
+const TAIL_ENVELOPE_FALLBACK_BPM = 120;
+
+/** The Length group's Envelope monitor: each lane's pulse shape after a hit
+ *  (e^(-rate·t)) over TAIL_ENVELOPE_BEATS beats, with dashed beat lines and
+ *  a hairline at the fade level the rows' ms count to. Redrawn every frame
+ *  while Shape is open — the last-hit dots move. */
+function createTailEnvelope() {
+  const canvas = document.createElement("canvas");
+  canvas.style.cssText = `display: block; width: 100%; height: ${TAIL_ENVELOPE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+  const ctx = canvas.getContext("2d")!;
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: TAIL_ENVELOPE_HEIGHT_CSS_PX });
+  const h = TAIL_ENVELOPE_HEIGHT_CSS_PX;
+  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
+
+  function curve(w: number, spanSec: number, rate: number): void {
+    ctx.beginPath();
+    const STEPS = 64;
+    for (let i = 0; i <= STEPS; i++) {
+      const x = (i / STEPS) * (w - 1);
+      const y = yOf(Math.exp(-rate * (i / STEPS) * spanSec));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  return {
+    canvas,
+    /** `rateScale` is Smoothing's (non-finite at its Off stop: nothing
+     *  plays, so only the as-set curves are drawn); `sinceHitSec[i]` is
+     *  HIT_LANES[i]'s time since its last hit, null before one. */
+    draw(tails: HitTails, rateScale: number, bpm: number, sinceHitSec: readonly (number | null)[]): void {
+      if (!sizer.ensure()) return;
+      const w = sizer.width;
+      ctx.clearRect(0, 0, w, h);
+      const beatSec = 60 / (bpm > 0 && Number.isFinite(bpm) ? bpm : TAIL_ENVELOPE_FALLBACK_BPM);
+      const spanSec = TAIL_ENVELOPE_BEATS * beatSec;
+
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fillRect(0, 0, 1, h);
+      ctx.fillRect(0, Math.round(yOf(Math.exp(-TAIL_FADE_TIME_CONSTANTS))) - 0.5, w, 1);
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
+      for (let b = 1; b <= TAIL_ENVELOPE_BEATS; b++) {
+        const x = Math.round((b / TAIL_ENVELOPE_BEATS) * (w - 1)) - 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+
+      const playing = Number.isFinite(rateScale);
+      const stretched = !playing || rateScale !== 1;
+      for (let li = 0; li < HIT_LANES.length; li++) {
+        const lane = HIT_LANES[li];
+        const color = HITS_LANES[li].color;
+        const setRate = LANE_DECAY_PER_SEC[lane] / tails[lane];
+        if (stretched) {
+          ctx.strokeStyle = withAlpha(color, 0.45);
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 3]);
+          curve(w, spanSec, setRate);
+        }
+        if (!playing) continue;
+        ctx.setLineDash([]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        const rate = setRate * rateScale;
+        curve(w, spanSec, rate);
+        const since = sinceHitSec[li];
+        if (since === null || since > spanSec) continue;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc((since / spanSec) * (w - 1), yOf(Math.exp(-rate * since)), 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.setLineDash([]);
+    },
+  };
+}
+
 function createHitCurve() {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = `display: block; width: 100%; height: ${HIT_CURVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
-  let cssWidth = 0;
 
-  /** Same "no layout yet" guard as every other canvas in this file
-   *  (createColumnRing's own ensureSize) — a folded/closed panel has a
-   *  zero-size rect. */
-  function ensureSize(): boolean {
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === cssWidth) return true;
-    cssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(HIT_CURVE_HEIGHT_CSS_PX * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return true;
-  }
+  /** Same "no layout yet" guard as every other canvas in this file (see
+   *  canvasSizer.ts) — a folded/closed panel has no width to draw at. */
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: HIT_CURVE_HEIGHT_CSS_PX });
 
   let lastKey = "";
   const xOf = (ratio: number, w: number) => ((ratio - 1) / (ONSET_METER_MAX - 1)) * (w - 1);
@@ -1555,13 +1807,15 @@ function createHitCurve() {
     draw(knee: number, laneRatios: readonly (number | null)[]): void {
       // The curve only changes when Knee or a lane's last hit does — and
       // both are rare next to the tick rate — so a repeat call is a no-op
-      // rather than a clear+stroke+rect read every frame. The width check
+      // rather than a clear+stroke+rect read every frame. The size check
       // stays first so a panel resize still repaints.
-      if (!ensureSize()) return;
-      const key = `${cssWidth}|${knee}|${laneRatios.join(",")}`;
+      if (!sizer.ensure()) return;
+      // `sizer.version` stands in for the width: resizing the backing store
+      // (a new width, or a new devicePixelRatio) clears the plot.
+      const key = `${sizer.version}|${knee}|${laneRatios.join(",")}`;
       if (key === lastKey) return;
       lastKey = key;
-      const w = cssWidth;
+      const w = sizer.width;
       const h = HIT_CURVE_HEIGHT_CSS_PX;
       ctx.clearRect(0, 0, w, h);
 
@@ -1599,7 +1853,7 @@ function createHitCurve() {
   };
 }
 
-/** The Signal card's Loudness welded block: Short-term as the big
+/** The Dynamics card's Loudness welded block: Short-term as the big
  *  seven-segment reading (toFixed's ASCII minus renders in DSEG7), "LUFS"
  *  under it, and the Integrated reading beneath that. Digits go hot past
  *  LUFS_HOT. */
@@ -1850,7 +2104,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
   const signalCard = createCard({
-    title: "Signal",
+    title: "Dynamics",
     accent: INPUT_GREEN,
     foldId: "signal",
     right: lufsResetChip,
@@ -1871,8 +2125,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // Row-level visibility (mono/lufs null on a device with no local
   // analyser) — see update()'s own Signal block for the toggles and the
   // "don't accumulate a column while hidden" behaviour they carry.
-  let waveformShown = false;
-  let lufsShown = false;
+  // null until the first unfolded tick applies the real state: the rows are
+  // built visible, so a mic-less device (where nothing ever shows) must still
+  // get its first setShown(false) rather than compare false !== false.
+  let waveformShown: boolean | null = null;
+  let lufsShown: boolean | null = null;
 
   // ---- Hits ----
   const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack);
@@ -1943,6 +2200,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   hitFloorRow.onChange((v) => deps.hitShape.set({ floor: v }));
   hitFloorRow.sync(() => deps.hitShape.get().floor);
 
+
   const hitCurveRow = createMeterRow({
     label: "Curve",
     accent: NEUTRAL_ACCENT,
@@ -1954,7 +2212,80 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   hitCurveRow.el.children[1].replaceWith(hitCurve.canvas);
   hitCurveRow.setReadout(ONSET_METER_MAX.toFixed(1));
 
+  // Length: how long each lane's pulse rings out (hitStrength.ts's
+  // `shape.tail`). Stored as a multiple of that lane's own fall, shown as
+  // the time it comes to (laneFadeMs), so a row reads in ms while an
+  // untouched one stays exactly 1. Linked (the default) moves every lane by
+  // the same ratio, so Low stays longer than High; unlinked, each row is
+  // its own. The Envelope monitor draws what the rows add up to.
+  let tailsLinked = loadTailsLinked();
+  const tailLinkChip = createChipButton("", "Linked: dragging any lane moves all four together, keeping their proportions", () => {
+    tailsLinked = !tailsLinked;
+    saveTailsLinked(tailsLinked);
+    refreshTailLinkChip();
+  });
+  function refreshTailLinkChip(): void {
+    tailLinkChip.textContent = tailsLinked ? "Linked" : "Unlinked";
+    tailLinkChip.style.cssText = tailsLinked ? chipBtnLitStyle : chipBtnStyle;
+  }
+  refreshTailLinkChip();
+  const lengthHead = document.createElement("div");
+  lengthHead.style.cssText = `${groupHeadingStyle} display: flex; align-items: center; justify-content: space-between;`;
+  lengthHead.append("Length", tailLinkChip);
+
+  const tailEnvelopeRow = createMeterRow({
+    label: "Envelope",
+    accent: NEUTRAL_ACCENT,
+    unit: "×",
+    description:
+      "Each lane's pulse falling after a hit, over four beats at the current tempo (dashed lines). Dots ride down from each lane's last hit. Solid is what plays; when this scene's Smoothing stretches it, the dashed curve is what the rows alone set. The readout is Smoothing's stretch.",
+  });
+  const tailEnvelope = createTailEnvelope();
+  tailEnvelopeRow.el.children[1].replaceWith(tailEnvelope.canvas);
+
+  const tailRows = HIT_LANES.map((lane, li) => {
+    const baseMs = laneFadeMs(lane, HIT_TAIL_DEFAULT);
+    const row = createControlRow({
+      label: HITS_LANES[li].label,
+      accent: HITS_LANES[li].color,
+      min: laneFadeMs(lane, HIT_TAIL_MIN),
+      max: laneFadeMs(lane, HIT_TAIL_MAX),
+      defaultValue: baseMs,
+      mapping: "log",
+      unit: "ms",
+      format: (v) => String(Math.round(v)),
+      description: TAIL_ROW_HINTS[lane],
+    });
+    // ms / baseMs is exactly 1 when the row's own reset commits baseMs.
+    row.onChange((ms) => setTail(lane, ms / baseMs));
+    return { lane, row, baseMs };
+  });
+  function syncTailRows(): void {
+    const tails = deps.hitShape.get().tail;
+    for (const t of tailRows) t.row.sync(() => t.baseMs * tails[t.lane]);
+  }
+  function setTail(lane: HitLane, mult: number): void {
+    if (!tailsLinked) {
+      deps.hitShape.set({ tail: { [lane]: mult } });
+      return;
+    }
+    const cur = deps.hitShape.get().tail;
+    // One ratio for every lane, narrowed so none runs past its range —
+    // proportions hold even when the dragged lane would push another off
+    // its end (the dragged row then snaps back to where that stops it).
+    let ratio = mult / cur[lane];
+    for (const l of HIT_LANES) ratio = Math.min(HIT_TAIL_MAX / cur[l], Math.max(HIT_TAIL_MIN / cur[l], ratio));
+    // Lanes level with the dragged one land on exactly its value, so a
+    // linked Reset of an untouched set returns every lane to exactly 1.
+    const unclamped = ratio === mult / cur[lane];
+    const next: Partial<Record<HitLane, number>> = {};
+    for (const l of HIT_LANES) next[l] = unclamped && cur[l] === cur[lane] ? mult : cur[l] * ratio;
+    deps.hitShape.set({ tail: next });
+    syncTailRows();
+  }
+
   hitsShape.body.append(
+    groupHeading("Height", true),
     hitAmountRow.el,
     spacer(),
     hitKneeRow.el,
@@ -1964,12 +2295,20 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     hitFloorRow.el,
     spacer(),
     hitCurveRow.el,
+    lengthHead,
+    tailEnvelopeRow.el,
+    ...tailRows.flatMap((t) => [spacer(), t.row.el]),
   );
+  syncTailRows();
 
   // Per-lane last-hit ratio, for the Curve's own dots — updated only on the
   // tick each lane fires (see the update() block below), so a dot always
   // marks a real hit rather than the ratio's live wander below the line.
   const lastHitRatio: (number | null)[] = [null, null, null, null];
+  // Per-lane last-hit time, for the Envelope's own dots — same lanes and
+  // same "only on the tick it fires" rule.
+  const lastHitMs: (number | null)[] = [null, null, null, null];
+  const sinceHitSec: (number | null)[] = [null, null, null, null];
 
   const hitsCard = createCard({ title: "Hits", accent: NEUTRAL_ACCENT, foldId: "hits" });
   hitsCard.body.append(hitsHistory.el, spacer(), hitsShape.el);
@@ -2064,7 +2403,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   mountJack("anim.centroid", brightnessRow.right, brightnessRow.el);
   // Inserted before the hint (el's 3rd child), so it sits under the meter
-  // like the Signal card's History. RAW briefly mixes raw/processed samples
+  // like the Dynamics card's History. RAW briefly mixes raw/processed samples
   // in the same trace right after a toggle, until HISTORY_SPAN_SEC rolls the
   // pre-toggle column out — harmless, and self-heals. The small legend under
   // it is what tells the two readings (the bar's own Brightness value, the
@@ -2101,29 +2440,21 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   let colStartMs: number | null = null;
 
   // devicePixelRatio-scaled backing store, resized whenever the card's
-  // layout width changes — same as spectrumStrip.ts. The history is one
-  // column per CSS pixel, so it's rebuilt (cleared) with the width.
-  let waveCssWidth = 0;
-  /** False while the canvas has no layout (the card is folded, or the panel
-   *  is closed) — same reasoning as spectrumStrip.ts's ensureSize: sizing to
-   *  a clamped 1px here would rebuild (clear) the wave history the moment
-   *  the card is hidden, then stretch a 1px backing store across it on show. */
-  function ensureWaveSize(): boolean {
-    const rect = waveCanvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === waveCssWidth) return true;
-    waveCssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    waveCanvas.width = Math.round(w * dpr);
-    waveCanvas.height = Math.round(WAVE_HEIGHT_CSS_PX * dpr);
-    waveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    histMin = new Float32Array(w);
-    histMax = new Float32Array(w);
-    histClip = new Uint8Array(w);
-    head = 0;
-    return true;
-  }
+  // layout width changes — same as spectrumStrip.ts (both via canvasSizer.ts,
+  // which returns false while the canvas has no layout: the card is folded or
+  // the panel is closed, so the wave history isn't rebuilt against a clamped
+  // 1px). The history is one column per CSS pixel, so it's rebuilt (cleared)
+  // with the width; a ratio-only change keeps it.
+  const waveSizer = createCanvasSizer(waveCanvas, waveCtx, {
+    heightCssPx: WAVE_HEIGHT_CSS_PX,
+    onWidthChange(w) {
+      histMin = new Float32Array(w);
+      histMax = new Float32Array(w);
+      histClip = new Uint8Array(w);
+      head = 0;
+    },
+  });
+  const ensureWaveSize = waveSizer.ensure;
 
   function commitColumn(min: number, max: number, clip: boolean): void {
     histMin[head] = min;
@@ -2163,7 +2494,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
    *  processing, so unlike the rest of the RAW chip it never changes with
    *  it (see file header). */
   function drawWave(): void {
-    const w = waveCssWidth;
+    const w = waveSizer.width;
     const h = WAVE_HEIGHT_CSS_PX;
     const mid = h / 2;
     const len = histMin.length;
@@ -2362,10 +2693,25 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           if (anim.lowOnset) lastHitRatio[1] = anim.hits.low.ratio;
           if (anim.midOnset) lastHitRatio[2] = anim.hits.mid.ratio;
           if (anim.highOnset) lastHitRatio[3] = anim.hits.high.ratio;
+          if (frame?.onset) lastHitMs[0] = nowMs;
+          if (anim.lowOnset) lastHitMs[1] = nowMs;
+          if (anim.midOnset) lastHitMs[2] = nowMs;
+          if (anim.highOnset) lastHitMs[3] = nowMs;
         }
-        // The Curve isn't part of the hits history's own canvas, so it only
-        // needs drawing while Shape is actually open to see it.
-        if (shapeOpen) hitCurve.draw(shape.knee, lastHitRatio);
+        // The Curve and Envelope aren't part of the hits history's own
+        // canvas, so they only need drawing while Shape is actually open.
+        if (shapeOpen) {
+          hitCurve.draw(shape.knee, lastHitRatio);
+          for (let li = 0; li < lastHitMs.length; li++) {
+            const at = lastHitMs[li];
+            sinceHitSec[li] = at === null ? null : (nowMs - at) / 1000;
+          }
+          tailEnvelope.draw(shape.tail, rateScale, anim ? anim.metronomeBpm : 0, sinceHitSec);
+          if (text) {
+            if (Number.isFinite(rateScale)) tailEnvelopeRow.setReadout((1 / rateScale).toFixed(2));
+            else tailEnvelopeRow.setReadout("Off", { textual: true, unit: "" });
+          }
+        }
       } else {
         // Folded: don't accumulate a column while hidden, same as Signal's History.
         hitsHistory.resetColumn();

@@ -39,19 +39,27 @@ void main() {
   float minDim = min(uResolution.x, uResolution.y);
   vec2 screenUv = vUv * uResolution.xy / minDim * 220.0;
 
-  float shake = uBeatPulse * 0.006;
+  // Out of register: each ink's artwork slides by a fraction of the short
+  // side (p spans 2 units across it, so 0.012 is 0.6 % of it, about 1.3 dot
+  // cells here) while the halftone grids stay fixed to the display. Shifting
+  // the dot grid alone would be invisible, since the shape each ink prints
+  // would still be sampled in the same place.
+  float shake = uBeatPulse * 0.012;
   vec2 offA = vec2(shake, 0.0);
   vec2 offB = vec2(-shake * 0.7, shake * 0.4);
 
-  float v = shapeField(p);
+  float vA = shapeField(p + offA);
+  float vB = shapeField(p + offB);
   float grain = hash21(floor(screenUv * 3.0)) * 0.06;
 
-  float inkA = halftone(screenUv + offA, v, 15.0, 1.0);
-  float inkB = halftone(screenUv + offB, v * 0.75 + 0.12, 75.0, 1.0);
+  float inkA = halftone(screenUv, vA, 15.0, 1.0);
+  float inkB = halftone(screenUv, vB * 0.75 + 0.12, 75.0, 1.0);
 
   vec3 paper = vec3(0.93, 0.91, 0.85) - grain;
-  vec3 colA = palette(0.15, uPalA, uPalB, uPalC, uPalD);
-  vec3 colB = palette(0.65, uPalA, uPalB, uPalC, uPalD);
+  // The room palette's first two inks: every palette keeps its inks
+  // readable and apart (see palette.ts), so the overprint doesn't turn to mud.
+  vec3 colA = uPalInk[0];
+  vec3 colB = uPalInk[1];
 
   vec3 col = paper;
   col = mix(col, col * colB * 1.4, inkB);

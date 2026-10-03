@@ -35,7 +35,10 @@ import { SETTING_GROUPS, type SceneSetting, type SettingGroup } from "./sceneSet
  * item 2 of family strain" without parsing the key string back apart, and
  * what lets `src/tuning/bakeDefaults.ts` skip a generated setting — its
  * default lives in the scene's own item table above, not a literal
- * `default:` a bake could find and rewrite in source.
+ * `default:` a bake could find and rewrite in source. `defineItemPairs`'s
+ * `diagonal: false` skips `i === j` entirely, for a pair table that has no
+ * own-item meaning (Physarum 2's Touch: a strain doesn't feed/eat its own
+ * trail through this control).
  *
  * **The panel/widget split.** A scene declares *what* its items are
  * (`defineItems`/`defineItemPairs` here, plain data) and *how they're
@@ -44,10 +47,12 @@ import { SETTING_GROUPS, type SceneSetting, type SettingGroup } from "./sceneSet
  * gets built in the browser, by `src/ui/deviceMenu.ts` and the widget
  * itself. Nothing under `src/render/` ever imports `src/ui/`. This is also
  * why the TV (`src/tv.ts`) and a paid scene under
- * `src/render/scenes/private/` can ignore `panel` outright: no setting of
- * any kind reaches the TV (phone-only already — see `src/net/protocol.ts`),
- * and anywhere the device menu never opens (the TV, a gallery preview, a
- * test), a scene's `settings` array — the same flat list
+ * `src/render/scenes/private/` can ignore `panel` outright: the TV never
+ * opens a device menu, yet an item's controls still reach it — they are
+ * ordinary keyed settings, so they ride in the room's look with every other
+ * (`isRoomKey`, `src/net/syncedStores.ts`) and nothing item-specific crosses
+ * the wire. Anywhere the device menu never opens (the TV, a gallery preview,
+ * a test), a scene's `settings` array — the same flat list
  * `composeSettings` below produces — is all that's ever read; `panel` only
  * matters to the one file that renders it.
  *
@@ -148,19 +153,36 @@ export interface PairwiseParam {
   min: number;
   max: number;
   step: number;
-  /** `default[i][j]`, or a function — mirrors a plain matrix rather than
-   *  forcing a flat per-pair list. */
-  default: readonly (readonly number[])[] | ((i: number, j: number) => number);
+  /** `default[i][j]`, a function, or one plain number shared by every pair
+   *  (Physarum 2's Touch, which starts at rest for every strain) — mirrors a
+   *  plain matrix rather than forcing a flat per-pair list. */
+  default: readonly (readonly number[])[] | ((i: number, j: number) => number) | number;
+  /** False skips `i === j`, for a pair table that has no own-item meaning
+   *  (Physarum 2's Touch: a strain doesn't feed/eat its own trail through
+   *  this control) — the diagonal is simply never emitted, rather than
+   *  emitted and ignored, so it can't sit as a permanently dead key in
+   *  Looks, resets or share codes. Default true (the diagonal is emitted,
+   *  as before). */
+  diagonal?: boolean;
+  /** Copied onto every generated spec — see `SceneSetting.masterScale`. */
+  masterScale?: false;
 }
 
 /** One `SceneSetting` per `(i, j)` pair over `0..count-1` (`i === j`
- *  included), keyed `<param.key><i><j>` and tagged `item: { family, index:
- *  i, param: param.key, other: j }` — see this file's header. */
+ *  included unless `param.diagonal === false`), keyed `<param.key><i><j>`
+ *  and tagged `item: { family, index: i, param: param.key, other: j }` —
+ *  see this file's header. */
 export function defineItemPairs(family: string, count: number, param: PairwiseParam): SceneSetting[] {
   const out: SceneSetting[] = [];
   for (let i = 0; i < count; i++) {
     for (let j = 0; j < count; j++) {
-      const def = typeof param.default === "function" ? param.default(i, j) : param.default[i]![j]!;
+      if (param.diagonal === false && i === j) continue;
+      const def =
+        typeof param.default === "function"
+          ? param.default(i, j)
+          : typeof param.default === "number"
+            ? param.default
+            : param.default[i]![j]!;
       out.push({
         key: `${param.key}${i}${j}`,
         label: param.label ? param.label(i, j) : `${family} ${i}→${j}`,
@@ -170,6 +192,7 @@ export function defineItemPairs(family: string, count: number, param: PairwisePa
         max: param.max,
         step: param.step,
         default: def,
+        masterScale: param.masterScale,
         item: { family, index: i, param: param.key, other: j },
       });
     }
@@ -182,8 +205,10 @@ export function defineItemPairs(family: string, count: number, param: PairwisePa
  *  with no groups at all already reads) — see this file's header. */
 export function composeSettings(...lists: readonly (readonly SceneSetting[])[]): SceneSetting[] {
   const rank = (g: SettingGroup | undefined): number => (g === undefined ? -1 : SETTING_GROUPS.indexOf(g));
-  return lists
-    .flat()
+  // concat, not .flat(): this runs at module load (physarum2.ts), and the TV
+  // runtimes the es2017 build target exists for (vite.config.ts) lack .flat().
+  return ([] as SceneSetting[])
+    .concat(...lists)
     .map((spec, order) => ({ spec, order }))
     .sort((a, b) => rank(a.spec.group) - rank(b.spec.group) || a.order - b.order)
     .map((x) => x.spec);
