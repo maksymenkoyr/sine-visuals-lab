@@ -1,0 +1,1733 @@
+<title>Zim Rave Drop</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0d0409;
+  --panel: #1c0a17;
+  --panel-2: #2a1023;
+  --line: #4a1d40;
+  --text: #f6e9f2;
+  --muted: #b896ad;
+  --accent: #ff3fae;
+  --accent-ink: #1a0614;
+  --build: #9cff2e;
+  --focus: #9cff2e;
+  --stage-bg: #14060f;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
+.app { min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
+.stage {
+  position: relative; width: min(100%, calc((100vh - var(--bar-h, 64px) - 44px) * 16 / 9)); aspect-ratio: 16 / 9;
+  background: var(--stage-bg); border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 1px var(--line);
+}
+@supports (height: 100svh) { .stage { width: min(100%, calc((100svh - var(--bar-h, 64px) - 44px) * 16 / 9)); } }
+.stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.bar {
+  width: 100%; max-width: 1600px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+button {
+  font: inherit; font-weight: 600; color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 12px; cursor: pointer; min-height: 36px; white-space: nowrap;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); min-width: 8.5em; }
+button[aria-pressed="true"] { border-color: var(--build); color: var(--build); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.field { display: flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; }
+.field output { color: var(--text); font-variant-numeric: tabular-nums; min-width: 4.6em; }
+.field small { font-size: 12px; }
+input[type=range] { accent-color: var(--accent); width: 120px; }
+.phrase { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.cells { display: grid; grid-template-columns: repeat(8, 22px); gap: 3px; position: relative; padding-top: 14px; }
+.cell { height: 18px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); display: grid; place-items: center; font-size: 10px; color: var(--muted); }
+.cell.build { border-color: var(--build); color: var(--build); background: repeating-linear-gradient(135deg, var(--panel-2) 0 4px, #2c3a12 4px 7px); }
+.cell.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.cell.build.on { background: var(--build); color: var(--accent-ink); }
+.cells .tag { position: absolute; top: 0; font-size: 10px; line-height: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+.tag.drop { left: 0; color: var(--accent); }
+.tag.build { left: calc(6 * 25px); color: var(--build); }
+.dots { display: grid; grid-template-columns: repeat(4, 9px); gap: 5px; padding-top: 14px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line); }
+.dot.on { background: var(--text); border-color: var(--text); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bare .app { padding: 0; gap: 0; } .bare .bar { display: none; } .bare .stage { width: 100vw; border-radius: 0; box-shadow: none; }
+@media (max-width: 640px) {
+  .app { justify-content: flex-start; }
+  .phrase { margin-left: 0; }
+  input[type=range] { width: 100px; }
+}
+</style>
+<main class="app">
+  <div class="stage" id="stage" role="img" aria-label="A cartoon rave: a tiny DJ slams a giant red button on the drop"></div>
+  <div class="bar" id="bar">
+    <button id="play" class="primary" title="Space">Play with sound</button>
+    <button id="sound" aria-pressed="false" title="M">Sound off</button>
+    <label class="field">Tempo <input id="tempo" type="range" min="90" max="160" step="1" value="128"> <output id="tempoOut">128 BPM</output></label>
+    <button id="drop" title="D">Drop now</button>
+    <label class="field">Camera cuts <small>Fewer</small><input id="cuts" type="range" min="0" max="2" step="1" value="1"><small>More</small></label>
+    <div class="phrase" aria-label="Phrase: 8 bars, drop at bar 1, build in bars 7 and 8">
+      <div class="cells" id="cells"><span class="tag drop">Drop</span><span class="tag build">Build</span></div>
+      <div class="dots" id="dots"></div>
+    </div>
+    <span class="sr" id="live" aria-live="polite"></span>
+  </div>
+</main>
+<script>
+// ---- lib.js
+// Drawing helpers for the Zim x PPG frame (the r11 still), plus the prototype's glow, matrix and cel helpers.
+// Characters (PPG): one thick pure-black union outline, flat fills, mitten nubs, giant eyes.
+// World (Zim): thin dark-plum outlines, base + hard shadow shape + pale rim line.
+const INK = '#0a0508';      // PPG pure black
+const PLUM = '#1a0614';     // Zim background line
+let LW = 7;
+const DEFS = [];
+let _id = 0;
+const uid = (p) => `${p}${++_id}`;
+const f1 = (n) => Math.round(n * 10) / 10;
+let _seed = 7;
+const rnd = () => { _seed = (_seed * 16807) % 2147483647; return (_seed - 1) / 2147483646; };
+const xf = (x, y, rot = 0, s = 1, flip = false) => `translate(${x},${y}) rotate(${rot}) scale(${flip ? -s : s},${s})`;
+
+// Parts with ONE outline around their union: all strokes first, then all fills, then inner.
+function blob(parts, inner = '', lw = LW, ink = INK) {
+  const s = parts.filter(p => !p.noOutline).map(p => `<path d="${p.d}" fill="${ink}" stroke="${ink}" stroke-width="${lw * 2}" stroke-linejoin="round" stroke-linecap="round"/>`).join('');
+  const f = parts.map(p => `<path d="${p.d}" fill="${p.fill}"${p.attr ? ' ' + p.attr : ''}/>`).join('');
+  return `<g>${s}${f}${inner}</g>`;
+}
+function shape(d, fill, lw = LW, ink = INK, extra = '') {
+  return `<path d="${d}" fill="${fill}" stroke="${ink}" stroke-width="${lw * 2}" paint-order="stroke" stroke-linejoin="round" ${extra}/>`;
+}
+function line(d, w = LW * 0.6, col = INK, extra = '') {
+  return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`;
+}
+const E = (cx, cy, rx, ry, rot = 0) => {
+  // ellipse as a path (so it can go in blob parts)
+  const c = Math.cos(rot * Math.PI / 180), s = Math.sin(rot * Math.PI / 180);
+  const p = (a) => { const x = rx * Math.cos(a), y = ry * Math.sin(a); return [cx + x * c - y * s, cy + x * s + y * c]; };
+  let d = '';
+  const n = 48;
+  for (let i = 0; i <= n; i++) { const q = p(i / n * Math.PI * 2); d += (i ? 'L' : 'M') + f1(q[0]) + ',' + f1(q[1]); }
+  return d + 'Z';
+};
+
+function crSample(pts, n) {
+  const P = [pts[0], ...pts, pts[pts.length - 1]];
+  const out = [];
+  const segs = pts.length - 1;
+  for (let i = 0; i <= n; i++) {
+    const t = (i / n) * segs;
+    const k = Math.min(Math.floor(t), segs - 1);
+    const u = t - k;
+    const p0 = P[k], p1 = P[k + 1], p2 = P[k + 2], p3 = P[k + 3];
+    const u2 = u * u, u3 = u2 * u;
+    const c = (a, b, cc, d) => 0.5 * ((2 * b) + (-a + cc) * u + (2 * a - 5 * b + 4 * cc - d) * u2 + (-a + 3 * b - 3 * cc + d) * u3);
+    out.push([c(p0[0], p1[0], p2[0], p3[0]), c(p0[1], p1[1], p2[1], p3[1]), t]);
+  }
+  return out;
+}
+function tubeD(pts, ws, n = 40, caps = [true, true]) {
+  const S = crSample(pts, n);
+  const wAt = (t) => {
+    const k = Math.min(Math.floor(t), ws.length - 2);
+    const u = t - k; const s = u * u * (3 - 2 * u);
+    return ws[k] + (ws[k + 1] - ws[k]) * s;
+  };
+  const L = [], R = [];
+  for (let i = 0; i < S.length; i++) {
+    const a = S[Math.max(0, i - 1)], b = S[Math.min(S.length - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+    const w = wAt(S[i][2]) / 2;
+    L.push([S[i][0] - dy * w, S[i][1] + dx * w]);
+    R.push([S[i][0] + dy * w, S[i][1] - dx * w]);
+  }
+  const we = wAt(S[S.length - 1][2]) / 2, ws0 = wAt(0) / 2;
+  let d = `M${f1(L[0][0])},${f1(L[0][1])}`;
+  for (let i = 1; i < L.length; i++) d += `L${f1(L[i][0])},${f1(L[i][1])}`;
+  d += caps[1] ? `A${f1(we)},${f1(we)} 0 0 0 ${f1(R[R.length - 1][0])},${f1(R[R.length - 1][1])}` : `L${f1(R[R.length - 1][0])},${f1(R[R.length - 1][1])}`;
+  for (let i = R.length - 2; i >= 0; i--) d += `L${f1(R[i][0])},${f1(R[i][1])}`;
+  d += caps[0] ? `A${f1(ws0)},${f1(ws0)} 0 0 0 ${f1(L[0][0])},${f1(L[0][1])}` : '';
+  return d + 'Z';
+}
+function crPath(pts, n = 30) {
+  const S = crSample(pts, n);
+  return 'M' + S.map(p => `${f1(p[0])},${f1(p[1])}`).join('L');
+}
+// Smooth closed outline through points (Catmull-Rom loop).
+function loopD(pts, n = 120) {
+  const m = pts.length;
+  const P = (i) => pts[(i + m) % m];
+  let d = '';
+  for (let i = 0; i < n; i++) {
+    const t = i / n * m, k = Math.floor(t), u = t - k;
+    const p0 = P(k - 1), p1 = P(k), p2 = P(k + 1), p3 = P(k + 2);
+    const u2 = u * u, u3 = u2 * u;
+    const c = (a, b, cc, dd) => 0.5 * ((2 * b) + (-a + cc) * u + (2 * a - 5 * b + 4 * cc - dd) * u2 + (-a + 3 * b - 3 * cc + dd) * u3);
+    d += (i ? 'L' : 'M') + f1(c(p0[0], p1[0], p2[0], p3[0])) + ',' + f1(c(p0[1], p1[1], p2[1], p3[1]));
+  }
+  return d + 'Z';
+}
+const poly = (pts) => 'M' + pts.map(p => f1(p[0]) + ',' + f1(p[1])).join('L') + 'Z';
+
+// PPG arm: a short tapered nub from shoulder to a round mitten ball. Returns blob parts.
+function ppgArm(sx, sy, hx, hy, w0, wm, col, bend = 0) {
+  const mx = (sx + hx) / 2, my = (sy + hy) / 2, l = Math.hypot(hx - sx, hy - sy);
+  const nx = -(hy - sy) / l, ny = (hx - sx) / l;
+  return [
+    { d: tubeD([[sx, sy], [mx + nx * bend, my + ny * bend], [hx, hy]], [w0, w0 * 0.78, w0 * 0.62], 24), fill: col },
+    { d: E(hx + (hx - sx) / l * wm * 0.25, hy + (hy - sy) / l * wm * 0.25, wm * 0.62, wm * 0.56, Math.atan2(hy - sy, hx - sx) * 180 / Math.PI), fill: col },
+  ];
+}
+// PPG leg: short tube hip -> ankle, white sock on the lower half, black Mary-Jane shoe pointing toeAng (deg).
+function ppgLeg(hx, hy, ax, ay, w, skin, toeAng, o = {}) {
+  const parts = [];
+  parts.push({ d: tubeD([[hx, hy], [ax, ay]], [w, w * 0.94], 10), fill: skin });
+  const k = o.sockFrom ?? 0.45;
+  const sx = hx + (ax - hx) * k, sy = hy + (ay - hy) * k;
+  parts.push({ d: tubeD([[sx, sy], [ax, ay]], [w * 0.97, w * 0.94], 8, [false, true]), fill: o.sock || '#ffffff' });
+  const ta = toeAng * Math.PI / 180;
+  const cx = ax + Math.cos(ta) * w * 0.32, cy = ay + Math.sin(ta) * w * 0.32;
+  parts.push({ d: E(cx, cy, w * 0.82, w * 0.55, toeAng), fill: o.shoe || INK });
+  const L = Math.hypot(ax - hx, ay - hy), fx = (ax - hx) / L, fy = (ay - hy) / L;
+  let inner = line(`M${f1(sx - fy * w * 0.5)},${f1(sy + fx * w * 0.5)} L${f1(sx + fy * w * 0.5)},${f1(sy - fx * w * 0.5)}`, LW * 0.5);
+  if (o.stripe) for (const t of [0.6, 0.78]) {
+    const qx = hx + (ax - hx) * t, qy = hy + (ay - hy) * t;
+    inner += line(`M${f1(qx - fy * w * 0.47)},${f1(qy + fx * w * 0.47)} L${f1(qx + fy * w * 0.47)},${f1(qy - fx * w * 0.47)}`, w * 0.15, o.stripe, 'stroke-linecap="butt"');
+  }
+  const hx2 = cx + Math.cos(ta) * w * 0.25 - Math.sin(ta) * w * 0.18, hy2 = cy + Math.sin(ta) * w * 0.25 + Math.cos(ta) * -w * 0.18;
+  inner += `<ellipse cx="${f1(hx2)}" cy="${f1(hy2)}" rx="${f1(w * 0.2)}" ry="${f1(w * 0.08)}" fill="#ffffff" opacity="0.9" transform="rotate(${toeAng} ${f1(hx2)} ${f1(hy2)})"/>`;
+  return { parts, inner };
+}
+
+// PPG eye: sclera ellipse, iris disc pushed toward the look direction, giant pupil, big highlight.
+// The sclera is meant to go into the head's blob parts so one outline wraps head+eyes.
+// opts: iris colour, look [dx,dy] (-1..1), pupilScale, pin (pinpoint pupil, no iris), lid (top lid cut angle)
+function ppgEyeParts(cx, cy, rx, ry, rot = 0) { return { d: E(cx, cy, rx, ry, rot), fill: '#ffffff' }; }
+function ppgEyeInner(cx, cy, rx, ry, rot, o = {}) {
+  const id = uid('eyc');
+  DEFS.push(`<clipPath id="${id}"><path d="${E(cx, cy, rx - 0.5, ry - 0.5, rot)}"/></clipPath>`);
+  const look = o.look || [0, 0];
+  const ir = Math.min(rx, ry) * (o.irisScale || 0.78);
+  const ix = cx + look[0] * (rx - ir * 0.75), iy = cy + look[1] * (ry - ir * 0.75);
+  let s = `<path d="${E(cx, cy, rx, ry, rot)}" fill="#ffffff"/><g clip-path="url(#${id})">`;
+  if (o.pin) {
+    // shocked: tiny pupil, no iris (Zim's pinpoint) on the PPG eye
+    s += `<circle cx="${ix}" cy="${iy}" r="${ir * 0.16}" fill="${INK}"/>`;
+  } else {
+    s += `<circle cx="${ix}" cy="${iy}" r="${ir}" fill="${o.iris || '#9a5cff'}"/>`;
+    s += `<circle cx="${ix}" cy="${iy}" r="${ir}" fill="none" stroke="${o.irisLine || '#4a1f7a'}" stroke-width="${LW * 0.3}"/>`;
+    const pr = ir * (o.pupilScale || 0.62);
+    const px = ix + look[0] * ir * 0.12, py = iy + look[1] * ir * 0.12;
+    s += `<circle cx="${px}" cy="${py}" r="${pr}" fill="${INK}"/>`;
+    s += `<circle cx="${px + pr * (o.hlx ?? 0.28)}" cy="${py - pr * 0.3}" r="${pr * 0.42}" fill="#ffffff"/>`;
+    if (o.glint) s += `<circle cx="${px - pr * 0.38}" cy="${py + pr * 0.4}" r="${pr * 0.13}" fill="#ffffff"/>`;
+  }
+  if (o.lid) s += `<path d="${o.lid}" fill="${o.lidCol || '#ffd8c4'}" stroke="${INK}" stroke-width="${LW * 1.0}"/>`;
+  s += `</g>`;
+  if (!o.noRing) s += `<path d="${E(cx, cy, rx, ry, rot)}" fill="none" stroke="${INK}" stroke-width="${LW * 1.05}"/>`;
+  return s;
+}
+
+function radial(id, stops, cx = '50%', cy = '50%', r = '50%', fx, fy, units = '') {
+  DEFS.push(`<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}"${fx ? ` fx="${fx}" fy="${fy}"` : ''}${units ? ` gradientUnits="${units}"` : ''}>${stops.map(s => `<stop offset="${s[0]}" stop-color="${s[1]}" stop-opacity="${s[2] ?? 1}"/>`).join('')}</radialGradient>`);
+  return `url(#${id})`;
+}
+function linear(id, stops, x1 = 0, y1 = 0, x2 = 0, y2 = 1, units = '') {
+  DEFS.push(`<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${units ? ` gradientUnits="${units}"` : ''}>${stops.map(s => `<stop offset="${s[0]}" stop-color="${s[1]}" stop-opacity="${s[2] ?? 1}"/>`).join('')}</linearGradient>`);
+  return `url(#${id})`;
+}
+
+// Zim machine panel: base fill, a hard shadow shape, a thin pale rim line, thin plum outline.
+function zpanel(d, base, shadowD, shade, rimD, rim, lw = 2.2) {
+  let s = `<path d="${d}" fill="${base}" stroke="${PLUM}" stroke-width="${lw}" stroke-linejoin="round"/>`;
+  if (shadowD) s += `<path d="${shadowD}" fill="${shade}"/>`;
+  if (rimD) s += line(rimD, lw * 1.1, rim);
+  return s;
+}
+// Motion/impact lines
+function speedLines(pts, w = 3, col = INK) { return pts.map(p => line(p, w, col)).join(''); }
+
+// Blast-lit rim (Zim's hard second tone, flipped to light): a crescent inside shape d on the side
+// facing the light. Drawn over the fill, under the face details.
+function rimLit(d, base, rim, dx, dy) {
+  const id = uid('rim');
+  DEFS.push(`<clipPath id="${id}"><path d="${d}"/></clipPath>`);
+  return `<g clip-path="url(#${id})"><path d="${d}" fill="${rim}"/><path d="${d}" fill="${base}" transform="translate(${dx},${dy})"/></g>`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Baked glow. The still used feGaussianBlur on a few flat discs; an animated SVG must not carry
+// filters, so each glow is a radial gradient whose alpha profile is the exact blur of a disc:
+// I(r) = ∫0..R (ρ/σ²) e^(-(r-ρ)²/2σ²) i0e(rρ/σ²) dρ, with i0e(x) = e^-x I0(x).
+function i0e(x) {
+  if (x < 3.75) {
+    const t = (x / 3.75) ** 2;
+    return Math.exp(-x) * (1 + t * (3.5156229 + t * (3.0899424 + t * (1.2067492 + t * (0.2659732 + t * (0.0360768 + t * 0.0045813))))));
+  }
+  const t = 3.75 / x;
+  return (0.39894228 + t * (0.01328592 + t * (0.00225319 + t * (-0.00157565 + t * (0.00916281 + t * (-0.02057706 + t * (0.02635537 + t * (-0.01647633 + t * 0.00392377)))))))) / Math.sqrt(x);
+}
+function blurDisc(r, R, s) {
+  const n = 160; let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const p = (i + 0.5) / n * R;
+    sum += (p / (s * s)) * Math.exp(-((r - p) ** 2) / (2 * s * s)) * i0e(r * p / (s * s));
+  }
+  return Math.min(1, sum * R / n);
+}
+// A gradient (objectBoundingBox) for a blurred disc of radius R, sigma s, drawn on a circle of radius R+3s.
+const _glowCache = {};
+function glowGrad(R, s, color) {
+  const key = `${R}_${s}_${color}`;
+  if (_glowCache[key]) return _glowCache[key];
+  const out = R + 3 * s, stops = [];
+  for (let i = 0; i <= 20; i++) { const f = i / 20; stops.push([f, color, blurDisc(f * out, R, s).toFixed(4)]); }
+  return (_glowCache[key] = radial(uid('glw'), stops));
+}
+// Blurred flat circle / ellipse (ellipse: the circle profile stretched; close enough for soft light).
+function glowCircle(cx, cy, R, s, color, extra = '') {
+  return `<circle cx="${cx}" cy="${cy}" r="${f1(R + 3 * s)}" fill="${glowGrad(R, s, color)}" ${extra}/>`;
+}
+// Blurred flat ellipse: the gradient's profile is the exact 2D blur sampled along the major axis,
+// and its minor radius is fitted so the profile along the minor axis matches too (least squares).
+const _ellCache = {};
+function glowEllipse(cx, cy, rx, ry, s, color, extra = '') {
+  const key = `${rx}_${ry}_${s}_${color}`;
+  if (!_ellCache[key]) {
+    const exact = (x0, y0) => {
+      let sum = 0;
+      for (let x = -rx; x <= rx; x += 1) for (let y = -ry; y <= ry; y += 1) {
+        if ((x / rx) ** 2 + (y / ry) ** 2 <= 1) sum += Math.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * s * s));
+      }
+      return sum / (2 * Math.PI * s * s);
+    };
+    const RX = rx + 3 * s, prof = [];
+    for (let i = 0; i <= 20; i++) prof.push(exact(i / 20 * RX, 0));
+    const at = (f) => { if (f >= 1) return 0; const k = f * 20, i = Math.floor(k); return prof[i] + (prof[i + 1] - prof[i]) * (k - i); };
+    const ys = [], ey = [];
+    for (let y = 0; y <= ry + 3 * s; y += 3) { ys.push(y); ey.push(exact(0, y)); }
+    let best = [RX, 1e9];
+    for (let RY = ry; RY <= RX; RY += 0.5) {
+      let e = 0; ys.forEach((y, i) => { e += (at(y / RY) - ey[i]) ** 2; });
+      if (e < best[1]) best = [RY, e];
+    }
+    _ellCache[key] = { RX, RY: best[0], fill: radial(uid('gle'), prof.map((v, i) => [i / 20, color, v.toFixed(4)])) };
+  }
+  const g = _ellCache[key];
+  return `<ellipse cx="${cx}" cy="${cy}" rx="${f1(g.RX)}" ry="${f1(g.RY)}" fill="${g.fill}" ${extra}/>`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// 2D affine matrices [a b c d e f] (SVG order). Every pose is a matrix built from a pivot.
+const MX = {
+  I: [1, 0, 0, 1, 0, 0],
+  mul(A, B) {
+    return [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3],
+      A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+  },
+  chain(...Ms) { return Ms.reduce((a, b) => MX.mul(a, b), MX.I); },
+  T: (x, y) => [1, 0, 0, 1, x, y],
+  R(deg) { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [c, s, -s, c, 0, 0]; },
+  S: (sx, sy = sx) => [sx, 0, 0, sy, 0, 0],
+  about(px, py, M) { return MX.chain(MX.T(px, py), M, MX.T(-px, -py)); },
+  pt(M, p) { return [M[0] * p[0] + M[2] * p[1] + M[4], M[1] * p[0] + M[3] * p[1] + M[5]]; },
+  inv(M) {
+    const det = M[0] * M[3] - M[1] * M[2];
+    const a = M[3] / det, b = -M[1] / det, c = -M[2] / det, d = M[0] / det;
+    return [a, b, c, d, -(a * M[4] + c * M[5]), -(b * M[4] + d * M[5])];
+  },
+  str(M) { return `matrix(${M.map(v => Math.round(v * 1e6) / 1e6).join(' ')})`; },
+};
+// A pose about a pivot: translate (x,y), rotate r degrees, scale (sx,sy), all around (px,py).
+function poseM(px, py, p = {}) {
+  return MX.chain(MX.T(p.x || 0, p.y || 0), MX.about(px, py, MX.mul(MX.R(p.r || 0), MX.S(p.sx ?? 1, p.sy ?? 1))));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Scene registry markup. A cel is one drawing of a part; only one cel of a part shows at a time
+// (limited animation swaps drawings). A rig group carries a transform, an fx group an opacity.
+const cel = (part, name, content, show = false) => `<g data-cel="${part}:${name}"${show ? '' : ' style="display:none"'}>${content}</g>`;
+const rig = (id, content, extra = '') => `<g data-x="${id}" ${extra}>${content}</g>`;
+const fxg = (id, content, extra = '') => `<g data-o="${id}" ${extra}>${content}</g>`;
+
+// ---- room.js
+// The room (Zim leads): black-heavy round chamber, ceiling ring with scallop lights, ribbed tubes,
+// LED bars, porthole, monitor; a balcony rail with a Zim-style crowd of small heads; the booth.
+// The blast (PPG flat ray burst in Zim colours) from the button.
+//
+// Prototype split: the drawing is the r11 still. The parts that move are wrapped in named groups
+// (rig = transform, fxg = opacity, cel = swappable drawing); motion.js says what moves them. Every
+// random draw keeps the still's order, so the hero frame is the still. New pieces (lasers, button
+// glow, lamp dimmers, lens caps, extra scope traces, eye cels) draw nothing at the hero frame.
+const BX = 470, BY = 588; // button centre
+const LAMPS = [];          // x of each scallop lamp, left to right
+const LEDS = [];           // [column][bar] -> true when lit in the still
+
+function room() {
+  _seed = 21;
+  let s = `<rect x="-400" y="-400" width="2400" height="1700" fill="#14060f"/>`;
+  const panels = [[-260, 120, 300], [60, 140, 250], [330, 150, 230], [580, 150, 260], [860, 150, 240], [1120, 140, 260], [1400, 120, 330]];
+  for (const [x, y, w] of panels) {
+    const h = 420;
+    s += zpanel(`M${x},${y} L${x + w},${y} L${x + w - 10},${y + h} L${x + 10},${y + h}Z`, '#2b0c27',
+      `M${x + w * 0.62},${y} L${x + w},${y} L${x + w - 10},${y + h} L${x + w * 0.7},${y + h}Z`, '#1f081c',
+      `M${x + 6},${y + 8} L${x + 14},${y + h - 8}`, '#5e2457');
+    s += `<rect x="${x + w * 0.18}" y="${y + 40}" width="${w * 0.12}" height="${h - 120}" rx="6" fill="#190716" stroke="${PLUM}" stroke-width="2"/>`;
+  }
+  // LED bar arrays: every bar is drawn dark, its lit face a separate layer the meters switch.
+  [[930, 230], [1010, 230], [-120, 250]].forEach(([x0, y0], col) => {
+    LEDS[col] = [];
+    for (let i = 0; i < 9; i++) {
+      const on = rnd() > 0.35;
+      LEDS[col][i] = on;
+      s += `<rect x="${x0}" y="${y0 + i * 22}" width="52" height="14" rx="2" fill="#5a0d26" stroke="${PLUM}" stroke-width="1.6"/>`;
+      s += `<g data-led="${col}:${i}"${on ? '' : ' style="display:none"'}><rect x="${x0}" y="${y0 + i * 22}" width="52" height="14" rx="2" fill="#e8204e" stroke="${PLUM}" stroke-width="1.6"/><rect x="${x0 + 4}" y="${y0 + i * 22 + 3}" width="20" height="3" fill="#ff9ab4"/></g>`;
+    }
+  });
+  // porthole to space
+  s += `<circle cx="760" cy="250" r="96" fill="#3a1440" stroke="${PLUM}" stroke-width="3"/>`;
+  s += `<circle cx="760" cy="250" r="78" fill="#0b0620" stroke="#6b2a66" stroke-width="5"/>`;
+  for (let i = 0; i < 40; i++) { const a = rnd() * 6.283, r = Math.sqrt(rnd()) * 72; s += `<circle cx="${760 + Math.cos(a) * r}" cy="${250 + Math.sin(a) * r}" r="${0.8 + rnd() * 1.6}" fill="#fff" opacity="${0.4 + rnd() * 0.6}"/>`; }
+  s += `<circle cx="732" cy="232" r="22" fill="#4a7bff"/><path d="M712,236 a22,22 0 0 0 40,6 a26,26 0 0 1 -40,-6z" fill="#2440a8"/>`;
+  s += line('M698,196 A80,80 0 0 1 760,172', 4, '#c25bb8');
+  for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283; s += `<circle cx="${760 + Math.cos(a) * 88}" cy="${250 + Math.sin(a) * 88}" r="4" fill="#7a2c70" stroke="${PLUM}" stroke-width="1.4"/>`; }
+  // monitor with scanlines + waveform (left back); the trace flips between drawings on the beat
+  s += zpanel('M120,250 L330,236 L338,392 L112,404Z', '#4a1640', 'M300,238 L330,236 L338,392 L306,394Z', '#33102d', 'M124,256 L320,244', '#a04a92', 2.6);
+  s += `<path d="M138,266 L312,256 L318,378 L132,388Z" fill="#200a3a"/>`;
+  for (let y = 262; y < 386; y += 6) s += `<line x1="132" y1="${y + (y - 262) * 0.05}" x2="318" y2="${y - 8 + (y - 262) * 0.05}" stroke="#3c1a66" stroke-width="2"/>`;
+  s += cel('scope', 'hero', line('M142,330 L160,330 L168,300 L180,362 L192,284 L204,350 L216,318 L230,326 L240,296 L252,358 L264,316 L280,322 L308,318', 3.2, '#8cff3a'), true);
+  for (let k = 0; k < 3; k++) {
+    let d = 'M142,330 L160,330';
+    for (let x = 168; x < 300; x += 12) d += ` L${x},${f1(326 - Math.sin(x * 0.11 + k * 2.1) * (18 + 16 * Math.sin(x * 0.05 + k)) * (k === 1 ? 1.4 : 1))}`;
+    s += cel('scope', 'k' + k, line(d + ' L308,322', 3.2, '#8cff3a'));
+  }
+  // ceiling ring: a huge curved band with scalloped lights hanging under it
+  const ring = (x) => 30 + Math.pow((x - 820) / 900, 2) * 210;
+  let top = '', bot = '';
+  for (let x = -400; x <= 2000; x += 40) { top += (x === -400 ? 'M' : 'L') + x + ',' + f1(ring(x) - 70); }
+  for (let x = 2000; x >= -400; x -= 40) { bot += 'L' + x + ',' + f1(ring(x) + 40); }
+  s += `<path d="${top}${bot}Z" fill="#5a1747" stroke="${PLUM}" stroke-width="3"/>`;
+  let mid = '';
+  for (let x = -400; x <= 2000; x += 40) mid += (x === -400 ? 'M' : 'L') + x + ',' + f1(ring(x) + 6);
+  s += `<path d="${mid}${bot}Z" fill="#3d0f33"/>`;
+  s += line(top.replace(/,(-?[\d.]+)/g, (m, y) => ',' + f1(+y + 8)), 3, '#b04a9a');
+  for (let x = -380; x < 2000; x += 120) s += line(`M${x},${f1(ring(x) - 64)} L${x + 6},${f1(ring(x) + 36)}`, 3, '#2a0a24');
+  // scallop lights: white half-domes under the band, pink glow below. Each lamp's glow and a dark
+  // dimmer over its dome are their own layers, so the chase can light one lamp at a time.
+  let glow = '', dome = '';
+  for (let x = -360; x < 2000; x += 96) {
+    const y = ring(x) + 40, i = LAMPS.length;
+    LAMPS.push(x);
+    glow += glowEllipse(x, y + 10, 52, 30, 16, '#ff4fb6', `data-o="lampGlow${i}"`);
+    const cup = `M${x - 36},${y} A36,22 0 0 0 ${x + 36},${y}Z`;
+    dome += `<path d="${cup}" fill="#fff4fb" stroke="${PLUM}" stroke-width="2.4"/>`;
+    dome += `<path d="M${x - 30},${y + 3} A30,14 0 0 0 ${x + 30},${y + 3}" fill="none" stroke="#ff9ad6" stroke-width="3"/>`;
+    dome += `<path d="${cup}" fill="#3a0a30" data-o="lampDim${i}" opacity="0" style="display:none"/>`;
+  }
+  s += glow + dome;   // the still's 0.7 group opacity is folded into each glow (motion.js LAMP_GLOW)
+  s += tube([[-60, 120], [40, 260], [20, 430], [120, 560]], 46, '#4e1a48', '#2a0b27', '#9a4b8c');
+  s += tube([[1560, 140], [1500, 330], [1580, 470]], 40, '#4e1a48', '#2a0b27', '#9a4b8c');
+  return s;
+}
+
+// A Zim ribbed tube: base + shadow side + rim + rib rings.
+function tube(pts, w, base, shade, rim) {
+  let s = shape(tubeD(pts, pts.map(() => w), 40), base, 1.4, PLUM);
+  const S = crSample(pts, 40);
+  const sh = tubeD(pts.map((p) => [p[0] + w * 0.22, p[1]]), pts.map(() => w * 0.45), 40);
+  s += `<path d="${sh}" fill="${shade}" opacity="0.9"/>`;
+  for (let i = 1; i < S.length - 1; i += 3) {
+    const a = S[i - 1], b = S[i + 1];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const l = Math.hypot(dx, dy); dx /= l; dy /= l;
+    const p = S[i];
+    s += line(`M${f1(p[0] - dy * w / 2)},${f1(p[1] + dx * w / 2)} Q${f1(p[0] + dx * 7)},${f1(p[1] + dy * 7)} ${f1(p[0] + dy * w / 2)},${f1(p[1] - dx * w / 2)}`, 2.4, PLUM);
+  }
+  s += line(crPath(pts.map(p => [p[0] - w * 0.28, p[1]])), 2.6, rim);
+  return s;
+}
+
+// The back crowd: rows of small heads behind a curved balcony rail, Zim-style mass.
+// Each row is a rig (it bounces); each head carries three eye cels switched per row by class:
+// e0 = the still's pinpoint squint, e1 = grooving (big pupils toward the DJ), e2 = wide-eyed.
+const railY = (x) => 560 - (x - 600) * 0.03 + Math.pow((x - 1100) / 700, 2) * 20;
+function backCrowd() {
+  _seed = 5;
+  let s = '';
+  const cols = ['#ffc7b0', '#f2b3c8', '#c9e88a', '#ffd9a8', '#d9c2ff'];
+  for (let row = 0; row < 3; row++) {
+    let rs = '';
+    for (let x = 600 + row * 22; x < 1700; x += 46 + rnd() * 10) {
+      const y = railY(x) - 34 - row * 26 + rnd() * 6;
+      const r = 17 - row * 2.5;
+      const c = cols[Math.floor(rnd() * cols.length)];
+      const lit = 0.55 + row * 0.12;
+      let g = '';
+      if (rnd() > 0.35) {
+        const side = rnd() > 0.5 ? 1 : -1;
+        g += `<path d="${tubeD([[x + side * r * 0.6, y + r * 0.6], [x + side * r * 1.3, y - r * 1.2]], [r * 0.45, r * 0.4], 8)}" fill="${c}" stroke="${INK}" stroke-width="3" paint-order="stroke"/>`;
+        g += `<circle cx="${x + side * r * 1.35}" cy="${y - r * 1.35}" r="${r * 0.34}" fill="${c}" stroke="${INK}" stroke-width="2.6" paint-order="stroke"/>`;
+      }
+      const kind = rnd();
+      let head;
+      if (kind < 0.35) head = `M${x - r * 0.8},${y + r} L${x - r * 0.9},${y - r * 1.2} L${x - r * 0.3},${y - r * 1.5} L${x},${y - r * 1.25} L${x + r * 0.35},${y - r * 1.55} L${x + r * 0.9},${y - r * 1.2} L${x + r * 0.8},${y + r}Z`;
+      else head = E(x, y, r * 1.1, r * 0.95);
+      g += `<path d="${head}" fill="${c}" stroke="${INK}" stroke-width="3" paint-order="stroke" stroke-linejoin="round"/>`;
+      const eye = (ex, rx, ry) => `<ellipse cx="${f1(ex)}" cy="${f1(y - r * 0.05)}" rx="${f1(rx)}" ry="${f1(ry)}" fill="#fff" stroke="${INK}" stroke-width="1.6"/>`;
+      let e0 = `<ellipse cx="${x - r * 0.38}" cy="${y - r * 0.05}" rx="${r * 0.33}" ry="${r * 0.42}" fill="#fff" stroke="${INK}" stroke-width="1.6"/>`;
+      e0 += `<ellipse cx="${x + r * 0.38}" cy="${y - r * 0.05}" rx="${r * 0.33}" ry="${r * 0.42}" fill="#fff" stroke="${INK}" stroke-width="1.6"/>`;
+      e0 += `<circle cx="${x - r * 0.42}" cy="${y}" r="${r * 0.08}" fill="${INK}"/><circle cx="${x + r * 0.34}" cy="${y}" r="${r * 0.08}" fill="${INK}"/>`;
+      let e1 = eye(x - r * 0.38, r * 0.33, r * 0.42) + eye(x + r * 0.38, r * 0.33, r * 0.42);
+      e1 += `<circle cx="${f1(x - r * 0.46)}" cy="${f1(y + r * 0.02)}" r="${f1(r * 0.21)}" fill="${INK}"/><circle cx="${f1(x + r * 0.3)}" cy="${f1(y + r * 0.02)}" r="${f1(r * 0.21)}" fill="${INK}"/>`;
+      e1 += `<circle cx="${f1(x - r * 0.41)}" cy="${f1(y - r * 0.06)}" r="${f1(r * 0.08)}" fill="#fff"/><circle cx="${f1(x + r * 0.35)}" cy="${f1(y - r * 0.06)}" r="${f1(r * 0.08)}" fill="#fff"/>`;
+      let e2 = eye(x - r * 0.42, r * 0.42, r * 0.54) + eye(x + r * 0.42, r * 0.42, r * 0.54);
+      e2 += `<circle cx="${f1(x - r * 0.42)}" cy="${f1(y - r * 0.05)}" r="${f1(r * 0.07)}" fill="${INK}"/><circle cx="${f1(x + r * 0.42)}" cy="${f1(y - r * 0.05)}" r="${f1(r * 0.07)}" fill="${INK}"/>`;
+      g += `<g class="e0">${e0}</g><g class="e1">${e1}</g><g class="e2">${e2}</g>`;
+      g += `<ellipse cx="${x}" cy="${y + r * 0.55}" rx="${r * 0.12}" ry="${r * 0.16}" fill="${INK}"/>`;
+      rs += `<g opacity="${lit}">${g}</g>`;
+    }
+    s += rig('crowd' + row, rs, 'class="ev0"');
+  }
+  s += `<rect x="560" y="420" width="1200" height="200" fill="#3a0a30" opacity="0.18"/>`;
+  let rp = [];
+  for (let x = 560; x <= 1720; x += 80) rp.push([x, railY(x)]);
+  s += `<path d="M560,${railY(560)} ${rp.map(p => 'L' + f1(p[0]) + ',' + f1(p[1])).join('')} L1720,640 L560,640Z" fill="#2b0a24" stroke="${PLUM}" stroke-width="2"/>`;
+  for (let x = 600; x < 1720; x += 110) s += `<rect x="${x}" y="${railY(x)}" width="10" height="70" fill="#4a1640" stroke="${PLUM}" stroke-width="1.6"/>`;
+  s += `<path d="${tubeD(rp, rp.map(() => 22), 60)}" fill="#b03a8a" stroke="${PLUM}" stroke-width="2.6"/>`;
+  s += line(crPath(rp.map(p => [p[0], p[1] - 5])), 4, '#ffc2e8');
+  return s;
+}
+
+// Floor: deep red-plum with round lit pads (Zim f_027). Each pad is its own layer so it can pulse.
+function floor() {
+  let s = `<path d="M-400,610 L2000,560 L2000,1300 L-400,1300Z" fill="#3d0b25"/>`;
+  s += `<path d="M-400,640 L2000,600 L2000,620 L-400,662Z" fill="#2a0619"/>`;
+  [[880, 700, 70, '#c04bff'], [1160, 680, 60, '#c04bff'], [1000, 820, 90, '#8cff3a'], [1500, 650, 50, '#c04bff']].forEach(([x, y, rx, c], i) => {
+    s += fxg('pad' + i, `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${rx * 0.28}" fill="${c}" opacity="0.9" stroke="${PLUM}" stroke-width="2"/><ellipse cx="${x - rx * 0.2}" cy="${y - rx * 0.06}" rx="${rx * 0.5}" ry="${rx * 0.1}" fill="#fff" opacity="0.5"/>`);
+  });
+  return s;
+}
+
+// Two laser beams from the ceiling (new; hidden at the hero frame). Each beam points along +x from
+// its source and motion.js rotates it.
+const LASERS = [[150, 70, '#8cff3a'], [1470, 60, '#ff4fd8']];
+function lasers() {
+  return LASERS.map(([x, y, c], i) => rig('laser' + i,
+    `<path d="M0,-3 L1900,-22 L1900,22 L0,3Z" fill="${c}" opacity="0.4"/><path d="M0,-1.4 L1900,-7 L1900,7 L0,1.4Z" fill="#f4ffe8" opacity="0.55"/>${glowCircle(0, 0, 12, 8, c)}<circle r="6" fill="#fff"/>`,
+    'style="display:none"')).join('');
+}
+
+// The blast: hard-edged flat rays from the button (PPG), Zim colours, over the room.
+function blast() {
+  _seed = 99;
+  let s = '';
+  const rays = [];
+  let a = -200;
+  while (a < 25) {
+    const w = 4 + rnd() * 8;
+    rays.push([a, a + w]);
+    a += w + 8 + rnd() * 12;
+  }
+  const L = 2400;
+  let pinks = '', pales = '', greens = '';
+  rays.forEach(([a0, a1], i) => {
+    const r0 = a0 * Math.PI / 180, r1 = a1 * Math.PI / 180;
+    const d = `M${BX},${BY} L${f1(BX + Math.cos(r0) * L)},${f1(BY + Math.sin(r0) * L)} L${f1(BX + Math.cos(r1) * L)},${f1(BY + Math.sin(r1) * L)}Z`;
+    if (i % 5 === 3) greens += `<path d="${d}"/>`;
+    else if (i % 2) pales += `<path d="${d}"/>`;
+    else pinks += `<path d="${d}"/>`;
+  });
+  s += rig('rays', `<g fill="#ff2fa4" opacity="0.5" data-ray="0.5" style="mix-blend-mode:screen">${pinks}</g><g fill="#ffb3e3" opacity="0.36" data-ray="0.36" style="mix-blend-mode:screen">${pales}</g><g fill="#8cff3a" opacity="0.3" data-ray="0.3" style="mix-blend-mode:screen">${greens}</g>`);
+  s += fxg('glowCore', glowCircle(BX, BY - 30, 260, 40, '#ff7fd0', 'opacity="0.55"'));
+  const star = (R0, R1, n, rot) => {
+    const p = [];
+    for (let i = 0; i < n * 2; i++) {
+      const aa = rot + i / (n * 2) * Math.PI * 2;
+      const rr = i % 2 ? R0 * (0.8 + rnd() * 0.3) : R1 * (0.75 + rnd() * 0.45);
+      p.push([BX + Math.cos(aa) * rr, BY - 30 + Math.sin(aa) * rr * 0.8]);
+    }
+    return poly(p);
+  };
+  s += rig('star', `<path d="${star(150, 330, 14, 0.1)}" fill="#ff8fd6"/><path d="${star(110, 230, 12, 0.3)}" fill="#ffe3f5"/><path d="${star(70, 150, 10, 0.05)}" fill="#ffffff"/>`);
+  return s;
+}
+
+// The booth: Zim spiky tech console, thin plum line, hard shade, rim lights, claws, lenses.
+function booth() {
+  let s = '';
+  const claw = (x, y, dir, h) => {
+    const d = `M${x - 26},${y} C${x - 20},${y - h * 0.5} ${x + dir * 20},${y - h * 0.9} ${x + dir * 70},${y - h} C${x + dir * 30},${y - h * 0.7} ${x + 24},${y - h * 0.4} ${x + 26},${y}Z`;
+    return zpanel(d, '#3e3346', `M${x + 4},${y} C${x + 6},${y - h * 0.45} ${x + dir * 30},${y - h * 0.78} ${x + dir * 70},${y - h} C${x + dir * 34},${y - h * 0.68} ${x + 24},${y - h * 0.4} ${x + 26},${y}Z`, '#26202c',
+      `M${x - 18},${y - 10} C${x - 12},${y - h * 0.5} ${x + dir * 18},${y - h * 0.85} ${x + dir * 60},${y - h * 0.97}`, '#b9a3c9', 2);
+  };
+  s += claw(130, 640, -1, 230) + claw(800, 610, 1, 250);
+  s += tube([[60, 900], [90, 760], [170, 700]], 34, '#3a1238', '#240a22', '#8a3c80');
+  s += zpanel('M80,620 L860,585 L900,640 L60,690Z', '#b02a6a', 'M60,690 L900,640 L896,652 L62,704Z', '#6e1440', 'M92,622 L852,588', '#ff9ad2', 2.4);
+  s += zpanel('M60,690 L900,640 L950,1000 L20,1000Z', '#8c1a4f', 'M620,655 L900,640 L950,1000 L700,1000Z', '#5c0f35', 'M68,700 L892,652', '#ff7fc0', 2.4);
+  for (let i = 0; i < 9; i++) {
+    const t = i / 8, x = 80 + t * 800, y = 694 - t * 50;
+    s += zpanel(`M${x - 14},${y} L${x},${y + 34} L${x + 14},${y - 1}Z`, '#d9d0e4', `M${x},${y + 34} L${x + 14},${y - 1} L${x + 4},${y}Z`, '#8d84a0', null, null, 1.6);
+  }
+  s += zpanel('M120,760 L420,740 L428,900 L112,920Z', '#2a0a1e', null, null, 'M124,766 L414,746', '#7a2f68');
+  for (let i = 0; i < 4; i++) {
+    const x = 160 + i * 72, y = 790 - i * 5;
+    s += `<circle cx="${x}" cy="${y}" r="24" fill="#ff2a3a" stroke="${PLUM}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="14" fill="#ff8a96"/><circle cx="${x - 6}" cy="${y - 7}" r="5" fill="#fff"/>`;
+    // the lens dims between its beats: a dark cap (absent at the hero frame)
+    s += `<circle cx="${x}" cy="${y}" r="22.5" fill="#4a0816" data-o="lens${i}" opacity="0" style="display:none"/>`;
+  }
+  s += zpanel('M470,736 L790,716 L800,870 L476,890Z', '#16210c', null, null, null, null, 3);
+  for (let y = 742; y < 884; y += 7) s += `<line x1="474" y1="${y}" x2="798" y2="${y - 20}" stroke="#203414" stroke-width="2.4"/>`;
+  s += cel('wave', 'hero', line('M484,812 L520,810 L534,760 L552,866 L572,744 L596,880 L620,770 L640,846 L664,792 L700,800 L790,788', 4, '#8cff3a'), true);
+  for (let k = 0; k < 4; k++) {   // the bass scope: four more traces, one per beat
+    let d = 'M484,812';
+    for (let x = 500; x <= 790; x += 14) {
+      const tt = (x - 484) / 306, env = Math.sin(tt * Math.PI) * (1 - 0.18 * k);
+      d += ` L${x},${f1(806 - tt * 20 + Math.sin(tt * (9 + k * 5) + k) * 52 * env * (k % 2 ? 0.6 : 1))}`;
+    }
+    s += cel('wave', 'k' + k, line(d, 4, '#8cff3a'));
+  }
+  [[230, 640], [710, 612]].forEach(([x, y], i) => {
+    s += `<ellipse cx="${x}" cy="${y}" rx="96" ry="26" fill="#2a2030" stroke="${PLUM}" stroke-width="2.4"/>`;
+    s += `<ellipse cx="${x}" cy="${y - 4}" rx="80" ry="20" fill="#120c16"/>`;
+    s += `<ellipse cx="${x}" cy="${y - 4}" rx="24" ry="7" fill="#8cff3a"/>`;
+    s += cel('groove' + i, 'hero', line(`M${x - 60},${y - 8} A60,14 0 0 1 ${x + 40},${y - 16}`, 2, '#5a4a66'), true);
+    // the record spins: three more groove-glint drawings around the platter ellipse
+    for (let k = 1; k < 4; k++) {
+      const a0 = Math.PI * (1.08 + k * 0.5), a1 = a0 + 1.9;
+      const p0 = [x + Math.cos(a0) * 60, y - 4 + Math.sin(a0) * 14], p1 = [x + Math.cos(a1) * 60, y - 4 + Math.sin(a1) * 14];
+      s += cel('groove' + i, 'k' + k, line(`M${f1(p0[0])},${f1(p0[1])} A60,14 0 0 1 ${f1(p1[0])},${f1(p1[1])}`, 2, '#5a4a66'));
+    }
+  });
+  return s;
+}
+
+// The button's glow for the build (new; dark at the hero frame).
+function buttonGlow() {
+  return fxg('btnGlow', glowEllipse(BX, BY - 26, 170, 90, 40, '#ff3f7a'), 'style="display:none"');
+}
+
+// The giant button: PPG prop line (thick black) on Zim hardware. Squashed by the slam; the dome
+// is a rig so it can stand tall in the groove and squash back to the still at the drop.
+function button() {
+  let s = '';
+  s += shape(E(BX, BY + 6, 132, 40), '#2a2230', 5);
+  for (let i = 0; i < 18; i++) {
+    const a = Math.PI * (0.05 + 0.9 * i / 17);
+    s += line(`M${f1(BX - Math.cos(a) * 128)},${f1(BY + 6 + Math.sin(a) * 36)} L${f1(BX - Math.cos(a) * 112)},${f1(BY + 6 + Math.sin(a) * 26)}`, 2.6, '#5a4a66');
+  }
+  const dome = `M${BX - 124},${BY + 2} C${BX - 130},${BY - 40} ${BX - 70},${BY - 58} ${BX},${BY - 58} C${BX + 70},${BY - 58} ${BX + 130},${BY - 40} ${BX + 124},${BY + 2} C${BX + 80},${BY + 22} ${BX - 80},${BY + 22} ${BX - 124},${BY + 2}Z`;
+  let d = shape(dome, '#ff1f3d', 5.5);
+  d += `<path d="M${BX + 40},${BY - 50} C${BX + 96},${BY - 46} ${BX + 120},${BY - 22} ${BX + 120},${BY} C${BX + 90},${BY + 14} ${BX + 60},${BY + 16} ${BX + 40},${BY + 16} C${BX + 70},${BY - 6} ${BX + 70},${BY - 30} ${BX + 40},${BY - 50}Z" fill="#c4102c"/>`;
+  d += `<path d="M${BX - 96},${BY - 22} C${BX - 80},${BY - 44} ${BX - 40},${BY - 50} ${BX - 16},${BY - 48}" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round"/>`;
+  s += rig('dome', d);
+  return s;
+}
+
+// ---- cast.js
+// The cast: PPG construction + Zim attitude. Original characters only.
+//
+// Prototype split: each character is a rig (a root group with a pose matrix) holding cels, the
+// drawings limited animation swaps. The cel named 'hero' is always the r11 still's own drawing, so
+// with every rig at its hero matrix and every part on 'hero' the frame is the still. Other cels are
+// the same construction code with other joint positions. ANCHORS records where props attach.
+const ANCHORS = { raverMitten: {}, kidHead: {} };
+const HERO = {};   // hero matrices of rigs the still placed with a transform
+
+// The DJ: tiny body, huge head, purple angular bob, spiked headphones.
+// Rigs: dj (root, pivot at her feet), djHead (pivot at the neck), djPhones (the headphones jump).
+// Cels: djLegs hero|stand, djTorso hero|pumpL|pumpR|windup, djEyes hero|blink.
+function dj() {
+  LW = 6.5;
+  const skin = '#ffd5c0', hair = '#6d1a9c', dress = '#9cff2e', stripe = '#8a2be2';
+  let s = '';
+  const L = (hx, hy, ax, ay, toe) => [hx, hy, ax, ay, toe];   // hip, ankle, toe angle
+  const legsDraw = (p, q) => {
+    const lA = ppgLeg(p[0], p[1], p[2], p[3], 28, skin, p[4], { stripe }), lB = ppgLeg(q[0], q[1], q[2], q[3], 28, skin, q[4], { stripe });
+    return blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
+  };
+  s += cel('djLegs', 'hero', legsDraw(L(446, 440, 366, 412, 200), L(436, 462, 356, 470, 178)), true);
+  s += cel('djLegs', 'stand', legsDraw(L(436, 448, 426, 528, 196), L(472, 448, 484, 528, -16)));
+  const body = 'M414,382 C404,404 400,428 408,452 C434,464 474,464 498,452 C504,428 498,402 486,380 C464,370 432,370 414,382Z';
+  const bi = `<path d="M405,432 C432,442 472,442 501,430 L503,442 C472,454 432,454 406,444Z" fill="${INK}"/>`;
+  const torso = (l, r) => blob([...ppgArm(414, 400, l[0], l[1], 24, 44, skin, l[2]), ...ppgArm(490, 396, r[0], r[1], 24, 46, skin, r[2]), { d: body, fill: dress }], bi);
+  s += cel('djTorso', 'hero', torso([444, 512, -8], [518, 508, 8]), true);
+  s += cel('djTorso', 'pumpL', torso([298, 420, -12], [552, 474, 10]));
+  s += cel('djTorso', 'pumpR', torso([362, 480, -10], [604, 330, 14]));
+  s += cel('djTorso', 'windup', torso([306, 352, -12], [606, 340, 12]));
+  // head + eyes in one outline
+  const hx = 410, hy = 262;
+  let h = '';
+  const head = loopD([[hx - 128, hy - 10], [hx - 100, hy - 82], [hx, hy - 110], [hx + 100, hy - 88], [hx + 132, hy - 6], [hx + 104, hy + 72], [hx + 10, hy + 104], [hx - 96, hy + 76]]);
+  const eL = [hx - 40, hy - 4, 56, 64, -10], eR = [hx + 72, hy - 10, 60, 70, 8];
+  h += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+  h += fxg('djRim', rimLit(head, skin, '#ffc4ea', 3, -13));
+  h += cel('djEyes', 'hero', ppgEyeInner(...eL, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.4, 0.16], irisScale: 0.7, pupilScale: 0.62, glint: true })
+    + ppgEyeInner(...eR, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.3, 0.18], irisScale: 0.7, pupilScale: 0.62, glint: true }), true);
+  h += cel('djEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
+  const mx = hx + 22, my = hy + 64;
+  const mouth = `M${mx - 66},${my - 8} C${mx - 30},${my + 2} ${mx + 30},${my - 4} ${mx + 70},${my - 20} C${mx + 62},${my + 22} ${mx + 20},${my + 40} ${mx - 14},${my + 36} C${mx - 46},${my + 30} ${mx - 64},${my + 14} ${mx - 66},${my - 8}Z`;
+  let teeth = '';
+  for (let i = 0; i < 7; i++) {
+    const t = i / 6, x = mx - 60 + t * 124, y = my - 6 - t * 12 + Math.sin(t * 3.1) * 4;
+    teeth += `<path d="M${x - 9},${y} L${x},${y + 15} L${x + 9},${y - 1}Z" fill="#fff"/>`;
+  }
+  for (let i = 0; i < 6; i++) {
+    const t = (i + 0.5) / 6, x = mx - 52 + t * 110, y = my + 30 - Math.sin(t * 3.1) * 8 + t * 2;
+    teeth += `<path d="M${x - 8},${y + 2} L${x},${y - 13} L${x + 8},${y + 2}Z" fill="#fff"/>`;
+  }
+  const mid = uid('mc');
+  DEFS.push(`<clipPath id="${mid}"><path d="${mouth}"/></clipPath>`);
+  h += `<path d="${mouth}" fill="#3a0a1e"/><g clip-path="url(#${mid})"><ellipse cx="${mx + 4}" cy="${my + 36}" rx="34" ry="16" fill="#ff5f8f"/>${teeth}</g>`;
+  h += `<path d="${mouth}" fill="none" stroke="${INK}" stroke-width="${LW * 0.85}" stroke-linejoin="round"/>`;
+  h += `<ellipse cx="${hx - 92}" cy="${hy + 46}" rx="18" ry="9" fill="#ff9ab0" opacity="0.8"/>`;
+  const H = [
+    [hx - 140, hy + 70], [hx - 150, hy - 20], [hx - 130, hy - 92], [hx - 80, hy - 130], [hx - 20, hy - 146], [hx + 50, hy - 140], [hx + 96, hy - 116],
+    [hx + 138, hy - 84], [hx + 152, hy - 30], [hx + 150, hy + 6],
+    [hx + 122, hy - 60], [hx + 102, hy - 40], [hx + 84, hy - 82], [hx + 52, hy - 60], [hx + 28, hy - 96], [hx - 4, hy - 66], [hx - 26, hy - 100], [hx - 58, hy - 72], [hx - 80, hy - 98], [hx - 100, hy - 50],
+    [hx - 110, hy + 10], [hx - 112, hy + 66],
+  ];
+  h += shape(poly(H), hair, LW);
+  let p = '';
+  p += shape(`M${hx - 150},${hy - 40} C${hx - 150},${hy - 190} ${hx + 120},${hy - 220} ${hx + 150},${hy - 70} L${hx + 132},${hy - 66} C${hx + 104},${hy - 190} ${hx - 128},${hy - 168} ${hx - 128},${hy - 36}Z`, '#3e3346', LW * 0.85);
+  p += shape(loopD([[hx + 128, hy - 92], [hx + 160, hy - 96], [hx + 170, hy - 50], [hx + 150, hy - 14], [hx + 132, hy - 30]]), '#3e3346', LW * 0.85);
+  const cup = loopD([[hx - 186, hy - 40], [hx - 150, hy - 74], [hx - 108, hy - 52], [hx - 104, hy + 34], [hx - 140, hy + 62], [hx - 186, hy + 34]]);
+  p += shape(`M${hx - 176},${hy - 44} L${hx - 210},${hy - 96} L${hx - 156},${hy - 66}Z`, '#d9d0e4', LW * 0.7);
+  p += shape(`M${hx - 186},${hy + 26} L${hx - 226},${hy + 40} L${hx - 180},${hy + 50}Z`, '#d9d0e4', LW * 0.7);
+  p += shape(cup, '#3e3346', LW);
+  p += `<ellipse cx="${hx - 146}" cy="${hy - 6}" rx="22" ry="38" fill="#ff3fae" stroke="${INK}" stroke-width="4"/><ellipse cx="${hx - 150}" cy="${hy - 16}" rx="8" ry="14" fill="#ffd0ee"/>`;
+  h += rig('djPhones', p);
+  h += `<path d="M${hx - 104},${hy - 74} L${hx - 2},${hy - 56} L${hx - 10},${hy - 44} Z" fill="${INK}"/>`;
+  h += `<path d="M${hx + 122},${hy - 86} L${hx + 34},${hy - 62} L${hx + 42},${hy - 50} Z" fill="${INK}"/>`;
+  s += rig('djHead', h);
+  return rig('dj', s);
+}
+// A closed, happy PPG eye (for blinks): skin over the eye, the black ring, a lid curve.
+function closedEye([cx, cy, rx, ry, rot], skin) {
+  return `<path d="${E(cx, cy, rx, ry, rot)}" fill="${skin}"/><path d="${E(cx, cy, rx, ry, rot)}" fill="none" stroke="${INK}" stroke-width="${LW * 1.05}"/>`
+    + line(`M${f1(cx - rx * 0.72)},${f1(cy + ry * 0.2)} Q${f1(cx)},${f1(cy - ry * 0.55)} ${f1(cx + rx * 0.72)},${f1(cy + ry * 0.2)}`, LW * 0.9);
+}
+
+// Impact around the mittens + shock rings (flat, hard-edged)
+function slamFx() {
+  let s = '';
+  let r0 = '';
+  for (const [r, w] of [[190, 7], [250, 5], [320, 4]]) r0 += `<path d="M${BX - r},${BY - 10} A${r},${r * 0.32} 0 0 0 ${BX + r},${BY - 10}" fill="none" stroke="#fff" stroke-width="${w}" opacity="0.9"/>`;
+  s += rig('rings', r0);
+  _seed = 3;
+  let st = '';
+  for (const [x, y] of [[452, 536], [526, 532]]) {
+    const p = [];
+    for (let i = 0; i < 18; i++) { const a = i / 18 * 6.283; const r = i % 2 ? 22 : 44 + rnd() * 16; p.push([x + Math.cos(a) * r, y + Math.sin(a) * r * 0.6]); }
+    st += `<path d="${poly(p)}" fill="#fff6c8" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>`;
+  }
+  for (const [x, y, a] of [[404, 516, -160], [400, 546, 175], [572, 496, -25], [580, 528, 0], [486, 470, -95]]) {
+    const r = a * Math.PI / 180;
+    st += line(`M${f1(x + Math.cos(r) * 10)},${f1(y + Math.sin(r) * 10)} L${f1(x + Math.cos(r) * 40)},${f1(y + Math.sin(r) * 40)}`, 6, INK);
+  }
+  s += fxg('impactStars', st);
+  return s;
+}
+
+// The pompadour raver: tall ridged-rectangle head (Zim shape, PPG line). His pompadour flies off.
+// Rigs: guy (root; the still tilts him 22° back), guyHead (pivot at the neck), pomp (the hairpiece,
+// in world space, since it travels between heads). Cels: guyLegs, guyTorso, guyEyes, guyBrows, guyMouth.
+const GUY = { hx: 1146, hy: 360, neck: [1146, 470], feet: [1140, 650] };
+function guyM(p = {}) {
+  // the still: translate(0,-10) translate(1150,640) scale(0.9) translate(-1150,-640) rotate(22,1150,560)
+  return MX.chain(MX.T(p.x || 0, -10 + (p.y || 0)), MX.about(1150, 640, MX.S(0.9)), MX.about(1150, 560, MX.R(p.r ?? 22)), MX.about(1140, 650, MX.S(p.sx ?? 1, p.sy ?? 1)));
+}
+function pompadour() {
+  LW = 6;
+  const skin = '#f7c6a3', shirt = '#7b2bd6';
+  let s = '';
+  const legsDraw = (a, b) => {
+    const lA = ppgLeg(a[0], a[1], a[2], a[3], 30, skin, a[4]), lB = ppgLeg(b[0], b[1], b[2], b[3], 30, skin, b[4]);
+    return blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
+  };
+  let g = '';
+  g += cel('guyLegs', 'hero', legsDraw([1128, 560, 1090, 640, 160], [1162, 562, 1150, 646, 170]), true);
+  g += cel('guyLegs', 'stand', legsDraw([1126, 560, 1114, 644, 196], [1164, 562, 1178, 644, -16]));
+  g += cel('guyLegs', 'crouch', legsDraw([1122, 566, 1092, 640, 200], [1168, 566, 1200, 640, -20]));
+  const body = 'M1110,480 C1100,520 1102,556 1114,574 C1140,584 1170,584 1188,572 C1196,550 1192,512 1182,480 C1160,470 1130,470 1110,480Z';
+  const vee = `<path d="M1124,482 L1146,512 L1170,480" fill="none" stroke="#9cff2e" stroke-width="8" stroke-linejoin="round"/>`;
+  const torso = (l, r) => blob([...ppgArm(1116, 494, l[0], l[1], 24, 38, skin, l[2]), ...ppgArm(1182, 490, r[0], r[1], 24, 40, skin, r[2]), { d: body, fill: shirt }], vee);
+  g += cel('guyTorso', 'hero', torso([1040, 452, 8], [1268, 432, -10]), true);
+  g += cel('guyTorso', 'pumpA', torso([1018, 418, 10], [1256, 532, -8]));
+  g += cel('guyTorso', 'pumpB', torso([1050, 546, 8], [1274, 400, -12]));
+  g += cel('guyTorso', 'crouch', torso([1062, 530, 6], [1232, 532, -6]));
+  const hx = GUY.hx, hy = GUY.hy;
+  let h = '';
+  const head = `M${hx - 82},${hy + 92} C${hx - 92},${hy + 20} ${hx - 92},${hy - 60} ${hx - 80},${hy - 112} L${hx - 50},${hy - 128} L${hx - 26},${hy - 116} L${hx},${hy - 132} L${hx + 26},${hy - 116} L${hx + 52},${hy - 128} L${hx + 82},${hy - 112} C${hx + 94},${hy - 60} ${hx + 94},${hy + 20} ${hx + 84},${hy + 92} C${hx + 50},${hy + 114} ${hx - 50},${hy + 114} ${hx - 82},${hy + 92}Z`;
+  const eL = [hx - 36, hy - 8, 46, 58, -4], eR = [hx + 46, hy - 10, 46, 58, 6];
+  h += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+  h += fxg('guyRim', rimLit(head, skin, '#ffc4ea', 13, -3));
+  const eyes = (oL, oR) => ppgEyeInner(...eL, oL) + ppgEyeInner(...eR, oR);
+  const iris = { iris: '#7a5230', irisLine: '#3e2614', irisScale: 0.6, pupilScale: 0.66 };
+  h += cel('guyEyes', 'hero', eyes({ pin: true, look: [-0.1, 0] }, { pin: true, look: [-0.15, 0] }), true);
+  h += cel('guyEyes', 'normal', eyes({ ...iris, look: [-0.25, 0.1] }, { ...iris, look: [-0.3, 0.1] }));
+  h += cel('guyEyes', 'up', eyes({ ...iris, look: [0.25, -0.75] }, { ...iris, look: [0.2, -0.75] }));
+  h += cel('guyEyes', 'left', eyes({ ...iris, look: [-0.8, -0.1] }, { ...iris, look: [-0.8, -0.1] }));
+  h += cel('guyEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
+  h += cel('guyBrows', 'hero', `<path d="M${hx - 80},${hy - 82} L${hx - 10},${hy - 96} L${hx - 20},${hy - 84}Z" fill="${INK}"/><path d="M${hx + 92},${hy - 90} L${hx + 18},${hy - 100} L${hx + 26},${hy - 86}Z" fill="${INK}"/>`, true);
+  h += cel('guyBrows', 'calm', `<path d="M${hx - 78},${hy - 70} L${hx - 10},${hy - 76} L${hx - 16},${hy - 64}Z" fill="${INK}"/><path d="M${hx + 92},${hy - 74} L${hx + 20},${hy - 78} L${hx + 26},${hy - 66}Z" fill="${INK}"/>`);
+  h += cel('guyBrows', 'sad', `<path d="M${hx - 80},${hy - 66} L${hx - 8},${hy - 90} L${hx - 12},${hy - 76}Z" fill="${INK}"/><path d="M${hx + 94},${hy - 70} L${hx + 18},${hy - 94} L${hx + 24},${hy - 80}Z" fill="${INK}"/>`);
+  h += cel('guyMouth', 'hero', `<ellipse cx="${hx + 6}" cy="${hy + 80}" rx="9" ry="12" fill="#3a0a1e" stroke="${INK}" stroke-width="4"/>`, true);
+  h += cel('guyMouth', 'smile', `<path d="M${hx - 26},${hy + 70} C${hx - 14},${hy + 98} ${hx + 26},${hy + 98} ${hx + 38},${hy + 66} C${hx + 18},${hy + 74} ${hx - 6},${hy + 76} ${hx - 26},${hy + 70}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/><path d="M${hx - 4},${hy + 86} C${hx + 4},${hy + 80} ${hx + 16},${hy + 80} ${hx + 22},${hy + 84}" fill="none" stroke="#ff5f8f" stroke-width="5" stroke-linecap="round"/>`);
+  h += cel('guyMouth', 'flat', line(`M${hx - 18},${hy + 82} C${hx},${hy + 76} ${hx + 16},${hy + 80} ${hx + 28},${hy + 76}`, 5));
+  h += fxg('guyShine', `<path d="M${hx - 60},${hy - 104} L${hx - 40},${hy - 116}" stroke="#fff" stroke-width="8" stroke-linecap="round"/><path d="M${hx - 66},${hy - 92} L${hx - 64},${hy - 70}" stroke="#fff" stroke-width="6" stroke-linecap="round"/>`);
+  g += rig('guyHead', h);
+  HERO.guy = guyM();
+  s += rig('guy', g, `transform="${MX.str(HERO.guy)}"`);
+  // the hairpiece: one solid black shape with a big curl, drawn around its own origin
+  const px = 0, py = 0;
+  const pomp = `M${px + 100},${py + 30} C${px + 40},${py + 12} ${px - 40},${py + 12} ${px - 104},${py + 30} C${px - 140},${py - 10} ${px - 130},${py - 80} ${px - 70},${py - 96} C${px - 10},${py - 110} ${px + 60},${py - 90} ${px + 100},${py - 60} C${px + 124},${py - 40} ${px + 120},${py + 10} ${px + 100},${py + 30}Z`;
+  HERO.pomp = MX.chain(MX.T(1440, 300), MX.R(-18), MX.S(0.82));
+  s += rig('pomp', `${shape(pomp, '#16101a', LW)}${line(`M${px - 96},${py + 6} C${px - 124},${py - 40} ${px - 84},${py - 74} ${px - 58},${py - 54} C${px - 40},${py - 38} ${px - 60},${py - 22} ${px - 74},${py - 32}`, 6, '#5d4f72')}<path d="M${px - 30},${py - 80} C${px + 10},${py - 90} ${px + 50},${py - 78} ${px + 80},${py - 54}" fill="none" stroke="#8a7aa3" stroke-width="8" stroke-linecap="round"/>`, `transform="${MX.str(HERO.pomp)}"`);
+  s += fxg('pompFx', line('M1196,262 C1226,190 1300,176 1350,236', 5, '#ffffff', 'stroke-dasharray="18 14"') + speedLines([`M1300,320 L1330,306`, `M1316,356 L1346,350`], 5));
+  return s;
+}
+
+// The round raver, foreground right. Rig: raver (root). Cels: raverTorso (arm), raverEyes,
+// raverMouth, raverHair. Her glowstick is its own rig (stick) in world space.
+const RAVER = { hx: 1380, hy: 690, shoulder: [1310, 840] };
+function raverM(p = {}) {
+  // the still: translate(1240,760) scale(0.74) translate(-1380,-690) rotate(8,1380,690)
+  return MX.chain(MX.T(1240 + (p.x || 0), 760 + (p.y || 0)), MX.S(0.74), MX.T(-1380, -690), MX.about(1380, 690, MX.mul(MX.R(p.r ?? 8), MX.S(p.sx ?? 1, p.sy ?? 1))));
+}
+function roundRaver() {
+  LW = 7.5;
+  const skin = '#ffcfb4', hair = '#18c9b8';
+  let s = '';
+  const hx = RAVER.hx, hy = RAVER.hy;
+  const body = `M${hx - 70},${hy + 120} C${hx - 90},${hy + 180} ${hx - 90},${hy + 260} ${hx - 70},${hy + 300} L${hx + 90},${hy + 300} C${hx + 100},${hy + 240} ${hx + 90},${hy + 170} ${hx + 70},${hy + 120}Z`;
+  const belt = `<path d="M${hx - 84},${hy + 200} C${hx - 30},${hy + 214} ${hx + 40},${hy + 214} ${hx + 92},${hy + 198} L${hx + 94},${hy + 218} C${hx + 40},${hy + 234} ${hx - 30},${hy + 234} ${hx - 86},${hy + 220}Z" fill="${INK}"/>`;
+  const torso = (name, ex, ey, bend, show) => {
+    const arm = ppgArm(hx - 70, hy + 150, ex, ey, 34, 54, skin, bend);
+    const [sx, sy] = RAVER.shoulder, l = Math.hypot(ex - sx, ey - sy);
+    ANCHORS.raverMitten[name] = [ex + (ex - sx) / l * 13.5, ey + (ey - sy) / l * 13.5, Math.atan2(ey - sy, ex - sx) * 180 / Math.PI];
+    return cel('raverTorso', name, blob([{ d: body, fill: '#ff3fae' }, ...arm], belt), show);
+  };
+  s += torso('hero', hx - 204, hy + 20, -16, true);
+  [-164, -149, -134, -119].forEach((a, i) => {
+    const r = a * Math.PI / 180;
+    s += torso('w' + i, RAVER.shoulder[0] + Math.cos(r) * 188, RAVER.shoulder[1] + Math.sin(r) * 188, -16 + i * 4);
+  });
+  const pts = [];
+  for (let i = 0; i < 40; i++) {
+    const a = i / 40 * Math.PI * 2;
+    let rx = 168, ry = 140;
+    let r = 1;
+    if (Math.cos(a) > 0.2) r += 0.05 * Math.sin(a * 14);
+    pts.push([hx + Math.cos(a) * rx * r, hy + Math.sin(a) * ry * r]);
+  }
+  const head = loopD(pts, 200);
+  const eL = [hx - 74, hy - 6, 62, 76, -8], eR = [hx + 52, hy - 14, 66, 80, 8];
+  s += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+  s += fxg('raverRim', rimLit(head, skin, '#ffc4ea', 15, 6));
+  const gold = { iris: '#ffb02e', irisLine: '#a8600a', pupilScale: 0.6, glint: true };
+  s += cel('raverEyes', 'hero', ppgEyeInner(...eL, { ...gold, look: [-0.42, -0.1] }) + ppgEyeInner(...eR, { ...gold, look: [-0.5, -0.1] }), true);
+  s += cel('raverEyes', 'up', ppgEyeInner(...eL, { ...gold, look: [0.15, -0.7] }) + ppgEyeInner(...eR, { ...gold, look: [0.1, -0.7] }));
+  s += cel('raverEyes', 'pin', ppgEyeInner(...eL, { pin: true, look: [-0.2, -0.05] }) + ppgEyeInner(...eR, { pin: true, look: [-0.25, -0.05] }));
+  s += cel('raverEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
+  s += cel('raverMouth', 'hero', shape(E(hx - 18, hy + 96, 20, 24, -10), '#3a0a1e', LW * 0.5) + `<ellipse cx="${hx - 16}" cy="${hy + 108}" rx="12" ry="7" fill="#ff5f8f"/>`, true);
+  s += cel('raverMouth', 'smile', `<path d="M${hx - 62},${hy + 82} C${hx - 40},${hy + 136} ${hx + 14},${hy + 136} ${hx + 30},${hy + 76} C${hx - 2},${hy + 88} ${hx - 34},${hy + 88} ${hx - 62},${hy + 82}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="${LW * 0.7}" stroke-linejoin="round"/><path d="M${hx - 34},${hy + 112} C${hx - 20},${hy + 102} ${hx},${hy + 102} ${hx + 10},${hy + 110} C${hx},${hy + 122} ${hx - 24},${hy + 122} ${hx - 34},${hy + 112}Z" fill="#ff5f8f"/>`);
+  s += `<ellipse cx="${hx - 120}" cy="${hy + 70}" rx="22" ry="10" fill="#ff8aa8" opacity="0.85"/>`;
+  // hair: one solid shape. hero = the still (streaming flat in the blast); stream2 = its flutter
+  // drawing; calmA/calmB = hanging down the side, two flutter drawings for the groove.
+  const fringe = [[132, -94], [102, -74], [86, -118], [42, -98], [22, -134], [-28, -110], [-58, -138], [-98, -104], [-132, -118], [-142, -40]];
+  const HP = [[-162, -10], [-170, -90], [-112, -152], [-10, -170], [90, -164], [200, -176], [330, -184], [440, -168], [486, -156], [372, -128], [492, -100], [364, -76], [462, -34], [336, -26], [412, 40], [250, 20], [176, 62], [154, 40], [162, -20], ...fringe];
+  const hairD = (P, hl) => shape(poly(P.map(([x, y]) => [hx + x, hy + y])), hair, LW) + `<path d="${hl}" fill="none" stroke="#7af2e6" stroke-width="9" stroke-linecap="round"/>`;
+  const hlHero = `M${hx - 80},${hy - 140} C${hx - 20},${hy - 156} ${hx + 120},${hy - 162} ${hx + 300},${hy - 166}`;
+  s += cel('raverHair', 'hero', hairD(HP, hlHero), true);
+  const HP2 = HP.map(([x, y], i) => (x > 300 ? [x - 14, y + (i % 2 ? 22 : -10)] : [x, y]));
+  s += cel('raverHair', 'stream2', hairD(HP2, hlHero));
+  const calm = (k) => [[-162, -10], [-170, -90], [-112, -152], [-10, -170], [90, -164], [158, -134], [194, -78], [206, -8], [216 + k * 8, 62 - k * 4], [230 + k * 14, 128 - k * 8], [194, 100], [184 - k * 6, 158 + k * 4], [154, 96], [160, 40], [162, -20], ...fringe];
+  const hlCalm = `M${hx - 80},${hy - 140} C${hx - 20},${hy - 156} ${hx + 90},${hy - 160} ${hx + 150},${hy - 126}`;
+  s += cel('raverHair', 'calmA', hairD(calm(0), hlCalm));
+  s += cel('raverHair', 'calmB', hairD(calm(1), hlCalm));
+  HERO.raver = raverM();
+  return rig('raver', s, `transform="${MX.str(HERO.raver)}"`);
+}
+// Her glowstick, around its own origin. The still: translate(190,70) rotate(-40,1250,520) on a
+// stick centred at (1255,520), then a soft glow at (1445,590).
+function glowstick() {
+  HERO.stick = MX.chain(MX.T(190, 70), MX.about(1250, 520, MX.R(-40)), MX.T(1255, 520));
+  const g = MX.pt(MX.inv(HERO.stick), [1445, 590]);
+  const s = `${shape('M-45,-8 L45,-8 C55,-8 55,8 45,8 L-45,8 C-55,8 -55,-8 -45,-8Z', '#9cff2e', 4)}<path d="M-39,-4 L35,-4" stroke="#eaffd0" stroke-width="4" stroke-linecap="round"/>`
+    + fxg('stickGlow', glowCircle(f1(g[0]), f1(g[1]), 40, 16, '#9cff2e', 'opacity="0.35"'));
+  return rig('stick', s, `transform="${MX.str(HERO.stick)}"`);
+}
+
+// A small raver at the rail. Hero: clinging on, blown out flat like a flag. In the groove he dances
+// standing on the rail. Rig: kid (root). Cels: kid hero|flap|standA|standB|crouch (whole drawings).
+const KID = { root: [140, -4], feet: [820, 540] };
+function flagRaver() {
+  LW = 4.5;
+  const skin = '#ffd9b8';
+  let s = '';
+  // the still's drawing, with the legs as parameters (flap = the next drawing of the flag)
+  const flag = (la, lb) => {
+    let k = '';
+    const rx0 = 900, ry0 = 552;
+    const lA = ppgLeg(842, 548, la[0], la[1], 18, skin, la[2]);
+    const lB = ppgLeg(842, 558, lb[0], lb[1], 18, skin, lb[2]);
+    k += blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
+    const body = 'M800,538 C820,532 840,534 850,540 C852,552 852,562 848,570 C832,576 814,574 800,566Z';
+    const a1 = ppgArm(806, 546, rx0 - 134, ry0 - 4, 14, 22, skin, -3);
+    const a2 = ppgArm(806, 560, rx0 - 136, ry0 + 6, 14, 22, skin, 3);
+    k += blob([{ d: body, fill: '#ff8a1f' }, ...a1, ...a2]);
+    const hx = 812, hy = 506;
+    const head = E(hx, hy, 46, 38, 8);
+    const eL = [hx - 18, hy - 2, 18, 22, 0], eR = [hx + 16, hy - 4, 18, 22, 0];
+    k += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+    k += fxg('kidRim', rimLit(head, skin, '#ffc4ea', 7, 0));
+    k += ppgEyeInner(...eL, { pin: true }) + ppgEyeInner(...eR, { pin: true });
+    k += `<path d="M${hx - 8},${hy + 24} L${hx + 4},${hy + 20} L${hx + 14},${hy + 26}" fill="none" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
+    k += shape(`M${hx - 44},${hy - 10} C${hx - 40},${hy - 40} ${hx},${hy - 50} ${hx + 40},${hy - 34} L${hx + 76},${hy - 40} L${hx + 52},${hy - 20} L${hx + 84},${hy - 14} L${hx + 44},${hy - 6} C${hx + 10},${hy - 30} ${hx - 20},${hy - 26} ${hx - 44},${hy - 10}Z`, '#1a1018', LW);
+    k += speedLines([`M870,500 L930,496`, `M880,520 L950,518`, `M900,584 L956,588`], 4);
+    return k;
+  };
+  s += cel('kid', 'hero', flag([892, 534, -10], [894, 566, 10]), true);
+  s += cel('kid', 'flap', flag([894, 522, -24], [890, 578, 22]));
+  // standing on the rail: o = {l, r: hands [x,y,bend], eyes, mouth, dy (crouch)}
+  const stand = (name, o) => {
+    let k = '';
+    const dy = o.dy || 0, hx = 820, hy = 410 + dy * 1.4;
+    ANCHORS.kidHead[name] = [hx + 2, hy - 40];
+    const lA = ppgLeg(810, 498 + dy, o.crouch ? 796 : 804, 534, 18, skin, 196);
+    const lB = ppgLeg(830, 498 + dy, o.crouch ? 846 : 838, 534, 18, skin, -16);
+    k += blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
+    const by = 452 + dy;
+    const body = `M800,${by} C795,${by + 18} 797,${by + 38} 803,${by + 48} C815,${by + 54} 831,${by + 54} 839,${by + 48} C845,${by + 36} 845,${by + 16} 838,${by} C828,${by - 6} 810,${by - 6} 800,${by}Z`;
+    const a1 = ppgArm(804, by + 10, o.l[0], o.l[1] + dy, 14, 22, skin, o.l[2]);
+    const a2 = ppgArm(836, by + 10, o.r[0], o.r[1] + dy, 14, 22, skin, o.r[2]);
+    k += blob([{ d: body, fill: '#ff8a1f' }, ...a1, ...a2]);
+    const head = E(hx, hy, 46, 38, 0);
+    const eL = [hx - 17, hy - 2, 18, 22, 0], eR = [hx + 17, hy - 2, 18, 22, 0];
+    k += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+    const iris = o.pin ? { pin: true } : { iris: '#3fa0ff', irisLine: '#1a4a8a', irisScale: 0.62, pupilScale: 0.66, look: o.look || [0, 0.1] };
+    k += ppgEyeInner(...eL, iris) + ppgEyeInner(...eR, iris);
+    k += o.mouth === 'o' ? `<ellipse cx="${hx}" cy="${hy + 22}" rx="5" ry="7" fill="#3a0a1e" stroke="${INK}" stroke-width="3"/>`
+      : `<path d="M${hx - 12},${hy + 18} C${hx - 6},${hy + 30} ${hx + 8},${hy + 30} ${hx + 14},${hy + 18}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
+    k += shape(`M${hx - 44},${hy - 6} C${hx - 46},${hy - 28} ${hx - 32},${hy - 42} ${hx - 16},${hy - 42} L${hx - 14},${hy - 62} L${hx + 2},${hy - 44} L${hx + 16},${hy - 66} L${hx + 20},${hy - 42} L${hx + 38},${hy - 56} L${hx + 34},${hy - 32} C${hx + 44},${hy - 24} ${hx + 46},${hy - 14} ${hx + 44},${hy - 6} C${hx + 20},${hy - 28} ${hx - 20},${hy - 28} ${hx - 44},${hy - 6}Z`, '#1a1018', LW);
+    return cel('kid', name, k);
+  };
+  s += stand('standA', { l: [774, 418, -6], r: [866, 470, 4] });
+  s += stand('standB', { l: [774, 470, -4], r: [866, 418, 6] });
+  s += stand('crouch', { l: [790, 486, 4], r: [850, 486, -4], dy: 10, crouch: true, pin: true, mouth: 'o' });
+  return rig('kid', s, `transform="translate(140,-4)"`);
+}
+
+// Debris and confetti blown along the rays, plus a black PPG speed line. Each confetti piece is a
+// rig so it can keep flying after the hero frame.
+const CONFETTI = [];
+function debris() {
+  _seed = 41;
+  let s = '';
+  const cols = ['#ff3fae', '#9cff2e', '#ffffff', '#a35bff', '#ffd23f'];
+  for (let i = 0; i < 46; i++) {
+    const a = (-150 + rnd() * 165) * Math.PI / 180, r = 240 + rnd() * 1200;
+    const x = BX + Math.cos(a) * r, y = BY - 30 + Math.sin(a) * r * 0.85;
+    if (x > 1600 || y > 900 || y < -10) continue;
+    const c = cols[Math.floor(rnd() * cols.length)];
+    const w = f1(10 + rnd() * 10), h = f1(6 + rnd() * 6), rot = f1(rnd() * 180);
+    CONFETTI.push({ x: +f1(x), y: +f1(y), a });
+    s += rig('cf' + (CONFETTI.length - 1), `<rect x="${f1(x)}" y="${f1(y)}" width="${w}" height="${h}" fill="${c}" stroke="${INK}" stroke-width="2.4" transform="rotate(${rot} ${f1(x)} ${f1(y)})"/>`);
+  }
+  let l = '';
+  for (const [x, y, len] of [[1460, 380, 110]]) {
+    const a = Math.atan2(y - BY, x - BX);
+    l += line(`M${x},${y} L${f1(x + Math.cos(a) * len)},${f1(y + Math.sin(a) * len)}`, 5, INK);
+  }
+  s += fxg('debrisLine', l);
+  return s;
+}
+
+// ---- motion.js
+// Motion: the whole picture as a pure function of the beat clock.
+//
+// frame(t) takes the cycle position and returns a plain description of the picture (rig matrices,
+// opacities, which cel each part shows, the camera); app.js writes it to the SVG. Nothing here reads
+// wall time, so a seek always gives the same picture, and the same function can drive a WebGL port.
+//
+// Time: c is the cycle position in beats, 0..32 (8 bars of 4/4). c = 0 is the drop. Bars 0-5 are the
+// groove (bars 1-6 on the phrase strip), 24-32 the build. cq is c quantised to animation steps
+// ("on twos": steps of 1/spb beat, ~12 fps, locked to the beat so a hit lands on its beat). The
+// characters and props read cq; lights, lasers, rays and the camera read c and move at display rate.
+const CYCLE = 32, BUILD = 24;
+const HOLD = 0.5;          // the hero frame holds from the impact until here (beats)
+const IMPACT = 0.07;       // two-colour impact frames before the hero frame (beats; ~2 display frames)
+const stepsPerBeat = (bpm) => Math.max(4, Math.round(720 / bpm));
+
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const seg = (c, a, b) => clamp((c - a) / (b - a));
+const smooth = (t) => t * t * (3 - 2 * t);
+const easeOut = (t) => 1 - (1 - t) * (1 - t);
+const easeIn = (t) => t * t;
+const back = (t, s = 1.70158) => { const u = t - 1; return 1 + (s + 1) * u * u * u + s * u * u; };
+const elastic = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -9 * t) * Math.sin((t * 10 - 0.75) * 2 * Math.PI / 3) + 1);
+const mod = (a, n) => ((a % n) + n) % n;
+const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const vnoise = (x) => { const i = Math.floor(x), f = smooth(x - i); return lerp(hash(i), hash(i + 1), f) * 2 - 1; };
+const decay = (ph, k) => Math.exp(-ph * k);
+
+// The groove's body curve: +1 squash on the beat, -1 stretch on the off-beat. Sampled on twos it
+// snaps: hit, rebound past the stretch (overshoot), hold, fall into the next beat.
+function bounce(ph) {
+  if (ph < 0.08) return 1;
+  if (ph < 0.5) return lerp(1, -1, back(seg(ph, 0.08, 0.5), 2.2));
+  return lerp(-1, 1, easeIn(seg(ph, 0.5, 1)));
+}
+// Blast light: full at the drop, gone 5 beats later. Characters' pink rim lights follow it.
+const blastI = (c) => (c < 1 ? 1 : 1 - smooth(seg(c, 1, 5)));
+
+// --- the DJ -----------------------------------------------------------------------------------
+const DJ_FEET = [455, 540], DJ_NECK = [420, 362], STAND_Y = 26;
+function djPose(T) {
+  const { cq, spb } = T, ph = mod(cq, 1), beat = Math.floor(cq);
+  const P = { root: {}, head: {}, phones: 0, legs: 'stand', torso: 'pumpL', eyes: 'hero', slot: 'back' };
+  if (cq < HOLD) return { ...P, legs: 'hero', torso: 'hero', slot: 'front' };
+  if (cq < 2.25) {                       // bounces off the button and drops behind it, cackling
+    const t = seg(cq, HOLD, 2.25);
+    if (t < 0.3) { P.root = { y: -64 * easeOut(t / 0.3), r: -6 * t / 0.3 }; P.legs = 'hero'; P.torso = 'windup'; P.slot = 'front'; }
+    else if (t < 0.7) { const u = (t - 0.3) / 0.4; P.root = { y: lerp(-64, STAND_Y, easeIn(u)), r: -6 * (1 - u) }; P.legs = u > 0.4 ? 'stand' : 'hero'; P.torso = 'pumpR'; }
+    else { const u = 1 - seg(t, 0.7, 1); P.root = { y: STAND_Y + 6 * u, sy: 1 - 0.16 * u, sx: 1 + 0.12 * u }; P.torso = 'pumpL'; }
+    P.head = { r: (Math.floor(cq * spb) % 2 ? 5 : -5) * (1 - t) };
+    P.eyes = t > 0.75 ? 'blink' : 'hero';
+    return P;
+  }
+  if (cq < BUILD) {                      // the groove
+    const b = bounce(ph), bl = bounce(mod(ph - 1 / spb, 1));
+    P.root = { y: STAND_Y + (b > 0 ? 5 * b : 12 * b), sy: 1 - 0.05 * b, sx: 1 + 0.04 * b };
+    P.head = { sy: 1 - 0.08 * b, sx: 1 + 0.05 * b, r: (beat % 2 ? 4 : -4) * (ph < 0.08 ? 1.4 : 1) };
+    P.phones = bl < 0 ? 14 * bl : 5 * bl;  // the headphones jump a step late
+    P.torso = beat % 2 ? 'pumpR' : 'pumpL';
+    if (Math.floor(cq / 4) % 2 && beat % 4 === 2 && ph > 0.3 && ph < 0.55) P.eyes = 'blink';
+    return P;
+  }
+  // the build: crouch, leap, hover in a wind-up squash that tightens to the drop
+  P.torso = 'windup';
+  const pulse = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5);
+  if (cq < 26) {
+    const u = easeOut(seg(cq, 24, 25));
+    P.root = { y: STAND_Y + 14 * u, sy: 1 - 0.12 * u - 0.04 * pulse, sx: 1 + 0.08 * u };
+    P.head = { sy: 1 - 0.06 * u, r: -3 * u };
+  } else if (cq < 26.75) {
+    const u = seg(cq, 26, 26.75), y = lerp(STAND_Y + 14, -50, back(u, 1.4));
+    P.root = { y, sy: lerp(1.16, 1, u), sx: lerp(0.9, 1, u), r: -4 * u };
+    P.legs = 'hero'; P.slot = y < 10 ? 'front' : 'back';
+  } else {
+    const u = seg(cq, 26.75, 31.5), w = seg(cq, 31.5, 32);
+    const shake = cq >= 28 && !T.reduced ? (Math.floor(cq * spb) % 2 ? 1 : -1) * (1.5 + 3.5 * seg(cq, 28, 32)) : 0;
+    P.root = { x: shake, y: -50 - 44 * u - 10 * w - 6 * pulse, sy: 0.92 - 0.04 * pulse - 0.1 * w, sx: 1.06 + 0.04 * pulse + 0.08 * w, r: -4 - 4 * w + shake * 0.5 };
+    P.head = { r: -4 - 6 * w, sy: 1 - 0.05 * pulse };
+    P.legs = 'hero'; P.slot = 'front';
+  }
+  return P;
+}
+
+// --- the button -------------------------------------------------------------------------------
+function domePose(T) {
+  const { cq } = T, ph = mod(cq, 1);
+  if (cq < HOLD) return {};
+  if (cq < 1.75) { const e = elastic(seg(cq, HOLD, 1.75)); return { sy: 1 + 0.15 * e, sx: 1 - 0.02 * e }; }
+  if (cq < BUILD) { const k = Math.max(0, bounce(ph)); return { sy: 1.15 - 0.07 * k, sx: 0.98 + 0.04 * k }; }
+  const p = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5);
+  return { sy: 1.15 + 0.08 * p, sx: 0.98 - 0.02 * p };
+}
+
+// --- the pompadour raver and his hairpiece -----------------------------------------------------
+function guyPose(T) {
+  const { cq, spb } = T, ph = mod(cq, 1), beat = Math.floor(cq);
+  const P = { root: { r: 0 }, head: {}, legs: 'stand', torso: 'pumpA', eyes: 'normal', brows: 'calm', mouth: 'smile', bald: cq < 16 };
+  const groove = (amt = 1) => {
+    const b = bounce(ph);
+    P.root = { r: 0, y: amt * (b > 0 ? 3 * b : 7 * b), sy: 1 - 0.03 * b * amt };
+    P.head = { y: 5 * Math.max(b, 0) * amt, sy: 1 - 0.05 * b * amt, r: (beat % 2 ? 3 : -3) * amt };
+    P.torso = beat % 2 ? 'pumpB' : 'pumpA';
+  };
+  if (cq < HOLD) return { ...P, root: { r: 22 }, legs: 'hero', torso: 'hero', eyes: 'hero', brows: 'hero', mouth: 'hero', bald: true };
+  if (cq < 1) return { ...P, root: { r: 22 + 6 * seg(cq, HOLD, 1) }, legs: 'hero', torso: 'hero', eyes: 'hero', brows: 'hero', mouth: 'hero', bald: true };
+  if (cq < 2.25) {
+    const t = seg(cq, 1, 2.25);
+    P.root = { r: 28 * (1 - back(t, 1.6)), sy: t > 0.45 && t < 0.7 ? 0.9 : 1 };
+    Object.assign(P, { legs: t < 0.4 ? 'hero' : 'stand', torso: 'hero', eyes: 'hero', brows: 'hero', mouth: 'hero' });
+    return P;
+  }
+  if (cq < 4) { P.head = { r: Math.sin(cq * 9) * 3 }; return Object.assign(P, { torso: 'hero', eyes: cq < 3 ? 'hero' : 'up', brows: 'hero', mouth: 'hero' }); }
+  if (cq < 8) { groove(0.8); return Object.assign(P, { eyes: beat % 2 ? 'up' : 'normal', brows: 'calm', mouth: 'flat' }); }
+  if (cq < 14) { groove(0.5); P.torso = 'crouch'; return Object.assign(P, { eyes: 'left', brows: 'sad', mouth: 'flat' }); }   // sulks, arms down, so the gag stays clear
+  if (cq < 16) { P.head = { r: -4 * seg(cq, 14, 16) }; return Object.assign(P, { torso: 'hero', eyes: 'up', brows: 'hero', mouth: 'hero' }); }
+  if (cq < 17) {
+    const u = 1 - seg(cq, 16, 16.5);
+    P.root = { r: 0, sy: 1 - 0.1 * u, sx: 1 + 0.06 * u };
+    return Object.assign(P, { torso: 'pumpB', eyes: cq < 16.4 ? 'blink' : 'normal', brows: 'calm', mouth: 'smile' });
+  }
+  if (cq < BUILD) { groove(1); if (Math.floor(cq / 4) % 2 === 0 && beat % 4 === 3 && ph > 0.4 && ph < 0.65) P.eyes = 'blink'; return P; }
+  const p = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5), u = seg(cq, 24, 25);
+  P.root = { r: 0, y: 10 * u + 3 * p, sy: 1 - 0.07 * u - 0.03 * p, sx: 1 + 0.04 * u };
+  P.head = { r: Math.sin(cq * spb * 2.1) * 1.5 * seg(cq, 28, 32) };
+  return Object.assign(P, { legs: 'crouch', torso: 'crouch', eyes: 'hero', brows: 'hero', mouth: 'hero' });
+}
+const GUY_PIVOT_NECK = GUY.neck;
+function guyMatrices(P) {
+  const root = guyM(P.root);
+  const head = poseM(GUY_PIVOT_NECK[0], GUY_PIVOT_NECK[1], P.head);
+  return { root, head };
+}
+
+// --- the flag kid -----------------------------------------------------------------------------
+function kidPose(T) {
+  const { cq, spb } = T, ph = mod(cq, 1), beat = Math.floor(cq);
+  if (cq < HOLD) return { cel: 'hero', root: {} };
+  if (cq < 2) return { cel: Math.floor(cq * spb) % 2 ? 'flap' : 'hero', root: { y: Math.floor(cq * spb) % 2 ? -2 : 0 } };
+  if (cq < 2.75) {
+    const u = seg(cq, 2, 2.75);
+    return { cel: 'standA', root: { y: -46 * Math.sin(Math.PI * Math.min(1, u * 1.25)), sy: u > 0.8 ? 0.84 : 1, sx: u > 0.8 ? 1.12 : 1 } };
+  }
+  if (cq < BUILD) {
+    const b = bounce(ph), heavy = cq >= 8 && cq < 14 ? 0.55 : 1;
+    const R = { y: heavy * (b > 0 ? 3 * b : 14 * b), sy: 1 - 0.07 * b * heavy, sx: 1 + 0.05 * b * heavy };
+    if (cq >= 8 && cq < 9) { const u = 1 - elastic(seg(cq, 8, 9)); R.sy = 1 - 0.3 * u; R.sx = 1 + 0.2 * u; R.y = 0; }
+    if (cq >= 14 && cq < 14.5) { R.sy = 0.86; R.sx = 1.1; R.y = 0; }
+    return { cel: beat % 2 ? 'standB' : 'standA', root: R };
+  }
+  const p = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5);
+  return { cel: 'crouch', root: { y: 2 * p, sy: 1 - 0.04 * p, x: Math.sin(cq * spb * 3.3) * 1.2 * seg(cq, 28, 32) } };
+}
+const kidM = (P) => MX.mul(MX.T(KID.root[0], KID.root[1]), poseM(KID.feet[0], KID.feet[1], P.root));
+
+// --- the round raver and her glowstick ----------------------------------------------------------
+function raverPose(T) {
+  const { cq, spb } = T, ph = mod(cq, 1), beat = Math.floor(cq), step = Math.floor(cq * spb);
+  const P = { root: { r: 4 }, torso: 'hero', eyes: 'hero', mouth: 'smile', hair: 'calmA' };
+  if (cq < HOLD) return { ...P, root: { r: 8 }, hair: 'hero', mouth: 'hero' };
+  if (cq < 2) return { ...P, root: { r: 8 + (step % 2 ? 0.8 : 0) }, hair: step % 2 ? 'stream2' : 'hero', mouth: 'hero' };
+  if (cq < 6) {
+    const u = seg(cq, 2, 2.5);
+    P.root = { r: lerp(8, 4, u), sy: u < 1 ? 1 - 0.05 * Math.sin(u * Math.PI) : 1 };
+    P.hair = cq < 2.25 ? 'calmB' : 'calmA'; P.eyes = cq < 3 ? 'hero' : 'up'; P.mouth = 'hero';
+    return P;
+  }
+  if (cq < 8) {                          // caught it: a happy squeeze, stick held high
+    const u = 1 - seg(cq, 6, 6.6);
+    P.root = { r: 4, sy: 1 - 0.08 * u, sx: 1 + 0.05 * u, y: 6 * u };
+    P.eyes = cq < 6.6 ? 'blink' : 'hero'; P.torso = 'w2';
+    P.hair = Math.floor(cq * 2) % 2 ? 'calmB' : 'calmA';
+    return P;
+  }
+  if (cq < BUILD) {
+    const b = bounce(ph), u = mod(cq, 2) / 2, tri = u < 0.5 ? u * 2 : 2 - u * 2;
+    P.root = { r: 4 + 2 * b, y: b > 0 ? 4 * b : 9 * b };
+    P.torso = 'w' + Math.min(3, Math.floor(tri * 4));
+    P.hair = Math.floor(cq * 2) % 2 ? 'calmB' : 'calmA';
+    if (Math.floor(cq / 4) % 4 === 2 && beat % 4 === 1 && ph > 0.3 && ph < 0.55) P.eyes = 'blink';
+    return P;
+  }
+  const p = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5);
+  P.root = { r: 4 + Math.sin(cq * spb * 2.7) * 1.2 * seg(cq, 28, 32), y: 4 + 3 * p };
+  return Object.assign(P, { torso: 'w1', eyes: 'pin', mouth: 'hero', hair: 'calmA' });
+}
+
+// World matrix for the glowstick held in her mitten (inside her rig, scaled back to world size).
+function stickHeld(raverRoot, torso) {
+  const [mx, my, ang] = ANCHORS.raverMitten[torso];
+  return MX.chain(raverRoot, MX.T(mx, my), MX.R(ang), MX.S(1 / 0.74), MX.T(46, 0));
+}
+const qbez = (a, b, c, t) => [(1 - t) * (1 - t) * a[0] + 2 * (1 - t) * t * b[0] + t * t * c[0], (1 - t) * (1 - t) * a[1] + 2 * (1 - t) * t * b[1] + t * t * c[1]];
+const place = (p, rot, s) => MX.chain(MX.T(p[0], p[1]), MX.R(rot), MX.S(s));
+const posOf = (M) => [M[4], M[5]];
+const rotOf = (M) => Math.atan2(M[1], M[0]) * 180 / Math.PI;
+const scaleOf = (M) => Math.hypot(M[0], M[1]);
+
+// --- the camera -------------------------------------------------------------------------------
+// Shots are 16:9 crops of the 1600x900 frame (after the Dutch tilt): centre, width, and a drift
+// (push-in factor and centre travel over the shot).
+const SHOTS = {
+  wide: { c: [800, 450], w: 1600, zoom: 0.05, move: [10, -6] },
+  dj: { c: [356, 372], w: 860, zoom: 0.07, move: [12, 6] },
+  djUp: { c: [440, 400], w: 1040, zoom: 0.12, move: [0, -20] },
+  button: { c: [476, 586], w: 680, zoom: 0.08, move: [-8, 4] },
+  raver: { c: [1270, 700], w: 720, zoom: 0.07, move: [-10, -6] },
+  pomp: { c: [1080, 360], w: 800, zoom: 0.06, move: [14, -4] },
+  crowd: { c: [860, 420], w: 580, zoom: 0.02, move: [560, -36] },
+};
+// The edit. Cut points (cycle beats) for each "Camera cuts" level; k is the cycle number (the
+// groove's picks vary per cycle); k = -1 is the opening, which starts on the wide frame.
+function cutPlan(k, level) {
+  const pick = (n, list) => list[Math.floor(hash(n * 7.13 + level) * list.length)];
+  let plan;
+  if (level <= 0) plan = [[0, 'wide'], [16, pick(k, ['dj', 'raver', 'crowd'])], [24, 'button'], [28, 'djUp']];
+  else if (level === 1) plan = [[0, 'wide'], [8, 'pomp'], [16, pick(k, ['dj', 'raver', 'crowd'])], [24, 'button'], [26, 'crowd'], [28, 'raver'], [30, 'djUp']];
+  else {
+    const a = pick(k, ['dj', 'wide', 'raver']);
+    const b = pick(k + 0.5, ['crowd', 'dj', 'pomp'].filter(s => s !== a));
+    plan = [[0, 'wide'], [4, 'raver'], [8, 'crowd'], [12, 'pomp'], [16, a], [20, b], [24, 'button'], [26, 'pomp'], [28, 'crowd'], [29, 'raver'], [30, 'button'], [31, 'djUp']];
+  }
+  // the opening (the page loads at c = 16 of cycle -1): hold the wide frame, then the usual build
+  if (k < 0) plan = [[16, 'wide'], ...(level >= 2 ? [[20, plan.find(p => p[0] === 20)[1]]] : []), ...plan.filter(([t]) => t >= 24)];
+  return plan;
+}
+function shotAt(c, k, level) {
+  const plan = cutPlan(k, level);
+  let i = 0;
+  while (i + 1 < plan.length && plan[i + 1][0] <= c) i++;
+  const start = plan[i][0], end = i + 1 < plan.length ? plan[i + 1][0] : CYCLE;
+  return { name: plan[i][1], u: (c - start) / (end - start), start };
+}
+function cropOf(name, u) {
+  const S = SHOTS[name], e = smooth(clamp(u));
+  let w = S.w * (1 - S.zoom * e), h = w * 9 / 16;
+  let cx = S.c[0] + S.move[0] * e, cy = S.c[1] + S.move[1] * e;
+  cx = clamp(cx, w / 2, 1600 - w / 2); cy = clamp(cy, h / 2, 900 - h / 2);
+  return { cx, cy, w };
+}
+
+// --- the frame ----------------------------------------------------------------------------------
+// T = { c, cq, k, bpm, spb, level, reduced, shot (optional override) }
+function frame(T) {
+  const { c, cq, k, spb, reduced } = T;
+  const ph = mod(c, 1), beatN = Math.floor(c), F = { x: {}, o: {}, cel: {}, cls: {}, slot: {}, led: [] };
+  const hero = c < HOLD;
+  const I = blastI(c);
+
+  // blast, rays, impact FX
+  F.rayOp = I > 0.002 ? I * (hero ? 1 : 0.82 + 0.18 * decay(ph, 4)) : 0;
+  F.x.rays = MX.about(BX, BY, MX.R(hero ? 0 : (c - HOLD) * 1.4));
+  F.o.glowCore = hero ? 1 : 1 - seg(c, HOLD, 3);
+  const st = seg(c, HOLD, 1.5);
+  F.o.star = hero ? 1 : 1 - st;
+  F.x.star = MX.about(BX, BY - 30, MX.S(1 + 0.6 * easeOut(st)));
+  const rg = seg(c, HOLD, 1.6);
+  F.o.rings = hero ? 1 : 1 - rg;
+  F.x.rings = MX.about(BX, BY - 10, MX.S(1 + 0.9 * easeOut(rg)));
+  F.o.impactStars = cq < 0.9 ? 1 : 0;
+  F.o.debrisLine = cq < HOLD ? 1 : 0;
+  F.o.pompFx = cq < HOLD ? 1 : 0;
+  F.x.dome = poseM(BX, BY + 18, domePose(T));
+  // the button glows and pulses through the build: each beat in bar 7, each half-beat in bar 8
+  let glow = 0;
+  if (c >= 2 && c < BUILD) glow = (0.08 + 0.22 * decay(ph, 6)) * seg(c, 2, 4);
+  else if (c >= BUILD) glow = reduced ? 0.3 + 0.5 * seg(c, BUILD, 32) : c < 28 ? 0.25 + 0.6 * decay(ph, 5) : 0.5 + 0.5 * decay(mod(c * 2, 1), 5);
+  F.o.btnGlow = glow;
+
+  // confetti: keeps flying out from the hero frame, drifts, falls, gone by bar 3
+  CONFETTI.forEach((p, i) => {
+    const t = cq - HOLD;
+    if (cq >= 8) { F.o['cf' + i] = 0; return; }
+    if (t <= 0) { F.x['cf' + i] = MX.I; F.o['cf' + i] = 1; return; }
+    const v = 150 + 90 * hash(i), dist = v * (1 - Math.exp(-1.3 * t)) / 1.3;
+    const dx = Math.cos(p.a) * dist + Math.sin(t * 2.6 + i) * 14 * Math.min(t, 1);
+    const dy = Math.sin(p.a) * dist * 0.85 + 11 * t * t;
+    F.x['cf' + i] = MX.mul(MX.T(dx, dy), MX.about(p.x, p.y, MX.R((hash(i + 7) - 0.5) * 260 * t)));
+    F.o['cf' + i] = 1 - seg(cq, 6, 8);
+  });
+
+  // the DJ
+  const D = djPose(T);
+  F.x.dj = poseM(DJ_FEET[0], DJ_FEET[1], D.root);
+  F.x.djHead = poseM(DJ_NECK[0], DJ_NECK[1], D.head);
+  F.x.djPhones = MX.T(0, D.phones || 0);
+  F.cel.djLegs = D.legs; F.cel.djTorso = D.torso; F.cel.djEyes = D.eyes;
+  F.slot.dj = D.slot;
+  F.o.djRim = I;
+
+  // the pompadour raver
+  const G = guyPose(T), GM = guyMatrices(G);
+  F.x.guy = GM.root; F.x.guyHead = GM.head;
+  Object.assign(F.cel, { guyLegs: G.legs, guyTorso: G.torso, guyEyes: G.eyes, guyBrows: G.brows, guyMouth: G.mouth });
+  F.o.guyShine = G.bald ? 1 : 0; F.o.guyRim = I;
+
+  // the kid
+  const K = kidPose(T), KM = kidM(K);
+  F.x.kid = KM; F.cel.kid = K.cel; F.o.kidRim = I;
+
+  // the hairpiece: blown off at the drop, lands on the kid, hops home before the build
+  const onKid = (Tk) => { const P = kidPose(Tk), a = ANCHORS.kidHead[P.cel] || ANCHORS.kidHead.standA; return MX.chain(kidM(P), MX.T(a[0], a[1]), MX.R(-24), MX.S(0.5)); };
+  const onGuy = (Tg, crook) => { const M = guyMatrices(guyPose(Tg)); return MX.chain(M.root, M.head, MX.T(1152, 222), MX.R(crook), MX.S(0.9)); };
+  const wob = -7 * bounce(mod(cq - 1 / spb, 1));   // the hair's lag: last step's bounce
+  let pomp = HERO.pomp, pompShow = 1;
+  if (cq < HOLD) pomp = HERO.pomp;
+  else if (cq < 2.5) {
+    const t = seg(cq, HOLD, 2.5);
+    pomp = place(qbez([1440, 300], [1590, -40], [1780, -320], easeIn(t) * 0.6 + t * 0.4), -18 + 720 * easeOut(t), 0.82);
+  } else if (cq < 5.5) pompShow = 0;
+  else if (cq < 8) {
+    const t = seg(cq, 5.5, 8), end = onKid({ ...T, cq: 8 });
+    pomp = place(qbez([1180, -200], [1080, 80], posOf(end), 0.65 * t + 0.35 * t * t), lerp(-560, rotOf(end), easeOut(t)), lerp(0.82, scaleOf(end), t));
+  } else if (cq < 14) pomp = MX.mul(onKid(T), MX.R(wob * 0.8));
+  else if (cq < 16) {
+    const a = onKid({ ...T, cq: 14 }), b = onGuy({ ...T, cq: 16 }, -18), t = seg(cq, 14.5, 16);
+    if (cq < 14.5) pomp = MX.mul(a, MX.about(0, 20, MX.S(1.12, 0.78)));
+    else {
+      const pa = posOf(a), pb = posOf(b), p = [lerp(pa[0], pb[0], t), lerp(pa[1], pb[1], t) - 130 * 4 * t * (1 - t)];
+      pomp = place(p, lerp(rotOf(a), rotOf(b) + 360, smooth(t)), lerp(scaleOf(a), scaleOf(b), t));
+    }
+  } else {
+    const crook = cq < 17 ? -18 : lerp(-18, 0, back(seg(cq, 17, 17.75), 2));
+    pomp = MX.mul(onGuy(T, crook), MX.R(cq < BUILD ? wob : 0));
+  }
+  F.x.pomp = pomp; F.o.pomp = pompShow;
+
+  // the round raver and her stick
+  const R = raverPose(T), RM = raverM(R.root);
+  F.x.raver = RM;
+  Object.assign(F.cel, { raverTorso: R.torso, raverEyes: R.eyes, raverMouth: R.mouth, raverHair: R.hair });
+  F.o.raverRim = I;
+  let stick = HERO.stick, stickShow = 1;
+  F.slot.stick = 'front';
+  if (cq < HOLD) stick = HERO.stick;
+  else if (cq < 2.5) {
+    const t = seg(cq, HOLD, 2.5), h = posOf(HERO.stick);
+    stick = place(qbez(h, [1560, 220], [1720, -200], t), -40 + 900 * easeOut(t), 1);
+  } else if (cq < 5) stickShow = 0;
+  else if (cq < 6) {
+    const t = seg(cq, 5, 6), end = stickHeld(raverM(raverPose({ ...T, cq: 6 }).root), 'w2');
+    stick = place(qbez([1250, -140], [1230, 300], posOf(end), easeIn(t)), lerp(500, rotOf(end), easeOut(t)), 1);
+  } else { stick = stickHeld(RM, R.torso); F.slot.stick = 'back'; }
+  F.x.stick = stick; F.o.stick = stickShow;
+  F.o.stickGlow = cq < 6 ? 1 : 0.6 + 0.4 * decay(mod(cq, 1), 4);
+
+  // the crowd: rows bounce half a beat apart; blown back at the drop; crouch wide-eyed in the build
+  for (let r = 0; r < 3; r++) {
+    let x = 0, y = 0, ev = 'ev1';
+    if (cq < HOLD) ev = 'ev0';
+    else if (cq < 2) {
+      const t = seg(cq, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r];
+      x = 20 * amt; y = -12 * amt; ev = 'ev0';
+    } else if (cq < BUILD) {
+      const b = bounce(mod(cq + (r % 2) * 0.5, 1));
+      y = b > 0 ? 3 * b : 8 * b;
+    } else {
+      const p = cq < 28 ? decay(mod(cq, 1), 5) : decay(mod(cq * 2, 1), 5);
+      y = 6 + 8 * seg(cq, BUILD, 32) + 2 * p; ev = 'ev2';
+    }
+    F.x['crowd' + r] = MX.T(x, y); F.cls['crowd' + r] = ev;
+  }
+
+  // ceiling lamps: chase one lamp in four per beat; strobe through the build; all on at the drop
+  const lampB = (i) => {
+    if (c < 1) return 1;
+    let g = 0.26 + 0.74 * (mod(i - beatN, 4) === 0 ? decay(ph, 3) : 0);
+    if (c < 2) g = lerp(1, g, seg(c, 1, 2));
+    if (c >= BUILD) {
+      if (reduced) g = 0.3 + 0.6 * seg(c, BUILD, 32);
+      else g = 0.18 + 0.82 * (c < 28 ? decay(mod(c * 2, 1), 7) : decay(mod(c * 4, 1), 7) * (mod(i + Math.floor(c * 4), 2) ? 1 : 0.6));
+    }
+    return g;
+  };
+  LAMPS.forEach((_, i) => { const b = lampB(i); F.o['lampGlow' + i] = 0.7 * b; F.o['lampDim' + i] = (1 - b) * 0.78; });
+  // floor pads and booth lenses
+  for (let i = 0; i < 4; i++) {
+    let p = 1;
+    if (c >= 1) p = c < BUILD ? 0.35 + 0.65 * (i % 2 === beatN % 2 ? decay(ph, 3) : 0.1) : reduced ? 0.6 : 0.4 + 0.6 * decay(mod(c * 2, 1), 5);
+    if (c >= 1 && c < 2) p = lerp(1, p, seg(c, 1, 2));
+    F.o['pad' + i] = p;
+    let l = 0;
+    if (c >= 1) l = c < BUILD ? (mod(beatN, 4) === i ? 0.75 * (1 - decay(ph, 4)) : 0.75) : (reduced ? 0.4 : (mod(Math.floor(c * 4), 4) === i ? 0 : 0.7));
+    F.o['lens' + i] = l;
+  }
+  // LED meters: jump on the beat, fall back; climb through the build; the still's pattern at the drop
+  for (let j = 0; j < 3; j++) {
+    if (c < 1) { F.led[j] = LEDS[j].slice(); continue; }
+    let lv;
+    if (c < BUILD) lv = (0.5 + 0.5 * hash(beatN * 3 + j + k * 97)) * decay(ph, 2.4);
+    else lv = 0.3 + 0.7 * seg(c, BUILD, 32) - (c >= 28 && !reduced ? 0.25 * hash(Math.floor(c * 4) + j * 11) : 0);
+    const n = Math.round(clamp(lv) * 9);
+    F.led[j] = LEDS[j].map((_, i) => i >= 9 - n);
+  }
+  F.cel.scope = c < 1 ? 'hero' : 'k' + mod(beatN, 3);
+  F.cel.wave = c < 1 ? 'hero' : 'k' + mod(beatN, 4);
+  const spin = ['hero', 'k1', 'k2', 'k3'][mod(Math.floor(cq * spb), 4)];
+  F.cel.groove0 = cq < HOLD ? 'hero' : spin; F.cel.groove1 = cq < HOLD ? 'hero' : spin;
+
+  // lasers: sweep across the room, swapping direction every bar; lock onto the button in the build
+  const lz = c < 4 ? 0 : seg(c, 4, 5);
+  LASERS.forEach(([sx, sy], i) => {
+    const bar = Math.floor(c / 4), u = mod(c, 4) / 4, e = smooth(bar % 2 ? 1 - u : u);
+    let ang = i === 0 ? lerp(12, 70, e) : lerp(168, 112, e);
+    if (c >= BUILD) {
+      const tgt = Math.atan2(BY - 70 - sy, BX - sx) * 180 / Math.PI;
+      ang = lerp(ang, tgt + (i ? 1 : -1) * (c < 28 ? 4 * Math.sin(c * Math.PI) : 0), smooth(seg(c, BUILD, 26)));
+    }
+    F.x['laser' + i] = MX.chain(MX.T(sx, sy), MX.R(ang));
+    let o = lz * (0.7 + 0.3 * decay(ph, 5));
+    if (c >= 28 && !reduced) o *= mod(Math.floor(c * 4), 2) ? 1 : 0.45;
+    F.o['laser' + i] = o;
+  });
+
+  // camera
+  const sh = T.shot ? { name: T.shot, u: 0.5 } : shotAt(c, k, T.level);
+  F.shot = sh.name;
+  let cam = MX.I, filter = '';
+  if (!(sh.name === 'wide' && c < HOLD)) {
+    const cr = cropOf(sh.name, sh.u), s = 1600 / cr.w;
+    cam = MX.chain(MX.T(800, 450), MX.S(s), MX.T(-cr.cx, -cr.cy));
+  }
+  if (!reduced && !T.shot) {
+    let A = 0;
+    if (c >= BUILD) A = 9 * seg(c, BUILD, 32) ** 2;
+    else if (c >= HOLD && c < 1.6) A = 14 * (1 - seg(c, HOLD, 1.6)) ** 2;
+    if (A > 0) {
+      const n = c * 11;
+      cam = MX.chain(MX.T(vnoise(n) * A, vnoise(n + 37) * A), MX.about(800, 450, MX.R(vnoise(n + 71) * A * 0.07)), cam);
+    }
+    if (c < IMPACT) filter = c < IMPACT / 2 ? 'impactA' : 'impactB';
+  }
+  F.cam = cam; F.filter = filter;
+  return F;
+}
+
+// ---- synth.js
+// A small WebAudio synth: kick, clap, hats, a 16th-note bass through a low-pass, an off-beat
+// chord stab, a snare-roll + noise riser for the build, a big kick + sub boom + crash for the drop,
+// and four cartoon sound effects for the gags. No samples. Everything goes through one compressor.
+//
+// The scheduler (app.js) calls play(slot, t, bpm) for every 16th note a little ahead of time; slot
+// is the 16th within the 8-bar cycle (0..127, 0 = the drop) and t the AudioContext time it sounds.
+function createSynth(offline) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = offline || new AC({ latencyHint: 'interactive' });
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.22;
+  const master = ctx.createGain(); master.gain.value = 0.5;
+  master.connect(comp); comp.connect(ctx.destination);
+  const drums = ctx.createGain(); drums.connect(master);
+  const music = ctx.createGain(); music.connect(master);       // ducked by the kick
+  const sfx = ctx.createGain(); sfx.gain.value = 0.9; sfx.connect(master);
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  { const d = noise.getChannelData(0); let s = 17; for (let i = 0; i < d.length; i++) { s = (s * 16807) % 2147483647; d[i] = s / 1073741823.5 - 1; } }
+
+  const g = (t, peak, a, d, out) => {        // a gain with an attack/decay envelope
+    const n = ctx.createGain(); n.gain.setValueAtTime(0.0001, t);
+    n.gain.linearRampToValueAtTime(peak, t + a); n.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+    n.connect(out); return n;
+  };
+  const src = (t, dur) => { const s = ctx.createBufferSource(); s.buffer = noise; s.start(t, Math.random() * 1.2); s.stop(t + dur); return s; };
+  const filt = (type, f, q = 0.7) => { const n = ctx.createBiquadFilter(); n.type = type; n.frequency.value = f; n.Q.value = q; return n; };
+  const osc = (type, f, t, dur) => { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.start(t); o.stop(t + dur); return o; };
+
+  function duck(t) { music.gain.setValueAtTime(0.35, t); music.gain.linearRampToValueAtTime(1, t + 0.2); }
+  function kick(t, amp = 1) {
+    const o = osc('sine', 150, t, 0.5); o.frequency.exponentialRampToValueAtTime(46, t + 0.11);
+    o.connect(g(t, amp, 0.002, 0.4, drums));
+    const n = src(t, 0.02), f = filt('highpass', 2500); n.connect(f); f.connect(g(t, 0.18 * amp, 0.001, 0.015, drums));
+    duck(t);
+  }
+  function clap(t) {
+    const n = src(t, 0.25), f = filt('bandpass', 1400, 0.9); n.connect(f);
+    const e = ctx.createGain(); e.gain.setValueAtTime(0.0001, t);
+    for (const k of [0, 0.011, 0.022]) { e.gain.setValueAtTime(0.42, t + k); e.gain.exponentialRampToValueAtTime(0.05, t + k + 0.009); }
+    e.gain.setValueAtTime(0.3, t + 0.031); e.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    f.connect(e); e.connect(drums);
+  }
+  function hat(t, v) { const n = src(t, 0.06), f = filt('highpass', 7500); n.connect(f); f.connect(g(t, 0.16 * v, 0.001, 0.04, drums)); }
+  function snare(t, v) {
+    const n = src(t, 0.16), f = filt('bandpass', 1900, 0.5); n.connect(f); f.connect(g(t, 0.75 * v, 0.001, 0.11, drums));
+    const o = osc('triangle', 185 + 60 * v, t, 0.1); o.connect(g(t, 0.4 * v, 0.001, 0.07, drums));
+  }
+  function bass(t, f, dur, cut) {
+    const o = osc('sawtooth', f, t, dur + 0.05), o2 = osc('square', f / 2, t, dur + 0.05);
+    const lp = filt('lowpass', cut * 3.2, 7); lp.frequency.setValueAtTime(cut * 3.2, t); lp.frequency.exponentialRampToValueAtTime(cut, t + dur * 0.9);
+    o.connect(lp); const sub = ctx.createGain(); sub.gain.value = 0.5; o2.connect(sub); sub.connect(lp);
+    lp.connect(g(t, 0.2, 0.004, dur, music));
+  }
+  function stab(t, fs) {
+    const lp = filt('lowpass', 2200, 1.2); lp.connect(g(t, 0.055, 0.003, 0.17, music));
+    for (const f of fs) for (const det of [-7, 7]) { const o = osc('sawtooth', f, t, 0.25); o.detune.value = det; o.connect(lp); }
+  }
+  function riser(t, dur, prog) {
+    const n = src(t, dur * 1.3), f = filt('bandpass', 350 * Math.pow(2, prog * 4.6), 4); n.connect(f);
+    const e = ctx.createGain(), lv = 0.06 + 0.85 * prog * prog;
+    e.gain.setValueAtTime(0.0001, t); e.gain.linearRampToValueAtTime(lv, t + dur * 0.3); e.gain.linearRampToValueAtTime(0.0001, t + dur * 1.25);
+    f.connect(e); e.connect(music);
+  }
+  function crash(t) {
+    const n = src(t, 2.6), f = filt('highpass', 4800); n.connect(f); f.connect(g(t, 0.3, 0.002, 2.3, drums));
+    const n2 = src(t, 1.2), f2 = filt('bandpass', 8200, 2); n2.connect(f2); f2.connect(g(t, 0.12, 0.002, 1, drums));
+  }
+  function drop(t) {
+    kick(t, 1.25);
+    const o = osc('sine', 62, t, 1.8); o.frequency.exponentialRampToValueAtTime(33, t + 1.4); o.connect(g(t, 0.75, 0.004, 1.6, drums));
+    const n = src(t, 0.3), f = filt('lowpass', 900, 1); n.connect(f); f.connect(g(t, 0.5, 0.001, 0.22, drums));   // the slam
+    crash(t);
+    music.gain.setValueAtTime(0.2, t); music.gain.linearRampToValueAtTime(1, t + 0.5);
+  }
+  // cartoon effects for the gags
+  function whistle(t, f0, f1, dur, vib = 7) {
+    const o = osc('sine', f0, t, dur + 0.05); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const l = osc('sine', vib, t, dur + 0.05), ld = ctx.createGain(); ld.gain.value = f0 * 0.02; l.connect(ld); ld.connect(o.frequency);
+    const e = ctx.createGain(); e.gain.setValueAtTime(0.0001, t); e.gain.linearRampToValueAtTime(0.05, t + 0.04);
+    e.gain.setValueAtTime(0.05, t + dur * 0.8); e.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(e); e.connect(sfx);
+  }
+  function boing(t, f) {
+    const o = osc('sine', f, t, 0.55), curve = new Float32Array(64);
+    for (let i = 0; i < 64; i++) { const x = i / 63; curve[i] = f * (1 + 0.35 * Math.exp(-x * 5) * Math.sin(x * 46)) * (1 - 0.25 * x); }
+    o.frequency.setValueCurveAtTime(curve, t, 0.5);
+    o.connect(g(t, 0.1, 0.004, 0.5, sfx));
+  }
+  function tink(t) { for (const [f, a] of [[2637, 0.06], [3951, 0.035]]) osc('sine', f, t, 0.4).connect(g(t, a, 0.001, 0.35, sfx)); }
+
+  const ROOT = [55, 55, 43.65, 49, 55, 65.41];
+  const CHORD = [[220, 261.6, 329.6], [220, 261.6, 329.6], [174.6, 220, 261.6], [196, 246.9, 293.7], [220, 261.6, 329.6], [261.6, 329.6, 392]];
+  function play(s, t, bpm) {
+    const b = 60 / bpm, s16 = b / 4, bar = Math.floor(s / 16), st = s % 16, sub = st % 4;
+    if (bar < 6) {
+      if (s === 0) drop(t); else if (sub === 0) kick(t);
+      if (st === 4 || st === 12) clap(t);
+      if (sub === 2) hat(t, 1); else if (sub === 3) hat(t, 0.3);
+      if (sub !== 0) bass(t, ROOT[bar] * (sub === 2 ? 2 : 1), s16 * 0.85, 260 + 140 * (sub === 2));
+      if (st === 6 || st === 14) stab(t, CHORD[bar]);
+    } else if (bar === 6) {              // build, bar 7: kick out, snare 8ths, bass pedal opening up
+      const p = st / 16;
+      if (sub % 2 === 0) snare(t, 0.45 + 0.3 * p);
+      if (sub === 0) kick(t, 0.35 * (1 - p));          // a ghost of the kick, fading out of the bar
+      if (sub === 2) hat(t, 0.8);
+      if (sub % 2 === 0) bass(t, 55, s16 * 1.6, 220 + 1600 * p * p);
+      riser(t, s16, (st / 16) * 0.5);
+    } else {                             // build, bar 8: snare 16ths, riser climbs, a breath before the drop
+      const p = st / 16;
+      if (st < 15) { snare(t, 0.65 + 0.55 * p); riser(t, s16, 0.5 + 0.5 * p); }
+    }
+    // the gags
+    if (s === 2) whistle(t, 520, 1900, b * 1.8);          // the pompadour flies off
+    if (s === 24) tink(t);                                // the glowstick is caught
+    if (s === 22) whistle(t, 1700, 380, b * 2.5);         // ...and the pompadour comes back down
+    if (s === 32) boing(t, 150);                          // landing on the kid
+    if (s === 58) whistle(t, 600, 1300, b * 0.75, 0);     // the hop home
+    if (s === 61) whistle(t, 1300, 500, b * 0.75, 0);
+    if (s === 64) boing(t, 210);
+  }
+  return { ctx, master, play };
+}
+
+// ---- app.js
+// The controller: the clock, the scheduler, the controls, and writing frame() into the SVG.
+//
+// The clock counts beats. With sound on, AudioContext time is the master: the picture shows the
+// beat that is reaching the speakers now (output timestamp, or currentTime minus outputLatency).
+// With sound off it runs on performance.now(). Tempo changes, pauses and clock switches re-anchor
+// (anchorPos at anchorTime), so the beat position never jumps.
+(() => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
+  const S = {
+    bpm: clamp(+store.get('zimRave.bpm') || 128, 90, 160), level: 1, playing: !reduced, sound: false, started: false,
+    anchorPos: reduced ? 0.3 : -16, anchorTime: performance.now() / 1000, dropAnchor: 0, pending: null, synth: null, shot: null,
+  };
+
+  // --- build the SVG -------------------------------------------------------------------------
+  const world = [room(), backCrowd(), floor(), lasers(), blast(), flagRaver(), booth(), '<g id="djBack"></g>', buttonGlow(), button(), slamFx(), debris(),
+    `<g id="djFront">${dj()}</g>`, pompadour(), '<g id="stickBack"></g>', roundRaver(), `<g id="stickFront">${glowstick()}</g>`].join('');
+  // impact frames: the hero frame thresholded to two Zim colours (and then inverted)
+  const two = (id, lo, hi) => `<filter id="${id}" x="0" y="0" width="1600" height="900" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0 0 0 0 1"/><feComponentTransfer><feFuncR type="discrete" tableValues="${lo[0]} ${hi[0]} ${hi[0]}"/><feFuncG type="discrete" tableValues="${lo[1]} ${hi[1]} ${hi[1]}"/><feFuncB type="discrete" tableValues="${lo[2]} ${hi[2]} ${hi[2]}"/></feComponentTransfer></filter>`;
+  DEFS.push(two('impactA', [0.06, 0.01, 0.05], [1, 0.18, 0.64]), two('impactB', [1, 0.93, 0.97], [0.06, 0.01, 0.05]));
+  const stage = document.getElementById('stage');
+  stage.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"><defs>${DEFS.join('')}</defs><rect width="1600" height="900" fill="#14060f"/><g id="cam"><g transform="rotate(-7,800,450) translate(800,450) scale(1.1) translate(-800,-450)">${world}</g></g></svg>`;
+  const svg = stage.firstChild, $ = (id) => document.getElementById(id);
+  const REG = { x: {}, o: {}, cel: {}, led: [] };
+  svg.querySelectorAll('[data-x]').forEach(el => { REG.x[el.dataset.x] = el; });
+  svg.querySelectorAll('[data-o]').forEach(el => { (REG.o[el.dataset.o] ||= []).push(el); });
+  svg.querySelectorAll('[data-cel]').forEach(el => { const [p, n] = el.dataset.cel.split(':'); (REG.cel[p] ||= {})[n] = el; });
+  const rayEls = [...svg.querySelectorAll('[data-ray]')];
+  svg.querySelectorAll('[data-led]').forEach(el => { const [j, i] = el.dataset.led.split(':').map(Number); (REG.led[j] ||= [])[i] = el; });
+  const slots = { dj: { front: $('djFront'), back: $('djBack'), el: REG.x.dj, at: 'front' }, stick: { front: $('stickFront'), back: $('stickBack'), el: REG.x.stick, at: 'front' } };
+  const cam = $('cam');
+  // the still's own transforms on rigs that need to keep them in their markup
+  const cache = new Map();
+  const showCel = {};
+  for (const p in REG.cel) for (const n in REG.cel[p]) if (REG.cel[p][n].style.display !== 'none') showCel[p] = n;
+
+  function setAttr(el, k, v) { const key = el; let m = cache.get(key); if (!m) cache.set(key, m = {}); if (m[k] !== v) { m[k] = v; if (v === null) el.removeAttribute(k); else el.setAttribute(k, v); } }
+  function setVis(el, op, displayOnly) {
+    let m = cache.get(el); if (!m) cache.set(el, m = {});
+    const show = op > 0.003, o = show ? (op >= 0.999 ? '' : op.toFixed(3)) : m.o;
+    if (m.show !== show) { m.show = show; el.style.display = show ? '' : 'none'; }
+    if (show && !displayOnly && m.o !== o) { m.o = o; el.style.opacity = o; }
+  }
+  function apply(F) {
+    for (const id in F.x) { const el = REG.x[id]; if (el) setAttr(el, 'transform', MX.str(F.x[id])); }
+    for (const id in F.o) { const els = REG.o[id] || (REG.x[id] ? [REG.x[id]] : null); if (els) for (const el of els) setVis(el, F.o[id]); }
+    for (const p in F.cel) {
+      const want = F.cel[p], cur = showCel[p];
+      if (want !== cur && REG.cel[p] && REG.cel[p][want]) { if (cur) REG.cel[p][cur].style.display = 'none'; REG.cel[p][want].style.display = ''; showCel[p] = want; }
+    }
+    for (const id in F.cls) setAttr(REG.x[id], 'class', F.cls[id]);
+    for (const k in F.slot) { const s = slots[k]; if (s.at !== F.slot[k]) { s.at = F.slot[k]; s[s.at].appendChild(s.el); } }
+    // the rays' screen blend must stay on the scene, so their opacity goes on the blend groups themselves
+    setVis(REG.x.rays, F.rayOp, true);
+    for (const el of rayEls) setAttr(el, 'opacity', (+el.dataset.ray * F.rayOp).toFixed(3));
+    F.led.forEach((col, j) => col.forEach((on, i) => setVis(REG.led[j][i], on ? 1 : 0)));
+    setAttr(cam, 'transform', F.cam === MX.I ? null : MX.str(F.cam));
+    setAttr(cam, 'filter', F.filter ? `url(#${F.filter})` : null);
+  }
+  const style = document.createElement('style');
+  style.textContent = '.ev0 .e1,.ev0 .e2,.ev1 .e0,.ev1 .e2,.ev2 .e0,.ev2 .e1{display:none}';
+  document.head.appendChild(style);
+
+  // --- the clock --------------------------------------------------------------------------------
+  function audibleNow() {
+    const ctx = S.synth.ctx;
+    if (ctx.getOutputTimestamp) {
+      const ts = ctx.getOutputTimestamp();
+      if (ts.contextTime > 0 && ts.performanceTime > 0) {
+        const t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+        if (Math.abs(t - ctx.currentTime) < 0.5) return t;
+      }
+    }
+    return ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
+  }
+  const audioClock = () => S.sound && S.synth && S.synth.ctx.state === 'running';
+  const now = () => (audioClock() ? audibleNow() : performance.now() / 1000);
+  const pos = () => (S.playing ? S.anchorPos + (now() - S.anchorTime) * S.bpm / 60 : S.anchorPos);
+  function reanchor(change) { const p = pos(); if (change) change(); S.anchorPos = p; S.anchorTime = now(); }
+  // the phrase map: where in the 8-bar cycle a beat position falls ("Drop now" moves the anchor)
+  function phrase(p) {
+    let a = S.dropAnchor;
+    if (S.pending !== null && p >= S.pending - 2) a = S.pending;
+    const rel = p - a, k = Math.floor(rel / CYCLE);
+    return { c: rel - k * CYCLE, k };
+  }
+
+  // --- the scheduler ----------------------------------------------------------------------------
+  let nextSlot = null;
+  function schedule() {
+    if (!S.playing || !audioClock()) { nextSlot = null; return; }
+    const ctx = S.synth.ctx, horizon = ctx.currentTime + 0.14;
+    const timeOf = (p) => S.anchorTime + (p - S.anchorPos) * 60 / S.bpm;
+    if (nextSlot === null) nextSlot = Math.ceil(pos() * 4 - 1e-6);
+    for (let n = 0; n < 64; n++) {
+      const p = nextSlot / 4, t = timeOf(p);
+      if (t > horizon) break;
+      if (t >= ctx.currentTime - 0.005) {
+        const { c } = phrase(p), slot = Math.round(c * 4) % 128;
+        S.synth.play(slot, Math.max(t, ctx.currentTime), S.bpm);
+      }
+      nextSlot++;
+    }
+  }
+  setInterval(schedule, 25);
+
+  // --- rendering --------------------------------------------------------------------------------
+  let lastP = null, frames = 0;
+  const perf = { n: 0, sum: 0 };
+  function render(force) {
+    const p = pos();
+    if (S.pending !== null && p >= S.pending) { S.dropAnchor = S.pending; S.pending = null; }
+    if (!force && p === lastP) return;
+    lastP = p;
+    const t0 = performance.now();
+    const spb = stepsPerBeat(S.bpm), pq = Math.floor(p * spb + 1e-6) / spb;
+    const A = phrase(p), Q = phrase(pq);
+    const F = frame({ c: A.c, k: A.k, cq: Q.c, kq: Q.k, bpm: S.bpm, spb, level: S.level, reduced, shot: S.shot });
+    apply(F);
+    strip(A.c);
+    S.last = { pos: p, c: A.c, k: A.k, cq: Q.c, shot: F.shot, filter: F.filter };
+    perf.sum += performance.now() - t0; perf.n++;
+    frames++;
+  }
+  function loop() { render(false); requestAnimationFrame(loop); }
+
+  // --- the controls -----------------------------------------------------------------------------
+  const cells = $('cells'), dots = $('dots');
+  const cellEls = [], dotEls = [];
+  for (let i = 0; i < 8; i++) { const d = document.createElement('div'); d.className = 'cell' + (i >= 6 ? ' build' : ''); d.textContent = i + 1; cells.appendChild(d); cellEls.push(d); }
+  for (let i = 0; i < 4; i++) { const d = document.createElement('div'); d.className = 'dot'; dots.appendChild(d); dotEls.push(d); }
+  let lastBar = -1, lastBeat = -1;
+  function strip(c) {
+    const bar = Math.floor(c / 4), beat = Math.floor(c) % 4;
+    if (bar !== lastBar) { if (lastBar >= 0) cellEls[lastBar].classList.remove('on'); cellEls[bar].classList.add('on'); lastBar = bar; }
+    if (beat !== lastBeat) { if (lastBeat >= 0) dotEls[lastBeat].classList.remove('on'); dotEls[beat].classList.add('on'); lastBeat = beat; }
+  }
+  const playBtn = $('play'), soundBtn = $('sound'), tempo = $('tempo'), tempoOut = $('tempoOut'), cuts = $('cuts'), live = $('live');
+  function syncUi() {
+    playBtn.textContent = !S.started ? 'Play with sound' : (S.playing ? 'Pause' : 'Play');
+    soundBtn.textContent = S.sound ? 'Sound on' : 'Sound off';
+    soundBtn.setAttribute('aria-pressed', String(S.sound));
+    tempo.value = S.bpm; tempoOut.textContent = `${S.bpm} BPM`;
+  }
+  function ensureSynth() {
+    if (!S.synth) { try { S.synth = createSynth(); } catch (e) { S.synth = null; } }
+    return S.synth;
+  }
+  async function setSound(on) {
+    if (on && !ensureSynth()) return;
+    if (on) {
+      const p = pos();
+      S.synth.master.gain.setTargetAtTime(0.5, S.synth.ctx.currentTime, 0.01);
+      try { await S.synth.ctx.resume(); } catch (e) { /* stays silent */ }
+      S.sound = S.synth.ctx.state === 'running';
+      S.anchorPos = p; S.anchorTime = now(); nextSlot = null;
+    } else {
+      reanchor(() => { S.sound = false; });
+      if (S.synth) { const ctx = S.synth.ctx; S.synth.master.gain.setTargetAtTime(0, ctx.currentTime, 0.02); setTimeout(() => { if (!S.sound) ctx.suspend(); }, 150); }
+    }
+    syncUi();
+  }
+  function setPlaying(on) {
+    reanchor(() => { S.playing = on; });
+    if (S.playing) S.anchorTime = now();
+    nextSlot = null; syncUi();
+  }
+  function togglePlay() {
+    if (!S.started) { S.started = true; ensureSynth(); if (!S.playing) setPlaying(true); setSound(true); syncUi(); return; }
+    setPlaying(!S.playing);
+  }
+  function dropNow() {
+    const p = pos(), { c } = phrase(p);
+    if (S.pending !== null) return;
+    if (c >= 30) return;                       // the drop is less than half a bar away anyway
+    let bd = Math.ceil(p / 4 - 1e-9) * 4;
+    if (bd - p < 1) bd += 4;                   // leave at least a beat of build
+    S.pending = bd;
+    live.textContent = 'Drop on the next bar';
+  }
+  playBtn.addEventListener('click', togglePlay);
+  soundBtn.addEventListener('click', () => { S.started = true; setSound(!S.sound); });
+  $('drop').addEventListener('click', dropNow);
+  tempo.addEventListener('input', () => { reanchor(() => { S.bpm = +tempo.value; }); nextSlot = null; store.set('zimRave.bpm', S.bpm); syncUi(); });
+  cuts.addEventListener('input', () => { S.level = +cuts.value; });
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) togglePlay(); }
+    else if (e.key === 'd' || e.key === 'D') dropNow();
+    else if (e.key === 'm' || e.key === 'M') { S.started = true; setSound(!S.sound); }
+  });
+  document.addEventListener('keyup', (e) => { if (e.code === 'Space') e.preventDefault(); });
+  // keep the stage inside the window: measure the control bar (it wraps on phones)
+  const bar = $('bar');
+  const fit = () => document.documentElement.style.setProperty('--bar-h', bar.offsetHeight + 'px');
+  new ResizeObserver(fit).observe(bar); fit();
+
+  // --- test hooks -------------------------------------------------------------------------------
+  window.__proto = {
+    seek(seconds) { S.playing = false; S.anchorPos = seconds * S.bpm / 60; S.pending = null; S.dropAnchor = 0; render(true); syncUi(); return S.last; },
+    seekBeat(b) { S.playing = false; S.anchorPos = b; S.pending = null; S.dropAnchor = 0; render(true); syncUi(); return S.last; },
+    render() { render(true); return S.last; },
+    state() { return { ...S.last, bpm: S.bpm, playing: S.playing, sound: S.sound, level: S.level, bar: Math.floor(S.last.c / 4) + 1, beat: Math.floor(S.last.c) % 4 + 1, frames, scriptMs: perf.n ? perf.sum / perf.n : 0 }; },
+    set(o) { if ('level' in o) { S.level = o.level; cuts.value = o.level; } if ('shot' in o) S.shot = o.shot; if ('bpm' in o) reanchor(() => { S.bpm = o.bpm; }); if ('play' in o) setPlaying(o.play); render(true); return S.last; },
+    // offline render of the soundtrack for a preview video: WAV (base64) from cycle beat b0 for n beats
+    async renderAudio(b0, n) {
+      const sr = 44100, dur = n * 60 / S.bpm, oc = new OfflineAudioContext(2, Math.ceil(sr * (dur + 0.5)), sr), syn = createSynth(oc);
+      for (let s = Math.ceil(b0 * 4); s < (b0 + n) * 4; s++) syn.play(mod(s, 128), (s / 4 - b0) * 60 / S.bpm, S.bpm);
+      const buf = await oc.startRendering(), L = buf.getChannelData(0), R = buf.getChannelData(1), len = Math.floor(sr * dur);
+      const v = new DataView(new ArrayBuffer(44 + len * 4)), w = (o, str) => [...str].forEach((ch, i) => v.setUint8(o + i, ch.charCodeAt(0)));
+      w(0, 'RIFF'); v.setUint32(4, 36 + len * 4, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 2, true);
+      v.setUint32(24, sr, true); v.setUint32(28, sr * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, len * 4, true);
+      for (let i = 0; i < len; i++) { v.setInt16(44 + i * 4, clamp(L[i], -1, 1) * 32767, true); v.setInt16(46 + i * 4, clamp(R[i], -1, 1) * 32767, true); }
+      let bin = ''; const u8 = new Uint8Array(v.buffer); for (let i = 0; i < u8.length; i += 32768) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 32768));
+      return btoa(bin);
+    },
+    bare() { document.body.classList.add('bare'); render(true); },
+    resetPerf() { perf.n = 0; perf.sum = 0; frames = 0; },
+  };
+  syncUi();
+  render(true);
+  requestAnimationFrame(loop);
+})();
+
+</script>
