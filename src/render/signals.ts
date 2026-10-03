@@ -165,6 +165,15 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
+/** "Onset surge" is the broadband flux ratio (1 = the detector's bare
+ *  trigger) rescaled so SURGE_RATIO_FLOOR reads 0 and SURGE_RATIO_CEIL
+ *  reads 1. Exported so the Hits card's Surge lane can mark where Beat
+ *  fires on that same scale (surgeAtThreshold) instead of copying the
+ *  numbers. */
+const SURGE_RATIO_FLOOR = 0.6;
+const SURGE_RATIO_CEIL = 2.0;
+export const surgeAtThreshold = clamp01((1 - SURGE_RATIO_FLOOR) / (SURGE_RATIO_CEIL - SURGE_RATIO_FLOOR));
+
 /** One entry in `SceneSetting.reads` (sceneSettings.ts) — either just a
  *  signal id (this setting always responds to it), or a signal id plus
  *  `activeWhen`, for a setting that only responds while some other setting
@@ -205,7 +214,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description:
       "How close the broadband onset detector is to firing right now (AnimFrame.beatRatio, features.ts's own unclamped fluxRatio), rescaled so 0.6 (a clear near-miss) reads 0 and 2.0 reads 1 — the same flux 'Beat' fires on, read continuously instead of as a one-shot, so a scene can lean into an approaching hit rather than only ever react after it lands.",
     kind: "level",
-    read: (_frame, anim) => clamp01((anim.beatRatio - 0.6) / 1.4),
+    read: (_frame, anim) => clamp01((anim.beatRatio - SURGE_RATIO_FLOOR) / (SURGE_RATIO_CEIL - SURGE_RATIO_FLOOR)),
     monitor: { card: "hits", row: "hits" },
     bandRange: "all",
   }),
