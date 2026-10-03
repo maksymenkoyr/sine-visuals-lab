@@ -15,10 +15,8 @@ import {
   setSourceRole,
   smoothstep,
   togglePatchSource,
-  driveCeiling,
   type DriveChoice,
   type DrivePatch,
-  type DriveSource,
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
@@ -1472,15 +1470,3 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
   });
 });
 
-describe("drives: driveCeiling", () => {
-  const src = (weight: number, extra: Partial<DriveSource> = {}): DriveSource => ({ choice: "feature.onset", weight, ...extra });
-  it("add sums the weights, max takes the largest, gate sums only the players", () => {
-    const sources = [src(1), src(2), src(0.5, { when: true }), src(1.5, { off: true })];
-    expect(driveCeiling({ mix: "add", sources }, 1)).toBeCloseTo(3.5);
-    expect(driveCeiling({ mix: "max", sources }, 1)).toBeCloseTo(2);
-    expect(driveCeiling({ mix: "gate", sources }, 1)).toBeCloseTo(3);
-  });
-  it("scales by the setting's gain", () => {
-    expect(driveCeiling({ mix: "add", sources: [src(1)] }, 2)).toBeCloseTo(2);
-  });
-});

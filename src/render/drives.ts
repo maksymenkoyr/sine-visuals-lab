@@ -953,23 +953,6 @@ function combine(patch: DrivePatch, weighted: number[]): number {
   return sum;
 }
 
-/** The most `combine(patch, …) × gain` can reach when every source sits at
- *  its own full-scale 1: the panel's "What it receives" graph fixes its top
- *  here, so the top of the graph means "as much as this setting can receive".
- *  Mirrors combine()'s three mixes — add sums the weights, max takes the
- *  largest, gate sums only the sources that play (a condition only ever
- *  multiplies by at most 1). */
-export function driveCeiling(patch: DrivePatch, gain = 1): number {
-  let total = 0;
-  for (const src of patch.sources) {
-    if (src.off) continue;
-    if (patch.mix === "max") total = Math.max(total, src.weight);
-    else if (patch.mix === "gate" && src.when) continue;
-    else total += src.weight;
-  }
-  return total * gain;
-}
-
 const lineDriveScratch = { drive: 0, excess: new Float32Array(NUM_BANDS) };
 const driveFrameScratch: FeatureFrame = {
   time: 0,
