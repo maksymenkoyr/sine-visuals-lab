@@ -16,15 +16,21 @@
 // dev:worker` listens on. NODE_TLS_REJECT_UNAUTHORIZED=0 is for that dev
 // server's self-signed certificate.
 //
-//   smoke  Claims a room as a host, then walks the join and send rules with a
-//          controller, a frame-watching controller and a renderer: who gets the
-//          look and when, that patches are acked and relayed (not echoed), that a
-//          renderer cannot patch and an oversized patch is refused, that a late
-//          joiner receives the same look, that every wrong credential is closed
-//          with the denial code and told nothing, the TV adopt route (it reaches
-//          only the slot socket that joined with the nonce), that a keyless
-//          host and renderer still relay frames in an unclaimed room, and that
-//          the host's endRoom tells every socket it ended.
+//   smoke  Claims a room as a host, then walks the join and send rules with two
+//          controllers (a tablet and a phone) and a renderer: who gets the look
+//          and when (the laptop too), that patches are acked and relayed to
+//          everyone but the sender with the sender's id, that a renderer cannot
+//          patch and an oversized patch is refused, that a late joiner receives
+//          the same look, that the roster lists every member with its device
+//          settings, that a deviceSet round trip changes one and a refused one is
+//          answered with deviceReject, that frames go from a device on its own
+//          input to the devices that follow it and from nobody else, that
+//          every wrong credential is closed with the denial code and told
+//          nothing, the TV adopt route (it reaches only the slot socket that
+//          joined with the nonce), that a keyless host and renderer still relay
+//          frames in an unclaimed room, that the host's deviceForget tells the
+//          removed device, and that the host's endRoom tells every socket it
+//          ended.
 //          Exits non-zero if any check fails.
 //   host   Plays the laptop for a real page: claims a room, prints its code,
 //          keys and the phone (controller) URL, and streams synthetic frames at
@@ -213,23 +219,32 @@ async function runSmoke() {
   let lookBeforeClose;
 
   // The host claims the room with both keys; from then on it is keyed.
-  await step("host claims an unclaimed room and gets a roster back", async () => {
-    host = connect("host", url.host());
+  await step("host claims an unclaimed room, is told the look, and gets a roster that lists it as the owner", async () => {
+    host = connect("host", url.host({ kind: "laptop", mic: "1" }));
     await host.opened;
+    const look = await host.take("look", isType("look"));
+    assertEqual([look.rev, look.doc], [0, null], "the look the laptop is told");
     host.send({ type: "hello", scene: "spectrum", palette: "neon" });
-    const roster = await host.take("roster", isType("roster"));
-    assert(roster.devices.some((d) => d.role === "host"), "roster should list the host");
+    const roster = await host.take("roster", (m) => m.type === "roster" && m.devices.some((d) => d.scene === "spectrum"));
+    const me = roster.devices.find((d) => d.role === "host");
+    assert(me, "roster should list the host");
+    assertEqual([me.owner, me.ears, me.screen, me.online], [true, "own", "main", true], "the owner's settings");
   });
 
-  await step("a controller is told the look is empty, and stays out of the roster", async () => {
-    phone = connect("phone", url.controller("smoke-phone"));
+  await step("a controller is told the look is empty, and is in the roster with its own settings", async () => {
+    phone = connect("phone", url.controller("smoke-phone", { kind: "phone", mic: "1", name: "Smoke phone" }));
     await phone.opened;
     const look = await phone.take("look", isType("look"));
     assertEqual([look.rev, look.doc], [0, null], "an unpatched room's look");
-    host.send({ type: "hello", scene: "spectrum", palette: "neon" });
-    const roster = await host.take("roster", isType("roster"));
-    assert(!roster.devices.some((d) => d.role === "controller"), "a controller must not be in the roster");
-    await phone.take("roster", isType("roster")); // it still receives one
+    const roster = await host.take("roster", (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-phone"));
+    const entry = roster.devices.find((d) => d.deviceId === "smoke-phone");
+    assertEqual(
+      [entry.role, entry.kind, entry.name, entry.hasMic, entry.ears, entry.follow, entry.screen, entry.online, entry.owner],
+      ["controller", "phone", "Smoke phone", true, "follow", null, "off", true, false],
+      "a phone's default settings",
+    );
+    assertEqual(roster.devices[0].deviceId, "smoke-host", "the owner is listed first");
+    await phone.take("roster", isType("roster")); // it receives one too
   });
 
   await step("a controller's patch is acked with the next revision", async () => {
@@ -246,14 +261,15 @@ async function runSmoke() {
     assertEqual([look.doc.scene, look.doc.palette, look.doc.storage], ["spectrum", "neon", { "vibe.smoke": "1" }], "look doc");
   });
 
-  await step("a later patch is relayed to the renderer and not echoed to its sender", async () => {
+  await step("a later patch is relayed to the renderer and the laptop with the sender's id, and not echoed", async () => {
     phone.send({ type: "lookPatch", n: 2, set: { "vibe.smoke": "2" } });
     const ack = await phone.take("lookAck", isType("lookAck"));
     assertEqual([ack.n, ack.rev], [2, 2], "lookAck n, rev");
     const patch = await tv.take("lookPatch", isType("lookPatch"));
-    assertEqual([patch.rev, patch.set], [2, { "vibe.smoke": "2" }], "relayed patch");
+    assertEqual([patch.rev, patch.set, patch.by], [2, { "vibe.smoke": "2" }, "smoke-phone"], "relayed patch");
+    const atHost = await host.take("lookPatch", (m) => m.type === "lookPatch" && m.rev === 2);
+    assertEqual([atHost.set, atHost.by], [{ "vibe.smoke": "2" }, "smoke-phone"], "the laptop's copy of the patch");
     await phone.expectNone("echoed lookPatch", isType("lookPatch"));
-    await host.expectNone("look traffic", (m) => m.type === "lookPatch" || m.type === "look");
   });
 
   await step("a patch that changes nothing is acked without a new revision or a broadcast", async () => {
@@ -263,16 +279,20 @@ async function runSmoke() {
     await tv.expectNone("lookPatch for a no-op", isType("lookPatch"));
   });
 
-  await step("host frames reach the renderer and a frames=1 controller, not a plain controller", async () => {
-    watcher = connect("watcher", url.controller("smoke-watcher", { frames: "1" }));
+  await step("host frames reach every device that follows it, never the host, and a follower's bytes go nowhere", async () => {
+    watcher = connect("watcher", url.controller("smoke-watcher", { kind: "tablet", mic: "1" }));
     await watcher.opened;
     await watcher.take("look", isType("look"));
     for (let i = 0; i < 3; i++) host.sendBinary(frame);
     const seenByTv = await tv.take("binary frame", isBinary);
     const seenByWatcher = await watcher.take("binary frame", isBinary);
-    assertEqual([seenByTv.binary, seenByWatcher.binary], [FRAME_BYTES, FRAME_BYTES], "relayed frame size");
-    await phone.expectNone("binary frame for a controller without frames=1", isBinary);
+    const seenByPhone = await phone.take("binary frame", isBinary);
+    assertEqual([seenByTv.binary, seenByWatcher.binary, seenByPhone.binary], [FRAME_BYTES, FRAME_BYTES, FRAME_BYTES], "relayed frame size");
     await host.expectNone("its own frame back", isBinary);
+    for (const c of [tv, watcher, phone]) c.inbox = c.inbox.filter((m) => !isBinary(m));
+    phone.sendBinary(frame); // the phone follows the laptop: it is not a feed
+    await tv.expectNone("a frame from a device that is not on its own input", isBinary);
+    await host.expectNone("a frame from a device that is not on its own input", isBinary);
   });
 
   await step("a renderer cannot patch the look", async () => {
@@ -299,6 +319,39 @@ async function runSmoke() {
     await tv.opened;
     const look = await tv.take("look", isType("look"));
     assertEqual(look, lookBeforeClose, "look after reconnect");
+  });
+
+  await step("a deviceSet changes one device and everyone is told; a refused one is answered to the sender alone", async () => {
+    phone.send({ type: "deviceSet", targetId: "smoke-tv", name: "Big TV", screen: "own" });
+    for (const c of [host, phone, tv]) {
+      const roster = await c.take(
+        "roster with the new name",
+        (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-tv" && d.name === "Big TV"),
+      );
+      assertEqual(roster.devices.find((d) => d.deviceId === "smoke-tv").screen, "own", "the TV's screen");
+    }
+    phone.send({ type: "deviceSet", targetId: "smoke-tv", ears: "own" });
+    const reject = await phone.take("deviceReject", isType("deviceReject"));
+    assertEqual([reject.targetId, reject.reason], ["smoke-tv", "no-mic"], "deviceReject targetId, reason");
+    phone.send({ type: "deviceSet", targetId: "smoke-tv", ears: "loud" });
+    const shape = await phone.take("deviceReject", isType("deviceReject"));
+    assertEqual([shape.targetId, shape.reason], ["smoke-tv", "shape"], "deviceReject for a bad value");
+    await tv.expectNone("deviceReject meant for the sender", isType("deviceReject"));
+  });
+
+  await step("a device on its own input is relayed to its followers, and the laptop's frames stop reaching them", async () => {
+    phone.send({ type: "deviceSet", targetId: "smoke-phone", ears: "own" });
+    await phone.take("roster showing it on its own input", (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-phone" && d.ears === "own"));
+    tv.send({ type: "deviceSet", targetId: "smoke-tv", follow: "smoke-phone" });
+    await tv.take("roster showing the TV following the phone", (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-tv" && d.follow === "smoke-phone"));
+    for (const c of [host, phone, tv, watcher]) c.inbox = c.inbox.filter((m) => !isBinary(m));
+    phone.sendBinary(frame);
+    const got = await tv.take("binary frame from the phone", isBinary);
+    assertEqual(got.binary, FRAME_BYTES, "relayed frame size");
+    await host.expectNone("a frame from a device nobody told the laptop to follow", isBinary);
+    host.sendBinary(frame);
+    await watcher.take("binary frame from the laptop", isBinary);
+    await tv.expectNone("a laptop frame at a device that follows the phone", isBinary);
   });
 
   // Every wrong credential: closed with the denial code, and told nothing.
@@ -389,6 +442,26 @@ async function runSmoke() {
       body: JSON.stringify({ room: code, k: roomKey, n: newKey(), pad: "x".repeat(LOOK_LIMITS.maxAdoptBodyBytes) }),
     });
     assertEqual(res.status, 413, "adopt with an oversized body");
+  });
+
+  // The laptop removes a device: the device is told, and the roster drops it.
+  // Only the message is checked, for the same reason as endRoom below.
+  await step("the host's deviceForget tells the removed device and drops it from the roster", async () => {
+    const forgetCode = await newRoomCode();
+    const hk = newKey();
+    const k = newKey();
+    const owner = connect("owner", roomUrl(forgetCode, "host", "smoke-fo-host", { hk, k }));
+    await owner.opened;
+    const pad = connect("pad to remove", roomUrl(forgetCode, "controller", "smoke-fo-pad", { k, kind: "tablet", mic: "1" }));
+    await pad.opened;
+    await owner.take("roster with the pad", (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-fo-pad"));
+    pad.send({ type: "deviceForget", targetId: "smoke-fo-host" }); // not allowed: only the owner forgets
+    await owner.expectNone("ended", isType("ended"));
+    owner.send({ type: "deviceForget", targetId: "smoke-fo-pad" });
+    const gone = await pad.take("ended", isType("ended"));
+    assertEqual(gone.reason, "removed", "ended reason");
+    await owner.take("roster without the pad", (m) => m.type === "roster" && !m.devices.some((d) => d.deviceId === "smoke-fo-pad"));
+    owner.close();
   });
 
   // The laptop's Reset: the host ends its room, every socket is told `ended`,

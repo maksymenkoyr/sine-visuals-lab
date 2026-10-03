@@ -53,4 +53,9 @@ describe("hostInRoster", () => {
     expect(hostInRoster([{ role: "renderer" }, { role: "controller" }])).toBe(false);
     expect(hostInRoster([{ role: "renderer" }, { role: "host" }])).toBe(true);
   });
+
+  it("does not count a host that is listed but offline", () => {
+    expect(hostInRoster([{ role: "host", online: false }])).toBe(false);
+    expect(hostInRoster([{ role: "host", online: true }])).toBe(true);
+  });
 });

@@ -8,6 +8,7 @@ import {
   type CoreSocket,
 } from "../server/roomCore.ts";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
+import { DEVICE_LIMITS } from "../server/roomDevices.ts";
 import { LOOK_PUBLISH_MS } from "../src/net/lookSync.ts";
 import { ROOM_CLOSE_DENIED, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
 
@@ -95,7 +96,10 @@ class FakeHost implements CoreHost {
 interface Presented {
   role?: string | null;
   deviceId?: string | null;
-  frames?: boolean;
+  /** What the device says it is: the `kind`, `mic` and `name` query values. */
+  kind?: string | null;
+  mic?: boolean;
+  name?: string | null;
   k?: string;
   hk?: string;
   /** The nonce a TV waiting in a pairing slot presents. */
@@ -121,7 +125,9 @@ class Room {
       {
         role: p.role === undefined ? null : p.role,
         deviceId: p.deviceId ?? null,
-        frames: p.frames ?? false,
+        kind: p.kind ?? null,
+        mic: p.mic ?? false,
+        name: p.name ?? null,
         adopt: p.adopt ?? null,
       },
       hashes,
@@ -142,13 +148,13 @@ class Room {
 
   /** The laptop claiming a room with both keys. */
   claimed(): Promise<FakeSocket> {
-    return this.need({ role: "host", deviceId: "laptop", hk: HK, k: K });
+    return this.need({ role: "host", deviceId: "laptop", hk: HK, k: K, mic: true });
   }
-  controller(deviceId = "phone", frames = false): Promise<FakeSocket> {
-    return this.need({ role: "controller", deviceId, k: K, frames });
+  controller(deviceId = "phone", extra: Presented = {}): Promise<FakeSocket> {
+    return this.need({ role: "controller", deviceId, k: K, ...extra });
   }
-  renderer(deviceId = "tv"): Promise<FakeSocket> {
-    return this.need({ role: "renderer", deviceId, k: K });
+  renderer(deviceId = "tv", extra: Presented = {}): Promise<FakeSocket> {
+    return this.need({ role: "renderer", deviceId, k: K, kind: "tv", ...extra });
   }
 
   say(ws: FakeSocket, msg: unknown): void {
@@ -166,6 +172,12 @@ class Room {
     const next = new Room(new Map(this.host.store));
     return next;
   }
+}
+
+/** The device list of the last roster a socket received. */
+function roster(ws: FakeSocket): Array<Record<string, unknown>> {
+  const last = ws.msgs("roster").pop();
+  return (last?.devices ?? []) as Array<Record<string, unknown>>;
 }
 
 describe("join", () => {
@@ -253,13 +265,28 @@ describe("join", () => {
     expect(await room.connect({ role: "host" })).toBeNull();
   });
 
-  it("gives the frames tag to a controller that asks, and to nobody else", async () => {
+  it("tags a socket by its role and its device id, and by nothing else", async () => {
     const room = new Room();
     await room.claimed();
-    expect((await room.controller("p1", true)).tags).toEqual(["controller", "p1", "frames"]);
-    expect((await room.controller("p2", false)).tags).toEqual(["controller", "p2"]);
-    const tv = await room.need({ role: "renderer", deviceId: "tv", k: K, frames: true });
-    expect(tv.tags).toEqual(["renderer", "tv"]);
+    expect((await room.controller("p1")).tags).toEqual(["controller", "p1"]);
+    expect((await room.renderer("tv")).tags).toEqual(["renderer", "tv"]);
+  });
+
+  it("takes a socket's kind, microphone and name from what it presented, with defaults from its role", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad", { kind: "tablet", mic: true, name: "Studio iPad" });
+    expect(pad.attachment).toMatchObject({ kind: "tablet", hasMic: true, joinName: "Studio iPad" });
+    const plain = await room.controller("plain");
+    expect(plain.attachment).toMatchObject({ kind: "phone", hasMic: false });
+    expect(plain.attachment.joinName).toBeUndefined();
+    const odd = await room.controller("odd", { kind: "fridge", name: "  \u0000  " });
+    expect(odd.attachment.kind).toBe("phone");
+    expect(odd.attachment.joinName).toBeUndefined();
+    const tv = await room.renderer("tv", { mic: true });
+    expect(tv.attachment).toMatchObject({ kind: "tv", hasMic: false });
+    const long = await room.controller("long", { name: "n".repeat(100) });
+    expect(long.attachment.joinName).toBe("n".repeat(32));
   });
 
   it("replaces a device id that is missing, malformed, over-long or reserved", async () => {
@@ -287,7 +314,8 @@ describe("join", () => {
     const host = await room.claimed();
     const tv = await room.renderer("tv");
     tv.clear();
-    room.say(squatter, { type: "setDevice", targetId: "tv", scene: "x" });
+    room.say(squatter, { type: "deviceSet", targetId: "tv", name: "Hijacked" });
+    room.say(squatter, { type: "deviceForget", targetId: "tv" });
     room.say(squatter, { type: "hello", scene: "x" });
     room.say(squatter, { type: "ping", t0: 1 });
     expect(tv.sent).toEqual([]);
@@ -298,10 +326,10 @@ describe("join", () => {
 });
 
 describe("message gating", () => {
-  it("relays binary only from the host", async () => {
+  it("relays binary only from a device on its own input: the host's, not a follower's", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller("phone", true);
+    const phone = await room.controller("phone");
     const tv = await room.renderer();
     room.bytes(phone);
     room.bytes(tv);
@@ -321,63 +349,31 @@ describe("message gating", () => {
     expect(tv.msgs("pong").length).toBe(1);
   });
 
-  it("drops a keyed renderer's setDevice but honours a legacy renderer's, a controller's and a host's", async () => {
+  it("ignores deviceSet and deviceForget in a room nobody has claimed, and the old setDevice everywhere", async () => {
     const legacy = new Room();
-    const target = await legacy.need({ role: "renderer", deviceId: "target" });
-    const legacyTv = await legacy.need({ role: "renderer", deviceId: "tv" });
-    legacy.say(legacyTv, { type: "setDevice", targetId: "target", scene: "mesh" });
-    expect(target.msgs("command")).toEqual([{ type: "command", scene: "mesh" }]);
+    const host = await legacy.need({ role: "host", deviceId: "laptop" });
+    const tv = await legacy.need({ role: "renderer", deviceId: "tv" });
+    host.clear();
+    tv.clear();
+    legacy.say(host, { type: "deviceSet", targetId: "tv", name: "X" });
+    legacy.say(tv, { type: "deviceSet", targetId: "tv", name: "X" });
+    legacy.say(host, { type: "deviceForget", targetId: "tv" });
+    legacy.say(host, { type: "setDevice", targetId: "tv", scene: "mesh" });
+    expect(tv.sent).toEqual([]);
+    expect(host.sent).toEqual([]);
+    expect(tv.closedWith).toBeNull();
 
     const keyed = new Room();
-    const host = await keyed.claimed();
-    const phone = await keyed.controller();
-    const tv = await keyed.renderer("tv");
-    const other = await keyed.renderer("other");
-    keyed.say(tv, { type: "setDevice", targetId: "other", scene: "mesh" });
-    expect(other.msgs("command")).toEqual([]);
-    keyed.say(phone, { type: "setDevice", targetId: "other", scene: "mesh" });
-    keyed.say(host, { type: "setDevice", targetId: "other", palette: "ember" });
-    expect(other.msgs("command")).toEqual([
-      { type: "command", scene: "mesh" },
-      { type: "command", palette: "ember" },
-    ]);
+    const keyedHost = await keyed.claimed();
+    const keyedTv = await keyed.renderer("tv");
+    keyedTv.clear();
+    keyed.say(keyedHost, { type: "setDevice", targetId: "tv", scene: "mesh" });
+    expect(keyedTv.sent).toEqual([]);
   });
 
-  it("forwards a command's viewport and drops over-long or non-string ids", async () => {
+  it("keeps delivering when one socket's send throws", async () => {
     const room = new Room();
     const host = await room.need({ role: "host", deviceId: "laptop" });
-    const tv = await room.need({ role: "renderer", deviceId: "tv" });
-    room.say(host, {
-      type: "setDevice",
-      targetId: "tv",
-      scene: "s".repeat(LOOK_LIMITS.maxIdChars + 1),
-      palette: 7,
-      viewport: { x: 0.5, y: 0, w: 0.5, h: 1 },
-    });
-    expect(tv.msgs("command")).toEqual([{ type: "command", viewport: { x: 0.5, y: 0, w: 0.5, h: 1 } }]);
-  });
-
-  it("ignores a setDevice aimed at a reserved or malformed tag", async () => {
-    const room = new Room();
-    const host = await room.claimed();
-    const phone = await room.controller("phone", true);
-    const tv = await room.renderer("tv");
-    for (const targetId of ["renderer", "controller", "host", "frames", "", "bad id", 7, null]) {
-      room.say(host, { type: "setDevice", targetId, scene: "mesh" });
-    }
-    expect(tv.msgs("command")).toEqual([]);
-    expect(phone.msgs("command")).toEqual([]);
-  });
-
-  it("keeps delivering when one target's send throws", async () => {
-    const room = new Room();
-    const host = await room.need({ role: "host", deviceId: "laptop" });
-    const bad = await room.need({ role: "renderer", deviceId: "twin" });
-    const good = await room.need({ role: "renderer", deviceId: "twin" });
-    bad.throwOnSend = true;
-    room.say(host, { type: "setDevice", targetId: "twin", scene: "mesh" });
-    expect(good.msgs("command").length).toBe(1);
-
     const tvA = await room.need({ role: "renderer", deviceId: "a" });
     const tvB = await room.need({ role: "renderer", deviceId: "b" });
     tvA.throwOnSend = true;
@@ -385,6 +381,16 @@ describe("message gating", () => {
     expect(tvB.frames().length).toBe(1);
     room.say(host, { type: "hello", scene: "mesh" });
     expect(tvB.msgs("roster").length).toBeGreaterThan(0);
+
+    const claimed = new Room();
+    const owner = await claimed.claimed();
+    const bad = await claimed.renderer("bad");
+    const good = await claimed.renderer("good");
+    bad.throwOnSend = true;
+    claimed.bytes(owner);
+    expect(good.frames().length).toBe(1);
+    claimed.say(owner, { type: "hello", scene: "mesh" });
+    expect(good.msgs("roster").length).toBeGreaterThan(0);
   });
 
   it("drops text over the message cap before parsing, and binary over the frame cap", async () => {
@@ -410,14 +416,15 @@ describe("message gating", () => {
     expect(tv.sent).toEqual([]);
   });
 
-  it("answers lookPatch from a renderer with lookReject role, and drops lookGet from a host", async () => {
+  it("answers lookPatch from a renderer with lookReject role, and lookGet from the host with the look", async () => {
     const room = new Room();
     const host = await room.claimed();
     const tv = await room.renderer();
     room.say(tv, { type: "lookPatch", n: 3, set: { "vibe.x": "1" } });
     expect(tv.msgs("lookReject")).toEqual([{ type: "lookReject", n: 3, reason: "role" }]);
+    host.clear();
     room.say(host, { type: "lookGet" });
-    expect(host.msgs("look")).toEqual([]);
+    expect(host.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
     const phone = await room.controller();
     expect(phone.msgs("look")[0].doc).toBeNull();
   });
@@ -436,14 +443,14 @@ describe("message gating", () => {
 });
 
 describe("the host's look", () => {
-  it("is applied, acked to the laptop and relayed to a TV and a phone, glide beside it", async () => {
+  it("is applied, acked to the laptop and relayed to a TV and a phone, glide and sender beside it", async () => {
     const room = new Room();
     const host = await room.claimed();
     const tv = await room.renderer();
     const phone = await room.controller();
     room.say(host, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1" }, glideMs: 4000 });
     expect(host.msgs("lookAck")).toEqual([{ type: "lookAck", n: 1, rev: 1 }]);
-    const expected = { type: "lookPatch", rev: 1, scene: "mesh", set: { "vibe.a": "1" }, glideMs: 4000 };
+    const expected = { type: "lookPatch", rev: 1, by: "laptop", scene: "mesh", set: { "vibe.a": "1" }, glideMs: 4000 };
     expect(tv.msgs("lookPatch")).toEqual([expected]);
     expect(phone.msgs("lookPatch")).toEqual([expected]);
     expect(host.msgs("lookPatch")).toEqual([]);
@@ -465,25 +472,89 @@ describe("the host's look", () => {
     room.say(host, { type: "lookPatch", n: 2, set: { "vibe.a": "2" }, glideMs: "soon" });
     room.say(host, { type: "lookPatch", n: 3, set: { "vibe.a": "3" }, glideMs: 9e9 });
     expect(tv.msgs("lookPatch")).toEqual([
-      { type: "lookPatch", rev: 1, set: { "vibe.a": "1" } },
-      { type: "lookPatch", rev: 2, set: { "vibe.a": "2" } },
-      { type: "lookPatch", rev: 3, set: { "vibe.a": "3" }, glideMs: 30_000 },
+      { type: "lookPatch", rev: 1, by: "laptop", set: { "vibe.a": "1" } },
+      { type: "lookPatch", rev: 2, by: "laptop", set: { "vibe.a": "2" } },
+      { type: "lookPatch", rev: 3, by: "laptop", set: { "vibe.a": "3" }, glideMs: 30_000 },
     ]);
   });
 });
 
 describe("relay", () => {
-  it("sends a host frame to each renderer and frame-watching controller exactly once, never to the sender or a plain controller", async () => {
+  /** laptop (owner, own input), tv and phone follow it; pad is a tablet with a mic that follows too. */
+  async function party(): Promise<{ room: Room; host: FakeSocket; tv: FakeSocket; pad: FakeSocket; phone: FakeSocket }> {
     const room = new Room();
     const host = await room.claimed();
-    const tvA = await room.renderer("a");
-    const tvB = await room.renderer("b");
-    const watcher = await room.controller("watcher", true);
-    const plain = await room.controller("plain", false);
+    const tv = await room.renderer("tv");
+    const pad = await room.controller("pad", { kind: "tablet", mic: true });
+    const phone = await room.controller("phone", { kind: "phone", mic: true });
+    return { room, host, tv, pad, phone };
+  }
+
+  it("sends a host frame to every device that follows it, once each, never back to the sender", async () => {
+    const { room, host, tv, pad, phone } = await party();
     room.bytes(host);
-    for (const ws of [tvA, tvB, watcher]) expect(ws.frames().length).toBe(1);
-    expect(plain.frames()).toEqual([]);
+    for (const ws of [tv, pad, phone]) expect(ws.frames().length).toBe(1);
     expect(host.frames()).toEqual([]);
+  });
+
+  it("does not send a host frame to a device on its own input, nor to one following another feed", async () => {
+    const { room, host, tv, pad, phone } = await party();
+    room.say(pad, { type: "deviceSet", targetId: "pad", ears: "own" });
+    room.say(phone, { type: "deviceSet", targetId: "phone", follow: "pad" });
+    room.bytes(host);
+    expect(tv.frames().length).toBe(1);
+    expect(pad.frames()).toEqual([]);
+    expect(phone.frames()).toEqual([]);
+  });
+
+  it("relays a controller on its own input to its followers only", async () => {
+    const { room, host, tv, pad, phone } = await party();
+    room.say(pad, { type: "deviceSet", targetId: "pad", ears: "own" });
+    room.say(phone, { type: "deviceSet", targetId: "phone", follow: "pad" });
+    room.bytes(pad);
+    expect(phone.frames().length).toBe(1);
+    for (const ws of [host, tv, pad]) expect(ws.frames()).toEqual([]);
+  });
+
+  it("follows a change at once: the cached followers are not stale", async () => {
+    const { room, host, tv, phone } = await party();
+    room.bytes(host);
+    expect(phone.frames().length).toBe(1);
+    room.say(tv, { type: "deviceSet", targetId: "phone", ears: "own" });
+    room.bytes(host);
+    expect(phone.frames().length).toBe(1);
+    expect(tv.frames().length).toBe(2);
+    room.say(tv, { type: "deviceSet", targetId: "phone", ears: "follow" });
+    room.bytes(host);
+    expect(phone.frames().length).toBe(2);
+  });
+
+  it("sends to every socket of a following device, and still not to the sender", async () => {
+    const { room, host, tv } = await party();
+    const tvAgain = await room.renderer("tv");
+    room.bytes(host);
+    expect(tv.frames().length).toBe(1);
+    expect(tvAgain.frames().length).toBe(1);
+  });
+
+  it("drops binary from a device that is not a feed, and from one the room has no record of", async () => {
+    const { room, host, tv, pad, phone } = await party();
+    room.bytes(tv);
+    room.bytes(phone);
+    for (const ws of [host, tv, pad, phone]) expect(ws.frames()).toEqual([]);
+    // A device that said it has no mic can never be a feed: the room refuses the change.
+    room.say(tv, { type: "deviceSet", targetId: "tv", ears: "own" });
+    expect(tv.msgs("deviceReject")).toEqual([{ type: "deviceReject", targetId: "tv", reason: "no-mic" }]);
+    room.bytes(tv);
+    expect(host.frames()).toEqual([]);
+  });
+
+  it("keeps the frame cap in a claimed room", async () => {
+    const { room, host, tv } = await party();
+    room.bytes(host, LOOK_LIMITS.maxBinaryBytes + 1);
+    expect(tv.frames()).toEqual([]);
+    room.bytes(host, LOOK_LIMITS.maxBinaryBytes);
+    expect(tv.frames().length).toBe(1);
   });
 
   it("relays the same bytes it was given, unparsed", async () => {
@@ -495,21 +566,17 @@ describe("relay", () => {
     expect(tv.frames()[0]).toBe(frame);
   });
 
-  it("dedupes a socket that sits under both tags", async () => {
-    const room = new Room();
-    const host = await room.claimed();
-    const both = await room.renderer("both");
-    both.tags.push("frames");
-    room.bytes(host);
-    expect(both.frames().length).toBe(1);
-  });
-
-  it("relays frames in a legacy room as before", async () => {
+  it("relays frames in a legacy room as before: the host's to every renderer, nobody else's", async () => {
     const room = new Room();
     const host = await room.need({ role: "host", deviceId: "laptop" });
     const tv = await room.need({ role: "renderer", deviceId: "tv" });
+    const tv2 = await room.need({ role: "renderer", deviceId: "tv2" });
     room.bytes(host, 39);
     expect(tv.frames().length).toBe(1);
+    expect(tv2.frames().length).toBe(1);
+    room.bytes(tv);
+    expect(host.frames()).toEqual([]);
+    expect(tv2.frames().length).toBe(1);
   });
 });
 
@@ -658,12 +725,12 @@ describe("adopt", () => {
 });
 
 describe("the look", () => {
-  it("opens with a null document at revision 0 for a keyed controller or renderer, and not for a host", async () => {
+  it("opens with a null document at revision 0 for every keyed socket, the host's included", async () => {
     const room = new Room();
     const host = await room.claimed();
     const phone = await room.controller();
     const tv = await room.renderer();
-    expect(host.sent).toEqual([]);
+    expect(host.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
     expect(phone.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
     expect(tv.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
   });
@@ -674,7 +741,7 @@ describe("the look", () => {
     expect(tv.sent).toEqual([]);
   });
 
-  it("applies a patch: ack, one revision, broadcast to everyone but the sender and the host", async () => {
+  it("applies a patch: ack, one revision, broadcast to everyone but the sender, the host included, naming the sender", async () => {
     const room = new Room();
     const host = await room.claimed();
     const phone = await room.controller("phone");
@@ -685,10 +752,10 @@ describe("the look", () => {
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", palette: "ember", set: { "vibe.a": "1", "vibe.b": "2" } });
 
     expect(phone.msgs()).toEqual([{ type: "lookAck", n: 1, rev: 1 }]);
-    const expected = { type: "lookPatch", rev: 1, scene: "mesh", palette: "ember", set: { "vibe.a": "1", "vibe.b": "2" } };
+    const expected = { type: "lookPatch", rev: 1, by: "phone", scene: "mesh", palette: "ember", set: { "vibe.a": "1", "vibe.b": "2" } };
     expect(tv.msgs()).toEqual([expected]);
     expect(phone2.msgs()).toEqual([expected]);
-    expect(host.sent).toEqual([]);
+    expect(host.msgs()).toEqual([expected]);
   });
 
   it("broadcasts only the entries that changed", async () => {
@@ -699,7 +766,7 @@ describe("the look", () => {
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1", "vibe.b": "2" } });
     tv.clear();
     room.say(phone, { type: "lookPatch", n: 2, scene: "mesh", set: { "vibe.a": "1", "vibe.b": "3" }, del: ["vibe.gone"] });
-    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 2, set: { "vibe.b": "3" } }]);
+    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 2, by: "phone", set: { "vibe.b": "3" } }]);
   });
 
   it("treats a no-op patch as acked with the same revision: no bump, no write, no broadcast", async () => {
@@ -733,7 +800,7 @@ describe("the look", () => {
     room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.a": "1", "vibe.b": "2" } });
     tv.clear();
     room.say(phone, { type: "lookPatch", n: 2, del: ["vibe.a"] });
-    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 2, del: ["vibe.a"] }]);
+    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 2, by: "phone", del: ["vibe.a"] }]);
     expect(room.host.store.has("k:vibe.a")).toBe(false);
     expect(room.host.store.get("k:vibe.b")).toBe("2");
   });
@@ -748,7 +815,7 @@ describe("the look", () => {
     room.say(phone, { type: "lookGet" });
     expect(phone.msgs()).toEqual([{ type: "look", rev: 1, doc }]);
     const late = await room.renderer("late");
-    expect(late.msgs()).toEqual([{ type: "look", rev: 1, doc }]);
+    expect(late.msgs("look")).toEqual([{ type: "look", rev: 1, doc }]);
   });
 
   it("rejects bad patches without touching state", async () => {
@@ -994,7 +1061,7 @@ describe("a cold start", () => {
     tv.clear();
     again.say(phone2, { type: "lookPatch", n: 1, set: { "vibe.z": "9" } });
     expect(phone2.msgs("lookAck").pop()).toEqual({ type: "lookAck", n: 1, rev: 3 });
-    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 3, set: { "vibe.z": "9" } }]);
+    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 3, by: "phone", set: { "vibe.z": "9" } }]);
   });
 
   it("starts unclaimed from empty storage, and from a claim it can't read", async () => {
@@ -1102,20 +1169,70 @@ describe("expiry", () => {
 });
 
 describe("the roster", () => {
-  it("lists hosts and renderers, hides controllers, and goes to everyone including controllers", async () => {
+  it("in a claimed room lists every member, controllers included, with its settings, and goes to everyone", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.controller("phone", { name: "Ann's phone", mic: true });
     const tv = await room.renderer();
     room.say(tv, { type: "hello", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 } });
     room.say(phone, { type: "hello", scene: "phone-scene", palette: "ice" });
 
-    const last = (ws: FakeSocket) => ws.msgs("roster").pop();
     const devices = [
-      { deviceId: "laptop", role: "host", scene: "", palette: "", viewport: { x: 0, y: 0, w: 1, h: 1 } },
-      { deviceId: "tv", role: "renderer", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 } },
+      {
+        deviceId: "laptop", role: "host", scene: "", palette: "", viewport: { x: 0, y: 0, w: 1, h: 1 },
+        kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", online: true, owner: true,
+      },
+      {
+        deviceId: "phone", role: "controller", scene: "phone-scene", palette: "ice", viewport: { x: 0, y: 0, w: 1, h: 1 },
+        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "off", online: true, owner: false,
+      },
+      {
+        deviceId: "tv", role: "renderer", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 },
+        kind: "tv", name: "TV", hasMic: false, ears: "follow", follow: null, screen: "main", online: true, owner: false,
+      },
     ];
-    for (const ws of [host, phone, tv]) expect(last(ws)).toEqual({ type: "roster", devices });
+    for (const ws of [host, phone, tv]) expect(ws.msgs("roster").pop()).toEqual({ type: "roster", devices });
+  });
+
+  it("is sent to every socket when one opens, and when one leaves, which leaves its device listed but offline", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    host.clear();
+    const phone = await room.controller("phone");
+    expect(roster(host).map((d) => d.deviceId)).toEqual(["laptop", "phone"]);
+    expect(roster(phone).map((d) => d.deviceId)).toEqual(["laptop", "phone"]);
+    room.say(phone, { type: "hello", scene: "mesh" });
+    room.close(phone);
+    const after = roster(host);
+    expect(after.map((d) => [d.deviceId, d.online])).toEqual([["laptop", true], ["phone", false]]);
+    expect(after[1]).toMatchObject({ scene: "", palette: "", viewport: FULL_VIEWPORT });
+    expect(phone.msgs("roster").length).toBe(2); // its own open, and its hello; none after it left
+  });
+
+  it("keeps a device online while another socket of it is still connected", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const first = await room.controller("phone");
+    await room.controller("phone");
+    room.close(first);
+    expect(roster(host).find((d) => d.deviceId === "phone")?.online).toBe(true);
+  });
+
+  it("lists the owner first, then the others in the order they were added", async () => {
+    const first = new Room();
+    await first.claimed();
+    await first.controller("a");
+    await first.controller("b");
+    const rows = new Map(first.host.store);
+    const laptop = JSON.parse(rows.get("d:laptop") ?? "{}");
+    const a = JSON.parse(rows.get("d:a") ?? "{}");
+    const b = JSON.parse(rows.get("d:b") ?? "{}");
+    rows.set("d:laptop", JSON.stringify({ ...laptop, added: 300 }));
+    rows.set("d:a", JSON.stringify({ ...a, added: 200 }));
+    rows.set("d:b", JSON.stringify({ ...b, added: 100 }));
+    const room = new Room(rows);
+    const host = await room.need({ role: "host", deviceId: "laptop", hk: HK, k: K });
+    expect(roster(host).map((d) => d.deviceId)).toEqual(["laptop", "b", "a"]);
   });
 
   it("keeps the shape an old client expects in a legacy room", async () => {
@@ -1166,6 +1283,393 @@ describe("the roster", () => {
     expect((roster?.devices as Array<{ deviceId: string }>).map((d) => d.deviceId)).toEqual(["laptop", "tv2"]);
     expect(tv.msgs("roster")).toEqual([]);
     expect(tv2.msgs("roster").length).toBe(1);
+  });
+});
+
+describe("device records", () => {
+  const row = (room: Room, id: string): Record<string, unknown> => JSON.parse(room.host.store.get(`d:${id}`) ?? "null");
+
+  it("makes a record for each device on open, from what its join query said", async () => {
+    const room = new Room();
+    await room.claimed();
+    await room.controller("pad", { kind: "tablet", mic: true, name: "Studio iPad" });
+    await room.controller("phone", { kind: "phone", mic: true });
+    await room.renderer("tv");
+    expect(row(room, "laptop")).toMatchObject({ role: "host", kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main" });
+    expect(row(room, "pad")).toMatchObject({ role: "controller", kind: "tablet", name: "Studio iPad", hasMic: true, ears: "follow", screen: "main" });
+    expect(row(room, "phone")).toMatchObject({ kind: "phone", name: "Phone", ears: "follow", screen: "off" });
+    expect(row(room, "tv")).toMatchObject({ role: "renderer", kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main" });
+    expect(row(room, "pad")).toMatchObject({ added: room.host.time, seen: room.host.time });
+  });
+
+  it("keeps a returning device's choices, and takes only what it is and when it was seen from its new join", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad", { kind: "tablet", mic: true, name: "Studio iPad" });
+    room.say(pad, { type: "deviceSet", targetId: "pad", name: "Kitchen", screen: "own" });
+    room.close(pad);
+    room.host.time += 5000;
+    await room.controller("pad", { kind: "tablet", mic: false, name: "Something else" });
+    expect(row(room, "pad")).toMatchObject({ name: "Kitchen", screen: "own", hasMic: false, added: 1_000_000, seen: 1_005_000 });
+  });
+
+  it("is rebuilt from the rows after hibernation: the same records and the same roster", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const pad = await room.controller("pad", { kind: "tablet", mic: true, name: "Studio iPad" });
+    await room.controller("phone", { kind: "phone" });
+    await room.renderer("tv");
+    room.say(pad, { type: "deviceSet", targetId: "pad", ears: "own" });
+    room.say(pad, { type: "deviceSet", targetId: "phone", follow: "pad", screen: "own" });
+    const before = roster(host);
+
+    const again = room.reborn();
+    const host2 = await again.need({ role: "host", deviceId: "laptop", hk: HK, k: K, mic: true });
+    const after = roster(host2);
+    expect(after.map((d) => d.deviceId)).toEqual(before.map((d) => d.deviceId));
+    const strip = (d: Record<string, unknown>) => ({ ...d, online: undefined, scene: undefined, palette: undefined });
+    expect(after.map(strip)).toEqual(before.map(strip));
+    expect(after.map((d) => d.online)).toEqual([true, false, false, false]);
+    // And frames route by the restored records.
+    const tv2 = await again.renderer("tv");
+    const padAgain = await again.controller("pad", { kind: "tablet", mic: true });
+    const phone2 = await again.controller("phone", { kind: "phone" });
+    again.bytes(padAgain);
+    expect(phone2.frames().length).toBe(1);
+    expect(tv2.frames()).toEqual([]);
+  });
+
+  it("skips rows it can't read, rows under an illegal id, and every row of an unclaimed room", async () => {
+    const first = new Room();
+    await first.claimed();
+    const rows = new Map(first.host.store);
+    const good = rows.get("d:laptop") ?? "";
+    rows.set("d:broken", "{nope");
+    rows.set("d:bad id", good);
+    rows.set("d:host", good);
+    const room = new Room(rows);
+    const host = await room.need({ role: "host", deviceId: "laptop", hk: HK, k: K });
+    expect(roster(host).map((d) => d.deviceId)).toEqual(["laptop"]);
+
+    const stray = new Room(new Map([["d:laptop", good]]));
+    const tv = await stray.need({ role: "renderer", deviceId: "tv" });
+    stray.say(tv, { type: "hello" });
+    expect(tv.msgs("roster").pop()).toEqual({ type: "roster", devices: [{ deviceId: "tv", role: "renderer", scene: "", palette: "", viewport: FULL_VIEWPORT }] });
+  });
+
+  it("clears the records with the room: an idle wipe, and the host's Reset", async () => {
+    const idle = new Room();
+    const host = await idle.claimed();
+    await idle.controller("pad");
+    idle.close(host);
+    idle.host.live = [];
+    idle.core.alarm();
+    expect(idle.host.store.size).toBe(0);
+    const next = await idle.need({ role: "host", deviceId: "other", hk: OTHER_HK, k: OTHER_K });
+    expect(roster(next).map((d) => d.deviceId)).toEqual(["other"]);
+
+    const reset = new Room();
+    const owner = await reset.claimed();
+    await reset.controller("pad");
+    reset.say(owner, { type: "endRoom" });
+    reset.host.live = [];
+    const fresh = await reset.need({ role: "host", deviceId: "laptop2", hk: OTHER_HK, k: OTHER_K });
+    expect(roster(fresh).map((d) => d.deviceId)).toEqual(["laptop2"]);
+  });
+
+  it("stamps a device's last-seen time when its socket closes", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad");
+    room.host.time += 7000;
+    room.close(pad);
+    expect(row(room, "pad")).toMatchObject({ added: 1_000_000, seen: 1_007_000 });
+  });
+
+  it("does not bring a forgotten device back when its old socket closes", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const pad = await room.controller("pad");
+    room.say(host, { type: "deviceForget", targetId: "pad" });
+    room.close(pad);
+    expect(room.host.store.has("d:pad")).toBe(false);
+  });
+
+  it("lets a hello update what the device is, but never its name", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const pad = await room.controller("pad", { kind: "phone", mic: true, name: "Pad" });
+    room.say(pad, { type: "hello", kind: "tablet", hasMic: false, name: "Hijack" });
+    expect(row(room, "pad")).toMatchObject({ kind: "tablet", hasMic: false, name: "Pad" });
+    expect(pad.attachment).toMatchObject({ kind: "tablet", hasMic: false });
+    expect(roster(host).find((d) => d.deviceId === "pad")).toMatchObject({ kind: "tablet", hasMic: false, name: "Pad" });
+    room.host.puts = [];
+    room.say(pad, { type: "hello", kind: "fridge", hasMic: "yes", scene: "mesh" });
+    expect(row(room, "pad")).toMatchObject({ kind: "tablet", hasMic: false });
+    expect(room.host.puts).toEqual([]); // nothing about the record changed: no row written
+    const tv = await room.renderer("tv");
+    room.say(tv, { type: "hello", hasMic: true });
+    expect(row(room, "tv").hasMic).toBe(false);
+  });
+
+  it("drops the record of the device that has been offline longest when the room holds too many, never the owner's", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    room.close(host); // the owner is now the oldest record and offline
+    for (let i = 0; i < DEVICE_LIMITS.maxStoredDevices - 1; i++) {
+      room.host.time += 1000;
+      const ws = await room.controller(`p${i}`);
+      room.host.time += 1000;
+      room.close(ws);
+    }
+    expect([...room.host.store.keys()].filter((k) => k.startsWith("d:")).length).toBe(DEVICE_LIMITS.maxStoredDevices);
+    room.host.time += 1000;
+    const online = await room.controller("online");
+    const rows = [...room.host.store.keys()].filter((k) => k.startsWith("d:"));
+    expect(rows.length).toBe(DEVICE_LIMITS.maxStoredDevices);
+    expect(rows).toContain("d:laptop");
+    expect(rows).not.toContain("d:p0");
+    expect(rows).toContain("d:p1");
+    expect(rows).toContain("d:online");
+    expect(roster(online).map((d) => d.deviceId)).not.toContain("p0");
+    room.host.time += 1000;
+    await room.controller("online2");
+    expect([...room.host.store.keys()]).not.toContain("d:p1");
+  });
+
+  it("gives a keyed non-host that presents the owner's device id a fresh id, leaving the owner's record alone", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv1 = await room.renderer("tv1");
+    for (const role of ["renderer", "controller"] as const) {
+      const imposter = await room.need({ role, deviceId: "laptop", k: K, kind: role === "renderer" ? "tv" : "phone" });
+      expect(imposter.attachment.deviceId).not.toBe("laptop");
+      expect(imposter.tags).not.toContain("laptop");
+    }
+    expect(row(room, "laptop")).toMatchObject({ role: "host", kind: "laptop", hasMic: true, ears: "own" });
+    expect(roster(host).find((d) => d.deviceId === "laptop")).toMatchObject({ owner: true });
+    // The owner's frames still reach the follower, and only through the owner's feed.
+    tv1.clear();
+    room.bytes(host);
+    expect(tv1.frames().length).toBe(1);
+    // The owner can remove one of them.
+    const other = await room.controller("pad");
+    room.say(host, { type: "deviceForget", targetId: "pad" });
+    expect(other.closedWith).not.toBeNull();
+    // The real owner reconnecting on its own id is still the owner.
+    room.close(host);
+    const again = await room.claimed();
+    expect(again.attachment.deviceId).toBe("laptop");
+    expect(row(room, "laptop")).toMatchObject({ role: "host" });
+  });
+
+  it("never changes a record's role when a socket rejoins under it", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad");
+    room.close(pad);
+    await room.renderer("pad");
+    expect(row(room, "pad")).toMatchObject({ role: "controller" });
+  });
+
+  it("rations a hello that rewrites the device row: a flood of trait flips writes only the allowance", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad", { kind: "phone", mic: true });
+    room.host.puts = [];
+    for (let i = 0; i < 1000; i++) {
+      room.say(pad, { type: "hello", kind: i % 2 === 0 ? "tablet" : "phone" });
+    }
+    expect(room.host.puts.length).toBeLessThanOrEqual(LOOK_LIMITS.patchBurst);
+    // Out of allowance: the attachment and the row still agree.
+    expect(pad.attachment.kind).toBe(row(room, "pad").kind);
+  });
+
+  it("points a feed's followers at another feed when the feed's record is evicted", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tablet = await room.controller("tablet", { kind: "tablet", mic: true });
+    const tv = await room.renderer("tv");
+    room.say(tablet, { type: "deviceSet", targetId: "tablet", ears: "own" });
+    room.say(tv, { type: "deviceSet", targetId: "tv", follow: "tablet" });
+    room.close(tablet); // the oldest-seen offline record from here on
+    for (let i = 0; i < DEVICE_LIMITS.maxStoredDevices; i++) {
+      room.host.time += 1000;
+      await room.controller(`g${i}`); // guests stay online and are never evicted
+    }
+    expect(room.host.store.has("d:tablet")).toBe(false);
+    expect(row(room, "tv").follow).toBeNull();
+    tv.clear();
+    room.bytes(host);
+    expect(tv.frames().length).toBe(1);
+  });
+
+  it("never evicts a device that is online", async () => {
+    const room = new Room();
+    await room.claimed();
+    for (let i = 0; i < DEVICE_LIMITS.maxStoredDevices + 2; i++) {
+      room.host.time += 1000;
+      await room.controller(`p${i}`); // all stay connected
+    }
+    expect([...room.host.store.keys()].filter((k) => k.startsWith("d:")).length).toBe(DEVICE_LIMITS.maxStoredDevices + 3);
+  });
+});
+
+describe("deviceSet", () => {
+  async function party(): Promise<{ room: Room; host: FakeSocket; pad: FakeSocket; tv: FakeSocket; phone: FakeSocket }> {
+    const room = new Room();
+    const host = await room.claimed();
+    const pad = await room.controller("pad", { kind: "tablet", mic: true, name: "Pad" });
+    const tv = await room.renderer("tv");
+    const phone = await room.controller("phone", { kind: "phone", mic: false });
+    [host, pad, tv, phone].forEach((s) => s.clear());
+    return { room, host, pad, tv, phone };
+  }
+
+  it("changes a device, stores its row and tells everyone, whoever asked", async () => {
+    const { room, host, pad, tv, phone } = await party();
+    room.say(phone, { type: "deviceSet", targetId: "pad", name: "  Kitchen   iPad ", screen: "own" });
+    expect(JSON.parse(room.host.store.get("d:pad") ?? "{}")).toMatchObject({ name: "Kitchen iPad", screen: "own" });
+    for (const ws of [host, pad, tv, phone]) {
+      expect(roster(ws).find((d) => d.deviceId === "pad")).toMatchObject({ name: "Kitchen iPad", screen: "own" });
+    }
+    expect(phone.msgs("deviceReject")).toEqual([]);
+    // A renderer may too: the QR is the permission.
+    room.say(tv, { type: "deviceSet", targetId: "tv", name: "Big TV" });
+    expect(roster(host).find((d) => d.deviceId === "tv")?.name).toBe("Big TV");
+  });
+
+  it("writes only the rows that changed, including a follower it re-pointed", async () => {
+    const { room, pad, tv } = await party();
+    room.say(pad, { type: "deviceSet", targetId: "pad", ears: "own" });
+    room.say(tv, { type: "deviceSet", targetId: "tv", follow: "pad" });
+    room.host.puts = [];
+    room.say(tv, { type: "deviceSet", targetId: "pad", ears: "follow" });
+    expect(room.host.puts.sort()).toEqual(["d:pad", "d:tv"]);
+    expect(JSON.parse(room.host.store.get("d:tv") ?? "{}").follow).toBeNull();
+  });
+
+  it("answers a refusal to the sender alone, with the target and the reason, and changes nothing", async () => {
+    const { room, host, pad, tv, phone } = await party();
+    const rowsBefore = new Map(room.host.store);
+    const refuse = (msg: Record<string, unknown>, reason: string, targetId: unknown) => {
+      phone.clear();
+      room.say(phone, { type: "deviceSet", ...msg });
+      expect(phone.msgs("deviceReject")).toEqual([{ type: "deviceReject", targetId, reason }]);
+    };
+    refuse({ targetId: "nobody", name: "x" }, "unknown", "nobody");
+    refuse({ targetId: "phone", ears: "own" }, "no-mic", "phone");
+    refuse({ targetId: "tv", screen: "off" }, "tv-off", "tv");
+    refuse({ targetId: "pad", follow: "tv" }, "bad-follow", "pad");
+    refuse({ targetId: "pad", follow: "pad" }, "bad-follow", "pad");
+    refuse({ targetId: "pad", ears: "loud" }, "shape", "pad");
+    refuse({ targetId: "pad" }, "shape", "pad");
+    refuse({ targetId: "pad", name: "" }, "shape", "pad");
+    refuse({ targetId: "bad id", name: "x" }, "shape", "bad id");
+    refuse({ targetId: "host", name: "x" }, "shape", "host");
+    refuse({ targetId: 7, name: "x" }, "shape", null);
+    refuse({ targetId: "t".repeat(65), name: "x" }, "shape", null);
+    refuse({ name: "x" }, "shape", null);
+    expect(room.host.store).toEqual(rowsBefore);
+    for (const ws of [host, pad, tv]) expect(ws.sent).toEqual([]);
+  });
+
+  it("rations changes like patches: a flood is answered with rate, and writes nothing more", async () => {
+    const { room, host, phone } = await party();
+    for (let i = 0; i < LOOK_LIMITS.patchBurst + 5; i++) {
+      room.say(phone, { type: "deviceSet", targetId: "pad", name: `n${i}` });
+    }
+    const rejects = phone.msgs("deviceReject");
+    expect(rejects.length).toBe(5);
+    expect(rejects.every((r) => r.reason === "rate" && r.targetId === "pad")).toBe(true);
+    expect(roster(host).find((d) => d.deviceId === "pad")?.name).toBe(`n${LOOK_LIMITS.patchBurst - 1}`);
+  });
+
+  it("is ignored in a room nobody has claimed", async () => {
+    const room = new Room();
+    const host = await room.need({ role: "host", deviceId: "laptop" });
+    room.say(host, { type: "deviceSet", targetId: "laptop", name: "X" });
+    expect(host.sent).toEqual([]);
+    expect(room.host.store.size).toBe(0);
+  });
+});
+
+describe("deviceForget", () => {
+  async function party(): Promise<{ room: Room; host: FakeSocket; pad: FakeSocket; tv: FakeSocket; phone: FakeSocket }> {
+    const room = new Room();
+    const host = await room.claimed();
+    const pad = await room.controller("pad", { kind: "tablet", mic: true, name: "Pad" });
+    const tv = await room.renderer("tv");
+    const phone = await room.controller("phone", { kind: "phone", mic: true });
+    room.say(pad, { type: "deviceSet", targetId: "pad", ears: "own" });
+    room.say(tv, { type: "deviceSet", targetId: "tv", follow: "pad" });
+    room.say(phone, { type: "deviceSet", targetId: "phone", follow: "pad" });
+    [host, pad, tv, phone].forEach((s) => s.clear());
+    return { room, host, pad, tv, phone };
+  }
+
+  it("lets the host remove a device: it is told it was removed and closed as denied, its row goes, its followers are re-pointed", async () => {
+    const { room, host, pad, tv, phone } = await party();
+    room.say(host, { type: "deviceForget", targetId: "pad" });
+
+    expect(pad.msgs("ended")).toEqual([{ type: "ended", reason: "removed" }]);
+    expect(pad.closedWith).toEqual({ code: ROOM_CLOSE_DENIED, reason: "removed" });
+    expect(room.host.store.has("d:pad")).toBe(false);
+    for (const ws of [tv, phone]) expect(ws.closedWith).toBeNull();
+    expect(JSON.parse(room.host.store.get("d:tv") ?? "{}").follow).toBeNull();
+    expect(JSON.parse(room.host.store.get("d:phone") ?? "{}").follow).toBeNull();
+    for (const ws of [host, tv, phone]) {
+      expect(roster(ws).map((d) => d.deviceId)).toEqual(["laptop", "tv", "phone"]);
+    }
+    // The followers now draw from the owner.
+    room.bytes(host);
+    expect(tv.frames().length).toBe(1);
+    expect(phone.frames().length).toBe(1);
+    // The room is otherwise untouched.
+    expect(room.host.store.has("meta")).toBe(true);
+  });
+
+  it("closes every socket of the forgotten device, and keeps going if one throws", async () => {
+    const { room, host, pad } = await party();
+    const twin = await room.controller("pad", { kind: "tablet", mic: true });
+    pad.throwOnSend = true;
+    room.say(host, { type: "deviceForget", targetId: "pad" });
+    expect(twin.msgs("ended")).toEqual([{ type: "ended", reason: "removed" }]);
+    expect(twin.closedWith?.code).toBe(ROOM_CLOSE_DENIED);
+    expect(pad.closedWith?.code).toBe(ROOM_CLOSE_DENIED);
+  });
+
+  it("is ignored from a controller or a renderer, and in a room nobody has claimed", async () => {
+    const { room, host, pad, tv, phone } = await party();
+    room.say(phone, { type: "deviceForget", targetId: "pad" });
+    room.say(tv, { type: "deviceForget", targetId: "pad" });
+    room.say(pad, { type: "deviceForget", targetId: "phone" });
+    expect(room.host.store.has("d:pad")).toBe(true);
+    expect(room.host.store.has("d:phone")).toBe(true);
+    for (const ws of [host, pad, tv, phone]) {
+      expect(ws.sent).toEqual([]);
+      expect(ws.closedWith).toBeNull();
+    }
+  });
+
+  it("refuses to forget the owner's own device, an unknown device or a malformed id", async () => {
+    const { room, host, pad, tv, phone } = await party();
+    for (const targetId of ["laptop", "nobody", "bad id", "host", 7, null, undefined]) {
+      room.say(host, { type: "deviceForget", targetId });
+    }
+    expect(room.host.store.has("d:laptop")).toBe(true);
+    for (const ws of [host, pad, tv, phone]) {
+      expect(ws.sent).toEqual([]);
+      expect(ws.closedWith).toBeNull();
+    }
+  });
+
+  it("lets a removed device back in as a newcomer with default settings", async () => {
+    const { room, host } = await party();
+    room.say(host, { type: "deviceForget", targetId: "pad" });
+    room.host.live = room.host.live.filter((s) => s.attachment.deviceId !== "pad");
+    await room.controller("pad", { kind: "tablet", mic: true, name: "Pad again" });
+    expect(JSON.parse(room.host.store.get("d:pad") ?? "{}")).toMatchObject({ name: "Pad again", ears: "follow", follow: null });
   });
 });
 
@@ -1239,7 +1743,7 @@ describe("readAttachment", () => {
 
   it("upgrades the shape written before roles, keys and socket ids existed", () => {
     const old = { role: "host", deviceId: "laptop", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 1, h: 1 } };
-    expect(readAttachment(old)).toEqual({ ...old, sid: "legacy:laptop", keyed: false });
+    expect(readAttachment(old)).toEqual({ ...old, sid: "legacy:laptop", keyed: false, kind: "laptop", hasMic: true });
   });
 
   it("falls back to safe defaults for anything else without throwing", () => {

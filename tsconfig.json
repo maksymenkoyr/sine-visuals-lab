@@ -26,6 +26,6 @@
   // limiter, and the room core the tests drive with fake sockets). They're
   // plain TS with no Workers or DOM types, so both projects can compile them;
   // "files" entries aren't subject to "exclude".
-  "files": ["server/usage.ts", "server/lookDoc.ts", "server/roomRules.ts", "server/rateLimit.ts", "server/roomCore.ts"],
+  "files": ["server/usage.ts", "server/lookDoc.ts", "server/roomRules.ts", "server/rateLimit.ts", "server/roomCore.ts", "server/roomDevices.ts"],
   "exclude": ["server"]
 }

@@ -49,7 +49,9 @@ export function waitingLine(hostInRoom: HostInRoom): string {
   return hostInRoom ? "The laptop is here but not listening. Start Mic or Share a tab on it" : "The laptop isn't in this room";
 }
 
-/** The roster's answer for `waitingLine`. */
-export function hostInRoster(roster: ReadonlyArray<{ role: string }>): boolean {
-  return roster.some((d) => d.role === "host");
+/** The roster's answer for `waitingLine`: the laptop is listed and online (a
+ *  claimed room keeps the owner's record while it is away; an entry that says
+ *  nothing about `online` is from a room that lists only who is present). */
+export function hostInRoster(roster: ReadonlyArray<{ role: string; online?: boolean }>): boolean {
+  return roster.some((d) => d.role === "host" && d.online !== false);
 }

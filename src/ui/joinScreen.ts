@@ -309,7 +309,7 @@ export interface RoomCodeEntryOptions {
  * The field to type a room's code instead of scanning its QR, with its Join
  * buttons. A pick leaves the page for the room the code names (`go`). One
  * builder for every place a device can join a room by code: the pairing
- * overlay below (TV, laptop, phone) and the Room panel (src/ui/controlPanel.ts).
+ * overlay below (TV, laptop, phone) and the Room view (src/ui/roomView.ts).
  */
 export function createRoomCodeEntry(options: RoomCodeEntryOptions = {}): HTMLFormElement {
   const compact = options.compact ?? false;

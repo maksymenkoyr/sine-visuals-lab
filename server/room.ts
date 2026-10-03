@@ -23,8 +23,10 @@ export interface Env {
  * client-side concern, and keeps the DO trivially cheap (WebSocket Hibernation
  * API means an idle room, e.g. a TV parked on the join screen, costs nothing).
  * What the room understands is small JSON: clock-sync ping/pong, the device
- * roster, `setDevice` routing by the target's device-id tag, and the look of a
- * claimed room.
+ * roster, the device records of a claimed room (`deviceSet`, `deviceForget`,
+ * server/roomDevices.ts) that decide which member's frames go to which, and
+ * the look of a claimed room. A device says what it is in the connect URL
+ * (`kind`, `mic`, `name`), which only seeds its record.
  *
  * A refused join is not an HTTP error: a browser WebSocket can't read the
  * status, so the socket is opened and closed at once with ROOM_CLOSE_DENIED,
@@ -73,7 +75,9 @@ export class Room extends DurableObject<Env> {
       {
         role: params.get("role"),
         deviceId: params.get("deviceId"),
-        frames: params.get("frames") === "1",
+        kind: params.get("kind"),
+        mic: params.get("mic") === "1",
+        name: params.get("name"),
         adopt: params.get("adopt"),
       },
       hashes,

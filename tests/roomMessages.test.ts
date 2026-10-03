@@ -3,8 +3,11 @@ import {
   parseAdoptMessage,
   parseControlMessage,
   parseViewport,
+  recordsFromRoster,
   type ControlMessage,
+  type RosterEntry,
 } from "../src/net/roomMessages.ts";
+import { feedOf, followersOf, pictureDelayMs, RENDER_DELAY_MS } from "../server/roomDevices.ts";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
 
 const KEY_A = "A".repeat(22);
@@ -33,10 +36,32 @@ describe("parseControlMessage: transport", () => {
   });
 });
 
-describe("parseControlMessage: clock, roster, command", () => {
-  it("accepts the room's `ended`, keeping nothing else from it", () => {
+/** A full roster entry as a claimed room sends it, with overrides. */
+function entry(over: Partial<RosterEntry> & { deviceId: string }): RosterEntry {
+  return {
+    role: "controller",
+    scene: "",
+    palette: "",
+    viewport: { x: 0, y: 0, w: 1, h: 1 },
+    kind: "phone",
+    name: "Phone",
+    hasMic: true,
+    ears: "follow",
+    follow: null,
+    screen: "off",
+    online: true,
+    owner: false,
+    ...over,
+  };
+}
+
+describe("parseControlMessage: clock, roster, devices", () => {
+  it("accepts the room's `ended`, keeping a reason only when it is `removed`", () => {
     expect(parse({ type: "ended" })).toEqual({ type: "ended" });
     expect(parse({ type: "ended", room: "ABCD" })).toEqual({ type: "ended" });
+    expect(parse({ type: "ended", reason: "removed" })).toEqual({ type: "ended", reason: "removed" });
+    expect(parse({ type: "ended", reason: "because" })).toEqual({ type: "ended" });
+    expect("reason" in (parse({ type: "ended", reason: 5 }) as object)).toBe(false);
   });
 
   it("accepts a pong with numeric times only", () => {
@@ -45,13 +70,56 @@ describe("parseControlMessage: clock, roster, command", () => {
     expect(parse({ type: "pong", t0: 1 })).toBeNull();
   });
 
-  it("accepts a roster including a controller role", () => {
-    const devices = [
-      { deviceId: "a", role: "host", scene: "mesh", palette: "p", viewport: { x: 0, y: 0, w: 0.5, h: 1 } },
-      { deviceId: "b", role: "renderer", scene: "", palette: "", viewport: { x: 0.5, y: 0, w: 0.5, h: 1 } },
-      { deviceId: "c", role: "controller", scene: "s", palette: "q", viewport: { x: 0, y: 0, w: 1, h: 1 } },
+  it("accepts a claimed room's roster with every member field, offline ones included", () => {
+    const devices: RosterEntry[] = [
+      entry({ deviceId: "a", role: "host", kind: "laptop", name: "Studio Mac", ears: "own", screen: "main", owner: true, scene: "mesh", palette: "p", viewport: { x: 0, y: 0, w: 0.5, h: 1 } }),
+      entry({ deviceId: "b", role: "renderer", kind: "tv", name: "TV", hasMic: false, screen: "main", viewport: { x: 0.5, y: 0, w: 0.5, h: 1 } }),
+      entry({ deviceId: "c", role: "controller", kind: "tablet", name: "iPad", ears: "follow", follow: "d", screen: "own", online: false }),
+      entry({ deviceId: "d", role: "controller", kind: "phone", name: "Phone", ears: "own", screen: "off" }),
     ];
     expect(parse({ type: "roster", devices })).toEqual({ type: "roster", devices });
+  });
+
+  it("fills the new fields for a legacy roster entry from its role", () => {
+    const old = (deviceId: string, role: string) => ({ deviceId, role, scene: "mesh", palette: "p" });
+    const msg = parse({ type: "roster", devices: [old("h", "host"), old("t", "renderer"), old("c", "controller")] }) as {
+      devices: RosterEntry[];
+    };
+    const [h, t, c] = msg.devices;
+    expect(h).toEqual({
+      deviceId: "h", role: "host", scene: "mesh", palette: "p", viewport: { x: 0, y: 0, w: 1, h: 1 },
+      kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", online: true, owner: true,
+    });
+    expect(t).toMatchObject({ kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main", online: true, owner: false });
+    expect(c).toMatchObject({ kind: "phone", name: "Phone", hasMic: true, ears: "follow", screen: "main", owner: false });
+  });
+
+  it("repairs bad member fields to the defaults instead of dropping the entry", () => {
+    const msg = parse({
+      type: "roster",
+      devices: [
+        {
+          deviceId: "x", role: "controller", kind: "toaster", name: "  \u0007  ", hasMic: "yes", ears: "both",
+          follow: 7, screen: "all", online: "no", owner: "yes",
+        },
+      ],
+    }) as { devices: RosterEntry[] };
+    expect(msg.devices[0]).toMatchObject({
+      kind: "phone", name: "Phone", hasMic: true, ears: "follow", follow: null, screen: "main", online: true, owner: false,
+    });
+  });
+
+  it("reads online, owner and a cleaned name as sent", () => {
+    const msg = parse({
+      type: "roster",
+      devices: [
+        { deviceId: "o", role: "controller", owner: true, online: false, name: "  Living   room \n iPad  ", kind: "tablet", hasMic: false },
+        { deviceId: "h", role: "host", owner: false },
+      ],
+    }) as { devices: RosterEntry[] };
+    expect(msg.devices[0]).toMatchObject({ owner: true, online: false, name: "Living room iPad", kind: "tablet", hasMic: false });
+    // An explicit owner: false wins over the role.
+    expect(msg.devices[1].owner).toBe(false);
   });
 
   it("drops roster entries that are malformed and repairs the cosmetic fields", () => {
@@ -67,7 +135,7 @@ describe("parseControlMessage: clock, roster, command", () => {
     });
     expect(msg).toEqual({
       type: "roster",
-      devices: [{ deviceId: "ok", role: "renderer", scene: "", palette: "", viewport: { x: 0, y: 0, w: 1, h: 1 } }],
+      devices: [entry({ deviceId: "ok", role: "renderer", kind: "tv", name: "TV", hasMic: false, screen: "main" })],
     });
   });
 
@@ -76,15 +144,24 @@ describe("parseControlMessage: clock, roster, command", () => {
     expect(parse({ type: "roster" })).toBeNull();
   });
 
-  it("reads a command's optional fields", () => {
-    expect(parse({ type: "command", scene: "mesh", palette: "p", viewport: { x: 0, y: 0, w: 1, h: 1 } })).toEqual({
-      type: "command",
-      scene: "mesh",
-      palette: "p",
-      viewport: { x: 0, y: 0, w: 1, h: 1 },
-    });
-    const bare = parse({ type: "command", scene: 3, viewport: { x: "0" } });
-    expect(bare).toEqual({ type: "command", scene: undefined, palette: undefined, viewport: undefined });
+  it("accepts a deviceReject with a known reason and keeps a target only when it is a string", () => {
+    for (const reason of ["unknown", "no-mic", "tv-off", "bad-follow", "shape", "rate"] as const) {
+      expect(parse({ type: "deviceReject", targetId: "d1", reason })).toEqual({ type: "deviceReject", targetId: "d1", reason });
+    }
+    expect(parse({ type: "deviceReject", targetId: null, reason: "shape" })).toEqual({ type: "deviceReject", targetId: null, reason: "shape" });
+    expect(parse({ type: "deviceReject", targetId: 4, reason: "rate" })).toEqual({ type: "deviceReject", targetId: null, reason: "rate" });
+    expect(parse({ type: "deviceReject", reason: "rate" })).toEqual({ type: "deviceReject", targetId: null, reason: "rate" });
+  });
+
+  it("rejects a deviceReject with an unknown or missing reason", () => {
+    expect(parse({ type: "deviceReject", targetId: "d1", reason: "nope" })).toBeNull();
+    expect(parse({ type: "deviceReject", targetId: "d1" })).toBeNull();
+    expect(parse({ type: "deviceReject", targetId: "d1", reason: 3 })).toBeNull();
+  });
+
+  it("no longer knows the old command message", () => {
+    expect(parse({ type: "command", scene: "mesh" })).toBeNull();
+    expect(parse({ type: "setDevice", targetId: "a", scene: "mesh" })).toBeNull();
   });
 
   it("parseViewport wants four numbers", () => {
@@ -92,6 +169,46 @@ describe("parseControlMessage: clock, roster, command", () => {
     expect(parseViewport({ x: 0, y: 0, w: 1 })).toBeUndefined();
     expect(parseViewport(null)).toBeUndefined();
     expect(parseViewport([0, 0, 1, 1])).toBeUndefined();
+  });
+});
+
+describe("recordsFromRoster", () => {
+  const roster: RosterEntry[] = [
+    entry({ deviceId: "laptop", role: "host", kind: "laptop", name: "Mac", ears: "own", screen: "main", owner: true }),
+    entry({ deviceId: "tv", role: "renderer", kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main" }),
+    entry({ deviceId: "ipad", role: "controller", kind: "tablet", name: "iPad", ears: "follow", follow: null, screen: "main", online: false }),
+    entry({ deviceId: "phone", role: "controller", kind: "phone", name: "Phone", ears: "own", screen: "off" }),
+  ];
+
+  it("turns each entry into a record in roster order and lists who is online", () => {
+    const { records, online } = recordsFromRoster(roster);
+    expect([...records.keys()]).toEqual(["laptop", "tv", "ipad", "phone"]);
+    expect(records.get("ipad")).toEqual({
+      name: "iPad", ears: "follow", follow: null, screen: "main", kind: "tablet", hasMic: true, role: "controller", added: 2, seen: 0,
+    });
+    expect(records.get("laptop")?.added).toBe(0);
+    expect([...online].sort()).toEqual(["laptop", "phone", "tv"]);
+  });
+
+  it("is an empty pair for an empty roster", () => {
+    const { records, online } = recordsFromRoster([]);
+    expect(records.size).toBe(0);
+    expect(online.size).toBe(0);
+  });
+
+  it("feeds the room's own rules: feeds, followers and picture delay", () => {
+    const { records, online } = recordsFromRoster(roster);
+    expect(feedOf(records, "laptop")).toBe("laptop");
+    expect(feedOf(records, "tv")).toBe("laptop");
+    expect(feedOf(records, "phone")).toBe("phone");
+    expect(followersOf(records, "laptop")).toEqual(["tv", "ipad"]);
+    expect(followersOf(records, "phone")).toEqual([]);
+    expect(pictureDelayMs(records, online, "tv")).toBe(RENDER_DELAY_MS);
+    // The laptop shows Main next to an online follower that shows Main.
+    expect(pictureDelayMs(records, online, "laptop")).toBe(RENDER_DELAY_MS);
+    // The offline iPad does not count: with the TV gone too the laptop is alone.
+    const alone = recordsFromRoster([roster[0], { ...roster[1], online: false }, roster[2]]);
+    expect(pictureDelayMs(alone.records, alone.online, "laptop")).toBe(0);
   });
 });
 
@@ -149,6 +266,25 @@ describe("parseControlMessage: look", () => {
       set: { "vibe.a": "1" },
       glideMs: 4000,
     });
+  });
+
+  it("keeps who made a relayed patch, when it is a plain device id", () => {
+    expect(parse({ type: "lookPatch", rev: 3, by: "dev-1_A", scene: "mesh" })).toEqual({
+      type: "lookPatch",
+      rev: 3,
+      by: "dev-1_A",
+      scene: "mesh",
+    });
+    const id64 = "a".repeat(64);
+    expect(parse({ type: "lookPatch", rev: 3, by: id64, scene: "mesh" })).toMatchObject({ by: id64 });
+  });
+
+  it("drops a `by` that is not a device id, but keeps the patch", () => {
+    for (const by of ["", "a".repeat(65), "has space", "x/y", "a\nb", 5, null, {}]) {
+      const msg = parse({ type: "lookPatch", rev: 3, by, scene: "mesh" });
+      expect(msg).toEqual({ type: "lookPatch", rev: 3, scene: "mesh" });
+      expect(msg && "by" in msg).toBe(false);
+    }
   });
 
   it("accepts a relayed patch that changes only the palette", () => {

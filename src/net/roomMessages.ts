@@ -8,43 +8,60 @@
  *
  * Client to room:
  * - `ping { t0 }` — clock sync, any role; answered with `pong`.
- * - `hello { scene, palette, viewport? }` — a device announcing what it shows;
- *   the room answers by broadcasting `roster`.
- * - `setDevice { targetId, scene?, palette?, viewport? }` — ask another device
- *   (by its roster id) to change; delivered to it as `command`.
- * - `lookGet` — a controller or TV asks for the current look; answered with `look`.
- * - `lookPatch { n, ...patch }` — a controller edits the look (server/lookDoc.ts
- *   has the patch semantics). Only a controller or the laptop (the host,
- *   publishing with Cue and Play, net/roomBridge.ts) may; `n` numbers the patch
- *   so the sender can match the reply. A patch may carry `glideMs`: screens
- *   arrive at the look it makes over that long instead of switching.
+ * - `hello { scene, palette, viewport?, kind?, hasMic? }` — a device announcing
+ *   what it shows, and optionally what it is: its `kind` and whether it can
+ *   open a microphone, the same two things the join URL carries. The room
+ *   answers by broadcasting `roster`. The room never takes a name from a
+ *   hello; a name is chosen with `deviceSet`.
+ * - `deviceSet { targetId, name?, ears?, follow?, screen? }` — change one
+ *   member's settings (server/roomDevices.ts says what each means and who may
+ *   ask). Any member of a claimed room may; the answer is a new `roster`, or
+ *   `deviceReject` when the room refused.
+ * - `deviceForget { targetId }` — the owner removes a member from the room. The
+ *   room sends that device `ended` with reason `removed` and closes it.
+ * - `lookGet` — a member asks for the current look; answered with `look`.
+ * - `lookPatch { n, ...patch }` — a member edits the look (server/lookDoc.ts
+ *   has the patch semantics). Any member of a claimed room may, the laptop
+ *   included (publishing with Cue and Play, net/roomBridge.ts); `n` numbers the
+ *   patch so the sender can match the reply. A patch may carry `glideMs`:
+ *   screens arrive at the look it makes over that long instead of switching.
  * - `endRoom` — the host of a claimed room ends it (the laptop's Reset). The
  *   room wipes its claim and look, sends every socket `ended`, and closes each
  *   with the denial code, so every device forgets the room as it would a dead
  *   one.
  *
  * Room to client:
- * - `pong { t0, tServer }`, `roster { devices }` (a phone controller is never
- *   listed, so it is invisible to the Room panel and to the host's wait-for-
- *   company check), `command { scene?, palette?, viewport? }`.
- * - `look { rev, doc }` — the whole look. Pushed when a controller or TV joins a
- *   claimed room, and as the reply to `lookGet`. `doc` is null until the first
- *   patch has ever applied.
- * - `lookPatch { rev, ...patch }` — what another controller (or the laptop)
- *   changed, only the entries that actually differed, to every controller and
- *   TV but the sender, with the `glideMs` it came with. The laptop is sent no
- *   relays: it is the one place a look is made.
- *   `rev` is the room's revision after it; a receiver that sees a hole asks
- *   for `lookGet` (src/net/lookSync.ts owns that rule).
+ * - `pong { t0, tServer }`.
+ * - `roster { devices }` — every member of a claimed room, online or not, with
+ *   what the room stores for it: `kind`, `name`, `hasMic`, `ears`, `follow`,
+ *   `screen`, `online`, `owner` (and what it shows now: `scene`, `palette`,
+ *   `viewport`). An unclaimed (legacy) room sends only the older fields, and
+ *   parseRosterEntry fills the rest with what such a device would have been
+ *   given. `recordsFromRoster` turns a roster into the records that
+ *   server/roomDevices.ts reads, so the client asks the same `feedOf` and
+ *   `pictureDelayMs` the room does.
+ * - `deviceReject { targetId, reason }` — the room refused a `deviceSet` or
+ *   `deviceForget` this device sent; `reason` is a `DeviceRejectReason`.
+ * - `look { rev, doc }` — the whole look. Pushed when any member joins a
+ *   claimed room (the laptop included), and as the reply to `lookGet`. `doc`
+ *   is null until the first patch has ever applied.
+ * - `lookPatch { rev, by?, ...patch }` — what another member changed, only the
+ *   entries that actually differed, to every member but the sender, with the
+ *   `glideMs` it came with. `by` is the sender's device id (absent from an
+ *   older room), so a receiver can tell whose change it is. `rev` is the
+ *   room's revision after it; a receiver that sees a hole asks for `lookGet`
+ *   (src/net/lookSync.ts owns that rule).
  * - `lookAck { n, rev }` / `lookReject { n, reason }` — the replies to the
  *   sender's patch. `reason` is a `LookRejectReason` (server/lookDoc.ts):
- *   `role` (not a controller), `size` (past the limits in `LOOK_LIMITS`) or
- *   `shape` (not a valid patch).
- * - `ended` — the host ended the room (`endRoom`). It means what a denial
- *   close means, and comes just before that close because the close alone is
- *   not enough: a close the room starts on a socket other than the one whose
- *   message it is handling can leave that client stuck closing (seen under
- *   `wrangler dev`), and a TV stuck there would sit in the dead room.
+ *   `role` (not a member that may), `size` (past the limits in `LOOK_LIMITS`)
+ *   or `shape` (not a valid patch).
+ * - `ended { reason? }` — the room is closed to this device: the host ended it
+ *   (`endRoom`), or the owner removed this device (reason `removed`). It means
+ *   what a denial close means, and comes just before that close because the
+ *   close alone is not enough: a close the room starts on a socket other than
+ *   the one whose message it is handling can leave that client stuck closing
+ *   (seen under `wrangler dev`), and a TV stuck there would sit in the dead
+ *   room.
  *
  * Phone-to-TV adoption does not come from a room's own state: `adopt { room,
  * k, n }`. A TV waiting to be paired sits alone in a throwaway room; the phone's
@@ -64,26 +81,57 @@
 import type { Viewport } from "../render/scene.ts";
 import { sanitizeLookDoc, sanitizeLookPatch, type LookRejectReason, type LookServerMsg } from "../../server/lookDoc.ts";
 import { ROOM_CODE_RE, validKey, type RoomRole } from "../../server/roomRules.ts";
+import {
+  cleanName,
+  defaultName,
+  kindForRole,
+  parseEars,
+  parseKind,
+  parseScreen,
+  type DeviceKind,
+  type DeviceRecord,
+  type Ears,
+  type ScreenUse,
+} from "../../server/roomDevices.ts";
 
+/** One member of the room as the room lists it: what it shows right now
+ *  (scene, palette, viewport) and what the room stores for it
+ *  (server/roomDevices.ts says what each setting means). */
 export interface RosterEntry {
   deviceId: string;
   role: RoomRole;
   scene: string;
   palette: string;
   viewport: Viewport;
+  kind: DeviceKind;
+  name: string;
+  hasMic: boolean;
+  ears: Ears;
+  /** The feed this device listens through (a device id), or null for the owner. */
+  follow: string | null;
+  screen: ScreenUse;
+  /** Has a live socket in the room right now. */
+  online: boolean;
+  owner: boolean;
 }
 
-export interface DeviceCommand {
-  scene?: string;
-  palette?: string;
-  viewport?: Viewport;
+/** Why the room refused a `deviceSet`: the first four are
+ *  server/roomDevices.ts's `DeviceSetResult`; `shape` is a message that is not
+ *  a valid one, `rate` is too many changes too quickly. */
+export type DeviceRejectReason = "unknown" | "no-mic" | "tv-off" | "bad-follow" | "shape" | "rate";
+
+export interface DeviceReject {
+  type: "deviceReject";
+  /** The device the refused change was aimed at; null when the message named none. */
+  targetId: string | null;
+  reason: DeviceRejectReason;
 }
 
 export type ControlMessage =
   | { type: "pong"; t0: number; tServer: number }
   | { type: "roster"; devices: RosterEntry[] }
-  | ({ type: "command" } & DeviceCommand)
-  | { type: "ended" }
+  | DeviceReject
+  | { type: "ended"; reason?: "removed" }
   | LookServerMsg;
 
 export interface AdoptMessage {
@@ -96,6 +144,9 @@ export interface AdoptMessage {
 
 const FULL_VIEWPORT: Viewport = { x: 0, y: 0, w: 1, h: 1 };
 
+/** A device id as it rides on a relayed patch's `by`: 1 to 64 letters, digits, `_` or `-`. */
+const BY_RE = /^[\w-]{1,64}$/;
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
@@ -107,6 +158,10 @@ function isCount(x: unknown): x is number {
 
 function isRejectReason(x: unknown): x is LookRejectReason {
   return x === "role" || x === "size" || x === "shape";
+}
+
+function isDeviceRejectReason(x: unknown): x is DeviceRejectReason {
+  return x === "unknown" || x === "no-mic" || x === "tv-off" || x === "bad-follow" || x === "shape" || x === "rate";
 }
 
 function parseJson(text: string): unknown {
@@ -131,13 +186,50 @@ function parseRosterEntry(raw: unknown): RosterEntry | null {
   const { deviceId, role } = raw;
   if (typeof deviceId !== "string") return null;
   if (role !== "host" && role !== "renderer" && role !== "controller") return null;
+  // A room that has not claimed its devices sends only deviceId, role, scene,
+  // palette and viewport; the rest default to what that role would have been
+  // given.
+  const kind = parseKind(raw.kind) ?? kindForRole(role);
   return {
     deviceId,
     role,
     scene: typeof raw.scene === "string" ? raw.scene : "",
     palette: typeof raw.palette === "string" ? raw.palette : "",
     viewport: parseViewport(raw.viewport) ?? FULL_VIEWPORT,
+    kind,
+    name: cleanName(raw.name) ?? defaultName(kind),
+    hasMic: typeof raw.hasMic === "boolean" ? raw.hasMic : role !== "renderer",
+    ears: parseEars(raw.ears) ?? (role === "host" ? "own" : "follow"),
+    follow: typeof raw.follow === "string" ? raw.follow : null,
+    screen: parseScreen(raw.screen) ?? "main",
+    online: raw.online !== false,
+    owner: raw.owner === true || (raw.owner === undefined && role === "host"),
   };
+}
+
+/** A roster as the records server/roomDevices.ts works on (`feedOf`,
+ *  `followersOf`, `pictureDelayMs`), plus the ids of the members that are
+ *  online. The roster is in the room's order (owner first, then by when each
+ *  joined), so `added` is the position; when each was last seen is not on the
+ *  wire, so `seen` is 0. */
+export function recordsFromRoster(roster: RosterEntry[]): { records: Map<string, DeviceRecord>; online: Set<string> } {
+  const records = new Map<string, DeviceRecord>();
+  const online = new Set<string>();
+  roster.forEach((e, i) => {
+    records.set(e.deviceId, {
+      name: e.name,
+      ears: e.ears,
+      follow: e.follow,
+      screen: e.screen,
+      kind: e.kind,
+      hasMic: e.hasMic,
+      role: e.role,
+      added: i,
+      seen: 0,
+    });
+    if (e.online) online.add(e.deviceId);
+  });
+  return { records, online };
 }
 
 /** Text from the room as a typed message, or null for anything that is not
@@ -158,15 +250,11 @@ export function parseControlMessage(data: unknown): ControlMessage | null {
     }
     return { type: "roster", devices };
   }
-  if (m.type === "command") {
-    return {
-      type: "command",
-      scene: typeof m.scene === "string" ? m.scene : undefined,
-      palette: typeof m.palette === "string" ? m.palette : undefined,
-      viewport: parseViewport(m.viewport),
-    };
+  if (m.type === "deviceReject") {
+    if (!isDeviceRejectReason(m.reason)) return null;
+    return { type: "deviceReject", targetId: typeof m.targetId === "string" ? m.targetId : null, reason: m.reason };
   }
-  if (m.type === "ended") return { type: "ended" };
+  if (m.type === "ended") return m.reason === "removed" ? { type: "ended", reason: "removed" } : { type: "ended" };
 
   if (m.type === "look") {
     if (!isCount(m.rev)) return null;
@@ -177,7 +265,11 @@ export function parseControlMessage(data: unknown): ControlMessage | null {
   if (m.type === "lookPatch") {
     if (!isCount(m.rev)) return null;
     const cleaned = sanitizeLookPatch(m);
-    return cleaned.ok ? { type: "lookPatch", rev: m.rev, ...cleaned.patch } : null;
+    if (!cleaned.ok) return null;
+    const by = typeof m.by === "string" && BY_RE.test(m.by) ? m.by : undefined;
+    return by === undefined
+      ? { type: "lookPatch", rev: m.rev, ...cleaned.patch }
+      : { type: "lookPatch", rev: m.rev, by, ...cleaned.patch };
   }
   if (m.type === "lookAck") {
     return isCount(m.n) && isCount(m.rev) ? { type: "lookAck", n: m.n, rev: m.rev } : null;

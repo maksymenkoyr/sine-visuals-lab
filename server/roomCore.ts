@@ -3,27 +3,34 @@
  * Vitest can drive a whole room with fakes. server/room.ts is the thin
  * Cloudflare adapter around this (it owns the WebSocketPair, the hibernation
  * calls and `ctx.storage`); the rules themselves are server/roomRules.ts (who
- * may join, who may send what) and server/lookDoc.ts (the look document and its
+ * may join, who may send what), server/roomDevices.ts (the device records:
+ * name, ears, screen) and server/lookDoc.ts (the look document and its
  * patch). The messages are described in src/net/roomMessages.ts.
  *
- * The room stays a relay. Feature frames go from the host to every renderer —
- * and to the controllers that asked to watch (tag `frames`) — as unparsed
- * bytes, capped in size and nothing more. The JSON it understands is small:
- * clock-sync ping/pong, the device roster, `setDevice` -> `command` routing by
- * the target's device-id tag, the TV adopt relay (delivered by nonce tag, see
- * `adopt`), and, in a claimed room only, the look and the host's `endRoom`
- * (the laptop's Reset, see `end`). The room never interprets a
- * setting; a look entry is an opaque string it stores and relays. A
- * controller's patches are rationed per socket (LOOK_LIMITS `patchBurst` and
- * `patchesPerSec`) because each accepted one is durable row writes.
+ * The room stays a relay. A claimed room keeps one record per device that ever
+ * joined it (`d:<deviceId>` rows, so a device that drops and comes back keeps
+ * its choices), and relays feature frames from each device that is on its own
+ * input (a feed) to the devices that follow it, as unparsed bytes, capped in
+ * size and nothing more; a device that isn't a feed has its frames dropped. A
+ * room nobody has claimed is the legacy relay: the host's frames go to every
+ * renderer. The JSON it understands is small: clock-sync ping/pong, the device
+ * roster (sent on every join, leave, hello and device change), `deviceSet` and
+ * `deviceForget` against the records, the TV adopt relay (delivered by nonce
+ * tag, see `adopt`), and, in a claimed room only, the look — which goes to
+ * every member, the laptop included, with the id of the member whose patch it
+ * is — and the host's `endRoom` (the laptop's Reset, see `end`). The room never
+ * interprets a setting; a look entry is an opaque string it stores and relays.
+ * A member's patches and device changes are rationed per socket (LOOK_LIMITS
+ * `patchBurst` and `patchesPerSec`) because each accepted one is durable row
+ * writes.
  *
  * A Durable Object that hibernates loses every instance field, so what must
  * outlive that is written as flat rows: the claim (hashed keys), the look's
- * revision and ids, and one row per look key. The constructor rebuilds the
- * in-memory state from those rows; every later change writes only the rows it
- * touched. A claimed room that has no socket left schedules a wipe (the idle
- * alarm); an accepted socket cancels it. No timer ever runs while a socket is
- * connected, so hibernation is preserved.
+ * revision and ids, one row per look key and one per device record. The
+ * constructor rebuilds the in-memory state from those rows; every later change
+ * writes only the rows it touched. A claimed room that has no socket left
+ * schedules a wipe (the idle alarm); an accepted socket cancels it. No timer
+ * ever runs while a socket is connected, so hibernation is preserved.
  *
  * Plain TS with no Workers or DOM types: the root tsconfig lists this file
  * (`files`) because the tests import it, the same arrangement as
@@ -51,10 +58,25 @@ import {
   parseRole,
   validDeviceId,
   validKey,
-  validTargetTag,
   type RoomMeta,
   type RoomRole,
 } from "./roomRules.ts";
+import {
+  DEVICE_LIMITS,
+  applyDeviceSet,
+  cleanName,
+  defaultSettings,
+  feedOf,
+  followersOf,
+  forgetDevice,
+  kindForRole,
+  ownerId,
+  parseKind,
+  parseRecord,
+  sanitizeDeviceSet,
+  type DeviceKind,
+  type DeviceRecord,
+} from "./roomDevices.ts";
 
 export interface Viewport {
   x: number;
@@ -68,7 +90,10 @@ export const FULL_VIEWPORT: Viewport = { x: 0, y: 0, w: 1, h: 1 };
 /** What a socket carries across hibernation (`serializeAttachment`, which
  *  caps it small — keep it to ids and short strings). `sid` is unique per
  *  socket and is what dedupes and excludes senders; `keyed` says the socket
- *  joined a claimed room, so the stricter send rules and the look apply. */
+ *  joined a claimed room, so the stricter send rules and the look apply.
+ *  `kind` and `hasMic` are what the device said it is (the join URL, then
+ *  `hello`); `joinName` is the name it asked for, kept only until the room
+ *  makes its record. */
 export interface Attachment {
   sid: string;
   role: RoomRole;
@@ -77,6 +102,9 @@ export interface Attachment {
   palette: string;
   viewport: Viewport;
   keyed: boolean;
+  kind: DeviceKind;
+  hasMic: boolean;
+  joinName?: string;
 }
 
 export interface CoreSocket {
@@ -104,7 +132,12 @@ export interface CoreHost {
 export interface JoinParams {
   role: string | null;
   deviceId: string | null;
-  frames: boolean;
+  /** What the device says it is (the `kind` / `mic` / `name` query values);
+   *  they only seed its record, and a missing or unknown one falls back to
+   *  what the role implies. */
+  kind?: string | null;
+  mic?: boolean;
+  name?: string | null;
   /** The nonce a TV waiting in a pairing slot presents (the `adopt` query
    *  value); only a keyless renderer gets a tag from it. */
   adopt?: string | null;
@@ -118,6 +151,7 @@ interface PatchBucket {
   at: number;
 }
 
+/** A roster entry as a legacy (unclaimed) room sends it. */
 interface RosterEntry {
   deviceId: string;
   role: RoomRole;
@@ -129,6 +163,7 @@ interface RosterEntry {
 const META_ROW = "meta";
 const LOOK_ROW = "look";
 const KEY_ROW_PREFIX = "k:";
+const DEVICE_ROW_PREFIX = "d:";
 const HASH_RE = /^[0-9a-f]{64}$/;
 const DENIED: JoinResult = { ok: false };
 
@@ -177,7 +212,26 @@ export function readAttachment(raw: unknown): Attachment {
     palette: typeof o.palette === "string" ? o.palette : "",
     viewport: parseViewport(o.viewport) ?? { ...FULL_VIEWPORT },
     keyed: o.keyed === true,
+    kind: parseKind(o.kind) ?? kindForRole(role),
+    hasMic: typeof o.hasMic === "boolean" ? o.hasMic : role !== "renderer",
+    joinName: cleanName(o.joinName),
   };
+}
+
+/** The device records from their rows, oldest first (the order a roster lists
+ *  them). Unreadable rows and rows under an id that is not a legal device id
+ *  are skipped. */
+function loadRecords(stored: ReadonlyMap<string, string>): Map<string, DeviceRecord> {
+  const rows: Array<[string, DeviceRecord]> = [];
+  for (const [key, value] of stored) {
+    if (!key.startsWith(DEVICE_ROW_PREFIX)) continue;
+    const id = key.slice(DEVICE_ROW_PREFIX.length);
+    if (!validDeviceId(id)) continue;
+    const record = parseRecord(value);
+    if (record) rows.push([id, record]);
+  }
+  rows.sort((a, b) => a[1].added - b[1].added);
+  return new Map(rows);
 }
 
 function parseMeta(raw: string | undefined): RoomMeta | null {
@@ -230,6 +284,13 @@ export class RoomCore {
   private meta: RoomMeta | null;
   private rev: number;
   private doc: LookDoc;
+  /** A claimed room's device records, in the order the devices were added
+   *  (empty while unclaimed). Only changed through `store` / `drop`, which keep
+   *  the rows and the follower cache in step. */
+  private records = new Map<string, DeviceRecord>();
+  /** Per feed device id, who draws from it: `followersOf` over `records`, kept
+   *  because frames arrive at 30 Hz. Cleared whenever `records` changes. */
+  private readonly followerCache = new Map<string, string[]>();
   /** Per socket id, in memory only: a room that hibernates starts its sockets
    *  with a full allowance, which a sender that never goes quiet cannot use. */
   private readonly patchBuckets = new Map<string, PatchBucket>();
@@ -243,6 +304,7 @@ export class RoomCore {
     const look = this.meta === null ? { rev: 0, doc: emptyLookDoc() } : loadLook(stored);
     this.rev = look.rev;
     this.doc = look.doc;
+    if (this.meta !== null) this.records = loadRecords(stored);
   }
 
   /** Decides a join and, if it is the claim, writes it — synchronously, so two
@@ -257,9 +319,13 @@ export class RoomCore {
     if (!decision.ok) return DENIED;
     if (decision.claim && hashes.hk !== null && hashes.k !== null) this.claim(hashes.hk, hashes.k);
 
-    const deviceId = validDeviceId(p.deviceId) ? p.deviceId : newSid;
+    // The owner's id is in every roster and shared by every tab of its browser,
+    // so a keyed non-host presenting it (another tab, a QR holder) is given a
+    // fresh id instead: it must not take over the owner's record.
+    const claimedId = validDeviceId(p.deviceId) ? p.deviceId : null;
+    const takesOwnerId = decision.keyed && role !== "host" && claimedId !== null && this.records.get(claimedId)?.role === "host";
+    const deviceId = claimedId !== null && !takesOwnerId ? claimedId : newSid;
     const tags: string[] = [role, deviceId];
-    if (role === "controller" && p.frames) tags.push("frames");
     // A keyless renderer is a TV waiting in a pairing slot (a claimed room's
     // keyed renderers are never adopted into anything).
     if (role === "renderer" && !decision.keyed && validKey(p.adopt)) tags.push(adoptTag(p.adopt), ADOPT_ANY_TAG);
@@ -271,16 +337,26 @@ export class RoomCore {
       palette: "",
       viewport: { ...FULL_VIEWPORT },
       keyed: decision.keyed,
+      kind: parseKind(p.kind) ?? kindForRole(role),
+      // The TV page has no way to open a microphone, whatever its URL says.
+      hasMic: role === "renderer" ? false : p.mic === true,
+      joinName: cleanName(p.name),
     };
     return { ok: true, attachment, tags };
   }
 
-  /** The socket is accepted: a claimed room is not idle any more, and a
-   *  keyed controller or renderer is told the current look at once. */
+  /** The socket is accepted: a claimed room is not idle any more, the device
+   *  has a record (made now if it is new), a keyed socket is told the current
+   *  look at once — the laptop's too, since a laptop that follows another
+   *  member's panel has to show what that panel set — and everyone is told who
+   *  is in the room. */
   opened(ws: CoreSocket): void {
     if (this.meta !== null) this.host.deleteAlarm();
     const a = ws.attachment;
-    if (a.keyed && a.role !== "host") this.send(ws, this.lookSnapshot());
+    if (!a.keyed || this.meta === null) return;
+    this.touchRecord(a);
+    this.send(ws, this.lookSnapshot());
+    this.broadcastRoster();
   }
 
   message(ws: CoreSocket, data: string | ArrayBuffer): void {
@@ -313,17 +389,13 @@ export class RoomCore {
         }
         return;
       case "hello":
-        // A device announcing itself, or its updated scene / palette / viewport.
-        ws.setAttachment({
-          ...a,
-          scene: shortString(msg.scene) ?? a.scene,
-          palette: shortString(msg.palette) ?? a.palette,
-          viewport: parseViewport(msg.viewport) ?? a.viewport,
-        });
-        this.broadcastRoster();
+        this.hello(ws, a, msg);
         return;
-      case "setDevice":
-        this.routeCommand(a, msg);
+      case "deviceSet":
+        this.deviceSet(ws, a, msg);
+        return;
+      case "deviceForget":
+        this.deviceForget(a, msg);
         return;
       case "lookGet":
         if (a.keyed && canSend(a.keyed, a.role, "lookGet")) this.send(ws, this.lookSnapshot());
@@ -337,13 +409,18 @@ export class RoomCore {
     }
   }
 
-  /** A socket is gone (closed or errored): tell everyone who is left, and
-   *  start the idle countdown if a claimed room has nobody. The closing socket
-   *  is excluded explicitly — the platform may still list it during its own
-   *  close handler. */
+  /** A socket is gone (closed or errored): note when its device was last seen,
+   *  tell everyone who is left, and start the idle countdown if a claimed room
+   *  has nobody. The closing socket is excluded explicitly — the platform may
+   *  still list it during its own close handler. */
   closed(ws: CoreSocket): void {
-    const gone = ws.attachment.sid;
+    const a = ws.attachment;
+    const gone = a.sid;
     this.patchBuckets.delete(gone);
+    if (this.meta !== null) {
+      const record = this.records.get(a.deviceId);
+      if (record) this.store(a.deviceId, { ...record, seen: this.host.now() });
+    }
     this.broadcastRoster(gone);
     if (this.meta === null) return;
     const someoneLeft = this.host.sockets().some((s) => s.attachment.sid !== gone);
@@ -355,10 +432,7 @@ export class RoomCore {
   alarm(): void {
     if (this.meta === null || this.host.sockets().length > 0) return;
     this.host.removeAll();
-    this.patchBuckets.clear();
-    this.meta = null;
-    this.rev = 0;
-    this.doc = emptyLookDoc();
+    this.forgetEverything();
   }
 
   /** The host ended the room (the laptop's Reset): the same wipe as the idle
@@ -373,10 +447,7 @@ export class RoomCore {
   private end(): void {
     const sockets = this.host.sockets();
     this.host.removeAll();
-    this.patchBuckets.clear();
-    this.meta = null;
-    this.rev = 0;
-    this.doc = emptyLookDoc();
+    this.forgetEverything();
     const ended = JSON.stringify({ type: "ended" });
     for (const ws of sockets) {
       this.send(ws, ended);
@@ -386,6 +457,149 @@ export class RoomCore {
         // Already closing.
       }
     }
+  }
+
+  /** Back to an unclaimed room's memory (the rows are the caller's to wipe). */
+  private forgetEverything(): void {
+    this.patchBuckets.clear();
+    this.records = new Map();
+    this.followerCache.clear();
+    this.meta = null;
+    this.rev = 0;
+    this.doc = emptyLookDoc();
+  }
+
+  /** Makes or refreshes the record of the device behind a keyed socket that
+   *  just opened: a newcomer gets the settings its role and kind imply (and
+   *  the name it asked for); a returning device keeps its choices and only has
+   *  what it is, and when it was seen, brought up to date. A room that has
+   *  grown past DEVICE_LIMITS.maxStoredDevices drops the record of the device
+   *  that has been offline longest (never the owner's). */
+  private touchRecord(a: Attachment): void {
+    const now = this.host.now();
+    const existing = this.records.get(a.deviceId);
+    if (existing) {
+      // The role stays the one the record joined with: only a host join makes
+      // it the owner's, so no other socket can change who the owner is.
+      const role = a.role === "host" ? "host" : existing.role;
+      this.store(a.deviceId, { ...existing, kind: a.kind, hasMic: a.hasMic, role, seen: now });
+      return;
+    }
+    const traits = { kind: a.kind, hasMic: a.hasMic };
+    this.store(a.deviceId, { ...defaultSettings(a.role, traits, a.joinName), ...traits, role: a.role, added: now, seen: now });
+    if (this.records.size <= DEVICE_LIMITS.maxStoredDevices) return;
+    let oldest: string | null = null;
+    let oldestSeen = Infinity;
+    for (const [id, r] of this.records) {
+      if (id === a.deviceId || r.role === "host" || r.seen >= oldestSeen) continue;
+      if (this.host.sockets(id).length > 0) continue;
+      oldest = id;
+      oldestSeen = r.seen;
+    }
+    if (oldest !== null) this.evict(oldest);
+  }
+
+  /** Removes a record the way a forget does: the devices that listened
+   *  through it are pointed at another feed first. */
+  private evict(id: string): void {
+    const { changed } = forgetDevice(this.records, id);
+    this.drop(id);
+    for (const [followerId, record] of changed) this.store(followerId, record);
+  }
+
+  /** Keeps a record in memory and as its row. */
+  private store(id: string, record: DeviceRecord): void {
+    this.records.set(id, record);
+    this.followerCache.clear();
+    this.host.put(DEVICE_ROW_PREFIX + id, JSON.stringify(record));
+  }
+
+  private drop(id: string): void {
+    this.records.delete(id);
+    this.followerCache.clear();
+    this.host.remove(DEVICE_ROW_PREFIX + id);
+  }
+
+  /** A device announcing itself, or its updated scene / palette / viewport. In
+   *  a claimed room it may also say what it is (`kind`, `hasMic`: a tablet
+   *  that turns out to have no microphone, say), which updates its record (a
+   *  durable write, so it spends from the allowance a device change does).
+   *  Never its name: the name is the Room view's to set (`deviceSet`). */
+  private hello(ws: CoreSocket, a: Attachment, msg: Record<string, unknown>): void {
+    const kind = parseKind(msg.kind) ?? a.kind;
+    const hasMic = a.role === "renderer" ? false : typeof msg.hasMic === "boolean" ? msg.hasMic : a.hasMic;
+    const next: Attachment = {
+      ...a,
+      scene: shortString(msg.scene) ?? a.scene,
+      palette: shortString(msg.palette) ?? a.palette,
+      viewport: parseViewport(msg.viewport) ?? a.viewport,
+    };
+    if (a.keyed) {
+      const record = this.records.get(a.deviceId);
+      const changes = record !== undefined && (record.kind !== kind || record.hasMic !== hasMic);
+      // A change to what the device is rewrites its row, so it spends from the
+      // same allowance as a device change; with no token left it is ignored.
+      if (!changes || this.takePatchToken(a.sid)) {
+        next.kind = kind;
+        next.hasMic = hasMic;
+        if (record !== undefined && changes) this.store(a.deviceId, { ...record, kind, hasMic });
+      }
+    }
+    ws.setAttachment(next);
+    this.broadcastRoster();
+  }
+
+  /** `deviceSet`: any member of a claimed room changes one device's name,
+   *  ears or screen (server/roomDevices.ts `applyDeviceSet` has the rules). An
+   *  accepted change is stored and the roster goes to everyone; a refused one
+   *  is answered to the sender alone with `deviceReject` and the reason. */
+  private deviceSet(ws: CoreSocket, sender: Attachment, msg: Record<string, unknown>): void {
+    if (!canSend(sender.keyed, sender.role, "deviceSet")) return;
+    const raw = typeof msg.targetId === "string" && msg.targetId.length <= 64 ? msg.targetId : null;
+    if (!this.takePatchToken(sender.sid)) {
+      this.rejectDevice(ws, raw, "rate");
+      return;
+    }
+    const clean = sanitizeDeviceSet(msg, validDeviceId);
+    if (clean === null) {
+      this.rejectDevice(ws, raw, "shape");
+      return;
+    }
+    const result = applyDeviceSet(this.records, clean.targetId, clean.patch);
+    if (!result.ok) {
+      this.rejectDevice(ws, clean.targetId, result.reason);
+      return;
+    }
+    for (const [id, record] of result.changed) this.store(id, record);
+    this.broadcastRoster();
+  }
+
+  /** `deviceForget`: the owner removes a device from the room. Its record and
+   *  row go, the devices that listened through it are pointed at another feed,
+   *  and each of its sockets is told `ended` with reason `removed` and closed
+   *  as denied, so it forgets the room's keys (it can rejoin by scanning the
+   *  QR again, as a newcomer). The owner can't forget itself. */
+  private deviceForget(sender: Attachment, msg: Record<string, unknown>): void {
+    if (!canSend(sender.keyed, sender.role, "deviceForget")) return;
+    const target = msg.targetId;
+    if (!validDeviceId(target) || target === sender.deviceId || !this.records.has(target)) return;
+    const { changed } = forgetDevice(this.records, target);
+    this.drop(target);
+    for (const [id, record] of changed) this.store(id, record);
+    const removed = JSON.stringify({ type: "ended", reason: "removed" });
+    for (const ws of this.host.sockets(target)) {
+      this.send(ws, removed);
+      try {
+        ws.close(ROOM_CLOSE_DENIED, "removed");
+      } catch {
+        // Already closing.
+      }
+    }
+    this.broadcastRoster();
+  }
+
+  private rejectDevice(ws: CoreSocket, targetId: string | null, reason: string): void {
+    this.send(ws, JSON.stringify({ type: "deviceReject", targetId, reason }));
   }
 
   /** The TV adopt request (POST /api/room/{slot}/adopt, relayed here by the
@@ -438,34 +652,40 @@ export class RoomCore {
     }
   }
 
-  /** Host bytes to every renderer and every frame-watching controller, once
-   *  each, never back to the sender. The room doesn't parse them. A keyless
-   *  socket left over from before the claim gets none (see `claim`). */
+  /** Feature bytes, unparsed and size-capped. In a claimed room they go from a
+   *  device that is on its own input (a feed, by its record) to every device
+   *  that follows it, and from anyone else nowhere. In a room nobody has
+   *  claimed they go from the host to every renderer, as before records
+   *  existed. Never back to the sender. A keyless socket left over from before
+   *  the claim gets none (see `claim`). */
   private relayFrame(sender: Attachment, data: ArrayBuffer): void {
     if (!canSend(sender.keyed, sender.role, "binary") || data.byteLength > LOOK_LIMITS.maxBinaryBytes) return;
-    const seen = new Set<string>([sender.sid]);
-    for (const tag of ["renderer", "frames"]) {
-      for (const target of this.host.sockets(tag)) {
+    if (!sender.keyed) {
+      for (const target of this.host.sockets("renderer")) {
         const a = target.attachment;
-        if (seen.has(a.sid) || a.keyed !== sender.keyed) continue;
-        seen.add(a.sid);
+        if (a.sid === sender.sid || a.keyed) continue;
+        this.send(target, data);
+      }
+      return;
+    }
+    if (feedOf(this.records, sender.deviceId) !== sender.deviceId) return;
+    for (const followerId of this.followersFor(sender.deviceId)) {
+      for (const target of this.host.sockets(followerId)) {
+        const a = target.attachment;
+        if (a.sid === sender.sid || !a.keyed) continue;
         this.send(target, data);
       }
     }
   }
 
-  /** One device commanding another (typically from a control panel) to change
-   *  its scene / palette / viewport. Routed to the target's device-id tag. */
-  private routeCommand(sender: Attachment, msg: Record<string, unknown>): void {
-    const target = msg.targetId;
-    if (!canSend(sender.keyed, sender.role, "setDevice") || !validTargetTag(target)) return;
-    const command = JSON.stringify({
-      type: "command",
-      scene: shortString(msg.scene),
-      palette: shortString(msg.palette),
-      viewport: parseViewport(msg.viewport),
-    });
-    for (const ws of this.host.sockets(target)) this.send(ws, command);
+  /** `followersOf` for a feed, cached until the records next change. */
+  private followersFor(feedId: string): string[] {
+    let list = this.followerCache.get(feedId);
+    if (list === undefined) {
+      list = followersOf(this.records, feedId);
+      this.followerCache.set(feedId, list);
+    }
+    return list;
   }
 
   private applyPatch(ws: CoreSocket, sender: Attachment, msg: Record<string, unknown>): void {
@@ -513,12 +733,13 @@ export class RoomCore {
     const relayed = JSON.stringify({
       type: "lookPatch",
       rev: this.rev,
+      by: sender.deviceId,
       ...effective,
       ...(clean.patch.glideMs !== undefined ? { glideMs: clean.patch.glideMs } : {}),
     } satisfies LookServerMsg);
     for (const other of this.host.sockets()) {
       const o = other.attachment;
-      if (o.sid === sender.sid || !o.keyed || o.role === "host") continue;
+      if (o.sid === sender.sid || !o.keyed) continue;
       this.send(other, relayed);
     }
   }
@@ -547,11 +768,46 @@ export class RoomCore {
     return JSON.stringify(msg);
   }
 
-  /** Every device's scene / palette / viewport to every socket. Controllers
-   *  see the roster but are not in it (a phone is not a screen), and the
-   *  roster of a room nobody has claimed keeps the shape it always had. */
+  /** Who is in the room, to every live socket. A claimed room lists every
+   *  device record, owner first and then in the order they were added, online
+   *  or not, with its name, ears and screen (the Room view draws from it); the
+   *  scene, palette and viewport come from one of the device's live sockets,
+   *  and are empty / full while it is offline. Only keyed sockets are told: a
+   *  keyless one left over from before the claim is being closed. A room
+   *  nobody has claimed keeps the shape it always had: the live hosts and
+   *  renderers (controllers see the roster but are not in it), to everyone. */
   private broadcastRoster(exceptSid?: string): void {
     const live = this.host.sockets().filter((ws) => ws.attachment.sid !== exceptSid);
+    if (this.meta !== null) {
+      const sockets = live.filter((ws) => ws.attachment.keyed);
+      const owner = ownerId(this.records);
+      const ids = [...this.records.keys()];
+      if (owner !== null) ids.splice(ids.indexOf(owner), 1);
+      if (owner !== null) ids.unshift(owner);
+      const entries = ids.map((id) => {
+        const r = this.records.get(id) as DeviceRecord;
+        const mine = sockets.find((ws) => ws.attachment.deviceId === id);
+        const a = mine?.attachment;
+        return {
+          deviceId: id,
+          role: r.role,
+          scene: a?.scene ?? "",
+          palette: a?.palette ?? "",
+          viewport: a?.viewport ?? { ...FULL_VIEWPORT },
+          kind: r.kind,
+          name: r.name,
+          hasMic: r.hasMic,
+          ears: r.ears,
+          follow: r.follow,
+          screen: r.screen,
+          online: mine !== undefined,
+          owner: r.role === "host",
+        };
+      });
+      const payload = JSON.stringify({ type: "roster", devices: entries });
+      for (const ws of sockets) this.send(ws, payload);
+      return;
+    }
     const devices: RosterEntry[] = [];
     for (const ws of live) {
       const a = ws.attachment;

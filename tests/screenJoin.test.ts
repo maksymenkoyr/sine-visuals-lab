@@ -16,6 +16,14 @@ const entry = (deviceId: string, role: RosterEntry["role"]): RosterEntry => ({
   scene: "mesh",
   palette: "neon",
   viewport: { x: 0, y: 0, w: 1, h: 1 },
+  kind: role === "renderer" ? "tv" : "laptop",
+  name: role === "renderer" ? "TV" : "Laptop",
+  hasMic: role !== "renderer",
+  ears: role === "host" ? "own" : "follow",
+  follow: null,
+  screen: "main",
+  online: true,
+  owner: role === "host",
 });
 const HOST = entry("laptop", "host");
 const TV1 = entry("tv-1", "renderer");
@@ -88,6 +96,18 @@ describe("roster helpers", () => {
     expect(hasNewRenderer([HOST, TV1], known)).toBe(false);
     expect(hasNewRenderer([HOST], known)).toBe(false);
     expect(hasNewRenderer([HOST, TV1, TV2], known)).toBe(true);
+  });
+
+  it("an offline owner is not the laptop being in the room", () => {
+    expect(hasHost([TV1, { ...HOST, online: false }])).toBe(false);
+  });
+
+  it("a screen that was in the room and left is not known, so its return counts as arriving", () => {
+    const away = { ...TV1, online: false };
+    const known = rendererIds([HOST, away]);
+    expect(known.size).toBe(0);
+    expect(hasNewRenderer([HOST, away], known)).toBe(false);
+    expect(hasNewRenderer([HOST, TV1], known)).toBe(true);
   });
 
   it("a baseline of nothing counts every screen as new (the bug the first roster avoids)", () => {
