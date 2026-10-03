@@ -47,19 +47,22 @@ export type RosterWait =
   | { kind: "denied" };
 
 export function hasHost(roster: RosterEntry[]): boolean {
-  return roster.some((d) => d.role === "host");
+  return roster.some((d) => d.role === "host" && d.online);
 }
 
-/** The renderers a roster lists, by device id. */
+/** The renderers a roster lists as online, by device id. A claimed room also
+ *  lists the screens that left (a TV keeps its record and its device id), and
+ *  those must not count as already here: when one comes back it is the one
+ *  that arrived. */
 export function rendererIds(roster: RosterEntry[]): Set<string> {
   const ids = new Set<string>();
-  for (const d of roster) if (d.role === "renderer") ids.add(d.deviceId);
+  for (const d of roster) if (d.role === "renderer" && d.online) ids.add(d.deviceId);
   return ids;
 }
 
-/** Whether the roster lists a renderer that is not in `known`. */
+/** Whether the roster lists an online renderer that is not in `known`. */
 export function hasNewRenderer(roster: RosterEntry[], known: ReadonlySet<string>): boolean {
-  return roster.some((d) => d.role === "renderer" && !known.has(d.deviceId));
+  return roster.some((d) => d.role === "renderer" && d.online && !known.has(d.deviceId));
 }
 
 /** Resolves when the connection has delivered a roster (the first one, or the

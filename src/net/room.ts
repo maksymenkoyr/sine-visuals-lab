@@ -221,6 +221,14 @@ abstract class RoomConnectionBase {
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private probeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** This connection presents a room key, so the room it joins is a claimed
+   *  one with a record per device. Without one it is the legacy room, whose
+   *  roster is padded with defaults (src/net/roomMessages.ts) that are not
+   *  records: the legacy sending and delay rules apply there. */
+  get keyed(): boolean {
+    return this.query.k !== undefined;
+  }
+
   constructor(code: string, role: RoomRole, opts: ConnOptions = {}) {
     this.code = code;
     this.role = role;
@@ -379,9 +387,10 @@ abstract class RoomConnectionBase {
   /** Call every local render tick. Any member may: the frame always goes into
    *  this device's own full-rate buffer, and onto the wire (decimated to ~30Hz)
    *  only when someone would use it. In a claimed room that is when the roster
-   *  shows a device that follows this one; a room that lists no record of this
-   *  device (the legacy room, or the roster not here yet) takes every frame and
-   *  relays it as it always did. Whether this device is *allowed* to be a feed
+   *  shows a device that follows this one; a connection with no room key (the
+   *  legacy room, whose roster only looks like records), or a roster that
+   *  doesn't list this device yet, takes every frame and relays it as it
+   *  always did. Whether this device is *allowed* to be a feed
    *  is the room's call, by the same records. */
   sendFrame(frame: EncodableFrame): void {
     const roomTimeMs = this.clock.roomNow();
@@ -393,7 +402,7 @@ abstract class RoomConnectionBase {
     // follower), so a stale hit isn't replayed on reconnect or when a follower
     // arrives.
     const view = this.rosterView;
-    if (view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
+    if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
     this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
   }
 
@@ -422,7 +431,7 @@ abstract class RoomConnectionBase {
   }
 
   /** How far behind the room clock this device targets right now. Once the
-   *  roster lists this device, the room's own rule (server/roomDevices.ts
+   *  keyed roster lists this device, the room's own rule (server/roomDevices.ts
    *  `pictureDelayMs`): a follower waits RENDER_DELAY_MS, a device on its own
    *  input draws at once unless it shows Main beside followers. Before that, and
    *  in a legacy room that sends no records: a renderer always waits
@@ -431,7 +440,7 @@ abstract class RoomConnectionBase {
    *  the legacy room lists doesn't count as company; the room leaves it off. */
   protected targetDelayMs(): number {
     const view = this.rosterView;
-    if (view && view.records.has(this.deviceId)) return pictureDelayMs(view.records, view.online, this.deviceId);
+    if (this.keyed && view && view.records.has(this.deviceId)) return pictureDelayMs(view.records, view.online, this.deviceId);
     if (this.role !== "host") return RENDER_DELAY_MS;
     let devices = 0;
     for (const d of this.roster) if (d.role !== "controller") devices++;

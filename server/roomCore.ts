@@ -319,7 +319,12 @@ export class RoomCore {
     if (!decision.ok) return DENIED;
     if (decision.claim && hashes.hk !== null && hashes.k !== null) this.claim(hashes.hk, hashes.k);
 
-    const deviceId = validDeviceId(p.deviceId) ? p.deviceId : newSid;
+    // The owner's id is in every roster and shared by every tab of its browser,
+    // so a keyed non-host presenting it (another tab, a QR holder) is given a
+    // fresh id instead: it must not take over the owner's record.
+    const claimedId = validDeviceId(p.deviceId) ? p.deviceId : null;
+    const takesOwnerId = decision.keyed && role !== "host" && claimedId !== null && this.records.get(claimedId)?.role === "host";
+    const deviceId = claimedId !== null && !takesOwnerId ? claimedId : newSid;
     const tags: string[] = [role, deviceId];
     // A keyless renderer is a TV waiting in a pairing slot (a claimed room's
     // keyed renderers are never adopted into anything).
@@ -474,7 +479,10 @@ export class RoomCore {
     const now = this.host.now();
     const existing = this.records.get(a.deviceId);
     if (existing) {
-      this.store(a.deviceId, { ...existing, kind: a.kind, hasMic: a.hasMic, role: a.role, seen: now });
+      // The role stays the one the record joined with: only a host join makes
+      // it the owner's, so no other socket can change who the owner is.
+      const role = a.role === "host" ? "host" : existing.role;
+      this.store(a.deviceId, { ...existing, kind: a.kind, hasMic: a.hasMic, role, seen: now });
       return;
     }
     const traits = { kind: a.kind, hasMic: a.hasMic };
@@ -488,7 +496,15 @@ export class RoomCore {
       oldest = id;
       oldestSeen = r.seen;
     }
-    if (oldest !== null) this.drop(oldest);
+    if (oldest !== null) this.evict(oldest);
+  }
+
+  /** Removes a record the way a forget does: the devices that listened
+   *  through it are pointed at another feed first. */
+  private evict(id: string): void {
+    const { changed } = forgetDevice(this.records, id);
+    this.drop(id);
+    for (const [followerId, record] of changed) this.store(followerId, record);
   }
 
   /** Keeps a record in memory and as its row. */
@@ -506,7 +522,8 @@ export class RoomCore {
 
   /** A device announcing itself, or its updated scene / palette / viewport. In
    *  a claimed room it may also say what it is (`kind`, `hasMic`: a tablet
-   *  that turns out to have no microphone, say), which updates its record.
+   *  that turns out to have no microphone, say), which updates its record (a
+   *  durable write, so it spends from the allowance a device change does).
    *  Never its name: the name is the Room view's to set (`deviceSet`). */
   private hello(ws: CoreSocket, a: Attachment, msg: Record<string, unknown>): void {
     const kind = parseKind(msg.kind) ?? a.kind;
@@ -518,10 +535,15 @@ export class RoomCore {
       viewport: parseViewport(msg.viewport) ?? a.viewport,
     };
     if (a.keyed) {
-      next.kind = kind;
-      next.hasMic = hasMic;
       const record = this.records.get(a.deviceId);
-      if (record && (record.kind !== kind || record.hasMic !== hasMic)) this.store(a.deviceId, { ...record, kind, hasMic });
+      const changes = record !== undefined && (record.kind !== kind || record.hasMic !== hasMic);
+      // A change to what the device is rewrites its row, so it spends from the
+      // same allowance as a device change; with no token left it is ignored.
+      if (!changes || this.takePatchToken(a.sid)) {
+        next.kind = kind;
+        next.hasMic = hasMic;
+        if (record !== undefined && changes) this.store(a.deviceId, { ...record, kind, hasMic });
+      }
     }
     ws.setAttachment(next);
     this.broadcastRoster();

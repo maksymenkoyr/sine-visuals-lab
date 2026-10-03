@@ -249,6 +249,28 @@ describe("applyDeviceSet", () => {
     expect(applyDeviceSet(room(), "pad", { follow: "tv" })).toEqual({ ok: false, reason: "bad-follow" });
   });
 
+  it("checks only what the patch sets: an owner with no mic can still be renamed or change its screen", () => {
+    const r = room();
+    r.set("laptop", { ...r.get("laptop")!, hasMic: false });
+    expect(ok(applyDeviceSet(r, "laptop", { name: "My laptop" })).get("laptop")?.name).toBe("My laptop");
+    expect(ok(applyDeviceSet(r, "laptop", { screen: "own" })).get("laptop")?.screen).toBe("own");
+    expect(applyDeviceSet(r, "laptop", { ears: "own" })).toEqual({ ok: false, reason: "no-mic" });
+    // A TV left on screen off by an odd record can still be renamed.
+    r.set("tv", { ...r.get("tv")!, screen: "off" });
+    expect(ok(applyDeviceSet(r, "tv", { name: "Big TV" })).get("tv")?.name).toBe("Big TV");
+  });
+
+  it("refuses the owner switching to Follow while its follow is null (it would follow itself)", () => {
+    expect(applyDeviceSet(room(), "laptop", { ears: "follow" })).toEqual({ ok: false, reason: "bad-follow" });
+    expect(applyDeviceSet(room(), "laptop", { follow: null })).toEqual({ ok: false, reason: "bad-follow" });
+    // Naming another feed is fine.
+    const r = room();
+    r.set("pad", { ...r.get("pad")!, ears: "own" });
+    expect(ok(applyDeviceSet(r, "laptop", { ears: "follow", follow: "pad" })).get("laptop")).toMatchObject({ ears: "follow", follow: "pad" });
+    // A non-owner on follow null follows the owner, which is not itself.
+    expect(ok(applyDeviceSet(room(), "pad", { ears: "follow" })).get("pad")?.ears).toBe("follow");
+  });
+
   it("a follow without ears means ears: follow", () => {
     const r = room();
     r.set("pad", { ...r.get("pad")!, ears: "own" });
@@ -285,9 +307,14 @@ describe("applyDeviceSet", () => {
   });
 
   it("when no other feed exists the followers are left as they were", () => {
-    const changed = ok(applyDeviceSet(room(), "laptop", { ears: "follow" }));
-    expect([...changed.keys()]).toEqual(["laptop"]);
-    expect(feedOf(new Map([...room()].map(([id, r]) => [id, changed.get(id) ?? r])), "tv")).toBeNull();
+    // The owner follows the pad, the pad is the only feed, and the pad stops.
+    const r = room();
+    r.set("pad", { ...r.get("pad")!, ears: "own" });
+    r.set("laptop", { ...r.get("laptop")!, ears: "follow", follow: "pad" });
+    r.set("tv", { ...r.get("tv")!, follow: "pad" });
+    const changed = ok(applyDeviceSet(r, "pad", { ears: "follow", follow: null }));
+    expect([...changed.keys()]).toEqual(["pad"]);
+    expect(feedOf(new Map([...r].map(([id, rec2]) => [id, changed.get(id) ?? rec2])), "tv")).toBeNull();
   });
 
   it("does not re-point anyone when a device switches to own input", () => {

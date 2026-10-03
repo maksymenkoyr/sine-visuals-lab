@@ -1208,7 +1208,7 @@ let screensReady = false;
  *  for (and the TV says so too, net/tvPhase.ts `waitingLine`). */
 function feedScreens(roster: RosterEntry[]): void {
   if (!screensReady || mode !== "host" || capture || audioPromise || captureFailed || stoppedByUser || syntheticFeed) return;
-  if (roster.some((d) => d.role === "renderer") && autoStartSource() !== null) void ensureAudio();
+  if (roster.some((d) => d.role === "renderer" && d.online) && autoStartSource() !== null) void ensureAudio();
 }
 
 /** Hot-swaps the live capture to a different source — the panel's Source
@@ -1632,8 +1632,10 @@ function wireDeviceMenu(): void {
 /** Any device can drive the room, not just the host: this builds the Room view
  *  (src/ui/roomView.ts) for whichever connection (host, controller or
  *  renderer) is currently active, wires the #panelBtn that opens it, and
- *  announces this device's scene to the room. Works from the gallery too: room
- *  control is a room capability, not a viz capability. Returns the view so the
+ *  announces this device's scene to the room. Only a keyed connection gets
+ *  the button: an unclaimed room has no records to edit. Works from the
+ *  gallery too: room control is a room capability, not a viz capability.
+ *  Returns the view so the
  *  keyed host's room badge can open it as well. */
 function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner: boolean): RoomView {
   const view = createRoomView({
@@ -1665,8 +1667,12 @@ function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner:
           }
         : { label: "Leave room", run: () => location.assign("/") },
   });
-  panelBtn.style.display = "block";
-  panelBtn.addEventListener("click", () => view.toggle());
+  // Only a keyed room has records to change: an unclaimed (legacy) room
+  // ignores `deviceSet` without a reply, so its controls would do nothing.
+  if (conn.keyed) {
+    panelBtn.style.display = "block";
+    panelBtn.addEventListener("click", () => view.toggle());
+  }
 
   conn.sendHello(scene.id, palette.id, viewport);
   return view;
@@ -1678,7 +1684,7 @@ function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner:
 function showPairingNotice(title: string, body: string): void {
   const root = document.createElement("div");
   root.style.cssText = `
-    position: fixed; inset: 0; z-index: 30;
+    position: fixed; inset: 0; z-index: 40; /* above the Room view (33): a removed phone may have it open */
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 12px; background: #000; color: #fff;
     font-family: system-ui, sans-serif; text-align: center; padding: 24px;
@@ -2280,7 +2286,10 @@ async function boot(): Promise<void> {
       },
       hostRoomKey !== null,
     );
-    if (hostRoomKey) roomCodeEl.addEventListener("click", () => roomView.toggle());
+    // The badge is the way into the Room view from the gallery too (it sits
+    // above it; #panelBtn lives in the scene row), on the laptop and on a
+    // device that joined by the QR alike.
+    if (hostRoomKey || isController) roomCodeEl.addEventListener("click", () => roomView.toggle());
   }
 
   immersive = createImmersiveMode({
@@ -2305,7 +2314,7 @@ async function boot(): Promise<void> {
     if (host && hostRoomKey) {
       roomBridge = createRoomBridge({
         send: (m) => host.sendLook(m),
-        screens: () => host.currentRoster.filter((d) => d.role === "renderer").length,
+        screens: () => host.currentRoster.filter((d) => d.role === "renderer" && d.online).length,
         look: () => ({ scene: scene.id, palette: palette.id }),
         capture: () => captureRoomStorage(localStorage),
         showRoom: () => roomCodeEl.click(),

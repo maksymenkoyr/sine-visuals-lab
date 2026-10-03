@@ -3,8 +3,8 @@
  * (a node each, with its ears and screen choice as chips, a green line from a
  * feed to the devices that listen through it, a violet line from MAIN to the
  * devices that show the room's look), an inspector for the selected device,
- * the invite QR, the typed-code field that adds a waiting TV, and Reset or
- * Leave. It replaces the old Screens card; the open/close mechanics are the
+ * the invite QR (a keyed room's can be swapped for its watch-only link), the
+ * typed-code field that adds a waiting TV, and Reset or Leave. It replaces the old Screens card; the open/close mechanics are the
  * same (a full-viewport overlay, shown and hidden by the caller) and so is the
  * rule that the QR is drawn on open, because a canvas inside a `display: none`
  * overlay measures nothing.
@@ -476,12 +476,17 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     `width: 100%; box-sizing: border-box; margin-top: 4px; padding: 7px 9px; color: #fff; background: rgba(0,0,0,0.35);` +
     `border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; font: 400 15px/1.2 ${FONT_LABEL}; outline: none;`;
   let nameShownFor: string | null = null;
+  /** Puts the shown device's stored name back in the field, so closing the view
+   *  mid-edit doesn't save the half-typed one when the field blurs. */
+  function revertName(): void {
+    const d = roster.find((r) => r.deviceId === selected);
+    if (d) nameInput.value = d.name;
+  }
   nameInput.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Enter") nameInput.blur();
     else if (e.key === "Escape") {
-      const d = roster.find((r) => r.deviceId === selected);
-      if (d) nameInput.value = d.name;
+      revertName();
       hide();
     }
   });
@@ -615,7 +620,17 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
   qrCanvas.style.cssText = "background: #fff; padding: 8px; border-radius: 4px; display: block;";
   const qrCaption = box(monoCaps);
   qrCaption.textContent = "Scan to join";
-  qrBox.append(qrCanvas, qrCaption);
+  // The controller QR can be swapped for the keyed watch-only link (a
+  // spectator: sees the room, sends nothing), as the old pairing overlay did.
+  let watchOnly = false;
+  const watchBtn = document.createElement("button");
+  watchBtn.type = "button";
+  watchBtn.style.cssText = `background: none; border: 0; padding: 2px 4px; cursor: pointer; color: inherit; opacity: 0.6; text-decoration: underline; font: 400 12px/1.2 ${FONT_LABEL};`;
+  watchBtn.addEventListener("click", () => {
+    watchOnly = !watchOnly;
+    drawInvite();
+  });
+  qrBox.append(qrCanvas, qrCaption, watchBtn);
 
   const footRight = box("flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 14px;");
   if (deps.adoptTv) {
@@ -929,12 +944,25 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
       qrBox.style.display = "none";
       return;
     }
-    drawQrCode(qrCanvas, joinUrlFor(invite.code, invite.kind, invite.info), 168);
+    // Only a keyed controller link has a watch-only twin.
+    const canWatch = invite.kind === "controller" && !!invite.info?.key;
+    const watching = canWatch && watchOnly;
+    drawQrCode(qrCanvas, joinUrlFor(invite.code, watching ? "renderer" : invite.kind, invite.info), 168);
+    qrCaption.textContent = watching ? "Scan to watch" : "Scan to join";
+    watchBtn.textContent = watching ? "control link" : "watch-only link";
+    watchBtn.style.display = canWatch ? "block" : "none";
     qrBox.style.display = "flex";
   }
 
+  /** Escape closes the view and nothing else: this listener is on the window
+   *  in the capture phase and stops the event there, so it never reaches the
+   *  page's own Escape (back to the gallery, leave fullscreen, unpin a card). */
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") hide();
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.target === nameInput) revertName();
+    hide();
   };
   const onResize = (): void => {
     if (open) layout();
@@ -949,7 +977,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     root.style.display = "flex";
     drawInvite();
     paintAll();
-    document.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", onResize);
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver(onResize);
@@ -961,7 +989,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     if (!open) return;
     open = false;
     root.style.display = "none";
-    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("keydown", onKey, true);
     window.removeEventListener("resize", onResize);
     ro?.disconnect();
     ro = null;

@@ -1437,6 +1437,73 @@ describe("device records", () => {
     expect([...room.host.store.keys()]).not.toContain("d:p1");
   });
 
+  it("gives a keyed non-host that presents the owner's device id a fresh id, leaving the owner's record alone", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv1 = await room.renderer("tv1");
+    for (const role of ["renderer", "controller"] as const) {
+      const imposter = await room.need({ role, deviceId: "laptop", k: K, kind: role === "renderer" ? "tv" : "phone" });
+      expect(imposter.attachment.deviceId).not.toBe("laptop");
+      expect(imposter.tags).not.toContain("laptop");
+    }
+    expect(row(room, "laptop")).toMatchObject({ role: "host", kind: "laptop", hasMic: true, ears: "own" });
+    expect(roster(host).find((d) => d.deviceId === "laptop")).toMatchObject({ owner: true });
+    // The owner's frames still reach the follower, and only through the owner's feed.
+    tv1.clear();
+    room.bytes(host);
+    expect(tv1.frames().length).toBe(1);
+    // The owner can remove one of them.
+    const other = await room.controller("pad");
+    room.say(host, { type: "deviceForget", targetId: "pad" });
+    expect(other.closedWith).not.toBeNull();
+    // The real owner reconnecting on its own id is still the owner.
+    room.close(host);
+    const again = await room.claimed();
+    expect(again.attachment.deviceId).toBe("laptop");
+    expect(row(room, "laptop")).toMatchObject({ role: "host" });
+  });
+
+  it("never changes a record's role when a socket rejoins under it", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad");
+    room.close(pad);
+    await room.renderer("pad");
+    expect(row(room, "pad")).toMatchObject({ role: "controller" });
+  });
+
+  it("rations a hello that rewrites the device row: a flood of trait flips writes only the allowance", async () => {
+    const room = new Room();
+    await room.claimed();
+    const pad = await room.controller("pad", { kind: "phone", mic: true });
+    room.host.puts = [];
+    for (let i = 0; i < 1000; i++) {
+      room.say(pad, { type: "hello", kind: i % 2 === 0 ? "tablet" : "phone" });
+    }
+    expect(room.host.puts.length).toBeLessThanOrEqual(LOOK_LIMITS.patchBurst);
+    // Out of allowance: the attachment and the row still agree.
+    expect(pad.attachment.kind).toBe(row(room, "pad").kind);
+  });
+
+  it("points a feed's followers at another feed when the feed's record is evicted", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tablet = await room.controller("tablet", { kind: "tablet", mic: true });
+    const tv = await room.renderer("tv");
+    room.say(tablet, { type: "deviceSet", targetId: "tablet", ears: "own" });
+    room.say(tv, { type: "deviceSet", targetId: "tv", follow: "tablet" });
+    room.close(tablet); // the oldest-seen offline record from here on
+    for (let i = 0; i < DEVICE_LIMITS.maxStoredDevices; i++) {
+      room.host.time += 1000;
+      await room.controller(`g${i}`); // guests stay online and are never evicted
+    }
+    expect(room.host.store.has("d:tablet")).toBe(false);
+    expect(row(room, "tv").follow).toBeNull();
+    tv.clear();
+    room.bytes(host);
+    expect(tv.frames().length).toBe(1);
+  });
+
   it("never evicts a device that is online", async () => {
     const room = new Room();
     await room.claimed();

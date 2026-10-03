@@ -797,6 +797,24 @@ describe("render delay", () => {
     expect(host.delay()).toBe(RENDER_DELAY_MS);
   });
 
+  it("a legacy room's defaulted roster does not switch a host to the records' rule", async () => {
+    const { HostConnection, RENDER_DELAY_MS } = await loadRoom();
+    class Probe extends HostConnection {
+      delay(): number {
+        return this.targetDelayMs();
+      }
+    }
+    const host = new Probe("ABCD");
+    last().open();
+    roster(last(), [{ deviceId: host.deviceId, role: "host", scene: "", palette: "" }]);
+    expect(host.delay()).toBe(0);
+    roster(last(), [
+      { deviceId: host.deviceId, role: "host", scene: "", palette: "" },
+      { deviceId: "tv", role: "renderer", scene: "", palette: "" },
+    ]);
+    expect(host.delay()).toBe(RENDER_DELAY_MS);
+  });
+
   it("a renderer always waits the fixed delay until the roster lists it", async () => {
     const { RendererConnection, RENDER_DELAY_MS } = await loadRoom();
     class Probe extends RendererConnection {
@@ -920,6 +938,19 @@ describe("sendFrame", () => {
     const host = new HostConnection("ABCD");
     last().open();
     roster(last(), [{ deviceId: "other", role: "renderer", scene: "", palette: "" }]);
+    vi.advanceTimersByTime(40);
+    host.sendFrame(FRAME);
+    expect(binaries(last())).toHaveLength(1);
+  });
+
+  it("sends in a legacy room even when its roster lists this device (defaults are not records)", async () => {
+    const { HostConnection } = await loadRoom();
+    const host = new HostConnection("ABCD");
+    last().open();
+    roster(last(), [
+      { deviceId: "first", role: "host", scene: "", palette: "" },
+      { deviceId: host.deviceId, role: "host", scene: "", palette: "" },
+    ]);
     vi.advanceTimersByTime(40);
     host.sendFrame(FRAME);
     expect(binaries(last())).toHaveLength(1);

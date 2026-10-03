@@ -244,11 +244,13 @@ export type DeviceSetResult =
  *  refused. Never mutates `records`.
  *
  *  - The target must be a known device.
- *  - `ears: "own"` needs a device that has a microphone.
- *  - `screen: "off"` is refused for a TV.
+ *  - Setting `ears: "own"` needs a device that has a microphone, and setting
+ *    `screen: "off"` is refused for a TV. Only what the patch sets is checked,
+ *    so a device whose record is already odd can still be renamed.
  *  - A `follow` must name another known device that is on its own input (after
  *    this patch), or be null (the owner). Setting `follow` without `ears`
- *    also sets `ears: "follow"`.
+ *    also sets `ears: "follow"`. A device never follows itself: the owner can't
+ *    switch to Follow while its `follow` is null (that would name itself).
  *  - When the target stops being a feed (own → follow), each device that drew
  *    from it is pointed at a feed that is still on its own input: the owner
  *    (`null`) if the owner still is one, else the first other feed in record
@@ -270,11 +272,22 @@ export function applyDeviceSet(
   }
   if (patch.screen !== undefined) next.screen = patch.screen;
 
-  if (next.ears === "own" && !next.hasMic) return { ok: false, reason: "no-mic" };
-  if (next.screen === "off" && next.kind === "tv") return { ok: false, reason: "tv-off" };
+  // Only what the patch sets is checked: a record that is already odd (an
+  // owner without a mic, say) can still be renamed or given another screen.
+  if (patch.ears === "own" && !next.hasMic) return { ok: false, reason: "no-mic" };
+  if (patch.screen === "off" && next.kind === "tv") return { ok: false, reason: "tv-off" };
   if (patch.follow !== undefined && patch.follow !== null) {
     const feed = records.get(patch.follow);
     if (patch.follow === targetId || !feed || feed.ears !== "own") return { ok: false, reason: "bad-follow" };
+  }
+  // `follow: null` means the owner, so the owner switching to Follow without
+  // naming another feed would follow itself.
+  if (
+    (patch.ears !== undefined || patch.follow !== undefined) &&
+    next.ears === "follow" &&
+    (next.follow ?? ownerId(records)) === targetId
+  ) {
+    return { ok: false, reason: "bad-follow" };
   }
 
   const changed = new Map<string, DeviceRecord>([[targetId, next]]);
