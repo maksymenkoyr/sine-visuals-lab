@@ -19,7 +19,9 @@
 // monitors column is made one scrollable piece, because the app caps it at
 // 100vh, which under CSS zoom is taller than the frame, and with Bands and
 // Dynamics open the Hits, Tempo and Character cards sit below the fold; it is
-// scrolled through during the shot, like the settings column.
+// scrolled through during the shot, like the settings column (the tall frame
+// starts at the top, Bands showing; the wide one starts at Dynamics so the Hits
+// jacks are on screen).
 //
 // The window starts at an exact song time: the page waits until DELTA seconds
 // after the mic stamp before ctx.startAt(), so clip t=0 is --wav-start + DELTA.
@@ -117,7 +119,7 @@ export default async function (ctx) {
   await ctx.wait(2200);
   await page.locator("#menuBtn").click();
   await ctx.wait(900);
-  await page.evaluate(({ sel, y }) => { document.querySelector(sel).scrollTop = y; }, { sel: L_SCROLL, y: 330 });
+  await page.evaluate(({ sel, y }) => { document.querySelector(sel).scrollTop = y; }, { sel: L_SCROLL, y: H > W ? 0 : 330 });
   await page.evaluate(({ sel, y }) => { document.querySelector(sel).scrollTop = y; }, { sel: R_SCROLL, y: await rowScrollTarget("Caustic density", (H / zoom - 76) * 0.3) });
   await ctx.wait(500);
 
@@ -133,86 +135,83 @@ export default async function (ctx) {
   ctx.startAt();
   console.log(`  t=0 is ${((Date.now() - micEpoch) / 1000).toFixed(3)} s after the mic stamp`);
 
-  // ---- the actions. In a take where a side is hidden, its action is done in
-  // the page at the instant the cursor would have pressed, and the cursor goes
-  // toward its next real target instead.
-  const lp = (fx, fy) => ({ x: W * fx, y: H * fy });
-  const wirePort = async (slot, n, label, restPt) => {
-    await until(slot);
-    await ensure(n);
-    if (realRight) await ctx.tap(port(n), { ms: 200, hold: 60, label });
-    else {
-      await ctx.cursor.moveTo(restPt.x, restPt.y, 330);
-      await page.locator(port(n)).first().evaluate((e) => e.click());
+  // ---- the actions. Every press happens at a fixed clip time P (the cursor
+  // starts its glide early enough to arrive by then), so the three takes press
+  // at the same instants. In a take where a side is hidden, that side's press
+  // is done in the page at P and the cursor glides toward its next real target.
+  let maxPressLate = 0;
+  const arrive = async (P) => { await until(P); maxPressLate = Math.max(maxPressLate, T() - P); };
+  const rest = (fx, fy) => ({ x: W * fx, y: H * fy });
+  const centre = async (sel) => { const b = await page.locator(sel).first().boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+  const clickIn = (sel) => page.locator(sel).first().evaluate((e) => e.click());
+
+  // A tap on a target on a visible side, or an in-page click on a hidden one.
+  const tapAt = async (P, sel, label, { real, restPt, ms = 240 }) => {
+    await until(P - ms / 1000 - 0.12);
+    if (real) {
+      const c = await centre(sel);
+      await until(P - ms / 1000 - 0.03);
+      await ctx.cursor.moveTo(c.x, c.y, ms);
+      await arrive(P);
+      ctx.mark(`tap ${label}`);
+      await page.mouse.down(); await sleep(60); await page.mouse.up();
+    } else {
+      await ctx.cursor.moveTo(restPt.x, restPt.y, ms);
+      await arrive(P);
+      await clickIn(sel);
       ctx.mark(`(hidden) ${label}`);
     }
   };
-  const wireJack = async (slot, n, label, restPt) => {
-    await until(slot);
-    if (realLeft) {
-      try { await page.locator(jack(n)).first().waitFor({ state: "visible", timeout: 1500 }); }
-      catch (e) {
-        console.log("JACK MISSING", n, JSON.stringify(await page.evaluate(() => [...document.querySelectorAll(".vc-jack")].map((j) => [j.getAttribute("aria-label"), Math.round(j.getBoundingClientRect().y)]))));
-        await ctx.snap("/Users/yaro/.claude/jobs/b76b483d/tmp/promo/shots/seg4b/fail.png");
-        throw e;
-      }
-      await ctx.tap(jack(n), { ms: 300, hold: 60, label });
-    }
-    else {
-      await ctx.cursor.moveTo(restPt.x + 40, restPt.y + 30, 380);
-      await sleep(90);
-      await page.locator(jack(n)).first().evaluate((e) => e.click());
-      ctx.mark(`(hidden) ${label}`);
-    }
-  };
-  const slide = async (slot, n, to, label, restPt) => {
-    await until(slot);
-    await ensure(n);
+  // A slider move from its value to fraction `to` of its range, 360 ms long.
+  const slideAt = async (P, n, to, label, restPt) => {
+    await until(P - 0.45);
     const s = page.locator(sliderSel(n)).first();
     const { v, min, max } = await s.evaluate((e) => ({ v: +e.value, min: +e.min, max: +e.max }));
     if (realRight) {
       const b = await s.boundingBox();
       const at = (f) => ({ x: b.x + 10 + (b.width - 20) * f, y: b.y + b.height / 2 });
-      await ctx.drag(at((v - min) / (max - min)), at(to), 360, { grab: 180 });
-      ctx.mark(`^ ${label}`);
+      await until(P - 0.25);
+      await ctx.cursor.moveTo(at((v - min) / (max - min)).x, at(0).y, 220);
+      await arrive(P);
+      ctx.mark(`drag start ${label}`);
+      await page.mouse.down(); await sleep(60);
+      await ctx.cursor.moveTo(at(to).x, at(0).y, 360);
+      await page.mouse.up();
     } else {
-      const g = ctx.cursor.moveTo(restPt.x, restPt.y, 400);
-      await sleep(260);
-      ctx.mark(`(hidden) ${label}`);
-      await Promise.all([g, page.evaluate(([sel, val, ms]) => window.__slide(sel, val, ms), [sliderSel(n), min + (max - min) * to, 360])]);
+      await ctx.cursor.moveTo(restPt.x, restPt.y, 250);
+      await arrive(P);
+      ctx.mark(`(hidden) drag start ${label}`);
+      await sleep(60);
+      await page.evaluate(([sel, val, ms]) => window.__slide(sel, val, ms), [sliderSel(n), min + (max - min) * to, 360]);
     }
   };
-  const pick = async (slot, row, txt, label, restPt) => {
-    await until(slot);
-    await ensure(row);
-    if (realRight) await ctx.tap(chip(row, txt), { ms: 240, hold: 60, label });
-    else {
-      await ctx.cursor.moveTo(restPt.x, restPt.y, 360);
-      await page.locator(chip(row, txt)).first().evaluate((e) => e.click());
-      ctx.mark(`(hidden) ${label}`);
-    }
-  };
+  const port_ = (P, n, restPt) => tapAt(P, port(n), `port ${n}`, { real: realRight, restPt, ms: 220 });
+  const jack_ = (P, n, restPt) => tapAt(P, jack(n), `jack ${n}`, { real: realLeft, restPt, ms: 280 });
+  const ensureAt = async (t, n) => { await until(t); await ensure(n); };
 
   // 1. Bass hits -> Caustic density, then pull the density up
-  await wirePort(0.0, "Caustic density", "port Caustic density", lp(0.5, 0.5));
-  await wireJack(0.5, "Bass hits", "jack Bass hits -> Caustic density", lp(0.45, 0.5));
-  await slide(1.15, "Caustic density", 0.8, "slider Caustic density", lp(0.45, 0.6));
+  await port_(0.40, "Caustic density", rest(0.5, 0.5));
+  await jack_(1.05, "Bass hits", rest(0.45, 0.5));
+  await slideAt(1.60, "Caustic density", 0.8, "Caustic density", rest(0.45, 0.6));
   // 2. Any hit -> Beat ripple, ring style Wave
-  await wirePort(2.05, "Beat ripple", "port Beat ripple", lp(0.5, 0.55));
-  await wireJack(2.55, "Any hit", "jack Any hit -> Beat ripple", lp(0.45, 0.45));
-  await pick(3.4, "Ring style", "Wave", "chip Ring style Wave", lp(0.4, 0.5));
+  await port_(2.55, "Beat ripple", rest(0.5, 0.55));
+  await jack_(3.15, "Any hit", rest(0.45, 0.45));
+  await ensureAt(3.45, "Ring style");
+  await tapAt(4.25, chip("Ring style", "Wave"), "chip Ring style Wave", { real: realRight, restPt: rest(0.4, 0.5), ms: 260 });
   // 3. Drift speed
-  await slide(3.95, "Drift speed", 0.95, "slider Drift speed", lp(0.5, 0.45));
-  // both columns scroll on to the next region while the cursor is between targets
-  await until(4.75);
-  page.evaluate(({ sel }) => window.__scrollTo(sel, 800, 600), { sel: L_SCROLL });
+  await slideAt(4.80, "Drift speed", 0.95, "Drift speed", rest(0.5, 0.45));
+  // the monitors column scrolls on while the settings column follows to the next region
+  await until(5.35);
+  page.evaluate(({ sel }) => window.__scrollTo(sel, 800, 700), { sel: L_SCROLL });
   ctx.mark("scroll monitors column");
+  await ensureAt(5.40, "Treble sparkle");
   // 4. Treble hits -> Treble sparkle, then Fog and the sparkle level
-  await wirePort(5.3, "Treble sparkle", "port Treble sparkle", lp(0.5, 0.5));
-  await wireJack(6.25, "Treble hits", "jack Treble hits -> Treble sparkle", lp(0.45, 0.5));
+  await port_(6.20, "Treble sparkle", rest(0.5, 0.5));
+  await jack_(6.85, "Treble hits", rest(0.45, 0.5));
   page.evaluate(({ sel }) => window.__scrollTo(sel, 0, 1300), { sel: L_SCROLL });
-  await slide(6.95, "Fog", 0.95, "slider Fog", lp(0.45, 0.4));
-  await slide(7.85, "Treble sparkle", 0.95, "slider Treble sparkle", lp(0.45, 0.4));
+  await ensureAt(7.00, "Fog");
+  await slideAt(7.55, "Fog", 0.95, "Fog", rest(0.45, 0.4));
+  await slideAt(8.30, "Treble sparkle", 0.95, "Treble sparkle", rest(0.45, 0.4));
   await until(9.2);
-  console.log(`SLOTS max lateness ${maxLate.toFixed(2)} s`);
+  console.log(`SLOTS max lateness ${maxLate.toFixed(2)} s, press lateness ${maxPressLate.toFixed(2)} s`);
 }
