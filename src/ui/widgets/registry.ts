@@ -14,8 +14,8 @@ import type { CardSpec } from "../controlsKit.ts";
  *
  * `appendRow` is the one bridge into deviceMenu's real row-building code
  * (`appendSettingRow`): a widget that wants an ordinary slider/patch-bay row
- * for one of its item settings gets the *actual* row — drive chip, Receives
- * patch, jack, cables, pin — by calling this instead of building its own
+ * for one of its item settings gets the *actual* row — drive chip, wire
+ * panel, jack, cables, pin — by calling this instead of building its own
  * look-alike. `get`/`set` go through the exact same store path a slider
  * drag uses (deviceMenu's `onSceneSettingChange`), so a widget's own custom
  * controls (Physarum 2's Affinity pads) read/write storage, Looks and reset
@@ -110,14 +110,14 @@ export interface WidgetCtx {
   /** Passthrough to the active scene's own `command()` (scene.ts) — a no-op
    *  for a scene with none. */
   command(name: string, args: Record<string, number>): void;
-  /** Mounts `spec` as a real device-menu row (drive chip, Receives patch,
+  /** Mounts `spec` as a real device-menu row (drive chip, wire panel,
    *  jack, cables, A/T, reset — deviceMenu.ts's own `appendSettingRow`)
    *  into `container`. `opts.linked` is the multi-item-selection bridge
    *  (itemBoxes.ts's own multi-strain edit, 2026-09-27): every OTHER item
    *  currently selected alongside `spec`'s own item, sharing the same
    *  `spec.item.param`. When given, deviceMenu applies any edit this row
    *  makes — a value (slider drag, typed value, reset arrow, T mute), an
-   *  Auto toggle, or a drive/patch change (anything in the Receives panel,
+   *  Auto toggle, or a drive/patch change (anything in the wire panel,
    *  jack/cable wiring, reset to scene default) — to every linked setting
    *  too, and shows a divergent-value tick per linked item on a numeric
    *  row's slider track (and a "Mixed — …" drive summary) for as long as

@@ -13,6 +13,9 @@ before adding a note here; this file doesn't restate them.
   auto-tune invariant that isn't owned by any single scene file.
 - [Tuning](tuning.md) — the live-tuning loop: param bus, mark, numeric probe,
   contact sheet, A/B.
+- [Vocabulary](vocabulary.md) — the words the panel uses for wiring the sound
+  into a scene (signal, jack, wire, port, reactive setting), mapped to the
+  code's own names.
 - [Status](status.md) — what's in flight right now. The one note here that's
   expected to be rewritten wholesale each session.
 - [Scene records](scenes/) — one note per scene, `scenes/<id>.md`: what it

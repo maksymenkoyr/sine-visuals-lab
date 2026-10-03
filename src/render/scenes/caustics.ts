@@ -154,7 +154,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description:
-      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Its source pushes it finer (a chorus, by default); a change — from the slider or the source — eases in rather than snapping.",
+      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -173,7 +173,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "breathe",
     label: "Breathe",
-    description: "How far the pool zooms in and out with its source — once a bar by default",
+    description: "How far the pool zooms in and out with whatever is wired in — once a bar by default",
     group: "Motion",
     min: 0,
     max: 1,

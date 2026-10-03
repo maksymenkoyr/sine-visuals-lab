@@ -200,8 +200,12 @@ import {
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
  *
+ * The words the panel shows for all of this — signal, jack, wire, port,
+ * reactive setting, wire panel, built-in — are docs/vocabulary.md's; this
+ * file's own names (patch, source, cable) stay code-side.
+ *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
- * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Signal/
+ * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Dynamics/
  * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
  * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
@@ -593,7 +597,7 @@ export interface DeviceMenuDeps {
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** The Signal card's Reset chip (its header, beside Loudness) — starts
+  /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
@@ -740,7 +744,7 @@ export interface DeviceMenu {
    *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
    *  device isn't running its own extractor (renderer, synthetic feed);
    *  `lufs` is this device's lufsAnalyser reading, null on the same paths
-   *  (the Signal card's Loudness row hides itself). `rateScale` is app.ts's
+   *  (the Dynamics card's Loudness row hides itself). `rateScale` is app.ts's
    *  already-resolved sensitivity.ts's smoothingRateScale for this tick's
    *  Smoothing value — forwarded to the meters so their own BPM settle and
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
@@ -749,7 +753,7 @@ export interface DeviceMenu {
    *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
    *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
    *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
-   *  Signal card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
+   *  Dynamics card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
    *  off the same *un-latched* AnimFrame as `anim` — null on the same paths.
    *  A drive row's live pill reads its uniformPair() (the same number a
    *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
@@ -849,7 +853,7 @@ const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em;
 // under a control someone has to find).
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
-  "Drag a knob up to boost a band, down to cut it. Pin a reactive setting to plug meters into it.";
+  "Drag a knob up to boost a band, down to cut it. Pin a reactive setting to plug signals into it.";
 
 // The Bands card's Levels row: a small caption, then a 3-column grid of
 // BAND_LEVEL_CHOICES's own compact meters (below) — one row rather than
@@ -881,7 +885,7 @@ const RAW_CHIP_TITLE =
 // createControlRow's own drivePanel slot: the label + summary wrapper that
 // pins on click. Stacked (label, then the summary on its own line) rather
 // than side by side — inline, the summary had nowhere left to grow in the
-// narrow controls column and ellipsized to unreadable ("Scene mix: bas…")
+// narrow controls column and ellipsized to unreadable ("Built-in: two-st…")
 // even at a middling width; a second line wraps instead, however long the
 // source list gets.
 const driveRowLeftStyle = `display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; cursor: pointer;`;
@@ -2591,14 +2595,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     driveCanvasSizes.delete(canvas);
   }
 
+  /** A `drive.sceneLabel` as the built-in summary shows it: the scene's
+   *  own "Scene: " prefix and a leading "this scene's own " dropped, since
+   *  "Built-in: " already says both (docs/vocabulary.md). Empty when the
+   *  scene names no label. */
+  function builtInText(spec: SceneSetting): string {
+    return (spec.drive?.sceneLabel ?? "").replace(/^Scene:\s*/, "").replace(/^this scene's own\s+/, "");
+  }
+
   /** A row's own one-line source summary — every muted source is left out
    *  of the plain-language list (this file's header's Muting paragraph) and
    *  folded into one short "· N off" suffix instead, so a summary never
    *  grows a parenthetical per muted source. */
   function driveSummaryText(spec: SceneSetting, setting: DriveSetting): string {
     if (setting === "scene") {
-      const label = spec.drive?.sceneLabel ?? "Scene mix";
-      return label.replace(/^Scene:\s*/, "Scene mix: ");
+      const label = builtInText(spec);
+      return label ? `Built-in: ${label}` : "Built-in";
     }
     if (!setting.sources.length) return "Nothing plugged in";
     const mutedCount = setting.sources.filter((s) => s.off).length;
@@ -2626,11 +2638,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   /** The short form driveSummaryText's own "scene" branch would otherwise
-   *  spell out ("Scene mix: bass level") — just "Scene", for the "Mixed —
+   *  spell out ("Built-in: bass level") — just "Built-in", for the "Mixed —
    *  …" line below, where every part has to stay short enough to read as a
    *  list. */
   function driveShortSummary(spec: SceneSetting, setting: DriveSetting): string {
-    return setting === "scene" ? "Scene" : driveSummaryText(spec, setting);
+    return setting === "scene" ? "Built-in" : driveSummaryText(spec, setting);
   }
 
   /** A drive row's own summary text, "Mixed — …" once its linked siblings
@@ -2704,12 +2716,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   const MIX_OPTIONS: { mix: DriveMix; label: string; hint: string }[] = [
-    { mix: "add", label: "Add", hint: "Stack the sources: each adds its share, so together they push harder." },
-    { mix: "max", label: "Strongest", hint: "Only the strongest source at each moment counts — they don't stack." },
+    { mix: "add", label: "Add", hint: "Stack the wires: each adds its share, so together they push harder." },
+    { mix: "max", label: "Strongest", hint: "Only the strongest wire at each moment counts — they don't stack." },
     {
       mix: "gate",
       label: "Only when",
-      hint: "Some sources play, but only while the condition is high — e.g. treble hits, only when the song is intense.",
+      hint: "Some wires play, but only while the condition is high — e.g. treble hits, only when the song is intense.",
     },
   ];
 
@@ -2726,14 +2738,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const EVERY_HINT = "How many beats one swing takes: 1 = every beat, 4 = once a bar.";
 
   const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
-    { role: "plays", label: "Plays", hint: "This source makes the setting move." },
+    { role: "plays", label: "Plays", hint: "This wire makes the setting move." },
     {
       role: "when",
       label: "Only when",
-      hint: "A condition: the playing sources only get through while this one is high. Mark more than one and every condition has to be high at once.",
+      hint: "A condition: the playing wires only get through while this one is high. Mark more than one and every condition has to be high at once.",
     },
   ];
-  const ROLE_REFUSE_HINT = "At least one source has to play.";
+  const ROLE_REFUSE_HINT = "At least one wire has to play.";
 
   const GRID_CHIP_HINT: Record<number, string> = {
     1: "A pulse every half beat.",
@@ -2754,7 +2766,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = opt.label;
       btn.disabled = disabled;
-      setHint(btn, disabled ? "Plug in a second source to gate one against the other." : opt.hint);
+      setHint(btn, disabled ? "Plug in a second signal to gate one against the other." : opt.hint);
       btn.setAttribute("aria-pressed", String(patch.mix === opt.mix));
       btn.style.cssText = disabled ? driveSegBtnDisabledStyle : patch.mix === opt.mix ? driveSegBtnLitStyle : driveSegBtnStyle;
       if (!disabled) {
@@ -2891,7 +2903,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
-  const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
+  const WEIGHT_HINT = "This wire's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
   const GENERIC_THRESHOLD_HINT =
     "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
@@ -3028,8 +3040,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
-  const MUTE_HINT_ON = "Switch this source off without unplugging it — its settings are kept.";
-  const MUTE_HINT_OFF = "Switch this source back on.";
+  const MUTE_HINT_ON = "Switch this wire off without unplugging it — its settings are kept.";
+  const MUTE_HINT_OFF = "Switch this wire back on.";
 
   /** The source line's own on/off switch (drives.ts's setSourceMuted) —
    *  lives in its own gutter column (driveSrcLineStyle) on every line, so
@@ -3090,7 +3102,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     removeBtn.style.cssText = driveSrcRemoveStyle;
     removeBtn.textContent = "×";
     removeBtn.setAttribute("aria-label", `Unplug ${driveSourceLabel(src.choice)}`);
-    setHint(removeBtn, "Unplug this source.");
+    setHint(removeBtn, "Unplug this wire.");
     removeBtn.addEventListener("click", () => {
       deps.onTogglePatchSource(sceneId, spec, src.choice);
       patchChanged(sceneId, spec);
@@ -3204,7 +3216,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "The last 4 seconds, on a scale that never changes: the top is one source at full weight, the dotted line across the middle one source at weight 1. White: what this setting receives. Thin coloured lines: each source (dashed: a condition). Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
+      "The last 4 seconds, on a scale that never changes: the top is one wire at full weight, the dotted line across the middle one wire at weight 1. White: what this setting receives. Thin coloured lines: each wire (dashed: a condition). Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -3473,7 +3485,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     resetBtn.type = "button";
     resetBtn.style.cssText = driveResetLinkStyle;
     resetBtn.textContent = "Reset to scene default";
-    setHint(resetBtn, `Back to what this scene does on its own: ${driveDefaultSummary(spec)}.`);
+    setHint(resetBtn, `Back to how this scene starts — ${driveDefaultSummary(spec)}.`);
     resetBtn.addEventListener("click", () => {
       deps.onResetDriveSetting(sceneId, spec);
       patchChanged(sceneId, spec);
@@ -3494,26 +3506,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     head.style.cssText = drivePatchHeadStyle;
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
-    eyebrow.textContent = "Receives";
+    eyebrow.textContent = "Wires";
     head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
     panel.appendChild(head);
 
     const list = document.createElement("div");
     list.style.cssText = driveSrcListStyle;
     if (setting === "scene") {
-      // The scene's own mix has no source line of its own, so it gets its
-      // own Unplug — without it the scene's mix could never be disconnected.
+      // The built-in reaction has no wire line of its own, so it gets its
+      // own Unplug — without it the built-in could never be disconnected.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      const mix = spec.drive?.sceneLabel?.replace(/^Scene:\s*/, "");
-      empty.textContent = mix
-        ? `Playing the scene's own mix: ${mix}. Plug in a meter to replace it.`
-        : "Playing the scene's own mix. Plug in a meter to replace it.";
+      const builtIn = builtInText(spec);
+      empty.textContent = builtIn
+        ? `Built-in: ${builtIn}. Plug in a signal to replace it.`
+        : "Built-in reaction. Plug in a signal to replace it.";
       const unplug = document.createElement("button");
       unplug.type = "button";
       unplug.style.cssText = driveResetLinkStyle;
       unplug.textContent = "Unplug";
-      setHint(unplug, "Disconnect the scene's own mix, so this setting doesn't react to the music.");
+      setHint(unplug, "Unplug the built-in reaction, so this setting doesn't react to the music.");
       unplug.addEventListener("click", () => {
         deps.onUnplugAll(sceneId, spec);
         patchChanged(sceneId, spec);
@@ -3524,7 +3536,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // in, so the setting holds still.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a meter, or reset to the scene default.";
+      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a signal, or reset to the scene default.";
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
@@ -3554,9 +3566,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // own `data-hint` (set by setHint above) — never a per-control
     // listener, never touched by refreshAuto/update(). In the stacked
     // layout jacks are far away, so the rest state points at the add-by-
-    // name chips instead of a meter's jack.
+    // name chips instead of a signal's jack.
     const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
-    const restHint = stacked ? "Add a source by name below." : "Click a meter's jack to plug it in or out.";
+    const restHint = stacked ? "Add a signal by name below." : "Click a signal's jack to plug it in or out.";
     const hintBar = document.createElement("div");
     hintBar.className = "vc-drive-bottom-hint";
     setHintText(hintBar, restHint);
@@ -3618,7 +3630,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sparkCanvas = document.createElement("canvas");
     sparkCanvas.className = "vc-drive-spark";
     sparkCanvas.style.cssText = driveSparkCanvasStyle;
-    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). Colour shows which source is contributing most.";
+    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). Colour shows which wire is contributing most.";
     sparkCanvas.title = SPARK_TOOLTIP;
     sparkCanvas.addEventListener("pointerenter", () =>
       showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]),
@@ -5389,7 +5401,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // (FeatureExtractor.bandSpanDb), not MUSIC_DIALS like the rows below —
   // no dial describes how much of the analyser's window the room is
   // actually using, which is exactly what this amount fixes — and eases
-  // slowly (autoGain.ts's EASE_RATE) so the Signal card's history trace
+  // slowly (autoGain.ts's EASE_RATE) so the Dynamics card's history trace
   // still reads as room drift, not something chasing the beat.
   const autoGainRow = createControlRow({
     label: "Auto-gain",
@@ -5443,7 +5455,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     unit: "%",
     format: (value) => String(Math.round(value * 100)),
     description:
-      "Quieter than this on the Signal card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
+      "Quieter than this on the Dynamics card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
     auto: {
       isEnabled: () => deps.isSilenceGateAuto(),
       toggle: (on) => {

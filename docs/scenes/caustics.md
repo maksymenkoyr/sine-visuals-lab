@@ -580,6 +580,9 @@ reference-measurement workflow used by later scenes.
   unchanged; only the on-beat direction flipped. `tests/caustics.test.ts`
   now pins non-increasing monotonicity in focus ("more pulse = more haze")
   and "never above rest, never zero" in place of the old snap's ceiling case.
+- 2026-10-03 — Caustic density's and Breathe's descriptions say "whatever is
+  wired in" instead of "its source", following the panel's vocabulary
+  (`docs/vocabulary.md`). Copy only; no behaviour changed.
 
 ## Tuning notes
 
