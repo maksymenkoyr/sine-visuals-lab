@@ -1,7 +1,7 @@
 import { INK, PLUM, ART, f1, rnd, shape, line, E, crSample, tubeD, crPath, poly, zpanel, glowCircle, glowEllipse, cel, rig, fxg } from "./lib";
-// The room (Zim leads): black-heavy round chamber, ceiling ring with scallop lights, ribbed tubes,
-// LED bars, porthole, monitor; a balcony rail with a Zim-style crowd of small heads; the booth.
-// The blast (PPG flat ray burst in Zim colours) from the button.
+// The room: black-heavy round chamber, ceiling ring with scallop lights, ribbed tubes,
+// LED bars, porthole, monitor; a balcony rail with an angular crowd of small heads; the booth.
+// The blast (flat ray burst in room colours) from the button.
 //
 // Prototype split: the drawing is the r11 still. The parts that move are wrapped in named groups
 // (rig = transform, fxg = opacity, cel = swappable drawing); motion.js says what moves them. Every
@@ -78,7 +78,7 @@ export function room() {
   return s;
 }
 
-// A Zim ribbed tube: base + shadow side + rim + rib rings.
+// A ribbed tube: base + shadow side + rim + rib rings.
 export function tube(pts: number[][], w: number, base: string, shade: string, rim: string) {
   let s = shape(tubeD(pts, pts.map(() => w), 40), base, 1.4, PLUM);
   const S = crSample(pts, 40);
@@ -94,7 +94,7 @@ export function tube(pts: number[][], w: number, base: string, shade: string, ri
   return s;
 }
 
-// The back crowd: rows of small heads behind a curved balcony rail, Zim-style mass.
+// The back crowd: rows of small heads behind a curved balcony rail, angular mass.
 // Each row is a rig (it bounces); each head carries three eye cels switched per row by class:
 // e0 = the still's pinpoint squint, e1 = grooving (big pupils toward the DJ), e2 = wide-eyed.
 export const railY = (x: number) => 560 - (x - 600) * 0.03 + Math.pow((x - 1100) / 700, 2) * 20;
@@ -145,7 +145,7 @@ export function backCrowd() {
   return s;
 }
 
-// Floor: deep red-plum with round lit pads (Zim f_027). Each pad is its own layer so it can pulse.
+// Floor: deep red-plum with round lit pads. Each pad is its own layer so it can pulse.
 export function floor() {
   let s = `<path d="M-400,610 L2000,560 L2000,1300 L-400,1300Z" fill="#3d0b25"/>`;
   s += `<path d="M-400,640 L2000,600 L2000,620 L-400,662Z" fill="#2a0619"/>`;
@@ -164,7 +164,7 @@ export function lasers() {
     'style="display:none"')).join('');
 }
 
-// The blast: hard-edged flat rays from the button (PPG), Zim colours, over the room.
+// The blast: hard-edged flat rays from the button, room colours, over the room.
 export function blast() {
   ART.seed = 99;
   let s = '';
@@ -199,7 +199,7 @@ export function blast() {
   return s;
 }
 
-// The booth: Zim spiky tech console, thin plum line, hard shade, rim lights, claws, lenses.
+// The booth: spiky tech console, thin plum line, hard shade, rim lights, claws, lenses.
 export function booth() {
   let s = '';
   const claw = (x: number, y: number, dir: number, h: number) => {
@@ -253,7 +253,7 @@ export function buttonGlow() {
   return fxg('btnGlow', glowEllipse(BX, BY - 26, 170, 90, 40, '#ff3f7a'), 'style="display:none"');
 }
 
-// The giant button: PPG prop line (thick black) on Zim hardware. Squashed by the slam; the dome
+// The giant button: thick-black prop line on the room hardware. Squashed by the slam; the dome
 // is a rig so it can stand tall in the groove and squash back to the still at the drop.
 export function button() {
   let s = '';

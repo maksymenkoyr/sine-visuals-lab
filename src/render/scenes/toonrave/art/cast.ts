@@ -1,7 +1,7 @@
 import type { Mat, Opts, Tup5 } from "./lib";
-import { INK, DEFS, ART, uid, f1, rnd, blob, shape, line, E, loopD, poly, ppgArm, ppgLeg, ppgEyeParts, ppgEyeInner, speedLines, rimLit, glowCircle, MX, cel, rig, fxg } from "./lib";
+import { INK, DEFS, ART, uid, f1, rnd, blob, shape, line, E, loopD, poly, toonArm, toonLeg, eyeParts, eyeInner, speedLines, rimLit, glowCircle, MX, cel, rig, fxg } from "./lib";
 import { BX, BY } from "./room";
-// The cast: PPG construction + Zim attitude. Original characters only.
+// The cast: round-limbed construction, sharp attitude. Original characters only.
 //
 // Prototype split: each character is a rig (a root group with a pose matrix) holding cels, the
 // drawings limited animation swaps. The cel named 'hero' is always the r11 still's own drawing, so
@@ -19,14 +19,14 @@ export function dj() {
   let s = '';
   const L = (hx: number, hy: number, ax: number, ay: number, toe: number): Tup5 => [hx, hy, ax, ay, toe];   // hip, ankle, toe angle
   const legsDraw = (p: Tup5, q: Tup5) => {
-    const lA = ppgLeg(p[0], p[1], p[2], p[3], 28, skin, p[4], { stripe }), lB = ppgLeg(q[0], q[1], q[2], q[3], 28, skin, q[4], { stripe });
+    const lA = toonLeg(p[0], p[1], p[2], p[3], 28, skin, p[4], { stripe }), lB = toonLeg(q[0], q[1], q[2], q[3], 28, skin, q[4], { stripe });
     return blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
   };
   s += cel('djLegs', 'hero', legsDraw(L(446, 440, 366, 412, 200), L(436, 462, 356, 470, 178)), true);
   s += cel('djLegs', 'stand', legsDraw(L(436, 448, 426, 528, 196), L(472, 448, 484, 528, -16)));
   const body = 'M414,382 C404,404 400,428 408,452 C434,464 474,464 498,452 C504,428 498,402 486,380 C464,370 432,370 414,382Z';
   const bi = `<path d="M405,432 C432,442 472,442 501,430 L503,442 C472,454 432,454 406,444Z" fill="${INK}"/>`;
-  const torso = (l: number[], r: number[]) => blob([...ppgArm(414, 400, l[0], l[1], 24, 44, skin, l[2]), ...ppgArm(490, 396, r[0], r[1], 24, 46, skin, r[2]), { d: body, fill: dress }], bi);
+  const torso = (l: number[], r: number[]) => blob([...toonArm(414, 400, l[0], l[1], 24, 44, skin, l[2]), ...toonArm(490, 396, r[0], r[1], 24, 46, skin, r[2]), { d: body, fill: dress }], bi);
   s += cel('djTorso', 'hero', torso([444, 512, -8], [518, 508, 8]), true);
   s += cel('djTorso', 'pumpL', torso([298, 420, -12], [552, 474, 10]));
   s += cel('djTorso', 'pumpR', torso([362, 480, -10], [604, 330, 14]));
@@ -36,10 +36,10 @@ export function dj() {
   let h = '';
   const head = loopD([[hx - 128, hy - 10], [hx - 100, hy - 82], [hx, hy - 110], [hx + 100, hy - 88], [hx + 132, hy - 6], [hx + 104, hy + 72], [hx + 10, hy + 104], [hx - 96, hy + 76]]);
   const eL: Tup5 = [hx - 40, hy - 4, 56, 64, -10], eR: Tup5 = [hx + 72, hy - 10, 60, 70, 8];
-  h += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', ART.LW);
+  h += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', ART.LW);
   h += fxg('djRim', rimLit(head, skin, '#ffc4ea', 3, -13));
-  h += cel('djEyes', 'hero', ppgEyeInner(...eL, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.4, 0.16], irisScale: 0.7, pupilScale: 0.62, glint: true })
-    + ppgEyeInner(...eR, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.3, 0.18], irisScale: 0.7, pupilScale: 0.62, glint: true }), true);
+  h += cel('djEyes', 'hero', eyeInner(...eL, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.4, 0.16], irisScale: 0.7, pupilScale: 0.62, glint: true })
+    + eyeInner(...eR, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.3, 0.18], irisScale: 0.7, pupilScale: 0.62, glint: true }), true);
   h += cel('djEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
   const mx = hx + 22, my = hy + 64;
   const mouth = `M${mx - 66},${my - 8} C${mx - 30},${my + 2} ${mx + 30},${my - 4} ${mx + 70},${my - 20} C${mx + 62},${my + 22} ${mx + 20},${my + 40} ${mx - 14},${my + 36} C${mx - 46},${my + 30} ${mx - 64},${my + 14} ${mx - 66},${my - 8}Z`;
@@ -78,7 +78,7 @@ export function dj() {
   s += rig('djHead', h);
   return rig('dj', s);
 }
-// A closed, happy PPG eye (for blinks): skin over the eye, the black ring, a lid curve.
+// A closed, happy eye (for blinks): skin over the eye, the black ring, a lid curve.
 export function closedEye([cx, cy, rx, ry, rot]: Tup5, skin: string) {
   return `<path d="${E(cx, cy, rx, ry, rot)}" fill="${skin}"/><path d="${E(cx, cy, rx, ry, rot)}" fill="none" stroke="${INK}" stroke-width="${ART.LW * 1.05}"/>`
     + line(`M${f1(cx - rx * 0.72)},${f1(cy + ry * 0.2)} Q${f1(cx)},${f1(cy - ry * 0.55)} ${f1(cx + rx * 0.72)},${f1(cy + ry * 0.2)}`, ART.LW * 0.9);
@@ -105,7 +105,7 @@ export function slamFx() {
   return s;
 }
 
-// The pompadour raver: tall ridged-rectangle head (Zim shape, PPG line). His pompadour flies off.
+// The pompadour raver: tall ridged-rectangle head (ridged shape, thick line). His pompadour flies off.
 // Rigs: guy (root; the still tilts him 22° back), guyHead (pivot at the neck), pomp (the hairpiece,
 // in world space, since it travels between heads). Cels: guyLegs, guyTorso, guyEyes, guyBrows, guyMouth.
 export const GUY = { hx: 1146, hy: 360, neck: [1146, 470], feet: [1140, 650] };
@@ -118,7 +118,7 @@ export function pompadour() {
   const skin = '#f7c6a3', shirt = '#7b2bd6';
   let s = '';
   const legsDraw = (a: Tup5, b: Tup5) => {
-    const lA = ppgLeg(a[0], a[1], a[2], a[3], 30, skin, a[4]), lB = ppgLeg(b[0], b[1], b[2], b[3], 30, skin, b[4]);
+    const lA = toonLeg(a[0], a[1], a[2], a[3], 30, skin, a[4]), lB = toonLeg(b[0], b[1], b[2], b[3], 30, skin, b[4]);
     return blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
   };
   let g = '';
@@ -127,7 +127,7 @@ export function pompadour() {
   g += cel('guyLegs', 'crouch', legsDraw([1122, 566, 1092, 640, 200], [1168, 566, 1200, 640, -20]));
   const body = 'M1110,480 C1100,520 1102,556 1114,574 C1140,584 1170,584 1188,572 C1196,550 1192,512 1182,480 C1160,470 1130,470 1110,480Z';
   const vee = `<path d="M1124,482 L1146,512 L1170,480" fill="none" stroke="#9cff2e" stroke-width="8" stroke-linejoin="round"/>`;
-  const torso = (l: number[], r: number[]) => blob([...ppgArm(1116, 494, l[0], l[1], 24, 38, skin, l[2]), ...ppgArm(1182, 490, r[0], r[1], 24, 40, skin, r[2]), { d: body, fill: shirt }], vee);
+  const torso = (l: number[], r: number[]) => blob([...toonArm(1116, 494, l[0], l[1], 24, 38, skin, l[2]), ...toonArm(1182, 490, r[0], r[1], 24, 40, skin, r[2]), { d: body, fill: shirt }], vee);
   g += cel('guyTorso', 'hero', torso([1040, 452, 8], [1268, 432, -10]), true);
   g += cel('guyTorso', 'pumpA', torso([1018, 418, 10], [1256, 532, -8]));
   g += cel('guyTorso', 'pumpB', torso([1050, 546, 8], [1274, 400, -12]));
@@ -136,9 +136,9 @@ export function pompadour() {
   let h = '';
   const head = `M${hx - 82},${hy + 92} C${hx - 92},${hy + 20} ${hx - 92},${hy - 60} ${hx - 80},${hy - 112} L${hx - 50},${hy - 128} L${hx - 26},${hy - 116} L${hx},${hy - 132} L${hx + 26},${hy - 116} L${hx + 52},${hy - 128} L${hx + 82},${hy - 112} C${hx + 94},${hy - 60} ${hx + 94},${hy + 20} ${hx + 84},${hy + 92} C${hx + 50},${hy + 114} ${hx - 50},${hy + 114} ${hx - 82},${hy + 92}Z`;
   const eL: Tup5 = [hx - 36, hy - 8, 46, 58, -4], eR: Tup5 = [hx + 46, hy - 10, 46, 58, 6];
-  h += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', ART.LW);
+  h += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', ART.LW);
   h += fxg('guyRim', rimLit(head, skin, '#ffc4ea', 13, -3));
-  const eyes = (oL: Opts, oR: Opts) => ppgEyeInner(...eL, oL) + ppgEyeInner(...eR, oR);
+  const eyes = (oL: Opts, oR: Opts) => eyeInner(...eL, oL) + eyeInner(...eR, oR);
   const iris = { iris: '#7a5230', irisLine: '#3e2614', irisScale: 0.6, pupilScale: 0.66 };
   h += cel('guyEyes', 'hero', eyes({ pin: true, look: [-0.1, 0] }, { pin: true, look: [-0.15, 0] }), true);
   h += cel('guyEyes', 'normal', eyes({ ...iris, look: [-0.25, 0.1] }, { ...iris, look: [-0.3, 0.1] }));
@@ -179,7 +179,7 @@ export function roundRaver() {
   const body = `M${hx - 70},${hy + 120} C${hx - 90},${hy + 180} ${hx - 90},${hy + 260} ${hx - 70},${hy + 300} L${hx + 90},${hy + 300} C${hx + 100},${hy + 240} ${hx + 90},${hy + 170} ${hx + 70},${hy + 120}Z`;
   const belt = `<path d="M${hx - 84},${hy + 200} C${hx - 30},${hy + 214} ${hx + 40},${hy + 214} ${hx + 92},${hy + 198} L${hx + 94},${hy + 218} C${hx + 40},${hy + 234} ${hx - 30},${hy + 234} ${hx - 86},${hy + 220}Z" fill="${INK}"/>`;
   const torso = (name: string, ex: number, ey: number, bend: number, show?: boolean) => {
-    const arm = ppgArm(hx - 70, hy + 150, ex, ey, 34, 54, skin, bend);
+    const arm = toonArm(hx - 70, hy + 150, ex, ey, 34, 54, skin, bend);
     const [sx, sy] = RAVER.shoulder, l = Math.hypot(ex - sx, ey - sy);
     ANCHORS.raverMitten[name] = [ex + (ex - sx) / l * 13.5, ey + (ey - sy) / l * 13.5, Math.atan2(ey - sy, ex - sx) * 180 / Math.PI];
     return cel('raverTorso', name, blob([{ d: body, fill: '#ff3fae' }, ...arm], belt), show);
@@ -199,12 +199,12 @@ export function roundRaver() {
   }
   const head = loopD(pts, 200);
   const eL: Tup5 = [hx - 74, hy - 6, 62, 76, -8], eR: Tup5 = [hx + 52, hy - 14, 66, 80, 8];
-  s += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', ART.LW);
+  s += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', ART.LW);
   s += fxg('raverRim', rimLit(head, skin, '#ffc4ea', 15, 6));
   const gold = { iris: '#ffb02e', irisLine: '#a8600a', pupilScale: 0.6, glint: true };
-  s += cel('raverEyes', 'hero', ppgEyeInner(...eL, { ...gold, look: [-0.42, -0.1] }) + ppgEyeInner(...eR, { ...gold, look: [-0.5, -0.1] }), true);
-  s += cel('raverEyes', 'up', ppgEyeInner(...eL, { ...gold, look: [0.15, -0.7] }) + ppgEyeInner(...eR, { ...gold, look: [0.1, -0.7] }));
-  s += cel('raverEyes', 'pin', ppgEyeInner(...eL, { pin: true, look: [-0.2, -0.05] }) + ppgEyeInner(...eR, { pin: true, look: [-0.25, -0.05] }));
+  s += cel('raverEyes', 'hero', eyeInner(...eL, { ...gold, look: [-0.42, -0.1] }) + eyeInner(...eR, { ...gold, look: [-0.5, -0.1] }), true);
+  s += cel('raverEyes', 'up', eyeInner(...eL, { ...gold, look: [0.15, -0.7] }) + eyeInner(...eR, { ...gold, look: [0.1, -0.7] }));
+  s += cel('raverEyes', 'pin', eyeInner(...eL, { pin: true, look: [-0.2, -0.05] }) + eyeInner(...eR, { pin: true, look: [-0.25, -0.05] }));
   s += cel('raverEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
   s += cel('raverMouth', 'hero', shape(E(hx - 18, hy + 96, 20, 24, -10), '#3a0a1e', ART.LW * 0.5) + `<ellipse cx="${hx - 16}" cy="${hy + 108}" rx="12" ry="7" fill="#ff5f8f"/>`, true);
   s += cel('raverMouth', 'smile', `<path d="M${hx - 62},${hy + 82} C${hx - 40},${hy + 136} ${hx + 14},${hy + 136} ${hx + 30},${hy + 76} C${hx - 2},${hy + 88} ${hx - 34},${hy + 88} ${hx - 62},${hy + 82}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="${ART.LW * 0.7}" stroke-linejoin="round"/><path d="M${hx - 34},${hy + 112} C${hx - 20},${hy + 102} ${hx},${hy + 102} ${hx + 10},${hy + 110} C${hx},${hy + 122} ${hx - 24},${hy + 122} ${hx - 34},${hy + 112}Z" fill="#ff5f8f"/>`);
@@ -246,19 +246,19 @@ export function flagRaver() {
   const flag = (la: number[], lb: number[]) => {
     let k = '';
     const rx0 = 900, ry0 = 552;
-    const lA = ppgLeg(842, 548, la[0], la[1], 18, skin, la[2]);
-    const lB = ppgLeg(842, 558, lb[0], lb[1], 18, skin, lb[2]);
+    const lA = toonLeg(842, 548, la[0], la[1], 18, skin, la[2]);
+    const lB = toonLeg(842, 558, lb[0], lb[1], 18, skin, lb[2]);
     k += blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
     const body = 'M800,538 C820,532 840,534 850,540 C852,552 852,562 848,570 C832,576 814,574 800,566Z';
-    const a1 = ppgArm(806, 546, rx0 - 134, ry0 - 4, 14, 22, skin, -3);
-    const a2 = ppgArm(806, 560, rx0 - 136, ry0 + 6, 14, 22, skin, 3);
+    const a1 = toonArm(806, 546, rx0 - 134, ry0 - 4, 14, 22, skin, -3);
+    const a2 = toonArm(806, 560, rx0 - 136, ry0 + 6, 14, 22, skin, 3);
     k += blob([{ d: body, fill: '#ff8a1f' }, ...a1, ...a2]);
     const hx = 812, hy = 506;
     const head = E(hx, hy, 46, 38, 8);
     const eL: Tup5 = [hx - 18, hy - 2, 18, 22, 0], eR: Tup5 = [hx + 16, hy - 4, 18, 22, 0];
-    k += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', ART.LW);
+    k += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', ART.LW);
     k += fxg('kidRim', rimLit(head, skin, '#ffc4ea', 7, 0));
-    k += ppgEyeInner(...eL, { pin: true }) + ppgEyeInner(...eR, { pin: true });
+    k += eyeInner(...eL, { pin: true }) + eyeInner(...eR, { pin: true });
     k += `<path d="M${hx - 8},${hy + 24} L${hx + 4},${hy + 20} L${hx + 14},${hy + 26}" fill="none" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
     k += shape(`M${hx - 44},${hy - 10} C${hx - 40},${hy - 40} ${hx},${hy - 50} ${hx + 40},${hy - 34} L${hx + 76},${hy - 40} L${hx + 52},${hy - 20} L${hx + 84},${hy - 14} L${hx + 44},${hy - 6} C${hx + 10},${hy - 30} ${hx - 20},${hy - 26} ${hx - 44},${hy - 10}Z`, '#1a1018', ART.LW);
     k += speedLines([`M870,500 L930,496`, `M880,520 L950,518`, `M900,584 L956,588`], 4);
@@ -271,19 +271,19 @@ export function flagRaver() {
     let k = '';
     const dy = o.dy || 0, hx = 820, hy = 410 + dy * 1.4;
     ANCHORS.kidHead[name] = [hx + 2, hy - 40];
-    const lA = ppgLeg(810, 498 + dy, o.crouch ? 796 : 804, 534, 18, skin, 196);
-    const lB = ppgLeg(830, 498 + dy, o.crouch ? 846 : 838, 534, 18, skin, -16);
+    const lA = toonLeg(810, 498 + dy, o.crouch ? 796 : 804, 534, 18, skin, 196);
+    const lB = toonLeg(830, 498 + dy, o.crouch ? 846 : 838, 534, 18, skin, -16);
     k += blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
     const by = 452 + dy;
     const body = `M800,${by} C795,${by + 18} 797,${by + 38} 803,${by + 48} C815,${by + 54} 831,${by + 54} 839,${by + 48} C845,${by + 36} 845,${by + 16} 838,${by} C828,${by - 6} 810,${by - 6} 800,${by}Z`;
-    const a1 = ppgArm(804, by + 10, o.l[0], o.l[1] + dy, 14, 22, skin, o.l[2]);
-    const a2 = ppgArm(836, by + 10, o.r[0], o.r[1] + dy, 14, 22, skin, o.r[2]);
+    const a1 = toonArm(804, by + 10, o.l[0], o.l[1] + dy, 14, 22, skin, o.l[2]);
+    const a2 = toonArm(836, by + 10, o.r[0], o.r[1] + dy, 14, 22, skin, o.r[2]);
     k += blob([{ d: body, fill: '#ff8a1f' }, ...a1, ...a2]);
     const head = E(hx, hy, 46, 38, 0);
     const eL: Tup5 = [hx - 17, hy - 2, 18, 22, 0], eR: Tup5 = [hx + 17, hy - 2, 18, 22, 0];
-    k += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', ART.LW);
+    k += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', ART.LW);
     const iris = o.pin ? { pin: true } : { iris: '#3fa0ff', irisLine: '#1a4a8a', irisScale: 0.62, pupilScale: 0.66, look: o.look || [0, 0.1] };
-    k += ppgEyeInner(...eL, iris) + ppgEyeInner(...eR, iris);
+    k += eyeInner(...eL, iris) + eyeInner(...eR, iris);
     k += o.mouth === 'o' ? `<ellipse cx="${hx}" cy="${hy + 22}" rx="5" ry="7" fill="#3a0a1e" stroke="${INK}" stroke-width="3"/>`
       : `<path d="M${hx - 12},${hy + 18} C${hx - 6},${hy + 30} ${hx + 8},${hy + 30} ${hx + 14},${hy + 18}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
     k += shape(`M${hx - 44},${hy - 6} C${hx - 46},${hy - 28} ${hx - 32},${hy - 42} ${hx - 16},${hy - 42} L${hx - 14},${hy - 62} L${hx + 2},${hy - 44} L${hx + 16},${hy - 66} L${hx + 20},${hy - 42} L${hx + 38},${hy - 56} L${hx + 34},${hy - 32} C${hx + 44},${hy - 24} ${hx + 46},${hy - 14} ${hx + 44},${hy - 6} C${hx + 20},${hy - 28} ${hx - 20},${hy - 28} ${hx - 44},${hy - 6}Z`, '#1a1018', ART.LW);
@@ -295,7 +295,7 @@ export function flagRaver() {
   return rig('kid', s, `transform="translate(140,-4)"`);
 }
 
-// Debris and confetti blown along the rays, plus a black PPG speed line. Each confetti piece is a
+// Debris and confetti blown along the rays, plus a black speed line. Each confetti piece is a
 // rig so it can keep flying after the hero frame.
 export const CONFETTI: { x: number; y: number; a: number }[] = [];
 export function debris() {

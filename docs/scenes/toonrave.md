@@ -42,12 +42,11 @@ on the app's bar lines. Draft scene, not on main yet.
 
 ## References
 
-- Style study: the look of classic Nickelodeon and Cartoon Network cartoons
+- The art direction was developed in a series of private style studies inspired by classic Nickelodeon and Cartoon Network cartoons
   (flat colour, heavy outlines, limited animation on twos, smear and squash
   poses, a hard impact frame). Studied as inspiration for the drawing and the
   timing; no frames, clips or audio were taken or copied.
-- An earlier still from the same study rounds (`stills/r5/zim-ppg` in the
-  prototype folder) was the first drawing; the prototype redrew it as its own
+- An earlier still from the same study rounds was the first drawing; the prototype redrew it as its own
   vector construction, and its hero frame is what the scene holds after the
   drop.
 
@@ -55,7 +54,7 @@ No `/ref` bundle; no downloaded media is kept anywhere in this repo.
 
 ## Measurements
 
-2026-10-03, on the prototype (`artifacts/zim-rave-drop.html`):
+2026-10-03, on the prototype (`artifacts/toonrave-prototype.html`):
 
 - **Hero frame vs the prototype's still:** mean difference 0.37/255, no pixel
   off by more than 24/255 at 1600x900. Matrices written at 1e-6 (4 decimals
@@ -137,8 +136,8 @@ and are not recorded here yet.
 
 ## Materials
 
-- `toonrave/artifacts/zim-rave-drop.html` — the prototype page ("Zim Rave
-  Drop"), one self-contained file with its own synth, built from the
+- `toonrave/artifacts/toonrave-prototype.html` — the prototype page ("Toon Rave
+  Prototype"), one self-contained file with its own synth, built from the
   prototype's `src/` folder. It is our own art and has no reference media in
   it. Its source folder (with `NOTES.md`, the
   timing map and shot list, and its build and shoot scripts) lives outside the

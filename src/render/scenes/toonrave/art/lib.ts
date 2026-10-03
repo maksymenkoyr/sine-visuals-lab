@@ -1,8 +1,8 @@
-// Drawing helpers for the Zim x PPG frame (the r11 still), plus the prototype's glow, matrix and cel helpers.
-// Characters (PPG): one thick pure-black union outline, flat fills, mitten nubs, giant eyes.
-// World (Zim): thin dark-plum outlines, base + hard shadow shape + pale rim line.
-export const INK = '#0a0508';      // PPG pure black
-export const PLUM = '#1a0614';     // Zim background line
+// Drawing helpers for the Toon Rave frame, plus the prototype's glow, matrix and cel helpers.
+// Characters: one thick pure-black union outline, flat fills, mitten nubs, giant eyes.
+// World: thin dark-plum outlines, base + hard shadow shape + pale rim line.
+export const INK = '#0a0508';      // pure black
+export const PLUM = '#1a0614';     // background line
 export const DEFS: string[] = [];
 export const ART = { LW: 7, id: 0, seed: 7 };
 export const uid = (p: string) => `${p}${++ART.id}`;
@@ -98,8 +98,8 @@ export function loopD(pts: number[][], n = 120) {
 }
 export const poly = (pts: number[][]) => 'M' + pts.map(p => f1(p[0]) + ',' + f1(p[1])).join('L') + 'Z';
 
-// PPG arm: a short tapered nub from shoulder to a round mitten ball. Returns blob parts.
-export function ppgArm(sx: number, sy: number, hx: number, hy: number, w0: number, wm: number, col: string, bend = 0): Part[] {
+// arm: a short tapered nub from shoulder to a round mitten ball. Returns blob parts.
+export function toonArm(sx: number, sy: number, hx: number, hy: number, w0: number, wm: number, col: string, bend = 0): Part[] {
   const mx = (sx + hx) / 2, my = (sy + hy) / 2, l = Math.hypot(hx - sx, hy - sy);
   const nx = -(hy - sy) / l, ny = (hx - sx) / l;
   return [
@@ -107,8 +107,8 @@ export function ppgArm(sx: number, sy: number, hx: number, hy: number, w0: numbe
     { d: E(hx + (hx - sx) / l * wm * 0.25, hy + (hy - sy) / l * wm * 0.25, wm * 0.62, wm * 0.56, Math.atan2(hy - sy, hx - sx) * 180 / Math.PI), fill: col },
   ];
 }
-// PPG leg: short tube hip -> ankle, white sock on the lower half, black Mary-Jane shoe pointing toeAng (deg).
-export function ppgLeg(hx: number, hy: number, ax: number, ay: number, w: number, skin: string, toeAng: number, o: Opts = {}) {
+// leg: short tube hip -> ankle, white sock on the lower half, black Mary-Jane shoe pointing toeAng (deg).
+export function toonLeg(hx: number, hy: number, ax: number, ay: number, w: number, skin: string, toeAng: number, o: Opts = {}) {
   const parts: Part[] = [];
   parts.push({ d: tubeD([[hx, hy], [ax, ay]], [w, w * 0.94], 10), fill: skin });
   const k = o.sockFrom ?? 0.45;
@@ -128,11 +128,11 @@ export function ppgLeg(hx: number, hy: number, ax: number, ay: number, w: number
   return { parts, inner };
 }
 
-// PPG eye: sclera ellipse, iris disc pushed toward the look direction, giant pupil, big highlight.
+// eye: sclera ellipse, iris disc pushed toward the look direction, giant pupil, big highlight.
 // The sclera is meant to go into the head's blob parts so one outline wraps head+eyes.
 // opts: iris colour, look [dx,dy] (-1..1), pupilScale, pin (pinpoint pupil, no iris), lid (top lid cut angle)
-export function ppgEyeParts(cx: number, cy: number, rx: number, ry: number, rot = 0): Part { return { d: E(cx, cy, rx, ry, rot), fill: '#ffffff' }; }
-export function ppgEyeInner(cx: number, cy: number, rx: number, ry: number, rot: number, o: Opts = {}) {
+export function eyeParts(cx: number, cy: number, rx: number, ry: number, rot = 0): Part { return { d: E(cx, cy, rx, ry, rot), fill: '#ffffff' }; }
+export function eyeInner(cx: number, cy: number, rx: number, ry: number, rot: number, o: Opts = {}) {
   const id = uid('eyc');
   DEFS.push(`<clipPath id="${id}"><path d="${E(cx, cy, rx - 0.5, ry - 0.5, rot)}"/></clipPath>`);
   const look = o.look || [0, 0];
@@ -140,7 +140,7 @@ export function ppgEyeInner(cx: number, cy: number, rx: number, ry: number, rot:
   const ix = cx + look[0] * (rx - ir * 0.75), iy = cy + look[1] * (ry - ir * 0.75);
   let s = `<path d="${E(cx, cy, rx, ry, rot)}" fill="#ffffff"/><g clip-path="url(#${id})">`;
   if (o.pin) {
-    // shocked: tiny pupil, no iris (Zim's pinpoint) on the PPG eye
+    // shocked: tiny pupil, no iris (a pinpoint) on the eye
     s += `<circle cx="${ix}" cy="${iy}" r="${ir * 0.16}" fill="${INK}"/>`;
   } else {
     s += `<circle cx="${ix}" cy="${iy}" r="${ir}" fill="${o.iris || '#9a5cff'}"/>`;
@@ -166,7 +166,7 @@ export function linear(id: string, stops: Stop[], x1 = 0, y1 = 0, x2 = 0, y2 = 1
   return `url(#${id})`;
 }
 
-// Zim machine panel: base fill, a hard shadow shape, a thin pale rim line, thin plum outline.
+// machine panel: base fill, a hard shadow shape, a thin pale rim line, thin plum outline.
 export function zpanel(d: string, base: string, shadowD: string | null | undefined, shade: string | null, rimD: string | null | undefined, rim: string | null, lw = 2.2) {
   let s = `<path d="${d}" fill="${base}" stroke="${PLUM}" stroke-width="${lw}" stroke-linejoin="round"/>`;
   if (shadowD) s += `<path d="${shadowD}" fill="${shade}"/>`;
@@ -176,7 +176,7 @@ export function zpanel(d: string, base: string, shadowD: string | null | undefin
 // Motion/impact lines
 export function speedLines(pts: string[], w = 3, col = INK) { return pts.map(p => line(p, w, col)).join(''); }
 
-// Blast-lit rim (Zim's hard second tone, flipped to light): a crescent inside shape d on the side
+// Blast-lit rim (the hard second tone, flipped to light): a crescent inside shape d on the side
 // facing the light. Drawn over the fill, under the face details.
 export function rimLit(d: string, base: string, rim: string, dx: number, dy: number) {
   const id = uid('rim');

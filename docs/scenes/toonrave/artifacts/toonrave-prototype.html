@@ -1,4 +1,4 @@
-<title>Zim Rave Drop</title>
+<title>Toon Rave Prototype</title>
 <style>
 :root {
   color-scheme: dark;
@@ -77,11 +77,11 @@ input[type=range] { accent-color: var(--accent); width: 120px; }
 </main>
 <script>
 // ---- lib.js
-// Drawing helpers for the Zim x PPG frame (the r11 still), plus the prototype's glow, matrix and cel helpers.
-// Characters (PPG): one thick pure-black union outline, flat fills, mitten nubs, giant eyes.
-// World (Zim): thin dark-plum outlines, base + hard shadow shape + pale rim line.
-const INK = '#0a0508';      // PPG pure black
-const PLUM = '#1a0614';     // Zim background line
+// Drawing helpers for the Toon Rave frame, plus the prototype's glow, matrix and cel helpers.
+// Characters: one thick pure-black union outline, flat fills, mitten nubs, giant eyes.
+// World: thin dark-plum outlines, base + hard shadow shape + pale rim line.
+const INK = '#0a0508';      // pure black
+const PLUM = '#1a0614';     // background line
 let LW = 7;
 const DEFS = [];
 let _id = 0;
@@ -172,8 +172,8 @@ function loopD(pts, n = 120) {
 }
 const poly = (pts) => 'M' + pts.map(p => f1(p[0]) + ',' + f1(p[1])).join('L') + 'Z';
 
-// PPG arm: a short tapered nub from shoulder to a round mitten ball. Returns blob parts.
-function ppgArm(sx, sy, hx, hy, w0, wm, col, bend = 0) {
+// arm: a short tapered nub from shoulder to a round mitten ball. Returns blob parts.
+function toonArm(sx, sy, hx, hy, w0, wm, col, bend = 0) {
   const mx = (sx + hx) / 2, my = (sy + hy) / 2, l = Math.hypot(hx - sx, hy - sy);
   const nx = -(hy - sy) / l, ny = (hx - sx) / l;
   return [
@@ -181,8 +181,8 @@ function ppgArm(sx, sy, hx, hy, w0, wm, col, bend = 0) {
     { d: E(hx + (hx - sx) / l * wm * 0.25, hy + (hy - sy) / l * wm * 0.25, wm * 0.62, wm * 0.56, Math.atan2(hy - sy, hx - sx) * 180 / Math.PI), fill: col },
   ];
 }
-// PPG leg: short tube hip -> ankle, white sock on the lower half, black Mary-Jane shoe pointing toeAng (deg).
-function ppgLeg(hx, hy, ax, ay, w, skin, toeAng, o = {}) {
+// leg: short tube hip -> ankle, white sock on the lower half, black Mary-Jane shoe pointing toeAng (deg).
+function toonLeg(hx, hy, ax, ay, w, skin, toeAng, o = {}) {
   const parts = [];
   parts.push({ d: tubeD([[hx, hy], [ax, ay]], [w, w * 0.94], 10), fill: skin });
   const k = o.sockFrom ?? 0.45;
@@ -202,11 +202,11 @@ function ppgLeg(hx, hy, ax, ay, w, skin, toeAng, o = {}) {
   return { parts, inner };
 }
 
-// PPG eye: sclera ellipse, iris disc pushed toward the look direction, giant pupil, big highlight.
+// eye: sclera ellipse, iris disc pushed toward the look direction, giant pupil, big highlight.
 // The sclera is meant to go into the head's blob parts so one outline wraps head+eyes.
 // opts: iris colour, look [dx,dy] (-1..1), pupilScale, pin (pinpoint pupil, no iris), lid (top lid cut angle)
-function ppgEyeParts(cx, cy, rx, ry, rot = 0) { return { d: E(cx, cy, rx, ry, rot), fill: '#ffffff' }; }
-function ppgEyeInner(cx, cy, rx, ry, rot, o = {}) {
+function eyeParts(cx, cy, rx, ry, rot = 0) { return { d: E(cx, cy, rx, ry, rot), fill: '#ffffff' }; }
+function eyeInner(cx, cy, rx, ry, rot, o = {}) {
   const id = uid('eyc');
   DEFS.push(`<clipPath id="${id}"><path d="${E(cx, cy, rx - 0.5, ry - 0.5, rot)}"/></clipPath>`);
   const look = o.look || [0, 0];
@@ -214,7 +214,7 @@ function ppgEyeInner(cx, cy, rx, ry, rot, o = {}) {
   const ix = cx + look[0] * (rx - ir * 0.75), iy = cy + look[1] * (ry - ir * 0.75);
   let s = `<path d="${E(cx, cy, rx, ry, rot)}" fill="#ffffff"/><g clip-path="url(#${id})">`;
   if (o.pin) {
-    // shocked: tiny pupil, no iris (Zim's pinpoint) on the PPG eye
+    // shocked: tiny pupil, no iris (a pinpoint) on the eye
     s += `<circle cx="${ix}" cy="${iy}" r="${ir * 0.16}" fill="${INK}"/>`;
   } else {
     s += `<circle cx="${ix}" cy="${iy}" r="${ir}" fill="${o.iris || '#9a5cff'}"/>`;
@@ -240,7 +240,7 @@ function linear(id, stops, x1 = 0, y1 = 0, x2 = 0, y2 = 1, units = '') {
   return `url(#${id})`;
 }
 
-// Zim machine panel: base fill, a hard shadow shape, a thin pale rim line, thin plum outline.
+// machine panel: base fill, a hard shadow shape, a thin pale rim line, thin plum outline.
 function zpanel(d, base, shadowD, shade, rimD, rim, lw = 2.2) {
   let s = `<path d="${d}" fill="${base}" stroke="${PLUM}" stroke-width="${lw}" stroke-linejoin="round"/>`;
   if (shadowD) s += `<path d="${shadowD}" fill="${shade}"/>`;
@@ -250,7 +250,7 @@ function zpanel(d, base, shadowD, shade, rimD, rim, lw = 2.2) {
 // Motion/impact lines
 function speedLines(pts, w = 3, col = INK) { return pts.map(p => line(p, w, col)).join(''); }
 
-// Blast-lit rim (Zim's hard second tone, flipped to light): a crescent inside shape d on the side
+// Blast-lit rim (the hard second tone, flipped to light): a crescent inside shape d on the side
 // facing the light. Drawn over the fill, under the face details.
 function rimLit(d, base, rim, dx, dy) {
   const id = uid('rim');
@@ -354,9 +354,9 @@ const rig = (id, content, extra = '') => `<g data-x="${id}" ${extra}>${content}<
 const fxg = (id, content, extra = '') => `<g data-o="${id}" ${extra}>${content}</g>`;
 
 // ---- room.js
-// The room (Zim leads): black-heavy round chamber, ceiling ring with scallop lights, ribbed tubes,
-// LED bars, porthole, monitor; a balcony rail with a Zim-style crowd of small heads; the booth.
-// The blast (PPG flat ray burst in Zim colours) from the button.
+// The room: black-heavy round chamber, ceiling ring with scallop lights, ribbed tubes,
+// LED bars, porthole, monitor; a balcony rail with an angular crowd of small heads; the booth.
+// The blast (flat ray burst in room colours) from the button.
 //
 // Prototype split: the drawing is the r11 still. The parts that move are wrapped in named groups
 // (rig = transform, fxg = opacity, cel = swappable drawing); motion.js says what moves them. Every
@@ -433,7 +433,7 @@ function room() {
   return s;
 }
 
-// A Zim ribbed tube: base + shadow side + rim + rib rings.
+// A ribbed tube: base + shadow side + rim + rib rings.
 function tube(pts, w, base, shade, rim) {
   let s = shape(tubeD(pts, pts.map(() => w), 40), base, 1.4, PLUM);
   const S = crSample(pts, 40);
@@ -449,7 +449,7 @@ function tube(pts, w, base, shade, rim) {
   return s;
 }
 
-// The back crowd: rows of small heads behind a curved balcony rail, Zim-style mass.
+// The back crowd: rows of small heads behind a curved balcony rail, angular mass.
 // Each row is a rig (it bounces); each head carries three eye cels switched per row by class:
 // e0 = the still's pinpoint squint, e1 = grooving (big pupils toward the DJ), e2 = wide-eyed.
 const railY = (x) => 560 - (x - 600) * 0.03 + Math.pow((x - 1100) / 700, 2) * 20;
@@ -500,7 +500,7 @@ function backCrowd() {
   return s;
 }
 
-// Floor: deep red-plum with round lit pads (Zim f_027). Each pad is its own layer so it can pulse.
+// Floor: deep red-plum with round lit pads. Each pad is its own layer so it can pulse.
 function floor() {
   let s = `<path d="M-400,610 L2000,560 L2000,1300 L-400,1300Z" fill="#3d0b25"/>`;
   s += `<path d="M-400,640 L2000,600 L2000,620 L-400,662Z" fill="#2a0619"/>`;
@@ -519,7 +519,7 @@ function lasers() {
     'style="display:none"')).join('');
 }
 
-// The blast: hard-edged flat rays from the button (PPG), Zim colours, over the room.
+// The blast: hard-edged flat rays from the button, room colours, over the room.
 function blast() {
   _seed = 99;
   let s = '';
@@ -554,7 +554,7 @@ function blast() {
   return s;
 }
 
-// The booth: Zim spiky tech console, thin plum line, hard shade, rim lights, claws, lenses.
+// The booth: spiky tech console, thin plum line, hard shade, rim lights, claws, lenses.
 function booth() {
   let s = '';
   const claw = (x, y, dir, h) => {
@@ -608,7 +608,7 @@ function buttonGlow() {
   return fxg('btnGlow', glowEllipse(BX, BY - 26, 170, 90, 40, '#ff3f7a'), 'style="display:none"');
 }
 
-// The giant button: PPG prop line (thick black) on Zim hardware. Squashed by the slam; the dome
+// The giant button: thick-black prop line on the room hardware. Squashed by the slam; the dome
 // is a rig so it can stand tall in the groove and squash back to the still at the drop.
 function button() {
   let s = '';
@@ -626,7 +626,7 @@ function button() {
 }
 
 // ---- cast.js
-// The cast: PPG construction + Zim attitude. Original characters only.
+// The cast: round-limbed construction, sharp attitude. Original characters only.
 //
 // Prototype split: each character is a rig (a root group with a pose matrix) holding cels, the
 // drawings limited animation swaps. The cel named 'hero' is always the r11 still's own drawing, so
@@ -644,14 +644,14 @@ function dj() {
   let s = '';
   const L = (hx, hy, ax, ay, toe) => [hx, hy, ax, ay, toe];   // hip, ankle, toe angle
   const legsDraw = (p, q) => {
-    const lA = ppgLeg(p[0], p[1], p[2], p[3], 28, skin, p[4], { stripe }), lB = ppgLeg(q[0], q[1], q[2], q[3], 28, skin, q[4], { stripe });
+    const lA = toonLeg(p[0], p[1], p[2], p[3], 28, skin, p[4], { stripe }), lB = toonLeg(q[0], q[1], q[2], q[3], 28, skin, q[4], { stripe });
     return blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
   };
   s += cel('djLegs', 'hero', legsDraw(L(446, 440, 366, 412, 200), L(436, 462, 356, 470, 178)), true);
   s += cel('djLegs', 'stand', legsDraw(L(436, 448, 426, 528, 196), L(472, 448, 484, 528, -16)));
   const body = 'M414,382 C404,404 400,428 408,452 C434,464 474,464 498,452 C504,428 498,402 486,380 C464,370 432,370 414,382Z';
   const bi = `<path d="M405,432 C432,442 472,442 501,430 L503,442 C472,454 432,454 406,444Z" fill="${INK}"/>`;
-  const torso = (l, r) => blob([...ppgArm(414, 400, l[0], l[1], 24, 44, skin, l[2]), ...ppgArm(490, 396, r[0], r[1], 24, 46, skin, r[2]), { d: body, fill: dress }], bi);
+  const torso = (l, r) => blob([...toonArm(414, 400, l[0], l[1], 24, 44, skin, l[2]), ...toonArm(490, 396, r[0], r[1], 24, 46, skin, r[2]), { d: body, fill: dress }], bi);
   s += cel('djTorso', 'hero', torso([444, 512, -8], [518, 508, 8]), true);
   s += cel('djTorso', 'pumpL', torso([298, 420, -12], [552, 474, 10]));
   s += cel('djTorso', 'pumpR', torso([362, 480, -10], [604, 330, 14]));
@@ -661,10 +661,10 @@ function dj() {
   let h = '';
   const head = loopD([[hx - 128, hy - 10], [hx - 100, hy - 82], [hx, hy - 110], [hx + 100, hy - 88], [hx + 132, hy - 6], [hx + 104, hy + 72], [hx + 10, hy + 104], [hx - 96, hy + 76]]);
   const eL = [hx - 40, hy - 4, 56, 64, -10], eR = [hx + 72, hy - 10, 60, 70, 8];
-  h += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+  h += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', LW);
   h += fxg('djRim', rimLit(head, skin, '#ffc4ea', 3, -13));
-  h += cel('djEyes', 'hero', ppgEyeInner(...eL, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.4, 0.16], irisScale: 0.7, pupilScale: 0.62, glint: true })
-    + ppgEyeInner(...eR, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.3, 0.18], irisScale: 0.7, pupilScale: 0.62, glint: true }), true);
+  h += cel('djEyes', 'hero', eyeInner(...eL, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.4, 0.16], irisScale: 0.7, pupilScale: 0.62, glint: true })
+    + eyeInner(...eR, { iris: '#a35bff', irisLine: '#5a1f9a', look: [0.3, 0.18], irisScale: 0.7, pupilScale: 0.62, glint: true }), true);
   h += cel('djEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
   const mx = hx + 22, my = hy + 64;
   const mouth = `M${mx - 66},${my - 8} C${mx - 30},${my + 2} ${mx + 30},${my - 4} ${mx + 70},${my - 20} C${mx + 62},${my + 22} ${mx + 20},${my + 40} ${mx - 14},${my + 36} C${mx - 46},${my + 30} ${mx - 64},${my + 14} ${mx - 66},${my - 8}Z`;
@@ -703,7 +703,7 @@ function dj() {
   s += rig('djHead', h);
   return rig('dj', s);
 }
-// A closed, happy PPG eye (for blinks): skin over the eye, the black ring, a lid curve.
+// A closed, happy eye (for blinks): skin over the eye, the black ring, a lid curve.
 function closedEye([cx, cy, rx, ry, rot], skin) {
   return `<path d="${E(cx, cy, rx, ry, rot)}" fill="${skin}"/><path d="${E(cx, cy, rx, ry, rot)}" fill="none" stroke="${INK}" stroke-width="${LW * 1.05}"/>`
     + line(`M${f1(cx - rx * 0.72)},${f1(cy + ry * 0.2)} Q${f1(cx)},${f1(cy - ry * 0.55)} ${f1(cx + rx * 0.72)},${f1(cy + ry * 0.2)}`, LW * 0.9);
@@ -730,7 +730,7 @@ function slamFx() {
   return s;
 }
 
-// The pompadour raver: tall ridged-rectangle head (Zim shape, PPG line). His pompadour flies off.
+// The pompadour raver: tall ridged-rectangle head (ridged shape, thick line). His pompadour flies off.
 // Rigs: guy (root; the still tilts him 22° back), guyHead (pivot at the neck), pomp (the hairpiece,
 // in world space, since it travels between heads). Cels: guyLegs, guyTorso, guyEyes, guyBrows, guyMouth.
 const GUY = { hx: 1146, hy: 360, neck: [1146, 470], feet: [1140, 650] };
@@ -743,7 +743,7 @@ function pompadour() {
   const skin = '#f7c6a3', shirt = '#7b2bd6';
   let s = '';
   const legsDraw = (a, b) => {
-    const lA = ppgLeg(a[0], a[1], a[2], a[3], 30, skin, a[4]), lB = ppgLeg(b[0], b[1], b[2], b[3], 30, skin, b[4]);
+    const lA = toonLeg(a[0], a[1], a[2], a[3], 30, skin, a[4]), lB = toonLeg(b[0], b[1], b[2], b[3], 30, skin, b[4]);
     return blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
   };
   let g = '';
@@ -752,7 +752,7 @@ function pompadour() {
   g += cel('guyLegs', 'crouch', legsDraw([1122, 566, 1092, 640, 200], [1168, 566, 1200, 640, -20]));
   const body = 'M1110,480 C1100,520 1102,556 1114,574 C1140,584 1170,584 1188,572 C1196,550 1192,512 1182,480 C1160,470 1130,470 1110,480Z';
   const vee = `<path d="M1124,482 L1146,512 L1170,480" fill="none" stroke="#9cff2e" stroke-width="8" stroke-linejoin="round"/>`;
-  const torso = (l, r) => blob([...ppgArm(1116, 494, l[0], l[1], 24, 38, skin, l[2]), ...ppgArm(1182, 490, r[0], r[1], 24, 40, skin, r[2]), { d: body, fill: shirt }], vee);
+  const torso = (l, r) => blob([...toonArm(1116, 494, l[0], l[1], 24, 38, skin, l[2]), ...toonArm(1182, 490, r[0], r[1], 24, 40, skin, r[2]), { d: body, fill: shirt }], vee);
   g += cel('guyTorso', 'hero', torso([1040, 452, 8], [1268, 432, -10]), true);
   g += cel('guyTorso', 'pumpA', torso([1018, 418, 10], [1256, 532, -8]));
   g += cel('guyTorso', 'pumpB', torso([1050, 546, 8], [1274, 400, -12]));
@@ -761,9 +761,9 @@ function pompadour() {
   let h = '';
   const head = `M${hx - 82},${hy + 92} C${hx - 92},${hy + 20} ${hx - 92},${hy - 60} ${hx - 80},${hy - 112} L${hx - 50},${hy - 128} L${hx - 26},${hy - 116} L${hx},${hy - 132} L${hx + 26},${hy - 116} L${hx + 52},${hy - 128} L${hx + 82},${hy - 112} C${hx + 94},${hy - 60} ${hx + 94},${hy + 20} ${hx + 84},${hy + 92} C${hx + 50},${hy + 114} ${hx - 50},${hy + 114} ${hx - 82},${hy + 92}Z`;
   const eL = [hx - 36, hy - 8, 46, 58, -4], eR = [hx + 46, hy - 10, 46, 58, 6];
-  h += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+  h += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', LW);
   h += fxg('guyRim', rimLit(head, skin, '#ffc4ea', 13, -3));
-  const eyes = (oL, oR) => ppgEyeInner(...eL, oL) + ppgEyeInner(...eR, oR);
+  const eyes = (oL, oR) => eyeInner(...eL, oL) + eyeInner(...eR, oR);
   const iris = { iris: '#7a5230', irisLine: '#3e2614', irisScale: 0.6, pupilScale: 0.66 };
   h += cel('guyEyes', 'hero', eyes({ pin: true, look: [-0.1, 0] }, { pin: true, look: [-0.15, 0] }), true);
   h += cel('guyEyes', 'normal', eyes({ ...iris, look: [-0.25, 0.1] }, { ...iris, look: [-0.3, 0.1] }));
@@ -804,7 +804,7 @@ function roundRaver() {
   const body = `M${hx - 70},${hy + 120} C${hx - 90},${hy + 180} ${hx - 90},${hy + 260} ${hx - 70},${hy + 300} L${hx + 90},${hy + 300} C${hx + 100},${hy + 240} ${hx + 90},${hy + 170} ${hx + 70},${hy + 120}Z`;
   const belt = `<path d="M${hx - 84},${hy + 200} C${hx - 30},${hy + 214} ${hx + 40},${hy + 214} ${hx + 92},${hy + 198} L${hx + 94},${hy + 218} C${hx + 40},${hy + 234} ${hx - 30},${hy + 234} ${hx - 86},${hy + 220}Z" fill="${INK}"/>`;
   const torso = (name, ex, ey, bend, show) => {
-    const arm = ppgArm(hx - 70, hy + 150, ex, ey, 34, 54, skin, bend);
+    const arm = toonArm(hx - 70, hy + 150, ex, ey, 34, 54, skin, bend);
     const [sx, sy] = RAVER.shoulder, l = Math.hypot(ex - sx, ey - sy);
     ANCHORS.raverMitten[name] = [ex + (ex - sx) / l * 13.5, ey + (ey - sy) / l * 13.5, Math.atan2(ey - sy, ex - sx) * 180 / Math.PI];
     return cel('raverTorso', name, blob([{ d: body, fill: '#ff3fae' }, ...arm], belt), show);
@@ -824,12 +824,12 @@ function roundRaver() {
   }
   const head = loopD(pts, 200);
   const eL = [hx - 74, hy - 6, 62, 76, -8], eR = [hx + 52, hy - 14, 66, 80, 8];
-  s += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+  s += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', LW);
   s += fxg('raverRim', rimLit(head, skin, '#ffc4ea', 15, 6));
   const gold = { iris: '#ffb02e', irisLine: '#a8600a', pupilScale: 0.6, glint: true };
-  s += cel('raverEyes', 'hero', ppgEyeInner(...eL, { ...gold, look: [-0.42, -0.1] }) + ppgEyeInner(...eR, { ...gold, look: [-0.5, -0.1] }), true);
-  s += cel('raverEyes', 'up', ppgEyeInner(...eL, { ...gold, look: [0.15, -0.7] }) + ppgEyeInner(...eR, { ...gold, look: [0.1, -0.7] }));
-  s += cel('raverEyes', 'pin', ppgEyeInner(...eL, { pin: true, look: [-0.2, -0.05] }) + ppgEyeInner(...eR, { pin: true, look: [-0.25, -0.05] }));
+  s += cel('raverEyes', 'hero', eyeInner(...eL, { ...gold, look: [-0.42, -0.1] }) + eyeInner(...eR, { ...gold, look: [-0.5, -0.1] }), true);
+  s += cel('raverEyes', 'up', eyeInner(...eL, { ...gold, look: [0.15, -0.7] }) + eyeInner(...eR, { ...gold, look: [0.1, -0.7] }));
+  s += cel('raverEyes', 'pin', eyeInner(...eL, { pin: true, look: [-0.2, -0.05] }) + eyeInner(...eR, { pin: true, look: [-0.25, -0.05] }));
   s += cel('raverEyes', 'blink', closedEye(eL, skin) + closedEye(eR, skin));
   s += cel('raverMouth', 'hero', shape(E(hx - 18, hy + 96, 20, 24, -10), '#3a0a1e', LW * 0.5) + `<ellipse cx="${hx - 16}" cy="${hy + 108}" rx="12" ry="7" fill="#ff5f8f"/>`, true);
   s += cel('raverMouth', 'smile', `<path d="M${hx - 62},${hy + 82} C${hx - 40},${hy + 136} ${hx + 14},${hy + 136} ${hx + 30},${hy + 76} C${hx - 2},${hy + 88} ${hx - 34},${hy + 88} ${hx - 62},${hy + 82}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="${LW * 0.7}" stroke-linejoin="round"/><path d="M${hx - 34},${hy + 112} C${hx - 20},${hy + 102} ${hx},${hy + 102} ${hx + 10},${hy + 110} C${hx},${hy + 122} ${hx - 24},${hy + 122} ${hx - 34},${hy + 112}Z" fill="#ff5f8f"/>`);
@@ -871,19 +871,19 @@ function flagRaver() {
   const flag = (la, lb) => {
     let k = '';
     const rx0 = 900, ry0 = 552;
-    const lA = ppgLeg(842, 548, la[0], la[1], 18, skin, la[2]);
-    const lB = ppgLeg(842, 558, lb[0], lb[1], 18, skin, lb[2]);
+    const lA = toonLeg(842, 548, la[0], la[1], 18, skin, la[2]);
+    const lB = toonLeg(842, 558, lb[0], lb[1], 18, skin, lb[2]);
     k += blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
     const body = 'M800,538 C820,532 840,534 850,540 C852,552 852,562 848,570 C832,576 814,574 800,566Z';
-    const a1 = ppgArm(806, 546, rx0 - 134, ry0 - 4, 14, 22, skin, -3);
-    const a2 = ppgArm(806, 560, rx0 - 136, ry0 + 6, 14, 22, skin, 3);
+    const a1 = toonArm(806, 546, rx0 - 134, ry0 - 4, 14, 22, skin, -3);
+    const a2 = toonArm(806, 560, rx0 - 136, ry0 + 6, 14, 22, skin, 3);
     k += blob([{ d: body, fill: '#ff8a1f' }, ...a1, ...a2]);
     const hx = 812, hy = 506;
     const head = E(hx, hy, 46, 38, 8);
     const eL = [hx - 18, hy - 2, 18, 22, 0], eR = [hx + 16, hy - 4, 18, 22, 0];
-    k += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+    k += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', LW);
     k += fxg('kidRim', rimLit(head, skin, '#ffc4ea', 7, 0));
-    k += ppgEyeInner(...eL, { pin: true }) + ppgEyeInner(...eR, { pin: true });
+    k += eyeInner(...eL, { pin: true }) + eyeInner(...eR, { pin: true });
     k += `<path d="M${hx - 8},${hy + 24} L${hx + 4},${hy + 20} L${hx + 14},${hy + 26}" fill="none" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
     k += shape(`M${hx - 44},${hy - 10} C${hx - 40},${hy - 40} ${hx},${hy - 50} ${hx + 40},${hy - 34} L${hx + 76},${hy - 40} L${hx + 52},${hy - 20} L${hx + 84},${hy - 14} L${hx + 44},${hy - 6} C${hx + 10},${hy - 30} ${hx - 20},${hy - 26} ${hx - 44},${hy - 10}Z`, '#1a1018', LW);
     k += speedLines([`M870,500 L930,496`, `M880,520 L950,518`, `M900,584 L956,588`], 4);
@@ -896,19 +896,19 @@ function flagRaver() {
     let k = '';
     const dy = o.dy || 0, hx = 820, hy = 410 + dy * 1.4;
     ANCHORS.kidHead[name] = [hx + 2, hy - 40];
-    const lA = ppgLeg(810, 498 + dy, o.crouch ? 796 : 804, 534, 18, skin, 196);
-    const lB = ppgLeg(830, 498 + dy, o.crouch ? 846 : 838, 534, 18, skin, -16);
+    const lA = toonLeg(810, 498 + dy, o.crouch ? 796 : 804, 534, 18, skin, 196);
+    const lB = toonLeg(830, 498 + dy, o.crouch ? 846 : 838, 534, 18, skin, -16);
     k += blob([...lA.parts, ...lB.parts], lA.inner + lB.inner);
     const by = 452 + dy;
     const body = `M800,${by} C795,${by + 18} 797,${by + 38} 803,${by + 48} C815,${by + 54} 831,${by + 54} 839,${by + 48} C845,${by + 36} 845,${by + 16} 838,${by} C828,${by - 6} 810,${by - 6} 800,${by}Z`;
-    const a1 = ppgArm(804, by + 10, o.l[0], o.l[1] + dy, 14, 22, skin, o.l[2]);
-    const a2 = ppgArm(836, by + 10, o.r[0], o.r[1] + dy, 14, 22, skin, o.r[2]);
+    const a1 = toonArm(804, by + 10, o.l[0], o.l[1] + dy, 14, 22, skin, o.l[2]);
+    const a2 = toonArm(836, by + 10, o.r[0], o.r[1] + dy, 14, 22, skin, o.r[2]);
     k += blob([{ d: body, fill: '#ff8a1f' }, ...a1, ...a2]);
     const head = E(hx, hy, 46, 38, 0);
     const eL = [hx - 17, hy - 2, 18, 22, 0], eR = [hx + 17, hy - 2, 18, 22, 0];
-    k += blob([{ d: head, fill: skin }, ppgEyeParts(...eL), ppgEyeParts(...eR)], '', LW);
+    k += blob([{ d: head, fill: skin }, eyeParts(...eL), eyeParts(...eR)], '', LW);
     const iris = o.pin ? { pin: true } : { iris: '#3fa0ff', irisLine: '#1a4a8a', irisScale: 0.62, pupilScale: 0.66, look: o.look || [0, 0.1] };
-    k += ppgEyeInner(...eL, iris) + ppgEyeInner(...eR, iris);
+    k += eyeInner(...eL, iris) + eyeInner(...eR, iris);
     k += o.mouth === 'o' ? `<ellipse cx="${hx}" cy="${hy + 22}" rx="5" ry="7" fill="#3a0a1e" stroke="${INK}" stroke-width="3"/>`
       : `<path d="M${hx - 12},${hy + 18} C${hx - 6},${hy + 30} ${hx + 8},${hy + 30} ${hx + 14},${hy + 18}Z" fill="#3a0a1e" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
     k += shape(`M${hx - 44},${hy - 6} C${hx - 46},${hy - 28} ${hx - 32},${hy - 42} ${hx - 16},${hy - 42} L${hx - 14},${hy - 62} L${hx + 2},${hy - 44} L${hx + 16},${hy - 66} L${hx + 20},${hy - 42} L${hx + 38},${hy - 56} L${hx + 34},${hy - 32} C${hx + 44},${hy - 24} ${hx + 46},${hy - 14} ${hx + 44},${hy - 6} C${hx + 20},${hy - 28} ${hx - 20},${hy - 28} ${hx - 44},${hy - 6}Z`, '#1a1018', LW);
@@ -920,7 +920,7 @@ function flagRaver() {
   return rig('kid', s, `transform="translate(140,-4)"`);
 }
 
-// Debris and confetti blown along the rays, plus a black PPG speed line. Each confetti piece is a
+// Debris and confetti blown along the rays, plus a black speed line. Each confetti piece is a
 // rig so it can keep flying after the hero frame.
 const CONFETTI = [];
 function debris() {
@@ -1516,14 +1516,14 @@ function createSynth(offline) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
   const S = {
-    bpm: clamp(+store.get('zimRave.bpm') || 128, 90, 160), level: 1, playing: !reduced, sound: false, started: false,
+    bpm: clamp(+store.get('toonRave.bpm') || 128, 90, 160), level: 1, playing: !reduced, sound: false, started: false,
     anchorPos: reduced ? 0.3 : -16, anchorTime: performance.now() / 1000, dropAnchor: 0, pending: null, synth: null, shot: null,
   };
 
   // --- build the SVG -------------------------------------------------------------------------
   const world = [room(), backCrowd(), floor(), lasers(), blast(), flagRaver(), booth(), '<g id="djBack"></g>', buttonGlow(), button(), slamFx(), debris(),
     `<g id="djFront">${dj()}</g>`, pompadour(), '<g id="stickBack"></g>', roundRaver(), `<g id="stickFront">${glowstick()}</g>`].join('');
-  // impact frames: the hero frame thresholded to two Zim colours (and then inverted)
+  // impact frames: the hero frame thresholded to two colours (and then inverted)
   const two = (id, lo, hi) => `<filter id="${id}" x="0" y="0" width="1600" height="900" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0 0 0 0 1"/><feComponentTransfer><feFuncR type="discrete" tableValues="${lo[0]} ${hi[0]} ${hi[0]}"/><feFuncG type="discrete" tableValues="${lo[1]} ${hi[1]} ${hi[1]}"/><feFuncB type="discrete" tableValues="${lo[2]} ${hi[2]} ${hi[2]}"/></feComponentTransfer></filter>`;
   DEFS.push(two('impactA', [0.06, 0.01, 0.05], [1, 0.18, 0.64]), two('impactB', [1, 0.93, 0.97], [0.06, 0.01, 0.05]));
   const stage = document.getElementById('stage');
@@ -1689,7 +1689,7 @@ function createSynth(offline) {
   playBtn.addEventListener('click', togglePlay);
   soundBtn.addEventListener('click', () => { S.started = true; setSound(!S.sound); });
   $('drop').addEventListener('click', dropNow);
-  tempo.addEventListener('input', () => { reanchor(() => { S.bpm = +tempo.value; }); nextSlot = null; store.set('zimRave.bpm', S.bpm); syncUi(); });
+  tempo.addEventListener('input', () => { reanchor(() => { S.bpm = +tempo.value; }); nextSlot = null; store.set('toonRave.bpm', S.bpm); syncUi(); });
   cuts.addEventListener('input', () => { S.level = +cuts.value; });
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;

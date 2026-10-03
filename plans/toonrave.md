@@ -19,7 +19,7 @@ and shown through a small WebGL2 pass. That pass also does the impact frame.
   - `src/app.js`: how the frame state is written onto the SVG (rigs `data-x`, fx
     `data-o`, cels `data-cel`, `data-led`, `data-ray`, crowd eye classes, the impact
     filter). It also has the controller and the scheduler.
-  - `zim-rave-drop.html`: the built page.
+  - `toonrave-prototype.html`: the built page.
   - `png/original.png`: the hero frame.
 - **Adding a scene:** `.claude/commands/new-scene.md` (the checklist) and
   `docs/adding-a-scene.md`.
@@ -243,7 +243,7 @@ Steps 1, 2 and 3 touch different files and may run in parallel.
 ### 6. The record
 
 - **Files:** `docs/scenes/toonrave.md` from `docs/scenes/_template.md`, plus
-  `docs/scenes/toonrave/artifacts/zim-rave-drop.html`, a copy of the prototype page,
+  `docs/scenes/toonrave/artifacts/toonrave-prototype.html`, a copy of the prototype page,
   which is our own art.
 - **Edit:** fill every template section.
   - **References:** credit the style study as inspiration (classic Nickelodeon and
