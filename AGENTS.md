@@ -21,9 +21,9 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 - Any TS change: `npm run typecheck` (root and `server/`) and `npm run test`.
 - Any visualization or UI change also needs headless Playwright screenshots
-  from before and after, and their paths in your summary. Embed them in the
-  PR body with `npm run pr-shots` (its header says how), never as local
-  paths; a paid scene's screenshots never go in a PR.
+  from before and after, and their paths in your summary. Put a couple of
+  them in the PR body: `npm run pr-shots -- before.png after.png` prints the
+  markdown (never for a paid scene).
 - CI runs the same two gates on every PR and before every deploy. The channels
   and releasing are explained in the `src/version.ts` header.
 
