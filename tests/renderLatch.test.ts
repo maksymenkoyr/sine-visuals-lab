@@ -48,6 +48,7 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     metronomeBar: false,
     metronomePulse: 0,
     metronomeBarPulse: 0,
+    hitTail: 1,
     gateDimmer: 1,
     hits: { low: NULL_DIAG, mid: NULL_DIAG, high: NULL_DIAG },
     hitStrength: { beat: NULL_HIT, low: NULL_HIT, mid: NULL_HIT, high: NULL_HIT },

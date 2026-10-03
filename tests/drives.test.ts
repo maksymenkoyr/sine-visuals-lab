@@ -1144,6 +1144,24 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
     expect(after).toBeCloseTo(Math.exp(-DT * BEAT_PULSE_DECAY_PER_SEC), 6);
   });
 
+  it("Fixed on Any hit falls slower when Tail is raised, like the pulse it stands in for", () => {
+    const run = (tail: number): number => {
+      const clock = createAnimClock();
+      const engine = createDriveEngine();
+      const sceneId = `height-fixed-tail-${tail}`;
+      const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "fixed" }] });
+      const shape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail };
+      const held = new Float32Array(NUM_BANDS).fill(0.9);
+      let anim = clock.advance(DT, frame({ bands: held, onset: true }), undefined, undefined, { shape });
+      engine.accumulate(DT, frame({ bands: held, onset: true }), 0.9, anim, sceneId, [spec]);
+      anim = clock.advance(DT, frame({ bands: held }), undefined, undefined, { shape });
+      engine.accumulate(DT, frame({ bands: held }), 0.9, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim).uniformPair("k").drive;
+    };
+    expect(run(2)).toBeCloseTo(Math.exp((-DT * BEAT_PULSE_DECAY_PER_SEC) / 2), 6);
+    expect(run(2)).toBeGreaterThan(run(1));
+  });
+
   it("a level-kind source (Bass level) ignores height entirely, even if one is stored", () => {
     const clock = createAnimClock();
     const engine = createDriveEngine();

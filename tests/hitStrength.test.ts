@@ -16,11 +16,14 @@ import {
   HIT_LOUDNESS_MIN,
   HIT_LOUDNESS_MAX,
   HIT_FLOOR_MIN,
+  HIT_TAIL_MAX,
+  HIT_TAIL_MIN,
+  pulseDecayScale,
   HIT_FLOOR_MAX,
   type HitShape,
 } from "../src/audio/hitStrength.ts";
 
-const FLAT: HitShape = { amount: HIT_AMOUNT_DEFAULT, knee: HIT_KNEE_DEFAULT, loudness: HIT_LOUDNESS_DEFAULT, floor: HIT_FLOOR_DEFAULT };
+const FLAT: HitShape = { amount: HIT_AMOUNT_DEFAULT, knee: HIT_KNEE_DEFAULT, loudness: HIT_LOUDNESS_DEFAULT, floor: HIT_FLOOR_DEFAULT, tail: 1 };
 
 describe("hitStandout", () => {
   it("is 0 at and below the firing line", () => {
@@ -57,9 +60,9 @@ describe("hitStrength", () => {
   it("amount 0 returns exactly 1, for any ratio/loudness/knee/loudness-mix/floor", () => {
     const cases: [number | null, number, HitShape][] = [
       [1, 0, FLAT],
-      [5, 1, { amount: 0, knee: 3, loudness: 1, floor: 0.8 }],
-      [null, 0.4, { amount: 0, knee: 0.1, loudness: 0.5, floor: 0.3 }],
-      [Number.NaN, Number.NaN, { amount: 0, knee: Number.NaN, loudness: Number.NaN, floor: Number.NaN }],
+      [5, 1, { amount: 0, knee: 3, loudness: 1, floor: 0.8, tail: 1 }],
+      [null, 0.4, { amount: 0, knee: 0.1, loudness: 0.5, floor: 0.3, tail: 1 }],
+      [Number.NaN, Number.NaN, { amount: 0, knee: Number.NaN, loudness: Number.NaN, floor: Number.NaN, tail: 1 }],
     ];
     for (const [ratio, loudness, shape] of cases) {
       expect(hitStrength(ratio, loudness, shape).strength).toBe(1);
@@ -67,13 +70,13 @@ describe("hitStrength", () => {
   });
 
   it("null ratio reads as stand-out 1 (a bare trigger)", () => {
-    const parts = hitStrength(null, 0, { amount: 1, knee: 1, loudness: 0, floor: 0 });
+    const parts = hitStrength(null, 0, { amount: 1, knee: 1, loudness: 0, floor: 0, tail: 1 });
     expect(parts.standout).toBe(1);
   });
 
   it("loudness crossfade: mix 0 is stand-out only, mix 1 is loudness only", () => {
-    const shapeStandoutOnly: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0 };
-    const shapeLoudnessOnly: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0 };
+    const shapeStandoutOnly: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: 1 };
+    const shapeLoudnessOnly: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: 1 };
     const ratio = 3;
     const loudness = 0.2;
     const standout = hitStandout(ratio, 1);
@@ -85,7 +88,7 @@ describe("hitStrength", () => {
     // Stand-out-only, floor above this hit's own stand-out: gated should
     // land at 0, so with amount 1 strength is exactly 0.
     const ratio = 1.2; // a small clearance -> small stand-out
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.9 };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.9, tail: 1 };
     const standout = hitStandout(ratio, 1);
     expect(standout).toBeLessThan(0.9);
     expect(hitStrength(ratio, 0, shape).strength).toBe(0);
@@ -97,7 +100,7 @@ describe("hitStrength", () => {
   });
 
   it("a floor just under 1 stays finite for a graded value right at the top", () => {
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: HIT_FLOOR_MAX };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: HIT_FLOOR_MAX, tail: 1 };
     const parts = hitStrength(1000, 0, shape); // stand-out saturates near 1
     expect(Number.isFinite(parts.strength)).toBe(true);
     expect(parts.strength).toBeGreaterThanOrEqual(0);
@@ -105,15 +108,15 @@ describe("hitStrength", () => {
   });
 
   it("a floor of exactly 1 (outside what the store ever stores) still returns a finite result", () => {
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 1 };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 1, tail: 1 };
     expect(Number.isFinite(hitStrength(1000, 0, shape).strength)).toBe(true);
     expect(Number.isFinite(hitStrength(1, 0, shape).strength)).toBe(true);
   });
 
   it("amount blends linearly between flat 1 and the fully graded value", () => {
     const ratio = 1.5;
-    const full: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0 };
-    const half: HitShape = { amount: 0.5, knee: 1, loudness: 0, floor: 0 };
+    const full: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: 1 };
+    const half: HitShape = { amount: 0.5, knee: 1, loudness: 0, floor: 0, tail: 1 };
     const gradedStrength = hitStrength(ratio, 0, full).strength;
     const halfStrength = hitStrength(ratio, 0, half).strength;
     expect(halfStrength).toBeCloseTo(1 + (gradedStrength - 1) * 0.5, 6);
@@ -127,7 +130,7 @@ describe("hitStrength", () => {
   });
 
   it("sanitizes non-finite loudness and shape fields without throwing or producing NaN", () => {
-    const shape: HitShape = { amount: Number.NaN, knee: 1, loudness: Number.NaN, floor: Number.NaN };
+    const shape: HitShape = { amount: Number.NaN, knee: 1, loudness: Number.NaN, floor: Number.NaN, tail: 1 };
     const parts = hitStrength(2, Number.NaN, shape);
     expect(Number.isFinite(parts.standout)).toBe(true);
     expect(Number.isFinite(parts.loudness)).toBe(true);
@@ -150,18 +153,18 @@ describe("hit shape persistence", () => {
   it("round-trips a partial set, leaving the other fields untouched", () => {
     setHitShape({ amount: 0.5 });
     expect(getHitShape()).toEqual({ ...FLAT, amount: 0.5 });
-    setHitShape({ knee: 2, floor: 0.3 });
-    expect(getHitShape()).toEqual({ ...FLAT, amount: 0.5, knee: 2, floor: 0.3 });
+    setHitShape({ knee: 2, floor: 0.3, tail: 2 });
+    expect(getHitShape()).toEqual({ ...FLAT, amount: 0.5, knee: 2, floor: 0.3, tail: 2 });
   });
 
   it("clamps out-of-range and non-finite values per field", () => {
-    setHitShape({ amount: -1, knee: 100, loudness: 5, floor: -5 });
-    expect(getHitShape()).toEqual({ amount: HIT_AMOUNT_MIN, knee: HIT_KNEE_MAX, loudness: HIT_LOUDNESS_MAX, floor: HIT_FLOOR_MIN });
+    setHitShape({ amount: -1, knee: 100, loudness: 5, floor: -5, tail: 100 });
+    expect(getHitShape()).toEqual({ amount: HIT_AMOUNT_MIN, knee: HIT_KNEE_MAX, loudness: HIT_LOUDNESS_MAX, floor: HIT_FLOOR_MIN, tail: HIT_TAIL_MAX });
 
-    setHitShape({ amount: 5, knee: 0, loudness: -5, floor: 5 });
-    expect(getHitShape()).toEqual({ amount: HIT_AMOUNT_MAX, knee: HIT_KNEE_MIN, loudness: HIT_LOUDNESS_MIN, floor: HIT_FLOOR_MAX });
+    setHitShape({ amount: 5, knee: 0, loudness: -5, floor: 5, tail: 0 });
+    expect(getHitShape()).toEqual({ amount: HIT_AMOUNT_MAX, knee: HIT_KNEE_MIN, loudness: HIT_LOUDNESS_MIN, floor: HIT_FLOOR_MAX, tail: HIT_TAIL_MIN });
 
-    setHitShape({ amount: Number.NaN, knee: Number.NaN, loudness: Number.NaN, floor: Number.NaN });
+    setHitShape({ amount: Number.NaN, knee: Number.NaN, loudness: Number.NaN, floor: Number.NaN, tail: Number.NaN });
     expect(getHitShape()).toEqual(FLAT);
   });
 
@@ -171,5 +174,23 @@ describe("hit shape persistence", () => {
       (shape as { amount: number }).amount = 0.9;
     }).toThrow();
     expect(getHitShape().amount).toBe(HIT_AMOUNT_DEFAULT);
+  });
+});
+
+describe("pulseDecayScale", () => {
+  it("is exactly 1 at the default tail and for no shape at all", () => {
+    expect(pulseDecayScale(FLAT)).toBe(1);
+    expect(pulseDecayScale(undefined)).toBe(1);
+  });
+
+  it("is the inverse of the tail: twice as long falls at half the rate", () => {
+    expect(pulseDecayScale({ ...FLAT, tail: 2 })).toBe(0.5);
+    expect(pulseDecayScale({ ...FLAT, tail: 0.25 })).toBe(4);
+  });
+
+  it("falls back to 1 for a non-finite or non-positive tail", () => {
+    for (const tail of [Number.NaN, Number.POSITIVE_INFINITY, 0, -3]) {
+      expect(pulseDecayScale({ ...FLAT, tail })).toBe(1);
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.ts";
+import { hitStrength, pulseDecayScale, type HitShape, type HitParts } from "../audio/hitStrength.ts";
 
 // Splits the 24 log-spaced bands into low/mid/high groups and derives, per
 // group: a slewed continuous level (safe to drive geometry with — it can't
@@ -205,7 +205,7 @@ function advanceGroup(
   state.diag.sinceOnsetSec = state.sinceOnsetSec;
   if (state.onset) state.sinceOnsetSec = 0;
 
-  state.pulse *= Math.exp(-dt * spec.pulseDecayRate * rateScale);
+  state.pulse *= Math.exp(-dt * spec.pulseDecayRate * rateScale * pulseDecayScale(shape));
   if (state.onset) {
     if (shape) {
       const hit = hitStrength(state.diag.ratio, raw, shape, state.hit);

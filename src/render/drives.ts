@@ -1093,11 +1093,11 @@ export function createDriveEngine(): DriveEngine {
             if (!st.grid) st.grid = createGridPulse();
             const gridBeats = beatGridBeats(choice.grid);
             const fired = st.grid.advance(anim.beats, anim.tempoLock, gridBeats, anim.onset);
-            st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC);
+            st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail);
             if (fired) st.gridPulse = 1;
             st.gridFiredPending ||= fired;
             if (wantsHeight) {
-              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC);
+              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail);
               if (fired) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : driveEnergy);
             }
           } else if (isLineChoice(choice)) {
@@ -1109,7 +1109,9 @@ export function createDriveEngine(): DriveEngine {
             st.lineExcess.set(result.excess);
             // Height ignored — see this file's header.
           } else if (SIGNALS[choice].kind === "edge" && wantsHeight) {
-            const rate = heightDecayPerSec(choice);
+            // Drop's own slow pulse (sectionIntensity.ts) is a section swell,
+            // not a hit's ring-out — Tail doesn't stretch it.
+            const rate = heightDecayPerSec(choice) * (choice === "anim.dropOnset" ? 1 : anim.hitTail);
             st.heightEnv *= Math.exp(-dtSec * rate);
             const edge = SIGNALS[choice].edge!(anim);
             if (edge) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : loudLevel(choice, anim, driveEnergy));

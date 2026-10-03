@@ -27,6 +27,12 @@
  * actually raises Dimension (the amount slider's label in Shape, the Hits
  * card's own disclosure — src/ui/audioMeters.ts).
  *
+ * `shape.tail` is the same sort of knob for a hit's *length* rather than its
+ * height: a multiple on how long the decaying pulse takes to fall (see
+ * pulseDecayScale), 1 leaving every pulse exactly as it was. Smoothing
+ * (sensitivity.ts's smoothingRateScale) already slows these same pulses along
+ * with the level slews; Tail is the hits-only counterpart and the two multiply.
+ *
  * Global per device (not per scene, unlike src/audio/sensitivity.ts and
  * src/render/sceneSettings.ts) and threaded the same way as
  * src/audio/silenceGate.ts's marks: a param into src/render/animClock.ts's
@@ -59,6 +65,9 @@ export interface HitShape {
   loudness: number;
   /** Graded strength below this counts as 0; the rest rescales to 0..1. */
   floor: number;
+  /** How long a hit's pulse rings out, as a multiple of today's fall:
+   *  1 = unchanged, 2 = twice as long, 0.5 = half. See pulseDecayScale. */
+  tail: number;
 }
 
 import { registerSyncedStore } from "../net/syncedStores.ts";
@@ -87,10 +96,18 @@ export const HIT_FLOOR_MIN = 0;
 export const HIT_FLOOR_MAX = 0.95;
 export const HIT_FLOOR_DEFAULT = 0;
 
+// The tail's own slider range (the Hits card's Shape section) — a multiple
+// of how long a pulse takes to fall, so it's a log slider: a quarter (a
+// short, snappy flick) to four times (a slow swell) either side of 1.
+export const HIT_TAIL_MIN = 0.25;
+export const HIT_TAIL_MAX = 4;
+export const HIT_TAIL_DEFAULT = 1;
+
 const STORAGE_KEY_AMOUNT = "vibe.hitAmount";
 const STORAGE_KEY_KNEE = "vibe.hitKnee";
 const STORAGE_KEY_LOUDNESS = "vibe.hitLoudness";
 const STORAGE_KEY_FLOOR = "vibe.hitFloor";
+const STORAGE_KEY_TAIL = "vibe.hitTail";
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -115,6 +132,7 @@ let amountCache = loadField(STORAGE_KEY_AMOUNT, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, 
 let kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
 let loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
 let floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
+let tailCache = loadField(STORAGE_KEY_TAIL, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
 
 // Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
 function reload(): void {
@@ -122,9 +140,10 @@ function reload(): void {
   kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
   loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
   floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
+  tailCache = loadField(STORAGE_KEY_TAIL, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
   snapshot = null;
 }
-for (const key of [STORAGE_KEY_AMOUNT, STORAGE_KEY_KNEE, STORAGE_KEY_LOUDNESS, STORAGE_KEY_FLOOR]) {
+for (const key of [STORAGE_KEY_AMOUNT, STORAGE_KEY_KNEE, STORAGE_KEY_LOUDNESS, STORAGE_KEY_FLOOR, STORAGE_KEY_TAIL]) {
   registerSyncedStore(key, reload);
 }
 
@@ -135,6 +154,7 @@ function persist(): void {
     localStorage.setItem(STORAGE_KEY_KNEE, String(kneeCache));
     localStorage.setItem(STORAGE_KEY_LOUDNESS, String(loudnessCache));
     localStorage.setItem(STORAGE_KEY_FLOOR, String(floorCache));
+    localStorage.setItem(STORAGE_KEY_TAIL, String(tailCache));
   } catch {
     // Not fatal — the setting just won't persist across reloads.
   }
@@ -148,7 +168,7 @@ let snapshot: HitShape | null = null;
 /** A frozen snapshot — callers can't mutate the cache through it. */
 export function getHitShape(): HitShape {
   if (snapshot === null) {
-    snapshot = Object.freeze({ amount: amountCache, knee: kneeCache, loudness: loudnessCache, floor: floorCache });
+    snapshot = Object.freeze({ amount: amountCache, knee: kneeCache, loudness: loudnessCache, floor: floorCache, tail: tailCache });
   }
   return snapshot;
 }
@@ -159,6 +179,7 @@ export function setHitShape(partial: Partial<HitShape>): void {
   if (partial.loudness !== undefined)
     loudnessCache = clampField(partial.loudness, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
   if (partial.floor !== undefined) floorCache = clampField(partial.floor, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
+  if (partial.tail !== undefined) tailCache = clampField(partial.tail, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
   persist();
 }
 
@@ -167,10 +188,25 @@ export function resetHitShape(): void {
   kneeCache = HIT_KNEE_DEFAULT;
   loudnessCache = HIT_LOUDNESS_DEFAULT;
   floorCache = HIT_FLOOR_DEFAULT;
+  tailCache = HIT_TAIL_DEFAULT;
   persist();
 }
 
 // ---- The pure formula --------------------------------------------------
+
+/** The factor a pulse's per-second decay rate is multiplied by for a given
+ *  `shape.tail`: a longer tail is a slower fall, so 1 / tail. Exactly 1 at the
+ *  default tail, so an untouched Tail leaves every pulse bit-for-bit as it
+ *  was. A missing shape (previews/gallery/probes, which never get one) or a
+ *  non-finite or non-positive tail reads as 1, same fallback rule as the
+ *  other fields. Applied wherever a hit's decaying pulse is built: animClock.ts
+ *  (beatPulse, the metronome pulses), bandEnergy.ts (each band group's pulse)
+ *  and drives.ts's Fixed/Loud heights, which read it back off
+ *  AnimFrame.hitTail so they fall like the pulses they stand in for. */
+export function pulseDecayScale(shape: HitShape | undefined): number {
+  const t = shape?.tail;
+  return t !== undefined && Number.isFinite(t) && t > 0 ? 1 / t : 1;
+}
 
 /** ratio (1 = bare trigger) -> 0..1, 0 at/below the firing line. Exported on
  *  its own for the Hits card's Shape section's own Curve monitor
