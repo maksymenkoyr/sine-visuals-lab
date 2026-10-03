@@ -134,8 +134,8 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *    digits dim the same way. Beneath that, a Timing strip
  *    (createTimingStrip): Grid (the tracker's own predicted beat, a tick
  *    as tall as the lock on every beatPhase wrap), Metronome (metronome.ts's
- *    own steady tick, taller on the bar) and Heard (every raw detected
- *    beat) share one time axis, so a detection landing under a grid tick
+ *    own steady tick, taller on the bar) and Onsets (every hit the detector
+ *    caught) share one time axis, so a detection landing under a grid tick
  *    reads as locked, one between ticks reads as a double, and a tick with
  *    nothing under it reads as a miss. Last, Wave: beatWave/barWave's own
  *    smooth swing, for a setting that wants to sway in time rather than
@@ -186,7 +186,7 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  * drive source can feed — Waveform and Energy (Signal), Section's own
  * Song+Drop pair and Centroid, on the Brightness row (Character), the BPM
  * block's own Metronome+Tempo pair, Lock, the Timing strip's own
- * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
+ * Grid/Metronome/Onsets jacks (createTimingStrip) and Wave's Beat/Bar pair
  * (Tempo), and one per hits-history lane plus a second
  * Beat-lane jack for Onset surge (createHitsHistory's own laneMounts, Hits)
  * — plus the Bands card's own level rows (BAND_LEVEL_CHOICES, deviceMenu.ts)
@@ -270,8 +270,9 @@ export interface AudioMeters {
    *  frame rate). */
   refreshPatchView(): void;
   /** This card's own jacks, keyed by driveSources.ts's jackKey — the cable
-   *  layer's (src/ui/cableLayer.ts) source endpoints. Never mutated after
-   *  a jack is built. */
+   *  layer's (src/ui/cableLayer.ts) source endpoints. A source with jacks on
+   *  two cards maps to whichever is currently visible; the map itself is
+   *  rebuilt per call, so don't hold it. */
   jackElements(): ReadonlyMap<string, HTMLElement>;
 }
 
@@ -1375,7 +1376,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   };
 }
 
-// The Tempo card's Timing strip: Grid/Metronome/Heard on one shared time
+// The Tempo card's Timing strip: Grid/Metronome/Onsets on one shared time
 // axis (createColumnRing above), replacing the old separate Beat and
 // Metronome rows — the point of one strip is seeing what the tracker
 // predicts against what actually rang the metronome and what the detector
@@ -1383,7 +1384,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
 // A jack is 13px tall (createHitsHistory's own lane-centring math); a
 // lane any shorter would make the Grid and Metronome lanes' jacks touch.
 const TIMING_LANE_HEIGHT_PX = 14;
-const TIMING_LANE_COUNT = 3; // Grid, Metronome, Heard
+const TIMING_LANE_COUNT = 3; // Grid, Metronome, Onsets
 const TIMING_HEIGHT_PX = TIMING_LANE_HEIGHT_PX * TIMING_LANE_COUNT;
 // Metronome's own pale sky, distinct from BEAT_GRID_COLOR's fuller AUTO_SKY
 // so Grid and Metronome never read as the same line stacked on itself —
@@ -1397,7 +1398,7 @@ interface TimingLane {
 const TIMING_LANES: readonly TimingLane[] = [
   { label: "Grid", color: BEAT_GRID_COLOR },
   { label: "Metronome", color: TIMING_METRO_COLOR },
-  { label: "Heard", color: BEAT_COLOR },
+  { label: "Onsets", color: BEAT_COLOR },
 ];
 
 /** The Tempo card's Timing strip. Grid: on a beatPhase wrap (the old Beat
@@ -1405,9 +1406,10 @@ const TIMING_LANES: readonly TimingLane[] = [
  *  else nothing — an unconfident tracker draws a short tick, same
  *  "unconfident reads as unconfident" convention the tempo dot uses. Metro:
  *  metronome.ts's own even tick (metronomeBeat), taller on the bar
- *  (metronomeBar). Heard: `frame.onset`, the exact edge the Hits card's
- *  Beat lane marks as fired. A detection landing under a grid tick reads as
- *  locked; one between ticks reads as a double; a grid tick with nothing
+ *  (metronomeBar). Onsets: `frame.onset`, the exact edge the Hits card's
+ *  Beat lane marks as fired — and the same "feature.onset" source that
+ *  lane's jack plugs, so it has a jack here too. A detection landing under
+ *  a grid tick reads as locked; one between ticks reads as a double; a grid tick with nothing
  *  under it reads as a miss. */
 function createTimingStrip(mountJack: MountJack) {
   const row = createMeterRow({
@@ -1415,7 +1417,7 @@ function createTimingStrip(mountJack: MountJack) {
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above, taller on the bar; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
+      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above, taller on the bar; Onsets (red) is every hit the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX);
@@ -1430,8 +1432,10 @@ function createTimingStrip(mountJack: MountJack) {
   const legend = createTraceLegend(TIMING_LANES.map((l) => ({ color: l.color, label: l.label })));
   vizWrap.after(legend.el);
 
-  // Grid's own jack (the same beat-grid choice the old Beat row mounted)
-  // and Metronome's own (anim.metronomeBar), each centred on its own lane —
+  // Grid's own jack (the same beat-grid choice the old Beat row mounted),
+  // Metronome's own (anim.metronomeBar) and Onsets' (feature.onset — the
+  // same source as the Hits card's Beat-lane jack; see jackElements), each
+  // centred on its own lane —
   // mounted absolutely inside vizWrap like createHitsHistory's own
   // laneMounts, but needing no lane glow of their own: the row-level fed
   // glow mountJack already gives every jack is enough here, since neither
@@ -1444,6 +1448,10 @@ function createTimingStrip(mountJack: MountJack) {
   metroJack.el.style.position = "absolute";
   metroJack.el.style.right = "2px";
   metroJack.el.style.top = `${TIMING_LANE_HEIGHT_PX + (TIMING_LANE_HEIGHT_PX - 13) / 2}px`;
+  const onsetJack = mountJack("feature.onset", vizWrap, row.el);
+  onsetJack.el.style.position = "absolute";
+  onsetJack.el.style.right = "2px";
+  onsetJack.el.style.top = `${2 * TIMING_LANE_HEIGHT_PX + (TIMING_LANE_HEIGHT_PX - 13) / 2}px`;
 
   let prevBeatPhase: number | null = null;
 
@@ -1452,7 +1460,7 @@ function createTimingStrip(mountJack: MountJack) {
     const len = ring.length;
     ctx.clearRect(0, 0, w, TIMING_HEIGHT_PX);
 
-    // A full-height guide wherever Grid marks a tick, so a Heard tick
+    // A full-height guide wherever Grid marks a tick, so an Onsets tick
     // elsewhere in the same column (a double) or its absence (a miss) reads
     // against the column the grid actually predicted.
     ctx.fillStyle = "rgba(255,255,255,0.08)";
@@ -1692,7 +1700,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // (the Section row's Song+Drop, every hits lane's shared Hits row) so
   // refreshPatchView below only ever writes that row's fed state once.
   const jackRegistry: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
-  const jackElementsMap = new Map<string, HTMLElement>();
+  // Every element mounted per key — a source can have two jacks (feature.onset:
+  // the Hits card's Beat lane and the Timing strip's Onsets lane), and the
+  // cable layer needs whichever one is on screen.
+  const jackElementsByKey = new Map<string, HTMLElement[]>();
 
   /** Builds one jack, wires it straight to `deps.patch`, and registers it
    *  for refreshPatchView's own row-level glow/dim pass below. `host` is
@@ -1710,7 +1721,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     );
     host.appendChild(jack.el);
     jackRegistry.push({ choice, jack, feedEl });
-    jackElementsMap.set(jackKey(choice), jack.el);
+    const key = jackKey(choice);
+    const els = jackElementsByKey.get(key);
+    if (els) els.push(jack.el);
+    else jackElementsByKey.set(key, [jack.el]);
     return jack;
   }
 
@@ -2528,7 +2542,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
     },
     jackElements(): ReadonlyMap<string, HTMLElement> {
-      return jackElementsMap;
+      // The first jack with a layout box wins, so a cable never anchors to a
+      // folded card's header while the same source's other jack is showing;
+      // all folded, the first (mount order) keeps the header fallback.
+      const out = new Map<string, HTMLElement>();
+      for (const [key, els] of jackElementsByKey) {
+        out.set(key, els.find((el) => el.getClientRects().length > 0) ?? els[0]!);
+      }
+      return out;
     },
   };
 }
