@@ -7,6 +7,7 @@ import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
+import type { HitLane } from "../audio/hitStrength.ts";
 import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveThresholdState } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
@@ -863,6 +864,25 @@ function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: n
   tr.line = tr.floor + clamp01(t) * (tr.peak - tr.floor);
 }
 
+/** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
+ *  Fixed/Loud release — the lane whose pulse heightDecayPerSec below borrows
+ *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
+ *  section swell, not a hit's ring-out, so no Length row stretches it. */
+function heightTailLane(choice: DriveSourceChoice): HitLane | null {
+  switch (choice) {
+    case "anim.lowOnset":
+      return "low";
+    case "anim.midOnset":
+      return "mid";
+    case "anim.highOnset":
+      return "high";
+    case "anim.dropOnset":
+      return null;
+    default:
+      return "beat"; // Any hit and the metronome, timed like beatPulse
+  }
+}
+
 /** Fixed/Loud's own release rate for a hit-kind source — reused directly
  *  from the module that owns the Graded pulse it stands in for (see this
  *  file's header). Only ever called for an edge-kind catalogue entry or a
@@ -1076,11 +1096,11 @@ export function createDriveEngine(): DriveEngine {
             if (!st.grid) st.grid = createGridPulse();
             const gridBeats = beatGridBeats(choice.grid);
             const fired = st.grid.advance(anim.beats, anim.tempoLock, gridBeats, anim.onset);
-            st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail);
+            st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail.beat);
             if (fired) st.gridPulse = 1;
             st.gridFiredPending ||= fired;
             if (wantsHeight) {
-              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail);
+              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail.beat);
               if (fired) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : driveEnergy);
             }
           } else if (isLineChoice(choice)) {
@@ -1092,9 +1112,8 @@ export function createDriveEngine(): DriveEngine {
             st.lineExcess.set(result.excess);
             // Height ignored — see this file's header.
           } else if (SIGNALS[choice].kind === "edge" && wantsHeight) {
-            // Drop's own slow pulse (sectionIntensity.ts) is a section swell,
-            // not a hit's ring-out — Tail doesn't stretch it.
-            const rate = heightDecayPerSec(choice) * (choice === "anim.dropOnset" ? 1 : anim.hitTail);
+            const lane = heightTailLane(choice);
+            const rate = heightDecayPerSec(choice) * (lane === null ? 1 : anim.hitTail[lane]);
             st.heightEnv *= Math.exp(-dtSec * rate);
             const edge = SIGNALS[choice].edge!(anim);
             if (edge) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : loudLevel(choice, anim, driveEnergy));

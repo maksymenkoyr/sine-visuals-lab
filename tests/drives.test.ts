@@ -1,3 +1,4 @@
+import { UNIT_TAILS } from "../src/audio/hitStrength.ts";
 import { describe, it, expect } from "vitest";
 import {
   createDriveEngine,
@@ -1142,13 +1143,13 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
     expect(after).toBeCloseTo(Math.exp(-DT * BEAT_PULSE_DECAY_PER_SEC), 6);
   });
 
-  it("Fixed on Any hit falls slower when Tail is raised, like the pulse it stands in for", () => {
-    const run = (tail: number): number => {
+  it("Fixed on Any hit falls slower when the Beat tail is raised, like the pulse it stands in for", () => {
+    const run = (beat: number, low = 1): number => {
       const clock = createAnimClock();
       const engine = createDriveEngine();
-      const sceneId = `height-fixed-tail-${tail}`;
+      const sceneId = `height-fixed-tail-${beat}-${low}`;
       const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "fixed" }] });
-      const shape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail };
+      const shape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail: { ...UNIT_TAILS, beat, low } };
       const held = new Float32Array(NUM_BANDS).fill(0.9);
       let anim = clock.advance(DT, frame({ bands: held, onset: true }), undefined, undefined, { shape });
       engine.accumulate(DT, frame({ bands: held, onset: true }), 0.9, anim, sceneId, [spec]);
@@ -1158,6 +1159,7 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
     };
     expect(run(2)).toBeCloseTo(Math.exp((-DT * BEAT_PULSE_DECAY_PER_SEC) / 2), 6);
     expect(run(2)).toBeGreaterThan(run(1));
+    expect(run(1, 4)).toBe(run(1));
   });
 
   it("a level-kind source (Bass level) ignores height entirely, even if one is stored", () => {

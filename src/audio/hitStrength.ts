@@ -28,10 +28,13 @@
  * card's own disclosure — src/ui/audioMeters.ts).
  *
  * `shape.tail` is the same sort of knob for a hit's *length* rather than its
- * height: a multiple on how long the decaying pulse takes to fall (see
- * pulseDecayScale), 1 leaving every pulse exactly as it was. Smoothing
- * (sensitivity.ts's smoothingRateScale) already slows these same pulses along
- * with the level slews; Tail is the hits-only counterpart and the two multiply.
+ * height, one per lane (HitLane): a multiple on how long that lane's decaying
+ * pulse takes to fall (see pulseDecayScale), 1 leaving it exactly as it was.
+ * A multiple rather than a time because the base rates belong to the modules
+ * that build each pulse (animClock.ts, bandEnergy.ts) — the Hits card's
+ * Length rows show the time it comes to. Smoothing (sensitivity.ts's
+ * smoothingRateScale) already slows these same pulses along with the level
+ * slews; Length is the hits-only counterpart and the two multiply.
  *
  * Global per device (not per scene, unlike src/audio/sensitivity.ts and
  * src/render/sceneSettings.ts) and threaded the same way as
@@ -65,10 +68,20 @@ export interface HitShape {
   loudness: number;
   /** Graded strength below this counts as 0; the rest rescales to 0..1. */
   floor: number;
-  /** How long a hit's pulse rings out, as a multiple of today's fall:
+  /** How long each lane's pulse rings out, as a multiple of its own fall:
    *  1 = unchanged, 2 = twice as long, 0.5 = half. See pulseDecayScale. */
-  tail: number;
+  tail: HitTails;
 }
+
+/** The pulses a tail can stretch, named like AnimFrame.hitStrength's lanes:
+ *  `beat` is the broadband pulse (and everything timed like it — the
+ *  metronome and beat-grid pulses), the rest bandEnergy.ts's groups. */
+export type HitLane = "beat" | "low" | "mid" | "high";
+export type HitTails = Readonly<Record<HitLane, number>>;
+export const HIT_LANES: readonly HitLane[] = ["beat", "low", "mid", "high"];
+
+/** setHitShape's argument: any subset of the fields, and of the lanes. */
+export type HitShapePatch = Partial<Omit<HitShape, "tail">> & { tail?: Partial<HitTails> };
 
 import { registerSyncedStore } from "../net/syncedStores.ts";
 
@@ -96,18 +109,25 @@ export const HIT_FLOOR_MIN = 0;
 export const HIT_FLOOR_MAX = 0.95;
 export const HIT_FLOOR_DEFAULT = 0;
 
-// The tail's own slider range (the Hits card's Shape section) — a multiple
-// of how long a pulse takes to fall, so it's a log slider: a quarter (a
-// short, snappy flick) to four times (a slow swell) either side of 1.
+// Each lane's tail range (the Hits card's Length rows) — a multiple of how
+// long that pulse takes to fall, so it's a log slider: a quarter (a short,
+// snappy flick) to four times (a slow swell) either side of 1.
 export const HIT_TAIL_MIN = 0.25;
 export const HIT_TAIL_MAX = 4;
 export const HIT_TAIL_DEFAULT = 1;
+/** Every lane at HIT_TAIL_DEFAULT — also every lane's decay scale then. */
+export const UNIT_TAILS: HitTails = Object.freeze({ beat: 1, low: 1, mid: 1, high: 1 });
 
 const STORAGE_KEY_AMOUNT = "vibe.hitAmount";
 const STORAGE_KEY_KNEE = "vibe.hitKnee";
 const STORAGE_KEY_LOUDNESS = "vibe.hitLoudness";
 const STORAGE_KEY_FLOOR = "vibe.hitFloor";
-const STORAGE_KEY_TAIL = "vibe.hitTail";
+const STORAGE_KEY_TAIL: Readonly<Record<HitLane, string>> = {
+  beat: "vibe.hitTailBeat",
+  low: "vibe.hitTailLow",
+  mid: "vibe.hitTailMid",
+  high: "vibe.hitTailHigh",
+};
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -132,7 +152,13 @@ let amountCache = loadField(STORAGE_KEY_AMOUNT, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, 
 let kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
 let loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
 let floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
-let tailCache = loadField(STORAGE_KEY_TAIL, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
+let tailCache: HitTails = loadTails();
+
+function loadTails(): HitTails {
+  const out = {} as Record<HitLane, number>;
+  for (const lane of HIT_LANES) out[lane] = loadField(STORAGE_KEY_TAIL[lane], HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
+  return Object.freeze(out);
+}
 
 // Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
 function reload(): void {
@@ -140,10 +166,10 @@ function reload(): void {
   kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
   loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
   floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
-  tailCache = loadField(STORAGE_KEY_TAIL, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
+  tailCache = loadTails();
   snapshot = null;
 }
-for (const key of [STORAGE_KEY_AMOUNT, STORAGE_KEY_KNEE, STORAGE_KEY_LOUDNESS, STORAGE_KEY_FLOOR, STORAGE_KEY_TAIL]) {
+for (const key of [STORAGE_KEY_AMOUNT, STORAGE_KEY_KNEE, STORAGE_KEY_LOUDNESS, STORAGE_KEY_FLOOR, ...Object.values(STORAGE_KEY_TAIL)]) {
   registerSyncedStore(key, reload);
 }
 
@@ -154,7 +180,7 @@ function persist(): void {
     localStorage.setItem(STORAGE_KEY_KNEE, String(kneeCache));
     localStorage.setItem(STORAGE_KEY_LOUDNESS, String(loudnessCache));
     localStorage.setItem(STORAGE_KEY_FLOOR, String(floorCache));
-    localStorage.setItem(STORAGE_KEY_TAIL, String(tailCache));
+    for (const lane of HIT_LANES) localStorage.setItem(STORAGE_KEY_TAIL[lane], String(tailCache[lane]));
   } catch {
     // Not fatal — the setting just won't persist across reloads.
   }
@@ -173,13 +199,20 @@ export function getHitShape(): HitShape {
   return snapshot;
 }
 
-export function setHitShape(partial: Partial<HitShape>): void {
+export function setHitShape(partial: HitShapePatch): void {
   if (partial.amount !== undefined) amountCache = clampField(partial.amount, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, HIT_AMOUNT_DEFAULT);
   if (partial.knee !== undefined) kneeCache = clampField(partial.knee, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
   if (partial.loudness !== undefined)
     loudnessCache = clampField(partial.loudness, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
   if (partial.floor !== undefined) floorCache = clampField(partial.floor, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
-  if (partial.tail !== undefined) tailCache = clampField(partial.tail, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
+  if (partial.tail !== undefined) {
+    const next = { ...tailCache };
+    for (const lane of HIT_LANES) {
+      const v = partial.tail[lane];
+      if (v !== undefined) next[lane] = clampField(v, HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT);
+    }
+    tailCache = Object.freeze(next);
+  }
   persist();
 }
 
@@ -188,24 +221,36 @@ export function resetHitShape(): void {
   kneeCache = HIT_KNEE_DEFAULT;
   loudnessCache = HIT_LOUDNESS_DEFAULT;
   floorCache = HIT_FLOOR_DEFAULT;
-  tailCache = HIT_TAIL_DEFAULT;
+  tailCache = UNIT_TAILS;
   persist();
 }
 
 // ---- The pure formula --------------------------------------------------
 
-/** The factor a pulse's per-second decay rate is multiplied by for a given
- *  `shape.tail`: a longer tail is a slower fall, so 1 / tail. Exactly 1 at the
- *  default tail, so an untouched Tail leaves every pulse bit-for-bit as it
- *  was. A missing shape (previews/gallery/probes, which never get one) or a
- *  non-finite or non-positive tail reads as 1, same fallback rule as the
- *  other fields. Applied wherever a hit's decaying pulse is built: animClock.ts
- *  (beatPulse, the metronome pulses), bandEnergy.ts (each band group's pulse)
- *  and drives.ts's Fixed/Loud heights, which read it back off
- *  AnimFrame.hitTail so they fall like the pulses they stand in for. */
-export function pulseDecayScale(shape: HitShape | undefined): number {
-  const t = shape?.tail;
+/** The factor a lane's pulse decay rate is multiplied by for a given
+ *  `shape.tail[lane]`: a longer tail is a slower fall, so 1 / tail. Exactly 1
+ *  at the default tail, so an untouched Length row leaves its pulses
+ *  bit-for-bit as they were. A missing shape (previews/gallery/probes, which
+ *  never get one) or a non-finite or non-positive tail reads as 1, same
+ *  fallback rule as the other fields. Applied wherever a hit's decaying pulse
+ *  is built: animClock.ts (beatPulse, the metronome pulses), bandEnergy.ts
+ *  (each band group's pulse) and drives.ts's grid pulses and Fixed/Loud
+ *  heights, which read it back off AnimFrame.hitTail so they fall like the
+ *  pulses they stand in for. */
+export function pulseDecayScale(shape: HitShape | undefined, lane: HitLane): number {
+  const t = shape?.tail[lane];
   return t !== undefined && Number.isFinite(t) && t > 0 ? 1 / t : 1;
+}
+
+/** Every lane's pulseDecayScale at once, for AnimFrame.hitTail. */
+export function pulseDecayScales(shape: HitShape | undefined): HitTails {
+  if (shape === undefined) return UNIT_TAILS;
+  return Object.freeze({
+    beat: pulseDecayScale(shape, "beat"),
+    low: pulseDecayScale(shape, "low"),
+    mid: pulseDecayScale(shape, "mid"),
+    high: pulseDecayScale(shape, "high"),
+  });
 }
 
 /** ratio (1 = bare trigger) -> 0..1, 0 at/below the firing line. Exported on
