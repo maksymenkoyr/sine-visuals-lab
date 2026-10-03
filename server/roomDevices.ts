@@ -1,7 +1,7 @@
 /**
- * The members of a claimed room and the three choices the Room view makes for
- * each: its name, where its sound comes from (`ears`) and what its screen
- * shows (`screen`). The room stores one record per device id
+ * The members of a claimed room and the choices the Room view makes for each:
+ * its name, where its sound comes from (`ears`), what its screen shows
+ * (`screen`) and, for a TV, how finely it draws (`quality`). The room stores one record per device id
  * (server/roomCore.ts keeps them as rows, so a device that drops and comes
  * back keeps its choices), lists every record in the roster, online or not,
  * and routes feature frames by them. The client reads the same records from
@@ -22,6 +22,14 @@
  * program that Play changes. `own` keeps whatever look the device has and is
  * skipped by Play. `off` is a remote with no picture of its own. A TV page has
  * no panel to be a remote with, so it can't be `off`.
+ *
+ * Quality. The quality preset a TV renders at (src/render/quality.ts), or
+ * `auto` for the one its own GPU benchmark picks, which it says in its
+ * `hello` as `autoQuality` so the Room view can show it. A TV page has no
+ * panel to choose it in, so the room holds the choice for it, and src/tv.ts
+ * applies it as it arrives. Every record has one, but only a TV reads it: a
+ * laptop, tablet or phone sets its own Quality in its panel. `auto` is the
+ * default, which is how every TV rendered before the choice existed.
  *
  * Who decides. Any keyed member may change any device (the QR is the
  * permission: only people in the room can scan it); only the owner may forget
@@ -44,6 +52,12 @@ export const RENDER_DELAY_MS = 120;
 export type DeviceKind = "laptop" | "tablet" | "phone" | "tv";
 export type Ears = "own" | "follow";
 export type ScreenUse = "main" | "own" | "off";
+/** src/render/quality.ts's QualityPreset, spelled out because the Worker
+ *  can't import the client's render code; tests/roomDevices.test.ts checks it
+ *  against QUALITY_PRESET_ORDER. */
+export type ScreenPreset = "high" | "mid" | "low" | "floor";
+/** src/render/qualityPref.ts's QualityChoice, likewise. */
+export type ScreenQuality = "auto" | ScreenPreset;
 
 /** What the Room view sets for a device. */
 export interface DeviceSettings {
@@ -54,6 +68,8 @@ export interface DeviceSettings {
    *  so switching back to follow returns to the same feed. */
   follow: string | null;
   screen: ScreenUse;
+  /** The quality a TV renders at; see the header. */
+  quality: ScreenQuality;
 }
 
 /** What a device is, as it says itself when it joins (and may update in a hello). */
@@ -77,6 +93,7 @@ export interface DeviceSetPatch {
   ears?: Ears;
   follow?: string | null;
   screen?: ScreenUse;
+  quality?: ScreenQuality;
 }
 
 export const DEVICE_LIMITS = {
@@ -98,6 +115,14 @@ export function parseEars(v: unknown): Ears | undefined {
 
 export function parseScreen(v: unknown): ScreenUse | undefined {
   return v === "main" || v === "own" || v === "off" ? v : undefined;
+}
+
+export function parsePreset(v: unknown): ScreenPreset | undefined {
+  return v === "high" || v === "mid" || v === "low" || v === "floor" ? v : undefined;
+}
+
+export function parseQuality(v: unknown): ScreenQuality | undefined {
+  return v === "auto" ? v : parsePreset(v);
 }
 
 /** The kind a device that didn't say is assumed to be, from its role. */
@@ -128,6 +153,7 @@ export function defaultSettings(role: RoomRole, traits: DeviceTraits, name?: str
     ears: own ? "own" : "follow",
     follow: null,
     screen: !own && traits.kind === "phone" ? "off" : "main",
+    quality: "auto",
   };
 }
 
@@ -160,6 +186,11 @@ export function sanitizeDeviceSet(
     if (screen === undefined) return null;
     patch.screen = screen;
   }
+  if (msg.quality !== undefined) {
+    const quality = parseQuality(msg.quality);
+    if (quality === undefined) return null;
+    patch.quality = quality;
+  }
   if (Object.keys(patch).length === 0) return null;
   return { targetId: msg.targetId, patch };
 }
@@ -187,6 +218,8 @@ export function parseRecord(raw: string): DeviceRecord | null {
     ears,
     follow: r.follow,
     screen,
+    // A row stored before the choice existed has none: `auto`, as it rendered then.
+    quality: parseQuality(r.quality) ?? "auto",
     kind,
     hasMic: r.hasMic === true,
     role,
@@ -271,6 +304,7 @@ export function applyDeviceSet(
     if (patch.ears === undefined) next.ears = "follow";
   }
   if (patch.screen !== undefined) next.screen = patch.screen;
+  if (patch.quality !== undefined) next.quality = patch.quality;
 
   // Only what the patch sets is checked: a record that is already odd (an
   // owner without a mic, say) can still be renamed or given another screen.

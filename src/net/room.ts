@@ -22,6 +22,7 @@ import {
   type DeviceKind,
   type DeviceRecord,
   type DeviceSetPatch,
+  type ScreenPreset,
 } from "../../server/roomDevices.ts";
 
 // The roster shape lives with the rest of the JSON vocabulary (roomMessages.ts);
@@ -210,7 +211,7 @@ abstract class RoomConnectionBase {
   // than silently dropping it, or the device would never appear in anyone's
   // roster. Kept after sending too: a reconnect is a new socket the room has
   // never heard from, so it needs the same hello again.
-  private lastHello: { scene: string; palette: string; viewport?: Viewport } | null = null;
+  private lastHello: { scene: string; palette: string; viewport?: Viewport; autoQuality?: ScreenPreset } | null = null;
 
   private readonly code: string;
   private readonly role: RoomRole;
@@ -261,7 +262,7 @@ abstract class RoomConnectionBase {
     return this.roster;
   }
 
-  /** This device's own roster entry (its stored name, ears and screen), or
+  /** This device's own roster entry (its stored name, ears, screen and quality), or
    *  null until the room has listed it. */
   get self(): RosterEntry | null {
     for (const e of this.roster) if (e.deviceId === this.deviceId) return e;
@@ -315,15 +316,16 @@ abstract class RoomConnectionBase {
   }
 
   /** Announce (or update) this device's own scene/palette(+viewport) so the roster stays current.
-   *  `viewport` is optional — omit it to leave the room's idea of this device's slice untouched. */
-  sendHello(scene: string, palette: string, viewport?: Viewport): void {
+   *  `viewport` is optional — omit it to leave the room's idea of this device's slice untouched.
+   *  `autoQuality` is a TV's: the preset its GPU benchmark picks (roomMessages.ts `hello`). */
+  sendHello(scene: string, palette: string, viewport?: Viewport, autoQuality?: ScreenPreset): void {
     // A later hello that omits the viewport must not forget an earlier one
     // when it is replayed to a fresh socket.
-    this.lastHello = { scene, palette, viewport: viewport ?? this.lastHello?.viewport };
-    this.sendRaw(JSON.stringify({ type: "hello", scene, palette, viewport }));
+    this.lastHello = { scene, palette, viewport: viewport ?? this.lastHello?.viewport, autoQuality: autoQuality ?? this.lastHello?.autoQuality };
+    this.sendRaw(JSON.stringify({ type: "hello", scene, palette, viewport, autoQuality }));
   }
 
-  /** Change one member's name, ears or screen (roomMessages.ts `deviceSet`;
+  /** Change one member's name, ears, screen or quality (roomMessages.ts `deviceSet`;
    *  server/roomDevices.ts has what each means). The answer is a new roster, or
    *  `onDeviceReject`. False when the socket is not open, so nothing was sent. */
   sendDeviceSet(targetId: string, patch: DeviceSetPatch): boolean {

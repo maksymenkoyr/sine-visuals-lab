@@ -13,6 +13,8 @@ import {
   ownerId,
   parseEars,
   parseKind,
+  parsePreset,
+  parseQuality,
   parseRecord,
   parseScreen,
   pictureDelayMs,
@@ -20,6 +22,8 @@ import {
   type DeviceRecord,
 } from "../server/roomDevices.ts";
 import { validDeviceId } from "../server/roomRules.ts";
+import { QUALITY_PRESET_ORDER } from "../src/render/quality.ts";
+import { QUALITY_OPTIONS } from "../src/render/qualityPref.ts";
 
 function rec(over: Partial<DeviceRecord> = {}): DeviceRecord {
   return {
@@ -27,6 +31,7 @@ function rec(over: Partial<DeviceRecord> = {}): DeviceRecord {
     ears: "follow",
     follow: null,
     screen: "main",
+    quality: "auto",
     kind: "tablet",
     hasMic: true,
     role: "controller",
@@ -85,11 +90,11 @@ describe("cleanName", () => {
 
 describe("defaultSettings", () => {
   it("gives the owner its own input and Main", () => {
-    expect(defaultSettings("host", { kind: "laptop", hasMic: true })).toEqual({ name: "Laptop", ears: "own", follow: null, screen: "main" });
+    expect(defaultSettings("host", { kind: "laptop", hasMic: true })).toEqual({ name: "Laptop", ears: "own", follow: null, screen: "main", quality: "auto" });
   });
 
   it("makes a TV follow the owner and show Main", () => {
-    expect(defaultSettings("renderer", { kind: "tv", hasMic: false })).toEqual({ name: "TV", ears: "follow", follow: null, screen: "main" });
+    expect(defaultSettings("renderer", { kind: "tv", hasMic: false })).toEqual({ name: "TV", ears: "follow", follow: null, screen: "main", quality: "auto" });
   });
 
   it("makes a tablet follow and show Main, but a phone follow and be a remote", () => {
@@ -112,6 +117,8 @@ describe("sanitizeDeviceSet", () => {
     expect(clean({ targetId: "tv", follow: "pad" })).toEqual({ targetId: "tv", patch: { follow: "pad" } });
     expect(clean({ targetId: "tv", screen: "off" })).toEqual({ targetId: "tv", patch: { screen: "off" } });
     expect(clean({ targetId: "tv", ears: "follow", screen: "own" })).toEqual({ targetId: "tv", patch: { ears: "follow", screen: "own" } });
+    expect(clean({ targetId: "tv", quality: "low" })).toEqual({ targetId: "tv", patch: { quality: "low" } });
+    expect(clean({ targetId: "tv", quality: "auto" })).toEqual({ targetId: "tv", patch: { quality: "auto" } });
   });
 
   it("takes follow: null as the owner", () => {
@@ -128,6 +135,8 @@ describe("sanitizeDeviceSet", () => {
     expect(clean({ targetId: "tv", follow: "bad id" })).toBeNull();
     expect(clean({ targetId: "tv", follow: 3 })).toBeNull();
     expect(clean({ targetId: "tv", screen: "wall" })).toBeNull();
+    expect(clean({ targetId: "tv", quality: "ultra" })).toBeNull();
+    expect(clean({ targetId: "tv", quality: null })).toBeNull();
     // One bad field refuses the lot, even beside good ones.
     expect(clean({ targetId: "tv", screen: "off", ears: "loud" })).toBeNull();
   });
@@ -142,6 +151,13 @@ describe("parseRecord", () => {
   it("round-trips a record through its row text", () => {
     const r = rec({ name: "Pad", ears: "own", follow: "laptop", added: 12, seen: 34 });
     expect(parseRecord(JSON.stringify(r))).toEqual(r);
+  });
+
+  it("reads a row stored before quality existed, or with a quality it doesn't know, as auto", () => {
+    const { quality: _, ...old } = rec({ quality: "low" });
+    expect(parseRecord(JSON.stringify(old))?.quality).toBe("auto");
+    expect(parseRecord(JSON.stringify({ ...rec(), quality: "ultra" }))?.quality).toBe("auto");
+    expect(parseRecord(JSON.stringify(rec({ quality: "floor" })))?.quality).toBe("floor");
   });
 
   it("reads hasMic as false unless it is exactly true", () => {
@@ -215,11 +231,26 @@ describe("ownerId, feedOf and followersOf", () => {
   });
 });
 
+describe("parseQuality and parsePreset", () => {
+  it("accept exactly the client's quality choices and presets (render/qualityPref.ts, render/quality.ts)", () => {
+    for (const p of QUALITY_PRESET_ORDER) expect(parsePreset(p)).toBe(p);
+    for (const o of QUALITY_OPTIONS) expect(parseQuality(o.choice)).toBe(o.choice);
+    expect(parsePreset("auto")).toBeUndefined();
+    for (const bad of ["ultra", "", null, undefined, 1, "toString"]) expect(parseQuality(bad)).toBeUndefined();
+  });
+});
+
 describe("applyDeviceSet", () => {
   const ok = (r: ReturnType<typeof applyDeviceSet>) => {
     if (!r.ok) throw new Error(`refused: ${r.reason}`);
     return r.changed;
   };
+
+  it("sets a quality on the target alone", () => {
+    const changed = ok(applyDeviceSet(room(), "tv", { quality: "low" }));
+    expect([...changed.keys()]).toEqual(["tv"]);
+    expect(changed.get("tv")?.quality).toBe("low");
+  });
 
   it("refuses an unknown target", () => {
     expect(applyDeviceSet(room(), "nobody", { screen: "own" })).toEqual({ ok: false, reason: "unknown" });
