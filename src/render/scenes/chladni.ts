@@ -668,8 +668,12 @@ const LIFT_PER_WEIGHT = 1.0;
 // units per second, per unit of drive^2 times the gradient of the plate's
 // squared motion across one nodal cell.
 const STREAM_RATE = 0.3;
+// A grain hopping this far (grainHopScale x grainBounce) is drawn at the
+// palette ramp's brightest end: an antinode under a loud drive or a kick.
+const MOTION_FULL = 1.0;
 // Treble glow (see POINT_VERT / POINT_FRAG): hats make the sand glint. One
-// grain in GLINT_ONE_IN carries a halo of HALO_PX pixels (at 720p) — a
+// grain in GLINT_ONE_IN (times the Sand amount above 1, so piling on sand
+// doesn't pile on bloom) carries a halo of HALO_PX pixels (at 720p) — a
 // fixed pixel radius, not a multiple of the grain size, so the halo is a
 // bloom around the grain and never a bigger grain. Spreading the light over
 // a few grains instead of all of them keeps each halo above the 8-bit
@@ -678,6 +682,33 @@ const HALO_PX = 10.0;
 const GLINT_ONE_IN = 8;
 // Bloom a fully glowing line reaches, summed over its glinting grains.
 const HALO_GAIN = 11.0;
+
+// How hard the music drives the plate, and how far a grain of weight w hops
+// on it — shared by the sim, which moves the grain by it, and the point pass,
+// which colours the grain by it, so a grain is drawn as thrown only while it
+// really is (not merely for lying on an antinode, where powder heaps).
+const GRAIN_MOTION_GLSL = `
+// Sustained energy plus a bass-onset kick; silence -> ~0 -> the figure
+// freezes. Vibration on a sub-linear curve so the low half of the slider is a
+// usable whisper while the top of the slider still throws sand hard.
+float plateDrive() {
+  float shake = pow(uShake, 1.5) * 2.0;
+  return shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uLowPulse) * 1.5;
+}
+// Weight (see file header): air drag cuts a light grain's hop short, and fine
+// powder clings, so it needs a harder plate to lift.
+float grainHopScale(float w) {
+  return 1.0 + ${HOP_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)});
+}
+float grainLift(float w) {
+  return ${LIFT_THRESHOLD.toFixed(2)} * (1.0 - ${LIFT_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)}));
+}
+// A soft lift on the local plate acceleration: accel^2 / T below the knee (a
+// rattle in place), accel - T above it (a free bounce).
+float grainBounce(float accel, float lift) {
+  return accel * accel / (accel + lift);
+}
+`;
 
 const SIM_FRAG = `#version 300 es
 precision highp float;
@@ -691,18 +722,14 @@ uniform float uSimDt;
 uniform float uSeed;
 uniform float uMaxOrder; // highest m among the active modes, for the step cap
 ${CHLADNI_GLSL}
+${GRAIN_MOTION_GLSL}
 
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
   vec2 p = unpackPos(texelFetch(uPosTex, texel, 0));
   vec2 seed = gl_FragCoord.xy * 0.173 + uSeed;
 
-  // How hard the plate is being driven right now: sustained energy plus a
-  // bass-onset kick. Silence -> ~0 -> the figure freezes.
-  // Vibration on a sub-linear curve so the low half of the slider is a usable
-  // whisper while the top of the slider still throws sand hard.
-  float shake = pow(uShake, 1.5) * 2.0;
-  float drive = shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uLowPulse) * 1.5;
+  float drive = plateDrive();
 
   float f = field(p);
   float a = abs(f) * 0.5;
@@ -710,14 +737,12 @@ void main() {
   // This grain's weight (see file header): how far it hops, how hard the
   // plate must shake to lift it, and how readily its bounces walk it to a line.
   float w = grainWeight(vec2(texel));
-  float hopScale = 1.0 + ${HOP_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)});
-  float lift = ${LIFT_THRESHOLD.toFixed(2)} * (1.0 - ${LIFT_PER_WEIGHT.toFixed(2)} * (w - ${WEIGHT_REF.toFixed(2)}));
+  float hopScale = grainHopScale(w);
+  float lift = grainLift(w);
   float pullScale = w / ${WEIGHT_REF.toFixed(2)};
 
-  // Local plate acceleration, and a soft lift: accel^2 / T below the knee
-  // (a rattle in place), accel - T above it (a free bounce).
   float accel = a * drive;
-  float bounce = accel * accel / (accel + lift);
+  float bounce = grainBounce(accel, lift);
 
   // Random bounce. sqrt(dt) so the random walk diffuses at the same rate at
   // any frame pace; the step is HOP_RATE-sized at the 60 fps reference.
@@ -797,7 +822,8 @@ uniform sampler2D uPosTex;
 uniform float uSide;
 uniform float uGrainGain;
 ${CHLADNI_GLSL}
-out float vAmp;
+${GRAIN_MOTION_GLSL}
+out float vMotion;
 out float vGlow;
 out float vSizePx;
 out float vScale;
@@ -811,7 +837,6 @@ void main() {
   int side = int(uSide);
   ivec2 texel = ivec2(gl_VertexID % side, gl_VertexID / side);
   vec2 p = unpackPos(texelFetch(uPosTex, texel, 0));
-  vAmp = amp(p);
   vec2 room = 0.5 + p * plateHalf();
   vec2 dev = (room - uViewport.xy) / uViewport.zw;
   gl_Position = vec4(dev * 2.0 - 1.0, 0.0, 1.0);
@@ -820,6 +845,8 @@ void main() {
   // grains rather than a smooth blob.
   vec2 jitter = hash22(vec2(texel) * 0.731 + 3.17);
   float w = grainWeight(vec2(texel));
+  // How far this grain is being thrown right now — see GRAIN_MOTION_GLSL.
+  vMotion = clamp(grainHopScale(w) * grainBounce(amp(p) * plateDrive(), grainLift(w)) / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0);
   vShade = 0.8 + 0.4 * jitter.y;
   // Each grain is a faceted shard (3 or 4 sides, POINT_FRAG), not a disc —
   // real sand is angular. Random facet count and rotation per grain, same
@@ -830,7 +857,7 @@ void main() {
   // Treble glow: the sprite grows by a fixed pixel margin to make room for
   // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
   // flashes rather than fogs.
-  float glint = step(1.0 - 1.0 / ${GLINT_ONE_IN.toFixed(1)}, hash21(vec2(texel) * 0.517 + 9.1));
+  float glint = step(1.0 - 1.0 / (${GLINT_ONE_IN.toFixed(1)} * max(1.0, uSandAmount)), hash21(vec2(texel) * 0.517 + 9.1));
   vGlow = glint * clamp(uHighGlow * highGlowDrive(0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
   float resScale = max(1.0, uResolution.y / 720.0);
   // A shard inscribed in the old disc covers less area than it (a triangle
@@ -847,12 +874,9 @@ void main() {
   // Grains take the bright half of the room palette's ramp, which every
   // palette keeps bright (see palette.ts): settled grains sit in its middle,
   // thrown grains run up to its brightest end.
-  vec3 col = palRamp(0.55 + 0.45 * vAmp);
+  vec3 col = palRamp(0.55 + 0.45 * vMotion);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
-  // Fine powder is chalkier still, so its heaps on the antinodes (where the
-  // ramp runs brightest) read as dust rather than as thrown sand.
-  float chalk = max(0.15 * (1.0 - vAmp), 0.5 * grainLightness(w));
-  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), chalk);
+  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vMotion));
   float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 2.0);
   vCol = col * bright;
   // The halo's tint and its area normalisation (see POINT_FRAG), without the
@@ -864,7 +888,7 @@ void main() {
 
 const POINT_FRAG = `#version 300 es
 precision highp float;
-in float vAmp;
+in float vMotion;
 in float vGlow;
 in float vSizePx;
 in float vScale;

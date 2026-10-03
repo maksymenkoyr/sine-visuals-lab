@@ -200,10 +200,24 @@ measured from a reference clip.
   All weight factors are 1 at `WEIGHT_REF`, the default, which is the plate
   as it was; the default Size mix reproduces the old ±25% size scatter. The
   streaming fades out by `GRAIN_HEAVY`, below the default weight, so the
-  default bed is sand with only its lightest grains slightly carried. Powder
-  is drawn chalkier so its heaps read as dust rather than thrown sand.
+  default bed is sand with only its lightest grains slightly carried.
   `drawnGrainCount` takes the bed's mean squared size (`grainSizeMoment`), so
   a powder bed draws more grains under the coverage cap than a grit bed.
+
+- 2026-10-04 (same PR, review): "all these 3 affecting colour in a weird
+  way" — Sand amount, Grain weight and Size mix all washed the sand toward
+  grey-white. Cause: a grain's colour was keyed to the plate's amplitude
+  where it lies (`amp(p)`), on the assumption that anything on an antinode
+  is being thrown, so all three dials changed the colour by changing how much
+  sand rests on the antinodes: powder heaps there, a light bed is all
+  powder, extra sand sits there unsorted. On top of that, the first cut drew
+  powder chalkier, and glinting grains (additive, white-tinted halos) grew in
+  number with Sand amount. Now the colour follows how far the grain is
+  really hopping (`GRAIN_MOTION_GLSL`, shared with the sim, full at
+  `MOTION_FULL`), the powder chalk is gone, and the glint share is divided
+  by the Sand amount above 1. Mean saturation of the lit sand over three
+  frames, Sand 3.09 / weight 0.27 / mix 0.08: 0.15 (71% of it grey) →
+  0.46–0.54, against 0.36–0.58 for the default bed.
 
 ## Tuning notes
 
