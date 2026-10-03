@@ -8,17 +8,25 @@
 // loop, framing, and the two instanced draws. docs/scenes/swarm.md is the
 // record (what it was built from, what was tried).
 //
-// Sync mapping (drives, not fixed couplings -- see drives.ts's header):
-// Breath is the core's attraction swinging with the beat wave, once every two
-// beats by default (a Scene source: DriveSource.every can't be set from a
-// setting's own default, and one swing a beat is too fast for the swarm to
-// follow). Scatter knocks a small share of the
-// particles out of step on a hit; they fly out to the rim and fall back in as
-// they re-sync, which also keeps the core loose enough to breathe (with no
-// hits at all it packs tight and still, the reference's settled state). Heat is the phase
-// noise, riding the overall level. Re-collapse throws the whole swarm back
-// out to the scattered start on a drop and collapses it again; the scene also
-// collapses once on start.
+// Sync mapping (drives, not fixed couplings -- see drives.ts's header). Two
+// speeds, because the physics is slow: the core's attraction takes most of a
+// beat to move it, so anything that must land *on* a hit is drawn, not
+// simulated.
+// - Simulated, slow: Breath is the core's attraction swinging with the beat
+//   wave, once every two beats by default (a Scene source:
+//   DriveSource.every can't be set from a setting's own default, and one
+//   swing a beat is too fast for the swarm to follow). Scatter knocks a small
+//   share of the particles out of step on a bass hit; they fly out to the rim
+//   and fall back in as they re-sync, which also keeps the core loose enough
+//   to breathe (with no hits it packs tight and still, the reference's
+//   settled state). Heat is the phase noise, riding the overall level.
+//   Re-collapse throws the swarm back out to the scattered start on a drop;
+//   the scene also collapses once on start.
+// - Drawn, on the hit: Thump swells the whole swarm on screen (THUMP_SCALE)
+//   and Beat flash lifts the lines and dots (FLASH_GAIN), both riding the
+//   hit's own decaying pulse. Bass hits by default for all three hit
+//   settings: a DJ track fires onsets several times a beat, which dissolved
+//   the core (Scatter) and blurred the flash into flicker.
 //
 // Time: the sim runs on a fixed 1/60 step with an accumulator, at most four
 // steps a frame (the remainder is dropped on a stall), from this scene's own
@@ -70,6 +78,12 @@ const NODE_RADIUS_PX = 1.4;
 /** Edge brightness at Lines = 1 (the prototype's own value, then tuned). */
 const EDGE_ALPHA = 0.22;
 const NODE_ALPHA = 0.8;
+/** How far Beat flash lifts the lines and dots at full: × (1 + this). */
+const FLASH_GAIN = 3.5;
+/** How far Thump swells the swarm on screen at full: × (1 + this). The
+ *  physics is too slow to answer a single hit (its attraction takes most of
+ *  a beat to move the core), so the per-hit snap is drawn, not simulated. */
+const THUMP_SCALE = 0.22;
 const EDGE_REACH_WORLD = 90;
 /** World-to-screen zoom at Size 1: the sim's rim settles at 0.41
  *  half-heights (measured on our frames, 2026-10-03) and the reference's at
@@ -133,7 +147,21 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.4,
-    drive: { default: "feature.onset" },
+    // Bass hits, not every onset: real music fires onsets several times a
+    // beat, and a share flung that often never lets the core re-form
+    // (measured 2026-10-03: a uniform disc on a 129 bpm DJ track).
+    drive: { default: "anim.lowOnset" },
+  },
+  {
+    key: "thump",
+    label: "Thump",
+    description: "How much the whole swarm swells on a hit, then settles back",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "heat",
@@ -177,6 +205,20 @@ const SETTINGS: SceneSetting[] = [
     max: 2,
     step: 0.05,
     default: 1,
+  },
+  {
+    key: "flash",
+    label: "Beat flash",
+    description: "Brightness punch on each hit — the lines and dots flare, then fade",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // Bass hits: on Any hit a DJ track fires several times a beat and the
+    // flash blurs into flicker (measured 2026-10-03); on the kick it reads
+    // as a pulse. Any hit stays a pick in the panel.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "reach",
@@ -353,6 +395,10 @@ function createSwarmScene(): Scene {
       const reach = resolveSceneSetting(ID, settingFor("reach"));
       const colours = resolveSceneSetting(ID, settingFor("colours"));
       const size = resolveSceneSetting(ID, settingFor("size"));
+      const flash = resolveSceneSetting(ID, settingFor("flash"));
+      const thump = resolveSceneSetting(ID, settingFor("thump"));
+      const flashPulse = flash > 0.02 ? clamp01(drives.value("flash", anim.lowPulse)) : 0;
+      const thumpPulse = thump > 0.02 ? clamp01(drives.value("thump", anim.lowPulse)) : 0;
 
       // The Scene breath: the Beat wave slowed to one swing every two beats --
       // 1 on every other beat, 0 on the ones between, fading with the
@@ -365,8 +411,8 @@ function createSwarmScene(): Scene {
       lastWave = clamp01(drives.value("breath", halfWave, 0.5));
 
       // Edges (a hit, a drop) are consumed once a render, not once a step.
-      if (scatter > 0.02 && drives.fired("scatter", anim.onset)) {
-        scatterPhases(s, Math.min(1, scatter * drives.value("scatter", anim.beatPulse)));
+      if (scatter > 0.02 && drives.fired("scatter", anim.lowOnset)) {
+        scatterPhases(s, Math.min(1, scatter * drives.value("scatter", anim.lowPulse)));
       }
       if (collapse > 0.02 && drives.fired("collapse", anim.dropOnset)) {
         rescatter(s, rng, spawnHalfW);
@@ -419,7 +465,8 @@ function createSwarmScene(): Scene {
       const pxScale = roomH / REF_PX_HEIGHT;
       const halfW = Math.max(0.5, (STROKE_PX * pxScale) / 2);
       const radius = Math.max(1, NODE_RADIUS_PX * pxScale);
-      const worldScale = (FRAME_SCALE * size * roomH * 0.5) / WORLD_HALF_HEIGHT;
+      const worldScale = (FRAME_SCALE * size * (1 + THUMP_SCALE * thump * thumpPulse) * roomH * 0.5) / WORLD_HALF_HEIGHT;
+      const flashLift = 1 + FLASH_GAIN * flash * flashPulse;
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, resW, resH);
@@ -443,7 +490,7 @@ function createSwarmScene(): Scene {
         edgeProg.use();
         common(edgeProg);
         edgeProg.setF("uHalfW", halfW);
-        edgeProg.setF("uGain", EDGE_ALPHA * lines);
+        edgeProg.setF("uGain", EDGE_ALPHA * lines * flashLift);
         gl.bindVertexArray(edgeVao);
         gl.bindBuffer(gl.ARRAY_BUFFER, edgeBuf);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeData, 0, nEdges * EDGE_STRIDE);
@@ -454,7 +501,7 @@ function createSwarmScene(): Scene {
         nodeProg.use();
         common(nodeProg);
         nodeProg.setF("uRadius", radius);
-        nodeProg.setF("uNodeGain", NODE_ALPHA);
+        nodeProg.setF("uNodeGain", NODE_ALPHA * flashLift);
         gl.bindVertexArray(nodeVao);
         gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuf);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, nodeData, 0, s.count * 3);

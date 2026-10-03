@@ -8,7 +8,8 @@ follows crowding: the packed core is white, the rim magenta to rose, its
 loosest tips orange-red and lime. A hit knocks a few particles out of step
 (they fly out to the rim and fall back in as they re-sync), loudness adds
 phase jitter, and a drop throws the whole swarm back out so it collapses
-again. Draft; on its own branch, not yet on main.
+again. On every bass hit the whole swarm thumps (swells on screen) and its
+lines flash. Draft; on its own branch, not yet on main.
 
 ## Where the code is
 
@@ -20,8 +21,9 @@ again. Draft; on its own branch, not yet on main.
   tuned constants, `SCATTER_MAX_SHARE`, `DENSE_NEIGHBOURS` and
   `CROWD_DIMMING` the hit and colour rules.
 - `src/render/scenes/swarm/index.ts` is the scene: `SETTINGS`, the drive reads
-  (`drives.value` for Breath and Heat, `drives.fired` for Scatter and
-  Re-collapse), the Scene breath wave, the fixed-step loop, framing
+  (`drives.value` for Breath, Heat, Thump and Beat flash, `drives.fired`
+  for Scatter and Re-collapse), the Scene breath wave, the drawn hit
+  reactions (`THUMP_SCALE`, `FLASH_GAIN`), the fixed-step loop, framing
   (`FRAME_SCALE`), `TIER_PARTICLES`.
 - `src/render/scenes/swarm/glsl.ts` is the two programs (instanced edge quads,
   instanced node sprites) and the crowd ramp (`RAMP_GLSL`).
@@ -74,6 +76,19 @@ by `scripts/measure_pngs.py`; r in half-heights from the lit centroid):
 
 The reference's breath period follows its Drag slider: ≈0.5 → 0.77 s;
 ≈0.21–0.35 → 0.88–1.0 s; ≥0.71 → no pulse.
+
+2026-10-03, reaction on real music (the user: "it doesn't react to music
+much"). Track: the cached `/ref` bundle `alt-kaleido`'s audio.wav (a 129 bpm
+DJ-set clip) as the fake mic, 10–26 s, shots back to back at ~27–35/s,
+scored by `swarm/scripts/react_score.py` against that bundle's librosa
+onsets (106 in the window, ≈6.6/s):
+
+| | Before | After |
+|---|---|---|
+| Picture | uniform grey disc, no core | core + gap + rim |
+| Brightness p10→p90 swing | 2 % | 75 % |
+| Change per 100 ms, 200 ms after an onset vs elsewhere | 1.04× | 1.98× |
+| Per kick (trace) | — | +40 % brightness, +6.5 % radius, decaying over the beat |
 
 ## Decisions and pivots
 
@@ -141,13 +156,34 @@ The reference's breath period follows its Drag slider: ≈0.5 → 0.77 s;
     (Local *agreement* — mean cos of phase differences — was tried first and
     never crossed the lock threshold: it behaves like local order squared.)
 
+- **2026-10-03, "it doesn't react to music much":** measured, it didn't —
+  on a real DJ track the picture's change after an onset was the same as
+  anywhere else, and the core never formed: onsets fire several times a
+  beat there (vs about once on the synthetic feed), and Scatter on every
+  onset kept the swarm a uniform grey disc, which also hid the breath.
+  - Scatter now defaults to bass hits.
+  - The physics can't answer a single hit: a velocity kick on the core
+    (`punchCore`, tried and removed) inflated the swarm for good at every
+    strength that showed; releasing the core's attraction on the hit widened
+    it on average but barely moved it inside a beat
+    (`swarm/scripts/bench_punch.ts`).
+  - So the per-hit snap is drawn: **Thump** (the swarm swells on screen,
+    `THUMP_SCALE`) and **Beat flash** (lines and dots lift, `FLASH_GAIN`),
+    both on bass hits. Beat flash on Any hit was tried first: at several
+    onsets a beat it blurred into flicker.
+
 ## Tuning notes
 
 - The settings that shape the picture: Sync (phase coupling — how much of the
   swarm locks), Drifters (spread of natural rates — the rim's fullness),
   Breath, Scatter, Heat, Damping.
 - Scatter and Sync trade off: more Scatter wants more Sync, or the core
-  dissolves into a uniform disc.
+  dissolves into a uniform disc — and the hit rate matters as much: wire
+  Scatter to Any hit on busy music and the core never forms.
+- Thump and Beat flash are the settings that make it read as "reacting";
+  the physics settings (Breath, Scatter, Heat) move it more slowly.
+- Judge reactions on real music, not the synthetic feed (it fires about one
+  hit a beat, far fewer than a real track).
 - Particles follows the quality preset until moved (`TIER_PARTICLES`); the
   sim cost grows with the square of the count (about 1.2 ms a step at the mid
   tier's count, measured 2026-10-03 in node).
@@ -164,7 +200,8 @@ The reference's breath period follows its Drag slider: ≈0.5 → 0.77 s;
   spread sheet is magenta in the middle.
 - The edge buffer holds a capped number of edges per particle; a very dense
   core at high Reach drops the rest silently.
-- Re-collapse on a drop, and every default, still need a real-music run.
+- Re-collapse on a drop has not been seen on a real track yet; the hit
+  reactions were measured on one track only.
 
 ## Materials
 
@@ -183,6 +220,12 @@ The reference's breath period follows its Drag slider: ≈0.5 → 0.77 s;
   - `scripts/shot.mjs` (headless shots of the live scene), `probe.mjs`
     (metronome lock on the synthetic feed), `measure_pngs.py` (the
     reference's radius metric on our shots), `tile.py` (side-by-side strips).
+- `swarm/scripts/` — the real-music reaction check: `react_shots.mjs`
+  (plays a `/ref` bundle's audio.wav into the scene as the mic and shoots
+  back to back), `react_score.py` (reaction ratio and brightness swing
+  against the bundle's onsets), `react_trace.py` (per-shot brightness and
+  radius with the onsets marked), `bench_punch.ts` (can the physics answer
+  one hit).
 - The reference video, frames and comparison strips: the local `/ref` cache
   (`tools/.cache/refs/entropic-collapse/`, video under `_downloads/`) and the
   private archive (`tools/ref-archive.py`).
