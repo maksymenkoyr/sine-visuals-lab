@@ -120,7 +120,20 @@ and are not recorded here yet.
   cup); it needs a dedicated over-the-head arm drawing.
 - Not yet heard on real music: the sync is tested only with synthetic audio.
 - No `minQuality`; the canvas width scales with quality but it has not been
-  benchmarked on a low-end device.
+  benchmarked on a low-end device. Software rendering (SwiftShader, as in
+  `tools/tune-sheet.mjs`) runs it at only about 20–25 fps; a real GPU holds the
+  display rate.
+- Some shot framings, kept from the prototype, read awkwardly:
+  - In the build, the raver shot shows the pompadour guy's dangling feet across
+    its top and crops the raver's chin.
+  - The button shot crops the DJ's face out entirely.
+  - The pomp shot is tight on the gag at its landing.
+
+  Each is one rectangle in `motion.ts`'s shot table. Changing one also means
+  updating the camera values in `tests/toonraveMotion.golden.ts`.
+- The first cut after load can come before the tempo lock arrives, so it may miss
+  the bar line. `conductor.ts` snaps to the grid on the first lock; every later
+  cut lands on the bar.
 
 ## Materials
 
