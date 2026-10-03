@@ -628,9 +628,9 @@ export interface DeviceMenuDeps {
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
   /** The master's Expansion dial (sceneSettings.ts's getSceneExpansion) —
-   *  the Input card's Expansion curve over every numeric scene param's
-   *  slider position, applied after Scale in resolveSceneSetting. Device-
-   *  local like Scale. */
+   *  how far and how long every drive reading may pull the picture away
+   *  from the normal line Scale sets (drives.ts's header, "Master
+   *  Expansion"). Device-local like Scale. */
   getSceneExpansion: () => number;
   onSceneExpansionChange: (value: number) => void;
   /** This tick's picture reading for the Master card's Picture block — null
@@ -4605,9 +4605,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoMasterInner.append(autoMasterLabel, autoMasterSub);
   autoMasterBtn.appendChild(autoMasterInner);
 
-  // Master: device-wide dials over every numeric scene param — Scale and
-  // Expansion — applied at autoTune.ts's resolveSceneSetting (once, never on drives,
-  // enums/booleans, or the Input card's gain stages — see that doc). Sits
+  // Master: device-wide dials. Scale sets every numeric scene param's normal
+  // line at autoTune.ts's resolveSceneSetting (once, never on drives,
+  // enums/booleans, or the Input card's gain stages — see that doc);
+  // Expansion sets how far and how long the music pulls the picture away
+  // from it, in the drive engine (drives.ts's header, "Master Expansion"). Sits
   // between the Auto bar and Input as its own always-visible card: it is
   // not part of the auto system, and unlike the Scene card below it must
   // not disappear on a scene that declares no settings of its own — those
@@ -4636,9 +4638,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "Scales every scene param at once — 1 is as dialed",
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
-  // The Input card's Expansion, over the scene's params instead of the
-  // mic's levels — same range, log slider and readout as that row, so the
-  // two read as the same control (see resolveSceneSetting for the curve).
+  // Same range, log slider and readout as the Input card's Expansion row.
+  // Acts on every drive reading around its own recent level — see
+  // drives.ts's header, "Master Expansion".
   const masterExpansionRow = createControlRow({
     label: "Expansion",
     accent: SCENE_VIOLET,
@@ -4648,7 +4650,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     mapping: "log",
     unit: "×",
     format: formatGain,
-    description: "Pushes every scene param away from the middle of its slider — 1 is as dialed",
+    description: "How far the music pulls the picture from its normal, and how long it stays away — 1 is as dialed",
   });
   masterExpansionRow.onChange((value) => deps.onSceneExpansionChange(value));
   masterCard.body.append(masterRow.el, masterExpansionRow.el);

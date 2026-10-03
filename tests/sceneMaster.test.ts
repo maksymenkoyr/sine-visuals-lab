@@ -22,7 +22,7 @@ import {
   setAutoEnabled,
   SENSITIVITY_AUTO_KEY,
 } from "../src/render/autoTune.ts";
-import { setSensitivity, shapeExpansion } from "../src/audio/sensitivity.ts";
+import { setSensitivity } from "../src/audio/sensitivity.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { clearAllPins, setPin } from "../src/tuning/pins.ts";
 
@@ -170,11 +170,8 @@ describe("resolveSceneSetting applies the master", () => {
   });
 });
 
-describe("resolveSceneSetting applies the master's Expansion", () => {
-  // A range that doesn't start at 0, so a slip between value and slider
-  // position (forgetting to subtract min) can't pass by accident.
-  const WIDE: SceneSetting = { key: "wide", label: "Wide", min: 2, max: 6, step: 0.1, default: 4 };
-
+describe("the master's Expansion leaves setting values alone", () => {
+  // It reshapes drive readings instead — tests/masterExpansion.test.ts.
   it("stores and clamps like the Scale dial", () => {
     expect(getSceneExpansion()).toBe(SCENE_EXPANSION_DEFAULT);
     setSceneExpansion(100);
@@ -183,62 +180,16 @@ describe("resolveSceneSetting applies the master's Expansion", () => {
     expect(getSceneExpansion()).toBe(SCENE_EXPANSION_DEFAULT);
   });
 
-  it("is bit-for-bit identity at 1", () => {
-    const sceneId = "expansion-identity";
-    setAutoEnabled(sceneId, WIDE.key, false);
-    setSceneSetting(sceneId, WIDE, 5.3);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBe(5.3);
-  });
-
-  it("runs the mic's Expansion curve over the slider position", () => {
-    const sceneId = "expansion-curve";
-    setAutoEnabled(sceneId, WIDE.key, false);
-    setSceneSetting(sceneId, WIDE, 5); // 3/4 of the way along
-    setSceneExpansion(2);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeCloseTo(2 + shapeExpansion(0.75, 2) * 4, 10);
-  });
-
-  it("pushes values away from mid-slider above 1 and toward it below 1, leaving the middle and ends fixed", () => {
-    const sceneId = "expansion-direction";
-    setAutoEnabled(sceneId, WIDE.key, false);
-    setSceneExpansion(3);
-    setSceneSetting(sceneId, WIDE, 5);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeGreaterThan(5);
-    setSceneSetting(sceneId, WIDE, 3);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeLessThan(3);
-    setSceneSetting(sceneId, WIDE, 4);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeCloseTo(4, 10);
-    setSceneSetting(sceneId, WIDE, 6);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeCloseTo(6, 10);
-    setSceneExpansion(1 / 3);
-    setSceneSetting(sceneId, WIDE, 5);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeLessThan(5);
-    expect(resolveSceneSetting(sceneId, WIDE)).toBeGreaterThan(4);
-  });
-
-  it("runs after Scale, on the scaled value", () => {
-    const sceneId = "expansion-after-scale";
+  it("never moves a resolved value, with or without Scale", () => {
+    const sceneId = "expansion-no-setting";
     setAutoEnabled(sceneId, NUMERIC.key, false);
     setSceneSetting(sceneId, NUMERIC, 0.4);
-    setSceneMaster(2); // 0.8
-    setSceneExpansion(2);
-    expect(resolveSceneSetting(sceneId, NUMERIC)).toBeCloseTo(shapeExpansion(0.8, 2), 10);
-  });
-
-  it("leaves enums, booleans, masterScale: false specs and DEV pins alone", () => {
-    const sceneId = "expansion-exempt";
     setSceneExpansion(4);
-    setSceneSetting(sceneId, ENUM_SPEC, 2);
-    expect(resolveSceneSetting(sceneId, ENUM_SPEC)).toBe(2);
-    setSceneSetting(sceneId, BOOL_SPEC, 1);
-    expect(resolveSceneSetting(sceneId, BOOL_SPEC)).toBe(1);
-    setAutoEnabled(sceneId, UNSCALED_SPEC.key, false);
-    setSceneSetting(sceneId, UNSCALED_SPEC, -0.9);
-    expect(resolveSceneSetting(sceneId, UNSCALED_SPEC)).toBe(-0.9);
-    setAutoEnabled(sceneId, NUMERIC.key, false);
-    setSceneSetting(sceneId, NUMERIC, 0.7);
-    setPin(sceneId, NUMERIC.key, 0.7);
-    expect(resolveSceneSetting(sceneId, NUMERIC)).toBe(0.7);
+    expect(resolveSceneSetting(sceneId, NUMERIC)).toBe(0.4);
+    setSceneMaster(2);
+    expect(resolveSceneSetting(sceneId, NUMERIC)).toBeCloseTo(0.8, 10);
+    setSceneExpansion(0.25);
+    expect(resolveSceneSetting(sceneId, NUMERIC)).toBeCloseTo(0.8, 10);
   });
 });
 

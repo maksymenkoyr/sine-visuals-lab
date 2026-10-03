@@ -11,14 +11,15 @@ import { proUnlocked } from "./pro.ts";
  * mode) — only cross-reload persistence depends on it.
  *
  * Also home to the device-wide master (getSceneMaster and getSceneExpansion
- * below): the Master card's Scale and Expansion dials over every numeric
- * scene param, each stored as a scalar rather
+ * below): the Master card's Scale dial over every numeric scene param and
+ * its Expansion dial over every drive reading, each stored as a scalar rather
  * than per scene because it describes this room's taste, not one scene's —
  * the same class of preference as audio/sensitivity.ts's gain stages, so like
  * them it stays out of Looks/share codes. Their keys do ride in a room's look
  * (net/syncedStores.ts's `isRoomKey`), so a paired TV draws with the phone's
- * master dials. Storage lives here; the scaling itself happens at the single resolve
- * choke point, resolveSceneSetting in autoTune.ts, which honours a per-
+ * master dials. Storage lives here; Scale happens at the single resolve
+ * choke point, resolveSceneSetting in autoTune.ts, and Expansion in the
+ * drive engine (drives.ts's header, "Master Expansion"). Scale honours a per-
  * setting `masterScale: false` opt-out (see SceneSetting.masterScale below)
  * for a value the master would otherwise distort past recognition.
  */
@@ -371,13 +372,11 @@ export const SCENE_MASTER_MIN = 0;
 export const SCENE_MASTER_MAX = 2;
 export const SCENE_MASTER_DEFAULT = 1;
 
-// The master's second dial: Expansion — the Input card's own Expansion curve
-// (audio/sensitivity.ts's shapeExpansion, same range) bent over each numeric
-// scene param's position along its slider, after Scale (autoTune.ts's
-// resolveSceneSetting). A param sitting past the middle of its track is
-// pushed further toward max, one short of the middle further toward min —
-// the gap between a scene's low and high params widens, as the mic's widens
-// the gap between quiet and loud. 1 is identity.
+// The master's second dial: Expansion — how far the music may pull the
+// picture away from the normal line Scale sets, and how long it stays away
+// (drives.ts's header, "Master Expansion"). It moves drive readings, never a
+// setting's own value. Same range and log slider as the Input card's
+// Expansion. 1 is identity.
 export const SCENE_EXPANSION_MIN = EXPANSION_MIN;
 export const SCENE_EXPANSION_MAX = EXPANSION_MAX;
 export const SCENE_EXPANSION_DEFAULT = EXPANSION_DEFAULT;
