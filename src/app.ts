@@ -95,6 +95,7 @@ import {
 } from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import {
   getSceneExpansion,
   getSceneMaster,
@@ -566,6 +567,9 @@ let outputSens = 1;
 let outputExp = 1;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
+/** The Power card's CPU / GPU / heap readouts (render/resourceMeter.ts);
+ *  created with the main GL context in boot(). */
+let resourceMeter: ResourceMeter | null = null;
 
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
 // with tv.ts) — see that file for why the gate needs a tolerance at all.
@@ -1759,6 +1763,7 @@ function wireDeviceMenu(): void {
       standingDown: governor?.standingDown ?? false,
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
+      ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
     }),
     // Rollup replaces import.meta.env.DEV with a literal `false` in a
     // production build, folding this to `undefined` and — since pins.ts
@@ -2360,6 +2365,7 @@ async function boot(): Promise<void> {
   detectedPreset = devPin ?? (await detectQuality());
   quality = qualitySettings(renderPreset());
   mainHost = createSceneHost(gl, quality);
+  resourceMeter = createResourceMeter(gl);
   if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
@@ -2976,7 +2982,12 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
 
 function loop(): void {
   requestAnimationFrame(loop);
+  const t0 = performance.now();
   tick();
+  // Only here, not in the hidden-tab background clock (which also calls
+  // tick): the meter reads busy time against rAF wall time.
+  const t1 = performance.now();
+  resourceMeter?.recordTick(t1 - t0, t1);
 }
 
 /** One pass of the loop: sample the audio, advance the clocks and drives, feed
@@ -3147,7 +3158,13 @@ function drawScene(
   // a full frame to signal by now.
   const picturePolled = pictureWanted();
   if (picturePolled) pollPicture();
-  scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
+  // The timer query only runs while the panel is open to show it.
+  resourceMeter?.beginGpu(deviceMenu?.isOpen() ?? false);
+  try {
+    scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
+  } finally {
+    resourceMeter?.endGpu();
+  }
   // Right after the scene has drawn — and nowhere else — because the
   // default framebuffer (preserveDrawingBuffer is false, gl.ts) only holds
   // this frame until the browser composites it; pictureReadback.ts's own
