@@ -79,7 +79,6 @@ const CLASSIFIED: Record<string, boolean> = {
   // A library and a dev tool, not the look on screen; and the panel's own chrome.
   "vibe.looks": false,
   "vibe.devPins": false,
-  "vibe.strainConsole.layout.": false,
   "vibe.panelBlur": false,
 };
 
@@ -162,7 +161,6 @@ describe("scoped capture", () => {
       "vibe.devPins": "{}",
       "vibe.preview.resolution": "1",
       "vibe.silenceGateClosed": "0.1",
-      "vibe.strainConsole.layout.physarum2:strains": "{}",
       "vibe.bandFader.2": "{}",
       "svl.usageMe": "1",
     });

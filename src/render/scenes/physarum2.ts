@@ -1505,8 +1505,8 @@ const PANEL: readonly PanelSection[] = [
       colours: STRAINS.map((s) => cssColor(s.color)),
       headcountSetting: "switching",
       // The Strain Console card: every per-strain setting for all the strains
-      // at once, as Lanes or Knobs, with Stain Synergy under them — see
-      // src/ui/widgets/strainConsole.ts. The order is the row/column order.
+      // at once, a row of lanes each, with Stain Synergy under them — see
+      // src/ui/widgets/strainConsole.ts. The order is the row order.
       console: {
         title: "Per strain",
         params: ["nutrient", "excite", "sensor", "angle", "turn", "stride", "life", "stain"],

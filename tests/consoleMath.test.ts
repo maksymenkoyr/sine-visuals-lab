@@ -1,13 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  KNOB_PX,
   applyEdit,
-  arcPath,
   arrowStep,
   formatValue,
   fromUnit,
   hueRailGradient,
-  knobDelta,
   quantize,
   randomValue,
   toUnit,
@@ -48,19 +45,6 @@ describe("toUnit / fromUnit", () => {
   });
 });
 
-describe("knobDelta", () => {
-  it("right and up both turn a knob up; left and down turn it down", () => {
-    expect(knobDelta(14, 0, unit, false)).toBeGreaterThan(0);
-    expect(knobDelta(0, -14, unit, false)).toBeGreaterThan(0);
-    expect(knobDelta(-14, 0, unit, false)).toBeLessThan(0);
-    expect(knobDelta(0, 14, unit, false)).toBeLessThan(0);
-  });
-  it("KNOB_PX of travel sweeps the whole range; Shift is a fifth of it", () => {
-    expect(knobDelta(KNOB_PX, 0, deg, false)).toBeCloseTo(115, 9);
-    expect(knobDelta(KNOB_PX, 0, deg, true)).toBeCloseTo(23, 9);
-  });
-});
-
 describe("arrowStep", () => {
   it("is 1% of the range (10% with Shift) but never smaller than the spec's step", () => {
     expect(arrowStep(deg, false)).toBeCloseTo(1.15, 9);
@@ -88,7 +72,7 @@ describe("formatValue", () => {
   });
 });
 
-describe("hueRailGradient / wheelPoint / arcPath", () => {
+describe("hueRailGradient / wheelPoint", () => {
   it("the rail's centre stop is the strain's own hue", () => {
     const g = hueRailGradient(0.5, 90, 58, 5);
     expect(g).toContain("hsl(180 90% 58%)");
@@ -101,10 +85,6 @@ describe("hueRailGradient / wheelPoint / arcPath", () => {
     const [x1, y1] = wheelPoint(0.25, 10);
     expect(x1).toBeCloseTo(10, 9);
     expect(y1).toBeCloseTo(0, 9);
-  });
-  it("an arc past half a turn takes the large-arc flag", () => {
-    expect(arcPath(17, 17, 13, 0, Math.PI * 1.5)).toContain(" 0 1 1 ");
-    expect(arcPath(17, 17, 13, 0, Math.PI / 2)).toContain(" 0 0 1 ");
   });
 });
 
