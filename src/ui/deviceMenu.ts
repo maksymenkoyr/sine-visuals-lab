@@ -468,6 +468,9 @@ export interface DeviceMenuDeps {
    *  card's `lufs` frame field. */
   getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
+  /** A tap on the row that's already live: disconnect it, so it can be
+   *  picked again (src/app.ts's stopOwnCapture). */
+  onStopAudio: () => void;
   /** The Source row's device list — which device the Mic source opens
    *  (src/audio/inputDevice.ts). Read on the row's own refresh timer, so
    *  src/app.ts answers from a cache, never a fresh enumerateDevices(). */
@@ -5028,6 +5031,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
      *  connected" sub-line, never the live row's default-label/loopback text. */
     isMissing: boolean;
     isLive: boolean; // set by refresh(), read by the per-tick meter update
+    /** The build-time tooltip, kept by refresh() while the live row's own
+     *  "tap to disconnect" one stands in for it. */
+    idleTitle?: string;
     /** What updateMeters last painted (live flag + lit segment count, or
      *  hidden), so a tick where nothing changed skips every style write. */
     meterKey?: string;
@@ -5203,7 +5209,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           refresh();
           return;
         }
-        if (row.isLive) return;
+        if (row.isLive) {
+          deps.onStopAudio();
+          refresh();
+          return;
+        }
         deps.onInputDeviceChange(deviceId);
       });
       return row;
@@ -5233,7 +5243,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // browser hears them.
       row.sub.textContent = "an app's sound: share its window (e.g. Spotify) — or Entire screen for everything";
       row.btn.title = "Share screen audio";
-      row.btn.addEventListener("click", () => deps.onAudioSourceChange("display"));
+      row.btn.addEventListener("click", () => {
+        if (row.isLive) {
+          deps.onStopAudio();
+          refresh();
+          return;
+        }
+        deps.onAudioSourceChange("display");
+      });
       return row;
     }
 
@@ -5298,6 +5315,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
             state.live &&
             (row.isScreen ? state.choice === "display" : state.choice === "mic" && row.name.textContent === liveLabel);
           row.isLive = isLive;
+          row.idleTitle ??= row.btn.title;
+          row.btn.title = isLive && !editing ? "Listening — tap to disconnect" : row.idleTitle;
           // The missing row's own sub-line ("not connected") and the
           // pre-permission placeholder's ("allow access to list every
           // input") are fixed at build time and never touched here — only a

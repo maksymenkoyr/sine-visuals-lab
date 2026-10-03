@@ -431,7 +431,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     sourceRow.setAttribute("aria-label", "Sound source");
   }
   const LIVE_LABEL = "LISTENING";
-  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; nameEl: HTMLElement; hintEl: HTMLElement; descriptor: string }>();
+  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; nameEl: HTMLElement; hintEl: HTMLElement; descriptor: string; title: string }>();
   // Only where there's an actual choice to nudge toward — the solo path (no
   // display capture) has nothing to pick between, so it keeps just the plain
   // label, same as before this hint existed.
@@ -453,6 +453,8 @@ export function createGallery(deps: GalleryDeps): Gallery {
       entry.btn.dataset.state = uiState;
       if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState === "live"));
       entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : entry.descriptor;
+      // Tapping the live one disconnects it (src/app.ts's onSourceChoice).
+      if (canChoose) entry.btn.title = uiState === "live" ? "Listening — tap to disconnect" : entry.title;
       // The Mic button's own name is the CHOSEN input's kind ("Mic"/"Line
       // in"/"Loopback" — src/audio/inputDevice.ts), not a fixed "Microphone":
       // a picked USB interface or loopback driver should read as what it is
@@ -485,7 +487,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       btn.dataset.solo = "";
       btn.tabIndex = -1;
     }
-    sourceButtons.set(choice, { btn, nameEl, hintEl, descriptor });
+    sourceButtons.set(choice, { btn, nameEl, hintEl, descriptor, title: title ?? "" });
     sourceRow.appendChild(btn);
   };
   // "Microphone" is only the initial paint — refreshSource() below repaints
