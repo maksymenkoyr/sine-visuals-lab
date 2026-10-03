@@ -224,6 +224,7 @@ import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
+import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
 import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
@@ -529,6 +530,9 @@ let lastAnim: AnimFrame | null = null;
  *  numbers are this window's last resolved Sensitivity/Expansion, which the
  *  bridge streams along with each frame (net/outputSync.ts's `p`). */
 let outputBridge: OutputBridge | null = null;
+/** The laptop's keyed room as a second output (net/roomBridge.ts): a TV in it
+ *  is cued and played like the pop-out. Null for everything but a keyed host. */
+let roomBridge: RoomBridge | null = null;
 let outputControls: OutputControls | null = null;
 let outputSens = 1;
 let outputExp = 1;
@@ -818,7 +822,7 @@ function applyPalette(next: Palette): void {
   activeConn()?.sendHello(scene.id, palette.id);
 }
 
-/** Panorama slice assignment, driven by the room panel — not offered in the on-device menu. */
+/** Panorama slice assignment, from a `setDevice` command (roomMessages.ts) — no screen of this app sends one any more. */
 function applyViewport(next: Viewport): void {
   viewport = next;
   activeConn()?.sendHello(scene.id, palette.id, viewport);
@@ -1336,10 +1340,6 @@ function startRendererDisconnectWatch(): void {
   }, 5000);
 }
 
-function menuItems(items: { id: string; name: string }[]) {
-  return items.map((i) => ({ id: i.id, name: i.name }));
-}
-
 // A named top-level function (rather than inline in the DeviceMenuDeps
 // object literal below) so micAuto.ts's setMicAuto can reuse this exact
 // seed-then-flip path for the Sensitivity/Expansion/Smoothing pseudo-params
@@ -1642,15 +1642,9 @@ function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null): void 
   const panel = createControlPanel({
     getRoster: () => conn.currentRoster,
     onRosterChange: (cb) => conn.onRosterChange(cb),
-    setDevice: (targetId, cmd) => conn.sendSetDevice(targetId, cmd),
-    scenes: menuItems(availableScenes()),
-    palettes: menuItems(PALETTES),
-    selfDeviceId: conn.deviceId,
-    // A phone controller is not in the roster it reads, so "Sync all to me"
-    // copies the look it is showing instead.
-    getSelfLook: () => (isController ? { scene: scene.id, palette: palette.id } : null),
     adoptTv: ownRoomKey ? adoptTvByCode : undefined,
     invite,
+    hasCuePlay: !isController,
   });
   panelBtn.style.display = "block";
   panelBtn.addEventListener("click", () => panel.toggle());
@@ -2291,7 +2285,27 @@ async function boot(): Promise<void> {
       look: () => ({ scene: scene.id, palette: palette.id }),
       power: () => outputPower,
     });
-    outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
+    let controlsBridge: OutputBridge = outputBridge;
+    // A keyed laptop's screens take Cue and Play too; a legacy room has no
+    // look to publish. The bar drives both outputs, the pop-out and the room.
+    const host = hostConn;
+    if (host && hostRoomKey) {
+      roomBridge = createRoomBridge({
+        send: (m) => host.sendLook(m),
+        screens: () => host.currentRoster.filter((d) => d.role === "renderer").length,
+        look: () => ({ scene: scene.id, palette: palette.id }),
+        capture: () => captureRoomStorage(localStorage),
+        showRoom: () => roomCodeEl.click(),
+      });
+      host.onLook((m) => {
+        if (m.type === "lookReject") roomBridge?.refused();
+      });
+      host.onState((s) => {
+        if (s === "open") roomBridge?.reconnected();
+      });
+      controlsBridge = combineBridges([outputBridge, roomBridge]);
+    }
+    outputControls = createOutputControls(controlsBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
   }
@@ -2743,6 +2757,7 @@ function tick(): void {
   // which is why the band-gained frame is built before the inViz return.
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   outputBridge?.update(nowRafMs);
+  roomBridge?.update(nowRafMs);
   // The preview transition sits outside the bridge check because a phone
   // controller has no bridge yet still previews, whenever a scene is showing.
   const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;

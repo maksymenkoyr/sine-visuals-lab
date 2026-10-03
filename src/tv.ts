@@ -27,6 +27,8 @@ import { createDriveEngine } from "./render/drives.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookReplica, type LookReplica } from "./net/lookSync.ts";
+import { createGlide, type Glide } from "./net/outputGlide.ts";
+import { DEFAULT_OUTPUT_PARAMS } from "./net/outputSync.ts";
 import { newKey, TV_SLOT_ROTATE_MS } from "./net/pairing.ts";
 import { clearSession, readSession, writeSession } from "./net/sessions.ts";
 import { PendingSlot } from "./net/pendingSlot.ts";
@@ -68,7 +70,11 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
  * it (`applyRoomStorage`), the same mechanism the pop-out uses. So the TV
  * resolves Sensitivity, Expansion, Smoothing, band gains and drives itself, from
  * its own anim clock on the host's frames, rather than being sent resolved
- * values; its Auto readouts are therefore its own. What does not travel:
+ * values; its Auto readouts are therefore its own. A patch that carries
+ * `glideMs` (the laptop's Play held down) is walked to over that long
+ * (`startGlide`, net/outputGlide.ts) instead of applied at once; the three
+ * resolved dials above are the TV's own, so they are not part of that walk.
+ * What does not travel:
  * the laptop's audio input and its own analysis marks (syncedStores.ts's
  * PRIVATE_KEYS and VOLATILE_PREFIXES), and the readings only a local extractor
  * has (`beatRatio`, `wavePeak`).
@@ -218,9 +224,19 @@ let hostInRoom: HostInRoom = null;
 let replica: LookReplica = createLookReplica();
 /** The scene / palette of the last look document applied. The look re-asserts
  *  a scene or palette only when the document's differs from this, so a
- *  settings-only patch never fights one a command (the Room panel) set. */
+ *  settings-only patch never fights one a command set. */
 let lastDocScene = "";
 let lastDocPalette = "";
+/** The look on screen, a glide's half-way step included: what the next glide
+ *  starts from. Null until the room has sent one. */
+let shown: LookDoc | null = null;
+/** A smooth arrival in progress: the laptop's Play held down sends a look with
+ *  `glideMs` (net/roomBridge.ts), and the settings walk there over that long
+ *  (net/outputGlide.ts says which move and which wait for the end). Any other
+ *  look message ends it by jumping straight to what it says. */
+let glide: Glide | null = null;
+/** The look the running glide arrives at, applied whole when it lands. */
+let glideTarget: LookDoc | null = null;
 
 function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
@@ -462,6 +478,9 @@ function joinRoom(room: string, key: string | null): void {
   replica = createLookReplica();
   lastDocScene = "";
   lastDocPalette = "";
+  shown = null;
+  glide = null;
+  glideTarget = null;
   hostInRoom = null;
 
   const c = new RendererConnection(room, { auth: key ? { roomKey: key } : undefined, reconnect: true });
@@ -489,8 +508,9 @@ function joinRoom(room: string, key: string | null): void {
   setPhase("joining");
 }
 
-/** Scene / palette / viewport commands, as before: the Room panel's Mosaic and
- *  Panorama, and Shuffle. A command's scene applies even though the look names
+/** Scene / palette / viewport commands (`setDevice`, roomMessages.ts). No
+ *  screen of this app sends one any more; the handler stays for a device on an
+ *  older build that still does. A command's scene applies even though the look names
  *  another; the look only speaks again when it changes (see `lastDocScene`). */
 function onCommand(cmd: DeviceCommand): void {
   if (cmd.palette) palette = getPalette(cmd.palette);
@@ -502,6 +522,8 @@ function onCommand(cmd: DeviceCommand): void {
 
 function onLook(m: LookServerMsg): void {
   if (m.type === "look") {
+    glide = null;
+    glideTarget = null;
     replica.onSnapshot(m.rev, m.doc);
     const doc = replica.doc();
     // An empty room (no look yet) is the defaults, not whatever was left from another room.
@@ -509,10 +531,45 @@ function onLook(m: LookServerMsg): void {
     else applyRoomStorage({}, localStorage);
   } else if (m.type === "lookPatch") {
     const r = replica.onPatch(m.rev, m);
-    if (r.status === "applied") applyDoc(r.doc);
-    else if (r.status === "gap") conn?.requestLook();
+    if (r.status === "applied") {
+      if (!startGlide(r.doc, m.glideMs)) {
+        glide = null;
+        glideTarget = null;
+        applyDoc(r.doc);
+      }
+    } else if (r.status === "gap") conn?.requestLook();
   }
   // lookAck / lookReject answer a controller's own patch; a TV never sends one.
+}
+
+/** Starts walking to `doc` over `ms` when the look allows it: the same scene
+ *  on screen, and a setting that is safe to move and does differ. False means
+ *  switch at once. */
+function startGlide(doc: LookDoc, ms: number | undefined): boolean {
+  if (typeof ms !== "number" || !(ms > 0) || shown === null) return false;
+  const from = { scene: scene.id, palette: palette.id, storage: shown.storage, params: DEFAULT_OUTPUT_PARAMS };
+  const to = { scene: doc.scene === "" ? scene.id : doc.scene, palette: doc.palette, storage: doc.storage, params: DEFAULT_OUTPUT_PARAMS };
+  const started = createGlide(from, to, scene.settings ?? [], performance.now(), ms);
+  if (!started) return false;
+  glide = started;
+  glideTarget = doc;
+  return true;
+}
+
+/** One step of a glide: stores only. The scene and palette stay as they were
+ *  until the glide lands through applyDoc(). */
+function stepGlide(nowMs: number): void {
+  if (!glide || !glideTarget) return;
+  const { state, done } = glide.lookAt(nowMs);
+  if (done) {
+    const target = glideTarget;
+    glide = null;
+    glideTarget = null;
+    applyDoc(target);
+    return;
+  }
+  shown = { scene: state.scene, palette: state.palette, storage: state.storage };
+  applyRoomStorage(state.storage, localStorage);
 }
 
 /** Makes the page show this look: settings first, so a scene's init() and
@@ -521,6 +578,7 @@ function onLook(m: LookServerMsg): void {
  *  messages come at the controller's publish cadence, lookSync.ts's
  *  LOOK_PUBLISH_MS), so a store that was edited out of band is re-seeded too. */
 function applyDoc(doc: LookDoc): void {
+  shown = doc;
   applyRoomStorage(doc.storage, localStorage);
   let paletteChanged = false;
   if (doc.palette !== lastDocPalette) {
@@ -642,6 +700,8 @@ async function main(): Promise<void> {
     const nowRafMs = performance.now();
     const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
     lastRafMs = nowRafMs;
+
+    stepGlide(nowRafMs);
 
     const c = conn;
     const s = c ? c.sample() : null;

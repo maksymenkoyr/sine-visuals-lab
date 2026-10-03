@@ -142,6 +142,15 @@ describe("parseControlMessage: look", () => {
     expect(msg).toEqual({ type: "lookPatch", rev: 3, scene: "mesh", set: { "vibe.a": "1" }, del: ["vibe.b"] });
   });
 
+  it("keeps the glide a relayed patch asks for", () => {
+    expect(parse({ type: "lookPatch", rev: 2, set: { "vibe.a": "1" }, glideMs: 4000 })).toEqual({
+      type: "lookPatch",
+      rev: 2,
+      set: { "vibe.a": "1" },
+      glideMs: 4000,
+    });
+  });
+
   it("accepts a relayed patch that changes only the palette", () => {
     expect(parse({ type: "lookPatch", rev: 1, palette: "neon" })).toEqual({ type: "lookPatch", rev: 1, palette: "neon" });
   });

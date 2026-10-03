@@ -94,7 +94,7 @@ describe("canSend", () => {
     ping: [true, true, true],
     hello: [true, true, true],
     lookGet: [false, true, true],
-    lookPatch: [false, true, false],
+    lookPatch: [true, true, false],
   };
 
   for (const keyed of [true, false]) {

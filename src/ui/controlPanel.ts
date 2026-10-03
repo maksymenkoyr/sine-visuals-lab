@@ -1,25 +1,15 @@
-import type { RosterEntry, DeviceCommand } from "../net/room.ts";
+import type { RosterEntry } from "../net/room.ts";
 import { createRoomCodeEntry, joinUrlFor, type AddScreenOutcome, type JoinKind, type JoinLinkInfo } from "./joinScreen.ts";
 import { drawQrCode } from "./qr.ts";
-
-export interface MenuItem {
-  id: string;
-  name: string;
-}
 
 export interface ControlPanelDeps {
   getRoster: () => RosterEntry[];
   onRosterChange: (cb: (r: RosterEntry[]) => void) => () => void;
-  setDevice: (targetId: string, cmd: DeviceCommand) => void;
-  scenes: MenuItem[];
-  palettes: MenuItem[];
-  selfDeviceId: string;
-  /** This device's own look, for a device the room's roster does not list: a
-   *  phone controller is hidden from it (a phone is not a screen), so without
-   *  this "Sync all to me" would have no "me" to copy. */
-  getSelfLook?: () => SyncLook | null;
   /** The typed-code field's way to hand a waiting TV to this room. */
   adoptTv?: (slot: string) => Promise<AddScreenOutcome>;
+  /** True on the laptop, whose Cue and Play bar (ui/outputControls.ts) is what
+   *  sends its look to the screens; a phone has no such bar and is told so. */
+  hasCuePlay: boolean;
   /** What this device's own invite QR encodes (the same link the pairing
    *  overlay behind the room-code badge shows). Left out, or returning null,
    *  the card has no QR: a phone controller is a member of the room, not its
@@ -35,25 +25,8 @@ export interface RoomInvite {
   info?: JoinLinkInfo;
 }
 
-/** The scene and palette "Sync all to me" copies to the other devices. */
-export interface SyncLook {
-  scene: string;
-  palette: string;
-}
-
-/** What "Sync all to me" copies: this device's roster entry when the room lists
- *  it, else its own look when it has one to give, else nothing. */
-export function syncSource(roster: RosterEntry[], selfDeviceId: string, own: SyncLook | null): SyncLook | null {
-  const self = roster.find((d) => d.deviceId === selfDeviceId);
-  return self ? { scene: self.scene, palette: self.palette } : own;
-}
-
 export interface ControlPanel {
   toggle(): void;
-}
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 const overlayStyle = `
@@ -69,26 +42,25 @@ const rowStyle = `
   display: flex; align-items: center; gap: 8px; padding: 8px 0;
   border-bottom: 1px solid #fff1; font-size: 13px;
 `;
-const selectStyle = `
-  flex: 1; background: #1a1a1a; color: #fff; border: 1px solid #fff2;
-  border-radius: 6px; padding: 6px; font: inherit; font-size: 12px;
-`;
 const actionBtnStyle = `
-  flex: 1; padding: 10px; margin: 4px; border-radius: 8px; border: 1px solid #fff2;
+  padding: 10px 18px; border-radius: 8px; border: 1px solid #fff2;
   background: #fff1; color: #fff; font: inherit; font-size: 13px; cursor: pointer;
 `;
 
-/** Smallest slice a drag can leave a device, as a [0,1] fraction of the shared canvas. */
-const MIN_SEGMENT_WIDTH = 0.04;
-const SEGMENT_COLORS = ["#3b5bfd", "#e0426b", "#1fb583", "#f2a93b", "#8e5bf2", "#2bb6c9"];
+/** The Room panel's words for the screens the room lists: one row each. A
+ *  screen is a `renderer`; the laptop itself and a phone controller are not
+ *  screens. */
+export function screenLabels(roster: RosterEntry[]): string[] {
+  return roster.filter((d) => d.role === "renderer").map((d) => `Screen ${d.deviceId.slice(-4).toUpperCase()}`);
+}
 
 /**
- * Room panel: lists every connected device with its current scene/palette,
- * lets any device set any other device's scene/palette, and offers
- * room-wide bulk actions. Available from any device, not just the host —
- * "control" in this app is a capability, not a role. It also carries the same
- * typed-code field as the pairing overlay (joinScreen.ts `createRoomCodeEntry`),
- * so a device can move to another room (a TV's, say) from here.
+ * Room panel: the screens in this room, how to send them a look, and the
+ * typed-code field to add a TV that is showing a code (the same field as the
+ * pairing overlay, joinScreen.ts `createRoomCodeEntry`). What the screens show
+ * is not set from here: on the laptop that is the Cue and Play bar
+ * (net/roomBridge.ts), which works like the pop-out's; a phone edits the look
+ * directly (net/lookSync.ts).
  */
 export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   const root = document.createElement("div");
@@ -98,7 +70,7 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   panel.style.cssText = panelStyle;
 
   const title = document.createElement("div");
-  title.textContent = "Room";
+  title.textContent = "Screens";
   title.style.cssText = "font-weight: 700; font-size: 16px; margin-bottom: 12px;";
 
   // The invite: the QR a phone scans to join this room (as controller, for a
@@ -126,83 +98,23 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   }
 
   const list = document.createElement("div");
+  list.style.cssText = "font-size: 13px;";
 
-  const actions = document.createElement("div");
-  actions.style.cssText = "display: flex; flex-wrap: wrap; margin-top: 14px;";
-
-  function makeActionButton(label: string, onClick: () => void): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.textContent = label;
-    btn.style.cssText = actionBtnStyle;
-    btn.addEventListener("click", onClick);
-    return btn;
-  }
-
-  const shuffleBtn = makeActionButton("Shuffle", () => {
-    for (const d of deps.getRoster()) {
-      deps.setDevice(d.deviceId, { scene: pick(deps.scenes).id, palette: pick(deps.palettes).id });
-    }
-  });
-
-  const syncBtn = makeActionButton("Sync all to me", () => {
-    const roster = deps.getRoster();
-    const self = syncSource(roster, deps.selfDeviceId, deps.getSelfLook?.() ?? null);
-    if (!self) return;
-    for (const d of roster) {
-      if (d.deviceId === deps.selfDeviceId) continue;
-      deps.setDevice(d.deviceId, { scene: self.scene, palette: self.palette });
-    }
-  });
-
-  const mirrorBtn = makeActionButton("Mirror", () => {
-    const scene = pick(deps.scenes).id;
-    const palette = pick(deps.palettes).id;
-    for (const d of deps.getRoster()) deps.setDevice(d.deviceId, { scene, palette });
-  });
-
-  const mosaicBtn = makeActionButton("Mosaic", () => {
-    const palette = pick(deps.palettes).id;
-    const roster = deps.getRoster();
-    roster.forEach((d, i) => {
-      deps.setDevice(d.deviceId, { scene: deps.scenes[i % deps.scenes.length].id, palette });
-    });
-  });
-
-  // Same scene everywhere, but each device gets an even horizontal slice of
-  // one shared virtual canvas — for 3 devices this is exactly "left wall /
-  // center / right wall" with no extra shortcut needed.
-  const panoramaBtn = makeActionButton("Panorama", () => {
-    const roster = deps.getRoster();
-    if (roster.length === 0) return;
-    const sceneId = pick(deps.scenes).id;
-    const paletteId = pick(deps.palettes).id;
-    const n = roster.length;
-    roster.forEach((d, i) => {
-      deps.setDevice(d.deviceId, {
-        scene: sceneId,
-        palette: paletteId,
-        viewport: { x: i / n, y: 0, w: 1 / n, h: 1 },
-      });
-    });
-  });
-
-  actions.append(shuffleBtn, syncBtn, mirrorBtn, mosaicBtn, panoramaBtn);
-
-  const layoutHeading = document.createElement("div");
-  layoutHeading.textContent = "Panorama layout — drag to resize";
-  layoutHeading.style.cssText = "font-size: 11px; opacity: 0.5; margin: 14px 0 6px;";
-
-  const layoutStrip = document.createElement("div");
-  layoutStrip.style.cssText =
-    "position: relative; display: flex; height: 56px; background: #1a1a1a; border-radius: 8px; overflow: hidden;";
+  const hint = document.createElement("div");
+  hint.style.cssText = "font-size: 12px; opacity: 0.6; line-height: 1.5; margin-top: 12px;";
+  hint.textContent = deps.hasCuePlay
+    ? "Hold CUE (Space) to preview your look on the screens. PLAY (Option) makes it theirs; hold Option to glide there."
+    : "Whatever you change here, the screens show.";
 
   const joinEntry = createRoomCodeEntry({ compact: true, adoptTv: deps.adoptTv, onEscape: close });
   joinEntry.style.cssText += "margin-top: 16px; padding-top: 14px; border-top: 1px solid #fff1;";
 
-  const closeBtn = makeActionButton("Close", close);
-  closeBtn.style.marginTop = "10px";
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.style.cssText = actionBtnStyle + "margin-top: 12px;";
+  closeBtn.addEventListener("click", close);
 
-  panel.append(title, inviteBox, list, actions, layoutHeading, layoutStrip, joinEntry, closeBtn);
+  panel.append(title, inviteBox, list, hint, joinEntry, closeBtn);
   root.appendChild(panel);
   root.addEventListener("click", (e) => {
     if (e.target === root) close();
@@ -210,167 +122,18 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   document.body.appendChild(root);
 
   function renderList(): void {
-    const roster = deps.getRoster();
     list.innerHTML = "";
-    for (const d of roster) {
+    const labels = screenLabels(deps.getRoster());
+    for (const text of labels) {
       const row = document.createElement("div");
       row.style.cssText = rowStyle;
-
-      const label = document.createElement("span");
-      const tag = d.deviceId === deps.selfDeviceId ? "you" : d.role;
-      label.textContent = `${d.deviceId.slice(-4).toUpperCase()} (${tag})`;
-      label.style.cssText = "width: 90px; flex-shrink: 0; opacity: 0.8;";
-
-      const paletteSelect = document.createElement("select");
-      paletteSelect.style.cssText = selectStyle;
-      for (const p of deps.palettes) {
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.textContent = p.name;
-        opt.selected = p.id === d.palette;
-        paletteSelect.appendChild(opt);
-      }
-      paletteSelect.addEventListener("change", () => deps.setDevice(d.deviceId, { palette: paletteSelect.value }));
-
-      row.append(label, paletteSelect);
+      row.textContent = text;
       list.appendChild(row);
     }
-    if (roster.length === 0) {
-      list.textContent = "No devices yet.";
-    }
+    if (labels.length === 0) list.textContent = "No screen yet. Scan the QR, or type the code a TV shows.";
   }
 
-  /**
-   * A left-to-right strip mirroring the shared Panorama canvas, one colored
-   * segment per device, with draggable handles between them. Devices that
-   * were never assigned a slice (still full-screen {0,0,1,1}) are shown as
-   * an even split purely for display — dragging commits that split for
-   * *every* device first, so a partial drag can never leave someone still
-   * overlapping the rest of the room.
-   */
-  // Committing the initial partition (see startDrag) round-trips through the
-  // server and echoes back as a roster update — without this guard, that
-  // echo would rebuild layoutStrip's DOM (and its actively-captured handle)
-  // out from under the pointer mid-drag.
-  let dragging = false;
-
-  function renderLayout(): void {
-    if (dragging) return;
-    const roster = deps.getRoster();
-    layoutStrip.innerHTML = "";
-    if (roster.length === 0) return;
-
-    let order = [...roster].sort((a, b) => a.viewport.x - b.viewport.x);
-    const partitioned = order.every((d, i) => i === 0 || d.viewport.x - order[i - 1].viewport.x > 1e-6);
-    let widths: number[];
-    if (partitioned) {
-      widths = order.map((d) => Math.max(d.viewport.w, 0.01));
-    } else {
-      order = [...roster];
-      widths = order.map(() => 1 / order.length);
-    }
-
-    order.forEach((d, i) => {
-      const seg = document.createElement("div");
-      seg.style.cssText = `
-        flex: ${widths[i]} 0 0%; display: flex; align-items: center; justify-content: center;
-        font-size: 11px; color: #fff; background: ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]};
-        user-select: none; overflow: hidden;
-      `;
-      seg.textContent = d.deviceId.slice(-4).toUpperCase();
-      layoutStrip.appendChild(seg);
-    });
-
-    for (let i = 0; i < order.length - 1; i++) {
-      const boundaryPct = widths.slice(0, i + 1).reduce((s, w) => s + w, 0) * 100;
-      const handle = document.createElement("div");
-      handle.style.cssText = `
-        position: absolute; top: 0; bottom: 0; width: 14px; left: calc(${boundaryPct}% - 7px);
-        cursor: ew-resize; z-index: 2; touch-action: none;
-      `;
-      handle.addEventListener("pointerdown", (e) => startDrag(e, i, order, widths));
-      layoutStrip.appendChild(handle);
-    }
-  }
-
-  function startDrag(e: PointerEvent, handleIndex: number, order: RosterEntry[], widths: number[]): void {
-    e.preventDefault();
-    dragging = true;
-    const handle = e.currentTarget as HTMLDivElement;
-    handle.setPointerCapture(e.pointerId);
-
-    // Commit a definitive partition for every device up front — otherwise a
-    // device that isn't adjacent to this handle would be left behind at its
-    // old (possibly full-screen) viewport.
-    let cum = 0;
-    for (let j = 0; j < order.length; j++) {
-      deps.setDevice(order[j].deviceId, { viewport: { x: cum, y: 0, w: widths[j], h: 1 } });
-      cum += widths[j];
-    }
-
-    const left = widths.slice(0, handleIndex).reduce((s, w) => s + w, 0);
-    const right = left + widths[handleIndex] + widths[handleIndex + 1];
-    const segA = layoutStrip.children[handleIndex] as HTMLDivElement;
-    const segB = layoutStrip.children[handleIndex + 1] as HTMLDivElement;
-    let boundary = left + widths[handleIndex];
-
-    function onMove(ev: PointerEvent): void {
-      const stripRect = layoutStrip.getBoundingClientRect();
-      const frac = (ev.clientX - stripRect.left) / stripRect.width;
-      boundary = Math.min(right - MIN_SEGMENT_WIDTH, Math.max(left + MIN_SEGMENT_WIDTH, frac));
-      handle.style.left = `calc(${boundary * 100}% - 7px)`;
-      segA.style.flex = `${boundary - left} 0 0%`;
-      segB.style.flex = `${right - boundary} 0 0%`;
-    }
-
-    // The drag ends exactly once, however it ends: a release commits the new
-    // boundary, a cancelled sequence (a touch gesture takeover, a system
-    // gesture) drops it. Without the cancel path `dragging` stayed true and
-    // renderLayout() ignored every roster change from then on. No
-    // lostpointercapture listener: that also fires after every pointerup and
-    // would end the drag twice.
-    let ended = false;
-    function end(commit: boolean): void {
-      if (ended) return;
-      ended = true;
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onCancel);
-      if (commit) {
-        const a = order[handleIndex];
-        const b = order[handleIndex + 1];
-        deps.setDevice(a.deviceId, { viewport: { x: left, y: 0, w: boundary - left, h: 1 } });
-        deps.setDevice(b.deviceId, { viewport: { x: boundary, y: 0, w: right - boundary, h: 1 } });
-      }
-      dragging = false;
-      renderLayout(); // pick up whatever the server has echoed back while frozen
-    }
-
-    function onUp(ev: PointerEvent): void {
-      try {
-        handle.releasePointerCapture(ev.pointerId);
-      } catch {
-        // Capture may already be gone — nothing to release.
-      }
-      end(true);
-    }
-
-    function onCancel(): void {
-      end(false);
-    }
-
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onCancel);
-  }
-
-  function renderAll(): void {
-    renderInvite();
-    renderList();
-    renderLayout();
-  }
-
-  deps.onRosterChange(renderAll);
+  deps.onRosterChange(renderList);
 
   function close(): void {
     root.style.display = "none";
@@ -381,7 +144,8 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
       if (root.style.display === "flex") {
         close();
       } else {
-        renderAll();
+        renderInvite();
+        renderList();
         root.style.display = "flex";
       }
     },

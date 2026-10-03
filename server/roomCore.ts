@@ -510,7 +510,12 @@ export class RoomCore {
     }
 
     this.send(ws, JSON.stringify({ type: "lookAck", n, rev: this.rev } satisfies LookServerMsg));
-    const relayed = JSON.stringify({ type: "lookPatch", rev: this.rev, ...effective } satisfies LookServerMsg);
+    const relayed = JSON.stringify({
+      type: "lookPatch",
+      rev: this.rev,
+      ...effective,
+      ...(clean.patch.glideMs !== undefined ? { glideMs: clean.patch.glideMs } : {}),
+    } satisfies LookServerMsg);
     for (const other of this.host.sockets()) {
       const o = other.attachment;
       if (o.sid === sender.sid || !o.keyed || o.role === "host") continue;
