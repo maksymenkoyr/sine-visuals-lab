@@ -52,6 +52,8 @@ import {
   START_INK_DEFAULT,
   MOTION_PARAMS,
   MOTION_PRESETS,
+  easeSpot,
+  SPOT_EASE_MS,
   type StrainRawValues,
   type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
@@ -793,5 +795,35 @@ describe("Fogleman's extras: settings and motion presets", () => {
     for (const p of MOTION_PARAMS) {
       lab.values[p].forEach((v, k) => expect(v).toBeCloseTo(spec(`${p}${k}`).default, 9));
     }
+  });
+});
+
+describe("easeSpot (the spotlight glide)", () => {
+  it("moves toward the target, from either side, and never overshoots", () => {
+    const cases: [number, number][] = [
+      [1, 0.15],
+      [0.15, 1],
+    ];
+    for (const [cur, target] of cases) {
+      let v = cur;
+      for (let i = 0; i < 60; i++) {
+        const next = easeSpot(v, target, 16);
+        expect(Math.abs(next - target)).toBeLessThanOrEqual(Math.abs(v - target) + 1e-12);
+        expect((next - target) * (cur - target)).toBeGreaterThanOrEqual(0);
+        v = next;
+      }
+    }
+  });
+
+  it("dt 0 changes nothing, and a large dt lands on the target", () => {
+    expect(easeSpot(1, 0.15, 0)).toBe(1);
+    expect(easeSpot(1, 0.15, -5)).toBe(1);
+    expect(easeSpot(1, 0.15, SPOT_EASE_MS * 40)).toBeCloseTo(0.15, 6);
+  });
+
+  it("is frame-rate independent: two half steps equal one whole step", () => {
+    const whole = easeSpot(1, 0.15, 100);
+    const halves = easeSpot(easeSpot(1, 0.15, 50), 0.15, 50);
+    expect(halves).toBeCloseTo(whole, 9);
   });
 });

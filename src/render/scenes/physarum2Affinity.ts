@@ -38,7 +38,10 @@
  *   pad's (x, y) falls in (`pairZone`/`pairRelation`), turning a template
  *   string like `"{A} → {B}"` into coloured-strain tokens a widget can render
  *   without `innerHTML` (`fillTemplate`), a value's pad-square position
- *   (`padPos`/`padValue`), the six pair index combinations (`pairsOf`), a
+ *   (`padPos`/`padValue`, and the squeezed Smell map `smellPadPos`/
+ *   `smellPadValue` that `layerPadPos`/`layerPadValue` pick between), a
+ *   direction read as a sentence (`pairSentence`, through each layer's
+ *   `verbs`), the six pair index combinations (`pairsOf`), a
  *   signed number with a real minus sign (`fmtSigned`), and a same-table
  *   check for the preset/mix-history comparison (`tablesMatch`).
  * - The mix row's own pure logic (`randomSmell`, `randomTouch`, `nudgeTable`,
@@ -162,6 +165,19 @@ export interface PairBand {
   at: number;
 }
 
+/** One step of a layer's verb ladder (`LayerWords.verbs`) — the phrase a
+ *  cursor hint says for a value (`pairSentence`). `upTo` is the exclusive
+ *  upper bound of the values this step covers; the last step's is `Infinity`.
+ *  `after` is a second word that goes after the second strain ("follows B
+ *  closely", "leaves B alone"); `ofTrail` adds the ui `trailSuffix` after the
+ *  strain ("eats B's trail"). */
+export interface PairVerb {
+  upTo: number;
+  verb: string;
+  after?: string;
+  ofTrail?: boolean;
+}
+
 export interface LayerWords {
   /** The Smell/Touch switch button's own heading and one-line subtitle. */
   title: string;
@@ -172,11 +188,16 @@ export interface LayerWords {
   bands: readonly [PairBand, PairBand, PairBand, PairBand, PairBand];
   /** `wordBand`'s four edges between the five `bands` above, ascending. */
   bandEdges: readonly [number, number, number, number];
-  /** Pad axis captions — "−" at the low end, `x`/`y` (a `fillTemplate`
-   *  template, `{A}`/`{B}` the two strains) in the middle, "+" at the high
-   *  end. No verbs (AGENTS.md's "Sliders: right = more" — an axis is a
-   *  slider with two ends, not a sentence). */
+  /** Pad axis captions — a word at the low end (`neg`), `x`/`y` (a
+   *  `fillTemplate` template, `{A}`/`{B}` the two strains) in the middle, a
+   *  word at the high end (`pos`). The ends are words, not bare −/+ (the user,
+   *  2026-10-02: the signs read as "not informative"); the high-end word still
+   *  names more of what the axis grows (AGENTS.md's "Sliders: right = more"). */
   axis: { neg: string; pos: string; x: string; y: string };
+  /** The verb ladder a cursor hint reads a value through, ascending by
+   *  `upTo` — see `PairVerb` and `pairSentence`. The last entry's `upTo` is
+   *  `Infinity`. */
+  verbs: readonly PairVerb[];
   /** One direction's status phrase, a `fillTemplate` template taking `{A}`
    *  (the strain reading it), `{B}` (the strain it's read against) and the
    *  `word` var (that direction's lower-cased band word) —
@@ -238,6 +259,12 @@ export interface PairWords {
     customMix: string;
     /** A pad square's `aria-label` template (`{A}`/`{B}`). */
     padAria: string;
+    /** Appended after the second strain when a `PairVerb` has `ofTrail`
+     *  ("eats B" + this = "eats B’s trail"). */
+    trailSuffix: string;
+    /** The cursor hint's note on a Touch pad whose strains rarely share
+     *  ground (`RARELY_MEET_OVERLAP`) while one of them is set to eat. */
+    rarelyMeet: string;
     /** The mix row's own `.vc-label` title, above Random/Nudge/Keep own
      *  trails/Back and the preset pills. */
     mixTitle: string;
@@ -258,7 +285,7 @@ export const PAIR_WORDS: PairWords = {
     smell: {
       title: "Smell",
       subtitle: "which trails it steers toward",
-      how: "Each pad is one pair. Drag the dot: across is how much the first strain follows the second's trail, up is the reverse.",
+      how: "Each pad is one pair. Drag the dot and watch the scene: across is how the first strain treats the second, up is the reverse.",
       bands: [
         { word: "Flees", at: -1.2 },
         { word: "Avoids", at: -0.6 },
@@ -267,7 +294,13 @@ export const PAIR_WORDS: PairWords = {
         { word: "Loves", at: 1.1 },
       ],
       bandEdges: [-0.9, -0.3, 0.3, 0.85],
-      axis: { neg: "−", pos: "+", x: "{A} → {B}", y: "{B} → {A}" },
+      axis: { neg: "avoids", pos: "follows", x: "{A} → {B}", y: "{B} → {A}" },
+      verbs: [
+        { upTo: -0.02, verb: "avoids" },
+        { upTo: 0.15, verb: "ignores" },
+        { upTo: 0.7, verb: "follows" },
+        { upTo: Infinity, verb: "follows", after: "closely" },
+      ],
       edge: "{word} {B}",
       relations: {
         zoneEdge: 0.3,
@@ -282,7 +315,7 @@ export const PAIR_WORDS: PairWords = {
     touch: {
       title: "Touch",
       subtitle: "what its steps do to other trails",
-      how: "Same pads, second table. Across is what the first strain's steps do to the second's trail: right feeds it, left eats it. Up is the reverse.",
+      how: "Same pads, second table: what each strain's steps do to the other's trail. Across is the first strain's steps on the second's trail, up is the reverse.",
       bands: [
         { word: "Devours", at: -1.2 },
         { word: "Eats", at: -0.6 },
@@ -291,7 +324,12 @@ export const PAIR_WORDS: PairWords = {
         { word: "Nurtures", at: 1.1 },
       ],
       bandEdges: [-0.9, -0.3, 0.3, 0.85],
-      axis: { neg: "−", pos: "+", x: "{A} → {B}", y: "{B} → {A}" },
+      axis: { neg: "eats", pos: "feeds", x: "{A} → {B}", y: "{B} → {A}" },
+      verbs: [
+        { upTo: -0.02, verb: "eats", ofTrail: true },
+        { upTo: 0.02, verb: "leaves", after: "alone" },
+        { upTo: Infinity, verb: "feeds", ofTrail: true },
+      ],
       edge: "{word} {B}'s trail",
       relations: {
         zoneEdge: 0.3,
@@ -310,8 +348,8 @@ export const PAIR_WORDS: PairWords = {
     ownNote: "Each strain always lays its own trail. Touch is only about everyone else's.",
     ownHint: "Drag a strain's own fader: up follows more of its own trail, down less.",
     pairs: "Pairs",
-    pairsHint: "Drag inside a pad to set both directions at once — across is the first strain's pull on the second, up is the reverse.",
-    statusIdle: "Hover or drag a pad to read both directions, in both tables.",
+    pairsHint: "Drag a dot and watch the scene. The corners show the four extremes: apart, together, and who chases whom.",
+    statusIdle: "Hover or drag a pad to read both directions.",
     random: { smell: "Random smell", touch: "Random touch" },
     nudge: "Nudge",
     keepOwn: "Keep own trails",
@@ -321,6 +359,8 @@ export const PAIR_WORDS: PairWords = {
     presetsTouch: "With touch",
     customMix: "Custom mix — not one of the experiments above.",
     padAria: "{A} and {B}",
+    trailSuffix: "’s trail",
+    rarelyMeet: "They rarely meet, so there is little to eat. Bring them together in Smell first.",
     mixTitle: "Mix",
     mixHint:
       "Random rerolls the table on screen, Nudge jitters it, Back undoes the last change — presets below jump to a named starting point. With Rivals on, a Smell roll always has every strain follow its own trail and shy from the others', so it splits into territories; off, any mix can come up.",
@@ -433,6 +473,79 @@ export function padPos(v: number): number {
 export function padValue(pct: number): number {
   const u = Math.max(-1, Math.min(1, (pct - 50) / 42));
   return Math.sign(u) * Math.pow(Math.abs(u), PAD_CURVE) * AFFINITY_MAX;
+}
+
+/** (value, pad percent) knots of a Smell pad's squeezed map
+ *  (`smellPadPos`/`smellPadValue`). Measured on the real pads
+ *  (docs/scenes/physarum2/scripts/padresponse.mjs): only values 0…+1 change a
+ *  Smell pair's picture — any negative value looks the same (avoiding harder
+ *  changes nothing) and so does anything above +1 — so that live band gets
+ *  most of the pad's travel and each flat tail a short strip. Same 8…92 ends
+ *  as `padPos`, so the marker keeps its room at the extremes. */
+export const SMELL_PAD_KNOTS: readonly (readonly [number, number])[] = [
+  [-1.5, 8],
+  [0, 29],
+  [1, 79.4],
+  [1.5, 92],
+];
+
+/** A Smell value's position across a pad, as a percentage — piecewise-linear
+ *  through `SMELL_PAD_KNOTS`, clamped to `[AFFINITY_MIN, AFFINITY_MAX]`. */
+export function smellPadPos(v: number): number {
+  const c = Math.max(AFFINITY_MIN, Math.min(AFFINITY_MAX, v));
+  for (let i = 1; i < SMELL_PAD_KNOTS.length; i++) {
+    const [v1, p1] = SMELL_PAD_KNOTS[i]!;
+    if (c <= v1) {
+      const [v0, p0] = SMELL_PAD_KNOTS[i - 1]!;
+      return p0 + ((c - v0) / (v1 - v0)) * (p1 - p0);
+    }
+  }
+  return SMELL_PAD_KNOTS[SMELL_PAD_KNOTS.length - 1]![1];
+}
+
+/** `smellPadPos`'s inverse: a percentage below the first knot reads
+ *  `AFFINITY_MIN`, above the last `AFFINITY_MAX`. */
+export function smellPadValue(pct: number): number {
+  const first = SMELL_PAD_KNOTS[0]!;
+  if (pct <= first[1]) return first[0];
+  for (let i = 1; i < SMELL_PAD_KNOTS.length; i++) {
+    const [v1, p1] = SMELL_PAD_KNOTS[i]!;
+    if (pct <= p1) {
+      const [v0, p0] = SMELL_PAD_KNOTS[i - 1]!;
+      return v0 + ((pct - p0) / (p1 - p0)) * (v1 - v0);
+    }
+  }
+  return SMELL_PAD_KNOTS[SMELL_PAD_KNOTS.length - 1]![0];
+}
+
+/** A pad's value-to-position map for `layer`: Smell pads use the squeezed
+ *  `smellPadPos`; Touch keeps the flat-around-zero `padPos` (own-trail faders
+ *  call `padPos`/`padValue` directly and are unchanged). */
+export function layerPadPos(layer: PairLayer, v: number): number {
+  return layer === "smell" ? smellPadPos(v) : padPos(v);
+}
+
+/** `layerPadPos`'s inverse. */
+export function layerPadValue(layer: PairLayer, pct: number): number {
+  return layer === "smell" ? smellPadValue(pct) : padValue(pct);
+}
+
+/** Below this share of ground in common (`pairOverlap`, physarum2Preview.ts),
+ *  a Touch pair rarely meets, so eating has almost nothing to bite — the
+ *  cursor hint says so. */
+export const RARELY_MEET_OVERLAP = 0.25;
+
+/** One direction as a sentence, the first strain as subject — "A avoids B",
+ *  "A follows B closely", "A eats B’s trail", "A leaves B alone" — read off
+ *  the layer's `verbs` ladder for value `v`, as tokens a widget renders
+ *  itself. The word that goes after the strain (`after`) comes after the
+ *  trail suffix when both apply. */
+export function pairSentence(words: LayerWords, ui: PairWords["ui"], a: number, b: number, v: number): PairToken[] {
+  const step = words.verbs.find((s) => v < s.upTo) ?? words.verbs[words.verbs.length - 1]!;
+  const tokens: PairToken[] = [{ strain: a }, { text: ` ${step.verb} ` }, { strain: b }];
+  if (step.ofTrail) tokens.push({ text: ui.trailSuffix });
+  if (step.after) tokens.push({ text: ` ${step.after}` });
+  return tokens;
 }
 
 /** Every unordered pair over `0..n-1`, ascending — the six pads' own (a, b)

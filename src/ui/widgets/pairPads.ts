@@ -4,10 +4,13 @@ import {
   AFFINITY_MIN,
   fillTemplate,
   fmtSigned,
+  layerPadPos,
+  layerPadValue,
   nudgeTable,
   padPos,
   padValue,
   pairRelation,
+  pairSentence,
   pairsOf,
   popHistory,
   pushHistory,
@@ -15,13 +18,21 @@ import {
   randomTouch,
   tablesMatch,
   PAIR_LOOK,
+  RARELY_MEET_OVERLAP,
   type AffinityPreset,
   type AffinityTables,
   type PairLayer,
   type PairToken,
   type PairWords,
 } from "../../render/scenes/physarum2Affinity.ts";
-import { createPairCulture, type PairCulture } from "../../render/scenes/physarum2Preview.ts";
+import {
+  createPairCulture,
+  pairContactPixelsInto,
+  pairOverlap,
+  trailQuantile,
+  type PairCulture,
+  type PairCultureInputs,
+} from "../../render/scenes/physarum2Preview.ts";
 import type { WidgetCtx } from "./registry.ts";
 import type { PreviewEffective, PreviewSource } from "./previews.ts";
 import { rowHeadStyle, rowLabelStyle, spacer } from "../controlsKit.ts";
@@ -46,27 +57,56 @@ import { setHintText } from "../hintSwatches.ts";
  * Every word a person reads here comes from `PairWords` (physarum2Affinity.ts)
  * — this file has no label/sentence literal of its own for anything other
  * than an `aria-label` scaffold. `PairWords.showRelations` is off by default:
- * a pad's header always shows its own two live values, each coloured by its
- * own strain (x = A→B, the first value; y = B→A, the second), and a pad
- * draws no corner labels — `pairRelation`/`relations.corners` are read only
- * when a caller flips `showRelations` on.
+ * a pad's header is hidden (the two numbers live in the cursor hint, see
+ * "Clearer pads" below) and a pad draws no corner labels —
+ * `pairRelation`/`relations.corners` are read only when a caller flips
+ * `showRelations` on.
  *
- * **Numbers only, no band words (2026-09-27 feedback).** An own-trail
- * fader's value and the pad-hover status line both show a plain signed
- * number, never a `PairWords.layers.*.bands` word ("Flees"/"Devours"/…) —
- * user testing found the words read as confusing rather than clarifying. The
- * bands stay in `PairWords` as tested, unused data (same status as
- * `showRelations`), and a pad's tick marks stay unlabelled marks at each
- * band's `at` value rather than being deleted along with the words. The
- * status line reads `"{A} → {B} {value} · {B} → {A} {value}"` for the layer
- * on screen, then the same for the other table when one exists — the axis
- * captions a pad's own body already draws with, not a word phrase.
+ * **Numbers, not band words (2026-09-27 feedback).** An own-trail fader's
+ * value shows a plain signed number, never a `PairWords.layers.*.bands` word
+ * ("Flees"/"Devours"/…) — user testing found the band words read as confusing
+ * rather than clarifying. The bands stay in `PairWords` as tested, unused
+ * data (same status as `showRelations`). The pad's own words are the ones
+ * "Clearer pads" added: axis-end verbs and the hint's sentences, which come
+ * from each layer's `verbs` ladder, not from the bands.
  *
- * **Flat around zero (2026-09-28).** Pads and own-trail faders both map the
- * pointer through `padValue` (and draw through its inverse `padPos`), which
- * bends the line by `PAD_CURVE` so the stretch around a relation's sign flip
- * is fine and gentle, steeper toward the edges.
+ * **Flat around zero (2026-09-28).** Touch pads and the own-trail faders map
+ * the pointer through `padValue` (and draw through its inverse `padPos`),
+ * which bends the line by `PAD_CURVE` so the stretch around a relation's sign
+ * flip is fine and gentle, steeper toward the edges. Smell pads no longer do:
+ * they use the squeezed `SMELL_PAD_KNOTS` map (`layerPadPos`/`layerPadValue`
+ * pick between the two per layer).
  *
+ * **Clearer pads (2026-10-02).** The user tried three versions of the pads on
+ * a trial page (docs/scenes/physarum2/artifacts/pairs-trial.html) and picked
+ * this one; that page's script is the reference behaviour. What changed, and
+ * why:
+ * - *Colours.* Each strain keeps its own colour and the ground the two share
+ *   turns white (`pairContactPixelsInto`), each channel scaled to its own
+ *   bright end — the old additive mix clipped dense paths and blended two
+ *   similar hues into one (measured: docs/scenes/physarum2/scripts/
+ *   padresponse.mjs). The quadrant tints and band ticks are gone; the picture
+ *   itself now says which corner is which.
+ * - *Squeezed Smell map.* On a Smell pad only values 0…+1 change the picture
+ *   (anything below 0 looks the same, and so does anything above +1), so
+ *   `SMELL_PAD_KNOTS` gives that band most of the pad and the zero lines sit
+ *   off-centre. Touch keeps the flat-around-zero curve.
+ * - *Words.* The axis ends say "avoids"/"follows" and "eats"/"feeds" instead
+ *   of −/+ (the user: bare signs read as "not informative"), four small
+ *   pictures in a Smell pad's corners show apart / together / who chases whom,
+ *   and a sentence follows the cursor (`pairSentence`, e.g. "A follows B
+ *   closely") with the two numbers beside it. The numbers moved there from the
+ *   pad header; the status line below reads the same sentences.
+ * - *Hold still, settle.* The pad under the pointer skips beat reseeds, and
+ *   letting go of a drag runs its culture `PAD_SETTLE_STEPS` steps at once
+ *   (violet ring for a moment) so it shows the result instead of drifting to
+ *   it.
+ * - *Spotlight.* While a pad is hovered, dragged or keyboard-focused, `tick`
+ *   sends `command("spotlight", { a, b })` every tick and the scene dims the
+ *   other strains (physarum2.ts's file header). Phone-local like every
+ *   command — the pop-out output and a TV never dim.
+ *
+
  * **Values are continuous.** Dragging a pad or an own-trail fader stores at
  * 0.01 resolution (`round01` below) — not the settings' own 0.05 `step`,
  * which only bounds a keyboard nudge and the Scene panel's generic numeric
@@ -203,6 +243,16 @@ const pairCultureCache = new Map<string, PairCulture>();
  *  slow frame, so a stall never turns into a burst of CPU work. */
 const PAD_STEPS_PER_SEC = 60;
 const PAD_MAX_STEPS_PER_TICK = 4;
+/** Every this many ticks a visible pad re-measures its picture: the bright
+ *  end each channel is scaled to (`trailQuantile`) and how much ground the two
+ *  strains share (`pairOverlap`). The exposure is smoothed (an EMA) so the
+ *  picture never jumps when a dense patch forms or breaks up. */
+const PAD_MEASURE_EVERY = 20;
+/** Steps a pad's culture runs the moment a drag is released, so the pad shows
+ *  where the new setting leads instead of drifting there over a few seconds. */
+const PAD_SETTLE_STEPS = 120;
+/** How long the settled ring (`vc-pad-settled`) stays on, in ms. */
+const PAD_SETTLED_MS = 450;
 
 function cachedCulture(key: string, size: number, agents: number, seed: number): PairCulture {
   let c = pairCultureCache.get(key);
@@ -546,18 +596,32 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
      *  and putImageData reads it back through this, with no per-tick copy. */
     img: ImageData | undefined;
     headEl: HTMLElement;
-    xValEl: HTMLElement;
-    yValEl: HTMLElement;
     marker: SVGGElement;
     guideX: SVGLineElement;
     guideY: SVGLineElement;
     lastX: number | undefined;
     lastY: number | undefined;
     visible: boolean;
+    /** The pointer is over the pad / a drag on it is live — the spotlight, the
+     *  cursor hint and the hold-still rule (no beat reseed) read these. */
+    hot: boolean;
+    dragging: boolean;
+    /** Each channel's bright end the contact picture scales to
+     *  (`trailQuantile(…, 0.98)`, smoothed) and the share of ground the two
+     *  strains have in common (`pairOverlap`) — see `measurePad`. */
+    exposure: [number, number];
+    overlap: number;
+    settleTimer: number | undefined;
   }
 
   const pads: PadHandle[] = [];
   let focusIdx = -1;
+  // The cursor hint's subject and pointer position (see `refreshHint`), and
+  // whether the last tick told the scene to spotlight a pair.
+  let hintPad: PadHandle | undefined;
+  let hintX = 0;
+  let hintY = 0;
+  let spotOn = false;
   const pairs = pairsOf(count);
 
   pairs.forEach(([a, b], idx) => {
@@ -566,9 +630,10 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
     const headEl = document.createElement("div");
     headEl.className = "vc-pad-head";
-    const xValEl = document.createElement("span");
-    const yValEl = document.createElement("span");
-    headEl.append(xValEl, yValEl);
+    // The two numbers moved into the cursor hint ("Clearer pads"); the header
+    // only has content while `words.showRelations` names the relation. A plain
+    // style toggle, not `hidden`: `.vc-pad-head` has its own authored `display`.
+    if (!words.showRelations) headEl.style.display = "none";
 
     const bodyEl = document.createElement("div");
     bodyEl.className = "vc-pad-body";
@@ -624,49 +689,73 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       imgBuf,
       img,
       headEl,
-      xValEl,
-      yValEl,
       marker: svgEl("g", {}),
       guideX: svgEl("line", {}),
       guideY: svgEl("line", {}),
       lastX: undefined,
       lastY: undefined,
       visible: false,
+      hot: false,
+      dragging: false,
+      exposure: culture ? [trailQuantile(culture.trails()[0], 0.98), trailQuantile(culture.trails()[1], 0.98)] : [0, 0],
+      overlap: culture && pair ? pairOverlap(culture.trails(), pair.size) : 0,
+      settleTimer: undefined,
     };
     pads.push(pad);
 
-    let dragging = false;
     const fromPointer = (e: PointerEvent): void => {
       const r = sq.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return;
       const xPct = ((e.clientX - r.left) / r.width) * 100;
       const yPct = ((e.clientY - r.top) / r.height) * 100;
-      setVal(state!.layer, a, b, padValue(xPct));
-      setVal(state!.layer, b, a, padValue(100 - yPct));
+      setVal(state!.layer, a, b, layerPadValue(state!.layer, xPct));
+      setVal(state!.layer, b, a, layerPadValue(state!.layer, 100 - yPct));
       redrawPad(pad);
     };
     sq.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       pointerFocus(sq);
       sq.setPointerCapture(e.pointerId);
-      dragging = true;
+      pad.dragging = true;
       focusIdx = idx;
+      hintPad = pad;
+      hintX = e.clientX;
+      hintY = e.clientY;
       fromPointer(e);
+      refreshHint();
     });
     sq.addEventListener("pointermove", (e) => {
-      if (dragging) fromPointer(e);
+      hintX = e.clientX;
+      hintY = e.clientY;
+      if (pad.dragging) fromPointer(e);
+      if (hintPad === pad) placeHint();
     });
-    sq.addEventListener("pointerup", () => {
-      dragging = false;
-    });
-    sq.addEventListener("pointercancel", () => {
-      dragging = false;
-    });
-    sq.addEventListener("pointerenter", () => {
+    // pointerup and pointercancel both end the drag; only a real release
+    // settles the culture (a cancelled gesture did not choose that value).
+    const endDrag = (settle: boolean): void => {
+      if (!pad.dragging) return;
+      pad.dragging = false;
+      if (settle) settlePad(pad);
+      if (!pad.hot && hintPad === pad) hintPad = undefined;
+      refreshHint();
+    };
+    sq.addEventListener("pointerup", () => endDrag(true));
+    sq.addEventListener("pointercancel", () => endDrag(false));
+    sq.addEventListener("pointerenter", (e) => {
+      pad.hot = true;
       focusIdx = idx;
+      hintPad = pad;
+      hintX = e.clientX;
+      hintY = e.clientY;
+      refreshHint();
     });
     sq.addEventListener("pointerleave", () => {
-      if (!dragging && focusIdx === idx) focusIdx = -1;
+      pad.hot = false;
+      if (!pad.dragging) {
+        if (focusIdx === idx) focusIdx = -1;
+        if (hintPad === pad) hintPad = undefined;
+        refreshHint();
+      }
     });
     sq.addEventListener("focus", () => {
       focusIdx = idx;
@@ -692,26 +781,77 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     drawPadChrome(pad);
   });
 
+  /** One of the four corner pictures on a Smell pad: apart, together, or who
+   *  chases whom — drawn in the two strains' own colours. `aChasesB` is the
+   *  bottom-right corner (A's pull on B high, B's on A low), `bChasesA` the
+   *  top-left. The same shapes as the trial page's `icon()`. */
+  function cornerIcon(kind: "apart" | "together" | "aChasesB" | "bChasesA", corner: string, a: number, b: number): HTMLSpanElement {
+    const ca = colours[a] ?? "#fff";
+    const cb = colours[b] ?? "#fff";
+    const span = document.createElement("span");
+    span.className = `vc-pad-ic vc-pad-ic-${corner}`;
+    span.setAttribute("aria-hidden", "true");
+    const svg = svgEl("svg", { viewBox: "0 0 22 12" }, span);
+    svg.setAttribute("aria-hidden", "true");
+    const arrow = (): void => {
+      svgEl(
+        "path",
+        {
+          d: "M8.5 6h5m-2-2.2 2.2 2.2-2.2 2.2",
+          stroke: "rgba(255,255,255,.75)",
+          "stroke-width": 1.2,
+          fill: "none",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+        },
+        svg,
+      );
+    };
+    if (kind === "apart") {
+      svgEl("circle", { cx: 4, cy: 6, r: 3.2, fill: ca }, svg);
+      svgEl("path", { d: "M11 1.5v9", stroke: "rgba(255,255,255,.6)", "stroke-width": 1.2 }, svg);
+      svgEl("circle", { cx: 18, cy: 6, r: 3.2, fill: cb }, svg);
+    } else if (kind === "together") {
+      svgEl("circle", { cx: 9, cy: 6, r: 3.8, fill: ca }, svg);
+      svgEl("circle", { cx: 13, cy: 6, r: 3.8, fill: cb, "fill-opacity": 0.85 }, svg);
+    } else if (kind === "aChasesB") {
+      svgEl("circle", { cx: 4, cy: 6, r: 3.2, fill: ca }, svg);
+      arrow();
+      svgEl("circle", { cx: 18, cy: 6, r: 3.2, fill: cb }, svg);
+    } else {
+      svgEl("circle", { cx: 4, cy: 6, r: 3.2, fill: cb }, svg);
+      arrow();
+      svgEl("circle", { cx: 18, cy: 6, r: 3.2, fill: ca }, svg);
+    }
+    return span;
+  }
+
   /** Redraws everything about a pad's SVG/canvas layout that depends on the
-   *  active layer (quadrant tints, ticks, marker shape) — called on mount
+   *  active layer (zero axes, corner pictures, marker shape) — called on mount
    *  and on every layer switch, never per-tick (see this file's header). */
   function drawPadChrome(pad: PadHandle): void {
-    const w = words.layers[state!.layer];
-    const look = PAIR_LOOK[state!.layer];
-    const svg = pad.sq.querySelector("svg")!;
+    const layer = state!.layer;
+    const w = words.layers[layer];
+    const look = PAIR_LOOK[layer];
+    // `:scope > svg`, not a plain "svg": the corner pictures each hold an svg
+    // of their own and sit before this one, so a descendant search would find
+    // a picture's svg on every redraw after the first.
+    const svg = pad.sq.querySelector(":scope > svg")!;
     svg.replaceChildren();
-    svgEl("rect", { x: 50, y: 0, width: 50, height: 50, fill: `rgba(${look.pos},0.1)` }, svg);
-    svgEl("rect", { x: 0, y: 50, width: 50, height: 50, fill: `rgba(${look.neg},0.1)` }, svg);
-    svgEl("rect", { x: 0, y: 0, width: 50, height: 50, fill: `rgba(${look.mixed},0.05)` }, svg);
-    svgEl("rect", { x: 50, y: 50, width: 50, height: 50, fill: `rgba(${look.mixed},0.05)` }, svg);
-    svgEl("line", { x1: 50, y1: 0, x2: 50, y2: 100, class: "vc-pad-axis" }, svg);
-    svgEl("line", { x1: 0, y1: 50, x2: 100, y2: 50, class: "vc-pad-axis" }, svg);
-    for (const band of w.bands) {
-      if (band.at === 0) continue;
-      const p = padPos(band.at);
-      svgEl("line", { x1: p, y1: 48.5, x2: p, y2: 51.5, class: "vc-pad-tick" }, svg);
-      svgEl("line", { x1: 48.5, y1: 100 - p, x2: 51.5, y2: 100 - p, class: "vc-pad-tick" }, svg);
+    // The four corner pictures are HTML, not part of the stretched svg
+    // (preserveAspectRatio="none" would squash them), and sit behind it so the
+    // marker draws over them. Smell only: Touch has no chase to picture.
+    for (const old of Array.from(pad.sq.querySelectorAll(".vc-pad-ic"))) old.remove();
+    if (layer === "smell") {
+      pad.sq.insertBefore(cornerIcon("bChasesA", "tl", pad.a, pad.b), svg);
+      pad.sq.insertBefore(cornerIcon("together", "tr", pad.a, pad.b), svg);
+      pad.sq.insertBefore(cornerIcon("apart", "bl", pad.a, pad.b), svg);
+      pad.sq.insertBefore(cornerIcon("aChasesB", "br", pad.a, pad.b), svg);
     }
+    // The zero lines sit where the layer's own map puts 0 (off-centre on Smell).
+    const zero = layerPadPos(layer, 0);
+    svgEl("line", { x1: zero, y1: 0, x2: zero, y2: 100, class: "vc-pad-axis" }, svg);
+    svgEl("line", { x1: 0, y1: 100 - zero, x2: 100, y2: 100 - zero, class: "vc-pad-axis" }, svg);
     if (words.showRelations && w.relations) {
       const c = w.relations.corners;
       const corner = (x: number, y: number, anchor: string, text: string): void => {
@@ -771,35 +911,32 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
    *  whenever that pad's own (x, y) changed (a drag, a keypress, or the
    *  per-tick read below). */
   function redrawPad(pad: PadHandle): void {
-    const x = getVal(state!.layer, pad.a, pad.b);
-    const y = getVal(state!.layer, pad.b, pad.a);
+    const layer = state!.layer;
+    const x = getVal(layer, pad.a, pad.b);
+    const y = getVal(layer, pad.b, pad.a);
     if (pad.lastX === x && pad.lastY === y) return;
     pad.lastX = x;
     pad.lastY = y;
-    const X = padPos(x);
-    const Y = 100 - padPos(y);
+    const X = layerPadPos(layer, x);
+    const Y = 100 - layerPadPos(layer, y);
+    const Z = layerPadPos(layer, 0);
     pad.marker.setAttribute("transform", `translate(${X} ${Y})`);
     pad.guideX.setAttribute("x1", String(X));
     pad.guideX.setAttribute("y1", String(Y));
     pad.guideX.setAttribute("x2", String(X));
-    pad.guideX.setAttribute("y2", "50");
+    pad.guideX.setAttribute("y2", String(100 - Z));
     pad.guideY.setAttribute("x1", String(X));
     pad.guideY.setAttribute("y1", String(Y));
-    pad.guideY.setAttribute("x2", "50");
+    pad.guideY.setAttribute("x2", String(Z));
     pad.guideY.setAttribute("y2", String(Y));
 
     if (words.showRelations) {
-      const rel = pairRelation(words.layers[state!.layer], x, y);
+      const rel = pairRelation(words.layers[layer], x, y);
       pad.headEl.replaceChildren();
       const beh = document.createElement("span");
       beh.className = "vc-pad-beh";
       if (rel) renderTokens(beh, fillTemplate(rel, pad.a, pad.b), shortLabels, colours);
       pad.headEl.appendChild(beh);
-    } else {
-      pad.xValEl.textContent = fmtSigned(x);
-      pad.xValEl.style.color = colours[pad.a] ?? "#fff";
-      pad.yValEl.textContent = fmtSigned(y);
-      pad.yValEl.style.color = colours[pad.b] ?? "#fff";
     }
   }
 
@@ -1003,6 +1140,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   let lastTickMs = -1;
   let lastStatusSig = "";
   let lastSeedEpoch: number | undefined;
+  let tickCount = 0;
   function tick(): void {
     const nowMs = performance.now();
     const dtSec = lastTickMs < 0 ? 0 : Math.min(0.1, (nowMs - lastTickMs) / 1000);
@@ -1036,22 +1174,25 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
 
     // The status line is an aria-live region: rewrite it only when what it
-    // says changed, not on every tick the pointer rests on a pad.
+    // says changed, not on every tick the pointer rests on a pad. It reads
+    // the pad's two directions as sentences for the layer on screen — the
+    // same sentences the cursor hint shows, plus the screen reader's copy of
+    // them.
     if (focusIdx >= 0 && pads[focusIdx]) {
       const { a, b } = pads[focusIdx]!;
       const layer = state!.layer;
-      const otherLayer: PairLayer = layer === "smell" ? "touch" : "smell";
-      const sig =
-        `${focusIdx}|${layer}|${fmtSigned(getVal(layer, a, b))}|${fmtSigned(getVal(layer, b, a))}` +
-        (hasTouch ? `|${fmtSigned(getVal(otherLayer, a, b))}|${fmtSigned(getVal(otherLayer, b, a))}` : "");
+      const lw = words.layers[layer];
+      const sx = pairSentence(lw, words.ui, a, b, getVal(layer, a, b));
+      const sy = pairSentence(lw, words.ui, b, a, getVal(layer, b, a));
+      const sig = JSON.stringify([sx, sy]);
       if (sig !== lastStatusSig) {
         lastStatusSig = sig;
         statusEl.replaceChildren();
-        appendEdgeNumbers(statusEl, a, b, layer);
-        if (hasTouch) {
-          statusEl.appendChild(document.createTextNode(" · "));
-          appendEdgeNumbers(statusEl, a, b, otherLayer);
-        }
+        const xEl = document.createElement("span");
+        renderTokens(xEl, sx, shortLabels, colours);
+        const yEl = document.createElement("span");
+        renderTokens(yEl, sy, shortLabels, colours);
+        statusEl.append(xEl, document.createTextNode(" · "), yEl);
       }
     } else if (lastStatusSig !== "idle") {
       lastStatusSig = "idle";
@@ -1060,56 +1201,175 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
     refreshPresetHighlight();
 
+    // Spotlight: while a pad is hovered, dragged, or holds real keyboard focus
+    // (a mouse press leaves focus on the pad too, tagged `vc-pf`, and that
+    // must not keep the dish dim), tell the scene which pair to keep bright —
+    // every tick, since the scene lets it lapse a moment after the last
+    // message (physarum2.ts's SPOT_HOLD_MS).
+    const active =
+      pads.find((p) => p.dragging) ??
+      pads.find((p) => p.hot) ??
+      pads.find((p) => p.sq === document.activeElement && !p.sq.classList.contains("vc-pf"));
+    if (active) {
+      ctx.command("spotlight", { a: active.a, b: active.b });
+      spotOn = true;
+    } else if (spotOn) {
+      ctx.command("spotlight", { a: -1, b: -1 });
+      spotOn = false;
+    }
+    refreshHint();
+
+    tickCount++;
     if (pair && effective) {
       for (const pad of pads) {
         if (!pad.culture || !pad.offscreen || !pad.imgBuf || !pad.img || !pad.visible) continue;
-        if (seedNow) pad.culture.seedColony(probeData?.seedDose ?? 0, probeData?.seedRadius ?? 0);
-        if (steps === 0 && !seedNow) continue;
+        // Hold still: the pad under the pointer keeps its network through a
+        // beat reseed, so what a drag is doing stays readable.
+        const reseed = seedNow && !pad.hot && !pad.dragging;
+        if (reseed) pad.culture.seedColony(probeData?.seedDose ?? 0, probeData?.seedRadius ?? 0);
+        if (tickCount % PAD_MEASURE_EVERY === 0) measurePad(pad);
+        if (steps === 0 && !reseed) continue;
         if (steps > 0) {
-          const w = pair.weights(ctx, pad.a, pad.b);
-          const inputs = {
-            motion: [effective(pad.a).motion, effective(pad.b).motion] as const,
-            smell: w.smell,
-            touch: w.touch,
-          };
+          const inputs = padInputs(pad);
           for (let s = 0; s < steps; s++) pad.culture.step(inputs);
         }
-        pad.culture.pixelsInto(pad.imgBuf, [colorFor(pad.a), colorFor(pad.b)]);
-        const octx = pad.offscreen.getContext("2d");
-        if (octx) octx.putImageData(pad.img, 0, 0);
-        const w = Math.round(pad.canvas.clientWidth);
-        const h = Math.round(pad.canvas.clientHeight);
-        if (w > 0 && h > 0) {
-          if (pad.canvas.width !== w) pad.canvas.width = w;
-          if (pad.canvas.height !== h) pad.canvas.height = h;
-          const vctx = pad.canvas.getContext("2d");
-          if (vctx) {
-            vctx.imageSmoothingEnabled = true;
-            vctx.imageSmoothingQuality = "high";
-            vctx.clearRect(0, 0, pad.canvas.width, pad.canvas.height);
-            vctx.drawImage(pad.offscreen, 0, 0, pad.canvas.width, pad.canvas.height);
-          }
-        }
+        paintPad(pad);
       }
     }
   }
 
-  /** Appends `"{A} → {B} {value} · {B} → {A} {value}"` for one table/layer —
-   *  numbers only (2026-09-27 feedback), reusing the same axis-caption
-   *  templates a pad's own body draws with (`w.axis.x`/`w.axis.y`) rather
-   *  than a band word, so the status line never says anything a pad doesn't
-   *  already show. `tick()`'s caller appends this once per table, current
-   *  layer first, when a second table exists. */
-  function appendEdgeNumbers(host: HTMLElement, a: number, b: number, layer: PairLayer): void {
-    const w = words.layers[layer];
-    const xEl = document.createElement("span");
-    renderTokens(xEl, fillTemplate(w.axis.x, a, b), shortLabels, colours);
-    host.appendChild(xEl);
-    host.appendChild(document.createTextNode(` ${fmtSigned(getVal(layer, a, b))} · `));
-    const yEl = document.createElement("span");
-    renderTokens(yEl, fillTemplate(w.axis.y, a, b), shortLabels, colours);
-    host.appendChild(yEl);
-    host.appendChild(document.createTextNode(` ${fmtSigned(getVal(layer, b, a))}`));
+  /** What a pad's culture steps with right now: its two strains' live motion
+   *  and the pair's Smell/Touch weights. Only called when `pair`/`effective`
+   *  exist. */
+  function padInputs(pad: PadHandle): PairCultureInputs {
+    const w = pair!.weights(ctx, pad.a, pad.b);
+    return {
+      motion: [effective!(pad.a).motion, effective!(pad.b).motion] as const,
+      smell: w.smell,
+      touch: w.touch,
+    };
+  }
+
+  /** Re-measures a pad's picture: each channel's bright end (smoothed 50/50
+   *  with the last reading, so a dense patch forming never jumps the
+   *  exposure; an unmeasured, zero reading is replaced outright) and how much
+   *  ground the two strains share. */
+  function measurePad(pad: PadHandle): void {
+    if (!pad.culture || !pair) return;
+    const trails = pad.culture.trails();
+    for (let k = 0; k < 2; k++) {
+      const next = trailQuantile(trails[k]!, 0.98);
+      pad.exposure[k] = pad.exposure[k]! > 0 ? 0.5 * pad.exposure[k]! + 0.5 * next : next;
+    }
+    pad.overlap = pairOverlap(trails, pair.size);
+  }
+
+  /** Draws a pad's contact-colour picture (physarum2Preview.ts's
+   *  `pairContactPixelsInto`) into its canvas. */
+  function paintPad(pad: PadHandle): void {
+    if (!pad.culture || !pad.offscreen || !pad.imgBuf || !pad.img || !pair) return;
+    pairContactPixelsInto(pad.culture.trails(), pair.size, pad.imgBuf, [colorFor(pad.a), colorFor(pad.b)], pad.exposure);
+    const octx = pad.offscreen.getContext("2d");
+    if (octx) octx.putImageData(pad.img, 0, 0);
+    const w = Math.round(pad.canvas.clientWidth);
+    const h = Math.round(pad.canvas.clientHeight);
+    if (w > 0 && h > 0) {
+      if (pad.canvas.width !== w) pad.canvas.width = w;
+      if (pad.canvas.height !== h) pad.canvas.height = h;
+      const vctx = pad.canvas.getContext("2d");
+      if (vctx) {
+        vctx.imageSmoothingEnabled = true;
+        vctx.imageSmoothingQuality = "high";
+        vctx.clearRect(0, 0, pad.canvas.width, pad.canvas.height);
+        vctx.drawImage(pad.offscreen, 0, 0, pad.canvas.width, pad.canvas.height);
+      }
+    }
+  }
+
+  /** Letting go of a drag: run the pad's culture `PAD_SETTLE_STEPS` steps on
+   *  the spot with the new setting, so it shows where it leads instead of
+   *  drifting there over a few seconds, and flash the settled ring. Nothing to
+   *  do without a pair source. */
+  function settlePad(pad: PadHandle): void {
+    if (!pair || !effective || !pad.culture) return;
+    const inputs = padInputs(pad);
+    for (let s = 0; s < PAD_SETTLE_STEPS; s++) pad.culture.step(inputs);
+    measurePad(pad);
+    paintPad(pad);
+    pad.sq.classList.add("vc-pad-settled");
+    if (pad.settleTimer !== undefined) window.clearTimeout(pad.settleTimer);
+    pad.settleTimer = window.setTimeout(() => {
+      pad.sq.classList.remove("vc-pad-settled");
+      pad.settleTimer = undefined;
+    }, PAD_SETTLED_MS);
+  }
+
+  // --- The cursor hint -----------------------------------------------------
+  // One element on <body> (a pad's own box is overflow-hidden and the panel
+  // scrolls), shown while a pad is hovered or dragged: what each direction is
+  // set to as a sentence with its number, and on Touch a note when the pair
+  // rarely meets. aria-hidden — the status line above carries the sentences
+  // for assistive tech.
+  const hintEl = document.createElement("div");
+  hintEl.className = "vc-pad-hint";
+  hintEl.hidden = true;
+  hintEl.setAttribute("aria-hidden", "true");
+  const hintLines = [0, 1].map(() => {
+    const ln = document.createElement("div");
+    ln.className = "vc-pad-hint-ln";
+    const text = document.createElement("span");
+    const value = document.createElement("span");
+    value.className = "vc-pad-hint-v";
+    ln.append(text, value);
+    hintEl.appendChild(ln);
+    return { text, value };
+  });
+  const hintNote = document.createElement("div");
+  hintNote.className = "vc-pad-hint-note";
+  hintNote.textContent = words.ui.rarelyMeet;
+  hintNote.hidden = true;
+  hintEl.appendChild(hintNote);
+  document.body.appendChild(hintEl);
+  let hintSig = "";
+
+  /** Shows, hides or refills the hint for `hintPad`. Rebuilds the DOM only
+   *  when what it says changed. */
+  function refreshHint(): void {
+    const pad = hintPad;
+    if (!pad) {
+      hintEl.hidden = true;
+      hintSig = "";
+      return;
+    }
+    const layer = state!.layer;
+    const lw = words.layers[layer];
+    const x = getVal(layer, pad.a, pad.b);
+    const y = getVal(layer, pad.b, pad.a);
+    const note = layer === "touch" && pad.overlap < RARELY_MEET_OVERLAP && (x < -0.02 || y < -0.02);
+    const sig = `${pad.a}${pad.b}|${layer}|${x}|${y}|${note}`;
+    if (sig !== hintSig) {
+      hintSig = sig;
+      renderTokens(hintLines[0]!.text, pairSentence(lw, words.ui, pad.a, pad.b, x), shortLabels, colours);
+      hintLines[0]!.value.textContent = fmtSigned(x);
+      renderTokens(hintLines[1]!.text, pairSentence(lw, words.ui, pad.b, pad.a, y), shortLabels, colours);
+      hintLines[1]!.value.textContent = fmtSigned(y);
+      hintNote.hidden = !note;
+    }
+    hintEl.hidden = false;
+    placeHint();
+  }
+
+  /** 16 px right of and 14 px above the pointer, flipped to the left near the
+   *  viewport's right edge and below the pointer near its top. */
+  function placeHint(): void {
+    if (hintEl.hidden) return;
+    const r = hintEl.getBoundingClientRect();
+    let left = hintX + 16;
+    let top = hintY - r.height - 14;
+    if (left + r.width > window.innerWidth - 8) left = hintX - r.width - 16;
+    if (top < 8) top = hintY + 22;
+    hintEl.style.left = `${Math.max(8, left)}px`;
+    hintEl.style.top = `${Math.max(8, top)}px`;
   }
 
   function refreshAll(): void {
@@ -1126,6 +1386,14 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   function dispose(): void {
     io?.disconnect();
+    hintEl.remove();
+    for (const pad of pads) {
+      if (pad.settleTimer !== undefined) window.clearTimeout(pad.settleTimer);
+      pad.settleTimer = undefined;
+    }
+    // Never leave the dish dimmed by a panel that is going away.
+    ctx.command("spotlight", { a: -1, b: -1 });
+    spotOn = false;
   }
 
   return { tick, dispose };

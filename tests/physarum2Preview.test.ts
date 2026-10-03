@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { createStrainPreview, createPairCulture, type StrainPreviewMotion, type PairCultureInputs } from "../src/render/scenes/physarum2Preview.ts";
+import {
+  createStrainPreview,
+  createPairCulture,
+  trailQuantile,
+  pairOverlap,
+  pairContactPixelsInto,
+  type StrainPreviewMotion,
+  type PairCultureInputs,
+} from "../src/render/scenes/physarum2Preview.ts";
 
 // A representative "coarse cells / spots" motion — sensor angle/reach/turn
 // on the wide, sharp-turning end of the range physarum2.ts's own STRAINS/
@@ -267,5 +275,78 @@ describe("physarum2Preview: createPairCulture", () => {
     const b = createPairCulture({ size: 24, agents: 300, seed: 5 });
     runSteps(b, 30, inputs(0, 0, 0.9));
     expect(a.totals()).toEqual(b.totals());
+  });
+});
+
+describe("physarum2Preview: contact pictures", () => {
+  const SIZE = 6;
+  const RED = [1, 0, 0] as const;
+  const BLUE = [0, 0, 1] as const;
+  const maps = (): [Float32Array, Float32Array] => [new Float32Array(SIZE * SIZE), new Float32Array(SIZE * SIZE)];
+  const px = (out: Uint8ClampedArray, cell: number): number[] => [out[cell * 4]!, out[cell * 4 + 1]!, out[cell * 4 + 2]!, out[cell * 4 + 3]!];
+
+  it("a cell only strain A touches takes A's hue, B's takes B's, an empty cell is black", () => {
+    const t = maps();
+    t[0][0] = 1;
+    t[1][1] = 1;
+    const out = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pairContactPixelsInto(t, SIZE, out, [RED, BLUE], [1, 1]);
+    const a = px(out, 0);
+    expect(a[0]).toBe(255);
+    expect(a[1]).toBe(0);
+    expect(a[2]).toBe(0);
+    const b = px(out, 1);
+    expect(b[0]).toBe(0);
+    expect(b[2]).toBe(255);
+    expect(px(out, 2)).toEqual([0, 0, 0, 255]);
+  });
+
+  it("equal strength in both strains turns the cell near white", () => {
+    const t = maps();
+    t[0][3] = 1;
+    t[1][3] = 1;
+    const out = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pairContactPixelsInto(t, SIZE, out, [RED, BLUE], [1, 1]);
+    const [r, g, b] = px(out, 3);
+    expect(r).toBeGreaterThan(240);
+    expect(g).toBeGreaterThan(240);
+    expect(b).toBeGreaterThan(240);
+  });
+
+  it("each channel is scaled to its own exposure", () => {
+    const t = maps();
+    t[0][0] = 0.5;
+    t[1][1] = 0.5;
+    const out = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pairContactPixelsInto(t, SIZE, out, [RED, BLUE], [0.5, 1]);
+    // A is at its own bright end (full), B at half of its.
+    expect(px(out, 0)[0]).toBe(255);
+    expect(px(out, 1)[2]!).toBeLessThan(255);
+  });
+
+  it("pairOverlap: identical maps 1, disjoint 0, empty 0", () => {
+    const same = maps();
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      same[0][i] = 1 + (i % 3);
+      same[1][i] = 1 + (i % 3);
+    }
+    expect(pairOverlap(same, SIZE, 3)).toBeCloseTo(1, 9);
+    const apart = maps();
+    apart[0][0] = 1; // block (0,0)
+    apart[1][SIZE * SIZE - 1] = 1; // block (1,1)
+    expect(pairOverlap(apart, SIZE, 3)).toBe(0);
+    expect(pairOverlap(maps(), SIZE, 3)).toBe(0);
+    const oneEmpty = maps();
+    oneEmpty[0][0] = 1;
+    expect(pairOverlap(oneEmpty, SIZE, 3)).toBe(0);
+  });
+
+  it("trailQuantile reads a sorted sample, and 0 for an empty map", () => {
+    const t = new Float32Array(100);
+    for (let i = 0; i < 100; i++) t[i] = i;
+    expect(trailQuantile(t, 0.98, 1)).toBe(98);
+    expect(trailQuantile(t, 0, 1)).toBe(0);
+    expect(trailQuantile(t, 1, 1)).toBe(99);
+    expect(trailQuantile(new Float32Array(0), 0.98)).toBe(0);
   });
 });

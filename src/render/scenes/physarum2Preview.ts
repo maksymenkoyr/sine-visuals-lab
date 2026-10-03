@@ -256,6 +256,10 @@ export interface PairCulture {
   /** Each channel's raw trail sum — for tests only (a pixel-space assertion
    *  would have to redo the same gamma/exposure curve `pixelsInto` applies). */
   totals(): [number, number];
+  /** Both channels' raw trail maps (`size*size`, row-major), live — read
+   *  them, never write. For measuring what a culture is doing (how much of
+   *  their territory two strains share) without `pixelsInto`'s clip. */
+  trails(): readonly [Float32Array, Float32Array];
   /** The scene's automatic beat reseed, at pad scale: each agent, with
    *  probability `share`, jumps into one disc of `radius` (a fraction of the
    *  dish's side, like the scene's field-unit Spread) at a random centre,
@@ -263,6 +267,98 @@ export interface PairCulture {
    *  network settles into a fixed shape within seconds, while the scene's
    *  own keeps being rebuilt on every beat. */
   seedColony(share: number, radius: number): void;
+}
+
+/** The value at quantile `q` (0..1) of every `stride`-th cell of `trail` —
+ *  a cheap sorted sample, 0 for an empty map. A pad keeps this at 0.98 per
+ *  channel as the bright end `pairContactPixelsInto` scales to. */
+export function trailQuantile(trail: Float32Array, q: number, stride = 5): number {
+  const s: number[] = [];
+  for (let i = 0; i < trail.length; i += stride) s.push(trail[i]!);
+  if (s.length === 0) return 0;
+  s.sort((x, y) => x - y);
+  return s[Math.min(s.length - 1, Math.floor(s.length * q))]!;
+}
+
+/** How much ground two strains share, 0..1: each strain's trail summed into
+ *  `block`×`block` cells and normalised to sum 1, then `Σ min(pA, pB)` (1 for
+ *  identical maps, 0 for disjoint ones, 0 when either strain is empty). The
+ *  same measure as `together()` in
+ *  docs/scenes/physarum2/scripts/padresponse.mjs. `size` is the maps' side. */
+export function pairOverlap(trails: readonly [Float32Array, Float32Array], size: number, block = 6): number {
+  const n = Math.floor(size / block);
+  if (n <= 0) return 0;
+  const a = new Float64Array(n * n);
+  const b = new Float64Array(n * n);
+  for (let y = 0; y < n * block; y++) {
+    const row = Math.floor(y / block) * n;
+    for (let x = 0; x < n * block; x++) {
+      const k = row + Math.floor(x / block);
+      const p = y * size + x;
+      a[k]! += trails[0][p]!;
+      b[k]! += trails[1][p]!;
+    }
+  }
+  let sa = 0;
+  let sb = 0;
+  for (let i = 0; i < a.length; i++) {
+    sa += a[i]!;
+    sb += b[i]!;
+  }
+  if (!(sa > 0 && sb > 0)) return 0;
+  let o = 0;
+  for (let i = 0; i < a.length; i++) o += Math.min(a[i]! / sa, b[i]! / sb);
+  return o;
+}
+
+const GAMMA_TABLE = new Float32Array(256);
+for (let i = 0; i < 256; i++) GAMMA_TABLE[i] = Math.pow(i / 255, GAMMA_INV);
+
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** A pad's picture in "contact" colours (the Clearer-pads look): each strain
+ *  keeps its own colour and the ground they share turns white, instead of the
+ *  two hues adding into one mixed shade (`PairCulture.pixelsInto`). Each
+ *  channel is scaled to its own bright end (`exposure`, a
+ *  `trailQuantile(…, 0.98)` the caller keeps) instead of one fixed exposure,
+ *  so dense paths stop clipping. `trails` are a culture's raw maps
+ *  (`PairCulture.trails()`), `out` is `size*size*4` bytes, alpha 255. */
+export function pairContactPixelsInto(
+  trails: readonly [Float32Array, Float32Array],
+  size: number,
+  out: Uint8ClampedArray,
+  colors: readonly [RGB, RGB],
+  exposure: readonly [number, number],
+): void {
+  const kA = 1 / Math.max(1e-4, exposure[0]);
+  const kB = 1 / Math.max(1e-4, exposure[1]);
+  const [cA, cB] = colors;
+  const tA = trails[0];
+  const tB = trails[1];
+  const cells = size * size;
+  for (let p = 0, q = 0; p < cells; p++, q += 4) {
+    const a = Math.min(1, tA[p]! * kA);
+    const b = Math.min(1, tB[p]! * kB);
+    const m = a > b ? a : b;
+    let r = 0;
+    let g = 0;
+    let bl = 0;
+    if (m >= 0.003) {
+      const w = smoothstep(0.3, 0.75, (a < b ? a : b) / m);
+      const base = a >= b ? cA : cB;
+      const l = GAMMA_TABLE[(m * 255) | 0]!;
+      r = (base[0] * (1 - w) + w) * l;
+      g = (base[1] * (1 - w) + w) * l;
+      bl = (base[2] * (1 - w) + w) * l;
+    }
+    out[q] = Math.min(255, r * 255);
+    out[q + 1] = Math.min(255, g * 255);
+    out[q + 2] = Math.min(255, bl * 255);
+    out[q + 3] = 255;
+  }
 }
 
 export interface PairCultureOptions {
@@ -426,5 +522,9 @@ export function createPairCulture(opts: PairCultureOptions = {}): PairCulture {
     }
   }
 
-  return { size, step, pixelsInto, totals, seedColony };
+  function trails(): readonly [Float32Array, Float32Array] {
+    return trail;
+  }
+
+  return { size, step, pixelsInto, totals, trails, seedColony };
 }

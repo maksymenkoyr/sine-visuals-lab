@@ -18,6 +18,13 @@ import {
   fmtSigned,
   padPos,
   padValue,
+  SMELL_PAD_KNOTS,
+  smellPadPos,
+  smellPadValue,
+  layerPadPos,
+  layerPadValue,
+  pairSentence,
+  RARELY_MEET_OVERLAP,
   pairsOf,
   tablesMatch,
   quantize,
@@ -590,5 +597,84 @@ describe("randomSmell's Rivals lean", () => {
 
   it("the Pairs widget has a word for the toggle", () => {
     expect(PAIR_WORDS.ui.rivals.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the squeezed Smell pad map", () => {
+  it("round-trips across the whole range", () => {
+    for (let v = AFFINITY_MIN; v <= AFFINITY_MAX + 1e-9; v += 0.05) {
+      expect(smellPadValue(smellPadPos(v))).toBeCloseTo(v, 9);
+    }
+    for (const [v, pct] of SMELL_PAD_KNOTS) {
+      expect(smellPadPos(v)).toBeCloseTo(pct, 9);
+      expect(smellPadValue(pct)).toBeCloseTo(v, 9);
+    }
+  });
+
+  it("is strictly increasing, and zero sits at 29", () => {
+    let prev = -Infinity;
+    for (let v = AFFINITY_MIN; v <= AFFINITY_MAX + 1e-9; v += 0.05) {
+      const p = smellPadPos(v);
+      expect(p).toBeGreaterThan(prev);
+      prev = p;
+    }
+    expect(smellPadPos(0)).toBe(29);
+  });
+
+  it("clamps both ends", () => {
+    expect(smellPadPos(-9)).toBe(8);
+    expect(smellPadPos(9)).toBe(92);
+    expect(smellPadValue(0)).toBe(AFFINITY_MIN);
+    expect(smellPadValue(8)).toBe(AFFINITY_MIN);
+    expect(smellPadValue(100)).toBe(AFFINITY_MAX);
+  });
+
+  it("gives the live 0..+1 band most of the pad's travel", () => {
+    expect(smellPadPos(1) - smellPadPos(0)).toBeGreaterThan(0.5 * (92 - 8));
+  });
+
+  it("layerPadPos/layerPadValue: Smell is squeezed, Touch keeps the flat-around-zero curve", () => {
+    expect(layerPadPos("smell", 0.4)).toBe(smellPadPos(0.4));
+    expect(layerPadValue("smell", 40)).toBe(smellPadValue(40));
+    for (const v of [-1.5, -0.7, 0, 0.3, 1.5]) {
+      expect(layerPadPos("touch", v)).toBe(padPos(v));
+    }
+    for (const pct of [8, 30, 50, 77, 92]) {
+      expect(layerPadValue("touch", pct)).toBe(padValue(pct));
+    }
+  });
+});
+
+describe("pairSentence", () => {
+  const text = (toks: ReturnType<typeof pairSentence>): string =>
+    toks.map((t) => ("strain" in t ? "ABCD"[t.strain]! : t.text)).join("");
+  const smell = PAIR_WORDS.layers.smell;
+  const touch = PAIR_WORDS.layers.touch;
+
+  it("reads Smell through its verb ladder", () => {
+    expect(text(pairSentence(smell, PAIR_WORDS.ui, 0, 1, -0.85))).toBe("A avoids B");
+    expect(text(pairSentence(smell, PAIR_WORDS.ui, 0, 1, 0.05))).toBe("A ignores B");
+    expect(text(pairSentence(smell, PAIR_WORDS.ui, 0, 1, 0.4))).toBe("A follows B");
+    expect(text(pairSentence(smell, PAIR_WORDS.ui, 0, 1, 1.2))).toBe("A follows B closely");
+  });
+
+  it("reads Touch, with the trail suffix and the after-word", () => {
+    expect(text(pairSentence(touch, PAIR_WORDS.ui, 2, 1, -1))).toBe("C eats B’s trail");
+    expect(text(pairSentence(touch, PAIR_WORDS.ui, 2, 1, 0))).toBe("C leaves B alone");
+    expect(text(pairSentence(touch, PAIR_WORDS.ui, 2, 1, 0.6))).toBe("C feeds B’s trail");
+  });
+
+  it("keeps strains as strain tokens, never baked into text", () => {
+    const toks = pairSentence(smell, PAIR_WORDS.ui, 3, 1, 0.4);
+    expect(toks[0]).toEqual({ strain: 3 });
+    expect(toks[2]).toEqual({ strain: 1 });
+  });
+
+  it("verb ladders ascend and end open", () => {
+    for (const w of [smell, touch]) {
+      for (let i = 1; i < w.verbs.length; i++) expect(w.verbs[i]!.upTo).toBeGreaterThan(w.verbs[i - 1]!.upTo);
+      expect(w.verbs[w.verbs.length - 1]!.upTo).toBe(Infinity);
+    }
+    expect(RARELY_MEET_OVERLAP).toBeGreaterThan(0);
   });
 });
