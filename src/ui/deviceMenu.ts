@@ -50,7 +50,6 @@ import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
 import {
   defaultDriveSetting,
-  driveCeiling,
   DRIVE_WEIGHT_MAX,
   DRIVE_WEIGHT_MIN,
   gateConditionIndices,
@@ -2569,6 +2568,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   });
+  /** The drive graphs' one fixed top — the row sparkline and the "What it
+   *  receives" graph alike: one source at the most weight it can have
+   *  (DRIVE_WEIGHT_MAX) reading full scale, times the setting's own gain.
+   *  It never moves — not with a weight drag, a source plugged in or muted,
+   *  or a peak scrolling past — so a taller line always means the setting is
+   *  receiving more. A weight-1 source peaks at `gain` (the dotted line);
+   *  anything past the top clips. */
+  function driveGraphTop(spec: SceneSetting): number {
+    return Math.max(1e-3, DRIVE_WEIGHT_MAX * (spec.drive?.gain ?? 1));
+  }
+
   function trackDriveCanvas(canvas: HTMLCanvasElement): CanvasSize {
     const size: CanvasSize = { w: 0, h: 0 };
     driveCanvasSizes.set(canvas, size);
@@ -3194,7 +3204,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "The last 4 seconds. White: what this setting receives. Thin coloured lines: each source (dashed: a condition). Dark: the gate was closed. Dotted line and cyan dots, when shown: see the key under the graph.",
+      "The last 4 seconds, on a scale that never changes: the top is one source at full weight, the dotted line across the middle one source at weight 1. White: what this setting receives. Thin coloured lines: each source (dashed: a condition). Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -3265,19 +3275,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const xs = (k: number) => (k / (RING - 1)) * w;
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
-      // A fixed top: the most this setting can receive (driveCeiling — every
-      // source at full scale), so the top of the graph always means that and
-      // the trace never rescales as peaks scroll out of the 4 s window. A
-      // scene's own mark line that rides above the signal clips at the top.
-      // Read live: a weight drag swaps the stored setting without rebuilding
-      // this graph, so the captured `patch` would keep the old top.
-      const live = deps.getDriveSetting(sceneId, spec);
+      // driveGraphTop: fixed, so the trace never rescales. A scene's own
+      // mark line that rides above the signal clips at the top.
       // `sourceValues()` and the generic gate's line are un-gained
       // (weight·value — drives.ts's header), the combined value and this top
       // are gained: every trace is scaled by `gain` below so they share one
       // axis (a 0.15-gain setting drew its source traces 7× off the top).
       const gain = spec.drive?.gain ?? 1;
-      const top = Math.max(0.05, driveCeiling(live === "scene" ? patch : live, gain));
+      const top = driveGraphTop(spec);
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
@@ -3328,23 +3333,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      if (top !== 1) {
-        // Where 1.0 (the normal maximum) sits, and the top's own number.
-        if (top > 1) {
-          ctx.setLineDash([2, 3]);
-          ctx.lineWidth = 1;
-          ctx.strokeStyle = MARK_LINE;
-          ctx.beginPath();
-          ctx.moveTo(0, ys(1));
-          ctx.lineTo(w, ys(1));
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-        ctx.font = `400 10px ${FONT_MONO}`;
-        ctx.textBaseline = "top";
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.fillText(top.toFixed(1), 4, 3);
-      }
+      // Where one weight-1 source peaks (gain), and the top's own number.
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = MARK_LINE;
+      ctx.beginPath();
+      ctx.moveTo(0, ys(gain));
+      ctx.lineTo(w, ys(gain));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = `400 10px ${FONT_MONO}`;
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fillText(top.toFixed(top < 1 ? 2 : 1), 4, 3);
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -3643,9 +3644,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let sparkHasMarks = false;
     let sparkHead = 0;
     let sparkFilled = 0;
-    // The most this setting can receive — the same fixed top the panel's
-    // "What it receives" graph uses, so the two read on one scale.
-    let sparkTop = 1;
+    // The same fixed top as the panel's "What it receives" graph
+    // (driveGraphTop), so the two read on one scale. A Scene row's
+    // approximation is an un-gained catalogue signal, so its top drops the
+    // gain to put full scale at the same height.
+    let sparkTop = driveGraphTop(spec);
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
 
@@ -3715,11 +3718,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const at = (k: number) => (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
       const xs = (k: number) => (k / (SPARK_LEN - 1)) * w;
-      // Starts at the setting's ceiling (sparkTop) and still grows to fit
-      // rather than clipping, which drew a busy input as a flat line along
-      // the top.
-      let top = sparkTop;
-      for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) top = Math.max(top, sparkVals[at(k)]!);
+      const top = sparkTop;
       const pad = sparkHasMarks ? 3 : 1;
       const ys = (v: number) => h - pad - Math.max(0, Math.min(1, v / top)) * (h - 2 * pad);
       sparkCtx.lineWidth = 1.3;
@@ -3822,7 +3821,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           col = driveSourceColor(setting.sources[bi]!.choice);
         }
       }
-      sparkTop = setting === "scene" ? 1 : Math.max(0.05, driveCeiling(setting, spec.drive?.gain ?? 1));
+      sparkTop = setting === "scene" ? DRIVE_WEIGHT_MAX : driveGraphTop(spec);
       const marks = takeSettingMarks(sceneId, spec.key, "row");
       if (marks) sparkHasMarks = true;
       for (let s = 0; s < slots; s++) {
