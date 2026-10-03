@@ -21,9 +21,8 @@ export default async function (ctx) {
   await ctx.tap("#audioPromptMicBtn", { ms: 450, label: "Mic button" });
   await ctx.wait(1100);
   await ctx.tap("#menuBtn", { ms: 600, label: "panel button" });
-  await ctx.wait(400);
   for (const k of keys) await ctx.press(k);
-  // Off the button (no tooltip hanging on the shot) and along the bottom edge, under the columns, so no row's hover hint opens on the way.
-  await ctx.cursor.moveTo(W * 0.5, H - 8, 800);
+  // Off the button (no tooltip hanging on the shot) and along the bottom edge in one quick move straight after the tap — the panel opens under the button, and a row it lands on would open its hover hint.
+  await ctx.cursor.moveTo(W * 0.25, H - 8, 300);
   await ctx.wait(1000);
 }
