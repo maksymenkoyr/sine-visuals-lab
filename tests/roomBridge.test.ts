@@ -1,151 +1,126 @@
 import { describe, expect, it } from "vitest";
 import { combineBridges, createRoomBridge } from "../src/net/roomBridge.ts";
 import type { OutputBridge, OutputStatus } from "../src/net/outputBridge.ts";
-import type { LookClientMsg } from "../server/lookDoc.ts";
+import type { MainPlay, MainPlayStatus } from "../src/net/mainPlay.ts";
 
-function setup() {
-  const sent: LookClientMsg[] = [];
-  const env = {
-    open: true,
-    screens: 1,
-    scene: "mesh",
-    palette: "neon",
-    storage: { "vibe.a": "1" } as Record<string, string>,
-  };
-  const bridge = createRoomBridge({
-    send: (m) => {
-      if (!env.open) return false;
-      sent.push(m);
-      return true;
+/** A MainPlay with the answers set by the test and every call recorded. */
+function fakePlay(init: Partial<MainPlayStatus> = {}) {
+  const calls: string[] = [];
+  let st: MainPlayStatus = { known: true, onAir: true, changedBy: null, ...init };
+  let result: "sent" | "glide" | null = "sent";
+  const listeners: Array<(s: MainPlayStatus) => void> = [];
+  const play: MainPlay = {
+    onSnapshot: () => {},
+    onPatch: () => {},
+    onAck: () => {},
+    onReject: () => {},
+    onDisconnect: () => {},
+    onNeedSnapshot: () => {},
+    tick: (now) => void calls.push(`tick:${now}`),
+    play: (g) => {
+      calls.push(`play:${g}`);
+      return result;
     },
-    screens: () => env.screens,
-    look: () => ({ scene: env.scene, palette: env.palette }),
-    capture: () => ({ ...env.storage }),
-    showRoom: () => {},
-  });
-  let now = 1000;
-  /** One render tick, far enough on that the look is re-read. */
-  const tick = (): void => {
-    now += 200;
-    bridge.update(now);
+    take: () => void calls.push("take"),
+    status: () => st,
+    onStatus: (cb) => {
+      listeners.push(cb);
+      return () => {};
+    },
   };
-  return { bridge, env, sent, tick };
+  return {
+    play,
+    calls,
+    setResult(r: "sent" | "glide" | null) {
+      result = r;
+    },
+    set(s: Partial<MainPlayStatus>) {
+      st = { ...st, ...s };
+      for (const cb of listeners) cb(st);
+    },
+  };
+}
+
+function setup(init: Partial<MainPlayStatus> = {}) {
+  const fp = fakePlay(init);
+  const env = { present: true, roomShown: 0 };
+  const bridge = createRoomBridge({
+    play: fp.play,
+    present: () => env.present,
+    showRoom: () => void env.roomShown++,
+  });
+  return { ...fp, bridge, env };
 }
 
 describe("createRoomBridge", () => {
-  it("is not open until the roster lists a screen, and says nothing until then", () => {
-    const { bridge, env, sent, tick } = setup();
-    env.screens = 0;
-    tick();
-    expect(bridge.status()).toEqual({ open: false, cue: false, differs: false });
-    expect(sent).toEqual([]);
-    expect(bridge.go()).toBe(false);
-  });
-
-  it("sends the whole look as the program when a screen arrives", () => {
-    const { bridge, sent, tick } = setup();
-    tick();
-    expect(bridge.status().open).toBe(true);
-    expect(sent).toEqual([{ type: "lookPatch", n: 1, scene: "mesh", palette: "neon", set: { "vibe.a": "1" } }]);
-  });
-
-  it("keeps the screen's program while the preview is tuned, and shows it as differing", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    env.storage["vibe.a"] = "2";
-    tick();
-    expect(sent).toHaveLength(1);
-    expect(bridge.status().differs).toBe(true);
-  });
-
-  it("Cue puts the preview on the screen and follows it live; releasing puts the program back", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    env.storage["vibe.a"] = "2";
-    tick();
+  it("is open while another device is online, and never has a Cue", () => {
+    const { bridge, env } = setup();
+    expect(bridge.status()).toEqual({ open: true, cue: false, differs: false, canCue: false, changedBy: null });
+    env.present = false;
+    expect(bridge.status().open).toBe(false);
     bridge.setCue(true);
-    expect(sent[1]).toMatchObject({ type: "lookPatch", set: { "vibe.a": "2" } });
-    env.storage["vibe.a"] = "3";
-    tick();
-    expect(sent[2]).toMatchObject({ set: { "vibe.a": "3" } });
-    expect(bridge.status().cue).toBe(true);
-    bridge.setCue(false);
-    expect(sent[3]).toMatchObject({ set: { "vibe.a": "1" } });
-    expect(bridge.status().differs).toBe(true);
+    expect(bridge.status().cue).toBe(false);
   });
 
-  it("Play makes the preview the program, and a plain Play carries no glide", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    env.storage["vibe.a"] = "2";
-    tick();
-    expect(bridge.go()).toBe(false);
-    expect(sent[1]).toEqual({ type: "lookPatch", n: 2, set: { "vibe.a": "2" } });
+  it("differs when this device is not on air, but not before Main is known", () => {
+    const { bridge, set } = setup({ onAir: false });
+    expect(bridge.status().differs).toBe(true);
+    set({ known: false });
     expect(bridge.status().differs).toBe(false);
   });
 
-  it("Play held glides within a scene, and the patch carries the length", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    env.storage["vibe.a"] = "2";
-    tick();
+  it("Play goes through MainPlay with the glide, and says whether it glided", () => {
+    const { bridge, calls, setResult } = setup();
+    setResult("glide");
     expect(bridge.go(4000)).toBe(true);
-    expect(sent[1]).toMatchObject({ set: { "vibe.a": "2" }, glideMs: 4000 });
+    setResult("sent");
+    expect(bridge.go()).toBe(false);
+    setResult(null);
+    expect(bridge.go(2000)).toBe(false);
+    expect(calls).toEqual(["play:4000", "play:undefined", "play:2000"]);
   });
 
-  it("never glides across a scene change: that is sent at once", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    env.scene = "sky";
-    tick();
-    expect(bridge.go(4000)).toBe(false);
-    expect(sent[1]).toEqual({ type: "lookPatch", n: 2, scene: "sky" });
+  it("update ticks MainPlay", () => {
+    const { bridge, calls } = setup();
+    bridge.update(1234);
+    expect(calls).toEqual(["tick:1234"]);
   });
 
-  it("sends everything again after a reconnect or a refusal", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    bridge.reconnected();
-    expect(sent[1]).toEqual({ type: "lookPatch", n: 2, scene: "mesh", palette: "neon", set: { "vibe.a": "1" } });
-    bridge.refused();
-    env.storage["vibe.a"] = "2";
-    tick();
-    bridge.setCue(true);
-    expect(sent[2]).toEqual({ type: "lookPatch", n: 3, scene: "mesh", palette: "neon", set: { "vibe.a": "2" } });
+  it("carries changedBy, and Take Main calls MainPlay's take", () => {
+    const { bridge, calls, set } = setup();
+    set({ onAir: false, changedBy: "iPad" });
+    expect(bridge.status().changedBy).toBe("iPad");
+    bridge.take?.();
+    expect(calls).toEqual(["take"]);
   });
 
-  it("does not count a look as delivered while the socket is down, and delivers it later", () => {
-    const { bridge, env, sent, tick } = setup();
-    env.open = false;
-    tick();
-    expect(sent).toEqual([]);
-    env.open = true;
-    bridge.reconnected();
-    expect(sent).toHaveLength(1);
-  });
-
-  it("forgets the program when the last screen leaves and starts over when one returns", () => {
-    const { bridge, env, sent, tick } = setup();
-    tick();
-    env.screens = 0;
-    tick();
-    expect(bridge.status().open).toBe(false);
-    env.storage["vibe.a"] = "9";
-    env.screens = 1;
-    tick();
-    expect(sent[1]).toEqual({ type: "lookPatch", n: 2, scene: "mesh", palette: "neon", set: { "vibe.a": "9" } });
-  });
-
-  it("calls status listeners only when the status changes", () => {
-    const { bridge, env, tick } = setup();
+  it("tells listeners when MainPlay's status changes, once per real change", () => {
+    const { bridge, set, env } = setup();
     const seen: OutputStatus[] = [];
     bridge.onStatus((s) => seen.push(s));
-    tick();
-    tick();
-    expect(seen).toEqual([{ open: true, cue: false, differs: false }]);
-    env.storage["vibe.a"] = "2";
-    tick();
-    expect(seen[1]).toEqual({ open: true, cue: false, differs: true });
+    bridge.update(1);
+    bridge.update(2);
+    expect(seen).toEqual([]);
+    set({ onAir: false });
+    set({ onAir: false });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].differs).toBe(true);
+    env.present = false;
+    bridge.update(3);
+    expect(seen).toHaveLength(2);
+    expect(seen[1].open).toBe(false);
+  });
+
+  it("has nothing to push for frames, power or render readouts", () => {
+    const { bridge } = setup();
+    expect(bridge.outputStatus()).toBeNull();
+    bridge.sendPower();
+  });
+
+  it("OUTPUT shows the room view", () => {
+    const { bridge, env } = setup();
+    bridge.open();
+    expect(env.roomShown).toBe(1);
   });
 });
 
@@ -166,6 +141,7 @@ function fakeBridge(init: OutputStatus) {
     pushFrame: () => calls.push("frame"),
     sendPower: () => calls.push("power"),
     outputStatus: () => null,
+    take: () => void calls.push("take"),
   };
   return {
     bridge,
@@ -178,14 +154,15 @@ function fakeBridge(init: OutputStatus) {
 }
 
 describe("combineBridges", () => {
-  const closed: OutputStatus = { open: false, cue: false, differs: false };
-  const open: OutputStatus = { open: true, cue: false, differs: false };
+  const closed: OutputStatus = { open: false, cue: false, differs: false, canCue: false };
+  const open: OutputStatus = { open: true, cue: false, differs: false, canCue: true };
+  const room: OutputStatus = { open: true, cue: false, differs: false, canCue: false };
 
   it("is open while any output is, and differs or cues while any does", () => {
     const a = fakeBridge(closed);
-    const b = fakeBridge({ open: true, cue: true, differs: true });
-    expect(combineBridges([a.bridge, b.bridge]).status()).toEqual({ open: true, cue: true, differs: true });
-    expect(combineBridges([a.bridge, fakeBridge(closed).bridge]).status()).toEqual(closed);
+    const b = fakeBridge({ open: true, cue: true, differs: true, canCue: true });
+    expect(combineBridges([a.bridge, b.bridge]).status()).toEqual({ open: true, cue: true, differs: true, canCue: true, changedBy: null });
+    expect(combineBridges([a.bridge, fakeBridge(closed).bridge]).status()).toEqual({ ...closed, changedBy: null });
   });
 
   it("sends Play to the open outputs only, and reports a glide if any glided", () => {
@@ -207,6 +184,46 @@ describe("combineBridges", () => {
     expect([a.calls, b.calls]).toEqual([["cue:false"], ["cue:true", "cue:false"]]);
   });
 
+  it("can cue only while an open output can, and names who changed Main", () => {
+    const pop = fakeBridge({ ...closed, canCue: true }); // a closed pop-out never offers Cue
+    const rm = fakeBridge({ ...room, changedBy: "iPad" });
+    const both = combineBridges([pop.bridge, rm.bridge]);
+    expect(both.status()).toMatchObject({ open: true, canCue: false, changedBy: "iPad" });
+    pop.set({ ...open });
+    expect(both.status()).toMatchObject({ canCue: true, changedBy: "iPad" });
+  });
+
+  it("takes the first changedBy that is set", () => {
+    const a = fakeBridge({ ...room, changedBy: null });
+    const b = fakeBridge({ ...room, changedBy: "iPad" });
+    const c = fakeBridge({ ...room, changedBy: "Laptop" });
+    expect(combineBridges([a.bridge, b.bridge, c.bridge]).status().changedBy).toBe("iPad");
+  });
+
+  it("Take Main reaches every output that has a take", () => {
+    const a = fakeBridge(open);
+    const b = fakeBridge(room);
+    const noTake = fakeBridge(room);
+    delete noTake.bridge.take;
+    combineBridges([a.bridge, b.bridge, noTake.bridge]).take?.();
+    expect([a.calls, b.calls, noTake.calls]).toEqual([["take"], ["take"], []]);
+  });
+
+  it("holds Cue only on an open output that can cue, never on the room", () => {
+    const pop = fakeBridge(open);
+    const rm = fakeBridge(room);
+    const both = combineBridges([pop.bridge, rm.bridge]);
+    both.setCue(true);
+    expect([pop.calls, rm.calls]).toEqual([["cue:true"], []]);
+  });
+
+  it("Play reaches the pop-out and the room together", () => {
+    const pop = fakeBridge(open);
+    const rm = fakeBridge(room);
+    combineBridges([pop.bridge, rm.bridge]).go(2000);
+    expect([pop.calls, rm.calls]).toEqual([["go:2000"], ["go:2000"]]);
+  });
+
   it("opens, and takes frames and power, from the first output", () => {
     const a = fakeBridge(closed);
     const b = fakeBridge(open);
@@ -222,8 +239,8 @@ describe("combineBridges", () => {
     const seen: OutputStatus[] = [];
     combineBridges([a.bridge, b.bridge]).onStatus((s) => seen.push(s));
     b.set(open);
-    b.set({ open: true, cue: false, differs: false });
+    b.set({ ...open });
     a.set(open);
-    expect(seen).toEqual([open]);
+    expect(seen).toEqual([{ ...open, changedBy: null }]);
   });
 });

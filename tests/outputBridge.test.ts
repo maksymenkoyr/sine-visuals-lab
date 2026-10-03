@@ -91,6 +91,24 @@ describe("outputBridge status and power", () => {
     expect(posted).toEqual([{ t: "power", power: POWER }]);
   });
 
+  it("can cue while the window is open, and not after it leaves", () => {
+    const { bridge, receive } = setup();
+    expect(bridge.status().canCue).toBe(false);
+    receive({ t: "status", s: status });
+    expect(bridge.status().canCue).toBe(true);
+    receive({ t: "bye" });
+    expect(bridge.status().canCue).toBe(false);
+  });
+
+  it("a status change in canCue reaches listeners", () => {
+    const { bridge, receive } = setup();
+    const seen: boolean[] = [];
+    bridge.onStatus((s) => seen.push(s.canCue));
+    receive({ t: "hello", haveState: false });
+    bridge.update(performance.now());
+    expect(seen).toEqual([true]);
+  });
+
   it("a goodbye clears the status", () => {
     const { bridge, receive } = setup();
     receive({ t: "status", s: status });

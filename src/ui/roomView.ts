@@ -13,8 +13,10 @@
  * file only draws the roster (src/net/roomMessages.ts `RosterEntry`) and sends
  * a `deviceSet` for each click (`RoomViewDeps.setDevice`). It never decides
  * anything the room would refuse; a refusal comes back as a `deviceReject` and
- * is shown under the controls. The invite link is never printed, because it
- * carries the room key.
+ * is shown under the controls. The one thing it tells the page early is this
+ * device's own ears choice (`RoomViewDeps.onSelfEars`, before the message is
+ * sent), so the page can open its microphone inside the tap. The invite link
+ * is never printed, because it carries the room key.
  *
  * Nodes are kept in a Map keyed by device id and updated in place on every
  * roster change (text and classes only; one is added or removed only when a
@@ -56,6 +58,7 @@ import {
   pictureDelayMs,
   type DeviceKind,
   type DeviceSetPatch,
+  type Ears,
 } from "../../server/roomDevices.ts";
 
 /** The room a QR opens: the link kind (joinScreen.ts `JoinKind`), the room
@@ -76,6 +79,11 @@ export interface RoomViewDeps {
   onRosterChange(cb: (r: RosterEntry[]) => void): () => void;
   onDeviceReject(cb: (m: { targetId: string | null; reason: string }) => void): () => void;
   setDevice(targetId: string, patch: DeviceSetPatch): void;
+  /** Called synchronously inside the click that sets THIS device's own ears,
+   *  before `setDevice` sends it: the page acts on the choice in the same tap
+   *  (an iPad opens its microphone only inside a gesture), without waiting for
+   *  the room to echo it. */
+  onSelfEars?: (ears: Ears) => void;
   /** Owner only; left out, the Remove button is never offered. */
   forgetDevice?: (targetId: string) => void;
   /** What this device's QR encodes; null (or no code) means no QR to show. */
@@ -232,6 +240,23 @@ export function currentFeedValue(entry: RosterEntry, roster: RosterEntry[]): str
   if (entry.follow === null) return OWNER_FEED_VALUE;
   const { records } = recordsFromRoster(roster);
   return entry.follow === ownerId(records) ? OWNER_FEED_VALUE : entry.follow;
+}
+
+/** One plain line under the Picture delay number saying why it is what it is,
+ *  read from the same records `pictureDelayMs` uses: a follower waits for its
+ *  feed's frames to cross the network (the feed named from the roster, the
+ *  owner when it follows `null`); a device on its own input waits only to stay
+ *  in step with the screens that follow, and otherwise draws at once. */
+export function delayReason(entry: RosterEntry, roster: RosterEntry[]): string {
+  const { records, online } = recordsFromRoster(roster);
+  if (entry.ears === "follow") {
+    const feedId = entry.follow ?? ownerId(records);
+    const feed = feedId === null ? undefined : roster.find((d) => d.deviceId === feedId);
+    return feed ? `Waits for ${feed.name}’s sound to arrive over the network.` : "Waits for the sound to arrive over the network.";
+  }
+  return pictureDelayMs(records, online, entry.deviceId) > 0
+    ? "Waits as long as the screens that follow, so beats land together."
+    : "Hears the music itself and draws at once.";
 }
 
 /** What to say under the controls when the room refuses a change. */
@@ -512,7 +537,10 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     ],
     (v) => {
       const d = roster.find((r) => r.deviceId === selected);
-      if (d) deps.setDevice(d.deviceId, { ears: v === "own" ? "own" : "follow" });
+      if (!d) return;
+      const ears: Ears = v === "own" ? "own" : "follow";
+      if (d.deviceId === deps.selfId) deps.onSelfEars?.(ears);
+      deps.setDevice(d.deviceId, { ears });
     },
   );
   const feedRow = box("margin-top: 8px;");
@@ -554,6 +582,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
   timingLabel.textContent = "Picture delay";
   const timingValue = box(`font: 400 13px/1.4 ${FONT_MONO}; color: #fff;`);
   timingRow.append(timingLabel, timingValue);
+  const timingNote = box(dimLine);
 
   const messageEl = box(`min-height: 1.4em; margin-top: 10px; font: 400 12px/1.4 ${FONT_LABEL}; color: ${HOT_RED};`);
 
@@ -609,6 +638,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     screenSeg.el,
     screenNote,
     timingRow,
+    timingNote,
     messageEl,
     removeBtn,
   );
@@ -918,6 +948,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
 
     const { records, online } = recordsFromRoster(roster);
     setText(timingValue, `${pictureDelayMs(records, online, d.deviceId)} ms`);
+    setText(timingNote, delayReason(d, roster));
     paintRemove();
   }
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { RoomCore, type Attachment, type CoreHost, type CoreSocket } from "../server/roomCore.ts";
 import { ROOM_CLOSE_DENIED, hashKey } from "../server/roomRules.ts";
 import { LOOK_LIMITS, validLookId, type LookClientMsg, type LookDoc, type LookRejectReason } from "../server/lookDoc.ts";
-import { createLookReplica, createLookSync, type LookSync } from "../src/net/lookSync.ts";
+import { createLookReplica } from "../src/net/lookSync.ts";
+import { createMainPlay, type MainPlay } from "../src/net/mainPlay.ts";
 import { parseControlMessage, type ControlMessage } from "../src/net/roomMessages.ts";
 import { applyRoomStorage, captureRoomStorage, registerSyncedStore } from "../src/net/syncedStores.ts";
 import { listScenes } from "../src/render/scene.ts";
@@ -11,13 +12,15 @@ import { listScenes } from "../src/render/scene.ts";
 import "../src/render/scenes/index.ts";
 import { PALETTES } from "../src/render/palette.ts";
 
-// The whole look path with no network and no DOM: phones publish through
-// createLookSync, the room is the real RoomCore over fake sockets, and a TV
+// The whole look path with no network and no DOM: devices Play through
+// createMainPlay (net/mainPlay.ts: nothing a device edits reaches the room
+// until its Play), the room is the real RoomCore over fake sockets, and a TV
 // follows through createLookReplica + applyRoomStorage into a Map-backed
 // storage. Messages cross as JSON text both ways, so the client-side parse
 // (parseControlMessage) and the room's own validation both run. The pieces are
-// tested alone in lookSync / roomCore / syncedScope; this file is for what only
-// shows when they are wired together.
+// tested alone in mainPlay / lookSync / roomCore / syncedScope; this file is
+// for what only shows when they are wired together. The first phone is the
+// room's owner, which is what seeds an empty room (the laptop's job for real).
 
 const HK = "h".repeat(22);
 const K = "k".repeat(22);
@@ -213,7 +216,7 @@ abstract class Endpoint {
     return this.log.filter((m) => m.type === type).length;
   }
 
-  /** Publishes anything pending; returns how many messages that sent. */
+  /** Lets the device's clock run; returns how many messages that sent. */
   tick(): number {
     return 0;
   }
@@ -227,27 +230,31 @@ class Phone extends Endpoint {
   readonly storage: MapStorage;
   scene: string;
   palette: string;
-  readonly sync: LookSync;
+  readonly main: MainPlay;
   readonly sent: LookClientMsg[] = [];
   readonly rejects: LookRejectReason[] = [];
   /** While true a send reports success but the room never hears it. */
   blackhole = false;
+  private clock = 0;
 
-  constructor(server: Server, deviceId: string, seed: Record<string, string>, scene = "", palette = "") {
+  constructor(server: Server, deviceId: string, seed: Record<string, string>, scene = "", palette = "", isOwner = false) {
     super(server, deviceId);
     this.storage = new MapStorage(seed);
     this.scene = scene;
     this.palette = palette;
-    this.sync = createLookSync({
-      read: () => ({ scene: this.scene, palette: this.palette, storage: captureRoomStorage(this.storage) }),
-      write: (doc) => {
+    this.main = createMainPlay({
+      send: (m) => this.send(m),
+      capture: () => ({ scene: this.scene, palette: this.palette, storage: captureRoomStorage(this.storage) }),
+      apply: (doc) => {
         applyRoomStorage(doc.storage, this.storage);
         if (doc.scene) this.scene = doc.scene;
         if (doc.palette) this.palette = doc.palette;
       },
-      send: (m) => this.send(m),
-      onReject: (r) => void this.rejects.push(r),
+      screen: () => "main",
+      isOwner,
+      nameOf: () => null,
     });
+    this.main.onNeedSnapshot(() => void this.send({ type: "lookGet" }));
   }
 
   private send(m: LookClientMsg): boolean {
@@ -269,31 +276,36 @@ class Phone extends Endpoint {
     return captureRoomStorage(this.storage);
   }
 
+  /** The Play button. */
+  play(glideMs?: number): "sent" | "glide" | null {
+    return this.main.play(glideMs);
+  }
+
   override tick(): number {
-    const before = this.sent.length;
-    this.sync.tick();
-    return this.sent.length - before;
+    this.main.tick((this.clock += 1000));
+    return 0;
   }
 
   protected receive(m: ControlMessage): void {
     switch (m.type) {
       case "look":
-        this.sync.onSnapshot(m.rev, m.doc);
+        this.main.onSnapshot(m.rev, m.doc);
         break;
       case "lookPatch":
-        this.sync.onPatch(m.rev, m);
+        this.main.onPatch(m.rev, m);
         break;
       case "lookAck":
-        this.sync.onAck(m.n, m.rev);
+        this.main.onAck(m.n, m.rev);
         break;
       case "lookReject":
-        this.sync.onReject(m.n, m.reason);
+        this.rejects.push(m.reason);
+        this.main.onReject(m.n, m.reason);
         break;
     }
   }
 
   protected override onLeave(): void {
-    this.sync.onDisconnect();
+    this.main.onDisconnect();
   }
 }
 
@@ -370,7 +382,7 @@ async function roomWith(...phones: Array<[string, Record<string, string>, string
   await server.claim();
   const made: Phone[] = [];
   for (const [id, s, scene, palette] of phones) {
-    const p = new Phone(server, id, s, scene, palette);
+    const p = new Phone(server, id, s, scene, palette, made.length === 0);
     await p.join(K, true);
     made.push(p);
     settle(...made);
@@ -378,8 +390,8 @@ async function roomWith(...phones: Array<[string, Record<string, string>, string
   return { server, phones: made };
 }
 
-describe("a phone seeding and a TV joining", () => {
-  it("the first phone seeds an empty room with its own room-scope look", async () => {
+describe("the owner seeding and a TV joining", () => {
+  it("the owner seeds an empty room with its own room-scope look", async () => {
     const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"]);
     const { rev, doc } = await server.look();
     expect(rev).toBe(1);
@@ -426,7 +438,7 @@ describe("a phone seeding and a TV joining", () => {
 });
 
 describe("edits reaching the TV", () => {
-  it("a phone's edits, removals, scene and palette reach the TV as the phone's room-scope storage", async () => {
+  it("a phone's edits, removals, scene and palette reach the TV, on Play, as the phone's room-scope storage", async () => {
     const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"]);
     const [a] = phones;
     const tv = new Tv(server, "tv");
@@ -439,7 +451,15 @@ describe("edits reaching the TV", () => {
     a.scene = "storm";
     a.palette = "ice";
     settle(a, tv);
+    // Nothing is sent until Play: the TV still shows what was played before.
+    expect(tv.scene).toBe("plume");
+    expect(tv.room()["vibe.hitAmount"]).toBeUndefined();
+    expect(a.main.status().onAir).toBe(false);
 
+    expect(a.play()).toBe("sent");
+    settle(a, tv);
+
+    expect(a.main.status().onAir).toBe(true);
     expect(tv.room()).toEqual(a.room());
     expect(tv.room()["vibe.drives"]).toBeUndefined();
     expect(tv.room()["vibe.hitAmount"]).toBe("4");
@@ -455,6 +475,7 @@ describe("edits reaching the TV", () => {
     await tv.join();
     settle(a, tv);
     a.set("vibe.hitAmount", "4");
+    a.play();
     settle(a, tv);
 
     const inRoom = Object.keys((await server.look()).doc?.storage ?? {});
@@ -468,7 +489,7 @@ describe("edits reaching the TV", () => {
     expect(tv.storage.getItem("vibe.deviceId")).toBe("tv-own-id");
   });
 
-  it("two phones converge, per key, by arrival order", async () => {
+  it("two phones that play at once merge per key, by arrival order, and Take Main brings the slower one in line", async () => {
     const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"], ["phoneB", seed(), "plume", "neon"]);
     const [a, b] = phones;
     const tv = new Tv(server, "tv");
@@ -479,16 +500,46 @@ describe("edits reaching the TV", () => {
     a.set("vibe.drives", '{"by":"A"}');
     b.set("vibe.hitDecay", "2");
     b.set("vibe.drives", '{"by":"B"}');
+    // Both press Play before either has heard the other.
+    a.play();
+    b.play();
     settle(a, b, tv);
 
     const doc = (await server.look()).doc;
-    expect(a.room()).toEqual(doc?.storage);
-    expect(b.room()).toEqual(doc?.storage);
     expect(tv.room()).toEqual(doc?.storage);
     expect(doc?.storage["vibe.hitAmount"]).toBe("1");
     expect(doc?.storage["vibe.hitDecay"]).toBe("2");
     // B's patch reached the room second.
     expect(doc?.storage["vibe.drives"]).toBe('{"by":"B"}');
+    // A's own look was on air, so it followed B's patch. B kept what it played
+    // and has not seen A's keys: it reads as not on air until it takes Main.
+    expect(a.room()).toEqual(doc?.storage);
+    expect(b.main.status().onAir).toBe(false);
+    b.main.take();
+    expect(b.room()).toEqual(doc?.storage);
+    expect(b.main.status().onAir).toBe(true);
+  });
+
+  it("a device that was on air follows someone else's Play; one with unplayed edits keeps them and is told", async () => {
+    const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"], ["phoneB", seed(), "plume", "neon"], ["phoneC", seed(), "plume", "neon"]);
+    const [a, b, c] = phones;
+    const tv = new Tv(server, "tv");
+    await tv.join();
+    settle(a, b, c, tv);
+
+    c.set("vibe.hitDecay", "7"); // unplayed
+    a.set("vibe.hitAmount", "3");
+    a.play();
+    settle(a, b, c, tv);
+
+    expect(tv.room()["vibe.hitAmount"]).toBe("3");
+    expect(b.room()["vibe.hitAmount"]).toBe("3"); // on air: follows
+    expect(c.room()["vibe.hitAmount"]).toBeUndefined(); // keeps its preview
+    expect(c.room()["vibe.hitDecay"]).toBe("7");
+    expect(c.main.status().changedBy).toBe("another device");
+    c.main.take();
+    expect(c.room()).toEqual(tv.room());
+    expect(c.main.status().changedBy).toBeNull();
   });
 });
 
@@ -504,6 +555,7 @@ describe("a flaky link", () => {
 
     a.set("vibe.drives", '{"v":2}');
     a.lose.push("lookAck");
+    a.play();
     settle(a, tv);
     expect((await server.look()).rev).toBe(rev + 1);
     expect(tv.count("lookPatch")).toBe(patches + 1);
@@ -516,7 +568,7 @@ describe("a flaky link", () => {
     expect(a.room()).toEqual(tv.room());
   });
 
-  it("a patch lost on the way is sent again after reconnect, exactly once", async () => {
+  it("a patch lost on the way goes out again on the next Play, exactly once", async () => {
     const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"]);
     const [a] = phones;
     const tv = new Tv(server, "tv");
@@ -527,12 +579,17 @@ describe("a flaky link", () => {
 
     a.set("vibe.drives", '{"v":3}');
     a.blackhole = true;
+    a.play();
     settle(a, tv);
     expect((await server.look()).rev).toBe(rev);
 
     a.blackhole = false;
     a.leave();
     await a.join(K, true);
+    settle(a, tv);
+    expect((await server.look()).rev).toBe(rev); // nothing is resent by itself
+    expect(a.main.status().onAir).toBe(false);
+    a.play();
     settle(a, tv);
     expect((await server.look()).rev).toBe(rev + 1);
     expect(tv.count("lookPatch")).toBe(patches + 1);
@@ -546,6 +603,7 @@ describe("a flaky link", () => {
     await tv.join();
     settle(a, tv);
     a.set("vibe.drives", '{"v":4}');
+    a.play();
     settle(a, tv);
     const { rev } = await server.look();
     const patches = tv.count("lookPatch");
@@ -567,11 +625,13 @@ describe("a flaky link", () => {
 
     tv.lose.push("lookPatch");
     a.set("vibe.hitAmount", "1");
+    a.play();
     settle(a, tv);
     expect(tv.room()["vibe.hitAmount"]).toBeUndefined();
     expect(tv.lookGets).toBe(0);
 
     a.set("vibe.hitDecay", "2");
+    a.play();
     settle(a, tv);
     expect(tv.lookGets).toBe(1);
     expect(tv.room()).toEqual(a.room());
@@ -584,17 +644,20 @@ describe("a flaky link", () => {
 
     b.lose.push("lookPatch");
     a.set("vibe.hitAmount", "1");
+    a.play();
     settle(a, b);
     expect(b.room()["vibe.hitAmount"]).toBeUndefined();
 
     a.set("vibe.hitDecay", "2");
+    a.play();
     settle(a, b);
     expect(b.sent.filter((m) => m.type === "lookGet")).toHaveLength(1);
     expect(b.room()).toEqual(a.room());
-    expect(b.sync.rev).toBe((await server.look()).rev);
+    expect(b.main.status().onAir).toBe(true);
+    expect((await server.look()).doc?.storage).toEqual(a.room());
   });
 
-  it("a phone that was offline keeps its unsent edits and takes the room's changes on return", async () => {
+  it("a phone that was offline keeps its unplayed edits on return, is told Main changed, and can take it", async () => {
     const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"], ["phoneB", seed(), "plume", "neon"]);
     const [a, b] = phones;
     const tv = new Tv(server, "tv");
@@ -603,8 +666,10 @@ describe("a flaky link", () => {
 
     b.leave();
     a.set("vibe.hitAmount", "1");
+    a.play();
     settle(a, tv);
-    b.set("vibe.hitDecay", "2"); // edited while offline: nothing can be sent
+    b.set("vibe.hitDecay", "2"); // edited while offline
+    expect(b.play()).toBeNull(); // nothing can be sent
     settle(a, b, tv);
     expect((await server.look()).doc?.storage["vibe.hitDecay"]).toBeUndefined();
 
@@ -612,9 +677,13 @@ describe("a flaky link", () => {
     settle(a, b, tv);
     const doc = (await server.look()).doc;
     expect(doc?.storage["vibe.hitAmount"]).toBe("1");
-    expect(doc?.storage["vibe.hitDecay"]).toBe("2");
-    expect(a.room()).toEqual(doc?.storage);
+    expect(doc?.storage["vibe.hitDecay"]).toBeUndefined();
+    expect(b.room()["vibe.hitDecay"]).toBe("2"); // its preview survived the wifi blink
+    expect(b.main.status()).toMatchObject({ onAir: false, changedBy: "another device" });
+
+    b.main.take();
     expect(b.room()).toEqual(doc?.storage);
+    expect(a.room()).toEqual(doc?.storage);
     expect(tv.room()).toEqual(doc?.storage);
   });
 
@@ -650,7 +719,7 @@ describe("refusals", () => {
     expect(a.count("lookPatch")).toBe(patches);
   });
 
-  it("a value past the size limit is rejected, leaves the room alone, and is not resent", async () => {
+  it("a value past the size limit is rejected, leaves the room alone, and is not resent by itself", async () => {
     const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"]);
     const [a] = phones;
     const tv = new Tv(server, "tv");
@@ -659,6 +728,7 @@ describe("refusals", () => {
     const before = await server.look();
 
     a.set("vibe.sceneSettings", "x".repeat(LOOK_LIMITS.maxValueBytes + 1));
+    a.play();
     settle(a, tv);
     expect(a.rejects).toEqual(["size"]);
     expect(await server.look()).toEqual(before);
@@ -681,6 +751,7 @@ describe("refusals", () => {
     expect(each * 2 + 1000).toBeLessThan(LOOK_LIMITS.maxMessageChars);
     a.set("vibe.bigOne", "a".repeat(each));
     a.set("vibe.bigTwo", "b".repeat(each));
+    a.play();
     settle(a);
     expect(a.rejects).toEqual(["size"]);
     expect(await server.look()).toEqual(before);

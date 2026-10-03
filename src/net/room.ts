@@ -406,6 +406,17 @@ abstract class RoomConnectionBase {
     this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
   }
 
+  /** Forget every frame this device has buffered or is about to send, as if
+   *  none had arrived. Called when the page switches between its own input and
+   *  a feed's frames (src/net/ears.ts): the two carry room times that
+   *  interleave, so they must never share one buffer. Nothing is sent and the
+   *  room hears nothing of it. */
+  resetFrames(): void {
+    this.buffer = new JitterBuffer();
+    this.decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
+    this.lastFrameAt = 0;
+  }
+
   protected onMessage(data: unknown): void {
     if (typeof data !== "string") {
       const decoded = decodeFeatureFrame(data as ArrayBuffer);
@@ -445,6 +456,12 @@ abstract class RoomConnectionBase {
     let devices = 0;
     for (const d of this.roster) if (d.role !== "controller") devices++;
     return devices <= 1 ? 0 : RENDER_DELAY_MS;
+  }
+
+  /** The delay `sample()` is heading for right now, in ms (`targetDelayMs`
+   *  above): what the Room view's Picture delay shows, and what a test reads. */
+  pictureDelayMs(): number {
+    return this.targetDelayMs();
   }
 
   /** The shared visual state every device — host or renderer — renders this instant. */
