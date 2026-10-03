@@ -10,6 +10,7 @@ import {
   delayReason,
   diagramHeight,
   feedChoices,
+  followPatch,
   kindLine,
   layoutNodes,
   neededHeight,
@@ -180,6 +181,31 @@ describe("rejectText", () => {
     expect(rejectText("rate")).toMatch(/Too many changes/);
     expect(rejectText("shape")).toBe("The room refused that change.");
     expect(rejectText("anything")).toBe("The room refused that change.");
+  });
+});
+
+describe("followPatch", () => {
+  it("names the first other feed for the owner, whose own follow (null) would name itself", () => {
+    const ipad = entry("ipad-1", { kind: "tablet", name: "iPad", ears: "own" });
+    expect(followPatch(laptop, [laptop, ipad])).toEqual({ follow: "ipad-1" });
+  });
+
+  it("is null when no other device is on its own input", () => {
+    const tv = entry("tv-1", { role: "renderer", kind: "tv", hasMic: false });
+    expect(followPatch(laptop, [laptop, tv])).toBeNull();
+  });
+
+  it("sends only ears when the device's own feed is still one", () => {
+    const ipad = entry("ipad-1", { kind: "tablet", ears: "own", follow: null });
+    expect(followPatch(ipad, [laptop, ipad])).toEqual({ ears: "follow" });
+  });
+
+  it("picks a live feed when the one it names has stopped being one", () => {
+    const owner = entry("laptop-1", { role: "host", kind: "laptop", ears: "follow", follow: "x", owner: true });
+    const ipad = entry("ipad-1", { kind: "tablet", ears: "own" });
+    const phone = entry("phone-1", { ears: "own", follow: null });
+    // The phone names the owner (null), which now follows: the iPad is the feed left.
+    expect(followPatch(phone, [owner, ipad, phone])).toEqual({ follow: "ipad-1" });
   });
 });
 

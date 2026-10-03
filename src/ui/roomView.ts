@@ -58,7 +58,6 @@ import {
   pictureDelayMs,
   type DeviceKind,
   type DeviceSetPatch,
-  type Ears,
 } from "../../server/roomDevices.ts";
 
 /** The room a QR opens: the link kind (joinScreen.ts `JoinKind`), the room
@@ -83,7 +82,7 @@ export interface RoomViewDeps {
    *  before `setDevice` sends it: the page acts on the choice in the same tap
    *  (an iPad opens its microphone only inside a gesture), without waiting for
    *  the room to echo it. */
-  onSelfEars?: (ears: Ears) => void;
+  onSelfEars?: (patch: DeviceSetPatch) => void;
   /** Owner only; left out, the Remove button is never offered. */
   forgetDevice?: (targetId: string) => void;
   /** What this device's QR encodes; null (or no code) means no QR to show. */
@@ -240,6 +239,21 @@ export function currentFeedValue(entry: RosterEntry, roster: RosterEntry[]): str
   if (entry.follow === null) return OWNER_FEED_VALUE;
   const { records } = recordsFromRoster(roster);
   return entry.follow === ownerId(records) ? OWNER_FEED_VALUE : entry.follow;
+}
+
+/** What pressing Follow sends for `entry`: only `ears` when the feed it
+ *  already names (its `follow`, the owner for null) is another device on its
+ *  own input; otherwise the first other device on its own input, as a
+ *  `follow` (which implies following); null when there is none. The owner's
+ *  `follow` is null, which names itself, so without this its Follow would
+ *  always be refused. */
+export function followPatch(entry: RosterEntry, roster: RosterEntry[]): DeviceSetPatch | null {
+  const { records } = recordsFromRoster(roster);
+  const current = entry.follow ?? ownerId(records);
+  if (current !== null && current !== entry.deviceId && records.get(current)?.ears === "own") return { ears: "follow" };
+  const first = feedChoices(roster, entry.deviceId)[0];
+  if (!first) return null;
+  return { follow: first.value === OWNER_FEED_VALUE ? null : first.value };
 }
 
 /** One plain line under the Picture delay number saying why it is what it is,
@@ -538,9 +552,15 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     (v) => {
       const d = roster.find((r) => r.deviceId === selected);
       if (!d) return;
-      const ears: Ears = v === "own" ? "own" : "follow";
-      if (d.deviceId === deps.selfId) deps.onSelfEars?.(ears);
-      deps.setDevice(d.deviceId, { ears });
+      const patch: DeviceSetPatch | null = v === "own" ? { ears: "own" } : followPatch(d, roster);
+      if (!patch) {
+        showMessage("No other device has its own input yet.");
+        paintAll(); // put the segmented control back on what the room says
+        return;
+      }
+      showMessage("");
+      if (d.deviceId === deps.selfId) deps.onSelfEars?.(patch);
+      deps.setDevice(d.deviceId, patch);
     },
   );
   const feedRow = box("margin-top: 8px;");
@@ -954,17 +974,31 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
 
   // ---- rejects ------------------------------------------------------------
   let messageTimer = 0;
+  /** One line under the controls in HOT_RED for REJECT_MS; "" clears it. */
+  function showMessage(text: string): void {
+    window.clearTimeout(messageTimer);
+    setText(messageEl, text);
+    if (text !== "") messageTimer = window.setTimeout(() => setText(messageEl, ""), REJECT_MS);
+  }
+
   // The subscriptions live as long as the page; nothing tears the view down.
   deps.onDeviceReject((m) => {
     if (!open) return;
     if (m.targetId !== null && m.targetId !== selected) return;
-    setText(messageEl, rejectText(m.reason));
-    window.clearTimeout(messageTimer);
-    messageTimer = window.setTimeout(() => setText(messageEl, ""), REJECT_MS);
+    showMessage(rejectText(m.reason));
   });
 
+  /** The selected device's settings as one string, to tell when a change to
+   *  it has landed: a refusal said about an earlier try is stale by then. */
+  function selectedKey(): string {
+    const d = roster.find((r) => r.deviceId === selected);
+    return d ? `${d.name}|${d.ears}|${d.follow ?? ""}|${d.screen}` : "";
+  }
+
   deps.onRosterChange((r) => {
+    const before = selectedKey();
     roster = r;
+    if (selectedKey() !== before) showMessage("");
     paintAll();
   });
 

@@ -108,9 +108,13 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
   function render(s: OutputStatus): void {
     status = s;
     popBtn.style.display = visible ? "block" : "none";
-    popBtn.textContent = s.open ? "OUTPUT ●" : "POP OUT";
-    popBtn.setAttribute("aria-pressed", String(s.open));
-    popBtn.title = s.open ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
+    // The pop-out's own state, not the bar's: `open` is also true while only
+    // the room's other devices are there, and that is no window to bring up.
+    // A pop-out that is open is the one output that can cue (`canCue`).
+    const popOpen = s.canCue;
+    popBtn.textContent = popOpen ? "OUTPUT ●" : "POP OUT";
+    popBtn.setAttribute("aria-pressed", String(popOpen));
+    popBtn.title = popOpen ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
     const show = visible && s.open;
     cueBtn.style.display = show && s.canCue ? "block" : "none";
     goBtn.style.display = show ? "block" : "none";

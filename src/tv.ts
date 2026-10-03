@@ -701,6 +701,18 @@ async function main(): Promise<void> {
       },
     };
     (window as unknown as { __tvPairing: typeof debug }).__tvPairing = debug;
+    // e2e read probe (DEV only): what the TV shows and whether frames flow.
+    (window as unknown as { __tv: unknown }).__tv = {
+      get scene() {
+        return scene.id;
+      },
+      get palette() {
+        return palette.id;
+      },
+      get msSinceLastFrame() {
+        return conn ? conn.msSinceLastFrame : Infinity;
+      },
+    };
   }
 
   // The scene is up before any connection exists, so the room's first `look`

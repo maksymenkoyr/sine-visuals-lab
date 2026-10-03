@@ -17,9 +17,11 @@ import type { MainPlay } from "./mainPlay.ts";
  *    iPad's own main window follows a glide with a plain switch (known limit).
  *  - There is no Cue for the room: `canCue` is false, so the bar hides CUE
  *    unless the pop-out (which does have one) is open next to it.
- *  - `differs` is "Main is not what this device shows" (MAIN ≠ YOURS).
+ *  - `differs` is "Main is not what this device shows" (MAIN ≠ YOURS), and only
+ *    while the room is open: a closed room can't be played to, so it must not
+ *    keep a combined bar on "differs" after Play reached only the pop-out.
  *  - `changedBy` is set while someone else played over a device that had
- *    unplayed edits; `take()` is that device's "Take Main".
+ *    unplayed edits (also only while open); `take()` is that device's "Take Main".
  *
  * Following is MainPlay's job, not this bridge's: it hears the room's look
  * through its own events (snapshot, patch, ack, reject, disconnect), so there
@@ -54,7 +56,10 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
   function status(): OutputStatus {
     const p = play.status();
     // Before the room has told this device its Main there is nothing to differ from.
-    return { open: opts.present(), cue: false, differs: p.known && !p.onAir, canCue: false, changedBy: p.changedBy };
+    // A closed room can't be played to, so it never reads as differing or changed
+    // (else a combined bar would stay on OUT ≠ PREVIEW after Play reached only the pop-out).
+    const open = opts.present();
+    return { open, cue: false, differs: open && p.known && !p.onAir, canCue: false, changedBy: open ? p.changedBy : null };
   }
 
   function emitIfChanged(): void {

@@ -11,7 +11,7 @@ interface Rig {
   applied: { doc: LookDoc; glideMs?: number }[];
   snapshotAsks: number;
   statuses: MainPlayStatus[];
-  setScreen(s: ScreenUse): void;
+  setScreen(s: ScreenUse | null): void;
   online: { value: boolean };
 }
 
@@ -19,8 +19,8 @@ function doc(scene: string, storage: Record<string, string> = {}, palette = "p1"
   return { scene, palette, storage };
 }
 
-function rig(opts: { isOwner?: boolean; screen?: ScreenUse; look?: LookDoc; names?: Record<string, string> } = {}): Rig {
-  let screen: ScreenUse = opts.screen ?? "main";
+function rig(opts: { isOwner?: boolean; screen?: ScreenUse | null; look?: LookDoc; names?: Record<string, string> } = {}): Rig {
+  let screen: ScreenUse | null = opts.screen === undefined ? "main" : opts.screen;
   const r = {
     look: opts.look ?? doc("mesh"),
     sent: [] as LookClientMsg[],
@@ -97,6 +97,83 @@ describe("joining", () => {
     const r = rig({ screen: "own", look: doc("mine") });
     r.mp.onSnapshot(4, doc("fluid"));
     expect(r.applied).toEqual([]);
+  });
+
+  it("a non-owner whose screen is unknown waits for the roster, then applies Main", () => {
+    const r = rig({ screen: null, look: doc("old") });
+    r.mp.onSnapshot(4, doc("fluid"));
+    expect(r.applied).toEqual([]);
+    r.setScreen("main");
+    r.mp.onScreenKnown();
+    expect(r.applied).toHaveLength(1);
+    expect(r.applied[0].doc.scene).toBe("fluid");
+    expect(r.mp.status()).toEqual({ known: true, onAir: true, changedBy: null });
+  });
+
+  it("a non-owner whose roster then says own keeps its look across the reload", () => {
+    const r = rig({ screen: null, look: doc("mine") });
+    r.mp.onSnapshot(4, doc("fluid"));
+    r.setScreen("own");
+    r.mp.onScreenKnown();
+    expect(r.applied).toEqual([]);
+    expect(r.look.scene).toBe("mine");
+    // and a patch before the roster says anything is not reported either
+    const q = rig({ screen: null, look: doc("mine") });
+    q.mp.onSnapshot(4, doc("fluid"));
+    q.mp.onPatch(5, { scene: "mesh" });
+    q.setScreen("own");
+    q.mp.onScreenKnown();
+    expect(q.applied).toEqual([]);
+    expect(q.mp.status().changedBy).toBeNull();
+  });
+
+  it("a roster that arrives with no join waiting changes nothing", () => {
+    const r = joined(doc("mesh"));
+    r.look = doc("mine");
+    r.mp.onScreenKnown();
+    expect(r.applied).toEqual([]);
+    expect(r.look.scene).toBe("mine");
+  });
+
+  it("an owner that opened in the gallery seeds a Main with no scene once it has one", () => {
+    const r = rig({ isOwner: true, look: doc("", { "vibe.a": "1" }) });
+    r.mp.onSnapshot(0, null);
+    // the first Main: palette and storage, no scene
+    expect(lookMsgs(r)).toEqual([{ type: "lookPatch", n: 1, palette: "p1", set: { "vibe.a": "1" } }]);
+    r.mp.onAck(1, 1);
+    r.mp.tick(1000);
+    expect(lookMsgs(r)).toHaveLength(1); // still no scene to send
+    r.look = doc("mesh", { "vibe.a": "1" }); // the owner enters a scene
+    r.mp.tick(2000);
+    expect(lookMsgs(r)).toHaveLength(2);
+    expect(lookMsgs(r)[1]).toEqual({ type: "lookPatch", n: 2, scene: "mesh" });
+    r.mp.onAck(2, 2);
+    r.look = doc("fluid", { "vibe.a": "1" }); // later picks are Play's, not the seed's
+    r.mp.tick(3000);
+    expect(lookMsgs(r)).toHaveLength(2);
+  });
+
+  it("the seed never sends over a scene Main already has, and only the owner seeds", () => {
+    const owner = rig({ isOwner: true, look: doc("mine") });
+    owner.mp.onSnapshot(4, doc("fluid"));
+    owner.mp.tick(1000);
+    expect(owner.sent).toEqual([]);
+    const pad = rig({ look: doc("mine") });
+    pad.mp.onSnapshot(4, doc(""));
+    pad.mp.tick(1000);
+    expect(pad.sent).toEqual([]);
+  });
+
+  it("the seed is sent once per connection, not again after a refusal", () => {
+    const r = rig({ isOwner: true, look: doc("mesh") });
+    r.mp.onSnapshot(4, doc(""));
+    expect(lookMsgs(r)).toHaveLength(1);
+    r.mp.onReject(1, "role");
+    r.mp.tick(1000);
+    expect(lookMsgs(r)).toHaveLength(1);
+    r.mp.onDisconnect();
+    r.mp.onSnapshot(4, doc(""));
+    expect(lookMsgs(r)).toHaveLength(2);
   });
 
   it("a non-owner in an empty room has nothing to apply and sends nothing", () => {
@@ -321,6 +398,43 @@ describe("play", () => {
     expect(r.mp.status()).toEqual({ known: true, onAir: true, changedBy: null });
     // and a fresh Play has nothing left to say
     expect(r.mp.play()).toBeNull();
+  });
+
+  it("a relay that changed what ours did not set is reported once ours is acked", () => {
+    const r = joined(doc("mesh", { "vibe.a": "1" }), { names: { d2: "iPad" } });
+    r.look = doc("mesh", { "vibe.a": "1", "vibe.mine": "7" });
+    r.mp.play(); // n=1
+    r.mp.onPatch(2, { set: { "vibe.theirs": "8" }, by: "d2" });
+    expect(r.mp.status().changedBy).toBeNull(); // not yet: ours is in the air
+    r.mp.onAck(1, 3);
+    expect(r.mp.status()).toEqual({ known: true, onAir: false, changedBy: "iPad" });
+    // Take Main brings it in
+    r.mp.take();
+    expect(r.look.storage["vibe.theirs"]).toBe("8");
+    expect(r.mp.status()).toEqual({ known: true, onAir: true, changedBy: null });
+  });
+
+  it("a relay that touched only keys ours also set reports nothing", () => {
+    const r = joined(doc("mesh", { "vibe.a": "1" }), { names: { d2: "iPad" } });
+    r.look = doc("mesh", { "vibe.a": "2" });
+    r.mp.play();
+    r.mp.onPatch(2, { set: { "vibe.a": "9" }, by: "d2" });
+    r.mp.onAck(1, 3); // ours won: Main is vibe.a=2
+    expect(r.mp.status()).toEqual({ known: true, onAir: true, changedBy: null });
+  });
+
+  it("a relay while ours is in flight is reported when ours is rejected, too", () => {
+    const r = joined(doc("mesh"), { names: { d2: "iPad" } });
+    r.look = doc("mine");
+    r.mp.play();
+    r.mp.onPatch(2, { scene: "fluid", by: "d2" }); // scene is in ours: nothing foreign
+    r.mp.onReject(1, "size");
+    expect(r.mp.status().changedBy).toBeNull();
+    r.look = doc("mesh", { "vibe.mine": "1" });
+    r.mp.play();
+    r.mp.onPatch(3, { set: { "vibe.theirs": "8" }, by: "d2" });
+    r.mp.onReject(2, "size");
+    expect(r.mp.status().changedBy).toBe("iPad");
   });
 
   it("an ack clears a notice that arrived while the patch was in the air", () => {

@@ -26,9 +26,16 @@
  * - **Joining.** The first snapshot of a connection decides: a non-owner
  *   applies an existing Main at once (as a phone always did); the room's owner
  *   (the laptop) keeps its own look and just reads "not on air"; in a room with
- *   no Main yet the owner plays its look as the first one. A later snapshot (a
- *   gap resync or a reconnect) follows only a device that was on air, so a
- *   wifi blink never costs anyone their unplayed edits.
+ *   no Main yet the owner plays its look as the first one. A room's Main that
+ *   has no scene (the owner opened in the gallery, so it had none to play)
+ *   gets the owner's scene, and only that, once the owner has one (`tick`). A
+ *   later snapshot (a gap resync or a reconnect) follows only a device that
+ *   was on air, so a wifi blink never costs anyone their unplayed edits.
+ *   The room sends a connection's snapshot before its roster, so a non-owner's
+ *   screen choice may still be unknown (`screen()` returns null) at the first
+ *   snapshot: the join waits for `onScreenKnown` and then applies Main only
+ *   when the screen isn't `own`, so a device set to `own` keeps its look
+ *   across a reload. While the screen is unknown nothing follows.
  *
  * "On air" compares this device's look to Main through outputSync.ts's
  * `stateKey` (sorted, stable, ignores the keys the main window rewrites on its
@@ -40,8 +47,11 @@
  * "on air" reading and for the next Play's diff (several quick Plays each send
  * only what is new, and a key reverted in between is still sent back). A relay
  * from someone else that lands while ours is in flight is folded into Main but
- * never shown or reported: ours is applied by the room after it, so the device
- * keeps what it played.
+ * never shown: ours is applied by the room after it, so the device keeps what
+ * it played. If it changed something none of ours set, the device does not
+ * show it either, so once ours settle (ack or reject) the device reports
+ * `changedBy` for it and offers Take Main (otherwise the next Play would
+ * silently send the old value back over it).
  *
  * Revisions give gap detection exactly as in lookSync.ts's `createLookReplica`,
  * which holds Main here: a relay that skips a revision asks the caller (through
@@ -85,8 +95,9 @@ export interface MainPlayOptions {
   capture: () => LookDoc;
   /** Make this device show `doc`. `glideMs` is a hint the device may ignore. */
   apply: (doc: LookDoc, glideMs?: number) => void;
-  /** This device's screen choice right now (its roster entry; "main" before one exists). */
-  screen: () => ScreenUse;
+  /** This device's screen choice right now (its roster entry); null until the
+   *  room has sent a roster that has this device (see the header). */
+  screen: () => ScreenUse | null;
   /** The room's owner device keeps its own look when it joins (see the header). */
   isOwner: boolean;
   /** The name to show for a device id (`by`), from the roster. */
@@ -104,6 +115,8 @@ export interface MainPlayStatus {
 
 export interface MainPlay {
   onSnapshot(rev: number, doc: LookDoc | null): void;
+  /** The roster now tells this device's screen: settles a join that waited for it. */
+  onScreenKnown(): void;
   /** Someone else's patch, as the room relayed it. */
   onPatch(rev: number, patch: LookPatch & { by?: string; glideMs?: number }): void;
   onAck(n: number, rev: number): void;
@@ -128,6 +141,19 @@ function lookKey(doc: LookDoc): string {
   return stateKey({ scene: doc.scene, palette: doc.palette, storage: doc.storage, params: DEFAULT_OUTPUT_PARAMS });
 }
 
+/** Does `changed` (what a relay changed) touch a scene, palette or key that none of `patches` sets? */
+function touchesOutside(changed: LookPatch, patches: LookPatch[]): boolean {
+  if (changed.scene !== undefined && !patches.some((p) => p.scene !== undefined)) return true;
+  if (changed.palette !== undefined && !patches.some((p) => p.palette !== undefined)) return true;
+  const mine = new Set<string>();
+  for (const p of patches) {
+    for (const k of Object.keys(p.set ?? {})) mine.add(k);
+    for (const k of p.del ?? []) mine.add(k);
+  }
+  const keys = [...Object.keys(changed.set ?? {}), ...(changed.del ?? [])];
+  return keys.some((k) => !mine.has(k));
+}
+
 export function createMainPlay(opts: MainPlayOptions): MainPlay {
   const replica = createLookReplica();
   /** Main is known: a snapshot has arrived on this connection. */
@@ -145,8 +171,31 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
   /** A lookGet has been asked for and no snapshot has answered yet. */
   let asked = false;
   let lastTick = -Infinity;
+  /** A non-owner's first snapshot arrived while its screen was unknown: the
+   *  join is decided in `onScreenKnown`. */
+  let joinHeld = false;
+  /** The owner has sent the scene for a Main that had none, on this connection. */
+  let seeded = false;
+  /** Someone else's relay landed while ours was in flight and changed what none
+   *  of ours set: who (see the header). Reported once ours settle. */
+  let foreignWhileInflight: string | null = null;
   let last: MainPlayStatus = { known: false, onAir: false, changedBy: null };
   const listeners: ((s: MainPlayStatus) => void)[] = [];
+
+  /** This device takes part in following Main: its screen is known and isn't `own`. */
+  function follows(): boolean {
+    const s = opts.screen();
+    return s !== null && s !== "own";
+  }
+
+  /** Once the in-flight patches are all settled, reports a relay that landed
+   *  among them and changed something they did not set. */
+  function settle(): void {
+    if (inflight.length > 0 || foreignWhileInflight === null) return;
+    const by = foreignWhileInflight;
+    foreignWhileInflight = null;
+    if (known && !matches(projected())) changedBy = changedBy ?? by;
+  }
 
   /** Main with our in-flight patches laid on top. */
   function projected(): LookDoc {
@@ -192,6 +241,10 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
     if (!known) return null;
     const diff = diffLook(projected(), opts.capture());
     if (!diff) return null;
+    return sendPatch(diff, glideMs);
+  }
+
+  function sendPatch(diff: LookPatch, glideMs?: number): "sent" | "glide" | null {
     const glide = glideMs !== undefined && glideMs > 0 && diff.scene === undefined;
     const n = seq + 1;
     const msg: LookClientMsg = { type: "lookPatch", n, ...diff };
@@ -201,6 +254,16 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
     inflight.push({ n, patch: diff });
     refresh();
     return glide ? "glide" : "sent";
+  }
+
+  /** The owner opened in the gallery, so the room's Main may have no scene: send
+   *  the owner's scene (alone) as soon as it has one. Once per connection. */
+  function seedScene(): void {
+    if (!opts.isOwner || !known || seeded) return;
+    const scene = opts.capture().scene;
+    if (scene === "" || projected().scene !== "") return;
+    seeded = true;
+    sendPatch({ scene });
   }
 
   return {
@@ -220,11 +283,23 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
       if (main === null) {
         if (opts.isOwner) play();
       } else if (first) {
-        if (!opts.isOwner && opts.screen() !== "own") show(main);
-      } else if (opts.screen() !== "own" && lookKey(main) !== prevKey) {
+        if (!opts.isOwner) {
+          if (opts.screen() === null) joinHeld = true;
+          else if (follows()) show(main);
+        }
+      } else if (follows() && lookKey(main) !== prevKey) {
         if (wasOn) show(main);
         else if (!matches(main)) changedBy = changedBy ?? SOMEONE;
       }
+      seedScene();
+      refresh();
+    },
+
+    onScreenKnown() {
+      if (!joinHeld || opts.screen() === null) return;
+      joinHeld = false;
+      const main = replica.doc();
+      if (known && main && follows()) show(main);
       refresh();
     },
 
@@ -239,7 +314,10 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
         return;
       }
       if (r.status === "stale") return;
-      if (!hadInflight && !isEmptyPatch(r.changed) && opts.screen() !== "own") {
+      if (hadInflight && !isEmptyPatch(r.changed) && follows() && touchesOutside(r.changed, inflight.map((f) => f.patch))) {
+        foreignWhileInflight = (patch.by !== undefined ? opts.nameOf(patch.by) : null) ?? SOMEONE;
+      }
+      if (!hadInflight && !isEmptyPatch(r.changed) && follows()) {
         if (wasOn) {
           const g = patch.glideMs;
           show(r.doc, typeof g === "number" && Number.isFinite(g) && g > 0 ? g : undefined);
@@ -260,12 +338,14 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
       const r = replica.onPatch(rev, sent);
       if (r.status === "gap") askForSnapshot();
       changedBy = null;
+      settle();
       refresh();
     },
 
     onReject(n, _reason) {
       if (n === null) inflight = [];
       else inflight = inflight.filter((f) => f.n !== n);
+      settle();
       refresh();
     },
 
@@ -273,12 +353,15 @@ export function createMainPlay(opts: MainPlayOptions): MainPlay {
       known = false;
       asked = false;
       inflight = [];
+      seeded = false;
+      foreignWhileInflight = null;
       refresh();
     },
 
     tick(nowMs) {
       if (nowMs - lastTick < MAIN_POLL_MS) return;
       lastTick = nowMs;
+      seedScene();
       refresh();
     },
 

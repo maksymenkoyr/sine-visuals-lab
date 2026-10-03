@@ -203,7 +203,7 @@ import {
 import { WORKER_ORIGIN } from "./net/config.ts";
 import { earsChange, listensOwn } from "./net/ears.ts";
 import { recordsFromRoster } from "./net/roomMessages.ts";
-import { followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
+import { applyDeviceSet, followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
 import { createMainPlay, type MainPlay } from "./net/mainPlay.ts";
@@ -1288,6 +1288,10 @@ function feedNameFor(conn: AnyConn): string {
  *  same. */
 function syncEars(): void {
   const now = ownInput();
+  // Frames from a feed are dropped while this page is its own feed (net/room.ts).
+  activeConn()?.setAcceptFrames(!now);
+  // The "waiting for laptop" badge is about a feed this page no longer follows.
+  if (now && controllerConn) setLaptopWaiting(false);
   // index.html: no sound-source picker on the gallery while this page follows.
   document.body.classList.toggle("follows-room", !now);
   const change = earsChange(ownWas, now);
@@ -1331,7 +1335,16 @@ function wireEars(conn: AnyConn): void {
     showHud(rejectText(m.reason));
     syncEars();
   });
+  // A removed device or a closed room ends this page's own capture: nothing is
+  // left to feed, and the browser's mic indicator must go out.
+  conn.onState((s) => {
+    if (s === "denied" && capture) {
+      stoppedByUser = true;
+      onCaptureEnded(capture, false);
+    }
+  });
   ownWas = ownInput();
+  conn.setAcceptFrames(!ownWas);
   document.body.classList.toggle("follows-room", !ownWas);
 }
 
@@ -1779,7 +1792,15 @@ function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner:
     },
     // This device's own ears act inside the tap, before the room echoes them:
     // iPad Safari opens the microphone only inside a gesture.
-    onSelfEars: (ears) => {
+    onSelfEars: (patch) => {
+      // A choice the room will refuse (a feed can't follow itself) changes
+      // nothing here: acting early would drop the capture and the room's
+      // refusal would not bring it back. The Room view sends Follow with a
+      // feed it can name (roomView.ts followPatch); a `follow` alone means
+      // following.
+      const { records } = recordsFromRoster(conn.currentRoster);
+      if (!applyDeviceSet(records, conn.deviceId, patch).ok) return;
+      const ears: Ears = patch.ears ?? "follow";
       setPendingEars(ears);
       syncEars();
       if (ears === "own") void ensureAudio("mic");
@@ -1910,7 +1931,8 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
       // walks the glide this window cannot.
       if (outputBridge?.status().open) outputBridge.go(glideMs);
     },
-    screen: () => conn.self?.screen ?? "main",
+    // Null until the roster has this device: the room sends the snapshot first.
+    screen: () => conn.self?.screen ?? null,
     isOwner,
     nameOf: (id) => conn.currentRoster.find((d) => d.deviceId === id)?.name ?? null,
   });
@@ -1927,6 +1949,7 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
   conn.onState((s) => {
     if (s !== "open") play.onDisconnect();
   });
+  conn.onRosterChange(() => play.onScreenKnown());
   mainPlay = play;
   return play;
 }

@@ -11,6 +11,7 @@ function fakePlay(init: Partial<MainPlayStatus> = {}) {
   const listeners: Array<(s: MainPlayStatus) => void> = [];
   const play: MainPlay = {
     onSnapshot: () => {},
+    onScreenKnown: () => {},
     onPatch: () => {},
     onAck: () => {},
     onReject: () => {},
@@ -67,6 +68,14 @@ describe("createRoomBridge", () => {
     expect(bridge.status().differs).toBe(true);
     set({ known: false });
     expect(bridge.status().differs).toBe(false);
+  });
+
+  it("a closed room never differs or names a change, whatever MainPlay says", () => {
+    const { bridge, env, set } = setup({ onAir: false, changedBy: "iPad" });
+    expect(bridge.status()).toMatchObject({ open: true, differs: true, changedBy: "iPad" });
+    env.present = false;
+    set({});
+    expect(bridge.status()).toEqual({ open: false, cue: false, differs: false, canCue: false, changedBy: null });
   });
 
   it("Play goes through MainPlay with the glide, and says whether it glided", () => {
@@ -191,6 +200,18 @@ describe("combineBridges", () => {
     expect(both.status()).toMatchObject({ open: true, canCue: false, changedBy: "iPad" });
     pop.set({ ...open });
     expect(both.status()).toMatchObject({ canCue: true, changedBy: "iPad" });
+  });
+
+  it("a closed differing room does not keep the combined bar on differs after Play", () => {
+    // pop-out open and showing the preview after Play; the room (nobody online) still differs
+    const pop = fakeBridge({ ...open });
+    const fp = setup({ onAir: false });
+    fp.env.present = false;
+    const both = combineBridges([pop.bridge, fp.bridge]);
+    expect(both.status().differs).toBe(false);
+    both.go();
+    expect(both.status()).toMatchObject({ open: true, differs: false, changedBy: null });
+    expect(fp.calls).not.toContain("play:undefined");
   });
 
   it("takes the first changedBy that is set", () => {

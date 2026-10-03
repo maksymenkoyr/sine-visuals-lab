@@ -1046,6 +1046,19 @@ describe("binary frames", () => {
     expect(host.msSinceLastFrame).toBeLessThan(1000);
   });
 
+  it("drops incoming frames while the page listens to its own input", async () => {
+    const { ControllerConnection } = await loadRoom();
+    const conn = new ControllerConnection("ABCD");
+    last().open();
+    conn.setAcceptFrames(false);
+    last().receive(encodeFeatureFrame({ ...FRAME, energy: 0.4 }, Date.now()));
+    expect(conn.msSinceLastFrame).toBe(Infinity);
+    expect(conn.sample()).toBeNull();
+    conn.setAcceptFrames(true);
+    last().receive(encodeFeatureFrame({ ...FRAME, energy: 0.4 }, Date.now()));
+    expect(conn.msSinceLastFrame).toBeLessThan(1000);
+  });
+
   it("ignores a binary message that is not a frame", async () => {
     const { RendererConnection } = await loadRoom();
     const conn = new RendererConnection("ABCD");

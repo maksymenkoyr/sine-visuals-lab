@@ -400,6 +400,11 @@
         color: rgba(255, 255, 255, 0.55);
         white-space: nowrap;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+        /* The keys' own glass behind the words, so the amber line stays
+         * readable over a bright scene (yellow, lime) as well as a dark one. */
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: rgba(8, 11, 10, 0.6);
       }
       #outState.differs {
         color: #ff9f1c;
@@ -412,9 +417,10 @@
       #takeBtn {
         display: none;
         pointer-events: auto;
-        padding: 2px 6px;
+        padding: 3px 8px;
         border: 0;
-        background: none;
+        border-radius: 6px;
+        background: rgba(8, 11, 10, 0.6);
         font: 400 12px/1.2 "Share Tech Mono", ui-monospace, monospace;
         letter-spacing: 0.14em;
         color: #ff9f1c;

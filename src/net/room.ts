@@ -190,6 +190,10 @@ abstract class RoomConnectionBase {
   private _connected = false;
   private _state: ConnState = "connecting";
   private lastFrameAt = 0;
+  /** False while the page listens to its own input: a feed's frames still on
+   *  their way (the room relays them until it has applied this device's switch)
+   *  are dropped, so they never mix with the device's own in one buffer. */
+  private acceptFrames = true;
   private roster: RosterEntry[] = [];
   // The roster as the records the room's own rules read (feedOf, followersOf,
   // pictureDelayMs); rebuilt whenever a roster arrives, not per frame.
@@ -417,8 +421,15 @@ abstract class RoomConnectionBase {
     this.lastFrameAt = 0;
   }
 
+  /** Whether incoming frames are kept (see `acceptFrames`). The page turns them
+   *  off while it listens to its own input and on while it follows a feed. */
+  setAcceptFrames(on: boolean): void {
+    this.acceptFrames = on;
+  }
+
   protected onMessage(data: unknown): void {
     if (typeof data !== "string") {
+      if (!this.acceptFrames) return;
       const decoded = decodeFeatureFrame(data as ArrayBuffer);
       if (decoded) this.pushFrame(decoded);
       return;
