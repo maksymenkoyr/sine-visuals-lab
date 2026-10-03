@@ -60,6 +60,13 @@ import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
  *     is stated in the button's own title since neither command reaches a
  *     paired TV.
  *
+ * **One Random (2026-10-03).** The user: "can we group this all in one cool
+ * random button. random smell, touch, per strain card". A single Random
+ * under the boxes calls the Strain Console's `randomize` and the Pairs
+ * pads' (Smell and Touch together); neither card has a Random of its own
+ * any more. Each roll lands as one entry on each card's own Back, so a roll
+ * whose motion is good but whose affinities aren't can be half-undone.
+ *
  * One `effective()` reading per item per tick feeds the preview, the box's own
  * colour and the console's colours — Synergy and Stain move a strain's colour
  * live, so nothing here keeps the base colour past the first paint.
@@ -278,6 +285,43 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   }
   container.appendChild(boxesEl);
 
+  // The one Random — see this file's header. Hidden until a card below
+  // registers something for it to roll.
+  const rollers: { randomize(): void; names: readonly string[] }[] = [];
+  const rollBtn = document.createElement("button");
+  rollBtn.type = "button";
+  rollBtn.className = "vc-roll";
+  rollBtn.hidden = true;
+  const rollDie = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  rollDie.setAttribute("viewBox", "0 0 24 24");
+  rollDie.setAttribute("aria-hidden", "true");
+  rollDie.classList.add("vc-roll-die");
+  rollDie.innerHTML =
+    '<rect x="3" y="3" width="18" height="18" rx="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/>' +
+    [[8, 8], [16, 8], [12, 12], [8, 16], [16, 16]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.6" fill="currentColor"/>`).join("");
+  const rollText = document.createElement("span");
+  rollText.className = "vc-roll-text";
+  const rollTitle = document.createElement("b");
+  rollTitle.textContent = "Random";
+  const rollSub = document.createElement("span");
+  rollText.append(rollTitle, rollSub);
+  rollBtn.append(rollDie, rollText);
+  rollBtn.addEventListener("click", () => {
+    for (const r of rollers) r.randomize();
+    rollBtn.classList.remove("vc-roll-spin");
+    void rollBtn.offsetWidth; // restart the die's spin on a quick re-click
+    rollBtn.classList.add("vc-roll-spin");
+  });
+  rollBtn.addEventListener("animationend", () => rollBtn.classList.remove("vc-roll-spin"));
+  container.appendChild(rollBtn);
+  function addRoller(randomize: () => void, names: readonly string[]): void {
+    rollers.push({ randomize, names });
+    const all = rollers.flatMap((r) => r.names);
+    rollSub.textContent = all.join(" · ");
+    rollBtn.title = `Roll ${all.join(", ")} at once. Each card's Back undoes its own part`;
+    rollBtn.hidden = false;
+  }
+
   // Live colours, refreshed once per tick below — the base colour until then.
   let liveColours: string[] = [...opts.colours];
   // This tick's effective() readings, shared with the Pairs pads below so they
@@ -487,6 +531,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       stateKey: `${ctx.sceneId}:${family}`,
     });
     consoleTick = (colours) => strainConsole.tick(colours);
+    if (strainConsole.randomLabels.length) addRoller(strainConsole.randomize, [opts.console.title]);
     // Without a preview source nothing above ticks; the console still needs to.
     if (!previewSource) ctx.onTick(() => strainConsole.tick(liveColours));
     else strainConsole.tick(liveColours);
@@ -522,6 +567,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     pair: previewSource?.pair,
     stateKey: `${ctx.sceneId}:${family}`,
   });
+  addRoller(pads.randomize, rel.tables.touch ? [rel.words.layers.smell.title, rel.words.layers.touch.title] : [rel.words.layers.smell.title]);
   ctx.onTick(() => pads.tick());
   ctx.onDispose(() => pads.dispose());
 });

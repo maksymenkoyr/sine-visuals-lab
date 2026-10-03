@@ -42,19 +42,22 @@ import {
  * the setting, so nothing jumps under the pointer. The wheel draws the set
  * hues hollow and the shown hues filled.
  *
- * The mix row (2026-10-02), under the lanes: Random rolls the `mix.random`
- * params for every item over each setting's whole range — Fogleman's random
- * species configs, whose ranges these sliders already span — a preset pill
- * writes the values it names (pressed while they still match), and Back
- * undoes the last Random, preset or colour action. With `colourActions`,
+ * The mix row (2026-10-02), under the lanes: a preset pill writes the values
+ * it names (pressed while they still match), and Back undoes the last
+ * Random, preset or colour action. Random (`randomize`) rolls the
+ * `mix.random` params for every item over each setting's whole range —
+ * Fogleman's random species configs, whose ranges these sliders already
+ * span. It has no button here since 2026-10-03: the Strains card's one
+ * Random (itemBoxes.ts) calls it along with the Pairs card's own. With
+ * `colourActions`,
  * Shuffle hands the hues on screen round the items in a new order and New
  * palette deals a random harmony (physarum2Synergy.ts) — both write the
  * stains, nothing else. Back's history lives at module level, keyed by
  * `stateKey`, so it survives a Look apply or card Reset like pairPads.ts's own.
  *
  * Every word a person reads here is a spec label/description, a value or a
- * preset's own name and hint; the few fixed strings (Link, Random, Back,
- * Shuffle, New palette) are the layout's own vocabulary.
+ * preset's own name and hint; the few fixed strings (Link, Back, Shuffle,
+ * New palette) are the layout's own vocabulary.
  */
 
 export interface ConsoleOptions {
@@ -69,8 +72,9 @@ export interface ConsoleOptions {
   /** A plain setting drawn as a row under the lanes with a hue wheel beside it
    *  (Synergy). Needs `hue`. */
   synergy?: { key: string };
-  /** The mix row — see this file's header. `random` names the params Random
-   *  rolls; each preset sets the params its `values` name, one value per item. */
+  /** The mix row — see this file's header. `random` names the params
+   *  `randomize` rolls; each preset sets the params its `values` name, one
+   *  value per item. */
   mix?: { random: readonly string[]; presets?: readonly ConsolePreset[] };
   /** Shuffle and New palette under the Synergy wheel. Needs `hue` and
    *  `synergy`. */
@@ -99,6 +103,10 @@ export interface StrainConsoleArgs {
 }
 
 export interface StrainConsole {
+  /** Rolls the `mix.random` params for every item — see this file's header. */
+  randomize(): void;
+  /** The labels of the params `randomize` rolls (empty: it does nothing). */
+  randomLabels: readonly string[];
   /** Refreshes every control from the settings. `colours` are the items' live
    *  colours (CSS), stain and all. */
   tick(colours: readonly string[]): void;
@@ -366,15 +374,12 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   });
 
   const randomParams = (opts.mix?.random ?? []).filter((p) => specs.has(p));
-  if (randomParams.length) {
-    const randomBtn = el("button", undefined, "Random");
-    randomBtn.type = "button";
-    randomBtn.title = `Roll ${randomParams.map((p) => specs.get(p)![0]!.label).join(", ")} for every strain`;
-    randomBtn.addEventListener("click", () => {
-      pushHistory();
-      for (const p of randomParams) writeValues(p, specs.get(p)!.map((spec) => randomValue(spec, Math.random)));
-    });
-    mixRow.appendChild(randomBtn);
+  /** Random, pressed from outside (the Strains card's one Random,
+   *  itemBoxes.ts): one entry on this console's Back. */
+  function randomize(): void {
+    if (!randomParams.length) return;
+    pushHistory();
+    for (const p of randomParams) writeValues(p, specs.get(p)!.map((spec) => randomValue(spec, Math.random)));
   }
   mixRow.appendChild(backBtn);
   mixEl.appendChild(mixRow);
@@ -519,6 +524,8 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   if (synergySpec) container.appendChild(synergyEl);
 
   return {
+    randomize,
+    randomLabels: randomParams.map((p) => specs.get(p)![0]!.label),
     tick(next) {
       colours = next;
       const probe = ctx.probe();

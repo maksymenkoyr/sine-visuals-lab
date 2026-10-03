@@ -62,7 +62,7 @@ labelled Rivalry, then Hostility — Crawl speed, Beat seeding, Exposure, Palett
 tint, Beat flash), each of the latter still carrying its own `auto` weights as before;
 and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
 Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
-pair (`pairsOf`), a Random/Nudge/Keep own trails/Back mix row and named
+pair (`pairsOf`), a Nudge/Keep own trails/Rivals/Back mix row and named
 presets — replacing the old plain-word rows/SVG-web pair,
 `relationRows.ts`/`relationWeb.ts`, both deleted) in its own Affinity card
 right after the Scene card ("The Affinity card" below). `src/render/scenes/
@@ -880,6 +880,27 @@ configs are used.
   (`knobDelta`, `arcPath`) are gone. They also asked for a Random, then
   withdrew it: the mix row's Random already rolls the strains.
 
+- **2026-10-03: one Random, and an own-trail roll that varies.** The user,
+  with a screenshot of the own-trail faders: "random smell works bad on own
+  trail, always [re]sets it to something like this" (every thumb near the
+  top), and "can we group this all in one cool random button. random smell,
+  touch, per strain card". Cause: the own trail rolled evenly in value over
+  `RIVAL_OWN_RANDOM`'s old 0.6…1.4 (Rivals on, the default; 0.2…1.4 off),
+  and the fader's `padPos` curve packs that whole span into its top stretch,
+  where the default already sits — so a roll barely moved the thumbs, and
+  above +1 nothing reads differently anyway. Now `rollOwn` rolls evenly
+  across the fader's height over a lower, wider range (`OWN_TRAIL_RANDOM`,
+  `RIVAL_OWN_RANDOM`), still always positive (a self-avoiding strain reads as
+  broken; Self-avoid stays a preset). The Pairs card's "Random smell/touch"
+  and the Strain Console's "Random" buttons are gone; one violet Random
+  with a die (`.vc-roll`) under the specimen boxes calls each card's
+  `randomize` — motion (`MOTION_PARAMS`), Smell and Touch together, Smell
+  still under Keep own trails and Rivals. Each roll is one entry on each
+  card's own Back, so half a roll can be undone. Checks: typecheck, tests (a
+  new one that own-trail rolls split about evenly over the fader), headless
+  screenshots of the panel before and after, six scripted rolls reading the
+  own-trail values back.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
@@ -1097,8 +1118,9 @@ applies there too. Tuned so far only against the synthetic feed at
     (Escape unpins, Solo hides the rest, the fold persists), a pad canvas
     surviving a strain-box selection change and a panel close/reopen (a
     culture must not restart), and (Random/Nudge/Keep own trails/Back) a preset applying
-    exactly, Back restoring the pre-preset tables exactly, a Touch-layer
-    Random leaving Smell alone, and a Smell Nudge with Keep own trails
+    exactly, Back restoring the pre-preset tables exactly, the Strains
+    card's one Random moving Smell and rolling Touch onto the grid (and the
+    Pairs card's Back undoing its half), and a Smell Nudge with Keep own trails
     leaving every own-trail fader unchanged. Also takes the panel
     screenshots (both layers, 1440/390) and, through the same real preset
     pills, the main-scene screenshots 8 s after War/Hunt/Gardens.
@@ -1178,7 +1200,7 @@ untouched. Not yet judged on real music; the default line is
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
 and why), and Fogleman's extras are in (2026-10-02: Auto level, Wander,
-Start ink and Fresh dish, Rivals, the console's Random/presets and
+Start ink and Fresh dish, Rivals, the one Random (2026-10-03), presets and
 Shuffle/New palette). What's left is Known issues: a real-GPU, real-music
 look at those, a real-music listen at Switching's default and
 `SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
@@ -1229,6 +1251,7 @@ fastest way to judge a tuning change without a mic; for the panel itself,
 is what actually exercises a box, a Pairs pad drag, Rebalance or Pipette
 press; a plain `.click()` is fine for a button that isn't a drag (a preset
 pill, Random/Nudge/Keep own trails/Back, `padcheck.mjs`'s own convention).
+The one Random is `.vc-roll`, under the specimen boxes (itemBoxes.ts).
 The pipette's own canvas listener lives on `#gl` directly and outlives a
 panel close (only a Scene-card rebuild disposes it — `ctx.onDispose`), so a
 headless check can arm it, close the panel for an unobstructed tap, then
