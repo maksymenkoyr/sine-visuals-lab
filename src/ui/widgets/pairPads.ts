@@ -114,7 +114,7 @@ import { setHintText } from "../hintSwatches.ts";
  * applies on both axes: right/up always reads more of whatever the axis
  * names, never less.
  *
- * **The mix row (Phase 3).** Nudge/Keep own trails/Rivals/Back, every
+ * **The mix row (Phase 3).** Nudge/Keep own trails/Back, every
  * preset pill and `randomize` share one rule: **push before you write**.
  * Each first snapshots both live tables (`snapshot()`) onto
  * `PairState.history` (a module-level stack, same survives-a-rebuild
@@ -128,11 +128,9 @@ import { setHintText } from "../hintSwatches.ts";
  * user: "group this all in one cool random button. random smell, touch, per
  * strain card"): the Strains card's one Random (itemBoxes.ts) calls
  * `randomize` and the Strain Console's own, so this card's Back still undoes
- * just its half of a roll. Keep own trails and Rivals
- * (2026-10-02: Random's lean toward a territorial table, on by default — see
- * `randomSmell`) are plain toggles (Smell only, hidden on Touch like the
- * own-trail strip itself) with no history entry of their own — flipping one
- * changes no value. None of this
+ * just its half of a roll. Keep own trails is a plain toggle (Smell only,
+ * hidden on Touch like the own-trail strip itself) with no history entry of
+ * its own — flipping it changes no value. None of this
  * calls `ctx.rerender()`; `tick()` already reflects a `ctx.set` on the next
  * frame the same way a slider drag does.
  *
@@ -212,7 +210,7 @@ export interface PairPadsSpec {
 
 export interface PairPadsHandle {
   /** The Strains card's Random (itemBoxes.ts): rolls Smell (`randomSmell`,
-   *  under this card's Keep own trails and Rivals toggles) and Touch
+   *  under this card's Keep own trails toggle) and Touch
    *  (`randomTouch`) together, as one entry on this card's Back. */
   randomize(): void;
   /** Reads live values, redraws changed pads' markers/header/status, and
@@ -233,9 +231,6 @@ interface PairState {
   /** Smell-only: Random/Nudge leave the own-trail diagonal untouched instead
    *  of rolling/jittering it — see `randomSmell`/`nudgeTable`. */
   keepOwn: boolean;
-  /** Smell-only: Random leans every roll toward rivals — own trail followed,
-   *  everyone else's avoided (`randomSmell`'s `rivals`). On by default. */
-  rivals: boolean;
   /** The mix-row undo stack — see this file's header. Module-level so it
    *  survives a Look apply or a card Reset the same way `pairCultureCache`
    *  does; in memory only (a reload starts empty). */
@@ -390,7 +385,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   let state = pairState.get(stateKey);
   if (!state) {
-    state = { layer: "smell", keepOwn: false, rivals: true, history: [] };
+    state = { layer: "smell", keepOwn: false, history: [] };
     pairState.set(stateKey, state);
   }
   const hasTouch = !!tables.touch;
@@ -949,7 +944,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
   }
 
-  // --- Row 4: mix row (Phase 3: Nudge / Keep own trails / Rivals / Back) +
+  // --- Row 4: mix row (Phase 3: Nudge / Keep own trails / Back) +
   // presets --------------------------------------------------------------
   const mixSectionRow = buildRow(ctx, rowSpec(stateKey, "mix", "Affinity mix"), words.ui.mixTitle, words.ui.mixHint);
 
@@ -962,24 +957,19 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   keepOwnBtn.type = "button";
   keepOwnBtn.setAttribute("aria-pressed", "false");
   keepOwnBtn.textContent = words.ui.keepOwn;
-  const rivalsBtn = document.createElement("button");
-  rivalsBtn.type = "button";
-  rivalsBtn.setAttribute("aria-pressed", "false");
-  rivalsBtn.textContent = words.ui.rivals;
   const backBtn = document.createElement("button");
   backBtn.type = "button";
   backBtn.disabled = true;
   backBtn.textContent = words.ui.back;
-  mixRow.append(nudgeBtn, keepOwnBtn, rivalsBtn, backBtn);
+  mixRow.append(nudgeBtn, keepOwnBtn, backBtn);
   mixSectionRow.body.appendChild(mixRow);
 
-  /** Reflects `state.history`/`state.keepOwn`/`state.rivals` onto the mix
+  /** Reflects `state.history`/`state.keepOwn` onto the mix
    *  row's own button state — called after every action that can change one
    *  (push, pop, a toggle) and once at mount, since all survive a rebuild. */
   function refreshMixRow(): void {
     backBtn.disabled = state!.history.length === 0;
     keepOwnBtn.setAttribute("aria-pressed", String(state!.keepOwn));
-    rivalsBtn.setAttribute("aria-pressed", String(state!.rivals));
   }
 
   function pushSnapshot(): void {
@@ -988,7 +978,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   function randomize(): void {
     pushSnapshot();
-    writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random, state!.rivals));
+    writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random));
     if (hasTouch) writeTable("touch", randomTouch(count, Math.random));
     refreshAll();
     refreshMixRow();
@@ -1001,10 +991,6 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   });
   keepOwnBtn.addEventListener("click", () => {
     state!.keepOwn = !state!.keepOwn;
-    refreshMixRow();
-  });
-  rivalsBtn.addEventListener("click", () => {
-    state!.rivals = !state!.rivals;
     refreshMixRow();
   });
   backBtn.addEventListener("click", () => {
@@ -1104,7 +1090,6 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     // Keep own trails only means anything on Smell (Touch's diagonal has no
     // setting to preserve at all) — same visibility rule as the strip itself.
     keepOwnBtn.style.display = layer === "smell" ? "" : "none";
-    rivalsBtn.style.display = layer === "smell" ? "" : "none";
     setHintText(layerRow.hintEl, words.layers[layer].how);
     focusIdx = -1;
     for (const pad of pads) {
