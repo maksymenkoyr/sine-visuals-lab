@@ -50,6 +50,8 @@ describe("the feature frame and the relay's binary cap", () => {
       palette: "",
       viewport: { x: 0, y: 0, w: 1, h: 1 },
       keyed: false,
+      kind: role === "host" ? "laptop" : "tv",
+      hasMic: role === "host",
     });
     const socket = (a: Attachment, tags: string[], log?: Array<string | ArrayBuffer>): CoreSocket & { tags: string[] } => ({
       attachment: a,

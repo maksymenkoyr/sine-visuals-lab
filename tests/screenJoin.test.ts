@@ -16,6 +16,14 @@ const entry = (deviceId: string, role: RosterEntry["role"]): RosterEntry => ({
   scene: "mesh",
   palette: "neon",
   viewport: { x: 0, y: 0, w: 1, h: 1 },
+  kind: role === "renderer" ? "tv" : "laptop",
+  name: role === "renderer" ? "TV" : "Laptop",
+  hasMic: role !== "renderer",
+  ears: role === "host" ? "own" : "follow",
+  follow: null,
+  screen: "main",
+  online: true,
+  owner: role === "host",
 });
 const HOST = entry("laptop", "host");
 const TV1 = entry("tv-1", "renderer");

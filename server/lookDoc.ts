@@ -110,7 +110,9 @@ export type LookClientMsg = { type: "lookGet" } | ({ type: "lookPatch"; n: numbe
 /** What the room sends back: the snapshot, a relayed patch, and the replies to a patch. */
 export type LookServerMsg =
   | { type: "look"; rev: number; doc: LookDoc | null }
-  | ({ type: "lookPatch"; rev: number } & LookPatch)
+  /** `by`: the device id of the member whose patch this is (the room adds
+   *  it to a relay; absent from an older room). */
+  | ({ type: "lookPatch"; rev: number; by?: string } & LookPatch)
   | { type: "lookAck"; n: number; rev: number }
   | { type: "lookReject"; n: number | null; reason: LookRejectReason };
 

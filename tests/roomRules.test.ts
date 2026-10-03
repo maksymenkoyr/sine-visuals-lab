@@ -11,7 +11,6 @@ import {
   safeEqualHex,
   validDeviceId,
   validKey,
-  validTargetTag,
   type JoinRequest,
   type RoomMeta,
   type RoomRole,
@@ -86,14 +85,12 @@ describe("decideJoin on a claimed room", () => {
 });
 
 describe("canSend", () => {
-  // Rows are message kinds; columns host / controller / renderer. The
-  // setDevice renderer cell and the endRoom host cell depend on whether the
-  // room is keyed.
-  const table: Record<Exclude<SendKind, "setDevice" | "endRoom">, [boolean, boolean, boolean]> = {
-    binary: [true, false, false],
+  // Rows are message kinds; columns host / controller / renderer. The kinds
+  // whose answer depends on whether the room is keyed are tested apart.
+  const table: Record<Exclude<SendKind, "binary" | "deviceSet" | "deviceForget" | "endRoom">, [boolean, boolean, boolean]> = {
     ping: [true, true, true],
     hello: [true, true, true],
-    lookGet: [false, true, true],
+    lookGet: [true, true, true],
     lookPatch: [true, true, false],
   };
 
@@ -108,13 +105,25 @@ describe("canSend", () => {
     }
   }
 
-  it("setDevice: host and controller always; a renderer only in a legacy room", () => {
-    expect(canSend(true, "host", "setDevice")).toBe(true);
-    expect(canSend(false, "host", "setDevice")).toBe(true);
-    expect(canSend(true, "controller", "setDevice")).toBe(true);
-    expect(canSend(false, "controller", "setDevice")).toBe(true);
-    expect(canSend(true, "renderer", "setDevice")).toBe(false);
-    expect(canSend(false, "renderer", "setDevice")).toBe(true);
+  it("binary: any member of a claimed room (the core then checks its record); only the host in a legacy room", () => {
+    for (const role of ["host", "controller", "renderer"] as const) expect(canSend(true, role, "binary")).toBe(true);
+    expect(canSend(false, "host", "binary")).toBe(true);
+    expect(canSend(false, "controller", "binary")).toBe(false);
+    expect(canSend(false, "renderer", "binary")).toBe(false);
+  });
+
+  it("deviceSet: any member of a claimed room, nobody in a legacy room", () => {
+    for (const role of ["host", "controller", "renderer"] as const) {
+      expect(canSend(true, role, "deviceSet")).toBe(true);
+      expect(canSend(false, role, "deviceSet")).toBe(false);
+    }
+  });
+
+  it("deviceForget: only a claimed room's host", () => {
+    expect(canSend(true, "host", "deviceForget")).toBe(true);
+    expect(canSend(true, "controller", "deviceForget")).toBe(false);
+    expect(canSend(true, "renderer", "deviceForget")).toBe(false);
+    for (const role of ["host", "controller", "renderer"] as const) expect(canSend(false, role, "deviceForget")).toBe(false);
   });
 
   it("endRoom: only a claimed room's host", () => {
@@ -143,17 +152,15 @@ describe("parseRole", () => {
   });
 });
 
-describe("device ids and target tags", () => {
+describe("device ids", () => {
   it("accepts UUIDs and plain tokens", () => {
     expect(validDeviceId("0f8fad5b-d9cb-469f-a165-70867728950e")).toBe(true);
     expect(validDeviceId("dev_1")).toBe(true);
-    expect(validTargetTag("dev_1")).toBe(true);
   });
 
   it("rejects the reserved tags, odd characters and bad lengths", () => {
     for (const tag of RESERVED_TAGS) {
       expect(validDeviceId(tag)).toBe(false);
-      expect(validTargetTag(tag)).toBe(false);
     }
     expect(RESERVED_TAGS.has("host")).toBe(true);
     expect(RESERVED_TAGS.has("renderer")).toBe(true);

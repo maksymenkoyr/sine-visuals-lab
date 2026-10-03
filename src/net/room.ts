@@ -6,22 +6,30 @@ import { SlewLimiter } from "./slewLimiter.ts";
 import { WireDecimator } from "./wireDecimator.ts";
 import { realStorage } from "./realStorage.ts";
 import { reconnectDelayMs, isTerminalClose, isSilent, PROBE_TIMEOUT_MS } from "./reconnect.ts";
-import { parseControlMessage, type DeviceCommand, type RosterEntry } from "./roomMessages.ts";
+import {
+  parseControlMessage,
+  recordsFromRoster,
+  type DeviceReject,
+  type RosterEntry,
+} from "./roomMessages.ts";
 import type { Viewport } from "../render/scene.ts";
 import type { LookClientMsg, LookServerMsg } from "../../server/lookDoc.ts";
 import { ROOM_CLOSE_DENIED, type RoomRole } from "../../server/roomRules.ts";
+import {
+  RENDER_DELAY_MS,
+  followersOf,
+  pictureDelayMs,
+  type DeviceKind,
+  type DeviceRecord,
+  type DeviceSetPatch,
+} from "../../server/roomDevices.ts";
 
-// The roster and command shapes live with the rest of the JSON vocabulary
-// (roomMessages.ts); callers that only want the types keep importing them here.
-export type { RosterEntry, DeviceCommand } from "./roomMessages.ts";
+// The roster shape lives with the rest of the JSON vocabulary (roomMessages.ts);
+// callers that only want the types keep importing them here. The render delay
+// lives with the rule that uses it (server/roomDevices.ts).
+export type { RosterEntry, DeviceReject } from "./roomMessages.ts";
 export type { RoomRole };
-
-/** Fallback target: how far behind the room clock a device without exclusive
- *  local capture renders, so a slow/jittery network path never shows up as
- *  visible desync — it just eats into slack. A host that's alone in the room
- *  targets 0 instead (see HostConnection.targetDelayMs) since there's no one
- *  to desync from and no network hop in its own path. */
-export const RENDER_DELAY_MS = 120;
+export { RENDER_DELAY_MS };
 
 /** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
 const BROADCAST_INTERVAL_MS = 1000 / 30;
@@ -71,8 +79,18 @@ export interface RoomAuth {
   hostKey?: string;
 }
 
+/** What this device says about itself when it joins (src/net/deviceKind.ts
+ *  guesses it): the room stores it as the device's record and lists it in the
+ *  roster. Absent = the room assumes what the role implies. */
+export interface DeviceInfo {
+  kind: DeviceKind;
+  hasMic: boolean;
+  name: string;
+}
+
 export interface ConnOptions {
   auth?: RoomAuth;
+  device?: DeviceInfo;
   /** Redial after a drop. Off by default: the legacy phone-as-renderer path
    *  relies on a dropped socket staying dropped (fallBackToSolo in app.ts). */
   reconnect?: boolean;
@@ -148,13 +166,18 @@ export async function createRoomCode(timeoutMs = 4000): Promise<string> {
 }
 
 /** The query parameters a join carries beyond role and device id: the keys it
- *  holds, and `frames` for a controller (a phone that wants the live frames
- *  for its own preview, and is otherwise hidden from the room). */
-function joinQuery(role: RoomRole, auth: RoomAuth | undefined): Record<string, string> {
+ *  holds, and what the device says it is (`kind`, `mic`, `name`) so the room
+ *  can create its record with sensible defaults. Every member is listed in a
+ *  claimed room now, so there is no longer a flag for a hidden controller. */
+function joinQuery(role: RoomRole, auth: RoomAuth | undefined, device: DeviceInfo | undefined): Record<string, string> {
   const q: Record<string, string> = {};
   if (role === "host" && auth?.hostKey) q.hk = auth.hostKey;
   if (auth?.roomKey) q.k = auth.roomKey;
-  if (role === "controller") q.frames = "1";
+  if (device) {
+    q.kind = device.kind;
+    q.mic = device.hasMic ? "1" : "0";
+    q.name = device.name;
+  }
   return q;
 }
 
@@ -168,8 +191,13 @@ abstract class RoomConnectionBase {
   private _state: ConnState = "connecting";
   private lastFrameAt = 0;
   private roster: RosterEntry[] = [];
+  // The roster as the records the room's own rules read (feedOf, followersOf,
+  // pictureDelayMs); rebuilt whenever a roster arrives, not per frame.
+  private rosterView: { records: Map<string, DeviceRecord>; online: Set<string> } | null = null;
   private rosterListeners: Array<(r: RosterEntry[]) => void> = [];
-  private commandListeners: Array<(c: DeviceCommand) => void> = [];
+  private rejectListeners: Array<(m: DeviceReject) => void> = [];
+  private _endedReason: "removed" | null = null;
+  private decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
   private stateListeners: Array<(s: ConnState) => void> = [];
   private lookListeners: Array<(m: LookServerMsg) => void> = [];
   // Announcing a device is a "last write wins" call made right at startup,
@@ -196,7 +224,7 @@ abstract class RoomConnectionBase {
   constructor(code: string, role: RoomRole, opts: ConnOptions = {}) {
     this.code = code;
     this.role = role;
-    this.query = joinQuery(role, opts.auth);
+    this.query = joinQuery(role, opts.auth, opts.device);
     this.reconnect = opts.reconnect === true;
     this.clock = new ClockSync((t0) => {
       this.sendPing(t0);
@@ -221,6 +249,19 @@ abstract class RoomConnectionBase {
     return this.roster;
   }
 
+  /** This device's own roster entry (its stored name, ears and screen), or
+   *  null until the room has listed it. */
+  get self(): RosterEntry | null {
+    for (const e of this.roster) if (e.deviceId === this.deviceId) return e;
+    return null;
+  }
+
+  /** Why the room ended this device's membership, once it has: `removed` when
+   *  the owner took it out of the room, null for any other end (or none yet). */
+  get endedReason(): "removed" | null {
+    return this._endedReason;
+  }
+
   /** Time since a frame last actually arrived in the buffer — distinct from
    *  socket state, since the DO relay leaves the renderer's own socket open
    *  even after the host it was relaying from disappears. */
@@ -235,11 +276,11 @@ abstract class RoomConnectionBase {
     };
   }
 
-  /** Fires when another device (typically a control panel) commands this one. */
-  onCommand(cb: (c: DeviceCommand) => void): () => void {
-    this.commandListeners.push(cb);
+  /** Fires when the room refuses a `deviceSet` or `deviceForget` this device sent. */
+  onDeviceReject(cb: (m: DeviceReject) => void): () => void {
+    this.rejectListeners.push(cb);
     return () => {
-      this.commandListeners = this.commandListeners.filter((f) => f !== cb);
+      this.rejectListeners = this.rejectListeners.filter((f) => f !== cb);
     };
   }
 
@@ -270,9 +311,17 @@ abstract class RoomConnectionBase {
     this.sendRaw(JSON.stringify({ type: "hello", scene, palette, viewport }));
   }
 
-  /** Ask another device (by id, from the roster) to change its scene/palette. */
-  sendSetDevice(targetId: string, cmd: DeviceCommand): void {
-    this.sendRaw(JSON.stringify({ type: "setDevice", targetId, ...cmd }));
+  /** Change one member's name, ears or screen (roomMessages.ts `deviceSet`;
+   *  server/roomDevices.ts has what each means). The answer is a new roster, or
+   *  `onDeviceReject`. False when the socket is not open, so nothing was sent. */
+  sendDeviceSet(targetId: string, patch: DeviceSetPatch): boolean {
+    return this.sendRaw(JSON.stringify({ type: "deviceSet", targetId, ...patch }));
+  }
+
+  /** The owner removes a member from the room (roomMessages.ts `deviceForget`).
+   *  The room refuses anyone else. False when the socket is not open. */
+  forgetDevice(targetId: string): boolean {
+    return this.sendRaw(JSON.stringify({ type: "deviceForget", targetId }));
   }
 
   /** Send a look message. False when the socket is not open, so the caller
@@ -327,29 +376,66 @@ abstract class RoomConnectionBase {
     this.lastFrameAt = Date.now();
   }
 
+  /** Call every local render tick. Any member may: the frame always goes into
+   *  this device's own full-rate buffer, and onto the wire (decimated to ~30Hz)
+   *  only when someone would use it. In a claimed room that is when the roster
+   *  shows a device that follows this one; a room that lists no record of this
+   *  device (the legacy room, or the roster not here yet) takes every frame and
+   *  relays it as it always did. Whether this device is *allowed* to be a feed
+   *  is the room's call, by the same records. */
+  sendFrame(frame: EncodableFrame): void {
+    const roomTimeMs = this.clock.roomNow();
+    this.pushFrame({ ...frame, roomTimeMs });
+
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
+    if (!d.send) return;
+    // The latches are cleared even when nothing goes out (socket not open, no
+    // follower), so a stale hit isn't replayed on reconnect or when a follower
+    // arrives.
+    const view = this.rosterView;
+    if (view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
+    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
+  }
+
   protected onMessage(data: unknown): void {
+    if (typeof data !== "string") {
+      const decoded = decodeFeatureFrame(data as ArrayBuffer);
+      if (decoded) this.pushFrame(decoded);
+      return;
+    }
     const msg = parseControlMessage(data);
     if (!msg) return;
     if (msg.type === "pong") {
       this.clock.onPong(msg.t0, msg.tServer);
     } else if (msg.type === "roster") {
       this.roster = msg.devices;
+      this.rosterView = recordsFromRoster(msg.devices);
       for (const cb of this.rosterListeners) cb(this.roster);
-    } else if (msg.type === "command") {
-      for (const cb of this.commandListeners) cb({ scene: msg.scene, palette: msg.palette, viewport: msg.viewport });
+    } else if (msg.type === "deviceReject") {
+      for (const cb of this.rejectListeners) cb(msg);
     } else if (msg.type === "ended") {
+      if (msg.reason === "removed") this._endedReason = "removed";
       this.roomEnded();
     } else {
       for (const cb of this.lookListeners) cb(msg);
     }
   }
 
-  /** How far behind the room clock this device targets right now. Overridden
-   *  by HostConnection to go to 0 when it's alone in the room; every other
-   *  case (renderers always, a host once someone else joins) uses the fixed
-   *  network-jitter fallback. */
+  /** How far behind the room clock this device targets right now. Once the
+   *  roster lists this device, the room's own rule (server/roomDevices.ts
+   *  `pictureDelayMs`): a follower waits RENDER_DELAY_MS, a device on its own
+   *  input draws at once unless it shows Main beside followers. Before that, and
+   *  in a legacy room that sends no records: a renderer always waits
+   *  RENDER_DELAY_MS; a host alone in the room targets 0 (nobody to desync from,
+   *  no network hop in its own path) and otherwise waits as well. A controller
+   *  the legacy room lists doesn't count as company; the room leaves it off. */
   protected targetDelayMs(): number {
-    return RENDER_DELAY_MS;
+    const view = this.rosterView;
+    if (view && view.records.has(this.deviceId)) return pictureDelayMs(view.records, view.online, this.deviceId);
+    if (this.role !== "host") return RENDER_DELAY_MS;
+    let devices = 0;
+    for (const d of this.roster) if (d.role !== "controller") devices++;
+    return devices <= 1 ? 0 : RENDER_DELAY_MS;
   }
 
   /** The shared visual state every device — host or renderer — renders this instant. */
@@ -529,36 +615,13 @@ abstract class RoomConnectionBase {
   };
 }
 
-export class HostConnection extends RoomConnectionBase {
-  private decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
+// The three roles are one connection; a subclass only fixes the role the room is
+// told at join (and the host adds the one thing only it may do).
 
+/** The laptop that opened the room: it holds the host key and may end the room. */
+export class HostConnection extends RoomConnectionBase {
   constructor(code: string, opts?: ConnOptions) {
     super(code, "host", opts);
-  }
-
-  /** Alone in the room (roster is empty pre-hello, or just this device's own
-   *  socket) -> render fresh, since there's nobody to desync from and no
-   *  network hop in this device's own path. Once anyone else joins, fall
-   *  back to the same delay everyone else uses. A phone controller doesn't
-   *  count — the room leaves it off the roster already; skipping it here is
-   *  a guard against an older or looser room listing one. */
-  protected override targetDelayMs(): number {
-    let devices = 0;
-    for (const d of this.currentRoster) if (d.role !== "controller") devices++;
-    return devices <= 1 ? 0 : RENDER_DELAY_MS;
-  }
-
-  /** Call every local render tick; internally decimates the wire send to ~30Hz
-   *  while feeding the full-rate local buffer so this device's own visuals stay smooth. */
-  sendFrame(frame: EncodableFrame): void {
-    const roomTimeMs = this.clock.roomNow();
-    this.pushFrame({ ...frame, roomTimeMs });
-
-    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
-    if (!d.send) return;
-    // The latches are cleared even if the socket isn't open, so a stale hit
-    // isn't replayed on reconnect.
-    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
   }
 
   /** Ends a claimed room for everyone (roomMessages.ts `endRoom`); the room
@@ -569,27 +632,16 @@ export class HostConnection extends RoomConnectionBase {
   }
 }
 
+/** The TV page, and a spectator opened from a room link. */
 export class RendererConnection extends RoomConnectionBase {
-  /** `role` is ControllerConnection's hook; everything else passes (code, opts). */
-  constructor(code: string, opts?: ConnOptions, role: "renderer" | "controller" = "renderer") {
-    super(code, role, opts);
-  }
-
-  protected override onMessage(data: unknown): void {
-    if (typeof data === "string") {
-      super.onMessage(data);
-      return;
-    }
-    const decoded = decodeFeatureFrame(data as ArrayBuffer);
-    if (decoded) this.pushFrame(decoded);
+  constructor(code: string, opts?: ConnOptions) {
+    super(code, "renderer", opts);
   }
 }
 
-/** A phone that edits the room's look. It decodes frames like a renderer (it
- *  asks the room for them, for its own preview) but the room never lists it,
- *  so the host and the Room panel don't see a second screen. */
-export class ControllerConnection extends RendererConnection {
+/** A device with a panel that joined by the room's QR (a phone or an iPad). */
+export class ControllerConnection extends RoomConnectionBase {
   constructor(code: string, opts?: ConnOptions) {
-    super(code, opts, "controller");
+    super(code, "controller", opts);
   }
 }

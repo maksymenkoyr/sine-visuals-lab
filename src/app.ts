@@ -216,7 +216,7 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
-import { createControlPanel, type RoomInvite } from "./ui/controlPanel.ts";
+import { createRoomView, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
@@ -225,6 +225,7 @@ import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
 import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
+import { thisDevice } from "./net/deviceKind.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
 import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
@@ -820,12 +821,6 @@ function applyPalette(next: Palette): void {
   controllerLook?.notePalette(next.id);
   showHud(`palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
-}
-
-/** Panorama slice assignment, from a `setDevice` command (roomMessages.ts) — no screen of this app sends one any more. */
-function applyViewport(next: Viewport): void {
-  viewport = next;
-  activeConn()?.sendHello(scene.id, palette.id, viewport);
 }
 
 function fatalError(message: string): void {
@@ -1634,40 +1629,47 @@ function wireDeviceMenu(): void {
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
 }
 
-/** Any device can drive the room, not just the host — this wires the panel,
- *  incoming remote commands, and the roster announcement for whichever
- *  connection (host or renderer) is currently active. Works from the
- *  gallery too: room control is a room capability, not a viz capability. */
-function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null): void {
-  const panel = createControlPanel({
+/** Any device can drive the room, not just the host: this builds the Room view
+ *  (src/ui/roomView.ts) for whichever connection (host, controller or
+ *  renderer) is currently active, wires the #panelBtn that opens it, and
+ *  announces this device's scene to the room. Works from the gallery too: room
+ *  control is a room capability, not a viz capability. Returns the view so the
+ *  keyed host's room badge can open it as well. */
+function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner: boolean): RoomView {
+  const view = createRoomView({
+    selfId: conn.deviceId,
+    isOwner: owner,
+    roomCode: () => roomCode,
     getRoster: () => conn.currentRoster,
     onRosterChange: (cb) => conn.onRosterChange(cb),
-    adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+    onDeviceReject: (cb) => conn.onDeviceReject(cb),
+    setDevice: (targetId, patch) => {
+      conn.sendDeviceSet(targetId, patch);
+    },
+    forgetDevice: owner
+      ? (targetId) => {
+          conn.forgetDevice(targetId);
+        }
+      : undefined,
     invite,
-    hasCuePlay: !isController,
+    adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+    finish: owner
+      ? { label: "Reset room", confirm: "Click again: every device pairs again", run: resetRoom }
+      : isController
+        ? {
+            label: "Leave room",
+            run: () => {
+              clearSession("controller", realStorage);
+              location.assign("/");
+            },
+          }
+        : { label: "Leave room", run: () => location.assign("/") },
   });
   panelBtn.style.display = "block";
-  panelBtn.addEventListener("click", () => panel.toggle());
-
-  conn.onCommand((cmd) => {
-    if (cmd.scene) {
-      const s = getScene(cmd.scene);
-      if (s && presetAllows(s, effectivePreset())) {
-        if (inViz) applyScene(s);
-        else {
-          // Commanded while idle on the gallery (e.g. a mosaic/panorama
-          // layout assigned from another device's room panel) — this
-          // device's job is to actually render its slice, so jump in.
-          void enterViz(s);
-          navigate({ kind: "viz", sceneId: s.id }, "push");
-        }
-      }
-    }
-    if (cmd.palette) applyPalette(getPalette(cmd.palette));
-    if (cmd.viewport) applyViewport(cmd.viewport);
-  });
+  panelBtn.addEventListener("click", () => view.toggle());
 
   conn.sendHello(scene.id, palette.id, viewport);
+  return view;
 }
 
 /** A full-screen, plain-words stop for a page that cannot go on: a phone that
@@ -1895,7 +1897,7 @@ function startController(
   roomCode = target.room;
   ownRoomKey = target.key;
   document.body.classList.add("controller"); // index.html: no sound-source picker on the gallery
-  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true });
+  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device: thisDevice() });
   controllerConn = conn;
 
   if (target.keyFromUrl) {
@@ -1920,7 +1922,11 @@ function startController(
     paintControllerBadge();
     if (s === "denied") {
       clearSession("controller", realStorage);
-      showPairingNotice("This room is closed", "Scan the QR on the laptop again to reconnect.");
+      if (conn.endedReason === "removed") {
+        showPairingNotice("Removed from the room", "Scan the QR on the laptop again to rejoin.");
+      } else {
+        showPairingNotice("This room is closed", "Scan the QR on the laptop again to reconnect.");
+      }
     }
   });
   startControllerLook(conn);
@@ -2186,7 +2192,7 @@ async function boot(): Promise<void> {
     roomCode = plan.room;
     rendererConn = new RendererConnection(
       roomCode,
-      plan.key ? { auth: { roomKey: plan.key }, reconnect: true } : undefined,
+      plan.key ? { auth: { roomKey: plan.key }, reconnect: true, device: thisDevice() } : { device: thisDevice() },
     );
     startRendererDisconnectWatch();
   } else if (plan.kind === "solo") {
@@ -2200,7 +2206,7 @@ async function boot(): Promise<void> {
     try {
       if (plan.kind === "host-join") {
         roomCode = plan.room;
-        hostConn = new HostConnection(roomCode);
+        hostConn = new HostConnection(roomCode, { device: thisDevice() });
         // A code alone opens only an old unclaimed room; a laptop's is keyed.
         hostConn.onState((s) => {
           if (s === "denied") showHud(`Room ${plan.room} needs its QR, a code alone can't join it.\nClick the room code to leave it.`, true);
@@ -2214,6 +2220,7 @@ async function boot(): Promise<void> {
         hostConn = new HostConnection(roomCode, {
           auth: { hostKey: hostRoom.hostKey, roomKey: hostRoom.roomKey },
           reconnect: true,
+          device: thisDevice(),
         });
         hostConn.onState((s) => {
           if (s !== "denied" || resettingRoom) return;
@@ -2237,24 +2244,23 @@ async function boot(): Promise<void> {
   if ((mode === "host" || mode === "renderer") && roomCode && !isController) {
     roomCodeEl.textContent = `room: ${roomCode}`;
     roomCodeEl.style.display = "block";
-    // The room view: this room's QR + code, and the field to type a code —
-    // a waiting TV's, on a keyed host (joinScreen.ts `createRoomCodeEntry`),
-    // else another room's. Stays open until dismissed — it holds a text field.
-    // A keyed host's overlay carries the controller link (and a watch-only
-    // toggle); a keyed spectator can pass on the key it was invited with; the
-    // old room a phone hosts for a TV has no key to put in a link. Its last
-    // button starts over: a keyed host ends its room for everyone and opens a
-    // new one (`resetRoom`); anyone else just leaves for a room of their own.
-    const roomKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
-    const invite = createJoinScreen(hostRoomKey ? "controller" : "renderer", document.body, {
-      dismissible: true,
-      adoptTv: ownRoomKey ? adoptTvByCode : undefined,
-      reset: hostRoomKey
-        ? { label: "Reset room", confirm: "Click again: every phone and TV pairs again", run: resetRoom }
-        : { label: "Leave this room", run: () => location.assign("/") },
-    });
-    invite.setCode(roomCode, roomKey ? { key: roomKey } : undefined);
-    roomCodeEl.addEventListener("click", () => invite.show());
+    // A keyed host's badge opens the Room view (wired below, once the
+    // connection exists). Every other room member keeps the pairing overlay:
+    // this room's QR + code, and the field to type another room's code
+    // (joinScreen.ts `createRoomCodeEntry`). It stays open until dismissed, it
+    // holds a text field. A keyed spectator can pass on the key it was invited
+    // with; the old room a phone hosts for a TV has no key to put in a link.
+    // Its last button leaves for a room of their own.
+    if (!hostRoomKey) {
+      const roomKey = plan.kind === "renderer" ? plan.key : undefined;
+      const invite = createJoinScreen("renderer", document.body, {
+        dismissible: true,
+        adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+        reset: { label: "Leave this room", run: () => location.assign("/") },
+      });
+      invite.setCode(roomCode, roomKey ? { key: roomKey } : undefined);
+      roomCodeEl.addEventListener("click", () => invite.show());
+    }
   }
 
   wireDeviceMenu();
@@ -2263,11 +2269,18 @@ async function boot(): Promise<void> {
   // laptop's keyed room, the plain/watch link for any other room member.
   if (conn) {
     const inviteKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
-    wireRoomControls(conn, () =>
-      isController || !roomCode
-        ? null
-        : { kind: hostRoomKey ? "controller" : "renderer", code: roomCode, info: inviteKey ? { key: inviteKey } : undefined },
+    const roomView = wireRoomControls(
+      conn,
+      () => {
+        if (!roomCode) return null;
+        // A controller page invites more devices with its own room key (an
+        // iPad can be the second remote); it has no key in a legacy room.
+        if (isController) return ownRoomKey ? { kind: "controller", code: roomCode, info: { key: ownRoomKey } } : null;
+        return { kind: hostRoomKey ? "controller" : "renderer", code: roomCode, info: inviteKey ? { key: inviteKey } : undefined };
+      },
+      hostRoomKey !== null,
     );
+    if (hostRoomKey) roomCodeEl.addEventListener("click", () => roomView.toggle());
   }
 
   immersive = createImmersiveMode({

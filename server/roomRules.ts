@@ -3,11 +3,17 @@
  * sockets in sight so tests can drive every case (server/roomCore.ts applies
  * them to live sockets; server/room.ts is the Cloudflare adapter around that).
  *
- * Roles. The laptop is the `host`: it plays and analyses the music, is the
- * only role whose binary frames are relayed, and publishes its own look to the
- * room's screens (Cue and Play). A phone is a `controller`: it edits the
- * room's look (server/lookDoc.ts) and may also watch frames. A TV is
- * a `renderer`: it draws from the host's frames and the look.
+ * Roles. The `host` is the room's owner: the laptop that claims it with the
+ * host key, publishes its own look to the room's screens (Cue and Play), and
+ * alone may end the room (`endRoom`, Reset) and forget a device
+ * (`deviceForget`). A `controller` is a device with a panel that joined by the
+ * QR (a phone, an iPad): it edits the room's look (server/lookDoc.ts). A
+ * `renderer` is the TV page: it draws, and only shows the look. In a claimed
+ * room every member is a device with a record (server/roomDevices.ts), whatever
+ * its role, and its binary frames are relayed only while that record has it on
+ * its own input (the core checks the record; `canSend` only lets a keyed
+ * member's bytes reach that check). In a legacy room only the host's frames
+ * are relayed, as before.
  *
  * The host key and the room key are separate on purpose. The host key never
  * goes into the QR or to another device, but the laptop does present it to the
@@ -71,8 +77,9 @@ export const MAX_SOCKETS_PER_ROOM = 16;
 /** How long a claimed room may sit with no socket before it is wiped. */
 export const ROOM_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Names the Durable Object already uses as socket tags (role tags, and the
- *  tag a frame-watching controller carries), so a device id can't be one. */
+/** Names the Durable Object uses or has used as socket tags (the role tags,
+ *  and `frames`, which an older client's controller carried), so a device id
+ *  can't be one: a device id is a tag, and must never fan out to a role. */
 export const RESERVED_TAGS: ReadonlySet<string> = new Set(["host", "renderer", "controller", "frames"]);
 
 const DEVICE_ID_RE = /^[\w-]+$/;
@@ -106,12 +113,6 @@ export function adoptTag(nonce: string): string {
  *  that names only the slot's code (typed on a laptop, no QR to read) still
  *  finds it. No nonce can equal it: a nonce is a long base64url key. */
 export const ADOPT_ANY_TAG = "adopt:any";
-
-/** A `setDevice` target is addressed by its socket tag, so it must be a
- *  legal device id — never a role tag, which would fan the command out. */
-export function validTargetTag(s: unknown): s is string {
-  return validDeviceId(s);
-}
 
 /** The shape of a room key or host key (minted by the laptop, base64url). */
 export function validKey(s: unknown): s is string {
@@ -186,26 +187,31 @@ export function decideJoin(meta: RoomMeta | null, req: JoinRequest): JoinDecisio
   return DENY;
 }
 
-export type SendKind = "binary" | "ping" | "hello" | "setDevice" | "lookGet" | "lookPatch" | "endRoom";
+export type SendKind = "binary" | "ping" | "hello" | "deviceSet" | "deviceForget" | "lookGet" | "lookPatch" | "endRoom";
 
 /** Whether a socket of `role` may send a message of this kind (the messages
- *  are described in src/net/roomMessages.ts). `keyed` only matters for
- *  `setDevice`: in a claimed room a renderer may not command other devices. The look
- *  kinds are looked at by role alone — a legacy room has no look, so the
- *  core ignores them there before it ever asks, and a `lookPatch` that this
+ *  are described in src/net/roomMessages.ts). `keyed` matters for the kinds
+ *  that only exist in a claimed room: `deviceSet` (any member may change any
+ *  device) and `deviceForget` and `endRoom` (the owner only). `binary` is let
+ *  through for any keyed member, because which of them is a feed is in the
+ *  room's device records, not here (a legacy room still takes the host's only).
+ *  The look kinds are looked at by role alone — a legacy room has no look, so
+ *  the core ignores them there before it ever asks, and a `lookPatch` that this
  *  refuses (renderer) is answered with a `lookReject` rather than
  *  dropped, which is the core's job too. */
 export function canSend(keyed: boolean, role: RoomRole, kind: SendKind): boolean {
   switch (kind) {
     case "binary":
-      return role === "host";
+      return keyed || role === "host";
     case "ping":
     case "hello":
       return true;
-    case "setDevice":
-      return role === "renderer" ? !keyed : true;
+    case "deviceSet":
+      return keyed;
+    case "deviceForget":
+      return keyed && role === "host";
     case "lookGet":
-      return role !== "host";
+      return true;
     case "lookPatch":
       // A phone edits the look live; the laptop publishes it with Cue and Play
       // (src/net/roomBridge.ts). A TV only shows it.

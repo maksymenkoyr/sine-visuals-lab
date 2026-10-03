@@ -115,7 +115,7 @@ class Server {
       hk: p.hk === undefined ? null : await hashKey(p.hk),
     };
     const result = this.core.join(
-      { role: p.role, deviceId: p.deviceId ?? null, frames: p.frames ?? false },
+      { role: p.role, deviceId: p.deviceId ?? null },
       hashes,
       `sid${++this.sids}`,
     );

@@ -11,7 +11,7 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
-import { createRoomCode, RendererConnection, type DeviceCommand } from "./net/room.ts";
+import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
@@ -483,10 +483,13 @@ function joinRoom(room: string, key: string | null): void {
   glideTarget = null;
   hostInRoom = null;
 
-  const c = new RendererConnection(room, { auth: key ? { roomKey: key } : undefined, reconnect: true });
+  const c = new RendererConnection(room, {
+    auth: key ? { roomKey: key } : undefined,
+    reconnect: true,
+    device: { kind: "tv", hasMic: false, name: "TV" },
+  });
   conn = c;
   c.onLook(onLook);
-  c.onCommand(onCommand);
   c.onRosterChange((r) => {
     if (conn === c) onRoster(r);
   });
@@ -506,18 +509,6 @@ function joinRoom(room: string, key: string | null): void {
   });
   announce();
   setPhase("joining");
-}
-
-/** Scene / palette / viewport commands (`setDevice`, roomMessages.ts). No
- *  screen of this app sends one any more; the handler stays for a device on an
- *  older build that still does. A command's scene applies even though the look names
- *  another; the look only speaks again when it changes (see `lastDocScene`). */
-function onCommand(cmd: DeviceCommand): void {
-  if (cmd.palette) palette = getPalette(cmd.palette);
-  if (cmd.viewport) viewport = cmd.viewport;
-  const next = cmd.scene ? getScene(cmd.scene) : undefined;
-  if (next && presetAllows(next, quality.preset)) switchScene(next);
-  else if (cmd.palette || cmd.viewport) announce();
 }
 
 function onLook(m: LookServerMsg): void {
