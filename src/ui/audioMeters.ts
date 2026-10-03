@@ -134,7 +134,8 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *    digits dim the same way. Beneath that, a Timing strip
  *    (createTimingStrip): Grid (the tracker's own predicted beat, a tick
  *    as tall as the lock on every beatPhase wrap), Metronome (metronome.ts's
- *    own steady tick, taller on the bar) and Heard (every raw detected
+ *    own steady tick, bright on the bar its jack sends, faint on the beats
+ *    between) and Heard (every raw detected
  *    beat) share one time axis, so a detection landing under a grid tick
  *    reads as locked, one between ticks reads as a double, and a tick with
  *    nothing under it reads as a miss. Last, Wave: beatWave/barWave's own
@@ -1457,6 +1458,15 @@ const TIMING_HEIGHT_PX = TIMING_LANE_HEIGHT_PX * TIMING_LANE_COUNT;
 // lighter, not more transparent: a dimmed AUTO_SKY on the dark card was too
 // faint to tell a beat tick from a bar tick.
 const TIMING_METRO_COLOR = "#cfe8ff";
+// The Metronome lane's jack sends Metronome bar (signals.ts's
+// anim.metronomeBar), one pulse per bar, so the bar tick is the lane's own
+// reading at full height and full colour; the beats between are context for
+// lining Heard up against, kept short and faint so they don't read as pulses
+// the jack sends too (a patched setting's "What it receives" graph shows one
+// bump per bar, and a lane of equal ticks under that jack contradicted it).
+const TIMING_METRO_BEAT_COLOR = withAlpha(TIMING_METRO_COLOR, 0.35);
+const TIMING_METRO_BEAT_HEIGHT = 0.45;
+const TIMING_METRO_LANE = 1;
 interface TimingLane {
   label: string;
   color: string;
@@ -1471,8 +1481,9 @@ const TIMING_LANES: readonly TimingLane[] = [
  *  row's own prevBeatPhase logic, moved here) a tick as tall as tempoLock,
  *  else nothing — an unconfident tracker draws a short tick, same
  *  "unconfident reads as unconfident" convention the tempo dot uses. Metro:
- *  metronome.ts's own even tick (metronomeBeat), taller on the bar
- *  (metronomeBar). Heard: `frame.onset`, the exact edge the Hits card's
+ *  metronome.ts's own even tick: full and bright on the bar (metronomeBar,
+ *  what this lane's jack sends), short and faint on the other beats
+ *  (metronomeBeat). Heard: `frame.onset`, the exact edge the Hits card's
  *  Beat lane marks as fired. A detection landing under a grid tick reads as
  *  locked; one between ticks reads as a double; a grid tick with nothing
  *  under it reads as a miss. */
@@ -1482,7 +1493,7 @@ function createTimingStrip(mountJack: MountJack) {
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above, taller on the bar; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
+      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above: faint on each beat, bright on the bar, and only the bar goes out its jack; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX);
@@ -1536,15 +1547,18 @@ function createTimingStrip(mountJack: MountJack) {
     }
 
     // Ticks bottom-up per lane, height proportional to the column's own
-    // value — NaN (or 0) draws nothing.
+    // value — NaN (or 0) draws nothing. A Metronome beat (anything under the
+    // bar's 1) is the faint context tick, not the lane's own reading.
     for (let x = 0; x <= len; x++) {
       const px = x === len ? w - 1 : x;
       for (let li = 0; li < TIMING_LANES.length; li++) {
-        const v = x === len ? ring.live(li) : ring.at(x, li);
-        if (!(v > 0)) continue;
+        const raw = x === len ? ring.live(li) : ring.at(x, li);
+        if (!(raw > 0)) continue;
+        const metroBeat = li === TIMING_METRO_LANE && raw < 1;
+        const v = metroBeat ? TIMING_METRO_BEAT_HEIGHT : raw;
         const top = li * TIMING_LANE_HEIGHT_PX;
         const h = Math.max(1, v * (TIMING_LANE_HEIGHT_PX - 1));
-        ctx.fillStyle = TIMING_LANES[li].color;
+        ctx.fillStyle = metroBeat ? TIMING_METRO_BEAT_COLOR : TIMING_LANES[li].color;
         ctx.fillRect(px, top + (TIMING_LANE_HEIGHT_PX - h), 1, h);
       }
     }

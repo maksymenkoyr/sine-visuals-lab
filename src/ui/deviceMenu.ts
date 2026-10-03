@@ -2480,7 +2480,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // there's nothing (any more) to feed. DeviceMenu.update() calls through
   // this rather than iterating every row, since only the pinned row ever
   // has a graph.
-  let activeOutputTick: ((drives: SceneDrives) => void) | null = null;
+  let activeOutputTick: ((drives: SceneDrives, slots: number) => void) | null = null;
 
   // Every drive row appendSettingRow builds below, reset at the top of
   // renderSceneSettings alongside sceneRowHandles — a scene switch/Look
@@ -2498,7 +2498,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPin(): void;
     refreshPreviewLit(): void;
     rebuildIfPinned(): void;
-    tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void;
+    tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
 
@@ -3190,7 +3190,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sceneId: string,
     spec: SceneSetting,
     patch: DrivePatch,
-  ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives) => void } {
+  ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives, slots: number) => void } {
     const wrap = document.createElement("div");
     setHint(
       wrap,
@@ -3394,54 +3394,59 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    function tick(drives: SceneDrives): void {
-      ringHead = (ringHead + 1) % RING;
+    /** `slots` is how many SPARKLINE_REFRESH_MS columns this call covers
+     *  (more than 1 after a slow frame — see the update loop), so the graph's
+     *  x axis stays real time: the held peak lands in the first, the live
+     *  reading fills the rest, and the scene's own marks (taken once) land
+     *  with the peak. */
+    function tick(drives: SceneDrives, slots: number): void {
       const src = drives.sourceValues(spec.key);
-      for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = heldSource(spec.key, i, src?.[i] ?? 0);
-      const v = heldValue(spec.key, drives.valueOf(spec.key));
-      combined[ringHead] = v;
+      const now = drives.valueOf(spec.key);
+      const v = heldValue(spec.key, now);
       const marks = takeSettingMarks(sceneId, spec.key, "graph");
-      for (const trace of markTraces.values()) trace[ringHead] = NaN;
-      for (const line of marks?.lines ?? []) {
-        let trace = markTraces.get(line.label);
-        if (!trace) {
-          trace = new Float32Array(RING).fill(NaN);
-          markTraces.set(line.label, trace);
-        }
-        trace[ringHead] = line.value;
-      }
       // The generic engine gate's own line (drives.ts's header's threshold
       // paragraph) — undefined for a scene-handled setting (it draws its own
       // line above instead, through settingMarks.ts) or while the gate is
       // off. Drawn the same dotted way as a scene's own mark lines, under
       // one fixed label so it gets its own key entry.
       const gateLine = drives.gateLine(spec.key);
-      if (gateLine !== undefined) {
-        let trace = markTraces.get(GENERIC_GATE_LINE_LABEL);
-        if (!trace) {
-          trace = new Float32Array(RING).fill(NaN);
-          markTraces.set(GENERIC_GATE_LINE_LABEL, trace);
-        }
-        trace[ringHead] = gateLine * (spec.drive?.gain ?? 1);
+      for (const line of marks?.lines ?? []) {
+        if (!markTraces.has(line.label)) markTraces.set(line.label, new Float32Array(RING).fill(NaN));
       }
-      reactions[ringHead] = marks?.reaction ?? 0;
-      if (key.style.display === "none" && (marks || gateLine !== undefined)) {
-        key.style.display = "flex";
-        keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
-        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
-        keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
+      if (gateLine !== undefined && !markTraces.has(GENERIC_GATE_LINE_LABEL)) {
+        markTraces.set(GENERIC_GATE_LINE_LABEL, new Float32Array(RING).fill(NaN));
       }
+      let open = 1;
       if (isGate) {
-        let open = 1;
         let anyCondition = false;
         for (const idx of conditionIdxs) {
           if (patch.sources[idx]!.off) continue; // muted condition — excluded from the AND, same as the engine
           anyCondition = true;
           open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, src?.[idx] ?? 0);
         }
-        gateOpen[ringHead] = !anyCondition || open > 0.5 ? 1 : 0;
+        if (!anyCondition) open = 1;
       }
-      filled = Math.min(RING, filled + 1);
+      for (let s = 0; s < slots; s++) {
+        const first = s === 0;
+        ringHead = (ringHead + 1) % RING;
+        for (let i = 0; i < perSource.length; i++) {
+          const sv = src?.[i] ?? 0;
+          perSource[i]![ringHead] = first ? heldSource(spec.key, i, sv) : sv;
+        }
+        combined[ringHead] = first ? v : now;
+        for (const trace of markTraces.values()) trace[ringHead] = NaN;
+        for (const line of marks?.lines ?? []) markTraces.get(line.label)![ringHead] = line.value;
+        if (gateLine !== undefined) markTraces.get(GENERIC_GATE_LINE_LABEL)![ringHead] = gateLine * (spec.drive?.gain ?? 1);
+        reactions[ringHead] = first ? (marks?.reaction ?? 0) : 0;
+        if (isGate) gateOpen[ringHead] = open > 0.5 ? 1 : 0;
+      }
+      if (key.style.display === "none" && (marks || gateLine !== undefined)) {
+        key.style.display = "flex";
+        keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
+        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
+        keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
+      }
+      filled = Math.min(RING, filled + slots);
       val.textContent = v.toFixed(2);
       draw();
     }
@@ -3456,7 +3461,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function buildPatchPanel(
     sceneId: string,
     spec: SceneSetting,
-  ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives) => void) | null } {
+  ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives, slots: number) => void) | null } {
     const setting = deps.getDriveSetting(sceneId, spec);
     const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
 
@@ -3528,7 +3533,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     panel.appendChild(buildAddChips(sceneId, spec, patch));
 
     let outputCanvas: HTMLCanvasElement | null = null;
-    let tick: ((drives: SceneDrives) => void) | null = null;
+    let tick: ((drives: SceneDrives, slots: number) => void) | null = null;
     if (patch.sources.length) {
       const graph = buildOutputGraph(sceneId, spec, patch);
       panel.appendChild(graph.el);
@@ -3764,8 +3769,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void {
+    /** `slots`: same as the output graph's own tick — the held peak in the
+     *  first column, the live reading in the rest. */
+    function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void {
       const setting = deps.getDriveSetting(sceneId, spec);
+      let now: number;
       let v: number;
       let col: string;
       if (setting === "scene") {
@@ -3787,16 +3795,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
               bestId = id;
             }
           }
-          v = best;
+          now = v = best;
           col = withAlpha(driveSourceColor(bestId), 0.55);
         } else {
           // No sceneSources to approximate from — a faint flat baseline
           // rather than a literal 0 (invisible at the track's very bottom).
-          v = 0.04;
+          now = v = 0.04;
           col = withAlpha(SCENE_VIOLET, 0.35);
         }
       } else {
-        v = heldValue(spec.key, drives.valueOf(spec.key));
+        now = drives.valueOf(spec.key);
+        v = heldValue(spec.key, now);
         col = SCENE_VIOLET;
         if (setting.sources.length) {
           const vals = drives.sourceValues(spec.key);
@@ -3814,13 +3823,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         }
       }
       sparkTop = setting === "scene" ? 1 : Math.max(0.05, driveCeiling(setting, spec.drive?.gain ?? 1));
-      sparkHead = (sparkHead + 1) % SPARK_LEN;
-      sparkVals[sparkHead] = v;
-      sparkCols[sparkHead] = col;
       const marks = takeSettingMarks(sceneId, spec.key, "row");
       if (marks) sparkHasMarks = true;
-      sparkReact[sparkHead] = marks?.reaction ?? 0;
-      sparkFilled = Math.min(SPARK_LEN, sparkFilled + 1);
+      for (let s = 0; s < slots; s++) {
+        sparkHead = (sparkHead + 1) % SPARK_LEN;
+        sparkVals[sparkHead] = s === 0 ? v : now;
+        sparkCols[sparkHead] = col;
+        sparkReact[sparkHead] = s === 0 ? (marks?.reaction ?? 0) : 0;
+      }
+      sparkFilled = Math.min(SPARK_LEN, sparkFilled + slots);
       drawSparkline();
     }
 
@@ -6736,7 +6747,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // graph if it has one (this file's own carried rule: canvas draws, not
   // DOM rebuilds, so this rides its own faster cadence rather than
   // AUTO_UI_REFRESH_MS's 10 Hz).
+  // A fixed clock, not "whenever 1/30 s has passed since the last draw":
+  // a frame that arrives late owes the graphs every column it spanned, so
+  // "last 4 s" is 4 s of real time at any frame rate and evenly timed hits
+  // land evenly spaced, as on the meters' own time-axis strips (the old
+  // reset-to-now dropped the remainder, so a 40 fps panel drew at 20 Hz and
+  // a heavy scene's graph covered 6 s, unevenly). A gap past
+  // SPARKLINE_MAX_SLOTS (folded card, closed panel, hidden tab) restarts the
+  // clock instead of filling seconds with one reading.
   const SPARKLINE_REFRESH_MS = 1000 / 30;
+  const SPARKLINE_MAX_SLOTS = 15;
   let lastSparklineMs = 0;
   // The Picture block's five readouts (its traces redraw every tick, same
   // reasoning as the sparklines above); the readout text itself rides this
@@ -6862,10 +6882,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // yet — canvas draws only, never a DOM rebuild.
       if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) {
         notePeaks(drives);
-        if (nowMs - lastSparklineMs >= SPARKLINE_REFRESH_MS) {
+        let slots = Math.floor((nowMs - lastSparklineMs) / SPARKLINE_REFRESH_MS);
+        if (slots > SPARKLINE_MAX_SLOTS) {
+          slots = 1;
           lastSparklineMs = nowMs;
-          for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
-          activeOutputTick?.(drives);
+        } else {
+          lastSparklineMs += slots * SPARKLINE_REFRESH_MS;
+        }
+        if (slots > 0) {
+          for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim, slots);
+          activeOutputTick?.(drives, slots);
           peakSeen.clear();
         }
       }
