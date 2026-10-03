@@ -3,12 +3,10 @@ import { HARMONIES, paletteStains, shuffledStains, shuffleOrder } from "../../re
 import type { WidgetCtx } from "./registry.ts";
 import {
   applyEdit,
-  arcPath,
   arrowStep,
   formatValue,
   fromUnit,
   hueRailGradient,
-  knobDelta,
   quantize,
   randomValue,
   toUnit,
@@ -19,28 +17,23 @@ import {
 
 /**
  * The Strain Console: every per-strain setting for all the strains at once,
- * as **Lanes** (one row per setting with a lane per strain on a shared scale,
- * plus a Link toggle) or **Knobs** (a setting-by-strain grid), and Stain
- * Synergy under them with a hue wheel. Built from the "Strain Console"
+ * as lanes (one row per setting with a lane per strain on a shared scale,
+ * plus a Link toggle), and Stain Synergy under them with a hue wheel. Built from the "Strain Console"
  * prototype (docs/scenes/physarum2/artifacts/strain-console.html) and mounted
  * by itemBoxes.ts into its own card, in place of the old one-strain-at-a-time
  * rows and their tap/checkbox selection.
  *
- * A lane or knob edits the existing per-item setting (`ctx.get`/`ctx.set`, the
+ * A lane edits the existing per-item setting (`ctx.get`/`ctx.set`, the
  * exact path a slider drag takes), so a Look, a reset and the TV see nothing
  * different. What the console can't draw is a row's jack, Receives patch,
- * sparkline and reset — so releasing a lane or knob mounts that setting's real
- * device-menu row (`ctx.mountRows`) under the grid, and that row is where a
+ * sparkline and reset — so releasing a lane mounts that setting's real
+ * device-menu row (`ctx.mountRows`) under the lanes, and that row is where a
  * source is patched in. The full-size row is also where a setting with no
  * jack (Sensor angle, Trail life) is typed exactly.
  *
- * Gestures (both layouts): drag to set; double-click puts the default back;
- * arrow keys step (Shift = ten times as far). Lanes: Link moves all the
- * strains together. Knobs: drag any way — right or up turns it up, left or
- * down turns it down, a fixed distance sweeps the whole range (consoleMath's
- * KNOB_PX), Shift is a fifth of the speed, Alt moves all the strains together;
- * a faint + and − on the diagonal a drag turns it along light up on the side
- * being turned toward and fade at a limit; a small tick marks the default.
+ * Gestures: drag to set; double-click puts the default back; arrow keys step
+ * (Shift = ten times as far). Link moves all the strains together. (A Knobs
+ * layout — a setting-by-strain grid — sat beside the lanes until 2026-10-03.)
  *
  * Stain Synergy: the stain settings hold what was set; what the dish shows is
  * those pulled toward the nearest colour harmony (physarum2Synergy.ts). While
@@ -49,7 +42,7 @@ import {
  * the setting, so nothing jumps under the pointer. The wheel draws the set
  * hues hollow and the shown hues filled.
  *
- * The mix row (2026-10-02), under the grid: Random rolls the `mix.random`
+ * The mix row (2026-10-02), under the lanes: Random rolls the `mix.random`
  * params for every item over each setting's whole range — Fogleman's random
  * species configs, whose ranges these sliders already span — a preset pill
  * writes the values it names (pressed while they still match), and Back
@@ -60,8 +53,8 @@ import {
  * `stateKey`, so it survives a Look apply or card Reset like pairPads.ts's own.
  *
  * Every word a person reads here is a spec label/description, a value or a
- * preset's own name and hint; the few fixed strings (Lanes, Knobs, Link,
- * Random, Back, Shuffle, New palette) are the layout's own vocabulary.
+ * preset's own name and hint; the few fixed strings (Link, Random, Back,
+ * Shuffle, New palette) are the layout's own vocabulary.
  */
 
 export interface ConsoleOptions {
@@ -73,7 +66,7 @@ export interface ConsoleOptions {
    *  its lane rail shows that item's hue across the range. `baseHues` are in
    *  turns, one per item. */
   hue?: { param: string; baseHues: readonly number[] };
-  /** A plain setting drawn as a row under the grid with a hue wheel beside it
+  /** A plain setting drawn as a row under the lanes with a hue wheel beside it
    *  (Synergy). Needs `hue`. */
   synergy?: { key: string };
   /** The mix row — see this file's header. `random` names the params Random
@@ -112,31 +105,12 @@ export interface StrainConsole {
   dispose(): void;
 }
 
-type Layout = "lanes" | "knobs";
-
-function readLayout(key: string): Layout {
-  try {
-    return localStorage.getItem(key) === "knobs" ? "knobs" : "lanes";
-  } catch {
-    return "lanes";
-  }
-}
-function writeLayout(key: string, v: Layout): void {
-  try {
-    localStorage.setItem(key, v);
-  } catch {
-    // Not fatal — the layout just won't survive a reload.
-  }
-}
-
 /** Back's undo stack per console (`stateKey`) — module-level so it survives
  *  a full rebuild; in memory only. */
 const HISTORY_MAX = 20;
 const histories = new Map<string, Record<string, number[]>[]>();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const KNOB_A0 = (135 * Math.PI) / 180;
-const KNOB_ARC = (270 * Math.PI) / 180;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -160,8 +134,6 @@ interface Cell {
 export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   const { ctx, container, family, labels, opts } = args;
   const count = labels.length;
-  const layoutKey = `vibe.strainConsole.layout.${args.stateKey}`;
-  let layout = readLayout(layoutKey);
   let colours: readonly string[] = args.colours;
   const disposers: (() => void)[] = [];
 
@@ -219,7 +191,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     for (let j = 0; j < count; j++) if (after[j] !== before[j]) ctx.set(ss[j]!, after[j]!);
   }
 
-  // ---------------- the real row under the grid ----------------
+  // ---------------- the real row under the lanes ----------------
 
   const detail = el("div", "vc-sc-detail");
   const detailHead = el("div", "vc-sc-detail-head");
@@ -229,8 +201,8 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   let detailKey = "";
   let detailHandle: { dispose(): void } | undefined;
 
-  /** Mounts item k's real setting row under the grid — where its jack, patch
-   *  and reset live. Called when a gesture on a lane or knob ends. */
+  /** Mounts item k's real setting row under the lanes — where its jack, patch
+   *  and reset live. Called when a gesture on a lane ends. */
   function showDetail(p: string, k: number): void {
     const spec = specs.get(p)![k]!;
     const key = `${p}:${k}`;
@@ -244,33 +216,10 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   }
   disposers.push(() => detailHandle?.dispose());
 
-  // ---------------- layouts ----------------
-
-  const tabs = el("div", "vc-sc-tabs");
-  tabs.setAttribute("role", "tablist");
-  const tabBtns = (["lanes", "knobs"] as const).map((l) => {
-    const b = el("button", "vc-sc-tab", l === "lanes" ? "Lanes" : "Knobs");
-    b.type = "button";
-    b.setAttribute("role", "tab");
-    b.addEventListener("click", () => {
-      layout = l;
-      writeLayout(layoutKey, l);
-      syncLayout();
-    });
-    tabs.appendChild(b);
-    return b;
-  });
+  // ---------------- lanes ----------------
 
   const lanesEl = el("div", "vc-sc-lanes");
-  const knobsEl = el("div", "vc-sc-knobs");
 
-  function syncLayout(): void {
-    tabBtns.forEach((b, i) => b.setAttribute("aria-selected", String((i === 0 ? "lanes" : "knobs") === layout)));
-    lanesEl.hidden = layout !== "lanes";
-    knobsEl.hidden = layout !== "knobs";
-  }
-
-  // ---- Lanes ----
   for (const p of params) {
     const ss = specs.get(p)!;
     const row = el("div", "vc-sc-row");
@@ -370,144 +319,8 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     }
     row.append(head, lanes);
     lanesEl.appendChild(row);
-    cells.set(`lanes:${p}`, laneCells);
+    cells.set(p, laneCells);
   }
-
-  // ---- Knobs ----
-  const knobHeads: HTMLElement[] = [];
-  const lastHeadColour: string[] = [];
-  knobsEl.appendChild(el("div"));
-  for (let k = 0; k < count; k++) {
-    const h = el("div", "vc-sc-knob-head", labels[k]);
-    knobsEl.appendChild(h);
-    knobHeads.push(h);
-  }
-  for (const p of params) {
-    const ss = specs.get(p)!;
-    const lbl = el("div", "vc-sc-knob-label", ss[0]!.label);
-    lbl.title = ss[0]!.description ?? "";
-    knobsEl.appendChild(lbl);
-    const knobCells: Cell[] = [];
-    for (let k = 0; k < count; k++) {
-      const spec = ss[k]!;
-      const kn = el("div", "vc-sc-knob");
-      kn.tabIndex = 0;
-      kn.setAttribute("role", "slider");
-      kn.setAttribute("aria-label", `${spec.label} ${labels[k]}`);
-      kn.setAttribute("aria-valuemin", String(spec.min));
-      kn.setAttribute("aria-valuemax", String(spec.max));
-      const kw = el("div", "vc-sc-kw");
-      const plus = el("span", "vc-sc-sign vc-sc-plus", "+");
-      const minus = el("span", "vc-sc-sign vc-sc-minus", "−");
-      plus.setAttribute("aria-hidden", "true");
-      minus.setAttribute("aria-hidden", "true");
-      const svg = svgEl("svg", { viewBox: "0 0 34 34", "aria-hidden": "true" });
-      const bg = svgEl("path", { fill: "none", stroke: "rgba(255,255,255,.14)", "stroke-width": "3", "stroke-linecap": "round", d: arcPath(17, 17, 13, KNOB_A0, KNOB_A0 + KNOB_ARC) });
-      const fg = svgEl("path", { fill: "none", "stroke-width": "3", "stroke-linecap": "round" });
-      const df = svgEl("line", { stroke: "rgba(255,255,255,.55)", "stroke-width": "1.5", "stroke-linecap": "round" });
-      const nd = svgEl("line", { stroke: "#fff", "stroke-width": "2", "stroke-linecap": "round" });
-      const ad = KNOB_A0 + KNOB_ARC * toUnit(spec.default, spec);
-      df.setAttribute("x1", (17 + 14.5 * Math.cos(ad)).toFixed(2));
-      df.setAttribute("y1", (17 + 14.5 * Math.sin(ad)).toFixed(2));
-      df.setAttribute("x2", (17 + 17 * Math.cos(ad)).toFixed(2));
-      df.setAttribute("y2", (17 + 17 * Math.sin(ad)).toFixed(2));
-      svg.append(bg, fg, df, nd);
-      kw.append(plus, minus, svg);
-      const kv = el("span", "vc-sc-knob-val");
-      kn.append(kw, kv);
-
-      let drag: { x: number; y: number; raw: number } | null = null;
-      let litTimer = 0;
-      const lightSign = (dir: number): void => {
-        plus.classList.toggle("lit", dir > 0);
-        minus.classList.toggle("lit", dir < 0);
-        window.clearTimeout(litTimer);
-        litTimer = window.setTimeout(() => {
-          plus.classList.remove("lit");
-          minus.classList.remove("lit");
-        }, 260);
-      };
-      disposers.push(() => window.clearTimeout(litTimer));
-      const setActive = (on: boolean): void => {
-        kn.classList.toggle("active", on);
-        lbl.classList.toggle("on", on);
-        knobHeads[k]!.classList.toggle("on", on);
-      };
-      kn.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        kn.focus();
-        kn.setPointerCapture(e.pointerId);
-        adoptShown(p, k);
-        drag = { x: e.clientX, y: e.clientY, raw: ctx.get(spec) };
-        setActive(true);
-      });
-      kn.addEventListener("pointermove", (e) => {
-        if (!drag) return;
-        const dx = e.clientX - drag.x;
-        const dy = e.clientY - drag.y;
-        drag.x = e.clientX;
-        drag.y = e.clientY;
-        if (dx - dy) lightSign(dx - dy);
-        // The unsnapped running value, so a slow drag isn't swallowed by the
-        // step; each move applies from the last pointer position, so pressing
-        // or releasing Shift/Alt mid-drag never jumps the value.
-        drag.raw = Math.max(spec.min, Math.min(spec.max, drag.raw + knobDelta(dx, dy, spec, e.shiftKey)));
-        write(p, k, drag.raw, e.altKey, e.shiftKey);
-      });
-      const end = (): void => {
-        if (!drag) return;
-        drag = null;
-        setActive(false);
-        showDetail(p, k);
-      };
-      kn.addEventListener("pointerup", end);
-      kn.addEventListener("pointercancel", end);
-      kn.addEventListener("dblclick", () => {
-        write(p, k, spec.default, false, false);
-        showDetail(p, k);
-      });
-      kn.addEventListener("keydown", (e) => {
-        const step = arrowStep(spec, e.shiftKey);
-        let d = 0;
-        if (e.key === "ArrowUp" || e.key === "ArrowRight") d = step;
-        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") d = -step;
-        else return;
-        e.preventDefault();
-        adoptShown(p, k);
-        write(p, k, ctx.get(spec) + d, e.altKey, false);
-        lightSign(d);
-        showDetail(p, k);
-      });
-      knobsEl.appendChild(kn);
-
-      // As the lanes': repaint only when the value or colour changed.
-      let lastV = NaN;
-      let lastC = "";
-      knobCells.push({
-        spec,
-        paint(value, colour) {
-          if (value === lastV && colour === lastC) return;
-          lastV = value;
-          lastC = colour;
-          const t = toUnit(value, spec);
-          const a = KNOB_A0 + KNOB_ARC * t;
-          fg.setAttribute("d", t > 0.002 ? arcPath(17, 17, 13, KNOB_A0, a) : "");
-          fg.setAttribute("stroke", colour);
-          nd.setAttribute("x1", (17 + 6 * Math.cos(a)).toFixed(2));
-          nd.setAttribute("y1", (17 + 6 * Math.sin(a)).toFixed(2));
-          nd.setAttribute("x2", (17 + 12 * Math.cos(a)).toFixed(2));
-          nd.setAttribute("y2", (17 + 12 * Math.sin(a)).toFixed(2));
-          kv.textContent = formatValue(value, fmtOf(p), spec);
-          kn.setAttribute("aria-valuenow", value.toFixed(3));
-          kn.style.setProperty("--sc", colour);
-          plus.classList.toggle("end", t > 0.998);
-          minus.classList.toggle("end", t < 0.002);
-        },
-      });
-    }
-    cells.set(`knobs:${p}`, knobCells);
-  }
-  knobsEl.style.setProperty("--n", String(count));
 
   // ---------------- the mix row: Random, Back, presets ----------------
 
@@ -700,27 +513,19 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
 
   // ---------------- assemble ----------------
 
-  container.append(tabs, lanesEl, knobsEl);
+  container.appendChild(lanesEl);
   if (opts.mix || opts.colourActions) container.appendChild(mixEl);
   container.appendChild(detail);
   if (synergySpec) container.appendChild(synergyEl);
-  syncLayout();
 
   return {
     tick(next) {
       colours = next;
       const probe = ctx.probe();
-      const active = layout === "lanes" ? "lanes" : "knobs";
       for (const p of params) {
         const values = shownValues(p, probe);
-        const list = cells.get(`${active}:${p}`)!;
+        const list = cells.get(p)!;
         for (let k = 0; k < count; k++) list[k]!.paint(values[k]!, colours[k] ?? "#fff");
-      }
-      if (layout === "knobs") {
-        knobHeads.forEach((h, k) => {
-          const c = colours[k] ?? "#fff";
-          if (lastHeadColour[k] !== c) h.style.color = lastHeadColour[k] = c;
-        });
       }
       wheelUpdate?.(probe);
       syncPresets();

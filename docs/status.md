@@ -29,8 +29,8 @@ regenerate it at session close.
 
 ## Open questions
 
-- Strain Console: Lanes or Knobs? Which of Sensor angle, Trail life and
-  Share become real per-strain settings?
+- Strain Console: which of Sensor angle, Trail life and Share become real
+  per-strain settings? (Lanes only since 2026-10-03.)
 - Pairs pads: add a one-line legend ("+ steers toward that trail, − steers
   away" / "+ adds to that trail, − erases part of it")?
 - Physarum 2's Gardens preset washes toward white; "Dose" is still easy to

@@ -1017,7 +1017,7 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-src-status[data-warn="red"] { color: ${HOT_RED}; }
 
 /* ---- src/ui/widgets/itemBoxes.ts + strainConsole.ts + pairPads.ts ----
- * A scene-declared item widget's own boxes, its Strain Console (Lanes/Knobs)
+ * A scene-declared item widget's own boxes, its Strain Console (lanes)
  * and (for a pairwise family) the Pairs pads — styled with this file's own tokens/fonts rather than a
  * widget-local stylesheet, same convention as every other panel piece.
  * Always a two-column grid, regardless of item count or panel width, so a
@@ -1067,23 +1067,11 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-pop-actions { display: flex; gap: 8px; }
 
 /* ---- src/ui/widgets/strainConsole.ts ----
- * The Strain Console card: a Lanes/Knobs switch, one row per setting with a
- * lane per strain (or a setting-by-strain grid of knobs), the real setting row
- * mounted under the grid for the last lane or knob touched, and Stain Synergy
- * with its hue wheel. --sc is a knob's strain colour, set inline per tick. */
-.vc-sc-tabs {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 8px; margin-bottom: 10px;
-}
-.vc-sc-tab {
-  border: 0; background: none; border-radius: 6px; padding: 6px 0; cursor: pointer;
-  font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.64);
-}
-.vc-sc-tab[aria-selected="true"] {
-  background: rgba(255, 255, 255, 0.08); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
-}
-.vc-sc-tab:focus-visible, .vc-sc-track:focus-visible, .vc-sc-knob:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
-.vc-sc-lanes[hidden], .vc-sc-knobs[hidden], .vc-sc-detail[hidden] { display: none; }
+ * The Strain Console card: one row per setting with a lane per strain and its
+ * Link chip, the real setting row mounted under the lanes for the
+ * last lane touched, and Stain Synergy with its hue wheel. */
+.vc-sc-track:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+.vc-sc-detail[hidden] { display: none; }
 .vc-sc-lanes { display: grid; gap: 6px; }
 .vc-sc-row {
   display: grid; gap: 6px; padding: 8px 10px; margin-inline: -10px; border-radius: 6px;
@@ -1115,34 +1103,6 @@ body.vc-keys-reveal [data-keycap]::after {
 /* A hue lane's rail is the strain's own hue across the Stain range. */
 .vc-sc-rail[style*="gradient"] { height: 4px; top: 6px; opacity: 0.7; }
 
-.vc-sc-knobs { display: grid; grid-template-columns: 92px repeat(var(--n, 4), minmax(0, 1fr)); row-gap: 6px; column-gap: 4px; align-items: center; }
-.vc-sc-knob-head { font: 400 11px/1 ${FONT_MONO}; text-align: center; transition: text-shadow 0.12s ease; }
-.vc-sc-knob-head.on { text-shadow: 0 0 8px currentColor; }
-.vc-sc-knob-label { font: 400 12.5px/1.15 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.64); }
-.vc-sc-knob-label.on { color: ${SCENE_VIOLET}; }
-.vc-sc-knob { display: grid; justify-items: center; gap: 1px; cursor: move; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
-.vc-sc-knob:hover, .vc-sc-knob:focus-visible { background: rgba(255, 255, 255, 0.05); }
-.vc-sc-knob.active { background: rgba(195, 165, 249, 0.1); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4); }
-.vc-sc-knob.active .vc-sc-knob-val { color: #fff; }
-.vc-sc-knob svg { width: 34px; height: 34px; display: block; }
-.vc-sc-knob-val { font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.64); font-variant-numeric: tabular-nums; }
-/* + up-right and − down-left of a knob: the diagonal a drag turns it along.
- * Faint at rest, brighter on hover, lit in the strain's colour and nudged
- * outward on the side being turned toward, nearly gone at the end it can't
- * go past. */
-.vc-sc-kw { position: relative; width: 34px; height: 34px; }
-.vc-sc-sign {
-  position: absolute; font: 600 11px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.4); opacity: 0.55; pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease;
-}
-.vc-sc-plus { top: -3px; right: -9px; }
-.vc-sc-minus { bottom: -1px; left: -9px; }
-.vc-sc-knob:hover .vc-sc-sign, .vc-sc-knob:focus-visible .vc-sc-sign, .vc-sc-knob.active .vc-sc-sign { opacity: 0.9; color: rgba(255, 255, 255, 0.64); }
-.vc-sc-sign.lit { opacity: 1 !important; color: var(--sc, #fff) !important; text-shadow: 0 0 4px var(--sc, #fff), 0 0 10px var(--sc, #fff); }
-.vc-sc-plus.lit { transform: translate(3px, -3px) scale(1.7); }
-.vc-sc-minus.lit { transform: translate(-3px, 3px) scale(1.7); }
-.vc-sc-sign.end { opacity: 0.12 !important; }
-
 .vc-sc-detail { display: grid; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .vc-sc-detail-head { font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.08em; }
 
@@ -1163,7 +1123,7 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-sc-syn > .vc-mix-row { grid-column: 1 / -1; margin-bottom: 0; }
 .vc-sc-harmony { font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); min-height: 10px; text-align: center; }
 @media (prefers-reduced-motion: reduce) {
-  .vc-sc-row, .vc-sc-sign, .vc-sc-knob-head { transition: none; }
+  .vc-sc-row { transition: none; }
 }
 
 /* The pipette's tap-point flash — position/left/top set inline per tap

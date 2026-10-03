@@ -21,8 +21,8 @@ their own uniforms). Registered as `physarum2Scene` via `registerScene` in
 `src/render/scenes/index.ts` (first line of registration, newest first within
 its gallery group), and absent from that file's `draftIds`, so featured.
 
-The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (Lanes,
-Knobs, the mix row with Random/Back/the motion presets, and the Synergy row
+The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (the
+lanes, the mix row with Random/Back/the motion presets, and the Synergy row
 with Shuffle/New palette — its header is the source for the gestures),
 `src/ui/widgets/consoleMath.ts` (the pure arithmetic,
 `tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own "Per
@@ -874,6 +874,11 @@ configs are used.
   review caught the corner pictures' own `<svg>` breaking `drawPadChrome`'s
   `querySelector("svg")` on every redraw after the first (the pads never
   mounted) and the pictures stacking over the marker.
+- **2026-10-03: Knobs removed; the console is lanes only.** User: "remove
+  knobs we keep just lanes." The Lanes/Knobs switch, the knob grid, its
+  remembered layout (`vibe.strainConsole.layout.*`) and the knob-only maths
+  (`knobDelta`, `arcPath`) are gone. They also asked for a Random, then
+  withdrew it: the mix row's Random already rolls the strains.
 
 ## Tuning notes
 
@@ -912,8 +917,8 @@ applies there too. Tuned so far only against the synthetic feed at
   music the split may want another default or `SWITCH_PRESSURE`, and a
   strain with a very sparse network can sit at the `SWITCH_FLOOR` share by
   design - worth a listen.
-- The console has no Auto (A) chip per lane or knob; those live in the
-  row it mounts under the grid. Whether Sensor angle and Trail life want a
+- The console has no Auto (A) chip per lane; those live in the
+  row it mounts under the lanes. Whether Sensor angle and Trail life want a
   jack of their own is open.
 - The Synergy anchor is inferred per device from which stored stain changed
   last, so a TV that joins mid-session starts with no anchor (free
@@ -1071,11 +1076,10 @@ applies there too. Tuned so far only against the synthetic feed at
   - `headcountcheck.mjs` — Switching's headcount read off the population
     bar with the panel open (moves at the default, frozen at 0), plus
     Trail life / Sensor angle overrides and any shader error.
-  - `consoleshot.mjs` — screenshots the Strain Console (Lanes, `--knobs`)
-    or the Strains card above it (`--scene-card`).
+  - `consoleshot.mjs` — screenshots the Strain Console's lanes or the
+    Strains card above it (`--scene-card`).
   - `consoledrive.mjs` — the console under real mouse drags: a lane, Link,
-    double-click reset, a knob (right+up = more), an Alt knob moving all
-    four, then Synergy pulled up through its real slider with two stains
+    double-click reset, then Synergy pulled up through its real slider with two stains
     set by hand.
   - `previewcheck.mjs` — node harness for the pure-culture collapse numbers
     in Measurements.

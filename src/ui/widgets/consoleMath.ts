@@ -1,7 +1,7 @@
 /**
- * The pure arithmetic behind the Strain Console's lanes and knobs
+ * The pure arithmetic behind the Strain Console's lanes
  * (strainConsole.ts) — kept DOM-free so tests/consoleMath.test.ts can pin it.
- * A lane or knob edits one per-item setting (a `SceneSetting.item`-tagged
+ * A lane edits one per-item setting (a `SceneSetting.item`-tagged
  * spec) over that spec's own min..max; nothing here knows what the setting
  * means.
  */
@@ -42,17 +42,6 @@ export function fromUnit(t: number, spec: RangeSpec): number {
   return spec.min + Math.max(0, Math.min(1, t)) * (spec.max - spec.min);
 }
 
-/** Pixels of pointer travel that sweep a knob's whole range. */
-export const KNOB_PX = 140;
-
-/** A knob drag's change to the value: right and up both turn it up (dx grows
- *  right, dy grows down in the DOM, so up is -dy), left and down both take
- *  away; KNOB_PX of travel sweeps the whole range and Shift is a fifth of
- *  that speed. */
-export function knobDelta(dx: number, dy: number, spec: RangeSpec, fine: boolean): number {
-  return ((dx - dy) / KNOB_PX) * (spec.max - spec.min) * (fine ? 0.2 : 1);
-}
-
 /** One arrow-key press: 1% of the range (10% with Shift), never less than the
  *  spec's own step — a smaller move would snap straight back to where it was. */
 export function arrowStep(spec: RangeSpec, shift: boolean): number {
@@ -61,14 +50,14 @@ export function arrowStep(spec: RangeSpec, shift: boolean): number {
 
 /** The new values when strain `k` is set to `v`. With `linked` every strain
  *  moves by the same amount instead (each clamped to its own range), the way
- *  Link on a lane or Alt on a knob works. */
+ *  Link on a lane works. */
 export function applyEdit(values: readonly number[], k: number, v: number, spec: RangeSpec, linked: boolean, fine = false): number[] {
   if (!linked) return values.map((x, i) => (i === k ? quantize(v, spec, fine) : x));
   const d = quantize(v, spec, fine) - values[k]!;
   return values.map((x) => quantize(x + d, spec, fine));
 }
 
-/** A lane/knob's readout for `v`. */
+/** A lane's readout for `v`. */
 export function formatValue(v: number, fmt: ValueFormat, spec: RangeSpec): string {
   if (fmt === "degrees") return `${Math.round(v)}°`;
   if (fmt === "turns") {
@@ -95,15 +84,6 @@ export function hueRailGradient(baseHue: number, saturation = 90, lightness = 58
  *  way a conic-gradient ring is painted) for a hue in turns. */
 export function wheelPoint(hue: number, r: number): [number, number] {
   return [Math.sin(hue * 2 * Math.PI) * r, -Math.cos(hue * 2 * Math.PI) * r];
-}
-
-/** The SVG arc path a knob's value track draws: `r` from `a0` to `a1` radians
- *  around the centre (cx, cy). */
-export function arcPath(cx: number, cy: number, r: number, a0: number, a1: number): string {
-  const p = (a: number): [number, number] => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-  const [x0, y0] = p(a0);
-  const [x1, y1] = p(a1);
-  return `M${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)},${y1.toFixed(2)}`;
 }
 
 /** A uniform roll over the spec's whole range, snapped to its step — the

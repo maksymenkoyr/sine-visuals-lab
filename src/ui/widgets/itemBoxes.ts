@@ -13,7 +13,7 @@ import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
  * culture + POP/TERR/VIG readouts), the population bar with Rebalance and the
  * Pipette, and — mounted as their own cards right after the Scene card — the
  * Strain Console (`options.console`, src/ui/widgets/strainConsole.ts: every
- * per-item setting for all the items at once, as Lanes or Knobs) and the
+ * per-item setting for all the items at once, as lanes) and the
  * Pairs pads (`options.relations`, src/ui/widgets/pairPads.ts). Built for
  * Physarum 2's four strains but generic over any scene's item family — a
  * future scene reuses this by declaring its own `Scene.panel` entry with

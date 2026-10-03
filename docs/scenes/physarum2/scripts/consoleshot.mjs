@@ -1,6 +1,6 @@
-// Screenshots the Strain Console card (Lanes by default, --knobs for Knobs) with the
+// Screenshots the Strain Console card with the
 // panel open, or --scene-card for the Strains card above it (boxes, headcount, Switching).
-//   node consoleshot.mjs <out-prefix> [--port 5290] [--knobs] [--scene-card] [--width 1440] [--height 1300]
+//   node consoleshot.mjs <out-prefix> [--port 5290] [--scene-card] [--width 1440] [--height 1300]
 const { chromium } = await import(new URL("../../../../node_modules/playwright/index.mjs", import.meta.url));
 const args = process.argv.slice(2);
 const out = args.find((a) => !a.startsWith("--"));
@@ -27,14 +27,9 @@ await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=120&quality=low#
 await page.waitForTimeout(1500);
 await page.evaluate(() => document.getElementById("menuBtn")?.click());
 await page.waitForTimeout(1200);
-if (args.includes("--knobs")) {
-  await page.evaluate(() => [...document.querySelectorAll(".vc-sc-tab")].find((b) => b.textContent === "Knobs")?.click());
-  await page.waitForTimeout(500);
-}
 const info = await page.evaluate(() => ({
   cards: [...document.querySelectorAll(".vc-widget-card")].map((c) => c.querySelector(".vc-card-head, .vc-card-title")?.textContent?.trim().slice(0, 30)),
   lanes: document.querySelectorAll(".vc-sc-lane").length,
-  knobs: document.querySelectorAll(".vc-sc-knob").length,
 }));
 console.log(JSON.stringify(info));
 const sel = args.includes("--scene-card") ? ".vc-item-boxes" : ".vc-sc-tabs";

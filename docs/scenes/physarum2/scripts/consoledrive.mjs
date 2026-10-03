@@ -1,6 +1,5 @@
 // Real-mouse drive of the Strain Console (down / wait / up, never a scripted click): a lane
-// drag, Link, double-click reset, a knob drag (right+up = more), an Alt knob drag moving all
-// four, then two stains set by hand and Synergy dragged up through its real slider (the
+// drag, Link, double-click reset, then two stains set by hand and Synergy dragged up through its real slider (the
 // hand-set stain stays where it was set, the others move to the nearest harmony).
 //   node consoledrive.mjs [--port 5290] [--out <prefix>]
 const { chromium } = await import(new URL("../../../../node_modules/playwright/index.mjs", import.meta.url));
@@ -21,7 +20,7 @@ await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=120&quality=low#
 await page.waitForTimeout(1500);
 await page.evaluate(() => document.getElementById("menuBtn")?.click());
 await page.waitForTimeout(1000);
-await page.evaluate(() => document.querySelector(".vc-sc-tabs")?.scrollIntoView({ block: "start" }));
+await page.evaluate(() => document.querySelector(".vc-sc-lanes")?.scrollIntoView({ block: "start" }));
 await page.waitForTimeout(400);
 
 const vis = (l) => [...document.querySelectorAll(`[aria-label="${l}"]`)].find((e) => e.getBoundingClientRect().width > 0);
@@ -72,25 +71,7 @@ await page.mouse.dblclick(b.x + b.w * 0.5, b.y + b.h / 2);
 await page.waitForTimeout(300);
 console.log("Nutrient PP-B2 after dblclick (default 0.6):", await val("Nutrient PP-B2"));
 
-// 4. Knobs: Trail life PP-A1 drag right 70px → +0.5; Alt drag Trail life PP-C3 down-left → all.
-await page.evaluate(() => [...document.querySelectorAll(".vc-sc-tab")].find((x) => x.textContent === "Knobs")?.click());
-await page.waitForTimeout(400);
-let kb = await box("Trail life PP-A1");
-console.log("knob box", JSON.stringify(kb), "life before", await val("Trail life PP-A1"));
-await realDrag({ x: kb.x + kb.w / 2, y: kb.y + kb.h / 2 }, { x: kb.x + kb.w / 2 + 35, y: kb.y + kb.h / 2 - 35 });
-console.log("Trail life PP-A1 after (right+up 70px, expect 1.00):", await val("Trail life PP-A1"));
-await page.screenshot({ path: `${out}-knobs.png` });
-// Alt-drag: hold Alt via keyboard.
-kb = await box("Trail life PP-C3");
-await page.keyboard.down("Alt");
-await realDrag({ x: kb.x + kb.w / 2, y: kb.y + kb.h / 2 }, { x: kb.x + kb.w / 2 - 28, y: kb.y + kb.h / 2 });
-await page.keyboard.up("Alt");
-const lifeAll = await Promise.all(["PP-A1", "PP-B2", "PP-C3", "PP-D4"].map((c) => val(`Trail life ${c}`)));
-console.log("Alt-drag left 28px on C3 (all move -0.2):", lifeAll.join());
-
-// 5. Synergy on: set two stains by hand, then pull Synergy up through its real slider.
-await page.evaluate(() => [...document.querySelectorAll(".vc-sc-tab")].find((x) => x.textContent === "Lanes")?.click());
-await page.waitForTimeout(500);
+// 4. Synergy on: set two stains by hand, then pull Synergy up through its real slider.
 let sb = await box("Stain PP-A1");
 await realDrag({ x: sb.x + sb.w * 0.5, y: sb.y + sb.h / 2 }, { x: sb.x + sb.w * 0.72, y: sb.y + sb.h / 2 });
 sb = await box("Stain PP-B2");
@@ -108,7 +89,7 @@ await page.waitForTimeout(1200);
 const stainShown = await Promise.all(["PP-A1", "PP-B2", "PP-C3", "PP-D4"].map((c) => val(`Stain ${c}`)));
 console.log("stain aria-valuenow with synergy=1 (shown):", stainShown.join());
 console.log("harmony text:", await page.evaluate(() => document.querySelector(".vc-sc-harmony")?.textContent));
-await page.evaluate(() => document.querySelector(".vc-sc-tabs")?.scrollIntoView({ block: "start" }));
+await page.evaluate(() => document.querySelector(".vc-sc-lanes")?.scrollIntoView({ block: "start" }));
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${out}-synergy.png` });
 console.log("errors", JSON.stringify(errors.filter((e) => !/8787|ERR_CONNECTION_REFUSED|@fs.*40[13]/.test(e))));
