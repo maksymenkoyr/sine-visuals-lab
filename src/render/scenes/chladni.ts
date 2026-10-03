@@ -461,13 +461,13 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "beatFlash",
-    label: "Beat flash",
-    description: "Brightness punch on each beat",
+    label: "Flash",
+    description: "Brightness punch on each beat — the sand and the plate both flare",
     group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.3,
+    default: 0.5,
     // Same reasoning as caustics' flash: punches read on punchy, uncluttered material.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
     // uBeatPulse directly, at both sites it's used (BG_FRAG's plate flash
@@ -659,7 +659,10 @@ void main() {
   // The rim only exists on the square plate; the full-frame plate has no edge to show.
   float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
   vec3 col = (plate + glow + rim * 0.10) * inside;
-  col *= 1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.3;
+  // The plate is near black, so a gain alone barely shows: the flash also
+  // lifts it toward the palette's middle.
+  float flash = uBeatFlash * beatFlashDrive(uBeatPulse);
+  col = col * (1.0 + flash) + palRamp(0.5) * 0.12 * flash * inside;
   outColor = vec4(col, 1.0);
 }
 `;
@@ -724,7 +727,7 @@ void main() {
   vec3 col = palRamp(0.55 + 0.45 * vAmp);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
   col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
-  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.8);
+  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 2.0);
   vCol = col * bright;
   // The halo's tint and its area normalisation (see POINT_FRAG), without the
   // falloff across the sprite: the fragment only multiplies that in.
