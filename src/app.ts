@@ -1057,6 +1057,19 @@ function chooseInputDevice(deviceId: string): void {
   } else void swapAudioSource("mic", true);
 }
 
+/** Releases this page's own capture and leaves it released: the Stop button,
+ *  and a tap on the source that's already live in either picker (the Input
+ *  card's Source row, the gallery masthead) — so a stuck or wrong input can
+ *  be dropped and picked again. The deliberate form of what onCaptureEnded
+ *  handles when the browser ends a capture on its own; stoppedByUser keeps
+ *  the implicit starts from reopening it until a tap asks. The room
+ *  connection is untouched. */
+function stopOwnCapture(): void {
+  if (!capture) return;
+  stoppedByUser = true;
+  onCaptureEnded(capture, false);
+}
+
 /** Maps a capture's kind to the panel's AudioSource vocabulary. A chosen
  *  input device (a mixer's USB interface) is still the "mic" source — only
  *  which device it opens differs. */
@@ -1539,6 +1552,7 @@ function wireDeviceMenu(): void {
     // deliberately bails with no live capture to swap out of. Stays
     // synchronous up to ensureAudio so a display choice keeps the tap's
     // transient activation.
+    onStopAudio: () => stopOwnCapture(),
     onAudioSourceChange: (choice) => {
       if (!bandAnalyser && ownInput() && !syntheticFeed) {
         setAudioSourceChoice(choice);
@@ -2619,11 +2633,7 @@ async function boot(): Promise<void> {
   // browser ends a capture on its own: release the mic/share, and put the
   // start prompt back so listening resumes only on a tap. The room
   // connection is untouched, same as there.
-  stopBtn.addEventListener("click", () => {
-    if (!capture) return;
-    stoppedByUser = true;
-    onCaptureEnded(capture, false);
-  });
+  stopBtn.addEventListener("click", stopOwnCapture);
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
   audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));
@@ -2658,6 +2668,12 @@ async function boot(): Promise<void> {
       sourceState: () => currentSourceState(),
       micLabel: () => inputChoiceLabel(),
       onSourceChoice: (next) => {
+        // The live source tapped again disconnects it (stopOwnCapture).
+        const state = currentSourceState();
+        if (state.live && state.choice === next) {
+          stopOwnCapture();
+          return Promise.resolve();
+        }
         if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
         // Nothing live yet: remember the choice AND start it, inside this same
         // click — a picker that only stored a pref read as buttons that do
