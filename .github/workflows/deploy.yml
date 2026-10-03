@@ -114,6 +114,21 @@ jobs:
           # carries no version.
           SVL_VERSION: ${{ steps.version.outputs.version }}
 
+      # The version picture (tools/versionMapLib.mjs): one static page of how
+      # the build numbers have moved, drawn from the release and build tags and
+      # served at /versions on Insiders, so it is as current as the last merge
+      # and costs nothing to run. This build's own `-beta` tag does not exist
+      # until the tag-insider job below, so the build is passed in. Push only,
+      # and never allowed to block a deploy: a failure here costs this deploy
+      # its /versions page and nothing else.
+      - name: Version picture
+        if: github.event_name == 'push'
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: node tools/version-map.mjs --out dist/versions.html --current-version "$VERSION" --current-commit "$COMMIT"
+
       # Every scene's own version (tools/sceneVersionLib.mjs), straight from
       # the build's own version.json rather than a second git read — `node
       # -e`, not `jq`, so this needs nothing beyond the `actions/setup-node`

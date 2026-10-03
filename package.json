@@ -17,6 +17,7 @@
     "deploy": "node -e \"console.error('Stable ships only via npm run release (merge main into production; .github/workflows/release.yml). A local build would carry the dev channel and any src/render/scenes/private checkout.'); process.exit(1)\"",
     "release": "node tools/release-pr.mjs",
     "release-notes": "node tools/release-notes.mjs",
+    "versions": "node tools/version-map.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:tempo": "vitest run tests/tempoEval.test.ts",
