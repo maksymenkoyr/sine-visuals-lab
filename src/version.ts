@@ -35,6 +35,12 @@ import { SOURCE_URL } from "./brand.ts";
  * set by hand in package.json — tools/appVersionLib.mjs's header owns the
  * rules, and CI passes the result in as `SVL_VERSION`.
  *
+ * A picture of how those numbers have actually moved (builds, releases, the
+ * commit each release was cut from) is generated from the release and build
+ * tags, never written by hand: deploy.yml publishes it at /versions on
+ * Insiders on every deploy, and `npm run versions` writes the same page
+ * locally. tools/versionMapLib.mjs's header says what it draws.
+ *
  * `versionLabel()` below is what actually renders per channel — see its own
  * comment for the exact text each channel gets — and `versionHref()` /
  * `versionHint()` are its link target and hover/tap hint.
