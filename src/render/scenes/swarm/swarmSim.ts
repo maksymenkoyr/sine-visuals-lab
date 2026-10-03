@@ -5,13 +5,19 @@
 //
 // Every particle has a position, a velocity and a phase. Three couplings:
 //
-// 1. All pairs repel with a 1/r force, which sets the swarm's outer rim.
+// 1. All pairs repel with a 1/r force. With the trap (below) this sets the
+//    rim's radius by Gauss's law -- the repulsion from everything inside a
+//    ring balances the trap at the same radius however packed the core is --
+//    so the core can breathe while the rim holds still.
 // 2. Close pairs (inside `mind`) attract, but only as much as both particles
 //    are *locked*: a particle's lock is a slow average of how closely its
-//    phase follows the swarm's mean phase, so drifters (whose own natural
-//    rate differs, `omegaSpread`) average out near zero and never pull in,
-//    while the in-sync particles pull into a dense core. The attraction
-//    strength `attract` breathes with the caller's `breathWave`.
+//    phase follows its own neighbourhood's mean phase (over the same reach),
+//    so drifters (whose natural rate differs, `omegaSpread`) average out near
+//    zero and never pull in, while in-step particles pull together -- first
+//    as local clumps, then as one dense core. A core packed tighter than its
+//    share of the trap expels the drifters into a thin annulus: the dark gap
+//    and the rim. The attraction strength `attract` breathes with the
+//    caller's `breathWave`.
 // 3. Phases pull toward neighbours (a Kuramoto coupling weighted by
 //    closeness, `phaseLength`) with a little noise (`noise`, the "heat").
 //
@@ -68,14 +74,14 @@ export interface SwarmParams {
 export const DEFAULT_SWARM_PARAMS: SwarmParams = {
   repulsion: 27556,
   repulsionFloor: 6,
-  attract: 3000,
-  breath: 0.8,
+  attract: 600,
+  breath: 0.5,
   mind: 150,
   sharp: 2,
   lockTau: 0.5,
-  phaseCoupling: 3,
+  phaseCoupling: 8,
   phaseLength: 120,
-  omegaSpread: 0.4,
+  omegaSpread: 0.8,
   noise: 0.3,
   trap: 1,
   drag: 0.3,
@@ -99,6 +105,13 @@ export interface Swarm {
   fy: Float64Array;
   dth: Float64Array;
   lk: Float64Array;
+  /** Scratch: Σ q·sin θj and Σ q·cos θj over the neighbours inside the
+   *  attraction's reach (q its own falloff) -- the local mean phase a lock
+   *  measures against -- and each phase's own sin/cos for the step. */
+  locSin: Float64Array;
+  locCos: Float64Array;
+  sinTh: Float64Array;
+  cosTh: Float64Array;
   rng: () => number;
 }
 
@@ -155,6 +168,10 @@ export function createSwarm(count: number, seed: number, spawnHalfW = DEFAULT_SP
     fy: new Float64Array(count),
     dth: new Float64Array(count),
     lk: new Float64Array(count),
+    locSin: new Float64Array(count),
+    locCos: new Float64Array(count),
+    sinTh: new Float64Array(count),
+    cosTh: new Float64Array(count),
     rng,
   };
   scatterPositions(s, spawnHalfW);
@@ -177,31 +194,40 @@ function meanPhase(s: Swarm): number {
   return Math.atan2(sn, cs);
 }
 
-/** The collapse ramp: the trap strength factor, eased (smoothstep) from 0.04
- *  to 1 over `seconds`, `tSinceStart` seconds after the collapse began. */
+/** The collapse ramp: the trap strength factor, eased in (cubic) from 0.04
+ *  to 1 over `seconds`, `tSinceStart` seconds after the collapse began. Eased
+ *  in rather than smoothstepped so the first seconds belong to the local
+ *  clumps, not the trap: a strong early trap shrank the whole net as one
+ *  box. */
 export function collapseTrap(tSinceStart: number, seconds: number): number {
   const u = seconds <= 0 ? 1 : Math.max(0, Math.min(1, tSinceStart / seconds));
-  const e = u * u * (3 - 2 * u);
-  return 0.04 + 0.96 * e;
+  return 0.04 + 0.96 * u * u * u;
 }
 
 /** One fixed step of dt seconds. `breathWave` is 0..1 (a beat wave: 1 on the
  *  beat), `trapScale` the collapse ramp (collapseTrap). */
 export function stepSwarm(s: Swarm, p: SwarmParams, dt: number, breathWave = 0.5, trapScale = 1): void {
   const n = s.count;
-  const { x, y, vx, vy, theta, lock, fx, fy, dth, lk } = s;
+  const { x, y, vx, vy, theta, lock, fx, fy, dth, lk, locSin, locCos, sinTh, cosTh } = s;
 
-  // Lock: a slow average of how close each phase is to the swarm's mean.
-  const psi = meanPhase(s);
-  s.psi = psi;
+  // Lock: a slow average of how closely each phase sits to its own
+  // neighbourhood's mean phase (updated after the pair loop below, so this step attracts
+  // on last step's locks). Local, not the swarm's mean: with random starting
+  // phases the global mean is ~0 and nothing would pull until the whole swarm
+  // had synced; locally, in-step clumps form first and merge -- the way the
+  // reference's scattered net gathers.
+  s.psi = meanPhase(s);
   const lockRate = Math.min(1, dt / p.lockTau);
   for (let i = 0; i < n; i++) {
-    lock[i] += (Math.cos(theta[i] - psi) - lock[i]) * lockRate;
     const l = lock[i] > 0 ? lock[i] : 0;
     lk[i] = p.sharp === 2 ? l * l : Math.pow(l, p.sharp);
     fx[i] = 0;
     fy[i] = 0;
     dth[i] = 0;
+    locSin[i] = 0;
+    locCos[i] = 0;
+    sinTh[i] = Math.sin(theta[i]);
+    cosTh[i] = Math.cos(theta[i]);
   }
 
   const a = p.attract * (1 + p.breath * (2 * breathWave - 1));
@@ -228,14 +254,24 @@ export function stepSwarm(s: Swarm, p: SwarmParams, dt: number, breathWave = 0.5
     let fxi = fx[i];
     let fyi = fy[i];
     let di = dth[i];
+    let si = locSin[i];
+    let ci = locCos[i];
+    const sThi = sinTh[i];
+    const cThi = cosTh[i];
     for (let j = i + 1; j < n; j++) {
       const ddx = x[j] - xi;
       const ddy = y[j] - yi;
       const r = Math.max(Math.sqrt(ddx * ddx + ddy * ddy), 1e-6);
       let f = -p.repulsion / (r > p.repulsionFloor ? r : p.repulsionFloor);
+      const dTh = theta[j] - thi;
       if (r < mind) {
-        const q = r * r * invMind2;
-        f += a * lki * lk[j] * (1 - q);
+        const q = 1 - r * r * invMind2;
+        f += a * lki * lk[j] * q;
+        // The local mean phase, over the neighbours this pair force reaches.
+        si += q * sinTh[j];
+        ci += q * cosTh[j];
+        locSin[j] += q * sThi;
+        locCos[j] += q * cThi;
       }
       const fr = (f * invN) / r;
       const gx = fr * ddx;
@@ -245,13 +281,21 @@ export function stepSwarm(s: Swarm, p: SwarmParams, dt: number, breathWave = 0.5
       fx[j] -= gx;
       fy[j] -= gy;
       const w = Math.exp(-r * invPl);
-      const t = k * w * Math.sin(theta[j] - thi);
+      const t = k * w * Math.sin(dTh);
       di += t;
       dth[j] -= t;
     }
     fx[i] = fxi;
     fy[i] = fyi;
     dth[i] = di;
+    locSin[i] = si;
+    locCos[i] = ci;
+  }
+  for (let i = 0; i < n; i++) {
+    // cos(θi − local mean phase) = (cos θi·C + sin θi·S) / |(S, C)|.
+    const m = Math.hypot(locSin[i], locCos[i]);
+    const target = m > 1e-9 ? (cosTh[i] * locCos[i] + sinTh[i] * locSin[i]) / m : 0;
+    lock[i] += (target - lock[i]) * lockRate;
   }
 
   const trap = p.trap * trapScale;
@@ -269,13 +313,23 @@ export function stepSwarm(s: Swarm, p: SwarmParams, dt: number, breathWave = 0.5
   }
 }
 
-/** A hit: every phase gets a Gaussian kick of `amount` * pi (amount 0..1).
- *  Locks are left alone -- they decay through their own average, which is
- *  what loosens the core and lets it re-tighten over about a second. */
+/** The most of the swarm one full-strength hit flings out of step. */
+export const SCATTER_MAX_SHARE = 0.1;
+
+/** A hit: a random share of the particles (`amount` * SCATTER_MAX_SHARE,
+ *  amount 0..1) each get a phase kick of half to a whole turn, the rest are
+ *  untouched. A flung particle loses its lock, drifts out to the rim and
+ *  rejoins the core when it re-syncs -- the "trying to escape" look -- while
+ *  the core itself stays whole. (Kicking every phase a little dissolved the
+ *  core outright at one hit per beat.) Locks are left alone: they decay
+ *  through their own average. */
 export function scatterPhases(s: Swarm, amount: number, rng: () => number = s.rng): void {
   if (amount <= 0) return;
+  const share = Math.min(1, amount) * SCATTER_MAX_SHARE;
   for (let i = 0; i < s.count; i++) {
-    s.theta[i] = wrapPi(s.theta[i] + amount * Math.PI * gauss(rng));
+    if (rng() >= share) continue;
+    const kick = Math.PI * (0.5 + 0.5 * rng()) * (rng() < 0.5 ? -1 : 1);
+    s.theta[i] = wrapPi(s.theta[i] + kick);
   }
 }
 
@@ -289,26 +343,63 @@ export function rescatter(s: Swarm, rng: () => number = s.rng, spawnHalfW = DEFA
   for (let i = 0; i < s.count; i++) s.theta[i] = wrapPi(rng() * TWO_PI);
 }
 
-/** Each particle's colour coordinate into `out`: how far its phase is from the
- *  swarm's mean, 0 (in step with the core) to 1 (half a turn away). */
-export function phaseOffsets(s: Swarm, out: Float64Array): void {
-  const psi = meanPhase(s);
-  for (let i = 0; i < s.count; i++) out[i] = Math.abs(wrapPi(s.theta[i] - psi)) / Math.PI;
-}
-
 /** Floats per edge written by collectEdges: x0, y0, x1, y1, c0, c1, alpha. */
 export const EDGE_STRIDE = 7;
 
+/** Neighbour counts (within the edge reach) at which a particle's colour
+ *  coordinate reaches 0 (white) and 1 (the far end of the ramp). Dense =
+ *  white, sparse = coloured: the reference's core is white, its rim rose,
+ *  its loosest tips orange and yellow-green, and its spread-out sheet magenta
+ *  in the middle and green at the edge -- colour follows crowding, not phase.
+ *  Counted as if the swarm had NEIGHBOUR_REF_COUNT particles and the reach
+ *  were NEIGHBOUR_REF_REACH (counts scale with both), so the Particles and
+ *  Reach settings don't repaint it. At those, the settled core counts well
+ *  over a hundred and the rim around a dozen. */
+export const DENSE_NEIGHBOURS = 50;
+export const SPARSE_NEIGHBOURS = 0;
+export const NEIGHBOUR_REF_COUNT = 256;
+export const NEIGHBOUR_REF_REACH = 90;
+
+/** How much an edge dims for each end that is more crowded than
+ *  DENSE_NEIGHBOURS: (DENSE / count)^this per end. Without it the packed core
+ *  piles up into flat white; the reference's core stays white but shows its
+ *  lines. */
+export const CROWD_DIMMING = 0.6;
+
 /** Writes every pair closer than `reach` into `out` (EDGE_STRIDE floats each;
- *  endpoints, each end's colour coordinate -- 0 in step with the core, 1 half
- *  a turn away -- and alpha, fading to 0 at `reach`). Returns the edge count,
- *  dropping the rest past the buffer's capacity. */
-export function collectEdges(s: Swarm, reach: number, out: Float32Array): number {
+ *  endpoints, each end's colour coordinate -- 0 crowded, 1 nearly alone, from
+ *  its neighbour count -- and alpha, fading to 0 at `reach` and dimmed by
+ *  CROWD_DIMMING at crowded ends). Returns the edge
+ *  count, dropping the rest past the buffer's capacity. `colourOut`, when
+ *  given, receives every particle's colour coordinate (for the node dots). */
+export function collectEdges(s: Swarm, reach: number, out: Float32Array, colourOut?: Float64Array): number {
   const cap = Math.floor(out.length / EDGE_STRIDE);
   const n = s.count;
-  const o = s.dth; // scratch reused: colour coordinates
-  phaseOffsets(s, o);
+  const o = s.dth; // scratch reused: neighbour counts, then colour coordinates
   const reach2 = reach * reach;
+  o.fill(0, 0, n);
+  for (let i = 0; i < n; i++) {
+    const xi = s.x[i];
+    const yi = s.y[i];
+    for (let j = i + 1; j < n; j++) {
+      const dx = s.x[j] - xi;
+      const dy = s.y[j] - yi;
+      if (dx * dx + dy * dy < reach2) {
+        o[i] += 1;
+        o[j] += 1;
+      }
+    }
+  }
+  const span = DENSE_NEIGHBOURS - SPARSE_NEIGHBOURS;
+  const rr = NEIGHBOUR_REF_REACH / reach;
+  const norm = (NEIGHBOUR_REF_COUNT / Math.max(1, n - 1)) * rr * rr;
+  const crowd = s.fy; // scratch (free between steps): each end's crowd dimming
+  for (let i = 0; i < n; i++) {
+    const d = o[i] * norm;
+    crowd[i] = d > DENSE_NEIGHBOURS ? Math.pow(DENSE_NEIGHBOURS / d, CROWD_DIMMING) : 1;
+    o[i] = Math.min(1, Math.max(0, (DENSE_NEIGHBOURS - d) / span));
+  }
+  if (colourOut) colourOut.set(o.subarray(0, n));
   let m = 0;
   for (let i = 0; i < n && m < cap; i++) {
     const xi = s.x[i];
@@ -325,7 +416,7 @@ export function collectEdges(s: Swarm, reach: number, out: Float32Array): number
       out[b + 3] = s.y[j];
       out[b + 4] = o[i];
       out[b + 5] = o[j];
-      out[b + 6] = 1 - Math.sqrt(d2) / reach;
+      out[b + 6] = (1 - Math.sqrt(d2) / reach) * crowd[i] * crowd[j];
       if (++m >= cap) break;
     }
   }

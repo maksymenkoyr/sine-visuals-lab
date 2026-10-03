@@ -3,6 +3,7 @@ import {
   createSwarm,
   stepSwarm,
   scatterPhases,
+  SCATTER_MAX_SHARE,
   rescatter,
   collapseTrap,
   collectEdges,
@@ -61,11 +62,19 @@ describe("swarm sim", () => {
     expect(hi.coreR90).toBeLessThan(hi.r90 - 30);
   });
 
-  it("a hit scatters the phases (order drops at once)", () => {
+  it("a hit flings a share of the particles half to a whole turn out of step, and leaves the rest", () => {
     const s = run(2, 25, 0.5);
-    const before = swarmMetrics(s).order;
+    const before = Array.from(s.theta);
     scatterPhases(s, 1, createRng(5));
-    expect(before - swarmMetrics(s).order).toBeGreaterThan(0.3);
+    let moved = 0;
+    for (let i = 0; i < N; i++) {
+      const d = Math.abs(Math.atan2(Math.sin(s.theta[i] - before[i]), Math.cos(s.theta[i] - before[i])));
+      if (d === 0) continue;
+      moved++;
+      expect(d).toBeGreaterThanOrEqual(Math.PI * 0.5 - 1e-9);
+    }
+    expect(moved / N).toBeGreaterThan(SCATTER_MAX_SHARE * 0.4);
+    expect(moved / N).toBeLessThan(SCATTER_MAX_SHARE * 2);
   });
 
   it("rescatter returns to the box at rest with the locks cleared", () => {

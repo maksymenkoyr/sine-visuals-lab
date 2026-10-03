@@ -13,19 +13,25 @@
 
 export const TONE = 1.6;
 
-/** The phase ramp: o = 0 (in step with the core) white, then rose, orange and
- *  yellow-green at o = 1 (half a turn out). `uColours` fades it toward white. */
+/** The crowd ramp: o = 0 (packed, in the core) white, then magenta, rose,
+ *  orange-red and yellow-green at o = 1 (nearly alone, the rim's loosest
+ *  tips). Measured on the reference: lit area 83-94 % rose/magenta (300-330
+ *  deg), the rim's inner row the bluer magenta, its outer row orange-red.
+ *  `uColours` fades it toward white. (Named phaseRamp for the shaders that
+ *  call it; colour stopped following phase once it followed crowding.) */
 export const RAMP_GLSL = `
 uniform float uColours;
 vec3 phaseRamp(float o) {
   vec3 white = vec3(1.0);
-  vec3 rose = vec3(0.941, 0.251, 0.690);
-  vec3 orange = vec3(1.0, 0.478, 0.102);
+  vec3 magenta = vec3(0.878, 0.251, 0.816);
+  vec3 rose = vec3(0.941, 0.251, 0.541);
+  vec3 ember = vec3(1.0, 0.353, 0.125);
   vec3 lime = vec3(0.722, 0.878, 0.251);
-  float t = clamp(o, 0.0, 1.0) * 3.0;
-  vec3 c = mix(white, rose, clamp(t, 0.0, 1.0));
-  c = mix(c, orange, clamp(t - 1.0, 0.0, 1.0));
-  c = mix(c, lime, clamp(t - 2.0, 0.0, 1.0));
+  float t = clamp(o, 0.0, 1.0);
+  vec3 c = mix(white, magenta, smoothstep(0.0, 0.25, t));
+  c = mix(c, rose, smoothstep(0.25, 0.42, t));
+  c = mix(c, ember, smoothstep(0.42, 0.6, t));
+  c = mix(c, lime, smoothstep(0.72, 0.92, t));
   return mix(white, c, uColours);
 }`;
 

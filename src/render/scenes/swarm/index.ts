@@ -2,17 +2,20 @@
 // and a phase, drawn as a graph of thin additive lines between near
 // neighbours on black. They fall from a scattered net into one body: a dense
 // white core of in-sync particles breathing on the beat, inside a thin, fixed
-// ring of out-of-sync drifters coloured by how far their phase is from the
-// core's. The physics is swarmSim.ts (pure, tested in tests/swarmSim.test.ts);
+// ring of out-of-sync drifters. Colour follows crowding (collectEdges): the
+// packed core is white, the rim rose, its loosest tips orange and lime. The physics is swarmSim.ts (pure, tested in tests/swarmSim.test.ts);
 // glsl.ts draws it; this file is the wiring: settings, drives, the fixed-step
 // loop, framing, and the two instanced draws. docs/scenes/swarm.md is the
 // record (what it was built from, what was tried).
 //
 // Sync mapping (drives, not fixed couplings -- see drives.ts's header):
-// Breath is the core's attraction swinging with the beat wave (one swing per
-// beat: DriveSource.every can't be set from a setting's own default, so a
-// slower breath is a pick in the panel). Scatter kicks every phase on a hit,
-// loosening the core; it re-tightens over about a second. Heat is the phase
+// Breath is the core's attraction swinging with the beat wave, once every two
+// beats by default (a Scene source: DriveSource.every can't be set from a
+// setting's own default, and one swing a beat is too fast for the swarm to
+// follow). Scatter knocks a small share of the
+// particles out of step on a hit; they fly out to the rim and fall back in as
+// they re-sync, which also keeps the core loose enough to breathe (with no
+// hits at all it packs tight and still, the reference's settled state). Heat is the phase
 // noise, riding the overall level. Re-collapse throws the whole swarm back
 // out to the scattered start on a drop and collapses it again; the scene also
 // collapses once on start.
@@ -39,7 +42,6 @@ import {
   rescatter,
   collapseTrap,
   collectEdges,
-  phaseOffsets,
   createRng,
   DEFAULT_SWARM_PARAMS,
   EDGE_STRIDE,
@@ -66,9 +68,13 @@ const REF_PX_HEIGHT = 720;
 const STROKE_PX = 1.6;
 const NODE_RADIUS_PX = 1.4;
 /** Edge brightness at Lines = 1 (the prototype's own value, then tuned). */
-const EDGE_ALPHA = 0.12;
+const EDGE_ALPHA = 0.22;
 const NODE_ALPHA = 0.8;
-const EDGE_REACH_WORLD = 150;
+const EDGE_REACH_WORLD = 90;
+/** World-to-screen zoom at Size 1: the sim's rim settles at 0.41
+ *  half-heights (measured on our frames, 2026-10-03) and the reference's at
+ *  0.46, so Size 1 frames it the same. */
+const FRAME_SCALE = 1.12;
 const CENTROID_TAU = 0.3;
 const COLLAPSE_SECONDS_SLOW = 16;
 const COLLAPSE_SECONDS_FAST = 6;
@@ -110,23 +116,23 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "breath",
     label: "Breath",
-    description: "How far the core swells and contracts with the beat wave",
+    description: "How far the core swells and contracts — by default once every two beats, with the tempo",
     group: "Motion",
     min: 0,
     max: 1.5,
     step: 0.05,
     default: 1,
-    drive: { default: "anim.beatWave" },
+    drive: { default: "scene", sceneLabel: "Scene: beat wave, every 2 beats", sceneSources: ["anim.beatWave"] },
   },
   {
     key: "scatter",
     label: "Scatter",
-    description: "How hard a hit scrambles the particles' phases — the core loosens, then locks back in",
+    description: "How many particles a hit knocks out of step — they fly out to the rim, then fall back into the core as they re-sync",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.12,
+    default: 0.4,
     drive: { default: "feature.onset" },
   },
   {
@@ -315,7 +321,7 @@ function createSwarmScene(): Scene {
       // The whole room's pixel size and where this device's slice starts in it.
       const roomW = resW / Math.max(viewport.w, 1e-4);
       const roomH = resH / Math.max(viewport.h, 1e-4);
-      const spawnHalfW = Math.max(120, WORLD_HALF_HEIGHT * (roomW / roomH) - 80);
+      const spawnHalfW = Math.max(120, (WORLD_HALF_HEIGHT * (roomW / roomH)) / FRAME_SCALE - 80);
 
       // Particle count: the setting overrides the quality preset's own count
       // only once it has been moved off its default.
@@ -348,10 +354,15 @@ function createSwarmScene(): Scene {
       const colours = resolveSceneSetting(ID, settingFor("colours"));
       const size = resolveSceneSetting(ID, settingFor("size"));
 
-      // The beat wave: 1 on the beat, 0 between. Unplugged, it rests at 0.5 --
-      // the attraction's own mean -- so the core just stops breathing.
-      const beatWave = anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomePhase));
-      lastWave = clamp01(drives.value("breath", beatWave, 0.5));
+      // The Scene breath: the Beat wave slowed to one swing every two beats --
+      // 1 on every other beat, 0 on the ones between, fading with the
+      // metronome. A swing a beat (0.47 s at 128 bpm) is too fast for the
+      // swarm's inertia to follow: measured, the core didn't move. The
+      // reference breathes every 0.70-1.0 s, about two beats. Unplugged, it
+      // rests at 0.5 -- the attraction's own mean -- so the core stops.
+      const beats = Math.floor(anim.metronomeBeats) + anim.metronomePhase;
+      const halfWave = anim.metronomeLevel * (0.5 + 0.5 * Math.cos(Math.PI * beats));
+      lastWave = clamp01(drives.value("breath", halfWave, 0.5));
 
       // Edges (a hit, a drop) are consumed once a render, not once a step.
       if (scatter > 0.02 && drives.fired("scatter", anim.onset)) {
@@ -398,8 +409,7 @@ function createSwarmScene(): Scene {
         centreY += (cy - centreY) * k;
       }
 
-      const nEdges = collectEdges(s, EDGE_REACH_WORLD * reach, edgeData);
-      phaseOffsets(s, offsets);
+      const nEdges = collectEdges(s, EDGE_REACH_WORLD * reach, edgeData, offsets);
       for (let i = 0; i < s.count; i++) {
         nodeData[i * 3] = s.x[i];
         nodeData[i * 3 + 1] = s.y[i];
@@ -409,7 +419,7 @@ function createSwarmScene(): Scene {
       const pxScale = roomH / REF_PX_HEIGHT;
       const halfW = Math.max(0.5, (STROKE_PX * pxScale) / 2);
       const radius = Math.max(1, NODE_RADIUS_PX * pxScale);
-      const worldScale = (size * roomH * 0.5) / WORLD_HALF_HEIGHT;
+      const worldScale = (FRAME_SCALE * size * roomH * 0.5) / WORLD_HALF_HEIGHT;
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, resW, resH);
