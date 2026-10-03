@@ -1,5 +1,5 @@
 import type { AnimFrame } from "../render/animClock.ts";
-import { SIGNALS, type MeterCardId, type MeterRowId } from "../render/signals.ts";
+import { SIGNALS, surgeAtThreshold, type MeterCardId, type MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, jackKey } from "./driveSources.ts";
@@ -187,8 +187,8 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  * Song+Drop pair and Centroid, on the Brightness row (Character), the BPM
  * block's own Metronome+Tempo pair, Lock, the Timing strip's own
  * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
- * (Tempo), and one per hits-history lane plus a second
- * Beat-lane jack for Onset surge (createHitsHistory's own laneMounts, Hits)
+ * (Tempo), and one per hits-history lane plus one for the Surge lane
+ * under them, Onset surge's own (createHitsHistory's own laneMounts, Hits)
  * — plus the Bands card's own level rows (BAND_LEVEL_CHOICES, deviceMenu.ts)
  * and its Frequencies corner, built directly
  * in deviceMenu.ts. Every jack's click/hover/fill/usage state is
@@ -975,9 +975,12 @@ function createTempoBlock(accent: string) {
 // onset) and Low/Mid/High (bandEnergy.ts's per-group onsets), one canvas,
 // one column per CSS pixel over HISTORY_SPAN_SEC (createColumnRing above).
 // A history, not just an instant reading, so a tuning session can see *why*
-// a hit did or didn't count.
+// a hit did or didn't count. A fifth, trace-only Surge lane sits under them
+// (not part of HITS_LANES: it has no hits, strengths or fires of its own) —
+// the Onset surge drive source (signals.ts's "feature.flux") drawn as a
+// setting would read it.
 const HITS_LANE_HEIGHT_PX = 16;
-const HITS_LANE_COUNT = 4; // Beat, Low, Mid, High
+const HITS_LANE_COUNT = 5; // Beat, Low, Mid, High, Surge
 const HITS_HEIGHT_PX = HITS_LANE_HEIGHT_PX * HITS_LANE_COUNT;
 // A lane's ratio trace runs to HITS_RATIO_MAX — 1 (the firing line) sits
 // inside the track with headroom above it, rather than pinning the lane to
@@ -986,7 +989,8 @@ const HITS_RATIO_MAX = ONSET_METER_MAX;
 // Per-column series layout in the ring: [ratio, event code, strength,
 // standout, loudness] per lane (hitsLaneIdx below), plus one shared
 // ground-shade series (1 - anim.gateDimmer; the room isn't per-lane, so one
-// series covers all four). Event code is fired=3 > blocked=2 > gated=1 > 0
+// series covers every lane), plus one Surge series (the Onset surge signal's
+// own 0..1 reading) between the lanes' fields and the ground. Event code is fired=3 > blocked=2 > gated=1 > 0
 // — see CODE_OF_VERDICT below — so a max-hold column resolves the right
 // priority on its own when a burst of rAF ticks closes into one column.
 // strength/standout/loudness (src/audio/hitStrength.ts's HitParts) are only
@@ -1004,10 +1008,10 @@ const HITS_LANES: readonly HitsLane[] = [
   { label: "High", color: STRIP_HIGH },
 ];
 // Same order as HITS_LANES — the drive source each lane's own jack plugs
-// in. The Beat lane also carries a second choice (Onset surge,
-// "feature.flux") on its own second jack — see createHitsHistory's own
-// laneMounts.
+// in. The Surge lane under them is Onset surge's own ("feature.flux") —
+// see createHitsHistory's own laneMounts.
 const HITS_LANE_CHOICES: readonly DriveSourceChoice[] = ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"];
+const SURGE_CHOICE: DriveSourceChoice = "feature.flux";
 const HITS_FIELDS_PER_LANE = 5; // ratio, code, strength, standout, loudness
 
 /** Where lane `li`'s own five fields sit in the ring's per-column series —
@@ -1017,7 +1021,9 @@ function hitsLaneIdx(li: number): { ratio: number; code: number; strength: numbe
   const base = li * HITS_FIELDS_PER_LANE;
   return { ratio: base, code: base + 1, strength: base + 2, standout: base + 3, loudness: base + 4 };
 }
-const HITS_GROUND_IDX = HITS_LANES.length * HITS_FIELDS_PER_LANE;
+const HITS_SURGE_LANE = HITS_LANES.length;
+const HITS_SURGE_IDX = HITS_LANES.length * HITS_FIELDS_PER_LANE;
+const HITS_GROUND_IDX = HITS_SURGE_IDX + 1;
 const HITS_SERIES_COUNT = HITS_GROUND_IDX + 1;
 // Ground shading is a wash, not a primary reading — capped well under full
 // white so a shut gate (1 - gateDimmer == 1) reads as a dim tint rather
@@ -1052,6 +1058,7 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
     group("Low", GROUP_TUNING.low),
     group("Mid", GROUP_TUNING.mid),
     group("High", GROUP_TUNING.high),
+    "Surge: how close Beat is to firing, as a setting fed by Onset surge sees it; the line is where Beat fires.",
     gate,
   ].join(" ");
 }
@@ -1112,7 +1119,11 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   row.el.children[1].replaceWith(vizWrap);
   row.setReadout(String(HISTORY_SPAN_SEC));
 
-  const legend = createTraceLegend(HITS_LANES.map((l) => ({ color: l.color, label: l.label })));
+  const surgeColor = driveSourceColor(SURGE_CHOICE);
+  const legend = createTraceLegend([
+    ...HITS_LANES.map((l) => ({ color: l.color, label: l.label })),
+    { color: surgeColor, label: "Surge" },
+  ]);
   vizWrap.after(legend.el);
 
   // One jack per lane, at that lane's own vertical centre on the right
@@ -1133,17 +1144,21 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
     vizWrap.appendChild(glow);
     return { choice, glowEl: glow };
   });
-  // The Beat lane's second jack: the broadband detector's own
-  // approach-to-firing reading (Onset surge, "feature.flux") — the old
-  // Onset row's own jack, moved here now that row is gone. Shares the Beat
-  // lane's glow rather than growing a second one: refreshPatchView groups
-  // laneMounts by glowEl, so two choices on one glow just means "whichever
-  // of the two is live wins" instead of the lane getting a second strip.
-  const fluxJack = mountJack("feature.flux", vizWrap, row.el);
-  fluxJack.el.style.position = "absolute";
-  fluxJack.el.style.right = "17px";
-  fluxJack.el.style.top = `${(HITS_LANE_HEIGHT_PX - 13) / 2}px`;
-  laneMounts.push({ choice: "feature.flux", glowEl: laneMounts[0]!.glowEl });
+  // The Surge lane's jack: the broadband detector's own approach-to-firing
+  // reading (Onset surge, "feature.flux") — the old Onset row's own jack,
+  // moved here now that row is gone, and onto a lane of its own so the
+  // trace a patched setting reads is the one under it.
+  const surgeJack = mountJack(SURGE_CHOICE, vizWrap, row.el);
+  surgeJack.el.style.position = "absolute";
+  surgeJack.el.style.right = "2px";
+  surgeJack.el.style.top = `${HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX + (HITS_LANE_HEIGHT_PX - 13) / 2}px`;
+  const surgeGlow = document.createElement("div");
+  surgeGlow.className = "vc-lane-glow";
+  surgeGlow.style.top = `${HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX}px`;
+  surgeGlow.style.height = `${HITS_LANE_HEIGHT_PX}px`;
+  surgeGlow.style.setProperty("--c", surgeColor);
+  vizWrap.appendChild(surgeGlow);
+  laneMounts.push({ choice: SURGE_CHOICE, glowEl: surgeGlow });
 
   // Fire timestamps per lane, for the legend's "N fires in the last span"
   // note — pruned to HISTORY_SPAN_SEC, same window the trace shows. Pruned
@@ -1200,6 +1215,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
     // the old Hits row's own divider, redrawn on canvas.
     ctx.fillStyle = "rgba(255,255,255,0.12)";
     ctx.fillRect(0, HITS_LANE_HEIGHT_PX - 0.5, w, 1);
+    ctx.fillRect(0, HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX - 0.5, w, 1);
 
     // 2. A hairline per lane at ratio == 1 — the firing line.
     ctx.fillStyle = "rgba(255,255,255,0.18)";
@@ -1229,6 +1245,49 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
       }
       ctx.stroke();
     }
+
+    // 3b. The Surge lane: a filled trace of the Onset surge signal (already
+    // 0..1), with a hairline where Beat fires on that scale — the same
+    // line the lanes above carry at ratio == 1.
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(0, Math.round(laneYFrac(HITS_SURGE_LANE, surgeAtThreshold)) - 0.5, w, 1);
+    const surgeBase = laneTop(HITS_SURGE_LANE) + HITS_LANE_HEIGHT_PX - 1;
+    ctx.strokeStyle = surgeColor;
+    ctx.fillStyle = withAlpha(surgeColor, 0.18);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let surgePen = false;
+    let surgeStart = 0;
+    let surgeLastX = 0;
+    const closeSurge = (): void => {
+      ctx.stroke();
+      if (!surgePen) return;
+      ctx.lineTo(surgeLastX, surgeBase);
+      ctx.lineTo(surgeStart, surgeBase);
+      ctx.closePath();
+      ctx.fill();
+    };
+    for (let x = 0; x <= len; x++) {
+      const v = x === len ? ring.live(HITS_SURGE_IDX) : ring.at(x, HITS_SURGE_IDX);
+      if (Number.isNaN(v)) {
+        if (surgePen) {
+          closeSurge();
+          ctx.beginPath();
+          surgePen = false;
+        }
+        continue;
+      }
+      const px = x === len ? w - 1 : x;
+      const y = laneYFrac(HITS_SURGE_LANE, v);
+      if (surgePen) ctx.lineTo(px, y);
+      else {
+        ctx.moveTo(px, y);
+        surgeStart = px;
+      }
+      surgeLastX = px;
+      surgePen = true;
+    }
+    if (surgePen) closeSurge();
 
     // 4. The event tick: fired is a bar up to that hit's own graded
     // strength (0..1 of the lane height, exactly full at Dimension 0 — see
@@ -1333,6 +1392,10 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
         setLane(1, anim.hits.low.ratio, lowVerdict, anim.lowOnset, anim.hitStrength.low);
         setLane(2, anim.hits.mid.ratio, midVerdict, anim.midOnset, anim.hitStrength.mid);
         setLane(3, anim.hits.high.ratio, highVerdict, anim.highOnset, anim.hitStrength.high);
+        // Like the Beat ratio trace, only there with a local detector
+        // (beatDiag) — anim.beatRatio is 0 on a TV/renderer, which would
+        // draw a flat line that looks like silence rather than "no reading".
+        vals[HITS_SURGE_IDX] = frame && beatDiag ? SIGNALS["feature.flux"].read(frame, anim) : null;
         vals[HITS_GROUND_IDX] = 1 - anim.gateDimmer;
         ring.push(vals, nowMs);
         if (beatFired) logFire(0, nowMs);
@@ -1345,6 +1408,10 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
       draw(shapeOpen, floor);
 
       if (text) {
+        legend.setNote(
+          HITS_SURGE_LANE,
+          anim && frame && beatDiag ? `${Math.round(SIGNALS["feature.flux"].read(frame, anim) * 100)}%` : "--",
+        );
         if (shapeOpen) {
           const parts = anim
             ? [anim.hitStrength.beat, anim.hitStrength.low, anim.hitStrength.mid, anim.hitStrength.high]
