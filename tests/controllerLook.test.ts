@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createControllerLook, type ControllerLook, type ControllerLookDevice } from "../src/net/controllerLook.ts";
-import { createLookSync, type LookSync } from "../src/net/lookSync.ts";
+import { createMainPlay, type MainPlay } from "../src/net/mainPlay.ts";
 import type { LookClientMsg, LookDoc } from "../server/lookDoc.ts";
 
 // A phone: the palettes and scenes its build has, and what it shows now.
@@ -43,7 +43,8 @@ function deviceOf(p: Phone, look: () => ControllerLook): ControllerLookDevice {
 interface Rig {
   p: Phone;
   look: ControllerLook;
-  sync: LookSync;
+  /** The phone's side of the room's Main, over this phone's look. */
+  main: MainPlay;
   sent: LookClientMsg[];
 }
 
@@ -53,8 +54,15 @@ function rig(over: Partial<Phone> = {}): Rig {
   const ref: { look: ControllerLook | null } = { look: null };
   const look = createControllerLook(deviceOf(p, () => ref.look as ControllerLook));
   ref.look = look;
-  const sync = createLookSync({ read: look.io.read, write: look.io.write, send: (m) => (sent.push(m), true) });
-  return { p, look, sync, sent };
+  const main = createMainPlay({
+    send: (m) => (sent.push(m), true),
+    capture: look.io.read,
+    apply: (d) => look.io.write(d),
+    screen: () => "main",
+    isOwner: false,
+    nameOf: () => null,
+  });
+  return { p, look, main, sent };
 }
 
 const doc = (scene: string, palette: string, storage: Record<string, string> = {}): LookDoc => ({ scene, palette, storage });
@@ -103,55 +111,56 @@ describe("createControllerLook", () => {
 });
 
 describe("a phone that cannot show the room's palette", () => {
-  it("does not publish its own palette over the room's after another controller changes it", () => {
+  it("does not play its own palette over the room's after another device changes it", () => {
     const r = rig();
-    r.sync.onSnapshot(4, doc("mesh", "neon"));
-    r.sync.tick();
-    expect(r.sent).toEqual([]);
+    r.main.onSnapshot(4, doc("mesh", "neon"));
+    r.main.tick(1000);
+    expect(r.main.play()).toBeNull();
 
-    r.sync.onPatch(5, { palette: "aurora" }); // a newer build's palette
-    r.sync.tick();
+    r.main.onPatch(5, { palette: "aurora" }); // a newer build's palette
+    r.main.tick(2000);
     expect(r.p.palette).toBe("neon");
+    expect(r.main.status().onAir).toBe(true);
+    expect(r.main.play()).toBeNull();
     expect(r.sent).toEqual([]);
   });
 
-  it("does not publish it after a reconnect either", () => {
+  it("does not play it after a reconnect either", () => {
     const r = rig();
-    r.sync.onSnapshot(4, doc("mesh", "aurora"));
-    r.sync.tick();
-    r.sync.onDisconnect();
-    r.sync.onSnapshot(6, doc("mesh", "aurora"));
-    r.sync.tick();
+    r.main.onSnapshot(4, doc("mesh", "aurora"));
+    r.main.onDisconnect();
+    r.main.onSnapshot(6, doc("mesh", "aurora"));
+    expect(r.main.play()).toBeNull();
     expect(r.sent).toEqual([]);
   });
 
-  it("still publishes a palette the phone's own user picks", () => {
+  it("still plays a palette the phone's own user picks", () => {
     const r = rig();
-    r.sync.onSnapshot(4, doc("mesh", "aurora"));
+    r.main.onSnapshot(4, doc("mesh", "aurora"));
     r.look.notePalette("ember");
     r.p.palette = "ember";
-    r.sync.tick();
+    expect(r.main.play()).toBe("sent");
     expect(r.sent).toEqual([{ type: "lookPatch", n: 1, palette: "ember" }]);
   });
 
-  it("takes a palette it can show, and publishes nothing for it", () => {
+  it("takes a palette it can show, and plays nothing for it", () => {
     const r = rig();
-    r.sync.onSnapshot(4, doc("mesh", "neon"));
-    r.sync.onPatch(5, { palette: "ember" });
-    r.sync.tick();
+    r.main.onSnapshot(4, doc("mesh", "neon"));
+    r.main.onPatch(5, { palette: "ember" });
     expect(r.p.palette).toBe("ember");
+    expect(r.main.play()).toBeNull();
     expect(r.sent).toEqual([]);
   });
 });
 
 describe("a phone that cannot mount the room's scene", () => {
-  it("does not publish its fallback scene over the room's", () => {
+  it("does not play its fallback scene over the room's", () => {
     const r = rig();
-    r.sync.onSnapshot(4, doc("storm", "neon"));
-    r.sync.tick();
-    r.sync.onPatch(5, { scene: "plume" });
-    r.sync.tick();
+    r.main.onSnapshot(4, doc("storm", "neon"));
+    expect(r.main.play()).toBeNull();
+    r.main.onPatch(5, { scene: "plume" });
     expect(r.p.scene).toBe("mesh");
+    expect(r.main.play()).toBeNull();
     expect(r.sent).toEqual([]);
   });
 });

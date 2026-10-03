@@ -7,6 +7,7 @@ import {
   chipsFor,
   currentFeedValue,
   deviceCountText,
+  delayReason,
   diagramHeight,
   feedChoices,
   kindLine,
@@ -179,5 +180,33 @@ describe("rejectText", () => {
     expect(rejectText("rate")).toMatch(/Too many changes/);
     expect(rejectText("shape")).toBe("The room refused that change.");
     expect(rejectText("anything")).toBe("The room refused that change.");
+  });
+});
+
+describe("delayReason", () => {
+  const tv = entry("tv-1", { role: "renderer", kind: "tv", name: "Lounge TV", ears: "follow", follow: null, screen: "main" });
+  const pad = entry("pad-1", { kind: "tablet", name: "iPad", ears: "own", screen: "main" });
+
+  it("a follower names the feed whose sound it waits for, the owner when it follows null", () => {
+    expect(delayReason(tv, [laptop, tv])).toBe("Waits for Studio’s sound to arrive over the network.");
+    const onPad = { ...tv, follow: "pad-1" };
+    expect(delayReason(onPad, [laptop, pad, onPad])).toBe("Waits for iPad’s sound to arrive over the network.");
+  });
+
+  it("a follower whose feed is not listed still gets a plain sentence", () => {
+    const lost = { ...tv, follow: "gone" };
+    expect(delayReason(lost, [laptop, lost])).toBe("Waits for the sound to arrive over the network.");
+  });
+
+  it("an own-input device beside following Main screens waits as long as they do", () => {
+    expect(delayReason(laptop, [laptop, tv])).toBe("Waits as long as the screens that follow, so beats land together.");
+  });
+
+  it("an own-input device with nobody to line up with draws at once", () => {
+    expect(delayReason(laptop, [laptop])).toBe("Hears the music itself and draws at once.");
+    // A follower that is offline does not count.
+    expect(delayReason(laptop, [laptop, { ...tv, online: false }])).toBe("Hears the music itself and draws at once.");
+    // Nor does one that does not show Main.
+    expect(delayReason(laptop, [laptop, { ...tv, screen: "own" }])).toBe("Hears the music itself and draws at once.");
   });
 });

@@ -57,8 +57,8 @@ export interface LookLimits {
   /** A controller's patch budget: it may send this many at once, and the room
    *  gives it `patchesPerSec` more every second (a token bucket per socket,
    *  server/roomCore.ts). Every accepted patch is durable row writes, so the
-   *  rate is capped; the phone's publisher (src/net/lookSync.ts, one patch in
-   *  flight, one per LOOK_PUBLISH_MS at most) stays well inside it. */
+   *  rate is capped; a device sends one patch per Play (src/net/mainPlay.ts,
+   *  one press at a time, a few in a burst at most), which stays well inside it. */
   readonly patchBurst: number;
   readonly patchesPerSec: number;
   /** The longest glide a patch may ask a screen to arrive over — the same

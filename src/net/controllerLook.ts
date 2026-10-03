@@ -1,24 +1,32 @@
 /**
- * The phone controller's side of the look: what it reads off the device to
- * publish, and what it does with a look the room hands it (the `LookIO` that
- * net/lookSync.ts drives). The device itself is injected, so this tests in node
- * with the real publisher on top (tests/controllerLook.test.ts).
+ * What a device in a keyed room reads off itself to Play, and what it does with
+ * a look the room hands it (the `capture` and `apply` that net/mainPlay.ts
+ * drives) — named for the phone controller, where it began, but every member of
+ * a keyed room uses it. The device itself is injected, so this tests in node
+ * with the real MainPlay on top (tests/controllerLook.test.ts).
  *
- * A phone can be handed an id it cannot show: a scene this build does not have
+ * A device can be handed an id it cannot show: a scene this build does not have
  * or is too heavy for, a palette from a newer build. It then keeps showing its
- * own fallback, but what it publishes must keep naming the room's id. lookSync
- * folds every value the room sends into its `base` whether or not `write`
- * managed to show it, so a `read` that reported the fallback would differ from
- * `base` and the next tick would publish the fallback over the room's choice
- * (and a reconnect would treat it as an unacked local edit). The same ids are
- * moved on by the phone's own picks, through noteScene / notePalette.
+ * own fallback, but what it reads must keep naming the room's id. MainPlay
+ * compares what a device reads to Main to say whether it is "on air", and Play
+ * sends the difference; a `read` that reported the fallback would differ from
+ * Main for good, and the next Play would send the fallback over the room's
+ * choice. The same ids are moved on by the device's own picks, through
+ * noteScene / notePalette.
  *
  * The room-scope storage has no such mirror here: net/roomStorage.ts owns which
  * keys a build takes part in.
  */
 
 import type { LookDoc } from "../../server/lookDoc.ts";
-import type { LookIO } from "./lookSync.ts";
+
+/** A device's look: what it reads off itself, and how it shows another. */
+export interface LookIO {
+  /** The device's current look: its scene and palette ids and its room-scope storage. */
+  read(): LookDoc;
+  /** Makes the device show this look (writes the stores, switches scene/palette). */
+  write(doc: LookDoc): void;
+}
 
 export interface ControllerLookDevice {
   /** The palette id this phone is showing. */
@@ -36,7 +44,7 @@ export interface ControllerLookDevice {
 }
 
 export interface ControllerLook {
-  io: Pick<LookIO, "read" | "write">;
+  io: LookIO;
   /** This phone itself is now showing this scene (a pick, or entering one). */
   noteScene(id: string): void;
   /** This phone itself is now showing this palette. */

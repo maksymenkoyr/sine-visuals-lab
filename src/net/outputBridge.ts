@@ -64,6 +64,12 @@ export interface OutputStatus {
   cue: boolean;
   /** Output shows something other than the preview. */
   differs: boolean;
+  /** Cue means something: the pop-out window is open (the room has no Cue, so
+   *  a room-only bridge says false and the bar hides CUE). */
+  canCue: boolean;
+  /** Who changed Main while this device had unplayed edits (a display name),
+   *  null or absent otherwise. Only the room bridge sets it (roomBridge.ts). */
+  changedBy?: string | null;
 }
 
 export interface OutputBridge {
@@ -87,6 +93,15 @@ export interface OutputBridge {
   sendPower(): void;
   /** The output's last reported render readouts, null while it is closed. */
   outputStatus(): OutputRenderStatus | null;
+  /** Drop this device's unplayed edits and show what Main shows now (the room
+   *  bridge's answer to `changedBy`). The pop-out has nothing to take. */
+  take?(): void;
+}
+
+/** The parts of an OutputStatus a listener cares about, as one comparable
+ *  string: bridges call their listeners only when this changes. */
+export function statusKey(s: OutputStatus): string {
+  return `${s.open}|${s.cue}|${s.differs}|${s.canCue}|${s.changedBy ?? ""}`;
 }
 
 export interface OutputBridgeOptions {
@@ -159,12 +174,12 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   });
 
   function status(): OutputStatus {
-    return { open: outputOpen, cue: outputOpen && cue.cueOn(), differs: outputOpen && cue.differs() };
+    return { open: outputOpen, cue: outputOpen && cue.cueOn(), differs: outputOpen && cue.differs(), canCue: outputOpen };
   }
 
   function emitIfChanged(): void {
     const s = status();
-    const key = `${s.open}|${s.cue}|${s.differs}`;
+    const key = statusKey(s);
     if (key === lastStatusKey) return;
     lastStatusKey = key;
     for (const cb of listeners) cb(s);
