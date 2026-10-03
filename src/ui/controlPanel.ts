@@ -130,7 +130,11 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
       row.textContent = text;
       list.appendChild(row);
     }
-    if (labels.length === 0) list.textContent = "No screen yet. Scan the QR, or type the code a TV shows.";
+    if (labels.length === 0) {
+      // The QR above makes a phone a remote, not a screen: a screen is the TV
+      // page, which shows its own code to type below.
+      list.textContent = `No screen yet. On the screen, open ${location.host}/tv and type the code it shows, below.`;
+    }
   }
 
   deps.onRosterChange(renderList);
