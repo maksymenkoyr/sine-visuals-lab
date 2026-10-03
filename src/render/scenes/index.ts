@@ -1,5 +1,6 @@
 import { listScenes, registerScene } from "../scene.ts";
 import { collectPrivateScenes } from "./privateScenes.ts";
+import { longPlayScene } from "./longplay/index.ts";
 import { swarmScene } from "./swarm/index.ts";
 import { coilScene } from "./coil/index.ts";
 import { tesseraScene } from "./tessera/index.ts";
@@ -42,6 +43,7 @@ import { toonraveScene } from "./toonrave/index.ts";
 registerScene(physarum2Scene);
 registerScene(skyScene);
 registerScene(toonraveScene);
+registerScene(longPlayScene);
 registerScene(swarmScene);
 registerScene(coilScene);
 registerScene(silkScene);
@@ -76,6 +78,7 @@ registerScene(ferrofluidScene);
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
   "toonrave",
+  "longplay",
   "swarm",
   "coil",
   "silk",
@@ -125,6 +128,7 @@ export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.
 
 export {
   toonraveScene,
+  longPlayScene,
   swarmScene,
   coilScene,
   skyScene,

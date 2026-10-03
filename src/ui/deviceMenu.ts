@@ -19,6 +19,7 @@ import {
   SCENE_MASTER_DEFAULT,
   SCENE_MASTER_MAX,
   SCENE_MASTER_MIN,
+  isProLocked,
   type SceneSetting,
 } from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
@@ -5881,6 +5882,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         label: spec.label,
         accent,
         options: spec.options,
+        pro: spec.proOptions ? (i) => spec.proOptions!.includes(spec.options![i]) : undefined,
+        locked: spec.proOptions ? (i) => isProLocked(spec, i) : undefined,
         defaultValue: deps.getSceneSettingDefault(sceneId, spec),
         description: spec.description,
         get: () => deps.getSceneSettingValue(sceneId, spec),

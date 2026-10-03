@@ -69,6 +69,11 @@ def main() -> None:
     ap.add_argument("--from", dest="cache", default=str(DEFAULT_CACHE), help="refs cache (default: this checkout's)")
     ap.add_argument("--as", dest="name", help="folder name under the scene (default: the bundle name)")
     args = ap.parse_args()
+    # Names, never paths: joining an absolute path would make `dest` that
+    # path itself — the rmtree below then deletes the bundle it was copying.
+    for label, value in (("bundle", args.bundle), ("scene", args.scene), ("--as", args.name)):
+        if value is not None and (Path(value).name != value or value in ("", ".", "..")):
+            sys.exit(f"{label} must be a plain name, not a path: {value!r} (use --from for another cache)")
 
     src = Path(args.cache).expanduser().resolve() / args.bundle
     if not src.is_dir():

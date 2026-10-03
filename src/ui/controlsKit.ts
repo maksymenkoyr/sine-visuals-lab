@@ -493,6 +493,11 @@ export interface PickerRowSpec {
    *  tick; this row only mounts it. A picker whose choice decides *which*
    *  signal the scene listens to (shards' Cut on) is the motivating case. */
   signals?: SignalStrip;
+  /** Options that are Pro content (sceneSettings.ts's `proOptions`) carry a
+   *  "Pro" tag; `locked(i)` true makes that chip unselectable and skips it
+   *  when cycling. Omit both for an ordinary picker. */
+  pro?: (index: number) => boolean;
+  locked?: (index: number) => boolean;
 }
 
 /** An enum setting's row: same head as a toggle row, a strip of named chips
@@ -539,12 +544,22 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   strip.setAttribute("aria-label", spec.label);
   strip.style.cssText = paletteListStyle;
   el.style.setProperty("--vc-accent", spec.accent);
+  const isLocked = (i: number): boolean => spec.locked?.(i) ?? false;
   const chips = spec.options.map((name, i) => {
     const btn = document.createElement("button");
     btn.textContent = name;
+    if (spec.pro?.(i)) {
+      const tag = document.createElement("sup");
+      tag.textContent = " PRO";
+      tag.style.cssText = "font-size: 0.6em; letter-spacing: 0.06em; opacity: 0.75;";
+      btn.appendChild(tag);
+      btn.title = isLocked(i) ? `${name} is a Pro view — coming with Pro` : `${name} (Pro)`;
+    }
     btn.setAttribute("role", "radio");
     btn.tabIndex = -1; // the strip is the ring's stop, not each chip
+    if (isLocked(i)) btn.setAttribute("aria-disabled", "true");
     btn.addEventListener("click", () => {
+      if (isLocked(i)) return;
       apply(i);
       spec.set(i);
       strip.focus();
@@ -568,7 +583,8 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   function apply(value: number): void {
     current = clampIndex(value);
     chips.forEach((chip, i) => {
-      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
+      chip.style.cssText =
+        (i === current ? paletteChipLitStyle : paletteChipStyle) + (isLocked(i) ? " opacity: 0.4; cursor: not-allowed;" : "");
       chip.setAttribute("aria-checked", String(i === current));
     });
     readout.textContent = spec.options[current];
@@ -577,7 +593,10 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   apply(current);
 
   const cycle = (step: number): void => {
-    const next = (current + step + spec.options.length) % spec.options.length;
+    const n = spec.options.length;
+    let next = current;
+    do next = (next + step + n) % n;
+    while (isLocked(next) && next !== current);
     apply(next);
     spec.set(next);
   };
