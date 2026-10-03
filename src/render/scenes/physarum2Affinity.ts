@@ -249,8 +249,6 @@ export interface PairWords {
     statusIdle: string;
     nudge: string;
     keepOwn: string;
-    /** The Smell layer's Random lean toggle — see `randomSmell`'s `rivals`. */
-    rivals: string;
     back: string;
     presetsSmell: string;
     presetsTouch: string;
@@ -265,7 +263,7 @@ export interface PairWords {
      *  ground (`RARELY_MEET_OVERLAP`) while one of them is set to eat. */
     rarelyMeet: string;
     /** The mix row's own `.vc-label` title, above Nudge/Keep own trails/
-     *  Rivals/Back and the preset pills. */
+     *  Back and the preset pills. */
     mixTitle: string;
     /** The mix row's `.vc-hint`. */
     mixHint: string;
@@ -351,7 +349,6 @@ export const PAIR_WORDS: PairWords = {
     statusIdle: "Hover or drag a pad to read both directions.",
     nudge: "Nudge",
     keepOwn: "Keep own trails",
-    rivals: "Rivals",
     back: "Back",
     presetsSmell: "Smell only",
     presetsTouch: "With touch",
@@ -361,7 +358,7 @@ export const PAIR_WORDS: PairWords = {
     rarelyMeet: "They rarely meet, so there is little to eat. Bring them together in Smell first.",
     mixTitle: "Mix",
     mixHint:
-      "Nudge jitters the table on screen, Back undoes the last change — presets below jump to a named starting point. Random, up by the strains, rolls Smell and Touch together. With Rivals on, its Smell roll always has every strain follow its own trail and shy from the others', so it splits into territories; off, any mix can come up. Keep own trails leaves the own-trail faders where they are.",
+      "Nudge jitters the table on screen, Back undoes the last change — presets below jump to a named starting point. Random, up by the strains, rolls Smell and Touch together, each over its whole range. Keep own trails leaves the own-trail faders where they are.",
   },
 };
 
@@ -609,30 +606,6 @@ const CHASE_SMELL: readonly (readonly number[])[] = [
 // tests can supply a seeded generator; the widget itself passes `Math.random`.
 // ---------------------------------------------------------------------
 
-/** The own-trail diagonal's own random range when Random rolls the Smell
- *  layer — narrower than, and always positive unlike, a full off-diagonal
- *  roll (`[AFFINITY_MIN, AFFINITY_MAX]`): every hand-picked default and
- *  preset but Self-avoid keeps a strain's own-trail weight positive (it
- *  follows its own trail), so rolling it over the full signed range would
- *  routinely produce a strain that avoids itself, reading as broken rather
- *  than as a variant worth exploring.
- *
- *  Rolled evenly across the own-trail fader's height (`rollOwn`), not evenly
- *  in value, from near zero (a weak pull) to just past +1 (a strong one);
- *  the fader's top stretch above that all reads alike. 2026-10-03 — the
- *  user: Random smell "always resets [the own trail] to something like
- *  this", every fader near the top. The old [0.2, 1.4] (and Rivals'
- *  [0.6, 1.4]), rolled evenly in value, put nearly every thumb in the top
- *  stretch of the fader, right where the default sits. */
-export const OWN_TRAIL_RANDOM: readonly [number, number] = [0.05, 1.1];
-/** Random's Rivals lean (the mix row's Rivals toggle): every own-trail cell
- *  rolled over the first range and every off-diagonal cell over the second,
- *  so each strain always follows its own trail and avoids everyone else's —
- *  the territorial split this scene is built around, rerolled in strength
- *  only. The idea of leaning a random table this way is from Fogleman's
- *  physarum (the scene record's References); the ranges are our own. */
-export const RIVAL_OWN_RANDOM: readonly [number, number] = [0.1, 1.1];
-export const RIVAL_OTHER_RANDOM: readonly [number, number] = [-1.4, -0.4];
 /** Random's own share of off-diagonal Touch cells left at exactly 0 — the
  *  prototype's own value, so a rolled Touch table still reads mostly as a
  *  Smell-only network with a few real bites/feeds rather than a wall of
@@ -663,31 +636,46 @@ export function quantize(v: number): number {
   return Math.round(v / AFFINITY_QUANTUM) * AFFINITY_QUANTUM;
 }
 
-/** One own-trail roll over `range`, even across the own-trail fader's height
- *  (`padPos`, the map the fader draws with) rather than even in value, so a
- *  run of rolls spreads its thumbs over the fader instead of bunching where
- *  `padPos`'s curve packs large values together. */
-export function rollOwn(range: readonly [number, number], rnd: () => number): number {
-  return quantize(padValue(uniform(padPos(range[0]), padPos(range[1]), rnd)));
+/** One roll over the whole `[AFFINITY_MIN, AFFINITY_MAX]` range, even across
+ *  the height of the control that draws it (`pos`/`value`: that control's
+ *  map and its inverse) rather than even in value. Both Smell maps squeeze
+ *  some stretch of values into little travel, and an even-in-value roll piles
+ *  its thumbs up there: the own-trail fader's `padPos` packs large values
+ *  into its ends (2026-10-03, the user: Random "always resets it to something
+ *  like this", every thumb near the top), and a Smell pad's `smellPadPos`
+ *  packs every negative value — which all look alike — into a short strip,
+ *  where half of an even-in-value roll landed. */
+function rollAcross(pos: (v: number) => number, value: (pct: number) => number, rnd: () => number): number {
+  return quantize(value(uniform(pos(AFFINITY_MIN), pos(AFFINITY_MAX), rnd)));
 }
 
-/** A fresh Smell table the same size as `cur` (`cur.length` rows) — every
- *  off-diagonal cell a quantised uniform roll over the full AFFINITY range;
- *  the diagonal (own trail) is either kept exactly as `cur` has it
- *  (`keepOwn`) or rolled over `OWN_TRAIL_RANDOM` by `rollOwn`, never the
- *  full range (see that constant's own comment). `rivals` narrows both rolls
- *  to `RIVAL_OWN_RANDOM`/`RIVAL_OTHER_RANDOM`. Pure — the caller reads `cur`
- *  from the live settings and writes the result back the same way. */
-export function randomSmell(cur: readonly (readonly number[])[], keepOwn: boolean, rnd: () => number, rivals = false): number[][] {
+/** One own-trail roll: the whole range, both signs, even across the own-trail
+ *  fader (`padPos`). A negative own trail is a strain that shies from its own
+ *  trail (the Self-avoid preset's look). Until 2026-10-03 this only ever
+ *  rolled positive, which the user read as broken ("these never go below");
+ *  now it rolls the whole fader like every other control Random moves. */
+export function rollOwn(rnd: () => number): number {
+  return rollAcross(padPos, padValue, rnd);
+}
+
+/** One other-strain Smell roll: the whole range, even across a Smell pad
+ *  (`smellPadPos`), so the live 0…+1 band gets most of the rolls, as it gets
+ *  most of the pad. */
+export function rollSmellPair(rnd: () => number): number {
+  return rollAcross(smellPadPos, smellPadValue, rnd);
+}
+
+/** A fresh Smell table the same size as `cur` (`cur.length` rows), every cell
+ *  rolled over the whole AFFINITY range: the own-trail diagonal by `rollOwn`
+ *  — or, with `keepOwn`, kept exactly as `cur` has it — and every other cell
+ *  by `rollSmellPair`. Pure — the caller reads `cur` from the live settings
+ *  and writes the result back the same way. */
+export function randomSmell(cur: readonly (readonly number[])[], keepOwn: boolean, rnd: () => number): number[][] {
   const n = cur.length;
-  const own = rivals ? RIVAL_OWN_RANDOM : OWN_TRAIL_RANDOM;
-  const other: readonly [number, number] = rivals ? RIVAL_OTHER_RANDOM : [AFFINITY_MIN, AFFINITY_MAX];
   const out: number[][] = [];
   for (let i = 0; i < n; i++) {
     const row: number[] = [];
-    for (let j = 0; j < n; j++) {
-      row.push(i === j ? (keepOwn ? cur[i]![j]! : rollOwn(own, rnd)) : quantize(uniform(...other, rnd)));
-    }
+    for (let j = 0; j < n; j++) row.push(i === j ? (keepOwn ? cur[i]![j]! : rollOwn(rnd)) : rollSmellPair(rnd));
     out.push(row);
   }
   return out;

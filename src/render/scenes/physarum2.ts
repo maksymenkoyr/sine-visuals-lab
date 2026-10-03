@@ -198,11 +198,11 @@ export { ATTRACT_ROWS };
 //   trail with fillStartInk's uniform roll; Fresh dish reseeds every agent
 //   (seedAgents) and refills the trail on the next render(), phone-local
 //   like Rebalance.
-// - Random leaning to rivals, and random motion/colour, live in the panel
-//   rather than here: physarum2Affinity.ts's `randomSmell` (the Rivals
-//   toggle), and the Strain Console's mix row (MOTION_PRESETS below, its
-//   Random) and colour row (physarum2Synergy.ts's Shuffle/New palette, which
-//   only write the stains).
+// - Random Smell/Touch and random motion/colour live in the panel rather
+//   than here: physarum2Affinity.ts's `randomSmell`/`randomTouch` (the Pairs
+//   card's half of the Strains card's one Random), and the Strain Console's
+//   mix row (MOTION_PRESETS below, its Random) and colour row
+//   (physarum2Synergy.ts's Shuffle/New palette, which only write the stains).
 //
 // Phase 3 (2026-09-27): probe()/command() (scene.ts) — phone-local, cheap,
 // never reaching the TV — give the device menu's Strains widget three more

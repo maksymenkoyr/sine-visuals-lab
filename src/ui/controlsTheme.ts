@@ -1282,7 +1282,7 @@ body.vc-keys-reveal [data-keycap]::after {
   font: 400 11.5px/1.35 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75); white-space: normal;
 }
 
-/* Nudge / Keep own trails / Rivals / Back (pairPads.ts's own header, "The mix
+/* Nudge / Keep own trails / Back (pairPads.ts's own header, "The mix
  * row"). Back starts disabled (an empty history) via the plain disabled
  * state; Keep own trails toggles via aria-pressed, styled the same violet
  * as a pressed .vc-exp-pill below. */

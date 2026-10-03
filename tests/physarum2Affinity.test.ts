@@ -30,13 +30,11 @@ import {
   quantize,
   randomSmell,
   rollOwn,
+  rollSmellPair,
   randomTouch,
   nudgeTable,
   pushHistory,
   popHistory,
-  OWN_TRAIL_RANDOM,
-  RIVAL_OWN_RANDOM,
-  RIVAL_OTHER_RANDOM,
   NUDGE_MAX,
   MIX_HISTORY_MAX,
   type AffinityTables,
@@ -403,35 +401,82 @@ describe("randomSmell", () => {
     }
   });
 
-  it("the diagonal lies in OWN_TRAIL_RANDOM when not kept", () => {
+  it("the diagonal rolls the whole range, both signs, on the 0.05 grid when not kept", () => {
     const rnd = mulberry32(2);
+    let sawNeg = false;
+    let sawPos = false;
     for (let n = 0; n < 100; n++) {
       const out = randomSmell(SAMPLE_TABLE, false, rnd);
       for (let i = 0; i < 4; i++) {
-        expect(out[i]![i]).toBeGreaterThanOrEqual(OWN_TRAIL_RANDOM[0] - 1e-9);
-        expect(out[i]![i]).toBeLessThanOrEqual(OWN_TRAIL_RANDOM[1] + 1e-9);
-        expect(onQuantumGrid(out[i]![i]!)).toBe(true);
+        const v = out[i]![i]!;
+        expect(v).toBeGreaterThanOrEqual(AFFINITY_MIN);
+        expect(v).toBeLessThanOrEqual(AFFINITY_MAX);
+        expect(onQuantumGrid(v)).toBe(true);
+        if (v < 0) sawNeg = true;
+        if (v > 0) sawPos = true;
       }
     }
+    expect(sawNeg).toBe(true);
+    expect(sawPos).toBe(true);
   });
 
   // 2026-10-03: the own trail used to roll evenly in value, which put nearly
-  // every thumb in the fader's top stretch, where the default already sits.
-  it("own-trail rolls spread over the fader's height, not bunched at the top", () => {
-    for (const range of [OWN_TRAIL_RANDOM, RIVAL_OWN_RANDOM]) {
-      const rnd = mulberry32(7);
-      const lo = padPos(range[0]);
-      const hi = padPos(range[1]);
-      const mid = (lo + hi) / 2;
-      let below = 0;
-      const rolls = 2000;
-      for (let n = 0; n < rolls; n++) if (padPos(rollOwn(range, rnd)) < mid) below++;
-      // Even in fader position: about half the thumbs land in the lower half.
-      expect(below / rolls).toBeGreaterThan(0.4);
-      expect(below / rolls).toBeLessThan(0.6);
-      // And the span covers a real stretch of the fader's positive half.
-      expect(hi - lo).toBeGreaterThan(20);
+  // every thumb in the fader's top stretch, where the default already sits;
+  // the same day it became a whole-range roll, even across the fader's height.
+  it("own-trail rolls spread evenly over the whole fader's height, both signs", () => {
+    const rnd = mulberry32(7);
+    const lo = padPos(AFFINITY_MIN);
+    const hi = padPos(AFFINITY_MAX);
+    const rolls = 2000;
+    const quarters = [0, 0, 0, 0];
+    let neg = 0;
+    let zero = 0;
+    for (let n = 0; n < rolls; n++) {
+      const v = rollOwn(rnd);
+      if (v < 0) neg++;
+      // The 0.05 snap parks every roll within ±0.025 of the fader's flat,
+      // steep-in-position middle on exactly 0 (about a seventh of them), which
+      // would pile onto the quarter boundary; judge the spread on the rest.
+      if (v === 0) {
+        zero++;
+        continue;
+      }
+      const q = Math.min(3, Math.max(0, Math.floor(((padPos(v) - lo) / (hi - lo)) * 4)));
+      quarters[q]!++;
     }
+    expect(zero / rolls).toBeLessThan(0.2);
+    for (const c of quarters) {
+      expect(c / (rolls - zero)).toBeGreaterThan(0.2);
+      expect(c / (rolls - zero)).toBeLessThan(0.3);
+    }
+    expect(neg / (rolls - zero)).toBeGreaterThan(0.45);
+    expect(neg / (rolls - zero)).toBeLessThan(0.55);
+  });
+
+  it("other-pair rolls spread evenly over a Smell pad's height, so the live 0…+1 band gets most", () => {
+    const rnd = mulberry32(8);
+    const lo = smellPadPos(AFFINITY_MIN);
+    const hi = smellPadPos(AFFINITY_MAX);
+    const rolls = 2000;
+    const quarters = [0, 0, 0, 0];
+    let live = 0;
+    let neg = 0;
+    for (let n = 0; n < rolls; n++) {
+      const v = rollSmellPair(rnd);
+      expect(onQuantumGrid(v)).toBe(true);
+      const q = Math.min(3, Math.max(0, Math.floor(((smellPadPos(v) - lo) / (hi - lo)) * 4)));
+      quarters[q]!++;
+      if (v >= 0 && v <= 1) live++;
+      if (v < 0) neg++;
+    }
+    for (const c of quarters) {
+      expect(c / rolls).toBeGreaterThan(0.2);
+      expect(c / rolls).toBeLessThan(0.3);
+    }
+    expect(live / rolls).toBeGreaterThan(0.55);
+    expect(live / rolls).toBeLessThan(0.65);
+    expect(neg / rolls).toBeGreaterThan(0.2);
+    expect(neg / rolls).toBeLessThan(0.3);
   });
 
   it("keepOwn preserves the diagonal exactly", () => {
@@ -591,35 +636,6 @@ describe("pushHistory / popHistory", () => {
     const [rest, popped] = popHistory([]);
     expect(popped).toBeUndefined();
     expect(rest).toEqual([]);
-  });
-});
-
-describe("randomSmell's Rivals lean", () => {
-  it("rolls every own trail positive and every other trail negative, on the 0.05 grid", () => {
-    const rnd = mulberry32(31);
-    for (let n = 0; n < 100; n++) {
-      const out = randomSmell(SAMPLE_TABLE, false, rnd, true);
-      for (let i = 0; i < 4; i++) {
-        for (let j = 0; j < 4; j++) {
-          const v = out[i]![j]!;
-          const [lo, hi] = i === j ? RIVAL_OWN_RANDOM : RIVAL_OTHER_RANDOM;
-          expect(v).toBeGreaterThanOrEqual(lo - 1e-9);
-          expect(v).toBeLessThanOrEqual(hi + 1e-9);
-          expect(onQuantumGrid(v)).toBe(true);
-        }
-      }
-    }
-    expect(RIVAL_OWN_RANDOM[0]).toBeGreaterThan(0);
-    expect(RIVAL_OTHER_RANDOM[1]).toBeLessThan(0);
-  });
-
-  it("still keeps the own trails exactly under keepOwn", () => {
-    const out = randomSmell(SAMPLE_TABLE, true, mulberry32(32), true);
-    for (let i = 0; i < 4; i++) expect(out[i]![i]).toBe(SAMPLE_TABLE[i]![i]);
-  });
-
-  it("the Pairs widget has a word for the toggle", () => {
-    expect(PAIR_WORDS.ui.rivals.length).toBeGreaterThan(0);
   });
 });
 

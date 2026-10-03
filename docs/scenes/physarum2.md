@@ -62,7 +62,7 @@ labelled Rivalry, then Hostility — Crawl speed, Beat seeding, Exposure, Palett
 tint, Beat flash), each of the latter still carrying its own `auto` weights as before;
 and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
 Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
-pair (`pairsOf`), a Nudge/Keep own trails/Rivals/Back mix row and named
+pair (`pairsOf`), a Nudge/Keep own trails/Back mix row and named
 presets — replacing the old plain-word rows/SVG-web pair,
 `relationRows.ts`/`relationWeb.ts`, both deleted) in its own Affinity card
 right after the Scene card ("The Affinity card" below). `src/render/scenes/
@@ -808,10 +808,13 @@ configs are used.
     noise. Half of the first `START_INK_MAX` washed the first frames pink,
     so the range came down and the default is small (`START_INK_DEFAULT`).
     Fresh dish is phone-local, like Rebalance and the pipette.
-  - **Rivals** (Affinity mix row, on by default): Random smell rolls own
-    trails positive and every other trail negative (`RIVAL_OWN_RANDOM`/
-    `RIVAL_OTHER_RANDOM`), so a roll always splits into territories. Off is
-    the old any-sign roll.
+  - **Random over the whole range** (the Pairs card's half of the Strains
+    card's one Random): every Smell cell rolls over the whole range, even
+    across the control that draws it — own trails across the fader
+    (`rollOwn`, so a strain can come out self-avoiding), other pairs across
+    the pad (`rollSmellPair`). A Rivals toggle that kept every roll in the
+    Rivals preset's shape (own trail followed, everyone else's avoided) was
+    removed on 2026-10-03; the Rivals preset gives that table in one press.
   - **Random motion and motion presets** (the Strain Console's new mix row):
     Random rolls `MOTION_PARAMS` for every strain over the sliders' whole
     ranges (which already span his random
@@ -900,6 +903,38 @@ configs are used.
   new one that own-trail rolls split about evenly over the fader), headless
   screenshots of the panel before and after, six scripted rolls reading the
   own-trail values back.
+
+- **2026-10-03: Random rolls Smell over the whole range; the Rivals toggle
+  is gone.** The user, with a screenshot of the own-trail faders after a
+  Random (all four positive): "something weird with how random works in
+  physarum 2 … these never goes below", then "double check on others param
+  randomisation. if they randoming in whole range". The audit: motion
+  (`MOTION_PARAMS`) and Touch already rolled their sliders' whole ranges;
+  Nutrient, Excitability and Trail life are not rolled at all, and Stain
+  only by Shuffle/New palette. Smell did not: the own trail rolled
+  +0.05…+1.1 with Rivals off and +0.1…+1.1 with it on (the default), and
+  with Rivals on every other pair rolled −1.4…−0.4 — where, by
+  `padresponse.mjs`, every value looks the same — so a default Random only
+  varied own-trail strength. Twelve scripted rolls of the old build
+  (`rollshot.mjs`): 0 of 48 own trails negative, all 141 stored other
+  values in −1.4…−0.4. Asked what Rivals was, the user: "doesn't it
+  duplicate some other params" — it did: the toggle only kept Random's
+  rolls in the Rivals preset's shape, a pill right under it. "remove". Now
+  `randomSmell` rolls every cell over the whole range, even across the
+  control that draws it (`rollOwn` over the fader's `padPos`,
+  `rollSmellPair` over a Smell pad's `smellPadPos`), so a strain can come
+  out self-avoiding and the pads' live 0…+1 band gets most of the pair
+  rolls; Keep own trails still holds the own trails. A side effect of the
+  even-across-the-fader roll: the fader is flat around zero, so the 0.05
+  snap lands about a seventh of own trails on exactly 0 (a strain that
+  ignores its own trail). Nutrient, Excitability and Trail life stay
+  unrolled (not asked for). Twelve rolls of the new build: 22 of 48 own
+  trails negative, reaching both −1.50 and +1.50; other values 30 below 0,
+  96 in 0…+1, 18 above +1. A roll with three self-avoiding strains
+  rendered as one strain's network over the others' dust, as Self-avoid
+  does. Checks: typecheck, the full suite (one unrelated, load-dependent
+  `moire.test.ts` timeout that passes alone), the Affinity card before and
+  after.
 
 ## Tuning notes
 
@@ -1137,6 +1172,11 @@ applies there too. Tuned so far only against the synthetic feed at
   - `padshot.mjs` — the Pairs pads at rest, held mid-drag (cursor hint and
     spotlight) and 1 s after release, `--layer touch` for the second table;
     the before/after shots of the Clearer pads build.
+  - `rollshot.mjs` — presses the Strains card's one Random a dozen times
+    with real presses, prints every Smell value after each roll and where
+    they landed (own trails below 0; other values below 0, in 0…+1, above
+    +1), and shoots the Affinity card before and after plus the window;
+    the before/after of the 2026-10-03 whole-range Random.
   - `padmodels.mjs` — node, no server: the shipped steering against two
     rejected models (probability gate, value-scaled reach) for avoid
     strength; see its header.
@@ -1200,7 +1240,7 @@ untouched. Not yet judged on real music; the default line is
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
 and why), and Fogleman's extras are in (2026-10-02: Auto level, Wander,
-Start ink and Fresh dish, Rivals, the one Random (2026-10-03), presets and
+Start ink and Fresh dish, the one Random (2026-10-03), presets and
 Shuffle/New palette). What's left is Known issues: a real-GPU, real-music
 look at those, a real-music listen at Switching's default and
 `SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
@@ -1232,7 +1272,7 @@ device-wide master. `tests/physarum2Affinity.test.ts` is
 math, the vocabulary shape (`PAIR_WORDS`, `AFFINITY_PRESETS`), the pad/preset
 pure helpers (`wordBand`/`pairZone`/`pairRelation`/`fillTemplate`/
 `padPos`/`padValue`/`pairsOf`/`tablesMatch`), and the mix row's own pure
-logic (`randomSmell` with and without its Rivals lean/`randomTouch`/
+logic (`randomSmell`'s whole-range rolls, even across fader and pad/`randomTouch`/
 `nudgeTable`/`pushHistory`/`popHistory`, each exercised with a seeded
 `mulberry32`, never `Math.random`). Shuffle/New palette's pure half is in
 `tests/physarum2Synergy.test.ts`, the console's Random/preset matching in
