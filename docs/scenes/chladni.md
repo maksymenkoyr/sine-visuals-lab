@@ -168,6 +168,15 @@ measured from a reference clip.
   (`palRamp(0.35 + 0.3 * a)`). Every palette's ramp rises in lightness
   (`tests/palette.test.ts`), so the sand reads in all of them. Under Neon the
   sand stays pink, running to near-white when thrown instead of to blue.
+- 2026-10-03 — Beat flash renamed **Flash** and made harder (the user asked
+  for it to "go harder"). The key stays `beatFlash`, so saved looks and share
+  codes still load. Grain brightness at full Flash went from ×1.8 to ×3, and
+  the default from 0.3 to 0.5. The plate used to get only a ×1.3 gain, which
+  on a near-black plate showed as nothing, so it now also lifts toward the
+  palette's middle (`palRamp(0.5)`). Measured headless at 1280×720, synthetic
+  120 BPM, default settings, a 24-frame burst: frame mean luma swung
+  42→52 (1.24×, mostly the sand pattern changing) before and 46→68 (1.48×)
+  after, with on-beat frames reading white-hot.
 
 ## Tuning notes
 
