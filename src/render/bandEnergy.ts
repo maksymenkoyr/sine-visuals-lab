@@ -1,7 +1,7 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import { hitStrength, pulseDecayScale, type HitShape, type HitParts } from "../audio/hitStrength.ts";
+import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitParts } from "../audio/hitStrength.ts";
 
 // Splits the 24 log-spaced bands into low/mid/high groups and derives, per
 // group: a slewed continuous level (safe to drive geometry with — it can't
@@ -167,6 +167,7 @@ function advanceGroup(
   rateScale: number,
   dimmer: number,
   shape: HitShape | undefined,
+  lane: HitLane,
 ): void {
   const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
   const raw = meanRange(bands, spec.lo, spec.hi);
@@ -205,7 +206,7 @@ function advanceGroup(
   state.diag.sinceOnsetSec = state.sinceOnsetSec;
   if (state.onset) state.sinceOnsetSec = 0;
 
-  state.pulse *= Math.exp(-dt * spec.pulseDecayRate * rateScale * pulseDecayScale(shape));
+  state.pulse *= Math.exp(-dt * spec.pulseDecayRate * rateScale * pulseDecayScale(shape, lane));
   if (state.onset) {
     if (shape) {
       const hit = hitStrength(state.diag.ratio, raw, shape, state.hit);
@@ -296,9 +297,9 @@ export function createBandEnergy(): BandEnergy {
         seenVersion = currentVersion;
       }
 
-      advanceGroup(low, specs.low, dtSec, bands, rateScale, dimmer, shape);
-      advanceGroup(mid, specs.mid, dtSec, bands, rateScale, dimmer, shape);
-      advanceGroup(high, specs.high, dtSec, bands, rateScale, dimmer, shape);
+      advanceGroup(low, specs.low, dtSec, bands, rateScale, dimmer, shape, "low");
+      advanceGroup(mid, specs.mid, dtSec, bands, rateScale, dimmer, shape, "mid");
+      advanceGroup(high, specs.high, dtSec, bands, rateScale, dimmer, shape, "high");
 
       result.low = low.level;
       result.mid = mid.level;

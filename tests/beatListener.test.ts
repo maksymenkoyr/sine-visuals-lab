@@ -10,7 +10,7 @@ import { CUT_LISTENER } from "../src/render/scenes/shards/layout.ts";
 import { SIGNALS } from "../src/render/signals.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import type { OnsetDiag } from "../src/audio/onsetDiag.ts";
-import type { HitParts } from "../src/audio/hitStrength.ts";
+import { UNIT_TAILS, type HitParts } from "../src/audio/hitStrength.ts";
 
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
 const NULL_HIT: HitParts = { standout: 0, loudness: 0, strength: 0 };
@@ -56,7 +56,7 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     metronomeBar: false,
     metronomePulse: 0,
     metronomeBarPulse: 0,
-    hitTail: 1,
+    hitTail: UNIT_TAILS,
     gateDimmer: 1,
     hits: { low: NULL_DIAG, mid: NULL_DIAG, high: NULL_DIAG },
     hitStrength: { beat: NULL_HIT, low: NULL_HIT, mid: NULL_HIT, high: NULL_HIT },

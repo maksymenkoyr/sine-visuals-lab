@@ -43,7 +43,7 @@ import {
   type SilenceGateMarks,
   type SilenceGateReading,
 } from "../audio/silenceGate.ts";
-import type { HitShape } from "../audio/hitStrength.ts";
+import type { HitShape, HitShapePatch } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
@@ -677,7 +677,7 @@ export interface DeviceMenuDeps {
    *  loudness should blend into its pulse height is a taste about
    *  detection itself, not one scene's look. */
   getHitShape: () => HitShape;
-  setHitShape: (partial: Partial<HitShape>) => void;
+  setHitShape: (partial: HitShapePatch) => void;
   /** Whether every member of "the whole mic" is on auto for this scene —
    *  drives the Input card's own Auto button. See src/audio/micAuto.ts's
    *  header for exactly what that membership is and how it overlaps

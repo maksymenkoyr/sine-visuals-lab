@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createBandEnergy } from "../src/render/bandEnergy.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { setBandSplit, resetBandSplit } from "../src/audio/bandSplit.ts";
-import type { HitShape } from "../src/audio/hitStrength.ts";
+import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
 
 const DT = 1 / 60;
 
@@ -346,7 +346,7 @@ describe("band energy", () => {
   });
 
   it("with a shape at amount 1, a bigger rise yields a bigger pulse", () => {
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: 1 };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: UNIT_TAILS };
     const weak = createBandEnergy();
     const strong = createBandEnergy();
     const quiet = bandsWith([]);
@@ -368,9 +368,9 @@ describe("band energy", () => {
     expect(strong.lowPulse).toBeLessThanOrEqual(1);
   });
 
-  it("a longer tail keeps a band's pulse up longer; a shorter one drops it sooner", () => {
-    const pulseAfterTenTicks = (tail: number): number => {
-      const shape: HitShape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail };
+  it("a longer Low tail keeps the low pulse up longer; a shorter one drops it sooner", () => {
+    const pulseAfterTenTicks = (low: number, mid = 1): number => {
+      const shape: HitShape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail: { ...UNIT_TAILS, low, mid } };
       const energy = createBandEnergy();
       const quiet = bandsWith([]);
       for (let i = 0; i < 60; i++) energy.advance(DT, quiet, 1, 1, shape);
@@ -382,10 +382,12 @@ describe("band energy", () => {
     const plain = pulseAfterTenTicks(1);
     expect(pulseAfterTenTicks(2)).toBeGreaterThan(plain);
     expect(pulseAfterTenTicks(0.5)).toBeLessThan(plain);
+    // Each group answers only to its own lane.
+    expect(pulseAfterTenTicks(1, 4)).toBe(plain);
   });
 
   it("a floor above a hit's own stand-out yields pulse 0 while onset is still true", () => {
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.9, tail: 1 };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.9, tail: UNIT_TAILS };
     const energy = createBandEnergy();
     const quiet = bandsWith([]);
     for (let i = 0; i < 60; i++) energy.advance(DT, quiet, 1, 1, shape);
