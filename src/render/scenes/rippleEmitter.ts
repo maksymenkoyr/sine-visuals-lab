@@ -386,16 +386,19 @@ const SALIENCE_FLOOR_RELAX_SEC = 3; // floor decays toward 0 with this time cons
 const SALIENCE_PEAK_RELAX_SEC = 6; // peak decays toward the floor with this time constant
 const SALIENCE_SPREAD_MIN = 0.3;
 
-// Ring threshold (0..1) → the bar. The margin runs from 1× the floor (ring
-// on anything just above the everyday sounds) to 3×. Above the default a
-// fixed minimum also grows, up to RING_THRESHOLD_MIN_AT_1, so raising the
+// Ring threshold (0..1) → the bar; Physarum 2's Dose threshold shares it
+// through advanceStandout. The margin runs linearly from
+// RING_THRESHOLD_MARGIN_AT_0 times the floor (none: every climb rings
+// whatever the floor) to RING_THRESHOLD_MARGIN_AT_1 times. Above the default
+// a fixed minimum also grows, up to RING_THRESHOLD_MIN_AT_1, so raising the
 // setting still does something on a clean source whose floor is 0.
-// RING_THRESHOLD_DEFAULT is exactly the behaviour before this was a setting:
-// a 1.5× margin and no minimum.
+// RING_THRESHOLD_DEFAULT lands exactly on the behaviour before this was a
+// setting (and before the range was widened on 2026-10-03): a 1.5× margin
+// and no minimum.
 export const RING_THRESHOLD_DEFAULT = 0.25;
-const RING_THRESHOLD_MARGIN_AT_0 = 1;
-const RING_THRESHOLD_MARGIN_AT_1 = 3;
-const RING_THRESHOLD_MIN_AT_1 = 0.25;
+const RING_THRESHOLD_MARGIN_AT_0 = 0;
+const RING_THRESHOLD_MARGIN_AT_1 = 6;
+const RING_THRESHOLD_MIN_AT_1 = 0.5;
 
 /** How far a climb must rise above its starting dip before it rings, for
  *  this floor and Ring threshold setting. Only ever called with the setting
@@ -474,7 +477,9 @@ function learnClimb(state: RippleEmissionState, climb: number): void {
  *  sized by salience (see the SALIENCE_* constants' comment): background
  *  climbs emit ~0, standout ones a full ring.
  *
- *  `threshold` is `null` for Ring threshold's own Off switch: every climb
+ *  `threshold` is `null` for a scene-handled threshold's Off switch
+ *  (Physarum 2's Dose — Caustics' Ring threshold is a plain setting with no
+ *  Off; its left end is the nearest thing): every climb
  *  rings, sized by nothing but its own absolute size (the bar is 0, the
  *  spread 1, so `target` above is just `clamp01(climb)`) — no standout
  *  required. The salience trackers (`floor`/`peak`) keep learning regardless
@@ -570,9 +575,8 @@ export function advanceStandout(
  *  for a ring to start, `fullRing` the level that makes it full strength,
  *  both measured from where the current climb started (or, between climbs,
  *  from where the signal is now — the dip a next climb would start from).
- *  `null` while Ring threshold is off — there's no bar to draw when every
- *  climb rings regardless of size (caustics.ts then publishes no lines at
- *  all, though the ring itself still shows as a reaction). */
+ *  `null` while the threshold is off — there's no bar to draw when every
+ *  climb counts regardless of size. */
 export function salienceMarks(state: RippleEmissionState): { ringsAbove: number; fullRing: number } | null {
   if (!state.thresholdOn) return null;
   if (state.climbing) {

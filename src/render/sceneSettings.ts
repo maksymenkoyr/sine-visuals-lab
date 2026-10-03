@@ -159,8 +159,8 @@ export interface SceneSetting {
     sceneSources?: readonly SignalId[];
     /** Declares this setting scene-handled for its own threshold — a gate
      *  the scene applies itself to whatever this setting receives, shaped
-     *  however its own signal needs (Beat ripple's adaptive "reach to ring"
-     *  line, rippleEmitter.ts, is the original of this). The panel shows the
+     *  however its own signal needs (Physarum 2's Dose threshold, on
+     *  rippleEmitter.ts's salience trackers, is one). The panel shows the
      *  On/Off toggle + slider right under this setting's graph
      *  (deviceMenu.ts), starting on; it's saved with the rest of this
      *  setting's patch (driveStore.ts's getDriveThresholdState), and the

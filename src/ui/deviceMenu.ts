@@ -2915,7 +2915,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** Every drive setting's own threshold row — On/Off + a labelled 0..1
    *  slider, right under its graph (or where the graph would be with
    *  nothing plugged in yet). Scene-handled (SceneSetting.drive.threshold
-   *  declared — Beat ripple's "reach to ring" line) uses its own label/hint
+   *  declared — Physarum 2's Dose threshold) uses its own label/hint
    *  and starts on; every other drive setting uses the generic label/hint
    *  and starts off, gated by drives.ts's own engine (that file's header's
    *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
