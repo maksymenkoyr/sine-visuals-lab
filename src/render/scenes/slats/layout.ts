@@ -258,6 +258,28 @@ export function packSlats(slats: readonly PackedSlat[]): Float32Array {
   return out;
 }
 
+/** The two packed layouts mixed at progress `m` (0..1, already eased) — exactly
+ *  what SLAT_VERT's `mix(aSlatA*, aSlatB*, uMorphMix)` shows on screen at that
+ *  moment. index.ts bakes this into the A buffer when a reshuffle restarts the
+ *  fade mid-way, so the new fade starts from the picture that is on screen
+ *  rather than snapping back to the old A. */
+export function bakeMorph(a: Float32Array, b: Float32Array, m: number): Float32Array {
+  const out = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = a[i] + (b[i] - a[i]) * m;
+  return out;
+}
+
+/** Roll angle (radians) after `dt` seconds at `degPerSec`. An accumulated
+ *  phase, never rate x absolute time: moving the Roll slider then changes
+ *  the *speed* from here on instead of re-aiming the whole picture by
+ *  (change in rate x seconds elapsed). Wrapped to a turn so it stays small
+ *  enough for float32 trig on a long session. */
+export function advanceRollPhase(phase: number, degPerSec: number, dt: number): number {
+  const turn = Math.PI * 2;
+  const next = (phase + degPerSec * (Math.PI / 180) * dt) % turn;
+  return next < 0 ? next + turn : next;
+}
+
 /** Time constant of the beat-triggered height/brightness kick (sync
  *  hypothesis 1) — short enough to read as a strike, the same family as
  *  caustics.ts's RIPPLE_ATTACK_SEC. */

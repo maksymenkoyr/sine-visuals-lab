@@ -1,78 +1,30 @@
-import type { SceneSetting } from "../../render/sceneSettings.ts";
 import { createStrainPreview, type StrainPreview } from "../../render/scenes/physarum2Preview.ts";
-import { chipBtnLitStyle, chipBtnStyle, createChipButton, groupHeading } from "../controlsKit.ts";
-import { registerWidget, type LinkedSetting, type WidgetCtx } from "./registry.ts";
-import { getPreviewSource } from "./previews.ts";
-import { buildRelationPresets, buildRelationRows, type RelationPreset, type RelationWord } from "./relationRows.ts";
-import { buildRelationWeb } from "./relationWeb.ts";
-import {
-  affinityRowTargets,
-  allItemsSelected,
-  editingHeading,
-  primarySelection,
-  sameSelection,
-  soloSelection,
-  toggleItemSelection,
-} from "./itemSelection.ts";
+import type { AffinityPreset, PairWords } from "../../render/scenes/physarum2Affinity.ts";
+import { chipBtnLitStyle, chipBtnStyle, createChipButton } from "../controlsKit.ts";
+import { SCENE_VIOLET } from "../controlsTheme.ts";
+import { registerWidget, type WidgetCtx } from "./registry.ts";
+import { getPreviewSource, type PreviewEffective } from "./previews.ts";
+import { buildPairPads } from "./pairPads.ts";
+import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
 
 /**
- * The generic "item boxes" widget: one specimen box per item of a
- * `SceneSetting.item`-tagged family (code/label + colour LED + a preview
- * area), a shared selection, and the selected item's own controls rendered
- * as real device-menu rows below the boxes. Built for Physarum 2's four
- * strains but generic over any scene's item family — a future scene reuses
- * this by declaring its own `Scene.panel` entry with `widget: "itemBoxes"`.
+ * The generic "item boxes" widget: one live specimen box per item of a
+ * `SceneSetting.item`-tagged family (code/label + colour LED + a live preview
+ * culture + POP/TERR/VIG readouts), the population bar with Rebalance and the
+ * Pipette, and — mounted as their own cards right after the Scene card — the
+ * Strain Console (`options.console`, src/ui/widgets/strainConsole.ts: every
+ * per-item setting for all the items at once, as lanes) and the
+ * Pairs pads (`options.relations`, src/ui/widgets/pairPads.ts). Built for
+ * Physarum 2's four strains but generic over any scene's item family — a
+ * future scene reuses this by declaring its own `Scene.panel` entry with
+ * `widget: "itemBoxes"`.
  *
- * `options` (see `ItemBoxesOptions` below): `labels`/`colours` per item,
- * `rowOrder` — the per-item param keys (`SceneSetting.item.param`) to show,
- * in order — an optional `relations` block for a *pairwise* family
- * (`att<i><j>`, via `sceneItems.ts`'s `defineItemPairs`): plain-word rows
- * from the selected item to every item (including itself), a compact SVG
- * web overview, and named presets — and an optional `preview` id (Phase 3).
- * Affinity has no selection of its own — it always follows the box selection
- * (the approved UX) — so a click on a box, a web node, or an experiment pill
- * all funnel through `updateSelection` below (see the Solo paragraph
- * further down for what that actually rebuilds). The current selection is
- * the one piece of state this widget keeps of its own, in localStorage keyed
- * by (scene, family) — a convenience only, wrapped in try/catch like every
- * other localStorage read/write in this codebase (sceneSettings.ts's own
- * store is the precedent).
- *
- * **Multi-selection (2026-09-27).** The "All" chip above the boxes selects
- * every item at once; the "Editing …" line under it names the current set
- * (`editingHeading`). The rows below the boxes are always the PRIMARY item's
- * own (`primarySelection` — the lowest selected index, "first in code
- * order"), but every edit made there is handed to `ctx.appendRow`/
- * `ctx.mountRows` as `{ ownLabel, linked }` (registry.ts's own doc comment on
- * that option) so deviceMenu.ts fans the edit out to every other selected
- * item's same setting, draws a divergent-value tick per one that still
- * disagrees, and folds a disagreeing drive/patch into a "Mixed — …" summary.
- * Affinity's own per-row fan-out (`affinityRowTargets`) follows the same
- * selection.
- *
- * **Solo vs. group, and no redraw on click (2026-09-27b).** A tap on a box
- * BODY (or a relation-web node) *solos* — the selection becomes exactly that
- * one item, even when a group was active (itemSelection.ts's
- * `soloSelection`) — since that's the common case and a still-lit group from
- * three taps ago is more often a stale surprise than an intended one. A
- * small checkbox in each box's header corner (real `<button role="checkbox"
- * aria-checked>`, ticked = in the edit group) is the deliberate way to build
- * a group: ticking adds, unticking removes (never empty —
- * `toggleItemSelection`'s own invariant), and a Shift/Cmd/Ctrl-modified tap
- * on the body does the same toggle for a desktop user who'd rather not
- * aim for the checkbox. None of this calls `ctx.rerender()` any more: a
- * selection change only (a) updates the box classes/checkboxes/"Editing"
- * line in place (`refreshBoxSelection`), (b) disposes and re-mounts the rows
- * section through `ctx.mountRows` (`mountRowsSection`), and (c) rebuilds the
- * Affinity web/rows/presets in place (`refreshAffinity` — that block is
- * plain widget-owned DOM with no deviceMenu registrations of its own, so a
- * full clear-and-rebuild of just its own host is enough). The boxes
- * themselves, their live preview canvases and sims, and the tick loop are
- * built once per widget mount and never touched by a selection change — see
- * registry.ts's header for why `ctx.mountRows` exists rather than reaching
- * for `ctx.rerender()` here. `ctx.rerender()` is still right for a Look
- * apply or a card Reset (deviceMenu.ts's own callers), since those actually
- * change values this widget doesn't otherwise watch for.
+ * **No selection.** The boxes used to be a selection (tap = solo, checkbox =
+ * group) whose rows showed one strain's settings at a time; the Strain Console
+ * replaced that (2026-09-29), so a box now just names a strain for the
+ * Pipette: tapping it aims the pipette at that strain and arms it; tapping the
+ * armed box again disarms. Nothing here is persisted (an armed pipette
+ * shouldn't survive a reload).
  *
  * **Phase 3 (`options.preview`).** When set, `src/ui/widgets/previews.ts`'s
  * registry resolves it to a `PreviewSource` (size/agent count + an
@@ -90,13 +42,15 @@ import {
  *     see docs/scenes/physarum2.md's Phase 3 entry for the measured cost);
  *   - adds a POP/TERR/VIG readout row per box (`ctx.probe()` for
  *     population/territory, `ctx.driveValue()` on the item's own Nutrient
- *     setting for Vigour — no scene involvement for that last one);
- *   - adds a population bar + Rebalance button below the boxes
- *     (`ctx.command("rebalance", {})`);
- *   - adds a Pipette toggle next to it: while armed, the next pointerdown on
- *     the main visualisation canvas (`#gl` — see index.html) calls
- *     `ctx.command("inject", {x, y, strain})` with the tap converted to that
- *     canvas's own 0..1 fraction (DOM y-down flipped to the shader's
+ *     setting for Vigour — no scene involvement for that last one). POP is
+ *     the measured headcount — nobody sets it (physarum2.ts's Switching
+ *     rule) — so the bar below is a read-only readout with Rebalance, and
+ *     Fresh dish (`ctx.command("fresh")`, 2026-10-02) beside it, which
+ *     restarts the whole dish;
+ *   - adds a Pipette toggle next to Rebalance: while armed, the next
+ *     pointerdown on the main visualisation canvas (`#gl` — see index.html)
+ *     calls `ctx.command("inject", {x, y, strain})` with the tap converted to
+ *     that canvas's own 0..1 fraction (DOM y-down flipped to the shader's
  *     vUv y-up — see physarum2.ts's coverUv/roomUv paragraph) and shows a
  *     brief amber ring at the tap point; staying armed for repeated taps
  *     until toggled off, Esc, or the panel closing (`ctx.onDispose`) removes
@@ -104,51 +58,63 @@ import {
  *     the canvas is also what the person is just watching, so accidental
  *     injects from an unrelated tap would be surprising — "this screen only"
  *     is stated in the button's own title since neither command reaches a
- *     paired TV. Armed-state is kept in an in-memory map keyed by (scene,
- *     family), like the selection above, but never in localStorage — an
- *     armed pipette shouldn't survive a reload.
+ *     paired TV.
+ *
+ * **One Random (2026-10-03).** The user: "can we group this all in one cool
+ * random button. random smell, touch, per strain card". A single Random
+ * under the boxes calls the Strain Console's `randomize` and the Pairs
+ * pads' (Smell and Touch together); neither card has a Random of its own
+ * any more. Each roll lands as one entry on each card's own Back, so a roll
+ * whose motion is good but whose affinities aren't can be half-undone.
+ *
+ * One `effective()` reading per item per tick feeds the preview, the box's own
+ * colour and the console's colours — Synergy and Stain move a strain's colour
+ * live, so nothing here keeps the base colour past the first paint.
  */
 
 export interface ItemBoxesOptions {
   /** Per-item display code/name, in index order. */
   labels: readonly string[];
-  /** Per-item CSS colour, same order as `labels`. */
+  /** Per-item CSS colour, same order as `labels` — the colour until a preview
+   *  source supplies the live one. */
   colours: readonly string[];
-  /** `SceneSetting.item.param` values to render, in display order, for
-   *  whichever item is selected. */
-  rowOrder: readonly string[];
-  /** Plural noun for the "Editing all `itemNoun`" heading once every item is
-   *  selected (itemSelection.ts's `editingHeading`) — e.g. "strains".
-   *  Defaults to "items" so a family that never names one still reads. */
-  itemNoun?: string;
   /** A registered id in src/ui/widgets/previews.ts — see this file's header.
    *  Omit for the old sized placeholder swatch (no live preview/readouts/
    *  population bar/pipette). */
   preview?: string;
+  /** Key of the plain setting that shapes the population split (Switching),
+   *  drawn as a row under the population bar. List it in the section's
+   *  `PanelSection.settings` too so the Scene card doesn't show it twice. */
+  headcountSetting?: string;
+  /** The Strain Console card (strainConsole.ts) — omit for no per-item
+   *  settings card. */
+  console?: ConsoleOptions & { title: string };
   relations?: {
-    /** The pairwise family's key prefix (`defineItemPairs`'s own `key`,
-     *  e.g. "att") — `<prefix><i><j>` is looked up directly. */
-    prefix: string;
     title: string;
-    words: readonly RelationWord[];
-    presets?: readonly RelationPreset[];
+    /** `item.param` of each pair table the Pairs widget edits
+     *  (`defineItemPairs`'s own `key`, e.g. `{ smell: "att", touch:
+     *  "touch" }`) — `touch` omitted hides the Smell/Touch switch. */
+    tables: { smell: string; touch?: string };
+    /** Short codes (e.g. "A1") for axis captions and pad-header values —
+     *  same order as `labels`. */
+    shortLabels: readonly string[];
+    words: PairWords;
+    presets?: readonly AffinityPreset[];
   };
 }
 
-function selectStoreKey(sceneId: string, family: string): string {
-  return `vibe.widgetSelect.${sceneId}.${family}`;
-}
-
-// Whether the pipette is armed, per (scene, family) — in-memory only (never
-// localStorage: an armed pipette shouldn't survive a reload) but keyed the
-// same way the selection above is, so it survives a full widget rebuild (a
-// Look apply, a card Reset — the only things left that re-run this builder;
-// a selection change no longer does, see this file's header) instead of
-// resetting under one.
+// Whether the pipette is armed, and at which item, per (scene, family) — in
+// memory only, but keyed so it survives a full widget rebuild (a Look apply, a
+// card Reset — what still re-runs this builder) instead of resetting under one.
 const pipetteArmedByFamily = new Map<string, boolean>();
+const pipetteItemByFamily = new Map<string, number>();
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function cssRgb(c: readonly [number, number, number]): string {
+  return `rgb(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)})`;
 }
 
 /** A brief amber flash at the tap point — document-body-fixed so it isn't
@@ -163,54 +129,15 @@ function showPipetteRing(clientX: number, clientY: number): void {
   setTimeout(() => ring.remove(), 700);
 }
 
-/** Reads the persisted selection set, ascending/deduped/non-empty. Also
- *  reads the pre-multi-select shape (a bare JSON number — `String(index)`
- *  is valid JSON) as that one index, so a browser that saved a single
- *  selection before this change upgrades cleanly instead of losing it. */
-function readSelectedSet(sceneId: string, family: string, count: number): number[] {
-  try {
-    const raw = localStorage.getItem(selectStoreKey(sceneId, family));
-    if (raw === null) return [0];
-    const parsed: unknown = JSON.parse(raw);
-    const arr = typeof parsed === "number" ? [parsed] : Array.isArray(parsed) ? parsed : null;
-    if (!arr) return [0];
-    const valid = [...new Set(arr.filter((n): n is number => Number.isInteger(n) && n >= 0 && n < count))].sort(
-      (a, b) => a - b,
-    );
-    return valid.length ? valid : [0];
-  } catch {
-    return [0];
-  }
-}
-
-function writeSelectedSet(sceneId: string, family: string, indices: readonly number[]): void {
-  try {
-    localStorage.setItem(selectStoreKey(sceneId, family), JSON.stringify(indices));
-  } catch {
-    // Not fatal — the selection just won't survive a reload.
-  }
-}
-
-function findPairSpec(
-  specs: readonly SceneSetting[],
-  family: string,
-  param: string,
-  i: number,
-  j: number,
-): SceneSetting | undefined {
-  return specs.find((s) => s.item?.family === family && s.item.param === param && s.item.index === i && s.item.other === j);
-}
-
 /** Phase 3 preview sims persist across a full widget rebuild (a Look apply,
- *  a card Reset, reopening the panel — a selection change no longer rebuilds
- *  the boxes at all, see this file's header) instead of restarting from
- *  noise every time: keyed by (scene, family, item index), looked up here
- *  and reattached to whatever new `<canvas>` this build made for it, rather
- *  than recreated with the rest of this function's own DOM.
- *  `PREVIEW_CACHE_MAX` is a safety net, not a real limit — one item family's
- *  worth of entries never gets close to it; it only matters if a session
- *  somehow visits far more item-preview scenes than exist today, and even
- *  then it just drops the oldest rather than growing forever. */
+ *  a card Reset, reopening the panel) instead of restarting from noise every
+ *  time: keyed by (scene, family, item index), looked up here and reattached
+ *  to whatever new `<canvas>` this build made for it, rather than recreated
+ *  with the rest of this function's own DOM. `PREVIEW_CACHE_MAX` is a safety
+ *  net, not a real limit — one item family's worth of entries never gets close
+ *  to it; it only matters if a session somehow visits far more item-preview
+ *  scenes than exist today, and even then it just drops the oldest rather than
+ *  growing forever. */
 const PREVIEW_CACHE_MAX = 24;
 const previewCache = new Map<string, StrainPreview>();
 
@@ -233,10 +160,7 @@ function cachedPreview(sceneId: string, family: string, index: number, size: num
 registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) => {
   // Guarded, then re-declared with their definite (non-optional) type below
   // rather than relying on control-flow narrowing of `section.items`/
-  // `section.options` themselves — a plain `function` declaration (several
-  // of this widget's own selection-update helpers are, since they need
-  // hoisting to call each other regardless of source order) doesn't retain
-  // an outer `if` guard's narrowing the way a same-scope statement does.
+  // `section.options` themselves.
   if (!section.items || !section.options) return;
   const family: string = section.items;
   const opts = section.options as ItemBoxesOptions;
@@ -244,93 +168,48 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   const count = labels.length;
   if (count === 0) return;
 
-  let selectedSet = readSelectedSet(ctx.sceneId, family, count);
-  let primary = primarySelection(selectedSet);
   const previewSource = opts.preview ? getPreviewSource(opts.preview) : undefined;
+  const pipetteKey = `${ctx.sceneId}.${family}`;
+  let pipetteArmed = pipetteArmedByFamily.get(pipetteKey) ?? false;
+  let pipetteItem = Math.min(count - 1, pipetteItemByFamily.get(pipetteKey) ?? 0);
 
-  // Set once the rows section / Affinity block below actually mount — see
-  // `mountRowsSection` and the `if (rel)` block near the end of this builder.
-  // Predeclared here (rather than as `function` declarations nested inside
-  // an `if`, which module strict mode block-scopes) so `updateSelection`
-  // above can reach either regardless of source order.
-  let rowsHandle: { dispose(): void } | undefined;
-  let refreshAffinity: (() => void) | undefined;
-
-  // Every box's own element and checkbox, filled by the box-building loop
-  // below. `refreshBoxSelection` is the only thing that ever touches them
-  // again after that (this file's header's Solo paragraph): a selection
-  // change updates classes/aria state in place, it never rebuilds a box —
-  // that would recreate/restart its live preview canvas and sim.
   const boxEls: HTMLElement[] = [];
-  const checkboxEls: HTMLButtonElement[] = [];
-
-  /** Applies `selectedSet` to every already-built box's own classes/aria
-   *  state and the "Editing …" line below the "All" chip — no DOM is
-   *  created or removed here (see this file's header's Solo paragraph). */
-  function refreshBoxSelection(): void {
-    for (let i = 0; i < count; i++) {
-      const isSel = selectedSet.includes(i);
-      boxEls[i]?.classList.toggle("vc-item-box-sel", isSel);
-      boxEls[i]?.setAttribute("aria-pressed", String(isSel));
-      checkboxEls[i]?.setAttribute("aria-checked", String(isSel));
-    }
-    editingEl.textContent = editingHeading(
-      selectedSet.map((i) => labels[i] ?? ""),
-      selectedSet.length === count,
-      opts.itemNoun ?? "items",
-    );
-  }
-
-  /** The one place `selectedSet`/`primary` change — every caller below
-   *  (a box body tap/keypress, its checkbox, the "All" chip, a relation-web
-   *  node) funnels through this instead of `ctx.rerender()`. See this
-   *  file's header's Solo paragraph for the scoped (a)/(b)/(c) update this
-   *  does in place. */
-  function updateSelection(next: number[]): void {
-    if (sameSelection(next, selectedSet)) return;
-    selectedSet = next;
-    primary = primarySelection(selectedSet);
-    writeSelectedSet(ctx.sceneId, family, next);
-    refreshBoxSelection();
-    mountRowsSection();
-    refreshAffinity?.();
-  }
-
-  // Phase 3 per-box state, filled in the loop below only when a preview
-  // source is registered — see this file's header.
   const previewSims: (StrainPreview | undefined)[] = [];
   const previewCanvases: (HTMLCanvasElement | undefined)[] = [];
   const previewOffscreen: (HTMLCanvasElement | undefined)[] = [];
   const previewVisible: boolean[] = [];
+  // Per box, made once on first draw: the offscreen canvas's 2D context and the
+  // ImageData that `sim.pixelsInto` fills each tick (no per-tick allocation).
+  const previewOffCtx: (CanvasRenderingContext2D | null | undefined)[] = [];
+  const previewImage: (ImageData | undefined)[] = [];
   const readoutEls: ({ pop: HTMLElement; terr: HTMLElement; vig: HTMLElement } | undefined)[] = [];
 
-  // The "All" chip + "Editing …" line — see this file's header's
-  // Multi-selection paragraph. Placed above the boxes (registry.ts's
-  // appendRow doc allows either that or the section's own heading row; the
-  // heading row is built by deviceMenu.ts before this widget ever mounts,
-  // so it isn't reachable from here).
-  const selBar = document.createElement("div");
-  selBar.className = "vc-item-selbar";
-  const allBtn = createChipButton("All", `Select every ${opts.itemNoun ?? "item"}`, () => {
-    updateSelection(allItemsSelected(count));
-  });
-  const editingEl = document.createElement("span");
-  editingEl.className = "vc-item-editing";
-  selBar.append(allBtn, editingEl);
-  container.appendChild(selBar);
-
-  // Whether `e` should TOGGLE membership rather than solo — a
-  // Shift/Cmd/Ctrl-modified tap on a box body or web node (this file's
-  // header's Solo paragraph); the checkbox always toggles regardless.
-  const isGroupModifier = (e: MouseEvent | KeyboardEvent): boolean => e.shiftKey || e.ctrlKey || e.metaKey;
+  let pipetteBtn: HTMLButtonElement | undefined;
+  function syncPipetteVisual(): void {
+    for (let i = 0; i < count; i++) {
+      const on = pipetteArmed && i === pipetteItem;
+      boxEls[i]?.classList.toggle("vc-item-box-sel", on);
+      boxEls[i]?.setAttribute("aria-pressed", String(on));
+    }
+    if (pipetteBtn) {
+      pipetteBtn.style.cssText = pipetteArmed ? chipBtnLitStyle : chipBtnStyle;
+      pipetteBtn.setAttribute("aria-pressed", String(pipetteArmed));
+    }
+  }
+  function setPipette(armed: boolean, item = pipetteItem): void {
+    pipetteArmed = armed;
+    pipetteItem = item;
+    pipetteArmedByFamily.set(pipetteKey, armed);
+    pipetteItemByFamily.set(pipetteKey, item);
+    syncPipetteVisual();
+  }
 
   const boxesEl = document.createElement("div");
   boxesEl.className = "vc-item-boxes";
   for (let i = 0; i < count; i++) {
-    // A `<div>`, not a `<button>`: the checkbox below is a real interactive
-    // `<button>` of its own, and nesting one inside a native button is
-    // invalid HTML (and would double-fire on a checkbox click). `role`/
-    // `tabIndex`/the keydown handler below restore native-button semantics.
+    // A `<div>` with button semantics, like the checkbox-carrying box it grew
+    // from — `role`/`tabIndex`/the keydown handler below give it native-button
+    // behaviour.
     const box = document.createElement("div");
     box.className = "vc-item-box";
     box.style.setProperty("--c", opts.colours[i] ?? "#fff");
@@ -338,7 +217,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     box.tabIndex = 0;
     box.setAttribute("aria-pressed", "false");
     box.setAttribute("aria-label", labels[i] ?? "");
-    box.title = "Tap to edit only this — Shift/Cmd-tap or the checkbox to add to the group";
+    box.title = "Aim the pipette at this one";
     boxEls[i] = box;
 
     const head = document.createElement("div");
@@ -348,22 +227,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     const code = document.createElement("span");
     code.className = "vc-item-code";
     code.textContent = labels[i] ?? "";
-    // The group checkbox (this file's header's Solo paragraph) — ticked
-    // means "in the edit group"; `stopPropagation` on its own click keeps
-    // the box body's own (solo) click handler below from also firing.
-    const checkbox = document.createElement("button");
-    checkbox.type = "button";
-    checkbox.className = "vc-item-check";
-    checkbox.setAttribute("role", "checkbox");
-    checkbox.setAttribute("aria-checked", "false");
-    checkbox.setAttribute("aria-label", labels[i] ?? "");
-    checkbox.title = "Include in the edit group";
-    checkboxEls[i] = checkbox;
-    checkbox.addEventListener("click", (e) => {
-      e.stopPropagation();
-      updateSelection(toggleItemSelection(selectedSet, i));
-    });
-    head.append(led, code, checkbox);
+    head.append(led, code);
 
     let previewEl: HTMLElement;
     if (previewSource) {
@@ -376,8 +240,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       off.height = previewSource.size;
       previewOffscreen[i] = off;
       // Reattached from the persisted cache rather than recreated — see
-      // this file's own cachedPreview doc comment (the "cultures restart on
-      // every click" fix).
+      // cachedPreview's doc comment (the "cultures restart on every click" fix).
       previewSims[i] = cachedPreview(ctx.sceneId, family, i, previewSource.size, previewSource.agents);
       previewVisible[i] = false;
       previewEl = canvas;
@@ -411,18 +274,62 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       readoutEls[i] = { pop: pop.val, terr: terr.val, vig: vig.val };
     }
 
-    box.addEventListener("click", (e) => {
-      updateSelection(isGroupModifier(e) ? toggleItemSelection(selectedSet, i) : soloSelection(i));
-    });
+    const aim = (): void => setPipette(!(pipetteArmed && pipetteItem === i), i);
+    box.addEventListener("click", aim);
     box.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();
-      updateSelection(isGroupModifier(e) ? toggleItemSelection(selectedSet, i) : soloSelection(i));
+      aim();
     });
     boxesEl.appendChild(box);
   }
   container.appendChild(boxesEl);
-  refreshBoxSelection();
+
+  // The one Random — see this file's header. Hidden until a card below
+  // registers something for it to roll.
+  const rollers: { randomize(): void; names: readonly string[] }[] = [];
+  const rollBtn = document.createElement("button");
+  rollBtn.type = "button";
+  rollBtn.className = "vc-roll";
+  rollBtn.hidden = true;
+  const rollDie = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  rollDie.setAttribute("viewBox", "0 0 24 24");
+  rollDie.setAttribute("aria-hidden", "true");
+  rollDie.classList.add("vc-roll-die");
+  rollDie.innerHTML =
+    '<rect x="3" y="3" width="18" height="18" rx="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/>' +
+    [[8, 8], [16, 8], [12, 12], [8, 16], [16, 16]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.6" fill="currentColor"/>`).join("");
+  const rollText = document.createElement("span");
+  rollText.className = "vc-roll-text";
+  const rollTitle = document.createElement("b");
+  rollTitle.textContent = "Random";
+  const rollSub = document.createElement("span");
+  rollText.append(rollTitle, rollSub);
+  rollBtn.append(rollDie, rollText);
+  rollBtn.addEventListener("click", () => {
+    for (const r of rollers) r.randomize();
+    rollBtn.classList.remove("vc-roll-spin");
+    void rollBtn.offsetWidth; // restart the die's spin on a quick re-click
+    rollBtn.classList.add("vc-roll-spin");
+  });
+  rollBtn.addEventListener("animationend", () => rollBtn.classList.remove("vc-roll-spin"));
+  container.appendChild(rollBtn);
+  function addRoller(randomize: () => void, names: readonly string[]): void {
+    rollers.push({ randomize, names });
+    const all = rollers.flatMap((r) => r.names);
+    rollSub.textContent = all.join(" · ");
+    rollBtn.title = `Roll ${all.join(", ")} at once. Each card's Back undoes its own part`;
+    rollBtn.hidden = false;
+  }
+
+  // Live colours, refreshed once per tick below — the base colour until then.
+  let liveColours: string[] = [...opts.colours];
+  // This tick's effective() readings, shared with the Pairs pads below so they
+  // don't re-read (and re-probe) the scene for every pad. Registration order
+  // keeps the boxes' tick ahead of `pads.tick()`; the pads fall back to their
+  // own read until the first tick.
+  let tickEffective: PreviewEffective[] = [];
+  let consoleTick: ((colours: readonly string[]) => void) | undefined;
 
   if (previewSource) {
     const io = new IntersectionObserver(
@@ -471,36 +378,33 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
 
     const actions = document.createElement("div");
     actions.className = "vc-pop-actions";
-    const rebalanceBtn = createChipButton("Rebalance", "Reset every strain's population to an equal share", () => {
+    const rebalanceBtn = createChipButton("Rebalance", "Put every strain back to an equal share", () => {
       ctx.command("rebalance", {});
     });
-    const pipetteKey = `${ctx.sceneId}.${family}`;
-    let pipetteArmed = pipetteArmedByFamily.get(pipetteKey) ?? false;
-    const pipetteBtn = createChipButton(
-      "Pipette",
-      "Arm, then tap the visualisation to inject the primary strain there — this screen only, settings/commands don't reach the TV",
-      () => {
-        pipetteArmed = !pipetteArmed;
-        pipetteArmedByFamily.set(pipetteKey, pipetteArmed);
-        syncPipetteVisual();
-      },
+    const freshBtn = createChipButton(
+      "Fresh dish",
+      "Start the dish over — every strain reseeded at an equal share on a trail of Start ink. This screen only, commands don't reach the TV",
+      () => ctx.command("fresh", {}),
     );
-    function syncPipetteVisual(): void {
-      pipetteBtn.style.cssText = pipetteArmed ? chipBtnLitStyle : chipBtnStyle;
-      pipetteBtn.setAttribute("aria-pressed", String(pipetteArmed));
-    }
+    pipetteBtn = createChipButton(
+      "Pipette",
+      "Arm, then tap the visualisation to inject the chosen strain there — tap a box above to choose which. This screen only, settings/commands don't reach the TV",
+      () => setPipette(!pipetteArmed),
+    );
     syncPipetteVisual();
-    actions.append(rebalanceBtn, pipetteBtn);
+    actions.append(rebalanceBtn, freshBtn, pipetteBtn);
     popWrap.append(popBar, popLabels, actions);
     container.appendChild(popWrap);
+    // The one setting that shapes the headcount (Switching), as a real row
+    // right under the bar it moves.
+    const headcountSpec = opts.headcountSetting ? ctx.specs.find((s) => s.key === opts.headcountSetting) : undefined;
+    if (headcountSpec) ctx.appendRow(container, headcountSpec);
 
     // The pipette taps the MAIN visualisation canvas (index.html's `#gl`,
     // the same element src/app.ts renders into), not anything inside this
-    // panel — see this file's header for why that alone already satisfies
-    // "ignore taps that land on the panel/UI" (the panel is separate DOM
-    // stacked above/beside it; a tap on the panel never reaches the canvas
-    // underneath). Capture phase, so a future canvas-level handler (there is
-    // none today) can't swallow the tap first.
+    // panel — the panel is separate DOM stacked above/beside it, so a tap on
+    // it never reaches the canvas underneath. Capture phase, so a future
+    // canvas-level handler (there is none today) can't swallow the tap first.
     const glCanvas = document.getElementById("gl") as HTMLCanvasElement | null;
     const onCanvasPointerDown = (e: PointerEvent): void => {
       if (!pipetteArmed || !glCanvas) return;
@@ -511,15 +415,11 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       // paragraph on why this is the one flip needed here.
       const x = clamp01((e.clientX - rect.left) / rect.width);
       const y = clamp01(1 - (e.clientY - rect.top) / rect.height);
-      ctx.command("inject", { x, y, strain: primary });
+      ctx.command("inject", { x, y, strain: pipetteItem });
       showPipetteRing(e.clientX, e.clientY);
     };
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === "Escape" && pipetteArmed) {
-        pipetteArmed = false;
-        pipetteArmedByFamily.set(pipetteKey, false);
-        syncPipetteVisual();
-      }
+      if (e.key === "Escape" && pipetteArmed) setPipette(false);
     };
     glCanvas?.addEventListener("pointerdown", onCanvasPointerDown, true);
     window.addEventListener("keydown", onKeyDown);
@@ -529,25 +429,33 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     });
 
     // --- Per-tick: step/draw visible previews, refresh readouts + the
-    // population bar. Stepping (not drawing) only every other tick — the
-    // agent+blur loop is the expensive part; see this file's header. ---
+    // population bar + the console. Stepping (not drawing) only every other
+    // tick — the agent+blur loop is the expensive part; see this file's
+    // header. ---
     let tickCount = 0;
     ctx.onTick(() => {
       tickCount++;
       const stepThisTick = tickCount % 2 === 0;
       const probeData = ctx.probe();
+      const effective: PreviewEffective[] = [];
+      for (let i = 0; i < count; i++) effective.push(previewSource.effective(ctx, i));
+      tickEffective = effective;
+      liveColours = effective.map((e) => cssRgb(e.color));
 
       for (let i = 0; i < count; i++) {
+        boxEls[i]?.style.setProperty("--c", liveColours[i]!);
         const sim = previewSims[i];
         const canvas = previewCanvases[i];
         const off = previewOffscreen[i];
         if (sim && canvas && off && previewVisible[i]) {
-          const octx = off.getContext("2d");
-          const effective = previewSource.effective(ctx, i);
-          if (stepThisTick) sim.step(effective.motion);
+          if (previewOffCtx[i] === undefined) previewOffCtx[i] = off.getContext("2d");
+          const octx = previewOffCtx[i];
+          const eff = effective[i]!;
+          if (stepThisTick) sim.step(eff.motion);
           if (octx) {
-            const img = octx.createImageData(sim.size, sim.size);
-            img.data.set(sim.pixels(effective.color));
+            let img = previewImage[i];
+            if (!img || img.width !== sim.size) img = previewImage[i] = octx.createImageData(sim.size, sim.size);
+            sim.pixelsInto(img.data, eff.color);
             octx.putImageData(img, 0, 0);
           }
           // Backing resolution follows the box's own CSS size (smooth,
@@ -593,113 +501,73 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
         for (let i = 0; i < count; i++) {
           const pct = total > 0 ? (shares[i]! / total) * 100 : 100 / count;
           popSegments[i]!.style.width = `${pct}%`;
+          popSegments[i]!.style.background = liveColours[i]!;
           popLabelTexts[i]!.textContent = ` ${labels[i]} ${Math.round(pct)}%`;
         }
       }
+      consoleTick?.(liveColours);
     });
   }
 
-  // The rows section — always the PRIMARY item's own rowOrder settings, each
-  // fanned out to every OTHER selected item via `linked` (this file's
-  // header's Multi-selection paragraph). Mounted once here and re-mounted
-  // (dispose + mountRows) by `mountRowsSection` on every selection change —
-  // never `ctx.rerender()` (this file's header's Solo paragraph;
-  // registry.ts's header on why `ctx.mountRows` exists). `rowsSectionEl`
-  // itself is permanent — only its mounted contents get swapped.
-  const rowsSectionEl = document.createElement("div");
-  rowsSectionEl.className = "vc-item-rows";
-  container.appendChild(rowsSectionEl);
-
-  function buildRowSpecs(): { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[] {
-    const primarySpecs = ctx.specsFor(family, primary);
-    const otherSelected = selectedSet.filter((i) => i !== primary);
-    const rows: { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[] = [];
-    for (const paramKey of opts.rowOrder) {
-      const spec = primarySpecs.find((s) => s.item?.param === paramKey);
-      if (!spec) continue;
-      const linked: LinkedSetting[] = [];
-      for (const i of otherSelected) {
-        const otherSpec = ctx.specsFor(family, i).find((s) => s.item?.param === paramKey);
-        if (otherSpec) linked.push({ spec: otherSpec, label: labels[i] ?? "", colour: opts.colours[i] });
-      }
-      rows.push({ spec, ownLabel: linked.length ? labels[primary] ?? "" : undefined, linked: linked.length ? linked : undefined });
-    }
-    return rows;
+  // The Strain Console — its own card right after the Scene card (the Pairs
+  // card below follows it): the same reasoning as the Pairs card (its file
+  // header, "Its own card") — a block that wants air and its own fold rather
+  // than more rows inside the Scene card's body. `mountCard` is only rebuilt by
+  // `renderSceneSettings` (deviceMenu.ts), the same trigger that rebuilds this
+  // whole widget.
+  if (opts.console) {
+    const card = ctx.mountCard({
+      title: opts.console.title,
+      accent: SCENE_VIOLET,
+      foldId: `${ctx.sceneId}-${family}-console`,
+    });
+    const strainConsole = buildStrainConsole({
+      ctx,
+      container: card.body,
+      family,
+      labels,
+      colours: opts.colours,
+      opts: opts.console,
+      stateKey: `${ctx.sceneId}:${family}`,
+    });
+    consoleTick = (colours) => strainConsole.tick(colours);
+    if (strainConsole.randomLabels.length) addRoller(strainConsole.randomize, [opts.console.title]);
+    // Without a preview source nothing above ticks; the console still needs to.
+    if (!previewSource) ctx.onTick(() => strainConsole.tick(liveColours));
+    else strainConsole.tick(liveColours);
+    ctx.onDispose(() => strainConsole.dispose());
   }
-
-  function mountRowsSection(): void {
-    rowsHandle?.dispose();
-    rowsHandle = ctx.mountRows(rowsSectionEl, buildRowSpecs());
-  }
-  mountRowsSection();
 
   const rel = opts.relations;
   if (!rel) return;
 
-  container.appendChild(groupHeading(rel.title));
-  // Affinity's own permanent host — `refreshAffinity` clears and rebuilds
-  // its contents (the web + rows + presets below) on a selection change or
-  // any value it draws changing; it's plain widget-owned DOM with no
-  // deviceMenu registrations, so a full clear-and-rebuild of just this host
-  // is already the scoped update (this file's header's Solo paragraph).
-  const affinityHost = document.createElement("div");
-  container.appendChild(affinityHost);
-
-  const getRel = (i: number, j: number): number => {
-    const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-    return spec ? ctx.get(spec) : 0;
-  };
-  // Applies `value` to every pair a multi-selection's row `rowJ` affects
-  // (itemSelection.ts's `affinityRowTargets`) — see relationRows.ts's own
-  // header for what row `rowJ` means. Refreshes Affinity in place rather
-  // than `ctx.rerender()`: it only ever changes `att<i><j>` settings, which
-  // the rows section above never shows.
-  const applyAffinityRow = (rowJ: number, value: number): void => {
-    for (const { i, j } of affinityRowTargets(selectedSet, primary, rowJ)) {
-      const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-      if (spec) ctx.set(spec, value);
-    }
-    refreshAffinity?.();
-  };
-
-  refreshAffinity = (): void => {
-    affinityHost.replaceChildren();
-    const webWrap = document.createElement("div");
-    webWrap.className = "vc-relweb-wrap";
-    webWrap.appendChild(
-      buildRelationWeb({
-        count,
-        colours: opts.colours,
-        labels,
-        selected: selectedSet,
-        get: getRel,
-        onSelect: (i, mods) => updateSelection(mods.toggle ? toggleItemSelection(selectedSet, i) : soloSelection(i)),
-      }),
-    );
-    affinityHost.appendChild(webWrap);
-
-    affinityHost.appendChild(
-      buildRelationRows({ count, labels, selected: selectedSet, words: rel.words, get: getRel, applyRow: applyAffinityRow }),
-    );
-
-    if (rel.presets?.length) {
-      affinityHost.appendChild(
-        buildRelationPresets({
-          count,
-          presets: rel.presets,
-          get: getRel,
-          apply: (matrix) => {
-            for (let i = 0; i < count; i++) {
-              for (let j = 0; j < count; j++) {
-                const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-                if (spec) ctx.set(spec, matrix[i]![j]!);
-              }
-            }
-            refreshAffinity?.();
-          },
-        }),
-      );
-    }
-  };
-  refreshAffinity();
+  // Its own card, right after the Scene card — see pairPads.ts's own file
+  // header, "Its own card, four rows" (2026-09-28), for why this replaced a
+  // plain `groupHeading` inside the Scene card body. `pair`/`effective` are the
+  // same previewSource this widget's own boxes already resolved above
+  // (`opts.preview`), so a pad's culture reads the identical live motion/colour
+  // a specimen box's own preview does.
+  const card = ctx.mountCard({
+    title: rel.title,
+    accent: SCENE_VIOLET,
+    foldId: `${ctx.sceneId}-${family}-affinity`,
+  });
+  const pads = buildPairPads({
+    ctx,
+    container: card.body,
+    family,
+    count,
+    labels,
+    shortLabels: rel.shortLabels,
+    colours: opts.colours,
+    tables: rel.tables,
+    words: rel.words,
+    presets: rel.presets ?? [],
+    effective: previewSource ? (k) => tickEffective[k] ?? previewSource.effective(ctx, k) : undefined,
+    pair: previewSource?.pair,
+    stateKey: `${ctx.sceneId}:${family}`,
+  });
+  addRoller(pads.randomize, rel.tables.touch ? [rel.words.layers.smell.title, rel.words.layers.touch.title] : [rel.words.layers.smell.title]);
+  ctx.onTick(() => pads.tick());
+  ctx.onDispose(() => pads.dispose());
 });

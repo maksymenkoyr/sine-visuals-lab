@@ -3,20 +3,20 @@
 // coordinates `c`, cell size, radius `r` (already beat-swelled), raw angle
 // `a`, fold count `n`, the pixel size in p units and the palette base — and
 // returns the final colour. What the styles share (fold, petal, noise, the
-// scale-cycling zoom noise, the posterised read) is in glsl.ts; the tiling
-// rule they must all respect is in index.ts's header: depend only on r and
-// a *folded* angle, and mask any rotation to zero before r reaches cell/2.
+// scale-cycling zoom noise, the posterised read) is in glsl.ts; the rule
+// they must all respect is in index.ts's header: depend only on r and a
+// *folded* angle, and mask any rotation to zero toward the disc edge
+// (EDGE_MASK_INNER below) so a mandala meets its parent with a steady rim.
 //
-// The camera zoom is index.ts's lattice zoom; what each style does inside
-// its cell is the *flow* (uFlowPos): Mandala's bands stream out along a
-// part-logarithmic ramp, Portal's log-spaced annuli drift outward, Prism's
-// log-spiral stripes slide out and its noise warp cycles octaves (zfbm),
-// Burst's log-polar shards rush out. All are exact in their own coordinates
-// so the flow never runs out or repeats; the beat surge (uSurgePos) rides
-// the same phase.
+// The camera zoom is index.ts's recursive dive (uZoomPos); what each style
+// does inside its cell is the *flow* (uFlowPos): Mandala's bands stream out
+// along a part-logarithmic ramp, Portal's log-spaced annuli drift outward,
+// Prism's log-spiral stripes slide out and its noise warp cycles octaves
+// (zfbm), Burst's log-polar shards rush out. All are exact in their own
+// coordinates so the flow never runs out or repeats; the beat surge
+// (uSurgePos) rides the same phase.
 
-import { RAINBOW_BLUE } from "./glsl.ts";
-import { CELL_MID } from "./glsl.ts";
+import { CELL_MID, RAINBOW_BLUE } from "./glsl.ts";
 
 /** Rotation is full inside this fraction of the cell and masks to zero at
  *  the edge (0.5), so no rotated ring ever meets a cell mirror (index.ts
@@ -27,7 +27,7 @@ const EDGE_MASK_INNER = 0.3;
  *  units each style's z is in), and the octaves one unit of the beat
  *  surge's displacement adds (Mandala pushes its bands instead). */
 const TEXTURE_FLOW = 0.3;
-export const SURGE_ZOOM = 0.25;
+const SURGE_ZOOM = 0.25;
 /** Bar breathe in the texture styles: octaves the flow rocks by, once per
  *  bar while the tempo is locked. */
 const BREATHE_OCTAVES = 0.12;
@@ -130,9 +130,9 @@ const familyGlsl = FAMILIES.map((f, j) => {
 
 export const MANDALA_GLSL = `
 vec3 styleMandala(vec2 c, float cell, float r, float a, float n, float pxSize, float tBase0) {
-  // Cell-relative units: the field below is tuned for a cell of CELL_MID,
-  // and a bigger cell must be a bigger mandala, not a wider view of it
-  // (the lattice zoom, index.ts header).
+  // Cell-relative units: main() (index.ts) hands every style a cell of
+  // CELL_LOCAL, and the field below is tuned for a cell of CELL_MID, so su
+  // rescales the local disc to that tuning.
   float su = ${CELL_MID.toFixed(2)} / cell;
   c *= su;
   r *= su;

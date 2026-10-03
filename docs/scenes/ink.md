@@ -93,6 +93,18 @@ primary at a time; ground `#fafafa` vs. `#fafafa`.
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Arms renamed Arm tightness: higher already meant a thinner cross. Label
   only.
+- 2026-10-02, review fixes in the motion code. (1) The flow phase was
+  `flowPhase * Flow`, so any Flow change (a slider step, or Auto's tempo and
+  pulse dials moving it) teleported the field by `flowPhase * dFlow`, worse
+  the longer the page had been open; it is now accumulated at the Flow rate
+  with `createScaledPhase` (`flowClock.ts`), and the result still goes
+  through `noiseFlows`/`sinPhases` in float64 as before. (2) The fallback
+  timer in `createParamDrift` subtracted 1 once per frame, so a long `dt`
+  (a hidden tab) left `t` above 1 and re-rolled a random target every frame,
+  seconds of hard-cut strobing; it now rolls once and keeps the fraction.
+  (3) Crossing the tempo-lock threshold swapped `t` from the timer to
+  `barPhase` and popped the picture; the ease now re-anchors on the lock and
+  unlock edges, restarting from where the picture is toward the same target.
 
 ## Tuning notes
 

@@ -4,7 +4,7 @@
 // Rescued from a working session on 2026-09-21.
 // usage: node flash-shot.mjs [port] [outDir]
 // May need adjusting to current code — setting names (flash, flashLevel,
-// drift, ripple, sparkle, dropReactivity) may have changed.
+// drift, ripple, sparkle) may have changed.
 const { chromium } = await import(new URL("../../../../node_modules/playwright/index.mjs", import.meta.url));
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +49,7 @@ async function lum(buf) {
   }, buf.toString("base64"));
 }
 
-const base = { flash: 1, drift: 0, ripple: 0, sparkle: 0, dropReactivity: 0 };
+const base = { flash: 1, drift: 0, ripple: 0, sparkle: 0 };
 for (const [name, flashLevel] of [["before-hits", 0], ["after-level", 1]]) {
   await page.evaluate((settings) => window.__viz.setParams({ scene: "caustics", autoPin: true, settings }), { ...base, flashLevel });
   await page.waitForTimeout(1500);

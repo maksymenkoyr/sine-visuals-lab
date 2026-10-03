@@ -20,6 +20,7 @@ import {
   resolveExpansion,
   resolveSmoothing,
   advanceAutoTune,
+  tickAutoTune,
   isAutoEnabled,
   setAutoEnabled,
   isSceneAuto,
@@ -256,6 +257,92 @@ describe("auto state and resolution", () => {
     expect(last).toBeCloseTo(target, 2);
   });
 
+  // The glide is clocked, not counted: a setting is read by the shader upload,
+  // the scene's own JS and the open panel, and none of that may speed it up.
+  it("a second read in the same tick returns the same step", () => {
+    const sceneId = "scene-auto-reads-same-tick";
+    setAutoEnabled(sceneId, SPEC.key, true);
+    advanceAutoTune(1 / 60, NEUTRAL);
+    resolveSceneSetting(sceneId, SPEC); // snap
+    const highTempo: DialValues = { ...NEUTRAL, tempo: 1 };
+    advanceAutoTune(0.1, highTempo);
+    const a = resolveSceneSetting(sceneId, SPEC);
+    for (let i = 0; i < 4; i++) expect(resolveSceneSetting(sceneId, SPEC)).toBe(a);
+    const target = computeAutoTarget(SPEC, highTempo, 1);
+    expect(a).toBeCloseTo(SPEC.default + (target - SPEC.default) * 0.05, 9); // one 0.1 s step at rate 0.5
+    advanceAutoTune(0.1, highTempo);
+    const c = resolveSceneSetting(sceneId, SPEC);
+    expect(c).toBeGreaterThan(a);
+    expect(c).toBeLessThan(target);
+  });
+
+  it("glides at the same speed whether read once or three times per tick, or only every other tick", () => {
+    const highTempo: DialValues = { ...NEUTRAL, tempo: 1 };
+    const once = "scene-auto-glide-once";
+    const thrice = "scene-auto-glide-thrice";
+    const everyOther = "scene-auto-glide-every-other";
+    for (const id of [once, thrice, everyOther]) setAutoEnabled(id, SPEC.key, true);
+    advanceAutoTune(1 / 60, NEUTRAL);
+    for (const id of [once, thrice, everyOther]) resolveSceneSetting(id, SPEC); // snap
+    let a = 0;
+    let b = 0;
+    let c = 0;
+    for (let i = 0; i < 60; i++) {
+      advanceAutoTune(1 / 60, highTempo);
+      a = resolveSceneSetting(once, SPEC);
+      resolveSceneSetting(thrice, SPEC);
+      resolveSceneSetting(thrice, SPEC);
+      b = resolveSceneSetting(thrice, SPEC);
+      if (i % 2 === 1) c = resolveSceneSetting(everyOther, SPEC);
+    }
+    expect(b).toBeCloseTo(a, 9);
+    expect(c).toBeCloseTo(a, 3);
+  });
+
+  it("a macro's driver glides once per tick however many sub-params read it", () => {
+    const macroSpec = ALL_SETTINGS.find((s) => s.macro)!;
+    const driver = macroSpec.macro!.driver;
+    const withMacro = "scene-auto-macro-reads";
+    const driverOnly = "scene-auto-macro-driver-only";
+    for (const id of [withMacro, driverOnly]) setAutoEnabled(id, driver.key, true);
+    setAutoEnabled(withMacro, macroSpec.key, true);
+    advanceAutoTune(1 / 60, NEUTRAL);
+    resolveSceneSetting(withMacro, macroSpec);
+    resolveSceneSetting(withMacro, driver);
+    resolveSceneSetting(driverOnly, driver);
+    const highTempo: DialValues = { ...NEUTRAL, tempo: 1 };
+    for (let i = 0; i < 30; i++) {
+      advanceAutoTune(1 / 60, highTempo);
+      resolveSceneSetting(withMacro, macroSpec);
+      resolveSceneSetting(withMacro, driver);
+      resolveSceneSetting(driverOnly, driver);
+    }
+    expect(resolveSceneSetting(withMacro, driver)).toBeCloseTo(resolveSceneSetting(driverOnly, driver), 9);
+  });
+
+  it("resolveSensitivity steps once per tick too, and tickAutoTune keeps it gliding without training the profile", () => {
+    const sceneId = "scene-auto-sens-tick";
+    advanceAutoTune(1 / 60, NEUTRAL);
+    resolveSensitivity(sceneId); // snap
+    const highTempo: DialValues = { ...NEUTRAL, dynamics: 1, density: 0 };
+    advanceAutoTune(0.1, highTempo);
+    const a = resolveSensitivity(sceneId);
+    expect(resolveSensitivity(sceneId)).toBe(a);
+    // A tick with no profile of its own (the idle preview) still moves the value.
+    tickAutoTune(0.1);
+    const b = resolveSensitivity(sceneId);
+    expect(b).not.toBe(a);
+    expect(resolveSensitivity(sceneId)).toBe(b);
+  });
+
+  it("seedAuto mid-tick is what the rest of that tick reads", () => {
+    const sceneId = "scene-auto-seed-mid-tick";
+    setAutoEnabled(sceneId, SPEC.key, true);
+    advanceAutoTune(1 / 60, { ...NEUTRAL, tempo: 1 });
+    seedAuto(sceneId, SPEC.key, 0.123);
+    expect(resolveSceneSetting(sceneId, SPEC)).toBe(0.123);
+  });
+
   it("isSceneAuto is false by default, and true only once every auto-capable setting passed to it is switched to auto", () => {
     const sceneId = "scene-auto-6";
     const specs = [SPEC, getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()];
@@ -456,6 +543,18 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
     expect(persisted).toEqual({ "scene-a": { drift: true } });
   });
 
+  it("one malformed scope entry is dropped without discarding the rest of the store", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.sceneAuto", JSON.stringify({ mesh: null, bad: 5, list: [1], "scene-a": { drift: true } }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/autoTune.ts");
+
+    expect(fresh.isAutoEnabled("scene-a", "drift")).toBe(true);
+    expect(JSON.parse(fake.raw.get("vibe.sceneAuto")!)).toEqual({ "scene-a": { drift: true } });
+  });
+
   it("an explicit manual choice on a default-auto pseudo-key survives a reload", async () => {
     const fake = makeFakeLocalStorage();
     (globalThis as { localStorage?: unknown }).localStorage = fake;
@@ -501,16 +600,16 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
   });
 });
 
-describe("caustics Focus snap auto weights", () => {
-  // Regression guard on the weight change in caustics.ts's `focus` spec.
+describe("caustics Fog pulse auto weights", () => {
+  // Regression guard on the weight change in caustics.ts's `focus` spec
+  // (labelled Fog pulse; key still `focus`).
   // The old weights ({ pulse: 0.35, attack: 0.25 }) displaced focus by
   // ~0.20 from its default on a steady percussive track and held it there
   // for the whole track — `pulse` alone floors near 0.92 once tempo locks
   // (it's 60% tempoLock, which saturates for almost any music with a steady
-  // beat), so this wasn't a rare edge case. Focus sitting near 1 saturates
-  // the beat snap against FOCUS_SHARP_MAX on nearly every hit rather than
-  // responding to a specific one (the failure mode the setting's own
-  // comment in caustics.ts describes).
+  // beat), so this wasn't a rare edge case. Focus sitting near 1 makes every
+  // hit pull the same near-max haze rather than responding to a specific one
+  // (the failure mode the setting's own comment in caustics.ts describes).
   //
   // The bounds are on the *displacement* from the default, not the absolute
   // value: defaults get baked from dialled-in values by Option+D

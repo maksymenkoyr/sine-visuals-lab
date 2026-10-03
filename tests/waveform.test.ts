@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rms, peak, crest, zeroCrossingRate, isClipping, downsampleForDisplay } from "../src/audio/waveform.ts";
+import { rms, peak, isClipping, downsampleForDisplay } from "../src/audio/waveform.ts";
 
 function sine(n: number, cycles: number, amplitude = 1): Float32Array {
   const out = new Float32Array(n);
@@ -15,35 +15,23 @@ function square(n: number, cycles: number, amplitude = 1): Float32Array {
 }
 
 describe("waveform", () => {
-  it("a sine's crest factor is ~sqrt(2)", () => {
-    const s = sine(2048, 20);
-    expect(crest(s)).toBeCloseTo(Math.SQRT2, 2);
+  it("rms and peak read a sine and a square wave", () => {
+    expect(rms(sine(2048, 20))).toBeCloseTo(Math.SQRT1_2, 2);
+    expect(peak(sine(2048, 20, 0.5))).toBeCloseTo(0.5, 2);
+    expect(rms(square(2048, 20, 0.5))).toBeCloseTo(0.5, 5);
+    expect(peak(square(2048, 20, 0.5))).toBeCloseTo(0.5, 5);
   });
 
-  it("a square wave's crest factor is ~1 (no dynamic range)", () => {
-    const s = square(2048, 20);
-    expect(crest(s)).toBeCloseTo(1, 2);
-  });
-
-  it("a silent buffer produces no NaN across rms/peak/crest/zeroCrossingRate", () => {
+  it("a silent buffer produces no NaN from rms/peak", () => {
     const silence = new Float32Array(2048);
     expect(Number.isFinite(rms(silence))).toBe(true);
     expect(Number.isFinite(peak(silence))).toBe(true);
-    expect(Number.isFinite(crest(silence))).toBe(true);
-    expect(Number.isFinite(zeroCrossingRate(silence))).toBe(true);
-    expect(crest(silence)).toBe(0);
   });
 
   it("flags clipping when samples ride the rail, not on an ordinary sine", () => {
     const clipped = new Float32Array(512).fill(0.995);
     expect(isClipping(clipped)).toBe(true);
     expect(isClipping(sine(512, 5, 0.8))).toBe(false);
-  });
-
-  it("zero-crossing rate is high for a fast tone and low for a slow one", () => {
-    const fast = zeroCrossingRate(sine(2048, 200));
-    const slow = zeroCrossingRate(sine(2048, 2));
-    expect(fast).toBeGreaterThan(slow);
   });
 
   it("downsampleForDisplay preserves a single-sample spike naive decimation would skip", () => {

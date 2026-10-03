@@ -38,6 +38,14 @@ import { NUM_BANDS } from "../audio/types.ts";
  * degradation, not a bug, and it can't be told apart from a genuine mid
  * loudness reading, so there's nothing to special-case here.
  *
+ * The room speaks JSON beside this frame (clock sync, the roster, the look
+ * document, pairing). Those messages are additive and unversioned — a client
+ * ignores a type it doesn't know — and src/net/roomMessages.ts owns them; none
+ * of it changes the binary rules above. The relay still never parses a frame,
+ * but it does drop one longer than LOOK_LIMITS.maxBinaryBytes
+ * (server/lookDoc.ts), so a layout that grows must raise that cap in the same
+ * change or the host's frames silently stop arriving.
+ *
  * Field names here (`onset`/`onsetPhase`/`pulseOnset`) are TS-side only —
  * the format is purely positional/length-discriminated (see
  * LEGACY_FRAME_BYTES), so renaming a field never touches the bytes on the
@@ -125,6 +133,10 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   const level = legacy ? 0.5 : view.getUint8(o) / 255;
   if (!legacy) o += 1;
   const roomTimeMs = view.getFloat64(o, true);
+  // A NaN or infinite timestamp would wedge the jitter buffer (NaN compares
+  // false everywhere, so it is never pruned; Infinity prunes all history).
+  // No honest sender writes one.
+  if (!Number.isFinite(roomTimeMs)) return null;
 
   return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, roomTimeMs };
 }

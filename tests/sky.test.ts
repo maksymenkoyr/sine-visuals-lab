@@ -21,8 +21,16 @@ import {
   spawnFloaters,
   skyScene,
   liftByDrive,
+  DRIFTER_SEEDS,
+  SKY_SPLAT_SLOTS,
+  SHADER_SEED_PERIOD,
+  wrapShaderSeed,
+  cloudNoiseFlows,
+  CLOUD_FLOW_LEN,
 } from "../src/render/scenes/sky/sky.ts";
-import { computeAutoTarget } from "../src/render/autoTune.ts";
+import { NOISE_PERIOD } from "../src/render/noiseHash.ts";
+import { computeAutoTarget, resolveSceneSetting } from "../src/render/autoTune.ts";
+import { setSceneMaster, setSceneExpansion, SCENE_MASTER_DEFAULT, SCENE_EXPANSION_DEFAULT } from "../src/render/sceneSettings.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { SIGNALS } from "../src/render/signals.ts";
 import type { DriveChoice } from "../src/render/drives.ts";
@@ -187,6 +195,19 @@ describe("day cycle", () => {
     const t = spec!.default;
     expect(t).toBeGreaterThan(0.5); // afternoon/evening, not morning
     expect(sunElevation(t)).toBeCloseTo(0.25, 1); // DAY_KEY_E's early-evening key
+  });
+
+  it("Time of day is a clock position, so the Master and Expansion dials never move it", () => {
+    const spec = (skyScene.settings ?? []).find((s) => s.key === "timeOfDay")!;
+    expect(spec.masterScale).toBe(false);
+    try {
+      setSceneMaster(0.6);
+      setSceneExpansion(1.5);
+      expect(resolveSceneSetting("sky", spec)).toBeCloseTo(spec.default, 9);
+    } finally {
+      setSceneMaster(SCENE_MASTER_DEFAULT);
+      setSceneExpansion(SCENE_EXPANSION_DEFAULT);
+    }
   });
 });
 
@@ -419,6 +440,27 @@ describe("wave pool", () => {
     expect(uploads.uBurstSeed[slot]).toBeCloseTo(12.25, 6);
   });
 
+  it("uploads the seed wrapped to SHADER_SEED_PERIOD, leaving the pool's own seed whole", () => {
+    const pool = createWavePool();
+    pool.trigger(1, 0.8, SHADER_SEED_PERIOD + 5);
+    pool.trigger(2, 0.8, 3);
+    const { prog, uploads } = fakeProgram();
+    pool.upload(prog);
+    expect(uploads.uBurstSeed[uploads.uBurstT0.indexOf(1)]).toBeCloseTo(5, 6);
+    expect(uploads.uBurstSeed[uploads.uBurstT0.indexOf(2)]).toBeCloseTo(3, 6);
+    expect(pool.bursts.map((b) => b.seed)).toContain(SHADER_SEED_PERIOD + 5);
+  });
+
+  it("wrapShaderSeed keeps a long session's seeds small, and is exact for the first period", () => {
+    expect(wrapShaderSeed(0)).toBe(0);
+    expect(wrapShaderSeed(255)).toBe(255);
+    expect(wrapShaderSeed(256)).toBe(0);
+    expect(wrapShaderSeed(1e9 + 0.5)).toBeGreaterThanOrEqual(0);
+    expect(wrapShaderSeed(1e9 + 0.5)).toBeLessThan(SHADER_SEED_PERIOD);
+    expect(wrapShaderSeed(-1)).toBe(SHADER_SEED_PERIOD - 1);
+    expect(wrapShaderSeed(NaN)).toBe(0);
+  });
+
   it("uploads a live wave's spawn position, defaulting to the screen centre", () => {
     const pool = createWavePool();
     pool.trigger(1, 1, 3, 0.2, 0.7);
@@ -475,6 +517,39 @@ describe("sky's SETTINGS follow the auto weight-authoring convention", () => {
       }
       expect(sum, `${s.key} sum of |auto weights|`).toBeLessThan(0.8);
     }
+  });
+});
+
+describe("cloudNoiseFlows", () => {
+  it("equals the raw per-octave drift for a short session", () => {
+    const f = cloudNoiseFlows(10);
+    // octave 0: bump (0.05, 0.03) per second, wisp (-0.085, 0), wrapped into [0, NOISE_PERIOD)
+    expect(f[0]).toBeCloseTo(0.5, 5);
+    expect(f[1]).toBeCloseTo(0.3, 5);
+    expect(f[2]).toBeCloseTo(NOISE_PERIOD - 0.85, 4);
+    expect(f[3]).toBe(0);
+    // octave 1 sees the same offset scaled by the fbm lacunarity
+    expect(f[4]).toBeCloseTo(0.5 * 2.02, 5);
+    expect(f[5]).toBeCloseTo(0.3 * 2.02, 5);
+  });
+
+  it("keeps every offset inside the lattice period however long the session runs", () => {
+    for (const t of [0, 1, 3600, 86400, 1e6, 1e9, 123456.789]) {
+      const f = cloudNoiseFlows(t);
+      expect(f.length).toBe(CLOUD_FLOW_LEN);
+      for (const v of f) {
+        expect(Number.isFinite(v)).toBe(true);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThan(NOISE_PERIOD);
+      }
+    }
+  });
+
+  it("is deterministic, reuses a given buffer, and survives non-finite time", () => {
+    const buf = new Float32Array(CLOUD_FLOW_LEN);
+    expect(cloudNoiseFlows(77.7, buf)).toBe(buf);
+    expect(Array.from(buf)).toEqual(Array.from(cloudNoiseFlows(77.7)));
+    for (const v of cloudNoiseFlows(NaN)) expect(v).toBe(0);
   });
 });
 
@@ -611,5 +686,11 @@ describe("floater stamp gate", () => {
   it("the spawn amount rests above the gate at its default (the shipped look can't self-silence), and the Scene grade never reads 0", () => {
     expect(setting("floaterDensity").default).toBeGreaterThan(0);
     expect(floaterCountFromEnergy(0)).toBeGreaterThan(0);
+  });
+});
+
+describe("SKY_SPLAT_SLOTS", () => {
+  it("has a splat slot for every cloud drifter (the sim silently drops slots past it)", () => {
+    expect(DRIFTER_SEEDS.length).toBeLessThanOrEqual(SKY_SPLAT_SLOTS);
   });
 });

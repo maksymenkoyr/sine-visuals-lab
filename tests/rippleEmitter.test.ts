@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   advanceEmission,
+  advanceStandout,
   buildProfile,
   createRippleEmissionState,
   createRippleEmitter,
@@ -747,5 +748,55 @@ describe("Ring style: Merge (close rings combine into one stronger ring)", () =>
       expect(merge.amp[i]).toBeCloseTo(bump.amp[i]!, 6);
       expect(merge.ageSec[i]).toBeCloseTo(bump.ageSec[i]!, 6);
     }
+  });
+});
+
+describe("advanceStandout — one yes per hit that stands out (Physarum 2's Dose reseed)", () => {
+  /** Fires counted per hit, for kicks (height 1 every 0.5s) with a small
+   *  background blip between each, like noisyKicks above. */
+  function firesFor(threshold: number | null): { kick: number; blip: number } {
+    const state = createRippleEmissionState();
+    let pulse = 0;
+    let kick = 0;
+    let blip = 0;
+    advanceStandout(state, DT, 0, threshold);
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let t = 0; t < 12; t += DT) {
+      pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
+      const onKick = Math.abs(t / 0.5 - Math.round(t / 0.5)) < DT / 2 / 0.5;
+      const onBlip = !onKick && Math.abs((t - 0.25) / 0.5 - Math.round((t - 0.25) / 0.5)) < DT / 2 / 0.5;
+      if (onKick) pulse = Math.max(pulse, 1);
+      else if (onBlip) pulse = Math.max(pulse, 0.2 + 0.2 * rnd());
+      const fired = advanceStandout(state, DT, pulse, threshold);
+      if (fired && t > 4) {
+        if (pulse > 0.8) kick++;
+        else blip++;
+      }
+    }
+    return { kick, blip };
+  }
+
+  it("fires once per kick and stays quiet on the background blips", () => {
+    const { kick, blip } = firesFor(RING_THRESHOLD_DEFAULT);
+    // 16 kicks in the 8s after the floor settles; one fire each, never two.
+    expect(kick).toBeGreaterThanOrEqual(14);
+    expect(kick).toBeLessThanOrEqual(16);
+    expect(blip).toBeLessThanOrEqual(1);
+  });
+
+  it("with the threshold Off every climb counts, blips included", () => {
+    // Many blips sit under the decaying tail of the kick before them and make
+    // no climb at all; the ones that do climb all count with the line off.
+    const { blip } = firesFor(null);
+    expect(blip).toBeGreaterThanOrEqual(2);
+    expect(blip).toBeGreaterThan(firesFor(RING_THRESHOLD_DEFAULT).blip);
+  });
+
+  it("a steady level never fires", () => {
+    const state = createRippleEmissionState();
+    let fires = 0;
+    for (let i = 0; i < 300; i++) if (advanceStandout(state, DT, 0.6)) fires++;
+    expect(fires).toBe(0);
   });
 });

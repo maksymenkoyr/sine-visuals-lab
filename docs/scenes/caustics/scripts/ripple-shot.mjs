@@ -20,7 +20,7 @@ const page = await ctx.newPage();
 page.on("console", (m) => { if (m.type() === "error") console.log("console:", m.text().slice(0, 200)); });
 await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=${bpm}#/v/caustics`);
 await page.waitForFunction(() => !!window.__viz, null, { timeout: 20000 });
-await page.evaluate(() => window.__viz.setParams({ scene: "caustics", autoPin: true, settings: { ripple: 1, drift: 0, driftBeat: 0, driftChurn: 0, driftKick: 0, breathe: 0, bass: 0, turbulence: 0, dropReactivity: 0, flash: 0, sparkleBright: 0 } }));
+await page.evaluate(() => window.__viz.setParams({ scene: "caustics", autoPin: true, settings: { ripple: 1, drift: 0, driftBeat: 0, driftChurn: 0, driftKick: 0, breathe: 0, bass: 0, turbulence: 0, flash: 0, sparkleBright: 0 } }));
 await page.waitForTimeout(wait);
 for (let i = 0; i < frames; i++) {
   await page.screenshot({ path: `${out}-${String(i).padStart(2, "0")}.png` });

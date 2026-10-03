@@ -34,12 +34,13 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // Settings map audio onto light and motion rather than position snapping:
 // uFog sets the resting look (how thin/bright the ridges sit between beats,
 // and how much of the dim wash the dark-water floor cut clips away), uFocus
-// is purely how much *harder* a beat sharpens the ridges above that resting
-// state — 0 means no snap at all, and the resting look itself never moves
-// with uFocus (see focusSharp below; this split replaced an earlier design
-// where one slider tried to own both and could only ever get one of "peak
-// reachable at any setting", "resting look stays put", "doesn't collapse to
-// fog between beats" right at a time — see this file's git history),
+// (the "Fog pulse" slider) is purely how much *softer* a beat hazes the
+// ridges below that resting state — 0 means no pulse at all, and the resting
+// look itself never moves with uFocus (see focusSharp below; this split
+// replaced an earlier design where one slider tried to own both and could
+// only ever get one of "peak reachable at any setting", "resting look stays
+// put", "doesn't collapse to fog between beats" right at a time — see this
+// file's git history),
 // Caustic density scales the noise field's spatial frequency (more/fewer,
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency) — wirable
 // (its source lifts the slider toward a finer mesh, Section by default), and
@@ -92,18 +93,13 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // top of the Drift-speed base rather than multipliers on it (see
 // driftRatePerSec below) — a multiplier on a base of zero can only ever stay
 // zero, so additive is what lets either one still move the pool with Drift
-// speed parked at 0. driftLevel also drives uLoudSwell (loudSwellDrive
-// below), an ungated visual swell — a loud passage widens the pool's
-// aperture and lifts the dark-water floor into a glow; a quiet one tightens
-// and deepens it. This is a look rather than motion along the phase, so —
-// not gated behind Drift speed or Speed pump — it must still land for anyone
-// who wants a still, breathing pool. uBass/uTurbulence/
+// speed parked at 0. Speed boost is rate-only: it never touches the pool's
+// aperture or the floor (an earlier loudSwell → uLoudSwell channel zoomed
+// the pool the way Breathe does, which read as Speed boost "breathing" at
+// high settings — removed; see docs/scenes/caustics.md's decision entry).
+// uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
-// / crest glints), and uDropReactivity ties everything to
-// sectionIntensity.ts's slow-tracked "which part of the song is this" signal
-// — a chorus or drop reads as a sustained, brighter, faster, more turbulent
-// surface, with a one-shot extra-strong ring at the exact moment intensity
-// spikes.
+// / crest glints).
 //
 // Precision, or why nothing the shader hashes ever grows with session
 // length: the drift phase only ever accumulates (advanceDensityFlow's
@@ -158,7 +154,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description:
-      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Its source pushes it finer (a chorus, by default); a change — from the slider or the source — eases in rather than snapping.",
+      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -177,7 +173,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "breathe",
     label: "Breathe",
-    description: "How far the pool zooms in and out with its source — once a bar by default",
+    description: "How far the pool zooms in and out with whatever is wired in — once a bar by default",
     group: "Motion",
     min: 0,
     max: 1,
@@ -320,7 +316,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "driftLevel",
     label: "Speed boost",
-    description: "Drift runs faster the louder the music is right now, and drops straight back to Drift speed when it quietens; the pool's aperture and floor glow swell with it too",
+    description: "Drift runs faster the louder the music is right now, and drops straight back to Drift speed when it quietens",
     group: "Motion",
     family: "Drift speed",
     min: 0,
@@ -336,13 +332,8 @@ const SETTINGS: SceneSetting[] = [
     // just frame.energy/anim.sectionIntensity: quiet stays quiet over the
     // tens of seconds AGC'd energy takes to re-adapt), so the default is
     // Scene. A non-default pick instead reads that source's 0..1 value
-    // directly as levelValue in driftRatePerSec below. extraUniforms reads
-    // this one patch twice with different rests (LOUD_NEUTRAL's own doc):
-    // the rate (driftRatePerSec) at rest 0, its own neutral (an unplugged
-    // jack adds no extra speed); the aperture/floor swell (loudSwellDrive)
-    // at rest LOUD_NEUTRAL, since loudSwellDrive's neutral is 0.5, not 0 —
-    // an unplugged jack reading 0 there swelled as permanent "quiet"
-    // tightening that grew with this very slider.
+    // directly as levelValue in driftRatePerSec below. Rate-only: one jack
+    // read, rest 0 (an unplugged jack adds no extra speed).
     drive: { default: "scene", sceneLabel: "Scene: this track's own calibrated loudness" },
   },
   {
@@ -392,22 +383,15 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.mid" },
   },
   {
-    key: "dropReactivity",
-    label: "Drop reactivity",
-    description: "Choruses and drops push brightness, turbulence, ripple and drift",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.76,
-    // Only lean into drop behavior on a track that actually has real dynamic swings.
-    auto: { dynamics: 0.45 },
-  },
-  {
     key: "fog",
     label: "Fog",
     description: "How hazy and soft the ridges sit at rest, between beats",
     group: "Look",
+    // Fog and Fog pulse together own "the haze": one sets how hazy the
+    // ridges sit at rest, the other how much haze a beat adds on top — so
+    // they render in one shared colour family (see sceneSettings.ts's
+    // `family`).
+    family: "Fog",
     min: 0,
     max: 1,
     step: 0.05,
@@ -418,24 +402,25 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "focus",
-    label: "Focus snap",
-    description: "How much harder a beat sharpens the ridges above their resting state; 0 = no snap at all",
+    label: "Fog pulse",
+    description: "How much a beat hazes the ridges softer than their resting state; 0 = no pulse at all",
     group: "Look",
+    family: "Fog",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.86,
-    // Beat-snap only reads as a snap on music with actual beats to snap to.
-    // The auto *weights* are kept low (not the ~0.9 that `pulse` alone would
-    // floor near on almost any locked-tempo track — 60% tempoLock saturates
-    // for basically all steady music) so Auto can't walk the resolved value
-    // the rest of the way to sitting near 1 all track, where the beat snap
-    // would saturate against FOCUS_SHARP_MAX on nearly every hit rather than
-    // responding to a specific one — the resting look itself no longer
-    // moves with this slider (see the Fog setting above and focusSharp
-    // below), so the old worry about pinning the *floor* up doesn't apply
-    // any more, but a saturated snap is just as flat a result. The default
-    // itself is a baked look (Option+D), not a weight choice.
+    // Beat-haze only reads as a pulse on music with actual beats to pulse
+    // to. The auto *weights* are kept low (not the ~0.9 that `pulse` alone
+    // would floor near on almost any locked-tempo track — 60% tempoLock
+    // saturates for basically all steady music) so Auto can't walk the
+    // resolved value the rest of the way to sitting near 1 all track, where
+    // every hit would pull the same near-max haze rather than responding to
+    // a specific one — the resting look itself never moves with this slider
+    // (see the Fog setting above and focusSharp below), so the old worry
+    // about pinning the *floor* doesn't apply any more, but a saturated
+    // pulse is just as flat a result. The default itself is a baked look
+    // (Option+D), not a weight choice.
     auto: { pulse: 0.2, attack: 0.15 },
     // uBeatPulse directly — a plain Beat default.
     drive: { default: "feature.onset" },
@@ -622,17 +607,6 @@ const RIPPLE_CEIL_MAX = 1.5;
 // same reasoning: a drop should read as a bigger strike than a plain beat.
 const RIPPLE_DROP_AMP = 1.8;
 
-// Hard ceiling on sharp regardless of uFog/uFocus. Was 26 in a brief period
-// where every focus setting shared this same ceiling as its *peak* — lowered
-// then because that shared ceiling got reached far more often (any focus
-// setting, given a strong enough beat, not just uFocus=1), and 26 pushes
-// pow(ridge, sharp) close enough to a step function that the underlying
-// value-noise contour lines read as a banded "pixel ladder" rather than a
-// smooth thin ridge, especially where the domain warp bunches several
-// octaves' contours together near the vortex point. Kept at 18 — still the
-// same visual line-width danger zone.
-const FOCUS_SHARP_MAX = 18;
-
 // uFog's two endpoints (see focusSharp below). CRISP is deliberately *below*
 // today's old fixed floor of 4 (uFocus's floor used to bottom out there) —
 // Fog is the setting that now owns "how thin/bright the resting look gets",
@@ -651,34 +625,24 @@ const FOG_FLOOR_HAZY = 0.0;
 // default, Bar wave) still swings zero.
 const BREATHE_ZOOM = 0.10;
 
-// uLoudSwell's (loudSwellDrive above) two visual channels, both small at the
-// Speed boost default (0.4) — see that constant's own comment — and both
-// on ground nothing else modulates at runtime: SWELL_ZOOM rides the same `p
-// *=` aperture line as BREATHE_ZOOM above, but the swell is the scene's own
-// aperiodic, sustained signal while uBreathe swings once per bar by default
-// (or whatever a re-patched cable carries), and SWELL_FLOOR_LIFT rides the
-// same dark-water floor cut uFog
-// sets at rest, so a loud passage glows into that dim wash and a quiet one
-// deepens it, distinct from uFlash/uEnergy/dropDrive, which all brighten the
-// ridge *crests* instead.
-const SWELL_ZOOM = 0.25;
-const SWELL_FLOOR_LIFT = 0.8;
-
-// uFocus=1 on a full beat (uBeatPulse=1) multiplies the resting sharpness by
-// (1 + FOCUS_SNAP_RATIO) — see focusSharp below. Chosen so the defaults (fog
-// 0.4, focus 0.7) land close to the swing this scene's very first version
-// had before any of its later focus-formula rewrites (rest ~9.4, peak ~19.4,
-// ~2.07x — see this file's git history and tests/caustics.test.ts's
-// "stays filamentary" case): every rewrite since has either scaled the rest
-// and peak together (the slider read as "merely thinner lines", not more
-// snap) or pinned the peak to the same value at every setting (the slider
-// stopped moving the actual snap, only the quiet resting state) — see the
+// uFocus=1 on a full beat (uBeatPulse=1) divides the resting sharpness by
+// (1 + FOCUS_SNAP_RATIO) — see focusSharp below: the pulse's direction is
+// reversed from the original Focus snap (which multiplied sharpness *up* on
+// a beat), so a beat now hazes toward Fog's soft end instead of snapping
+// crisp, and the label reads "Fog pulse" to say so. The magnitude, the
+// decoupling and the failure modes it dodges are unchanged: every rewrite of
+// this formula before the Fog/Focus split either scaled the rest and peak
+// together (the slider read as "merely thinner lines", not more pulse) or
+// pinned the peak to the same value at every setting (the slider stopped
+// moving the actual on-beat swing, only the quiet resting state) — see the
 // long history of this exact tradeoff across 5fe4b3c, db884a0, b44000d, and
 // 9b52b66. Decoupling "resting state" (uFog, above) from "how much a beat
-// pushes above it" (uFocus, here) is what makes both failure modes
-// impossible at once: uFocus=0 always means literally no snap (sharp never
-// moves off whatever uFog set), and the resting state never moves with
-// uFocus no matter how the slider is dragged.
+// moves below it" (uFocus, here) is what makes both failure modes impossible
+// at once: uFocus=0 always means literally no pulse (sharp never moves off
+// whatever uFog set), and the resting state never moves with uFocus no
+// matter how the slider is dragged. Division (not rest * (1 - …)) keeps the
+// pulse always-positive and finite at any reading, so there's no floor to
+// clamp and no ceiling to saturate against.
 const FOCUS_SNAP_RATIO = 1.3;
 
 // Caustic density's reach (causticDensityScale below): 0.5 is exactly today's old fixed
@@ -715,17 +679,17 @@ export function fogFloorCut(fog: number): number {
 }
 
 /** The ridge sharpness FRAG actually renders with: uFog sets the resting
- *  value, uFocus scales how much *harder* a full beat pushes above it — a
- *  pure multiplier on the resting value, never a replacement for it, so
- *  uFocus=0 holds sharp exactly at rest (no snap) and the resting value
- *  itself never depends on uFocus at any beatPulse. Clamped to
- *  FOCUS_SHARP_MAX, the same anti-ladder ceiling every past version of this
- *  formula has respected. Exported so tests/caustics.test.ts can pin the
- *  monotonicity and rest-independence invariants this file's history keeps
- *  breaking one at a time. */
+ *  value, uFocus scales how much *softer* a full beat hazes it below — the
+ *  reciprocal of the old Focus snap's multiply (rest / (1 + f·b·ratio)
+ *  instead of rest · (1 + f·b·ratio)), so the pulse only ever pulls sharp
+ *  down toward Fog's soft end, never above rest and never non-positive, with
+ *  no clamp needed. uFocus=0 holds sharp exactly at rest (no pulse) and the
+ *  resting value itself never depends on uFocus at any beatPulse. Exported
+ *  so tests/caustics.test.ts can pin the monotonicity and rest-independence
+ *  invariants this file's history keeps breaking one at a time. */
 export function focusSharp(fog: number, focus: number, beatPulse: number): number {
   const rest = fogRestingSharp(fog);
-  return Math.min(rest * (1 + focus * beatPulse * FOCUS_SNAP_RATIO), FOCUS_SHARP_MAX);
+  return rest / (1 + focus * beatPulse * FOCUS_SNAP_RATIO);
 }
 
 /** Caustic density (0..1) -> the noise-sampling frequency multiplier. 0.5 ->
@@ -753,7 +717,7 @@ const CENTROID_HUE_GAIN = 0.5;
 // The treble-sparkle sub-params (see the sparkleBright..sparkleSustain
 // entries in SETTINGS above) each interpolate between two endpoints of what
 // used to be one hardcoded shader constant. Named here — spliced into FRAG
-// below via template interpolation, exactly like FOCUS_SHARP_MAX/HUE_DAMP_K
+// below via template interpolation, exactly like FOCUS_SNAP_RATIO/HUE_DAMP_K
 // above — so the numbers exist in one place and the pure functions beneath
 // them can pin each sub-param's default to the old constant it replaces in
 // tests/caustics.test.ts, the same role driftRatePerSec's export plays for
@@ -979,9 +943,8 @@ const PUMP_VEL_CAP = 8;
 
 // Absolute ceiling on the rate driftRatePerSec returns. The additive model
 // below can't reach this on its own even with every term maxed at once —
-// base = DRIFT_BASE_RATE(2) * drift(1) * (1 + dropReactivity(1) *
-// sectionIntensity(1) * 0.8) = 3.6, level = LEVEL_GAIN(3), pump capped at
-// PUMP_VEL_CAP(8), summing to 14.6 — so this is now a generous backstop
+// base = DRIFT_BASE_RATE(2) * drift(1) = 2, level = LEVEL_GAIN(3), pump
+// capped at PUMP_VEL_CAP(8), summing to 13 — so this is now a generous backstop
 // rather than a value any combination of settings is meant to reach, unlike
 // the older multiplicative surge design this rate replaced (see this file's
 // git history), which could actually walk right up to it.
@@ -1003,10 +966,7 @@ const LOUD_ENV_EXPAND_RATE_PER_SEC = 1 / 0.3; // ~0.3s: a new extreme is grabbed
 const LOUD_ENV_CONTRACT_RATE_PER_SEC = 1 / 30; // ~30s: an old extreme is forgotten slowly — see above
 const LOUD_MIN_RANGE = 0.15; // below this observed range, confidence blends the output toward neutral instead of amplifying noise
 // advanceLoudSwell's own seed/no-signal value (0.5 = neither expand nor
-// contract the pool) — also what extraUniforms passes as drives.value()'s
-// `rest` for the "driftLevel" jack when it feeds loudSwellDrive, so an
-// unplugged jack reads as this same neutral there instead of drives.ts's
-// plain rest of 0 (loudSwellDrive's own doc comment below).
+// contract — the calibration's neutral, where level sits mid-range).
 const LOUD_NEUTRAL = 0.5;
 
 export interface LoudSwellState {
@@ -1054,20 +1014,6 @@ export function advanceLoudSwell(st: LoudSwellState, dtSec: number, level: numbe
   return LOUD_NEUTRAL + confidence * (raw - LOUD_NEUTRAL);
 }
 
-// loudSwellDrive is uLoudSwell's JS-side source: driftLevel^2 weights how
-// far loudSwell (0..1, LOUD_NEUTRAL = neutral) can push it — squared so the
-// swing opens up mostly in the slider's top half rather than growing
-// linearly — left linear and signed ([-1, 1], 0 at neutral) rather than
-// exponentiated, since FRAG uses it as a direct multiplier on aperture/floor
-// terms rather than a rate ratio. See the file header's driftLevel
-// paragraph for what it drives. Its neutral isn't 0 — loudSwellDrive(d, 0)
-// is a permanent -d² "quiet" tightening — so an unplugged "driftLevel" jack
-// (drives.ts's header's "Nothing plugged in" paragraph) has to read
-// LOUD_NEUTRAL here, not the engine's plain rest of 0 (extraUniforms below).
-export function loudSwellDrive(driftLevel: number, loudSwell: number): number {
-  return driftLevel * driftLevel * (2 * loudSwell - 1);
-}
-
 export interface PumpState {
   vel: number;
 }
@@ -1108,11 +1054,6 @@ export interface DriftInputs {
    *  by the driftPump slider and its input, and added straight onto the
    *  rate — see PUMP_ACCEL/PUMP_RELEASE_SEC above. */
   pumpVel: number;
-  /** Drop reactivity slider (0..1) and sectionIntensity (0..1) — same boost
-   *  the shader's dropDrive/dropFlash terms use, so drift speeds up with the
-   *  song's own intensity in the same choruses/drops that brighten it. */
-  dropReactivity: number;
-  sectionIntensity: number;
 }
 
 /** Pure phase-rate math for the drift accumulator, split out from
@@ -1123,7 +1064,7 @@ export interface DriftInputs {
  *  lets either one still move the pool while Drift speed itself sits at 0 —
  *  a multiplier on a base of zero can only ever stay zero. */
 export function driftRatePerSec(s: DriftInputs): number {
-  const base = DRIFT_BASE_RATE * s.drift * (1 + s.sectionIntensity * s.dropReactivity * 0.8);
+  const base = DRIFT_BASE_RATE * s.drift;
   const level = LEVEL_GAIN * s.driftLevel * s.levelValue;
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
@@ -1151,9 +1092,6 @@ void main() {
   vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 p = (uv - 0.5) * aspectFix * 3.0;
 
-  float dropDrive = uDropReactivity * uSectionIntensity;
-  float dropFlash = uDropReactivity * uDropPulse;
-
   // Breathe: the pool zooms on whatever source is patched onto the breathe
   // setting, at BREATHE_ZOOM depth scaled by uBreathe — Bar wave by default,
   // the once-per-bar swing the old bar-locked cosine this line replaced used
@@ -1163,11 +1101,6 @@ void main() {
   // bit-for-bit no zoom in either of those cases, not "the scene's own
   // contribution" (there's a real one now: Bar wave).
   p *= 1.0 + ${BREATHE_ZOOM.toFixed(2)} * uBreathe * breatheDrive(0.0);
-  // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
-  // one tightens it — the scene's own sustained signal, where the breath
-  // above only moves when a cable carries it. See SWELL_ZOOM's own comment
-  // for why this line, not a new one.
-  p *= 1.0 - ${SWELL_ZOOM.toFixed(2)} * uLoudSwell;
 
   // Bass swell: a sustained radial bulge near center, strongest right on a
   // low-band onset and fading outward — distinct from the beat ripple, which
@@ -1240,39 +1173,45 @@ void main() {
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
   float amp = 1.0;
-  // uFog sets the resting sharpness (sharpRest); uFocus is a pure multiplier
-  // on top of it, driven by uBeatPulse, so uFocus=0 always holds sharp
-  // exactly at sharpRest (no snap, at any beatPulse) and sharpRest itself
-  // never moves with uFocus (see focusSharp's own doc comment above, and
-  // this file's git history for the two different ways earlier versions of
-  // this line each conflated the two: scaling floor and peak together, or
-  // pinning the peak identical at every focus setting).
+  // uFog sets the resting sharpness (sharpRest); uFocus is a pure divisor
+  // on it, driven by uBeatPulse, so uFocus=0 always holds sharp exactly at
+  // sharpRest (no pulse, at any beatPulse) and sharpRest itself never moves
+  // with uFocus (see focusSharp's own doc comment above, and this file's
+  // git history for the two different ways earlier versions of this line
+  // each conflated the two: scaling floor and peak together, or pinning the
+  // peak identical at every focus setting). The division is the reverse of
+  // the original Focus snap's multiply: a beat pulls sharp *down* toward
+  // Fog's soft end, so sharp <= sharpRest always — no ceiling to clamp
+  // against (the old FOCUS_SHARP_MAX) and never a non-positive exponent.
   float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
-  float sharp = min(sharpRest * (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}), ${FOCUS_SHARP_MAX}.0)
+  float sharp = (sharpRest / (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}))
     * (1.0 - bassBulge * 0.25);
-  float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
+  float ridgeGain = sqrt(sharp / 4.0); // a wider ridge is proportionally dimmed, so Fog pulse eases intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
   // no antialiasing trick fixes that after the fact. Ordinarily this stays
   // hidden: the six octaves' ridge contours pass through those fold points
-  // at very different widths and never gang up. A focus snap breaks that —
-  // every octave goes thin at once, so right where warp already folds
-  // several of their contours close together, they all render as hard
-  // near-coincident lines simultaneously, reading as a dense "pixel ladder"
-  // fan. An earlier attempt eased warpAmt down in sync with focusDrive to
-  // loosen that fold right when sharpness would otherwise expose it hardest
-  // — removed at the time (see this file's git history) because it moved
-  // ridge *positions* on every beat as a side effect of an anti-aliasing fix
-  // that didn't demonstrably work, i.e. unwanted motion for no proven
-  // benefit. uTurbulence below already owns this same warpAmt channel and is
-  // drive-wirable (see the "turbulence" SceneSetting's own drive) — pick Any
-  // hit there instead of reaching for a second, dedicated beat-reshape
-  // control (a "Beat churn" setting used to duplicate exactly this channel
-  // with its own decaying pulse; removed for that reason — see this file's
-  // git history). aaSharp below still bounds the pixel-ladder artifact
-  // independent of warpAmt; a maxed Mid turbulence against a maxed Focus
-  // snap is the case to eyeball for it.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7);
+  // at very different widths and never gang up. Anything that thins every
+  // octave at once breaks that — right where warp already folds several of
+  // their contours close together, they all render as hard near-coincident
+  // lines simultaneously, reading as a dense "pixel ladder" fan. That used
+  // to be the focus *snap* (sharp slamming up on a beat); Fog pulse can't
+  // do it any more since its beat only ever widens lines, so the remaining
+  // case is a crisp resting look (uFog low, sharp high at rest) against a
+  // strong warp. An earlier attempt eased warpAmt down in sync with
+  // focusDrive to loosen that fold right when sharpness would otherwise
+  // expose it hardest — removed at the time (see this file's git history)
+  // because it moved ridge *positions* on every beat as a side effect of an
+  // anti-aliasing fix that didn't demonstrably work, i.e. unwanted motion
+  // for no proven benefit. uTurbulence below already owns this same warpAmt
+  // channel and is drive-wirable (see the "turbulence" SceneSetting's own
+  // drive) — pick Any hit there instead of reaching for a second, dedicated
+  // beat-reshape control (a "Beat churn" setting used to duplicate exactly
+  // this channel with its own decaying pulse; removed for that reason — see
+  // this file's git history). aaSharp below still bounds the pixel-ladder
+  // artifact independent of warpAmt; a maxed Mid turbulence against the
+  // crispest Fog is the case to eyeball for it.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2);
   for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
@@ -1288,11 +1227,13 @@ void main() {
     // has no concept of pixel size, so whenever the true line width (which
     // shrinks as sharp climbs) drops below what a pixel's worth of noise
     // change (fwidth(v)) can resolve, the rasterizer can only stair-step
-    // between "in" and "out" — the "pixel ladder" artifact, worst right
-    // when uFocus slams sharp up fast on a beat. Capping the exponent used
-    // here (never the uniform "sharp" itself, so ridgeGain's brightness
-    // still tracks the real, unclamped snap) keeps the rendered line at
-    // least ~1px wide regardless of how fast sharp moves.
+    // between "in" and "out" — the "pixel ladder" artifact, worst at a
+    // crisp resting look (uFog low). Fog pulse only ever lowers sharp, so
+    // it widens lines and never triggers this; the cap stays for the
+    // resting case and for any drive patch that might push sharp up. Capping
+    // the exponent used here (never the uniform "sharp" itself, so
+    // ridgeGain's brightness still tracks the real value) keeps the
+    // rendered line at least ~1px wide regardless of how sharp moves.
     float aaSharp = min(sharp, 0.3 / max(fwidth(v), 1e-4));
     acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
     amp *= 0.6;
@@ -1410,16 +1351,11 @@ void main() {
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8
-       + dropDrive * 0.5 + dropFlash * 1.2;
+  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
-  // Loudness swell's floor lift: a loud passage glows the dim wash between
-  // filaments instead of clipping it away; a quiet one deepens the cut
-  // toward flat black water. See SWELL_FLOOR_LIFT's own comment.
-  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog)
-    * max(0.0, 1.0 - ${SWELL_FLOOR_LIFT.toFixed(2)} * uLoudSwell));
+  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
   // Hue phase rides brightness (a ridge crest tints differently than the
   // dim water around it) through a cosine, which wraps through its full
   // hue cycle for roughly a unit change of phase. Raw acc can swing several
@@ -1484,7 +1420,6 @@ uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 // The glided, drive-scaled Caustic density (advanceDensityFlow) — see
 // densScale in FRAG.
 uniform float uDensityLive;
-uniform float uLoudSwell;
 uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
 // Linear interpolation into a profile array built by rippleEmitter.ts's
@@ -1516,17 +1451,12 @@ float softCeil(float x, float knee, float ceil) {
         // Kept up to date every tick regardless of driftLevel's own drive
         // choice — see the "driftLevel" SceneSetting's own comment — and
         // drives.value()'s sceneDefault, so at that setting's Scene default
-        // (today's behavior) levelValue/swellValue are exactly this
-        // calibrated reading.
+        // (today's behavior) levelValue is exactly this calibrated reading.
         const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
-        // Two reads of the same patch, different rests for an unplugged jack
-        // (drives.ts's header's "Nothing plugged in" paragraph): the rate
-        // below only ever adds on top of Drift speed's own base, so nothing
-        // plugged in should add nothing — rest 0, its own neutral. The swell
-        // read passes LOUD_NEUTRAL instead — loudSwellDrive's own neutral
-        // isn't 0 (see that function's own doc comment).
+        // Rest 0 for an unplugged jack (drives.ts's header's "Nothing
+        // plugged in" paragraph): the rate only ever adds on top of Drift
+        // speed's own base, so nothing plugged in should add nothing.
         const levelValue = drives.value("driftLevel", loudSwellCalibrated);
-        const swellValue = drives.value("driftLevel", loudSwellCalibrated, LOUD_NEUTRAL);
         // Speed pump's own accelerate-then-release velocity, advanced before the
         // rate below reads pump.vel, so this tick's push already counts.
         // Bass hit's own decaying envelope at driftPump's Beat-hit default —
@@ -1537,8 +1467,6 @@ float softCeil(float x, float knee, float ceil) {
           driftLevel,
           levelValue,
           pumpVel: pump.vel,
-          dropReactivity: getSetting("dropReactivity"),
-          sectionIntensity: anim.sectionIntensity,
         });
         // Caustic density: the slider lifted toward a finer mesh by its own
         // source (densityTargetFor — the slider exactly when nothing is
@@ -1610,7 +1538,6 @@ float softCeil(float x, float knee, float ceil) {
         return {
           uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
-          uLoudSwell: loudSwellDrive(driftLevel, swellValue),
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,
         };

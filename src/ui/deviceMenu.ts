@@ -13,6 +13,9 @@ import {
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import {
+  SCENE_EXPANSION_DEFAULT,
+  SCENE_EXPANSION_MAX,
+  SCENE_EXPANSION_MIN,
   SCENE_MASTER_DEFAULT,
   SCENE_MASTER_MAX,
   SCENE_MASTER_MIN,
@@ -40,7 +43,7 @@ import {
   type SilenceGateMarks,
   type SilenceGateReading,
 } from "../audio/silenceGate.ts";
-import type { HitShape } from "../audio/hitStrength.ts";
+import type { HitShape, HitShapePatch } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
@@ -93,6 +96,8 @@ import {
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
+import type { PreviewSize } from "../render/outputPower.ts";
+import type { OutputRenderStatus } from "../net/outputSync.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
@@ -108,6 +113,7 @@ import {
   FOLDED_BAR_PX,
   FONT_LABEL,
   FONT_MONO,
+  GLASS_BG,
   GLASS_FILTER,
   HOT_RED,
   HOT_YELLOW,
@@ -130,9 +136,12 @@ import {
   digitsStyle,
   digitsTextStyle,
   groupHeading,
-  paletteChipLitStyle,
-  paletteChipStyle,
-  paletteListStyle,
+  paletteGroupLabelStyle,
+  paletteGroupRowStyle,
+  paletteGroupsStyle,
+  paletteSwatchChipLitStyle,
+  paletteSwatchChipStyle,
+  paletteSwatchStyle,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -191,8 +200,12 @@ import {
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
  *
+ * The words the panel shows for all of this — signal, jack, wire, port,
+ * reactive setting, wire panel, built-in — are docs/vocabulary.md's; this
+ * file's own names (patch, source, cable) stay code-side.
+ *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
- * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Signal/
+ * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Dynamics/
  * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
  * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
@@ -234,7 +247,12 @@ import {
  * selection/patch change, scroll of either scrolling column, resize, a
  * card fold, a Scene-card rebuild — scheduleCableRecompute), with only
  * `stroke-dashoffset` written per tick, on the pinned group alone
- * (cableLayer.tick, flow speed off each source's own live value).
+ * (cableLayer.tick, flow speed off each source's own live value). A
+ * pinned cable is also pressable: cableGroupFor gives its real patch
+ * sources an onPress, and cableLayer.ts draws a hit stroke over the
+ * group for it, so pressing a cable unplugs that source — the same
+ * toggle as the source line's own × button. A preview cable and a
+ * display-only scene-mix cable stay decoration (no per-source press).
  *
  * In Only when mode, a source's *role* (drives.ts's `DriveSource.when`) is
  * its own, independent flag — several lines can be marked "Only when" at
@@ -424,8 +442,16 @@ export interface AudioStatus {
   sampleRate: number | null;
 }
 
+/** A palette as the Palette card shows it. */
+export interface PaletteMenuItem extends MenuItem {
+  /** Rows are grouped by this, in the order groups first appear. */
+  group: string;
+  /** The palette's ramp, darkest first, drawn as the chip's swatch. */
+  swatch: readonly string[];
+}
+
 export interface DeviceMenuDeps {
-  getPalettes: () => MenuItem[];
+  getPalettes: () => PaletteMenuItem[];
   currentSceneId: () => string;
   currentPaletteId: () => string;
   onPickPalette: (id: string) => void;
@@ -571,7 +597,7 @@ export interface DeviceMenuDeps {
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** The Signal card's Reset chip (its header, beside Loudness) — starts
+  /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
@@ -597,6 +623,12 @@ export interface DeviceMenuDeps {
    *  nor sent to the TV. */
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
+  /** The master's Expansion dial (sceneSettings.ts's getSceneExpansion) —
+   *  the Input card's Expansion curve over every numeric scene param's
+   *  slider position, applied after Scale in resolveSceneSetting. Device-
+   *  local like Scale. */
+  getSceneExpansion: () => number;
+  onSceneExpansionChange: (value: number) => void;
   /** This tick's picture reading for the Master card's Picture block — null
    *  whenever the meter has gone stale (the panel was just opened, or
    *  nothing has forced sampling with the panel closed) rather than a frozen
@@ -649,7 +681,7 @@ export interface DeviceMenuDeps {
    *  loudness should blend into its pulse height is a taste about
    *  detection itself, not one scene's look. */
   getHitShape: () => HitShape;
-  setHitShape: (partial: Partial<HitShape>) => void;
+  setHitShape: (partial: HitShapePatch) => void;
   /** Whether every member of "the whole mic" is on auto for this scene —
    *  drives the Input card's own Auto button. See src/audio/micAuto.ts's
    *  header for exactly what that membership is and how it overlaps
@@ -670,6 +702,30 @@ export interface DeviceMenuDeps {
    *  governor actually decided this session, and why. Polled at the panel's
    *  existing ~10Hz auto-refresh tick, not per frame. */
   getPowerStatus: () => PowerStatus;
+  /** True while a pop-out output window is open: the main Power card then
+   *  describes this window's preview (titled "Preview", Quality bound to the
+   *  preview's own choice) and gains the size and resolution rows. */
+  isPreview: () => boolean;
+  /** False when the preview has no box to resize (a phone controller's), which
+   *  hides the Size row; absent means it can. */
+  canResizePreview?: () => boolean;
+  getPreviewSize: () => PreviewSize;
+  onPreviewSizeChange: (size: PreviewSize) => void;
+  /** The preview's and the output's Resolution scale (src/render/outputPower.ts),
+   *  a fraction from RESOLUTION_MIN to RESOLUTION_MAX. */
+  getPreviewResolution: () => number;
+  onPreviewResolutionChange: (value: number) => void;
+  /** The pop-out output's live render readouts, null while none is open —
+   *  the second, "Output" Power card shows only while this is non-null. */
+  getOutputPowerStatus: () => OutputRenderStatus | null;
+  /** The output's own Quality choice, Resolution and Energy saving
+   *  (src/render/outputPower.ts), edited on the Output card and sent to its window. */
+  getOutputQualityChoice: () => QualityChoice;
+  onOutputQualityChoiceChange: (choice: QualityChoice) => void;
+  getOutputResolution: () => number;
+  onOutputResolutionChange: (value: number) => void;
+  getOutputPowerMode: () => PowerMode;
+  onOutputPowerModeChange: (mode: PowerMode) => void;
   /** The button that opens this menu — excluded from the tap-outside
    *  focus reset, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
@@ -688,7 +744,7 @@ export interface DeviceMenu {
    *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
    *  device isn't running its own extractor (renderer, synthetic feed);
    *  `lufs` is this device's lufsAnalyser reading, null on the same paths
-   *  (the Signal card's Loudness row hides itself). `rateScale` is app.ts's
+   *  (the Dynamics card's Loudness row hides itself). `rateScale` is app.ts's
    *  already-resolved sensitivity.ts's smoothingRateScale for this tick's
    *  Smoothing value — forwarded to the meters so their own BPM settle and
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
@@ -697,7 +753,7 @@ export interface DeviceMenu {
    *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
    *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
    *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
-   *  Signal card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
+   *  Dynamics card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
    *  off the same *un-latched* AnimFrame as `anim` — null on the same paths.
    *  A drive row's live pill reads its uniformPair() (the same number a
    *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
@@ -729,7 +785,8 @@ export interface DeviceMenu {
 // in controlsKit.ts; everything else per-element is inline here, in the same
 // cssText-constant convention as the rest of src/ui/.
 
-// "A" chip: filled when auto owns the row, outlined when the user does.
+// "A" chip: filled when auto owns the row, outlined when the user does. The
+// "T" chip below shares the outlined style (autoChipManualStyle) unlit.
 const autoChipBaseStyle = `
   width: 17px; height: 16px; display: grid; place-items: center; border-radius: 3px;
   font: 500 9.5px/1 ${FONT_MONO}; cursor: pointer; padding: 0; flex-shrink: 0;
@@ -739,12 +796,10 @@ const autoChipLitStyle = (accent: string) =>
 const autoChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 // "T" chip: mutes the row to its floor and back (see the header comment).
-// Shares the A chip's geometry, but lit it fills with FADER_OFF — the panel's
+// Shares the A chip's geometry and unlit style, but lit it fills with FADER_OFF — the panel's
 // one "this is off" colour, the band faders' too — rather than the row's
 // accent, so a muted row never reads as a lit A chip at a glance.
 const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
-const offChipManualStyle = (accent: string) =>
-  `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 
 // The Auto master bar — its own slim full-width strip at the top of the
@@ -755,8 +810,8 @@ const autoMasterBaseStyle = `
   cursor: pointer; padding: 0; border-radius: 3px;
   -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
-const autoMasterStyle = `${autoMasterBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
-const autoMasterLitStyle = `${autoMasterBaseStyle} background: ${withAlpha("#1479b0", 0.28)}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
+const autoMasterStyle = `${autoMasterBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
+const autoMasterLitStyle = `${autoMasterBaseStyle} background: linear-gradient(${withAlpha("#1479b0", 0.28)}, ${withAlpha("#1479b0", 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
 // Label + ON/OFF sub-label inline on one line, centred in the bar.
 const autoMasterInnerStyle = `display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%;`;
 const autoMasterLabelStyle = (lit: boolean) =>
@@ -766,7 +821,7 @@ const autoMasterSubStyle = (lit: boolean) =>
 
 // The Input card's own "Auto" button (see micAuto.ts's header for what
 // "the whole mic" covers) — a compact, header-sized member of the
-// autoMaster* family above: same lit/unlit shape, same backdrop-filtered
+// autoMaster* family above: same lit/unlit shape, same glass-tinted
 // pill, scaled down to sit beside a Reset chip in a card header instead of
 // spanning the settings column, and given the Input card's own accent
 // (INPUT_GREEN) rather than the Auto bar's sky blue.
@@ -775,8 +830,8 @@ const micAutoBaseStyle = `
   border-radius: 4px; cursor: pointer;
   -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
-const micAutoStyle = `${micAutoBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
-const micAutoLitStyle = `${micAutoBaseStyle} background: ${withAlpha(INPUT_GREEN, 0.28)}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
+const micAutoStyle = `${micAutoBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
+const micAutoLitStyle = `${micAutoBaseStyle} background: linear-gradient(${withAlpha(INPUT_GREEN, 0.28)}, ${withAlpha(INPUT_GREEN, 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
 // Wraps the Auto button and the Reset chip in the Input card's header —
 // createCard's `right` slot takes one element, not a list.
 const inputCardHeaderRightStyle = `display: flex; align-items: center; gap: 6px;`;
@@ -798,7 +853,7 @@ const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em;
 // under a control someone has to find).
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
-  "Drag a knob up to boost a band, down to cut it. Pin a reactive setting to plug meters into it.";
+  "Drag a knob up to boost a band, down to cut it. Pin a reactive setting to plug signals into it.";
 
 // The Bands card's Levels row: a small caption, then a 3-column grid of
 // BAND_LEVEL_CHOICES's own compact meters (below) — one row rather than
@@ -830,7 +885,7 @@ const RAW_CHIP_TITLE =
 // createControlRow's own drivePanel slot: the label + summary wrapper that
 // pins on click. Stacked (label, then the summary on its own line) rather
 // than side by side — inline, the summary had nowhere left to grow in the
-// narrow controls column and ellipsized to unreadable ("Scene mix: bas…")
+// narrow controls column and ellipsized to unreadable ("Built-in: two-st…")
 // even at a middling width; a second line wraps instead, however long the
 // source list gets.
 const driveRowLeftStyle = `display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; cursor: pointer;`;
@@ -951,8 +1006,8 @@ const SOLO_EYE_PX = 18;
 // Footer strip.
 const footerStyle = `
   display: flex; align-items: center; justify-content: space-between; padding: 7px 12px;
-  background: rgba(8,11,10,0.26);
-  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  background: ${GLASS_BG};
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
   font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
 `;
@@ -1098,8 +1153,9 @@ export interface ControlRowSpec {
    *  through its own onChange, which flips the flag just the same — the one
    *  hook the Input card's rows use to keep its own Auto button in
    *  sync (deviceMenu.ts's refreshMicAuto) instead of each row sprinkling
-   *  that call individually. Omit for a row nothing else needs to hear
-   *  about (every scene-setting row today). */
+   *  that call individually, and the scene rows use to keep the Auto
+   *  master bar in sync (refreshAutoMaster). Omit for a row nothing else
+   *  needs to hear about. */
   onAutoToggled?: () => void;
   /** Dev-only: makes the readout typable, bound to a scene+key already —
    *  see DeviceMenuDeps.devPin. Omit to leave the readout the plain
@@ -1490,6 +1546,7 @@ export function createControlRow(spec: ControlRowSpec) {
       clearOff();
       commit(value);
     } else {
+      clearOff();
       spec.pin.set(value);
       display(value, false);
     }
@@ -1514,7 +1571,7 @@ export function createControlRow(spec: ControlRowSpec) {
   const offChip = document.createElement("button");
   offChip.textContent = "T";
   offChip.title = `Turn ${spec.label} off (T)`;
-  offChip.style.cssText = offChipManualStyle(spec.accent);
+  offChip.style.cssText = autoChipManualStyle(spec.accent);
   offChip.classList.add("vc-keycap-anchor");
   offChip.dataset.key = "mute";
   offChip.dataset.keycap = "T";
@@ -1756,7 +1813,7 @@ export function createControlRow(spec: ControlRowSpec) {
   }
 
   function refreshOffChip(): void {
-    offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : offChipManualStyle(spec.accent);
+    offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : autoChipManualStyle(spec.accent);
   }
   function clearOff(): void {
     if (offStoredValue === null) return;
@@ -1851,7 +1908,9 @@ export function createControlRow(spec: ControlRowSpec) {
     refreshChip,
     /** Forgets this row's T restore point — for the card-level Reset chips
      *  (Bands, Input), which write straight through setValue() rather than
-     *  this row's own resetBtn. */
+     *  this row's own resetBtn. Call it BEFORE setValue(): display() renders
+     *  the row muted while a restore point is held, and clearOff() itself
+     *  only repaints the T chip. */
     clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
      *  owns it (resolveLive() already reflects a pin ahead of auto — see
@@ -1859,8 +1918,14 @@ export function createControlRow(spec: ControlRowSpec) {
      *  pin ahead of the manual store otherwise. */
     sync(manualValue: () => number): void {
       refreshChip();
-      if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
-      else display(spec.pin?.get() ?? manualValue(), false);
+      if (spec.auto && spec.auto.isEnabled()) {
+        // Auto owns the row, so a T restore point means nothing any more —
+        // drop it, or the T chip stays lit and the next T would write the
+        // stale value and take the row off auto. The manual branch keeps it:
+        // open() syncs every row, and a muted manual row must stay muted.
+        clearOff();
+        display(spec.auto.resolveLive(), true);
+      } else display(spec.pin?.get() ?? manualValue(), false);
     },
     /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
      *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
@@ -1942,7 +2007,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, toggle, hint);
-  el.addEventListener("click", () => toggle.focus());
+  el.addEventListener("click", () => toggle.focus({ preventScroll: true }));
   wireHoverFocus(el, toggle);
 
   function apply(value: number): void {
@@ -2000,19 +2065,57 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // ---- power column: energy saving mode ----
   // Leftmost — a compact card, not a scrolling stack, so it isn't wired into
-  // the digit-block keyboard jump (renumberBlocks/markBlock): its only
-  // controls are plain chip buttons, outside the .vc-slider/.vc-toggle/
-  // .vc-fader Tab ring, the same as the palette chips they're modeled on.
+  // the digit-block keyboard jump (renumberBlocks/markBlock): its controls
+  // are plain chip buttons plus the Resolution slider, all kept outside the
+  // Tab ring (ringElements() skips this column), the same as the palette
+  // chips they're modeled on.
   const powerCard = createPowerCard({
     getPowerMode: deps.getPowerMode,
     onPowerModeChange: deps.onPowerModeChange,
     getQualityChoice: deps.getQualityChoice,
     onQualityChoiceChange: deps.onQualityChoiceChange,
     getPowerStatus: deps.getPowerStatus,
+    isPreview: deps.isPreview,
+    canResizePreview: deps.canResizePreview,
+    getPreviewSize: deps.getPreviewSize,
+    onPreviewSizeChange: deps.onPreviewSizeChange,
+    getResolution: deps.getPreviewResolution,
+    onResolutionChange: deps.onPreviewResolutionChange,
   });
+  // The pop-out output's own Power card, under the main one, shown only
+  // while an output window is open. Same card, other deps: its status is
+  // what the output reports (net/outputSync.ts's OutputRenderStatus).
+  const outputPowerCard = createPowerCard(
+    {
+      getPowerMode: deps.getOutputPowerMode,
+      onPowerModeChange: deps.onOutputPowerModeChange,
+      getQualityChoice: deps.getOutputQualityChoice,
+      onQualityChoiceChange: deps.onOutputQualityChoiceChange,
+      getResolution: deps.getOutputResolution,
+      onResolutionChange: deps.onOutputResolutionChange,
+      getPowerStatus: () => {
+        const s = deps.getOutputPowerStatus();
+        return {
+          mode: deps.getOutputPowerMode(),
+          choice: deps.getOutputQualityChoice(),
+          recommended: s?.recommended ?? "high",
+          fps: s?.fps ?? 0,
+          level: s ? s.level : null,
+          maxLevel: s?.maxLevel ?? 0,
+          fraction: s?.fraction ?? 1,
+          standingDown: s?.standingDown ?? false,
+          bufferWidth: s?.bufferWidth ?? 0,
+          bufferHeight: s?.bufferHeight ?? 0,
+        };
+      },
+    },
+    { title: "Output", foldId: "powerOutput" },
+  );
+  outputPowerCard.setVisible(false);
+  let outputPowerShown = false;
   const powerCol = document.createElement("div");
   powerCol.className = "vc-power-col";
-  powerCol.appendChild(powerCard.el);
+  powerCol.append(powerCard.el, outputPowerCard.el);
 
   // ---- spectrum column: the Bands card ----
   // The live spectrum and the band gains are one card: the strip is the
@@ -2380,7 +2483,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // there's nothing (any more) to feed. DeviceMenu.update() calls through
   // this rather than iterating every row, since only the pinned row ever
   // has a graph.
-  let activeOutputTick: ((drives: SceneDrives) => void) | null = null;
+  let activeOutputTick: ((drives: SceneDrives, slots: number) => void) | null = null;
 
   // Every drive row appendSettingRow builds below, reset at the top of
   // renderSceneSettings alongside sceneRowHandles — a scene switch/Look
@@ -2398,9 +2501,35 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPin(): void;
     refreshPreviewLit(): void;
     rebuildIfPinned(): void;
-    tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void;
+    tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
+
+  // Peak-hold between graph samples. The sparklines and the output graph
+  // sample at SPARKLINE_REFRESH_MS, but a hit is a one-tick spike that
+  // decays right away — a sample landing a tick or two after the hit drew
+  // a Fixed hit (every one starts at exactly 1) at 0.8-0.9 and the peaks
+  // looked uneven. notePeaks() runs every frame and remembers the highest
+  // reading per setting (combined and per source); the 30 Hz tick draws
+  // max(now, that), then the update loop clears it.
+  const peakSeen = new Map<string, { v: number; src: number[] }>();
+  function notePeaks(drives: SceneDrives): void {
+    for (const h of driveRowHandles) {
+      if (deps.getDriveSetting(h.sceneId, h.spec) === "scene") continue;
+      const key = h.spec.key;
+      let p = peakSeen.get(key);
+      if (!p) {
+        p = { v: 0, src: [] };
+        peakSeen.set(key, p);
+      }
+      p.v = Math.max(p.v, drives.valueOf(key));
+      const vals = drives.sourceValues(key);
+      if (vals) for (let i = 0; i < vals.length; i++) p.src[i] = Math.max(p.src[i] ?? 0, vals[i]!);
+    }
+  }
+  const heldValue = (key: string, now: number): number => Math.max(now, peakSeen.get(key)?.v ?? 0);
+  const heldSource = (key: string, i: number, now: number): number => Math.max(now, peakSeen.get(key)?.src[i] ?? 0);
+
   /** Every Scene-card row that can be pinned — all of them, drive or not,
    *  in document order: what togglePin refreshes, Tab walks (moveTabPin)
    *  and a rebuild re-finds the pin in. A drive row's refreshPin is its
@@ -2443,6 +2572,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   });
+  /** The drive graphs' one fixed top — the row sparkline and the "What it
+   *  receives" graph alike: one source at the most weight it can have
+   *  (DRIVE_WEIGHT_MAX) reading full scale, times the setting's own gain.
+   *  It never moves — not with a weight drag, a source plugged in or muted,
+   *  or a peak scrolling past — so a taller line always means the setting is
+   *  receiving more. A weight-1 source peaks at `gain` (the dotted line);
+   *  anything past the top clips. */
+  function driveGraphTop(spec: SceneSetting): number {
+    return Math.max(1e-3, DRIVE_WEIGHT_MAX * (spec.drive?.gain ?? 1));
+  }
+
   function trackDriveCanvas(canvas: HTMLCanvasElement): CanvasSize {
     const size: CanvasSize = { w: 0, h: 0 };
     driveCanvasSizes.set(canvas, size);
@@ -2455,14 +2595,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     driveCanvasSizes.delete(canvas);
   }
 
+  /** A `drive.sceneLabel` as the built-in summary shows it: the scene's
+   *  own "Scene: " prefix and a leading "this scene's own " dropped, since
+   *  "Built-in: " already says both (docs/vocabulary.md). Empty when the
+   *  scene names no label. */
+  function builtInText(spec: SceneSetting): string {
+    return (spec.drive?.sceneLabel ?? "").replace(/^Scene:\s*/, "").replace(/^this scene's own\s+/, "");
+  }
+
   /** A row's own one-line source summary — every muted source is left out
    *  of the plain-language list (this file's header's Muting paragraph) and
    *  folded into one short "· N off" suffix instead, so a summary never
    *  grows a parenthetical per muted source. */
   function driveSummaryText(spec: SceneSetting, setting: DriveSetting): string {
     if (setting === "scene") {
-      const label = spec.drive?.sceneLabel ?? "Scene mix";
-      return label.replace(/^Scene:\s*/, "Scene mix: ");
+      const label = builtInText(spec);
+      return label ? `Built-in: ${label}` : "Built-in";
     }
     if (!setting.sources.length) return "Nothing plugged in";
     const mutedCount = setting.sources.filter((s) => s.off).length;
@@ -2490,11 +2638,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   /** The short form driveSummaryText's own "scene" branch would otherwise
-   *  spell out ("Scene mix: bass level") — just "Scene", for the "Mixed —
+   *  spell out ("Built-in: bass level") — just "Built-in", for the "Mixed —
    *  …" line below, where every part has to stay short enough to read as a
    *  list. */
   function driveShortSummary(spec: SceneSetting, setting: DriveSetting): string {
-    return setting === "scene" ? "Scene" : driveSummaryText(spec, setting);
+    return setting === "scene" ? "Built-in" : driveSummaryText(spec, setting);
   }
 
   /** A drive row's own summary text, "Mixed — …" once its linked siblings
@@ -2568,12 +2716,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   const MIX_OPTIONS: { mix: DriveMix; label: string; hint: string }[] = [
-    { mix: "add", label: "Add", hint: "Stack the sources: each adds its share, so together they push harder." },
-    { mix: "max", label: "Strongest", hint: "Only the strongest source at each moment counts — they don't stack." },
+    { mix: "add", label: "Add", hint: "Stack the wires: each adds its share, so together they push harder." },
+    { mix: "max", label: "Strongest", hint: "Only the strongest wire at each moment counts — they don't stack." },
     {
       mix: "gate",
       label: "Only when",
-      hint: "Some sources play, but only while the condition is high — e.g. treble hits, only when the song is intense.",
+      hint: "Some wires play, but only while the condition is high — e.g. treble hits, only when the song is intense.",
     },
   ];
 
@@ -2590,14 +2738,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const EVERY_HINT = "How many beats one swing takes: 1 = every beat, 4 = once a bar.";
 
   const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
-    { role: "plays", label: "Plays", hint: "This source makes the setting move." },
+    { role: "plays", label: "Plays", hint: "This wire makes the setting move." },
     {
       role: "when",
       label: "Only when",
-      hint: "A condition: the playing sources only get through while this one is high. Mark more than one and every condition has to be high at once.",
+      hint: "A condition: the playing wires only get through while this one is high. Mark more than one and every condition has to be high at once.",
     },
   ];
-  const ROLE_REFUSE_HINT = "At least one source has to play.";
+  const ROLE_REFUSE_HINT = "At least one wire has to play.";
 
   const GRID_CHIP_HINT: Record<number, string> = {
     1: "A pulse every half beat.",
@@ -2618,8 +2766,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = opt.label;
       btn.disabled = disabled;
-      setHint(btn, disabled ? "Plug in a second source to gate one against the other." : opt.hint);
-      btn.setAttribute("aria-description", opt.hint);
+      setHint(btn, disabled ? "Plug in a second signal to gate one against the other." : opt.hint);
       btn.setAttribute("aria-pressed", String(patch.mix === opt.mix));
       btn.style.cssText = disabled ? driveSegBtnDisabledStyle : patch.mix === opt.mix ? driveSegBtnLitStyle : driveSegBtnStyle;
       if (!disabled) {
@@ -2645,7 +2792,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = opt.label;
       setHint(btn, opt.hint);
-      btn.setAttribute("aria-description", opt.hint);
       btn.setAttribute("aria-pressed", String(current === opt.h));
       btn.style.cssText = current === opt.h ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       btn.addEventListener("click", () => {
@@ -2681,7 +2827,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = String(n);
       setHint(btn, EVERY_HINT);
-      btn.setAttribute("aria-description", EVERY_HINT);
       btn.setAttribute("aria-pressed", String(current === n));
       btn.style.cssText = current === n ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       btn.addEventListener("click", () => {
@@ -2720,7 +2865,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.textContent = opt.label;
       btn.disabled = disabled;
       setHint(btn, disabled ? ROLE_REFUSE_HINT : opt.hint);
-      btn.setAttribute("aria-description", disabled ? ROLE_REFUSE_HINT : opt.hint);
       btn.setAttribute("aria-pressed", String(pressed));
       btn.style.cssText = disabled ? driveMiniSegBtnDisabledStyle : pressed ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       if (!disabled) {
@@ -2747,7 +2891,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.textContent = driveGridDivisionLabel(i);
       const hint = GRID_CHIP_HINT[i] ?? "";
       setHint(btn, hint);
-      btn.setAttribute("aria-description", hint);
       btn.setAttribute("aria-pressed", String(current === i));
       btn.style.cssText = current === i ? driveChipLitStyle(DRIVE_WHITE) : driveChipStyle;
       btn.addEventListener("click", () => {
@@ -2760,7 +2903,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
-  const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
+  const WEIGHT_HINT = "This wire's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
   const GENERIC_THRESHOLD_HINT =
     "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
@@ -2897,8 +3040,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
-  const MUTE_HINT_ON = "Switch this source off without unplugging it — its settings are kept.";
-  const MUTE_HINT_OFF = "Switch this source back on.";
+  const MUTE_HINT_ON = "Switch this wire off without unplugging it — its settings are kept.";
+  const MUTE_HINT_OFF = "Switch this wire back on.";
 
   /** The source line's own on/off switch (drives.ts's setSourceMuted) —
    *  lives in its own gutter column (driveSrcLineStyle) on every line, so
@@ -2959,7 +3102,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     removeBtn.style.cssText = driveSrcRemoveStyle;
     removeBtn.textContent = "×";
     removeBtn.setAttribute("aria-label", `Unplug ${driveSourceLabel(src.choice)}`);
-    setHint(removeBtn, "Unplug this source.");
+    setHint(removeBtn, "Unplug this wire.");
     removeBtn.addEventListener("click", () => {
       deps.onTogglePatchSource(sceneId, spec, src.choice);
       patchChanged(sceneId, spec);
@@ -3069,11 +3212,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sceneId: string,
     spec: SceneSetting,
     patch: DrivePatch,
-  ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives) => void } {
+  ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives, slots: number) => void } {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "The last 4 seconds. White: what this setting receives. Thin coloured lines: each source (dashed: a condition). Dark: the gate was closed. Dotted line and cyan dots, when shown: see the key under the graph.",
+      "The last 4 seconds, on a scale that never changes: the top is one wire at full weight, the dotted line across the middle one wire at weight 1. White: what this setting receives. Thin coloured lines: each wire (dashed: a condition). Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -3144,17 +3287,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const xs = (k: number) => (k / (RING - 1)) * w;
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
-      // The chart grows to fit: several sources added together can go past
-      // 1, and a scene's line rides above the signal — clipping both at 1
-      // flattened the result against the top and hid the line.
-      let top = 1;
-      for (let k = RING - n; k < RING; k++) {
-        const idx = at(k);
-        top = Math.max(top, combined[idx]!);
-        for (const trace of perSource) top = Math.max(top, trace[idx]!);
-        for (const trace of markTraces.values()) if (trace[idx]! >= 0) top = Math.max(top, trace[idx]!);
-      }
-      top *= 1.05;
+      // driveGraphTop: fixed, so the trace never rescales. A scene's own
+      // mark line that rides above the signal clips at the top.
+      // `sourceValues()` and the generic gate's line are un-gained
+      // (weight·value — drives.ts's header), the combined value and this top
+      // are gained: every trace is scaled by `gain` below so they share one
+      // axis (a 0.15-gain setting drew its source traces 7× off the top).
+      const gain = spec.drive?.gain ?? 1;
+      const top = driveGraphTop(spec);
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
@@ -3180,7 +3320,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (let k = RING - n; k < RING; k++) {
           const idx = at(k);
           const x = xs(k);
-          const y = ys(perSource[i]![idx]!);
+          const y = ys(perSource[i]![idx]! * gain);
           if (k === RING - n) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -3205,6 +3345,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ctx.stroke();
       }
       ctx.setLineDash([]);
+      // Where one weight-1 source peaks (gain), and the top's own number.
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = MARK_LINE;
+      ctx.beginPath();
+      ctx.moveTo(0, ys(gain));
+      ctx.lineTo(w, ys(gain));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = `400 10px ${FONT_MONO}`;
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fillText(top.toFixed(top < 1 ? 2 : 1), 4, 3);
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -3254,54 +3407,59 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    function tick(drives: SceneDrives): void {
-      ringHead = (ringHead + 1) % RING;
+    /** `slots` is how many SPARKLINE_REFRESH_MS columns this call covers
+     *  (more than 1 after a slow frame — see the update loop), so the graph's
+     *  x axis stays real time: the held peak lands in the first, the live
+     *  reading fills the rest, and the scene's own marks (taken once) land
+     *  with the peak. */
+    function tick(drives: SceneDrives, slots: number): void {
       const src = drives.sourceValues(spec.key);
-      for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
-      const v = drives.valueOf(spec.key);
-      combined[ringHead] = v;
+      const now = drives.valueOf(spec.key);
+      const v = heldValue(spec.key, now);
       const marks = takeSettingMarks(sceneId, spec.key, "graph");
-      for (const trace of markTraces.values()) trace[ringHead] = NaN;
-      for (const line of marks?.lines ?? []) {
-        let trace = markTraces.get(line.label);
-        if (!trace) {
-          trace = new Float32Array(RING).fill(NaN);
-          markTraces.set(line.label, trace);
-        }
-        trace[ringHead] = line.value;
-      }
       // The generic engine gate's own line (drives.ts's header's threshold
       // paragraph) — undefined for a scene-handled setting (it draws its own
       // line above instead, through settingMarks.ts) or while the gate is
       // off. Drawn the same dotted way as a scene's own mark lines, under
       // one fixed label so it gets its own key entry.
       const gateLine = drives.gateLine(spec.key);
-      if (gateLine !== undefined) {
-        let trace = markTraces.get(GENERIC_GATE_LINE_LABEL);
-        if (!trace) {
-          trace = new Float32Array(RING).fill(NaN);
-          markTraces.set(GENERIC_GATE_LINE_LABEL, trace);
-        }
-        trace[ringHead] = gateLine;
+      for (const line of marks?.lines ?? []) {
+        if (!markTraces.has(line.label)) markTraces.set(line.label, new Float32Array(RING).fill(NaN));
       }
-      reactions[ringHead] = marks?.reaction ?? 0;
-      if (key.style.display === "none" && (marks || gateLine !== undefined)) {
-        key.style.display = "flex";
-        keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
-        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
-        keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
+      if (gateLine !== undefined && !markTraces.has(GENERIC_GATE_LINE_LABEL)) {
+        markTraces.set(GENERIC_GATE_LINE_LABEL, new Float32Array(RING).fill(NaN));
       }
+      let open = 1;
       if (isGate) {
-        let open = 1;
         let anyCondition = false;
         for (const idx of conditionIdxs) {
           if (patch.sources[idx]!.off) continue; // muted condition — excluded from the AND, same as the engine
           anyCondition = true;
           open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, src?.[idx] ?? 0);
         }
-        gateOpen[ringHead] = !anyCondition || open > 0.5 ? 1 : 0;
+        if (!anyCondition) open = 1;
       }
-      filled = Math.min(RING, filled + 1);
+      for (let s = 0; s < slots; s++) {
+        const first = s === 0;
+        ringHead = (ringHead + 1) % RING;
+        for (let i = 0; i < perSource.length; i++) {
+          const sv = src?.[i] ?? 0;
+          perSource[i]![ringHead] = first ? heldSource(spec.key, i, sv) : sv;
+        }
+        combined[ringHead] = first ? v : now;
+        for (const trace of markTraces.values()) trace[ringHead] = NaN;
+        for (const line of marks?.lines ?? []) markTraces.get(line.label)![ringHead] = line.value;
+        if (gateLine !== undefined) markTraces.get(GENERIC_GATE_LINE_LABEL)![ringHead] = gateLine * (spec.drive?.gain ?? 1);
+        reactions[ringHead] = first ? (marks?.reaction ?? 0) : 0;
+        if (isGate) gateOpen[ringHead] = open > 0.5 ? 1 : 0;
+      }
+      if (key.style.display === "none" && (marks || gateLine !== undefined)) {
+        key.style.display = "flex";
+        keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
+        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
+        keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
+      }
+      filled = Math.min(RING, filled + slots);
       val.textContent = v.toFixed(2);
       draw();
     }
@@ -3316,7 +3474,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function buildPatchPanel(
     sceneId: string,
     spec: SceneSetting,
-  ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives) => void) | null } {
+  ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives, slots: number) => void) | null } {
     const setting = deps.getDriveSetting(sceneId, spec);
     const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
 
@@ -3327,7 +3485,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     resetBtn.type = "button";
     resetBtn.style.cssText = driveResetLinkStyle;
     resetBtn.textContent = "Reset to scene default";
-    setHint(resetBtn, `Back to what this scene does on its own: ${driveDefaultSummary(spec)}.`);
+    setHint(resetBtn, `Back to how this scene starts — ${driveDefaultSummary(spec)}.`);
     resetBtn.addEventListener("click", () => {
       deps.onResetDriveSetting(sceneId, spec);
       patchChanged(sceneId, spec);
@@ -3348,26 +3506,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     head.style.cssText = drivePatchHeadStyle;
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
-    eyebrow.textContent = "Receives";
+    eyebrow.textContent = "Wires";
     head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
     panel.appendChild(head);
 
     const list = document.createElement("div");
     list.style.cssText = driveSrcListStyle;
     if (setting === "scene") {
-      // The scene's own mix has no source line of its own, so it gets its
-      // own Unplug — without it the scene's mix could never be disconnected.
+      // The built-in reaction has no wire line of its own, so it gets its
+      // own Unplug — without it the built-in could never be disconnected.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      const mix = spec.drive?.sceneLabel?.replace(/^Scene:\s*/, "");
-      empty.textContent = mix
-        ? `Playing the scene's own mix: ${mix}. Plug in a meter to replace it.`
-        : "Playing the scene's own mix. Plug in a meter to replace it.";
+      const builtIn = builtInText(spec);
+      empty.textContent = builtIn
+        ? `Built-in: ${builtIn}. Plug in a signal to replace it.`
+        : "Built-in reaction. Plug in a signal to replace it.";
       const unplug = document.createElement("button");
       unplug.type = "button";
       unplug.style.cssText = driveResetLinkStyle;
       unplug.textContent = "Unplug";
-      setHint(unplug, "Disconnect the scene's own mix, so this setting doesn't react to the music.");
+      setHint(unplug, "Unplug the built-in reaction, so this setting doesn't react to the music.");
       unplug.addEventListener("click", () => {
         deps.onUnplugAll(sceneId, spec);
         patchChanged(sceneId, spec);
@@ -3378,7 +3536,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // in, so the setting holds still.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a meter, or reset to the scene default.";
+      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a signal, or reset to the scene default.";
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
@@ -3388,7 +3546,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     panel.appendChild(buildAddChips(sceneId, spec, patch));
 
     let outputCanvas: HTMLCanvasElement | null = null;
-    let tick: ((drives: SceneDrives) => void) | null = null;
+    let tick: ((drives: SceneDrives, slots: number) => void) | null = null;
     if (patch.sources.length) {
       const graph = buildOutputGraph(sceneId, spec, patch);
       panel.appendChild(graph.el);
@@ -3408,9 +3566,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // own `data-hint` (set by setHint above) — never a per-control
     // listener, never touched by refreshAuto/update(). In the stacked
     // layout jacks are far away, so the rest state points at the add-by-
-    // name chips instead of a meter's jack.
+    // name chips instead of a signal's jack.
     const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
-    const restHint = stacked ? "Add a source by name below." : "Click a meter's jack to plug it in or out.";
+    const restHint = stacked ? "Add a signal by name below." : "Click a signal's jack to plug it in or out.";
     const hintBar = document.createElement("div");
     hintBar.className = "vc-drive-bottom-hint";
     setHintText(hintBar, restHint);
@@ -3472,7 +3630,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sparkCanvas = document.createElement("canvas");
     sparkCanvas.className = "vc-drive-spark";
     sparkCanvas.style.cssText = driveSparkCanvasStyle;
-    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). Colour shows which source is contributing most.";
+    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). Colour shows which wire is contributing most.";
     sparkCanvas.title = SPARK_TOOLTIP;
     sparkCanvas.addEventListener("pointerenter", () =>
       showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]),
@@ -3498,6 +3656,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let sparkHasMarks = false;
     let sparkHead = 0;
     let sparkFilled = 0;
+    // The same fixed top as the panel's "What it receives" graph
+    // (driveGraphTop), so the two read on one scale. A Scene row's
+    // approximation is an un-gained catalogue signal, so its top drops the
+    // gain to put full scale at the same height.
+    let sparkTop = driveGraphTop(spec);
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
 
@@ -3567,10 +3730,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const at = (k: number) => (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
       const xs = (k: number) => (k / (SPARK_LEN - 1)) * w;
-      // Grows to fit (sources added together go past 1) rather than
-      // clipping, which drew a busy input as a flat line along the top.
-      let top = 1;
-      for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) top = Math.max(top, sparkVals[at(k)]!);
+      const top = sparkTop;
       const pad = sparkHasMarks ? 3 : 1;
       const ys = (v: number) => h - pad - Math.max(0, Math.min(1, v / top)) * (h - 2 * pad);
       sparkCtx.lineWidth = 1.3;
@@ -3620,8 +3780,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void {
+    /** `slots`: same as the output graph's own tick — the held peak in the
+     *  first column, the live reading in the rest. */
+    function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void {
       const setting = deps.getDriveSetting(sceneId, spec);
+      let now: number;
       let v: number;
       let col: string;
       if (setting === "scene") {
@@ -3643,16 +3806,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
               bestId = id;
             }
           }
-          v = best;
+          now = v = best;
           col = withAlpha(driveSourceColor(bestId), 0.55);
         } else {
           // No sceneSources to approximate from — a faint flat baseline
           // rather than a literal 0 (invisible at the track's very bottom).
-          v = 0.04;
+          now = v = 0.04;
           col = withAlpha(SCENE_VIOLET, 0.35);
         }
       } else {
-        v = drives.valueOf(spec.key);
+        now = drives.valueOf(spec.key);
+        v = heldValue(spec.key, now);
         col = SCENE_VIOLET;
         if (setting.sources.length) {
           const vals = drives.sourceValues(spec.key);
@@ -3669,13 +3833,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           col = driveSourceColor(setting.sources[bi]!.choice);
         }
       }
-      sparkHead = (sparkHead + 1) % SPARK_LEN;
-      sparkVals[sparkHead] = v;
-      sparkCols[sparkHead] = col;
+      sparkTop = setting === "scene" ? DRIVE_WEIGHT_MAX : driveGraphTop(spec);
       const marks = takeSettingMarks(sceneId, spec.key, "row");
       if (marks) sparkHasMarks = true;
-      sparkReact[sparkHead] = marks?.reaction ?? 0;
-      sparkFilled = Math.min(SPARK_LEN, sparkFilled + 1);
+      for (let s = 0; s < slots; s++) {
+        sparkHead = (sparkHead + 1) % SPARK_LEN;
+        sparkVals[sparkHead] = s === 0 ? v : now;
+        sparkCols[sparkHead] = col;
+        sparkReact[sparkHead] = s === 0 ? (marks?.reaction ?? 0) : 0;
+      }
+      sparkFilled = Math.min(SPARK_LEN, sparkFilled + slots);
       drawSparkline();
     }
 
@@ -3751,6 +3918,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** Pins without ever unpinning — a press on a card (isCardPress). */
   function pinSetting(sceneId: string, spec: SceneSetting): void {
     if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
+  }
+
+  /** Registers `rowEl` into `pinRowHandles` outside the drive system's own
+   *  `DriveRowHandle` path — `appendSettingRow`'s own `registerPinRow` calls
+   *  this for its non-drive branch (a toggle/enum/plain-slider row), and
+   *  `WidgetCtx.registerCard` (registry.ts's own doc comment has the full
+   *  contract, including why `spec` is often a synthetic identity rather
+   *  than a real setting) is the exact same call for a widget's own custom
+   *  row. `main`, when given, is the row's own value control: a click
+   *  anywhere on `rowEl` that isn't some OTHER in-row control (isCardPress)
+   *  pins — passing `rowEl` itself as `main` (every WidgetCtx.registerCard
+   *  caller does) makes every press anywhere in the row count, pads/faders/
+   *  buttons included, matching this file's header's "press anywhere on the
+   *  card pins it" rule for an ordinary row. */
+  function registerPinnableRow(sceneId: string, spec: SceneSetting, accent: string, rowEl: HTMLElement, main?: HTMLElement | null): void {
+    if (main) {
+      rowEl.addEventListener("click", (e) => {
+        if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+      });
+    }
+    rowEl.style.setProperty("--vc-pin-color", accent);
+    pinRowHandles.push({
+      sceneId,
+      spec,
+      rowEl,
+      refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
+    });
   }
 
   /** The only place `preview` is written. See previewDrive's own callers
@@ -4066,8 +4260,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  once each from cableSpecsForShown below. `isNew`/justAddedKey only
    *  ever applies to the pinned group in practice (a patch can't be edited
    *  without pinning it first — see onJackClick), but there's no reason to
-   *  special-case that away here. */
-  function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null): CableGroupSpec {
+   *  special-case that away here. `interactive` marks the pinned group: its
+   *  real patch sources get cableLayer.ts's own onPress, so pressing a
+   *  cable unplugs that source — the same toggle the source line's own ×
+   *  button takes (below). A preview group is never interactive (a hover
+   *  preview isn't a committed patch), and a `"scene"` setting's display-
+   *  only sceneSources are never interactive from either group (they have
+   *  no per-source unplug — the row's own Unplug button owns that). */
+  function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null, interactive: boolean): CableGroupSpec {
     if (!sel) return { sources: [], portEl: null };
     const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);
     if (!handle) return { sources: [], portEl: null };
@@ -4092,7 +4292,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // (controlsTheme.ts's .vc-cable-cond), consistent with the source
       // line's own dashed marker and the output graph's dashed trace. A
       // muted source draws in the flat, dashed `.vc-cable-muted` style
-      // instead (no glow, no flow) regardless of role.
+      // instead (no glow/flow) regardless of role.
+      const target = sel;
       const conditionIdxs = setting.mix === "gate" ? gateConditionIndices(setting) : [];
       setting.sources.forEach((src, idx) => {
         const key = jackKey(src.choice);
@@ -4108,6 +4309,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           jackEl,
           getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
           isNew: key === justAddedKey,
+          // Press-to-unplug, pinned group only — the same toggle the
+          // source line's own × button takes (see this function's header).
+          onPress: interactive
+            ? () => {
+                justAddedKey = null;
+                deps.onTogglePatchSource(target.sceneId, target.spec, src.choice);
+                patchChanged(target.sceneId, target.spec);
+              }
+            : undefined,
         });
       });
     }
@@ -4118,8 +4328,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  its header and activePreview() above for why these are independent
    *  rather than one "shown" selection. */
   function cableSpecsForShown(): { pinned: CableGroupSpec; preview: CableGroupSpec } {
-    const pinnedGroup = cableGroupFor(pinned);
-    const previewGroup = cableGroupFor(activePreview());
+    const pinnedGroup = cableGroupFor(pinned, true);
+    const previewGroup = cableGroupFor(activePreview(), false);
     justAddedKey = null;
     return { pinned: pinnedGroup, preview: previewGroup };
   }
@@ -4214,7 +4424,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  hides it — closed panel, nothing pinned, or the row scrolled out of
    *  its column. Rides every cable recompute (scroll, resize, pin, solo). */
   function positionSoloEye(): void {
-    const row = isOpen ? sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") : null;
+    const row = isOpen ? findPinnedRowEl() : null;
     const r = row?.getBoundingClientRect();
     const col = (narrowMQ.matches ? root : controlsCol).getBoundingClientRect();
     const top = r ? r.top + 20 : 0;
@@ -4313,7 +4523,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // nothing left for it to collapse for. With meters shown, every card in
   // Power + the meters column folded still counts as "everything folded".
   function refreshColumnsFold(): void {
-    const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")];
+    const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")].filter((c) => c.style.display !== "none");
     columnsWrap.classList.toggle(
       "vc-cols-folded",
       !isFolded(METERS_COLUMN) && cards.length > 0 && cards.every((c) => c.classList.contains("vc-folded")),
@@ -4387,8 +4597,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoMasterInner.append(autoMasterLabel, autoMasterSub);
   autoMasterBtn.appendChild(autoMasterInner);
 
-  // Master: one device-wide dial over every numeric scene param, multiplied
-  // in at autoTune.ts's resolveSceneSetting (scaled once, never on drives,
+  // Master: device-wide dials over every numeric scene param — Scale and
+  // Expansion — applied at autoTune.ts's resolveSceneSetting (once, never on drives,
   // enums/booleans, or the Input card's gain stages — see that doc). Sits
   // between the Auto bar and Input as its own always-visible card: it is
   // not part of the auto system, and unlike the Scene card below it must
@@ -4418,7 +4628,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "Scales every scene param at once — 1 is as dialed",
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
-  masterCard.body.appendChild(masterRow.el);
+  // The Input card's Expansion, over the scene's params instead of the
+  // mic's levels — same range, log slider and readout as that row, so the
+  // two read as the same control (see resolveSceneSetting for the curve).
+  const masterExpansionRow = createControlRow({
+    label: "Expansion",
+    accent: SCENE_VIOLET,
+    min: SCENE_EXPANSION_MIN,
+    max: SCENE_EXPANSION_MAX,
+    defaultValue: SCENE_EXPANSION_DEFAULT,
+    mapping: "log",
+    unit: "×",
+    format: formatGain,
+    description: "Pushes every scene param away from the middle of its slider — 1 is as dialed",
+  });
+  masterExpansionRow.onChange((value) => deps.onSceneExpansionChange(value));
+  masterCard.body.append(masterRow.el, masterExpansionRow.el);
 
   // Picture block — see the comment above const masterCard. A plain
   // .vc-row/.vc-hint block (not createMeterRow's bar-meter shape: there's no
@@ -4590,8 +4815,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       },
       // This row is one of the whole-mic Auto button's own members (see
       // micAuto.ts's header) — refreshMicAuto keeps that button's lit state
-      // honest whenever a chip click could have changed it.
-      onAutoToggled: refreshMicAuto,
+      // honest whenever a chip click could have changed it. It also
+      // refreshes the Auto master bar (refreshMicAutoAndMaster).
+      onAutoToggled: refreshMicAutoAndMaster,
       pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
     });
     row.onChange(onChange);
@@ -4798,6 +5024,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
      *  connected" sub-line, never the live row's default-label/loopback text. */
     isMissing: boolean;
     isLive: boolean; // set by refresh(), read by the per-tick meter update
+    /** What updateMeters last painted (live flag + lit segment count, or
+     *  hidden), so a tick where nothing changed skips every style write. */
+    meterKey?: string;
   }
 
   function buildRow(kind: "device" | "screen"): SourceRowHandle {
@@ -5137,9 +5366,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       updateMeters(liveLevel: number | null): void {
         for (const row of rows) {
           const level = row.isLive ? Math.min(1, Math.max(0, liveLevel ?? 0)) : row.deviceId ? deps.getInputLevel(row.deviceId) : null;
+          const lit = level === null ? 0 : Math.round(level * SOURCE_METER_SEGMENTS);
+          // The level is quantised to a few steps and idle rows mostly sit at
+          // zero, so most ticks repeat the last paint — assigning cssText
+          // re-parses and invalidates style even for an identical string.
+          const key = `${row.isLive ? 1 : 0}|${level === null ? "h" : lit}`;
+          if (key === row.meterKey) continue;
+          row.meterKey = key;
           row.meter.style.cssText = sourceMeterStyle(row.isLive);
           row.meter.style.visibility = level === null ? "hidden" : "visible";
-          const lit = level === null ? 0 : Math.round(level * SOURCE_METER_SEGMENTS);
           const onStyle = row.isLive ? sourceMeterSegLiveOnStyle : sourceMeterSegIdleOnStyle;
           const offStyle = row.isLive ? sourceMeterSegLiveOffStyle : sourceMeterSegIdleOffStyle;
           for (let i = 0; i < row.segments.length; i++) row.segments[i].style.cssText = i < lit ? onStyle : offStyle;
@@ -5166,7 +5401,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // (FeatureExtractor.bandSpanDb), not MUSIC_DIALS like the rows below —
   // no dial describes how much of the analyser's window the room is
   // actually using, which is exactly what this amount fixes — and eases
-  // slowly (autoGain.ts's EASE_RATE) so the Signal card's history trace
+  // slowly (autoGain.ts's EASE_RATE) so the Dynamics card's history trace
   // still reads as room drift, not something chasing the beat.
   const autoGainRow = createControlRow({
     label: "Auto-gain",
@@ -5220,7 +5455,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     unit: "%",
     format: (value) => String(Math.round(value * 100)),
     description:
-      "Quieter than this on the Signal card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
+      "Quieter than this on the Dynamics card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
     auto: {
       isEnabled: () => deps.isSilenceGateAuto(),
       toggle: (on) => {
@@ -5288,9 +5523,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     createChipButton("Reset", "Reset sensitivity, expansion and smoothing", () => {
       for (const { row, defaultValue, onChange } of inputRows) {
         onChange(defaultValue);
+        // Clear the T restore point first: setValue() renders a row muted
+        // for as long as one is held, so clearing after would leave it
+        // showing "Off" over the restored default.
+        row.clearOff();
         row.setValue(defaultValue);
         row.refreshChip();
-        row.clearOff();
       }
       // onChange above took those rows back to manual without going through
       // a row's own commit(), so its onAutoToggled hook never heard about it.
@@ -5336,6 +5574,35 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.el.style.display = "none";
   const sceneRows = document.createElement("div");
   sceneCard.body.appendChild(sceneRows);
+  // Cards a widget mounts alongside the Scene card (WidgetCtx.mountCard,
+  // registry.ts — Physarum 2's Affinity card is the first) — a plain host,
+  // not a card of its own, sitting right after the Scene card in the
+  // controls column (controlsCol.append below) so a mounted card reads as
+  // "one more block after the Scene card" rather than a floating extra.
+  // Cleared at the top of every renderSceneSettings() call exactly like
+  // sceneRows.innerHTML, so a widget card never survives a scene switch/Look
+  // apply/card Reset it wasn't rebuilt by. pinnableCards()/findPinnedRowEl()
+  // below search it alongside sceneCard.el for whichever card holds the
+  // currently pinned row, since a row built through WidgetCtx.registerCard
+  // pins exactly like a Scene-card row (registerPinnableRow, below) but can
+  // live in either card.
+  const sceneWidgetCardsHost = document.createElement("div");
+  /** Every top-level card a Scene-setting row's pin can live in — the Scene
+   *  card itself, plus whatever `sceneWidgetCardsHost` currently holds. */
+  function pinnableCards(): HTMLElement[] {
+    return [sceneCard.el, ...sceneWidgetCardsHost.querySelectorAll<HTMLElement>(":scope > .vc-card")];
+  }
+  /** The currently `.vc-drive-pinned` row, wherever it lives — replaces the
+   *  several `sceneCard.el.querySelector(".vc-drive-pinned")` call sites
+   *  Solo/the solo eye/jumpToBlock used before a widget could mount a second
+   *  pinnable card. */
+  function findPinnedRowEl(): HTMLElement | null {
+    for (const card of pinnableCards()) {
+      const row = card.querySelector<HTMLElement>(".vc-drive-pinned");
+      if (row) return row;
+    }
+    return null;
+  }
   // What the per-tick loop and the auto refresh need from a scene row — a
   // slider row (createControlRow) satisfies it as is; an enum picker with
   // `reads` supplies its own pair (see appendSettingRow).
@@ -5522,9 +5789,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // HOVER_SELECT_DELAY_MS before actually previewing, canceled by
     // whichever comes first: a newer focusin (any row, cancelPendingPreview
     // at the top of both this and previewDrive) or this row losing focus
-    // before the timer fires (onRowFocusOut below) — together these are
-    // what let a fast sweep across several rows toward the spectrum strip
-    // leave the starting preview alone. Keyboard/click focus (not
+    // before the timer fires (wirePreviewFocus's focusout below) — together
+    // these are what let a fast sweep across several rows toward the spectrum
+    // strip leave the starting preview alone. Keyboard/click focus (not
     // pointer-originated) previews immediately. Never touches `pinned` —
     // only an explicit click (togglePin) does that.
     function onRowFocusIn(): void {
@@ -5540,37 +5807,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    /** Cancels this row's own still-pending hover preview if focus leaves
-     *  it for somewhere that never calls onRowFocusIn at all (the spectrum
+    /** Makes this row pinnable (pinRowHandles). A drive row brings its own
+     *  handle, and createControlRow wires its card press (onCardPin); any
+     *  other row's `main` control is passed so a press on it, or on the card
+     *  around it, pins — the non-drive case is `registerPinnableRow`, shared
+     *  with `WidgetCtx.registerCard` (see that function's own doc comment). */
+    function registerPinRow(rowEl: HTMLElement, drive: DriveRowHandle | null, main?: HTMLElement | null): void {
+      if (drive) {
+        if (main) {
+          rowEl.addEventListener("click", (e) => {
+            if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+          });
+        }
+        pinRowHandles.push(drive);
+        return;
+      }
+      registerPinnableRow(sceneId, spec, accent, rowEl, main);
+    }
+
+    /** Wires `el`'s focusin to onRowFocusIn, and a focusout that cancels
+     *  this row's own still-pending hover preview if focus leaves it for
+     *  somewhere that never calls onRowFocusIn at all (the spectrum
      *  strip, the meters, another card) before the dwell fires — a newer
      *  row's own focusin already cancels via onRowFocusIn's own call, but
      *  that only fires for focus landing on *another row*, not for focus
      *  leaving the ring of rows entirely. `el` is the whole row (slider,
      *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
      *  its own reset chip) isn't a leave. */
-    /** Makes this row pinnable (pinRowHandles). A drive row brings its own
-     *  handle, and createControlRow wires its card press (onCardPin); any
-     *  other row's `main` control is passed so a press on it, or on the card
-     *  around it, pins. */
-    function registerPinRow(rowEl: HTMLElement, drive: DriveRowHandle | null, main?: HTMLElement | null): void {
-      if (main) {
-        rowEl.addEventListener("click", (e) => {
-          if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
-        });
-      }
-      if (drive) {
-        pinRowHandles.push(drive);
-        return;
-      }
-      rowEl.style.setProperty("--vc-pin-color", accent);
-      pinRowHandles.push({
-        sceneId,
-        spec,
-        rowEl,
-        refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
-      });
-    }
-
     function wirePreviewFocus(el: HTMLElement): void {
       el.addEventListener("focusin", onRowFocusIn);
       el.addEventListener("focusout", (e) => {
@@ -5675,6 +5938,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
             getManual: () => deps.getSceneSettingValue(sceneId, spec),
           }
         : undefined,
+      // isSceneAuto is true only while EVERY auto-capable row is auto, so any
+      // one row's A chip or a drag off auto flips the master bar's state.
+      onAutoToggled: refreshAutoMaster,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
@@ -5783,6 +6049,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
+    sceneWidgetCardsHost.innerHTML = "";
     sceneRowHandles = [];
     for (const c of driveSparkCanvases) untrackDriveCanvas(c);
     driveSparkCanvases = [];
@@ -5834,6 +6101,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const claimedFamilies = new Set(
       panelSections.map((s) => s.items).filter((x): x is string => x !== undefined),
     );
+    // Plain settings a section renders itself (PanelSection.settings) — the
+    // flat loop below skips these too.
+    const claimedKeys = new Set(panelSections.flatMap((s) => s.settings ?? []));
     for (const section of panelSections) {
       const build = getWidget(section.widget);
       // tests/sceneKeys.test.ts checks every panel widget id is registered
@@ -5858,6 +6128,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
         appendRow: (rowContainer, spec, opts) => appendSettingRow(rowContainer, sceneId, spec, specs, SCENE_VIOLET, opts),
         mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
+        mountCard: (spec) => {
+          const card = createCard(spec);
+          // Own class beyond the generic .vc-card so a script (padcheck.mjs)
+          // or a future second widget card can find "a card a widget
+          // mounted" without matching on its title text.
+          card.el.classList.add("vc-widget-card");
+          markBlock(card.title);
+          sceneWidgetCardsHost.appendChild(card.el);
+          return { el: card.el, body: card.body };
+        },
+        registerCard: (rowEl, spec) => registerPinnableRow(sceneId, spec, SCENE_VIOLET, rowEl, rowEl),
         // The exact same live reading a row's own sparkline draws — see
         // WidgetCtx.driveValue's own doc comment (registry.ts).
         driveValue: (spec, rest) => lastDrives?.valueOf(spec.key, rest) ?? rest ?? 0,
@@ -5885,6 +6166,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i];
       if (spec.item && claimedFamilies.has(spec.item.family)) continue;
+      if (claimedKeys.has(spec.key)) continue;
       const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
       if (groupChanged) {
         hasGroups = true;
@@ -5956,6 +6238,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       else {
         pinned = null;
         lastPinnedSetting = null;
+        // The old output graph is detached with its patch panel — stop
+        // update() redrawing it (togglePin clears this the same way).
+        activeOutputTick = null;
       }
     }
     // A jack click with nothing pinned reaches for lastPreview — drop it on
@@ -5973,23 +6258,37 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Palette: the only picker left in the panel.
   const paletteCard = createCard({ title: "Palette", accent: "rgba(255,255,255,0.7)" });
   const paletteList = document.createElement("div");
-  paletteList.style.cssText = paletteListStyle;
+  paletteList.style.cssText = paletteGroupsStyle;
   paletteCard.body.appendChild(paletteList);
 
   function renderPalettes(): void {
     paletteList.innerHTML = "";
     const currentId = deps.currentPaletteId();
+    const rows = new Map<string, HTMLDivElement>();
     for (const item of deps.getPalettes()) {
+      let row = rows.get(item.group);
+      if (!row) {
+        row = document.createElement("div");
+        row.style.cssText = paletteGroupRowStyle;
+        const label = document.createElement("span");
+        label.textContent = item.group;
+        label.style.cssText = paletteGroupLabelStyle;
+        row.appendChild(label);
+        rows.set(item.group, row);
+        paletteList.appendChild(row);
+      }
       const btn = document.createElement("button");
-      btn.textContent = item.name;
-      btn.style.cssText = item.id === currentId ? paletteChipLitStyle : paletteChipStyle;
+      btn.style.cssText = item.id === currentId ? paletteSwatchChipLitStyle : paletteSwatchChipStyle;
+      const swatch = document.createElement("span");
+      swatch.style.cssText = `${paletteSwatchStyle} background: linear-gradient(90deg, ${item.swatch.join(", ")});`;
+      btn.append(swatch, item.name);
       btn.addEventListener("click", () => {
         deps.onPickPalette(item.id);
         // Stay open — the scene isn't hidden behind a backdrop, so tapping
         // through palettes to watch the scene recolor is the point.
         renderPalettes();
       });
-      paletteList.appendChild(btn);
+      row.appendChild(btn);
     }
   }
 
@@ -6132,7 +6431,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // stays where it is — the column scrolls so the rest of the panel comes
     // back around it; only when the column can't scroll that far (a pane
     // near the top of the list) does it slide the rest of the way.
-    const anchor = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") ?? sceneCard.el;
+    const anchor = findPinnedRowEl() ?? sceneCard.el;
     const before = anchor.getBoundingClientRect().top;
     soloOn = on;
     applySolo();
@@ -6174,11 +6473,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
-    if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     // A pinned setting (its row plus its patch pane, the one outlined in
-    // its source colour) is the thing being worked on — it alone stays,
-    // the meters column included in what goes.
-    const pinnedRow = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned");
+    // its source colour) is the thing being worked on — it alone stays, the
+    // meters column included in what goes. The pinned row can live in the
+    // Scene card or a card a widget mounted beside it (WidgetCtx.mountCard);
+    // whichever one holds it is unfolded the same way the Scene card alone
+    // used to be.
+    const pinnedRow = findPinnedRowEl();
+    const activeCard = pinnedRow?.closest<HTMLElement>(".vc-card") ?? sceneCard.el;
+    if (activeCard.classList.contains("vc-folded")) activeCard.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     const leaves = new Set<Element>([pinnedRow ?? sceneCard.el, dock]);
     const onPath = new Set<Element>();
     for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
@@ -6198,8 +6501,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // on screen than showToast's own default toast duration.
   installKeyHints((text) => showToast(text, 4000));
 
+  // What each button last painted — refreshAutoMaster/refreshMicAuto also run
+  // on the 10 Hz tick, and re-assigning four cssTexts every time is wasteful.
+  // null until the first paint, so that one always writes.
+  let autoMasterLitShown: boolean | null = null;
+  let micAutoLitShown: boolean | null = null;
+
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
+    if (lit === autoMasterLitShown) return;
+    autoMasterLitShown = lit;
     autoMasterBtn.style.cssText = lit ? autoMasterLitStyle : autoMasterStyle;
     autoMasterLabel.style.cssText = autoMasterLabelStyle(lit);
     autoMasterSub.style.cssText = autoMasterSubStyle(lit);
@@ -6225,7 +6536,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // header comment for how it relates to the scene master above.
   function refreshMicAuto(): void {
     const lit = deps.isMicAuto(deps.currentSceneId());
+    if (lit === micAutoLitShown) return;
+    micAutoLitShown = lit;
     micAutoBtn.style.cssText = lit ? micAutoLitStyle : micAutoStyle;
+  }
+  // The Input rows are members of both buttons (see toggleMicAuto below).
+  function refreshMicAutoAndMaster(): void {
+    refreshMicAuto();
+    refreshAutoMaster();
   }
   function toggleMicAuto(): void {
     const sceneId = deps.currentSceneId();
@@ -6238,7 +6556,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -6258,7 +6576,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // panel's own switch.
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
-    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t))) return;
+    // The cable layer sits on <body>, outside root (cableLayer.ts's own
+    // header — it's above every card on purpose), but pressing a cable is a
+    // patch edit like a jack click, not a click on the scene: without this
+    // clause a cable press would unpin the setting it just unplugged from.
+    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t)))
+      return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && root.contains(active)) active.blur();
     if (pinned) togglePin(pinned.sceneId, pinned.spec);
@@ -6274,9 +6597,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // only ever appended into a source line, this card's own assembly
   // section) — a control inside any of those would otherwise sit in the
   // ring and fail to focus.
+  // The Power column's Resolution slider is left out, as its chips are: a
+  // folded Power card is only visibility:hidden (it keeps its layout box), so
+  // it would pass the filter below and Tab would dead-end on a hidden control.
   function ringElements(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
-      (el) => el.getClientRects().length > 0,
+      (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col"),
     );
   }
 
@@ -6323,7 +6649,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!heading) return;
     // Soloed, a jump outside what's soloed needs the rest of the panel
     // back rather than trying to move the solo onto it.
-    if (soloOn && !(sceneCard.el.querySelector(".vc-drive-pinned") ?? sceneCard.el).contains(heading)) setSolo(false);
+    if (soloOn && !(findPinnedRowEl() ?? sceneCard.el).contains(heading)) setSolo(false);
     // A folded card's controls have no layout box and are invisible to
     // ringElements() below — unfold first, or the jump would silently land
     // on the next block's control instead.
@@ -6390,6 +6716,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshBandsSplit();
     refreshBandFaders();
     masterRow.sync(() => deps.getSceneMaster());
+    masterExpansionRow.sync(() => deps.getSceneExpansion());
     // Whatever was rebuilt above comes in unmarked.
     applySolo();
     root.classList.add("vc-open");
@@ -6431,7 +6758,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // graph if it has one (this file's own carried rule: canvas draws, not
   // DOM rebuilds, so this rides its own faster cadence rather than
   // AUTO_UI_REFRESH_MS's 10 Hz).
+  // A fixed clock, not "whenever 1/30 s has passed since the last draw":
+  // a frame that arrives late owes the graphs every column it spanned, so
+  // "last 4 s" is 4 s of real time at any frame rate and evenly timed hits
+  // land evenly spaced, as on the meters' own time-axis strips (the old
+  // reset-to-now dropped the remainder, so a 40 fps panel drew at 20 Hz and
+  // a heavy scene's graph covered 6 s, unevenly). A gap past
+  // SPARKLINE_MAX_SLOTS (folded card, closed panel, hidden tab) restarts the
+  // clock instead of filling seconds with one reading.
   const SPARKLINE_REFRESH_MS = 1000 / 30;
+  const SPARKLINE_MAX_SLOTS = 15;
   let lastSparklineMs = 0;
   // The Picture block's five readouts (its traces redraw every tick, same
   // reasoning as the sparklines above); the readout text itself rides this
@@ -6555,10 +6891,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // pinned row's output graph (if it has one) rides the same tick.
       // Skipped while the Scene card is folded or there's nothing to read
       // yet — canvas draws only, never a DOM rebuild.
-      if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded() && nowMs - lastSparklineMs >= SPARKLINE_REFRESH_MS) {
-        lastSparklineMs = nowMs;
-        for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
-        activeOutputTick?.(drives);
+      if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) {
+        notePeaks(drives);
+        let slots = Math.floor((nowMs - lastSparklineMs) / SPARKLINE_REFRESH_MS);
+        if (slots > SPARKLINE_MAX_SLOTS) {
+          slots = 1;
+          lastSparklineMs = nowMs;
+        } else {
+          lastSparklineMs += slots * SPARKLINE_REFRESH_MS;
+        }
+        if (slots > 0) {
+          for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim, slots);
+          activeOutputTick?.(drives, slots);
+          peakSeen.clear();
+        }
       }
 
       // Picture: the Overall trace plus one compact trace per measure of the
@@ -6603,7 +6949,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lastAutoRefreshMs = nowMs;
 
       refreshSpectrumHeader();
+      powerCard.setTitle(deps.isPreview() ? "Preview" : "Power");
       powerCard.refresh();
+      const outputShown = deps.getOutputPowerStatus() !== null;
+      if (outputShown !== outputPowerShown) {
+        outputPowerShown = outputShown;
+        outputPowerCard.setVisible(outputShown);
+        // A hidden card can't count toward "everything folded".
+        refreshColumnsFold();
+      }
+      if (outputShown) outputPowerCard.refresh();
       sourceRow.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       autoGainRow.refreshAuto();
@@ -6613,6 +6968,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
+      // The two Auto buttons follow their rows' auto flags, which an
+      // external change (a paired device, a drag elsewhere) can flip.
+      refreshAutoMaster();
+      refreshMicAuto();
       // The pinned setting's patch panel — re-synced here rather than every
       // tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the

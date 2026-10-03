@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <title>Sine Visuals Lab Output</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #gl {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      body.idle {
+        cursor: none;
+      }
+      /* Shown for a few seconds after the window opens, then gone for good:
+       * the projector never carries text while the show runs. */
+      #hint {
+        position: fixed;
+        left: 50%;
+        bottom: 24px;
+        transform: translateX(-50%);
+        color: #fff8;
+        font: 400 12px/1.4 ui-monospace, monospace;
+        letter-spacing: 0.08em;
+        background: #0008;
+        padding: 5px 14px;
+        border-radius: 999px;
+        transition: opacity 0.8s;
+        pointer-events: none;
+      }
+      #hint.gone {
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="hint">Double-click or press F for fullscreen</div>
+    <script type="module" src="/src/output.ts"></script>
+  </body>
+</html>

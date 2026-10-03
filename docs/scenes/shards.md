@@ -103,6 +103,19 @@ bpm, 13 beats):
   hold, so arrangements land very slightly less often. Cut mode's signal
   pills (`feature.onset` / `anim.lowOnset`) were added on the same PR so the
   Cut on row shows which trigger the current choice rides.
+- **2026-10-02 (review fixes):** (1) The room aspect had the slice's width
+  and height inverted (`roomAspect` in `layout.ts` now owns the formula),
+  the prism vertex shader now crops the room-wide projection to this
+  device's slice the way `meshGrid.ts` does, and the star size in pixels
+  divides by the slice's height share instead of multiplying — all three
+  only matter in a Panorama slice (the full viewport is the identity).
+  (2) "Silence freezes the picture" was only half true: plate growth and
+  the camera recede ran on between cuts without limit, so a long cut-free
+  stretch shrank the cluster to a speck. `GROW_MAX` and `DOLLY_MAX_FACTOR`
+  (with `Camera.dist0`) now cap them, sized so a normal gap between cuts
+  never reaches them; the drift eases to a hold. (3) The bloom path's
+  depth renderbuffer is 24-bit (it was 16-bit with a far plane of 80 —
+  the same near-coplanar z-fight Tessera hit).
 
 ## Tuning notes
 

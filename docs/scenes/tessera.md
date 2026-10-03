@@ -123,6 +123,14 @@ interpretation was revised:
   bright rims at oblique angles; `wall` default raised to 0.35 so a box's
   mouth reads as a narrow dark slit in a bright bar (matching burst
   captures) rather than a wide dark hole in a thin frame.
+- **2026-10-02 (review fixes):** the box vertex shader now crops its
+  room-wide projection to this device's slice (`meshGrid.ts`'s remap), so a
+  Panorama slice shows its share of the picture instead of the whole room
+  squeezed in; the full viewport is the identity. Comment-only: the far
+  plane note in `boxVert` named a stale shell radius and a 16-bit depth
+  buffer (the code is `SHELL_RADIUS` in `lattice.ts` and a 24-bit
+  renderbuffer), and comments that cited plan files not in the repo now
+  point at Round 2 above.
 
 ## Tuning notes
 

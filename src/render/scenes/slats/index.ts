@@ -85,6 +85,8 @@ import {
   createOnsetEnvelope,
   advanceOnsetEnvelope,
   shouldReshuffle,
+  bakeMorph,
+  advanceRollPhase,
   type Rng,
   type PartitionOptions,
 } from "./layout.ts";
@@ -194,8 +196,11 @@ export const slatsScene: Scene = (() => {
 
   let rng: Rng = createRng(RNG_SEED);
   let slatCount = 0;
+  let packedA: Float32Array = new Float32Array(0);
   let packedB: Float32Array = new Float32Array(0);
   let morphT = 0;
+  /** Accumulated Roll angle, radians (layout.ts's advanceRollPhase). */
+  let rollPhase = 0;
   let lastTime: number | null = null;
   let prevBarPhase = 0;
   const onsetEnv = createOnsetEnvelope();
@@ -223,7 +228,8 @@ export const slatsScene: Scene = (() => {
    *  B's own array is already the source of truth), and a fresh B starts
    *  its own fade in from morphT = 0. */
   function swapAtoB(gl: WebGL2RenderingContext): void {
-    uploadInstanceBuffer(gl, bufA!, packedB);
+    packedA = packedB;
+    uploadInstanceBuffer(gl, bufA!, packedA);
   }
 
   function makeHalfColourTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
@@ -316,10 +322,12 @@ export const slatsScene: Scene = (() => {
       gl.vertexAttribDivisor(3, 1);
       gl.bindVertexArray(null);
 
-      uploadInstanceBuffer(gl, bufA, generateLayout(rng, slatCount));
+      packedA = generateLayout(rng, slatCount);
+      uploadInstanceBuffer(gl, bufA, packedA);
       regenerateB(gl);
 
       morphT = 0;
+      rollPhase = 0;
       lastTime = null;
       prevBarPhase = 0;
       onsetEnv.value = 0;
@@ -341,10 +349,18 @@ export const slatsScene: Scene = (() => {
       const reshuffleProb = resolveSceneSetting(ID, settingFor("reshuffle"));
 
       if (shouldReshuffle(prevBarPhase, anim.barPhase, anim.tempoLock, reshuffleProb, rng)) {
+        // Mid-fade, the picture on screen is A and B mixed at morphT:
+        // bake that into A so the new fade starts from it instead of
+        // snapping the wall back to the old A for a frame.
+        if (morphT > 0) {
+          packedA = bakeMorph(packedA, packedB, smoothstep01(clamp01(morphT)));
+          uploadInstanceBuffer(gl, bufA, packedA);
+        }
         regenerateB(gl);
         morphT = 0;
       }
       prevBarPhase = anim.barPhase;
+      rollPhase = advanceRollPhase(rollPhase, resolveSceneSetting(ID, settingFor("roll")), dt);
 
       morphT += dt / Math.max(0.05, morphSeconds);
       if (morphT >= 1) {
@@ -361,6 +377,7 @@ export const slatsScene: Scene = (() => {
         uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         prog.setF("uMorphMix", morphMix);
         prog.setF("uOnsetEnv", onsetEnv.value);
+        prog.setF("uRollAngle", rollPhase);
         gl.bindVertexArray(slatVao);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -444,8 +461,10 @@ export const slatsScene: Scene = (() => {
       bufA = null;
       bufB = null;
       slatCount = 0;
+      packedA = new Float32Array(0);
       packedB = new Float32Array(0);
       morphT = 0;
+      rollPhase = 0;
       lastTime = null;
       prevBarPhase = 0;
       onsetEnv.value = 0;

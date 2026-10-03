@@ -1,4 +1,5 @@
 import { NUM_BANDS } from "../audio/types.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
@@ -105,6 +106,12 @@ function loadInitial(): Store {
 
 const cache: Store = loadInitial();
 
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY, () => {
+  for (const k of Object.keys(cache)) delete cache[k];
+  Object.assign(cache, loadInitial());
+});
+
 function persist(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
@@ -155,9 +162,13 @@ function isValidGridIndex(n: unknown): n is number {
  *  than re-validating the same shape a second way). Accepts `"scene"` for
  *  the legacy top-level `choice` field/Look `d` entries; sanitizeSourceChoice
  *  below is the same check with `"scene"` rejected, for a patch source. */
-export function sanitizeChoice(raw: unknown): DriveChoice | null {
+function sanitizeChoice(raw: unknown): DriveChoice | null {
   if (raw === "scene") return "scene";
-  if (typeof raw === "string") return raw in SIGNALS ? (raw as DriveChoice) : null;
+  // Own-property check, not `in`: SIGNALS is a plain object, so `in` would
+  // also pass "constructor"/"toString"/"__proto__" from a crafted Look link
+  // or corrupt storage, and drives.ts would then throw reading `.read` off
+  // the inherited function on every frame.
+  if (typeof raw === "string") return Object.prototype.hasOwnProperty.call(SIGNALS, raw) ? (raw as DriveChoice) : null;
   if (raw && typeof raw === "object") {
     const source = (raw as { source?: unknown }).source;
     if (source === "line") return { source: "line" };
@@ -171,7 +182,7 @@ export function sanitizeChoice(raw: unknown): DriveChoice | null {
 
 /** `sanitizeChoice`, with `"scene"` rejected — what one `DriveSource.choice`
  *  inside a patch must sanitize to. */
-export function sanitizeSourceChoice(raw: unknown): DriveSourceChoice | null {
+function sanitizeSourceChoice(raw: unknown): DriveSourceChoice | null {
   const choice = sanitizeChoice(raw);
   return choice === null || choice === "scene" ? null : choice;
 }
@@ -325,20 +336,53 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
   };
 }
 
+// getDriveSetting runs several times a frame per drive setting (the engine's
+// per-tick accumulate, the shader upload, the scene's own reads, the panel),
+// and decoding a stored value allocates a Set and a handful of objects. The
+// decode is keyed on the entry plus the exact stored value it came from, so
+// an edit (a fresh `patch` object), a reset (field deleted) and the synced-
+// store reseed (entries replaced wholesale) all miss the cache by themselves.
+// Callers treat the returned setting as read-only — drives.ts's pure editors
+// copy before changing — which is what makes handing out one shared object
+// safe.
+const decoded = new WeakMap<DriveEntry, { raw: unknown; setting: DriveSetting | null }>();
+const defaults = new WeakMap<SceneSetting, DriveSetting>();
+
+function decodeEntry(entry: DriveEntry, raw: unknown, decode: (raw: unknown) => DriveSetting | null): DriveSetting | null {
+  const hit = decoded.get(entry);
+  if (hit !== undefined && hit.raw === raw) return hit.setting;
+  const setting = decode(raw);
+  decoded.set(entry, { raw, setting });
+  return setting;
+}
+
+function defaultFor(spec: SceneSetting): DriveSetting {
+  let setting = defaults.get(spec);
+  if (setting === undefined) {
+    setting = defaultDriveSetting(spec);
+    defaults.set(spec, setting);
+  }
+  return setting;
+}
+
 /** This setting's stored DriveSetting, or its `drive.default` — with the
  *  one-time legacy beat-grid migration above folded in — for a setting
  *  that's never been touched. `spec.drive` must be set; callers only reach
- *  this for a setting the panel has already shown a source picker on. */
+ *  this for a setting the panel has already shown a source picker on. The
+ *  result is shared between calls: never mutate it. */
 export function getDriveSetting(sceneId: string, spec: SceneSetting): DriveSetting {
   const scope = settingScope(sceneId, spec.key);
   const entry = cache[scope]?.[spec.key];
 
   if (entry?.patch !== undefined) {
-    const sanitized = sanitizeDriveSetting(entry.patch);
+    const sanitized = decodeEntry(entry, entry.patch, sanitizeDriveSetting);
     if (sanitized !== null) return sanitized;
   } else if (entry?.choice !== undefined) {
-    const sanitized = sanitizeChoice(entry.choice);
-    if (sanitized !== null) return driveSettingFromChoice(sanitized);
+    const sanitized = decodeEntry(entry, entry.choice, (raw) => {
+      const choice = sanitizeChoice(raw);
+      return choice === null ? null : driveSettingFromChoice(choice);
+    });
+    if (sanitized !== null) return sanitized;
   }
 
   const migrated = migratedBeatGridChoice(sceneId, spec);
@@ -347,7 +391,7 @@ export function getDriveSetting(sceneId: string, spec: SceneSetting): DriveSetti
     setDriveSetting(sceneId, spec, setting);
     return setting;
   }
-  return defaultDriveSetting(spec);
+  return defaultFor(spec);
 }
 
 export function setDriveSetting(sceneId: string, spec: SceneSetting, setting: DriveSetting): void {
@@ -362,6 +406,14 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
   delete entry.patch;
   delete entry.choice;
+  // The legacy beat-grid snapshot is never cleared (a scene can have several
+  // Beat-default settings and variant scopes, each needing its own one-time
+  // migration), so with no patch left the next read would re-apply the old
+  // grid and write it back — Reset would land on the grid, not the default.
+  // Persisting the explicit default blocks that.
+  if (migratedBeatGridChoice(sceneId, spec) !== null) {
+    entry.patch = encodeDriveSetting(normalizeDriveSetting(defaultDriveSetting(spec)));
+  }
   delete entry.threshold; // "Reset to scene default" covers the threshold row too
   delete entry.thresholdOn;
   persist();

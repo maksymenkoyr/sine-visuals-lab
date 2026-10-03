@@ -111,6 +111,29 @@ describe("defineItemPairs", () => {
     const specs = defineItemPairs("strain", 2, { key: "att", min: -1.5, max: 1.5, step: 0.05, default: () => 0 });
     expect(specs[1]!.label).toBe("strain 0→1");
   });
+
+  it("diagonal: false skips i === j, giving exactly the off-diagonal keys", () => {
+    const specs = defineItemPairs("strain", 3, { key: "touch", min: -1.5, max: 1.5, step: 0.05, default: 0, diagonal: false });
+    expect(specs.map((s) => s.key)).toEqual(["touch01", "touch02", "touch10", "touch12", "touch20", "touch21"]);
+    expect(specs.map((s) => [s.item?.index, s.item?.other])).toEqual([
+      [0, 1],
+      [0, 2],
+      [1, 0],
+      [1, 2],
+      [2, 0],
+      [2, 1],
+    ]);
+  });
+
+  it("copies masterScale: false onto every generated spec", () => {
+    const specs = defineItemPairs("strain", 2, { key: "att", min: -1.5, max: 1.5, step: 0.05, default: 0, masterScale: false });
+    for (const s of specs) expect(s.masterScale).toBe(false);
+  });
+
+  it("masterScale is undefined when not given", () => {
+    const specs = defineItemPairs("strain", 2, { key: "att", min: -1.5, max: 1.5, step: 0.05, default: 0 });
+    for (const s of specs) expect(s.masterScale).toBeUndefined();
+  });
 });
 
 describe("composeSettings", () => {
@@ -122,6 +145,12 @@ describe("composeSettings", () => {
     const a = [spec("a")];
     const b = [spec("b")];
     expect(composeSettings(a, b).map((s) => s.key)).toEqual(["a", "b"]);
+  });
+
+  it("puts ungrouped settings first, whichever list they come from, and takes any number of lists", () => {
+    const result = composeSettings([spec("m", "Motion")], [spec("u1")], [spec("f", "Form"), spec("u2")]);
+    expect(result.map((s) => s.key)).toEqual(["u1", "u2", "f", "m"]);
+    expect(composeSettings()).toEqual([]);
   });
 
   it("stable-sorts by SETTING_GROUPS order, preserving relative order within a group", () => {

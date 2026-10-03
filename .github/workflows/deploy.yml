@@ -42,8 +42,8 @@ permissions:
   contents: read
 
 env:
-  # The tools/tune-*.mjs scripts are the only playwright consumers and they never
-  # run in CI, so skip its postinstall browser download.
+  # playwright is only used by local dev tools under tools/ (never in CI), so
+  # skip its postinstall browser download.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
@@ -215,11 +215,6 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
-  # Tear the preview Worker down (and its Room namespace with it) once the PR
-  # is merged or closed. `--force` skips wrangler's interactive confirmation and
-  # the "other Workers depend on this" check, which can't apply to a Worker
-  # nothing else binds to. A preview that never deployed (fork PR, or the gates
-  # failed on every push) makes this a harmless "not found".
   # Publishes each Insider build as a GitHub pre-release `vX.Y.Z-beta` on the
   # commit it shipped (creating that tag), and comments the version on the pull
   # request that commit landed through — so the version shows where people
@@ -255,12 +250,20 @@ jobs:
             exit 0
           fi
           if [ -n "$pr" ]; then
-            title=$(gh api "repos/$REPO/pulls/$pr" -q .title)
-            notes="$title (#$pr)"
+            # The title line in the Stable notes' own shape
+            # (tools/releaseNotesLib.mjs), then the PR description's opening
+            # paragraph — the first one that's prose once any heading above it
+            # is dropped, not a list, table, image or HTML — as the summary.
+            notes=$(gh api "repos/$REPO/pulls/$pr" -q '"**\(.title)** by @\(.user.login) in #\(.number)"')
+            summary=$(gh api "repos/$REPO/pulls/$pr" -q '(.body // "") | gsub("\r"; "") | split("\n\n") | map(sub("^(\\s*#[^\n]*\n)+"; "")) | map(select(test("^\\s*([#<|!*-]|\\d+\\.|$)") | not)) | (.[0] // "")')
+            if [ -n "$summary" ]; then notes="$notes"$'\n\n'"$summary"; fi
           else
             notes="$(gh api "repos/$REPO/commits/$SHA" -q '.commit.message | split("\n")[0]')"
           fi
           notes="$notes"$'\n\n'"Live on Insider: https://insider.sinevisualslab.com — commit $SHA"
+          # Newest earlier Insider build, for a compare link; none is fine.
+          prev=$(gh api "repos/$REPO/releases?per_page=10" -q "[.[] | select(.prerelease and .tag_name != \"$TAG\")][0].tag_name // empty" 2>/dev/null || true)
+          if [ -n "$prev" ]; then notes="$notes"$'\n\n'"**Full Changelog**: https://github.com/$REPO/compare/$prev...$TAG"; fi
           gh release create "$TAG" --repo "$REPO" --target "$SHA" --prerelease \
             --title "$VERSION - beta" --notes "$notes"
           echo "Published $TAG" >> "$GITHUB_STEP_SUMMARY"
@@ -269,6 +272,11 @@ jobs:
               --body "Shipped to Insider as **$VERSION - beta** — [$TAG](https://github.com/$REPO/releases/tag/$TAG)"
           fi
 
+  # Tear the preview Worker down (and its Room namespace with it) once the PR
+  # is merged or closed. `--force` skips wrangler's interactive confirmation and
+  # the "other Workers depend on this" check, which can't apply to a Worker
+  # nothing else binds to. A preview that never deployed (fork PR, or the gates
+  # failed on every push) makes this a harmless "not found".
   teardown-preview:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest

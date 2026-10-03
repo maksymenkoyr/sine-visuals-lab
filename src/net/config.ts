@@ -1,6 +1,8 @@
 const DEFAULT_LOCAL_WORKER = "https://localhost:8787";
 
-function isLocalHost(hostname: string): boolean {
+/** Whether a page is on a developer machine (localhost, 127.0.0.1, `.local`):
+ *  where the Worker is a separate dev origin and usage counting stays off. */
+export function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".local");
 }
 

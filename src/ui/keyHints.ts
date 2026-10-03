@@ -75,11 +75,13 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "R", id: "reset", label: "Reset", hint: "Reset the focused row" },
   { key: "T", id: "mute", label: "Mute", hint: "Mute the focused row, press again to restore" },
   { key: "Z X C", id: "zxc", label: "Slider jump", hint: "Slider to middle · max · pointer" },
-  { key: "Esc", id: "esc", label: "Unpin", hint: "Unpin a patched setting" },
+  { key: "Esc", id: "esc", label: "Unpin", hint: "Unpin the pinned setting" },
   { key: "?", id: "keys", label: "Keys", hint: "This list" },
   { key: "B", id: "beat-one", label: "The 1", hint: "This beat is the 1 (⇧ clears ×2/÷2 and nudge)" },
   { key: "[ ]", id: "tempo-x", label: "Tempo ÷2 ×2", hint: "Halve / double the beat" },
   { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
+  { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
+  { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {
@@ -186,11 +188,16 @@ const TIP_COOLDOWN_MS = 60_000;
 let lastTipMs = 0;
 let onTip: ((text: string) => void) | null = null;
 
-function tip(text: string): void {
+/** True when the tip was actually handed to `onTip` — false inside the
+ *  cooldown, or before installKeyHints has supplied a `onTip`. A caller that
+ *  spends something on showing a tip (noteMouseUse's "never again" mark)
+ *  does so only on true. */
+function tip(text: string): boolean {
   const now = Date.now();
-  if (now - lastTipMs < TIP_COOLDOWN_MS) return;
+  if (now - lastTipMs < TIP_COOLDOWN_MS || !onTip) return false;
   lastTipMs = now;
-  onTip?.(text);
+  onTip(text);
+  return true;
 }
 
 /** Call when `id`'s shortcut key itself was pressed — deviceMenu.ts's
@@ -203,16 +210,20 @@ export function noteKeyUse(id: string): void {
 
 /** Call when `id`'s tagged control was clicked with a mouse.
  *  installKeyHints wires this automatically off every `[data-key]` click
- *  (skipping touch) — exported mainly for symmetry with noteKeyUse. */
+ *  (skipping touch) — exported for symmetry with noteKeyUse and for
+ *  tests/keyHints.test.ts. */
 export function noteMouseUse(id: string): void {
   if (cache.used[id] || cache.tipped[id]) return;
   mouseUses[id] = (mouseUses[id] ?? 0) + 1;
   if (mouseUses[id] < 2) return;
   const s = shortcutFor(id);
   if (!s) return;
+  // Only an id whose tip was actually shown is retired: one swallowed by the
+  // cooldown (or arriving before installKeyHints) keeps its count, so the
+  // next click after the cooldown earns it again.
+  if (!tip(`Tip: press ${s.key} — ${s.label}`)) return;
   cache = { ...cache, tipped: { ...cache.tipped, [id]: true } };
   persist();
-  tip(`Tip: press ${s.key} — ${s.label}`);
 }
 
 /** The first-ever panel open — deviceMenu.ts's open(). Independent of the
@@ -241,7 +252,10 @@ export function installKeyHints(tipCallback: (text: string) => void): void {
     else hideTooltip();
   });
   document.addEventListener("pointerout", (e) => {
-    if (taggedAncestor(e.target) !== hovered) return;
+    // Nothing tagged hovered → this pointerout isn't ours; hiding here would
+    // kill the shared tooltip of another surface (the version label's hint
+    // vanished whenever the pointer crossed between its child spans).
+    if (!hovered || taggedAncestor(e.target) !== hovered) return;
     const related = e.relatedTarget;
     if (related instanceof Node && hovered?.contains(related)) return;
     hovered = null;

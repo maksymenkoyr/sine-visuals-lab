@@ -10,7 +10,7 @@ import { createMusicProfile, type MusicProfile, type DialValues } from "./musicP
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
-import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.ts";
+import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../audio/hitStrength.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
@@ -57,7 +57,7 @@ export interface AnimFrame {
    *  louder peak at once, then falls at WAVE_PEAK_FALL_PER_SEC times this
    *  tick's smoothing rateScale (so Smoothing's Off stop, rateScale =
    *  Infinity, makes it exactly the instantaneous peak, same as the Signal
-   *  card's RAW reading). It's the one number the Signal card's Waveform
+   *  card's RAW reading). It's the one number the Dynamics card's Waveform
    *  readout shows and the `anim.wavePeak` drive source (signals.ts) reads —
    *  computed here once so both read the same thing. Linear amplitude [0,1]
    *  of the raw capture (before auto-gain/sensitivity), not normalized. 0
@@ -169,6 +169,11 @@ export interface AnimFrame {
    *  that wants the metronome's pulse without consuming its one-shot edge. */
   metronomePulse: number;
   metronomeBarPulse: number;
+  /** Each lane's pulseDecayScale for this tick's HitShape (all 1 when none
+   *  was passed): the factor that lane's pulse decay rate carries, here so
+   *  drives.ts's Fixed/Loud heights and grid pulses can fall at the same
+   *  stretched rate as the pulses they stand in for. */
+  hitTail: HitTails;
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
@@ -253,7 +258,7 @@ export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts 
 // AnimFrame.wavePeak's own fall rate — matches the meters' own peak-hold
 // fall (audioMeters.ts's PEAK_FALL_PER_SEC, spectrumStrip.ts's peak-hold
 // decay), so moving the hold in here (from audioMeters.ts's own local state)
-// doesn't change how the Signal card's Waveform readout looks or feels.
+// doesn't change how the Dynamics card's Waveform readout looks or feels.
 export const WAVE_PEAK_FALL_PER_SEC = 1.2;
 
 // The phase comb's own hit weight (beatClock.ts's advance()) — how much this
@@ -292,6 +297,9 @@ export function createAnimClock(): AnimClock {
   const metroTrim: BeatTrimmer = createBeatTrimmer();
   let wasRunning = false;
   const bandEnergy: BandEnergy = createBandEnergy();
+  // AnimFrame.hitTail, cached against the HitShape it was built from.
+  let tailShape: HitShape | undefined;
+  let tailScales: HitTails = UNIT_TAILS;
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
@@ -318,6 +326,13 @@ export function createAnimClock(): AnimClock {
       hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
+      // getHitShape() hands back the same frozen snapshot until a field
+      // changes, so this rebuilds only on an edit, not every tick.
+      if (hit?.shape !== tailShape) {
+        tailShape = hit?.shape;
+        tailScales = pulseDecayScales(tailShape);
+      }
+      const hitTail = tailScales;
       // AnimFrame.wavePeak's own peak-hold — see that field's own doc
       // comment. `hit.wavePeak` omitted/null (no local mic) holds nothing:
       // it snaps straight to 0, the same as `beatRatio` above. Otherwise a
@@ -376,7 +391,7 @@ export function createAnimClock(): AnimClock {
 
       // Raw hits — no grid. See AnimFrame.onset's own doc comment.
       const onset = frame.onset;
-      beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
+      beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale * hitTail.beat);
       if (onset) {
         if (hit) {
           const ratio = hit.beatRatio ?? Math.max(1, bandEnergy.lowDiag.ratio, bandEnergy.midDiag.ratio, bandEnergy.highDiag.ratio);
@@ -386,9 +401,9 @@ export function createAnimClock(): AnimClock {
           beatPulse = 1;
         }
       }
-      metronomePulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
+      metronomePulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale * hitTail.beat);
       if (mt.beatTick) metronomePulse = 1;
-      metronomeBarPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
+      metronomeBarPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale * hitTail.beat);
       if (mt.barTick) metronomeBarPulse = 1;
 
       return {
@@ -442,6 +457,7 @@ export function createAnimClock(): AnimClock {
         metronomeBar: metronome.running && mt.barTick,
         metronomePulse,
         metronomeBarPulse,
+        hitTail,
         gateDimmer: dimmer,
         hits: {
           low: { ...bandEnergy.lowDiag },

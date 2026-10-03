@@ -64,10 +64,6 @@ export class JitterBuffer {
     if (frame.bpm > 0) this.bpm = frame.bpm;
   }
 
-  get size(): number {
-    return this.frames.length;
-  }
-
   sampleAt(targetMs: number): Sample | null {
     const n = this.frames.length;
     if (n === 0) return null;
@@ -127,9 +123,5 @@ export class JitterBuffer {
     if (targetMs < this.lastPulseRoomTimeMs) return false;
     this.lastFiredPulseRoomTimeMs = this.lastPulseRoomTimeMs;
     return true;
-  }
-
-  get currentBpm(): number {
-    return this.bpm;
   }
 }

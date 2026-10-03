@@ -47,15 +47,15 @@ the shader, resolving each one against `src/render/musicProfile.ts`'s dials unle
 the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 
 `src/router.ts` decides which scene mounts (`#/` → gallery, `#/v/<sceneId>` → one
-scene), read by `src/app.ts`, which is the phone/controller/gallery entry
+scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 (`index.html`).
 
 The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
 in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-their Signal card's Waveform row is fed by `src/audio/waveformAnalyser.ts`
+their Dynamics card's Waveform row is fed by `src/audio/waveformAnalyser.ts`
 (math in `waveform.ts`), which reads time-domain samples straight off this
 device's own mic, entirely separate from
-`FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
+`FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV" below —
 a viewer with no local mic doesn't get that row at all. The same card's
 History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
@@ -70,27 +70,80 @@ this device's own capture, hidden on a mic-less renderer like the Waveform row.
 this file's `FeatureFrame`/`AnimFrame` values actually drive it, and the
 device menu renders that as a live pill pointing back at the meter row above.
 
-## Phone to TV
+## Laptop, phone and TV
 
-`src/tv.ts` is the paired-display entry (`tv.html`). The two devices don't share a
-process — they share a `FeatureFrame` stream over a WebSocket, relayed through a
-Cloudflare Durable Object.
+A room's devices don't share a process; they share a WebSocket, relayed through a
+Cloudflare Durable Object, and each has a role (`RoomRole`: host, controller or
+renderer). The laptop is the **host**: it listens, runs everything in the first
+section, and streams its `FeatureFrame`s (`HostConnection`). A phone is a
+**controller**: `src/app.ts` in its mic-less renderer mode, with the whole panel
+(`ControllerConnection`); what it edits becomes the room's *look*. A TV is a
+**renderer** (`src/tv.ts`, `tv.html`): it draws the host's frames with the room's
+look and has no panel or audio of its own.
 
 - `src/net/protocol.ts` encodes/decodes `FeatureFrame` to/from a fixed-size binary
   frame. Read its header comment before touching the wire format — it documents
   the current layout and a legacy-decode fallback with its own sunset condition.
 - `server/room.ts` (the Durable Object, class `Room`, bound as `ROOM` per
-  `wrangler.toml`) relays frames between whichever device is host and whichever
-  are renderers. It never parses a `FeatureFrame` — bytes pass through untouched,
-  so protocol changes on the client side don't require a worker deploy.
-- `src/net/room.ts` (client side) is where the phone/TV split becomes concrete:
-  `RENDER_DELAY_MS` and the jitter/slew machinery (`src/net/jitterBuffer.ts`,
+  `wrangler.toml`) is only the Cloudflare adapter. What a room does is
+  `server/roomCore.ts`, which the tests drive with fake sockets; who may join and
+  who may send what is `server/roomRules.ts`. The room still never parses a
+  `FeatureFrame` — bytes pass through untouched — so a frame change within
+  `LOOK_LIMITS.maxBinaryBytes` (`server/lookDoc.ts`) needs no worker deploy; the
+  room drops a frame longer than that cap, so a layout that outgrows it needs the
+  cap raised and the worker deployed too. A change to the JSON messages or to the
+  rules always does, because the room validates those.
+- `server/lookDoc.ts` is the look: a scene id, a palette id and the raw text of
+  every localStorage store that changes how a scene looks. Which keys count is
+  `isRoomKey` in `src/net/syncedStores.ts`; the room never interprets a setting.
+  A claimed room keeps its look (and the hashes of its keys), so a TV that joins
+  late or reconnects gets the current state without asking the phone.
+- `src/net/lookSync.ts` keeps a device and the room's look in step: the phone's
+  publisher (patches, acks, the merge after a reconnect) and the TV's replica. A
+  phone and a TV also install `src/net/roomStorage.ts`'s overlay first, so
+  applying a room's look never overwrites the device's own saved settings.
+- `src/net/roomMessages.ts` is the JSON vocabulary spoken beside the frames.
+- `src/net/room.ts` (client side) holds a connection class per role, with
+  `src/net/reconnect.ts` for the ones that rejoin on their own. `RENDER_DELAY_MS`
+  and the jitter/slew machinery (`src/net/jitterBuffer.ts`,
   `src/net/slewLimiter.ts`) exist so a renderer's `uTime` moves smoothly even
   when packets don't arrive smoothly. `src/net/clock.ts` (`ClockSync`) is what
   lets a renderer interpret a host's `roomTimeMs` as its own local time.
 
+Pairing is done by scanning QR codes, or by typing the code a waiting TV shows
+into the laptop's room view. The laptop shows a QR that makes a phone its
+controller (`src/net/hostRoom.ts` keeps the laptop's room across reloads); the TV
+shows its own, and the phone that scans it tells the TV which room to join
+(`src/net/adopt.ts`, `src/net/pendingSlot.ts`, `src/net/tvPhase.ts`) — the request
+is delivered only to the waiting screen that holds the QR's nonce. Either side can
+start over: the TV's Reset forgets its room, and the laptop's Reset room ends the
+room for every device (`endRoom` in `src/net/roomMessages.ts`) before opening a new
+one. `src/net/bootPlan.ts` decides what a page's URL means, `src/net/sessions.ts`
+keeps the secrets a rejoin needs, and `src/ui/joinScreen.ts` draws the QR and the
+code field.
+
+Not everything travels. What stays on the laptop — its audio input and its own
+auto-tracked analysis marks — is named by `PRIVATE_KEYS` and `VOLATILE_PREFIXES`
+in `syncedStores.ts` (`isRoomKey` there is the question of what joins the look),
+and the TV resolves Sensitivity, Expansion and Smoothing itself from the frames,
+so its Auto readouts are its own.
+
 A device that's alone in a room (no pairing) never touches any of this — `src/
 app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
+
+## Pop-out output window
+
+The same-machine cousin of the TV: `output.html` → `src/output.ts`, a chrome-free
+second window fed by the main window over a BroadcastChannel instead of the room
+socket, with Cue/Play to hold or send what it shows. Everything about it — why
+`tv.ts` itself couldn't be reused, the message layer, what crosses — is the header
+of `src/net/outputSync.ts`; `src/net/outputBridge.ts` is the main window's end.
+The keys and the hold-to-glide gesture are the header of `src/ui/outputKeys.ts`;
+what a glide may and may not move smoothly is the header of `src/net/outputGlide.ts`.
+While an output is open the main window renders only a cheap preview (its own
+Quality and Resolution, in a smaller box), and the output has its own Quality,
+Resolution and Energy saving, set from the Output Power card;
+`src/render/outputPower.ts` owns those settings.
 
 ## Where the quality/perf ceiling comes from
 

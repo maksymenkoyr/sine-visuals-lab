@@ -1,8 +1,8 @@
 // Silk's shader bodies — see driver.ts's header for the picture and the
-// echo/tail split, and index.ts's header for the reference and the
+// analytic-echo picture, and index.ts's header for the reference and the
 // pass list. Everything here is injected after COMMON_UNIFORMS_GLSL, this
 // scene's own setting uniforms, and the extra uniforms each pass declares
-// (index.ts's buildSharpFragSource / buildTailFragSource).
+// (index.ts's buildSharpFragSource).
 import { PALETTE_GLSL } from "../../palette.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
 import { ECHO_FLOW_STRIDE, ECHO_HZ, ECHO_MAX, FIELD_OCTAVES, MAX_STRANDS } from "./driver.ts";
@@ -186,10 +186,11 @@ const FIELD_EPS = 0.0015;
  *  scale (exp(-zoomRate*k/ECHO_HZ), computed here from a single uZoomRate
  *  — no per-echo scale array needed, it's a plain function of k) and its
  *  own backdated flow phase (uEchoFlow, see FIELD_GLSL). Folded ONCE per
- *  tap — folding is scale-invariant (it only touches angle), so every
+ *  tap (the pixel and its two epsilon neighbours, hoisted out of the echo
+ *  loop) — folding is scale-invariant (it only touches angle), so every
  *  echo can reuse foldPoint's *result*, just scaled — but the gradient is
- *  still taken by re-running fold+field at p+eps in each axis (never
- *  fwidth after a fold: a 2×2 quad straddling a mirror line reads its
+ *  still taken by re-running the field at those folded p+eps points in
+ *  each axis (never fwidth after a fold: a 2×2 quad straddling a mirror line reads its
  *  neighbour as its own mirror image and under-estimates the derivative —
  *  see kaleido-scene memory). Combined with max, not sum, so echoes lining
  *  up when the zoom reverses brighten instead of flashing. */
@@ -205,17 +206,21 @@ vec2 presenceCoord(vec2 p) {
   return mix(foldPointWide(p, 8.0), foldPointWide(p, 6.0), clamp(uFoldMix, 0.0, 1.0));
 }
 
-float fieldForEcho(vec2 p, int k, float scaleK) {
-  vec2 q = foldedPoint(p) * scaleK * uFieldEff;
+// fp is an already-folded point: folding is echo-invariant (it only touches
+// angle), so main() folds the pixel and its two epsilon neighbours once,
+// before the echo loop, instead of once per echo.
+float fieldForEcho(vec2 fp, int k, float scaleK) {
+  vec2 q = fp * scaleK * uFieldEff;
   return strandField(q, k);
 }
 
-// Returns (F, dF/dx, dF/dy) at room-space p, via forward differences of
-// the *whole* pipeline (fold, scale, field) — see the file header.
-vec3 fieldAndGrad(vec2 p, int k, float scaleK) {
-  float f0 = fieldForEcho(p, k, scaleK);
-  float fx = fieldForEcho(p + vec2(${FIELD_EPS.toFixed(4)}, 0.0), k, scaleK);
-  float fy = fieldForEcho(p + vec2(0.0, ${FIELD_EPS.toFixed(4)}), k, scaleK);
+// Returns (F, dF/dx, dF/dy) at a pixel, via forward differences of the
+// *whole* pipeline (fold, scale, field) — see the file header. Takes the
+// folded pixel and its folded +eps-in-x and +eps-in-y neighbours.
+vec3 fieldAndGrad(vec2 f0p, vec2 fxp, vec2 fyp, int k, float scaleK) {
+  float f0 = fieldForEcho(f0p, k, scaleK);
+  float fx = fieldForEcho(fxp, k, scaleK);
+  float fy = fieldForEcho(fyp, k, scaleK);
   return vec3(f0, (fx - f0) / ${FIELD_EPS.toFixed(4)}, (fy - f0) / ${FIELD_EPS.toFixed(4)});
 }
 
@@ -243,6 +248,10 @@ void main() {
 
   float r = length(p);
   vec2 presPf0 = presenceCoord(p);
+  // Folded once per pixel, not per echo (see fieldForEcho).
+  vec2 fold0 = foldedPoint(p);
+  vec2 foldX = foldedPoint(p + vec2(${FIELD_EPS.toFixed(4)}, 0.0));
+  vec2 foldY = foldedPoint(p + vec2(0.0, ${FIELD_EPS.toFixed(4)}));
   int nStrands = int(uStrands + 0.5);
   int kMax = int(uEchoCount + 0.5);
   float echoDecay = clamp(uEcho, 0.0, 0.995);
@@ -266,7 +275,7 @@ void main() {
   for (int k = 0; k < ${ECHO_MAX}; k++) {
     if (k >= kMax) break;
     float scaleK = exp(-uZoomRate * float(k) / ${ECHO_HZ.toFixed(1)});
-    vec3 fg = fieldAndGrad(p, k, scaleK);
+    vec3 fg = fieldAndGrad(fold0, foldX, foldY, k, scaleK);
     float gradMag = max(length(fg.yz), 1e-3);
     float decayK = pow(echoDecay, float(k));
     float pres = presence(presPf0 * scaleK * uFieldEff);
@@ -336,7 +345,7 @@ void main() {
     // with the regime (driver.ts); webBreath adds a small independent
     // radius pulse. The wobble reuses echo k's own warp flow offset, so no
     // new flow uniform is needed for it.
-    vec2 webP = foldedPoint(p) * scaleK * uFieldEff;
+    vec2 webP = fold0 * scaleK * uFieldEff;
     vec2 wobble = (vec2(vnoise(webP * 5.0 + echoOff0, 37u), vnoise(webP * 5.0 + echoOff0 + 3.1, 41u)) - 0.5) * 0.03;
     vec2 webQ = webP + wobble;
     float chordDist = abs(dot(webQ, vec2(cos(uWebTilt), sin(uWebTilt))) - webRBreathed);
@@ -367,59 +376,7 @@ void main() {
 }
 `;
 
-/** Pass 2: the tail — the one real feedback texture, half-ish resolution,
- *  carrying only the diffuse haze beyond the K crisp echoes. Runs *after*
- *  the sharp pass each frame and reads this same frame's uSharpTex, so it
- *  lags the sharp picture by exactly one frame — invisible on a slow haze.
- *  Stored sqrt-encoded (`s = sqrt(v)`) so the per-step floor subtraction
- *  below actually reaches 0 instead of freezing above it under 8-bit
- *  rounding — see driver.ts's tailDecayStep/stepsToZero and their test.
- *  Samples outside [0,1] return black rather than the CLAMP_TO_EDGE
- *  default, which would otherwise smear the frame edge inward forever. */
-export const TAIL_BODY = `
-uniform sampler2D uPrevTail;
-uniform sampler2D uSharpTex;
-
-const float TAIL_FLOOR = ${(1 / 255).toFixed(6)};
-
-void main() {
-  // roomUv, not vUv directly, so this pass's room-space math lines up with
-  // the sharp pass's under uViewport room-slicing too — texture(..., vUv)
-  // below stays plain vUv on purpose: both targets are our own, sampled at
-  // the same texture-space coordinate regardless of room mode.
-  vec2 ruv = roomUv(vUv);
-  vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
-  vec2 p = (ruv - 0.5) * aspect * 2.0;
-
-  float s1 = exp(uZoomRate / ${ECHO_HZ.toFixed(1)});
-  vec2 pPrev = p * s1;
-  // Back through roomUv's own mapping, not straight to vUv: uPrevTail is
-  // this device's own private target, indexed by its local vUv, which
-  // only equals room-space uv when uViewport is the full {0,0,1,1} (true
-  // outside a multi-device room). A point that would sample past this
-  // device's own captured slice has nothing to read, same as off [0,1].
-  vec2 ruvPrev = pPrev / (aspect * 2.0) + 0.5;
-  vec2 uvPrev = (ruvPrev - uViewport.xy) / uViewport.zw;
-
-  vec3 sOld = vec3(0.0);
-  if (uvPrev.x >= 0.0 && uvPrev.x <= 1.0 && uvPrev.y >= 0.0 && uvPrev.y <= 1.0) {
-    sOld = texture(uPrevTail, uvPrev).rgb;
-  }
-  float tailDecay = mix(0.85, 0.97, clamp(uEcho, 0.0, 1.0));
-  vec3 sDecayed = max(sOld * sqrt(tailDecay) - vec3(TAIL_FLOOR), vec3(0.0));
-  vec3 vDecayed = sDecayed * sDecayed;
-
-  float r = length(p);
-  float holeGate = smoothstep(uHoleEff * 0.8, uHoleEff, r);
-  float emitGain = 0.35 * clamp(uHaze, 0.0, 1.0);
-  vec3 vEmit = texture(uSharpTex, vUv).rgb * emitGain;
-
-  vec3 vNew = (vDecayed + vEmit) * holeGate;
-  outColor = vec4(sqrt(clamp(vNew, 0.0, 1.0)), 1.0);
-}
-`;
-
-/** Pass 3: two-level separable Gaussian bloom — verbatim from
+/** Pass 2: two-level separable Gaussian bloom — verbatim from
  *  crystal/glsl.ts's BLUR_FRAG (itself from powder.ts's chain). */
 export const BLUR_FRAG = `#version 300 es
 precision highp float;
@@ -438,7 +395,7 @@ void main() {
 }
 `;
 
-/** Pass 4: sharp + two glow levels, then saturation from the level
+/** Pass 3: sharp + two glow levels, then saturation from the level
  *  envelope (uLevelS — frame.level, not an auto-gained band, so this
  *  fades out with the song, per the reference's "saturation follows
  *  loudness continuously" finding) and brightness from the mid envelope
