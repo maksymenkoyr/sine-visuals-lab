@@ -233,11 +233,11 @@ export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono`/`rawBands` null on any device
-   *  without a local analyser (the Signal card's Waveform row hidden;
+   *  without a local analyser (the Dynamics card's Waveform row hidden;
    *  Energy reads idle under RAW — see file header); `fixedEnergy` null on
    *  any device without a local FeatureExtractor (the History trace drops
    *  its reference line); `lufs` null on any device without a local
-   *  lufsAnalyser (the Signal card's Loudness row and header Reset chip
+   *  lufsAnalyser (the Dynamics card's Loudness row and header Reset chip
    *  hidden). A folded card skips its computation and DOM writes for the
    *  frame — folding buys back the layout/canvas cost, not just the screen
    *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
@@ -254,7 +254,7 @@ export interface AudioMeters {
    *  (the hits history's Beat lane draws no ratio trace there, same as
    *  synthetic). `gate` is this device's own SilenceGateReading
    *  (src/audio/silenceGate.ts) — null on the same devices as `fixedEnergy`
-   *  (the Signal card's Gate row reads idle; its trace still plots
+   *  (the Dynamics card's Gate row reads idle; its trace still plots
    *  `frame.level` against the two marks, since that part doesn't need a
    *  local extractor). */
   update(
@@ -294,10 +294,10 @@ export interface AudioMeters {
 }
 
 export interface AudioMetersDeps {
-  /** The Signal card's Reset chip (its header, beside Loudness): start the
+  /** The Dynamics card's Reset chip (its header, beside Loudness): start the
    *  integrated reading over. */
   onLufsReset: () => void;
-  /** The Signal card's Gate row's trace guides and the Hits card's hits
+  /** The Dynamics card's Gate row's trace guides and the Hits card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
    *  Silence below/Sound above rows edit (src/audio/silenceGate.ts). Read
    *  fresh every draw()/text tick so dragging a mark in the Input card
@@ -449,7 +449,7 @@ const tempoDotStyle = `
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-// The Signal card's Loudness row. The bar spans LUFS_SCALE_MIN..MAX — a
+// The Dynamics card's Loudness row. The bar spans LUFS_SCALE_MIN..MAX — a
 // broadcast meter's range, with the two targets people actually aim at
 // marked: EBU R128's −23 for broadcast, and the level streaming services
 // normalise to (LUFS_TARGET_STREAMING), above which the bar and digits go
@@ -480,7 +480,7 @@ const TEMPO_TITLE =
 // anim.metronomeBpm; the RAW chip / Smoothing Off bypass that settle and
 // show the raw estimate instead (see this file's own header).
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
-// The Signal card's history trace: level, energy, and the fixed-mapping
+// The Dynamics card's history trace: level, energy, and the fixed-mapping
 // reference over the last HISTORY_SPAN_SEC, one column per CSS pixel so the
 // card's width always spans exactly that long. Each column keeps the max of
 // what it saw, so a beat's peak survives however many frames a column
@@ -507,7 +507,7 @@ const BEAT_TRACE_HEIGHT_CSS_PX = 28;
 // blue as the auto-gain/auto-tune system, distinct from BEAT_COLOR so
 // "detected" (red) and "predicted" (blue) never read as the same line.
 const BEAT_GRID_COLOR = AUTO_SKY;
-// The Signal card's own Gate row (src/audio/silenceGate.ts): a second trace,
+// The Dynamics card's own Gate row (src/audio/silenceGate.ts): a second trace,
 // inserted under the Gate row's meter the way the Character card's Centroid
 // row inserts its own, so it reads a little more crowded than the row above
 // it and gets a bit more height. GATE_DIMMER_COLOR reuses the same blue as
@@ -659,7 +659,7 @@ function createColumnRing(seriesCount: number, heightPx: number) {
   };
 }
 
-/** A rolling line-trace view over createColumnRing — the Signal card's
+/** A rolling line-trace view over createColumnRing — the Dynamics card's
  *  History (three series: level, energy, the fixed-mapping reference), the
  *  Character card's Centroid trace (one series, no legend), the Signal
  *  card's Gate trace (its own series plus `guides`) and, exported for it, the Master
@@ -702,7 +702,7 @@ export function createTraceStrip(series: TraceStripSeries[], heightPx: number, g
     canvas,
     push: ring.push,
     /** Redraws every series in the order given to createTraceStrip — the
-     *  last one lands on top, same as the Signal card putting Level over
+     *  last one lands on top, same as the Dynamics card putting Level over
      *  Energy over the fixed-mapping reference. With no `guides`, draws the
      *  plain fixed mid-height line every trace has always had; with `guides`,
      *  draws those instead (a mid-height line would read as an unlabeled
@@ -1118,7 +1118,7 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
  *  synthetic/renderer"); Low/Mid/High from `anim.lowOnset`/`midOnset`/
  *  `highOnset` and `anim.hits.low/mid/high` (always available once `anim`
  *  exists, local or remote — bandEnergy.ts runs everywhere); ground shading
- *  from `1 - anim.gateDimmer` — the same dimmer the Signal card's Gate row
+ *  from `1 - anim.gateDimmer` — the same dimmer the Dynamics card's Gate row
  *  shows — so a half-open gate reads lighter than a shut one. A fired
  *  column's strength/standout/loudness come from `anim.hitStrength.*`
  *  (src/audio/hitStrength.ts) — see this function's own draw() for how
@@ -1853,7 +1853,7 @@ function createHitCurve() {
   };
 }
 
-/** The Signal card's Loudness welded block: Short-term as the big
+/** The Dynamics card's Loudness welded block: Short-term as the big
  *  seven-segment reading (toFixed's ASCII minus renders in DSEG7), "LUFS"
  *  under it, and the Integrated reading beneath that. Digits go hot past
  *  LUFS_HOT. */
@@ -2104,7 +2104,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
   const signalCard = createCard({
-    title: "Signal",
+    title: "Dynamics",
     accent: INPUT_GREEN,
     foldId: "signal",
     right: lufsResetChip,
@@ -2403,7 +2403,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   mountJack("anim.centroid", brightnessRow.right, brightnessRow.el);
   // Inserted before the hint (el's 3rd child), so it sits under the meter
-  // like the Signal card's History. RAW briefly mixes raw/processed samples
+  // like the Dynamics card's History. RAW briefly mixes raw/processed samples
   // in the same trace right after a toggle, until HISTORY_SPAN_SEC rolls the
   // pre-toggle column out — harmless, and self-heals. The small legend under
   // it is what tells the two readings (the bar's own Brightness value, the

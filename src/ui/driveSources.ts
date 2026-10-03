@@ -63,7 +63,7 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
-  "anim.wavePeak": "the peak of the raw sound wave — the same % the Signal card's Waveform shows.",
+  "anim.wavePeak": "the peak of the raw sound wave — the same % the Dynamics card's Waveform shows.",
   "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
   "anim.tempo": "how fast the Tempo card's own BPM is, from slow to fast.",

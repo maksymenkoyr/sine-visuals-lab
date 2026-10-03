@@ -75,7 +75,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "R", id: "reset", label: "Reset", hint: "Reset the focused row" },
   { key: "T", id: "mute", label: "Mute", hint: "Mute the focused row, press again to restore" },
   { key: "Z X C", id: "zxc", label: "Slider jump", hint: "Slider to middle · max · pointer" },
-  { key: "Esc", id: "esc", label: "Unpin", hint: "Unpin a patched setting" },
+  { key: "Esc", id: "esc", label: "Unpin", hint: "Unpin the pinned setting" },
   { key: "?", id: "keys", label: "Keys", hint: "This list" },
   { key: "B", id: "beat-one", label: "The 1", hint: "This beat is the 1 (⇧ clears ×2/÷2 and nudge)" },
   { key: "[ ]", id: "tempo-x", label: "Tempo ÷2 ×2", hint: "Halve / double the beat" },

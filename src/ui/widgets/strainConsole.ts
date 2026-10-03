@@ -25,7 +25,7 @@ import {
  *
  * A lane edits the existing per-item setting (`ctx.get`/`ctx.set`, the
  * exact path a slider drag takes), so a Look, a reset and the TV see nothing
- * different. What the console can't draw is a row's jack, Receives patch,
+ * different. What the console can't draw is a row's jack, wire panel,
  * sparkline and reset — so releasing a lane mounts that setting's real
  * device-menu row (`ctx.mountRows`) under the lanes, and that row is where a
  * source is patched in. The full-size row is also where a setting with no

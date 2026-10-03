@@ -57,7 +57,7 @@ export interface AnimFrame {
    *  louder peak at once, then falls at WAVE_PEAK_FALL_PER_SEC times this
    *  tick's smoothing rateScale (so Smoothing's Off stop, rateScale =
    *  Infinity, makes it exactly the instantaneous peak, same as the Signal
-   *  card's RAW reading). It's the one number the Signal card's Waveform
+   *  card's RAW reading). It's the one number the Dynamics card's Waveform
    *  readout shows and the `anim.wavePeak` drive source (signals.ts) reads —
    *  computed here once so both read the same thing. Linear amplitude [0,1]
    *  of the raw capture (before auto-gain/sensitivity), not normalized. 0
@@ -258,7 +258,7 @@ export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts 
 // AnimFrame.wavePeak's own fall rate — matches the meters' own peak-hold
 // fall (audioMeters.ts's PEAK_FALL_PER_SEC, spectrumStrip.ts's peak-hold
 // decay), so moving the hold in here (from audioMeters.ts's own local state)
-// doesn't change how the Signal card's Waveform readout looks or feels.
+// doesn't change how the Dynamics card's Waveform readout looks or feels.
 export const WAVE_PEAK_FALL_PER_SEC = 1.2;
 
 // The phase comb's own hit weight (beatClock.ts's advance()) — how much this

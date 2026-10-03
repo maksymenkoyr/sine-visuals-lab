@@ -144,7 +144,7 @@ const SPAN_FULL_DB = 45;
 
 // Steady-state time constant for easing toward the target below — ~4s to
 // reach ~63% of the way there. Still deliberately slower than the music:
-// the Signal card's history trace (src/ui/audioMeters.ts) draws the gap this
+// the Dynamics card's history trace (src/ui/audioMeters.ts) draws the gap this
 // amount opens between Level and Energy, and a value that tracked the room
 // in real time would make that gap breathe with the music instead of with
 // the room. It no longer also has to double as this tracker's start-up

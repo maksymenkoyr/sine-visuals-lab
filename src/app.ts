@@ -298,12 +298,12 @@ let laptopWaiting = false;
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Time-domain sibling of bandAnalyser — the waveform for the controls
- *  panel's Signal card, its Waveform row (src/ui/audioMeters.ts). Never
+ *  panel's Dynamics card, its Waveform row (src/ui/audioMeters.ts). Never
  *  touches FeatureExtractor or the wire frame: this is display-only data
  *  local to this device, not a render-driving signal. See
  *  waveformAnalyser.ts's header for why. */
 let waveformAnalyser: WaveformAnalyser | null = null;
-/** K-weighted loudness tap for the panel's Signal card, its Loudness row
+/** K-weighted loudness tap for the panel's Dynamics card, its Loudness row
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
@@ -470,7 +470,7 @@ let lastVis: FeatureFrame | null = null;
 let lastRawBands: Float32Array | null = null;
 /** This tick's waveform samples, straight off waveformAnalyser — same
  *  solo/host-only availability as lastRawBands above, for the same reason
- *  (no local mic on a renderer device). Feeds the Signal card's Waveform row. */
+ *  (no local mic on a renderer device). Feeds the Dynamics card's Waveform row. */
 let lastMono: Float32Array | null = null;
 /** This tick's deep waveform samples, straight off measureAnalyser — DEV
  *  only, see that variable's own comment. Same buffer identity every read;
@@ -499,14 +499,14 @@ let lastFluxRatio: number | null = null;
  *  see beatClock.ts's own file header for why those never get this feed). */
 let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
-// Signal card's Gate row (audioMeters.ts). `fired` is the local extractor's
+// Dynamics card's Gate row (audioMeters.ts). `fired` is the local extractor's
 // own frame's onset (not the jitter-buffered `lastVis`), so it and
 // `suppressed` always describe the same tick's decision — see the two
 // currentVisual() branches below where this is set. Same solo/host-only
 // availability as lastBeatDiag above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
- *  availability as lastMono, for the Signal card's Loudness row. */
+ *  availability as lastMono, for the Dynamics card's Loudness row. */
 let lastLufs: LufsReading | null = null;
 /** This tick's src/audio/inputHealth.ts reading — same solo/host-only
  *  availability as lastGate above and for the same reason. Read by the
@@ -3046,7 +3046,7 @@ function tick(): void {
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
   // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
-  // own peak feeds AnimFrame.wavePeak (the Signal card's Waveform readout and
+  // own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
   // its drive jack); null on any device with no local mic.
   const anim = gained
     ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {

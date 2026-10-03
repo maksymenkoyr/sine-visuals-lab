@@ -158,7 +158,7 @@ export class FeatureExtractor {
   private env = new Float32Array(NUM_BANDS);
   // The same envelope over the fixed mapping alone, kept regardless of the
   // blend so `fixedEnergy` can always say what `energy` would read with
-  // auto-gain fully off — a local diagnostic (the Signal card's history
+  // auto-gain fully off — a local diagnostic (the Dynamics card's history
   // trace in src/ui/audioMeters.ts), never part of the FeatureFrame itself.
   private envFixed = new Float32Array(NUM_BANDS);
   private lastFixedEnergy = 0;
@@ -204,7 +204,7 @@ export class FeatureExtractor {
    *  firing comparison — see silenceGate.ts's silenceGateDimmer. 1 with no
    *  `gate` argument (or whenever the gate is off), down toward 0 the
    *  quieter the room reads. A local diagnostic like fluxRatio above, never
-   *  part of FeatureFrame — the Signal card's Gate row and its trace
+   *  part of FeatureFrame — the Dynamics card's Gate row and its trace
    *  (audioMeters.ts) are the one reader. */
   get gateDimmer(): number {
     return this.lastGateDimmer;
@@ -215,7 +215,7 @@ export class FeatureExtractor {
    *  this needs a one-shot spacing separate from the refractory a suppressed
    *  hit deliberately doesn't start. A local diagnostic like fluxRatio
    *  above, never part of FeatureFrame — gated hits show up as faint ticks
-   *  on the Hits card's own lanes; the Signal card's Gate row no longer
+   *  on the Hits card's own lanes; the Dynamics card's Gate row no longer
    *  marks them. */
   get suppressed(): boolean {
     return this.lastSuppressed;

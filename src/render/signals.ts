@@ -93,7 +93,7 @@ export type MeterCardId = "signal" | "hits" | "tempo" | "character";
  *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
  *  instead; "timing" is the Tempo card's own Timing strip
  *  (createTimingStrip), the anchor for `anim.metronomeBar`. "waveform" is
- *  the Signal card's own Waveform row, first in its body (audioMeters.ts's
+ *  the Dynamics card's own Waveform row, first in its body (audioMeters.ts's
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
  *  "wave" above (the beat/bar swing trace, a different row entirely).
  *  "centroid" is the Character card's Brightness row (dialRows' own
@@ -315,7 +315,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Signal card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
     monitor: { card: "signal", row: "waveform" },
