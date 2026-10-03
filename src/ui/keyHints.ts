@@ -252,7 +252,10 @@ export function installKeyHints(tipCallback: (text: string) => void): void {
     else hideTooltip();
   });
   document.addEventListener("pointerout", (e) => {
-    if (taggedAncestor(e.target) !== hovered) return;
+    // Nothing tagged hovered → this pointerout isn't ours; hiding here would
+    // kill the shared tooltip of another surface (the version label's hint
+    // vanished whenever the pointer crossed between its child spans).
+    if (!hovered || taggedAncestor(e.target) !== hovered) return;
     const related = e.relatedTarget;
     if (related instanceof Node && hovered?.contains(related)) return;
     hovered = null;
