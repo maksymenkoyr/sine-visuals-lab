@@ -326,3 +326,98 @@ describeMotion("toonrave motion", () => {
     closeArr(cameraMatrix({ shot: "wide", src: { x: 0, y: 0, w: 1600, h: 900 }, shake: { x: 5, y: -3, rot: 0 } }), [1, 0, 0, 1, 5, -3], "shake");
   });
 });
+
+import {
+  describe as describeDraw,
+  it as itDraw,
+  expect as expectDraw,
+} from "vitest";
+import {
+  boxesOverlap,
+  colorWithOpacity,
+  mulMat,
+  parseFraction,
+  parseStyle,
+  parseTransform,
+  roundRectPath,
+  roundedOpacity,
+  transformBox,
+  unionBox,
+} from "../src/render/scenes/toonrave/svgDraw.ts";
+
+describeDraw("toonrave svgDraw helpers", () => {
+  const close = (a: number[], b: number[]) => {
+    expectDraw(a.length).toBe(b.length);
+    a.forEach((v, i) => expectDraw(v).toBeCloseTo(b[i], 6));
+  };
+
+  itDraw("parses the transform forms the art uses", () => {
+    close(parseTransform("matrix(0.834465 0.337146 -0.337146 0.834465 379.166434 -297.018487)"), [0.834465, 0.337146, -0.337146, 0.834465, 379.166434, -297.018487]);
+    close(parseTransform("translate(140,-4)"), [1, 0, 0, 1, 140, -4]);
+    close(parseTransform("translate(7)"), [1, 0, 0, 1, 7, 0]);
+    close(parseTransform("scale(2)"), [2, 0, 0, 2, 0, 0]);
+    close(parseTransform(""), [1, 0, 0, 1, 0, 0]);
+    close(parseTransform(null), [1, 0, 0, 1, 0, 0]);
+  });
+
+  itDraw("rotates about a point, in either separator style", () => {
+    // 90 degrees about (10, 0) sends (0, 0) to (10, -10) and (10, 5) to (5, 0)
+    for (const s of ["rotate(90 10 0)", "rotate(90,10,0)"]) {
+      const m = parseTransform(s);
+      close([m[4], m[5]], [10, -10]);
+      close([m[0] * 10 + m[2] * 5 + m[4], m[1] * 10 + m[3] * 5 + m[5]], [5, 0]);
+    }
+    const r = parseTransform("rotate(-10 902.7 529)");
+    const rad = -Math.PI / 18;
+    close([r[0], r[1], r[2], r[3]], [Math.cos(rad), Math.sin(rad), -Math.sin(rad), Math.cos(rad)]);
+    // the fixed point stays put
+    close([r[0] * 902.7 + r[2] * 529 + r[4], r[1] * 902.7 + r[3] * 529 + r[5]], [902.7, 529]);
+  });
+
+  itDraw("chains the world transform in order", () => {
+    const world = parseTransform("rotate(-7,800,450) translate(800,450) scale(1.1) translate(-800,-450)");
+    // the centre of the art maps to itself, and the chain equals the product of its parts
+    close([world[0] * 800 + world[2] * 450 + world[4], world[1] * 800 + world[3] * 450 + world[5]], [800, 450]);
+    const rot = parseTransform("rotate(-7,800,450)");
+    const rest = parseTransform("translate(800,450) scale(1.1) translate(-800,-450)");
+    close(world, mulMat(rot, rest));
+  });
+
+  itDraw("rejects a transform function it does not know", () => {
+    expectDraw(() => parseTransform("perspective(4)")).toThrow();
+    expectDraw(() => parseTransform("matrix(1 2 3)")).toThrow();
+  });
+
+  itDraw("parses style strings", () => {
+    expectDraw(parseStyle("display:none")).toEqual({ display: "none" });
+    expectDraw(parseStyle("mix-blend-mode:screen")).toEqual({ "mix-blend-mode": "screen" });
+    expectDraw(parseStyle(" Opacity : .5 ;display:none; ")).toEqual({ opacity: ".5", display: "none" });
+    expectDraw(parseStyle("")).toEqual({});
+    expectDraw(parseStyle(null)).toEqual({});
+  });
+
+  itDraw("reads fractions, colours, opacities and rounded rects", () => {
+    expectDraw(parseFraction("50%", 0)).toBe(0.5);
+    expectDraw(parseFraction("0.25", 0)).toBe(0.25);
+    expectDraw(parseFraction(null, 0.5)).toBe(0.5);
+    expectDraw(colorWithOpacity("#ff4fb6", 0.5)).toBe("rgba(255,79,182,0.5)");
+    expectDraw(colorWithOpacity("#f80", 1)).toBe("rgba(255,136,0,1)");
+    expectDraw(colorWithOpacity("red", 0.5)).toBe("red");
+    expectDraw(roundedOpacity(0.99949)).toBe(1);
+    expectDraw(roundedOpacity(0.5)).toBe(0.5);
+    expectDraw(roundedOpacity(0.12345)).toBe(0.123);
+    expectDraw(roundRectPath(0, 0, 10, 20, null, null)).toBe("M0,0h10v20h-10z");
+    // rx clamps to half the width
+    expectDraw(roundRectPath(0, 0, 10, 20, 100, null)).toContain("A5,10 ");
+  });
+
+  itDraw("boxes: transform, union and overlap", () => {
+    const b = transformBox([0, 0, 10, 20], [0, 1, -1, 0, 5, 5]); // a quarter turn
+    close(b, [-15, 5, 5, 15]);
+    close(unionBox(null, [1, 2, 3, 4]), [1, 2, 3, 4]);
+    close(unionBox([0, 0, 1, 1], [2, 2, 3, 3]), [0, 0, 3, 3]);
+    expectDraw(boxesOverlap([0, 0, 2, 2], [1, 1, 3, 3])).toBe(true);
+    expectDraw(boxesOverlap([0, 0, 2, 2], [2, 0, 4, 2])).toBe(false);
+    expectDraw(boxesOverlap([0, 0, 1, 1], [5, 5, 6, 6])).toBe(false);
+  });
+});
