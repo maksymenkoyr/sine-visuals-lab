@@ -25,6 +25,9 @@ import {
   HIT_LOUDNESS_DEFAULT,
   HIT_LOUDNESS_MAX,
   HIT_LOUDNESS_MIN,
+  HIT_TAIL_DEFAULT,
+  HIT_TAIL_MAX,
+  HIT_TAIL_MIN,
   type HitParts,
   type HitShape,
 } from "../audio/hitStrength.ts";
@@ -2023,6 +2026,23 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   hitFloorRow.onChange((v) => deps.hitShape.set({ floor: v }));
   hitFloorRow.sync(() => deps.hitShape.get().floor);
 
+  // Log slider: the range is a multiple either side of 1 (a quarter to four
+  // times), so the track's midpoint is the unchanged fall.
+  const hitTailRow = createControlRow({
+    label: "Tail",
+    accent: NEUTRAL_ACCENT,
+    min: HIT_TAIL_MIN,
+    max: HIT_TAIL_MAX,
+    defaultValue: HIT_TAIL_DEFAULT,
+    mapping: "log",
+    unit: "×",
+    format: (v) => v.toFixed(2),
+    description:
+      "How long a hit's pulse rings out before it's gone. 1: as before. Left: a short flick that is over almost at once. Right: a slow swell that is still fading when the next hit lands. It stretches every hit pulse and anything wired to one with a Fixed or Loud height.",
+  });
+  hitTailRow.onChange((v) => deps.hitShape.set({ tail: v }));
+  hitTailRow.sync(() => deps.hitShape.get().tail);
+
   const hitCurveRow = createMeterRow({
     label: "Curve",
     accent: NEUTRAL_ACCENT,
@@ -2042,6 +2062,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     hitLoudnessRow.el,
     spacer(),
     hitFloorRow.el,
+    spacer(),
+    hitTailRow.el,
     spacer(),
     hitCurveRow.el,
   );

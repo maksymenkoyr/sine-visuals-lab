@@ -51,6 +51,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.hitKnee": true,
   "vibe.hitLoudness": true,
   "vibe.hitFloor": true,
+  "vibe.hitTail": true,
   // Rewritten by the laptop's own analysis (the extractor), so it stays there.
   "vibe.silenceGate": false,
   "vibe.silenceGateClosed": false,

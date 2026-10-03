@@ -7,7 +7,7 @@ import { smoothingRateScale, SMOOTHING_DEFAULT } from "../src/audio/sensitivity.
 
 // Reused wherever a test needs to pass `hit` just to reach `wavePeak` —
 // its own fields don't matter when no onset fires this tick.
-const NEUTRAL_SHAPE: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0 };
+const NEUTRAL_SHAPE: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: 1 };
 
 const DT = 1 / 60;
 
@@ -77,14 +77,38 @@ describe("createAnimClock", () => {
 
   it("with a shape at amount 1 and loudness 1, beatPulse on onset lands on frame.level", () => {
     const clock = createAnimClock();
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0 };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: 1 };
     const anim = clock.advance(DT, frame({ onset: true, level: 0.37 }), undefined, undefined, { shape });
     expect(anim.beatPulse).toBeCloseTo(0.37, 5);
   });
 
+  it("Tail stretches how long beatPulse rings out, and publishes hitTail", () => {
+    const decayAfter = (tail: number): { pulse: number; hitTail: number } => {
+      const clock = createAnimClock();
+      const shape: HitShape = { ...NEUTRAL_SHAPE, amount: 0, tail };
+      clock.advance(DT, frame({ onset: true }), undefined, undefined, { shape });
+      let anim = clock.advance(DT, frame(), undefined, undefined, { shape });
+      for (let i = 0; i < 9; i++) anim = clock.advance(DT, frame(), undefined, undefined, { shape });
+      return { pulse: anim.beatPulse, hitTail: anim.hitTail };
+    };
+    const plain = decayAfter(1);
+    const long = decayAfter(2);
+    const short = decayAfter(0.5);
+    expect(plain.hitTail).toBe(1);
+    expect(long.hitTail).toBe(0.5);
+    expect(long.pulse).toBeGreaterThan(plain.pulse);
+    expect(short.pulse).toBeLessThan(plain.pulse);
+    // Twice as long = exactly the square root of what a plain pulse kept.
+    expect(long.pulse).toBeCloseTo(Math.sqrt(plain.pulse), 6);
+  });
+
+  it("omitted `hit` leaves hitTail at 1", () => {
+    expect(createAnimClock().advance(DT, frame()).hitTail).toBe(1);
+  });
+
   it("hitStrength.low mirrors bandEnergy's own graded hit when a shape is given", () => {
     const clock = createAnimClock();
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0 };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: 1 };
     const quietBands = new Float32Array(NUM_BANDS).fill(0.1);
     for (let i = 0; i < 30; i++) clock.advance(DT, frame({ bands: quietBands, level: 1 }), undefined, undefined, { shape });
     const loudBands = new Float32Array(NUM_BANDS).fill(0.6);
