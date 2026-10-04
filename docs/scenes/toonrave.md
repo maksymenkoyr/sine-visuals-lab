@@ -25,8 +25,9 @@ on the app's bar lines. Draft scene, not on main yet.
   when the lock returns. `dropFired` can start a cycle early, gated by
   `MIN_DROP_GAP_BEATS`. `createStepClock` is the cast's other clock for Moves
   on signal: one beat of dancing per fired step, holding at
-  `STEP_HOLD_PHASE` between steps; `frameAt` reads it as `castBeats`, in the
-  groove only.
+  `STEP_HOLD_PHASE` between steps. `frameAt`'s `castC` is the cast's own
+  cycle position (the DJ, guy, kid, raver, crowd, their props and the button);
+  index.ts moves it only on a fire, and `stillCamera` holds each shot's framing.
 - `src/render/scenes/toonrave/svgDraw.ts` — `compileScene` parses the markup
   once into a `DrawProgram`; `drawProgram` paints one `FrameState` with
   Canvas2D every frame (vector, so crisp at any zoom).
@@ -112,6 +113,15 @@ and are not recorded here yet.
   that": Energy's beat-grid pulse kept scaling the held pose every beat. While
   the signal steps the cast, Energy's pulse is now sampled at each step and
   held, so it sizes each step and nothing moves the cast between steps.
+- 2026-10-04 — "Still movement happens while there are no signals": measured
+  on a silent mic, the cast's poses were frozen but the camera's push-in inside
+  each shot, the drop gags and the build (still on the BPM), the button's
+  squash and the snap into the groove all moved. Now the cast has its own cycle
+  position everywhere in the cycle: groove fires step it, gag and build fires
+  let it catch up to the script for half a beat, nothing else moves it (not
+  even a drop, and not an unwired toggle); the camera holds each shot's
+  framing while the toggle is on. Lights keep the beat: they have their own
+  control.
 
 ## Tuning notes
 
@@ -126,11 +136,12 @@ and are not recorded here yet.
   repeatable.
 - Under a locked beat clock the drops land on bar lines; with no lock it
   free-runs at 120 BPM until one appears.
-- Moves on signal: DEV `window.__toonrave.peek().castBeats` is the cast's step
-  count (null while the cast is on the beats) and `.pulse` the Energy pulse
-  applied; in the groove these two decide the cast's pose, so a trace of them
-  shows whether anything moves the cast between steps. With nothing wired the cast
-  stays on the beats, so the toggle can never freeze the groove.
+- Moves on signal: DEV `window.__toonrave.peek().castC` is the cast's own cycle
+  position (null while the cast is on the beats) and `.pulse` the Energy pulse
+  applied; these two decide the cast's pose, so a trace of them shows whether
+  anything moves the cast between fires. A silent fake mic
+  (`--use-file-for-fake-audio-capture` on a silent wav) is the honest "no signal"
+  check; synthetic audio always has hits.
 
 ## Known issues and next steps
 
