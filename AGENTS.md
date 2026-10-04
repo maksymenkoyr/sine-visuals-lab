@@ -72,10 +72,8 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` �
   and stop: no edits, plans or artifacts unless I ask.
 - **Ask about wording and look.** If a label, UX wording or the intended look
   could reasonably mean two things, ask one short question before building.
-- **Extend, don't duplicate.** When a requested effect overlaps an existing
-  system (Sparkle, the governor, the brightness dial…), build it into that
-  system rather than adding a parallel one. If it's unclear which system owns
-  it, ask one question.
+- **Overlaps.** If a requested scene feature overlaps an existing system
+  (Sparkle, the governor, the brightness dial…), raise it before building.
 - **Scene links.** When working on a visualization, run `npm run dev` and
   give the user the link to that scene that the dev server prints at startup,
   not the gallery root. Any query goes *before* the hash; one placed after the
