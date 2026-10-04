@@ -23,6 +23,15 @@
  * same physical jack can carry both a pinned and a preview cable at once
  * without their flow offsets colliding.
  *
+ * A third group, `fan`, answers "where does this signal go": while a
+ * signal's row is lit (deviceMenu.ts's own lit-row tracking — the same
+ * hover/focus glow controlsTheme.ts's `.vc-row:hover/:focus-within` draws),
+ * every wire that leaves its jack is drawn to every port it reaches in the
+ * scene — one jack fanning out, where pinned/preview are many jacks into
+ * one port. It is drawn under the other two, flat and static like a
+ * preview (`.vc-cable-fan`, solid where a preview is dashed), so it costs
+ * the tick loop nothing.
+ *
  * A source carrying its own onPress (CableSourceSpec below) is pressable:
  * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke
  * over it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
@@ -127,9 +136,10 @@ export interface CableGroupSpec {
 export interface CableLayer {
   el: SVGSVGElement;
   /** Full rebuild — see this file's header. `preview` is drawn on top of
-   *  `pinned`; pass an empty-sources group for either to draw only the
-   *  other (or neither). */
-  recompute(pinned: CableGroupSpec, preview: CableGroupSpec): void;
+   *  `pinned`, and `fan` (a lit signal's wires, one group per port it
+   *  reaches) under both; pass an empty-sources group (or no fan groups)
+   *  to draw only the others (or none). */
+  recompute(pinned: CableGroupSpec, preview: CableGroupSpec, fan?: readonly CableGroupSpec[]): void;
   /** Per-tick dash-offset advance for the pinned group's own flow, speed ∝
    *  each source's own live value — no DOM reads. A no-op under
    *  prefers-reduced-motion. */
@@ -301,20 +311,27 @@ export function createCableLayer(): CableLayer {
   // offset.
   const offsets = new Map<string, number>();
 
-  function recompute(pinnedGroup: CableGroupSpec, previewGroup: CableGroupSpec): void {
+  function recompute(pinnedGroup: CableGroupSpec, previewGroup: CableGroupSpec, fanGroups: readonly CableGroupSpec[] = []): void {
     // Pass 1 — every getBoundingClientRect() read (resolveGroup,
     // powerAvoidBand), none of it interleaved with a DOM write (this
     // file's own header, and the carried rule against layout thrashing),
     // for both groups, before a single path element is built.
     const pinnedResolved = resolveGroup(pinnedGroup);
     const previewResolved = resolveGroup(previewGroup);
-    const avoidBand = pinnedResolved || previewResolved ? powerAvoidBand() : null;
+    const fanResolved = fanGroups.map(resolveGroup).filter((g) => g !== null);
+    const avoidBand = pinnedResolved || previewResolved || fanResolved.length ? powerAvoidBand() : null;
 
     // Pass 2 — every write: clear the old cables, build and append the new
     // ones, forget any carried flow offset nothing still uses.
     svg.textContent = "";
     flows = [];
     const liveKeys = new Set<string>();
+
+    // The lit signal's fan first, so the pinned/preview cables it may
+    // share a jack and port with draw over it — see this file's header.
+    for (const { portPt, resolved } of fanResolved) {
+      for (const { src, pt } of resolved) svg.append(pathEl("vc-cable-fan", cablePathD(pt, portPt, avoidBand), src.color));
+    }
 
     // The pinned group dims once a preview is also on screen, so it never
     // competes with the cable that's actually being previewed right now —

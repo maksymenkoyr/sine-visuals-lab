@@ -761,7 +761,7 @@ body.vc-keys-reveal [data-keycap]::after {
 /* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane
  * mounts beside itself, coloured in its own source (driveSources.ts). Solid
  * fill when it feeds the shown (preview ?? pinned) setting; the usage dots
- * (.vc-jack-uses) count this scene's settings that use it, always on
+ * (.vc-jack-uses), around the ring, count this scene's settings that use it, always on
  * regardless of selection — see jack.ts's own header for the full split
  * between this file's classes and deviceMenu.ts's own state. */
 .vc-jack {
@@ -776,11 +776,14 @@ body.vc-keys-reveal [data-keycap]::after {
   box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent);
 }
 .vc-jack:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-.vc-jack-uses {
-  position: absolute; left: 50%; top: calc(100% + 2px); transform: translateX(-50%);
-  display: flex; gap: 2px; pointer-events: none;
+/* The usage dots ring the jack itself (jack.ts's setUses/useDotLayout):
+ * each dot sits at its own --a around the centre, --r out, sized --s. */
+.vc-jack-uses { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.vc-jack-uses i {
+  position: absolute; left: calc(var(--s) / -2); top: calc(var(--s) / -2);
+  width: var(--s); height: var(--s); border-radius: 50%; background: var(--c); opacity: 0.75;
+  transform: rotate(var(--a)) translateY(calc(-1 * var(--r)));
 }
-.vc-jack-uses i { width: 2.5px; height: 2.5px; border-radius: 50%; background: var(--c); opacity: 0.65; }
 
 /* Highlighting while a setting is previewed/pinned (deviceMenu.ts's own
  * refreshPatchHighlight/refreshBandsJacks, audioMeters.ts's
@@ -858,6 +861,12 @@ body.vc-keys-reveal [data-keycap]::after {
 /* The previewed setting's own cables — flat and quiet on purpose, so a
  * transient hover never reads as "committed" the way a pinned patch does. */
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+/* A lit signal's wires to every port it reaches (cableLayer.ts's fan
+ * group) — solid where a preview is dashed, and quieter than a pinned
+ * cable, since it shows where a signal goes rather than one patch. */
+.vc-cable-fan { fill: none; stroke-width: 1; opacity: 0.55; animation: vc-cable-fan-in 0.15s ease-out; }
+@keyframes vc-cable-fan-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .vc-cable-fan { animation: none; } }
 /* Every one of an Only when patch's own condition sources (there can be more
  * than one now — src/render/drives.ts's own header) — a longer dash than
  * .vc-cable-soft's fine 3/3 (a scene-mix cable) and than .vc-cable-preview's
