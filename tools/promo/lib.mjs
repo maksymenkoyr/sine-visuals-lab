@@ -76,6 +76,8 @@ export async function launch({ width = W, height = H, dsf = 1, wav = null } = {}
       "--enable-gpu", "--use-angle=metal", "--enable-gpu-rasterization", "--ignore-gpu-blocklist",
       "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
       "--autoplay-policy=no-user-gesture-required",
+      // a second page (the room's TV, the pop-out) would otherwise be throttled to ~10 fps as a background window
+      "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
       ...(wav ? [`--use-file-for-fake-audio-capture=${wav}%noloop`] : []),
     ],
   });
@@ -132,13 +134,13 @@ export const hideChrome = async (page) => {
 
 /** Beat clock: T0 = first beat tick >= now + lead (page performance.now() ms), or, with `at`, beat
  *  `at` of the feed itself (a song take starts on a fixed beat of the wav). */
-export async function beatClock(page, leadMs = 1500, { at = null } = {}) {
+export async function beatClock(page, leadMs = 1500, { at = null, late = false } = {}) {   // late: `at` may be past
   const r = await page.evaluate(([lead, P, at]) => {
     const now = performance.now();
     const k = at ?? Math.ceil((now + lead - window.__S) / P);
     return { T0: window.__S + k * P, origin: performance.timeOrigin, now };
   }, [leadMs, P, at]);
-  if (r.T0 < r.now + 200) throw new Error(`beat ${at} of the feed is already past; start the wav earlier`);
+  if (!late && r.T0 < r.now + 200) throw new Error(`beat ${at} of the feed is already past; start the wav earlier`);
   const T0 = r.T0;
   const waitBeat = (b) => page.evaluate(([t]) => new Promise((res) => {
     const f = () => { const d = t - performance.now(); if (d <= 0) res(); else if (d > 30) setTimeout(f, 8); else requestAnimationFrame(f); };

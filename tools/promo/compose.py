@@ -83,10 +83,18 @@ def inset(base, im, size, pos, pad=3):
     return base
 # the inset sits above the caption band (the caption covers y 1340..1530)
 def cuep_frame(b): return inset(fit(frame_at("cuep", b)).copy(), frame_at("cuep_out", b), (700, 394), (190, 900))
-def room_frame(b): return inset(fit(frame_at("room", b)).copy(), frame_at("room_tv", b), (440, 248), (590, 1050))
+def tag_at(base, key, pos):
+    t = png(f"label_{key}.png"); base.paste(t.convert("RGB"), pos, t.getchannel("A")); return base
+def room_split(b, vb):
+    # the room as it is used: the laptop (its Room view, then the PLAY bar and palettes) over the TV it plays to
+    base = Image.new("RGB", (W, H), (6, 8, 13))
+    base.paste(frame_at("room", b, vb).resize((W, 608), Image.LANCZOS), (0, 240))
+    inset(base, frame_at("room_tv", b, vb), (820, 461), (130, 866))
+    tag_at(base, "laptop", (20, 258)); tag_at(base, "tv", (148, 884))
+    return base
 def backdrop(name, b, video_beat):
     if name == "cuep": return cuep_frame(b)
-    if name == "room": return room_frame(b)
+    if name == "room": return room_split(b, video_beat)
     return fit(frame_at(name, b, video_beat))
 
 # ---- segments ---------------------------------------------------------------------------------------
@@ -185,7 +193,8 @@ for i in range(n_frames):
         while si + 1 < len(SEGS) and bp >= bounds[si + 1] - 1e-9: si += 1
         kind, (tk, tb), arg, dur = SEGS[si]
         local = bp - bounds[si]; t_in = local * P
-        im = camera(backdrop(tk, tb + local, bp), tk, local, dur, tb + local)
+        im = backdrop(tk, tb + local, bp)
+        if tk != "room": im = camera(im, tk, local, dur, tb + local)   # the room's split view stays put
         if kind == "version":
             im = dim(im, 0.30, t_in)
             o = im.convert("RGBA"); o.alpha_composite(with_alpha(png("intro.png"), min(1.0, t_in / 0.18))); im = o.convert("RGB")

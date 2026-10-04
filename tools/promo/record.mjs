@@ -65,6 +65,13 @@ async function run(name, scene, cfg) {
 
 const FB_SETUP = async (page) => { await openPanel(page); await sleep(1200); await hideChrome(page); await sleep(500); };
 const every = (step, names, from = 0) => names.map((n, i) => [from + i * step, n]);
+// Video beat where the first demo using `take` starts: demos run in lines.json order from DEMO_START.
+const demoStart = (take) => {
+  const lines = JSON.parse(fs.readFileSync(`${WORK}/lines.json`, "utf8"));
+  let b = Number(process.env.DEMO_START);
+  for (const d of lines.demos || []) { if (d.take === take) return b; b += d.beats; }
+  return null;
+};
 // A scene take on the song. `flips` are [video beat, button text] — the drop is video beat MIC.drop.
 const song = (name, scene, flips, { query = "" } = {}) => {
   if (!MIC) { console.log(`${name}: no MIC_WAV — run it through promo.mjs record`); return; }
@@ -246,42 +253,59 @@ const T = {
     },
   }),
 
+  // A laptop and a TV in one room, on the song (a TV never gets the synthetic feed): add the TV by its
+  // code, then change the look on the laptop — the TV keeps its own until Play — and press Play, twice.
+  // Timed to where the room's demos sit in the video (lines.json), since compose cuts it by song time.
+  // A landscape laptop, not the phone layout: on a phone the panel covers the PLAY bar.
   room: async () => {
-    const { browser, page } = await launch(UI_VIEW);
-    try {
-      page.on("pageerror", (e) => console.log("room pageerror", e.message));
-      await open(page, "physarum2");
-      await page.addStyleTag({ content: ".pv-cur{width:18px!important;height:18px!important;margin:-9px 0 0 -9px!important}" });
-      const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
-      const tv = await ctxB.newPage();
-      await tv.goto(`${BASE}/tv`, { waitUntil: "load" });
-      await sleep(3500);
-      const txt = await tv.evaluate(() => document.body.innerText.slice(0, 400));
-      const code = (txt.match(/\n([A-Z0-9]{4})\n/) || [])[1];
-      await page.evaluate(() => document.querySelector("#panelBtn")?.click());
-      await sleep(2000);
-      await page.locator('input[placeholder="CODE"]').first().fill(code);
-      await sleep(400);
-      await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /add a tv by its code/i.test(own(e)))?.scrollIntoView({ block: "center" }); });
-      await sleep(600);
-      await page.mouse.move(288, 300);
-      await installTracker(page, "room");
-      const bc = await beatClock(page, 1800);
-      const castA = await startCast(page, `${OUT}room_main`);
-      const castB = await startCast(tv, `${OUT}room_tv`);
-      const btn = await centerOf(page, "Add screen");
-      await at(bc, 0.2);
-      await moveTo(page, btn.x, btn.y, 0.9 * P);
-      await at(bc, 1.4);
-      await page.mouse.down(); await sleep(120); await page.mouse.up();
-      await sleep(10);
-      await at(bc, 3.0);
-      await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /^room\b/i.test(own(e)) && e.getBoundingClientRect().y < 120 && e.getBoundingClientRect().x > 150)?.scrollIntoView({ block: "start" }); });
-      await at(bc, 8.6);
-      const meta = { name: "room", beats: 8, P, bpm: BPM, epochT0: bc.epochT0 };
-      await castA.stop(meta); await castB.stop({ ...meta, name: "room_tv" }); await saveTrack(page, "room_main");
-      console.log("room done");
-    } finally { await browser.close(); }
+    if (!MIC) { console.log("room: no MIC_WAV — run it through promo.mjs record"); return; }
+    const d0 = demoStart("room");
+    if (d0 == null) { console.log("room: no demo in lines.json uses it"); return; }
+    const vb = (b) => d0 + b + MIC.pre;   // take beat of demo beat b
+    for (let tryN = 0; tryN < 2; tryN++) {
+      const { browser, page } = await launch({ width: 1280, height: 720, dsf: 1, wav: MIC.wav });
+      try {
+        page.on("pageerror", (e) => console.log("room pageerror", e.message));
+        await open(page, "caustics", { music: true });
+        await page.addStyleTag({ content: ".pv-cur{width:18px!important;height:18px!important;margin:-9px 0 0 -9px!important}" });
+        const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
+        const tv = await ctxB.newPage();
+        await tv.goto(`${BASE}/tv`, { waitUntil: "load" });
+        await sleep(3500);
+        const code = ((await tv.evaluate(() => document.body.innerText.slice(0, 400))).match(/\n([A-Z0-9]{4})\n/) || [])[1];
+        // the panel underneath, already at the palettes; the Room view over it with the TV's code typed
+        await openPanel(page); await sleep(1200); await scrollTextTo(page, "Palette", "start"); await sleep(600);
+        await page.evaluate(() => document.querySelector("#panelBtn")?.click()); await sleep(2000);
+        await page.locator('input[placeholder="CODE"]').first().fill(code); await sleep(400);
+        await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /add a tv by its code/i.test(own(e)))?.scrollIntoView({ block: "center" }); });
+        await sleep(600);
+        await page.mouse.move(640, 400);
+        const bc = await beatClock(page, 0, { at: MIC.lead, late: true });   // its action starts well after
+        if (await page.evaluate(() => performance.now()) > bc.T0 + vb(-1.5) * P) throw new Error("room: setup ran past the demo's start");
+        const castA = await startCast(page, `${OUT}room_main`);
+        const castB = await startCast(tv, `${OUT}room_tv`);
+        const btn = await centerOf(page, "Add screen");
+        await at(bc, vb(-0.8)); await moveTo(page, btn.x, btn.y, 0.6 * P);
+        await at(bc, vb(0.4)); await press(page, 120);
+        await at(bc, vb(3.5)); await page.evaluate(() => document.querySelector("#panelBtn")?.click());   // close the Room view
+        const tap = async (b, text, opts) => {
+          await at(bc, vb(b - 0.5));
+          const c = await centerOf(page, text, opts);
+          if (!c) { console.log("room: no", text); return; }
+          await moveTo(page, c.x, c.y, 0.4 * P);
+          await at(bc, vb(b)); await press(page, 120);
+        };
+        await tap(4.5, "Ice", { minX: 640 }); await tap(5.75, "PLAY");
+        await tap(7, "Ember", { minX: 640 }); await tap(8.25, "PLAY");
+        await at(bc, vb(10));
+        const meta = { name: "room", beats: vb(10), P, bpm: BPM, epochT0: bc.epochT0, songT0: MIC.songT0 + MIC.lead * P / 1000 };
+        const frames = await castA.stop(meta); await castB.stop({ ...meta, name: "room_tv" });
+        const st = smooth(frames, bc.epochT0 + vb(-1) * P / 1000, 11);
+        const ok = st.fps >= 50 && st.slow <= 0.12;
+        console.log(`room try${tryN} fps ${st.fps.toFixed(1)} slow ${(st.slow * 100).toFixed(0)}% ${ok ? "OK" : "SLOW"}`);
+        if (ok) return;
+      } finally { await browser.close(); }
+    }
   },
 
   cuep: async () => {
