@@ -6,14 +6,14 @@
 //     "demos":  [{ "take": "ui_strains", "from": 0, "beats": 3, "group": "Scenes", "text": "…" }, …],
 //     "groups": [{ "key": "scenes", "title": "Scenes", "rows": ["…", …] }] }
 // A demo is a clip that shows a change happening (a take from record.mjs, `from` its first beat) with
-// one caption along the bottom; a group is the full list of changes, which compose.py spins through a
-// wheel low in the frame. Rows must stay short: a wheel row is one line (~40 characters), a caption
-// wraps to two. This script warns when text does not fit.
+// one caption along the bottom; a group is the full list of changes, shown as a list card held low in
+// the frame whose rows scroll through it (compose.py). Rows must stay short: a list row is one line
+// (~40 characters), a caption wraps to two. This script warns when text does not fit.
 //
-// Writes <work>/cards/: meta.json {demos, groups: [{key, n}]}, intro.png, demo_<i>.png, and per group
-// head_<key>.png + row_<key>_<i>.png (one wheel row each, centred).
-// The look: dark translucent panels with white hairlines, the app's own accent (white) — a release
-// page's feel without its icons or colours.
+// Writes <work>/cards/: meta.json {demos, visible, groups: [{key, n}]}, intro.png, demo_<i>.png, and per
+// group chrome_<key>.png (the card and its header, sized for VISIBLE rows) + row_<key>_<i>.png.
+// The look: the version card is a GitHub release in miniature (tag icon, a "Latest" badge); the rest
+// keeps that family's translucent card, header bar and row rules, without its icons or colours.
 import { chromium } from "playwright";
 import fs from "node:fs";
 
@@ -23,10 +23,22 @@ const OUT = `${WORK}/cards`;
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
-const W = 940, CAP_H = 190, ROW_H = 84, HEAD_H = 70;
-const fontStack = `-apple-system,"SF Pro Display","SF Pro Text","Segoe UI","Noto Sans",Helvetica,Arial,sans-serif`;
+// The list card: X/Y of its top-left corner on the 1080x1920 frame, header and row heights, rows shown.
+const X = 70, W = 940, HEAD = 96, ROW = 80, VISIBLE = 5, CAP_H = 190;
+const Y = 1545 - (HEAD + VISIBLE * ROW);        // its bottom sits just above the band Stories covers
+const fontStack = `-apple-system,"SF Pro Text","Segoe UI","Noto Sans",Helvetica,Arial,sans-serif`;
 const base = `html,body{margin:0;background:transparent}*{box-sizing:border-box}
-body{font-family:${fontStack};color:#f2f4f7;-webkit-font-smoothing:antialiased}`;
+body{font-family:${fontStack};color:#eef1f5;-webkit-font-smoothing:antialiased}`;
+const css = `${base}
+body{width:1080px;height:1920px;position:relative}
+.card{position:absolute;left:${X}px;top:${Y}px;width:${W}px;height:${HEAD + VISIBLE * ROW + 2}px;border-radius:14px;
+ background:rgba(10,13,18,.5);border:1.5px solid rgba(255,255,255,.24);overflow:hidden}
+.head{height:${HEAD}px;display:flex;align-items:center;gap:20px;padding:0 32px;background:rgba(22,26,32,.55);border-bottom:1.5px solid rgba(255,255,255,.18)}
+.head h2{margin:0;font-size:40px;font-weight:650;letter-spacing:-.01em;flex:1;text-shadow:0 1px 8px rgba(0,0,0,.6)}
+.count{min-width:56px;height:44px;border-radius:22px;padding:0 16px;display:flex;align-items:center;justify-content:center;font-size:25px;font-weight:600;background:rgba(255,255,255,.14)}
+.row{position:absolute;left:0;top:0;width:${W}px;height:${ROW}px;display:flex;align-items:center;gap:20px;padding:0 32px;border-top:1.5px solid rgba(255,255,255,.12);font-size:35px;font-weight:500;white-space:nowrap;text-shadow:0 1px 8px rgba(0,0,0,.75)}
+.row i{flex:none;width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55)}
+`;
 const capCss = `${base}
 .c{width:${W}px;height:${CAP_H}px;border-radius:18px;padding:22px 32px;display:flex;flex-direction:column;gap:12px;
  background:rgba(8,10,14,.62);border:1.5px solid rgba(255,255,255,.34)}
@@ -35,19 +47,16 @@ const capCss = `${base}
 .top span:last-of-type{letter-spacing:.04em}
 .t{font-size:40px;line-height:1.2;font-weight:600;text-shadow:0 1px 10px rgba(0,0,0,.8);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 `;
-const rowCss = `${base}
-.r{width:${W}px;height:${ROW_H}px;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:600;white-space:nowrap;text-shadow:0 2px 12px rgba(0,0,0,.9)}
-.h{width:${W}px;height:${HEAD_H}px;display:flex;align-items:center;justify-content:center;gap:18px;font-size:26px;letter-spacing:.2em;text-transform:uppercase;font-weight:650;color:rgba(255,255,255,.75);text-shadow:0 1px 8px rgba(0,0,0,.8)}
-.h i{display:block;width:70px;height:1.5px;background:rgba(255,255,255,.4)}
-.h b{font-weight:500;color:rgba(255,255,255,.5);letter-spacing:.06em}
-`;
+// GitHub's release header: a tag, the version, a green outlined "Latest" badge
 const introCss = `${base}
 body{width:1080px;height:1920px;position:relative}
-.v{position:absolute;left:70px;top:760px;width:${W}px;height:420px;border-radius:22px;background:rgba(8,10,14,.5);border:1.5px solid rgba(255,255,255,.3);
- display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px}
-.v div:first-child{font-size:116px;font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 18px rgba(0,0,0,.7)}
-.v div:last-child{font-size:34px;color:rgba(255,255,255,.7);font-weight:500;letter-spacing:.14em;text-transform:uppercase}
+.v{position:absolute;left:70px;top:760px;width:${W}px;height:420px;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
+ display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
+.t{display:flex;align-items:center;gap:26px;font-size:112px;font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 16px rgba(0,0,0,.7)}
+.s{display:flex;align-items:center;gap:20px;font-size:36px;color:#b6c0cc;font-weight:500;text-shadow:0 1px 8px rgba(0,0,0,.7)}
+.latest{font-size:28px;font-weight:600;color:#3fb950;border:2px solid #3fb950;border-radius:30px;padding:4px 20px}
 `;
+const tag = (c, n) => `<svg width="${n}" height="${n}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.4" stroke-linejoin="round"><path d="M2 2.8v4.5c0 .3.1.5.3.7l6.2 6.2c.4.4 1 .4 1.4 0l4.1-4.1c.4-.4.4-1 0-1.4L8 2.5a1 1 0 0 0-.7-.3H2.8c-.4 0-.8.3-.8.6Z"/><circle cx="5" cy="5" r="1" fill="${c}" stroke="none"/></svg>`;
 const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 const b = await chromium.launch();
@@ -57,7 +66,7 @@ async function shot(html, path, style) {
   await p.evaluate(() => document.fonts.ready);
   await p.screenshot({ path, omitBackground: true });
 }
-const meta = { demos: 0, groups: [] };
+const meta = { demos: 0, visible: VISIBLE, card: { x: X, y: Y + HEAD, w: W, row: ROW }, groups: [] };
 const warn = [];
 
 const demos = lines.demos || [];
@@ -72,18 +81,19 @@ for (let i = 0; i < demos.length; i++) {
 meta.demos = demos.length;
 
 for (const g of lines.groups) {
-  await p.setViewportSize({ width: W, height: HEAD_H });
-  await shot(`<div class="h"><i></i><span>${esc(g.title)}</span><b>${g.rows.length}</b><i></i></div>`, `${OUT}/head_${g.key}.png`, rowCss);
-  await p.setViewportSize({ width: W, height: ROW_H });
+  await p.setViewportSize({ width: 1080, height: 1920 });
+  await shot(`<div class="card" style="height:${HEAD + Math.min(VISIBLE, g.rows.length) * ROW + 2}px"><div class="head"><h2>${esc(g.title)}</h2><div class="count">${g.rows.length}</div></div></div>`, `${OUT}/chrome_${g.key}.png`, css);
+  await p.setViewportSize({ width: W, height: ROW });
   for (let i = 0; i < g.rows.length; i++) {
-    await shot(`<div class="r"><span>${esc(g.rows[i])}</span></div>`, `${OUT}/row_${g.key}_${i}.png`, rowCss);
-    const wide = await p.evaluate(() => document.querySelector(".r span").getBoundingClientRect().width > 900);
+    await shot(`<div class="row"><i></i><span>${esc(g.rows[i])}</span></div>`, `${OUT}/row_${g.key}_${i}.png`, css.replace("width:1080px;height:1920px;", ""));
+    const wide = await p.evaluate(() => document.querySelector(".row span").getBoundingClientRect().right > 940 - 28);
     if (wide) warn.push(`${g.key}: too wide for one line: "${g.rows[i]}"`);
   }
   meta.groups.push({ key: g.key, n: g.rows.length });
 }
 await p.setViewportSize({ width: 1080, height: 1920 });
-await shot(`<div class="v"><div>${esc(lines.title)}</div><div>${esc(lines.subtitle || "")}</div></div>`, `${OUT}/intro.png`, introCss);
+await shot(`<div class="v"><div class="t">${tag("#3fb950", 84)}<span>${esc(lines.title)}</span></div>
+  <div class="s"><span>${esc(lines.subtitle || "")}</span><span class="latest">Latest</span></div></div>`, `${OUT}/intro.png`, introCss);
 fs.writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta));
 await b.close();
 for (const w of warn) console.log("WARN", w);

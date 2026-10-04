@@ -11,16 +11,18 @@
 #   2. the demos from lines.json — clips that show a change happening, one caption at a time along the
 #      bottom: the next caption slides in and pushes the old one out. The interface camera leans toward
 #      the tracked part that changes; scene footage keeps a steady camera;
-#   3. every group of lines.json over steady scene footage, its rows spinning through a wheel held low
-#      in the frame (a picker: the row in the band is full size, the ones above and below shrink and fade);
+#   3. every group of lines.json over steady scene footage, as a list card held low in the frame whose
+#      rows scroll through it like a carousel: a new row comes in at the bottom as the top one leaves
+#      (a wheel-style picker was tried and rejected as too far from the list card);
 #   then a two-beat fade. The song's drop goes on the first demo (meta.dropBeat, which promo.mjs uses) —
 #   make that demo a Physarum 2 take from a beat where it re-rolls.
 # plan.json can override the timing, in beats:
 #
-#   { "intro": {"take": "intro", "t0": 0}, "look": 3, "version": 6, "row": 0.5, "hold": 2,
+#   { "intro": {"take": "intro", "t0": 0}, "look": 3, "version": 6, "dwell": 2, "row": 0.5, "hold": 2,
 #     "scenes": ["intro", "song_cau", "song_chl", "song_p2r"] }
 #
-# row = beats per wheel step, hold = beats the wheel rests on a group's last row, scenes = the takes
+# dwell = beats a list shows its first rows before it scrolls, row = beats per scroll step, hold = beats
+# it rests on its last rows, scenes = the takes
 # behind the groups, in turn. Scene takes heard the song (record.mjs), so each is cut at the song time
 # the video plays at that moment, and its picture moves with the music you hear; panel takes are cut by
 # their own beats.
@@ -34,7 +36,11 @@ FPS, TAIL, FADE_BEATS = 30, 0.9, 2
 W, H = 1080, 1920
 plan = json.load(open(f"{WORK}/plan.json")) if os.path.exists(f"{WORK}/plan.json") else {}
 LOOK, VERSION, ROW, HOLD = plan.get("look", 3), plan.get("version", 6), plan.get("row", 0.5), plan.get("hold", 2)
+DWELL = plan.get("dwell", 2)
 META = json.load(open(f"{WORK}/cards/meta.json"))
+CARD, VISIBLE = META["card"], META["visible"]                     # the list card's row window (cards.mjs)
+def list_steps(n): return max(0, n - VISIBLE)
+def list_beats(n): return math.ceil(DWELL + list_steps(n) * ROW) + HOLD
 LINES = json.load(open(f"{WORK}/lines.json"))
 DROP_BEAT = int(os.environ.get("DROP_BEAT") or LOOK + VERSION)
 SS = song["dropTime"] - DROP_BEAT * P    # song time at video beat 0 (promo.mjs encode starts the song there)
@@ -92,7 +98,7 @@ SEGS = [("look", (INTRO["take"], INTRO["t0"]), None, LOOK), ("version", (INTRO["
 for i, d in enumerate(LINES.get("demos", [])):
     SEGS.append(("demo", (d["take"], d.get("from", 0)), i, d["beats"]))
 for k, g in enumerate(META["groups"]):
-    SEGS.append(("wheel", (SCENE_POOL[k % len(SCENE_POOL)], 0), g, math.ceil(g["n"] * ROW) + HOLD))
+    SEGS.append(("list", (SCENE_POOL[k % len(SCENE_POOL)], 0), g, list_beats(g["n"])))
 TOTAL_BEATS = sum(sg[3] for sg in SEGS)
 
 # ---- camera -----------------------------------------------------------------------------------------
@@ -135,29 +141,21 @@ def scrim(top, strength):   # darkens the bottom of the frame from `top` down, s
     return _scrims[(top, strength)]
 def darken(im, top, strength): return Image.composite(Image.new("RGB", im.size, (3, 5, 10)), im, scrim(top, strength))
 
-WHEEL_CY, WHEEL_PITCH, WHEEL_TH, WHEEL_HEAD_Y = 1310, 88, 0.36, 975   # band centre, row pitch, radians per row
-def wheel(im, g, local):
-    key, n = g["key"], g["n"]
-    im = darken(im, 900, 200)
+def scroller(im, g, local):
+    key, n, rh = g["key"], g["n"], CARD["row"]
+    im = darken(im, CARD["y"] - 380, 170)
     o = im.convert("RGBA")
     fade = min(1.0, local * P / 0.2)
-    step = local / ROW
-    s = min(n - 1.0, math.floor(step) + ease((step % 1) / 0.6))    # the wheel ticks on each step, then rests
-    head = png(f"head_{key}.png")
-    o.alpha_composite(with_alpha(head, fade), ((W - head.width) // 2, WHEEL_HEAD_Y))
-    band = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(band)
-    for y in (WHEEL_CY - WHEEL_PITCH // 2 - 2, WHEEL_CY + WHEEL_PITCH // 2 + 2):
-        d.line((90, y, W - 90, y), fill=(255, 255, 255, int(80 * fade)), width=2)
-    o.alpha_composite(band)
-    R = WHEEL_PITCH / WHEEL_TH
-    for j in range(max(0, int(s) - 4), min(n, int(s) + 5)):
-        a = (j - s) * WHEEL_TH
-        if abs(a) >= 1.3: continue
-        c = math.cos(a)
-        r = png(f"row_{key}_{j}.png")
-        rw, rh = int(r.width * (0.78 + 0.22 * c)), max(1, int(r.height * c))
-        rr = with_alpha(r.resize((rw, rh), Image.LANCZOS), fade * c ** 3)
-        o.alpha_composite(rr, ((W - rw) // 2, int(WHEEL_CY + R * math.sin(a) - rh / 2)))
+    chrome = png(f"chrome_{key}.png")
+    o.alpha_composite(with_alpha(chrome, fade) if fade < 1 else chrome)
+    k = (local - DWELL) / ROW
+    s = 0.0 if k <= 0 else min(list_steps(n), math.floor(k) + ease((k % 1) / 0.6))   # ticks on each step
+    win = Image.new("RGBA", (CARD["w"], (VISIBLE + 2) * rh), (0, 0, 0, 0))          # a row of margin each side
+    for j in range(int(s), min(n, int(s) + VISIBLE + 1)):
+        y = (j - s) * rh
+        a = max(0.0, min(1.0, 1 + y / rh, 1 - (y - (VISIBLE - 1) * rh) / rh))       # out at the top, in at the bottom
+        if a > 0: win.alpha_composite(with_alpha(png(f"row_{key}_{j}.png"), a * fade), (0, int(round(y)) + rh))
+    o.alpha_composite(win.crop((0, rh, CARD["w"], (VISIBLE + 1) * rh)), (CARD["x"], CARD["y"]))
     return o.convert("RGB")
 CAP_X, CAP_Y, CAP_SLIDE, CAP_T = 70, 1340, 300, 0.4   # caption position; slide distance (px) and time (s)
 def caption(im, i, local):
@@ -193,8 +191,8 @@ for i in range(n_frames):
             o = im.convert("RGBA"); o.alpha_composite(with_alpha(png("intro.png"), min(1.0, t_in / 0.18))); im = o.convert("RGB")
         elif kind == "demo":
             im = caption(im, arg, local)
-        elif kind == "wheel":
-            im = wheel(im, arg, local)
+        elif kind == "list":
+            im = scroller(im, arg, local)
         if bp > TOTAL_BEATS - FADE_BEATS:
             f = max(0.0, 1 - (bp - (TOTAL_BEATS - FADE_BEATS)) / FADE_BEATS)
             im = Image.eval(im, lambda v: int(v * f))
