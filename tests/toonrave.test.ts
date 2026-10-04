@@ -492,7 +492,6 @@ import {
   canvasSize,
   DROP_CYCLE_BEATS,
   CAST_RIGS,
-  HERO_C,
 } from "../src/render/scenes/toonrave/index.ts";
 import { clampCentre, frameFocus } from "../src/render/scenes/toonrave/focus.ts";
 import { cutPlan as cutPlanScene } from "../src/render/scenes/toonrave/motion.ts";
@@ -508,7 +507,9 @@ describeScene("toonrave settings", () => {
     const order = settings.map((s) => SETTING_GROUPS.indexOf(s.group as (typeof SETTING_GROUPS)[number]));
     expectScene(order.every((i) => i >= 0)).toBe(true);
     expectScene(order).toEqual([...order].sort((a, b) => a - b));
-    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
+    expectScene(settings.map((s) => s.group)).toEqual([...Array(8).fill("Motion"), "Look", "Camera", "Camera", "Post"]);
+    // the Energy family is one contiguous run
+    expectScene(settings.filter((s) => s.family === "Energy").map((s) => s.key)).toEqual(["energy", "energyBoost", "energyPump", "energyDrop"]);
   });
 
   itScene("no setting has auto or macro", () => {
@@ -523,7 +524,8 @@ describeScene("toonrave settings", () => {
       expectScene(s.default, s.key).toBeGreaterThanOrEqual(s.min);
       expectScene(s.default, s.key).toBeLessThanOrEqual(s.max);
     }
-    expectScene(byKey("bounce").default).toBe(1);
+    expectScene(byKey("dance").default).toBe(1);
+    expectScene(byKey("energy").default).toBe(0);
     expectScene(byKey("lights").default).toBe(1);
     expectScene(byKey("shake").default).toBe(1);
     expectScene(byKey("cuts").default).toBe(2);
@@ -538,7 +540,7 @@ describeScene("toonrave settings", () => {
     expectScene([drops.min, drops.max, drops.step]).toEqual([0, drops.options!.length - 1, 1]);
     expectScene(drops.options![drops.default]).toBe("Every 16 bars");
     expectScene(DROP_CYCLE_BEATS).toEqual([128, 64, 32]);
-    for (const k of ["dropHits", "flash"]) {
+    for (const k of ["dance", "dropHits", "clock", "flash"]) {
       const s = byKey(k);
       expectScene(s.type, k).toBe("boolean");
       expectScene([s.min, s.max, s.step], k).toEqual([0, 1, 1]);
@@ -548,9 +550,16 @@ describeScene("toonrave settings", () => {
   });
 
   itScene("the reactive settings have drives, and the trigger reads the drop edge", () => {
-    expectScene(byKey("bounce").drive?.default).toEqual({ source: "beat", grid: 2 });
+    expectScene(byKey("dance").drive?.default).toBe("anim.lowOnset");
+    expectScene(byKey("energyBoost").drive?.default).toBe("anim.energy");
+    expectScene(byKey("energyPump").drive?.default).toBe("anim.lowOnset");
+    expectScene(byKey("energy").drive).toBeUndefined();
+    expectScene(byKey("energyDrop").drive).toBeUndefined();
     expectScene(byKey("lights").drive).toBeDefined();
     expectScene(byKey("dropHits").drive?.default).toBe("anim.dropOnset");
+    expectScene(byKey("clock").drive?.default).toBe("anim.energy");
+    expectScene(byKey("clock").drive?.threshold?.default).toBeGreaterThan(0);
+    expectScene(byKey("clock").default).toBe(1);
   });
 });
 
@@ -558,44 +567,20 @@ describeScene("toonrave look shaping", () => {
   const opts = { cycleBeats: 32 as const, cuts: 0 as const, bpm: 128 };
   const at = (c: number) => sceneFrameAt(c, opts);
 
-  itScene("all amounts at 1 leave the state exactly as frameAt made it", () => {
+  itScene("both amounts at 1 leave the state exactly as frameAt made it", () => {
     const a = JSON.stringify(at(20.3));
-    const s = shapeState(at(20.3), { bounce: 1, lights: 1, shake: 1 });
+    const s = shapeState(at(20.3), { lights: 1, shake: 1 });
     expectScene(JSON.stringify(s)).toBe(a);
-  });
-
-  itScene("the hero frame is untouched by any Energy amount", () => {
-    const a = JSON.stringify(at(HERO_C).x);
-    for (const bounce of [0, 0.5, 1.5]) {
-      const s = shapeState(at(HERO_C), { bounce, lights: 1, shake: 1 });
-      expectScene(JSON.stringify(s.x), `bounce ${bounce}`).toBe(a);
-    }
-  });
-
-  itScene("Energy 0 holds the cast in the rest pose and leaves the lights' rigs alone", () => {
-    const rest = at(HERO_C).x;
-    const moving = at(20.3);
-    const s = shapeState(at(20.3), { bounce: 0, lights: 1, shake: 1 });
-    for (const id of CAST_RIGS) expectScene(s.x[id], id).toEqual(rest[id]);
-    expectScene(s.x.rays).toEqual(moving.x.rays);
-    expectScene(s.x.laser0).toEqual(moving.x.laser0);
-  });
-
-  itScene("Energy halves the motion away from the rest pose", () => {
-    const rest = at(HERO_C).x;
-    const moving = at(20.3).x.dj;
-    const s = shapeState(at(20.3), { bounce: 0.5, lights: 1, shake: 1 });
-    for (let i = 0; i < 6; i++) expectScene(s.x.dj[i]).toBeCloseTo((rest.dj[i] + moving[i]) / 2, 9);
   });
 
   itScene("Lights scales lasers, lamps and rays, capped at fully on, and 0 turns them off", () => {
     const base = at(20.3);
-    const off = shapeState(at(20.3), { bounce: 1, lights: 0, shake: 1 });
+    const off = shapeState(at(20.3), { lights: 0, shake: 1 });
     expectScene(off.rayOp).toBe(0);
     for (const id in off.o) {
       if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) expectScene(off.o[id], id).toBe(0);
     }
-    const bright = shapeState(at(20.3), { bounce: 1, lights: 1.5, shake: 1 });
+    const bright = shapeState(at(20.3), { lights: 1.5, shake: 1 });
     for (const id in bright.o) expectScene(bright.o[id], id).toBeLessThanOrEqual(Math.max(1, base.o[id]));
     expectScene(bright.rayOp).toBeLessThanOrEqual(1);
     // everything else is left alone
@@ -604,11 +589,11 @@ describeScene("toonrave look shaping", () => {
 
   itScene("Shake scales the camera's shake and nothing else of the camera", () => {
     const base = at(0.2);
-    const s = shapeState(at(0.2), { bounce: 1, lights: 1, shake: 0 });
+    const s = shapeState(at(0.2), { lights: 1, shake: 0 });
     expectScene(s.camera.shake).toEqual({ x: 0, y: 0, rot: 0 });
     expectScene(s.camera.src).toEqual(base.camera.src);
     expectScene(s.camera.shot).toBe(base.camera.shot);
-    const half = shapeState(at(0.2), { bounce: 1, lights: 1, shake: 0.5 });
+    const half = shapeState(at(0.2), { lights: 1, shake: 0.5 });
     expectScene(half.camera.shake.x).toBeCloseTo(base.camera.shake.x * 0.5, 9);
     expectScene(half.camera.shake.rot).toBeCloseTo(base.camera.shake.rot * 0.5, 9);
   });
@@ -693,5 +678,222 @@ describeScene("toonrave post shader", () => {
     expectScene(src).toContain("vec3(1.0, 0.18, 0.64)");
     expectScene(src).toContain("vec3(1.0, 0.93, 0.97)");
     expectScene(src.startsWith("#version 300 es")).toBe(true);
+  });
+});
+
+import { describe as describeMoves, it as itMoves, expect as expectMoves } from "vitest";
+import {
+  createDance,
+  createEnergy,
+  createPlayhead,
+  drainPerSec,
+  pickSpeedStep,
+  SPEED_STEPS,
+  MOVE_BINS,
+} from "../src/render/scenes/toonrave/dance.ts";
+
+describeMoves("toonrave cast clock and move (motion.ts)", () => {
+  const optsFor = (cycleBeats: 32 | 64 | 128) => ({ cycleBeats, cuts: 2 as const, bpm: 128 });
+
+  itMoves("the cycle's own position as castC gives exactly the same picture, anywhere in the cycle", () => {
+    for (const n of [32, 64, 128] as const) {
+      for (let c = 0; c < n; c += 0.37) {
+        const plain = JSON.stringify(sceneFrameAt(c, optsFor(n)));
+        const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(n), castC: c }));
+        expectMoves(own, `cycle ${n} c ${c.toFixed(2)}`).toBe(plain);
+      }
+    }
+  });
+
+  // what the cast is: its rigs, the props it carries and the button it hits, its cels
+  const castOf = (f: ReturnType<typeof sceneFrameAt>) => ({
+    x: [...CAST_RIGS, "pomp", "stick", "dome"].map((id) => f.x[id]),
+    o: [f.o.pomp, f.o.stick],
+    cel: Object.keys(f.cel).filter((k) => /^(dj|guy|kid|raver)/.test(k)).map((k) => f.cel[k]),
+    cls: [f.cls.crowd0, f.cls.crowd1, f.cls.crowd2],
+    slot: f.slot,
+  });
+
+  itMoves("a held castC and move hold the whole cast still while the cycle runs on", () => {
+    const move = { b: 0.4, lag: 0.1, off: -0.3 };
+    const ref = castOf(sceneFrameAt(20, { ...optsFor(64), castC: 20.2, move }));
+    for (const c of [17, 21.4, 33.3, 40.3, 55.9]) {
+      expectMoves(castOf(sceneFrameAt(c, { ...optsFor(64), castC: 20.2, move })), `c ${c}`).toEqual(ref);
+    }
+  });
+
+  itMoves("in the groove the move drives the cast's bounce; the lights and camera keep the cycle", () => {
+    const at = (b: number) => sceneFrameAt(40.3, { ...optsFor(64), castC: 20.2, move: { b, lag: b, off: b } });
+    const down = at(1);
+    const up = at(-1);
+    for (const id of ["dj", "guy", "kid", "raver", "crowd0", "dome"]) expectMoves(down.x[id], id).not.toEqual(up.x[id]);
+    const plain = sceneFrameAt(40.3, optsFor(64));
+    expectMoves(down.camera).toEqual(plain.camera);
+    expectMoves(down.rayOp).toBe(plain.rayOp);
+    for (const id in plain.o) {
+      if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) expectMoves(down.o[id], id).toBe(plain.o[id]);
+    }
+  });
+
+  itMoves("the move is ignored in the build", () => {
+    for (const castC of [59.2, 62.5]) {
+      const without = JSON.stringify(sceneFrameAt(30, { ...optsFor(64), castC }));
+      const withMove = JSON.stringify(sceneFrameAt(30, { ...optsFor(64), castC, move: { b: 1, lag: 1, off: 1 } }));
+      expectMoves(withMove, `castC ${castC}`).toBe(without);
+    }
+  });
+});
+
+describeMoves("toonrave dance (dance.ts)", () => {
+  const FPS = 60;
+
+  itMoves("energy drains to the floor, slower the lower it is, and rises to a floor above it fast", () => {
+    const e = createEnergy();
+    const quiet = { base: 0, boost: 0, level: 0, pump: 1, pumpFired: false, drop: 0.35 };
+    for (let i = 0; i < 5; i++) e.step(1 / FPS, { ...quiet, pumpFired: true });
+    const high = e.value;
+    expectMoves(high).toBeGreaterThan(0.9);
+    let prev = high;
+    const drops: number[] = [];
+    for (let s = 0; s < 3; s++) {
+      for (let i = 0; i < FPS; i++) e.step(1 / FPS, quiet);
+      drops.push(prev - e.value);
+      prev = e.value;
+    }
+    expectMoves(drops[0]).toBeGreaterThan(drops[1]);
+    expectMoves(drops[1]).toBeGreaterThan(drops[2]);
+    // the boost's floor pulls it up within a fraction of a second
+    for (let i = 0; i < FPS / 2; i++) e.step(1 / FPS, { ...quiet, boost: 1, level: 0.8 });
+    expectMoves(e.value).toBeGreaterThan(0.78);
+    expectMoves(e.floor).toBeCloseTo(0.8, 9);
+    expectMoves(drainPerSec(1)).toBeGreaterThan(drainPerSec(0));
+  });
+
+  itMoves("a pump hit adds the pump amount's share, and nothing fires: energy settles at the base", () => {
+    const e = createEnergy();
+    e.step(0, { base: 0, boost: 0, level: 0, pump: 0.5, pumpFired: true, drop: 0 });
+    expectMoves(e.value).toBeCloseTo(0.1, 9);
+    for (let i = 0; i < FPS * 120; i++) e.step(1 / FPS, { base: 0.3, boost: 0, level: 0, pump: 0.5, pumpFired: false, drop: 1 });
+    expectMoves(e.value).toBeCloseTo(0.3, 3);
+  });
+
+  itMoves("speed steps follow energy with a little hysteresis", () => {
+    expectMoves(SPEED_STEPS.map((s) => s.multiple)).toEqual([0, 0.25, 0.5, 1, 2]);
+    expectMoves(pickSpeedStep(0, 0)).toBe(0);
+    expectMoves(pickSpeedStep(0.7, 0)).toBe(3);
+    expectMoves(pickSpeedStep(1.4, 0)).toBe(4);
+    // sitting on a line keeps the step it came from
+    expectMoves(pickSpeedStep(0.45, 3)).toBe(3);
+    expectMoves(pickSpeedStep(0.45, 2)).toBe(2);
+    expectMoves(pickSpeedStep(0.6, 0)).toBe(3); // a steady kick at the default pump: 1x
+  });
+
+  itMoves("a pump swinging energy across a line every beat doesn't change the speed every beat", () => {
+    const p = createPlayhead();
+    const steps = new Set<number>();
+    for (let i = 0; i < 60 * 20; i++) {
+      const t = i / 60;
+      const e = 0.46 + 0.06 * Math.cos(2 * Math.PI * t * 2); // 0.40..0.52 around the 1x line, twice a second
+      p.update(1 / 60, e, t / 2, 0.5);
+      if (t > 8) steps.add(p.step);
+    }
+    expectMoves(steps.size).toBe(1);
+  });
+
+  itMoves("the playhead runs at the step's multiple of the beat, and stop holds where it was", () => {
+    const d = createDance();
+    const p = createPlayhead();
+    p.update(20, 0.7, 0, 0.5); // 1x (long enough for the smoothed energy to settle)
+    expectMoves(p.position(2.25)).toBeCloseTo(0.25, 9);
+    p.update(20, 1.2, 0, 0.5); // 2x
+    expectMoves(p.position(2.25)).toBeCloseTo(0.5, 9);
+    p.update(20, 0, 3.4, 0.5); // energy gone: stop, held at 2x's place at bar 3.4
+    expectMoves(p.step).toBe(0);
+    expectMoves(p.position(9.9)).toBeCloseTo(0.8, 9);
+    expectMoves(p.value(d, 9.9)).toBe(0); // nothing learned yet: the move is flat
+  });
+
+  itMoves("a kick at 120 BPM is found and learned as four peaks on the beats; without it the beat holds", () => {
+    const d = createDance();
+    let pulse = 0;
+    for (let i = 0; i < FPS * 16; i++) {
+      const t = i / FPS;
+      const fired = i % (FPS / 2) === 0;
+      pulse = fired ? 1 : pulse * Math.exp(-6 / FPS);
+      d.step(1 / FPS, fired, pulse);
+      void t;
+    }
+    expectMoves(d.bpm).toBeGreaterThan(115);
+    expectMoves(d.bpm).toBeLessThan(125);
+    expectMoves(d.status()).toBe("locked");
+    // the loop: a peak near each beat (every MOVE_BINS / 4 slots), low halfway between
+    const q = MOVE_BINS / 4;
+    const near = (center: number) => Math.max(...[-2, -1, 0, 1, 2].map((k) => d.shape[(center + k + MOVE_BINS) % MOVE_BINS]));
+    for (let b = 0; b < 4; b++) {
+      expectMoves(near(b * q), `beat ${b}`).toBeGreaterThan(0.8);
+      expectMoves(d.shape[b * q + q / 2], `between ${b}`).toBeLessThan(0.35);
+    }
+    for (let i = 0; i < FPS * 3; i++) d.step(1 / FPS, false, 0);
+    expectMoves(d.status()).toBe("holding");
+    expectMoves(d.bpm).toBeGreaterThan(115);
+  });
+});
+
+import { describe as describePause, it as itPause, expect as expectPause } from "vitest";
+import { createConductor as createConductorP, type ConductorInput as ConductorInputP } from "../src/render/scenes/toonrave/conductor.ts";
+
+describePause("toonrave conductor pause (Clock on signal)", () => {
+  const FPS = 60;
+  const mk = (t: number, lock: number, beats: number, paused: boolean, drop = false): ConductorInputP => ({
+    timeSec: t,
+    dtSec: 1 / FPS,
+    beats,
+    beatPhase: beats - Math.floor(beats),
+    barPhase: beats / 4 - Math.floor(beats / 4),
+    tempoLock: lock,
+    bpm: lock ? 120 : 0,
+    dropFired: drop,
+    paused,
+  });
+
+  for (const lock of [1, 0]) {
+    itPause(`paused holds c while the music runs on, and it carries on after (${lock ? "locked" : "unlocked"})`, () => {
+      const k = createConductorP();
+      let held = -1;
+      let prev = 0;
+      let maxStep = 0;
+      for (let i = 0; i <= FPS * 30; i++) {
+        const t = i / FPS;
+        const beats = t * 2;
+        const paused = t >= 6 && t < 14;
+        const o = k.step(mk(t, lock, beats, paused, paused && i % 30 === 0), 64);
+        if (paused) {
+          if (held < 0) held = prev;
+          expectPause(o.c, `t ${t.toFixed(2)}`).toBe(held); // a drop fired while paused is ignored too
+        } else if (i > 0) {
+          const d = o.c - prev;
+          if (d > -30) maxStep = Math.max(maxStep, d);
+          expectPause(d > -30 ? d : 0, `t ${t.toFixed(2)}`).toBeGreaterThanOrEqual(-1e-9);
+        }
+        prev = o.c;
+      }
+      expectPause(held).toBeGreaterThan(0);
+      // no jump on resume: at most the slew's 1.5x of a frame's beats
+      expectPause(maxStep).toBeLessThanOrEqual((2 / FPS) * 1.5 + 1e-9);
+    });
+  }
+
+  itPause("never paused is the plain conductor, frame for frame", () => {
+    const a = createConductorP();
+    const b = createConductorP();
+    for (let i = 0; i <= FPS * 20; i++) {
+      const t = i / FPS;
+      const beats = t * 2;
+      const lock = t > 3 && t < 9 ? 0 : 1;
+      const x = a.step(mk(t, lock, beats, false, i === 600), 32);
+      const { paused: _p, ...plain } = mk(t, lock, beats, false, i === 600);
+      const y = b.step(plain, 32);
+      expectPause(x).toEqual(y);
+    }
   });
 });

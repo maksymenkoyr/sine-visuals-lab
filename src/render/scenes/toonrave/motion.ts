@@ -29,6 +29,15 @@
 // its beat). Lights, lasers, rays, the button glow and the camera read the
 // continuous c and move at display rate.
 //
+// Dance. MotionOpts.castC, when given, is the cast's own cycle position: the DJ,
+// the guy and his hair, the kid, the raver and her stick, the crowd and the button
+// they hit read their Timing from it, while the lights, rays, confetti and camera
+// keep `c`; castC = c gives exactly the picture without it. MotionOpts.move, when
+// given with a groove castC, stands in for the groove's own bounce curve: every
+// groove pose that reads bounce(ph) reads move.b instead (the hair's lag reads
+// move.lag, the crowd's offset rows move.off), so the cast dances the move Dance
+// learned (dance.ts) at the speed Energy sets, through the same poses.
+//
 // Cuts. `cuts` 0 holds the wide shot all cycle. 1, 2 and 3 are the prototype's
 // "Camera cuts" levels 0, 1 and 2 (see cutPlan): a new groove shot every 4, 2
 // and 1 bars. The drop is always wide, and the same shot never appears twice in
@@ -71,7 +80,17 @@ export interface MotionOpts {
   cycle?: number;
   /** Reduced motion: no shake, no impact frame, no strobes. Default false. */
   reduced?: boolean;
+  /** The cast's own cycle position (see "Dance" above); wrapped into the cycle.
+   *  Absent: `c`. */
+  castC?: number;
+  /** The groove's bounce values from the learned move (see "Dance" above), each
+   *  -1 (stretched) .. 1 (squashed): `b` now, `lag` one step back, `off` half a
+   *  beat along for the crowd's offset rows. Read by the poses' bounce branches,
+   *  which also cover some of the gags: index.ts gives it only in the groove. */
+  move?: GrooveMove;
 }
+
+export interface GrooveMove { b: number; lag: number; off: number }
 
 export interface Camera {
   shot: ShotId;
@@ -193,7 +212,7 @@ const blastI = (c: number): number => (c < 1 ? 1 : 1 - smooth(seg(c, 1, 5)));
  * shifted to the prototype's beats 24..32), `build` is true in the build,
  * where the groove's open-ended poses give way to the build's.
  */
-interface Timing { cq: number; spb: number; build: boolean; reduced: boolean }
+interface Timing { cq: number; spb: number; build: boolean; reduced: boolean; move?: GrooveMove }
 
 // --- the DJ -----------------------------------------------------------------------------------
 const DJ_FEET = [455, 540], DJ_NECK = [420, 362], STAND_Y = 26;
@@ -212,7 +231,7 @@ function djPose(T: Timing): DjPose {
     return P;
   }
   if (!T.build) { // the groove
-    const b = bounce(ph), bl = bounce(mod(ph - 1 / spb, 1));
+    const b = T.move ? T.move.b : bounce(ph), bl = T.move ? T.move.lag : bounce(mod(ph - 1 / spb, 1));
     P.root = { y: STAND_Y + (b > 0 ? 5 * b : 12 * b), sy: 1 - 0.05 * b, sx: 1 + 0.04 * b };
     P.head = { sy: 1 - 0.08 * b, sx: 1 + 0.05 * b, r: (beat % 2 ? 4 : -4) * (ph < 0.08 ? 1.4 : 1) };
     P.phones = bl < 0 ? 14 * bl : 5 * bl; // the headphones jump a step late
@@ -246,7 +265,7 @@ function domePose(T: Timing): Pose {
   const { cq } = T, ph = mod(cq, 1);
   if (cq < HOLD) return {};
   if (cq < 1.75) { const e = elastic(seg(cq, HOLD, 1.75)); return { sy: 1 + 0.15 * e, sx: 1 - 0.02 * e }; }
-  if (!T.build) { const k = Math.max(0, bounce(ph)); return { sy: 1.15 - 0.07 * k, sx: 0.98 + 0.04 * k }; }
+  if (!T.build) { const k = Math.max(0, T.move ? T.move.b : bounce(ph)); return { sy: 1.15 - 0.07 * k, sx: 0.98 + 0.04 * k }; }
   const p = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5);
   return { sy: 1.15 + 0.08 * p, sx: 0.98 - 0.02 * p };
 }
@@ -257,7 +276,7 @@ function guyPose(T: Timing): GuyPose {
   const { cq, spb } = T, ph = mod(cq, 1), beat = Math.floor(cq);
   const P: GuyPose = { root: { r: 0 }, head: {}, legs: "stand", torso: "pumpA", eyes: "normal", brows: "calm", mouth: "smile", bald: cq < 16 };
   const groove = (amt = 1): void => {
-    const b = bounce(ph);
+    const b = T.move ? T.move.b : bounce(ph);
     P.root = { r: 0, y: amt * (b > 0 ? 3 * b : 7 * b), sy: 1 - 0.03 * b * amt };
     P.head = { y: 5 * Math.max(b, 0) * amt, sy: 1 - 0.05 * b * amt, r: (beat % 2 ? 3 : -3) * amt };
     P.torso = beat % 2 ? "pumpB" : "pumpA";
@@ -300,7 +319,7 @@ function kidPose(T: Timing): KidPose {
     return { cel: "standA", root: { y: -46 * Math.sin(Math.PI * Math.min(1, u * 1.25)), sy: u > 0.8 ? 0.84 : 1, sx: u > 0.8 ? 1.12 : 1 } };
   }
   if (!T.build) {
-    const b = bounce(ph), heavy = cq >= 8 && cq < 14 ? 0.55 : 1;
+    const b = T.move ? T.move.b : bounce(ph), heavy = cq >= 8 && cq < 14 ? 0.55 : 1;
     const R: Pose = { y: heavy * (b > 0 ? 3 * b : 14 * b), sy: 1 - 0.07 * b * heavy, sx: 1 + 0.05 * b * heavy };
     if (cq >= 8 && cq < 9) { const u = 1 - elastic(seg(cq, 8, 9)); R.sy = 1 - 0.3 * u; R.sx = 1 + 0.2 * u; R.y = 0; }
     if (cq >= 14 && cq < 14.5) { R.sy = 0.86; R.sx = 1.1; R.y = 0; }
@@ -332,7 +351,7 @@ function raverPose(T: Timing): RaverPose {
     return P;
   }
   if (!T.build) {
-    const b = bounce(ph), u = mod(cq, 2) / 2, tri = u < 0.5 ? u * 2 : 2 - u * 2;
+    const b = T.move ? T.move.b : bounce(ph), u = mod(cq, 2) / 2, tri = u < 0.5 ? u * 2 : 2 - u * 2;
     P.root = { r: 4 + 2 * b, y: b > 0 ? 4 * b : 9 * b };
     P.torso = "w" + Math.min(3, Math.floor(tri * 4));
     P.hair = Math.floor(cq * 2) % 2 ? "calmB" : "calmA";
@@ -423,14 +442,20 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   const k = opts.cycle ?? 0, reduced = opts.reduced === true;
   const buildAt = cycleBeats - BUILD_BEATS, shift = buildAt - BUILD_AT;
   const cNat = mod(cIn, cycleBeats), spb = stepsPerBeat(bpm);
-  const stepN = Math.floor(cNat * spb + 1e-6), cqNat = stepN / spb;
-  // the continuous clock, and the stepped one, each in the pose code's own time (the
-  // shift is a whole number of steps, so the stepped time is an exact step / spb)
+  // the stepped clock in the pose code's own time (the shift is a whole number of
+  // steps, so the stepped time is an exact step / spb)
+  const timingAt = (cw: number): Timing => {
+    const n = Math.floor(cw * spb + 1e-6), b = n / spb >= buildAt;
+    return { cq: b ? (n - shift * spb) / spb : n / spb, spb, build: b, reduced };
+  };
+  // the continuous clock, in the pose code's own time
   const build = cNat >= buildAt, c = build ? cNat - shift : cNat;
-  const buildQ = cqNat >= buildAt;
-  const T: Timing = { cq: buildQ ? (stepN - shift * spb) / spb : cqNat, spb, build: buildQ, reduced };
+  const T = timingAt(cNat);
   const { cq } = T;
   const ph = mod(c, 1), beatN = Math.floor(c);
+  // the cast's timing: the cycle's, or its own cycle position when given
+  const TC: Timing = opts.castC !== undefined ? { ...timingAt(mod(opts.castC, cycleBeats)), move: opts.move } : T;
+  const cqc = TC.cq;
   const F: FrameState = {
     c: cNat, x: {}, o: {}, cel: {}, cls: {}, slot: { dj: "back", stick: "front" }, led: [], rayOp: 0,
     camera: { shot: "wide", src: { x: 0, y: 0, w: FRAME_W, h: FRAME_H }, shake: { x: 0, y: 0, rot: 0 } },
@@ -452,7 +477,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   F.o.impactStars = cq < 0.9 ? 1 : 0;
   F.o.debrisLine = cq < HOLD ? 1 : 0;
   F.o.pompFx = cq < HOLD ? 1 : 0;
-  F.x.dome = poseM(BX, BY + 18, domePose(T));
+  F.x.dome = poseM(BX, BY + 18, domePose(TC));
   // the button glows and pulses through the build: each beat in bar 7, each half-beat in bar 8
   let glow = 0;
   if (c >= 2 && !build) glow = (0.08 + 0.22 * decay(ph, 6)) * seg(c, 2, 4);
@@ -472,7 +497,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   });
 
   // the DJ
-  const D = djPose(T);
+  const D = djPose(TC);
   F.x.dj = poseM(DJ_FEET[0]!, DJ_FEET[1]!, D.root);
   F.x.djHead = poseM(DJ_NECK[0]!, DJ_NECK[1]!, D.head);
   F.x.djPhones = MX.T(0, D.phones || 0);
@@ -481,74 +506,74 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   F.o.djRim = I;
 
   // the pompadour raver
-  const G = guyPose(T), GM = guyMatrices(G);
+  const G = guyPose(TC), GM = guyMatrices(G);
   F.x.guy = GM.root; F.x.guyHead = GM.head;
   Object.assign(F.cel, { guyLegs: G.legs, guyTorso: G.torso, guyEyes: G.eyes, guyBrows: G.brows, guyMouth: G.mouth });
   F.o.guyShine = G.bald ? 1 : 0; F.o.guyRim = I;
 
   // the kid
-  const K = kidPose(T), KM = kidM(K);
+  const K = kidPose(TC), KM = kidM(K);
   F.x.kid = KM; F.cel.kid = K.cel; F.o.kidRim = I;
 
   // the hairpiece: blown off at the drop, lands on the kid, hops home before the build
   const onKid = (Tk: Timing): Mat => { const P = kidPose(Tk), a = KID_HEAD[P.cel] || KID_HEAD.standA!; return MX.chain(kidM(P), MX.T(a[0], a[1]), MX.R(-24), MX.S(0.5)); };
   const onGuy = (Tg: Timing, crook: number): Mat => { const M = guyMatrices(guyPose(Tg)); return MX.chain(M.root, M.head, MX.T(1152, 222), MX.R(crook), MX.S(0.9)); };
-  const wob = -7 * bounce(mod(cq - 1 / spb, 1)); // the hair's lag: last step's bounce
+  const wob = -7 * (TC.move ? TC.move.lag : bounce(mod(cqc - 1 / spb, 1))); // the hair's lag: last step's bounce
   let pomp: Mat = HERO_POMP, pompShow = 1;
-  if (cq < HOLD) pomp = HERO_POMP;
-  else if (cq < 2.5) {
-    const t = seg(cq, HOLD, 2.5);
+  if (cqc < HOLD) pomp = HERO_POMP;
+  else if (cqc < 2.5) {
+    const t = seg(cqc, HOLD, 2.5);
     pomp = place(qbez([1440, 300], [1590, -40], [1780, -320], easeIn(t) * 0.6 + t * 0.4), -18 + 720 * easeOut(t), 0.82);
-  } else if (cq < 5.5) pompShow = 0;
-  else if (cq < 8) {
-    const t = seg(cq, 5.5, 8), end = onKid({ ...T, cq: 8 });
+  } else if (cqc < 5.5) pompShow = 0;
+  else if (cqc < 8) {
+    const t = seg(cqc, 5.5, 8), end = onKid({ ...TC, cq: 8 });
     pomp = place(qbez([1180, -200], [1080, 80], posOf(end), 0.65 * t + 0.35 * t * t), lerp(-560, rotOf(end), easeOut(t)), lerp(0.82, scaleOf(end), t));
-  } else if (cq < 14) pomp = MX.mul(onKid(T), MX.R(wob * 0.8));
-  else if (cq < 16) {
-    const a = onKid({ ...T, cq: 14 }), b = onGuy({ ...T, cq: 16 }, -18), t = seg(cq, 14.5, 16);
-    if (cq < 14.5) pomp = MX.mul(a, MX.about(0, 20, MX.S(1.12, 0.78)));
+  } else if (cqc < 14) pomp = MX.mul(onKid(TC), MX.R(wob * 0.8));
+  else if (cqc < 16) {
+    const a = onKid({ ...TC, cq: 14 }), b = onGuy({ ...TC, cq: 16 }, -18), t = seg(cqc, 14.5, 16);
+    if (cqc < 14.5) pomp = MX.mul(a, MX.about(0, 20, MX.S(1.12, 0.78)));
     else {
       const pa = posOf(a), pb = posOf(b), p: V2 = [lerp(pa[0], pb[0], t), lerp(pa[1], pb[1], t) - 130 * 4 * t * (1 - t)];
       pomp = place(p, lerp(rotOf(a), rotOf(b) + 360, smooth(t)), lerp(scaleOf(a), scaleOf(b), t));
     }
   } else {
-    const crook = cq < 17 ? -18 : lerp(-18, 0, back(seg(cq, 17, 17.75), 2));
-    pomp = MX.mul(onGuy(T, crook), MX.R(!T.build ? wob : 0));
+    const crook = cqc < 17 ? -18 : lerp(-18, 0, back(seg(cqc, 17, 17.75), 2));
+    pomp = MX.mul(onGuy(TC, crook), MX.R(!TC.build ? wob : 0));
   }
   F.x.pomp = pomp; F.o.pomp = pompShow;
 
   // the round raver and her stick
-  const R = raverPose(T), RM = raverM(R.root);
+  const R = raverPose(TC), RM = raverM(R.root);
   F.x.raver = RM;
   Object.assign(F.cel, { raverTorso: R.torso, raverEyes: R.eyes, raverMouth: R.mouth, raverHair: R.hair });
   F.o.raverRim = I;
   let stick: Mat = HERO_STICK, stickShow = 1;
   F.slot.stick = "front";
-  if (cq < HOLD) stick = HERO_STICK;
-  else if (cq < 2.5) {
-    const t = seg(cq, HOLD, 2.5), h = posOf(HERO_STICK);
+  if (cqc < HOLD) stick = HERO_STICK;
+  else if (cqc < 2.5) {
+    const t = seg(cqc, HOLD, 2.5), h = posOf(HERO_STICK);
     stick = place(qbez(h, [1560, 220], [1720, -200], t), -40 + 900 * easeOut(t), 1);
-  } else if (cq < 5) stickShow = 0;
-  else if (cq < 6) {
-    const t = seg(cq, 5, 6), end = stickHeld(raverM(raverPose({ ...T, cq: 6 }).root), "w2");
+  } else if (cqc < 5) stickShow = 0;
+  else if (cqc < 6) {
+    const t = seg(cqc, 5, 6), end = stickHeld(raverM(raverPose({ ...TC, cq: 6 }).root), "w2");
     stick = place(qbez([1250, -140], [1230, 300], posOf(end), easeIn(t)), lerp(500, rotOf(end), easeOut(t)), 1);
   } else { stick = stickHeld(RM, R.torso); F.slot.stick = "back"; }
   F.x.stick = stick; F.o.stick = stickShow;
-  F.o.stickGlow = cq < 6 ? 1 : 0.6 + 0.4 * decay(mod(cq, 1), 4);
+  F.o.stickGlow = cqc < 6 ? 1 : 0.6 + 0.4 * decay(mod(cqc, 1), 4);
 
   // the crowd: rows bounce half a beat apart; blown back at the drop; crouch wide-eyed in the build
   for (let r = 0; r < 3; r++) {
     let x = 0, y = 0, ev: EyeClass = "ev1";
-    if (cq < HOLD) ev = "ev0";
-    else if (cq < 2) {
-      const t = seg(cq, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r]!;
+    if (cqc < HOLD) ev = "ev0";
+    else if (cqc < 2) {
+      const t = seg(cqc, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r]!;
       x = 20 * amt; y = -12 * amt; ev = "ev0";
-    } else if (!T.build) {
-      const b = bounce(mod(cq + (r % 2) * 0.5, 1));
+    } else if (!TC.build) {
+      const b = TC.move ? (r % 2 ? TC.move.off : TC.move.b) : bounce(mod(cqc + (r % 2) * 0.5, 1));
       y = b > 0 ? 3 * b : 8 * b;
     } else {
-      const p = cq < 28 ? decay(mod(cq, 1), 5) : decay(mod(cq * 2, 1), 5);
-      y = 6 + 8 * seg(cq, BUILD_AT, 32) + 2 * p; ev = "ev2";
+      const p = cqc < 28 ? decay(mod(cqc, 1), 5) : decay(mod(cqc * 2, 1), 5);
+      y = 6 + 8 * seg(cqc, BUILD_AT, 32) + 2 * p; ev = "ev2";
     }
     F.x["crowd" + r] = MX.T(x, y); F.cls["crowd" + r] = ev;
   }
