@@ -106,6 +106,7 @@ import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from ".
 import { inputKind, isInputHidden, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../audio/inputDevice.ts";
 import type { InputHealthReading } from "../audio/inputHealth.ts";
 import type { AnimFrame } from "../render/animClock.ts";
+import { createLeashGauge } from "./leashGauge.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -628,11 +629,15 @@ export interface DeviceMenuDeps {
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
   /** The master's Expansion dial (sceneSettings.ts's getSceneExpansion) —
-   *  the Input card's Expansion curve over every numeric scene param's
-   *  slider position, applied after Scale in resolveSceneSetting. Device-
-   *  local like Scale. */
+   *  how far and how long every drive reading may pull the picture away
+   *  from the normal line Scale sets (drives.ts's header, "Master
+   *  Expansion"). Device-local like Scale. */
   getSceneExpansion: () => number;
   onSceneExpansionChange: (value: number) => void;
+  /** Expansion's shape chip, as an index into sceneSettings.ts's
+   *  EXPANSION_SHAPES (getSceneExpansionShape). Device-local like Scale. */
+  getSceneExpansionShape: () => number;
+  onSceneExpansionShapeChange: (index: number) => void;
   /** This tick's picture reading for the Master card's Picture block — null
    *  whenever the meter has gone stale (the panel was just opened, or
    *  nothing has forced sampling with the panel closed) rather than a frozen
@@ -4605,9 +4610,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoMasterInner.append(autoMasterLabel, autoMasterSub);
   autoMasterBtn.appendChild(autoMasterInner);
 
-  // Master: device-wide dials over every numeric scene param — Scale and
-  // Expansion — applied at autoTune.ts's resolveSceneSetting (once, never on drives,
-  // enums/booleans, or the Input card's gain stages — see that doc). Sits
+  // Master: device-wide dials. Scale sets every numeric scene param's normal
+  // line at autoTune.ts's resolveSceneSetting (once, never on drives,
+  // enums/booleans, or the Input card's gain stages — see that doc);
+  // Expansion sets how far and how long the music pulls the picture away
+  // from it, in the drive engine (drives.ts's header, "Master Expansion"). Sits
   // between the Auto bar and Input as its own always-visible card: it is
   // not part of the auto system, and unlike the Scene card below it must
   // not disappear on a scene that declares no settings of its own — those
@@ -4636,9 +4643,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "Scales every scene param at once — 1 is as dialed",
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
-  // The Input card's Expansion, over the scene's params instead of the
-  // mic's levels — same range, log slider and readout as that row, so the
-  // two read as the same control (see resolveSceneSetting for the curve).
+  // Same range, log slider and readout as the Input card's Expansion row.
+  // Acts on every drive reading around its own recent level — see
+  // drives.ts's header, "Master Expansion".
   const masterExpansionRow = createControlRow({
     label: "Expansion",
     accent: SCENE_VIOLET,
@@ -4648,10 +4655,47 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     mapping: "log",
     unit: "×",
     format: formatGain,
-    description: "Pushes every scene param away from the middle of its slider — 1 is as dialed",
+    description: "How far the music pulls the picture from its normal, and how long it stays away — 1 is as dialed",
   });
   masterExpansionRow.onChange((value) => deps.onSceneExpansionChange(value));
-  masterCard.body.append(masterRow.el, masterExpansionRow.el);
+  // Expansion's shape (drives.ts's header, "Master Expansion"): icon chips
+  // in EXPANSION_SHAPES order, so the chosen index is what's stored. Each
+  // icon draws its curve — the music's change from usual across, the
+  // picture's change from normal up — and the name rides as its tooltip.
+  const curveIcon = (d: string) =>
+    `<svg width="30" height="18" viewBox="0 0 30 18" fill="none" aria-hidden="true">` +
+    `<path d="M2 9H28M15 1V17" stroke="currentColor" stroke-opacity="0.25" stroke-width="1"/>` +
+    `<path d="${d}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const masterShapeRow = createPickerRow({
+    label: "Expansion shape",
+    accent: SCENE_VIOLET,
+    options: [
+      "Even — follows every change",
+      "Soft top — rounds off big jumps",
+      "Big moves only — ignores the beat, follows the song's sections",
+    ],
+    icons: [
+      curveIcon("M3 16L27 2"),
+      curveIcon("M3 16L15 9C19 6.6 22 5.4 27 5"),
+      curveIcon("M3 17L10 9H20L27 1"),
+    ],
+    compact: true,
+    defaultValue: 0,
+    description: "Expansion shape",
+    get: () => deps.getSceneExpansionShape(),
+    set: (index) => deps.onSceneExpansionShapeChange(index),
+    wire: (row, strip, a) => {
+      wireHoverFocus(row, strip);
+      wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
+    },
+  });
+  // The leash gauge (leashGauge.ts): Scale's normal as a notch, Expansion's
+  // reach as a band, the picture now as a needle — drawn every tick below.
+  const leashGauge = createLeashGauge(SCENE_VIOLET);
+  const leashRow = document.createElement("div");
+  leashRow.className = "vc-row";
+  leashRow.append(leashGauge.el);
+  masterCard.body.append(masterRow.el, masterExpansionRow.el, masterShapeRow.el, leashRow);
 
   // Picture block — see the comment above const masterCard. A plain
   // .vc-row/.vc-hint block (not createMeterRow's bar-meter shape: there's no
@@ -6743,6 +6787,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshBandFaders();
     masterRow.sync(() => deps.getSceneMaster());
     masterExpansionRow.sync(() => deps.getSceneExpansion());
+    masterShapeRow.sync();
     // Whatever was rebuilt above comes in unmarked.
     applySolo();
     root.classList.add("vc-open");
@@ -6939,6 +6984,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // write is what's throttled). deps.getPictureReading() is null
       // whenever the meter's gone stale, which a null level draws as a gap
       // in the trace and "--" in the readout, same as every other meter row.
+      leashGauge.draw({
+        normal: deps.getSceneMaster() / SCENE_MASTER_MAX,
+        expansion: deps.getSceneExpansion(),
+        excursion: drives?.masterExcursion() ?? null,
+      });
+
       const pictureReading = deps.getPictureReading();
       const pictureTextDue = nowMs - lastPictureTextMs >= PICTURE_TEXT_REFRESH_MS;
       if (pictureTextDue) lastPictureTextMs = nowMs;

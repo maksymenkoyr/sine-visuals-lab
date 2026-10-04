@@ -38,6 +38,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.sceneAuto": true,
   "vibe.sceneMaster": true,
   "vibe.sceneExpansion": true,
+  "vibe.sceneExpansionShape": true,
   "vibe.drives": true,
   "vibe.sensitivity": true,
   "vibe.expansion": true,

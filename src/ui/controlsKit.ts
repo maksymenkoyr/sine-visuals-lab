@@ -498,6 +498,14 @@ export interface PickerRowSpec {
    *  when cycling. Omit both for an ordinary picker. */
   pro?: (index: number) => boolean;
   locked?: (index: number) => boolean;
+  /** Inline SVG markup per option, drawn in its chip instead of the name —
+   *  the name moves to the chip's tooltip and accessible label. For a choice
+   *  that reads better as a picture (the Master card's Expansion curves). */
+  icons?: readonly string[];
+  /** Just the chip strip: no label/readout/reset head and no hint line —
+   *  `description` becomes the strip's tooltip. Pair with `icons`, whose
+   *  tooltips name each choice. */
+  compact?: boolean;
 }
 
 /** An enum setting's row: same head as a toggle row, a strip of named chips
@@ -505,6 +513,10 @@ export interface PickerRowSpec {
  *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
  *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
  *  a toggle isn't — see createToggleRow. */
+// An icon chip (PickerRowSpec.icons): the palette chip's frame, sized to
+// its drawing rather than to a word, with the SVG inheriting the chip's ink.
+const pickerIconChipStyle = " display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; line-height: 0;";
+
 export function createPickerRow(spec: PickerRowSpec): PickerRow {
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -545,9 +557,17 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   strip.style.cssText = paletteListStyle;
   el.style.setProperty("--vc-accent", spec.accent);
   const isLocked = (i: number): boolean => spec.locked?.(i) ?? false;
+  if (spec.compact && spec.description) strip.title = spec.description;
   const chips = spec.options.map((name, i) => {
     const btn = document.createElement("button");
-    btn.textContent = name;
+    const icon = spec.icons?.[i];
+    if (icon) {
+      btn.innerHTML = icon;
+      btn.title = name;
+      btn.setAttribute("aria-label", name);
+    } else {
+      btn.textContent = name;
+    }
     if (spec.pro?.(i)) {
       const tag = document.createElement("sup");
       tag.textContent = " PRO";
@@ -573,7 +593,8 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   setHintText(hint, spec.description ?? "");
   if (!spec.description) hint.style.display = "none";
 
-  el.append(head, strip, hint);
+  if (spec.compact) el.append(strip);
+  else el.append(head, strip, hint);
   if (spec.signals) el.appendChild(spec.signals.strip);
 
   const clampIndex = (value: number): number =>
@@ -584,7 +605,9 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
     current = clampIndex(value);
     chips.forEach((chip, i) => {
       chip.style.cssText =
-        (i === current ? paletteChipLitStyle : paletteChipStyle) + (isLocked(i) ? " opacity: 0.4; cursor: not-allowed;" : "");
+        (i === current ? paletteChipLitStyle : paletteChipStyle) +
+        (spec.icons?.[i] ? pickerIconChipStyle : "") +
+        (isLocked(i) ? " opacity: 0.4; cursor: not-allowed;" : "");
       chip.setAttribute("aria-checked", String(i === current));
     });
     readout.textContent = spec.options[current];

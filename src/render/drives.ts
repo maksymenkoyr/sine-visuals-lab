@@ -1,7 +1,7 @@
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
-import { settingScope } from "./sceneSettings.ts";
+import { getSceneExpansion, getSceneExpansionShape, SCENE_EXPANSION_DEFAULT, settingScope, type ExpansionShape } from "./sceneSettings.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
@@ -88,6 +88,31 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  *   equal exactly what a plain single `DriveChoice` gave before this system
  *   had patches — see the identity note further down, and
  *   tests/drives.test.ts's own identity walk.
+ *
+ * **Master Expansion.** The Master card's Expansion dial
+ * (sceneSettings.ts's getSceneExpansion) acts here, on the gained reading,
+ * not on any setting's value: Scale (autoTune.ts's resolveSceneSetting)
+ * sets where the picture normally sits, and Expansion says how far the
+ * music may pull it away from there and how long it stays away. Each
+ * patched setting keeps an ExpansionTracker over its own gained reading:
+ * `normal`, an average over EXPANSION_NORMAL_TAU_SEC, and `usual`, one whose
+ * catch-up time (expansionUsualTauSec) grows with the dial. A scene reads
+ * `max(0, normal + expansionReach(E)·(reading − usual))`. Below 1, `usual`
+ * catches up fast and the reach shrinks, so a dip or a peak is pulled back
+ * to `normal` within a second or two even while the music stays there.
+ * Above 1, `usual` lags and the reach grows, so a drop throws the picture
+ * far and a long breakdown holds it down. The Master card's shape chips
+ * (sceneSettings.ts's getSceneExpansionShape) bend that straight line —
+ * see shapeExcursion: "even" keeps it, "softTop" rounds big upward jumps
+ * off below the reading's nominal top of 1, and "bigMoves" ignores beat-to-
+ * beat swings by comparing `recent` (a short average) with `usual`, so the
+ * picture only moves when a section changes. At 1 with "even" the reading
+ * passes through untouched (bit-for-bit, so every identity rule in this
+ * header holds); any other shape applies at 1 too.
+ * Applied before the generic gate — its tracker sees the expanded reading,
+ * so the line it draws is on the same scale the scene gets — and to
+ * `fired()`'s gate check, but never to an edge itself or to
+ * `sourceValues()`'s per-source traces.
  *
  * **Heights.** A hit-kind source (an edge-kind catalogue entry, or a beat
  * grid — never a level-kind entry or the drawn line, which ignore `height`
@@ -401,6 +426,12 @@ export interface SceneDrives {
    *  scene-handled threshold (the scene draws its own line instead), or the
    *  generic gate simply off. */
   gateLine(key: string): number | undefined;
+  /** The Master card gauge's needle: how far this scene's picture sits from
+   *  its normal right now — the mean, over every patched setting with a live
+   *  source, of its Master-Expansion reading minus its own `normal`, in
+   *  reading units (this file's header, "Master Expansion"). Null when no
+   *  setting has a tracker yet. Never consumes an edge. */
+  masterExcursion(): number | null;
 }
 
 /** Always "scene" — the identity fallback every caller not wired to a real
@@ -418,6 +449,7 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   valueOf: (_key, _rest) => 0,
   threshold: () => undefined,
   gateLine: () => undefined,
+  masterExcursion: () => null,
 };
 
 // matches animClock.ts's own BEAT_PULSE_DECAY_PER_SEC exactly (imported, not
@@ -475,6 +507,69 @@ const GATE_PEAK_DECAY_TAU_SEC = 4;
 // than a hard step.
 const GATE_KNEE_FRACTION = 0.04;
 const GATE_KNEE_SPREAD_MIN = 0.1;
+
+// Master Expansion (this file's header): `normal`'s fixed averaging time,
+// and the dial's mapping onto `usual`'s catch-up time and the reach. At 1×
+// usual's time equals normal's and the reach is 1 — the passthrough the
+// engine short-circuits to.
+export const EXPANSION_NORMAL_TAU_SEC = 30;
+export function expansionUsualTauSec(expansion: number): number {
+  return EXPANSION_NORMAL_TAU_SEC * expansion * expansion * expansion;
+}
+export function expansionReach(expansion: number): number {
+  return Math.sqrt(expansion);
+}
+
+// "bigMoves": `recent` averages over about a bar at dance tempos, so single
+// hits blur into a level; a recent-vs-usual gap under the low mark is
+// ignored, and it reaches full size by the high mark (reading units, after
+// the reach).
+const EXPANSION_RECENT_TAU_SEC = 1.5;
+const BIG_MOVE_LOW = 0.08;
+const BIG_MOVE_HIGH = 0.2;
+// "softTop": headroom it always leaves above `normal`, so a reading whose
+// normal already sits near or past 1 can still lift a little.
+const SOFT_TOP_MIN_ROOM = 0.25;
+
+export interface ExpansionTracker {
+  normal: number;
+  usual: number;
+  recent: number;
+  /** Seconds tracked so far. Until an average's own time has passed it is
+   *  the plain mean of everything heard, so a scene that opens on silence
+   *  settles on the music within seconds instead of after `normal`'s 30. */
+  ageSec: number;
+}
+
+function advanceExpansionTracker(tr: ExpansionTracker, dtSec: number, v: number, expansion: number): void {
+  tr.ageSec += dtSec;
+  const step = (tau: number) => Math.min(1, dtSec / Math.min(tau, tr.ageSec));
+  tr.normal += (v - tr.normal) * step(EXPANSION_NORMAL_TAU_SEC);
+  tr.usual += (v - tr.usual) * step(expansionUsualTauSec(expansion));
+  tr.recent += (v - tr.recent) * step(EXPANSION_RECENT_TAU_SEC);
+}
+
+/** How far from `normal` the picture goes, for each shape chip — this
+ *  file's header, "Master Expansion". */
+function shapeExcursion(v: number, tr: ExpansionTracker, reach: number, shape: ExpansionShape): number {
+  if (shape === "bigMoves") {
+    const x = reach * (tr.recent - tr.usual);
+    return x * smoothstep(BIG_MOVE_LOW, BIG_MOVE_HIGH, Math.abs(x));
+  }
+  const x = reach * (v - tr.usual);
+  if (shape === "softTop" && x > 0) {
+    const room = Math.max(SOFT_TOP_MIN_ROOM, 1 - tr.normal);
+    return room * Math.tanh(x / room);
+  }
+  return x;
+}
+
+/** A gained reading through the Master Expansion (this file's header).
+ *  Exported for tests. */
+export function expandReading(v: number, tr: ExpansionTracker, expansion: number, shape: ExpansionShape): number {
+  if (expansion === SCENE_EXPANSION_DEFAULT && shape === "even") return v;
+  return Math.max(0, tr.normal + shapeExcursion(v, tr, expansionReach(expansion), shape));
+}
 
 function clampWeight(w: number): number {
   return Number.isFinite(w) ? Math.min(DRIVE_WEIGHT_MAX, Math.max(DRIVE_WEIGHT_MIN, w)) : DRIVE_WEIGHT_DEFAULT;
@@ -1016,6 +1111,10 @@ export function createDriveEngine(): DriveEngine {
   // on — forScene()'s gateBuiltIn advances it from value(), which a scene
   // may call more than once a frame, so this keeps it to once per frame.
   const builtInGateFrames = new Map<string, AnimFrame>();
+  // One Master Expansion tracker per (scene, setting) — this file's header.
+  // Advanced every tick even at 1×, so turning the dial starts from a warm
+  // `normal`/`usual` instead of the reading of that moment.
+  const expansionTrackers = new Map<string, ExpansionTracker>();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -1093,6 +1192,8 @@ export function createDriveEngine(): DriveEngine {
   return {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
+      const expansion = getSceneExpansion();
+      const shape = getSceneExpansionShape();
       for (const spec of settings) {
         if (!spec.drive) continue;
         const setting = getDriveSetting(sceneId, spec);
@@ -1134,15 +1235,26 @@ export function createDriveEngine(): DriveEngine {
           // forScene() time below.
         }
 
+        if (!hasLiveSource(setting)) continue;
+        const gain = spec.drive.gain ?? 1;
+        const raw = combine(setting, weightedValuesImpl(sceneId, spec.key, setting, anim)) * gain;
+        const trKey = gateTrackerKey(sceneId, spec.key);
+        let ex = expansionTrackers.get(trKey);
+        if (!ex) {
+          ex = { normal: 0, usual: 0, recent: 0, ageSec: 0 };
+          expansionTrackers.set(trKey, ex);
+        }
+        advanceExpansionTracker(ex, dtSec, raw, expansion);
+
         // The generic engine gate (this file's header's threshold
         // paragraph): only for a setting that hasn't opted out by declaring
         // its own scene-handled threshold, and only once it's actually
-        // switched on — an untouched setting costs nothing extra here.
+        // switched on — an untouched setting costs nothing extra here. It
+        // tracks the expanded reading, the one the scene gets.
         if (spec.drive.threshold === undefined) {
           const thresholdState = getDriveThresholdState(sceneId, spec);
           if (thresholdState.on) {
-            const gain = spec.drive.gain ?? 1;
-            const v = combine(setting, weightedValuesImpl(sceneId, spec.key, setting, anim)) * gain;
+            const v = expandReading(raw, ex, expansion, shape);
             advanceGateTracker(gateTrackerFor(sceneId, spec.key), dtSec, v, thresholdState.value);
           }
         }
@@ -1151,6 +1263,8 @@ export function createDriveEngine(): DriveEngine {
 
     forScene(sceneId, settings, anim) {
       const specByKey = new Map(settings.map((s) => [s.key, s]));
+      const expansion = getSceneExpansion();
+      const shape = getSceneExpansionShape();
 
       function resolve(key: string): { setting: DriveSetting; gain: number } {
         const spec = specByKey.get(key);
@@ -1182,6 +1296,17 @@ export function createDriveEngine(): DriveEngine {
         if (!spec?.drive || spec.drive.threshold !== undefined) return undefined;
         if (!getDriveThresholdState(sceneId, spec).on) return undefined;
         return gateTrackers.get(gateTrackerKey(sceneId, key));
+      }
+
+      // The combined, gained reading through the Master Expansion (this
+      // file's header) — what value()/uniformPair()/valueOf() hand on to the
+      // generic gate, and what fired()'s gate check compares. A setting
+      // accumulate() has never advanced a tracker for passes through.
+      function reading(key: string, setting: DrivePatch, gain: number): number {
+        const v = combine(setting, weightedValues(key, setting)) * gain;
+        if (expansion === SCENE_EXPANSION_DEFAULT && shape === "even") return v;
+        const ex = expansionTrackers.get(gateTrackerKey(sceneId, key));
+        return ex ? expandReading(v, ex, expansion, shape) : v;
       }
 
       // value()/uniformPair()/valueOf()'s own soft knee around the generic
@@ -1251,7 +1376,7 @@ export function createDriveEngine(): DriveEngine {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return gateBuiltIn(key, sceneDefault);
           if (!hasLiveSource(setting)) return rest;
-          return applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
+          return applyGenericGate(key, reading(key, setting, gain));
         },
 
         fired(key, sceneDefaultFired, upper = VALUE_TRIGGER_UPPER_DEFAULT) {
@@ -1286,7 +1411,7 @@ export function createDriveEngine(): DriveEngine {
           // The generic gate's own hard cut, on top of whatever the mix
           // above already required (this file's header's threshold
           // paragraph) — a weak hit's edge is blocked even though it fired.
-          return ok && passesGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
+          return ok && passesGenericGate(key, reading(key, setting, gain));
         },
 
         excess(key) {
@@ -1300,7 +1425,7 @@ export function createDriveEngine(): DriveEngine {
         uniformPair(key) {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return { drive: 0, custom: 0 };
-          return { drive: applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain), custom: 1 };
+          return { drive: applyGenericGate(key, reading(key, setting, gain)), custom: 1 };
         },
 
         sourceValues(key) {
@@ -1322,7 +1447,7 @@ export function createDriveEngine(): DriveEngine {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return 0;
           if (!hasLiveSource(setting)) return rest;
-          return applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
+          return applyGenericGate(key, reading(key, setting, gain));
         },
 
         threshold(key) {
@@ -1334,6 +1459,21 @@ export function createDriveEngine(): DriveEngine {
 
         gateLine(key) {
           return genericGate(key)?.line;
+        },
+
+        masterExcursion() {
+          let sum = 0;
+          let count = 0;
+          for (const spec of settings) {
+            if (!spec.drive) continue;
+            const setting = getDriveSetting(sceneId, spec);
+            if (setting === "scene" || !hasLiveSource(setting)) continue;
+            const ex = expansionTrackers.get(gateTrackerKey(sceneId, spec.key));
+            if (!ex) continue;
+            sum += reading(spec.key, setting, spec.drive.gain ?? 1) - ex.normal;
+            count++;
+          }
+          return count ? sum / count : null;
         },
       };
     },

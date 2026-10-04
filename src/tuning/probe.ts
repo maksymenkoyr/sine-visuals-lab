@@ -67,8 +67,9 @@ export interface ProbeSnapshot {
    *  can tell a master≠1 run apart from a params run instead of reading a
    *  mysterious uniform offset. */
   master: number;
-  /** The master's Expansion dial (getSceneExpansion), applied to every
-   *  `settings[*].resolved` after `master` — same reason for reporting it. */
+  /** The master's Expansion dial (getSceneExpansion). It never touches
+   *  `settings[*].resolved` — it reshapes drive readings (drives.ts's
+   *  header) — but a run with it ≠ 1 reacts differently, so it's reported. */
   masterExpansion: number;
   bands: { low: number; mid: number; high: number; energy: number };
   /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
