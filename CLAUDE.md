@@ -14,21 +14,8 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
   (its recent log, and a grep for the symbol), and whether an open PR already
   covers it (`gh pr list`). If one looks related, read its diff first. Parallel
   sessions often land the same fix.
-- Branch from freshly fetched `origin/main`. Rebase (never merge) before opening
-  a PR, and check again for divergence right before pushing. Never rewrite
-  shared history without explicit confirmation.
-
-## Done means
-
-- Any TS change: `npm run typecheck` (root and `server/`) and `npm run test`.
-- Any visualization or UI change also needs headless Playwright screenshots
-  from before and after, and their paths in your summary. Put a couple of
-  them in the PR body: `npm run pr-shots -- before.png after.png` prints the
-  markdown (never for a paid scene).
-- A bug isn't fixed until every other place the same behaviour shows up has
-  been checked too.
-- CI runs the same two gates on every PR and before every deploy. The channels
-  and releasing are explained in the `src/version.ts` header.
+- Branch from freshly fetched `origin/main`. Never rewrite shared history
+  without explicit confirmation.
 
 ## Two rules for keeping documentation honest
 
@@ -125,6 +112,6 @@ scene record's "Measurements" and dated "Decisions and pivots".
   | Look and shader work judged by eye, DSP and tempo | Opus |
 - `/exec-cheap` runs only when the user types it: never suggest it or route
   work to it, and never use it for paid scenes.
-- Close a session with `/wrap`.
+- Finish every change with `/ship`, and close a session with `/wrap`.
 - `/promo` makes the promo video for a Stable release; the steps are in the
   `tools/promo/promo.mjs` header, the playbook in `.claude/commands/promo.md`.
