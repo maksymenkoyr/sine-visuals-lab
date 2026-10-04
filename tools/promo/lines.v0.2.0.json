@@ -1,0 +1,51 @@
+{
+  "title": "0.2.0 - beta",
+  "subtitle": "Sine Visuals Lab",
+  "groups": [
+    { "key": "scenes", "title": "Scenes", "style": "carousel", "rows": [
+      "New scene: Coil",
+      "Physarum 2: Strain Console, Pairs pads",
+      "Physarum 2: Start ink, Wander, Rivals",
+      "Physarum 2: Crawl speed = base + boost + pump",
+      "Physarum 2: Dose threshold, one Random",
+      "Physarum: Vividness setting",
+      "Caustics: Fog pulse, rate-only Speed boost",
+      "Caustics, Storm: Drop reactivity removed",
+      "Chladni: stops fixating on one figure",
+      "Fluid and Sky share one solver",
+      "Storm: Swirl and Flow stop teleporting",
+      "Review fixes across the whole gallery" ] },
+    { "key": "controls", "title": "Controls", "style": "carousel", "rows": [
+      "Palettes become roles: ground, ramp, inks",
+      "Mood-grouped palette library",
+      "Patch bay: press a cable to unplug it",
+      "Cables stay visible while hovering",
+      "Master card gets Expansion",
+      "Panel words: signal, jack, wire, port",
+      "Stop really stops the mic",
+      "Panel blur is now a switch",
+      "No screen capture offered on phones",
+      "Cheaper meters, steadier layout" ] },
+    { "key": "output", "title": "Output and rooms", "style": "card", "rows": [
+      "Pop-out output window",
+      "Cue (Space) and Play (Option)",
+      "Cue and Play for a TV",
+      "Resolution slider, Output Power card",
+      "Output keeps drawing in a hidden tab",
+      "Room: laptop, phone and TV together",
+      "Pair a TV with a QR or a typed code",
+      "Every device is a member of the room",
+      "Ears: each device picks its audio",
+      "Reset the room from TV or laptop" ] },
+    { "key": "sound", "title": "Sound and beat", "style": "card", "rows": [
+      "Hits: new Surge lane",
+      "Hits: Tail control",
+      "Hits: Length in ms, Envelope monitor",
+      "Drive graphs: one fixed scale",
+      "Drive graphs: peak-hold, same clock",
+      "Auto-tune glides smoothly each tick" ] },
+    { "key": "release", "title": "Release", "style": "card", "rows": [
+      "Release pages: highlights, grouped changes",
+      "Scene versions listed for every release" ] }
+  ]
+}

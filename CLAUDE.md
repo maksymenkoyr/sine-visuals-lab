@@ -126,3 +126,5 @@ scene record's "Measurements" and dated "Decisions and pivots".
 - `/exec-cheap` runs only when the user types it: never suggest it or route
   work to it, and never use it for paid scenes.
 - Close a session with `/wrap`.
+- `/promo` makes the promo video for a Stable release; the steps are in the
+  `tools/promo/promo.mjs` header, the playbook in `.claude/commands/promo.md`.
