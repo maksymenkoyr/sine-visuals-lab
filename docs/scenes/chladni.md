@@ -361,3 +361,5 @@ measured from a reference clip.
   cross-scene vocabulary.
 - `#148` / `4a2208f` (2026-09-26) — Sand amount setting: scales the drawn
   grain bed; 0 leaves the plate bare.
+- `#312` (2026-10-04, draft) — Sand zones: Freeze edge and Snap edge
+  settings with a draggable gauge in the Scene card; Settling pull removed.
