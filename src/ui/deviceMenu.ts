@@ -1971,6 +1971,10 @@ interface ToggleRowSpec {
   description?: string;
   get: () => number;
   set: (value: number) => void;
+  /** A drive-capable toggle's port, summary and sparkline (the same slot
+   *  createControlRow has; buildDriveRow makes them), so a trigger toggle can
+   *  be wired to any signal like a slider row. */
+  drivePanel?: { port: HTMLElement; summary: HTMLElement; below: HTMLElement; onPin: () => void };
 }
 
 /** A boolean setting's row: same head as a slider row, a pill toggle where
@@ -2002,7 +2006,28 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   resetBtn.dataset.key = "reset";
   resetBtn.dataset.keycap = "R";
   right.append(readout, resetBtn);
-  head.append(label, right);
+  if (spec.drivePanel) {
+    // As createControlRow's drive head: the port at the row's left edge, the
+    // summary under the label, either one pins.
+    const dp = spec.drivePanel;
+    const left = document.createElement("div");
+    left.style.cssText = driveRowLeftStyle;
+    left.classList.add("vc-drive-row-left");
+    dp.summary.classList.add("vc-drive-summary");
+    left.append(label, dp.summary);
+    left.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dp.onPin();
+    });
+    dp.port.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dp.onPin();
+    });
+    el.appendChild(dp.port);
+    head.append(left, right);
+  } else {
+    head.append(label, right);
+  }
 
   const toggle = document.createElement("button");
   toggle.className = "vc-toggle";
@@ -2016,7 +2041,11 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, toggle, hint);
-  el.addEventListener("click", () => toggle.focus({ preventScroll: true }));
+  if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
+  // Clicks inside the pinned patch panel keep their own focus (as a slider row's).
+  el.addEventListener("click", (e) => {
+    if (!spec.drivePanel?.below.contains(e.target as Node)) toggle.focus({ preventScroll: true });
+  });
   wireHoverFocus(el, toggle);
 
   function apply(value: number): void {
@@ -5963,6 +5992,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
     if (spec.type === "boolean") {
+      // A trigger toggle (Toon Rave's Drop on big hits) gets the same port and
+      // patch panel as a slider row, so its signal can be rewired.
+      const toggleDrive = spec.drive ? buildDriveRow(sceneId, spec) : null;
       const toggleEl = createToggleRow({
         label: spec.label,
         accent,
@@ -5970,10 +6002,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         description: spec.description,
         get: () => deps.getSceneSettingValue(sceneId, spec),
         set: setLinkedValue,
+        drivePanel: toggleDrive
+          ? { port: toggleDrive.port, summary: toggleDrive.summary, below: toggleDrive.below, onPin: () => togglePin(sceneId, spec) }
+          : undefined,
       });
       wirePreviewFocus(toggleEl);
-      registerPinRow(toggleEl, null, toggleEl.querySelector<HTMLElement>(".vc-toggle"));
       container.appendChild(toggleEl);
+      const toggleHandle = toggleDrive ? toggleDrive.bind(toggleEl) : null;
+      if (toggleHandle) driveRowHandles.push(toggleHandle);
+      registerPinRow(toggleEl, toggleHandle, toggleEl.querySelector<HTMLElement>(".vc-toggle"));
       return;
     }
 
