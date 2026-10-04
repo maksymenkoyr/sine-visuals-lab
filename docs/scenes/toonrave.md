@@ -23,7 +23,10 @@ on the app's bar lines. Draft scene, not on main yet.
   AnimFrame's beats/`tempoLock`/bpm into `c`. Locked, `c` follows the beats and
   re-anchors only at a drop; unlocked, it free-runs and slews back to a bar line
   when the lock returns. `dropFired` can start a cycle early, gated by
-  `MIN_DROP_GAP_BEATS`.
+  `MIN_DROP_GAP_BEATS`. `createStepClock` is the cast's other clock for Moves
+  on signal: one beat of dancing per fired step, holding at
+  `STEP_HOLD_PHASE` between steps; `frameAt` reads it as `castBeats`, in the
+  groove only.
 - `src/render/scenes/toonrave/svgDraw.ts` — `compileScene` parses the markup
   once into a `DrawProgram`; `drawProgram` paints one `FrameState` with
   Canvas2D every frame (vector, so crisp at any zoom).
@@ -36,7 +39,7 @@ on the app's bar lines. Draft scene, not on main yet.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
   the golden in `tests/toonraveMotion.golden.ts`.
 - Plugs into: drives (`bounce`, labelled Energy, on the beat grid, `lights` on the treble level,
-  `dropHits` on `anim.dropOnset`), `animClock` (`beats`, `tempoLock`), quality
+  `dropHits` on `anim.dropOnset`, `moves` on `anim.lowOnset`), `animClock` (`beats`, `tempoLock`), quality
   (`MAX_CANVAS_WIDTH` caps the canvas width). The build is es2017, so nothing
   at module scope touches `document`, `Path2D` or `window`.
 
@@ -96,6 +99,15 @@ and are not recorded here yet.
   bounce", but the steps always follow the BPM through the conductor; the wire
   only pumps how big they are. The caption now says both, with the quiet-end
   share computed from `BOUNCE_DRIVE_DEPTH`.
+- 2026-10-04 — Moves on signal (asked for as "sync their moves to any
+  signal"): the cast's groove dancing can follow any wired signal instead of
+  the BPM. Only the groove's dancing switches clocks; drops, gags, the build,
+  lights and camera stay on the BPM, because the cycle's story is built on bar
+  lines. A step jumps to the hit pose, the rebound plays at the tempo and holds
+  at its top (`STEP_HOLD_PHASE`), so every fire shows as a slam down rather
+  than drifting on between fires. Off by default; Bass hit as the default wire.
+  Toggle rows had no wire port until this change (deviceMenu.ts's boolean
+  branch skipped `buildDriveRow`), so Drop on big hits got its port too.
 
 ## Tuning notes
 
@@ -110,6 +122,9 @@ and are not recorded here yet.
   repeatable.
 - Under a locked beat clock the drops land on bar lines; with no lock it
   free-runs at 120 BPM until one appears.
+- Moves on signal: DEV `window.__toonrave.peek().castBeats` is the cast's step
+  count (null while the cast is on the beats). With nothing wired the cast
+  stays on the beats, so the toggle can never freeze the groove.
 
 ## Known issues and next steps
 
