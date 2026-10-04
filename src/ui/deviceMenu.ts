@@ -813,7 +813,7 @@ const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 /** The Master card's Expansion shape chips by name, in sceneSettings.ts's
  *  EXPANSION_SHAPES order — the chips' own labels and the output graph's
  *  Expansion tag both read these. */
-const EXPANSION_SHAPE_NAMES = ["Even", "Soft top", "Big moves only"] as const;
+const EXPANSION_SHAPE_NAMES = ["Even", "Soft top", "Big moves only", "Up only", "Down only"] as const;
 
 // The Auto master bar — its own slim full-width strip at the top of the
 // settings column, a folded card's title-bar height (FOLDED_BAR_PX,
@@ -4756,7 +4756,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Expansion's shape (drives.ts's header, "Master Expansion"): icon chips
   // in EXPANSION_SHAPES order, so the chosen index is what's stored. Each
   // icon draws its curve — the music's change from usual across, the
-  // picture's change from normal up — and the name rides as its tooltip.
+  // picture's change from normal up — and the name rides as its tooltip
+  // and, with what it does, in the hint line under the strip.
   const curveIcon = (d: string) =>
     `<svg width="30" height="18" viewBox="0 0 30 18" fill="none" aria-hidden="true">` +
     `<path d="M2 9H28M15 1V17" stroke="currentColor" stroke-opacity="0.25" stroke-width="1"/>` +
@@ -4768,11 +4769,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       `${EXPANSION_SHAPE_NAMES[0]} — follows every change`,
       `${EXPANSION_SHAPE_NAMES[1]} — rounds off big jumps`,
       `${EXPANSION_SHAPE_NAMES[2]} — ignores the beat, follows the song's sections`,
+      `${EXPANSION_SHAPE_NAMES[3]} — loud parts lift the picture, quiet parts leave it at normal`,
+      `${EXPANSION_SHAPE_NAMES[4]} — quiet parts lower the picture, loud parts leave it at normal`,
     ],
     icons: [
       curveIcon("M3 16L27 2"),
       curveIcon("M3 16L15 9C19 6.6 22 5.4 27 5"),
       curveIcon("M3 17L10 9H20L27 1"),
+      curveIcon("M3 9H15L27 2"),
+      curveIcon("M3 16L15 9H27"),
     ],
     compact: true,
     defaultValue: 0,
