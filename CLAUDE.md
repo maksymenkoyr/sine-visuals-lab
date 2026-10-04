@@ -13,8 +13,6 @@ A browser-based, real-time WebGL2 audio visualizer.
   plans or artifacts unless I ask.
 - If a label, UX wording or the intended look could reasonably mean two
   things, ask one short question before building.
-- If a requested scene feature overlaps an existing system (Sparkle, the
-  governor, the brightness dial…), raise it before building.
 - When working on a visualization, run `npm run dev` and give the user the
   link to that scene that the dev server prints at startup, not the gallery
   root. Any query goes *before* the hash; one placed after it lands on the
