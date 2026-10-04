@@ -8,12 +8,9 @@ A browser-based, real-time WebGL2 audio visualizer.
   variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
   dials"). Dated notes (`docs/status.md`, a scene record's measurements and
   dated decisions) are the exception.
-- When I ask "why", "what does X mean" or "explain X", answer in plain prose
-  grounded in the code: name the file/function and the one mechanism that
-  causes the behaviour, then stop and wait. Don't edit code, and no plans,
-  HTML artifacts or designs unless I ask for them.
-- Open any plan, explanation or research answer with at most five plain lines.
-  Go deeper only into the part I pick.
+- Keep answers short: at most five plain lines, deeper only into the part I
+  pick. When I ask why or what something means, answer and stop: no edits,
+  plans or artifacts unless I ask.
 - If a label, UX wording or the intended look could reasonably mean two
   things, ask one short question before building. Otherwise make the obvious
   choice and say what you assumed.

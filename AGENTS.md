@@ -67,12 +67,9 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 ## Standing rules
 
-- **Answering questions.** When I ask "why", "what does X mean" or "explain
-  X", answer in plain prose grounded in the code: name the file/function and
-  the one mechanism that causes the behaviour, then stop and wait. Don't edit
-  code, and no plans, HTML artifacts or designs unless I ask for them.
-- **Short version first.** Open any plan, explanation or research answer
-  with at most five plain lines. Go deeper only into the part I pick.
+- **Short answers.** Keep answers short: at most five plain lines, deeper
+  only into the part I pick. When I ask why or what something means, answer
+  and stop: no edits, plans or artifacts unless I ask.
 - **Ask about wording and look.** If a label, UX wording or the intended look
   could reasonably mean two things, ask one short question before building.
   Otherwise make the obvious choice and say what you assumed.
