@@ -16,14 +16,14 @@
 //
 // Settings reshape the frame state after frameAt() rather than being threaded
 // through motion.ts, so the prototype's own numbers stay untouched at the defaults:
-//   - Dance size (key `bounce`) scales each cast rig's matrix between its rest
+//   - Energy (key `bounce`) scales each cast rig's matrix between its rest
 //     pose (the hero frame's matrix, which is also the markup's own placement)
 //     and the moving one, so 1 is exactly the prototype and the hero frame never
 //     changes. It sets only how big the moves are; when they happen is the
 //     conductor's beat clock, whatever the setting is wired to.
 //   - Lights scales the lasers', lamps' and rays' opacity (capped at fully on).
 //   - Shake scales the camera's noise shake.
-// Dance size and Lights are drive settings (drives.ts): Dance size swells with its
+// Energy and Lights are drive settings (drives.ts): Energy swells with its
 // signal (BOUNCE_DRIVE_DEPTH below the slider at a 0 reading, the slider at a full
 // one; a beat-grid pulse by default), Lights' follows the treble level (0.8x quiet
 // to 1.2x loud). With nothing plugged in both rest at exactly their slider value. Drop on big hits is the trigger setting: its drive's edge
@@ -58,15 +58,15 @@ export const DROP_CYCLE_BEATS: readonly (32 | 64 | 128)[] = [128, 64, 32];
 const MAX_CANVAS_WIDTH: Record<QualityPreset, number> = { high: 1920, mid: 1600, low: 1280, floor: 960 };
 
 /** The cycle position of the prototype's hero frame (two animation steps in at
- *  12 steps a beat); the rest pose Dance size scales away from. */
+ *  12 steps a beat); the rest pose Energy scales away from. */
 export const HERO_C = 2 / 12;
 
-/** How far Dance size's signal can pull the moves down below the slider (at a 0 reading). */
+/** How far Energy's signal can pull the moves down below the slider (at a 0 reading). */
 const BOUNCE_DRIVE_DEPTH = 0.3;
 /** The Lights drive's swing around the slider: 1 - this at a quiet reading, 1 + this at a loud one. */
 const LIGHTS_DRIVE_SWING = 0.2;
 
-/** The rigs that make up the cast, the ones Dance size moves. Lights, rays, rings,
+/** The rigs that make up the cast, the ones Energy moves. Lights, rays, rings,
  *  confetti and the like keep their own motion. */
 export const CAST_RIGS: readonly string[] = [
   "dj", "djHead", "djPhones", "guy", "guyHead", "kid", "raver", "pomp", "stick", "crowd0", "crowd1", "crowd2",
@@ -76,7 +76,7 @@ const SETTINGS: SceneSetting[] = [
   // Motion
   {
     key: "bounce",
-    label: "Dance size",
+    label: "Energy",
     description:
       "How big the cast's dance moves are; the steps themselves follow the BPM. " +
       `The wired signal pumps the size: this value at its peak, ${Math.round((1 - BOUNCE_DRIVE_DEPTH) * 100)}% of it when quiet. ` +
@@ -169,7 +169,7 @@ const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 // --- pure helpers (unit-tested under node) ---------------------------------------------------------
 
-/** The rig matrices at the hero frame: the rest pose Dance size scales away from. */
+/** The rig matrices at the hero frame: the rest pose Energy scales away from. */
 let restPose: Record<string, Mat> | null = null;
 function getRestPose(): Record<string, Mat> {
   if (!restPose) restPose = frameAt(HERO_C, { cycleBeats: 32, cuts: 0, bpm: 128 }).x;
@@ -185,7 +185,7 @@ export interface LookAmounts {
   shake: number;
 }
 
-/** Reshapes a frame state by the Dance size, Lights and Shake amounts, in place, and
+/** Reshapes a frame state by the Energy, Lights and Shake amounts, in place, and
  *  returns it. All three at 1 leave the state exactly as frameAt() made it. */
 export function shapeState(state: FrameState, amounts: LookAmounts): FrameState {
   const { bounce, lights, shake } = amounts;
