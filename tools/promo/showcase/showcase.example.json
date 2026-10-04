@@ -1,0 +1,163 @@
+{
+  "note": "Everything that is per-video data for the showcase edit; see the header of edit.py for the pipeline and what each section feeds. Relative paths are relative to the work dir; 'work' itself is absolute or relative to the repo root. Song keys are only names used in this file; copy this file to <work>/showcase.json and put the real audio paths in.",
+  "work": "tools/.cache/showcase",
+
+  "songs": {
+    "songA": "songs/songA.stereo48.wav",
+    "songB": "songs/songB.stereo48.wav",
+    "songC": "songs/songC.stereo48.wav",
+    "songD": "songs/songD.stereo48.wav",
+    "songE": "songs/songE.stereo48.wav",
+    "songF": "songs/songF.stereo48.wav",
+    "songG": "songs/songG.stereo48.wav"
+  },
+  "loudnessLufs": -14.0,
+
+  "bed": { "song": "songA", "bpm": 136, "drop": 55.35, "note": "drop = song time of the bass entering, on the bed's beat grid" },
+
+  "clips": {
+    "dir": "clips/scenes",
+    "note": "<dir>/<name>-<fmt>.mp4; window = song time at clip t=0 (the recorder already shifted for the app's reaction lag)",
+    "windows": {
+      "A1q": 54, "A2": 54, "A3-mig": 54,
+      "S1-mig": 64, "S2p": 28, "S3": 60, "S4-mig": 50, "S5p": 66, "S6": 80
+    }
+  },
+
+  "intro": {
+    "recording": "recordings/intro.mov",
+    "size": [3248, 1944],
+    "note": "Two shots from a screen recording, a camera move and a speed curve each. Camera keys: [t, point, width, swell]; a value that differs per format is {\"h\":..,\"v\":..}. Speed keys: [t, speed]; slow-mo is added around 'click'.",
+    "points": {
+      "mic": { "h": [2510, 425], "v": [2550, 510] },
+      "share": { "h": [2710, 425], "v": [2815, 510] },
+      "popup": [684, 640],
+      "picker": [1650, 885]
+    },
+    "blur": [
+      { "from": 0, "to": 99, "box": [2870, 1695, 3120, 1780], "note": "room badge" },
+      { "from": 4.95, "to": 8.1, "box": [1824, 508, 2156, 724], "note": "other windows in the share picker" },
+      { "from": 4.95, "to": 8.1, "box": [1092, 868, 1436, 1084] },
+      { "from": 4.95, "to": 8.1, "box": [1464, 868, 1792, 1084] },
+      { "from": 4.95, "to": 8.1, "box": [1824, 868, 2156, 1084] }
+    ],
+    "slow": { "min": 0.3, "extra": 0.5 },
+    "shots": [
+      {
+        "name": "mic",
+        "src": [0.25, 2.25],
+        "camera": [
+          [0.25, "mic", { "h": 1300, "v": 720 }, 0],
+          [0.95, "mic", { "h": 1240, "v": 695 }, 0],
+          [1.85, "popup", { "h": 1480, "v": 750 }, { "h": 900, "v": 420 }],
+          [2.25, "popup", { "h": 1420, "v": 730 }, 0]
+        ],
+        "speed": [[0.25, 1.0], [2.25, 1.0]],
+        "click": 2.02
+      },
+      {
+        "name": "screen",
+        "src": [3.55, 8.05],
+        "camera": [
+          [3.55, "share", { "h": 1300, "v": 720 }, 0],
+          [4.05, "share", { "h": 1240, "v": 695 }, 0],
+          [4.95, "picker", { "h": 2190, "v": 1093 }, { "h": 500, "v": 250 }],
+          [8.05, "picker", { "h": 2050, "v": 1040 }, 0]
+        ],
+        "speed": [[3.55, 1.0], [5.00, 1.0], [5.30, 3.5], [6.55, 3.5], [6.85, 1.0], [8.05, 1.0]],
+        "click": 7.84
+      }
+    ]
+  },
+
+  "gallery": {
+    "recording": "recordings/gallery.mov",
+    "size": [3024, 1964],
+    "fps": 51.43,
+    "note": "Gallery part then a scene part, source seconds. page / scene = the crop areas (x0,y0,x1,y1) without browser chrome. zoomIn eases from the whole page to the pointer; zoomOut eases the scene back to its framing; pointerRest = where the pointer sits on the scene (erased there).",
+    "page": [112, 181, 3024, 1819],
+    "scene": [112, 300, 3024, 1819],
+    "galleryRange": [0.90, 3.78],
+    "sceneRange": [3.80, 4.90],
+    "zoomIn": [1.50, 2.60],
+    "zoomOut": [3.80, 4.50],
+    "pointerRest": [1640, 1180, 2160, 1620],
+    "tightWidth": { "h": 1050, "v": 560 },
+    "slowPush": 0.06,
+    "followTau": 0.22,
+    "track": "track.json",
+    "tracking": {
+      "note": "Pointer templates: recording frames [at, x, y] where the pointer is clear of everything; the search box is where it can be",
+      "templates": [
+        { "at": 2.4, "x": 1885, "y": 1395 },
+        { "at": 3.2, "x": 1880, "y": 1395 }
+      ],
+      "search": [112, 181, 3024, 1860],
+      "until": 3.80
+    }
+  },
+
+  "drop": {
+    "note": "[clip, bars] shots from the drop; each cut starts at the song time the drop has reached",
+    "shots": [["A1q", 1], ["A2", 1], ["A3-mig", 0.5], ["A1q", 0.5], ["A2", 0.5], ["A3-mig", 0.5]]
+  },
+
+  "wiring": {
+    "note": "t0 = song time at take t=0; the wiring starts where the drop shots end and runs 'beats' beats. Horizontal is one camera-moved take (camera.py makes 'cam' in the work dir); vertical cuts between two takes by [column, from beat, to beat].",
+    "t0": 62.00,
+    "beats": 24,
+    "h": { "take": "clips/wiring-h.mp4", "cam": "wiring-h-cam.mp4" },
+    "v": {
+      "takes": { "L": "clips/wiring-vL.mp4", "R": "clips/wiring-vR.mp4" },
+      "plan": [["R", 0, 1], ["L", 1, 4], ["R", 4, 12], ["L", 12, 14], ["R", 14, 24]]
+    }
+  },
+
+  "camera": {
+    "note": "Eased crops over the horizontal wiring take. Views are [centre x, centre y, crop width] in source pixels; keys are [clip time, view].",
+    "sourceSize": [2880, 1620],
+    "views": {
+      "WIDE": [1440, 810, 2880],
+      "SETTINGS": [2140, 860, 1600],
+      "MONITORS": [760, 900, 1600],
+      "SCENE_R": [1980, 560, 1900]
+    },
+    "keys": [
+      [0.00, "WIDE"], [1.90, "WIDE"],
+      [2.30, "SETTINGS"], [5.50, "SETTINGS"],
+      [5.95, "MONITORS"], [6.45, "MONITORS"],
+      [6.85, "SCENE_R"], [10.30, "SCENE_R"],
+      [10.90, "WIDE"], [12.0, "WIDE"]
+    ]
+  },
+
+  "shuffle": {
+    "note": "Each shot starts at a strong bass hit of its own song: [clip, song, song time]",
+    "shot": 1.2,
+    "shots": [
+      ["S1-mig", "songB", 66.287],
+      ["S2p", "songC", 29.300],
+      ["S3", "songD", 62.891],
+      ["S4-mig", "songE", 51.219],
+      ["S5p", "songF", 68.473],
+      ["S6", "songG", 80.697]
+    ]
+  },
+
+  "end": { "length": 4.3 },
+
+  "captions": {
+    "note": "Overlay captions. from/to = [anchor, offset seconds]; anchors: start, introCut (mic -> screen), introEnd, galleryEnd, wiringStart, shuffleStart. pos = where the text block sits per format.",
+    "items": [
+      { "id": "mic", "big": "Use mic.", "small": "", "pos": { "v": "low", "h": "lowright" }, "from": ["start", 0], "to": ["introCut", 0], "fade": 0.06 },
+      { "id": "screen", "big": "Or share screen.", "small": "", "pos": { "v": "low", "h": "topright" }, "from": ["introCut", 0], "to": ["introEnd", 0], "fade": 0.06 },
+      { "id": "start", "big": "No install.<br>Right in the browser.", "small": "", "pos": { "v": "lowerhalf", "h": "low" }, "from": ["introEnd", 0.1], "to": ["galleryEnd", -0.05], "fade": 0.2 },
+      { "id": "wire", "big": "Deep customisation", "small": "Wire any signal to any setting", "pos": { "v": "toptight", "h": "low" }, "from": ["wiringStart", 0.25], "to": ["shuffleStart", -0.15], "fade": 0.2 },
+      { "id": "shuffle", "big": "Any song.<br>Any scene.", "small": "", "pos": { "v": "low", "h": "low" }, "from": ["shuffleStart", 0.15], "to": ["shuffleStart", 2.6], "fade": 0.2 }
+    ],
+    "cards": {
+      "end": { "logo": "public/icon-512.png", "url": "sinevisualslab.com", "tag": "Real-time music visuals in your browser" },
+      "or": { "text": "or" }
+    }
+  }
+}
