@@ -72,7 +72,6 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
   and stop: no edits, plans or artifacts unless I ask.
 - **Ask about wording and look.** If a label, UX wording or the intended look
   could reasonably mean two things, ask one short question before building.
-  Otherwise make the obvious choice and say what you assumed.
 - **Extend, don't duplicate.** When a requested effect overlaps an existing
   system (Sparkle, the governor, the brightness dialâ€¦), build it into that
   system rather than adding a parallel one. If it's unclear which system owns

@@ -12,8 +12,7 @@ A browser-based, real-time WebGL2 audio visualizer.
   pick. When I ask why or what something means, answer and stop: no edits,
   plans or artifacts unless I ask.
 - If a label, UX wording or the intended look could reasonably mean two
-  things, ask one short question before building. Otherwise make the obvious
-  choice and say what you assumed.
+  things, ask one short question before building.
 - When a requested effect overlaps an existing system (Sparkle, the governor,
   the brightness dial…), build it into that system rather than adding a
   parallel one. If it's unclear which system owns it, ask one question.
