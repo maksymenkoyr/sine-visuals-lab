@@ -31,6 +31,7 @@ import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
+import { RING_THRESHOLD_DEFAULT } from "../src/render/scenes/rippleEmitter.ts";
 
 const DT = 1 / 60;
 
@@ -531,6 +532,14 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     const sceneDefaultNeither = neither.lowOnset || neither.onset;
     expect(sceneDefaultNeither).toBe(false);
     expect(engine.forScene("caustics", settings, neither).fired("ripple", sceneDefaultNeither)).toBe(false);
+  });
+
+  it("ripple takes the generic Threshold like every other drive setting; Ring threshold is its own plain setting", () => {
+    expect(byKey("ripple").drive!.threshold).toBeUndefined();
+    const ring = byKey("ringThreshold");
+    expect(ring.label).toBe("Ring threshold");
+    expect(ring.drive).toBeUndefined();
+    expect(ring.default).toBe(RING_THRESHOLD_DEFAULT);
   });
 });
 
@@ -1424,6 +1433,31 @@ describe("drives: the generic engine gate — every drive setting without its ow
     }
     expect(lastLoudFired).toBe(true); // the loud hit still fires
     expect(lastLoudValue).toBe(1);
+  });
+
+  it("a built-in (\"scene\") reaction read through value() is gated too, once switched on — off, it passes straight through", () => {
+    const sceneId = "gate-built-in";
+    const spec = settingWithDrive("k", "scene");
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function read(v: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), 0, anim, sceneId, [spec]);
+      const drives = engine.forScene(sceneId, [spec], anim);
+      const out = drives.value("k", v);
+      expect(drives.value("k", v)).toBe(out); // a second read the same frame doesn't advance the tracker again
+      return { out, drives };
+    }
+
+    expect(read(0.1).out).toBe(0.1); // off: identity
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0.5);
+    for (let i = 0; i < 5; i++) read(1); // a loud burst teaches the peak
+    let last = read(0.1);
+    for (let i = 0; i < 180; i++) last = read(0.1); // settles low, well under the line
+    expect(last.out).toBe(0);
+    expect(last.drives.gateLine("k")).toBeGreaterThan(0.1);
+    expect(read(1).out).toBeCloseTo(1, 5);
   });
 });
 

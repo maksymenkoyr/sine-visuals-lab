@@ -583,6 +583,28 @@ reference-measurement workflow used by later scenes.
 - 2026-10-03 — Caustic density's and Breathe's descriptions say "whatever is
   wired in" instead of "its source", following the panel's vocabulary
   (`docs/vocabulary.md`). Copy only; no behaviour changed.
+- 2026-10-03 — Beat ripple gets the same Threshold as every other drive
+  setting, and Ring threshold moves back out to its own setting
+  (`ringThreshold`, in the Beat ripple family under the ring controls). The
+  user: the shared threshold "works great but not in beat ripple" — its
+  scene-handled `drive.threshold` had taken the row every other setting uses
+  for the engine's generic gate. Now `ripple` declares none, so the row under
+  its graph is the generic gate (off by default, so nothing changes until
+  it's switched on), applied to the signal before `advanceEmission` sees it;
+  Ring threshold then decides which climbs that got through send a ring, and
+  still draws the "reach to ring" line. It has no Off switch any more — its
+  left end is now a bar of 0, the nearest thing. Range widened at the user's
+  ask: `ringThresholdBar`'s margin was 1×–3× the floor and is now 0×–6×,
+  with the top's fixed minimum 0.25 → 0.5; the default (0.25) still lands on
+  the old 1.5×, no minimum. Physarum 2's Dose threshold shares
+  `ringThresholdBar`, so its range widened the same way. Because `ripple`
+  defaults to its built-in reaction ("scene"), which the generic gate never
+  touched, `drives.ts` now gates a built-in reaction read through `value()`
+  too (forScene()'s `gateBuiltIn`) — otherwise the new row would do nothing
+  at the default. Not migrated: someone who had tuned the old in-row Ring
+  threshold has that stored value read as the generic gate's instead. The
+  "How Beat Ripple Listens" artifact still describes the old in-row slider
+  and Off switch.
 
 ## Tuning notes
 

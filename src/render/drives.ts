@@ -126,7 +126,8 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  *
  * `"scene"` is still the one setting with no engine state at all: `.value()`
  * and `.fired()` simply return whatever the caller's own `sceneDefault`/
- * `sceneDefaultFired` argument was, and `.uniformPair()` returns
+ * `sceneDefaultFired` argument was (`.value()` through the generic gate
+ * once its threshold is switched on — the threshold paragraph below), and `.uniformPair()` returns
  * `{ drive: 0, custom: 0 }` so the generated GLSL helper
  * (`mix(sceneDefault, u<Key>Drive, u<Key>Custom)`, sceneCommon.ts's
  * DRIVE_GLSL) reduces to exactly `sceneDefault` — bit-for-bit, since
@@ -171,8 +172,10 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * threshold` marks a setting scene-handled: the scene owns the whole idea of
  * "how far does this have to stand out before it counts" and reads the
  * user's own slider back with `drives.threshold(key)`, applying whatever
- * gate shape actually fits its signal — Beat ripple's salience floor/peak
- * trackers (rippleEmitter.ts), not the generic one below. Declaring
+ * gate shape actually fits its signal — Physarum 2's Dose reads
+ * rippleEmitter.ts's salience floor/peak trackers, not the generic one
+ * below. (Caustics' Beat ripple takes both instead: the generic gate on its
+ * drive, then its own Ring threshold as a plain setting.) Declaring
  * `drive.threshold` is what opts a setting *out* of the engine's own gate;
  * every other patched setting (no `drive.threshold` on its spec) gets a
  * generic version of the same idea for free, off by default so nothing
@@ -185,7 +188,10 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * `value()`/`uniformPair()`/`valueOf()` fade a reading out smoothly below
  * that line (a soft knee, not a hard cut, so a hit riding right on the edge
  * doesn't flicker) and `fired()` blocks an edge whose own combined value
- * falls under it, on top of whatever that mix already required. The panel's
+ * falls under it, on top of whatever that mix already required. A setting
+ * still on its built-in reaction (`"scene"`) gets the same gate through
+ * `value()` only — forScene()'s gateBuiltIn advances its tracker there, on
+ * the scene's own value, since accumulate() never sees it. The panel's
  * own graph draws the line with `SceneDrives.gateLine(key)` — `undefined`
  * whenever there's nothing to draw: no `drive` at all, a scene-handled
  * threshold (the scene draws its own line through settingMarks.ts instead),
@@ -449,7 +455,7 @@ export const GATE_OPEN_HIGH = 0.55;
  *  ever read before a user moves it. Unlike a scene-handled threshold
  *  (SceneSetting.drive.threshold's own `default`), there's one value for
  *  every generic setting, since none of them shaped this gate on purpose the
- *  way Beat ripple shaped its own. */
+ *  way a scene-handled setting shapes its own. */
 export const GENERIC_THRESHOLD_DEFAULT = 0.25;
 // The generic gate tracker's own time constants (accumulate() below) — a
 // floor that chases a *lower* resting level quickly (so a quiet moment reads
@@ -1006,6 +1012,10 @@ export function createDriveEngine(): DriveEngine {
   const states = new Map<string, SourceState>();
   // One gate tracker per (scene, setting) — see GateTrackerState's own doc.
   const gateTrackers = new Map<string, GateTrackerState>();
+  // The AnimFrame a built-in ("scene") setting's gate tracker last advanced
+  // on — forScene()'s gateBuiltIn advances it from value(), which a scene
+  // may call more than once a frame, so this keeps it to once per frame.
+  const builtInGateFrames = new Map<string, AnimFrame>();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -1023,7 +1033,8 @@ export function createDriveEngine(): DriveEngine {
 
   /** Creates the tracker on first touch — only ever called from
    *  accumulate() below, for a setting accumulate() has already confirmed is
-   *  a real patch with the generic gate on. A read-only lookup (forScene()'s
+   *  a real patch with the generic gate on, or from forScene()'s gateBuiltIn
+   *  for a built-in reaction with the gate on. A read-only lookup (forScene()'s
    *  own gateTrackerLine/applyGate/passesGate) uses the Map directly instead,
    *  so merely *reading* a setting nobody has ever accumulated for (still on
    *  "scene", or the gate is off) doesn't manufacture a fresh, meaningless
@@ -1160,12 +1171,12 @@ export function createDriveEngine(): DriveEngine {
       }
 
       // Whether `key` is gated by the *generic* engine gate right now (a
-      // patch, its spec opted in by not declaring its own drive.threshold,
-      // and the threshold switched on) — undefined otherwise, in which case
-      // there's nothing here for a caller to apply. Reads the tracker
-      // read-only: a setting the generic gate has never had a reason to
-      // advance for (still "scene", or the gate is off) simply isn't gated,
-      // rather than manufacturing a fresh tracker just to answer this.
+      // patch, or a built-in reaction gateBuiltIn has advanced for; its spec
+      // opted in by not declaring its own drive.threshold; the threshold
+      // switched on) — undefined otherwise, in which case there's nothing
+      // here for a caller to apply. Reads the tracker read-only: a setting
+      // the generic gate has never had a reason to advance for simply isn't
+      // gated, rather than manufacturing a fresh tracker just to answer this.
       function genericGate(key: string): GateTrackerState | undefined {
         const spec = specByKey.get(key);
         if (!spec?.drive || spec.drive.threshold !== undefined) return undefined;
@@ -1216,10 +1227,29 @@ export function createDriveEngine(): DriveEngine {
         return stepValueTrigger(st.valueTrigger, raw, upper, anim);
       }
 
+      // The generic gate on a built-in ("scene") reaction read through
+      // value(): accumulate() never sees the scene's own value, so the
+      // tracker advances here instead, on the value the scene passed, once
+      // per AnimFrame. Only value() — uniformPair()'s built-in reading lives
+      // in the shader, out of the engine's reach, and fired()'s is a bare
+      // yes/no with no level to compare.
+      function gateBuiltIn(key: string, v: number): number {
+        const spec = specByKey.get(key);
+        if (!spec?.drive || spec.drive.threshold !== undefined) return v;
+        const thresholdState = getDriveThresholdState(sceneId, spec);
+        if (!thresholdState.on) return v;
+        const k = gateTrackerKey(sceneId, key);
+        if (builtInGateFrames.get(k) !== anim) {
+          builtInGateFrames.set(k, anim);
+          advanceGateTracker(gateTrackerFor(sceneId, key), anim.dtSec, v, thresholdState.value);
+        }
+        return applyGenericGate(key, v);
+      }
+
       return {
         value(key, sceneDefault, rest = 0) {
           const { setting, gain } = resolve(key);
-          if (setting === "scene") return sceneDefault;
+          if (setting === "scene") return gateBuiltIn(key, sceneDefault);
           if (!hasLiveSource(setting)) return rest;
           return applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
         },

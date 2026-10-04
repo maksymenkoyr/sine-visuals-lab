@@ -255,6 +255,12 @@ describe("Ring threshold (the adaptive threshold's margin)", () => {
     expect(ringThresholdBar(0, RING_THRESHOLD_DEFAULT)).toBe(0);
   });
 
+  it("its range is wide: no bar at the bottom, well past the old top (3x floor + 0.25) at the top", () => {
+    for (const floor of [0, 0.1, 0.2, 0.5]) expect(ringThresholdBar(floor, 0)).toBe(0);
+    expect(ringThresholdBar(0.2, 1)).toBeGreaterThan(3 * 0.2 + 0.25);
+    expect(ringThresholdBar(0, 1)).toBeGreaterThan(0.25);
+  });
+
   it("raising it rings less on the busy kick-and-hi-hat case; lowering it rings more", () => {
     const totalFaint = (threshold: number) => {
       const state = createRippleEmissionState();

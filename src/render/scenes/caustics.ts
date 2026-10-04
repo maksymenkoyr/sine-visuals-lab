@@ -194,7 +194,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Beat ripple",
     description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
-    // One colour for this row and the four ring controls under it, so the
+    // One colour for this row and the ring controls under it, so the
     // ripple's own set reads apart from Breathe above and Drift below.
     family: "Beat ripple",
     min: 0,
@@ -219,21 +219,31 @@ const SETTINGS: SceneSetting[] = [
     // dial's value, the same split the scene's very first ring pool used. A
     // drop still emits its own stronger ring on top, independent of this
     // choice.
-    // `threshold` is the adaptive "reach to ring" line's margin over its
-    // noise-floor estimate (rippleEmitter.ts's ringThresholdBar), adjusted by
-    // the On/Off toggle + slider under this setting's graph in the panel —
-    // Off (advanceEmission's `threshold: null`) makes every climb ring,
-    // sized only by how far it climbed.
+    // No `drive.threshold`: the Threshold row under this graph is the same
+    // engine gate every other drive setting has (drives.ts's header's
+    // threshold paragraph), applied to the signal before the emitter sees
+    // it. What decides whether a climb that got through sends a ring is
+    // Ring threshold, the next setting.
     drive: {
       default: "scene",
       sceneLabel: "Scene: bass or beat hit",
       sceneSources: ["anim.lowOnset", "feature.onset"],
-      threshold: {
-        default: RING_THRESHOLD_DEFAULT,
-        label: "Ring threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to send a ring. Left: more rings, even from quiet sounds. Right: only clear standouts.",
-      },
     },
+  },
+  {
+    key: "ringThreshold",
+    label: "Ring threshold",
+    description:
+      "How far a hit has to stand out from the everyday sounds to send a ring — the \"reach to ring\" line on Beat ripple's graph. Left: more rings, even from quiet sounds. Right: only clear standouts.",
+    group: "Motion",
+    family: "Beat ripple",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: RING_THRESHOLD_DEFAULT,
+    // The adaptive line's margin over its learned noise floor
+    // (rippleEmitter.ts's ringThresholdBar), read only by advanceEmission —
+    // a response-shape, so no `auto` and no `drive`, like Ring width below.
   },
   {
     key: "ringWidth",
@@ -1497,21 +1507,16 @@ float softCeil(float x, float knee, float ceil) {
         // itself instead of stacking full rings).
         const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
         const rawSignal = drives.value("ripple", sceneDefaultSignal);
-        // drives.threshold() is null while Ring threshold's own Off switch is
-        // pressed (drives.ts's header's threshold paragraph) — passed through
-        // as-is, since that's exactly what advanceEmission's own `threshold`
-        // param wants for "every climb rings, sized by its own climb".
-        // undefined only means there's no engine at all (PASSTHROUGH_DRIVES).
-        const rippleThreshold = drives.threshold("ripple");
-        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, rippleThreshold === undefined ? RING_THRESHOLD_DEFAULT : rippleThreshold);
+        // rawSignal has already been through the shared Threshold gate (when
+        // it's on); Ring threshold then sets how far a climb must stand out
+        // from the learned everyday ones to send a ring.
+        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, getSetting("ringThreshold"));
         emitter.emit(emitted, ringStyle);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
         // ring, and each ring actually sent. Only the one line — a second
         // "full ring" line made the graph harder to read, and a ring's dot
-        // already shows how strong it was. No lines at all while Ring
-        // threshold is off (salienceMarks returns null) — the ring itself
-        // still shows as a reaction.
+        // already shows how strong it was.
         const marks = salienceMarks(emission);
         publishSettingMarks("caustics", "ripple", marks ? [{ value: marks.ringsAbove, label: "reach to ring" }] : [], emitted);
 
