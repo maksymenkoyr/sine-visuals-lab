@@ -294,11 +294,14 @@ const framesDir = bestDir;
 // 25 fps clock, so the output held only ~25 distinct pictures a second.)
 const seqDir = join(framesDir, "seq");
 mkdirSync(seqDir, { recursive: true });
-let j = 0;
+// By stamp, not arrival: a stamp is not always monotonic, and a walk that
+// stops at the first farther neighbour would stick on one frame.
+const order = times.map((_, i) => i).filter((i) => Number.isFinite(times[i])).sort((a, b) => times[a] - times[b]);
+let p = 0;
 for (let k = 0; k < Math.round(seconds * FPS); k++) {
   const t = fromSec + k / FPS + lagMs / 1000;
-  while (j + 1 < times.length && Math.abs(times[j + 1] - t) < Math.abs(times[j] - t)) j++;
-  linkSync(frames[j].file, join(seqDir, `${String(k).padStart(6, "0")}.jpg`));
+  while (p + 1 < order.length && Math.abs(times[order[p + 1]] - t) < Math.abs(times[order[p]] - t)) p++;
+  linkSync(frames[order[p]].file, join(seqDir, `${String(k).padStart(6, "0")}.jpg`));
 }
 // Audio: the wav is the mic, so it sits in the clip where the mic started
 // (the clock's 0 in mic mode; wherever the actions enabled it in wall mode,
