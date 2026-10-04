@@ -63,6 +63,18 @@ measured from a reference clip.
   share 0.32–0.59 → 0.32–0.49, mean luma 30–63 → 46–68 — the spread is the
   figure changing, not the change.
 
+- 2026-10-04 (sand zones): `scripts/sand-zones-measure.mjs`, the sim rule on
+  the CPU at a steady drive, four figures, 3000 grains from a scattered bed.
+  Grain travel in 1 s, in nodal cells: 0.006 at drive 0.1, 0.022 at 0.2,
+  0.049 at 0.4, 0.103 at 0.8. Share of grains on the lines after 1 s / 4 s
+  (scattered sand alone gives 0.16): 0.20 / 0.47 at 0.8, 0.23 / 0.75 at 1.0,
+  0.48 / 0.98 at 1.5, 0.71 / 1.00 at 2.0. So the figure holds below about
+  0.2 (`FREEZE_REF`), and half a scattered bed is on the lines within a
+  second, two beats, from about 1.5 (`SNAP_REF`). The "Curve to Sand"
+  explainer artifact had put the snap edge at 0.8, about half of what the
+  real rule does; at the default Vibration the plate mostly sits in the
+  drift zone, with kicks reaching toward the snap edge.
+
 - 2026-10-02: offline probe of the real `FeatureExtractor` into
   `createPlateResponse` at default settings, on a synthetic bass/chords/lead/
   drums track. It ran clean, and through `tests/tempoEval/micChain.ts` with
@@ -219,6 +231,28 @@ measured from a reference clip.
   frames, Sand 3.09 / weight 0.27 / mix 0.08: 0.15 (71% of it grey) →
   0.46–0.54, against 0.36–0.58 for the default bed.
 
+- 2026-10-04 (sand zones): from the "Curve to Sand" explainer
+  (https://claude.ai/artifact/XCYfqi5nXgW9Mvjmont5fD), the user asked whether
+  the drift zone can actually be changed, and for it in the UI. It can: the
+  zones come from the sim rule (the lift knee sets where sand starts moving,
+  the pull bias where it snaps). The two edges are now settings, Freeze edge
+  and Snap edge, applied as a piecewise-linear remap of the plate's drive
+  (`zoneDrive`, `src/render/scenes/chladniSand.ts`) inside `plateDrive`, so
+  the bounce, pull, air streaming and grain colour all agree. A remap rather
+  than moving `LIFT_THRESHOLD` and the pull bias directly, because each of
+  those moves both edges at once (motion scales with the knee at a fixed
+  drive-to-knee ratio). The remap is the identity at the default edges, so the
+  default plate is unchanged. Settling pull is gone: it only moved the snap
+  edge, which is now Snap edge (extend, don't duplicate); its 0.5 default is
+  baked into `PULL_BIAS`, and its Auto lean toward a steady beat went with
+  it. The edges are manual, because the gauge shows the stored values and
+  Auto would make it lie. The Scene card shows them as the Sand zones gauge
+  (`src/ui/widgets/sandZones.ts`): the drive on a fixed square-root axis
+  (linear left the freeze band too thin to read), the three bands, the two
+  edges as draggable handles (keyboard sliders too), the plate's drive now as
+  a needle (`probe()`), and a strip of grains stepped by the same rule at each
+  drive, which re-scatters every few seconds so an edge move shows at once.
+
 ## Tuning notes
 
 - Pattern complexity sets the plate's effective size (`FUNDAMENTAL_HZ_SMALL`
@@ -237,9 +271,10 @@ measured from a reference clip.
   low half is a usable whisper while the top still throws sand hard; judge
   by whether nodal lines stay crisp even at max Vibration (a washout
   regression to watch for, per #47's test plan).
-- Settling pull is a Form setting, not Motion — it governs how crisply the
-  figure ultimately resolves rather than something watched moving in real
-  time.
+- Freeze edge and Snap edge set where the sand holds, drifts and snaps; judge
+  them on the Sand zones gauge against the needle while music plays. A low
+  Snap edge makes every kick re-form the figure crisply; a high Freeze edge
+  lets quiet passages hold one figure.
 - Quality tiers change grain count (`ctx.quality.maxParticles`) only;
   `grainGain` compensates so sparser beds (`floor`/`low`) read about as
   bright as the `high` tier reference count (`REFERENCE_GRAINS`).
@@ -291,7 +326,9 @@ measured from a reference clip.
   shots, to compare whether the plate moves between figures or sits on one)
   and `grain-weight-shot.mjs` (Metal-GPU shots of named Grain weight / Size
   mix beds after each has sorted; on a checkout without those settings every
-  shot is the default bed, the "before" side).
+  shot is the default bed, the "before" side) and `sand-zones-measure.mjs`
+  (the sim rule on the CPU at steady drives, where `FREEZE_REF` and
+  `SNAP_REF` come from).
   Captured screenshots are session output, not
   kept in the repo.
 
