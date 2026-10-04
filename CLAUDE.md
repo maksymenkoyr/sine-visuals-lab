@@ -2,14 +2,12 @@ A browser-based, real-time WebGL2 audio visualizer.
 
 - Before starting, grep `origin/main` for the change and read the description
   of any related open PR (its diff only if the overlap is still unclear).
-- A doc exists only for knowledge with no single owning file. If a fact has an
-  obvious home, a file whose job is exactly that thing, it goes in that file's
-  header comment, not in `docs/`.
-- Never write down anything countable: not a count, not a table of values, not
-  a list that lives in code. Name the symbol instead ("the dials in
-  `MUSIC_DIALS`", not "the seven dials"), so renaming it surfaces every
-  reference. The exceptions are dated records: `docs/status.md` and a scene
-  record's "Measurements" and dated "Decisions and pivots".
+- Explain code in a comment at the top of its file. Write a doc in `docs/`
+  only for an explanation that spans several files.
+- In comments and docs, don't copy numbers or lists from the code: name the
+  variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
+  dials"). Dated notes (`docs/status.md`, a scene record's measurements and
+  dated decisions) are the exception.
 - Moving any slider right makes more of what its label names. If a value works
   the other way, rename the label to what grows ("Speed", not "Period") or
   invert the mapping.

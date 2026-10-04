@@ -33,16 +33,12 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 ## Two rules for keeping documentation honest
 
-**1. A doc exists only for knowledge with no single owning file.** If a fact has
-an obvious home, a file whose job is exactly that thing, it goes in that file's
-header comment, not in `docs/`.
-
-**2. Never write down anything countable.** Not a count, not a table of values,
-not a list that lives in code. Name the symbol instead ("the dials in
-`MUSIC_DIALS`", not "the seven dials"). Renaming a symbol surfaces every
-reference to it, so a sentence that names one can't go stale silently. The
-exceptions are dated records: `docs/status.md` (regenerated each session) and a
-scene record's "Measurements" and dated "Decisions and pivots".
+- Explain code in a comment at the top of its file. Write a doc in `docs/`
+  only for an explanation that spans several files.
+- In comments and docs, don't copy numbers or lists from the code: name the
+  variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
+  dials"). Dated notes (`docs/status.md`, a scene record's measurements and
+  dated decisions) are the exception.
 
 ## Read this before touching X
 
