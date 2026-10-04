@@ -29,6 +29,13 @@
 // its beat). Lights, lasers, rays, the button glow and the camera read the
 // continuous c and move at display rate.
 //
+// Moves on signal. MotionOpts.castBeats, when given, is the cast's own beat count
+// in the groove (one beat of dancing per signal step; conductor.ts's step clock).
+// Only the groove's dancing reads it -- the DJ, the guy and his hair, the kid, the
+// raver and her stick, the crowd -- through their own Timing; the gags, the build,
+// the lights and the camera keep the cycle's clock. castBeats = c - GROOVE_AT gives
+// exactly the picture without it.
+//
 // Cuts. `cuts` 0 holds the wide shot all cycle. 1, 2 and 3 are the prototype's
 // "Camera cuts" levels 0, 1 and 2 (see cutPlan): a new groove shot every 4, 2
 // and 1 bars. The drop is always wide, and the same shot never appears twice in
@@ -71,6 +78,10 @@ export interface MotionOpts {
   cycle?: number;
   /** Reduced motion: no shake, no impact frame, no strobes. Default false. */
   reduced?: boolean;
+  /** The cast's own beats of dancing since the groove began, when its moves follow
+   *  a signal instead of the cycle (see "Moves on signal" above). Read only in the
+   *  groove, wrapped into it. Absent: the cast dances on the cycle's clock. */
+  castBeats?: number;
 }
 
 export interface Camera {
@@ -431,6 +442,11 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   const T: Timing = { cq: buildQ ? (stepN - shift * spb) / spb : cqNat, spb, build: buildQ, reduced };
   const { cq } = T;
   const ph = mod(c, 1), beatN = Math.floor(c);
+  // the cast's timing: the cycle's, or in the groove its own beat count when given
+  const castOwn = opts.castBeats !== undefined && !buildQ && cqNat >= GROOVE_AT;
+  const castC = castOwn ? GROOVE_AT + mod(opts.castBeats as number, buildAt - GROOVE_AT) : 0;
+  const TC: Timing = castOwn ? { cq: Math.floor(castC * spb + 1e-6) / spb, spb, build: false, reduced } : T;
+  const cqc = TC.cq;
   const F: FrameState = {
     c: cNat, x: {}, o: {}, cel: {}, cls: {}, slot: { dj: "back", stick: "front" }, led: [], rayOp: 0,
     camera: { shot: "wide", src: { x: 0, y: 0, w: FRAME_W, h: FRAME_H }, shake: { x: 0, y: 0, rot: 0 } },
@@ -472,7 +488,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   });
 
   // the DJ
-  const D = djPose(T);
+  const D = djPose(TC);
   F.x.dj = poseM(DJ_FEET[0]!, DJ_FEET[1]!, D.root);
   F.x.djHead = poseM(DJ_NECK[0]!, DJ_NECK[1]!, D.head);
   F.x.djPhones = MX.T(0, D.phones || 0);
@@ -481,19 +497,19 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   F.o.djRim = I;
 
   // the pompadour raver
-  const G = guyPose(T), GM = guyMatrices(G);
+  const G = guyPose(TC), GM = guyMatrices(G);
   F.x.guy = GM.root; F.x.guyHead = GM.head;
   Object.assign(F.cel, { guyLegs: G.legs, guyTorso: G.torso, guyEyes: G.eyes, guyBrows: G.brows, guyMouth: G.mouth });
   F.o.guyShine = G.bald ? 1 : 0; F.o.guyRim = I;
 
   // the kid
-  const K = kidPose(T), KM = kidM(K);
+  const K = kidPose(TC), KM = kidM(K);
   F.x.kid = KM; F.cel.kid = K.cel; F.o.kidRim = I;
 
   // the hairpiece: blown off at the drop, lands on the kid, hops home before the build
   const onKid = (Tk: Timing): Mat => { const P = kidPose(Tk), a = KID_HEAD[P.cel] || KID_HEAD.standA!; return MX.chain(kidM(P), MX.T(a[0], a[1]), MX.R(-24), MX.S(0.5)); };
   const onGuy = (Tg: Timing, crook: number): Mat => { const M = guyMatrices(guyPose(Tg)); return MX.chain(M.root, M.head, MX.T(1152, 222), MX.R(crook), MX.S(0.9)); };
-  const wob = -7 * bounce(mod(cq - 1 / spb, 1)); // the hair's lag: last step's bounce
+  const wob = -7 * bounce(mod(cqc - 1 / spb, 1)); // the hair's lag: last step's bounce
   let pomp: Mat = HERO_POMP, pompShow = 1;
   if (cq < HOLD) pomp = HERO_POMP;
   else if (cq < 2.5) {
@@ -512,13 +528,13 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
       pomp = place(p, lerp(rotOf(a), rotOf(b) + 360, smooth(t)), lerp(scaleOf(a), scaleOf(b), t));
     }
   } else {
-    const crook = cq < 17 ? -18 : lerp(-18, 0, back(seg(cq, 17, 17.75), 2));
-    pomp = MX.mul(onGuy(T, crook), MX.R(!T.build ? wob : 0));
+    const crook = cqc < 17 ? -18 : lerp(-18, 0, back(seg(cqc, 17, 17.75), 2));
+    pomp = MX.mul(onGuy(TC, crook), MX.R(!T.build ? wob : 0));
   }
   F.x.pomp = pomp; F.o.pomp = pompShow;
 
   // the round raver and her stick
-  const R = raverPose(T), RM = raverM(R.root);
+  const R = raverPose(TC), RM = raverM(R.root);
   F.x.raver = RM;
   Object.assign(F.cel, { raverTorso: R.torso, raverEyes: R.eyes, raverMouth: R.mouth, raverHair: R.hair });
   F.o.raverRim = I;
@@ -534,7 +550,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
     stick = place(qbez([1250, -140], [1230, 300], posOf(end), easeIn(t)), lerp(500, rotOf(end), easeOut(t)), 1);
   } else { stick = stickHeld(RM, R.torso); F.slot.stick = "back"; }
   F.x.stick = stick; F.o.stick = stickShow;
-  F.o.stickGlow = cq < 6 ? 1 : 0.6 + 0.4 * decay(mod(cq, 1), 4);
+  F.o.stickGlow = cq < 6 ? 1 : 0.6 + 0.4 * decay(mod(cqc, 1), 4);
 
   // the crowd: rows bounce half a beat apart; blown back at the drop; crouch wide-eyed in the build
   for (let r = 0; r < 3; r++) {
@@ -544,7 +560,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
       const t = seg(cq, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r]!;
       x = 20 * amt; y = -12 * amt; ev = "ev0";
     } else if (!T.build) {
-      const b = bounce(mod(cq + (r % 2) * 0.5, 1));
+      const b = bounce(mod(cqc + (r % 2) * 0.5, 1));
       y = b > 0 ? 3 * b : 8 * b;
     } else {
       const p = cq < 28 ? decay(mod(cq, 1), 5) : decay(mod(cq * 2, 1), 5);

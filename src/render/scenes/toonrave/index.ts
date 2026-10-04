@@ -23,6 +23,10 @@
 //     conductor's beat clock, whatever the setting is wired to.
 //   - Lights scales the lasers', lamps' and rays' opacity (capped at fully on).
 //   - Shake scales the camera's noise shake.
+// Moves on signal hands the cast's groove dancing to conductor.ts's step clock:
+// each fire of its drive is one step (motion.ts's castBeats). Off, or on with
+// nothing wired, the cast dances on the cycle's beats as before; the gags, the
+// build, the lights and the camera always do.
 // Energy and Lights are drive settings (drives.ts): Energy swells with its
 // signal (BOUNCE_DRIVE_DEPTH below the slider at a 0 reading, the slider at a full
 // one; a beat-grid pulse by default), Lights' follows the treble level (0.8x quiet
@@ -44,9 +48,9 @@ import type { Palette } from "../../palette.ts";
 import { buildSceneSvg } from "./art/scene.ts";
 import { buildPostFrag } from "./glsl.ts";
 import { compileScene, drawProgram, type DrawProgram, type View } from "./svgDraw.ts";
-import { createConductor } from "./conductor.ts";
+import { createConductor, createStepClock } from "./conductor.ts";
 import { clampCentre, frameFocus } from "./focus.ts";
-import { frameAt,FRAME_W, FRAME_H, type FrameState, type Mat, type MotionOpts } from "./motion.ts";
+import { frameAt, FRAME_W, FRAME_H, GROOVE_AT, BUILD_BEATS, type FrameState, type Mat, type MotionOpts } from "./motion.ts";
 
 const ID = "toonrave";
 
@@ -111,6 +115,20 @@ const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     drive: { default: "anim.dropOnset" },
+  },
+  {
+    key: "moves",
+    label: "Moves on signal",
+    description:
+      "Off: the cast dances on the BPM. On: they take one step each time the wired signal fires and hold still in between. " +
+      "Drops, gags, lights and camera stay on the BPM",
+    group: "Motion",
+    type: "boolean",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 0,
+    drive: { default: "anim.lowOnset" },
   },
   // Look
   {
@@ -260,6 +278,8 @@ function createToonRaveScene(): Scene {
   let c2d: CanvasRenderingContext2D | null = null;
 
   const conductor = createConductor();
+  const stepClock = createStepClock();
+  let inGroove = false;
   let lastTime: number | null = null;
   let lastC = 0;
   let lastBars = 0; // dev peek only
@@ -284,6 +304,8 @@ function createToonRaveScene(): Scene {
     init(ctx: SceneContext) {
       const { gl } = ctx;
       conductor.reset();
+      stepClock.reset();
+      inGroove = false;
       lastTime = null;
       lastC = 0;
       cycle = 0;
@@ -365,7 +387,18 @@ function createToonRaveScene(): Scene {
       const frozen = frozenC !== null;
       const c = frozen ? (frozenC as number) : out.c;
 
+      // Moves on signal: always read the trigger so an edge is consumed even when off.
+      // With nothing wired (valueOf's rest comes back), the cast stays on the beats.
+      const movesOn = resolveSceneSetting(ID, settingFor("moves")) >= 0.5;
+      const stepEdge = drives.fired("moves", anim.lowOnset);
+      const movesWired = drives.valueOf("moves", -1) >= 0;
+      const grooveNow = c >= GROOVE_AT && c < cycleBeats - BUILD_BEATS;
+      if (grooveNow && !inGroove) stepClock.reset();
+      inGroove = grooveNow;
+      const castBeats = grooveNow ? stepClock.step(stepEdge, dt, out.bpm) : undefined;
+
       const opts: MotionOpts = { cycleBeats, cuts, bpm: out.bpm, cycle, reduced };
+      if (movesOn && movesWired && !frozen) opts.castBeats = castBeats;
       const state = frameAt(c, opts);
 
       // Audio modulation of the two drive settings; frozen frames stay repeatable.
