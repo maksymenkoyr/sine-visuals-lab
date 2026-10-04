@@ -283,6 +283,7 @@ function createToonRaveScene(): Scene {
   let lastTime: number | null = null;
   let lastC = 0;
   let lastBars = 0; // dev peek only
+  let lastCast: number | null = null; // dev peek only
   let cycle = 0;
   let reduced = false;
   let frozenC: number | null = null;
@@ -336,8 +337,9 @@ function createToonRaveScene(): Scene {
       if (import.meta.env.DEV && typeof window !== "undefined") {
         (window as unknown as { __toonrave?: unknown }).__toonrave = {
           freeze,
-          // the cycle position and the app's bar count, for checking cuts against the bar line
-          peek: () => ({ c: lastC, bars: lastBars }),
+          // the cycle position and the app's bar count, for checking cuts against the bar line;
+          // the cast's own step count while Moves on signal drives it (else null)
+          peek: () => ({ c: lastC, bars: lastBars, castBeats: lastCast }),
         };
       }
     },
@@ -399,6 +401,7 @@ function createToonRaveScene(): Scene {
 
       const opts: MotionOpts = { cycleBeats, cuts, bpm: out.bpm, cycle, reduced };
       if (movesOn && movesWired && !frozen) opts.castBeats = castBeats;
+      lastCast = opts.castBeats ?? null;
       const state = frameAt(c, opts);
 
       // Audio modulation of the two drive settings; frozen frames stay repeatable.
