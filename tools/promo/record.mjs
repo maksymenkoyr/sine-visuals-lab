@@ -5,6 +5,13 @@
 // Every take is re-recorded until it plays smoothly (`run`), because a stuttering take can't be fixed
 // in the edit. `intro` is the opening look: PROMO_LOOK is a share link from the Looks card
 // (?look=<code>#/v/<scene>), loaded through the app's own ?look= parameter.
+//
+// Scene takes (`intro`, `song_*`) hear the song itself: promo.mjs cuts <work>/mic.wav from the song so
+// that it starts MIC_LEAD beats (time for the app's analyser and beat clock to settle) before song time
+// MIC_SONG_T0 + MIC_LEAD·P, and each scene take films MIC_SPAN beats from there — a stretch that covers
+// the whole video, so compose.py can take any moment of it at the song time the video plays there
+// (meta.songT0). Their script beats count from that start, which is MIC_PRE beats before video beat 0.
+// Panel takes keep the synthetic feed: they show the interface, and only pulse on the grid behind it.
 import fs from "node:fs";
 import {
   BASE, launch, open, openPanel, hideChrome, beatClock, startCast, sleep, moveTo, drag, centerOf, scrollTextTo, clickText, press, P, BPM,
@@ -12,6 +19,10 @@ import {
 
 const WORK = process.env.PROMO_WORK || new URL("../.cache/promo/", import.meta.url).pathname;
 const OUT = `${WORK}/takes/`;
+const MIC = process.env.MIC_WAV ? {
+  wav: process.env.MIC_WAV, lead: Number(process.env.MIC_LEAD), span: Number(process.env.MIC_SPAN),
+  pre: Number(process.env.MIC_PRE), drop: Number(process.env.DROP_BEAT), songT0: Number(process.env.MIC_SONG_T0),
+} : null;
 const UI_VIEW = { width: 576, height: 1024, dsf: 1 };
 const FB_VIEWS = [{ width: 720, height: 1280, dsf: 1 }, { width: 576, height: 1024, dsf: 1 }];
 const at = (bc, b) => bc.waitBeat(b);
@@ -23,19 +34,20 @@ function smooth(frames, t0, beats) {
   const gaps = []; for (let i = 1; i < w.length; i++) gaps.push((w[i].t - w[i - 1].t) * 1000);
   return { fps: (w.length - 1) / (w.at(-1).t - w[0].t), slow: gaps.filter((g) => g > 34).length / gaps.length, max: Math.max(...gaps) };
 }
-async function once(name, scene, { setup, script, beats, view, lead = 1800, track: cfg_track, query = "" }) {
-  const { browser, page } = await launch(view || {});
+async function once(name, scene, { setup, script, beats, view, lead = 1800, track: cfg_track, query = "", music = false }) {
+  const { browser, page } = await launch({ ...(view || {}), wav: music ? MIC.wav : null });
   page.on("pageerror", (e) => console.log(name, "pageerror", e.message));
   try {
-    await open(page, scene, { query });
+    await open(page, scene, { query, music });
     await setup?.(page);
     await sleep(500);
     if (cfg_track) await installTracker(page, cfg_track);
-    const bc = await beatClock(page, lead);
+    const bc = await beatClock(page, lead, music ? { at: MIC.lead } : {});
     const cast = await startCast(page, `${OUT}${name}`);
     await script(page, bc);
     await at(bc, beats + 0.6);
-    const frames = await cast.stop({ name, scene, beats, P, bpm: BPM, epochT0: bc.epochT0, view });
+    const songT0 = music ? MIC.songT0 + MIC.lead * P / 1000 : undefined;
+    const frames = await cast.stop({ name, scene, beats, P, bpm: BPM, epochT0: bc.epochT0, view, songT0 });
     if (cfg_track) await saveTrack(page, name);
     return { st: smooth(frames, bc.epochT0, beats) };
   } finally { await browser.close(); }
@@ -52,11 +64,15 @@ async function run(name, scene, cfg) {
 }
 
 const FB_SETUP = async (page) => { await openPanel(page); await sleep(1200); await hideChrome(page); await sleep(500); };
-const fb = (name, scene, flips, beats = 32) => run(name, scene, {
-  beats, views: FB_VIEWS, setup: FB_SETUP,
-  script: async (page, bc) => { for (const [b, n] of flips) { await at(bc, b); await clickText(page, n); } },
-});
 const every = (step, names, from = 0) => names.map((n, i) => [from + i * step, n]);
+// A scene take on the song. `flips` are [video beat, button text] — the drop is video beat MIC.drop.
+const song = (name, scene, flips, { query = "" } = {}) => {
+  if (!MIC) { console.log(`${name}: no MIC_WAV — run it through promo.mjs record`); return; }
+  return run(name, scene, {
+    music: true, beats: MIC.span, views: FB_VIEWS, setup: FB_SETUP, query,
+    script: async (page, bc) => { for (const [b, n] of flips) { await at(bc, b + MIC.pre); await clickText(page, n); } },
+  });
+};
 
 /** Slider span for the row labelled `label` in the phone panel: the nearest wide canvas below the label. */
 const sliderOf = (page, label) => page.evaluate(([label, PX]) => {
@@ -104,22 +120,25 @@ const installTracker = (page, kind) => page.evaluate((kind) => {
 const saveTrack = async (page, name) => fs.writeFileSync(`${OUT}${name}/track.json`, JSON.stringify(await page.evaluate(() => window.__trk || [])));
 
 const T = {
+  // the user's look, untouched, on the song (without PROMO_LOOK: Physarum 2 as it opens)
   intro: async () => {
     const look = process.env.PROMO_LOOK;
-    if (!look) { console.log("intro: no PROMO_LOOK, skipped (compose falls back to a Physarum 2 take)"); return; }
+    if (!look) { console.log("intro: no PROMO_LOOK — a stand-in Physarum 2 opening"); return song("intro", "physarum2", []); }
     const u = new URL(look);
     const scene = decodeURIComponent((u.hash.match(/\/v\/([^/?]+)/) || [])[1] || "physarum2");
-    await run("intro", scene, {
-      beats: 10, views: FB_VIEWS,
-      query: `&look=${u.searchParams.get("look")}`,
-      setup: async (page) => { await hideChrome(page); await sleep(300); },
-      script: async () => {},
-    });
+    return song("intro", scene, [], { query: `&look=${u.searchParams.get("look")}` });
   },
-  fb_cau: () => fb("fb_cau", "caustics", every(4, ["Sunset", "Ice", "Amethyst", "Ember", "Acid", "Halation", "Fire", "Arcade"])),
-  fb_chl: () => fb("fb_chl", "chladni", every(4, ["Ice", "Fire", "Acid", "Amethyst", "Sunset", "Malachite", "Arcade", "Ember"])),
-  fb_p2a: () => fb("fb_p2a", "physarum2", every(2, ["Random", "Shuffle", "Symbiosis", "New palette", "Chase", "Random", "Mob", "Shuffle", "Gardens", "New palette", "War", "Random", "Hunt", "Shuffle", "Self-avoid", "New palette"])),
-  fb_p2b: () => fb("fb_p2b", "physarum2", every(2, ["Random", "New palette", "Cells", "Shuffle", "Rivals", "Random", "Coral", "Chase", "New palette", "Weave", "Random", "Symbiosis", "Shuffle", "Islands", "Random", "New palette"])),
+  // Re-rolls every two bars from the drop: a dish needs a few beats to grow into its pattern, and one
+  // re-rolled every beat or two never does (the first cut's Physarum takes looked flat for that reason).
+  // From the user's look when it is a Physarum 2 one: its drives (speed boost/pump, seed, flash) are what
+  // make the dish answer the music — the scene's defaults barely pulse (pulse 1.08 vs the look's 1.48).
+  song_p2r: () => {
+    const look = process.env.PROMO_LOOK && new URL(process.env.PROMO_LOOK);
+    const query = look && /\/v\/physarum2\b/.test(look.hash) ? `&look=${look.searchParams.get("look")}` : "";
+    return song("song_p2r", "physarum2", every(8, Array(12).fill("Random"), MIC?.drop ?? 0), { query });
+  },
+  song_chl: () => song("song_chl", "chladni", every(8, ["Ice", "Fire", "Acid", "Amethyst", "Sunset", "Malachite", "Arcade", "Ember", "Ice", "Fire", "Acid", "Amethyst"], MIC?.drop ?? 0)),
+  song_cau: () => song("song_cau", "caustics", every(8, ["Sunset", "Ice", "Amethyst", "Ember", "Acid", "Halation", "Fire", "Arcade", "Sunset", "Ice", "Amethyst", "Ember"], MIC?.drop ?? 0)),
 
   ui_strains: () => run("ui_strains", "physarum2", {
     track: "strains", beats: 8, view: UI_VIEW,

@@ -40,7 +40,10 @@ what to check at each step.
   other work and re-run that take (`node tools/promo/record.mjs <take>` with `BPM`/`PROMO_WORK` set). The
   panel takes find controls by their visible text and `.vc-*` classes; when the UI is reworked a take
   can silently do nothing — tile a few frames of each take (Pillow; Homebrew ffmpeg may be broken) and
-  check that something moves.
+  check that something moves. Scene takes hear the song itself (a fake mic): check them with
+  `tools/promo/motion.py <take> --from <drop beat + 3>` — motion and sync to the song's hits. The first
+  cut's scene takes ran on the synthetic feed and the user called them flat and out of sync: on it
+  Chladni held one figure (motion 1.7) where the song gives it changing figures (3.9, sync 0.56).
 - `cards`: no `WARN` lines.
 - `compose`: tile ~16 frames across the video and look at them before encoding. Cuts should land on
   beats; each demo's caption should name what its clip shows; text must sit inside the middle of the screen

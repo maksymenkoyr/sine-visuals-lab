@@ -2,7 +2,7 @@
   "title": "0.2.0 - beta",
   "subtitle": "Sine Visuals Lab",
   "demos": [
-    { "take": "fb_p2a", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: one Random for motion, Smell and Touch" },
+    { "take": "song_p2r", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: one Random for motion, Smell and Touch" },
     { "take": "ui_strains", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: the Strain Console" },
     { "take": "ui_pads", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: Pairs pads" },
     { "take": "ui_palettes", "from": 0, "beats": 4, "group": "Controls", "text": "Palettes: a mood-grouped library" },
@@ -21,7 +21,7 @@
       "Physarum 2: strains trade agents",
       "Physarum 2: Synergy pulls inks into harmony",
       "Physarum 2: Auto level evens the glow",
-      "Physarum 2: Crawl speed = base + boost + pump",
+      "Physarum 2: Crawl speed gets boost + pump",
       "Physarum 2: Dose threshold, one Random",
       "Caustics: Fog pulse, rate-only Speed boost",
       "Caustics: Drop reactivity removed",

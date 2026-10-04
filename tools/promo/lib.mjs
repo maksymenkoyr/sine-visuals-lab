@@ -1,6 +1,12 @@
 // Capture helpers for the release promo (tools/promo/promo.mjs is the entry point): Metal-GPU
-// Chromium, CDP screencast with real timestamps, a beat clock locked to the app's synthetic
-// feed (`?audio=synthetic&bpm=N` makes beat k land at __S + k*P), and a fake cursor.
+// Chromium, CDP screencast with real timestamps, a beat clock, and a fake cursor. The beat clock
+// locks to one of two feeds:
+// - synthetic (`?audio=synthetic&bpm=N` makes beat k land at __S + k*P) — for panel takes, where the
+//   scene behind the panel only has to pulse on the grid;
+// - the song itself (launch({wav})): Chromium plays the wav as the microphone from the moment the
+//   app's getUserMedia resolves, which an init script stamps as __S (the same trick as
+//   tools/ref-browser.mjs). The wav is cut to start on a beat of the song, so beat k is again
+//   __S + k*P — and the scene reacts to the very music the video plays over it.
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
@@ -19,6 +25,15 @@ const INIT = () => {
     const v = g.call(this, k);
     if (k === "bpm") window.__S = performance.now();
     return v;
+  };
+};
+const MIC_STAMP = () => {
+  const md = navigator.mediaDevices;
+  const orig = md.getUserMedia.bind(md);
+  md.getUserMedia = async (c) => {
+    const s = await orig(c);
+    if (c && c.audio && !window.__S) window.__S = performance.now();
+    return s;
   };
 };
 
@@ -53,7 +68,7 @@ const OVERLAY_CSS = `
 .pv-cur.down{width:20px;height:20px;margin:-10px 0 0 -10px;background:#7ff3ff}
 `;
 
-export async function launch({ width = W, height = H, dsf = 1 } = {}) {
+export async function launch({ width = W, height = H, dsf = 1, wav = null } = {}) {
   const browser = await chromium.launch({
     channel: "chromium",
     headless: true,
@@ -61,17 +76,26 @@ export async function launch({ width = W, height = H, dsf = 1 } = {}) {
       "--enable-gpu", "--use-angle=metal", "--enable-gpu-rasterization", "--ignore-gpu-blocklist",
       "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
       "--autoplay-policy=no-user-gesture-required",
+      ...(wav ? [`--use-file-for-fake-audio-capture=${wav}%noloop`] : []),
     ],
   });
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: dsf, ignoreHTTPSErrors: true, permissions: ["microphone"] });
-  await ctx.addInitScript(INIT);
+  await ctx.addInitScript(wav ? MIC_STAMP : INIT);
   const page = await ctx.newPage();
   return { browser, ctx, page };
 }
 
 /** Navigate, wait for boot, inject overlay helpers + fake cursor. */
-export async function open(page, scene, { query = "" } = {}) {
-  await page.goto(`${BASE}/?audio=synthetic&bpm=${BPM}${query}#/v/${scene}`, { waitUntil: "load" });
+export async function open(page, scene, { query = "", music = false } = {}) {
+  if (music) {
+    // the app opens the mic only on a gesture: click the canvas, as a visitor would
+    await page.goto(`${BASE}/?${query.replace(/^&/, "")}#/v/${scene}`, { waitUntil: "load" });
+    await sleep(800);
+    const vp = page.viewportSize();
+    await page.mouse.click(vp.width / 2, vp.height / 2);
+  } else {
+    await page.goto(`${BASE}/?audio=synthetic&bpm=${BPM}${query}#/v/${scene}`, { waitUntil: "load" });
+  }
   await page.waitForFunction(() => typeof window.__S === "number", null, { timeout: 15000 });
   await sleep(3500);
   await page.addStyleTag({ content: OVERLAY_CSS });
@@ -106,13 +130,15 @@ export const hideChrome = async (page) => {
   await sleep(400);
 };
 
-/** Beat clock: T0 = first beat tick >= now + lead (page performance.now() ms). */
-export async function beatClock(page, leadMs = 1500) {
-  const r = await page.evaluate(([lead, P]) => {
+/** Beat clock: T0 = first beat tick >= now + lead (page performance.now() ms), or, with `at`, beat
+ *  `at` of the feed itself (a song take starts on a fixed beat of the wav). */
+export async function beatClock(page, leadMs = 1500, { at = null } = {}) {
+  const r = await page.evaluate(([lead, P, at]) => {
     const now = performance.now();
-    const k = Math.ceil((now + lead - window.__S) / P);
+    const k = at ?? Math.ceil((now + lead - window.__S) / P);
     return { T0: window.__S + k * P, origin: performance.timeOrigin, now };
-  }, [leadMs, P]);
+  }, [leadMs, P, at]);
+  if (r.T0 < r.now + 200) throw new Error(`beat ${at} of the feed is already past; start the wav earlier`);
   const T0 = r.T0;
   const waitBeat = (b) => page.evaluate(([t]) => new Promise((res) => {
     const f = () => { const d = t - performance.now(); if (d <= 0) res(); else if (d > 30) setTimeout(f, 8); else requestAnimationFrame(f); };
