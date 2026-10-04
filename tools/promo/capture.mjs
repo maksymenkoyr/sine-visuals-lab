@@ -7,7 +7,7 @@
 //        [--chrome none|panel|all] [--lag-ms 83] [--quality high] [--port 5173]
 //        [--zoom 1] [--keys m,...] [--keep-frames DIR] [--retries 3] [--max-gap-ms 40]
 //        [--actions file.mjs] [--time mic|wall] [--from auto] [--wav-start 52]
-//        [--folds '{"column:meters":true}'] [--show-toasts] [--grant-mic] [--settle-ms 1200]
+//        [--folds '{"column:meters":true}'] [--jpeg-quality 92] [--show-toasts] [--grant-mic] [--settle-ms 1200]
 //
 // UI shots (--actions): a module whose default export is `async (ctx) => {}`
 // is run as a timeline while recording. ctx has `page`, `W`/`H`/`zoom`/`keys`
@@ -143,6 +143,9 @@ const keepDir = opt("--keep-frames", null);
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const retries = +opt("--retries", "3");
 const maxGapMs = +opt("--max-gap-ms", "40");
+// Screencast JPEG quality: at 2880x1620 the encode, not the page, can be what
+// limits the frame rate; a lower quality is faster.
+const jpegQuality = +opt("--jpeg-quality", "92");
 
 // One take: launch, play the track as the mic, screencast until the window
 // is covered. Returns the frames with their track times.
@@ -192,7 +195,7 @@ async function take(dir) {
     frames.push({ file, ts: f.metadata.timestamp * 1000, same });
     cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
   });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 92, maxWidth: W, maxHeight: H, everyNthFrame: 1 });
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: jpegQuality, maxWidth: W, maxHeight: H, everyNthFrame: 1 });
 
   let baseEpochMs, micEpochMs = null, ui = null;
   let marks = [];
