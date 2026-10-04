@@ -21,6 +21,7 @@ import {
   FUNDAMENTAL_HZ_LARGE,
   type PlateResponseInputs,
 } from "../src/render/scenes/chladni.ts";
+import { clampZoneEdges, zoneDrive, FREEZE_REF, SNAP_REF, ZONE_MIN_GAP } from "../src/render/scenes/chladniSand.ts";
 import { qualitySettings } from "../src/render/quality.ts";
 import { MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
@@ -366,5 +367,35 @@ describe("grain weight", () => {
     const powder = drawnGrainCount(count, 6, platePx2, SAND_AMOUNT_MAX, grainSizeMoment(0, 0));
     const grit = drawnGrainCount(count, 6, platePx2, SAND_AMOUNT_MAX, grainSizeMoment(1, 0));
     expect(powder).toBeGreaterThan(grit);
+  });
+});
+
+describe("sand zones", () => {
+  it("is the identity at the default edges — the plate as it was", () => {
+    for (let d = 0; d <= 4; d += 0.05) expect(zoneDrive(d, FREEZE_REF, SNAP_REF)).toBeCloseTo(d, 9);
+  });
+
+  it("makes the user's edges act as the measured ones", () => {
+    expect(zoneDrive(0.6, 0.6, 2.2)).toBeCloseTo(FREEZE_REF, 9);
+    expect(zoneDrive(2.2, 0.6, 2.2)).toBeCloseTo(SNAP_REF, 9);
+    expect(zoneDrive(0.3, 0.05, 0.4)).toBeGreaterThan(FREEZE_REF);
+  });
+
+  it("is continuous and rising at any edges, slope 1 past the snap edge", () => {
+    for (const [f, s] of [[0.05, 0.15], [0.2, 1.5], [1, 1.2], [0.5, 3]] as const) {
+      let prev = -1;
+      for (let d = 0; d <= 4; d += 0.01) {
+        const v = zoneDrive(d, f, s);
+        expect(v).toBeGreaterThan(prev);
+        if (prev >= 0) expect(v - prev).toBeLessThan(0.2);
+        prev = v;
+      }
+      expect(zoneDrive(s + 1, f, s) - zoneDrive(s + 0.5, f, s)).toBeCloseTo(0.5, 9);
+    }
+  });
+
+  it("keeps the edges apart when they cross", () => {
+    const { freeze, snap } = clampZoneEdges(1.2, 0.8);
+    expect(snap - freeze).toBeCloseTo(ZONE_MIN_GAP, 9);
   });
 });

@@ -7,6 +7,16 @@ import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
+import {
+  FREEZE_REF,
+  HOP_RATE,
+  LIFT_THRESHOLD,
+  PULL_BIAS,
+  rawPlateDrive,
+  SNAP_REF,
+  ZONE_AXIS_MAX,
+  ZONE_DRIVE_GLSL,
+} from "./chladniSand.ts";
 
 // A Chladni plate, simulated rather than painted: a plate whose resonant
 // modes are each driven by the music's energy at that mode's own resonant
@@ -61,7 +71,9 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // never migrates — the sand lying between the figures on a real plate —
 // while sand on the antinodes dances its way to the lines over seconds. A
 // louder drive narrows the quiet zones into crisp lines. Nothing slides:
-// every move is a bounce. A grain that bounces off the plate edge respawns
+// every move is a bounce. The drive the sand feels passes through the Sand
+// zones' remap first (Freeze edge and Snap edge — see chladniSand.ts, which
+// also holds the rule's constants so the panel gauge moves grains by them). A grain that bounces off the plate edge respawns
 // at a random spot — a real plate spills sand; refilling keeps the count
 // constant. Silence drives nothing, so the figure freezes in place.
 //
@@ -414,21 +426,6 @@ const SETTINGS: SceneSetting[] = [
     type: "boolean",
   },
   {
-    key: "settle",
-    label: "Settling pull",
-    description: "How readily bouncing sand finds the still lines — sand the plate barely moves never migrates",
-    // Form, not Motion — it's how crisply the figure ultimately resolves
-    // (paired with Resonance above), not something you watch move in
-    // real time the way Vibration or Bass kick are.
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    // A steady beat reads best with figures that lock in crisply.
-    auto: { pulse: 0.2 },
-  },
-  {
     key: "grainSize",
     label: "Grain size",
     description: "Size of each sand grain on screen",
@@ -497,6 +494,28 @@ const SETTINGS: SceneSetting[] = [
     auto: { brightness: -0.3, attack: 0.25 },
     // uLowPulse directly — a plain Bass hit default.
     drive: { default: "anim.lowOnset" },
+  },
+  {
+    key: "freezeEdge",
+    label: "Freeze edge",
+    description: "Plate drive below which the sand holds still and the figure stays put",
+    // Drawn as a handle on the Sand zones gauge (sandZones widget), not a row.
+    // Manual: the gauge shows stored edges, so Auto would make it lie.
+    group: "Motion",
+    min: 0.05,
+    max: ZONE_AXIS_MAX - 0.2,
+    step: 0.05,
+    default: FREEZE_REF,
+  },
+  {
+    key: "snapEdge",
+    label: "Snap edge",
+    description: "Plate drive above which the sand jumps onto a new figure within a beat or two",
+    group: "Motion",
+    min: 0.15,
+    max: ZONE_AXIS_MAX,
+    step: 0.05,
+    default: SNAP_REF,
   },
   {
     key: "fieldGlow",
@@ -645,17 +664,8 @@ float grainLightness(float w) {
 }
 `;
 
-// Plate acceleration (amplitude x drive, g-ish units) at the knee between a
-// grain rattling in place and bouncing free. This is what leaves sand lying
-// between the lines at a moderate drive.
-const LIFT_THRESHOLD = 0.05;
-// Plate-space units per second of bounce displacement per unit bounce, at
-// the 60 fps reference step.
-const HOP_RATE = 1.0;
-// On a fully lifted antinode, each bounce lands this fraction of its own
-// length downhill of |field| at Settling pull 1 — the bias of the random
-// walk. It fades to zero toward the lift knee, so quiet sand never migrates.
-const PULL_BIAS = 0.3;
+// The lift knee, hop rate and pull bias live in chladniSand.ts, beside the
+// Sand zones they define.
 // A step may never cross more than this fraction of one nodal cell, so high
 // modes can't overshoot a line and oscillate.
 const STEP_CELL_FRACTION = 0.25;
@@ -688,12 +698,14 @@ const HALO_GAIN = 11.0;
 // which colours the grain by it, so a grain is drawn as thrown only while it
 // really is (not merely for lying on an antinode, where powder heaps).
 const GRAIN_MOTION_GLSL = `
+${ZONE_DRIVE_GLSL}
 // Sustained energy plus a bass-onset kick; silence -> ~0 -> the figure
 // freezes. Vibration on a sub-linear curve so the low half of the slider is a
-// usable whisper while the top of the slider still throws sand hard.
+// usable whisper while the top of the slider still throws sand hard. Then the
+// Sand zones' remap (chladniSand.ts). Mirrored by rawPlateDrive for probe().
 float plateDrive() {
   float shake = pow(uShake, 1.5) * 2.0;
-  return shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uLowPulse) * 1.5;
+  return zoneDrive(shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uLowPulse) * 1.5);
 }
 // Weight (see file header): air drag cuts a light grain's hop short, and fine
 // powder clings, so it needs a harder plate to lift.
@@ -757,7 +769,7 @@ void main() {
   vec2 dir = g / (length(g) + 1e-4) * sign(f);
   float cells = max(uMaxOrder, 1.0);
   float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / cells;
-  float bias = ${PULL_BIAS.toFixed(2)} * uSettle * pullScale * smoothstep(0.0, 3.0 * lift, accel);
+  float bias = ${PULL_BIAS.toFixed(2)} * pullScale * smoothstep(0.0, 3.0 * lift, accel);
   float pull = min(stepCap, ${HOP_RATE.toFixed(2)} * hopScale * bounce * bias * uSimDt);
 
   // Air streaming carries light grains the other way, up the gradient of
@@ -986,6 +998,9 @@ function createChladniScene(): Scene {
   let grainCount = 0;
   let response: PlateResponse | null = null;
   let lastFrameTime: number | null = null;
+  // The plate's drive before the Sand zones' remap, as of the last render —
+  // the Sand zones gauge's needle (probe()).
+  let lastRawDrive = 0;
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   function setModes(prog: GLProgram, modes: readonly ActiveMode[]): void {
@@ -999,6 +1014,18 @@ function createChladniScene(): Scene {
     id: ID,
     name: "Chladni",
     settings: SETTINGS,
+    panel: [
+      {
+        widget: "sandZones",
+        title: "Sand zones",
+        hint: "How the sand answers the plate's drive: still, drifting to a new figure, or snapping onto it. Drag an edge to move it.",
+        settings: ["freezeEdge", "snapEdge"],
+      },
+    ],
+
+    probe() {
+      return { drive: lastRawDrive };
+    },
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
@@ -1054,6 +1081,12 @@ function createChladniScene(): Scene {
       });
       let maxOrder = 1;
       for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.m);
+      lastRawDrive = rawPlateDrive(
+        resolveSceneSetting(ID, settingFor("shake")),
+        drives.value("shake", frame.energy),
+        resolveSceneSetting(ID, settingFor("kick")),
+        drives.value("kick", anim.lowPulse),
+      );
 
       gl.disable(gl.BLEND);
 
