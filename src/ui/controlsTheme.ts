@@ -1100,9 +1100,10 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 
 /* ---- src/ui/widgets/strainConsole.ts ----
- * The Strain Console card: one row per setting with a lane per strain and its
- * Link chip, the real setting row mounted under the lanes for the
- * last lane touched, and Stain Synergy with its hue wheel. */
+ * The Strain settings card: one row per setting with a group port, a lane
+ * per strain with its own port, and a Link chip, the real setting row mounted
+ * under the lanes for the last lane touched, and Stain Synergy with its hue
+ * wheel. */
 .vc-sc-track:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
 .vc-sc-detail[hidden] { display: none; }
 .vc-sc-lanes { display: grid; gap: 6px; }
@@ -1113,7 +1114,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-sc-row:hover, .vc-sc-row:focus-within {
   background: rgba(195, 165, 249, 0.06); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4), 0 0 14px rgba(195, 165, 249, 0.18);
 }
-.vc-sc-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.vc-sc-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vc-sc-row-name { display: flex; align-items: center; gap: 8px; }
+/* A lane's port and a row's group port: a stand-in with the real port's look
+ * until the row is mounted, then the row's own port, moved in. */
+.vc-sc-port-slot { display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; }
+.vc-sc-port-slot .vc-drive-port { position: static; flex: none; }
+.vc-sc-port-slot .vc-drive-port[hidden] { display: none; }
+.vc-row.vc-port-moved .vc-drive-row-left { padding-left: 0; }
 .vc-sc-row-title { font: 400 14px/1.2 ${FONT_LABEL}; color: #fff; }
 .vc-sc-row:hover .vc-sc-row-title, .vc-sc-row:focus-within .vc-sc-row-title { color: ${SCENE_VIOLET}; }
 .vc-sc-chip {
@@ -1123,7 +1131,8 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-sc-chip:hover { color: #fff; }
 .vc-sc-chip[aria-pressed="true"] { color: #fff; border-color: ${SCENE_VIOLET}; background: rgba(195, 165, 249, 0.14); }
 .vc-sc-lane-list { display: grid; gap: 3px; }
-.vc-sc-lane { display: grid; grid-template-columns: 30px minmax(0, 1fr) 44px; align-items: center; gap: 8px; height: 16px; }
+.vc-sc-lane { display: grid; grid-template-columns: 14px 30px minmax(0, 1fr) 44px; align-items: center; gap: 8px; height: 16px; }
+.vc-sc-lane-port { display: flex; align-items: center; }
 .vc-sc-lane-code { font: 400 10px/1 ${FONT_MONO}; white-space: nowrap; overflow: hidden; }
 .vc-sc-lane-val { font: 400 11px/1 ${FONT_MONO}; text-align: right; color: rgba(255, 255, 255, 0.64); font-variant-numeric: tabular-nums; }
 .vc-sc-track { position: relative; height: 16px; cursor: pointer; touch-action: none; outline: none; }

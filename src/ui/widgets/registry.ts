@@ -141,11 +141,24 @@ export interface WidgetCtx {
    *  mirroring what a full rebuild's own pinned-row reconciliation does.
    *  Safe to call again with a fresh `rows` set after disposing the
    *  previous call's handle — that's the whole update path (itemBoxes.ts's
-   *  selection change: dispose the old rows section, mount the new one). */
+   *  selection change: dispose the old rows section, mount the new one).
+   *
+   *  `portHost` moves that row's port out of the row into the widget's own
+   *  element (the Strain settings card's lanes): it stays the row's port, so
+   *  pinning, the port's look and the cables all follow it there, and
+   *  `dispose()` removes it from `portHost` again. */
   mountRows(
     container: HTMLElement,
-    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[],
+    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[]; portHost?: HTMLElement }[],
   ): { dispose(): void };
+  /** The cssText of an unpinned port for `specs` — the exact look a row's
+   *  port has for one setting; for several that one port wires together, the
+   *  same look when they all receive the same, else a dashed "mixed" ring in
+   *  every wire's colour. For a widget's stand-in port drawn before the real
+   *  row is mounted (strainConsole.ts). */
+  portLook(specs: readonly SceneSetting[]): string;
+  /** Pins `spec`'s row (never unpins) — the row must be mounted. */
+  pin(spec: SceneSetting): void;
   /** Mounts a whole extra card (controlsKit.ts's `createCard`) as a sibling
    *  of the Scene card, right after it in the controls column — for a widget
    *  section that reads as its own block rather than more rows inside the

@@ -422,7 +422,7 @@ describe("Crawl speed / Speed boost / Speed pump", () => {
 
 describe("resolveStrainEffective — the one strain-motion mapping (shared by the GPU packing and the specimen-box previews)", () => {
   const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 22, life: LIFE_DEFAULT };
-  const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+  const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 0, life: 0 };
 
   it("at zero raw values and zero drive, reproduces the sliders' own MIN and the strain's unshifted colour", () => {
     for (let k = 0; k < SPECIES_COUNT; k++) {
@@ -490,9 +490,21 @@ describe("Strain Console settings: Sensor angle, Trail life, Switching, Synergy"
 
   it("the effective sensor angle is the stored one in radians (clamped to the slider's range)", () => {
     const raw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 60, life: LIFE_DEFAULT };
-    const drive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+    const drive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 0, life: 0 };
     expect(resolveStrainEffective(0, raw, drive).sensorAngleRad).toBeCloseTo(60 * (Math.PI / 180), 9);
     expect(resolveStrainEffective(0, { ...raw, angle: 999 }, drive).sensorAngleRad).toBeCloseTo(ANGLE_MAX_DEG * (Math.PI / 180), 9);
+  });
+
+  it("a Sensor angle or Trail life drive widens the angle and lengthens the trail, and 0 leaves the slider alone", () => {
+    const raw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 30, life: LIFE_DEFAULT };
+    const still: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 0, life: 0 };
+    const rest = resolveStrainEffective(0, raw, still);
+    expect(rest.sensorAngleRad).toBeCloseTo(30 * (Math.PI / 180), 9);
+    expect(rest.decayMul).toBeCloseTo(1, 9);
+    const loud = resolveStrainEffective(0, raw, { ...still, angle: 0.5, life: 0.5 });
+    expect(loud.sensorAngleRad).toBeGreaterThan(rest.sensorAngleRad);
+    expect(loud.sensorAngleRad).toBeLessThanOrEqual(ANGLE_MAX_DEG * (Math.PI / 180));
+    expect(loud.decayMul).toBeLessThan(rest.decayMul);
   });
 
   it("Trail life defaults to the shared decay exactly and right = a longer-lived trail", () => {

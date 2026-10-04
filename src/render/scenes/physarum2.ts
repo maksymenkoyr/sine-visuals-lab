@@ -802,9 +802,9 @@ export interface StrainRawValues {
   life: number;
 }
 
-/** A strain's live drive reading for each of the same six controls — the GPU
+/** A strain's live drive reading for each of the same controls — the GPU
  *  path reads `drives.value(key, sceneDefault, rest?)` (a per-strain band
- *  for Nutrient/Sensor range/Turn angle/Speed/Stain — STRAIN_BAND_SIGNALS —
+ *  for every control but Excitability — STRAIN_BAND_SIGNALS —
  *  `anim.beatPulse` for Excitability; Nutrient alone passes NUTRIENT_REST as
  *  its own `rest`, since an unplugged jack there must read as exactly 1, not
  *  0 — see that constant's own doc); the preview reads
@@ -817,6 +817,8 @@ export interface StrainDriveValues {
   turn: number;
   stride: number;
   stain: number;
+  angle: number;
+  life: number;
 }
 
 export interface StrainEffective {
@@ -854,8 +856,13 @@ export function resolveStrainEffective(k: number, raw: StrainRawValues, drive: S
   const stepDist = strideSliderToDist(strideEff) * surge;
   const stainShift = raw.stain + drive.stain * STAIN_DRIVE_GAIN;
   const color = hueRotateRGB(strain.color, stainShift);
-  const sensorAngleRad = Math.max(ANGLE_MIN_DEG, Math.min(ANGLE_MAX_DEG, raw.angle)) * DEG;
-  return { sensorAngleRad, decayMul: lifeToDecayMul(raw.life), stainShift, sensorDist, rotationRad, stepDist, feed, color };
+  // Sensor angle is in degrees: pushed toward the widest angle the same way
+  // the 0..1 controls are pushed toward 1, so drive 0 is the slider exactly.
+  const angleSet = Math.max(ANGLE_MIN_DEG, Math.min(ANGLE_MAX_DEG, raw.angle));
+  const angleUnit = pushToward1((angleSet - ANGLE_MIN_DEG) / (ANGLE_MAX_DEG - ANGLE_MIN_DEG), drive.angle);
+  const sensorAngleRad = (ANGLE_MIN_DEG + clamp01(angleUnit) * (ANGLE_MAX_DEG - ANGLE_MIN_DEG)) * DEG;
+  const decayMul = lifeToDecayMul(clamp01(pushToward1(clamp01(raw.life), drive.life)));
+  return { sensorAngleRad, decayMul, stainShift, sensorDist, rotationRad, stepDist, feed, color };
 }
 
 // ---------------------------------------------------------------------
@@ -1067,9 +1074,10 @@ const stainSettings = defineItems("strain", SPECIES_COUNT, {
   drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: STAIN_JACK_GAIN },
 });
 
-// Sensor angle and Trail life have no jack (plain sliders): neither was ever
-// audio-driven, and the Strain Console (src/ui/widgets/strainConsole.ts) is
-// where they live.
+// Sensor angle and Trail life got their jacks on 2026-10-04 (every lane in
+// the Strain settings card has a port): this strain's own band by default,
+// like Sensor range — a loud band widens the angle and lengthens the trail a
+// little; identity at drive 0, same reasoning as Sensor range.
 const angleSettings = defineItems("strain", SPECIES_COUNT, {
   key: "angle",
   label: "Sensor angle",
@@ -1079,6 +1087,7 @@ const angleSettings = defineItems("strain", SPECIES_COUNT, {
   max: ANGLE_MAX_DEG,
   step: 1,
   default: (k) => Math.round(STRAINS[k]!.sensorAngleRad / DEG),
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const lifeSettings = defineItems("strain", SPECIES_COUNT, {
@@ -1090,6 +1099,7 @@ const lifeSettings = defineItems("strain", SPECIES_COUNT, {
   max: 1,
   step: 0.02,
   default: LIFE_DEFAULT, // the shared Trail decay, unchanged
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const attSettings = defineItemPairs("strain", SPECIES_COUNT, {
@@ -1508,7 +1518,7 @@ const PANEL: readonly PanelSection[] = [
       // at once, a row of lanes each, with Stain Synergy under them — see
       // src/ui/widgets/strainConsole.ts. The order is the row order.
       console: {
-        title: "Per strain",
+        title: "Strain settings",
         params: ["nutrient", "excite", "sensor", "angle", "turn", "stride", "life", "stain"],
         formats: { angle: "degrees", stain: "turns" },
         // A Stain is a hue shift over the strain's own base colour, so each
@@ -2337,6 +2347,8 @@ function createPhysarum2Scene(): Scene {
     turn: 0,
     stride: 0,
     stain: 0,
+    angle: 0,
+    life: 0,
   }));
   let lastViewport: Viewport = FULL_VIEWPORT;
   let lastResW = 1;
@@ -2676,6 +2688,8 @@ function createPhysarum2Scene(): Scene {
         turn: d.value(turnSettings[k]!.key, motionDefault),
         stride: d.value(strideSettings[k]!.key, motionDefault),
         stain: d.value(stainSettings[k]!.key, bandDefault * STAIN_JACK_GAIN),
+        angle: d.value(angleSettings[k]!.key, motionDefault),
+        life: d.value(lifeSettings[k]!.key, motionDefault),
       };
       // What probe() reports as the strain's vigour: the signal actually
       // feeding its Nutrient this frame, scene default included (the

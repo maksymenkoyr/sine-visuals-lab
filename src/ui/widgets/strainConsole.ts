@@ -25,11 +25,19 @@ import {
  *
  * A lane edits the existing per-item setting (`ctx.get`/`ctx.set`, the
  * exact path a slider drag takes), so a Look, a reset and the TV see nothing
- * different. What the console can't draw is a row's jack, wire panel,
- * sparkline and reset — so releasing a lane mounts that setting's real
- * device-menu row (`ctx.mountRows`) under the lanes, and that row is where a
- * source is patched in. The full-size row is also where a setting with no
- * jack (Sensor angle, Trail life) is typed exactly.
+ * different. What the console can't draw is a row's wire panel, sparkline
+ * and reset — so releasing a lane mounts that setting's real device-menu row
+ * (`ctx.mountRows`) under the lanes, where a value is also typed exactly.
+ *
+ * Ports (2026-10-04): every lane starts with a port, and every row has a
+ * group port before its title. Until its row is mounted a port is a stand-in
+ * drawn with the real port's look (`ctx.portLook`); pressing it mounts that
+ * row, pinned, and the row's real port moves into the lane (`portHost`), so
+ * the wires, the wire panel and the cables are the patch bay's own. The group
+ * port mounts strain 0's row with the other strains `linked`, the panel's
+ * multi-item path: a wire plugged in there goes to every strain, and each
+ * lane's own port can still change one strain afterwards (the group port
+ * then reads mixed).
  *
  * Gestures: drag to set; double-click puts the default back; arrow keys step
  * (Shift = ten times as far). Link moves all the strains together. (A Knobs
@@ -116,6 +124,8 @@ export interface StrainConsole {
 /** Back's undo stack per console (`stateKey`) — module-level so it survives
  *  a full rebuild; in memory only. */
 const HISTORY_MAX = 20;
+/** How often the stand-in ports re-read their wires (ms). */
+const PORT_SYNC_MS = 250;
 const histories = new Map<string, Record<string, number[]>[]>();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -161,6 +171,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   const isHue = (p: string): boolean => opts.hue?.param === p;
 
   const cells = new Map<string, Cell[]>();
+  let lastPortSync = -Infinity;
   const link = new Map<string, boolean>();
 
   // ---------------- values ----------------
@@ -209,18 +220,56 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   let detailKey = "";
   let detailHandle: { dispose(): void } | undefined;
 
-  /** Mounts item k's real setting row under the lanes — where its jack, patch
-   *  and reset live. Called when a gesture on a lane ends. */
-  function showDetail(p: string, k: number): void {
-    const spec = specs.get(p)![k]!;
+  /** Where each port sits: `${p}:${k}` per lane, `${p}:all` for a row's
+   *  group port. The stand-in hides while the real port is moved in. */
+  const portSlots = new Map<string, { slot: HTMLElement; standIn: HTMLButtonElement; specs: SceneSetting[]; look: string }>();
+  let movedSlot: string | undefined;
+
+  function addPort(host: HTMLElement, key: string, portSpecs: SceneSetting[], title: string, onPress: () => void): void {
+    const slot = el("span", "vc-sc-port-slot");
+    const standIn = el("button", "vc-drive-port");
+    standIn.type = "button";
+    standIn.title = title;
+    standIn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onPress();
+    });
+    slot.appendChild(standIn);
+    host.appendChild(slot);
+    portSlots.set(key, { slot, standIn, specs: portSpecs, look: "" });
+  }
+
+  /** Mounts item k's real setting row under the lanes — or, for `"all"`, the
+   *  row that edits every item's setting together — where its wires, patch
+   *  and reset live, its port moved into the lane. Called when a gesture on a
+   *  lane ends (`pin` false) or a port is pressed (`pin` true). */
+  function showDetail(p: string, k: number | "all", pin: boolean): void {
+    const ss = specs.get(p)!;
+    const spec = ss[k === "all" ? 0 : k]!;
     const key = `${p}:${k}`;
-    if (key === detailKey) return;
-    detailKey = key;
-    detailHandle?.dispose();
-    detail.hidden = false;
-    detailHead.textContent = `${labels[k]} · ${spec.label}`;
-    detailHead.style.color = colours[k] ?? "#fff";
-    detailHandle = ctx.mountRows(detailRow, [{ spec }]);
+    if (key !== detailKey) {
+      detailKey = key;
+      detailHandle?.dispose();
+      const prev = movedSlot ? portSlots.get(movedSlot) : undefined;
+      if (prev) prev.standIn.hidden = false;
+      detail.hidden = false;
+      const all = k === "all";
+      detailHead.textContent = all ? `All strains · ${spec.label}` : `${labels[k]} · ${spec.label}`;
+      detailHead.style.color = all ? "#fff" : (colours[k] ?? "#fff");
+      const target = portSlots.get(key);
+      movedSlot = spec.drive && target ? key : undefined;
+      if (movedSlot) target!.standIn.hidden = true;
+      detailHandle = ctx.mountRows(detailRow, [
+        {
+          spec,
+          portHost: movedSlot ? target!.slot : undefined,
+          ...(all
+            ? { ownLabel: labels[0], linked: ss.slice(1).map((s, j) => ({ spec: s, label: labels[j + 1]!, colour: colours[j + 1] })) }
+            : {}),
+        },
+      ]);
+    }
+    if (pin && spec.drive) ctx.pin(spec);
   }
   disposers.push(() => detailHandle?.dispose());
 
@@ -233,7 +282,12 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     const row = el("div", "vc-sc-row");
     row.title = ss[0]!.description ?? "";
     const head = el("div", "vc-sc-row-head");
-    head.appendChild(el("span", "vc-sc-row-title", ss[0]!.label));
+    const titleWrap = el("span", "vc-sc-row-name");
+    if (ss[0]!.drive) {
+      addPort(titleWrap, `${p}:all`, ss, `Click to wire every strain's ${ss[0]!.label} at once`, () => showDetail(p, "all", true));
+    }
+    titleWrap.appendChild(el("span", "vc-sc-row-title", ss[0]!.label));
+    head.appendChild(titleWrap);
     const linkBtn = el("button", "vc-sc-chip", "Link");
     linkBtn.type = "button";
     linkBtn.title = "Drag one strain and all of them move by the same amount";
@@ -261,7 +315,11 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       const thumb = el("div", "vc-sc-thumb");
       track.append(rail, fill, thumb);
       const val = el("span", "vc-sc-lane-val");
-      lane.append(code, track, val);
+      const portCell = el("span", "vc-sc-lane-port");
+      if (spec.drive) {
+        addPort(portCell, `${p}:${k}`, [spec], `Click to choose what ${labels[k]}'s ${spec.label} listens to`, () => showDetail(p, k, true));
+      }
+      lane.append(portCell, code, track, val);
       lanes.appendChild(lane);
 
       let dragging = false;
@@ -284,13 +342,13 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       const end = (): void => {
         if (!dragging) return;
         dragging = false;
-        showDetail(p, k);
+        showDetail(p, k, false);
       };
       track.addEventListener("pointerup", end);
       track.addEventListener("pointercancel", end);
       track.addEventListener("dblclick", () => {
         write(p, k, spec.default, false, false);
-        showDetail(p, k);
+        showDetail(p, k, false);
       });
       track.addEventListener("keydown", (e) => {
         const step = arrowStep(spec, e.shiftKey);
@@ -301,7 +359,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
         e.preventDefault();
         adoptShown(p, k);
         write(p, k, ctx.get(spec) + d, !!link.get(p), false);
-        showDetail(p, k);
+        showDetail(p, k, false);
       });
 
       // paint() runs every tick; skip it while neither the value nor the
@@ -537,6 +595,16 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       wheelUpdate?.(probe);
       syncPresets();
       syncBack();
+      // Stand-in ports read the patch store, which decodes on every read —
+      // a few times a second is plenty for a wire change to show.
+      const now = performance.now();
+      if (now - lastPortSync >= PORT_SYNC_MS) {
+        lastPortSync = now;
+        for (const port of portSlots.values()) {
+          const look = ctx.portLook(port.specs);
+          if (look !== port.look) port.standIn.style.cssText = port.look = look;
+        }
+      }
     },
     dispose() {
       for (const d of disposers) d();

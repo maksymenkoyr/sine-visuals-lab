@@ -2759,6 +2759,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return `border: 1.5px solid rgba(8,11,10,0.75); background: ${bg}; box-shadow: 0 0 0 2px rgba(8,11,10,0.75), 0 0 6px ${glow}${ring};`;
   }
 
+  /** registry.ts's `WidgetCtx.portLook`: an unpinned port's look for one
+   *  setting, or for several that one port wires together — theirs when they
+   *  all receive the same, else every wire colour among them on a dashed
+   *  ring ("mixed"). */
+  function portLookFor(sceneId: string, specs: readonly SceneSetting[]): string {
+    const settings = specs.map((s) => deps.getDriveSetting(sceneId, s));
+    const first = settings[0];
+    if (first === undefined) return drivePortStyle("scene", "none");
+    if (settings.every((s) => sameDriveSetting(s, first))) return drivePortStyle(first, "none");
+    const cols = [...new Set(settings.flatMap((s) => (s === "scene" ? [] : s.sources.map((x) => driveSourceColor(x.choice)))))];
+    const bg = cols.length
+      ? `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length) * 100}% ${((i + 1) / cols.length) * 100}%`).join(", ")})`
+      : "transparent";
+    return `border: 1.5px dashed rgba(255,255,255,0.7); background: ${bg}; box-shadow: 0 0 0 2px rgba(8,11,10,0.75);`;
+  }
+
   // ---- Patch-panel sub-builders — each takes the (sceneId, spec) pair and
   // whatever local data it needs, and wires its own controls straight to
   // `deps`; patchChanged() below is the one place a mutation is followed by
@@ -6222,7 +6238,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     container: HTMLElement,
     sceneId: string,
     specs: SceneSetting[],
-    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[],
+    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[]; portHost?: HTMLElement }[],
   ): { dispose(): void } {
     const host = document.createElement("div");
     container.appendChild(host);
@@ -6238,6 +6254,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const addedSparks = driveSparkCanvases.slice(sparkStart);
     // Every row registers here too (registerPinRow), drive or not.
     const addedPinRows = pinRowHandles.slice(pinRowStart);
+    // A row's port moved out to where the widget drew it (`portHost`): it is
+    // still this row's `portEl`, so the cables end there.
+    const movedPorts: HTMLElement[] = [];
+    for (const r of rows) {
+      if (!r.portHost) continue;
+      const h = addedDriveRows.find((d) => d.spec.key === r.spec.key);
+      if (!h) continue;
+      r.portHost.appendChild(h.portEl);
+      h.rowEl.classList.add("vc-port-moved");
+      movedPorts.push(h.portEl);
+    }
 
     if (pinned) {
       const stillHere = addedPinRows.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
@@ -6270,6 +6297,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         driveSparkCanvases = driveSparkCanvases.filter((c) => !addedSparks.includes(c));
         for (const r of rows) linkedByKey.delete(r.spec.key);
         host.remove();
+        for (const port of movedPorts) port.remove();
         const ownsKey = (p: { sceneId: string; spec: SceneSetting } | null): boolean =>
           p !== null && p.sceneId === sceneId && rows.some((r) => r.spec.key === p.spec.key);
         // Never leave the pin (or a hover preview) on a row that no longer
@@ -6369,6 +6397,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
         appendRow: (rowContainer, spec, opts) => appendSettingRow(rowContainer, sceneId, spec, specs, SCENE_VIOLET, opts),
         mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
+        portLook: (portSpecs) => portLookFor(sceneId, portSpecs),
+        pin: (spec) => pinSetting(sceneId, spec),
         mountCard: (spec) => {
           const card = createCard(spec);
           // Own class beyond the generic .vc-card so a script (padcheck.mjs)
