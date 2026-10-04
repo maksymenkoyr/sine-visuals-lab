@@ -51,6 +51,14 @@ import {
 // The strongest few modes by response are summed in the shader, weighted
 // by that response, so mode changes are the plate's own dynamics rather
 // than a scripted crossfade.
+// Figure hold sets how much stronger a new mode must ring to take the plate:
+// the mode on top last frame counts holdMargin times its real response, 1
+// at 0 (exactly the model above) up to 1 + HOLD_MARGIN_MAX. A margin, not a
+// timer: a challenger that clears it takes over at once, and silence still
+// freezes. It only goes one way because the plain model is already as eager
+// as the music allows — a shorter running average or a larger surprise
+// share were both measured on the tempo-eval tracks and changed the figure
+// no more often (docs/scenes/chladni.md, Measurements).
 //
 // The sand. Grain positions live in a ping-pong pair of RGBA8 textures,
 // 16-bit fixed point per axis (R,G = x, B,A = y). RGBA8 is renderable on
@@ -177,6 +185,9 @@ export interface PlateResponseInputs {
   resonance: number;
   /** Ring setting, [0,1]: how long a mode keeps ringing after its tone stops. */
   ring: number;
+  /** Figure hold setting, [0,1]: how much stronger a new mode must ring to
+   *  take the plate — see holdMargin. Omitted = 0, the plain model. */
+  figureHold?: number;
 }
 
 export interface ActiveMode extends PlateMode {
@@ -208,6 +219,18 @@ const RESPONSE_FLOOR = 1e-9;
  *  energy's own running average over BASELINE_SEC — see createPlateResponse. */
 const BASELINE_SEC = 4;
 const SURPRISE_SHARE = 0.8;
+/** The top mode's head start at full Figure hold. */
+const HOLD_MARGIN_MAX = 3;
+/** Figure hold's curve: on the tempo-eval tracks most of the effect sits in
+ *  the low margins, so a squared slider spreads it across the travel. */
+const HOLD_CURVE = 2;
+
+/** The top mode's response multiplier across the Figure hold slider: 1 at
+ *  0, 1 + HOLD_MARGIN_MAX at 1. */
+export function holdMargin(figureHold: number): number {
+  const h = Math.max(0, Math.min(1, figureHold));
+  return 1 + HOLD_MARGIN_MAX * Math.pow(h, HOLD_CURVE);
+}
 
 export function ringSeconds(ring: number): number {
   return RING_SEC_MIN + Math.max(0, Math.min(1, ring)) * (RING_SEC_MAX - RING_SEC_MIN);
@@ -227,6 +250,9 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
   const baseline = new Float32Array(table.length).fill(NaN);
   const sharpened = new Float32Array(table.length);
   const order = table.map((_, i) => i);
+  /** Table index of the mode on top last frame — the one Figure hold's
+   *  margin favours. */
+  let top = 0;
   const active: ActiveMode[] = [];
   for (let k = 0; k < ACTIVE_MODES; k++) {
     const mode = table[Math.min(k, table.length - 1)];
@@ -242,6 +268,7 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
       const sharpen = SHARPEN_DAMPED + (SHARPEN_SHARP - SHARPEN_DAMPED) * resonance;
       const release = ringSeconds(inputs.ring);
       const attack = Math.max(ATTACK_SEC_MIN, release * ATTACK_FRACTION);
+      const margin = holdMargin(inputs.figureHold ?? 0);
       const bandCount = Math.min(bands.length, NUM_BANDS);
 
       for (let k = 0; k < table.length; k++) {
@@ -271,7 +298,7 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
         const excitation = Math.max(0, raw - SURPRISE_SHARE * baseline[k]);
         const tau = excitation > amplitudes[k] ? attack : release;
         amplitudes[k] += (excitation - amplitudes[k]) * (1 - Math.exp(-dt / tau));
-        sharpened[k] = Math.pow(amplitudes[k], sharpen);
+        sharpened[k] = Math.pow(k === top ? amplitudes[k] * margin : amplitudes[k], sharpen);
       }
 
       order.sort((a, b) => sharpened[b] - sharpened[a]);
@@ -287,6 +314,7 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
         slot.sign = mode.sign;
         slot.weight = sharpened[order[k]] / sum;
       }
+      top = order[0];
       return active;
     },
   };
@@ -413,6 +441,18 @@ const SETTINGS: SceneSetting[] = [
     default: 0.4,
     // Fast, percussive music wants a quicker-decaying plate.
     auto: { tempo: -0.25, attack: -0.15 },
+  },
+  {
+    key: "figureHold",
+    label: "Figure hold",
+    description: "How firmly the plate keeps its figure: 0, the figure follows whichever part of the music is busiest right now; higher, a new figure must ring clearly stronger than the one on the plate to take over",
+    // Manual — how restless the plate should look is a taste call, not a
+    // property of the track.
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
   },
   {
     key: "squarePlate",
@@ -1078,6 +1118,7 @@ function createChladniScene(): Scene {
         complexity: resolveSceneSetting(ID, settingFor("complexity")),
         resonance: resolveSceneSetting(ID, settingFor("resonance")),
         ring: resolveSceneSetting(ID, settingFor("ring")),
+        figureHold: resolveSceneSetting(ID, settingFor("figureHold")),
       });
       let maxOrder = 1;
       for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.m);

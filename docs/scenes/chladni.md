@@ -20,7 +20,8 @@ different mode takes over. Featured, on main.
   mapping), `createPlateResponse` (the per-mode resonance/ring/attack model
   that picks `ACTIVE_MODES` strongest modes each frame, each mode excited
   by its band energy less `SURPRISE_SHARE` of that energy's own running
-  average over `BASELINE_SEC`), `grainTextureSide`,
+  average over `BASELINE_SEC`, and giving last frame's top mode
+  `holdMargin`'s head start), `grainTextureSide`,
   `grainGain`, `drawnGrainCount` (the fixed-sand-budget logic — see
   "Known issues" for why it exists), and the grain-weight helpers
   `grainWeightAt`/`grainSizeFactor`/`grainSizeMoment`, which mirror
@@ -85,6 +86,24 @@ measured from a reference clip.
   music in it already gave (1,2) 98% before. Headless shots 7.5 s apart at
   `?audio=synthetic&bpm=120`: before held one lattice the whole time, after
   moved between figures with the lines still crisp.
+
+- 2026-10-04 (figure hold): `docs/scenes/chladni/scripts/figure-hold-measure.test.ts`,
+  the tempo-eval synthetic tracks clean and through `micChain`, real
+  `FeatureExtractor` into `createPlateResponse` at default settings.
+  Turnover (share of the plate's mode blend that changes per second) / clarity
+  (mean top-mode weight), clean tracks at hold 0 → 0.5 → 1: 0.61–0.88 / 0.27–0.30
+  → 0.37–0.59 / 0.52–0.58 → 0.10–0.24 / 0.84–0.91; through the mic 0.23–0.62 /
+  0.35–0.41 → 0.15–0.53 / 0.63–0.71 → 0.03–0.12 / 0.90–0.96. Hold 0.25 barely
+  moves turnover and lifts clarity by about 0.1. Resonance and Ring maxed at
+  hold 0, for comparison: clean turnover 0.41–0.63, through the mic 0.27–0.56
+  (Resonance 1 alone raised it through the mic, up to 0.76). Two candidates for
+  a "more change" side, measured as a mid-default slider and dropped: a running
+  average shortened to 1 s, and `SURPRISE_SHARE` raised toward 1, with and
+  without the shorter average — figure changes per minute stayed within the
+  run-to-run spread of the default on every track. Headless shots at 2.5 s
+  intervals (synthetic 120 BPM): hold 0 moved between blended figures, 0.5 kept
+  one figure with finer detail coming and going, 1 held one clean figure
+  through the whole run.
 
 ## Decisions and pivots
 
@@ -252,6 +271,23 @@ measured from a reference clip.
   edges as draggable handles (keyboard sliders too), the plate's drive now as
   a needle (`probe()`), and a strip of grains stepped by the same rule at each
   drive, which re-scatters every few seconds so an edge move shows at once.
+- 2026-10-04 (figure hold): the user asked what drives figure changes, then
+  whether their sensitivity can be regulated. **Figure hold** (Form, after
+  Ring): last frame's top mode counts `holdMargin` times its response, so a
+  new figure has to ring clearly stronger to take over. A margin rather than a
+  minimum time on the plate, so a big change still lands at once and nothing
+  moves on a timer. Squared across the slider (`HOLD_CURVE`), because the
+  linear first pass held nearly every track still from halfway up. One-way, default
+  0 = the plate as it was: the first build was a mid-default "Figure change"
+  slider whose right half shortened the running average, and it measured flat
+  (see Measurements) — the plain model already changes as often as the music
+  gives it reason to. It also makes the figure cleaner (the top mode takes a
+  bigger share of the blend), which overlaps Resonance, but Resonance doesn't
+  slow the turnover. Manual, no `auto`: how restless the plate looks is taste,
+  not a property of the track. Counting top-mode switches was the wrong
+  measure: at hold 0 on broadband music the top flickers every few frames
+  inside a near-even four-way blend that hardly changes, and a small hold
+  turned that into fewer but visible switches.
 
 ## Tuning notes
 
@@ -278,6 +314,10 @@ measured from a reference clip.
 - Quality tiers change grain count (`ctx.quality.maxParticles`) only;
   `grainGain` compensates so sparser beds (`floor`/`low`) read about as
   bright as the `high` tier reference count (`REFERENCE_GRAINS`).
+- Figure hold (`figureHold`, `holdMargin`, `HOLD_MARGIN_MAX`, `HOLD_CURVE`)
+  is how long a figure stays, independent of the spectrum. Judge it on a long
+  stretch of real music: at the top a figure should still give way to a new
+  section, not stick through a whole track.
 - `BASELINE_SEC`/`SURPRISE_SHARE` decide how strongly a constant spectral
   tilt is cancelled. Raising the share cancels more of it but trades away how
   firmly a held tone keeps its figure, and figures change more often. Judge
@@ -334,7 +374,9 @@ measured from a reference clip.
   mix beds after each has sorted; on a checkout without those settings every
   shot is the default bed, the "before" side) and `sand-zones-measure.mjs`
   (the sim rule on the CPU at steady drives, where `FREEZE_REF` and
-  `SNAP_REF` come from).
+  `SNAP_REF` come from) and `figure-hold-measure.test.ts` (figure turnover and
+  clarity across Figure hold on the tempo-eval tracks; copy into `tests/` to
+  run).
   Captured screenshots are session output, not
   kept in the repo.
 
@@ -367,5 +409,7 @@ measured from a reference clip.
   cross-scene vocabulary.
 - `#148` / `4a2208f` (2026-09-26) — Sand amount setting: scales the drawn
   grain bed; 0 leaves the plate bare.
-- `#312` (2026-10-04, draft) — Sand zones: Freeze edge and Snap edge
+- `#312` (2026-10-04) — Sand zones: Freeze edge and Snap edge
   settings with a draggable gauge in the Scene card; Settling pull removed.
+- 2026-10-04 (draft) — Figure hold: how much stronger a new figure must ring
+  to take the plate.

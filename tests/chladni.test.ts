@@ -19,6 +19,7 @@ import {
   ACTIVE_MODES,
   FUNDAMENTAL_HZ_SMALL,
   FUNDAMENTAL_HZ_LARGE,
+  holdMargin,
   type PlateResponseInputs,
 } from "../src/render/scenes/chladni.ts";
 import { clampZoneEdges, zoneDrive, FREEZE_REF, SNAP_REF, ZONE_MIN_GAP } from "../src/render/scenes/chladniSand.ts";
@@ -332,6 +333,65 @@ describe("plate response", () => {
     const held = { n: first[0].n, m: first[0].m };
     const second = run(r, tone(17), 2, inputs({ complexity: 0.5 }));
     expect(second[0]).not.toMatchObject(held);
+  });
+});
+
+/** Two tones at once: `a` at level 1, `b` at `bLevel`. */
+function twoTones(a: number, b: number, bLevel: number): Float32Array {
+  const bands = tone(a);
+  bands[b] = bLevel;
+  return bands;
+}
+
+describe("figure hold", () => {
+  // On the default plate (complexity 0.5) band 5 sits on (1, 2) and band 8
+  // on (1, 3).
+  const plate = (figureHold?: number) => inputs({ complexity: 0.5, figureHold });
+
+  it("0 is the plain model, bit for bit", () => {
+    const plain = createPlateResponse();
+    const held = createPlateResponse();
+    for (const bands of [tone(5), twoTones(5, 8, 0.6), tone(12), SILENCE, tone(15)]) {
+      expect(run(held, bands, 1.5, plate(0))).toEqual(run(plain, bands, 1.5, plate()));
+      expect(Array.from(held.amplitudes)).toEqual(Array.from(plain.amplitudes));
+    }
+  });
+
+  it("the top mode's head start grows across the slider", () => {
+    expect(holdMargin(0)).toBe(1);
+    expect(holdMargin(0.5)).toBeGreaterThan(holdMargin(0.25));
+    expect(holdMargin(1)).toBeGreaterThan(holdMargin(0.5));
+    expect(holdMargin(-1)).toBe(holdMargin(0));
+    expect(holdMargin(2)).toBe(holdMargin(1));
+  });
+
+  it("holds the figure against a new tone the plain plate switches to, but not against a much stronger one", () => {
+    const after = (figureHold: number, bLevel: number) => {
+      const r = createPlateResponse();
+      const first = run(r, tone(5), 3, plate(figureHold));
+      expect(first[0]).toMatchObject({ n: 1, m: 2 });
+      return run(r, twoTones(5, 8, bLevel), 3, plate(figureHold))[0];
+    };
+    expect(after(0, 0.6)).toMatchObject({ n: 1, m: 3 });
+    expect(after(1, 0.6)).toMatchObject({ n: 1, m: 2 });
+    expect(after(1, 2)).toMatchObject({ n: 1, m: 3 });
+  });
+
+  it("hands the figure on the plate a bigger share of a blur", () => {
+    const flat = new Float32Array(NUM_BANDS).fill(0.5);
+    const top = (figureHold: number) => {
+      const r = createPlateResponse();
+      run(r, SILENCE, 0.5, plate(figureHold));
+      return run(r, flat, 2, plate(figureHold))[0].weight;
+    };
+    expect(top(1)).toBeGreaterThan(top(0));
+  });
+
+  it("silence still freezes the figure at full hold", () => {
+    const r = createPlateResponse();
+    const during = run(r, tone(8), 1, plate(1));
+    const after = run(r, SILENCE, 2, plate(1));
+    expect(after[0]).toMatchObject({ n: during[0].n, m: during[0].m });
   });
 });
 
