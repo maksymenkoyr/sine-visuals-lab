@@ -23,7 +23,9 @@ on the app's bar lines. Draft scene, not on main yet.
   AnimFrame's beats/`tempoLock`/bpm into `c`. Locked, `c` follows the beats and
   re-anchors only at a drop; unlocked, it free-runs and slews back to a bar line
   when the lock returns. `dropFired` can start a cycle early, gated by
-  `MIN_DROP_GAP_BEATS`. `createStepClock` is the cast's other clock for Moves
+  `MIN_DROP_GAP_BEATS`. `paused` (Clock on signal) holds `c` as a lost lock
+  that doesn't advance; a returning lock re-anchors on the next bar line.
+  `createStepClock` is the cast's other clock for Moves
   on signal: one beat of dancing per fired step, holding at
   `STEP_HOLD_PHASE` between steps. `frameAt`'s `castC` is the cast's own
   cycle position (the DJ, guy, kid, raver, crowd, their props and the button);
@@ -40,7 +42,8 @@ on the app's bar lines. Draft scene, not on main yet.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
   the golden in `tests/toonraveMotion.golden.ts`.
 - Plugs into: drives (`bounce`, labelled Energy, on the beat grid, `lights` on the treble level,
-  `dropHits` on `anim.dropOnset`, `moves` on `anim.lowOnset`), `animClock` (`beats`, `tempoLock`), quality
+  `dropHits` on `anim.dropOnset`, `moves` on `anim.lowOnset`, `clock` on `anim.energy` with a scene-handled
+  threshold `CLOCK_RUN_MARK`), `animClock` (`beats`, `tempoLock`), quality
   (`MAX_CANVAS_WIDTH` caps the canvas width). The build is es2017, so nothing
   at module scope touches `document`, `Path2D` or `window`.
 
@@ -122,6 +125,12 @@ and are not recorded here yet.
   even a drop, and not an unwired toggle); the camera holds each shot's
   framing while the toggle is on. Lights keep the beat: they have their own
   control.
+- 2026-10-04 — "None of the drivers show signal but something affects the
+  scene": the conductor free-ran at 120 BPM in silence, and everything that
+  isn't the cast (lamps, lasers, LEDs, turntables, drops, cuts) reads that one
+  clock. The user chose to stop the clock in silence and to expose it: Clock
+  on signal, a driver on All level with a threshold line, on by default. It
+  goes by input level, not tempo lock, because a lock can drop in a breakdown.
 
 ## Tuning notes
 
@@ -142,6 +151,9 @@ and are not recorded here yet.
   anything moves the cast between fires. A silent fake mic
   (`--use-file-for-fake-audio-capture` on a silent wav) is the honest "no signal"
   check; synthetic audio always has hits.
+- Clock on signal: the threshold under its graph is the run mark; once running
+  it stops only below `CLOCK_STOP_SHARE` of it, so a level at the line doesn't
+  stutter. Nothing wired = held, like Moves on signal.
 
 ## Known issues and next steps
 
