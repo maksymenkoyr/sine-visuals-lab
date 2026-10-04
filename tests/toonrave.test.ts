@@ -564,7 +564,7 @@ describeScene("toonrave look shaping", () => {
     expectScene(JSON.stringify(s)).toBe(a);
   });
 
-  itScene("the hero frame is untouched by any Dance size amount", () => {
+  itScene("the hero frame is untouched by any Energy amount", () => {
     const a = JSON.stringify(at(HERO_C).x);
     for (const bounce of [0, 0.5, 1.5]) {
       const s = shapeState(at(HERO_C), { bounce, lights: 1, shake: 1 });
@@ -572,7 +572,7 @@ describeScene("toonrave look shaping", () => {
     }
   });
 
-  itScene("Dance size 0 holds the cast in the rest pose and leaves the lights' rigs alone", () => {
+  itScene("Energy 0 holds the cast in the rest pose and leaves the lights' rigs alone", () => {
     const rest = at(HERO_C).x;
     const moving = at(20.3);
     const s = shapeState(at(20.3), { bounce: 0, lights: 1, shake: 1 });
@@ -581,7 +581,7 @@ describeScene("toonrave look shaping", () => {
     expectScene(s.x.laser0).toEqual(moving.x.laser0);
   });
 
-  itScene("Dance size halves the motion away from the rest pose", () => {
+  itScene("Energy halves the motion away from the rest pose", () => {
     const rest = at(HERO_C).x;
     const moving = at(20.3).x.dj;
     const s = shapeState(at(20.3), { bounce: 0.5, lights: 1, shake: 1 });

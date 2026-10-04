@@ -30,12 +30,12 @@ on the app's bar lines. Draft scene, not on main yet.
 - `src/render/scenes/toonrave/glsl.ts` — `buildPostFrag`, the one GL pass: shows
   the canvas as a texture and applies the impact frame.
 - `src/render/scenes/toonrave/index.ts` — the `Scene` (id `"toonrave"`),
-  `SETTINGS`, `shapeState` (applies Dance size, Lights and Shake after `frameAt`,
+  `SETTINGS`, `shapeState` (applies Energy, Lights and Shake after `frameAt`,
   so the prototype's numbers stay untouched at the defaults), `HERO_C`,
   `CAST_RIGS`, `DROP_CYCLE_BEATS` and the DEV `freeze` command.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
   the golden in `tests/toonraveMotion.golden.ts`.
-- Plugs into: drives (`bounce`, labelled Dance size, on the beat grid, `lights` on the treble level,
+- Plugs into: drives (`bounce`, labelled Energy, on the beat grid, `lights` on the treble level,
   `dropHits` on `anim.dropOnset`), `animClock` (`beats`, `tempoLock`), quality
   (`MAX_CANVAS_WIDTH` caps the canvas width). The build is es2017, so nothing
   at module scope touches `document`, `Path2D` or `window`.
@@ -90,8 +90,8 @@ and are not recorded here yet.
   the rest of the cycle.
 - 2026-10-03 — Settings reshape the state after `frameAt` (`shapeState`)
   rather than being threaded through `motion.ts`, so the defaults are exactly
-  the prototype and Dance size 1 never moves the hero frame.
-- 2026-10-04 — Bounce renamed Dance size (key still `bounce`, so saved looks
+  the prototype and Energy 1 never moves the hero frame.
+- 2026-10-04 — Bounce renamed Energy ("Dance size" was tried first and rejected; key still `bounce`, so saved looks
   keep working). "Bounce" plus a beat-grid wire read as "the signal makes them
   bounce", but the steps always follow the BPM through the conductor; the wire
   only pumps how big they are. The caption now says both, with the quiet-end
@@ -99,7 +99,7 @@ and are not recorded here yet.
 
 ## Tuning notes
 
-- Dance size scales each cast rig's matrix between the hero-frame rest pose and
+- Energy scales each cast rig's matrix between the hero-frame rest pose and
   the moving one; 0 freezes everyone. Its signal only scales that size
   (`BOUNCE_DRIVE_DEPTH`); the timing is the conductor's. Cuts 0 holds the wide shot (use it to judge
   the hero frame); the groove's picks vary per cycle by hash and never repeat a
