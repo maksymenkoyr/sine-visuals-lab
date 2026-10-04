@@ -23,7 +23,13 @@ on the app's bar lines. Draft scene, not on main yet.
   AnimFrame's beats/`tempoLock`/bpm into `c`. Locked, `c` follows the beats and
   re-anchors only at a drop; unlocked, it free-runs and slews back to a bar line
   when the lock returns. `dropFired` can start a cycle early, gated by
-  `MIN_DROP_GAP_BEATS`.
+  `MIN_DROP_GAP_BEATS`. `paused` (Clock on signal) holds `c` as a lost lock
+  that doesn't advance; a returning lock re-anchors on the next bar line.
+  `createStepClock` is the cast's other clock for Moves
+  on signal: one beat of dancing per fired step, holding at
+  `STEP_HOLD_PHASE` between steps. `frameAt`'s `castC` is the cast's own
+  cycle position (the DJ, guy, kid, raver, crowd, their props and the button);
+  index.ts moves it only on a fire, and `stillCamera` holds each shot's framing.
 - `src/render/scenes/toonrave/svgDraw.ts` — `compileScene` parses the markup
   once into a `DrawProgram`; `drawProgram` paints one `FrameState` with
   Canvas2D every frame (vector, so crisp at any zoom).
@@ -36,7 +42,8 @@ on the app's bar lines. Draft scene, not on main yet.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
   the golden in `tests/toonraveMotion.golden.ts`.
 - Plugs into: drives (`bounce`, labelled Energy, on the beat grid, `lights` on the treble level,
-  `dropHits` on `anim.dropOnset`), `animClock` (`beats`, `tempoLock`), quality
+  `dropHits` on `anim.dropOnset`, `moves` on `anim.lowOnset`, `clock` on `anim.energy` with a scene-handled
+  threshold `CLOCK_RUN_MARK`), `animClock` (`beats`, `tempoLock`), quality
   (`MAX_CANVAS_WIDTH` caps the canvas width). The build is es2017, so nothing
   at module scope touches `document`, `Path2D` or `window`.
 
@@ -96,6 +103,34 @@ and are not recorded here yet.
   bounce", but the steps always follow the BPM through the conductor; the wire
   only pumps how big they are. The caption now says both, with the quiet-end
   share computed from `BOUNCE_DRIVE_DEPTH`.
+- 2026-10-04 — Moves on signal (asked for as "sync their moves to any
+  signal"): the cast's groove dancing can follow any wired signal instead of
+  the BPM. Only the groove's dancing switches clocks; drops, gags, the build,
+  lights and camera stay on the BPM, because the cycle's story is built on bar
+  lines. A step jumps to the hit pose, the rebound plays at the tempo and holds
+  at its top (`STEP_HOLD_PHASE`), so every fire shows as a slam down rather
+  than drifting on between fires. Off by default; Bass hit as the default wire.
+  Toggle rows had no wire port until this change (deviceMenu.ts's boolean
+  branch skipped `buildDriveRow`), so Drop on big hits got its port too.
+- 2026-10-04 — "Why do they move when the signal is at 0? Shouldn't be like
+  that": Energy's beat-grid pulse kept scaling the held pose every beat. While
+  the signal steps the cast, Energy's pulse is now sampled at each step and
+  held, so it sizes each step and nothing moves the cast between steps.
+- 2026-10-04 — "Still movement happens while there are no signals": measured
+  on a silent mic, the cast's poses were frozen but the camera's push-in inside
+  each shot, the drop gags and the build (still on the BPM), the button's
+  squash and the snap into the groove all moved. Now the cast has its own cycle
+  position everywhere in the cycle: groove fires step it, gag and build fires
+  let it catch up to the script for half a beat, nothing else moves it (not
+  even a drop, and not an unwired toggle); the camera holds each shot's
+  framing while the toggle is on. Lights keep the beat: they have their own
+  control.
+- 2026-10-04 — "None of the drivers show signal but something affects the
+  scene": the conductor free-ran at 120 BPM in silence, and everything that
+  isn't the cast (lamps, lasers, LEDs, turntables, drops, cuts) reads that one
+  clock. The user chose to stop the clock in silence and to expose it: Clock
+  on signal, a driver on All level with a threshold line, on by default. It
+  goes by input level, not tempo lock, because a lock can drop in a breakdown.
 
 ## Tuning notes
 
@@ -110,6 +145,15 @@ and are not recorded here yet.
   repeatable.
 - Under a locked beat clock the drops land on bar lines; with no lock it
   free-runs at 120 BPM until one appears.
+- Moves on signal: DEV `window.__toonrave.peek().castC` is the cast's own cycle
+  position (null while the cast is on the beats) and `.pulse` the Energy pulse
+  applied; these two decide the cast's pose, so a trace of them shows whether
+  anything moves the cast between fires. A silent fake mic
+  (`--use-file-for-fake-audio-capture` on a silent wav) is the honest "no signal"
+  check; synthetic audio always has hits.
+- Clock on signal: the threshold under its graph is the run mark; once running
+  it stops only below `CLOCK_STOP_SHARE` of it, so a level at the line doesn't
+  stutter. Nothing wired = held, like Moves on signal.
 
 ## Known issues and next steps
 

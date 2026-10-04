@@ -15,9 +15,18 @@
  * continuous. The first lock after reset(), and any lock within the first
  * SNAP_WINDOW_SEC of rendering, instead anchors at once and snaps c to the grid.
  *
+ * paused (Clock on signal, with its signal below the mark) holds c where it is:
+ * it drops the anchor as a lost lock would and stops the free run, so when it
+ * clears, c carries on from where it stopped and a returning lock re-anchors on
+ * the next bar line exactly as above. A drop is ignored while paused.
+ *
  * dropFired starts a new cycle on the nearest whole beat (c becomes 0 there),
  * but only if at least MIN_DROP_GAP_BEATS have passed since the last drop
  * (scheduled or fired). Pure: no wall clock, no DOM.
+ *
+ * createStepClock (at the bottom) is the cast's other clock, for Moves on
+ * signal: a beat count that advances one beat per fired step instead of with
+ * the music's beats.
  */
 
 export interface ConductorInput {
@@ -30,6 +39,8 @@ export interface ConductorInput {
   tempoLock: number;
   bpm: number;
   dropFired: boolean;
+  /** Hold the clock where it is (see the header). Default false. */
+  paused?: boolean;
 }
 
 export interface ConductorOut {
@@ -88,15 +99,18 @@ export function createConductor(): Conductor {
 
   const step = (inp: ConductorInput, cycleBeats: number): ConductorOut => {
     const n = cycleBeats;
-    const locked = inp.tempoLock > 0.5 && inp.bpm > 0;
-    if (locked) lastBpm = inp.bpm;
+    const paused = inp.paused === true;
+    const tempoLocked = inp.tempoLock > 0.5 && inp.bpm > 0;
+    if (tempoLocked) lastBpm = inp.bpm;
+    // paused reads as an unlocked clock that doesn't advance
+    const locked = tempoLocked && !paused;
 
     let dt = started ? inp.timeSec - prevTime : inp.dtSec;
     if (!(dt >= 0)) dt = Math.max(0, inp.dtSec);
     if (dt > MAX_DT_SEC) dt = MAX_DT_SEC;
-    const frameBeats = (dt * lastBpm) / 60;
+    const frameBeats = paused ? 0 : (dt * lastBpm) / 60;
 
-    const drop = inp.dropFired && sinceDrop >= MIN_DROP_GAP_BEATS;
+    const drop = !paused && inp.dropFired && sinceDrop >= MIN_DROP_GAP_BEATS;
 
     if (!started) {
       started = true;
@@ -173,8 +187,43 @@ export function createConductor(): Conductor {
     prevBeats = inp.beats;
     prevTime = inp.timeSec;
     prevC = c;
-    return { c, bpm: lastBpm, locked };
+    return { c, bpm: lastBpm, locked: tempoLocked };
   };
 
   return { step, reset };
+}
+
+/** Where a step's dancing waits for the next one, in beats into the step: the
+ *  bounce's rebound top (motion.ts's bounce() is up at half a beat), so the next
+ *  step lands as a visible slam down into the hit pose. */
+export const STEP_HOLD_PHASE = 0.5;
+
+/**
+ * Step clock, for Moves on signal: the cast's own beat count in the groove (the
+ * groove part of the castC motion.ts reads). Each fired step starts the next whole beat (its hit
+ * pose); between steps the beat plays at the tempo up to STEP_HOLD_PHASE and holds
+ * there, so with no signal the cast stands in its rebound pose rather than drifting
+ * on. Steps faster than that cut the rebound short. Pure: no wall clock.
+ */
+export interface StepClock {
+  step(fired: boolean, dtSec: number, bpm: number): number;
+  /** Back to holding before the first step (call when the groove begins). */
+  reset(): void;
+}
+
+export function createStepClock(): StepClock {
+  let m = STEP_HOLD_PHASE;
+  return {
+    step(fired, dtSec, bpm) {
+      if (fired) m = Math.floor(m) + 1;
+      else {
+        const dt = Math.min(MAX_DT_SEC, Math.max(0, dtSec));
+        m = Math.min(m + (dt * Math.max(0, bpm)) / 60, Math.floor(m) + STEP_HOLD_PHASE);
+      }
+      return m;
+    },
+    reset() {
+      m = STEP_HOLD_PHASE;
+    },
+  };
 }

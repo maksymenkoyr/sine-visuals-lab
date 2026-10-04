@@ -508,7 +508,7 @@ describeScene("toonrave settings", () => {
     const order = settings.map((s) => SETTING_GROUPS.indexOf(s.group as (typeof SETTING_GROUPS)[number]));
     expectScene(order.every((i) => i >= 0)).toBe(true);
     expectScene(order).toEqual([...order].sort((a, b) => a - b));
-    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
+    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
   });
 
   itScene("no setting has auto or macro", () => {
@@ -538,7 +538,7 @@ describeScene("toonrave settings", () => {
     expectScene([drops.min, drops.max, drops.step]).toEqual([0, drops.options!.length - 1, 1]);
     expectScene(drops.options![drops.default]).toBe("Every 16 bars");
     expectScene(DROP_CYCLE_BEATS).toEqual([128, 64, 32]);
-    for (const k of ["dropHits", "flash"]) {
+    for (const k of ["dropHits", "clock", "moves", "flash"]) {
       const s = byKey(k);
       expectScene(s.type, k).toBe("boolean");
       expectScene([s.min, s.max, s.step], k).toEqual([0, 1, 1]);
@@ -551,6 +551,11 @@ describeScene("toonrave settings", () => {
     expectScene(byKey("bounce").drive?.default).toEqual({ source: "beat", grid: 2 });
     expectScene(byKey("lights").drive).toBeDefined();
     expectScene(byKey("dropHits").drive?.default).toBe("anim.dropOnset");
+    expectScene(byKey("moves").drive?.default).toBe("anim.lowOnset");
+    expectScene(byKey("moves").default).toBe(0);
+    expectScene(byKey("clock").drive?.default).toBe("anim.energy");
+    expectScene(byKey("clock").drive?.threshold?.default).toBeGreaterThan(0);
+    expectScene(byKey("clock").default).toBe(1);
   });
 });
 
@@ -693,5 +698,133 @@ describeScene("toonrave post shader", () => {
     expectScene(src).toContain("vec3(1.0, 0.18, 0.64)");
     expectScene(src).toContain("vec3(1.0, 0.93, 0.97)");
     expectScene(src.startsWith("#version 300 es")).toBe(true);
+  });
+});
+
+import { describe as describeMoves, it as itMoves, expect as expectMoves } from "vitest";
+import { createStepClock, STEP_HOLD_PHASE } from "../src/render/scenes/toonrave/conductor.ts";
+
+describeMoves("toonrave moves on signal", () => {
+  const optsFor = (cycleBeats: 32 | 64 | 128) => ({ cycleBeats, cuts: 2 as const, bpm: 128 });
+
+  itMoves("the cycle's own position as castC gives exactly the same picture, anywhere in the cycle", () => {
+    for (const n of [32, 64, 128] as const) {
+      for (let c = 0; c < n; c += 0.37) {
+        const plain = JSON.stringify(sceneFrameAt(c, optsFor(n)));
+        const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(n), castC: c }));
+        expectMoves(own, `cycle ${n} c ${c.toFixed(2)}`).toBe(plain);
+      }
+    }
+  });
+
+  // what the cast is: its rigs, the props it carries and the button it hits, its cels
+  const castOf = (f: ReturnType<typeof sceneFrameAt>) => ({
+    x: [...CAST_RIGS, "pomp", "stick", "dome"].map((id) => f.x[id]),
+    o: [f.o.pomp, f.o.stick],
+    cel: Object.keys(f.cel).filter((k) => /^(dj|guy|kid|raver)/.test(k)).map((k) => f.cel[k]),
+    cls: [f.cls.crowd0, f.cls.crowd1, f.cls.crowd2],
+    slot: f.slot,
+  });
+
+  itMoves("a held castC holds the whole cast still while the cycle runs on: groove, gags, build and drop", () => {
+    for (const held of [20.3, 3.6, 59.2]) {
+      const ref = castOf(sceneFrameAt(0, { ...optsFor(64), castC: held }));
+      for (const c of [0.1, 0.6, 2, 9.5, 17, 21.4, 40.3, 55.9, 57, 60.5, 63.9]) {
+        expectMoves(castOf(sceneFrameAt(c, { ...optsFor(64), castC: held })), `held ${held} c ${c}`).toEqual(ref);
+      }
+    }
+  });
+
+  itMoves("castC moves the cast but not the lights", () => {
+    const plain = sceneFrameAt(40.3, optsFor(64));
+    const own = sceneFrameAt(40.3, { ...optsFor(64), castC: 23.04 });
+    expectMoves(own.x.dj).not.toEqual(plain.x.dj);
+    expectMoves(own.x.crowd0).not.toEqual(plain.x.crowd0);
+    expectMoves(own.camera).toEqual(plain.camera);
+    expectMoves(own.rayOp).toBe(plain.rayOp);
+    for (const id in plain.o) {
+      if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) expectMoves(own.o[id], id).toBe(plain.o[id]);
+    }
+  });
+
+  itMoves("stillCamera holds a shot's framing: no push-in inside the shot", () => {
+    const wide = { cycleBeats: 64 as const, cuts: 0 as const, bpm: 128 };
+    expectMoves(sceneFrameAt(20, wide).camera.src).not.toEqual(sceneFrameAt(40, wide).camera.src);
+    const still = { ...wide, stillCamera: true };
+    expectMoves(sceneFrameAt(20, still).camera.src).toEqual(sceneFrameAt(40, still).camera.src);
+    // the hero frame is still the full frame
+    expectMoves(sceneFrameAt(0.1, still).camera.src).toEqual(sceneFrameAt(0.1, wide).camera.src);
+  });
+
+  itMoves("the step clock holds without steps, starts a whole beat on each, and plays to the hold at the tempo", () => {
+    const k = createStepClock();
+    expectMoves(k.step(false, 1, 120)).toBe(STEP_HOLD_PHASE); // no steps: holds
+    expectMoves(k.step(true, 1 / 60, 120)).toBe(1); // a step: the next whole beat, its hit pose
+    expectMoves(k.step(false, 0.1, 120)).toBeCloseTo(1.2, 9); // 120 BPM: 0.2 beat in 0.1 s
+    expectMoves(k.step(false, 0.4, 120)).toBe(1 + STEP_HOLD_PHASE); // stops at the hold
+    expectMoves(k.step(false, 5, 120)).toBe(1 + STEP_HOLD_PHASE);
+    expectMoves(k.step(true, 1 / 60, 120)).toBe(2);
+    expectMoves(k.step(true, 1 / 60, 120)).toBe(3); // steps faster than the hold cut the rebound short
+    k.reset();
+    expectMoves(k.step(false, 0, 120)).toBe(STEP_HOLD_PHASE);
+  });
+});
+
+import { describe as describePause, it as itPause, expect as expectPause } from "vitest";
+import { createConductor as createConductorP, type ConductorInput as ConductorInputP } from "../src/render/scenes/toonrave/conductor.ts";
+
+describePause("toonrave conductor pause (Clock on signal)", () => {
+  const FPS = 60;
+  const mk = (t: number, lock: number, beats: number, paused: boolean, drop = false): ConductorInputP => ({
+    timeSec: t,
+    dtSec: 1 / FPS,
+    beats,
+    beatPhase: beats - Math.floor(beats),
+    barPhase: beats / 4 - Math.floor(beats / 4),
+    tempoLock: lock,
+    bpm: lock ? 120 : 0,
+    dropFired: drop,
+    paused,
+  });
+
+  for (const lock of [1, 0]) {
+    itPause(`paused holds c while the music runs on, and it carries on after (${lock ? "locked" : "unlocked"})`, () => {
+      const k = createConductorP();
+      let held = -1;
+      let prev = 0;
+      let maxStep = 0;
+      for (let i = 0; i <= FPS * 30; i++) {
+        const t = i / FPS;
+        const beats = t * 2;
+        const paused = t >= 6 && t < 14;
+        const o = k.step(mk(t, lock, beats, paused, paused && i % 30 === 0), 64);
+        if (paused) {
+          if (held < 0) held = prev;
+          expectPause(o.c, `t ${t.toFixed(2)}`).toBe(held); // a drop fired while paused is ignored too
+        } else if (i > 0) {
+          const d = o.c - prev;
+          if (d > -30) maxStep = Math.max(maxStep, d);
+          expectPause(d > -30 ? d : 0, `t ${t.toFixed(2)}`).toBeGreaterThanOrEqual(-1e-9);
+        }
+        prev = o.c;
+      }
+      expectPause(held).toBeGreaterThan(0);
+      // no jump on resume: at most the slew's 1.5x of a frame's beats
+      expectPause(maxStep).toBeLessThanOrEqual((2 / FPS) * 1.5 + 1e-9);
+    });
+  }
+
+  itPause("never paused is the plain conductor, frame for frame", () => {
+    const a = createConductorP();
+    const b = createConductorP();
+    for (let i = 0; i <= FPS * 20; i++) {
+      const t = i / FPS;
+      const beats = t * 2;
+      const lock = t > 3 && t < 9 ? 0 : 1;
+      const x = a.step(mk(t, lock, beats, false, i === 600), 32);
+      const { paused: _p, ...plain } = mk(t, lock, beats, false, i === 600);
+      const y = b.step(plain, 32);
+      expectPause(x).toEqual(y);
+    }
   });
 });

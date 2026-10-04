@@ -29,6 +29,14 @@
 // its beat). Lights, lasers, rays, the button glow and the camera read the
 // continuous c and move at display rate.
 //
+// Moves on signal. MotionOpts.castC, when given, is the cast's own cycle position:
+// the DJ, the guy and his hair, the kid, the raver and her stick, the crowd and the
+// button they hit read their Timing from it, anywhere in the cycle, while the
+// lights, rays, confetti and camera keep `c`. index.ts holds it still between the
+// signal's fires, so with no signal the cast does not move. castC = c gives exactly
+// the picture without it. MotionOpts.stillCamera holds each shot's framing at its
+// start (no push-in or pan inside a shot; the cuts still land where they do).
+//
 // Cuts. `cuts` 0 holds the wide shot all cycle. 1, 2 and 3 are the prototype's
 // "Camera cuts" levels 0, 1 and 2 (see cutPlan): a new groove shot every 4, 2
 // and 1 bars. The drop is always wide, and the same shot never appears twice in
@@ -71,6 +79,11 @@ export interface MotionOpts {
   cycle?: number;
   /** Reduced motion: no shake, no impact frame, no strobes. Default false. */
   reduced?: boolean;
+  /** The cast's own cycle position, when its moves follow a signal instead of the
+   *  cycle (see "Moves on signal" above); wrapped into the cycle. Absent: `c`. */
+  castC?: number;
+  /** Hold each shot's framing at its start instead of pushing in. Default false. */
+  stillCamera?: boolean;
 }
 
 export interface Camera {
@@ -423,14 +436,20 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   const k = opts.cycle ?? 0, reduced = opts.reduced === true;
   const buildAt = cycleBeats - BUILD_BEATS, shift = buildAt - BUILD_AT;
   const cNat = mod(cIn, cycleBeats), spb = stepsPerBeat(bpm);
-  const stepN = Math.floor(cNat * spb + 1e-6), cqNat = stepN / spb;
-  // the continuous clock, and the stepped one, each in the pose code's own time (the
-  // shift is a whole number of steps, so the stepped time is an exact step / spb)
+  // the stepped clock in the pose code's own time (the shift is a whole number of
+  // steps, so the stepped time is an exact step / spb)
+  const timingAt = (cw: number): Timing => {
+    const n = Math.floor(cw * spb + 1e-6), b = n / spb >= buildAt;
+    return { cq: b ? (n - shift * spb) / spb : n / spb, spb, build: b, reduced };
+  };
+  // the continuous clock, in the pose code's own time
   const build = cNat >= buildAt, c = build ? cNat - shift : cNat;
-  const buildQ = cqNat >= buildAt;
-  const T: Timing = { cq: buildQ ? (stepN - shift * spb) / spb : cqNat, spb, build: buildQ, reduced };
+  const T = timingAt(cNat);
   const { cq } = T;
   const ph = mod(c, 1), beatN = Math.floor(c);
+  // the cast's timing: the cycle's, or its own cycle position when given
+  const TC = opts.castC !== undefined ? timingAt(mod(opts.castC, cycleBeats)) : T;
+  const cqc = TC.cq;
   const F: FrameState = {
     c: cNat, x: {}, o: {}, cel: {}, cls: {}, slot: { dj: "back", stick: "front" }, led: [], rayOp: 0,
     camera: { shot: "wide", src: { x: 0, y: 0, w: FRAME_W, h: FRAME_H }, shake: { x: 0, y: 0, rot: 0 } },
@@ -452,7 +471,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   F.o.impactStars = cq < 0.9 ? 1 : 0;
   F.o.debrisLine = cq < HOLD ? 1 : 0;
   F.o.pompFx = cq < HOLD ? 1 : 0;
-  F.x.dome = poseM(BX, BY + 18, domePose(T));
+  F.x.dome = poseM(BX, BY + 18, domePose(TC));
   // the button glows and pulses through the build: each beat in bar 7, each half-beat in bar 8
   let glow = 0;
   if (c >= 2 && !build) glow = (0.08 + 0.22 * decay(ph, 6)) * seg(c, 2, 4);
@@ -472,7 +491,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   });
 
   // the DJ
-  const D = djPose(T);
+  const D = djPose(TC);
   F.x.dj = poseM(DJ_FEET[0]!, DJ_FEET[1]!, D.root);
   F.x.djHead = poseM(DJ_NECK[0]!, DJ_NECK[1]!, D.head);
   F.x.djPhones = MX.T(0, D.phones || 0);
@@ -481,74 +500,74 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   F.o.djRim = I;
 
   // the pompadour raver
-  const G = guyPose(T), GM = guyMatrices(G);
+  const G = guyPose(TC), GM = guyMatrices(G);
   F.x.guy = GM.root; F.x.guyHead = GM.head;
   Object.assign(F.cel, { guyLegs: G.legs, guyTorso: G.torso, guyEyes: G.eyes, guyBrows: G.brows, guyMouth: G.mouth });
   F.o.guyShine = G.bald ? 1 : 0; F.o.guyRim = I;
 
   // the kid
-  const K = kidPose(T), KM = kidM(K);
+  const K = kidPose(TC), KM = kidM(K);
   F.x.kid = KM; F.cel.kid = K.cel; F.o.kidRim = I;
 
   // the hairpiece: blown off at the drop, lands on the kid, hops home before the build
   const onKid = (Tk: Timing): Mat => { const P = kidPose(Tk), a = KID_HEAD[P.cel] || KID_HEAD.standA!; return MX.chain(kidM(P), MX.T(a[0], a[1]), MX.R(-24), MX.S(0.5)); };
   const onGuy = (Tg: Timing, crook: number): Mat => { const M = guyMatrices(guyPose(Tg)); return MX.chain(M.root, M.head, MX.T(1152, 222), MX.R(crook), MX.S(0.9)); };
-  const wob = -7 * bounce(mod(cq - 1 / spb, 1)); // the hair's lag: last step's bounce
+  const wob = -7 * bounce(mod(cqc - 1 / spb, 1)); // the hair's lag: last step's bounce
   let pomp: Mat = HERO_POMP, pompShow = 1;
-  if (cq < HOLD) pomp = HERO_POMP;
-  else if (cq < 2.5) {
-    const t = seg(cq, HOLD, 2.5);
+  if (cqc < HOLD) pomp = HERO_POMP;
+  else if (cqc < 2.5) {
+    const t = seg(cqc, HOLD, 2.5);
     pomp = place(qbez([1440, 300], [1590, -40], [1780, -320], easeIn(t) * 0.6 + t * 0.4), -18 + 720 * easeOut(t), 0.82);
-  } else if (cq < 5.5) pompShow = 0;
-  else if (cq < 8) {
-    const t = seg(cq, 5.5, 8), end = onKid({ ...T, cq: 8 });
+  } else if (cqc < 5.5) pompShow = 0;
+  else if (cqc < 8) {
+    const t = seg(cqc, 5.5, 8), end = onKid({ ...TC, cq: 8 });
     pomp = place(qbez([1180, -200], [1080, 80], posOf(end), 0.65 * t + 0.35 * t * t), lerp(-560, rotOf(end), easeOut(t)), lerp(0.82, scaleOf(end), t));
-  } else if (cq < 14) pomp = MX.mul(onKid(T), MX.R(wob * 0.8));
-  else if (cq < 16) {
-    const a = onKid({ ...T, cq: 14 }), b = onGuy({ ...T, cq: 16 }, -18), t = seg(cq, 14.5, 16);
-    if (cq < 14.5) pomp = MX.mul(a, MX.about(0, 20, MX.S(1.12, 0.78)));
+  } else if (cqc < 14) pomp = MX.mul(onKid(TC), MX.R(wob * 0.8));
+  else if (cqc < 16) {
+    const a = onKid({ ...TC, cq: 14 }), b = onGuy({ ...TC, cq: 16 }, -18), t = seg(cqc, 14.5, 16);
+    if (cqc < 14.5) pomp = MX.mul(a, MX.about(0, 20, MX.S(1.12, 0.78)));
     else {
       const pa = posOf(a), pb = posOf(b), p: V2 = [lerp(pa[0], pb[0], t), lerp(pa[1], pb[1], t) - 130 * 4 * t * (1 - t)];
       pomp = place(p, lerp(rotOf(a), rotOf(b) + 360, smooth(t)), lerp(scaleOf(a), scaleOf(b), t));
     }
   } else {
-    const crook = cq < 17 ? -18 : lerp(-18, 0, back(seg(cq, 17, 17.75), 2));
-    pomp = MX.mul(onGuy(T, crook), MX.R(!T.build ? wob : 0));
+    const crook = cqc < 17 ? -18 : lerp(-18, 0, back(seg(cqc, 17, 17.75), 2));
+    pomp = MX.mul(onGuy(TC, crook), MX.R(!TC.build ? wob : 0));
   }
   F.x.pomp = pomp; F.o.pomp = pompShow;
 
   // the round raver and her stick
-  const R = raverPose(T), RM = raverM(R.root);
+  const R = raverPose(TC), RM = raverM(R.root);
   F.x.raver = RM;
   Object.assign(F.cel, { raverTorso: R.torso, raverEyes: R.eyes, raverMouth: R.mouth, raverHair: R.hair });
   F.o.raverRim = I;
   let stick: Mat = HERO_STICK, stickShow = 1;
   F.slot.stick = "front";
-  if (cq < HOLD) stick = HERO_STICK;
-  else if (cq < 2.5) {
-    const t = seg(cq, HOLD, 2.5), h = posOf(HERO_STICK);
+  if (cqc < HOLD) stick = HERO_STICK;
+  else if (cqc < 2.5) {
+    const t = seg(cqc, HOLD, 2.5), h = posOf(HERO_STICK);
     stick = place(qbez(h, [1560, 220], [1720, -200], t), -40 + 900 * easeOut(t), 1);
-  } else if (cq < 5) stickShow = 0;
-  else if (cq < 6) {
-    const t = seg(cq, 5, 6), end = stickHeld(raverM(raverPose({ ...T, cq: 6 }).root), "w2");
+  } else if (cqc < 5) stickShow = 0;
+  else if (cqc < 6) {
+    const t = seg(cqc, 5, 6), end = stickHeld(raverM(raverPose({ ...TC, cq: 6 }).root), "w2");
     stick = place(qbez([1250, -140], [1230, 300], posOf(end), easeIn(t)), lerp(500, rotOf(end), easeOut(t)), 1);
   } else { stick = stickHeld(RM, R.torso); F.slot.stick = "back"; }
   F.x.stick = stick; F.o.stick = stickShow;
-  F.o.stickGlow = cq < 6 ? 1 : 0.6 + 0.4 * decay(mod(cq, 1), 4);
+  F.o.stickGlow = cqc < 6 ? 1 : 0.6 + 0.4 * decay(mod(cqc, 1), 4);
 
   // the crowd: rows bounce half a beat apart; blown back at the drop; crouch wide-eyed in the build
   for (let r = 0; r < 3; r++) {
     let x = 0, y = 0, ev: EyeClass = "ev1";
-    if (cq < HOLD) ev = "ev0";
-    else if (cq < 2) {
-      const t = seg(cq, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r]!;
+    if (cqc < HOLD) ev = "ev0";
+    else if (cqc < 2) {
+      const t = seg(cqc, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r]!;
       x = 20 * amt; y = -12 * amt; ev = "ev0";
-    } else if (!T.build) {
-      const b = bounce(mod(cq + (r % 2) * 0.5, 1));
+    } else if (!TC.build) {
+      const b = bounce(mod(cqc + (r % 2) * 0.5, 1));
       y = b > 0 ? 3 * b : 8 * b;
     } else {
-      const p = cq < 28 ? decay(mod(cq, 1), 5) : decay(mod(cq * 2, 1), 5);
-      y = 6 + 8 * seg(cq, BUILD_AT, 32) + 2 * p; ev = "ev2";
+      const p = cqc < 28 ? decay(mod(cqc, 1), 5) : decay(mod(cqc * 2, 1), 5);
+      y = 6 + 8 * seg(cqc, BUILD_AT, 32) + 2 * p; ev = "ev2";
     }
     F.x["crowd" + r] = MX.T(x, y); F.cls["crowd" + r] = ev;
   }
@@ -608,7 +627,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   const sh = shotAt(cNat, cutPlan(k, cuts, cycleBeats), cycleBeats);
   const cam = F.camera;
   cam.shot = sh.name;
-  if (!(sh.name === "wide" && cNat < HOLD)) cam.src = cropOf(sh.name, sh.u);
+  if (!(sh.name === "wide" && cNat < HOLD)) cam.src = cropOf(sh.name, opts.stillCamera ? 0 : sh.u);
   if (!reduced) {
     let A = 0;
     if (build) A = 9 * seg(c, BUILD_AT, 32) ** 2;
