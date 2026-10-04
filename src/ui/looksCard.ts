@@ -12,15 +12,24 @@ import { chipBtnStyle, createCard, createChipButton, spacer } from "./controlsKi
  * Fully dependency-injected like every other card here — no store import.
  * app.ts is the one place that wires these callbacks to sceneLooks.ts.
  *
- * "Save current as…" and "Paste a look code" reveal an inline <input>
- * rather than using prompt(): this panel runs over a fullscreen canvas on a
- * phone or TV, and a modal prompt can drop fullscreen on some browsers.
+ * "Save look" saves in one click: app.ts names the look (lookNames.ts makes
+ * up a silly one) and the card says what it was called. A double-click on a
+ * look's name renames it in place; the click handler skips the double-click's
+ * second click, which would otherwise apply the look again and overwrite its
+ * Undo snapshot with the look itself.
+ *
+ * Renaming and "Paste a look code" use an inline <input> rather than
+ * prompt(): this panel runs over a fullscreen canvas on a phone or TV, and a
+ * modal prompt can drop fullscreen on some browsers.
  */
 
 export interface LooksCardDeps {
   currentSceneId: () => string;
   listLooks: (sceneId: string) => SceneLook[];
-  onSaveLook: (sceneId: string, name: string) => void;
+  /** Saves the current tuning under a generated name and returns it. */
+  onSaveLook: (sceneId: string) => string;
+  /** False when the new name is blank or another look of the scene has it. */
+  onRenameLook: (sceneId: string, from: string, to: string) => boolean;
   onApplyLook: (look: SceneLook) => void;
   onDeleteLook: (sceneId: string, name: string) => void;
   decodeLook: (code: string) => SceneLook | null;
@@ -58,7 +67,7 @@ const inlineInputStyle = `
 `;
 const feedbackStyle = `font: 400 10.5px/1.4 ${FONT_MONO}; color: rgba(255,255,255,0.5); margin-top: 4px;`;
 
-/** One row of "Save current as…" style: a chip that reveals an inline input
+/** One row of "Paste a look code" style: a chip that reveals an inline input
  *  on click, confirms on Enter, and dismisses on Escape or blur. */
 function createInlineAction(chipText: string, chipTitle: string, placeholder: string, onConfirm: (value: string) => void) {
   const row = document.createElement("div");
@@ -121,11 +130,15 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
     feedback.style.display = "";
   }
 
-  const saveAction = createInlineAction("Save current as…", "Save this scene's current tuning under a name", "Name this look", (name) => {
-    deps.onSaveLook(deps.currentSceneId(), name);
-    feedback.style.display = "none";
+  const saveRow = document.createElement("div");
+  saveRow.style.cssText = actionRowStyle;
+  const saveChip = createChipButton("Save look", "Save this scene's current tuning as a new look", () => {
+    const name = deps.onSaveLook(deps.currentSceneId());
     refresh();
+    showFeedback(`Saved as "${name}". Double-click a name to rename it.`);
   });
+  saveChip.style.cssText = `${chipBtnStyle} flex: 1; text-align: center;`;
+  saveRow.appendChild(saveChip);
 
   const pasteAction = createInlineAction("Paste a look code", "Apply a look shared as a code", "Paste a look code", (code) => {
     const look = deps.decodeLook(code);
@@ -142,7 +155,39 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
     refresh();
   });
 
-  card.body.append(list, spacer(), ...saveAction.el, ...pasteAction.el, feedback);
+  card.body.append(list, spacer(), saveRow, ...pasteAction.el, feedback);
+
+  /** Swaps a look's name button for an input holding its name. Enter or
+   *  leaving the field keeps the new name, Escape keeps the old one. */
+  function startRename(sceneId: string, look: SceneLook, nameBtn: HTMLButtonElement): void {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = look.name;
+    input.style.cssText = `${inlineInputStyle} padding: 2px 6px;`;
+    let done = false;
+    function finish(keep: boolean): void {
+      if (done) return;
+      done = true;
+      const to = input.value.trim();
+      if (keep && to && to !== look.name) {
+        if (deps.onRenameLook(sceneId, look.name, to)) feedback.style.display = "none";
+        else showFeedback(`There's already a look called "${to}".`);
+      }
+      refresh();
+    }
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        finish(false);
+      } else if (e.key === "Enter") {
+        finish(true);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    nameBtn.replaceWith(input);
+    input.focus();
+    input.select();
+  }
 
   function renderList(): void {
     const sceneId = deps.currentSceneId();
@@ -161,12 +206,14 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
 
       const nameBtn = document.createElement("button");
       nameBtn.textContent = look.name;
-      nameBtn.title = `Apply "${look.name}"`;
+      nameBtn.title = `Apply "${look.name}" (double-click to rename)`;
       nameBtn.style.cssText = nameBtnStyle;
-      nameBtn.addEventListener("click", () => {
+      nameBtn.addEventListener("click", (e) => {
+        if (e.detail > 1) return;
         deps.onApplyLook(look);
         refresh();
       });
+      nameBtn.addEventListener("dblclick", () => startRename(sceneId, look, nameBtn));
 
       const copyBtn = document.createElement("button");
       copyBtn.textContent = "⧉";

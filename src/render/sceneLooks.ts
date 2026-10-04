@@ -139,6 +139,18 @@ export function saveSharedLook(look: SceneLook): SceneLook {
   return saved;
 }
 
+/** Renames a saved look in place (it keeps its spot in the list). Returns
+ *  false, changing nothing, when `to` is blank or already names another look
+ *  of this scene — renaming must never silently replace one. */
+export function renameLook(sceneId: string, from: string, to: string): boolean {
+  const list = cache[sceneId];
+  const look = list?.find((l) => l.name === from);
+  if (!list || !look || !to || list.some((l) => l !== look && l.name === to)) return false;
+  look.name = to;
+  persist();
+  return true;
+}
+
 export function deleteLook(sceneId: string, name: string): void {
   const list = cache[sceneId];
   if (!list) return;

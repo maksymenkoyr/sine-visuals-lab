@@ -531,7 +531,9 @@ export interface DeviceMenuDeps {
   /** Named, shareable snapshots of the Scene card's own settings — see
    *  src/render/sceneLooks.ts. Rendered by the Looks card, next to Scene. */
   listLooks: (sceneId: string) => SceneLook[];
-  onSaveLook: (sceneId: string, name: string) => void;
+  /** Saves the current tuning under a generated name and returns it. */
+  onSaveLook: (sceneId: string) => string;
+  onRenameLook: (sceneId: string, from: string, to: string) => boolean;
   onApplyLook: (look: SceneLook) => void;
   onDeleteLook: (sceneId: string, name: string) => void;
   decodeLook: (code: string) => SceneLook | null;
@@ -5892,6 +5894,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     currentSceneId: deps.currentSceneId,
     listLooks: deps.listLooks,
     onSaveLook: deps.onSaveLook,
+    onRenameLook: deps.onRenameLook,
     onApplyLook: (look) => {
       deps.onApplyLook(look);
       renderSceneSettings();
