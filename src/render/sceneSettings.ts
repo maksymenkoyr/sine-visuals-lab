@@ -1,6 +1,7 @@
 import type { SignalId, SignalLink } from "./signals.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
 import { registerSyncedStore } from "../net/syncedStores.ts";
+import { proUnlocked } from "./pro.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -82,6 +83,11 @@ export interface SceneSetting {
   type?: "boolean" | "enum";
   /** The names an "enum" setting picks between, in value order. */
   options?: readonly string[];
+  /** The `options` that are Pro content (src/render/pro.ts). While Pro is
+   *  locked, a locked option can't be stored or read back — clamp() turns
+   *  it into `default`, which must itself be a free option — and the
+   *  device menu shows it as a locked chip. */
+  proOptions?: readonly string[];
   /** How this parameter responds to music character. Signed weights per dial;
    *  omit for a parameter that should stay manual. See autoTune.ts. Inline
    *  type-only import avoids a runtime cycle with autoTune.ts, which imports
@@ -315,7 +321,15 @@ function clamp(spec: SceneSetting, value: number): number {
   if (!Number.isFinite(value)) return spec.default;
   // An enum's value is an index — a stored 0.7 must not linger between chips.
   if (spec.type === "enum") value = Math.round(value);
-  return Math.min(spec.max, Math.max(spec.min, value));
+  value = Math.min(spec.max, Math.max(spec.min, value));
+  return isProLocked(spec, value) ? spec.default : value;
+}
+
+/** True when `value` is an enum option listed in `proOptions` and Pro is
+ *  locked (src/render/pro.ts). */
+export function isProLocked(spec: SceneSetting, value: number): boolean {
+  if (!spec.proOptions?.length || !spec.options || proUnlocked()) return false;
+  return spec.proOptions.includes(spec.options[Math.round(value)] ?? "");
 }
 
 export function getSceneSetting(sceneId: string, spec: SceneSetting): number {
