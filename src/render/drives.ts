@@ -142,9 +142,13 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * own `weight·value` this tick, in patch order — un-gained, so the panel can
  * draw each source's thin trace independent of the setting's own `gain`.
  * `valueOf(key)` returns the same reading `value()`/`uniformPair()` give a
- * scene (mix-combined, then × `gain`) — the row's own sparkline. Both are
- * pure reads of state `accumulate()` already advanced; neither consumes a
- * grid edge the way `fired()` does. The panel's jacks and cables
+ * scene (mix-combined, then × `gain`) — the row's own sparkline.
+ * `expansionPair(key)` returns that reading just before and just after the
+ * Master Expansion (both ahead of the generic gate), so the output graph
+ * can shade what Expansion moved; null whenever Expansion passes the
+ * reading through untouched. All three are pure reads of state
+ * `accumulate()` already advanced; none consumes a grid edge the way
+ * `fired()` does. The panel's jacks and cables
  * (src/ui/jack.ts, src/ui/cableLayer.ts, wired from src/ui/deviceMenu.ts)
  * read only these two plus a patch's own `sources`/`mix` — nothing here
  * exists for them alone.
@@ -409,6 +413,12 @@ export interface SceneDrives {
    *  `rest` (default 0) — the same rule value() applies, this file's
    *  header's "Nothing plugged in" paragraph. */
   valueOf(key: string, rest?: number): number;
+  /** The gained reading just before and just after the Master Expansion
+   *  (this file's header), both ahead of the generic gate — the output
+   *  graph shades the gap between them. Null when Expansion passes the
+   *  reading through (1× with "even"), for `"scene"`, a patch with no live
+   *  source, or a setting accumulate() has no tracker for yet. */
+  expansionPair(key: string): { before: number; after: number } | null;
   /** This setting's own threshold value when its threshold is on (whether
    *  scene-handled — SceneSetting.drive.threshold, adjusted by the slider
    *  under its graph — or the generic engine gate every other patched
@@ -447,6 +457,7 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   uniformPair: () => ({ drive: 0, custom: 0 }),
   sourceValues: () => null,
   valueOf: (_key, _rest) => 0,
+  expansionPair: () => null,
   threshold: () => undefined,
   gateLine: () => undefined,
   masterExcursion: () => null,
@@ -1448,6 +1459,16 @@ export function createDriveEngine(): DriveEngine {
           if (setting === "scene") return 0;
           if (!hasLiveSource(setting)) return rest;
           return applyGenericGate(key, reading(key, setting, gain));
+        },
+
+        expansionPair(key) {
+          if (expansion === SCENE_EXPANSION_DEFAULT && shape === "even") return null;
+          const { setting, gain } = resolve(key);
+          if (setting === "scene" || !hasLiveSource(setting)) return null;
+          const ex = expansionTrackers.get(gateTrackerKey(sceneId, key));
+          if (!ex) return null;
+          const before = combine(setting, weightedValues(key, setting)) * gain;
+          return { before, after: expandReading(before, ex, expansion, shape) };
         },
 
         threshold(key) {
