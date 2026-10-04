@@ -211,8 +211,10 @@ import {
  * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
  * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
- * pinned) setting, with tiny usage dots for how many of this scene's
- * settings use it. Clicking one with a pinned setting toggles it into that
+ * pinned) setting, with tiny usage dots around the ring for how many of
+ * this scene's settings use it. While a signal's row is lit (hover or
+ * focus), every one of those wires is drawn to its port (litSignalFan,
+ * cableLayer.ts's fan group). Clicking one with a pinned setting toggles it into that
  * patch (onJackClick); with nothing pinned, it pins whichever setting was
  * last previewed (`lastPreview`, since `preview` itself goes back to null
  * the moment the pointer leaves) and plugs in in the same click, or shows a
@@ -4451,8 +4453,69 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
-      cableLayer.recompute(pinnedGroup, previewGroup);
+      cableLayer.recompute(pinnedGroup, previewGroup, litSignalFan());
     });
+  }
+
+  // ---- The lit signal's fan (cableLayer.ts's third group) ----
+  // A signal row lights on hover or focus (controlsTheme.ts's
+  // `.vc-row:hover, .vc-row:focus-within`); while it's lit, every wire
+  // leaving its jack(s) — the very ones its usage dots count (jackUsage) —
+  // is drawn to its port. Tracked by one delegated pointer/focus pair on
+  // the panel root, both kept because the glow itself answers to either:
+  // a pointer over one row while focus sits on another lights both.
+  let hoverJackRow: HTMLElement | null = null;
+  let focusJackRow: HTMLElement | null = null;
+  /** The signal row `t` sits in — a `.vc-row` carrying at least one jack
+   *  (a Hits row carries one per lane) — or null. */
+  function jackRowOf(t: EventTarget | null): HTMLElement | null {
+    if (!(t instanceof Element)) return null;
+    const row = t.closest<HTMLElement>(".vc-row");
+    return row && row.querySelector(".vc-jack") ? row : null;
+  }
+  function setLitJackRows(hover: HTMLElement | null, focus: HTMLElement | null): void {
+    if (hover === hoverJackRow && focus === focusJackRow) return;
+    const hadFan = hoverJackRow !== null || focusJackRow !== null;
+    hoverJackRow = hover;
+    focusJackRow = focus;
+    if (hadFan || hover || focus) scheduleCableRecompute();
+  }
+  root.addEventListener("pointerover", (e) => setLitJackRows(jackRowOf(e.target), focusJackRow));
+  root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
+  root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
+  root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
+
+  /** One fan group per port the lit row's jack(s) reach in the active
+   *  scene — one cable per (setting, jack), so a jack draws exactly as
+   *  many cables as it has usage dots. */
+  function litSignalFan(): CableGroupSpec[] {
+    const rows = [hoverJackRow, focusJackRow].filter((r): r is HTMLElement => r !== null);
+    if (!rows.length) return [];
+    const keyOfEl = new Map<HTMLElement, string>();
+    for (const [key, el] of combinedJackElements()) keyOfEl.set(el, key);
+    const litJacks = new Map<string, HTMLElement>();
+    for (const row of rows) {
+      for (const el of row.querySelectorAll<HTMLElement>(".vc-jack")) {
+        const key = keyOfEl.get(el);
+        if (key) litJacks.set(key, el);
+      }
+    }
+    const sceneId = deps.currentSceneId();
+    const groups: CableGroupSpec[] = [];
+    for (const h of driveRowHandles) {
+      if (h.sceneId !== sceneId || !h.spec.drive) continue;
+      const setting = deps.getDriveSetting(h.sceneId, h.spec);
+      if (setting === "scene") continue;
+      const sources: CableSourceSpec[] = [];
+      for (const src of setting.sources) {
+        const key = jackKey(src.choice);
+        const jackEl = litJacks.get(key);
+        if (!jackEl || sources.some((s) => s.key === key)) continue;
+        sources.push({ key, color: driveSourceColor(src.choice), soft: false, jackEl, getValue: () => 0 });
+      }
+      if (sources.length) groups.push({ sources, portEl: h.portEl });
+    }
+    return groups;
   }
   function refreshCableVisibility(): void {
     // Soloed, the meters column is hidden, so a cable would run to a jack

@@ -32,10 +32,30 @@ export interface JackHandle {
   /** aria-pressed — a source of the *pinned* setting specifically, i.e.
    *  what a click on this jack would toggle off. */
   setPressed(on: boolean): void;
-  /** Tiny dots under the ring — how many of this scene's settings use this
-   *  source right now, capped so a busy source doesn't grow the row. */
+  /** Tiny dots around the ring — one per setting of this scene that uses
+   *  this source right now. They step clockwise from 12 o'clock at a fixed
+   *  pitch, so a count still reads at a glance; once a full turn is
+   *  taken they spread evenly and shrink instead, so a busy source never
+   *  spills past its ring (useDotLayout below). */
   setUses(n: number): void;
   setLabel(ariaLabel: string, title: string): void;
+}
+
+/** The dots' own ring, in px from the jack's centre — just outside its
+ *  13px ring and 1.5px border (controlsTheme.ts's .vc-jack). */
+const USE_DOT_RADIUS_PX = 9;
+/** A dot's size and step while they fit within one turn. */
+const USE_DOT_PX = 1.8;
+const USE_DOT_STEP_DEG = 30;
+
+/** Where `n` usage dots sit and how big they are — see setUses. Past one
+ *  full turn the step becomes 360/n and the dot shrinks with it, keeping
+ *  the same dot-to-gap ratio as the full-size pitch, down to a floor
+ *  where neighbouring dots simply merge into a solid ring. */
+export function useDotLayout(n: number): { stepDeg: number; sizePx: number } {
+  const perTurn = 360 / USE_DOT_STEP_DEG;
+  if (n <= perTurn) return { stepDeg: USE_DOT_STEP_DEG, sizePx: USE_DOT_PX };
+  return { stepDeg: 360 / n, sizePx: Math.max(0.8, (USE_DOT_PX * perTurn) / n) };
 }
 
 /** A round button-like span — see this file's own header. `onClick`/`onHover`
@@ -66,7 +86,6 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
   el.addEventListener("focus", () => onHover(true));
   el.addEventListener("blur", () => onHover(false));
 
-  const MAX_USE_DOTS = 4;
   return {
     el,
     setFilled(on) {
@@ -76,9 +95,15 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
       el.setAttribute("aria-pressed", String(on));
     },
     setUses(n) {
-      const count = Math.max(0, Math.min(MAX_USE_DOTS, n));
+      const count = Math.max(0, Math.floor(n));
       while (uses.children.length < count) uses.appendChild(document.createElement("i"));
       while (uses.children.length > count) uses.lastElementChild?.remove();
+      const { stepDeg, sizePx } = useDotLayout(count);
+      uses.style.setProperty("--s", `${sizePx}px`);
+      uses.style.setProperty("--r", `${USE_DOT_RADIUS_PX}px`);
+      Array.from(uses.children as HTMLCollectionOf<HTMLElement>).forEach((dot, i) => {
+        dot.style.setProperty("--a", `${i * stepDeg}deg`);
+      });
     },
     setLabel(ariaLabel, title) {
       el.setAttribute("aria-label", ariaLabel);
