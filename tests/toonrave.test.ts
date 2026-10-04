@@ -508,7 +508,7 @@ describeScene("toonrave settings", () => {
     const order = settings.map((s) => SETTING_GROUPS.indexOf(s.group as (typeof SETTING_GROUPS)[number]));
     expectScene(order.every((i) => i >= 0)).toBe(true);
     expectScene(order).toEqual([...order].sort((a, b) => a - b));
-    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
+    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
   });
 
   itScene("no setting has auto or macro", () => {
@@ -538,7 +538,7 @@ describeScene("toonrave settings", () => {
     expectScene([drops.min, drops.max, drops.step]).toEqual([0, drops.options!.length - 1, 1]);
     expectScene(drops.options![drops.default]).toBe("Every 16 bars");
     expectScene(DROP_CYCLE_BEATS).toEqual([128, 64, 32]);
-    for (const k of ["dropHits", "moves", "flash"]) {
+    for (const k of ["dropHits", "clock", "moves", "flash"]) {
       const s = byKey(k);
       expectScene(s.type, k).toBe("boolean");
       expectScene([s.min, s.max, s.step], k).toEqual([0, 1, 1]);
@@ -553,6 +553,9 @@ describeScene("toonrave settings", () => {
     expectScene(byKey("dropHits").drive?.default).toBe("anim.dropOnset");
     expectScene(byKey("moves").drive?.default).toBe("anim.lowOnset");
     expectScene(byKey("moves").default).toBe(0);
+    expectScene(byKey("clock").drive?.default).toBe("anim.energy");
+    expectScene(byKey("clock").drive?.threshold?.default).toBeGreaterThan(0);
+    expectScene(byKey("clock").default).toBe(1);
   });
 });
 
@@ -764,5 +767,64 @@ describeMoves("toonrave moves on signal", () => {
     expectMoves(k.step(true, 1 / 60, 120)).toBe(3); // steps faster than the hold cut the rebound short
     k.reset();
     expectMoves(k.step(false, 0, 120)).toBe(STEP_HOLD_PHASE);
+  });
+});
+
+import { describe as describePause, it as itPause, expect as expectPause } from "vitest";
+import { createConductor as createConductorP, type ConductorInput as ConductorInputP } from "../src/render/scenes/toonrave/conductor.ts";
+
+describePause("toonrave conductor pause (Clock on signal)", () => {
+  const FPS = 60;
+  const mk = (t: number, lock: number, beats: number, paused: boolean, drop = false): ConductorInputP => ({
+    timeSec: t,
+    dtSec: 1 / FPS,
+    beats,
+    beatPhase: beats - Math.floor(beats),
+    barPhase: beats / 4 - Math.floor(beats / 4),
+    tempoLock: lock,
+    bpm: lock ? 120 : 0,
+    dropFired: drop,
+    paused,
+  });
+
+  for (const lock of [1, 0]) {
+    itPause(`paused holds c while the music runs on, and it carries on after (${lock ? "locked" : "unlocked"})`, () => {
+      const k = createConductorP();
+      let held = -1;
+      let prev = 0;
+      let maxStep = 0;
+      for (let i = 0; i <= FPS * 30; i++) {
+        const t = i / FPS;
+        const beats = t * 2;
+        const paused = t >= 6 && t < 14;
+        const o = k.step(mk(t, lock, beats, paused, paused && i % 30 === 0), 64);
+        if (paused) {
+          if (held < 0) held = prev;
+          expectPause(o.c, `t ${t.toFixed(2)}`).toBe(held); // a drop fired while paused is ignored too
+        } else if (i > 0) {
+          const d = o.c - prev;
+          if (d > -30) maxStep = Math.max(maxStep, d);
+          expectPause(d > -30 ? d : 0, `t ${t.toFixed(2)}`).toBeGreaterThanOrEqual(-1e-9);
+        }
+        prev = o.c;
+      }
+      expectPause(held).toBeGreaterThan(0);
+      // no jump on resume: at most the slew's 1.5x of a frame's beats
+      expectPause(maxStep).toBeLessThanOrEqual((2 / FPS) * 1.5 + 1e-9);
+    });
+  }
+
+  itPause("never paused is the plain conductor, frame for frame", () => {
+    const a = createConductorP();
+    const b = createConductorP();
+    for (let i = 0; i <= FPS * 20; i++) {
+      const t = i / FPS;
+      const beats = t * 2;
+      const lock = t > 3 && t < 9 ? 0 : 1;
+      const x = a.step(mk(t, lock, beats, false, i === 600), 32);
+      const { paused: _p, ...plain } = mk(t, lock, beats, false, i === 600);
+      const y = b.step(plain, 32);
+      expectPause(x).toEqual(y);
+    }
   });
 });
