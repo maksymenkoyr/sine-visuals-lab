@@ -69,7 +69,7 @@
 //
 // --from / --seconds pick the window of the track that ends up in the clip;
 // everything before --from still plays (the analyser needs its warm-up).
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, linkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { chromium } from "playwright";
@@ -285,17 +285,18 @@ const { frames, times, probes, micAt, from: fromSec } = best;
 const untilSec = fromSec + seconds;
 const framesDir = bestDir;
 
-// Rebuild at a constant 60 fps on the track's clock.
-const lines = [];
+// Rebuild at a constant 60 fps on the track's clock: one hard link per output
+// frame, read as an image sequence at exactly FPS. (A concat list of single
+// JPEGs was used before and is wrong: the JPEG demuxer stamps each image on a
+// 25 fps clock, so the output held only ~25 distinct pictures a second.)
+const seqDir = join(framesDir, "seq");
+mkdirSync(seqDir, { recursive: true });
 let j = 0;
 for (let k = 0; k < Math.round(seconds * FPS); k++) {
   const t = fromSec + k / FPS + lagMs / 1000;
   while (j + 1 < times.length && times[j + 1] <= t + 1e-4) j++;
-  lines.push(`file '${frames[j].file}'`, `duration ${1 / FPS}`);
+  linkSync(frames[j].file, join(seqDir, `${String(k).padStart(6, "0")}.jpg`));
 }
-lines.push(lines.at(-2));
-const list = join(framesDir, "list.txt");
-writeFileSync(list, lines.join("\n") + "\n");
 // Audio: the wav is the mic, so it sits in the clip where the mic started
 // (the clock's 0 in mic mode; wherever the actions enabled it in wall mode,
 // silence before, none at all if they never did).
@@ -304,13 +305,13 @@ const audioIn = timeBase === "mic" ? ["-ss", String(fromSec), "-i", wav]
   : micAt >= fromSec ? ["-i", wav] : ["-ss", String(fromSec - micAt), "-i", wav];
 const delayMs = timeBase === "wall" && micAt != null && micAt > fromSec ? Math.round((micAt - fromSec) * 1000) : 0;
 ffmpeg([
-  "-f", "concat", "-safe", "0", "-i", list,
+  "-framerate", String(FPS), "-i", join(seqDir, "%06d.jpg"),
   ...audioIn,
   ...(delayMs ? ["-af", `adelay=${delayMs}:all=1,apad`] : []),
   "-map", "0:v", "-map", "1:a",
   // The screencast's JPEGs are full-range BT.601; convert to the limited-range
   // BT.709 every player and Instagram expect, or blacks lift and colours shift.
-  "-vf", `fps=${FPS},scale=in_range=pc:out_range=tv:in_color_matrix=bt601:out_color_matrix=bt709,format=yuv420p`,
+  "-vf", `scale=in_range=pc:out_range=tv:in_color_matrix=bt601:out_color_matrix=bt709,format=yuv420p`,
   "-c:v", "libx264", "-preset", "slow", "-crf", "14", "-profile:v", "high",
   "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
   "-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-ac", "2",
