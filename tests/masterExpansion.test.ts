@@ -87,6 +87,25 @@ describe("Master Expansion on drive readings", () => {
     expect(excursion(4, "mx-soft-dip-soft", 0.6, 0.3, 2)).toBeCloseTo(even, 12);
   });
 
+  it("Up only follows a peak as Even does but leaves a dip at normal", () => {
+    const evenPeak = excursion(4, "mx-up-peak-even", 0.6, 0.9, 2);
+    setSceneExpansionShape("upOnly");
+    expect(excursion(4, "mx-up-peak", 0.6, 0.9, 2)).toBeCloseTo(evenPeak, 12);
+    // At `normal`, which itself drifts a little toward the dip.
+    const dip = excursion(4, "mx-up-dip", 0.6, 0.1, 4);
+    expect(dip).toBeGreaterThan(0.5);
+    expect(dip).toBeLessThanOrEqual(0.6);
+  });
+
+  it("Down only follows a dip as Even does but leaves a peak at normal", () => {
+    const evenDip = excursion(4, "mx-down-dip-even", 0.6, 0.1, 4);
+    setSceneExpansionShape("downOnly");
+    expect(excursion(4, "mx-down-dip", 0.6, 0.1, 4)).toBeCloseTo(evenDip, 12);
+    const peak = excursion(4, "mx-down-peak", 0.6, 0.9, 2);
+    expect(peak).toBeGreaterThanOrEqual(0.6);
+    expect(peak).toBeLessThan(0.65);
+  });
+
   it("Big moves only ignores beat-to-beat pulses but follows a section change", () => {
     setSceneExpansionShape("bigMoves");
     setSceneExpansion(2);

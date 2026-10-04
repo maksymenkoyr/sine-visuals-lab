@@ -106,7 +106,9 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * see shapeExcursion: "even" keeps it, "softTop" rounds big upward jumps
  * off below the reading's nominal top of 1, and "bigMoves" ignores beat-to-
  * beat swings by comparing `recent` (a short average) with `usual`, so the
- * picture only moves when a section changes. At 1 with "even" the reading
+ * picture only moves when a section changes. "upOnly" keeps only the rises
+ * (a breakdown leaves the picture at `normal`) and "downOnly" only the
+ * dips (a drop never throws it above `normal`). At 1 with "even" the reading
  * passes through untouched (bit-for-bit, so every identity rule in this
  * header holds); any other shape applies at 1 too.
  * Applied before the generic gate — its tracker sees the expanded reading,
@@ -568,6 +570,8 @@ function shapeExcursion(v: number, tr: ExpansionTracker, reach: number, shape: E
     return x * smoothstep(BIG_MOVE_LOW, BIG_MOVE_HIGH, Math.abs(x));
   }
   const x = reach * (v - tr.usual);
+  if (shape === "upOnly") return Math.max(0, x);
+  if (shape === "downOnly") return Math.min(0, x);
   if (shape === "softTop" && x > 0) {
     const room = Math.max(SOFT_TOP_MIN_ROOM, 1 - tr.normal);
     return room * Math.tanh(x / room);

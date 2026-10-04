@@ -440,7 +440,7 @@ export const setSceneExpansion = expansionDial.set;
 // the picture's (drives.ts's header, "Master Expansion"). A choice, not an
 // amount, so the Master card shows it as chips. Stored as an index into
 // EXPANSION_SHAPES — append new shapes, never reorder, or saved picks move.
-export const EXPANSION_SHAPES = ["even", "softTop", "bigMoves"] as const;
+export const EXPANSION_SHAPES = ["even", "softTop", "bigMoves", "upOnly", "downOnly"] as const;
 export type ExpansionShape = (typeof EXPANSION_SHAPES)[number];
 export const EXPANSION_SHAPE_DEFAULT: ExpansionShape = "even";
 export const SCENE_EXPANSION_SHAPE_KEY = "vibe.sceneExpansionShape";

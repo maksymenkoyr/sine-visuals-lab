@@ -502,9 +502,10 @@ export interface PickerRowSpec {
    *  the name moves to the chip's tooltip and accessible label. For a choice
    *  that reads better as a picture (the Master card's Expansion curves). */
   icons?: readonly string[];
-  /** Just the chip strip: no label/readout/reset head and no hint line —
-   *  `description` becomes the strip's tooltip. Pair with `icons`, whose
-   *  tooltips name each choice. */
+  /** Just the chip strip and its hint line: no label/readout/reset head,
+   *  `description` becomes the strip's tooltip, and the hint line shows the
+   *  hovered chip's option text, else the chosen one's. Pair with `icons`,
+   *  whose tooltips name each choice. */
   compact?: boolean;
 }
 
@@ -593,8 +594,20 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   setHintText(hint, spec.description ?? "");
   if (!spec.description) hint.style.display = "none";
 
-  if (spec.compact) el.append(strip);
-  else el.append(head, strip, hint);
+  // Compact: the hint says what the hovered chip does, falling back to the
+  // chosen one — the icons alone don't say it.
+  let hovered = -1;
+  const showHint = (): void => {
+    if (spec.compact) setHintText(hint, spec.options[hovered >= 0 ? hovered : current] ?? "");
+  };
+  if (spec.compact) {
+    hint.style.display = "";
+    chips.forEach((chip, i) => {
+      chip.addEventListener("pointerenter", () => { hovered = i; showHint(); });
+      chip.addEventListener("pointerleave", () => { if (hovered === i) hovered = -1; showHint(); });
+    });
+    el.append(strip, hint);
+  } else el.append(head, strip, hint);
   if (spec.signals) el.appendChild(spec.signals.strip);
 
   const clampIndex = (value: number): number =>
@@ -611,6 +624,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
       chip.setAttribute("aria-checked", String(i === current));
     });
     readout.textContent = spec.options[current];
+    showHint();
     resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
   }
   apply(current);
