@@ -435,3 +435,20 @@ const expansionDial = createDeviceDial(
 );
 export const getSceneExpansion = expansionDial.get;
 export const setSceneExpansion = expansionDial.set;
+
+// Expansion's shape: how the music's distance from its usual level becomes
+// the picture's (drives.ts's header, "Master Expansion"). A choice, not an
+// amount, so the Master card shows it as chips. Stored as an index into
+// EXPANSION_SHAPES — append new shapes, never reorder, or saved picks move.
+export const EXPANSION_SHAPES = ["even", "softTop", "bigMoves"] as const;
+export type ExpansionShape = (typeof EXPANSION_SHAPES)[number];
+export const EXPANSION_SHAPE_DEFAULT: ExpansionShape = "even";
+export const SCENE_EXPANSION_SHAPE_KEY = "vibe.sceneExpansionShape";
+
+const shapeDial = createDeviceDial(SCENE_EXPANSION_SHAPE_KEY, 0, EXPANSION_SHAPES.length - 1, 0);
+export function getSceneExpansionShape(): ExpansionShape {
+  return EXPANSION_SHAPES[Math.round(shapeDial.get())] ?? EXPANSION_SHAPE_DEFAULT;
+}
+export function setSceneExpansionShape(shape: ExpansionShape): void {
+  shapeDial.set(Math.max(0, EXPANSION_SHAPES.indexOf(shape)));
+}

@@ -98,6 +98,10 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import {
   getSceneExpansion,
+  getSceneExpansionShape,
+  EXPANSION_SHAPES,
+  EXPANSION_SHAPE_DEFAULT,
+  setSceneExpansionShape,
   getSceneMaster,
   getSceneSetting,
   resetSceneSettings,
@@ -1679,6 +1683,8 @@ function wireDeviceMenu(): void {
     onSceneMasterChange: (value) => setSceneMaster(value),
     getSceneExpansion: () => getSceneExpansion(),
     onSceneExpansionChange: (value) => setSceneExpansion(value),
+    getSceneExpansionShape: () => EXPANSION_SHAPES.indexOf(getSceneExpansionShape()),
+    onSceneExpansionShapeChange: (index) => setSceneExpansionShape(EXPANSION_SHAPES[index] ?? EXPANSION_SHAPE_DEFAULT),
     // The Master card's Picture block — null whenever the meter's gone stale
     // (the panel was just opened, so nothing has pushed a reading into it
     // yet, or the sampling loop is gapped for longer than a full reset — see

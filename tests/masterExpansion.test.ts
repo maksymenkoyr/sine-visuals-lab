@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createDriveEngine, expandReading } from "../src/render/drives.ts";
 import { createAnimClock } from "../src/render/animClock.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
-import { SCENE_EXPANSION_DEFAULT, setSceneExpansion, type SceneSetting } from "../src/render/sceneSettings.ts";
+import { SCENE_EXPANSION_DEFAULT, setSceneExpansion, setSceneExpansionShape, type SceneSetting } from "../src/render/sceneSettings.ts";
 
 // The Master card's Expansion acting on drive readings — drives.ts's
 // header, "Master Expansion". "anim.energy" reads the driveEnergy handed to
@@ -37,12 +37,15 @@ function excursion(expansion: number, sceneId: string, usual: number, then: numb
   return play(engine, sceneId, then, seconds);
 }
 
-afterEach(() => setSceneExpansion(SCENE_EXPANSION_DEFAULT));
+afterEach(() => {
+  setSceneExpansion(SCENE_EXPANSION_DEFAULT);
+  setSceneExpansionShape("even");
+});
 
 describe("Master Expansion on drive readings", () => {
   it("passes the reading through bit-for-bit at 1", () => {
     expect(excursion(1, "mx-identity", 0.6, 0.137, 4)).toBe(0.137);
-    expect(expandReading(0.42, 0.1, 0.9, SCENE_EXPANSION_DEFAULT)).toBe(0.42);
+    expect(expandReading(0.42, { normal: 0.1, usual: 0.9, recent: 0.5, ageSec: 60 }, SCENE_EXPANSION_DEFAULT, "even")).toBe(0.42);
   });
 
   it("low Expansion pulls a quiet stretch back to the normal level", () => {
@@ -71,7 +74,49 @@ describe("Master Expansion on drive readings", () => {
     expect(play(engine, "mx-warm-start", 0.6, 10)).toBeGreaterThan(0.45);
   });
 
+  it("Soft top keeps a big jump under the reading's nominal top", () => {
+    setSceneExpansionShape("softTop");
+    const v = excursion(4, "mx-soft-peak", 0.6, 0.9, 2);
+    expect(v).toBeGreaterThan(0.75);
+    expect(v).toBeLessThanOrEqual(1);
+  });
+
+  it("Soft top leaves a dip exactly as Even has it", () => {
+    const even = excursion(4, "mx-soft-dip-even", 0.6, 0.3, 2);
+    setSceneExpansionShape("softTop");
+    expect(excursion(4, "mx-soft-dip-soft", 0.6, 0.3, 2)).toBeCloseTo(even, 12);
+  });
+
+  it("Big moves only ignores beat-to-beat pulses but follows a section change", () => {
+    setSceneExpansionShape("bigMoves");
+    setSceneExpansion(2);
+    const engine = createDriveEngine();
+    const sceneId = "mx-big-moves";
+    const beat = (t: number) => (t % 0.5 < 0.1 ? 0.9 : 0.3); // kicks on a steady level
+    let t = 0;
+    const read = () => engine.forScene(sceneId, [SPEC], ANIM).value(SPEC.key, -1);
+    let lo = Infinity, hi = -Infinity;
+    for (; t < 120; t += DT) {
+      engine.accumulate(DT, FRAME, beat(t), ANIM, sceneId, [SPEC]);
+      if (t > 100) { const v = read(); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    }
+    expect(hi - lo).toBeLessThan(0.05); // steady section: the kicks don't move it
+    const before = read();
+    for (const end = t + 4; t < end; t += DT) engine.accumulate(DT, FRAME, 0.05, ANIM, sceneId, [SPEC]);
+    expect(read()).toBeLessThan(before - 0.2); // breakdown: it does
+  });
+
+  it("masterExcursion reports how far the picture sits from normal, for the gauge's needle", () => {
+    const engine = createDriveEngine();
+    const sceneId = "mx-gauge";
+    expect(engine.forScene(sceneId, [SPEC], ANIM).masterExcursion()).toBeNull();
+    play(engine, sceneId, 0.4, 120);
+    expect(Math.abs(engine.forScene(sceneId, [SPEC], ANIM).masterExcursion()!)).toBeLessThan(0.02);
+    play(engine, sceneId, 0.9, 1);
+    expect(engine.forScene(sceneId, [SPEC], ANIM).masterExcursion()!).toBeGreaterThan(0.4);
+  });
+
   it("never reads below zero", () => {
-    expect(expandReading(0, 0.2, 0.9, 4)).toBe(0);
+    expect(expandReading(0, { normal: 0.2, usual: 0.9, recent: 0.9, ageSec: 60 }, 4, "even")).toBe(0);
   });
 });
