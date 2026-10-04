@@ -104,6 +104,14 @@ measured from a reference clip.
   intervals (synthetic 120 BPM): hold 0 moved between blended figures, 0.5 kept
   one figure with finer detail coming and going, 1 held one clean figure
   through the whole run.
+- 2026-10-04, promo footage (PR #313, `tools/promo/motion.py`, Stable 0.2.0
+  defaults, 720×1280): on `?audio=synthetic` the plate held one simple figure
+  for 32 beats and only the palette changed — motion 1.67 (mean frame-to-frame
+  grey change), beat pulse 1.15. Fed a 175 BPM drum & bass track through the
+  fake mic it kept re-forming into new figures: motion 3.89, sync to the song's
+  onset strength 0.56 at a 20 ms lag, pulse 1.27 (64 beats after the drop). The
+  user had called the synthetic footage "bad … low dynamic movement"; never
+  judge or film Chladni on the synthetic feed — it has no spectrum to follow.
 
 ## Decisions and pivots
 
