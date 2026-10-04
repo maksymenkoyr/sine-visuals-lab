@@ -116,6 +116,19 @@ describe("Master Expansion on drive readings", () => {
     expect(engine.forScene(sceneId, [SPEC], ANIM).masterExcursion()!).toBeGreaterThan(0.4);
   });
 
+  it("expansionPair hands the graph the reading before and after Expansion, and nothing at 1×", () => {
+    const engine = createDriveEngine();
+    const sceneId = "mx-pair";
+    play(engine, sceneId, 0.6, 120);
+    expect(engine.forScene(sceneId, [SPEC], ANIM).expansionPair(SPEC.key)).toBeNull();
+    setSceneExpansion(4);
+    const after = play(engine, sceneId, 0.9, 2);
+    const pair = engine.forScene(sceneId, [SPEC], ANIM).expansionPair(SPEC.key)!;
+    expect(pair.before).toBeCloseTo(0.9, 6);
+    expect(pair.after).toBe(after); // what the scene reads, with the generic gate off
+    expect(pair.after).toBeGreaterThan(pair.before);
+  });
+
   it("never reads below zero", () => {
     expect(expandReading(0, { normal: 0.2, usual: 0.9, recent: 0.9, ageSec: 60 }, 4, "even")).toBe(0);
   });

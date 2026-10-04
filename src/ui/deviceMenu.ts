@@ -810,6 +810,10 @@ const autoChipManualStyle = (accent: string) =>
 // accent, so a muted row never reads as a lit A chip at a glance.
 const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
+/** The Master card's Expansion shape chips by name, in sceneSettings.ts's
+ *  EXPANSION_SHAPES order — the chips' own labels and the output graph's
+ *  Expansion tag both read these. */
+const EXPANSION_SHAPE_NAMES = ["Even", "Soft top", "Big moves only"] as const;
 
 // The Auto master bar — its own slim full-width strip at the top of the
 // settings column, a folded card's title-bar height (FOLDED_BAR_PX,
@@ -2547,6 +2551,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   let driveRowHandles: DriveRowHandle[] = [];
 
+  /** The output graph's corner tag while Expansion moves a reading: the
+   *  dial, plus the shape chip's name when it isn't the first (Even). */
+  const expansionTagText = (expansion: number, shapeIndex: number): string =>
+    `Expansion ${expansion.toFixed(2)}×` + (shapeIndex > 0 ? ` · ${EXPANSION_SHAPE_NAMES[shapeIndex] ?? ""}` : "");
+
   // Peak-hold between graph samples. The sparklines and the output graph
   // sample at SPARKLINE_REFRESH_MS, but a hit is a one-tick spike that
   // decays right away — a sample landing a tick or two after the hit drew
@@ -2554,23 +2563,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // looked uneven. notePeaks() runs every frame and remembers the highest
   // reading per setting (combined and per source); the 30 Hz tick draws
   // max(now, that), then the update loop clears it.
-  const peakSeen = new Map<string, { v: number; src: number[] }>();
+  const peakSeen = new Map<string, { v: number; src: number[]; before: number; after: number }>();
   function notePeaks(drives: SceneDrives): void {
     for (const h of driveRowHandles) {
       if (deps.getDriveSetting(h.sceneId, h.spec) === "scene") continue;
       const key = h.spec.key;
       let p = peakSeen.get(key);
       if (!p) {
-        p = { v: 0, src: [] };
+        p = { v: 0, src: [], before: 0, after: 0 };
         peakSeen.set(key, p);
       }
       p.v = Math.max(p.v, drives.valueOf(key));
       const vals = drives.sourceValues(key);
       if (vals) for (let i = 0; i < vals.length; i++) p.src[i] = Math.max(p.src[i] ?? 0, vals[i]!);
+      const pair = drives.expansionPair(key);
+      if (pair) {
+        p.before = Math.max(p.before, pair.before);
+        p.after = Math.max(p.after, pair.after);
+      }
     }
   }
   const heldValue = (key: string, now: number): number => Math.max(now, peakSeen.get(key)?.v ?? 0);
   const heldSource = (key: string, i: number, now: number): number => Math.max(now, peakSeen.get(key)?.src[i] ?? 0);
+  const heldExpansion = (key: string, now: { before: number; after: number }): { before: number; after: number } => {
+    const p = peakSeen.get(key);
+    return { before: Math.max(now.before, p?.before ?? 0), after: Math.max(now.after, p?.after ?? 0) };
+  };
 
   /** Every Scene-card row that can be pinned — all of them, drive or not,
    *  in document order: what togglePin refreshes, Tab walks (moveTabPin)
@@ -3258,7 +3276,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "The last 4 seconds, on a scale that never changes: the top is one wire at full weight, the dotted line across the middle one wire at weight 1. White: what this setting receives. Thin coloured lines: each wire (dashed: a condition). Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
+      "The last 4 seconds, on a scale that never changes: the top is one wire at full weight, the dotted line across the middle one wire at weight 1. White: what this setting receives. Thin coloured lines: each wire (dashed: a condition). Violet: what the Master card's Expansion moved — solid where it pushed this setting up, hatched where it pulled it down; none at 1× with Even. Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -3301,6 +3319,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Lines are recorded per tick (a scene's line can move — Beat ripple's
     // rides the signal) and drawn as traces, labelled at their latest point.
     const reactions = new Float32Array(RING);
+    // The Master Expansion's own gap (drives.ts expansionPair): the reading
+    // before and after it, NaN on a tick it passed the reading through.
+    const expBefore = new Float32Array(RING).fill(NaN);
+    const expAfter = new Float32Array(RING).fill(NaN);
+    let expansionTag = "";
     const markTraces = new Map<string, Float32Array>();
     let ringHead = 0;
     let filled = 0;
@@ -3316,6 +3339,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const STRIP_H = 3;
     const MARK_LINE = "rgba(255,255,255,0.55)";
     const MARK_REACTION = "rgba(110,235,225,0.9)";
+    // Expansion's gap in the Master card's own colour (its dial and leash
+    // gauge): a solid fill where it pushed the reading up, a hatch where it
+    // pulled it down.
+    const EXP_UP = withAlpha(SCENE_VIOLET, 0.45);
+    const EXP_DOWN = withAlpha(SCENE_VIOLET, 0.14);
+    const EXP_HATCH = withAlpha(SCENE_VIOLET, 0.6);
     // The generic engine gate's own line has no scene of its own to name it
     // (unlike Beat ripple's "reach to ring") — one fixed label, used as both
     // this trace's key in `markTraces` and the text the key row shows for it.
@@ -3400,6 +3429,37 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       ctx.textBaseline = "top";
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(top.toFixed(top < 1 ? 2 : 1), 4, 3);
+
+      // Expansion's gap, under the white line: one column per tick.
+      const colW = w / (RING - 1);
+      for (let k = RING - n; k < RING; k++) {
+        const idx = at(k);
+        const b = expBefore[idx]!;
+        const a = expAfter[idx]!;
+        if (!(Math.abs(a - b) > 0.004)) continue; // NaN or too small to see
+        const x = xs(k);
+        const yB = ys(b);
+        const yA = ys(a);
+        if (a > b) {
+          ctx.fillStyle = EXP_UP;
+          ctx.fillRect(x, yA, colW + 0.5, yB - yA);
+        } else {
+          ctx.fillStyle = EXP_DOWN;
+          ctx.fillRect(x, yB, colW + 0.5, yA - yB);
+          if (k % 3 === 0) {
+            ctx.fillStyle = EXP_HATCH;
+            ctx.fillRect(x, yB, 1, yA - yB);
+          }
+        }
+      }
+      if (expansionTag) {
+        const tw = ctx.measureText(expansionTag).width;
+        ctx.fillStyle = withAlpha(SCENE_VIOLET, 0.16);
+        ctx.fillRect(w - tw - 12, 3, tw + 8, 14);
+        ctx.fillStyle = SCENE_VIOLET;
+        ctx.fillText(expansionTag, w - tw - 8, 5);
+      }
+
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -3458,6 +3518,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const src = drives.sourceValues(spec.key);
       const now = drives.valueOf(spec.key);
       const v = heldValue(spec.key, now);
+      const pairNow = drives.expansionPair(spec.key);
+      const pairHeld = pairNow && heldExpansion(spec.key, pairNow);
+      expansionTag = pairNow ? expansionTagText(deps.getSceneExpansion(), deps.getSceneExpansionShape()) : "";
       const marks = takeSettingMarks(sceneId, spec.key, "graph");
       // The generic engine gate's own line (drives.ts's header's threshold
       // paragraph) — undefined for a scene-handled setting (it draws its own
@@ -3489,6 +3552,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           perSource[i]![ringHead] = first ? heldSource(spec.key, i, sv) : sv;
         }
         combined[ringHead] = first ? v : now;
+        const pair = first ? pairHeld : pairNow;
+        expBefore[ringHead] = pair ? pair.before : NaN;
+        expAfter[ringHead] = pair ? pair.after : NaN;
         for (const trace of markTraces.values()) trace[ringHead] = NaN;
         for (const line of marks?.lines ?? []) markTraces.get(line.label)![ringHead] = line.value;
         if (gateLine !== undefined) markTraces.get(GENERIC_GATE_LINE_LABEL)![ringHead] = gateLine * (spec.drive?.gain ?? 1);
@@ -4699,9 +4765,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     label: "Expansion shape",
     accent: SCENE_VIOLET,
     options: [
-      "Even — follows every change",
-      "Soft top — rounds off big jumps",
-      "Big moves only — ignores the beat, follows the song's sections",
+      `${EXPANSION_SHAPE_NAMES[0]} — follows every change`,
+      `${EXPANSION_SHAPE_NAMES[1]} — rounds off big jumps`,
+      `${EXPANSION_SHAPE_NAMES[2]} — ignores the beat, follows the song's sections`,
     ],
     icons: [
       curveIcon("M3 16L27 2"),
