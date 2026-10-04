@@ -318,8 +318,14 @@ measured from a reference clip.
 
 ## Materials
 
-- No `/ref` bundle and no artifacts; the original design was built against
-  the plate physics rather than a reference clip.
+- No `/ref` bundle; the original design was built against the plate physics
+  rather than a reference clip.
+- Artifacts: `docs/scenes/chladni/artifacts/sand-zones-gauge.html`, the
+  source of the "Sand Zones Gauge" explainer
+  (https://claude.ai/artifact/TGUaybdbJWeeo5K4DeyfC3). It covers how the drive
+  is built, what the edges do to it, and why the sand has three ranges, with
+  live demos on a copy of `chladniSand.ts`'s numbers. Self-contained; open it
+  in a browser.
 - Working scripts: `docs/scenes/chladni/scripts/` — `sand-amount-shot.mjs`
   (headless before/after shots of the Sand amount setting via
   `window.__viz.setParams`) and `figure-sequence-shot.mjs` (a timed run of
