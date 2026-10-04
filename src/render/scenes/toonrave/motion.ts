@@ -29,13 +29,14 @@
 // its beat). Lights, lasers, rays, the button glow and the camera read the
 // continuous c and move at display rate.
 //
-// Moves on signal. MotionOpts.castC, when given, is the cast's own cycle position:
-// the DJ, the guy and his hair, the kid, the raver and her stick, the crowd and the
-// button they hit read their Timing from it, anywhere in the cycle, while the
-// lights, rays, confetti and camera keep `c`. index.ts holds it still between the
-// signal's fires, so with no signal the cast does not move. castC = c gives exactly
-// the picture without it. MotionOpts.stillCamera holds each shot's framing at its
-// start (no push-in or pan inside a shot; the cuts still land where they do).
+// Dance. MotionOpts.castC, when given, is the cast's own cycle position: the DJ,
+// the guy and his hair, the kid, the raver and her stick, the crowd and the button
+// they hit read their Timing from it, while the lights, rays, confetti and camera
+// keep `c`; castC = c gives exactly the picture without it. MotionOpts.move, when
+// given with a groove castC, stands in for the groove's own bounce curve: every
+// groove pose that reads bounce(ph) reads move.b instead (the hair's lag reads
+// move.lag, the crowd's offset rows move.off), so the cast dances the move Dance
+// learned (dance.ts) at the speed Energy sets, through the same poses.
 //
 // Cuts. `cuts` 0 holds the wide shot all cycle. 1, 2 and 3 are the prototype's
 // "Camera cuts" levels 0, 1 and 2 (see cutPlan): a new groove shot every 4, 2
@@ -79,12 +80,17 @@ export interface MotionOpts {
   cycle?: number;
   /** Reduced motion: no shake, no impact frame, no strobes. Default false. */
   reduced?: boolean;
-  /** The cast's own cycle position, when its moves follow a signal instead of the
-   *  cycle (see "Moves on signal" above); wrapped into the cycle. Absent: `c`. */
+  /** The cast's own cycle position (see "Dance" above); wrapped into the cycle.
+   *  Absent: `c`. */
   castC?: number;
-  /** Hold each shot's framing at its start instead of pushing in. Default false. */
-  stillCamera?: boolean;
+  /** The groove's bounce values from the learned move (see "Dance" above), each
+   *  -1 (stretched) .. 1 (squashed): `b` now, `lag` one step back, `off` half a
+   *  beat along for the crowd's offset rows. Read by the poses' bounce branches,
+   *  which also cover some of the gags: index.ts gives it only in the groove. */
+  move?: GrooveMove;
 }
+
+export interface GrooveMove { b: number; lag: number; off: number }
 
 export interface Camera {
   shot: ShotId;
@@ -206,7 +212,7 @@ const blastI = (c: number): number => (c < 1 ? 1 : 1 - smooth(seg(c, 1, 5)));
  * shifted to the prototype's beats 24..32), `build` is true in the build,
  * where the groove's open-ended poses give way to the build's.
  */
-interface Timing { cq: number; spb: number; build: boolean; reduced: boolean }
+interface Timing { cq: number; spb: number; build: boolean; reduced: boolean; move?: GrooveMove }
 
 // --- the DJ -----------------------------------------------------------------------------------
 const DJ_FEET = [455, 540], DJ_NECK = [420, 362], STAND_Y = 26;
@@ -225,7 +231,7 @@ function djPose(T: Timing): DjPose {
     return P;
   }
   if (!T.build) { // the groove
-    const b = bounce(ph), bl = bounce(mod(ph - 1 / spb, 1));
+    const b = T.move ? T.move.b : bounce(ph), bl = T.move ? T.move.lag : bounce(mod(ph - 1 / spb, 1));
     P.root = { y: STAND_Y + (b > 0 ? 5 * b : 12 * b), sy: 1 - 0.05 * b, sx: 1 + 0.04 * b };
     P.head = { sy: 1 - 0.08 * b, sx: 1 + 0.05 * b, r: (beat % 2 ? 4 : -4) * (ph < 0.08 ? 1.4 : 1) };
     P.phones = bl < 0 ? 14 * bl : 5 * bl; // the headphones jump a step late
@@ -259,7 +265,7 @@ function domePose(T: Timing): Pose {
   const { cq } = T, ph = mod(cq, 1);
   if (cq < HOLD) return {};
   if (cq < 1.75) { const e = elastic(seg(cq, HOLD, 1.75)); return { sy: 1 + 0.15 * e, sx: 1 - 0.02 * e }; }
-  if (!T.build) { const k = Math.max(0, bounce(ph)); return { sy: 1.15 - 0.07 * k, sx: 0.98 + 0.04 * k }; }
+  if (!T.build) { const k = Math.max(0, T.move ? T.move.b : bounce(ph)); return { sy: 1.15 - 0.07 * k, sx: 0.98 + 0.04 * k }; }
   const p = cq < 28 ? decay(ph, 5) : decay(mod(cq * 2, 1), 5);
   return { sy: 1.15 + 0.08 * p, sx: 0.98 - 0.02 * p };
 }
@@ -270,7 +276,7 @@ function guyPose(T: Timing): GuyPose {
   const { cq, spb } = T, ph = mod(cq, 1), beat = Math.floor(cq);
   const P: GuyPose = { root: { r: 0 }, head: {}, legs: "stand", torso: "pumpA", eyes: "normal", brows: "calm", mouth: "smile", bald: cq < 16 };
   const groove = (amt = 1): void => {
-    const b = bounce(ph);
+    const b = T.move ? T.move.b : bounce(ph);
     P.root = { r: 0, y: amt * (b > 0 ? 3 * b : 7 * b), sy: 1 - 0.03 * b * amt };
     P.head = { y: 5 * Math.max(b, 0) * amt, sy: 1 - 0.05 * b * amt, r: (beat % 2 ? 3 : -3) * amt };
     P.torso = beat % 2 ? "pumpB" : "pumpA";
@@ -313,7 +319,7 @@ function kidPose(T: Timing): KidPose {
     return { cel: "standA", root: { y: -46 * Math.sin(Math.PI * Math.min(1, u * 1.25)), sy: u > 0.8 ? 0.84 : 1, sx: u > 0.8 ? 1.12 : 1 } };
   }
   if (!T.build) {
-    const b = bounce(ph), heavy = cq >= 8 && cq < 14 ? 0.55 : 1;
+    const b = T.move ? T.move.b : bounce(ph), heavy = cq >= 8 && cq < 14 ? 0.55 : 1;
     const R: Pose = { y: heavy * (b > 0 ? 3 * b : 14 * b), sy: 1 - 0.07 * b * heavy, sx: 1 + 0.05 * b * heavy };
     if (cq >= 8 && cq < 9) { const u = 1 - elastic(seg(cq, 8, 9)); R.sy = 1 - 0.3 * u; R.sx = 1 + 0.2 * u; R.y = 0; }
     if (cq >= 14 && cq < 14.5) { R.sy = 0.86; R.sx = 1.1; R.y = 0; }
@@ -345,7 +351,7 @@ function raverPose(T: Timing): RaverPose {
     return P;
   }
   if (!T.build) {
-    const b = bounce(ph), u = mod(cq, 2) / 2, tri = u < 0.5 ? u * 2 : 2 - u * 2;
+    const b = T.move ? T.move.b : bounce(ph), u = mod(cq, 2) / 2, tri = u < 0.5 ? u * 2 : 2 - u * 2;
     P.root = { r: 4 + 2 * b, y: b > 0 ? 4 * b : 9 * b };
     P.torso = "w" + Math.min(3, Math.floor(tri * 4));
     P.hair = Math.floor(cq * 2) % 2 ? "calmB" : "calmA";
@@ -448,7 +454,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   const { cq } = T;
   const ph = mod(c, 1), beatN = Math.floor(c);
   // the cast's timing: the cycle's, or its own cycle position when given
-  const TC = opts.castC !== undefined ? timingAt(mod(opts.castC, cycleBeats)) : T;
+  const TC: Timing = opts.castC !== undefined ? { ...timingAt(mod(opts.castC, cycleBeats)), move: opts.move } : T;
   const cqc = TC.cq;
   const F: FrameState = {
     c: cNat, x: {}, o: {}, cel: {}, cls: {}, slot: { dj: "back", stick: "front" }, led: [], rayOp: 0,
@@ -512,7 +518,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   // the hairpiece: blown off at the drop, lands on the kid, hops home before the build
   const onKid = (Tk: Timing): Mat => { const P = kidPose(Tk), a = KID_HEAD[P.cel] || KID_HEAD.standA!; return MX.chain(kidM(P), MX.T(a[0], a[1]), MX.R(-24), MX.S(0.5)); };
   const onGuy = (Tg: Timing, crook: number): Mat => { const M = guyMatrices(guyPose(Tg)); return MX.chain(M.root, M.head, MX.T(1152, 222), MX.R(crook), MX.S(0.9)); };
-  const wob = -7 * bounce(mod(cqc - 1 / spb, 1)); // the hair's lag: last step's bounce
+  const wob = -7 * (TC.move ? TC.move.lag : bounce(mod(cqc - 1 / spb, 1))); // the hair's lag: last step's bounce
   let pomp: Mat = HERO_POMP, pompShow = 1;
   if (cqc < HOLD) pomp = HERO_POMP;
   else if (cqc < 2.5) {
@@ -563,7 +569,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
       const t = seg(cqc, HOLD, 2), amt = (t < 0.2 ? easeOut(t / 0.2) : 1 - elastic(seg(t, 0.2, 1))) * [1, 0.6, 0.35][r]!;
       x = 20 * amt; y = -12 * amt; ev = "ev0";
     } else if (!TC.build) {
-      const b = bounce(mod(cqc + (r % 2) * 0.5, 1));
+      const b = TC.move ? (r % 2 ? TC.move.off : TC.move.b) : bounce(mod(cqc + (r % 2) * 0.5, 1));
       y = b > 0 ? 3 * b : 8 * b;
     } else {
       const p = cqc < 28 ? decay(mod(cqc, 1), 5) : decay(mod(cqc * 2, 1), 5);
@@ -627,7 +633,7 @@ export function frameAt(cIn: number, opts: MotionOpts): FrameState {
   const sh = shotAt(cNat, cutPlan(k, cuts, cycleBeats), cycleBeats);
   const cam = F.camera;
   cam.shot = sh.name;
-  if (!(sh.name === "wide" && cNat < HOLD)) cam.src = cropOf(sh.name, opts.stillCamera ? 0 : sh.u);
+  if (!(sh.name === "wide" && cNat < HOLD)) cam.src = cropOf(sh.name, sh.u);
   if (!reduced) {
     let A = 0;
     if (build) A = 9 * seg(c, BUILD_AT, 32) ** 2;

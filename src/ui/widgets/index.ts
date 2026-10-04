@@ -4,5 +4,6 @@
 // imports this rather than each widget file by name.
 import "./itemBoxes.ts";
 import "./sandZones.ts";
+import "./danceMove.ts";
 
 export * from "./registry.ts";
