@@ -12,7 +12,8 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 - Never edit on `main`. Work on a worktree branch and land it through a PR.
 - Before starting, fetch and check whether `origin/main` already has the change
   (its recent log, and a grep for the symbol), and whether an open PR already
-  covers it (`gh pr list`). If one looks related, read its diff first. Parallel
+  covers it (`gh pr list`). If one looks related, read its description
+  first (its diff only if the overlap is still unclear). Parallel
   sessions often land the same fix.
 - Branch from freshly fetched `origin/main`. Rebase (never merge) before opening
   a PR, and check again for divergence right before pushing. Never rewrite
@@ -32,16 +33,12 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 ## Two rules for keeping documentation honest
 
-**1. A doc exists only for knowledge with no single owning file.** If a fact has
-an obvious home, a file whose job is exactly that thing, it goes in that file's
-header comment, not in `docs/`.
-
-**2. Never write down anything countable.** Not a count, not a table of values,
-not a list that lives in code. Name the symbol instead ("the dials in
-`MUSIC_DIALS`", not "the seven dials"). Renaming a symbol surfaces every
-reference to it, so a sentence that names one can't go stale silently. The
-exceptions are dated records: `docs/status.md` (regenerated each session) and a
-scene record's "Measurements" and dated "Decisions and pivots".
+- Explain code in a comment at the top of its file. Write a doc in `docs/`
+  only for an explanation that spans several files.
+- In comments and docs, don't copy numbers or lists from the code: name the
+  variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
+  dials"). Dated notes (`docs/status.md`, a scene record's measurements and
+  dated decisions) are the exception.
 
 ## Read this before touching X
 
@@ -70,22 +67,11 @@ scene record's "Measurements" and dated "Decisions and pivots".
 
 ## Standing rules
 
-- **Sliders: right = more.** Moving any slider right makes more of what its
-  label names. If a value works the other way, rename the label to what grows
-  ("Speed", not "Period") or invert the mapping.
-- **Answering questions.** When I ask "why", "what does X mean" or "explain
-  X", answer in plain prose grounded in the code: name the file/function and
-  the one mechanism that causes the behaviour, then stop and wait. Don't edit
-  code, and no plans, HTML artifacts or designs unless I ask for them.
-- **Short version first.** Open any plan, explanation or research answer
-  with at most five plain lines. Go deeper only into the part I pick.
+- **Short answers.** Keep answers short: at most five plain lines, deeper
+  only into the part I pick. When I ask why or what something means, answer
+  and stop: no edits, plans or artifacts unless I ask.
 - **Ask about wording and look.** If a label, UX wording or the intended look
   could reasonably mean two things, ask one short question before building.
-  Otherwise make the obvious choice and say what you assumed.
-- **Extend, don't duplicate.** When a requested effect overlaps an existing
-  system (Sparkle, the governor, the brightness dialâ€¦), build it into that
-  system rather than adding a parallel one. If it's unclear which system owns
-  it, ask one question.
 - **Scene links.** When working on a visualization, run `npm run dev` and
   give the user the link to that scene that the dev server prints at startup,
   not the gallery root. Any query goes *before* the hash; one placed after the

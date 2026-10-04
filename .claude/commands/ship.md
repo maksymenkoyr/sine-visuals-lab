@@ -17,6 +17,9 @@ Finish the change on this branch:
    a couple in the PR body — `npm run pr-shots -- before.png after.png`
    prints the markdown. Never for a paid scene.
 
+   For a visualization change, also run `npm run dev` and give the user the
+   scene link it prints at startup, not the gallery root.
+
 4. **Rebase.** Fetch, rebase (never merge) on `origin/main`, and check again
    for divergence right before pushing.
 

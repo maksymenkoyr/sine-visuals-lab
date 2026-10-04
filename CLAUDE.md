@@ -1,34 +1,18 @@
 A browser-based, real-time WebGL2 audio visualizer.
 
-- Before starting, grep `origin/main` for the change and read the diff of any
-  related open PR.
-- A doc exists only for knowledge with no single owning file. If a fact has an
-  obvious home, a file whose job is exactly that thing, it goes in that file's
-  header comment, not in `docs/`.
-- Never write down anything countable: not a count, not a table of values, not
-  a list that lives in code. Name the symbol instead ("the dials in
-  `MUSIC_DIALS`", not "the seven dials"), so renaming it surfaces every
-  reference. The exceptions are dated records: `docs/status.md` and a scene
-  record's "Measurements" and dated "Decisions and pivots".
-- Moving any slider right makes more of what its label names. If a value works
-  the other way, rename the label to what grows ("Speed", not "Period") or
-  invert the mapping.
-- When I ask "why", "what does X mean" or "explain X", answer in plain prose
-  grounded in the code: name the file/function and the one mechanism that
-  causes the behaviour, then stop and wait. Don't edit code, and no plans,
-  HTML artifacts or designs unless I ask for them.
-- Open any plan, explanation or research answer with at most five plain lines.
-  Go deeper only into the part I pick.
+- Before starting, grep `origin/main` for the change and read the description
+  of any related open PR (its diff only if the overlap is still unclear).
+- Explain code in a comment at the top of its file. Write a doc in `docs/`
+  only for an explanation that spans several files.
+- In comments and docs, don't copy numbers or lists from the code: name the
+  variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
+  dials"). Dated notes (`docs/status.md`, a scene record's measurements and
+  dated decisions) are the exception.
+- Keep answers short: at most five plain lines, deeper only into the part I
+  pick. When I ask why or what something means, answer and stop: no edits,
+  plans or artifacts unless I ask.
 - If a label, UX wording or the intended look could reasonably mean two
-  things, ask one short question before building. Otherwise make the obvious
-  choice and say what you assumed.
-- When a requested effect overlaps an existing system (Sparkle, the governor,
-  the brightness dial…), build it into that system rather than adding a
-  parallel one. If it's unclear which system owns it, ask one question.
-- When working on a visualization, run `npm run dev` and give the user the
-  link to that scene that the dev server prints at startup, not the gallery
-  root. Any query goes *before* the hash; one placed after it lands on the
-  gallery.
+  things, ask one short question before building.
 - The repo is AGPL-3.0-or-later. New dependencies must be permissively
   licensed (MIT, BSD, Apache-2.0, ISC, OFL or similar), never GPL, LGPL or
   AGPL; `CONTRIBUTING.md` says why. Any third-party code bundled into the

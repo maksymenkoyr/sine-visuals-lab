@@ -50,7 +50,8 @@ Close out this working session:
    the old name as a fallback — this catches a rename the tool's diff-based
    search can miss, like a name only mentioned in prose rather than declared
    in code. Fix any reference you find — this is the enforcement mechanism
-   behind rule 2 in `CLAUDE.md` ("never write down anything countable"): a
+   behind `CLAUDE.md`'s rule to name the variable instead of copying numbers
+   or lists from the code: a
    reference that names a real symbol will surface itself here the moment
    that symbol changes.
 

@@ -6,8 +6,8 @@ it. Draft or featured, and whether it's on main.>
 ## Where the code is
 
 <The files and the symbols worth knowing: the scene module, its GLSL, helpers,
-its tests. Name symbols; don't restate values the code owns (CLAUDE.md
-rule 2). Note any shared system it plugs into: drives, beatListener,
+its tests. Name symbols; don't restate values the code owns (CLAUDE.md's
+rule on numbers and lists). Note any shared system it plugs into: drives, beatListener,
 noiseHash, bloom, and so on.>
 
 ## References
