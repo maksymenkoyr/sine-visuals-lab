@@ -14,30 +14,26 @@
 //   - svgDraw.ts: compileScene(markup) once, drawProgram(...) per frame.
 //   - this file: settings, the GL objects, and the per-frame wiring.
 //
-// Settings reshape the frame state after frameAt() rather than being threaded
-// through motion.ts, so the prototype's own numbers stay untouched at the defaults:
-//   - Energy (key `bounce`) scales each cast rig's matrix between its rest
-//     pose (the hero frame's matrix, which is also the markup's own placement)
-//     and the moving one, so 1 is exactly the prototype and the hero frame never
-//     changes. It sets only how big the moves are; when they happen is the
-//     conductor's beat clock, whatever the setting is wired to.
-//   - Lights scales the lasers', lamps' and rays' opacity (capped at fully on).
-//   - Shake scales the camera's noise shake.
+// Dance (on by default) is the cast's groove: dance.ts finds a beat in the Dance
+// signal, learns the move (the signal folded over one bar of that beat) and plays
+// it at the speed Energy sets, in on-beat steps; motion.ts draws it through the
+// groove's own poses (MotionOpts.move, on a groove castC whose beat walks through
+// the move so the cels alternate). Energy, Energy boost, Energy pump and Energy
+// drop are the Caustics Drift-speed family's shape, on speed through the move.
+// With no signal energy drains and they stop. The gags and the build keep their
+// script on the clock. The Dance card (src/ui/widgets/danceMove.ts) shows the
+// learned move from probe(). Off: the groove's own choreography on the clock.
 // Clock on signal (on by default) pauses the conductor while its signal (All level by
 // default) is below the threshold line under its graph, so in silence the whole
 // picture holds: drops, cuts, lights and the cast's script all read the one clock.
-// Moves on signal gives the cast its own cycle position (motion.ts's castC) that
-// only moves when its drive fires: in the groove each fire is a step of
-// conductor.ts's step clock; in the gags and the build a fire lets the cast catch
-// up to the script for STEP_HOLD_PHASE of a beat. Between fires, and with nothing
-// wired, it holds; Energy's pulse is sampled per fire and the camera holds each
-// shot's framing, so with no signal nothing moves the cast. Lights keep the beat.
-// Off, the cast dances on the cycle's beats as before.
-// Energy and Lights are drive settings (drives.ts): Energy swells with its
-// signal (BOUNCE_DRIVE_DEPTH below the slider at a 0 reading, the slider at a full
-// one; a beat-grid pulse by default), Lights' follows the treble level (0.8x quiet
-// to 1.2x loud). With nothing plugged in both rest at exactly their slider value. Drop on big hits is the trigger setting: its drive's edge
-// (the section-loudness drop) becomes ConductorInput.dropFired.
+// Settings that reshape the frame after frameAt(), so the prototype's own numbers
+// stay untouched at the defaults:
+//   - Lights scales the lasers', lamps' and rays' opacity (capped at fully on); a
+//     drive setting on the treble level (0.8x quiet to 1.2x loud, its slider value
+//     with nothing plugged in).
+//   - Shake scales the camera's noise shake.
+// Drop on big hits is the trigger setting: its drive's edge (the section-loudness
+// drop) becomes ConductorInput.dropFired.
 //
 // DEV only: `command("freeze", {c})` (and `window.__toonrave.freeze(c | null)`)
 // pins the cycle position so a test can screenshot an exact frame; freezing also
@@ -46,7 +42,7 @@ import type { FeatureFrame } from "../../../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
-import type { Scene, SceneContext, Viewport } from "../../scene.ts";
+import type { PanelSection, Scene, SceneContext, Viewport } from "../../scene.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "../../drives.ts";
 import type { QualityPreset } from "../../quality.ts";
 import type { AnimFrame } from "../../animClock.ts";
@@ -54,9 +50,10 @@ import type { Palette } from "../../palette.ts";
 import { buildSceneSvg } from "./art/scene.ts";
 import { buildPostFrag } from "./glsl.ts";
 import { compileScene, drawProgram, type DrawProgram, type View } from "./svgDraw.ts";
-import { createConductor, createStepClock, STEP_HOLD_PHASE } from "./conductor.ts";
+import { createConductor } from "./conductor.ts";
+import { createDance, createEnergy, createPlayhead, MAX_ENERGY, MOVE_BINS, SPEED_STEPS } from "./dance.ts";
 import { clampCentre, frameFocus } from "./focus.ts";
-import { frameAt, FRAME_W, FRAME_H, GROOVE_AT, BUILD_BEATS, type FrameState, type Mat, type MotionOpts } from "./motion.ts";
+import { frameAt, stepsPerBeat, FRAME_W, FRAME_H, GROOVE_AT, BUILD_BEATS, type FrameState, type MotionOpts } from "./motion.ts";
 
 const ID = "toonrave";
 
@@ -68,11 +65,14 @@ export const DROP_CYCLE_BEATS: readonly (32 | 64 | 128)[] = [128, 64, 32];
 const MAX_CANVAS_WIDTH: Record<QualityPreset, number> = { high: 1920, mid: 1600, low: 1280, floor: 960 };
 
 /** The cycle position of the prototype's hero frame (two animation steps in at
- *  12 steps a beat); the rest pose Energy scales away from. */
+ *  12 steps a beat). */
 export const HERO_C = 2 / 12;
 
-/** How far Energy's signal can pull the moves down below the slider (at a 0 reading). */
-const BOUNCE_DRIVE_DEPTH = 0.3;
+/** Where in the groove the cast stands while Dance plays them: a bar in, so the
+ *  move's four beats walk through groove beats GROOVE_AT + this .. + 3, with the
+ *  beat's own phase parked off every blink window. */
+const DANCE_BEAT_AT = 4;
+const DANCE_PHASE = 0.2;
 /** Clock on signal's default mark: the clock runs while its signal reads above
  *  this (the threshold line under its graph, which the viewer can move). */
 const CLOCK_RUN_MARK = 0.05;
@@ -82,8 +82,8 @@ const CLOCK_STOP_SHARE = 0.6;
 /** The Lights drive's swing around the slider: 1 - this at a quiet reading, 1 + this at a loud one. */
 const LIGHTS_DRIVE_SWING = 0.2;
 
-/** The rigs that make up the cast, the ones Energy moves. Lights, rays, rings,
- *  confetti and the like keep their own motion. */
+/** The rigs that make up the cast. Lights, rays, rings, confetti and the like keep
+ *  their own motion. */
 export const CAST_RIGS: readonly string[] = [
   "dj", "djHead", "djPhones", "guy", "guyHead", "kid", "raver", "pomp", "stick", "crowd0", "crowd1", "crowd2",
 ];
@@ -91,18 +91,64 @@ export const CAST_RIGS: readonly string[] = [
 const SETTINGS: SceneSetting[] = [
   // Motion
   {
-    key: "bounce",
-    label: "Energy",
+    key: "dance",
+    label: "Dance",
     description:
-      "How big the cast's dance moves are; the steps themselves follow the BPM. " +
-      `The wired signal pumps the size: this value at its peak, ${Math.round((1 - BOUNCE_DRIVE_DEPTH) * 100)}% of it when quiet. ` +
-      "0 holds everyone still",
+      "The cast dances a move learned from this signal: it finds the beat, folds one bar of the signal over itself and " +
+      "dances that loop. Off: the groove's own choreography on the BPM",
     group: "Motion",
+    type: "boolean",
     min: 0,
-    max: 1.5,
-    step: 0.05,
+    max: 1,
+    step: 1,
     default: 1,
-    drive: { default: { source: "beat", grid: 2 } },
+    drive: { default: "anim.lowOnset" },
+  },
+  {
+    key: "energy",
+    label: "Energy",
+    description: "Where energy settles with no signal. Energy is how fast they go through the move; 0 = they end up standing still",
+    group: "Motion",
+    family: "Energy",
+    min: 0,
+    max: MAX_ENERGY,
+    step: 0.05,
+    default: 0,
+  },
+  {
+    key: "energyBoost",
+    label: "Energy boost",
+    description: "Lifts energy while the signal is high",
+    group: "Motion",
+    family: "Energy",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    drive: { default: "anim.energy" },
+  },
+  {
+    key: "energyPump",
+    label: "Energy pump",
+    description: "Each hit kicks energy up",
+    group: "Motion",
+    family: "Energy",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    drive: { default: "anim.lowOnset" },
+  },
+  {
+    key: "energyDrop",
+    label: "Energy drop",
+    description: "How fast energy drains back. It drains slower the lower it gets",
+    group: "Motion",
+    family: "Energy",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
   },
   {
     key: "drops",
@@ -148,20 +194,6 @@ const SETTINGS: SceneSetting[] = [
         hint: "The clock runs while the signal is above this line and stops below it",
       },
     },
-  },
-  {
-    key: "moves",
-    label: "Moves on signal",
-    description:
-      "Off: the cast dances on the BPM. On: they move only when the wired signal fires and stand still otherwise, " +
-      "and the camera holds each shot. Drops, cuts and lights stay on the BPM",
-    group: "Motion",
-    type: "boolean",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 0,
-    drive: { default: "anim.lowOnset" },
   },
   // Look
   {
@@ -210,6 +242,12 @@ const SETTINGS: SceneSetting[] = [
   },
 ];
 
+/** The Dance card: the Dance row, the learned move and the Energy rows, in one group
+ *  (src/ui/widgets/danceMove.ts). */
+const PANEL: readonly PanelSection[] = [
+  { widget: "danceMove", title: "Dance", settings: ["dance", "energy", "energyBoost", "energyPump", "energyDrop"] },
+];
+
 function settingFor(key: string): SceneSetting {
   const s = SETTINGS.find((x) => x.key === key);
   if (!s) throw new Error(`toonrave: unknown setting ${key}`);
@@ -218,47 +256,19 @@ function settingFor(key: string): SceneSetting {
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-/** The groove's length in beats for a cycle length (the step clock wraps in it). */
-const grooveLen = (cycleBeats: number): number => cycleBeats - BUILD_BEATS - GROOVE_AT;
-
 // --- pure helpers (unit-tested under node) ---------------------------------------------------------
 
-/** The rig matrices at the hero frame: the rest pose Energy scales away from. */
-let restPose: Record<string, Mat> | null = null;
-function getRestPose(): Record<string, Mat> {
-  if (!restPose) restPose = frameAt(HERO_C, { cycleBeats: 32, cuts: 0, bpm: 128 }).x;
-  return restPose;
-}
-
 export interface LookAmounts {
-  /** Multiplier on the cast's motion away from its rest pose (1 = the prototype). */
-  bounce: number;
   /** Multiplier on the lasers', lamps' and rays' opacity (capped at 1 per element). */
   lights: number;
   /** Multiplier on the camera shake. */
   shake: number;
 }
 
-/** Reshapes a frame state by the Energy, Lights and Shake amounts, in place, and
- *  returns it. All three at 1 leave the state exactly as frameAt() made it. */
+/** Reshapes a frame state by the Lights and Shake amounts, in place, and returns
+ *  it. Both at 1 leave the state exactly as frameAt() made it. */
 export function shapeState(state: FrameState, amounts: LookAmounts): FrameState {
-  const { bounce, lights, shake } = amounts;
-  if (bounce !== 1) {
-    const rest = getRestPose();
-    for (const id of CAST_RIGS) {
-      const m = state.x[id];
-      const r = rest[id];
-      if (!m || !r) continue;
-      state.x[id] = [
-        r[0] + (m[0] - r[0]) * bounce,
-        r[1] + (m[1] - r[1]) * bounce,
-        r[2] + (m[2] - r[2]) * bounce,
-        r[3] + (m[3] - r[3]) * bounce,
-        r[4] + (m[4] - r[4]) * bounce,
-        r[5] + (m[5] - r[5]) * bounce,
-      ];
-    }
-  }
+  const { lights, shake } = amounts;
   if (lights !== 1) {
     for (const id in state.o) {
       if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) state.o[id] = Math.min(1, state.o[id] * lights);
@@ -314,18 +324,16 @@ function createToonRaveScene(): Scene {
   let c2d: CanvasRenderingContext2D | null = null;
 
   const conductor = createConductor();
-  const stepClock = createStepClock();
-  let inGroove = false;
-  let stepPulse = 1; // Energy's pulse as it was at the cast's last step
+  const dance = createDance();
+  const energy = createEnergy();
+  const playhead = createPlayhead();
   let clockRunning = true; // Clock on signal's state, with its hysteresis
-  let castHeld: number | null = null; // the cast's own cycle position while Moves on signal is on
-  let catchUpFrom: number | null = null; // the fire (in unwrapped beats) the cast is catching up from
-  let grooveSteps = false; // a fire has come since the groove began
   let lastTime: number | null = null;
   let lastC = 0;
   let lastBars = 0; // dev peek only
   let lastCast: number | null = null; // dev peek only
-  let lastPulse = 1; // dev peek only
+  let lastMove = 0; // the move value the cast is at (0..1), for probe()
+  let lastPos = 0; // the playhead's place in the move (0..1), for probe()
   let cycle = 0;
   let reduced = false;
   let frozenC: number | null = null;
@@ -338,6 +346,30 @@ function createToonRaveScene(): Scene {
     id: ID,
     name: "Toon Rave",
     settings: SETTINGS,
+    panel: PANEL,
+
+    // For the Dance card: the found beat, the energy and its speed step, where the
+    // cast is in the move, and the learned move itself (m0..m<MOVE_BINS-1).
+    probe() {
+      const out: Record<string, number> = {
+        bpm: dance.bpm,
+        status: ["none", "finding", "locked", "holding"].indexOf(dance.status()),
+        energy: energy.value,
+        floor: energy.floor,
+        maxEnergy: MAX_ENERGY,
+        speedStep: playhead.step,
+        speedSteps: SPEED_STEPS.length,
+        position: lastPos,
+        move: lastMove,
+        bins: MOVE_BINS,
+      };
+      for (let i = 0; i < MOVE_BINS; i++) out["m" + i] = dance.shape[i];
+      SPEED_STEPS.forEach((s, i) => {
+        out["stepAt" + i] = s.at;
+        out["stepMultiple" + i] = s.multiple;
+      });
+      return out;
+    },
 
     command(name, args) {
       if (name === "freeze") freeze(typeof args.c === "number" ? args.c : null);
@@ -347,13 +379,10 @@ function createToonRaveScene(): Scene {
     init(ctx: SceneContext) {
       const { gl } = ctx;
       conductor.reset();
-      stepClock.reset();
-      inGroove = false;
-      stepPulse = 1;
+      dance.reset();
+      energy.reset();
+      playhead.reset();
       clockRunning = true;
-      castHeld = null;
-      catchUpFrom = null;
-      grooveSteps = false;
       lastTime = null;
       lastC = 0;
       cycle = 0;
@@ -385,9 +414,9 @@ function createToonRaveScene(): Scene {
         (window as unknown as { __toonrave?: unknown }).__toonrave = {
           freeze,
           // the cycle position and the app's bar count, for checking cuts against the bar line;
-          // the cast's own cycle position while Moves on signal drives it (else null), and
-          // the Energy pulse applied this frame: these two decide the cast's pose
-          peek: () => ({ c: lastC, bars: lastBars, castC: lastCast, pulse: lastPulse }),
+          // the cast's own cycle position while Dance plays them (else null) and the move
+          // value they're at: with the cycle, these decide the cast's pose
+          peek: () => ({ c: lastC, bars: lastBars, castC: lastCast, move: lastMove, energy: energy.value }),
         };
       }
     },
@@ -407,7 +436,6 @@ function createToonRaveScene(): Scene {
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
       lastTime = anim.timeSec;
 
-      const bounceAmount = resolveSceneSetting(ID, settingFor("bounce"));
       const dropsIdx = Math.round(resolveSceneSetting(ID, settingFor("drops")));
       const dropHitsOn = resolveSceneSetting(ID, settingFor("dropHits")) >= 0.5;
       const lightsAmount = resolveSceneSetting(ID, settingFor("lights"));
@@ -450,68 +478,49 @@ function createToonRaveScene(): Scene {
       const frozen = frozenC !== null;
       const c = frozen ? (frozenC as number) : out.c;
 
-      // Moves on signal: always read the trigger so an edge is consumed even when off.
-      const movesOn = resolveSceneSetting(ID, settingFor("moves")) >= 0.5;
-      const stepEdge = drives.fired("moves", anim.lowOnset);
-      const grooveNow = c >= GROOVE_AT && c < cycleBeats - BUILD_BEATS;
-      // Energy's pulse; frozen frames stay repeatable.
-      const livePulse = frozen ? 1 : clamp01(drives.value("bounce", anim.beatPulse, 1));
-
-      // The cast's own position (motion.ts's castC) only moves on a fire: in the groove
-      // each fire is a step of the step clock; in the gags and the build a fire lets the
-      // cast catch up to the script and play STEP_HOLD_PHASE of it. Between fires (and
-      // with nothing wired) it holds, so no signal = no movement.
-      let castC: number | undefined;
-      if (movesOn && !frozen) {
-        const abs = cycle * cycleBeats + c;
-        if (castHeld === null) {
-          castHeld = c; // switched on: hold where they are
-          catchUpFrom = null;
-          grooveSteps = false;
-          stepPulse = livePulse;
-        }
-        if (stepEdge) stepPulse = livePulse;
-        if (grooveNow) {
-          if (!inGroove) {
-            stepClock.reset();
-            grooveSteps = false;
-          }
-          if (stepEdge) grooveSteps = true;
-          if (grooveSteps) {
-            const m = stepClock.step(stepEdge, dt, out.bpm);
-            castHeld = GROOVE_AT + (((m % grooveLen(cycleBeats)) + grooveLen(cycleBeats)) % grooveLen(cycleBeats));
-          }
-        } else {
-          if (stepEdge) catchUpFrom = abs;
-          if (catchUpFrom !== null) {
-            const e = abs - catchUpFrom;
-            castHeld = catchUpFrom + Math.min(e, STEP_HOLD_PHASE) - cycle * cycleBeats;
-            if (e >= STEP_HOLD_PHASE) catchUpFrom = null;
-          }
-        }
-        castC = castHeld;
-      } else {
-        castHeld = null;
-        catchUpFrom = null;
+      // Dance: always read the triggers so an edge is consumed even when off.
+      const danceOn = resolveSceneSetting(ID, settingFor("dance")) >= 0.5;
+      const danceFired = drives.fired("dance", anim.lowOnset);
+      const danceValue = clamp01(drives.value("dance", 0, 0));
+      const pumpFired = drives.fired("energyPump", anim.lowOnset);
+      if (!frozen) {
+        dance.step(dt, danceFired, danceValue);
+        energy.step(dt, {
+          base: resolveSceneSetting(ID, settingFor("energy")),
+          boost: resolveSceneSetting(ID, settingFor("energyBoost")),
+          level: drives.value("energyBoost", frame.energy, 0),
+          pump: resolveSceneSetting(ID, settingFor("energyPump")),
+          pumpFired,
+          drop: resolveSceneSetting(ID, settingFor("energyDrop")),
+        });
       }
-      inGroove = grooveNow;
+      // On twos: the move is read at the scene's ~12 steps a second, locked to the found beat.
+      const beatBpm = dance.bpm > 0 ? dance.bpm : out.bpm;
+      const spb = stepsPerBeat(beatBpm);
+      const bars = Math.round(dance.beats * spb) / spb / 4; // nearest step: never trails the signal by a whole step
+      playhead.update(dt, energy.value, bars, 60 / beatBpm);
+      const grooveNow = c >= GROOVE_AT && c < cycleBeats - BUILD_BEATS;
 
       const opts: MotionOpts = { cycleBeats, cuts, bpm: out.bpm, cycle, reduced };
-      if (castC !== undefined) {
-        opts.castC = castC;
-        opts.stillCamera = true;
+      lastPos = playhead.position(bars);
+      lastMove = playhead.value(dance, bars);
+      if (danceOn && !frozen && grooveNow) {
+        // the move's beat walks the groove's beats, so the cels alternate with it
+        const toB = (v: number): number => 2 * v - 1; // 0..1 → stretched..squashed
+        const lagBars = 1 / spb / 4;
+        opts.castC = GROOVE_AT + DANCE_BEAT_AT + Math.floor(lastPos * 4) + DANCE_PHASE;
+        opts.move = {
+          b: toB(lastMove),
+          lag: toB(playhead.value(dance, bars - lagBars)),
+          off: toB(playhead.value(dance, bars, 1 / 8)),
+        };
       }
-      lastCast = castC ?? null;
+      lastCast = opts.castC ?? null;
       const state = frameAt(c, opts);
 
-      // Audio modulation of the two drive settings; frozen frames stay repeatable.
-      // While the signal steps the cast, Energy's pulse is taken once per step: it
-      // sizes each step but never moves the cast between steps, so no signal = still.
-      const pulse = castC !== undefined ? stepPulse : livePulse;
-      lastPulse = pulse;
+      // The Lights drive; frozen frames stay repeatable.
       const level = frozen ? 0.5 : clamp01(drives.value("lights", anim.high, 0.5));
       shapeState(state, {
-        bounce: bounceAmount * (1 - BOUNCE_DRIVE_DEPTH + BOUNCE_DRIVE_DEPTH * pulse),
         lights: lightsAmount * (1 - LIGHTS_DRIVE_SWING + 2 * LIGHTS_DRIVE_SWING * level),
         shake: shakeAmount,
       });
