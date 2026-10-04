@@ -27,6 +27,10 @@ import {
   wrapShaderSeed,
   cloudNoiseFlows,
   CLOUD_FLOW_LEN,
+  brushSwell,
+  spriteSpeed,
+  advanceSpritePhase,
+  SPRITE_PERIOD_SEC,
 } from "../src/render/scenes/sky/sky.ts";
 import { NOISE_PERIOD } from "../src/render/noiseHash.ts";
 import { computeAutoTarget, resolveSceneSetting } from "../src/render/autoTune.ts";
@@ -587,11 +591,12 @@ describe("sky's patch-bay drives", () => {
     cloudBrightness: "anim.mid",
     floaterVisibility: "anim.high",
     brushOpacity: "anim.energy",
+    sprites: "feature.onset",
   };
 
   it("exactly these settings carry a jack", () => {
     expect(driveKeys.sort()).toEqual(
-      ["brushOpacity", "cloudBrightness", "cloudCover", "flowSpeed", "floaterDensity", "floaterVisibility", "lightWaves", "turbulence"].sort(),
+      ["brushOpacity", "cloudBrightness", "cloudCover", "flowSpeed", "floaterDensity", "floaterVisibility", "lightWaves", "sprites", "turbulence"].sort(),
     );
   });
 
@@ -614,8 +619,8 @@ describe("sky's patch-bay drives", () => {
     }
   });
 
-  it("brush move, floater sustain, time of day and day drift carry no jack (motion shape/lifetime/day timeline, per drives.ts's boundary)", () => {
-    for (const key of ["brushMove", "floaterSustain", "timeOfDay", "dayDrift"]) {
+  it("brush move, floater sustain, floater glide, time of day, day drift, rainbow and dither carry no jack (motion shape/lifetime/day timeline/fixed look, per drives.ts's boundary)", () => {
+    for (const key of ["brushMove", "floaterSustain", "floaterGlide", "timeOfDay", "dayDrift", "rainbow", "dither"]) {
       const spec = (skyScene.settings ?? []).find((s) => s.key === key);
       expect(spec, key).toBeDefined();
       expect(spec!.drive, key).toBeUndefined();
@@ -631,6 +636,43 @@ describe("sky's patch-bay drives", () => {
   it("floaters has no hand-authored reads — its live pill comes from the drive choice", () => {
     const spec = (skyScene.settings ?? []).find((s) => s.key === "floaterDensity");
     expect(spec!.reads).toBeUndefined();
+  });
+});
+
+describe("brushSwell", () => {
+  it("is 1 on the beat, decays toward 0, and reads 0 before any sweep", () => {
+    expect(brushSwell(0)).toBe(1);
+    expect(brushSwell(0.2)).toBeLessThan(1);
+    expect(brushSwell(0.4)).toBeLessThan(brushSwell(0.2));
+    expect(brushSwell(5)).toBeLessThan(0.01);
+    expect(brushSwell(-1)).toBe(0);
+    expect(brushSwell(NaN)).toBe(0);
+  });
+});
+
+describe("blue-field sprites' clock", () => {
+  it("runs at the steady pace with nothing plugged in and surges with the reading", () => {
+    expect(spriteSpeed(0)).toBe(1);
+    expect(spriteSpeed(1)).toBeGreaterThan(spriteSpeed(0.5));
+    expect(spriteSpeed(-1)).toBe(1);
+    expect(spriteSpeed(NaN)).toBe(1);
+  });
+
+  it("advances by dt times speed and wraps into [0, SPRITE_PERIOD_SEC)", () => {
+    expect(advanceSpritePhase(1, 0.5, 2)).toBeCloseTo(2, 9);
+    const wrapped = advanceSpritePhase(SPRITE_PERIOD_SEC - 0.25, 0.5, 1);
+    expect(wrapped).toBeCloseTo(0.25, 9);
+    let t = 0;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < 20000; i++) {
+      t = advanceSpritePhase(t, 1 / 60, 3.5);
+      lo = Math.min(lo, t);
+      hi = Math.max(hi, t);
+    }
+    expect(lo).toBeGreaterThanOrEqual(0);
+    expect(hi).toBeLessThan(SPRITE_PERIOD_SEC);
+    expect(advanceSpritePhase(NaN, NaN, NaN)).toBe(0);
   });
 });
 

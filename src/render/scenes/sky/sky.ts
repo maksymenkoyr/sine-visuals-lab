@@ -19,15 +19,22 @@ import {
   type Splat,
 } from "../fluidSim.ts";
 
-// Sky: a real 2D fluid sim driving cloud cover, with two vision illusions
-// layered on top — floaters (in waves) and Haidinger's brush. Picked from
-// the "Open Sky Illusions" preview artifact; the blue field entoptic
-// phenomenon was in the first pass but cut after a live look at real
-// screenshots (small darting dots read as noise rather than an atmospheric
-// illusion once the cloud itself was worth looking at). Vection, Troxler
-// fading, afterimage, the autokinetic effect and pareidolia are
-// deliberately NOT built here either, not even as disabled settings — a
-// later pass's scope, not this one's.
+// Sky: a real 2D fluid sim driving cloud cover, with three vision illusions
+// layered on top — floaters (in waves), Haidinger's brush and blue-field
+// sprites. Picked from the "Open Sky Illusions" preview artifact. The blue
+// field entoptic phenomenon was in the first pass, cut as noise, and came
+// back at the user's request as sprites with motion (spritesAt): darting
+// comets with tails that surge on the beat, sparse at the centre of view.
+// Vection, Troxler fading, afterimage, the autokinetic effect and
+// pareidolia are deliberately NOT built here, not even as disabled
+// settings.
+//
+// The Rainbow setting splits the beat light waves into a spectrum across
+// the ring's width and gives the floaters' rims a faint prism fringe that
+// drifts through the spectrum along a streak (spectrumAt; see the
+// SWEEP_SPECTRUM_SPAN and FLOATER_DISPERSION comments). Gradient dither adds
+// about one 8-bit step of noise as the last step, so the sky gradient
+// doesn't band.
 //
 // The fluid sim is Neon Fluid's stable-fluids solver, fluidSim.ts, shared:
 // Sky passes its own splat-slot count (SKY_SPLAT_SLOTS, one per cloud
@@ -63,11 +70,12 @@ import {
 //   texture and continuous morphing, plus a cheap lit-top/shadowed-bottom
 //   shade from the density gradient — a thin slab, not Storm's Gas-mode
 //   raymarch, which is private to storm.ts) -> Haidinger's brush (faint,
-//   blended into the sky+cloud) -> floaters (drawn last, on top of
-//   everything, since they're the viewer's own eye artifact).
+//   added onto the sky+cloud, swelling on each beat) -> blue-field sprites
+//   -> floaters (drawn last, on top of everything, since they're the
+//   viewer's own eye artifact) -> gradient dither.
 // The sky/cloud sample the shared room-space canvas (roomUv) since the
 // fluid is one world shared across a Panorama's devices, same as every
-// other world-simulating scene; the two illusions instead centre on *this
+// other world-simulating scene; the illusions instead centre on *this
 // device's own* screen (vUv, not roomUv) — each is a viewer's own eye
 // artifact, not shared room content, so it has to track the screen the
 // viewer is actually looking at rather than a hypothetical shared-canvas
@@ -90,12 +98,16 @@ import {
 // is a slanted ellipse of density (streakDensity), frayed row by row so
 // each row's run starts and ends at its own column, the references'
 // stair-stepped rows. Every pixel of a cell reads the density at the cell's
-// centre and the cell's own hash fixes its floater's shape, so a drifting
-// streak moves by floaters switching on and off across the grid. Its
+// centre and the cell's own hash fixes its floater's shape. Floater glide
+// sets whether the grid stays put (a drifting streak then moves by floaters
+// switching on and off across it) or rides along with each stamp, so its
+// floaters glide with the wind; with the grids differing, a pixel draws the
+// two densest streaks so overlapping ones don't cut each other off. Its
 // envelope is subtracted from the density rather than multiplied in, so a
 // streak pops in fringe-first and dissolves cell by cell (body strand to
 // fringe strand to nothing). FLOATER_CELL is sized so a floater plus its
-// fringe fits in one cell, since a pixel only evaluates its own cell.
+// fringe fits in one cell, since a pixel only evaluates its own cell (of
+// each streak's grid).
 //
 // Where and when they arrive is one mechanism — the floater brush (an
 // invisible spawn point the scene owns, stepBrush; NOT Haidinger's bowtie,
@@ -131,10 +143,12 @@ import {
 //
 // On each beat (the same shared beatListener's edge, gated through the
 // Light waves drive in render()) a thin ring of pale light ripples quickly
-// out from near the centre of view (lightWaveAt), tinted only from the
-// sky's own lavender, rose and pale-cyan tones, and it lights only the
-// floaters' own tubes: the sky and clouds around them never change, so the
-// wave is only seen as a glint passing through a streak.
+// out from near the centre of view (lightWaveAt), tinted from the sky's own
+// lavender, rose and pale-cyan tones and pulled toward a spectrum by
+// Rainbow, and it lights only the floaters' own tubes and a pixel or two
+// around them: the sky and clouds away from them never change, so the wave
+// is only seen as a glint passing through a streak. The same beat swells
+// Haidinger's brush for a moment (brushSwell).
 //
 // Floater visibility (floaterGain) scales the tubes' contrast, and Floater
 // sustain (waveLifeSec) sets how long each stamp stays; each keeps the
@@ -294,6 +308,54 @@ export function sunElevation(dayPhase: number): number {
 
 // --- Haidinger's brush. ---
 const BRUSH_TURNS_PER_SEC = 0.045; // one full turn every ~22s
+// How fast the brush's beat swell decays, per second: each light-wave sweep
+// (the same beat) restarts it at 1, and the bowtie fades back to its resting
+// opacity over a fraction of a beat.
+const BRUSH_SWELL_DECAY = 3.5;
+
+/** The brush's beat swell, 0..1, `sinceSweepSec` after the latest light-wave
+ *  sweep fired: 1 on the beat, decaying back to 0. Never fired (or NaN)
+ *  reads 0. */
+export function brushSwell(sinceSweepSec: number): number {
+  if (!(sinceSweepSec >= 0)) return 0;
+  return Math.exp(-sinceSweepSec * BRUSH_SWELL_DECAY);
+}
+
+// --- Blue-field sprites (the blue field entoptic phenomenon): tiny bright
+// specks darting along short curved paths all over the sky, the white blood
+// cells in the retina's own capillaries seen against a bright sky. Each
+// sprite runs one path per cycle on the scene's own sprite clock
+// (advanceSpritePhase), which runs at a steady pace and surges forward on
+// the Blue-field sprites jack's reading (spriteSpeed) — in the real
+// phenomenon they pulse with the heartbeat, here with the beat. ---
+/** The sprite clock wraps at this many seconds of base-pace travel. Every
+ *  sprite's cycle rate is a whole number of cycles per period (the shader's
+ *  SPRITE_CYCLES_MIN..MAX), so the wrap moves each sprite back by a whole
+ *  number of cycles, and the shader hashes each path from its cycle index
+ *  modulo that number: nothing on screen changes at the wrap, and the GPU
+ *  never sees a growing clock (the seed-precision problem
+ *  SHADER_SEED_PERIOD describes). */
+export const SPRITE_PERIOD_SEC = 64;
+const SPRITE_SURGE = 2.5; // extra speed at a jack reading of 1, on top of the steady pace
+
+/** The sprite clock's speed multiplier at a jack reading: 1 (the steady
+ *  pace) at 0, so an unplugged jack leaves the sprites darting at their own
+ *  pace rather than freezing; up to 1 + SPRITE_SURGE as the beat pulse
+ *  peaks. Negative or NaN readings count as 0. */
+export function spriteSpeed(drive: number): number {
+  const d = Number.isFinite(drive) ? Math.max(0, drive) : 0;
+  return 1 + SPRITE_SURGE * d;
+}
+
+/** The sprite clock: seconds of base-pace travel, wrapped to
+ *  [0, SPRITE_PERIOD_SEC). */
+export function advanceSpritePhase(prev: number, dtSec: number, speed: number): number {
+  const from = Number.isFinite(prev) ? prev : 0;
+  const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+  const k = Number.isFinite(speed) ? Math.max(0, speed) : 1;
+  const next = from + dt * k;
+  return next - Math.floor(next / SPRITE_PERIOD_SEC) * SPRITE_PERIOD_SEC;
+}
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
@@ -701,6 +763,17 @@ const SETTINGS: SceneSetting[] = [
     default: 0.35,
   },
   {
+    key: "floaterGlide",
+    label: "Floater glide",
+    description:
+      "How the floaters travel with their streak — snapping from cell to cell on a fixed screen grid at 0, gliding smoothly with the wind at 1",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 1,
+  },
+  {
     key: "dayDrift",
     label: "Day drift",
     description:
@@ -784,6 +857,43 @@ const SETTINGS: SceneSetting[] = [
     // its edge is the broadband onset, which is what sceneSources names.
     drive: { default: "scene", sceneLabel: "Scene: every beat", sceneSources: ["feature.onset"] },
   },
+  {
+    key: "rainbow",
+    label: "Rainbow",
+    description:
+      "How much the light waves split into rainbow bands, and the floaters' rims into faint prism colours — the pale sky tints alone at 0, a clear spectrum at 1",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
+  {
+    key: "sprites",
+    label: "Blue-field sprites",
+    description:
+      "Tiny bright specks darting along short curved paths all over the sky, the way they do when you stare at a bright blue sky — none at 0, a busy field at 1. They thin out right at the centre of view, and the signal makes them surge forward",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    // A plain Beat default: each beat pulse surges the sprites forward
+    // (spriteSpeed in render(), 1 at drive 0), like the real ones pulsing
+    // with the heartbeat; an unplugged jack leaves them at their own pace.
+    drive: { default: "feature.onset" },
+  },
+  {
+    key: "dither",
+    label: "Gradient dither",
+    description:
+      "Fine noise, about one brightness step, that hides the stripes a smooth sky gradient shows on an 8-bit screen — off at 0, two steps at 1",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
 ];
 
 function settingFor(key: string): SceneSetting {
@@ -824,6 +934,9 @@ uniform float uSweepT0[${MAX_SWEEPS}];
 uniform float uSweepSeed[${MAX_SWEEPS}];
 uniform float uFloaterGain; // floaterGain(Floater visibility)
 uniform float uDayPhase; // 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset (see advanceDayOffset)
+uniform float uBrushSwell; // brushSwell(): 1 on a light-wave beat, decaying back to 0
+uniform float uSpritePhase; // advanceSpritePhase(): the sprite clock, wrapped to SPRITE_PERIOD_SEC
+uniform float uSpriteSpeed; // spriteSpeed(): this tick's speed multiplier, which stretches the sprites' tails
 
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
 const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
@@ -838,13 +951,21 @@ const float SWEEP_SEC_C = ${SWEEP_SEC.toFixed(3)};
 // like a ripple on water. Coloured only from pale tints already in the
 // sky's own palette (SWEEP_TINT_*), drifting between them around the ring
 // and across its width, and screen-blended at up to SWEEP_ALPHA (times the
-// Light waves setting): a soft glint in the floaters, not a rainbow.
+// Light waves setting). The Rainbow setting pulls those tints toward a
+// spectrum laid across the ring's width (spectrumAt over SWEEP_SPECTRUM_SPAN
+// widths, red on the leading edge, violet in the trail), like a rainbow's
+// own band order. The glint lights each floater's tube and a soft halo
+// SWEEP_HALO_PX wide around it, so a tube a few pixels across still shows it.
 const float SWEEP_WIDTH = 0.045;
 const float SWEEP_WOBBLE = 0.02;
 const float SWEEP_WOBBLE_LOBES = 5.0;
 const float SWEEP_ORIGIN_SPREAD = 0.12;
 const float SWEEP_EASE = 1.8; // >1 eases the ring out: fast from the centre, slowing as it spreads
-const float SWEEP_ALPHA = 0.42;
+const float SWEEP_ALPHA = 0.85;
+const float SWEEP_HALO_PX = 1.5;
+const float SWEEP_HALO = 0.45; // the halo's glint relative to the tube's own
+const float SWEEP_SPECTRUM_SPAN = 2.6; // ring widths the spectrum spreads over, leading edge to trail
+const float RAINBOW_SAT = 0.85; // spectrum saturation at Rainbow = 1 (1 = pure hues, which read as neon here)
 const vec3 SWEEP_TINT_A = vec3(0.84, 0.80, 1.00); // lavender, the early-evening zenith lifted
 const vec3 SWEEP_TINT_B = vec3(1.00, 0.86, 0.90); // rose, the sunset cloud tone lifted
 const vec3 SWEEP_TINT_C = vec3(0.82, 0.94, 1.00); // pale cyan, the midday horizon lifted
@@ -932,7 +1053,51 @@ const float CLOUD_SHADOW_K2 = 0.52;
 const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
-const float BRUSH_BASE = 0.4;
+const float BRUSH_BASE = 0.5;
+const float BRUSH_SWELL = 1.0; // extra opacity the beat swell (uBrushSwell) adds at its peak
+// Haidinger's brush is a yellow bowtie with faint blue in the gaps between
+// its lobes. Each lobe adds light (a warm or a cool lift) rather than
+// multiplying the sky by a tint: yellow multiplied into a blue sky only
+// greys it toward olive.
+const vec3 BRUSH_YELLOW = vec3(0.16, 0.13, 0.02);
+const vec3 BRUSH_BLUE = vec3(-0.03, 0.01, 0.10);
+// Blue-field sprites (see advanceSpritePhase in the JS above). Each
+// SPRITE_CELL square of the screen may hold one sprite (more cells hold one
+// as the Blue-field sprites setting rises, up to SPRITE_FILL of them). A
+// sprite runs one short curved path per cycle, starting within
+// SPRITE_START_JITTER cells of its cell's centre and travelling
+// SPRITE_PATH_MIN..MAX cells, so it stays within reach of the 2x2 block of
+// cells a pixel checks (spritesAt). Its rate is a whole number of cycles per SPRITE_PERIOD_SEC
+// (SPRITE_CYCLES_MIN..MAX), so the clock's wrap is seamless. It fades in and
+// out over each path (a sine envelope), trails a short tail that stretches
+// with uSpriteSpeed, and keeps clear of the centre of view (SPRITE_GAP_R,
+// the fovea has no capillaries) and mostly of the clouds (SPRITE_OVER_CLOUD).
+const float SPRITE_CELL = 0.075;
+const float SPRITE_FILL = 0.55;
+const float SPRITE_START_JITTER = 0.25;
+const float SPRITE_PATH_MIN = 0.35;
+const float SPRITE_PATH_MAX = 0.6;
+const float SPRITE_BEND = 2.4; // radians of turn over one path, at most (random sign)
+const float SPRITE_PERIOD_C = ${SPRITE_PERIOD_SEC.toFixed(1)};
+const float SPRITE_CYCLES_MIN = 48.0; // cycles per SPRITE_PERIOD_C, hashed per sprite
+const float SPRITE_CYCLES_MAX = 96.0;
+const float SPRITE_R = 0.0016; // head radius, screen p-units (floored at SPRITE_MIN_PX)
+const float SPRITE_MIN_PX = 1.1;
+const float SPRITE_TAIL = 0.07; // tail length in path fractions at the steady pace
+const float SPRITE_GAIN = 0.75; // peak brightening toward white at the head
+const float SPRITE_GAP_R = 0.07;
+const float SPRITE_OVER_CLOUD = 0.35; // how visible a sprite stays over solid cloud
+const vec3 SPRITE_TINT = vec3(0.97, 0.98, 1.0);
+// The floaters' prism fringe at Rainbow = 1: the tube profile is read a
+// little further out for red and further in for blue (FLOATER_DISPERSION,
+// in units of the rim band's own width), so each rim splits into faint
+// colour edges, and the rim's brightening drifts through the spectrum along
+// the streak (FLOATER_IRIDESCENCE of its tint).
+const float FLOATER_DISPERSION = 0.9;
+const float FLOATER_IRIDESCENCE = 0.9;
+// Gradient dither: triangular noise of up to DITHER_LSB 8-bit steps at
+// Gradient dither = 1, independent per channel, added to the final colour.
+const float DITHER_LSB = 2.0;
 // Floater waves (see the file header): each wave is a streak of the small
 // refractive-tube floaters laid out on a fixed grid, arranged like the
 // user's text-grid references, where ">" fills a streak's body, "_" runs
@@ -1172,7 +1337,9 @@ vec3 dayMix(float w[4], vec3 k[4]) {
 // floaters the stamp lays down): the density product sets the ceiling, amp
 // scales it per event, and the product gate in main()'s wave loop keeps any
 // of it from drawing while the amount is 0.
-float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, float life, out float slant, out float hot) {
+// row is the cell's row in the grid the stamp reads (main's Floater glide
+// shift), so a gliding streak keeps its own fray.
+float streakDensity(vec2 c, float row, vec2 centre, float seed, float amp, float age, float life, out float slant, out float hot) {
   float size = clamp(uFloaterDensity * 1.3 * floaterDensityDrive(1.0), 0.1, 1.0) * clamp(amp, 0.0, 1.0);
   vec2 L = mix(STREAK_L_MIN, STREAK_L_MAX, size);
   slant = mix(STREAK_SLANT_MIN, STREAK_SLANT_MAX, hash21(vec2(seed, 51.0)));
@@ -1182,7 +1349,6 @@ float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, float
   vec2 q = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
   // Row fray: noise keyed on the grid row (and only coarsely on position
   // along the streak), so a whole row's run shifts together.
-  float row = floor(c.y / FLOATER_CELL.y);
   float rag = (vnoise(vec2(row * 0.9 * FLOATER_SCALE + seed * 7.1, q.x / L.x * 2.2 + seed)) - 0.5) * STREAK_RAG;
   vec2 e = q / L;
   float fadeOut = min(WAVE_FADE_OUT, life * 0.5); // a short-sustain wave still gets a clean pop in and out
@@ -1196,10 +1362,67 @@ float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, float
   return 1.0 - dot(e, e) + rag - (1.0 - env) * 1.1;
 }
 
+// A smooth hue wheel, h in turns (0 red, 1/3 green, 2/3 blue), pulled
+// toward white by 1 - sat: the Rainbow setting's one colour source.
+vec3 spectrumAt(float h, float sat) {
+  vec3 hue = clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+  return mix(vec3(1.0), hue, sat);
+}
+
+// Where a sprite's curved path is at fraction u of it: a constant-curvature
+// arc of length len from start, leaving at heading h0 and turning by bend.
+vec2 spriteArc(vec2 start, float h0, float bend, float len, float u) {
+  if (abs(bend) < 1.0e-3) return start + len * u * vec2(cos(h0), sin(h0));
+  float h1 = h0 + bend * u;
+  return start + len / bend * vec2(sin(h1) - sin(h0), cos(h0) - cos(h1));
+}
+
+// The blue-field sprites' brightening at p (see the SPRITE_CELL comment):
+// every sprite in the 2x2 cells nearest p, each a bright head with a fading
+// tail along its own path at this moment of its cycle. A sprite reaches
+// less than one cell from its own cell's centre along either axis (start
+// jitter plus the longest path plus a head), and every cell the 2x2 block
+// leaves out has its centre at least a cell away, so the block is enough.
+// A sprite whose whole path is out of reach is skipped before any trig.
+float spritesAt(vec2 p, float amount) {
+  float px = 1.0 / max(uResolution.y, 1.0);
+  float r = max(SPRITE_R, SPRITE_MIN_PX * px);
+  vec2 base = floor(p / SPRITE_CELL - 0.5);
+  float glow = 0.0;
+  for (int j = 0; j <= 1; j++) {
+    for (int i = 0; i <= 1; i++) {
+      vec2 id = base + vec2(float(i), float(j));
+      if (hash21(id * 0.917 + 3.1) > amount * SPRITE_FILL) continue;
+      float cycles = floor(mix(SPRITE_CYCLES_MIN, SPRITE_CYCLES_MAX + 1.0, hash21(id * 1.31 + 7.7)));
+      float t = uSpritePhase * cycles / SPRITE_PERIOD_C + hash21(id * 0.53 + 11.9);
+      float u = fract(t);
+      // The cycle's index taken modulo the sprite's own cycle count, so the
+      // clock's wrap (t drops by exactly that count) changes nothing.
+      float k = mod(floor(t), cycles);
+      vec2 hk = hash22(id + k * 0.371);
+      vec2 start = (id + 0.5 + (hk - 0.5) * 2.0 * SPRITE_START_JITTER) * SPRITE_CELL;
+      if (length(p - start) > SPRITE_PATH_MAX * SPRITE_CELL + 3.0 * r) continue;
+      float h0 = hash21(id * 1.7 + k * 0.913) * 6.28318;
+      float bend = (hash21(id * 2.3 + k * 0.577) - 0.5) * 2.0 * SPRITE_BEND;
+      float len = mix(SPRITE_PATH_MIN, SPRITE_PATH_MAX, hk.y) * SPRITE_CELL;
+      vec2 head = spriteArc(start, h0, bend, len, u);
+      vec2 tail = spriteArc(start, h0, bend, len, max(u - SPRITE_TAIL * uSpriteSpeed, 0.0));
+      vec2 pa = p - tail;
+      vec2 ba = head - tail;
+      float along = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-9), 0.0, 1.0);
+      float d = length(pa - ba * along);
+      float env = sin(3.14159 * u);
+      glow += exp(-d * d / (r * r)) * mix(0.25, 1.0, along * along) * env * env;
+    }
+  }
+  return glow;
+}
+
 // The beat light waves' glow at p (see the SWEEP_WIDTH comment): the sum of
 // every live wave's thin ring rippling out from near the centre of view,
-// each tinted from the sky's own pale palette. main() applies it only inside
-// the floaters' tubes.
+// each tinted from the sky's own pale palette, pulled toward a spectrum by
+// the Rainbow setting. main() applies it only in and around the floaters'
+// tubes.
 vec3 lightWaveAt(vec2 p, float devAspect) {
   vec3 glow = vec3(0.0);
   for (int i = 0; i < MAX_SWEEPS_C; i++) {
@@ -1219,10 +1442,68 @@ vec3 lightWaveAt(vec2 p, float devAspect) {
     float band = x > 0.0 ? exp(-x * x * 3.0) : exp(-x * x * 0.6);
     float drift = 0.5 + 0.5 * sin(ang * 2.0 + seed * 4.1);
     vec3 tint = mix(mix(SWEEP_TINT_A, SWEEP_TINT_B, drift), SWEEP_TINT_C, 0.5 + 0.5 * cos(x * 1.3 + seed));
+    // Red on the leading edge (x near 0) to violet in the trail (x negative).
+    vec3 spectral = spectrumAt(clamp(-x / SWEEP_SPECTRUM_SPAN, 0.0, 1.0) * 0.8, RAINBOW_SAT);
+    tint = mix(tint, spectral, uRainbow);
     float fade = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.6, 1.0, t));
     glow += tint * band * fade;
   }
   return glow;
+}
+
+// One cell's floater over color (main's step 4 picks which): from the
+// streak density at the cell, an aligned strand in the body, a short flat
+// strand on the fringe or a dot in a hotspot, as a refractive tube
+// (floaterProfile) modulating what's behind it rather than a painted colour;
+// then any beat light wave glinting through it. The cell's own hash fixes
+// the floater's shape.
+void drawFloater(inout vec3 color, vec2 p, float px, float devAspect, float cloudAlpha, float dens, float hot, float slant, vec2 cellId, vec2 cellC, vec2 stampC, float stampSeed) {
+  // Keep off the clouds: the cell's centre, looked up in the same field the
+  // cloud pass thresholds, with a margin below CLOUD_LOW so a streak gives
+  // way before a cloud's visible edge reaches it.
+  float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(roomUv(cellC / vec2(devAspect, 1.0) + 0.5)));
+  float vis = clear * (1.0 - cloudAlpha);
+  if (vis <= 0.0) return;
+  float cellSeed = hash21(cellId * 0.731 + 17.3) * 97.0 + cellId.x * 0.013;
+  float s;
+  if (dens > CELL_T_BODY && hot > CELL_T_HOT) {
+    float r = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(cellSeed, 15.0)));
+    s = length(p - cellC) - max(r, FLOATER_MIN_PX * px);
+  } else if (dens > CELL_T_BODY) {
+    float len = mix(BODY_LEN_MIN, BODY_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
+    float heading = slant + (hash21(vec2(cellSeed, 44.0)) - 0.5) * BODY_HEADING_JITTER;
+    s = floaterStrand(p, cellC, cellSeed, heading, len);
+  } else {
+    float len = mix(FRINGE_LEN_MIN, FRINGE_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
+    s = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
+  }
+  // Rainbow's prism fringe (FLOATER_DISPERSION): red reads the tube's
+  // profile a little further out, blue a little further in.
+  float disp = uRainbow * FLOATER_DISPERSION * max(FLOATER_RIM_W, FLOATER_MIN_PX * px);
+  vec3 delta = clamp(vec3(floaterProfile(s - disp), floaterProfile(s), floaterProfile(s + disp)) * uFloaterGain, -0.55, 0.55) * vis;
+  // The rim's brightening drifts through the spectrum along the streak
+  // (FLOATER_IRIDESCENCE at Rainbow = 1), its brightness kept.
+  vec2 along = vec2(cos(slant), sin(slant));
+  vec3 iri = spectrumAt(dot(cellC - stampC, along) * 2.2 + stampSeed * 0.37 + uTime * 0.04, 0.7);
+  iri /= max(dot(iri, LUMA), 0.3);
+  vec3 rimTint = mix(FLOATER_COOL_TINT, iri, uRainbow * FLOATER_IRIDESCENCE);
+  color *= 1.0 + min(delta, vec3(0.0)) + max(delta, vec3(0.0)) * rimTint;
+
+  // Beat light waves pass through the floaters only: each live wave is a
+  // thin ring rippling out from near the centre of view (see the
+  // SWEEP_WIDTH comment), and it lights this floater's own tube (inside it
+  // and its rim) plus a soft halo SWEEP_HALO_PX around it, gone well inside
+  // the cell so no cell edge shows, screen-blended so a floater glints as
+  // the ring crosses it while the sky and clouds away from it stay untouched.
+  float tube = 1.0 - smoothstep(0.0, max(FLOATER_FRINGE_W, FLOATER_MIN_PX * px), s);
+  float haloPx = SWEEP_HALO_PX * px;
+  float halo = SWEEP_HALO * exp(-max(s, 0.0) / haloPx) * (1.0 - smoothstep(2.0 * haloPx, 3.0 * haloPx, s));
+  float lightMask = max(tube, halo);
+  if (lightMask > 0.0) {
+    vec3 sweepGlow = lightWaveAt(p, devAspect);
+    vec3 lit = clamp(sweepGlow * SWEEP_ALPHA * uLightWaves * lightMask * vis, 0.0, 1.0);
+    color = 1.0 - (1.0 - color) * (1.0 - lit);
+  }
 }
 
 void main() {
@@ -1325,39 +1606,60 @@ void main() {
   float ang = atan(p.y, p.x) - uBrushPhase;
   float lobe = cos(2.0 * ang);
   float radial = smoothstep(0.0, BRUSH_R_CORE, r) * smoothstep(BRUSH_R_OUT, BRUSH_R_IN, r);
-  vec3 brushTint = mix(vec3(0.82, 0.85, 1.05), vec3(1.05, 0.98, 0.82), lobe * 0.5 + 0.5);
+  vec3 brushLift = mix(BRUSH_BLUE, BRUSH_YELLOW, lobe * 0.5 + 0.5);
   // The brush is polarised skylight, so it dims toward the low twilight glow.
   float daylight = smoothstep(-0.1, 0.25, lightE);
   // The dim factor itself is (1.0 - k*drive) (identity at drive 0), not the
   // old brushOpacityDrive(1.0-0.4*uEnergy) — that put the WHOLE factor
   // inside the drive macro, so an unplugged jack (Custom=1, drive=0) zeroed
   // it outright and made the brush vanish rather than sit at full opacity.
-  float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * brushOpacityDrive(uEnergy)) * daylight, 0.0, 1.0);
-  color = mix(color, color * brushTint, brushAmt);
+  // Each beat's light-wave sweep also swells the bowtie (uBrushSwell), so
+  // the brush breathes with the beat instead of sitting below notice.
+  float brushAmt = clamp(uBrushOpacity * (BRUSH_BASE + BRUSH_SWELL * uBrushSwell) * radial * abs(lobe) * (1.0 - 0.4 * brushOpacityDrive(uEnergy)) * daylight, 0.0, 1.0);
+  color = max(color + brushLift * brushAmt, 0.0);
 
-  // 4. Floater waves (see the file header): snap this pixel to its grid
-  // cell, take the densest live streak at the cell's centre, and from that
-  // density decide what floater (if any) the cell holds: an aligned strand
-  // in the body, a short flat strand on the fringe, a dot in a hotspot. Each
-  // floater is a refractive tube (floaterProfile), applied as a modulation of
-  // what's behind it rather than a painted colour. The cell's own hash fixes
-  // its floater's shape, so a drifting streak moves by floaters switching on
-  // and off across a fixed grid.
-  vec2 cellId = floor(p / FLOATER_CELL);
-  vec2 cellC = (cellId + 0.5) * FLOATER_CELL;
+  // 3b. Blue-field sprites (see the SPRITE_CELL comment): bright specks
+  // darting over the sky, thinning out at the centre of view and mostly
+  // hidden by solid cloud, drawn under the floaters (both are the eye's own,
+  // but the floaters sit in front).
+  if (uSprites > 0.0) {
+    float sprite = spritesAt(p, uSprites) * smoothstep(SPRITE_GAP_R * 0.5, SPRITE_GAP_R * 1.5, r);
+    float spriteA = clamp(sprite * SPRITE_GAIN * mix(1.0, SPRITE_OVER_CLOUD, cloudAlpha), 0.0, 1.0);
+    color = mix(color, SPRITE_TINT, spriteA);
+  }
+
+  // 4. Floater waves (see the file header): snap this pixel to a grid cell,
+  // take the densest live streak at the cell's centre, and draw the floater
+  // that density puts in the cell (drawFloater). Each stamp reads the grid
+  // shifted by Floater glide times its own drift so far: at 0 every stamp
+  // shares one fixed screen grid and a drifting streak moves by floaters
+  // switching on and off across it; at 1 the grid rides along with the
+  // stamp, so its floaters glide with the wind and keep their shapes. Once
+  // grids differ, two overlapping streaks would cut each other's floaters
+  // off at cell edges, so the runner-up streak is drawn too wherever its
+  // cell isn't the winner's own (with one shared grid, at glide 0, it always
+  // is, and only the winner draws).
   // The slider alone — Flow speed's own drive already moves the fluid
   // (render()'s flowSpeedAmount, integrated through the sim's own dt/force);
   // multiplying it in again here made every streak visibly jump the instant
   // any live source was patched in.
   vec2 wind = STREAK_DRIFT * (0.5 + uFlowSpeed);
-  float dens = -1.0;
-  float hot = 0.0;
-  float slant = 0.0;
+  // Winner (x) and runner-up (y): density, hotspot, slant, stamp seed.
+  vec2 dens = vec2(-1.0);
+  vec2 hot = vec2(0.0);
+  vec2 slant = vec2(0.0);
+  vec2 seedW = vec2(0.0);
+  vec2 idA = vec2(0.0);
+  vec2 idB = vec2(0.0);
+  vec2 cA = vec2(0.0);
+  vec2 cB = vec2(0.0);
+  vec2 stampA = vec2(0.0);
+  vec2 stampB = vec2(0.0);
   // Draw-side off-gate, the twin of render()'s spawnFloaters: with the
   // Floaters density product at 0 nothing new stamps, and any stamp still
   // live stops drawing this instant — dens stays below every threshold
-  // below, so neither the streaks nor their sweep glints (inside the
-  // dens > CELL_T_FRINGE block) are drawn until the amount comes back.
+  // below, so neither the streaks nor their sweep glints are drawn until the
+  // amount comes back.
   float densityAmt = uFloaterDensity * floaterDensityDrive(1.0);
   bool floatersOn = densityAmt > 0.0;
   // The stamp-independent half of streakDensity's size, hoisted out of the loop.
@@ -1368,55 +1670,42 @@ void main() {
     float life = uBurstLife[b];
     if (age < 0.0 || age > life) continue;
     vec2 centre = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
+    vec2 gridShift = wind * age * uFloaterGlide;
+    vec2 id = floor((p - gridShift) / FLOATER_CELL);
+    vec2 c = (id + 0.5) * FLOATER_CELL + gridShift;
     // Cull against this stamp's own long half-axis, not the largest any stamp
     // could have: most of the frame is out of reach of a given streak.
     float stampLx = mix(STREAK_L_MIN.x, STREAK_L_MAX.x, sizeBase * clamp(uBurstAmp[b], 0.0, 1.0));
-    vec2 dc = cellC - centre;
+    vec2 dc = c - centre;
     if (dot(dc, dc) > stampLx * stampLx * STREAK_CULL2) continue;
     float h;
     float sl;
-    float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, life, sl, h);
-    if (d > dens) {
-      dens = d;
-      hot = h;
-      slant = sl;
+    float d = streakDensity(c, id.y, centre, uBurstSeed[b], uBurstAmp[b], age, life, sl, h);
+    if (d > dens.x) {
+      dens.y = dens.x; hot.y = hot.x; slant.y = slant.x; seedW.y = seedW.x;
+      idB = idA; cB = cA; stampB = stampA;
+      dens.x = d; hot.x = h; slant.x = sl; seedW.x = uBurstSeed[b];
+      idA = id; cA = c; stampA = centre;
+    } else if (d > dens.y) {
+      dens.y = d; hot.y = h; slant.y = sl; seedW.y = uBurstSeed[b];
+      idB = id; cB = c; stampB = centre;
     }
   }
-  if (dens > CELL_T_FRINGE) {
-    // Keep off the clouds: the cell's centre, looked up in the same field the
-    // cloud pass thresholds, with a margin below CLOUD_LOW so a streak gives
-    // way before a cloud's visible edge reaches it.
-    float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(roomUv(cellC / vec2(devAspect, 1.0) + 0.5)));
-    float cellSeed = hash21(cellId * 0.731 + 17.3) * 97.0 + cellId.x * 0.013;
-    float s;
-    if (dens > CELL_T_BODY && hot > CELL_T_HOT) {
-      float r = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(cellSeed, 15.0)));
-      s = length(p - cellC) - max(r, FLOATER_MIN_PX * px);
-    } else if (dens > CELL_T_BODY) {
-      float len = mix(BODY_LEN_MIN, BODY_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
-      float heading = slant + (hash21(vec2(cellSeed, 44.0)) - 0.5) * BODY_HEADING_JITTER;
-      s = floaterStrand(p, cellC, cellSeed, heading, len);
-    } else {
-      float len = mix(FRINGE_LEN_MIN, FRINGE_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
-      s = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
-    }
-    float vis = clear * (1.0 - cloudAlpha);
-    float delta = clamp(floaterProfile(s) * uFloaterGain, -0.55, 0.55) * vis;
-    color *= 1.0 + min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT;
+  vec2 cGap = cA - cB;
+  if (dens.y > CELL_T_FRINGE && dot(cGap, cGap) > 1.0e-10) {
+    drawFloater(color, p, px, devAspect, cloudAlpha, dens.y, hot.y, slant.y, idB, cB, stampB, seedW.y);
+  }
+  if (dens.x > CELL_T_FRINGE) {
+    drawFloater(color, p, px, devAspect, cloudAlpha, dens.x, hot.x, slant.x, idA, cA, stampA, seedW.x);
+  }
 
-    // Beat light waves pass through the floaters only: each live wave is a
-    // thin ring rippling out from near the centre of view (see the
-    // SWEEP_WIDTH comment), and it lights just this floater's own tube
-    // (inside it and its rim), screen-blended so a floater glints a pale
-    // sky tint as the ring crosses it while the sky and clouds around it stay
-    // untouched.
-    float tube = 1.0 - smoothstep(0.0, max(FLOATER_FRINGE_W, FLOATER_MIN_PX * px), s);
-    if (tube > 0.0) {
-      vec3 sweepGlow = lightWaveAt(p, devAspect);
-      vec3 lit = clamp(sweepGlow * SWEEP_ALPHA * uLightWaves * tube * vis, 0.0, 1.0);
-      color = 1.0 - (1.0 - color) * (1.0 - lit);
-    }
-  }
+  // 5. Gradient dither (DITHER_LSB): triangular noise per channel, the sum
+  // of two independent hashes of the pixel, so the sky's smooth gradient
+  // doesn't break into 8-bit stripes.
+  vec2 fc = gl_FragCoord.xy;
+  vec3 n1 = vec3(hash21(fc * 0.731 + 0.17), hash21(fc * 0.731 + 5.33), hash21(fc * 0.731 + 9.71));
+  vec3 n2 = vec3(hash21(fc.yx * 0.613 + 2.41), hash21(fc.yx * 0.613 + 7.03), hash21(fc.yx * 0.613 + 13.9));
+  color += (n1 + n2 - 1.0) * uDither * DITHER_LSB / 255.0;
 
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
@@ -1457,6 +1746,8 @@ function createSkyScene(): Scene {
   const sweepSeed = new Float32Array(MAX_SWEEPS);
   const cloudFlow = new Float32Array(CLOUD_FLOW_LEN);
   let sweepsFired = 0;
+  let lastSweepSec: number | null = null;
+  let spritePhase = 0;
   // The floater brush's own state — the invisible spawn point that steps
   // across the sky once per stamp (stepBrush). Unrelated to Haidinger's
   // brushPhase far below.
@@ -1495,6 +1786,8 @@ function createSkyScene(): Scene {
       brushHeading = BRUSH_HEADING_INIT;
       sweepT0.fill(WAVE_DEAD_T0);
       sweepsFired = 0;
+      lastSweepSec = null;
+      spritePhase = 0;
       waveSeedCounter = 0;
       lastFrameTime = null;
     },
@@ -1575,6 +1868,7 @@ function createSkyScene(): Scene {
         sweepT0[slot] = anim.timeSec;
         sweepSeed[slot] = wrapShaderSeed(sweepsFired) * 1.618 + 3.0;
         sweepsFired++;
+        lastSweepSec = anim.timeSec;
       }
       const floaterAmount = resolveSceneSetting(ID, settingFor("floaterDensity")) * drives.value("floaterDensity", 1);
       if (drives.fired("floaterDensity", beatFired)) {
@@ -1606,6 +1900,12 @@ function createSkyScene(): Scene {
       // anim.barPhase (see file header).
       brushPhase = advanceBrushPhase(brushPhase, dt);
 
+      // Blue-field sprites' own clock: a steady pace that surges on the
+      // jack's reading (plain Beat by default, so each beat pulse throws
+      // them forward), wrapped seamlessly (SPRITE_PERIOD_SEC).
+      const spriteSpeedNow = spriteSpeed(drives.value("sprites", anim.beatPulse));
+      spritePhase = advanceSpritePhase(spritePhase, dt, spriteSpeedNow);
+
       // Day cycle: Time of day is where the sky starts, Day drift how fast it
       // moves on from there, hurrying through the hours the sun is down
       // (see file header).
@@ -1620,6 +1920,9 @@ function createSkyScene(): Scene {
       uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       displayProg.setF("uBrushPhase", brushPhase);
       displayProg.setF("uDayPhase", dayPhase);
+      displayProg.setF("uBrushSwell", lastSweepSec === null ? 0 : brushSwell(anim.timeSec - lastSweepSec));
+      displayProg.setF("uSpritePhase", spritePhase);
+      displayProg.setF("uSpriteSpeed", spriteSpeedNow);
       displayProg.setF(
         "uFloaterGain",
         floaterGain(liftByDrive(resolveSceneSetting(ID, settingFor("floaterVisibility")), drives.value("floaterVisibility", anim.high))),
