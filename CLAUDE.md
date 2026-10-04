@@ -13,10 +13,6 @@ A browser-based, real-time WebGL2 audio visualizer.
   plans or artifacts unless I ask.
 - If a label, UX wording or the intended look could reasonably mean two
   things, ask one short question before building.
-- When working on a visualization, run `npm run dev` and give the user the
-  link to that scene that the dev server prints at startup, not the gallery
-  root. Any query goes *before* the hash; one placed after it lands on the
-  gallery.
 - The repo is AGPL-3.0-or-later. New dependencies must be permissively
   licensed (MIT, BSD, Apache-2.0, ISC, OFL or similar), never GPL, LGPL or
   AGPL; `CONTRIBUTING.md` says why. Any third-party code bundled into the
