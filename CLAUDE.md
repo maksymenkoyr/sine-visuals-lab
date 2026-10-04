@@ -3,15 +3,17 @@
 The working rules for this repo.
 
 A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` →
-`src/app.ts` (controller + gallery) and `tv.html` → `src/tv.ts` (paired display).
+`src/app.ts` (laptop host, phone controller and gallery) and `tv.html` →
+`src/tv.ts` (paired display).
 `docs/index.md` is the map of how the pieces fit.
 
 ## Git
 
 - Never edit on `main`. Work on a worktree branch and land it through a PR.
 - Before starting, fetch and check whether `origin/main` already has the change
-  (its recent log, and a grep for the symbol). Parallel sessions often land the
-  same fix.
+  (its recent log, and a grep for the symbol), and whether an open PR already
+  covers it (`gh pr list`). If one looks related, read its diff first. Parallel
+  sessions often land the same fix.
 - Branch from freshly fetched `origin/main`. Rebase (never merge) before opening
   a PR, and check again for divergence right before pushing. Never rewrite
   shared history without explicit confirmation.
@@ -23,6 +25,8 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` �
   from before and after, and their paths in your summary. Put a couple of
   them in the PR body: `npm run pr-shots -- before.png after.png` prints the
   markdown (never for a paid scene).
+- A bug isn't fixed until every other place the same behaviour shows up has
+  been checked too.
 - CI runs the same two gates on every PR and before every deploy. The channels
   and releasing are explained in the `src/version.ts` header.
 
@@ -44,13 +48,15 @@ scene record's "Measurements" and dated "Decisions and pivots".
 | Touching... | Read first |
 |---|---|
 | Any broad question — architecture, adding a scene, tuning, what's in flight | `docs/index.md` |
-| The wire format between phone and TV | `src/net/protocol.ts` header |
+| The binary feature-frame format (host to screens) | `src/net/protocol.ts` header |
+| The room, pairing, the phone controller, or the TV's look | `src/net/roomMessages.ts` header (the JSON message vocabulary) and `server/roomRules.ts` header (who may join and send); `src/net/lookSync.ts` header for how the look stays in step |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
 | A scene's per-item settings or a custom widget in its Scene card | `src/render/sceneItems.ts` header, then `src/ui/widgets/registry.ts` header |
 | Making a setting audio-reactive | `src/render/drives.ts` header — a scene reads `<key>Drive(…)`, never a signal directly |
-| Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header |
-| The pop-out output window, Cue/Play, or a localStorage store that changes how a scene looks | `src/net/outputSync.ts` header — such a store must register with `src/net/syncedStores.ts` |
+| Any word the panel shows for signals, jacks, wires or reactive settings | `docs/vocabulary.md` |
+| Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header; `server/roomRules.ts` and `server/roomCore.ts` headers for what a claimed room keeps |
+| The pop-out output window, Cue/Play, or a localStorage store that changes how a scene looks | `src/net/outputSync.ts` header — such a store must register with `src/net/syncedStores.ts` to reach the output or a room's TV |
 | The Cue/Play keys, or a setting that must not glide (`glide: false`) | `src/ui/outputKeys.ts` header, then `src/net/outputGlide.ts` header |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at `target:` |
@@ -69,8 +75,13 @@ scene record's "Measurements" and dated "Decisions and pivots".
   ("Speed", not "Period") or invert the mapping.
 - **Answering questions.** When I ask "why", "what does X mean" or "explain
   X", answer in plain prose grounded in the code: name the file/function and
-  the one mechanism that causes the behaviour, then stop and wait. No plans,
-  HTML artifacts or designs unless I ask for them.
+  the one mechanism that causes the behaviour, then stop and wait. Don't edit
+  code, and no plans, HTML artifacts or designs unless I ask for them.
+- **Short version first.** Open any plan, explanation or research answer
+  with at most five plain lines. Go deeper only into the part I pick.
+- **Ask about wording and look.** If a label, UX wording or the intended look
+  could reasonably mean two things, ask one short question before building.
+  Otherwise make the obvious choice and say what you assumed.
 - **Extend, don't duplicate.** When a requested effect overlaps an existing
   system (Sparkle, the governor, the brightness dial…), build it into that
   system rather than adding a parallel one. If it's unclear which system owns
@@ -99,8 +110,19 @@ scene record's "Measurements" and dated "Decisions and pivots".
 
 ## Claude Code
 
-- Give every subagent and workflow `agent()` its own `model` and `effort`,
-  the cheapest that does the job — even under Ultracode.
+- Work solo unless a task would make one context read far more than it
+  needs. When delegating to a subagent or a workflow `agent()`, give it the
+  cheapest `model` and `effort` that fits:
+
+  | Task | Model, effort |
+  |---|---|
+  | Find files, sweep greps, list call sites, read logs | Haiku, low |
+  | Edits spelled out exactly (rename, move, apply a listed change) | Haiku, low |
+  | Execute a written plan, write tests, fix typecheck errors | Sonnet, medium |
+  | Headless screenshot runs, measurement scripts | Sonnet, low |
+  | First pass of a review (finding candidates) | Sonnet, medium |
+  | Plans, architecture, verifying findings, final review | Opus, high |
+  | Look and shader work judged by eye, DSP and tempo | Opus |
 - `/exec-cheap` runs only when the user types it: never suggest it or route
   work to it, and never use it for paid scenes.
 - Close a session with `/wrap`.
