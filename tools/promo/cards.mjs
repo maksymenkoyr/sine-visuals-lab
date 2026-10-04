@@ -12,7 +12,8 @@
 //
 // Writes <work>/cards/: meta.json {demos, visible, groups: [{key, n}]}, intro.png, demo_<i>.png, and per
 // group chrome_<key>.png (the card and its header, sized for VISIBLE rows) + row_<key>_<i>.png.
-// Also label_laptop.png / label_tv.png, the device tags of the room's split view.
+// Also the two-screen demos' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
+// the laptop's Cue and Play keys.
 // The look: the version card is a GitHub release in miniature (a green tag icon); the rest
 // keeps that family's translucent card, header bar and row rules, without its icons or colours.
 import { chromium } from "playwright";
@@ -96,9 +97,20 @@ await shot(`<div class="v"><div class="t">${tag("#3fb950", 84)}<span>${esc(lines
   <div class="s"><span>${esc(lines.subtitle || "")}</span></div></div>`, `${OUT}/intro.png`, introCss);
 // device tags for the room's split view
 await p.setViewportSize({ width: 220, height: 56 });
-for (const [k, t] of [["laptop", "Laptop"], ["tv", "TV"]])
+await p.setViewportSize({ width: 320, height: 56 });
+for (const [k, t] of [["laptop", "Laptop"], ["tv", "TV"], ["popout", "Pop-out window"]])
   await shot(`<div class="l">${t}</div>`, `${OUT}/label_${k}.png`, `${base}
 .l{display:inline-flex;align-items:center;height:48px;padding:0 20px;border-radius:24px;background:rgba(8,10,14,.7);border:1.5px solid rgba(255,255,255,.34);font-size:26px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}`);
+// the laptop's two output keys, drawn on its deck; lit = held (Cue orange, Play green, as the app's bars)
+for (const [k, w, cap, word, lit] of [["space", 300, "space", "CUE", "#f5a524"], ["option", 150, "⌥ option", "PLAY", "#3fb950"]])
+  for (const on of [false, true]) {
+    await p.setViewportSize({ width: w, height: 58 });
+    await shot(`<div class="k"><b>${word}</b><span>${cap}</span></div>`, `${OUT}/key_${k}_${on ? "on" : "off"}.png`, `${base}
+.k{width:${w}px;height:58px;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:21px;
+ background:${on ? lit : "#2b2f37"};border:1.5px solid ${on ? lit : "rgba(255,255,255,.22)"};color:${on ? "#0b0d10" : "rgba(255,255,255,.72)"};
+ box-shadow:${on ? `0 0 26px ${lit}` : "0 3px 0 rgba(0,0,0,.5)"}}
+.k b{font-weight:800;letter-spacing:.1em}.k span{font-weight:500;opacity:.8}`);
+  }
 fs.writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta));
 await b.close();
 for (const w of warn) console.log("WARN", w);

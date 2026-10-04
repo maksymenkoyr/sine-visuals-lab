@@ -109,7 +109,8 @@ const steps = {
     const file = join(out, `sine-visuals-lab-v${o.version}-promo.mp4`);
     run(ffmpeg(), ["-y", "-loglevel", "error", "-framerate", String(meta.fps), "-i", join(work, "frames", "%05d.jpg"),
       "-ss", ss.toFixed(4), "-t", meta.total.toFixed(3), "-i", resolve(song.file),
-      "-af", `afade=t=in:st=0:d=0.5,afade=t=out:st=${(meta.total - 1.6).toFixed(3)}:d=1.6,aresample=48000`,
+      // no fade-out (the user's call): the song stops on the bar line compose ends on; 40 ms only de-clicks it
+      "-af", `afade=t=in:st=0:d=0.5,afade=t=out:st=${(meta.total - 0.04).toFixed(3)}:d=0.04,aresample=48000`,
       "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
       "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-maxrate", "15M", "-bufsize", "30M", "-profile:v", "high",
       "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",

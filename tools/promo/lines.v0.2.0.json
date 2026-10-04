@@ -9,9 +9,9 @@
     { "take": "ui_wire", "from": 0, "beats": 3, "group": "Controls", "text": "Patch bay: press a cable to unplug it" },
     { "take": "ui_master", "from": 0, "beats": 4, "group": "Controls", "text": "Master card: Scale and Expansion" },
     { "take": "ui_hits", "from": 0, "beats": 3, "group": "Sound and beat", "text": "Hits: Length per lane, Envelope monitor" },
-    { "take": "cuep", "from": 0, "beats": 6, "group": "Output and rooms", "text": "Pop-out output: hold Cue, then Play" },
+    { "take": "cuep", "beats": 7, "group": "Output and rooms", "text": "Pop-out window: hold Space to preview, tap Option to play" },
     { "take": "room", "beats": 4, "group": "Output and rooms", "text": "Room: add a TV by its code" },
-    { "take": "room", "beats": 6, "group": "Output and rooms", "text": "Change the look, press Play: the TV follows" }
+    { "take": "room", "beats": 6, "group": "Output and rooms", "text": "Change the look, play it: the TV follows" }
   ],
   "groups": [
     { "key": "scenes", "title": "Scenes", "rows": [

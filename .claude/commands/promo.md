@@ -43,7 +43,7 @@ alternatives next to them were tried and turned down.
 ## The agreed video (v0.2.0, 2026-10 — each point is the user's call)
 
 - **Shape**: the opening look → the version card held a couple of seconds → the demo clips → the full
-  change lists → a short fade. Vertical 9:16 for phone Stories, about 30 s (not over). Calm cuts, every
+  change lists → the scene held, no text. Vertical 9:16 for phone Stories, about 30 s plus the end hold. Calm cuts, every
   cut on a beat. The song's first drop lands on the first demo.
 - **Version card**: GitHub-release flavoured — a green tag icon, the version ("0.2.0 - beta"), the app
   name under it. *Rejected*: the green "Latest" badge.
@@ -61,9 +61,17 @@ alternatives next to them were tried and turned down.
   low sync to the music". Physarum 2 starts from the user's look and re-rolls every two bars from the
   drop (every two beats never let a dish grow).
 - **Interface demos**: the camera leans toward the part that changes.
-- **Room**: shown working, not just paired — a laptop over the TV, labelled, both on the song: add the
-  TV by its code, then change the palette on the laptop (the TV keeps its look) and press Play, and the
-  TV follows; twice. *Rejected*: a phone-layout controller with a small TV inset.
+- **Pop-out, Cue/Play and Room**: drawn as devices — a laptop (its panel's left column hidden so its
+  own picture shows) with its Space (Cue) and Option (Play) keys on the deck, lit while pressed, over
+  the second screen ("Pop-out window" or "TV"), whose frame glows orange while Cue shows the laptop's
+  look there and flashes green on Play. Both on the song. Cue/Play: a palette on the laptop leaves the
+  pop-out alone; holding Space previews it on the pop-out until release (Cue is a peek, not a hold —
+  `src/ui/outputKeys.ts`); a tap of Option sends it for good. Room: add the TV by its code, then a palette
+  and a tap of Option, twice — the TV follows each time. *Rejected*: screen captures without device
+  frames or keys (a phone-layout controller with a small inset; a bare laptop-over-TV split).
+- **The end**: no fade-out of anything, picture or music. The last list is cut away on a beat and the
+  scene holds a couple of seconds; the video stops on a bar line. *Rejected*: a fade to black and a
+  music fade-out.
 - **Lists stay complete**; when the video runs long, ask what to cut rather than trimming lines.
 
 ## Run, and look at every step
@@ -79,7 +87,9 @@ alternatives next to them were tried and turned down.
   (a fake mic); check scene takes with `tools/promo/motion.py <take> --from <drop beat + 3>` — motion and
   sync to the song's hits. On the synthetic feed Chladni held one figure (motion 1.7); on the song it keeps
   changing (3.9, sync 0.56). Plain Physarum 2 barely pulses on the song (pulse 1.08 vs the look's 1.48).
-  For the room, look at the TV frames after each Play: the TV must change only then.
+  For the two-screen takes, look at the second screen's frames: it must change only on Cue (until
+  release) and Play. They record two pages at once and are the first to go `SLOW` when another job
+  encodes on this Mac — wait for it rather than keep a choppy take.
 - `cards`: no `WARN` lines.
 - `compose`: tile ~16 frames across the video and look at them before encoding. Cuts on beats; each
   caption names what its clip shows; text inside the middle of the screen (Stories covers the top ~13 % and
