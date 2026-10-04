@@ -28,8 +28,9 @@
  * The page is self-contained: system fonts, inline style, no script and no
  * request to anywhere. deploy.yml writes it to dist/versions.html on every
  * Insiders deploy, so it is served at /versions on the Insiders site and is
- * always as current as the last merge; `npm run versions` writes the same
- * page locally. How much history it keeps is BUILDS_BEFORE / BUILDS_AFTER.
+ * always as current as the last merge — the version label in every build's
+ * gallery footer links to that copy (src/version.ts, versionHref()); `npm run
+ * versions` writes the same page locally. How much history it keeps is BUILDS_BEFORE / BUILDS_AFTER.
  */
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;

@@ -1,5 +1,3 @@
-import { SOURCE_URL } from "./brand.ts";
-
 /**
  * The one home for "what build is this, and what channel is it on" — the
  * label shown bottom-left of the gallery footer (src/ui/gallery.ts) and in
@@ -38,8 +36,8 @@ import { SOURCE_URL } from "./brand.ts";
  * A picture of how those numbers have actually moved (builds, releases, the
  * commit each release was cut from) is generated from the release and build
  * tags, never written by hand: deploy.yml publishes it at /versions on
- * Insiders on every deploy, and `npm run versions` writes the same page
- * locally. tools/versionMapLib.mjs's header says what it draws.
+ * Insiders on every deploy, the label links there from every channel
+ * (versionHref()), and `npm run versions` writes the same page locally. tools/versionMapLib.mjs's header says what it draws.
  *
  * `versionLabel()` below is what actually renders per channel — see its own
  * comment for the exact text each channel gets — and `versionHref()` /
@@ -137,17 +135,17 @@ export function channelBadge(info: BuildInfo): { label: string; hint: readonly s
   };
 }
 
+/** The version picture as Insiders serves it — the one copy deploy.yml
+ *  publishes, so the only one that is always current. */
+const VERSIONS_URL = "https://insiders.sinevisualslab.com/versions";
+
 /**
- * Where the label links to: the GitHub Release for a released stable build,
- * or the pre-release `vX.Y.Z-beta` deploy.yml publishes for an insider one,
- * else the commit it was built from, else just the repo (no commit known at
- * all — an unlikely `.git`-less checkout).
+ * Where the label links to: the version picture (tools/versionMapLib.mjs).
+ * An Insiders tab opens its own `/versions`; every other build — Stable, a
+ * PR preview, dev — has none of its own and opens the Insiders one.
  */
 export function versionHref(info: BuildInfo): string {
-  if (info.channel === "stable" && info.version) return `${SOURCE_URL}/releases/tag/v${info.version}`;
-  if (info.channel === "insider" && info.version) return `${SOURCE_URL}/releases/tag/v${info.version}-beta`;
-  if (info.commit) return `${SOURCE_URL}/commit/${info.commit}`;
-  return SOURCE_URL;
+  return info.channel === "insider" ? "/versions" : VERSIONS_URL;
 }
 
 const formatBuiltAt = (builtAt: string): string | null => {
