@@ -1,4 +1,5 @@
 import type { SceneSetting } from "../../render/sceneSettings.ts";
+import type { DriveSetting } from "../../render/drives.ts";
 import { HARMONIES, paletteStains, shuffledStains, shuffleOrder } from "../../render/scenes/physarum2Synergy.ts";
 import type { WidgetCtx } from "./registry.ts";
 import {
@@ -8,6 +9,7 @@ import {
   fromUnit,
   hueRailGradient,
   quantize,
+  randomPatch,
   randomValue,
   toUnit,
   valuesMatch,
@@ -25,11 +27,19 @@ import {
  *
  * A lane edits the existing per-item setting (`ctx.get`/`ctx.set`, the
  * exact path a slider drag takes), so a Look, a reset and the TV see nothing
- * different. What the console can't draw is a row's jack, wire panel,
- * sparkline and reset — so releasing a lane mounts that setting's real
- * device-menu row (`ctx.mountRows`) under the lanes, and that row is where a
- * source is patched in. The full-size row is also where a setting with no
- * jack (Sensor angle, Trail life) is typed exactly.
+ * different. What the console can't draw is a row's wire panel, sparkline
+ * and reset — so releasing a lane mounts that setting's real device-menu row
+ * (`ctx.mountRows`) under the lanes, where a value is also typed exactly.
+ *
+ * Ports (2026-10-04): every lane starts with a port, and every row has a
+ * group port before its title. Until its row is mounted a port is a stand-in
+ * drawn with the real port's look (`ctx.portLook`); pressing it mounts that
+ * row, pinned, and the row's real port moves into the lane (`portHost`), so
+ * the wires, the wire panel and the cables are the patch bay's own. The group
+ * port mounts strain 0's row with the other strains `linked`, the panel's
+ * multi-item path: a wire plugged in there goes to every strain, and each
+ * lane's own port can still change one strain afterwards (the group port
+ * then reads mixed).
  *
  * Gestures: drag to set; double-click puts the default back; arrow keys step
  * (Shift = ten times as far). Link moves all the strains together. (A Knobs
@@ -47,17 +57,20 @@ import {
  * Random, preset or colour action. Random (`randomize`) rolls the
  * `mix.random` params for every item over each setting's whole range —
  * Fogleman's random species configs, whose ranges these sliders already
- * span. It has no button here since 2026-10-03: the Strains card's one
- * Random (itemBoxes.ts) calls it along with the Pairs card's own. With
- * `colourActions`,
+ * span — and plugs every lane that has a port into random signals with
+ * random wire settings (consoleMath.ts's `randomPatch`); Back puts the
+ * wires back too. Its button is back on this card since 2026-10-04 (the
+ * user: "return those buttons … but also keep global random"): the
+ * Strains card's Random (itemBoxes.ts) still calls it along with the Pairs
+ * card's own. With `colourActions`,
  * Shuffle hands the hues on screen round the items in a new order and New
  * palette deals a random harmony (physarum2Synergy.ts) — both write the
  * stains, nothing else. Back's history lives at module level, keyed by
  * `stateKey`, so it survives a Look apply or card Reset like pairPads.ts's own.
  *
  * Every word a person reads here is a spec label/description, a value or a
- * preset's own name and hint; the few fixed strings (Link, Back, Shuffle,
- * New palette) are the layout's own vocabulary.
+ * preset's own name and hint; the few fixed strings (Link, Random, Back,
+ * Shuffle, New palette) are the layout's own vocabulary.
  */
 
 export interface ConsoleOptions {
@@ -116,7 +129,15 @@ export interface StrainConsole {
 /** Back's undo stack per console (`stateKey`) — module-level so it survives
  *  a full rebuild; in memory only. */
 const HISTORY_MAX = 20;
-const histories = new Map<string, Record<string, number[]>[]>();
+/** How often the stand-in ports re-read their wires (ms). */
+const PORT_SYNC_MS = 250;
+/** One Back entry: every param's stored values, and — after a Random — every
+ *  lane's wires as they were. */
+interface HistoryEntry {
+  values: Record<string, number[]>;
+  drives?: Map<SceneSetting, DriveSetting>;
+}
+const histories = new Map<string, HistoryEntry[]>();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -161,6 +182,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   const isHue = (p: string): boolean => opts.hue?.param === p;
 
   const cells = new Map<string, Cell[]>();
+  let lastPortSync = -Infinity;
   const link = new Map<string, boolean>();
 
   // ---------------- values ----------------
@@ -209,18 +231,56 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   let detailKey = "";
   let detailHandle: { dispose(): void } | undefined;
 
-  /** Mounts item k's real setting row under the lanes — where its jack, patch
-   *  and reset live. Called when a gesture on a lane ends. */
-  function showDetail(p: string, k: number): void {
-    const spec = specs.get(p)![k]!;
+  /** Where each port sits: `${p}:${k}` per lane, `${p}:all` for a row's
+   *  group port. The stand-in hides while the real port is moved in. */
+  const portSlots = new Map<string, { slot: HTMLElement; standIn: HTMLButtonElement; specs: SceneSetting[]; look: string }>();
+  let movedSlot: string | undefined;
+
+  function addPort(host: HTMLElement, key: string, portSpecs: SceneSetting[], title: string, onPress: () => void): void {
+    const slot = el("span", "vc-sc-port-slot");
+    const standIn = el("button", "vc-drive-port");
+    standIn.type = "button";
+    standIn.title = title;
+    standIn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onPress();
+    });
+    slot.appendChild(standIn);
+    host.appendChild(slot);
+    portSlots.set(key, { slot, standIn, specs: portSpecs, look: "" });
+  }
+
+  /** Mounts item k's real setting row under the lanes — or, for `"all"`, the
+   *  row that edits every item's setting together — where its wires, patch
+   *  and reset live, its port moved into the lane. Called when a gesture on a
+   *  lane ends (`pin` false) or a port is pressed (`pin` true). */
+  function showDetail(p: string, k: number | "all", pin: boolean): void {
+    const ss = specs.get(p)!;
+    const spec = ss[k === "all" ? 0 : k]!;
     const key = `${p}:${k}`;
-    if (key === detailKey) return;
-    detailKey = key;
-    detailHandle?.dispose();
-    detail.hidden = false;
-    detailHead.textContent = `${labels[k]} · ${spec.label}`;
-    detailHead.style.color = colours[k] ?? "#fff";
-    detailHandle = ctx.mountRows(detailRow, [{ spec }]);
+    if (key !== detailKey) {
+      detailKey = key;
+      detailHandle?.dispose();
+      const prev = movedSlot ? portSlots.get(movedSlot) : undefined;
+      if (prev) prev.standIn.hidden = false;
+      detail.hidden = false;
+      const all = k === "all";
+      detailHead.textContent = all ? `All strains · ${spec.label}` : `${labels[k]} · ${spec.label}`;
+      detailHead.style.color = all ? "#fff" : (colours[k] ?? "#fff");
+      const target = portSlots.get(key);
+      movedSlot = spec.drive && target ? key : undefined;
+      if (movedSlot) target!.standIn.hidden = true;
+      detailHandle = ctx.mountRows(detailRow, [
+        {
+          spec,
+          portHost: movedSlot ? target!.slot : undefined,
+          ...(all
+            ? { ownLabel: labels[0], linked: ss.slice(1).map((s, j) => ({ spec: s, label: labels[j + 1]!, colour: colours[j + 1] })) }
+            : {}),
+        },
+      ]);
+    }
+    if (pin && spec.drive) ctx.pin(spec);
   }
   disposers.push(() => detailHandle?.dispose());
 
@@ -233,7 +293,12 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     const row = el("div", "vc-sc-row");
     row.title = ss[0]!.description ?? "";
     const head = el("div", "vc-sc-row-head");
-    head.appendChild(el("span", "vc-sc-row-title", ss[0]!.label));
+    const titleWrap = el("span", "vc-sc-row-name");
+    if (ss[0]!.drive) {
+      addPort(titleWrap, `${p}:all`, ss, `Click to wire every strain's ${ss[0]!.label} at once`, () => showDetail(p, "all", true));
+    }
+    titleWrap.appendChild(el("span", "vc-sc-row-title", ss[0]!.label));
+    head.appendChild(titleWrap);
     const linkBtn = el("button", "vc-sc-chip", "Link");
     linkBtn.type = "button";
     linkBtn.title = "Drag one strain and all of them move by the same amount";
@@ -261,7 +326,11 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       const thumb = el("div", "vc-sc-thumb");
       track.append(rail, fill, thumb);
       const val = el("span", "vc-sc-lane-val");
-      lane.append(code, track, val);
+      const portCell = el("span", "vc-sc-lane-port");
+      if (spec.drive) {
+        addPort(portCell, `${p}:${k}`, [spec], `Click to choose what ${labels[k]}'s ${spec.label} listens to`, () => showDetail(p, k, true));
+      }
+      lane.append(portCell, code, track, val);
       lanes.appendChild(lane);
 
       let dragging = false;
@@ -284,13 +353,13 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       const end = (): void => {
         if (!dragging) return;
         dragging = false;
-        showDetail(p, k);
+        showDetail(p, k, false);
       };
       track.addEventListener("pointerup", end);
       track.addEventListener("pointercancel", end);
       track.addEventListener("dblclick", () => {
         write(p, k, spec.default, false, false);
-        showDetail(p, k);
+        showDetail(p, k, false);
       });
       track.addEventListener("keydown", (e) => {
         const step = arrowStep(spec, e.shiftKey);
@@ -301,7 +370,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
         e.preventDefault();
         adoptShown(p, k);
         write(p, k, ctx.get(spec) + d, !!link.get(p), false);
-        showDetail(p, k);
+        showDetail(p, k, false);
       });
 
       // paint() runs every tick; skip it while neither the value nor the
@@ -359,27 +428,46 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   const syncBack = (): void => {
     backBtn.disabled = hist.length === 0;
   };
-  /** Snapshots every console param before an action writes — Back's entry. */
-  function pushHistory(): void {
-    const snap: Record<string, number[]> = {};
-    for (const p of params) snap[p] = stored(p);
-    hist.push(snap);
+  /** Every lane that has a port — what Random rewires. */
+  const wired = params.flatMap((p) => specs.get(p)!.filter((s) => s.drive));
+  /** Snapshots every console param before an action writes — Back's entry;
+   *  `withDrives` also keeps every lane's wires. */
+  function pushHistory(withDrives = false): void {
+    const values: Record<string, number[]> = {};
+    for (const p of params) values[p] = stored(p);
+    const entry: HistoryEntry = { values };
+    if (withDrives) entry.drives = new Map(wired.map((s) => [s, ctx.getDrive(s)]));
+    hist.push(entry);
     if (hist.length > HISTORY_MAX) hist.shift();
     syncBack();
   }
   backBtn.addEventListener("click", () => {
     const snap = hist.pop();
-    if (snap) for (const p of Object.keys(snap)) writeValues(p, snap[p]!, true);
+    if (snap) {
+      for (const p of Object.keys(snap.values)) writeValues(p, snap.values[p]!, true);
+      if (snap.drives) for (const [s, d] of snap.drives) ctx.setDrive(s, d);
+      lastPortSync = -Infinity;
+    }
     syncBack();
   });
 
   const randomParams = (opts.mix?.random ?? []).filter((p) => specs.has(p));
-  /** Random, pressed from outside (the Strains card's one Random,
-   *  itemBoxes.ts): one entry on this console's Back. */
+  /** Random — this card's button, or the Strains card's (itemBoxes.ts): rolls
+   *  the `mix.random` params and rewires every lane, one entry on Back. */
   function randomize(): void {
-    if (!randomParams.length) return;
-    pushHistory();
+    if (!randomParams.length && !wired.length) return;
+    pushHistory(true);
     for (const p of randomParams) writeValues(p, specs.get(p)!.map((spec) => randomValue(spec, Math.random)));
+    for (const s of wired) ctx.setDrive(s, randomPatch(Math.random));
+    lastPortSync = -Infinity;
+  }
+  if (randomParams.length || wired.length) {
+    const randomBtn = el("button", undefined, "Random");
+    randomBtn.type = "button";
+    const rolled = randomParams.map((p) => specs.get(p)![0]!.label).join(", ");
+    randomBtn.title = `Roll ${rolled || "nothing"} for every strain, and plug every slider into random signals`;
+    randomBtn.addEventListener("click", randomize);
+    mixRow.appendChild(randomBtn);
   }
   mixRow.appendChild(backBtn);
   mixEl.appendChild(mixRow);
@@ -537,6 +625,16 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       wheelUpdate?.(probe);
       syncPresets();
       syncBack();
+      // Stand-in ports read the patch store, which decodes on every read —
+      // a few times a second is plenty for a wire change to show.
+      const now = performance.now();
+      if (now - lastPortSync >= PORT_SYNC_MS) {
+        lastPortSync = now;
+        for (const port of portSlots.values()) {
+          const look = ctx.portLook(port.specs);
+          if (look !== port.look) port.standIn.style.cssText = port.look = look;
+        }
+      }
     },
     dispose() {
       for (const d of disposers) d();

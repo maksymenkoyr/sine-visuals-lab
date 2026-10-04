@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import {
   applyEdit,
   arrowStep,
@@ -6,6 +7,10 @@ import {
   fromUnit,
   hueRailGradient,
   quantize,
+  randomPatch,
+  RANDOM_WEIGHT_MAX,
+  RANDOM_WEIGHT_MIN,
+  RANDOM_WIRE_SIGNALS,
   randomValue,
   toUnit,
   valuesMatch,
@@ -107,5 +112,54 @@ describe("randomValue / valuesMatch (the console's Random and preset pills)", ()
     expect(valuesMatch([0.46, 0.2], [0.4516, 0.2], s)).toBe(true);
     expect(valuesMatch([0.48, 0.2], [0.4516, 0.2], s)).toBe(false);
     expect(valuesMatch([0.46], [0.46, 0.2], s)).toBe(false);
+  });
+});
+
+describe("randomPatch (the console's Random wiring)", () => {
+  /** A small seeded generator so the rolls are repeatable. */
+  function seeded(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  it("wires one or two different catalogue signals with weights in range, never Tempo or Tempo lock", () => {
+    const rnd = seeded(7);
+    const counts = new Set<number>();
+    const mixes = new Set<string>();
+    for (let i = 0; i < 400; i++) {
+      const p = randomPatch(rnd);
+      counts.add(p.sources.length);
+      mixes.add(p.mix);
+      if (p.sources.length === 2) expect(p.sources[0]!.choice).not.toEqual(p.sources[1]!.choice);
+      for (const s of p.sources) {
+        expect(RANDOM_WIRE_SIGNALS).toContain(s.choice);
+        expect(s.weight).toBeGreaterThanOrEqual(RANDOM_WEIGHT_MIN - 1e-9);
+        expect(s.weight).toBeLessThanOrEqual(RANDOM_WEIGHT_MAX + 1e-9);
+      }
+      // Only "Only when" marks a condition, and then it is the second wire.
+      expect(p.sources.some((s) => s.when)).toBe(p.mix === "gate");
+      if (p.mix === "gate") expect(p.sources[0]!.when).toBeUndefined();
+    }
+    expect([...counts].sort()).toEqual([1, 2]);
+    expect([...mixes].sort()).toEqual(["add", "gate", "max"]);
+    expect(RANDOM_WIRE_SIGNALS).not.toContain("anim.tempo");
+    expect(RANDOM_WIRE_SIGNALS).not.toContain("anim.tempoLock");
+  });
+
+  it("gives a hit its height and Beat wave its beats per swing, and nothing else either", () => {
+    const rnd = seeded(11);
+    for (let i = 0; i < 400; i++) {
+      for (const s of randomPatch(rnd).sources) {
+        const id = s.choice as SignalId;
+        expect(s.height !== undefined).toBe(SIGNALS[id].kind === "edge");
+        expect(s.every !== undefined).toBe(id === "anim.beatWave");
+      }
+    }
   });
 });

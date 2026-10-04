@@ -247,6 +247,8 @@ export interface PairWords {
     pairsHint: string;
     /** Shown in the status line while no pad has focus/hover/drag. */
     statusIdle: string;
+    /** This card's Random, which rolls the layer on screen. */
+    random: Record<PairLayer, string>;
     nudge: string;
     keepOwn: string;
     back: string;
@@ -347,6 +349,7 @@ export const PAIR_WORDS: PairWords = {
     pairs: "Pairs",
     pairsHint: "Drag a dot and watch the scene. The corners show the four extremes: apart, together, and who chases whom.",
     statusIdle: "Hover or drag a pad to read both directions.",
+    random: { smell: "Random smell", touch: "Random touch" },
     nudge: "Nudge",
     keepOwn: "Keep own trails",
     back: "Back",
@@ -358,7 +361,7 @@ export const PAIR_WORDS: PairWords = {
     rarelyMeet: "They rarely meet, so there is little to eat. Bring them together in Smell first.",
     mixTitle: "Mix",
     mixHint:
-      "Nudge jitters the table on screen, Back undoes the last change — presets below jump to a named starting point. Random, up by the strains, rolls Smell and Touch together, each over its whole range. Keep own trails leaves the own-trail faders where they are.",
+      "Random rolls the table on screen over its whole range, Nudge jitters it, Back undoes the last change — presets below jump to a named starting point. Random up by the strains rolls Smell and Touch together. Keep own trails leaves the own-trail faders where they are.",
   },
 };
 

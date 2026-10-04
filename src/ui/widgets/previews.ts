@@ -76,8 +76,6 @@ export function getPreviewSource(id: string): PreviewSource | undefined {
 const REF_TEXELS_PER_PREVIEW_CELL = 4;
 
 const STRAIN_PARAMS = ["nutrient", "excite", "sensor", "turn", "stride", "stain", "angle", "life"] as const;
-/** The params that have a drive reading (a jack) — Sensor angle and Trail life have none. */
-type DrivenParam = Exclude<StrainParam, "angle" | "life">;
 type StrainParam = (typeof STRAIN_PARAMS)[number];
 
 /** One strain's settings, found by param, plus its Smell/Touch cells by the
@@ -146,7 +144,7 @@ registerPreviewSource("physarum2", {
     // running without the music. Nutrient's fallback passes its own rest
     // (NUTRIENT_REST's doc): unplugged, its neutral isn't 0.
     const live = ctx.probe();
-    const dv = (p: DrivenParam, rest = 0): number => {
+    const dv = (p: StrainParam, rest = 0): number => {
       const v = live?.[`drive_${p}${k}`];
       if (typeof v === "number") return v;
       const spec = specs[p];
@@ -159,6 +157,8 @@ registerPreviewSource("physarum2", {
       turn: dv("turn"),
       stride: dv("stride"),
       stain: dv("stain"),
+      angle: dv("angle"),
+      life: dv("life"),
     };
     const eff = resolveStrainEffective(k, raw, drive);
     const motion: StrainPreviewMotion = {

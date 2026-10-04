@@ -114,7 +114,7 @@ import { setHintText } from "../hintSwatches.ts";
  * applies on both axes: right/up always reads more of whatever the axis
  * names, never less.
  *
- * **The mix row (Phase 3).** Nudge/Keep own trails/Back, every
+ * **The mix row (Phase 3).** Random/Nudge/Keep own trails/Back, every
  * preset pill and `randomize` share one rule: **push before you write**.
  * Each first snapshots both live tables (`snapshot()`) onto
  * `PairState.history` (a module-level stack, same survives-a-rebuild
@@ -123,12 +123,13 @@ import { setHintText } from "../hintSwatches.ts";
  * Random/Nudge/Back/a preset would otherwise persist all 12 (Touch) or 16
  * (Smell) settings to localStorage on every click regardless of how many
  * cells actually moved (`sceneSettings.ts`'s own per-`ctx.set` persist).
- * Nudge only ever touches the layer on screen; `randomize`, a preset and
- * Back write both tables. Random itself has no button here (2026-10-03, the
- * user: "group this all in one cool random button. random smell, touch, per
- * strain card"): the Strains card's one Random (itemBoxes.ts) calls
- * `randomize` and the Strain Console's own, so this card's Back still undoes
- * just its half of a roll. Keep own trails is a plain toggle (Smell only,
+ * This card's Random and Nudge only ever touch the layer on screen;
+ * `randomize`, a preset and Back write both tables. Random's button was
+ * folded into the Strains card's one Random on 2026-10-03 and came back on
+ * 2026-10-04 (the user: "return those buttons … but also keep global
+ * random"): the Strains card's Random (itemBoxes.ts) still calls
+ * `randomize` and the Strain Console's own, so this card's Back undoes just
+ * its half of that roll. Keep own trails is a plain toggle (Smell only,
  * hidden on Touch like the own-trail strip itself) with no history entry of
  * its own — flipping it changes no value. None of this
  * calls `ctx.rerender()`; `tick()` already reflects a `ctx.set` on the next
@@ -944,12 +945,17 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
   }
 
-  // --- Row 4: mix row (Phase 3: Nudge / Keep own trails / Back) +
+  // --- Row 4: mix row (Phase 3: Random / Nudge / Keep own trails / Back) +
   // presets --------------------------------------------------------------
   const mixSectionRow = buildRow(ctx, rowSpec(stateKey, "mix", "Affinity mix"), words.ui.mixTitle, words.ui.mixHint);
 
   const mixRow = document.createElement("div");
   mixRow.className = "vc-mix-row";
+  // This card's own Random rolls the layer on screen (back 2026-10-04); the
+  // Strains card's Random still rolls both through `randomize`.
+  const randomBtn = document.createElement("button");
+  randomBtn.type = "button";
+  randomBtn.textContent = words.ui.random[state.layer];
   const nudgeBtn = document.createElement("button");
   nudgeBtn.type = "button";
   nudgeBtn.textContent = words.ui.nudge;
@@ -961,7 +967,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   backBtn.type = "button";
   backBtn.disabled = true;
   backBtn.textContent = words.ui.back;
-  mixRow.append(nudgeBtn, keepOwnBtn, backBtn);
+  mixRow.append(randomBtn, nudgeBtn, keepOwnBtn, backBtn);
   mixSectionRow.body.appendChild(mixRow);
 
   /** Reflects `state.history`/`state.keepOwn` onto the mix
@@ -983,6 +989,13 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     refreshAll();
     refreshMixRow();
   }
+  randomBtn.addEventListener("click", () => {
+    pushSnapshot();
+    if (state!.layer === "smell") writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random));
+    else writeTable("touch", randomTouch(count, Math.random));
+    refreshAll();
+    refreshMixRow();
+  });
   nudgeBtn.addEventListener("click", () => {
     pushSnapshot();
     writeTable(state!.layer, nudgeTable(tableOf(state!.layer), state!.layer, state!.keepOwn, Math.random));
@@ -1090,6 +1103,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     // Keep own trails only means anything on Smell (Touch's diagonal has no
     // setting to preserve at all) — same visibility rule as the strip itself.
     keepOwnBtn.style.display = layer === "smell" ? "" : "none";
+    randomBtn.textContent = words.ui.random[layer];
     setHintText(layerRow.hintEl, words.layers[layer].how);
     focusIdx = -1;
     for (const pad of pads) {

@@ -25,8 +25,9 @@ The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (the
 lanes, the mix row with Random/Back/the motion presets, and the Synergy row
 with Shuffle/New palette — its header is the source for the gestures),
 `src/ui/widgets/consoleMath.ts` (the pure arithmetic,
-`tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own "Per
-strain" card between the Strains block and the Affinity card. The colour
+`tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own
+"Strain settings" card (the panel title, `PANEL`'s `console.title`) between
+the Strains block and the Affinity card. The colour
 harmony fit is `physarum2Synergy.ts` (pure, `tests/physarum2Synergy.test.ts`),
 the recruiting rule is `SIM_FRAG`'s Headcount block (`SWITCH_MAX`'s comment
 has the rule), and the measured headcount is `POP_FRAG` through
@@ -945,6 +946,44 @@ configs are used.
   `moire.test.ts` timeout that passes alone), the Affinity card before and
   after.
 
+- **2026-10-04: the card is "Strain settings", and every slider has a
+  port.** The user: "per strain card. we should find different name for
+  it. also now lets add signal input on each slider and also one for a
+  group". Asked, they picked "Strain settings" (over Traits, Behaviour,
+  Tuning) and, for the group port, "wires all four" over a separate group
+  drive added on top: the group port mounts strain 0's row with the other
+  strains `linked` (the panel's multi-item path), so a wire plugged in
+  there is written to every strain's own patch and each lane can still be
+  changed alone; the group port then reads mixed (dashed ring in every
+  wire's colour). A lane's port is a stand-in with the real port's look
+  (`WidgetCtx.portLook`) until it is pressed; then the real row mounts
+  pinned under the lanes and its port moves into the lane
+  (`mountRows`'s `portHost`), so the cables end on the lane. Sensor angle
+  and Trail life had no jack; they now take the strain's own band at
+  `MOTION_JACK_GAIN` through `pushToward1` like Sensor range, so with the
+  default wire a loud band widens the angle and lengthens the trail a
+  little (a small change to the default look; identity with nothing
+  plugged in). Checked headless: Nutrient's group port wired the drawn line
+  into all four `nutrient<k>`, a second signal on PP-C3's lane port alone
+  turned the group port mixed, the cable landed on the lane port.
+
+- **2026-10-04: each card's Random is back, and Random rewires.** The user:
+  "before we had random button like for different section but we replaced
+  with one that has all. can we return those buttons and also add random
+  button to strain settings but also keep global random. and make random
+  for strains to connect to random signals with random parameters". The
+  Affinity card's Random rolls the layer on screen again ("Random smell" /
+  "Random touch", as before 2026-10-03), the Strain settings card has its
+  Random again, and the Strains card's Random stays and calls both. The
+  strain Random still rolls `MOTION_PARAMS` and now also plugs every lane
+  that has a port into one wire, or two under a random mix, from the signal
+  catalogue (`consoleMath.ts`'s `randomPatch`: random weight, a random
+  height on a hit, random beats per swing on Beat wave; Tempo and Tempo
+  lock left out because they hardly move). Back puts the wires back too.
+  Assumed, not asked: every lane is rewired (not only the rolled rows),
+  and Nutrient, Excitability, Trail life and Stain values stay unrolled as
+  before.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
@@ -1259,8 +1298,9 @@ untouched. Not yet judged on real music; the default line is
 and why), and Fogleman's extras are in (2026-10-02: Auto level, Wander,
 Start ink and Fresh dish, the one Random (2026-10-03), presets and
 Shuffle/New palette). What's left is Known issues: a real-GPU, real-music
-look at those, a real-music listen at Switching's default and
-`SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
+look at those, and a real-music listen at Switching's default and
+`SWITCH_PRESSURE`. Every lane and every row has a port since 2026-10-04.
+The console's
 rows are the existing per-strain settings (`nutrient`/`excite`/`sensor`/
 `angle`/`turn`/`stride`/`life`/`stain` `<k>`), so a change there reads,
 resets and shares through Looks like any slider. The user reviews panel UX
