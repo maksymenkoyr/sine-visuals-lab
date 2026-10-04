@@ -12,7 +12,8 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 - Never edit on `main`. Work on a worktree branch and land it through a PR.
 - Before starting, fetch and check whether `origin/main` already has the change
   (its recent log, and a grep for the symbol), and whether an open PR already
-  covers it (`gh pr list`). If one looks related, read its diff first. Parallel
+  covers it (`gh pr list`). If one looks related, read its description
+  first (its diff only if the overlap is still unclear). Parallel
   sessions often land the same fix.
 - Branch from freshly fetched `origin/main`. Rebase (never merge) before opening
   a PR, and check again for divergence right before pushing. Never rewrite

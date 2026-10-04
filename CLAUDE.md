@@ -1,7 +1,7 @@
 A browser-based, real-time WebGL2 audio visualizer.
 
-- Before starting, grep `origin/main` for the change and read the diff of any
-  related open PR.
+- Before starting, grep `origin/main` for the change and read the description
+  of any related open PR (its diff only if the overlap is still unclear).
 - A doc exists only for knowledge with no single owning file. If a fact has an
   obvious home, a file whose job is exactly that thing, it goes in that file's
   header comment, not in `docs/`.
