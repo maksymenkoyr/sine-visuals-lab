@@ -11,8 +11,9 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 - Never edit on `main`. Work on a worktree branch and land it through a PR.
 - Before starting, fetch and check whether `origin/main` already has the change
-  (its recent log, and a grep for the symbol). Parallel sessions often land the
-  same fix.
+  (its recent log, and a grep for the symbol), and whether an open PR already
+  covers it (`gh pr list`). If one looks related, read its diff first. Parallel
+  sessions often land the same fix.
 - Branch from freshly fetched `origin/main`. Rebase (never merge) before opening
   a PR, and check again for divergence right before pushing. Never rewrite
   shared history without explicit confirmation.
@@ -24,6 +25,8 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
   from before and after, and their paths in your summary. Put a couple of
   them in the PR body: `npm run pr-shots -- before.png after.png` prints the
   markdown (never for a paid scene).
+- A bug isn't fixed until every other place the same behaviour shows up has
+  been checked too.
 - CI runs the same two gates on every PR and before every deploy. The channels
   and releasing are explained in the `src/version.ts` header.
 
@@ -72,8 +75,13 @@ scene record's "Measurements" and dated "Decisions and pivots".
   ("Speed", not "Period") or invert the mapping.
 - **Answering questions.** When I ask "why", "what does X mean" or "explain
   X", answer in plain prose grounded in the code: name the file/function and
-  the one mechanism that causes the behaviour, then stop and wait. No plans,
-  HTML artifacts or designs unless I ask for them.
+  the one mechanism that causes the behaviour, then stop and wait. Don't edit
+  code, and no plans, HTML artifacts or designs unless I ask for them.
+- **Short version first.** Open any plan, explanation or research answer
+  with at most five plain lines. Go deeper only into the part I pick.
+- **Ask about wording and look.** If a label, UX wording or the intended look
+  could reasonably mean two things, ask one short question before building.
+  Otherwise make the obvious choice and say what you assumed.
 - **Extend, don't duplicate.** When a requested effect overlaps an existing
   system (Sparkle, the governor, the brightness dialâ€¦), build it into that
   system rather than adding a parallel one. If it's unclear which system owns
