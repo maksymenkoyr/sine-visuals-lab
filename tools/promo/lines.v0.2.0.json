@@ -1,21 +1,36 @@
 {
   "title": "0.2.0 - beta",
   "subtitle": "Sine Visuals Lab",
+  "demos": [
+    { "take": "song_p2r", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: one Random for motion, Smell and Touch" },
+    { "take": "ui_strains", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: the Strain Console" },
+    { "take": "ui_pads", "from": 0, "beats": 4, "group": "Scenes", "text": "Physarum 2: Pairs pads" },
+    { "take": "ui_palettes", "from": 0, "beats": 4, "group": "Controls", "text": "Palettes: a mood-grouped library" },
+    { "take": "ui_wire", "from": 0, "beats": 3, "group": "Controls", "text": "Patch bay: press a cable to unplug it" },
+    { "take": "ui_master", "from": 0, "beats": 4, "group": "Controls", "text": "Master card: Scale and Expansion" },
+    { "take": "ui_hits", "from": 0, "beats": 3, "group": "Sound and beat", "text": "Hits: Length per lane, Envelope monitor" },
+    { "take": "cuep", "beats": 7, "group": "Output and rooms", "text": "Pop-out window: hold Space to preview, tap Option to play" },
+    { "take": "room", "beats": 4, "group": "Output and rooms", "text": "Room: add a TV by its code" },
+    { "take": "room", "beats": 6, "group": "Output and rooms", "text": "Change the look, play it: the TV follows" }
+  ],
   "groups": [
-    { "key": "scenes", "title": "Scenes", "style": "carousel", "rows": [
-      "New scene: Coil",
+    { "key": "scenes", "title": "Scenes", "rows": [
       "Physarum 2: Strain Console, Pairs pads",
+      "Pairs pads in words: “A1 follows B2”",
+      "Physarum 2: motion presets, Fresh dish",
       "Physarum 2: Start ink, Wander, Rivals",
-      "Physarum 2: Crawl speed = base + boost + pump",
+      "Physarum 2: strains trade agents",
+      "Physarum 2: Synergy pulls inks into harmony",
+      "Physarum 2: Auto level evens the glow",
+      "Physarum 2: Crawl speed gets boost + pump",
       "Physarum 2: Dose threshold, one Random",
-      "Physarum: Vividness setting",
       "Caustics: Fog pulse, rate-only Speed boost",
-      "Caustics, Storm: Drop reactivity removed",
+      "Caustics: Drop reactivity removed",
       "Chladni: stops fixating on one figure",
-      "Fluid and Sky share one solver",
-      "Storm: Swirl and Flow stop teleporting",
+      "Chladni: sand readable in every palette",
+      "Sky: cheaper fluid, no noise seams",
       "Review fixes across the whole gallery" ] },
-    { "key": "controls", "title": "Controls", "style": "carousel", "rows": [
+    { "key": "controls", "title": "Controls", "rows": [
       "Palettes become roles: ground, ramp, inks",
       "Mood-grouped palette library",
       "Patch bay: press a cable to unplug it",
@@ -23,28 +38,34 @@
       "Master card gets Expansion",
       "Panel words: signal, jack, wire, port",
       "Stop really stops the mic",
-      "Panel blur is now a switch",
+      "Panel blur: a switch, on by default",
       "No screen capture offered on phones",
-      "Cheaper meters, steadier layout" ] },
-    { "key": "output", "title": "Output and rooms", "style": "card", "rows": [
+      "Cheaper meters, steadier layout",
+      "Smooth on 75 and 144 Hz screens",
+      "Gallery tiles animate at full rate",
+      "Recovers by itself if the GPU drops" ] },
+    { "key": "output", "title": "Output and rooms", "rows": [
       "Pop-out output window",
       "Cue (Space) and Play (Option)",
-      "Cue and Play for a TV",
+      "Hold Play to glide into the new look",
       "Resolution slider, Output Power card",
       "Output keeps drawing in a hidden tab",
       "Room: laptop, phone and TV together",
       "Pair a TV with a QR or a typed code",
       "Every device is a member of the room",
+      "Name each device; Own or Main screen",
+      "Play sends your look to every Main screen",
       "Ears: each device picks its audio",
       "Reset the room from TV or laptop" ] },
-    { "key": "sound", "title": "Sound and beat", "style": "card", "rows": [
+    { "key": "sound", "title": "Sound and beat", "rows": [
       "Hits: new Surge lane",
-      "Hits: Tail control",
-      "Hits: Length in ms, Envelope monitor",
+      "Hits: Tail per lane, in ms",
+      "Hits: Envelope monitor, tails in history",
       "Drive graphs: one fixed scale",
       "Drive graphs: peak-hold, same clock",
-      "Auto-tune glides smoothly each tick" ] },
-    { "key": "release", "title": "Release", "style": "card", "rows": [
+      "Auto-tune glides smoothly each tick",
+      "A TV catches every hit" ] },
+    { "key": "release", "title": "Release", "rows": [
       "Release pages: highlights, grouped changes",
       "Scene versions listed for every release" ] }
   ]

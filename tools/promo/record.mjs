@@ -5,6 +5,13 @@
 // Every take is re-recorded until it plays smoothly (`run`), because a stuttering take can't be fixed
 // in the edit. `intro` is the opening look: PROMO_LOOK is a share link from the Looks card
 // (?look=<code>#/v/<scene>), loaded through the app's own ?look= parameter.
+//
+// Scene takes (`intro`, `song_*`) hear the song itself: promo.mjs cuts <work>/mic.wav from the song so
+// that it starts MIC_LEAD beats (time for the app's analyser and beat clock to settle) before song time
+// MIC_SONG_T0 + MIC_LEAD·P, and each scene take films MIC_SPAN beats from there — a stretch that covers
+// the whole video, so compose.py can take any moment of it at the song time the video plays there
+// (meta.songT0). Their script beats count from that start, which is MIC_PRE beats before video beat 0.
+// Panel takes keep the synthetic feed: they show the interface, and only pulse on the grid behind it.
 import fs from "node:fs";
 import {
   BASE, launch, open, openPanel, hideChrome, beatClock, startCast, sleep, moveTo, drag, centerOf, scrollTextTo, clickText, press, P, BPM,
@@ -12,6 +19,10 @@ import {
 
 const WORK = process.env.PROMO_WORK || new URL("../.cache/promo/", import.meta.url).pathname;
 const OUT = `${WORK}/takes/`;
+const MIC = process.env.MIC_WAV ? {
+  wav: process.env.MIC_WAV, lead: Number(process.env.MIC_LEAD), span: Number(process.env.MIC_SPAN),
+  pre: Number(process.env.MIC_PRE), drop: Number(process.env.DROP_BEAT), songT0: Number(process.env.MIC_SONG_T0),
+} : null;
 const UI_VIEW = { width: 576, height: 1024, dsf: 1 };
 const FB_VIEWS = [{ width: 720, height: 1280, dsf: 1 }, { width: 576, height: 1024, dsf: 1 }];
 const at = (bc, b) => bc.waitBeat(b);
@@ -23,19 +34,20 @@ function smooth(frames, t0, beats) {
   const gaps = []; for (let i = 1; i < w.length; i++) gaps.push((w[i].t - w[i - 1].t) * 1000);
   return { fps: (w.length - 1) / (w.at(-1).t - w[0].t), slow: gaps.filter((g) => g > 34).length / gaps.length, max: Math.max(...gaps) };
 }
-async function once(name, scene, { setup, script, beats, view, lead = 1800, track: cfg_track, query = "" }) {
-  const { browser, page } = await launch(view || {});
+async function once(name, scene, { setup, script, beats, view, lead = 1800, track: cfg_track, query = "", music = false }) {
+  const { browser, page } = await launch({ ...(view || {}), wav: music ? MIC.wav : null });
   page.on("pageerror", (e) => console.log(name, "pageerror", e.message));
   try {
-    await open(page, scene, { query });
+    await open(page, scene, { query, music });
     await setup?.(page);
     await sleep(500);
     if (cfg_track) await installTracker(page, cfg_track);
-    const bc = await beatClock(page, lead);
+    const bc = await beatClock(page, lead, music ? { at: MIC.lead } : {});
     const cast = await startCast(page, `${OUT}${name}`);
     await script(page, bc);
     await at(bc, beats + 0.6);
-    const frames = await cast.stop({ name, scene, beats, P, bpm: BPM, epochT0: bc.epochT0, view });
+    const songT0 = music ? MIC.songT0 + MIC.lead * P / 1000 : undefined;
+    const frames = await cast.stop({ name, scene, beats, P, bpm: BPM, epochT0: bc.epochT0, view, songT0 });
     if (cfg_track) await saveTrack(page, name);
     return { st: smooth(frames, bc.epochT0, beats) };
   } finally { await browser.close(); }
@@ -52,11 +64,72 @@ async function run(name, scene, cfg) {
 }
 
 const FB_SETUP = async (page) => { await openPanel(page); await sleep(1200); await hideChrome(page); await sleep(500); };
-const fb = (name, scene, flips, beats = 32) => run(name, scene, {
-  beats, views: FB_VIEWS, setup: FB_SETUP,
-  script: async (page, bc) => { for (const [b, n] of flips) { await at(bc, b); await clickText(page, n); } },
-});
 const every = (step, names, from = 0) => names.map((n, i) => [from + i * step, n]);
+// Video beat where the first demo using `take` starts: demos run in lines.json order from DEMO_START.
+const demoStart = (take) => {
+  const lines = JSON.parse(fs.readFileSync(`${WORK}/lines.json`, "utf8"));
+  let b = Number(process.env.DEMO_START);
+  for (const d of lines.demos || []) { if (d.take === take) return b; b += d.beats; }
+  return null;
+};
+// A two-screen demo: a landscape laptop (on a phone layout the panel covers the PLAY bar), its panel at
+// the palettes, and the second screen it plays to (`second` opens it and returns its page), both on the
+// song (a room's TV never gets the synthetic feed) and both cast — <name>_main and <name>_out. Timed to
+// where the take's demos sit in the video (lines.json), since compose cuts it by song time; `script`
+// counts beats from the first of them and returns where it ends. Key presses go into meta.keys
+// ([epoch s, key, down]) so compose can light the laptop's Space and Option keys.
+async function twoScreens(name, second, script) {
+  if (!MIC) { console.log(`${name}: no MIC_WAV — run it through promo.mjs record`); return; }
+  const d0 = demoStart(name);
+  if (d0 == null) { console.log(`${name}: no demo in lines.json uses it`); return; }
+  const vb = (b) => d0 + b + MIC.pre;   // take beat of demo beat b
+  for (let tryN = 0; tryN < 2; tryN++) {
+    const { browser, ctx, page } = await launch({ width: 1280, height: 720, dsf: 1, wav: MIC.wav });
+    try {
+      page.on("pageerror", (e) => console.log(name, "pageerror", e.message));
+      await open(page, "caustics", { music: true });
+      await page.addStyleTag({ content: ".pv-cur{width:18px!important;height:18px!important;margin:-9px 0 0 -9px!important}" });
+      await openPanel(page); await sleep(1200); await scrollTextTo(page, "Palette", "start"); await sleep(600);
+      await page.keyboard.press("m"); await sleep(600);   // hide the panel's left column: the laptop's own picture shows
+      const other = await second({ browser, ctx, page });
+      await page.bringToFront();
+      await page.mouse.move(640, 400);
+      const bc = await beatClock(page, 0, { at: MIC.lead, late: true });   // the action starts well after
+      if (await page.evaluate(() => performance.now()) > bc.T0 + vb(-1.5) * P) throw new Error(`${name}: setup ran past the demo's start`);
+      const castA = await startCast(page, `${OUT}${name}_main`);
+      const castB = await startCast(other, `${OUT}${name}_out`);
+      const keys = [];
+      const key = async (k, down) => {
+        keys.push([await page.evaluate(() => (performance.timeOrigin + performance.now()) / 1000), k, down]);
+        await (down ? page.keyboard.down(k) : page.keyboard.up(k));
+      };
+      const atB = (b) => at(bc, vb(b));
+      const tap = async (b, text, opts) => {
+        await atB(b - 0.5);
+        const c = await centerOf(page, text, opts);
+        if (!c) { console.log(`${name}: no "${text}"`); return; }
+        await moveTo(page, c.x, c.y, 0.4 * P);
+        await atB(b); await press(page, 120);
+      };
+      const end = await script({ page, at: atB, tap, key });
+      await atB(end);
+      const meta = { name, beats: vb(end), P, bpm: BPM, epochT0: bc.epochT0, songT0: MIC.songT0 + MIC.lead * P / 1000, keys };
+      const frames = await castA.stop(meta); await castB.stop({ ...meta, name: `${name}_out` });
+      const st = smooth(frames, bc.epochT0 + vb(-1) * P / 1000, end + 1);
+      const ok = st.fps >= 50 && st.slow <= 0.12;
+      console.log(`${name} try${tryN} fps ${st.fps.toFixed(1)} slow ${(st.slow * 100).toFixed(0)}% ${ok ? "OK" : "SLOW"}`);
+      if (ok) return;
+    } finally { await browser.close(); }
+  }
+}
+// A scene take on the song. `flips` are [video beat, button text] — the drop is video beat MIC.drop.
+const song = (name, scene, flips, { query = "" } = {}) => {
+  if (!MIC) { console.log(`${name}: no MIC_WAV — run it through promo.mjs record`); return; }
+  return run(name, scene, {
+    music: true, beats: MIC.span, views: FB_VIEWS, setup: FB_SETUP, query,
+    script: async (page, bc) => { for (const [b, n] of flips) { await at(bc, b + MIC.pre); await clickText(page, n); } },
+  });
+};
 
 /** Slider span for the row labelled `label` in the phone panel: the nearest wide canvas below the label. */
 const sliderOf = (page, label) => page.evaluate(([label, PX]) => {
@@ -104,22 +177,25 @@ const installTracker = (page, kind) => page.evaluate((kind) => {
 const saveTrack = async (page, name) => fs.writeFileSync(`${OUT}${name}/track.json`, JSON.stringify(await page.evaluate(() => window.__trk || [])));
 
 const T = {
+  // the user's look, untouched, on the song (without PROMO_LOOK: Physarum 2 as it opens)
   intro: async () => {
     const look = process.env.PROMO_LOOK;
-    if (!look) { console.log("intro: no PROMO_LOOK, skipped (compose falls back to a Physarum 2 take)"); return; }
+    if (!look) { console.log("intro: no PROMO_LOOK — a stand-in Physarum 2 opening"); return song("intro", "physarum2", []); }
     const u = new URL(look);
     const scene = decodeURIComponent((u.hash.match(/\/v\/([^/?]+)/) || [])[1] || "physarum2");
-    await run("intro", scene, {
-      beats: 8, views: FB_VIEWS,
-      query: `&look=${u.searchParams.get("look")}`,
-      setup: async (page) => { await hideChrome(page); await sleep(300); },
-      script: async () => {},
-    });
+    return song("intro", scene, [], { query: `&look=${u.searchParams.get("look")}` });
   },
-  fb_cau: () => fb("fb_cau", "caustics", every(4, ["Sunset", "Ice", "Amethyst", "Ember", "Acid", "Halation", "Fire", "Arcade"])),
-  fb_chl: () => fb("fb_chl", "chladni", every(4, ["Ice", "Fire", "Acid", "Amethyst", "Sunset", "Malachite", "Arcade", "Ember"])),
-  fb_p2a: () => fb("fb_p2a", "physarum2", every(2, ["Random", "Shuffle", "Symbiosis", "New palette", "Chase", "Random", "Mob", "Shuffle", "Gardens", "New palette", "War", "Random", "Hunt", "Shuffle", "Self-avoid", "New palette"])),
-  fb_p2b: () => fb("fb_p2b", "physarum2", every(2, ["Random", "New palette", "Cells", "Shuffle", "Rivals", "Random", "Coral", "Chase", "New palette", "Weave", "Random", "Symbiosis", "Shuffle", "Islands", "Random", "New palette"])),
+  // Re-rolls every two bars from the drop: a dish needs a few beats to grow into its pattern, and one
+  // re-rolled every beat or two never does (the first cut's Physarum takes looked flat for that reason).
+  // From the user's look when it is a Physarum 2 one: its drives (speed boost/pump, seed, flash) are what
+  // make the dish answer the music — the scene's defaults barely pulse (pulse 1.08 vs the look's 1.48).
+  song_p2r: () => {
+    const look = process.env.PROMO_LOOK && new URL(process.env.PROMO_LOOK);
+    const query = look && /\/v\/physarum2\b/.test(look.hash) ? `&look=${look.searchParams.get("look")}` : "";
+    return song("song_p2r", "physarum2", every(8, Array(12).fill("Random"), MIC?.drop ?? 0), { query });
+  },
+  song_chl: () => song("song_chl", "chladni", every(8, ["Ice", "Fire", "Acid", "Amethyst", "Sunset", "Malachite", "Arcade", "Ember", "Ice", "Fire", "Acid", "Amethyst"], MIC?.drop ?? 0)),
+  song_cau: () => song("song_cau", "caustics", every(8, ["Sunset", "Ice", "Amethyst", "Ember", "Acid", "Halation", "Fire", "Arcade", "Sunset", "Ice", "Amethyst", "Ember"], MIC?.drop ?? 0)),
 
   ui_strains: () => run("ui_strains", "physarum2", {
     track: "strains", beats: 8, view: UI_VIEW,
@@ -227,71 +303,43 @@ const T = {
     },
   }),
 
-  room: async () => {
-    const { browser, page } = await launch(UI_VIEW);
-    try {
-      page.on("pageerror", (e) => console.log("room pageerror", e.message));
-      await open(page, "physarum2");
-      await page.addStyleTag({ content: ".pv-cur{width:18px!important;height:18px!important;margin:-9px 0 0 -9px!important}" });
-      const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
-      const tv = await ctxB.newPage();
-      await tv.goto(`${BASE}/tv`, { waitUntil: "load" });
-      await sleep(3500);
-      const txt = await tv.evaluate(() => document.body.innerText.slice(0, 400));
-      const code = (txt.match(/\n([A-Z0-9]{4})\n/) || [])[1];
-      await page.evaluate(() => document.querySelector("#panelBtn")?.click());
-      await sleep(2000);
-      await page.locator('input[placeholder="CODE"]').first().fill(code);
-      await sleep(400);
-      await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /add a tv by its code/i.test(own(e)))?.scrollIntoView({ block: "center" }); });
-      await sleep(600);
-      await page.mouse.move(288, 300);
-      await installTracker(page, "room");
-      const bc = await beatClock(page, 1800);
-      const castA = await startCast(page, `${OUT}room_main`);
-      const castB = await startCast(tv, `${OUT}room_tv`);
-      const btn = await centerOf(page, "Add screen");
-      await at(bc, 0.2);
-      await moveTo(page, btn.x, btn.y, 0.9 * P);
-      await at(bc, 1.4);
-      await page.mouse.down(); await sleep(120); await page.mouse.up();
-      await sleep(10);
-      await at(bc, 3.0);
-      await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /^room\b/i.test(own(e)) && e.getBoundingClientRect().y < 120 && e.getBoundingClientRect().x > 150)?.scrollIntoView({ block: "start" }); });
-      await at(bc, 8.6);
-      const meta = { name: "room", beats: 8, P, bpm: BPM, epochT0: bc.epochT0 };
-      await castA.stop(meta); await castB.stop({ ...meta, name: "room_tv" }); await saveTrack(page, "room_main");
-      console.log("room done");
-    } finally { await browser.close(); }
-  },
+  // add the TV by its code; then a palette on the laptop (the TV keeps its look) and a tap of Option (Play), twice
+  room: () => twoScreens("room", async ({ browser, page }) => {
+    const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
+    const tv = await ctxB.newPage();
+    await tv.goto(`${BASE}/tv`, { waitUntil: "load" });
+    await sleep(3500);
+    const code = ((await tv.evaluate(() => document.body.innerText.slice(0, 400))).match(/\n([A-Z0-9]{4})\n/) || [])[1];
+    await page.evaluate(() => document.querySelector("#panelBtn")?.click()); await sleep(2000);   // the Room view, over the panel
+    await page.locator('input[placeholder="CODE"]').first().fill(code); await sleep(400);
+    await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /add a tv by its code/i.test(own(e)))?.scrollIntoView({ block: "center" }); });
+    await sleep(600);
+    return tv;
+  }, async ({ page, at, tap, key }) => {
+    const btn = await centerOf(page, "Add screen");
+    await at(-0.8); await moveTo(page, btn.x, btn.y, 0.6 * P);
+    await at(0.4); await press(page, 120);
+    await at(3.5); await page.evaluate(() => document.querySelector("#panelBtn")?.click());   // close the Room view
+    const play = async (b) => { await at(b); await key("Alt", true); await sleep(150); await key("Alt", false); };
+    await tap(4.5, "Ice", { minX: 640 }); await play(5.75);
+    await tap(7, "Ember", { minX: 640 }); await play(8.25);
+    return 10;
+  }),
 
-  cuep: async () => {
-    const { browser, ctx, page } = await launch({ width: 720, height: 1280, dsf: 1 });
+  // A palette on the laptop leaves the pop-out alone; holding Space (Cue) shows it there only while held
+  // (outputKeys.ts: a peek, the output goes back on release); a tap of Option (Play) sends it for good.
+  cuep: () => twoScreens("cuep", async ({ ctx, page }) => {
     let pop = null; ctx.on("page", (p) => { pop = p; });
-    try {
-      await open(page, "caustics");
-      await openPanel(page); await sleep(1100); await openPanel(page); await sleep(600);
-      await page.evaluate(() => { const own = (e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(); [...document.querySelectorAll("*")].find((e) => /^pop out$/i.test(own(e)))?.click(); });
-      for (let i = 0; i < 40 && !pop; i++) await sleep(100);
-      await sleep(3500);
-      await page.bringToFront();
-      await installTracker(page, "cuep");
-      const bc = await beatClock(page, 1800);
-      const castA = await startCast(page, `${OUT}cuep_main`);
-      const castB = await startCast(pop, `${OUT}cuep_out`);
-      const key = (k, d) => (d ? page.keyboard.down(k) : page.keyboard.up(k));
-      const plan = [
-        [0, () => key("Space", true)],
-        [1, () => clickText(page, "Sunset")], [2.5, () => clickText(page, "Ice")], [4, () => clickText(page, "Amethyst")],
-        [5.5, () => key("Alt", true)], [8, () => key("Alt", false)], [9, () => key("Space", false)],
-      ];
-      for (const [b, f] of plan) { await at(bc, b); await f(); }
-      await at(bc, 10.6);
-      const meta = { name: "cuep", beats: 10, P, bpm: BPM, epochT0: bc.epochT0 };
-      await castA.stop(meta); await castB.stop({ ...meta, name: "cuep_out" }); await saveTrack(page, "cuep_main");
-      console.log("cuep done");
-    } finally { await browser.close(); }
-  },
+    await page.evaluate(() => document.querySelector("#outBtn")?.click());
+    for (let i = 0; i < 60 && !pop; i++) await sleep(100);
+    await sleep(3500);
+    return pop;
+  }, async ({ at, tap, key }) => {
+    await tap(0.5, "Ice", { minX: 640 });
+    await at(2); await key("Space", true); await at(3.5); await key("Space", false);
+    await at(4.5); await key("Alt", true); await sleep(150); await key("Alt", false);
+    return 7;
+  }),
 };
 
 fs.mkdirSync(OUT, { recursive: true });

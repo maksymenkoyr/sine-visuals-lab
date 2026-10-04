@@ -215,6 +215,15 @@ configs are used.
     single jump, the first sweep's mistake before raw trails were read
     (`PairCulture.trails()`). `padmodels.mjs`: neither a probability gate
     nor a value-scaled smell reach made avoid strength change the overlap.
+- 2026-10-04, promo footage (PR #313, `tools/promo/motion.py`, Stable 0.2.0,
+  a 175 BPM drum & bass track through the fake mic, 64 beats after the drop):
+  the scene's **defaults** plus Random every 8 beats barely pulse with the
+  music — motion 4.61, beat pulse 1.08, sync to onsets 0.11. The user's saved
+  look (drives: Speed boost ← beat wave, Speed pump and Seed ← low onset,
+  Flash ← onset) pulses clearly: 5.32 / 1.48 / 0.32 untouched, 5.80 / 1.52
+  with Random every 8 beats on top (Random keeps the drives). The first promo
+  cut re-rolled presets every 2 beats on the synthetic feed; the user found
+  half of it flat — a dish needs a few beats to grow into its pattern.
 
 ## Decisions and pivots
 
@@ -954,6 +963,10 @@ applies there too. Tuned so far only against the synthetic feed at
 
 ## Known issues and next steps
 
+- The defaults barely answer real music (2026-10-04, Measurements: beat pulse
+  1.08 vs 1.48 for the user's own look). The look's drives — Speed boost on
+  the beat wave, Speed pump and Seed on the low onset, Flash on onsets — are
+  what make the dish move with a song; a candidate for the defaults.
 - Fogleman's extras (2026-10-02) were judged only headlessly on SwiftShader
   with the synthetic feed: the motion presets, Auto level's default and
   Wander all want a look on a real GPU with music. Fresh dish is
@@ -1083,6 +1096,10 @@ applies there too. Tuned so far only against the synthetic feed at
 
 ## Materials
 
+- The user's own look that opened the v0.2.0 promo (2026-10-04), a Looks-card
+  share link: `physarum2/looks/promo-0.2.0.txt`. Its drives are the ones that
+  make the dish answer music (Measurements, 2026-10-04); `tools/promo` uses it
+  as the Physarum footage's starting point.
 - Artifact "Physarum Lab" (controls prototype, private):
   https://claude.ai/artifact/UhgRTMw36hB6mFBccP7ada — source in
   `physarum2/artifacts/`: `lab.src.html`, `strainPreview.js` (the shared

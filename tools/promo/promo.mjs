@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 // Builds a release's promo video — a vertical 1080x1920 montage of what changed, cut to a song.
-// The playbook (what to ask the user, how to judge each step) is .claude/commands/promo.md; this file
+// The playbook (what to ask the user, how to judge each step) is .claude/commands/release-promo.md; this file
 // only runs the steps, one at a time or all together.
 //
-//   node tools/promo/promo.mjs <step> --version 0.3.0 [--song file] [--look link] [--out dir]
-//        [--drop-beat 18] [--bpm N] [--base url]
+//   node tools/promo/promo.mjs <step> [--version 0.3.0] [--song file|link] [--look link] [--out dir]
+//        [--drop-beat N] [--bpm N] [--base url]
+//
+// --version defaults to what Stable serves now (its version.json), so a run "just works" for the last
+// release. --song (a file, or a link yt-dlp can fetch) is kept as <work>/song.wav and --look (a Looks-card
+// share link) as <work>/look.txt; without them a run reuses its own, else the newest earlier release's.
 //
 // steps (in order):
 //   notes    writes <work>/release-notes.md, the Stable release's page, for drafting lines.json
-//   song     beat grid + first drop of --song → song.json (song.py)
-//   record   headless Chromium on the live site, one take per shot, cut on the song's beats (record.mjs)
+//   song     beat grid + first drop of the song → song.json (song.py)
+//   record   headless Chromium on the live site, one take per shot, cut on the song's beats (record.mjs);
+//            scene takes hear the song itself through a fake mic (<work>/mic.wav). `record <take>…`
+//            re-records only those takes
 //   cards    the text cards from <work>/lines.json (cards.mjs)
 //   compose  frames: footage + cards + camera (compose.py)
-//   encode   frames + the song, starting so the drop lands on --drop-beat → <out>/…-promo.mp4
+//   encode   frames + the song, starting so the drop lands on the drop beat (default: the first demo;
+//            --drop-beat moves it, for record and compose too) → <out>/…-promo.mp4
 //   all      song, record, cards, compose, encode
 // <work> is tools/.cache/promo/v<version> (git-ignored); lines.json is the one file written by hand.
 //
@@ -20,7 +27,7 @@
 // Chromium, and a working ffmpeg (else imageio-ffmpeg through uv is used). It records the DEPLOYED site
 // (--base, default Stable), so run it after the release is live, not before.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -30,21 +37,50 @@ const { values: o, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     version: { type: "string" }, song: { type: "string" }, look: { type: "string" }, out: { type: "string" },
-    "drop-beat": { type: "string", default: "18" }, bpm: { type: "string" }, base: { type: "string" },
+    "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" },
   },
 });
 const step = positionals[0];
-if (!step || !o.version) { console.error("usage: node tools/promo/promo.mjs <notes|song|record|cards|compose|encode|all> --version X.Y.Z [flags]"); process.exit(2); }
+if (!step) { console.error("usage: node tools/promo/promo.mjs <notes|song|record|cards|compose|encode|all> [--version X.Y.Z] [flags]"); process.exit(2); }
+if (!o.version) {
+  o.version = (await (await fetch("https://www.sinevisualslab.com/version.json")).json()).version;
+  console.log(`version ${o.version} (what Stable serves now)`);
+}
 
-const work = resolve(here, "../.cache/promo", `v${o.version}`);
+const cache = resolve(here, "../.cache/promo"), work = join(cache, `v${o.version}`);
 mkdirSync(work, { recursive: true });
+// <work>/<file>, else the newest earlier release's — the song and the look carry over between releases
+function remembered(file) {
+  if (existsSync(join(work, file))) return join(work, file);
+  const earlier = readdirSync(cache).filter((d) => d.startsWith("v") && existsSync(join(cache, d, file)))
+    .map((d) => join(cache, d, file)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (!earlier[0]) return null;
+  copyFileSync(earlier[0], join(work, file));
+  console.log(`${file}: reusing ${earlier[0]}`);
+  return join(work, file);
+}
+if (o.look) writeFileSync(join(work, "look.txt"), o.look.trim() + "\n");
+const lookFile = ["record", "all"].includes(step) ? remembered("look.txt") : null;
+const look = o.look || (lookFile && readFileSync(lookFile, "utf8").trim());
 const out = resolve(o.out || join(homedir(), "Movies", `sine-visuals-lab-v${o.version}-promo`));
-const env = { ...process.env, PROMO_WORK: work, ...(o.look ? { PROMO_LOOK: o.look } : {}), ...(o.base ? { BASE: o.base } : {}) };
+const env = { ...process.env, PROMO_WORK: work, ...(look ? { PROMO_LOOK: look } : {}), ...(o.base ? { BASE: o.base } : {}) };
 const run = (cmd, args, extra = {}) => {
   const r = spawnSync(cmd, args, { stdio: "inherit", env: { ...env, ...extra } });
   if (r.status !== 0) { console.error(`\n${cmd} ${args[0] ?? ""} failed (${r.status})`); process.exit(r.status || 1); }
 };
 const need = (f, why) => { if (!existsSync(f)) { console.error(`missing ${f} — ${why}`); process.exit(2); } };
+
+// The video beat the song's first drop lands on: the first demo, after the opening look and the
+// version card (compose.py's `look` + `version`, from plan.json), unless --drop-beat says otherwise.
+// record (the song stretch the scene takes hear), compose and encode must all agree on it.
+function demoStart() {   // the first demo's video beat
+  const f = join(work, "plan.json"), plan = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {};
+  return (plan.look ?? 3) + (plan.version ?? 6);
+}
+function dropBeat() { return o["drop-beat"] ? Number(o["drop-beat"]) : demoStart(); }
+// Scene takes hear the song from MIC_PRE beats before the video starts, for MIC_SPAN beats (longer than
+// any cut), after up to MIC_LEAD beats of the song before that so the app's analyser has settled.
+const MIC_PRE = 3, MIC_LEAD = 32, MIC_SPAN = 120;
 
 function ffmpeg() {
   try { execFileSync("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore" }); return "ffmpeg"; } catch {}
@@ -58,31 +94,53 @@ const steps = {
     console.log(`wrote ${join(work, "release-notes.md")}`);
   },
   song() {
-    if (!o.song) { console.error("--song <audio file> is required"); process.exit(2); }
-    run("uv", ["run", "-q", "--with", "librosa", "--with", "numpy", "--with", "soundfile", "python", join(here, "song.py"), resolve(o.song), join(work, "song.json"),
+    const wav = join(work, "song.wav");
+    if (o.song) {
+      let src = o.song;
+      if (/^https?:/.test(src)) {   // a link: yt-dlp fetches the audio as is (it can't convert without a system ffmpeg)
+        for (const f of readdirSync(work).filter((f) => f.startsWith("song.src."))) rmSync(join(work, f));
+        run("uvx", ["yt-dlp", "--no-playlist", "-q", "-f", "ba", "-o", join(work, "song.src.%(ext)s"), src]);
+        src = join(work, readdirSync(work).find((f) => f.startsWith("song.src.")));
+      }
+      run(ffmpeg(), ["-y", "-loglevel", "error", "-i", resolve(src), "-ac", "2", "-ar", "44100", wav]);
+    } else if (!remembered("song.wav")) { console.error("--song <file or link> is required (no earlier release's song to reuse)"); process.exit(2); }
+    run("uv", ["run", "-q", "--with", "librosa", "--with", "numpy", "--with", "soundfile", "python", join(here, "song.py"), wav, join(work, "song.json"),
       ...(o.bpm ? ["--bpm", o.bpm] : [])]);
   },
   record() {
     const s = join(work, "song.json"); need(s, "run the song step first");
-    run("node", [join(here, "record.mjs"), "intro", "all"], { BPM: String(JSON.parse(readFileSync(s, "utf8")).bpm) });
+    const song = JSON.parse(readFileSync(s, "utf8")), P = song.period, drop = dropBeat();
+    const start = song.dropTime - (drop + MIC_PRE) * P;          // song time of the scene takes' beat 0
+    const lead = Math.min(MIC_LEAD, Math.floor(start / P));
+    if (lead < 8) { console.error(`the drop is only ${song.dropTime}s into the song — too early to give the scene takes a lead-in`); process.exit(2); }
+    const wavT0 = start - lead * P, wav = join(work, "mic.wav");
+    run(ffmpeg(), ["-y", "-loglevel", "error", "-ss", wavT0.toFixed(4), "-t", ((lead + MIC_SPAN) * P + 2).toFixed(3), "-i", resolve(song.file),
+      "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", wav]);   // the format Chromium's fake mic reads
+    run("node", [join(here, "record.mjs"), ...(positionals.length > 1 ? positionals.slice(1) : ["all"])], {
+      BPM: String(song.bpm), DROP_BEAT: String(drop), DEMO_START: String(demoStart()),
+      MIC_WAV: wav, MIC_SONG_T0: String(wavT0), MIC_LEAD: String(lead), MIC_PRE: String(MIC_PRE), MIC_SPAN: String(MIC_SPAN),
+    });
   },
-  cards() { need(join(work, "lines.json"), "write lines.json (see .claude/commands/promo.md)"); run("node", [join(here, "cards.mjs")]); },
+  cards() { need(join(work, "lines.json"), "write lines.json (see .claude/commands/release-promo.md)"); run("node", [join(here, "cards.mjs")]); },
   compose() {
     need(join(work, "song.json"), "run the song step first");
     need(join(work, "cards", "meta.json"), "run the cards step first");
-    run("uv", ["run", "-q", "--with", "pillow", "python", join(here, "compose.py")]);
+    run("uv", ["run", "-q", "--with", "pillow", "python", join(here, "compose.py")], { DROP_BEAT: String(dropBeat()) });
   },
   encode() {
     const song = JSON.parse(readFileSync(join(work, "song.json"), "utf8"));
     const meta = JSON.parse(readFileSync(join(work, "frames", "meta.json"), "utf8"));
     if (song.dropTime == null) { console.error("song.json has no dropTime; pass a different --song or place the start by hand"); process.exit(2); }
-    const ss = song.dropTime - Number(o["drop-beat"]) * song.period;
-    if (ss < 0) { console.error(`the drop is only ${song.dropTime}s into the song, too early for --drop-beat ${o["drop-beat"]}; lower it`); process.exit(2); }
+    const drop = dropBeat();
+    if (meta.dropBeat !== drop) { console.error(`the frames were composed for a drop on beat ${meta.dropBeat}, not ${drop}; re-run record and compose with the same --drop-beat`); process.exit(2); }
+    const ss = song.dropTime - drop * song.period;
+    if (ss < 0) { console.error(`the drop is only ${song.dropTime}s into the song, too early for drop beat ${drop}; pass a lower --drop-beat`); process.exit(2); }
     mkdirSync(out, { recursive: true });
     const file = join(out, `sine-visuals-lab-v${o.version}-promo.mp4`);
     run(ffmpeg(), ["-y", "-loglevel", "error", "-framerate", String(meta.fps), "-i", join(work, "frames", "%05d.jpg"),
       "-ss", ss.toFixed(4), "-t", meta.total.toFixed(3), "-i", resolve(song.file),
-      "-af", `afade=t=in:st=0:d=0.5,afade=t=out:st=${(meta.total - 1.6).toFixed(3)}:d=1.6,aresample=48000`,
+      // no fade-out (the user's call): the song stops on the bar line compose ends on; 40 ms only de-clicks it
+      "-af", `afade=t=in:st=0:d=0.5,afade=t=out:st=${(meta.total - 0.04).toFixed(3)}:d=0.04,aresample=48000`,
       "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
       "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-maxrate", "15M", "-bufsize", "30M", "-profile:v", "high",
       "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",

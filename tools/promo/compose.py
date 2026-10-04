@@ -2,47 +2,60 @@
 #
 #   uv run -q --with pillow python tools/promo/compose.py          (promo.mjs runs this)
 #
-# Reads <work>: song.json (tempo), cards/ (cards.mjs), takes/ (record.mjs), plan.json (optional).
-# Writes <work>/frames/00000.jpg … + frames/meta.json {total, frames, fps}: 1080x1920, constant 30 fps,
-# each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
+# Reads <work>: song.json (tempo), lines.json, cards/ (cards.mjs), takes/ (record.mjs), plan.json (optional).
+# Writes <work>/frames/00000.jpg … + frames/meta.json {total, frames, fps, dropBeat}: 1080x1920, constant
+# 30 fps, each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
 #
-# Shape of the video: a short opening look, the release card ("0.2.0 - beta"), then one segment per
-# group in lines.json — "carousel" groups ride a bottom carousel over clear scene footage with a lively
-# camera (bar-hit zoom, slow roll, orbiting pan, a punch on every beat); "card" groups show one list card
-# over dimmed panel footage, whose camera leans toward the tracked part of the interface. It ends with a
-# two-beat fade. Backdrops are allocated from two pools of takes; plan.json can name them per group:
+# Shape of the video (the user's calls, 2026-10):
+#   1. the opening look, then the release card ("0.2.0 - beta") held for a couple of seconds;
+#   2. the demos from lines.json — clips that show a change happening, one caption at a time along the
+#      bottom: the next caption slides in and pushes the old one out. The interface camera leans toward
+#      the tracked part that changes; scene footage keeps a steady camera;
+#   3. every group of lines.json over steady scene footage, as a list card held low in the frame whose
+#      rows scroll through it like a carousel: a new row comes in at the bottom as the top one leaves
+#      (a wheel-style picker was tried and rejected as too far from the list card);
+#   then the last list is cut away and its scene holds a couple of seconds — nothing fades out, the
+#   video stops on a bar line (the user's call). The two-screen demos (Cue/Play with the pop-out, the
+#   room with a TV) are drawn as devices: a laptop with its Cue/Play keys over the second screen.
+#   The song's drop goes on the first demo (meta.dropBeat, which promo.mjs uses) —
+#   make that demo a Physarum 2 take from a beat where it re-rolls.
+# plan.json can override the timing, in beats:
 #
-#   { "intro": {"take": "intro", "t0": 0}, "step": 2, "hold": 4, "back": {"<key>": [["<take>", 0, 8], …]} }
+#   { "intro": {"take": "intro", "t0": 0}, "look": 3, "version": 6, "dwell": 2, "row": 0.5, "hold": 2,
+#     "end": 6, "scenes": ["intro", "song_cau", "song_chl", "song_p2r"] }
 #
-# step = beats per carousel card, hold = beats a list card stays up after its last row lands, back =
-# [take, first beat in the take, beats] pieces for a group. The opening look is the `intro` take when
-# there is one, else a Physarum 2 stand-in. The first scene piece is Physarum 2, which re-rolls every
-# 10 beats from take beat 0 — with an 8-beat opening that puts a re-roll on video beat 18, which is
-# where promo.mjs places the song's drop (--drop-beat).
+# dwell = beats a list shows its first rows before it scrolls, row = beats per scroll step, hold = beats
+# it rests on its last rows, end = the least beats held after the last list, scenes = the takes
+# behind the groups, in turn. Scene takes heard the song (record.mjs), so each is cut at the song time
+# the video plays at that moment, and its picture moves with the music you hear; panel takes are cut by
+# their own beats.
 import bisect, json, math, os, shutil
 from PIL import Image, ImageDraw, ImageFilter
 
 WORK = os.environ.get("PROMO_WORK") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cache", "promo")
 song = json.load(open(f"{WORK}/song.json"))
 P = 60.0 / song["bpm"]
-FPS, TAIL, FADE_BEATS = 30, 0.9, 2
+FPS = 30
 W, H = 1080, 1920
 plan = json.load(open(f"{WORK}/plan.json")) if os.path.exists(f"{WORK}/plan.json") else {}
-STEP, HOLD = plan.get("step", 2), plan.get("hold", 4)
+LOOK, VERSION, ROW, HOLD = plan.get("look", 3), plan.get("version", 6), plan.get("row", 0.5), plan.get("hold", 2)
+DWELL, END = plan.get("dwell", 2), plan.get("end", 6)
 META = json.load(open(f"{WORK}/cards/meta.json"))
+CARD, VISIBLE = META["card"], META["visible"]                     # the list card's row window (cards.mjs)
+def list_steps(n): return max(0, n - VISIBLE)
+def list_beats(n): return math.ceil(DWELL + list_steps(n) * ROW) + HOLD
 LINES = json.load(open(f"{WORK}/lines.json"))
-GROUPS = [g["key"] for g in LINES["groups"]]
+DROP_BEAT = int(os.environ.get("DROP_BEAT") or LOOK + VERSION)
+SS = song["dropTime"] - DROP_BEAT * P    # song time at video beat 0 (promo.mjs encode starts the song there)
 
 REAL = {"cuep": "cuep_main", "room": "room_main"}           # composited takes: the controller's own take
-TAKE_BEATS = {"cuep": 9, "room": 6.5}                         # usable beats of the short takes (the rest: 8 or 32)
-def take_beats(name): return TAKE_BEATS.get(name, 8 if name.startswith("ui_") or name == "intro" else 32)
 
 def load_take(name):
     real = REAL.get(name, name)
     d = f"{WORK}/takes/{real}"
     j = json.load(open(f"{d}/frames.json"))
     tk = dict(dir=d, t0=j["meta"]["epochT0"], ts=[f["t"] for f in j["frames"]], files=[f["file"] for f in j["frames"]],
-              vw=(j["meta"].get("view") or {}).get("width", 576))
+              vw=(j["meta"].get("view") or {}).get("width", 576), songT0=j["meta"].get("songT0"), keys=j["meta"].get("keys", []))
     tf = f"{d}/track.json"
     tk["track"] = json.load(open(tf)) if os.path.exists(tf) else []
     tk["track_ts"] = [r[0] for r in tk["track"]]
@@ -52,9 +65,12 @@ def get(name):
     if name not in takes: takes[name] = load_take(name)
     return takes[name]
 
-def frame_at(name, beat):
+def src_time(tk, beat, video_beat=None):
+    # a take that heard the song is cut at the song time the video plays here; others by their own beat
+    return tk["t0"] + (SS + video_beat * P - tk["songT0"] if tk["songT0"] is not None and video_beat is not None else beat * P)
+def frame_at(name, beat, video_beat=None):
     tk = get(name)
-    src_t = tk["t0"] + beat * P
+    src_t = src_time(tk, beat, video_beat)
     k = bisect.bisect_left(tk["ts"], src_t)
     if k >= len(tk["ts"]) or (k > 0 and abs(tk["ts"][k - 1] - src_t) <= abs(tk["ts"][k] - src_t)): k = max(0, k - 1)
     return Image.open(f"{tk['dir']}/{tk['files'][k]}").convert("RGB")
@@ -70,40 +86,67 @@ def inset(base, im, size, pos, pad=3):
     ImageDraw.Draw(base).rectangle((x - pad, y - pad, x + w + pad - 1, y + h + pad - 1), outline=(235, 240, 255), width=3)
     base.paste(im.resize(size, Image.LANCZOS), pos)
     return base
-def cuep_frame(b): return inset(fit(frame_at("cuep", b)).copy(), frame_at("cuep_out", b), (780, 439), (150, 1472))
-def room_frame(b): return inset(fit(frame_at("room", b)).copy(), frame_at("room_tv", b), (440, 248), (590, 1180))
-def backdrop(name, b):
-    if name == "cuep": return cuep_frame(b)
-    if name == "room": return room_frame(b)
-    return fit(frame_at(name, b))
+def tag_at(base, key, pos):
+    t = png(f"label_{key}.png"); base.paste(t.convert("RGB"), pos, t.getchannel("A")); return base
 
-# ---- which take sits behind which group ------------------------------------------------------------
-INTRO = plan.get("intro") or ({"take": "intro", "t0": 0} if os.path.isdir(f"{WORK}/takes/intro") else {"take": "fb_p2b", "t0": 4})
-SCENE_POOL = [("fb_cau", 0, 6), ("fb_chl", 0, 8), ("fb_cau", 8, 12), ("fb_p2b", 16, 8), ("fb_chl", 8, 8), ("fb_cau", 20, 8)]
-UI_POOL = [("cuep", 0, 9), ("room", 1.5, 5), ("ui_hits", 0, 8), ("ui_wire", 0, 3), ("ui_palettes", 0, 6), ("ui_master", 0, 4), ("ui_pads", 0, 5)]
-cursor = {"scene": 0, "ui": 0}
-def allocate(dur, kind, first=None):
-    pool = SCENE_POOL if kind == "scene" else UI_POOL
-    pieces, left = [], dur
-    if first:
-        n = min(left, first[2]); pieces.append((first[0], first[1], n)); left -= n
-    while left > 0.01:
-        take, tb, nb = pool[cursor[kind] % len(pool)]; cursor[kind] += 1
-        n = min(left, nb); pieces.append((take, tb, n)); left -= n
-    return pieces
+# The two-screen demos (record.mjs twoScreens): drawn as devices — a laptop with its Cue (Space) and
+# Play (Option) keys on the deck, lit while held, over the second screen it plays to, whose frame glows
+# orange while Cue shows the laptop's look there and flashes green when Play sends it. Everything stays above the caption band (y 1340..1530).
+TWO = {"cuep": "popout", "room": "tv"}                       # take → the second screen's label
+DEV_X, DEV_W, DEV_H, BEZEL, LAP_Y, OUT_Y = 120, 840, 473, 14, 262, 850
+CUE_RGB, PLAY_RGB = (245, 165, 36), (63, 185, 80)              # the app's CUE and PLAY bar colours
+def device(base, im, y, glow=0.0, rgb=PLAY_RGB):
+    if glow > 0:
+        g = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(g).rounded_rectangle((DEV_X - BEZEL - 8, y - BEZEL - 8, DEV_X + DEV_W + BEZEL + 8, y + DEV_H + BEZEL + 8),
+                                            radius=26, outline=(*rgb, int(255 * glow)), width=12)
+        g = g.filter(ImageFilter.GaussianBlur(9)); base.paste(g, (0, 0), g)
+    ImageDraw.Draw(base).rounded_rectangle((DEV_X - BEZEL, y - BEZEL, DEV_X + DEV_W + BEZEL, y + DEV_H + BEZEL),
+                                           radius=20, fill=(22, 25, 31), outline=(78, 84, 96), width=2)
+    base.paste(im.resize((DEV_W, DEV_H), Image.LANCZOS), (DEV_X, y))
+def keys_at(name, vb):
+    tk = get(name); t = src_time(tk, 0, vb)
+    down, play_up = {}, None
+    for et, k, d in tk["keys"]:
+        if et > t: break
+        down[k] = d
+        if k == "Alt" and not d: play_up = et
+    # Cue (Space held) puts the laptop's look on the second screen while held: orange; Play: a green flash
+    if down.get("Space"): return down, 1.0, CUE_RGB
+    glow = 1.0 if down.get("Alt") else max(0.0, 1 - (t - play_up) / 0.6) if play_up else 0.0
+    return down, glow, PLAY_RGB
+def two_screens(name, b, vb):
+    base = Image.new("RGB", (W, H), (6, 8, 13))
+    down, glow, rgb = keys_at(name, vb)
+    device(base, frame_at(name, b, vb), LAP_Y)
+    y0 = LAP_Y + DEV_H + BEZEL                                 # the laptop's deck, with its two output keys
+    ImageDraw.Draw(base).polygon([(DEV_X - BEZEL, y0), (DEV_X + DEV_W + BEZEL, y0), (DEV_X + DEV_W + 70, y0 + 66), (DEV_X - 70, y0 + 66)],
+                                 fill=(34, 38, 46), outline=(80, 86, 98))
+    ks, ko = png(f"key_space_{'on' if down.get('Space') else 'off'}.png"), png(f"key_option_{'on' if down.get('Alt') else 'off'}.png")
+    x = (W - ks.width - 24 - ko.width) // 2
+    base.paste(ks.convert("RGB"), (x, y0 + 4), ks.getchannel("A")); base.paste(ko.convert("RGB"), (x + ks.width + 24, y0 + 4), ko.getchannel("A"))
+    device(base, frame_at(f"{name}_out", b, vb), OUT_Y, glow, rgb)
+    tag_at(base, "laptop", (DEV_X + 10, LAP_Y + 10)); tag_at(base, TWO[name], (DEV_X + 10, OUT_Y + 10))
+    return base
+def backdrop(name, b, video_beat):
+    if name in TWO: return two_screens(name, b, video_beat)
+    return fit(frame_at(name, b, video_beat))
 
-SEGS = [("look", [(INTRO["take"], INTRO["t0"], 3)], None, 3), ("intro", [(INTRO["take"], INTRO["t0"] + 3, 5)], None, 5)]
-first_scene = True
-for g in GROUPS:
-    n = META[g]["n"]; carousel = META[g]["style"] == "carousel"
-    dur = n * STEP if carousel else n + HOLD
-    if g in plan.get("back", {}):
-        pieces = [tuple(p) for p in plan["back"][g]]
-    elif carousel:
-        pieces = allocate(dur, "scene", first=("fb_p2a", 0, 18) if first_scene else None); first_scene = False
-    else:
-        pieces = allocate(dur, "ui")
-    SEGS.append((g, pieces, g, dur))
+# ---- segments ---------------------------------------------------------------------------------------
+# Song takes (record.mjs) cover the whole video, so a segment needs only the take's name.
+INTRO = plan.get("intro") or {"take": "intro", "t0": 0}
+SCENE_POOL = plan.get("scenes") or ["intro", "song_cau", "song_chl", "song_p2r"]   # behind the groups, in turn
+
+SEGS = [("look", (INTRO["take"], INTRO["t0"]), None, LOOK), ("version", (INTRO["take"], INTRO["t0"] + LOOK), None, VERSION)]
+for i, d in enumerate(LINES.get("demos", [])):
+    SEGS.append(("demo", (d["take"], d.get("from", 0)), i, d["beats"]))
+for k, g in enumerate(META["groups"]):
+    SEGS.append(("list", (SCENE_POOL[k % len(SCENE_POOL)], 0), g, list_beats(g["n"])))
+# The end: the last list is cut away and its scene holds a couple of seconds, no fade (the user's call);
+# stretched to a bar line counted from the drop, so the song stops on a beat.
+end = END
+while (sum(sg[3] for sg in SEGS) + end - DROP_BEAT) % 4: end += 1
+SEGS.append(("end", (SEGS[-1][1][0], 0), None, end))
 TOTAL_BEATS = sum(sg[3] for sg in SEGS)
 
 # ---- camera -----------------------------------------------------------------------------------------
@@ -118,70 +161,65 @@ def track_box(tk, src_t, scale):
     recent = [r for r in tk["track"][max(0, k - 2):k + 1] if len(r) == 5]
     r = [sum(x[i] for x in recent) / len(recent) for i in range(1, 5)]
     return [v * scale for v in r]
-def camera(im, name, pidx, local, plen, take_beat):
-    t = local / max(plen, 1)
-    phase = (local % 1) * P
+def camera(im, name, local, plen, take_beat):
     if name in ("cuep", "room"):
-        z, punch = 1.0 + 0.12 * ease(t), 1 + 0.035 * math.exp(-8 * phase)
-        cx, cy = W * 0.5, H * (0.45 - 0.05 * t)
-    elif name.startswith("ui_"):
+        return zoom(im, 1.0 + 0.10 * ease(local / max(plen, 1)), W * 0.5, H * 0.42)
+    if name.startswith("ui_"):
         tk = get(name)
         bx = track_box(tk, tk["t0"] + take_beat * P, W / tk["vw"])
-        z, punch = 1.0 + 0.40 * ease(local / 3), 1 + 0.015 * math.exp(-8 * phase)
         cx, cy = (bx[0] + bx[2] / 2, bx[1] + bx[3] / 2) if bx else (W * 0.62, H * 0.5)
         cx = W * 0.5 + (cx - W * 0.5) * 0.8; cy = H * 0.5 + (cy - H * 0.5) * 0.8
-    else:   # scene footage: bar-hit zoom that relaxes over the bar, per-beat punch, slow roll, orbiting pan
-        z = 1.14 + 0.07 * math.sin(2 * math.pi * local / 16 + pidx) + 0.24 * math.exp(-(local % 4) * 1.15)
-        punch = 1 + 0.05 * math.exp(-8 * phase)
-        cx = W * (0.5 + 0.07 * math.sin(2 * math.pi * local / 12 + pidx * 2)); cy = H * (0.5 + 0.06 * math.cos(2 * math.pi * local / 9 + pidx))
-        im = im.rotate(2.6 * math.sin(2 * math.pi * local / 10 + pidx), resample=Image.BICUBIC, center=(cx, cy))
-    return zoom(im, z * punch, cx, cy)
+        return zoom(im, 1.0 + 0.40 * ease(local / 3), cx, cy)
+    return im   # scene footage: a steady camera
 
 # ---- text layers ------------------------------------------------------------------------------------
 _png = {}
 def png(path):
     if path not in _png: _png[path] = Image.open(f"{WORK}/cards/{path}").convert("RGBA")
     return _png[path]
-_static = {}
-def static_layer(g, k):
-    if (g, k) not in _static:
-        lay = png(f"chrome_{g}.png").copy()
-        for i in range(k): lay.alpha_composite(png(f"row_{g}_{i}.png"))
-        _static[(g, k)] = lay
-    return _static[(g, k)]
 def with_alpha(lay, a):
     lay = lay.copy(); lay.putalpha(lay.getchannel("A").point(lambda v: int(v * a))); return lay
-def fade_row(g, i, a):
-    r = png(f"row_{g}_{i}.png"); lay = Image.new("RGBA", r.size, (0, 0, 0, 0)); lay.paste(r, (0, int((1 - a) * 14)))
-    return with_alpha(lay, a)
 
-_scrim = None
-def scrim():
-    global _scrim
-    if _scrim is None:
+_scrims = {}
+def scrim(top, strength):   # darkens the bottom of the frame from `top` down, so the text reads
+    if (top, strength) not in _scrims:
         a = Image.new("L", (W, H), 0); d = ImageDraw.Draw(a)
-        for y in range(1180, H): d.line((0, y, W, y), fill=int(150 * min(1, (y - 1180) / 300)))
-        _scrim = a
-    return _scrim
-CARD_Y, CARD_W, CARD_PITCH, CARD_X0 = 1335, 460, 480, 70
-def carousel(im, g, n, local):
-    s = min(int(local // STEP) + ease((local % STEP - (STEP - 0.75)) / 0.75), n - 1)
-    im = Image.composite(Image.new("RGB", im.size, (3, 5, 10)), im, scrim())
-    for j in range(max(0, int(s) - 1), min(n, int(s) + 4)):
-        x = int(round(CARD_X0 + (j - s) * CARD_PITCH))
-        if x > W or x + CARD_W < 0: continue
-        a_on = max(0.0, 1 - abs(j - s) * 1.6)
-        edge = max(0.0, 1 - (CARD_X0 - x) / 360) if x < CARD_X0 else 1.0
-        for variant, a in (("", 1.0), ("_on", a_on)):
-            if a <= 0 or edge <= 0: continue
-            c = png(f"car_{g}_{j}{variant}.png")
-            im.paste(c.convert("RGB"), (x, CARD_Y), c.getchannel("A").point(lambda v: int(v * a * edge)))
+        for y in range(top, H): d.line((0, y, W, y), fill=int(strength * min(1, (y - top) / 300)))
+        _scrims[(top, strength)] = a
+    return _scrims[(top, strength)]
+def darken(im, top, strength): return Image.composite(Image.new("RGB", im.size, (3, 5, 10)), im, scrim(top, strength))
+
+def scroller(im, g, local):
+    key, n, rh = g["key"], g["n"], CARD["row"]
+    im = darken(im, CARD["y"] - 380, 170)
+    o = im.convert("RGBA")
+    fade = min(1.0, local * P / 0.2)
+    chrome = png(f"chrome_{key}.png")
+    o.alpha_composite(with_alpha(chrome, fade) if fade < 1 else chrome)
+    k = (local - DWELL) / ROW
+    s = 0.0 if k <= 0 else min(list_steps(n), math.floor(k) + ease((k % 1) / 0.6))   # ticks on each step
+    win = Image.new("RGBA", (CARD["w"], (VISIBLE + 2) * rh), (0, 0, 0, 0))          # a row of margin each side
+    for j in range(int(s), min(n, int(s) + VISIBLE + 1)):
+        y = (j - s) * rh
+        a = max(0.0, min(1.0, 1 + y / rh, 1 - (y - (VISIBLE - 1) * rh) / rh))       # out at the top, in at the bottom
+        if a > 0: win.alpha_composite(with_alpha(png(f"row_{key}_{j}.png"), a * fade), (0, int(round(y)) + rh))
+    o.alpha_composite(win.crop((0, rh, CARD["w"], (VISIBLE + 1) * rh)), (CARD["x"], CARD["y"]))
+    return o.convert("RGB")
+CAP_X, CAP_Y, CAP_SLIDE, CAP_T = 70, 1340, 300, 0.4   # caption position; slide distance (px) and time (s)
+def caption(im, i, local):
+    im = darken(im, 1180, 150)
+    a = ease(local * P / CAP_T)
+    if i > 0 and a < 1:
+        c = png(f"demo_{i - 1}.png")
+        im.paste(c.convert("RGB"), (int(CAP_X - a * CAP_SLIDE), CAP_Y), c.getchannel("A").point(lambda v: int(v * (1 - a))))
+    c = png(f"demo_{i}.png")
+    im.paste(c.convert("RGB"), (int(CAP_X + (1 - a) * CAP_SLIDE), CAP_Y), c.getchannel("A").point(lambda v: int(v * a)))
     return im
 def dim(im, amount, t_in): return Image.blend(im, Image.new("RGB", im.size, (4, 6, 12)), amount * min(1.0, t_in / 0.3))
 
 # ---- frames -----------------------------------------------------------------------------------------
-n_frames = int((TOTAL_BEATS * P + TAIL) * FPS)
-print(f"{TOTAL_BEATS} beats, {TOTAL_BEATS * P:.3f}s + {TAIL}s tail = {n_frames} frames @ {FPS}")
+n_frames = round(TOTAL_BEATS * P * FPS)
+print(f"{TOTAL_BEATS} beats ({end} held at the end) = {TOTAL_BEATS * P:.3f}s = {n_frames} frames @ {FPS}; drop on beat {DROP_BEAT}")
 bounds, b0 = [], 0
 for sg in SEGS: bounds.append(b0); b0 += sg[3]
 FRAMES = f"{WORK}/frames"
@@ -189,34 +227,18 @@ shutil.rmtree(FRAMES, ignore_errors=True); os.makedirs(FRAMES)
 si = 0
 for i in range(n_frames):
     bp = (i / FPS) / P
-    if bp >= TOTAL_BEATS:
-        im = Image.new("RGB", (W, H), (0, 0, 0))
-    else:
-        while si + 1 < len(SEGS) and bp >= bounds[si + 1] - 1e-9: si += 1
-        name, pieces, g, dur = SEGS[si]
-        local = bp - bounds[si]; t_in = local * P
-        acc = 0
-        for pidx, (tk, tb, nb) in enumerate(pieces):
-            if local < acc + nb or pidx == len(pieces) - 1:
-                im = camera(backdrop(tk, tb + (local - acc)), tk, pidx, local - acc, nb, tb + (local - acc)); break
-            acc += nb
-        if name == "intro":
-            im = dim(im, 0.30, t_in)
-            o = im.convert("RGBA"); o.alpha_composite(with_alpha(png("intro.png"), min(1.0, t_in / 0.18))); im = o.convert("RGB")
-        elif g and META[g]["style"] == "carousel":
-            im = carousel(im, g, META[g]["n"], local)
-        elif g:
-            n = META[g]["n"]
-            im = dim(im, 0.50, t_in)
-            o = im.convert("RGBA")
-            ca = min(1.0, t_in / 0.15)
-            k = min(n, int(local))
-            o.alpha_composite(with_alpha(static_layer(g, k), ca) if ca < 1.0 else static_layer(g, k))
-            if k < n: o.alpha_composite(fade_row(g, k, min(1.0, (local - k) * P / 0.22) * ca))
-            im = o.convert("RGB")
-        if bp > TOTAL_BEATS - FADE_BEATS:
-            f = max(0.0, 1 - (bp - (TOTAL_BEATS - FADE_BEATS)) / FADE_BEATS)
-            im = Image.eval(im, lambda v: int(v * f))
+    while si + 1 < len(SEGS) and bp >= bounds[si + 1] - 1e-9: si += 1
+    kind, (tk, tb), arg, dur = SEGS[si]
+    local = bp - bounds[si]; t_in = local * P
+    im = backdrop(tk, tb + local, bp)
+    if tk not in TWO: im = camera(im, tk, local, dur, tb + local)   # the two-screen layout stays put
+    if kind == "version":
+        im = dim(im, 0.30, t_in)
+        o = im.convert("RGBA"); o.alpha_composite(with_alpha(png("intro.png"), min(1.0, t_in / 0.18))); im = o.convert("RGB")
+    elif kind == "demo":
+        im = caption(im, arg, local)
+    elif kind == "list":
+        im = scroller(im, arg, local)
     im.save(f"{FRAMES}/{i:05d}.jpg", quality=94, subsampling=0)
-    if i % 150 == 0: print(i, f"beat {bp:.1f}", SEGS[si][0] if bp < TOTAL_BEATS else "tail", flush=True)
-json.dump(dict(total=TOTAL_BEATS * P + TAIL, frames=n_frames, fps=FPS), open(f"{FRAMES}/meta.json", "w"))
+    if i % 150 == 0: print(i, f"beat {bp:.1f}", kind, flush=True)
+json.dump(dict(total=n_frames / FPS, frames=n_frames, fps=FPS, dropBeat=DROP_BEAT), open(f"{FRAMES}/meta.json", "w"))
