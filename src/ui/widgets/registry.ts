@@ -1,5 +1,6 @@
 import type { PanelSection } from "../../render/scene.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
+import type { DriveSetting } from "../../render/drives.ts";
 import type { CardSpec } from "../controlsKit.ts";
 
 /**
@@ -159,6 +160,14 @@ export interface WidgetCtx {
   portLook(specs: readonly SceneSetting[]): string;
   /** Pins `spec`'s row (never unpins) — the row must be mounted. */
   pin(spec: SceneSetting): void;
+  /** The setting's wires as the patch store holds them (`"scene"` while it
+   *  is on its built-in reaction). */
+  getDrive(spec: SceneSetting): DriveSetting;
+  /** Replaces the setting's wires, as the wire panel would, and refreshes
+   *  its row if mounted. Unlike an edit made in a row, it is never copied to
+   *  that row's `linked` settings — a widget writing several settings writes
+   *  each one (strainConsole.ts's Random). */
+  setDrive(spec: SceneSetting, setting: DriveSetting): void;
   /** Mounts a whole extra card (controlsKit.ts's `createCard`) as a sibling
    *  of the Scene card, right after it in the controls column — for a widget
    *  section that reads as its own block rather than more rows inside the

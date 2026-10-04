@@ -4016,6 +4016,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPatchHighlight();
   }
 
+  /** registry.ts's `WidgetCtx.setDrive`: patchChanged's refresh without its
+   *  linked-row copy, since the widget writes every setting it means to. A
+   *  setting equal to the scene default is a reset, so Back after a Random
+   *  leaves a lane on its default rather than a stored copy of it. */
+  function setDriveFromWidget(sceneId: string, spec: SceneSetting, setting: DriveSetting): void {
+    if (sameDriveSetting(setting, defaultDriveSetting(spec))) deps.onResetDriveSetting(sceneId, spec);
+    else deps.onSetDriveSetting(sceneId, spec, setting);
+    const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
+    h?.refreshMeta();
+    h?.rebuildIfPinned();
+    refreshLineMode();
+    refreshPatchHighlight();
+  }
+
   /** Pins/unpins — the only place `pinned` is written (besides Escape in
    *  onKeyDown and the scene-mismatch check in renderSceneSettings's own
    *  tail). Clears any pending preview so a click doesn't leave a stale
@@ -6399,6 +6413,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
         portLook: (portSpecs) => portLookFor(sceneId, portSpecs),
         pin: (spec) => pinSetting(sceneId, spec),
+        getDrive: (spec) => deps.getDriveSetting(sceneId, spec),
+        setDrive: (spec, setting) => setDriveFromWidget(sceneId, spec, setting),
         mountCard: (spec) => {
           const card = createCard(spec);
           // Own class beyond the generic .vc-card so a script (padcheck.mjs)

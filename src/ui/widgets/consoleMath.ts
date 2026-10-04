@@ -1,3 +1,6 @@
+import { SIGNALS, type SignalId } from "../../render/signals.ts";
+import { DRIVE_EVERY_VALUES, type DriveMix, type DrivePatch, type DriveSource, type HitHeight } from "../../render/drives.ts";
+
 /**
  * The pure arithmetic behind the Strain Console's lanes
  * (strainConsole.ts) — kept DOM-free so tests/consoleMath.test.ts can pin it.
@@ -97,4 +100,49 @@ export function randomValue(spec: RangeSpec, rnd: () => number): number {
 export function valuesMatch(values: readonly number[], target: readonly number[], spec: RangeSpec): boolean {
   const tol = (spec.step > 0 ? spec.step : 1e-6) / 2 + 1e-9;
   return values.length === target.length && values.every((v, i) => Math.abs(v - target[i]!) <= tol);
+}
+
+/** The signals the console's Random wires a lane to: every catalogue signal
+ *  but the two that hardly move while a song plays (Tempo, Tempo lock) —
+ *  wired in, they would only hold a setting off its slider. */
+export const RANDOM_WIRE_SIGNALS: readonly SignalId[] = (Object.keys(SIGNALS) as SignalId[]).filter(
+  (id) => id !== "anim.tempo" && id !== "anim.tempoLock",
+);
+/** How often Random gives a lane a second wire instead of one. */
+export const RANDOM_SECOND_WIRE = 0.4;
+/** A random wire's weight range, snapped to RANDOM_WEIGHT_STEP. */
+export const RANDOM_WEIGHT_MIN = 0.4;
+export const RANDOM_WEIGHT_MAX = 1.6;
+const RANDOM_WEIGHT_STEP = 0.05;
+const HEIGHTS: readonly HitHeight[] = ["graded", "fixed", "loud"];
+const MIXES: readonly DriveMix[] = ["add", "max", "gate"];
+
+function pick<T>(list: readonly T[], rnd: () => number): T {
+  return list[Math.min(list.length - 1, Math.floor(rnd() * list.length))]!;
+}
+
+/** One random wire from `signal`: a weight, a height when it is a hit, and
+ *  the beats per swing when it is Beat wave. */
+function randomSource(signal: SignalId, rnd: () => number): DriveSource {
+  const w = RANDOM_WEIGHT_MIN + rnd() * (RANDOM_WEIGHT_MAX - RANDOM_WEIGHT_MIN);
+  const src: DriveSource = { choice: signal, weight: Number((Math.round(w / RANDOM_WEIGHT_STEP) * RANDOM_WEIGHT_STEP).toFixed(2)) };
+  if (SIGNALS[signal].kind === "edge") src.height = pick(HEIGHTS, rnd);
+  if (signal === "anim.beatWave") src.every = pick(DRIVE_EVERY_VALUES, rnd);
+  return src;
+}
+
+/** The console's Random wiring for one lane: one wire, or (RANDOM_SECOND_WIRE
+ *  of the time) two different ones under a random mix — under "Only when"
+ *  the second is the condition. `rnd` uniform [0, 1), injected for tests. */
+export function randomPatch(rnd: () => number, signals: readonly SignalId[] = RANDOM_WIRE_SIGNALS): DrivePatch {
+  const first = pick(signals, rnd);
+  const sources = [randomSource(first, rnd)];
+  let mix: DriveMix = "add";
+  if (signals.length > 1 && rnd() < RANDOM_SECOND_WIRE) {
+    const rest = signals.filter((id) => id !== first);
+    sources.push(randomSource(pick(rest, rnd), rnd));
+    mix = pick(MIXES, rnd);
+    if (mix === "gate") sources[1]!.when = true;
+  }
+  return { mix, sources };
 }

@@ -60,12 +60,13 @@ import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
  *     is stated in the button's own title since neither command reaches a
  *     paired TV.
  *
- * **One Random (2026-10-03).** The user: "can we group this all in one cool
- * random button. random smell, touch, per strain card". A single Random
- * under the boxes calls the Strain Console's `randomize` and the Pairs
- * pads' (Smell and Touch together); neither card has a Random of its own
- * any more. Each roll lands as one entry on each card's own Back, so a roll
- * whose motion is good but whose affinities aren't can be half-undone.
+ * **The global Random (2026-10-03).** The user: "can we group this all in
+ * one cool random button. random smell, touch, per strain card". The Random
+ * under the boxes calls the Strain Console's `randomize` (motion and every
+ * lane's wires) and the Pairs pads' (Smell and Touch together). Since
+ * 2026-10-04 each card has its own Random again beside it. Each roll lands
+ * as one entry on each card's own Back, so a roll whose motion is good but
+ * whose affinities aren't can be half-undone.
  *
  * One `effective()` reading per item per tick feeds the preview, the box's own
  * colour and the console's colours — Synergy and Stain move a strain's colour

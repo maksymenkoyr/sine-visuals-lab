@@ -958,6 +958,23 @@ configs are used.
   into all four `nutrient<k>`, a second signal on PP-C3's lane port alone
   turned the group port mixed, the cable landed on the lane port.
 
+- **2026-10-04: each card's Random is back, and Random rewires.** The user:
+  "before we had random button like for different section but we replaced
+  with one that has all. can we return those buttons and also add random
+  button to strain settings but also keep global random. and make random
+  for strains to connect to random signals with random parameters". The
+  Affinity card's Random rolls the layer on screen again ("Random smell" /
+  "Random touch", as before 2026-10-03), the Strain settings card has its
+  Random again, and the Strains card's Random stays and calls both. The
+  strain Random still rolls `MOTION_PARAMS` and now also plugs every lane
+  that has a port into one wire, or two under a random mix, from the signal
+  catalogue (`consoleMath.ts`'s `randomPatch`: random weight, a random
+  height on a hit, random beats per swing on Beat wave; Tempo and Tempo
+  lock left out because they hardly move). Back puts the wires back too.
+  Assumed, not asked: every lane is rewired (not only the rolled rows),
+  and Nutrient, Excitability, Trail life and Stain values stay unrolled as
+  before.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
