@@ -4,7 +4,7 @@
 #   - how far this checkout is behind origin/main, when it is, so a session
 #     never reads stale code as current;
 #   - the open PRs, so a session sees a change another session already has
-#     in flight (CLAUDE.md's Git section says what to do with them).
+#     in flight (CLAUDE.md's before-starting rule says what to do with them).
 # Prints nothing it can't fetch: offline or without `gh` login it stays
 # silent and never blocks the session.
 
