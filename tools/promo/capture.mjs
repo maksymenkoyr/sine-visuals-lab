@@ -57,9 +57,12 @@
 // holes) and is canvas-only, the second ran at 20 fps. Each screencast frame
 // carries a wall-clock timestamp; that, minus the epoch time of the mic
 // stamp, is the frame's time in the track. The clip is then rebuilt at a
-// constant 60 fps by taking, for each output frame, the newest captured
-// frame at or before its track time — a dropped frame becomes a repeated
-// one, never a shift.
+// constant 60 fps by taking, for each output frame, the captured
+// frame nearest its track time — a dropped frame becomes a repeated one, never
+// a shift. (Nearest, not "newest at or before": the compositor's frame
+// stamps jitter by several ms around the 60 Hz grid, and at-or-before turns
+// every late stamp into a repeated picture plus a skipped one, ~20% of the
+// clip, though every captured frame is a new picture.)
 //
 // --lag-ms: the app hears a sound a little after it plays (analyser window,
 // onset detection), so its reaction lands that late. Each output frame at
@@ -294,7 +297,7 @@ mkdirSync(seqDir, { recursive: true });
 let j = 0;
 for (let k = 0; k < Math.round(seconds * FPS); k++) {
   const t = fromSec + k / FPS + lagMs / 1000;
-  while (j + 1 < times.length && times[j + 1] <= t + 1e-4) j++;
+  while (j + 1 < times.length && Math.abs(times[j + 1] - t) < Math.abs(times[j] - t)) j++;
   linkSync(frames[j].file, join(seqDir, `${String(k).padStart(6, "0")}.jpg`));
 }
 // Audio: the wav is the mic, so it sits in the clip where the mic started
