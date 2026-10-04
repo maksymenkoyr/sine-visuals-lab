@@ -508,7 +508,7 @@ describeScene("toonrave settings", () => {
     const order = settings.map((s) => SETTING_GROUPS.indexOf(s.group as (typeof SETTING_GROUPS)[number]));
     expectScene(order.every((i) => i >= 0)).toBe(true);
     expectScene(order).toEqual([...order].sort((a, b) => a - b));
-    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
+    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
   });
 
   itScene("no setting has auto or macro", () => {
@@ -538,7 +538,7 @@ describeScene("toonrave settings", () => {
     expectScene([drops.min, drops.max, drops.step]).toEqual([0, drops.options!.length - 1, 1]);
     expectScene(drops.options![drops.default]).toBe("Every 16 bars");
     expectScene(DROP_CYCLE_BEATS).toEqual([128, 64, 32]);
-    for (const k of ["dropHits", "flash"]) {
+    for (const k of ["dropHits", "moves", "flash"]) {
       const s = byKey(k);
       expectScene(s.type, k).toBe("boolean");
       expectScene([s.min, s.max, s.step], k).toEqual([0, 1, 1]);
@@ -551,6 +551,8 @@ describeScene("toonrave settings", () => {
     expectScene(byKey("bounce").drive?.default).toEqual({ source: "beat", grid: 2 });
     expectScene(byKey("lights").drive).toBeDefined();
     expectScene(byKey("dropHits").drive?.default).toBe("anim.dropOnset");
+    expectScene(byKey("moves").drive?.default).toBe("anim.lowOnset");
+    expectScene(byKey("moves").default).toBe(0);
   });
 });
 
@@ -693,5 +695,56 @@ describeScene("toonrave post shader", () => {
     expectScene(src).toContain("vec3(1.0, 0.18, 0.64)");
     expectScene(src).toContain("vec3(1.0, 0.93, 0.97)");
     expectScene(src.startsWith("#version 300 es")).toBe(true);
+  });
+});
+
+import { describe as describeMoves, it as itMoves, expect as expectMoves } from "vitest";
+import { GROOVE_AT, BUILD_BEATS } from "../src/render/scenes/toonrave/motion.ts";
+import { createStepClock, STEP_HOLD_PHASE } from "../src/render/scenes/toonrave/conductor.ts";
+
+describeMoves("toonrave moves on signal", () => {
+  const optsFor = (cycleBeats: 32 | 64 | 128) => ({ cycleBeats, cuts: 2 as const, bpm: 128 });
+
+  itMoves("the cycle's own groove beat count as castBeats gives exactly the same picture", () => {
+    for (const n of [32, 64, 128] as const) {
+      for (let c = GROOVE_AT; c < n - BUILD_BEATS; c += 0.37) {
+        const plain = JSON.stringify(sceneFrameAt(c, optsFor(n)));
+        const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(n), castBeats: c - GROOVE_AT }));
+        expectMoves(own, `cycle ${n} c ${c.toFixed(2)}`).toBe(plain);
+      }
+    }
+  });
+
+  itMoves("castBeats is ignored in the gags and the build", () => {
+    for (const c of [0.2, 3, 9.5, 15.9, 24.1, 28.6, 31.9]) {
+      const plain = JSON.stringify(sceneFrameAt(c, optsFor(32)));
+      const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(32), castBeats: 5.25 }));
+      expectMoves(own, `c ${c}`).toBe(plain);
+    }
+  });
+
+  itMoves("in the groove it moves the cast but not the lights or the camera", () => {
+    const plain = sceneFrameAt(40.3, optsFor(64));
+    const own = sceneFrameAt(40.3, { ...optsFor(64), castBeats: 7.04 });
+    expectMoves(own.x.dj).not.toEqual(plain.x.dj);
+    expectMoves(own.x.crowd0).not.toEqual(plain.x.crowd0);
+    expectMoves(own.camera).toEqual(plain.camera);
+    expectMoves(own.rayOp).toBe(plain.rayOp);
+    for (const id in plain.o) {
+      if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) expectMoves(own.o[id], id).toBe(plain.o[id]);
+    }
+  });
+
+  itMoves("the step clock holds without steps, starts a whole beat on each, and plays to the hold at the tempo", () => {
+    const k = createStepClock();
+    expectMoves(k.step(false, 1, 120)).toBe(STEP_HOLD_PHASE); // no steps: holds
+    expectMoves(k.step(true, 1 / 60, 120)).toBe(1); // a step: the next whole beat, its hit pose
+    expectMoves(k.step(false, 0.1, 120)).toBeCloseTo(1.2, 9); // 120 BPM: 0.2 beat in 0.1 s
+    expectMoves(k.step(false, 0.4, 120)).toBe(1 + STEP_HOLD_PHASE); // stops at the hold
+    expectMoves(k.step(false, 5, 120)).toBe(1 + STEP_HOLD_PHASE);
+    expectMoves(k.step(true, 1 / 60, 120)).toBe(2);
+    expectMoves(k.step(true, 1 / 60, 120)).toBe(3); // steps faster than the hold cut the rebound short
+    k.reset();
+    expectMoves(k.step(false, 0, 120)).toBe(STEP_HOLD_PHASE);
   });
 });
