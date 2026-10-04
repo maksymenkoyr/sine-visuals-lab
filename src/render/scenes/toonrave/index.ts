@@ -27,6 +27,8 @@
 // each fire of its drive is one step (motion.ts's castBeats). Off, or on with
 // nothing wired, the cast dances on the cycle's beats as before; the gags, the
 // build, the lights and the camera always do.
+// While Moves on signal steps the cast, Energy's pulse is sampled at each step and
+// held, so between steps nothing moves the cast at all.
 // Energy and Lights are drive settings (drives.ts): Energy swells with its
 // signal (BOUNCE_DRIVE_DEPTH below the slider at a 0 reading, the slider at a full
 // one; a beat-grid pulse by default), Lights' follows the treble level (0.8x quiet
@@ -280,10 +282,12 @@ function createToonRaveScene(): Scene {
   const conductor = createConductor();
   const stepClock = createStepClock();
   let inGroove = false;
+  let stepPulse = 1; // Energy's pulse as it was at the cast's last step
   let lastTime: number | null = null;
   let lastC = 0;
   let lastBars = 0; // dev peek only
   let lastCast: number | null = null; // dev peek only
+  let lastPulse = 1; // dev peek only
   let cycle = 0;
   let reduced = false;
   let frozenC: number | null = null;
@@ -307,6 +311,7 @@ function createToonRaveScene(): Scene {
       conductor.reset();
       stepClock.reset();
       inGroove = false;
+      stepPulse = 1;
       lastTime = null;
       lastC = 0;
       cycle = 0;
@@ -338,8 +343,9 @@ function createToonRaveScene(): Scene {
         (window as unknown as { __toonrave?: unknown }).__toonrave = {
           freeze,
           // the cycle position and the app's bar count, for checking cuts against the bar line;
-          // the cast's own step count while Moves on signal drives it (else null)
-          peek: () => ({ c: lastC, bars: lastBars, castBeats: lastCast }),
+          // the cast's own step count while Moves on signal drives it (else null), and the
+          // Energy pulse applied this frame: with the cycle, these two decide the cast's pose
+          peek: () => ({ c: lastC, bars: lastBars, castBeats: lastCast, pulse: lastPulse }),
         };
       }
     },
@@ -395,6 +401,9 @@ function createToonRaveScene(): Scene {
       const stepEdge = drives.fired("moves", anim.lowOnset);
       const movesWired = drives.valueOf("moves", -1) >= 0;
       const grooveNow = c >= GROOVE_AT && c < cycleBeats - BUILD_BEATS;
+      // Energy's pulse; frozen frames stay repeatable.
+      const livePulse = frozen ? 1 : clamp01(drives.value("bounce", anim.beatPulse, 1));
+      if ((grooveNow && !inGroove) || stepEdge) stepPulse = livePulse;
       if (grooveNow && !inGroove) stepClock.reset();
       inGroove = grooveNow;
       const castBeats = grooveNow ? stepClock.step(stepEdge, dt, out.bpm) : undefined;
@@ -405,7 +414,10 @@ function createToonRaveScene(): Scene {
       const state = frameAt(c, opts);
 
       // Audio modulation of the two drive settings; frozen frames stay repeatable.
-      const pulse = frozen ? 1 : clamp01(drives.value("bounce", anim.beatPulse, 1));
+      // While the signal steps the cast, Energy's pulse is taken once per step: it
+      // sizes each step but never moves the cast between steps, so no signal = still.
+      const pulse = opts.castBeats !== undefined ? stepPulse : livePulse;
+      lastPulse = pulse;
       const level = frozen ? 0.5 : clamp01(drives.value("lights", anim.high, 0.5));
       shapeState(state, {
         bounce: bounceAmount * (1 - BOUNCE_DRIVE_DEPTH + BOUNCE_DRIVE_DEPTH * pulse),

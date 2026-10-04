@@ -108,6 +108,10 @@ and are not recorded here yet.
   than drifting on between fires. Off by default; Bass hit as the default wire.
   Toggle rows had no wire port until this change (deviceMenu.ts's boolean
   branch skipped `buildDriveRow`), so Drop on big hits got its port too.
+- 2026-10-04 — "Why do they move when the signal is at 0? Shouldn't be like
+  that": Energy's beat-grid pulse kept scaling the held pose every beat. While
+  the signal steps the cast, Energy's pulse is now sampled at each step and
+  held, so it sizes each step and nothing moves the cast between steps.
 
 ## Tuning notes
 
@@ -123,7 +127,9 @@ and are not recorded here yet.
 - Under a locked beat clock the drops land on bar lines; with no lock it
   free-runs at 120 BPM until one appears.
 - Moves on signal: DEV `window.__toonrave.peek().castBeats` is the cast's step
-  count (null while the cast is on the beats). With nothing wired the cast
+  count (null while the cast is on the beats) and `.pulse` the Energy pulse
+  applied; in the groove these two decide the cast's pose, so a trace of them
+  shows whether anything moves the cast between steps. With nothing wired the cast
   stays on the beats, so the toggle can never freeze the groove.
 
 ## Known issues and next steps
