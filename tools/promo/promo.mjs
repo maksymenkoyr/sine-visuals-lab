@@ -4,7 +4,7 @@
 // only runs the steps, one at a time or all together.
 //
 //   node tools/promo/promo.mjs <step> --version 0.3.0 [--song file] [--look link] [--out dir]
-//        [--drop-beat 18] [--bpm N] [--base url]
+//        [--drop-beat N] [--bpm N] [--base url]
 //
 // steps (in order):
 //   notes    writes <work>/release-notes.md, the Stable release's page, for drafting lines.json
@@ -12,7 +12,8 @@
 //   record   headless Chromium on the live site, one take per shot, cut on the song's beats (record.mjs)
 //   cards    the text cards from <work>/lines.json (cards.mjs)
 //   compose  frames: footage + cards + camera (compose.py)
-//   encode   frames + the song, starting so the drop lands on --drop-beat → <out>/…-promo.mp4
+//   encode   frames + the song, starting so the drop lands on --drop-beat (default: the first demo,
+//            which compose writes as dropBeat) → <out>/…-promo.mp4
 //   all      song, record, cards, compose, encode
 // <work> is tools/.cache/promo/v<version> (git-ignored); lines.json is the one file written by hand.
 //
@@ -30,7 +31,7 @@ const { values: o, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     version: { type: "string" }, song: { type: "string" }, look: { type: "string" }, out: { type: "string" },
-    "drop-beat": { type: "string", default: "18" }, bpm: { type: "string" }, base: { type: "string" },
+    "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" },
   },
 });
 const step = positionals[0];
@@ -76,8 +77,9 @@ const steps = {
     const song = JSON.parse(readFileSync(join(work, "song.json"), "utf8"));
     const meta = JSON.parse(readFileSync(join(work, "frames", "meta.json"), "utf8"));
     if (song.dropTime == null) { console.error("song.json has no dropTime; pass a different --song or place the start by hand"); process.exit(2); }
-    const ss = song.dropTime - Number(o["drop-beat"]) * song.period;
-    if (ss < 0) { console.error(`the drop is only ${song.dropTime}s into the song, too early for --drop-beat ${o["drop-beat"]}; lower it`); process.exit(2); }
+    const dropBeat = Number(o["drop-beat"] ?? meta.dropBeat);
+    const ss = song.dropTime - dropBeat * song.period;
+    if (ss < 0) { console.error(`the drop is only ${song.dropTime}s into the song, too early for drop beat ${dropBeat}; pass a lower --drop-beat`); process.exit(2); }
     mkdirSync(out, { recursive: true });
     const file = join(out, `sine-visuals-lab-v${o.version}-promo.mp4`);
     run(ffmpeg(), ["-y", "-loglevel", "error", "-framerate", String(meta.fps), "-i", join(work, "frames", "%05d.jpg"),

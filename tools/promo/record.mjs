@@ -110,7 +110,7 @@ const T = {
     const u = new URL(look);
     const scene = decodeURIComponent((u.hash.match(/\/v\/([^/?]+)/) || [])[1] || "physarum2");
     await run("intro", scene, {
-      beats: 8, views: FB_VIEWS,
+      beats: 10, views: FB_VIEWS,
       query: `&look=${u.searchParams.get("look")}`,
       setup: async (page) => { await hideChrome(page); await sleep(300); },
       script: async () => {},
