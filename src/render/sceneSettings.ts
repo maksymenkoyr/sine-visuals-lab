@@ -52,7 +52,9 @@ export type SettingGroup = (typeof SETTING_GROUPS)[number];
 export interface SceneSetting {
   /** Uniform suffix — "focus" becomes uFocus. Keep it a valid GLSL identifier tail. */
   key: string;
-  /** Shown in the device menu. */
+  /** Shown in the device menu. Moving the slider right makes more of what
+   *  this names: if the value works the other way, name what grows ("Speed",
+   *  not "Period") or invert the mapping. */
   label: string;
   /** One-line plain-language note shown under the slider. Omit for no caption. */
   description?: string;

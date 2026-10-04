@@ -8,9 +8,6 @@ A browser-based, real-time WebGL2 audio visualizer.
   variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
   dials"). Dated notes (`docs/status.md`, a scene record's measurements and
   dated decisions) are the exception.
-- Moving any slider right makes more of what its label names. If a value works
-  the other way, rename the label to what grows ("Speed", not "Period") or
-  invert the mapping.
 - When I ask "why", "what does X mean" or "explain X", answer in plain prose
   grounded in the code: name the file/function and the one mechanism that
   causes the behaviour, then stop and wait. Don't edit code, and no plans,

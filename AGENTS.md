@@ -67,9 +67,6 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 ## Standing rules
 
-- **Sliders: right = more.** Moving any slider right makes more of what its
-  label names. If a value works the other way, rename the label to what grows
-  ("Speed", not "Period") or invert the mapping.
 - **Answering questions.** When I ask "why", "what does X mean" or "explain
   X", answer in plain prose grounded in the code: name the file/function and
   the one mechanism that causes the behaviour, then stop and wait. Don't edit
