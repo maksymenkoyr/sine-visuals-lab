@@ -190,7 +190,7 @@ export const STEP_HOLD_PHASE = 0.5;
 
 /**
  * Step clock, for Moves on signal: the cast's own beat count in the groove (the
- * castBeats motion.ts reads). Each fired step starts the next whole beat (its hit
+ * groove part of the castC motion.ts reads). Each fired step starts the next whole beat (its hit
  * pose); between steps the beat plays at the tempo up to STEP_HOLD_PHASE and holds
  * there, so with no signal the cast stands in its rebound pose rather than drifting
  * on. Steps faster than that cut the rebound short. Pure: no wall clock.

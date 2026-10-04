@@ -699,33 +699,42 @@ describeScene("toonrave post shader", () => {
 });
 
 import { describe as describeMoves, it as itMoves, expect as expectMoves } from "vitest";
-import { GROOVE_AT, BUILD_BEATS } from "../src/render/scenes/toonrave/motion.ts";
 import { createStepClock, STEP_HOLD_PHASE } from "../src/render/scenes/toonrave/conductor.ts";
 
 describeMoves("toonrave moves on signal", () => {
   const optsFor = (cycleBeats: 32 | 64 | 128) => ({ cycleBeats, cuts: 2 as const, bpm: 128 });
 
-  itMoves("the cycle's own groove beat count as castBeats gives exactly the same picture", () => {
+  itMoves("the cycle's own position as castC gives exactly the same picture, anywhere in the cycle", () => {
     for (const n of [32, 64, 128] as const) {
-      for (let c = GROOVE_AT; c < n - BUILD_BEATS; c += 0.37) {
+      for (let c = 0; c < n; c += 0.37) {
         const plain = JSON.stringify(sceneFrameAt(c, optsFor(n)));
-        const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(n), castBeats: c - GROOVE_AT }));
+        const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(n), castC: c }));
         expectMoves(own, `cycle ${n} c ${c.toFixed(2)}`).toBe(plain);
       }
     }
   });
 
-  itMoves("castBeats is ignored in the gags and the build", () => {
-    for (const c of [0.2, 3, 9.5, 15.9, 24.1, 28.6, 31.9]) {
-      const plain = JSON.stringify(sceneFrameAt(c, optsFor(32)));
-      const own = JSON.stringify(sceneFrameAt(c, { ...optsFor(32), castBeats: 5.25 }));
-      expectMoves(own, `c ${c}`).toBe(plain);
+  // what the cast is: its rigs, the props it carries and the button it hits, its cels
+  const castOf = (f: ReturnType<typeof sceneFrameAt>) => ({
+    x: [...CAST_RIGS, "pomp", "stick", "dome"].map((id) => f.x[id]),
+    o: [f.o.pomp, f.o.stick],
+    cel: Object.keys(f.cel).filter((k) => /^(dj|guy|kid|raver)/.test(k)).map((k) => f.cel[k]),
+    cls: [f.cls.crowd0, f.cls.crowd1, f.cls.crowd2],
+    slot: f.slot,
+  });
+
+  itMoves("a held castC holds the whole cast still while the cycle runs on: groove, gags, build and drop", () => {
+    for (const held of [20.3, 3.6, 59.2]) {
+      const ref = castOf(sceneFrameAt(0, { ...optsFor(64), castC: held }));
+      for (const c of [0.1, 0.6, 2, 9.5, 17, 21.4, 40.3, 55.9, 57, 60.5, 63.9]) {
+        expectMoves(castOf(sceneFrameAt(c, { ...optsFor(64), castC: held })), `held ${held} c ${c}`).toEqual(ref);
+      }
     }
   });
 
-  itMoves("in the groove it moves the cast but not the lights or the camera", () => {
+  itMoves("castC moves the cast but not the lights", () => {
     const plain = sceneFrameAt(40.3, optsFor(64));
-    const own = sceneFrameAt(40.3, { ...optsFor(64), castBeats: 7.04 });
+    const own = sceneFrameAt(40.3, { ...optsFor(64), castC: 23.04 });
     expectMoves(own.x.dj).not.toEqual(plain.x.dj);
     expectMoves(own.x.crowd0).not.toEqual(plain.x.crowd0);
     expectMoves(own.camera).toEqual(plain.camera);
@@ -733,6 +742,15 @@ describeMoves("toonrave moves on signal", () => {
     for (const id in plain.o) {
       if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) expectMoves(own.o[id], id).toBe(plain.o[id]);
     }
+  });
+
+  itMoves("stillCamera holds a shot's framing: no push-in inside the shot", () => {
+    const wide = { cycleBeats: 64 as const, cuts: 0 as const, bpm: 128 };
+    expectMoves(sceneFrameAt(20, wide).camera.src).not.toEqual(sceneFrameAt(40, wide).camera.src);
+    const still = { ...wide, stillCamera: true };
+    expectMoves(sceneFrameAt(20, still).camera.src).toEqual(sceneFrameAt(40, still).camera.src);
+    // the hero frame is still the full frame
+    expectMoves(sceneFrameAt(0.1, still).camera.src).toEqual(sceneFrameAt(0.1, wide).camera.src);
   });
 
   itMoves("the step clock holds without steps, starts a whole beat on each, and plays to the hold at the tempo", () => {
