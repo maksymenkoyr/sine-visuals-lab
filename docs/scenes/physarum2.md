@@ -1229,7 +1229,10 @@ applies there too. Tuned so far only against the synthetic feed at
     now documents, rather than links to a stale diff for, the temporary
     forced-step-count hook a Touch/War perf run needs in `physarum2.ts`'s
     `render()` — copy it in by hand, measure, then `git diff` must show
-    physarum2.ts untouched again; never commit it.
+    physarum2.ts untouched again; never commit it. `panelprof.mjs`
+    (panel-open CPU profile + every blocking GL read timed by caller) and
+    `paneltrace.mjs` (the main thread's own style/layout/paint from a Chrome
+    trace) are the 2026-10-04 panel-lag measurements.
   - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
     down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
     switch, the Affinity card's rows waking on hover and pinning on a press
