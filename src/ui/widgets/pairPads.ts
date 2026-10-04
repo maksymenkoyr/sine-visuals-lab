@@ -38,6 +38,7 @@ import type { PreviewEffective, PreviewSource } from "./previews.ts";
 import { rowHeadStyle, rowLabelStyle, spacer } from "../controlsKit.ts";
 import { SCENE_VIOLET } from "../controlsTheme.ts";
 import { setHintText } from "../hintSwatches.ts";
+import { watchSize, type WatchedSize } from "../onScreen.ts";
 
 /**
  * The Pairs widget: one live two-strain culture per pad, a Smell/Touch
@@ -607,6 +608,10 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     lastX: number | undefined;
     lastY: number | undefined;
     visible: boolean;
+    /** The canvas's observed size: paintPad runs after this tick's style
+     *  writes, so reading clientWidth there forced a style and layout pass
+     *  per pad (onScreen.ts). */
+    cssSize: WatchedSize | null;
     /** The pointer is over the pad / a drag on it is live — the spotlight, the
      *  cursor hint and the hold-still rule (no beat reseed) read these. */
     hot: boolean;
@@ -700,6 +705,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       lastX: undefined,
       lastY: undefined,
       visible: false,
+      cssSize: null,
       hot: false,
       dragging: false,
       exposure: culture ? [trailQuantile(culture.trails()[0], 0.98), trailQuantile(culture.trails()[1], 0.98)] : [0, 0],
@@ -1128,6 +1134,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       )
     : undefined;
   if (io) for (const pad of pads) io.observe(pad.canvas);
+  if (pair) for (const pad of pads) pad.cssSize = watchSize(pad.canvas);
 
   function colorFor(k: number): readonly [number, number, number] {
     return effective ? effective(k).color : parseCssRgb(colours[k] ?? "rgb(255,255,255)");
@@ -1275,8 +1282,8 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     pairContactPixelsInto(pad.culture.trails(), pair.size, pad.imgBuf, [colorFor(pad.a), colorFor(pad.b)], pad.exposure);
     const octx = pad.offscreen.getContext("2d");
     if (octx) octx.putImageData(pad.img, 0, 0);
-    const w = Math.round(pad.canvas.clientWidth);
-    const h = Math.round(pad.canvas.clientHeight);
+    const w = pad.cssSize ? pad.cssSize.w : Math.round(pad.canvas.clientWidth);
+    const h = pad.cssSize ? pad.cssSize.h : Math.round(pad.canvas.clientHeight);
     if (w > 0 && h > 0) {
       if (pad.canvas.width !== w) pad.canvas.width = w;
       if (pad.canvas.height !== h) pad.canvas.height = h;
@@ -1390,6 +1397,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   function dispose(): void {
     io?.disconnect();
+    for (const pad of pads) pad.cssSize?.disconnect();
     hintEl.remove();
     for (const pad of pads) {
       if (pad.settleTimer !== undefined) window.clearTimeout(pad.settleTimer);

@@ -328,22 +328,40 @@ export function createSpectrumStrip(): SpectrumStrip {
     ctx.fill();
   }
 
+  // The axis labels only move with the width, the pixel ratio or the band
+  // range, but text is the costliest thing on this canvas to draw (shaping
+  // and glyph raster, every tick the panel is open) — so they're drawn once
+  // into their own canvas and blitted under the plot each frame.
+  let axisCanvas: HTMLCanvasElement | null = null;
+  let axisKey = "";
+
   function drawAxis(width: number, plotHeight: number): void {
     if (edgesHz.length !== NUM_BANDS + 1) return;
-    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-    ctx.font = `11px ${FONT_MONO}`;
-    ctx.textBaseline = "bottom";
     const maxHz = edgesHz[NUM_BANDS];
     const minHz = edgesHz[0];
-    const y = plotHeight + STRIP_AXIS_HEIGHT_PX;
-    for (const hz of AXIS_TICKS_HZ) {
-      if (hz <= minHz || hz >= maxHz) continue;
-      const t = Math.log(hz / minHz) / Math.log(maxHz / minHz);
-      const label = formatHz(hz);
-      const labelWidth = ctx.measureText(label).width;
-      const x = Math.min(width - labelWidth, Math.max(0, t * width - labelWidth / 2));
-      ctx.fillText(label, x, y);
+    const dpr = window.devicePixelRatio || 1;
+    const key = `${width}|${dpr}|${minHz}|${maxHz}`;
+    if (key !== axisKey || !axisCanvas) {
+      axisCanvas ??= document.createElement("canvas");
+      axisCanvas.width = Math.max(1, Math.round(width * dpr));
+      axisCanvas.height = Math.round(STRIP_AXIS_HEIGHT_PX * dpr);
+      const actx = axisCanvas.getContext("2d");
+      if (!actx) return;
+      axisKey = key;
+      actx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      actx.fillStyle = "rgba(255, 255, 255, 0.5)";
+      actx.font = `11px ${FONT_MONO}`;
+      actx.textBaseline = "bottom";
+      for (const hz of AXIS_TICKS_HZ) {
+        if (hz <= minHz || hz >= maxHz) continue;
+        const t = Math.log(hz / minHz) / Math.log(maxHz / minHz);
+        const label = formatHz(hz);
+        const labelWidth = actx.measureText(label).width;
+        const x = Math.min(width - labelWidth, Math.max(0, t * width - labelWidth / 2));
+        actx.fillText(label, x, STRIP_AXIS_HEIGHT_PX);
+      }
     }
+    ctx.drawImage(axisCanvas, 0, plotHeight, width, STRIP_AXIS_HEIGHT_PX);
   }
 
   function draw(nowMs: number): void {

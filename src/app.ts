@@ -3199,11 +3199,14 @@ function drawScene(
 }
 
 /** Whether anything currently wants a live picture reading — the Master
- *  card's Picture block while it's open, or a headless driver that forced it
+ *  card's Picture block while it's on screen (not merely while the panel is
+ *  open: each sample ends in a synchronous getBufferSubData, which waits
+ *  behind the GPU's backlog — ~15 ms a call under the Panel blur on a heavy
+ *  scene, 2026-10-04), or a headless driver that forced it
  *  on (tuning/debug.ts's `picture.force`, tools/master-sweep.mjs's own
  *  `__viz.pictureForce(true)`). */
 function pictureWanted(): boolean {
-  return pictureForced || (deviceMenu?.isOpen() ?? false);
+  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false);
 }
 
 /** The readback is created lazily, on mainHost's own GL context, the first
