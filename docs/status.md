@@ -9,10 +9,11 @@ _2026-10-04_
 ## In flight
 
 - **Release promo** — draft #313 (`worktree-promo-demo-first`). The v0.2.0
-  video the user signed off: `~/Movies/sine-visuals-lab-v0.2.0-promo/`, 30 s.
-  The PR makes `tools/promo` produce it: scene takes hear the song through a
-  fake mic, demos first, the list card scrolling low in the frame, the room
-  shown as laptop over TV. `.claude/commands/promo.md` "The agreed video"
+  video: `~/Movies/sine-visuals-lab-v0.2.0-promo/`, 31.9 s. The PR makes
+  `tools/promo` produce it: scene takes hear the song through a fake mic,
+  demos first, pop-out/Cue/Play and the room drawn as a laptop with lit keys
+  over its second screen, the list card scrolling low in the frame, no fades.
+  `/release-promo` (`.claude/commands/release-promo.md`, its "Scenario")
   records every call the user made, so the next run comes out the same.
 - **Other open PRs:** #317 CLAUDE.md review (draft); #307 Toon Rave "Energy"
   label; #236 Output Cast mode (draft); #160 magnet slider; #74 architecture
@@ -29,7 +30,8 @@ _2026-10-04_
 
 ## Next up
 
-- Merge #313, then run `/promo` for the next Stable release (ask for the
-  song and a Looks share link first).
+- Merge #313, then run `/release-promo` after the next Stable release — it
+  takes the release, reuses the last song and look unless given new ones,
+  and starts from the changelog.
 - Prune worktrees whose PRs merged (47 besides `main`; check each one's PR
   with `gh pr view`).

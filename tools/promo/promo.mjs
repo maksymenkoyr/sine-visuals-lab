@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 // Builds a release's promo video — a vertical 1080x1920 montage of what changed, cut to a song.
-// The playbook (what to ask the user, how to judge each step) is .claude/commands/promo.md; this file
+// The playbook (what to ask the user, how to judge each step) is .claude/commands/release-promo.md; this file
 // only runs the steps, one at a time or all together.
 //
-//   node tools/promo/promo.mjs <step> --version 0.3.0 [--song file] [--look link] [--out dir]
+//   node tools/promo/promo.mjs <step> [--version 0.3.0] [--song file|link] [--look link] [--out dir]
 //        [--drop-beat N] [--bpm N] [--base url]
+//
+// --version defaults to what Stable serves now (its version.json), so a run "just works" for the last
+// release. --song (a file, or a link yt-dlp can fetch) is kept as <work>/song.wav and --look (a Looks-card
+// share link) as <work>/look.txt; without them a run reuses its own, else the newest earlier release's.
 //
 // steps (in order):
 //   notes    writes <work>/release-notes.md, the Stable release's page, for drafting lines.json
-//   song     beat grid + first drop of --song → song.json (song.py)
+//   song     beat grid + first drop of the song → song.json (song.py)
 //   record   headless Chromium on the live site, one take per shot, cut on the song's beats (record.mjs);
 //            scene takes hear the song itself through a fake mic (<work>/mic.wav). `record <take>…`
 //            re-records only those takes
@@ -23,7 +27,7 @@
 // Chromium, and a working ffmpeg (else imageio-ffmpeg through uv is used). It records the DEPLOYED site
 // (--base, default Stable), so run it after the release is live, not before.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -37,12 +41,29 @@ const { values: o, positionals } = parseArgs({
   },
 });
 const step = positionals[0];
-if (!step || !o.version) { console.error("usage: node tools/promo/promo.mjs <notes|song|record|cards|compose|encode|all> --version X.Y.Z [flags]"); process.exit(2); }
+if (!step) { console.error("usage: node tools/promo/promo.mjs <notes|song|record|cards|compose|encode|all> [--version X.Y.Z] [flags]"); process.exit(2); }
+if (!o.version) {
+  o.version = (await (await fetch("https://www.sinevisualslab.com/version.json")).json()).version;
+  console.log(`version ${o.version} (what Stable serves now)`);
+}
 
-const work = resolve(here, "../.cache/promo", `v${o.version}`);
+const cache = resolve(here, "../.cache/promo"), work = join(cache, `v${o.version}`);
 mkdirSync(work, { recursive: true });
+// <work>/<file>, else the newest earlier release's — the song and the look carry over between releases
+function remembered(file) {
+  if (existsSync(join(work, file))) return join(work, file);
+  const earlier = readdirSync(cache).filter((d) => d.startsWith("v") && existsSync(join(cache, d, file)))
+    .map((d) => join(cache, d, file)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (!earlier[0]) return null;
+  copyFileSync(earlier[0], join(work, file));
+  console.log(`${file}: reusing ${earlier[0]}`);
+  return join(work, file);
+}
+if (o.look) writeFileSync(join(work, "look.txt"), o.look.trim() + "\n");
+const lookFile = ["record", "all"].includes(step) ? remembered("look.txt") : null;
+const look = o.look || (lookFile && readFileSync(lookFile, "utf8").trim());
 const out = resolve(o.out || join(homedir(), "Movies", `sine-visuals-lab-v${o.version}-promo`));
-const env = { ...process.env, PROMO_WORK: work, ...(o.look ? { PROMO_LOOK: o.look } : {}), ...(o.base ? { BASE: o.base } : {}) };
+const env = { ...process.env, PROMO_WORK: work, ...(look ? { PROMO_LOOK: look } : {}), ...(o.base ? { BASE: o.base } : {}) };
 const run = (cmd, args, extra = {}) => {
   const r = spawnSync(cmd, args, { stdio: "inherit", env: { ...env, ...extra } });
   if (r.status !== 0) { console.error(`\n${cmd} ${args[0] ?? ""} failed (${r.status})`); process.exit(r.status || 1); }
@@ -73,8 +94,17 @@ const steps = {
     console.log(`wrote ${join(work, "release-notes.md")}`);
   },
   song() {
-    if (!o.song) { console.error("--song <audio file> is required"); process.exit(2); }
-    run("uv", ["run", "-q", "--with", "librosa", "--with", "numpy", "--with", "soundfile", "python", join(here, "song.py"), resolve(o.song), join(work, "song.json"),
+    const wav = join(work, "song.wav");
+    if (o.song) {
+      let src = o.song;
+      if (/^https?:/.test(src)) {   // a link: yt-dlp fetches the audio as is (it can't convert without a system ffmpeg)
+        for (const f of readdirSync(work).filter((f) => f.startsWith("song.src."))) rmSync(join(work, f));
+        run("uvx", ["yt-dlp", "--no-playlist", "-q", "-f", "ba", "-o", join(work, "song.src.%(ext)s"), src]);
+        src = join(work, readdirSync(work).find((f) => f.startsWith("song.src.")));
+      }
+      run(ffmpeg(), ["-y", "-loglevel", "error", "-i", resolve(src), "-ac", "2", "-ar", "44100", wav]);
+    } else if (!remembered("song.wav")) { console.error("--song <file or link> is required (no earlier release's song to reuse)"); process.exit(2); }
+    run("uv", ["run", "-q", "--with", "librosa", "--with", "numpy", "--with", "soundfile", "python", join(here, "song.py"), wav, join(work, "song.json"),
       ...(o.bpm ? ["--bpm", o.bpm] : [])]);
   },
   record() {
@@ -91,7 +121,7 @@ const steps = {
       MIC_WAV: wav, MIC_SONG_T0: String(wavT0), MIC_LEAD: String(lead), MIC_PRE: String(MIC_PRE), MIC_SPAN: String(MIC_SPAN),
     });
   },
-  cards() { need(join(work, "lines.json"), "write lines.json (see .claude/commands/promo.md)"); run("node", [join(here, "cards.mjs")]); },
+  cards() { need(join(work, "lines.json"), "write lines.json (see .claude/commands/release-promo.md)"); run("node", [join(here, "cards.mjs")]); },
   compose() {
     need(join(work, "song.json"), "run the song step first");
     need(join(work, "cards", "meta.json"), "run the cards step first");
