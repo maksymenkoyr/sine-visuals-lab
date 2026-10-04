@@ -7,6 +7,10 @@
 //   npm run usage -- 7         # last 7 days
 //   npm run usage -- 30 --me   # include the owner's own events
 //
+// "Last N days" is N whole UTC days plus today so far: the window starts at
+// midnight, so a date's row reads the same whatever N is. A rolling N×24 h
+// window cut the first day short.
+//
 // Auth: CLOUDFLARE_API_TOKEN, from the environment or from the gitignored
 // `.env` at the repo root (the main checkout's, so it works from any
 // worktree). It needs Account > Account Analytics > Read — create it once at
@@ -71,7 +75,7 @@ async function sql(query) {
   return JSON.parse(text).data;
 }
 
-const where = `timestamp > NOW() - INTERVAL '${days}' DAY${includeMe ? "" : " AND blob4 = 'visitor'"}`;
+const where = `timestamp >= toStartOfInterval(NOW() - INTERVAL '${days}' DAY, INTERVAL '1' DAY)${includeMe ? "" : " AND blob4 = 'visitor'"}`;
 const who = includeMe ? "everyone, owner included" : "visitors only";
 
 function table(title, rows) {
