@@ -4658,14 +4658,30 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "How far the music pulls the picture from its normal, and how long it stays away — 1 is as dialed",
   });
   masterExpansionRow.onChange((value) => deps.onSceneExpansionChange(value));
-  // Expansion's shape (drives.ts's header, "Master Expansion"): chips in
-  // EXPANSION_SHAPES order, so the chosen index is what's stored.
+  // Expansion's shape (drives.ts's header, "Master Expansion"): icon chips
+  // in EXPANSION_SHAPES order, so the chosen index is what's stored. Each
+  // icon draws its curve — the music's change from usual across, the
+  // picture's change from normal up — and the name rides as its tooltip.
+  const curveIcon = (d: string) =>
+    `<svg width="30" height="18" viewBox="0 0 30 18" fill="none" aria-hidden="true">` +
+    `<path d="M2 9H28M15 1V17" stroke="currentColor" stroke-opacity="0.25" stroke-width="1"/>` +
+    `<path d="${d}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const masterShapeRow = createPickerRow({
-    label: "Shape",
+    label: "Expansion shape",
     accent: SCENE_VIOLET,
-    options: ["Even", "Soft top", "Big moves only"],
+    options: [
+      "Even — follows every change",
+      "Soft top — rounds off big jumps",
+      "Big moves only — ignores the beat, follows the song's sections",
+    ],
+    icons: [
+      curveIcon("M3 16L27 2"),
+      curveIcon("M3 16L15 9C19 6.6 22 5.4 27 5"),
+      curveIcon("M3 17L10 9H20L27 1"),
+    ],
+    compact: true,
     defaultValue: 0,
-    description: "Even follows every change · Soft top rounds off big jumps · Big moves only ignores the beat and follows the song's sections",
+    description: "Expansion shape",
     get: () => deps.getSceneExpansionShape(),
     set: (index) => deps.onSceneExpansionShapeChange(index),
     wire: (row, strip, a) => {
