@@ -6,15 +6,15 @@
 //   bilinear tap, wrapped around the sphere's longitude and clamped at the
 //   poles), then mixes toward its home on the sphere by uBlend. The position
 //   lives in two RGBA8 targets at 16 bits an axis (see packAxis below), the
-//   same packing powder.ts uses — RGBA8 is the only renderable format this
-//   repo relies on.
+//   same packing powder.ts uses — this repo renders only into 8-bit formats
+//   (chladni.ts's header says why EXT_color_buffer_float is left unused).
 // - SEG_VERT/SEG_FRAG: one anti-aliased line segment per pair of
 //   neighbouring texels (along u and along v), added into an R8 target.
 //   Where a basin boundary separates two copied positions, the pairs across
 //   it draw the straight chord between them; inside a basin the pair has no
 //   length and its quad piles onto the knot.
-// - KNOT_VERT/KNOT_FRAG: one faint point per texel into an eighth-res
-//   target, blurred wide: the flares. A line spreads its texels thin and
+// - KNOT_VERT/KNOT_FRAG: one faint point per texel into a quarter-res
+//   target, blurred tight for a core and wide for a halo: the flares. A line spreads its texels thin and
 //   barely registers there; a knot, where thousands sit on one spot,
 //   saturates its pixel and the blur turns it into a flare. (An 8-bit
 //   target can't hold a knot's brightness at full res: a point there clips
@@ -92,7 +92,9 @@ int wrapI(int i, int n) {
 
 // Two-valued value noise on a lattice periodic in x (period cells), with a
 // third axis z that the drift moves along: each whole step of z is an
-// independent hash stream, blended smoothly.
+// independent hash stream, blended smoothly. Cells are hashed by integer
+// index (NOISE_HASH_GLSL) and the drift phase arrives already wrapped, as
+// noiseHash.ts's header requires of a noise coordinate that grows.
 vec2 vnoise(vec2 p, float z, int period, uint seed) {
   vec2 i = floor(p);
   vec2 f = p - i;
@@ -344,8 +346,10 @@ export const COMPOSITE_FRAG = `#version 300 es
 precision highp float;
 ${FRINGE_GLSL}
 uniform sampler2D uGlow;
-uniform sampler2D uFlare;
-uniform float uFlareGain;
+uniform sampler2D uFlareCore;
+uniform sampler2D uFlareHalo;
+uniform float uCoreGain;
+uniform float uHaloGain;
 uniform float uLine;
 uniform float uGlowGain;
 uniform vec3 uGround;
@@ -353,7 +357,9 @@ in vec2 vUv;
 out vec4 outColor;
 void main() {
   vec3 sharp = fringe(vUv) * uLine;
-  vec3 glow = texture(uGlow, vUv).rgb * uGlowGain + texture(uFlare, vUv).rgb * uFlareGain;
+  vec3 glow = texture(uGlow, vUv).rgb * uGlowGain
+            + texture(uFlareCore, vUv).rgb * uCoreGain
+            + texture(uFlareHalo, vUv).rgb * uHaloGain;
   // Soft shoulder: a knot where thousands of segments pile up reads white
   // with a halo instead of a flat clipped disc.
   vec3 c = 1.0 - exp(-(sharp + glow) * 1.6);

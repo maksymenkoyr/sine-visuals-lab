@@ -7,35 +7,39 @@
 // blends of the two, which lie on the straight line between them. Drawing
 // a segment between every pair of neighbouring texels then gives the
 // picture: long straight chords and triangles across the sphere, meeting in
-// white knots, with a few arcs left where the flow has not settled. A
-// colour fringe comes from reading red, green and blue from three moments
-// of the drawn history, so anything that moves splits into colour and
-// anything still stays white. glsl.ts has the shaders, core.ts the pure
-// helpers; docs/scenes/tangle.md is the record (the reference it was
-// measured from, what was tried).
+// white knots, with a few arcs left where the flow has not settled. The
+// knots flare (a separate density pass, glsl.ts's KNOT_VERT), and a colour
+// fringe comes from reading red, green and blue from three moments of the
+// drawn history, so anything that moves splits into colour and anything
+// still stays white. glsl.ts has the shaders, core.ts the pure helpers;
+// docs/scenes/tangle.md is the record (the reference it was measured from,
+// what was tried).
 //
 // Sync mapping (drives -- see drives.ts's header). The reference is silent,
 // so all of this is ours:
 // - Re-inflate: on a hit, every position is pulled part of the way home to
-//   the sphere in one step, by the hit's height -- the lines swell back
-//   toward a crinkled sphere and the fringe flares on the jump, then the
-//   warp folds them into lines again.
-// - Reset on drop: a drop brings back the whole sphere, the reference's own
-//   opening, and it collapses again.
+//   the sphere, by the hit's height, over INFLATE_STEPS steps, and the fine
+//   octave crinkles them (CRINKLE_TAU) -- the lines swell back toward a
+//   crinkled sphere and the fringe flares on the slide, then the warp folds
+//   them into lines again.
+// - Reset on drop: a drop brings back the whole, freshly crinkled sphere --
+//   the reference's own opening -- and it collapses again.
 // - Drift: the noise field moves, sliding the lines into new shapes,
 //   faster with the mids. Without it, the copies only ever merge: the
 //   tangle would thin to a few lines and stop.
 //
-// Time: the warp steps at a fixed STEP_DT (the reference's collapse takes
-// about 60 of its frames) with an accumulator, at most MAX_STEPS_PER_FRAME a
-// frame, from the delta of anim.timeSec -- the gallery preview hands
-// render() an un-latched anim, so anim.dtSec is not used (same as swarm).
+// Time: the warp steps at a fixed STEP_DT with an accumulator, at most
+// MAX_STEPS_PER_FRAME a frame, from the delta of anim.timeSec -- the gallery
+// preview hands render() an un-latched anim, so anim.dtSec is not used (same
+// as swarm). AMP is per step, tuned so the sphere folds into long lines in
+// about the reference's 1.4 s.
 //
 // Targets: the position texture is two ping-pong pairs of RGBA8 (16 bits an
 // axis, packed as in powder.ts); segments add into one R8 slot of a ring of
 // RING_SLOTS at the drawing buffer's size (the history the fringe reads);
-// the glow is a half-res RGBA8 chain and the flares an eighth-res one. All of them are rebuilt when the
-// drawing buffer changes size, which the quality governor does at runtime.
+// the glow is a half-res RGBA8 chain and the flares a quarter-res one. All
+// of them are rebuilt when the drawing buffer changes size, which the
+// quality governor does at runtime.
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
@@ -62,8 +66,6 @@ const CRINKLE_TAU = 0.6;
 const CRINKLE_PER_PULL = 4;
 /** The fine octave's cells per coarse cell (rounded to a whole count). */
 const FINE_PER_COARSE = 6;
-/** How far every step pulls back toward the sphere with no hit at all. */
-const LEAK = 0;
 /** A hit's pull home is spread over this many steps, so the lines slide
  *  out instead of teleporting -- a one-step jump doubles the whole picture
  *  in the colour fringe. */
@@ -97,18 +99,22 @@ const GLOW_SIGMA_PX = 13.6 / Math.SQRT2;
 const SEG_GAIN = 0.015;
 /** How much of the lines themselves goes into the glow. */
 const LINE_GLOW = 0.15;
-/** The flares: each texel a faint point in an eighth-res target, its
+/** The flares: each texel a faint point in a quarter-res target, its
  *  brightness at side 256 (scaled by (256 / side)², the texel count, so a
  *  knot of the same share of the sphere flares the same at every quality
- *  preset), blurred at FLARE_SIGMA_PX (reference-height pixels). The
- *  reference's biggest flare is ~130 px across at 720. */
-const FLARE_DIVISOR = 8;
+ *  preset). Two blurs of it: a tight one for the white core and a wide one
+ *  of that for the halo (sigmas in reference-height pixels). The
+ *  reference's biggest flare is ~130 px across at 720, its core a third of
+ *  that. */
+const FLARE_DIVISOR = 4;
 /** Each texel's point there is this wide (reference-height pixels): wide
- *  enough that a saturated knot holds the light the blur spreads. */
-const FLARE_POINT_PX = 48;
+ *  enough that a saturated knot holds the light the blurs spread. */
+const FLARE_POINT_PX = 24;
 const FLARE_POINT_GAIN = 1 / 300;
-const FLARE_SIGMA_PX = 28;
-const FLARE_GAIN = 1.4;
+const FLARE_CORE_SIGMA_PX = 8;
+const FLARE_HALO_SIGMA_PX = 30;
+const FLARE_CORE_GAIN = 2.5;
+const FLARE_HALO_GAIN = 4;
 /** Flare density below this is dropped before the blur: the opening
  *  sphere and the lines' own texels stay under it, knots clip past it. */
 const FLARE_KNEE = 0.7;
@@ -286,8 +292,9 @@ function createTangleScene(): Scene {
   let head = 0;
   let glowTex: (WebGLTexture | null)[] = [null, null];
   let glowFbo: (WebGLFramebuffer | null)[] = [null, null];
-  let flareTex: (WebGLTexture | null)[] = [null, null];
-  let flareFbo: (WebGLFramebuffer | null)[] = [null, null];
+  // Flares: [0] the points (then the halo), [1] scratch, [2] the core.
+  let flareTex: (WebGLTexture | null)[] = [null, null, null];
+  let flareFbo: (WebGLFramebuffer | null)[] = [null, null, null];
   let targetW = 0;
   let targetH = 0;
 
@@ -385,13 +392,15 @@ function createTangleScene(): Scene {
     for (let i = 0; i < 2; i++) {
       if (glowFbo[i]) gl.deleteFramebuffer(glowFbo[i]);
       if (glowTex[i]) gl.deleteTexture(glowTex[i]);
+    }
+    for (let i = 0; i < 3; i++) {
       if (flareFbo[i]) gl.deleteFramebuffer(flareFbo[i]);
       if (flareTex[i]) gl.deleteTexture(flareTex[i]);
     }
     glowTex = [null, null];
     glowFbo = [null, null];
-    flareTex = [null, null];
-    flareFbo = [null, null];
+    flareTex = [null, null, null];
+    flareFbo = [null, null, null];
     targetW = targetH = 0;
   }
 
@@ -415,6 +424,8 @@ function createTangleScene(): Scene {
     for (let i = 0; i < 2; i++) {
       glowTex[i] = makeTexture(gl, gl.RGBA8, gl.RGBA, gw, gh, gl.LINEAR);
       glowFbo[i] = attach(gl, [glowTex[i]], "glow");
+    }
+    for (let i = 0; i < 3; i++) {
       flareTex[i] = makeTexture(gl, gl.RGBA8, gl.RGBA, flareSize(w), flareSize(h), gl.LINEAR);
       flareFbo[i] = attach(gl, [flareTex[i]], "flare");
     }
@@ -510,7 +521,7 @@ function createTangleScene(): Scene {
         simProg.setF("uFreqFine", freqFine);
         simProg.setF("uPhase", wrapFlow(phase));
         simProg.setF("uPhaseFine", wrapFlow(phase * FINE_DRIFT + 11.3));
-        simProg.setF("uBlend", Math.max(glideStep(glide), LEAK));
+        simProg.setF("uBlend", glideStep(glide));
         drawFullscreenQuad(gl, quadVao);
         read = write;
         crinkle *= Math.exp(-STEP_DT / CRINKLE_TAU);
@@ -585,8 +596,8 @@ function createTangleScene(): Scene {
       blurProg.setV2("uStep", 0, tap / gh);
       drawFullscreenQuad(gl, quadVao);
 
-      // --- flares: every texel a faint point at an eighth of the room's
-      // pixels; only knots add up to anything, and the blur spreads them ---
+      // --- flares: every texel a faint point at a quarter of the room's
+      // pixels; only knots add up to anything, and the blurs spread them ---
       const fw = flareSize(resW);
       const fh = flareSize(resH);
       gl.viewport(0, 0, fw, fh);
@@ -602,18 +613,23 @@ function createTangleScene(): Scene {
       gl.bindVertexArray(emptyVao);
       gl.drawArrays(gl.POINTS, 0, side * side);
       gl.disable(gl.BLEND);
-      const flareTap = Math.max(0.5, (FLARE_SIGMA_PX * pxScale) / FLARE_DIVISOR / 2);
+      // The blur's own sigma is two taps: a tap is sigma / 2 target pixels.
+      const coreTap = Math.max(0.5, (FLARE_CORE_SIGMA_PX * pxScale) / FLARE_DIVISOR / 2);
+      const haloTap = Math.max(0.5, (FLARE_HALO_SIGMA_PX * pxScale) / FLARE_DIVISOR / 2);
+      const blur = blurProg;
+      const quad = quadVao;
+      const flareBlur = (from: number, to: number, knee: number, sx: number, sy: number): void => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, flareFbo[to]);
+        sampler(gl, blur, "uSrc", 0, flareTex[from]);
+        blur.setF("uKnee", knee);
+        blur.setV2("uStep", sx / fw, sy / fh);
+        drawFullscreenQuad(gl, quad);
+      };
       blurProg.use();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, flareFbo[1]);
-      sampler(gl, blurProg, "uSrc", 0, flareTex[0]);
-      blurProg.setF("uKnee", FLARE_KNEE);
-      blurProg.setV2("uStep", flareTap / fw, 0);
-      drawFullscreenQuad(gl, quadVao);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, flareFbo[0]);
-      sampler(gl, blurProg, "uSrc", 0, flareTex[1]);
-      blurProg.setF("uKnee", 0);
-      blurProg.setV2("uStep", 0, flareTap / fh);
-      drawFullscreenQuad(gl, quadVao);
+      flareBlur(0, 1, FLARE_KNEE, coreTap, 0);
+      flareBlur(1, 2, 0, 0, coreTap);
+      flareBlur(2, 1, 0, haloTap, 0);
+      flareBlur(1, 0, 0, 0, haloTap);
 
       // --- composite ---
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -621,8 +637,10 @@ function createTangleScene(): Scene {
       compositeProg.use();
       bindFringe(compositeProg);
       sampler(gl, compositeProg, "uGlow", 3, glowTex[0]);
-      sampler(gl, compositeProg, "uFlare", 4, flareTex[0]);
-      compositeProg.setF("uFlareGain", FLARE_GAIN * glow);
+      sampler(gl, compositeProg, "uFlareCore", 4, flareTex[2]);
+      sampler(gl, compositeProg, "uFlareHalo", 5, flareTex[0]);
+      compositeProg.setF("uCoreGain", FLARE_CORE_GAIN * glow);
+      compositeProg.setF("uHaloGain", FLARE_HALO_GAIN * glow);
       compositeProg.setF("uLine", 1);
       compositeProg.setF("uGlowGain", GLOW_GAIN * glow);
       gl.uniform3f(loc(gl, compositeProg, "uGround"), GROUND[0], GROUND[1], GROUND[2]);
@@ -631,7 +649,7 @@ function createTangleScene(): Scene {
       // The gallery renders every scene into one shared context each tick:
       // leave no blend state, VAO or texture binding behind.
       gl.bindVertexArray(null);
-      for (let u = 4; u >= 0; u--) {
+      for (let u = 5; u >= 0; u--) {
         gl.activeTexture(gl.TEXTURE0 + u);
         gl.bindTexture(gl.TEXTURE_2D, null);
       }
