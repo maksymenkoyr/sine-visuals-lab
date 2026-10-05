@@ -6,7 +6,7 @@
 //   { "title": "0.2.0 - beta", "subtitle": "Sine Visuals Lab", "opening": "Your music, drawn live.",
 //     "proofs": [{ "take": "song_p2r", "beats": 8, "text": "…" }, …] }
 // `opening` is the hook's line, over the first bar; a proof is a clip that proves it (a take from
-// record.mjs, `from` its first beat for a panel take) with one caption along the bottom; title and
+// `promo.mjs record`, `from` its first beat for a panel take) with one caption along the bottom; title and
 // subtitle make the version card at the end. The opening may wrap to two lines, a caption must fit on one: this script warns when not.
 //
 // Writes <work>/cards/: meta.json {proofs, cap}, opening.png, proof_<i>.png, version.png.

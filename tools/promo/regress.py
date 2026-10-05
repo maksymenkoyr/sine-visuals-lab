@@ -36,7 +36,7 @@ Comparing results
                                     with no rate control (edit.py), where equal input must give equal bits.
   psnr A B                          Frame counts, durations and per-frame PSNR (min, mean) of two encodes of
                                     the same picture; for encodes that vary run to run (x264 with VBV).
-  repeats FILE                      Share of consecutive frames that read as repeats (showcase check.py rule).
+  repeats FILE [--from S]           Share of consecutive frames that read as repeats (showcase check.py rule).
 
 Stand-ins for media that no longer exist (the explainer's approved clips)
   standins CONFIG OUT               From the real explainer config builds test-pattern clips, wiring takes,
@@ -309,12 +309,15 @@ def psnr(argv):
 def repeats(argv):
     import numpy as np
     f = argv[0]
-    w, h, *_ = probe(f)
+    # --from S scores only the pairs from S seconds on: a test track's silent lead-in repeats by design.
+    start = float(argv[argv.index("--from") + 1]) if "--from" in argv else 0.0
+    w, h, fps, *_ = probe(f)
     W, H = (90, 160) if h > w else (160, 90)
     raw = subprocess.run([ffmpeg(), "-loglevel", "error", "-i", f, "-vf", f"scale={W}:{H},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
     fr = np.frombuffer(raw, np.uint8).reshape(-1, H, W).astype(np.int16)
     d = np.abs(np.diff(fr, axis=0)).mean(axis=(1, 2))
-    print(f"{os.path.basename(f)}: {100 * (d < 0.05).sum() / max(1, len(d)):.1f}% repeated frame pairs ({len(fr)} frames)")
+    d = d[np.arange(1, len(fr)) / fps >= start]
+    print(f"{os.path.basename(f)}: {100 * (d < 0.05).sum() / max(1, len(d)):.1f}% repeated frame pairs ({len(fr)} frames, from {start:g} s)")
 
 
 # ---- stand-ins -------------------------------------------------------------------------------------------

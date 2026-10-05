@@ -3,20 +3,20 @@ description: Make a short vertical video of the best parts of the current Stable
 ---
 
 **The idea:** a short vertical video that shows the best parts of the current Stable version to one
-audience, built around one viral hook and cut to the user's song.
+audience, built around one viral hook and cut to the user's song. It is the main ad: its job is to
+make a stranger stop scrolling and want the app.
+
+Read `docs/video-house-style.md` and the header of `tools/promo/promo.mjs` first. The engine's
+defaults already play the Shape below. Change only what the user asks for, and record each new call
+in the Shape, noting what it replaced.
+
+All commands are `node tools/promo/promo.mjs <step> --video hook`.
 
 ## Audience
 
-Who the app is for (the user, 2026-10-05):
-
-- **Small DJs and artists** who want their party or concert to look good and be remembered, but have
-  no budget or crew for visuals.
-- **Home-party hosts** who want a good vibe with no effort: turn it on and it runs. Putting it on a TV
-  or a few monitors is a bonus, not the pitch.
-
-What both get: visuals that look like a pro made them, for no money and no effort. A video speaks to
-one of them first, in their situation and their words, never the panel's. The other can come along
-when the hook is about what they share: a party or concert people remember.
+The two audiences are in the house style. A video speaks to one of them first, in their situation and
+their words. The other can come along when the hook is about what they share: a party or concert
+people remember. What both get: visuals that look like a pro made them, for no money and no effort.
 
 ## Hook
 
@@ -57,40 +57,31 @@ decision and a change every 3–5 s (socialync.io/blog/short-form-video-structur
 open loops (curiosity gap, pattern interrupt, POV, before/after) whose picture, caption and sound agree
 (kineclip.com/blog/how-to-write-viral-hooks-short-form-2026, hooklayer.dev/guides/viral-hooks).
 
-The machinery is `tools/promo/`; read the header of `tools/promo/promo.mjs` first. Its defaults already
-play the Shape below. Change only what the user asks for, and record each new call in the Shape,
-noting what it replaced.
-
 ## Inputs
 
-- **Version**: none needed. `promo.mjs` takes what Stable serves now. The recorder films the deployed
-  site, so the release must be live.
-- **Song**: `--song <file or link>`. Without it, the last release's song is reused. Say once that
-  posting needs its rights. When the user names several songs, measure each one's tempo and drop
-  (`song.py`, then the bass by bar around the drop) and cut each drop, one bar before to eight after,
-  into `<out>/song-review/` at one loudness so the user can listen; a song without a drop, or without a
-  steady tempo, can't carry the Shape.
+- **Version**: none needed; the engine takes what Stable serves now.
+- **Song**: `--song <file or link>`. Without it, the last run's song is reused. When the user names
+  several songs, measure each one's tempo and drop (`song.py`, then the bass by bar around the drop)
+  and cut each drop, one bar before to eight after, into a `song-review/` folder at one loudness so the
+  user can listen; a song without a drop, or without a steady tempo, can't carry the Shape.
 - **Several songs** in one video: write `<work>/mix.json` (its shape is in `tools/promo/mix.py`) and run
   `song` without `--song`. They must share a tempo within a few bpm. Before recording, make a review
   copy of the mix and check that each drop and switch lands on its planned beat.
-- **Look**: `--look "<Looks-card share link>"` opens the video. Without it, the last release's look is
+- **Look**: `--look "<Looks-card share link>"` opens the video. Without it, the last run's look is
   reused; with none at all the opening is a plain Physarum 2 stand-in, and you say so.
-- Output goes to `~/Movies/sine-visuals-lab-v<version>-promo/`.
 
-Each of steps 1–4 ends on the user's answer: show your proposal in a message of its own, ask in at
-most five plain lines, and go on only once they have chosen. A pleased reply to a list is not a
-choice; ask which one.
+Each of steps 1–4 ends on the user's answer (house style).
 
 ## 1. Pick the audience
 
-Say which audience this video speaks to, and why this release serves them best. The user confirms or
-switches.
+Say which audience this video speaks to, and why the current Stable serves them best. The user
+confirms or switches.
 
 ## 2. Pick the hook
 
 Offer three or four hooks for that audience, each from a different pattern. For each, give the caption,
 the frame-1 shot and the proofs that would close its loop, then say which you'd pick and why. The last
-release's hook is a candidate only if it still opens a loop.
+run's hook is a candidate only if it still opens a loop.
 
 ## 3. Pick the proofs
 
@@ -98,61 +89,38 @@ Candidates are what the current Stable does best on screen:
 
 - the featured scenes (those not in `DRAFT_SCENE_IDS` in Stable's `src/render/scenes/index.ts`),
   reacting to the song;
-- this release's changes. `node tools/promo/promo.mjs notes` writes the changelog to the work folder.
-  It holds only PR titles, and the best changes hide in PR bodies, so read every body (a Sonnet
-  subagent). Check each change against the release's final state, because a later PR may undo it.
+- this release's changes: `notes` writes the changelog to the work folder; read the PR bodies too.
 
 Keep a candidate only if it proves the hook to that audience and its change shows within two bars at
 phone size, and rank the keepers by how hard they grab. A clip of the panel being tweaked works against
-a no-effort promise. Leave out paid scenes, draft scenes and internal work. The available takes are
-the `T` table in `tools/promo/record.mjs`; a new proof may need a new take (copy a `ui_*` one).
+a no-effort promise. The available takes are in `tools/promo/takes.json`; a new proof may need a new
+take (copy a `ui_*` entry there and its script in `tools/promo/shots/take-ui.mjs`).
 
 ## 4. Show the plan
 
-Show the plan as a table, with times in seconds from the song's bpm. A question tool in the same
-message hides the table ("I didn't see any list").
-
-| Time | On screen | Caption |
-|---|---|---|
-| 0.0–1.4 s | Opening: the hook's frame-1 shot | The hook |
-| 1.4–4.1 s | Drop: the first proof | What it shows, in plain words |
-| … | … | … |
-| 22.0–24.7 s | End: version card over the opening's scene | — |
-
-Let the user add, cut, reorder and reword. Then write `<work>/lines.json`, shaped like
-`tools/promo/lines.v0.2.0.json`.
+Write `<work>/lines.json`, shaped like `tools/promo/shapes/hook.example.json`, run `song` if the work
+folder has none yet, then `plan` prints the time table. Show it on its own; the user adds, cuts, reorders and rewords, and you re-run `plan`.
 
 ## 5. Build and check
 
-`node tools/promo/promo.mjs all [--song …] [--look …]`, or step by step: `song` → `record` → `cards` →
-`compose` → `encode`. `record <take>…` re-records only those takes. Look at every step:
+`all`, or step by step: `song` → `record` → `cards` → `render` → `check` → `deliver`. `record <take>…`
+re-records only those takes.
 
 - `song`: the bpm must match what the user counts (for a half or double reading, pass `--bpm`).
   `dropTime` must be the real drop: check the bass by bar around it, since the detector can pick an
   earlier swell.
-- `record`: every take must say `OK`. A `SLOW` that survives its retries means the Mac was busy; wait
-  for other encodes to finish rather than keep a choppy take. Panel takes find controls by visible text
-  and `.vc-*` classes, so a reworked UI can make one silently do nothing: tile a few frames of each take
-  and check that something moves. Check scene takes with `tools/promo/motion.py <take> --from <drop
-  beat + 3>`. The two-screen takes are timed to their slot in `lines.json`, so re-record them after a
-  reorder. In their footage, the second screen must change only during Cue (while Space is held) and on
-  Play.
+- `record`: every take prints `OK`. The two-screen takes are timed to their slot in the plan, so
+  re-record them after a reorder. In their footage, the second screen must change only during Cue and
+  on Play.
 - `cards`: no `WARN` lines.
-- `compose`: tile about 16 frames across the video. Check that cuts land on beats, that each caption
-  names what its clip shows, and that text stays in the middle band (Stories covers the top ~13 % and
-  the bottom ~19 %). Then watch the first two seconds muted and alone: they must open the loop and make
-  you want the rest.
-- `encode`: confirm the length, that the drop lands on the first proof (the audio's rms jumps there),
-  and that the music plays at full level to the last frame. The full file is over the 30 MB send
-  limit, so send a 720p preview copy.
-
-Deliver the path, the length, what was reused (song, look) or is a stand-in, and the song-rights note.
-Post nothing. This needs a Metal GPU, so it runs on the user's Mac after the release is live, never in
-CI.
+- `render`, then `check`: tile about 16 frames across the video. Cuts land on beats, each caption
+  names what its clip shows, `safe` prints no `WARN`. Then watch the first two seconds muted and alone:
+  they must open the loop and make you want the rest. Confirm the drop lands on the first proof and the
+  length is within `style.json` `videos.hook.maxSec`.
 
 ## Shape
 
-Vertical 9:16 for phone Stories, at most 30 s, every cut on a beat.
+Vertical 9:16 for phone Stories, every cut on a beat.
 
 1. **Opening** (one bar): the hook's frame-1 shot with its caption big in the middle. Unless the hook
    needs another shot, that is the user's look, untouched, reacting to the song.
@@ -167,14 +135,9 @@ Vertical 9:16 for phone Stories, at most 30 s, every cut on a beat.
      panel's name for the feature. It slides in as the last one leaves, on a translucent card with a
      white hairline. Scene proofs carry none; the picture speaks.
    - The palette proof taps a few palettes, each on a beat.
-   - Scene proofs keep a steady camera and hear the song itself, never the synthetic feed (on that feed
-     Chladni held one figure and Physarum barely pulsed: "flat, low sync to the music").
-   - Interface proofs: the camera leans toward the part that changes.
-   - Pop-out and Room are drawn as devices: a laptop, with its Space (Cue) and Option (Play) keys lit
-     while pressed, above the second screen. That screen's frame glows orange while Cue shows the
-     laptop's look on it and flashes green on Play. Cue is a peek: it shows only while Space is held
-     (`src/ui/outputKeys.ts`). Room: add the TV by its code, then a palette and Play, twice; the TV
-     follows each time.
+   - Scene proofs keep a steady camera. Interface proofs: the camera leans toward the part that changes.
+   - Pop-out and Room are drawn as devices (house style). Room: add the TV by its code, then a palette
+     and Play, twice; the TV follows each time.
 3. **End**: the opening's scene alone for a bar, then a slim version card (a green tag icon, the version,
    the app name) over it for about three bars. With several songs, the song switches a couple of times
    under the card, a bar of each next song from its drop, so the look shows it follows any track. The
@@ -183,17 +146,14 @@ Vertical 9:16 for phone Stories, at most 30 s, every cut on a beat.
 **Songs**: one, or a few on one tempo, cut into one soundtrack (`mix.json`). A second song comes in
 mid-video on a bar line, into its last build bar, so its drop lands on a scene proof.
 
-Nothing fades out, picture or music. The style is half as GitHub-ish as a release page: white accents
-(the app's own), no icons or pills on captions. Only the version card keeps GitHub's tag.
+The style is half as GitHub-ish as a release page: white accents (the app's own), no icons or pills on
+captions. Only the version card keeps GitHub's tag.
 
 **Rejected:**
-- the changelog montage, replaced on 2026-10-05 by this shape. It had the version card second and
-  every change in scrolling lists.
+- the changelog montage as this video (2026-10-05): it lives on as the release video,
+  `/video-release-stable`;
 - slogans as the hook ("Your music, drawn live.", 2026-10-05): a statement about the product opens no
   loop. Replaced by the viral hook above, picked for an audience (steps 1–2).
 - keeping the last release's opening line by default (2026-10-05);
-- the "Latest" badge on the version card, and its first, 420 px tall size ("slimmer", 2026-10-05);
-- captions on scene proofs ("Slime mold that dances to your set" and the like, 2026-10-05);
-- one-beat cuts ("too dynamic");
-- fades;
-- screen captures without device frames.
+- the "Latest" badge on the version card, and its first, taller size ("slimmer", 2026-10-05);
+- captions on scene proofs ("Slime mold that dances to your set" and the like, 2026-10-05).

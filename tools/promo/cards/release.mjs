@@ -1,12 +1,12 @@
 // The release video's text, rendered once as transparent PNGs that compose.py lays over the footage.
-// cards.mjs dispatches here; /video-release approved this look.
+// cards.mjs dispatches here; /video-release-stable approved this look.
 //   node tools/promo/cards.mjs --work <work> --video release
 //
 // Reads <work>/lines.json:
 //   { "title": "0.2.0 - beta", "subtitle": "Sine Visuals Lab",
 //     "demos":  [{ "take": "ui_strains", "from": 0, "beats": 3, "group": "Scenes", "text": "…" }, …],
 //     "groups": [{ "key": "scenes", "title": "Scenes", "rows": ["…", …] }] }
-// A demo is a clip that shows a change happening (a take from record.mjs, `from` its first beat) with
+// A demo is a clip that shows a change happening (a take from `promo.mjs record`, `from` its first beat) with
 // one caption along the bottom; a group is the full list of changes, shown as a list card held low in
 // the frame whose rows scroll through it (compose.py). Rows must stay short: a list row is one line
 // (~40 characters), a caption wraps to two. This script warns when text does not fit.

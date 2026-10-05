@@ -1,7 +1,7 @@
 // The two-screen takes (`cuep`, `room`): a landscape laptop (on a phone layout the panel covers the PLAY
 // bar), its panel at the palettes, and the second screen it plays to, both on the song (a room's TV never
-// gets the synthetic feed) and both cast: <name>_main and <name>_out. record.mjs's twoScreens with the two
-// openers and scripts verbatim; the retry loop is capture.mjs's now. Run by `capture.mjs --take NAME --work
+// gets the synthetic feed) and both cast: <name>_main and <name>_out; capture.mjs
+// retries a slow attempt. Run by `capture.mjs --take NAME --work
 // DIR` (shot contract: ctx in, {casts, gate} out; see its header). Timed to where the take's first
 // segment sits in the video (rec.slots, from cuts.json), since compose cuts it by song time; `script`
 // counts beats from there and returns where it ends. Key presses go into meta.keys ([epoch s, key, down])

@@ -1,7 +1,6 @@
 // The scene takes (`intro`, `song_*`): a scene on the song, filmed for the whole span of the video.
 // Run by `capture.mjs --take NAME --work DIR` (shot contract: ctx in, {casts, gate} out; see its header);
-// record.mjs once() with music, as data: the scene, the look rule and the palette flips come from the
-// take's entry in tools/promo/takes.json. The fake microphone plays the song from the mic span's start,
+// the scene, the look rule and the palette flips come from the take's entry in tools/promo/takes.json. The fake microphone plays the song from the mic span's start,
 // so script beats count from there (rec.mic.pre beats before video beat 0), and meta.songT0 is the song
 // time at the span's first video beat. Page helpers: shots/lib/app.mjs.
 import { open, beatClock, sleep, clickText, every, FB_SETUP, BPM, P } from "./lib/app.mjs";

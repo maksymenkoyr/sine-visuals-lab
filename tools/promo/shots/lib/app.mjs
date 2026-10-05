@@ -1,7 +1,8 @@
-// The page and mouse helpers of the take shots (shots/take-*.mjs), copied from tools/promo/lib.mjs
-// (everything but launch and startCast, which now live in capture.mjs take mode) and from
-// tools/promo/record.mjs (PX, FB_SETUP, every, sliderOf, installTracker). capture.mjs sets BASE and BPM in
-// the environment before it imports a shot, so beat k of the synthetic feed is at __S + k*P here too.
+// The page and mouse helpers of the take shots (shots/take-*.mjs): opening the app on a feed, the
+// panel, the beat clock, an eased mouse, finding controls by their visible text, and the rectangle
+// tracker the interface camera follows (launch and the screencast are capture.mjs's). capture.mjs sets
+// BASE and BPM in the environment before it imports a shot, so beat k of the synthetic feed is at
+// __S + k*P here too.
 // open() does not take the init scripts (capture.mjs adds them); it installs the classic pv-cur cursor
 // and hides the 'Press ?' hint. The beat clock locks to the synthetic feed or, for a song take, to the
 // wav the fake microphone plays (the __S stamp).

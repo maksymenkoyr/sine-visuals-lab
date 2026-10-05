@@ -4,9 +4,9 @@
 // The video comes from the flag, else from <work>/cuts.json "video"; PROMO_WORK stands in for --work.
 // Each module in cards/ is the renderer that made that video's approved look, moved as it was, and
 // exports render(work). It reads its own input and writes its own PNGs (each module's header says which):
-//   cards/release.mjs    /video-release: <work>/lines.json (demos, groups) -> <work>/cards/
+//   cards/release.mjs    /video-release-stable: <work>/lines.json (demos, groups) -> <work>/cards/
 //   cards/hook.mjs       /video-hook-stable: <work>/lines.json (opening, proofs) -> <work>/cards/
-//   cards/explainer.mjs  /video-explainer: <work>/showcase.json (captions) -> <work>/caps/
+//   cards/explainer.mjs  /video-explainer-stable: <work>/showcase.json (captions) -> <work>/caps/
 // The modules keep their own CSS and Chromium call order on purpose: identical calls give identical PNGs,
 // which the regressions in regress.py compare. A new video adds a module here, nothing is shared.
 import fs from "node:fs";

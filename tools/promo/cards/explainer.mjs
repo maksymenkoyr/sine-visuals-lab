@@ -1,4 +1,4 @@
-// The explainer's text (cards.mjs dispatches here; /video-explainer approved this look): the showcase's
+// The explainer's text (cards.mjs dispatches here; /video-explainer-stable approved this look): the showcase's
 // caption overlays (transparent full-frame PNGs) and its opaque end card.
 //
 //   node tools/promo/cards.mjs --work <work> --video explainer

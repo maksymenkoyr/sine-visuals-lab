@@ -1,9 +1,9 @@
 // The six interface takes (`ui_*`): the phone panel at a control while the scene pulses behind it on the
-// synthetic feed, one table entry per take. The setup and script code is record.mjs's T table, copied
-// verbatim; the entry's track kind (the rectangle installTracker follows) sits with it, its scene and the
-// sizes in tools/promo/takes.json. Run by `capture.mjs --take NAME --work DIR` (shot contract: ctx in,
-// {casts, gate} out; see its header), flow as record.mjs once() without music: open, setup, tracker,
-// beat clock, cast, script, then track.json. Page helpers: shots/lib/app.mjs.
+// synthetic feed. Each take's entry here holds its setup, its script (the control moves, each on a beat)
+// and its track kind (the rectangle installTracker follows); its scene and sizes are in
+// tools/promo/takes.json. Run by `capture.mjs --take NAME --work DIR` (shot contract: ctx in, {casts,
+// gate} out; see its header). The flow: open, setup, tracker, beat clock, cast, script, then track.json.
+// Page helpers: shots/lib/app.mjs.
 import { open, setMouse, openPanel, beatClock, sleep, moveTo, drag, centerOf, scrollTextTo, clickText, press, P, BPM, PX, sliderOf, installTracker } from "./lib/app.mjs";
 
 const at = (bc, b) => bc.waitBeat(b);

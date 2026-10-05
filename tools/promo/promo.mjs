@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // The one runner for the promo videos: the release video, the hook video and the explainer all go
 // through these steps, and the playbooks (what to ask the user, how to judge each step) are the skills in
-// .claude/commands/ (video-release, video-hook-stable, video-explainer) with docs/video-house-style.md.
+// .claude/commands/ (video-release-stable, video-hook-stable, video-explainer-stable) with
+// docs/video-house-style.md.
 //
 //   node tools/promo/promo.mjs <step> [--video release|hook|explainer] [--work DIR] [--fmt v|h]
 //        [--version 0.3.0] [--song file|link] [--look link] [--dest DIR] [--drop-beat N] [--bpm N]
-//        [--base url] [--recorder new|legacy] [--print-plan] [take|clip name ...]
+//        [--base url] [--print-plan] [take|clip name ...]
 //
 // The pipeline:  song -> plan -> record -> cards -> render -> check -> deliver   (`all` runs them)
 //
@@ -42,8 +43,7 @@
 //                  holds the explainer's clip entries (capture.mjs header)
 //   style.json     the tokens more than one file reads (safe band, per-video fps and length, delivery)
 //
-// --recorder legacy runs the old record.mjs (hook only, env-driven) until the new recorder has been
-// checked on real footage. --print-plan on record lists the captures it would make and launches nothing.
+// --print-plan on record lists the captures it would make and launches nothing.
 // Needs macOS (the recorder runs on the Metal GPU, software rendering stutters), uv, Playwright's
 // Chromium, and records the DEPLOYED site (--base, default Stable), so run it after the release is live.
 import { execFileSync, spawnSync } from "node:child_process";
@@ -56,7 +56,7 @@ const here = new URL(".", import.meta.url).pathname;
 const { values: o, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    video: { type: "string" }, work: { type: "string" }, recorder: { type: "string" }, fmt: { type: "string" }, dest: { type: "string" },
+    video: { type: "string" }, work: { type: "string" }, fmt: { type: "string" }, dest: { type: "string" },
     "print-plan": { type: "boolean" },
     version: { type: "string" }, song: { type: "string" }, look: { type: "string" }, out: { type: "string" },
     "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" },
@@ -128,12 +128,6 @@ const fmts = () => (o.fmt ? o.fmt.split(",") : loadCuts().formats);
 // Scene takes hear the song from MIC_PRE beats before the video starts, for at least MIC_SPAN beats (more when
 // the cut is longer), after up to MIC_LEAD beats of the song before that so the app's analyser has settled.
 const MIC_PRE = 3, MIC_LEAD = 32, MIC_SPAN = 120;
-// The legacy recorder's drop beat: the plan's `look` (the opening's length), unless --drop-beat says otherwise.
-function legacyProofsStart() {
-  const f = join(work, "plan.json"), plan = existsSync(f) ? readJson(f) : {};
-  return plan.look ?? 4;
-}
-const legacyDropBeat = () => (o["drop-beat"] ? Number(o["drop-beat"]) : legacyProofsStart());
 
 // The soundtrack stretch the scene takes hear, cut from the song so the drop sits at `drop` beats of the video.
 function micPlan(drop, spanBeats) {
@@ -215,18 +209,6 @@ const steps = {
       return;
     }
     need(join(work, "song.json"), "run the song step first");
-    if (o.recorder === "legacy") {   // the old env-driven record.mjs, hook only
-      if (video !== "hook") { console.error("--recorder legacy records the hook video only"); process.exit(2); }
-      const drop = legacyDropBeat();
-      const m = micPlan(drop, MIC_SPAN);
-      const src = existsSync(m.song.file) ? m.song.file : (console.log(`song.json file ${m.song.file} is gone; using ${join(work, "song.wav")}`), join(work, "song.wav"));
-      const wav = cutMic(m, src);
-      run("node", [join(here, "record.mjs"), ...(names.length ? names : ["all"])], {
-        BPM: String(m.song.bpm), DROP_BEAT: String(drop), PROOFS_START: String(legacyProofsStart()),
-        MIC_WAV: wav, MIC_SONG_T0: String(m.wavT0), MIC_LEAD: String(m.lead), MIC_PRE: String(MIC_PRE), MIC_SPAN: String(m.span),
-      });
-      return;
-    }
     const cuts = loadCuts();
     const drop = cuts.dropBeat;
     const m = micPlan(drop, cuts.frames.totalBeats + 8);
@@ -255,7 +237,7 @@ const steps = {
   encode() {
     if (!frames) { console.error("the explainer has no compose/encode step; use render"); process.exit(2); }
     const cuts = loadCuts(), meta = readJson(join(work, "frames", "meta.json"));
-    const song = readJson(join(work, "song.json")), ss = song.dropTime - cuts.dropBeat * song.period;   // as the legacy encode, from song.json's own period
+    const song = readJson(join(work, "song.json")), ss = song.dropTime - cuts.dropBeat * song.period;   // from song.json's own period, as the approved masters were cut
     if (song.dropTime == null || ss < 0) { console.error(`the drop is too early in the song for drop beat ${cuts.dropBeat}; pass a lower --drop-beat to plan`); process.exit(2); }
     if (meta.dropBeat !== cuts.dropBeat) { console.error(`the frames were composed for a drop on beat ${meta.dropBeat}, not ${cuts.dropBeat}; re-run compose`); process.exit(2); }
     mkdirSync(join(work, "out"), { recursive: true });

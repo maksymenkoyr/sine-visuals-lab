@@ -3,7 +3,7 @@
     python3 tools/promo/shapes/release.py --work DIR [--drop-beat N] [--print-segs]
 
 The release video is the last Stable release's changes played over the user's song (.claude/commands/
-video-release.md says why): the opening look, the version card, the demos with one caption each, every
+video-release-stable.md says why): the opening look, the version card, the demos with one caption each, every
 group of changes as a list card, then the scene holding to a bar line. This file lays that out on the song's
 beats, replaying the arithmetic of the approved v0.2.0 compose.py in the same order, so the floats match.
 

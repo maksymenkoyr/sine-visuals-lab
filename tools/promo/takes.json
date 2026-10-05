@@ -1,5 +1,5 @@
 {
-  "note": "The take table read by `capture.mjs --take NAME --work DIR` (its header says how entries merge with <work>/takes.json): record.mjs's T table as data. shot = the module under tools/promo/shots that runs the take; feed = what the scene hears (song: the fake microphone plays the song; synthetic: the grid only); sizes = [width, height] tried in order, tries each; look = when the record's Stable look applies to a scene take; flips = a button pressed every `every` beats from the drop.",
+  "note": "The take table read by `capture.mjs --take NAME --work DIR` (its header says how entries merge with <work>/takes.json): the take table as data. shot = the module under tools/promo/shots that runs the take; feed = what the scene hears (song: the fake microphone plays the song; synthetic: the grid only); sizes = [width, height] tried in order, tries each; look = when the record's Stable look applies to a scene take; flips = a button pressed every `every` beats from the drop.",
   "defaults": { "tries": 2, "feed": "synthetic", "sizes": [[576, 1024]] },
   "takes": {
     "intro": { "shot": "take-scene.mjs", "feed": "song", "lookScene": true, "look": "always", "sizes": [[720, 1280], [576, 1024]] },
