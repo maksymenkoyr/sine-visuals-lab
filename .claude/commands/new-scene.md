@@ -34,7 +34,9 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    not the gallery root (see the standing rule in `CLAUDE.md` for the URL form).
 8. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
    and confirm the probe shows every setting's `mode` as `"manual"` until you
-   switch it to auto in the device menu, `"auto"` after.
+   switch it to auto in the device menu, `"auto"` after. Finish with the
+   loop's real-audio check (`tools/tune-real.mjs`): the scene must react to
+   a real song and stay still in silence, apart from motion it has by design.
 9. Start the scene's record: copy `docs/scenes/_template.md` to
    `docs/scenes/$1.md` and fill in what's known — references (if `/ref` was
    run, its links, timestamps and bundle name), the first entries of
