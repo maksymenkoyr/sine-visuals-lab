@@ -22,6 +22,7 @@
 import { DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName } from "../../sceneCommon.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
+import { MAX_SOLID_EDGES } from "./solids.ts";
 
 /** The line colour measured on the reference's wall projection (bright
  *  pixels minus the local wall, normalised — docs/scenes/echoes.md's
@@ -73,15 +74,35 @@ vec2 flowField(vec2 p) {
 }
 `;
 
-/** Distance from p to the outline of a regular polygon with uCorners
- *  corners (a circle below 3), circumradius uRadius, turned by uAngle.
- *  Edge normals sit at k·(2π/n) − π/2, so every polygon rests on a flat
- *  bottom edge. Within one edge's angular sector the nearest point of the
- *  outline is on that edge (the sector borders run through the corners,
- *  where the two edge lines are equidistant), so the distance is just to
- *  that one segment. */
+/** Distance from p to the outline. A 3D or 4D figure (uEdgeCount > 0) is
+ *  already turned and projected by solids.ts: its edges arrive as 2D
+ *  segments, one per texel of uEdges (x1, y1, x2, y2), and the distance is
+ *  to the nearest one — skipped entirely beyond uBound, the farthest any
+ *  vertex reached, since no line is out there.
+ *
+ *  Otherwise a regular polygon with uCorners corners (a circle below 3),
+ *  circumradius uRadius, turned by uAngle. Edge normals sit at
+ *  k·(2π/n) − π/2, so every polygon rests on a flat bottom edge. Within one
+ *  edge's angular sector the nearest point of the outline is on that edge
+ *  (the sector borders run through the corners, where the two edge lines
+ *  are equidistant), so the distance is just to that one segment. */
 const OUTLINE_GLSL = `
+float segmentsDist(vec2 p) {
+  if (length(p) > uBound) return 1e3;
+  float d = 1e3;
+  for (int i = 0; i < ${MAX_SOLID_EDGES}; i++) {
+    if (float(i) >= uEdgeCount) break;
+    vec4 e = texelFetch(uEdges, ivec2(i, 0), 0);
+    vec2 pa = p - e.xy;
+    vec2 ba = e.zw - e.xy;
+    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
+    d = min(d, length(pa - ba * h));
+  }
+  return d;
+}
+
 float outlineDist(vec2 p) {
+  if (uEdgeCount > 0.5) return segmentsDist(p);
   float c = cos(uAngle), s = sin(uAngle);
   vec2 q = vec2(c * p.x + s * p.y, -s * p.x + c * p.y);
   if (uCorners < 2.5) return abs(length(q) - uRadius);
@@ -111,6 +132,9 @@ uniform sampler2D uPrev;
 uniform float uRadius;
 uniform float uAngle;
 uniform float uCorners;
+uniform sampler2D uEdges;
+uniform float uEdgeCount;
+uniform float uBound;
 uniform float uStroke;
 uniform float uPx;
 uniform float uStep;

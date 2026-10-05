@@ -1,7 +1,7 @@
 # Echoes (`echoes`)
 
-One warm-white outline — a circle or a regular polygon — drawn into a
-feedback loop that a drifting noise field warps every frame, so it sheds a
+One warm-white outline — a circle, a regular polygon, or a 3D or 4D
+wireframe figure turning in space — drawn into a feedback loop that a drifting noise field warps every frame, so it sheds a
 fan of echo lines that peel off, bend, pinch to points and fade. The music
 swings its size once a bar, pops it outward on bass hits (a ripple that runs
 down the fan) and spreads the echoes further apart as the mids get louder.
@@ -20,10 +20,17 @@ Draft, not yet on main.
   two channels to colour: `LINE_RGB` on black, or the room palette's ramp by
   freshness with Colours raised). Its header owns the R/G channel meaning and
   why the fade is linear.
+- `src/render/scenes/echoes/solids.ts` — the 3D and 4D figures in `SOLIDS`
+  (vertices only; edges are derived as nearest pairs) and `projectSolid`,
+  which turns one through 3D/4D planes and projects it to 2D segments. Its
+  header owns the turning and projection; `index.ts` maps the Shape chips
+  (`SHAPES`) to flat corner counts or figures and uploads the segments as a
+  one-row float texture that `segmentsDist` in glsl.ts reads.
 - Shared systems: drives (Flow, Breathe, Kick), `noiseHash.ts`
   (`NOISE_HASH_GLSL` for the field, `wrapFlow` for the drift phase).
-- Tests: no scene-specific ones; the cross-scene tests (`tests/drives.test.ts`,
-  `tests/settingGroups.test.ts`, …) cover it through `listScenes()`.
+- Tests: `tests/echoesSolids.test.ts` (each figure's vertex and edge counts,
+  equal edges, projected size); the cross-scene tests (`tests/drives.test.ts`,
+  `tests/settingGroups.test.ts`, …) cover the rest through `listScenes()`.
 
 ## References
 
@@ -119,6 +126,30 @@ beat; the bar wave moved the resting size between pops.
   strength echoes crinkled where the reference's sweep in smooth arcs;
   compared side by side with the previous version before keeping it.
 
+2026-10-05 — the user asked "can figures morph into each other? can we add
+3d figures? 4d?", then "just add 3d and 4d figures" (no morphing):
+
+- **3D and 4D figures as more Shape chips**, appended after the flat ones
+  so a saved look's index still means the same shape. Wireframes, turned
+  and projected in JS each frame (a few dozen vertices at most), drawn by
+  the shader as the nearest of the projected segments — the echo loop is
+  unchanged. A 4D figure also turns through two planes that include the
+  fourth axis, which is what turns a tesseract inside out.
+- **Spin drives the tumble.** One turn phase, with each plane at its own
+  multiple, so the Spin slider speeds the whole motion; the phase is never
+  wrapped, since wrapping would jump every plane but the first.
+- **Sized by a measured average.** Projected as built, the 4D figures and
+  the tetrahedron drew about half the size of a circle at the same Size.
+  Each figure is now divided by its own average projected size over a sweep
+  of turns, measured once, so all of them land within about ±12 % of the
+  circle while a 4D figure's swelling as it turns still shows.
+- **GPU cost:** `tools/gpu-bench.mjs --app --dpr 2` put the step pass at
+  0.81 ms with the circle and 3.74 ms with the 24-cell, the figure with the
+  most edges, but a circle re-run straight after read 4.10 ms. On this
+  machine the GPU clock and the shared Chrome swing more than the figure
+  costs, so no optimisation was made. Pixels beyond the figure's reach skip
+  the edge loop.
+
 ## Tuning notes
 
 - The reference's bare-circle stretches (17–20 s) are Flow 0; its busy
@@ -128,6 +159,9 @@ beat; the bar wave moved the resting size between pops.
   reference's 10–12 s look, but not a good resting state.
 - Judge it on real music: synthetic audio's mid level is low, so Flow reads
   short fans there.
+- The figures with many edges (the 24-cell, the icosahedron) fill into a
+  dense mass at the default Echoes; fewer echoes, or more Spin so the trails
+  separate, reads cleaner.
 
 ## Known issues and next steps
 
@@ -168,4 +202,5 @@ beat; the bar wave moved the resting size between pops.
 
 ## History
 
-- #369 — first draft from `/ref` on the live-coding reference.
+- #369 — first draft from `/ref` on the live-coding reference; then 3D and
+  4D wireframe figures as more Shape chips.
