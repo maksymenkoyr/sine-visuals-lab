@@ -725,6 +725,6 @@ hexagon and decagon.
   to take the plate.
 - 2026-10-05 (draft) — Treble glow renamed Glow; it starts on two real wires
   (Treble level + Treble hit) instead of a built-in.
-- `#361` (2026-10-05, draft) — Toss on the drop, Powder colour, the
+- `#366` (2026-10-05, draft; replaces #361) — Toss on the drop, Powder colour, the
   Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
   an endless pull-back on the square plate.
