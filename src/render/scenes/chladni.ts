@@ -144,7 +144,8 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // no more often (docs/scenes/chladni.md, Measurements).
 //
 // The sand. Grain positions live in a ping-pong pair of RGBA8 textures,
-// 16-bit fixed point per axis (R,G = x, B,A = y). RGBA8 is renderable on
+// 16-bit fixed point per axis (R,G = x, B,A = y), beside a pair holding each
+// grain's memory (see the sand colour paragraph below). RGBA8 is renderable on
 // every WebGL2 device with no EXT_color_buffer_float dependency (the
 // webOS/Tizen targets vite.config.ts builds for), and 1/65535 of the plate
 // is sub-pixel even at 4K; half-float would be *too coarse* for positions,
@@ -195,6 +196,29 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // colour: it is scaled back so its brightest shade just fits, so past that
 // point Grain brightness stops brightening it (only Flash and a toss still
 // clip it, briefly). The colour is drawing only: the sim never reads it.
+//
+// More sand colour, all of it off (or the plate as it was) by default.
+// Thrown colour and Thrown to (THROWN_TO) say how far a thrown grain's colour
+// moves and where: up the ramp toward white, as it always did, to the second
+// colour, through the palette's inks, or dark. Toward white arrives early,
+// because the brightness gain clips the ramp's bright end to white, so the
+// others follow a curve (THROWN_REACH) to keep pace. Two sides colours a grain
+// by the sign of the plate's value under it, which side of the still line it
+// lies by (the plate moves one way on one side while the other side moves the
+// other way), and tints the plate's glow the same. Spectrum rings colours the
+// sand from a history of the bands, a ring-buffer texture written SPEC_RATE
+// rows a second, each band as a share of its own recent peak: distance from
+// the centre is how long ago, the angle is pitch. Glitter treats each shard's
+// rotation as the way it faces: a light circling once a bar flashes the
+// grains facing it, and thrown grains tumble to new angles. Those four are
+// stateless. Embers and Beat waves need each grain to remember something,
+// and the positions have no spare bits, so the sim writes a second RGBA8
+// texture beside them (MEMORY_GLSL), ping-ponged through the same
+// framebuffers: a heat that hops raise and rest lets fall over Ember fade,
+// and the ink the last beat wave dyed it (advanceWave: each fired edge of the
+// jack runs a ring out from the centre, dyeing what it passes). Embers draws
+// a hot grain at its own hue's full strength, never clipped to white, with a
+// halo on a share of the grains, and a cold one nearly dark.
 //
 // The toss. Sand on a nodal line never hops, so no kick can disturb a formed
 // figure; at a drop (the Toss jack's edge, the app's Drop signal by default)
@@ -479,6 +503,94 @@ const POWDER_THROWN_LIFT = 0.2;
  *  times the bed's brightness, so a pile reads as grains (POINT_VERT). */
 const SHADE_LO = 0.8;
 const SHADE_SPAN = 0.4;
+
+/** Thrown to's choices, in value order: where a thrown grain's colour goes
+ *  (Thrown colour sets how far). See the file header's sand colour section. */
+export const THROWN_TO = ["Toward white", "Second colour", "Through the palette", "Into shadow"] as const;
+/** Into shadow: a fully thrown grain keeps this share of its brightness. */
+const SHADOW_KEEP = 0.12;
+/** The share of a full throw by which the Thrown to choices other than
+ *  Toward white have arrived (measured on Neon: Toward white reads white
+ *  from about a quarter of a throw, its ramp clipped by the brightness gain). */
+const THROWN_REACH = 0.4;
+/** Two sides: the width either side of a still line, in field units (|f| <= 2),
+ *  over which a grain's colour changes sides. */
+const SIDE_EDGE = 0.04;
+/** Two sides on the plate's glow: the second colour scaled to sit near the
+ *  ramp's middle, where the glow's own colour sits. */
+const SIDE_GLOW_INK = 0.6;
+/** Embers: the heat a fully thrown grain gains per second (heat runs 0..1);
+ *  Ember fade sets how fast rest cools it. */
+export const EMBER_HEAT_RATE = 4;
+/** Embers at 1: a cold grain keeps this share of its brightness. */
+const EMBER_COLD = 0.05;
+/** Embers: how a grain's heat turns into glow — a square root, so sand
+ *  rattling on a line under loud music still glows faintly instead of
+ *  reading as cold as sand in silence. */
+const EMBER_GLOW_POWER = 0.5;
+/** One grain in EMBER_HALO_ONE_IN (times the Sand amount above 1, as the
+ *  Glow's glints) carries the ember halo, for the fill-rate reason the
+ *  Glow's glints give. */
+const EMBER_HALO_ONE_IN = 6;
+/** The heat a halo carrier starts to glow at, the heat its halo is full at,
+ *  and how strong a full halo is (a Glow glint's is 1). Below 1 because a
+ *  toss heats the whole bed at once: at 1, one carrier in three flooded the
+ *  screen with colour on a real drop. */
+const EMBER_HALO_FROM = 0.15;
+const EMBER_HALO_FULL = 0.8;
+const EMBER_HALO_MAX = 0.6;
+/** Spectrum rings: history rows written per second, rows kept, and how fast
+ *  a ring runs out from the centre (plate units per second). The history
+ *  must outlast a ring's run to the square's corner. */
+export const SPEC_RATE = 60;
+export const SPEC_ROWS = 128;
+export const SPEC_SPEED = 0.8;
+/** Each band is written as its share of its own recent peak (decaying over
+ *  SPEC_PEAK_SEC, never below SPEC_PEAK_FLOOR), as a spectrogram's colour
+ *  scale adapts: the music is always loudest in the bass, and absolute
+ *  levels left the treble side of the plate dark. */
+export const SPEC_PEAK_SEC = 4;
+const SPEC_PEAK_FLOOR = 0.05;
+/** A ring's brightness over that share: stretched from SPEC_QUIET (dark) to
+ *  SPEC_LOUD (full), so a band's rise and fall reads as a ring rather than a
+ *  steady wash; a quiet floor keeps the figure visible. */
+const SPEC_QUIET = 0.45;
+const SPEC_LOUD = 1.0;
+const SPEC_FLOOR = 0.1;
+const SPEC_GAIN = 1.5;
+/** Beat waves: how fast a wave runs out from the centre (plate units per
+ *  second: about a beat at 120 BPM to the plate's edge, so the last wave's
+ *  colour still shows outside the new one) and how far it goes before it
+ *  stops dyeing (past the square's corner). */
+export const WAVE_SPEED = 2;
+export const WAVE_REACH = 1.5;
+/** Glitter: how narrowly a shard must face the light to flash, the flash's
+ *  brightness and growth, how much it dims the rest of the sand at 1 (so the
+ *  flashes stand out), and how often a thrown grain tumbles to a new angle
+ *  (per second), from a hop of TUMBLE_MOTION up. */
+const GLINT_POWER = 48;
+const GLITTER_GAIN = 2.4;
+const GLITTER_GROW = 1.5;
+const GLITTER_DIM = 0.55;
+const TUMBLE_HZ = 10;
+const TUMBLE_MOTION = 0.08;
+
+/** A beat wave: how many have started (the id the sim stamps on the sand it
+ *  dyes) and when the last one did (frame.time, seconds). */
+export interface WaveState {
+  count: number;
+  at: number;
+}
+
+/** Steps the beat wave by one rendered frame: a fired edge starts the next
+ *  one from the centre. `radius` is how far the wave in play has run, or -1
+ *  while none is (it has run past WAVE_REACH, none has started, or the audio
+ *  clock went back past its start, a new source). */
+export function advanceWave(last: WaveState, now: number, fired: boolean): { wave: WaveState; radius: number } {
+  const wave = fired ? { count: last.count + 1, at: now } : last;
+  const radius = (now - wave.at) * WAVE_SPEED;
+  return { wave, radius: wave.count > 0 && now >= wave.at && radius <= WAVE_REACH ? radius : -1 };
+}
 
 /** How much a grain of weight `w` is drawn in the powder colour at Powder
  *  colour 1. Mirrors powderShare in CHLADNI_GLSL. */
@@ -917,6 +1029,97 @@ const SETTINGS: SceneSetting[] = [
     default: 0,
   },
   {
+    key: "thrownColour",
+    label: "Thrown colour",
+    description: "How far a grain's colour moves while it is thrown: 0 keeps its resting colour, 1 is the usual, 2 moves it at the lightest hop. Thrown to picks where it goes",
+    // Manual like Powder colour: how the sand is coloured is taste.
+    group: "Look",
+    family: "thrown",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+  },
+  {
+    key: "thrownTo",
+    label: "Thrown to",
+    description: "Where a thrown grain's colour goes: up the palette to white, to the second colour, through the palette's colours, or dark",
+    group: "Look",
+    family: "thrown",
+    min: 0,
+    max: THROWN_TO.length - 1,
+    step: 1,
+    default: 0,
+    type: "enum",
+    options: THROWN_TO,
+  },
+  {
+    key: "twoSides",
+    label: "Two sides",
+    description: "Colours each grain by its side of the still line it lies by: the plate moves up on one side while the other goes down. One side keeps the sand colour, the other takes the second colour, and the plate's glow shows the same checkerboard",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
+  {
+    key: "embers",
+    label: "Embers",
+    description: "Hops heat the sand and rest cools it: hot sand glows in pure colour like neon, with a halo, and sand that has rested goes nearly dark. 0 is off",
+    group: "Look",
+    family: "embers",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
+  {
+    key: "emberFade",
+    label: "Ember fade",
+    description: "Seconds hot sand takes to cool: short, only the sand being thrown right now glows; long, the lines a loud part left behind keep glowing",
+    group: "Look",
+    family: "embers",
+    min: 0.25,
+    max: 8,
+    step: 0.25,
+    default: 2,
+    // A time, not an amount: the Master dial must not change it.
+    masterScale: false,
+  },
+  {
+    key: "spectrumRings",
+    label: "Spectrum rings",
+    description: "Colours the sand with the music's spectrum flowing out from the centre in rings: around the plate is pitch, bass at the top and treble at the bottom; further out is longer ago",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
+  {
+    key: "beatWaves",
+    label: "Beat waves",
+    description: "On each beat a wave runs out from the centre and dyes the sand it passes in the next palette colour; the sand carries the dye as it moves, until the next wave",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    // The jack's edge starts a wave (advanceWave); the slider is how much of the dye shows.
+    drive: { default: "feature.onset" },
+  },
+  {
+    key: "glitter",
+    label: "Glitter",
+    description: "Each grain is a flat shard: a light circles the plate once a bar, and the grains facing it flash in the palette's colours. Thrown grains tumble and twinkle",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
+  {
     key: "highGlow",
     label: "Glow",
     description: "Each grain blooms with a soft halo when its wires light up — the treble (hats and cymbals) to start",
@@ -1309,10 +1512,25 @@ vec2 tossLanding(vec2 p, vec2 disp, vec2 texel) {
 }
 `;
 
+// The grain memory (see the file header): a second RGBA8 texture beside the
+// positions. R,A = heat in 16-bit fixed point (8 bits would stall a slow
+// fade: one step of rounding outweighs a frame's cooling), G = the beat-wave
+// dye, an ink index over 3, B = the id (mod 256) of the last wave that dyed it.
+const MEMORY_GLSL = `
+uniform sampler2D uMemTex;
+float memHeat(vec4 mem) {
+  return (floor(mem.r * 255.0 + 0.5) * 256.0 + floor(mem.a * 255.0 + 0.5)) / 65535.0;
+}
+int memInk(vec4 mem) {
+  return int(floor(mem.g * 3.0 + 0.5));
+}
+`;
+
 const SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outMemory;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
@@ -1320,9 +1538,33 @@ uniform sampler2D uPosTex;
 uniform float uSimDt;
 uniform float uSeed;
 uniform float uMaxOrder; // highest m among the active modes (times the finest zoom layer's scale), for the step cap
+// Embers: this frame's cooling factor, exp(-dt / Ember fade).
+uniform float uEmberCool;
+// Beat waves (advanceWave): the wave in play's id mod 256 (-1 for none), how
+// far it has run from the centre (plate units), and its ink index.
+uniform float uWaveId;
+uniform float uWaveRadius;
+uniform float uWaveInk;
 ${CHLADNI_GLSL}
 ${GRAIN_MOTION_GLSL}
 ${TOSS_GLSL}
+${MEMORY_GLSL}
+
+// One frame of a grain's memory: hops heat it (motion is how far it is being
+// thrown, as the point pass reads it) and rest cools it; a beat wave dyes it
+// once as it passes. plateP is where it lies, in plate space.
+vec4 stepMemory(vec4 mem, vec2 plateP, float motion) {
+  float heat = clamp(memHeat(mem) * uEmberCool + ${glslFloat(EMBER_HEAT_RATE)} * motion * uSimDt, 0.0, 1.0);
+  float v = floor(heat * 65535.0 + 0.5);
+  float hi = floor(v / 256.0);
+  mem.r = hi / 255.0;
+  mem.a = (v - hi * 256.0) / 255.0;
+  if (uWaveId >= 0.0 && floor(mem.b * 255.0 + 0.5) != uWaveId && length(plateP - uOutline.xy) < uWaveRadius) {
+    mem.g = uWaveInk / 3.0;
+    mem.b = uWaveId / 255.0;
+  }
+  return mem;
+}
 
 #ifdef ZOOM_OUT
 // Zoom out (chladniZoom.ts): this frame's shrink toward the centre, and the
@@ -1348,6 +1590,7 @@ void main() {
   vec4 stored = texelFetch(uPosTex, texel, 0);
   vec2 p = unpackPos(stored);
   vec2 seed = gl_FragCoord.xy * 0.173 + uSeed;
+  vec4 mem = texelFetch(uMemTex, texel, 0);
 #ifdef ZOOM_OUT
   // The bed shrinks with the field, as one piece (a grain in the air too:
   // where it took off shrinks under it).
@@ -1356,7 +1599,8 @@ void main() {
 
   // Tossed (see TOSS_GLSL): in the air the plate can't move a grain, so its
   // stored spot stays where it took off; on the one pass its flight ends it
-  // comes down at its landing spot.
+  // comes down at its landing spot. A grain in the air is thrown as hard as
+  // a grain can be, so it heats as one.
   if (tossLive(uTossPrevAge)) {
     vec4 fl = tossFlight(vec2(texel));
     if (uTossAge >= 0.0 && uTossAge < fl.x) {
@@ -1365,10 +1609,13 @@ void main() {
 #else
       outColor = stored;
 #endif
+      outMemory = stepMemory(mem, GRAIN_TO_PLATE(p), 1.0);
       return;
     }
     if (uTossPrevAge < fl.x && fl.x <= uTossAge) {
-      outColor = packPos(tossLanding(p, fl.zw, vec2(texel)));
+      vec2 landed = tossLanding(p, fl.zw, vec2(texel));
+      outColor = packPos(landed);
+      outMemory = stepMemory(mem, GRAIN_TO_PLATE(landed), 1.0);
       return;
     }
   }
@@ -1424,6 +1671,8 @@ void main() {
   if (streamLen > stepCap) stream *= stepCap / streamLen;
 
   p += hop - dir * pull + stream;
+  // How far this grain is being thrown, as the point pass measures it (vMotion).
+  outMemory = stepMemory(mem, p, clamp(hopScale * bounce / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0));
 #ifdef ZOOM_OUT
   p = PLATE_TO_GRAIN(p);
 #endif
@@ -1460,6 +1709,7 @@ ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
 ${ROOM_UV_GLSL}
 ${CHLADNI_GLSL}
+uniform vec3 uPowderInk; // powderInk(palette), chladniPowder.ts: Two sides' second colour
 
 void main() {
   vec2 uv = roomUv(vUv);
@@ -1474,11 +1724,17 @@ void main() {
   float inside = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, border);
 #endif
 
-  float a = amp(p);
+  float f = field(p);
+  float a = abs(f) * 0.5;
   vec3 plate = vec3(0.030, 0.031, 0.036);
   // The middle of the room palette's ramp: bright enough to read on the
   // plate, darker than the grains that sit on top of it.
-  vec3 glow = palRamp(0.35 + 0.3 * a) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
+  vec3 glowHue = palRamp(0.35 + 0.3 * a);
+  // Two sides: the cells where the plate moves the way the sand's second
+  // colour marks glow in that colour, so the plate shows the checkerboard the
+  // sand is sorted by. Scaled down to sit near the ramp's middle.
+  if (uTwoSides > 0.0) glowHue = mix(glowHue, uPowderInk * ${glslFloat(SIDE_GLOW_INK)}, uTwoSides * smoothstep(-0.12, 0.12, f));
+  vec3 glow = glowHue * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
   // A faint rim along the plate's true outline, the same width in plate
   // units on every shape (one minus the gauge, times the apothem, is the
   // distance to the nearest edge). The stretched full-frame square has no
@@ -1507,9 +1763,42 @@ uniform sampler2D uPosTex;
 uniform float uSide;
 uniform float uGrainGain;
 uniform vec3 uPowderInk; // powderInk(palette), chladniPowder.ts
+// Spectrum rings: the band history (NUM_BANDS across, SPEC_ROWS rows, a
+// ring buffer written SPEC_RATE rows a second) and where its newest row is.
+uniform sampler2D uSpecTex;
+uniform float uSpecNewest;
 ${CHLADNI_GLSL}
 ${GRAIN_MOTION_GLSL}
 ${TOSS_GLSL}
+${MEMORY_GLSL}
+
+// A colour lit as Powder colour is: times the grain's brightness, but scaled
+// back so the bed's brightest shade just fits, so it keeps its hue instead of
+// clipping toward white.
+vec3 litHue(vec3 c, float bright, float brightBase) {
+  return c * bright / max(1.0, max(c.r, max(c.g, c.b)) * brightBase * ${glslFloat(SHADE_LO + SHADE_SPAN)});
+}
+// The palette's inks in order, t = 0 the first and 1 the last.
+vec3 inkWalk(float t) {
+  float x = clamp(t, 0.0, 1.0) * 3.0;
+  int i = int(min(floor(x), 2.0));
+  return mix(uPalInk[i], uPalInk[i + 1], x - float(i));
+}
+// The palette's inks round a loop, u in [0,1) once round.
+vec3 inkLoop(float u) {
+  float x = fract(u) * 4.0;
+  int i = int(floor(x));
+  return mix(uPalInk[i], uPalInk[(i + 1) % 4], x - float(i));
+}
+// The band level at pitch (0 = lowest band, 1 = highest) ageSec ago, from the
+// history; linear between rows and bands, the rows wrapping round the buffer.
+// The newest row is a row behind the clock, so nothing reads the row being
+// filled next.
+float specLevel(float pitch, float ageSec) {
+  float row = uSpecNewest - ageSec * ${glslFloat(SPEC_RATE)};
+  float band = clamp(pitch, 0.0, 1.0) * ${(NUM_BANDS - 1).toFixed(1)};
+  return texture(uSpecTex, vec2((band + 0.5) / ${NUM_BANDS.toFixed(1)}, (row + 0.5) / ${SPEC_ROWS.toFixed(1)})).r;
+}
 out float vMotion;
 out float vGlow;
 out float vSizePx;
@@ -1556,8 +1845,11 @@ void main() {
   // grains rather than a smooth blob.
   vec2 jitter = hash22(vec2(texel) * 0.731 + 3.17);
   float w = grainWeight(vec2(texel));
+  // The plate's value under the grain: its sign is the side of the line the
+  // grain lies by (Two sides), its size how hard the plate moves there.
+  float fHere = field(GRAIN_TO_PLATE(p));
   // How far this grain is being thrown right now — see GRAIN_MOTION_GLSL.
-  vMotion = clamp(grainHopScale(w) * grainBounce(amp(GRAIN_TO_PLATE(p)) * plateDrive(), grainLift(w)) / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0);
+  vMotion = clamp(grainHopScale(w) * grainBounce(abs(fHere) * 0.5 * plateDrive(), grainLift(w)) / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0);
   // A grain in the air runs up the ramp the higher it is, to its brightest
   // end by TOSS_WHITE_RISE.
   if (airborne) vMotion = max(vMotion, clamp(rise / ${glslFloat(TOSS_WHITE_RISE)}, 0.0, 1.0));
@@ -1568,11 +1860,33 @@ void main() {
   vec2 shard = hash22(vec2(texel) * 0.911 + 5.7);
   vFacets = shard.x < 0.5 ? 3.0 : 4.0;
   vRot = shard.y * 6.2832;
+  // Glitter: the shard's angle is the way it faces. A thrown grain tumbles:
+  // TUMBLE_HZ times a second it lands at a new random angle (each grain on
+  // its own beat), so it twinkles, while sand at rest keeps its angle and
+  // flashes only when the circling light reaches it. The light goes round
+  // once a bar. Grains facing it flash and grow.
+  float sparkle = 0.0;
+  if (uGlitter > 0.0) {
+    float tumble = smoothstep(${glslFloat(TUMBLE_MOTION)}, ${glslFloat(4 * TUMBLE_MOTION)}, vMotion);
+    vRot += tumble * 6.2832 * hash21(vec2(texel) * 0.29 + floor(uTime * ${glslFloat(TUMBLE_HZ)} + shard.x * 7.0));
+    sparkle = pow(max(cos(vRot - uBarPhase * 6.2832), 0.0), ${glslFloat(GLINT_POWER)}) * uGlitter;
+  }
+  // The grain's memory (Embers' heat, Beat waves' dye), from the sim.
+  vec4 mem = texelFetch(uMemTex, texel, 0);
+  float heat = memHeat(mem);
   // Glow: the sprite grows by a fixed pixel margin to make room for
   // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
   // flashes rather than fogs.
   float glint = step(1.0 - 1.0 / (${GLINT_ONE_IN.toFixed(1)} * max(1.0, uSandAmount)), hash21(vec2(texel) * 0.517 + 9.1));
-  vGlow = glint * clamp(uHighGlow * highGlowDrive(${GLOW_LEVEL_WEIGHT.toFixed(2)} * uHigh + ${GLOW_HIT_WEIGHT.toFixed(2)} * uHighPulse), 0.0, 1.0);
+  float glintGlow = glint * clamp(uHighGlow * highGlowDrive(${GLOW_LEVEL_WEIGHT.toFixed(2)} * uHigh + ${GLOW_HIT_WEIGHT.toFixed(2)} * uHighPulse), 0.0, 1.0);
+  // Embers' neon halo: carried by one grain in EMBER_HALO_ONE_IN, growing
+  // with its heat.
+  float emberGlow = 0.0;
+  if (uEmbers > 0.0) {
+    float carrier = step(1.0 - 1.0 / (${EMBER_HALO_ONE_IN.toFixed(1)} * max(1.0, uSandAmount)), hash21(vec2(texel) * 0.389 + 2.3));
+    emberGlow = carrier * uEmbers * ${glslFloat(EMBER_HALO_MAX)} * smoothstep(${glslFloat(EMBER_HALO_FROM)}, ${glslFloat(EMBER_HALO_FULL)}, heat);
+  }
+  vGlow = clamp(glintGlow + emberGlow, 0.0, 1.0);
   float resScale = max(1.0, uResolution.y / 720.0);
   // A shard inscribed in the old disc covers less area than it (a triangle
   // 0.41x, a square 0.64x); grow the size by the matching factor so a faceted
@@ -1583,6 +1897,7 @@ void main() {
   // drawn. Not while Zoom out runs: the sand then covers the frame at any Zoom.
   float size = uGrainSize * shardGrow * grainSizeFactor(w) * resScale * max(1.0, GRAIN_ZOOM)
     * (1.0 + ${glslFloat(TOSS_GROW)} * riseGrow);
+  if (sparkle > 0.0) size *= 1.0 + ${glslFloat(GLITTER_GROW)} * sparkle;
   vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
   vScale = vSizePx / size;
   gl_PointSize = vSizePx;
@@ -1592,10 +1907,17 @@ void main() {
   // Grains take the bright half of the room palette's ramp, which every
   // palette keeps bright (see palette.ts): settled grains sit in its middle,
   // thrown grains run up to its brightest end.
+  // Thrown colour sets how far a thrown grain's colour moves (1: by its hop,
+  // as it always did) and Thrown to where (THROWN_TO). Toward white is the
+  // ramp below; the others start from the resting colour (the ramp at 0) and
+  // move further down.
+  float thrown = clamp(vMotion * uThrownColour, 0.0, 1.0);
+  int thrownTo = int(uThrownTo + 0.5);
+  float rampMotion = thrownTo == 0 ? thrown : 0.0;
   // chladniPowder.ts's gritColour mirrors these two lines.
-  vec3 col = palRamp(${GRIT_RAMP_LO.toFixed(2)} + ${GRIT_RAMP_SPAN.toFixed(2)} * vMotion);
+  vec3 col = palRamp(${GRIT_RAMP_LO.toFixed(2)} + ${GRIT_RAMP_SPAN.toFixed(2)} * rampMotion);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
-  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), ${GRIT_CHALK.toFixed(2)} * (1.0 - vMotion));
+  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), ${GRIT_CHALK.toFixed(2)} * (1.0 - rampMotion));
   // The bed's brightness (Grain brightness on this quality tier), then this
   // grain's shade, the beat's flash and the toss's lift on top.
   float brightBase = (0.8 + 1.7 * uGrainGlow) * uGrainGain;
@@ -1610,14 +1932,69 @@ void main() {
   // throw clips it toward white, briefly, as grit. At 0 both mixes take
   // nothing from the powder: the grit colour, unchanged.
   float powder = uPowderColour * powderShare(w);
-  vec3 dust = mix(uPowderInk, vec3(1.0), ${POWDER_THROWN_LIFT.toFixed(2)} * vMotion);
+  vec3 dust = mix(uPowderInk, vec3(1.0), ${POWDER_THROWN_LIFT.toFixed(2)} * rampMotion);
   float dustTop = max(dust.r, max(dust.g, dust.b)) * brightBase * ${glslFloat(SHADE_LO + SHADE_SPAN)};
   vec3 dustLit = dust * bright / max(1.0, dustTop);
   vCol = mix(col * bright, dustLit, powder);
+
+  // The rest of Thrown to: to the second colour (Powder colour's), through
+  // the palette's inks, or dark. Toward white gets there early, because the
+  // grain's brightness gain clips the bright end of the ramp to white well
+  // before a full throw; these colours are lit to keep their hue, so they
+  // take reach, a curve that arrives by THROWN_REACH of a throw, to move
+  // as readily.
+  float reach = smoothstep(0.0, ${glslFloat(THROWN_REACH)}, thrown);
+  if (thrownTo == 1) vCol = mix(vCol, litHue(uPowderInk, bright, brightBase), reach);
+  else if (thrownTo == 2) vCol = mix(vCol, litHue(inkWalk(reach), bright, brightBase), smoothstep(0.0, 0.3, reach));
+  else if (thrownTo == 3) vCol *= 1.0 - ${glslFloat(1 - SHADOW_KEEP)} * reach;
+
+  // Two sides: the second colour on the side of the line where the plate's
+  // value is positive (the up side, at this instant of the cycle).
+  if (uTwoSides > 0.0) {
+    vCol = mix(vCol, litHue(uPowderInk, bright, brightBase), uTwoSides * smoothstep(${glslFloat(-SIDE_EDGE)}, ${glslFloat(SIDE_EDGE)}, fHere));
+  }
+
+  // Beat waves: the ink the last wave over this grain dyed it (the sim).
+  if (uBeatWaves > 0.0) vCol = mix(vCol, litHue(uPalInk[memInk(mem)], bright, brightBase), uBeatWaves);
+
+  // Spectrum rings: the spectrum ageSec ago, where ageSec is how long a ring
+  // takes to run out this far from the centre, pitch round the plate (bass
+  // at the top, mirrored so the plate stays symmetric). Coloured by pitch
+  // along the palette's inks, brighter the louder that band was; faded out
+  // before the history runs out.
+  if (uSpectrumRings > 0.0) {
+    vec2 q = GRAIN_TO_PLATE(p) - uOutline.xy + vec2(0.0, 1e-5);
+    float age = length(q) / ${glslFloat(SPEC_SPEED)};
+    float pitch = abs(atan(q.x, q.y)) / PI;
+    float level = smoothstep(${glslFloat(SPEC_QUIET)}, ${glslFloat(SPEC_LOUD)}, specLevel(pitch, age));
+    float maxAge = ${glslFloat((SPEC_ROWS - 2) / SPEC_RATE)};
+    float keep = 1.0 - smoothstep(0.85 * maxAge, maxAge, age);
+    vec3 ring = litHue(inkWalk(pitch), bright, brightBase) * (${glslFloat(SPEC_FLOOR)} + ${glslFloat(SPEC_GAIN)} * level);
+    vCol = mix(vCol, ring, uSpectrumRings * keep);
+  }
+
+  // Embers: whatever colour the grain has by now, at full strength while hot
+  // (its hue with the brightest channel pinned at 1, as a neon tube: never
+  // clipped toward white) and nearly dark once rested.
+  vec3 neon = vCol / max(max(vCol.r, max(vCol.g, vCol.b)), 1e-4);
+  if (uEmbers > 0.0) {
+    vec3 hot = neon * min(max(vCol.r, max(vCol.g, vCol.b)), 1.0);
+    vCol = mix(vCol, mix(vCol * ${glslFloat(EMBER_COLD)}, hot, pow(heat, ${glslFloat(EMBER_GLOW_POWER)})), uEmbers);
+  }
+
+  // Glitter: the rest of the sand dims so the flashes stand out, and a
+  // facing grain flashes in the ink its angle picks round the palette, so
+  // the flashes run through the inks once a bar with the light.
+  if (uGlitter > 0.0) vCol *= 1.0 - ${glslFloat(GLITTER_DIM)} * uGlitter;
+  if (sparkle > 0.0) vCol += litHue(inkLoop(vRot / 6.2832), bright, brightBase) * sparkle * ${glslFloat(GLITTER_GAIN)};
+
   // The halo's tint and its area normalisation (see POINT_FRAG), without the
-  // falloff across the sprite: the fragment only multiplies that in.
+  // falloff across the sprite: the fragment only multiplies that in. The
+  // Glow's glints' halo runs toward white; the embers' keeps the grain's hue.
   float haloNorm = ${HALO_GAIN.toFixed(1)} * resScale * resScale / (vSizePx * vSizePx);
-  vHaloCol = mix(mix(col, dust, powder), vec3(1.0), 0.45) * haloNorm * bright;
+  vec3 haloTint = mix(mix(col, dust, powder), vec3(1.0), 0.45);
+  if (emberGlow > 0.0) haloTint = mix(haloTint, neon, emberGlow / (glintGlow + emberGlow));
+  vHaloCol = haloTint * haloNorm * bright;
 }
 `;
 
@@ -1724,11 +2101,19 @@ function makePrograms(gl: WebGL2RenderingContext, zoom: boolean): Programs {
   const sim = createProgram(gl, src(SIM_FRAG));
   const bg = createProgram(gl, src(BG_FRAG));
   const point = createProgram(gl, src(POINT_FRAG), src(POINT_VERT));
-  // The atlas sits on unit 1 in all three programs (uPosTex has unit 0).
+  // The atlas sits on unit 1 in all three programs (uPosTex has unit 0), the
+  // grain memory on unit 2 in the two grain passes, and the spectrum history
+  // on unit 3 in the point pass.
   for (const prog of [sim, bg, point]) {
     prog.use();
     gl.uniform1i(gl.getUniformLocation(prog.program, "uPlateAtlas"), 1);
   }
+  for (const prog of [sim, point]) {
+    prog.use();
+    gl.uniform1i(gl.getUniformLocation(prog.program, "uMemTex"), 2);
+  }
+  point.use();
+  gl.uniform1i(gl.getUniformLocation(point.program, "uSpecTex"), 3);
   return {
     sim,
     bg,
@@ -1751,7 +2136,20 @@ function createChladniScene(): Scene {
   let quadVao: WebGLVertexArrayObject | null = null;
   let pointVao: WebGLVertexArrayObject | null = null;
   const posTex: (WebGLTexture | null)[] = [null, null];
+  // The grain memory (MEMORY_GLSL), ping-ponged with the positions: each
+  // posFbo writes both, the second as COLOR_ATTACHMENT1.
+  const memTex: (WebGLTexture | null)[] = [null, null];
   const posFbo: (WebGLFramebuffer | null)[] = [null, null];
+  // Spectrum rings' band history: one R8 row of NUM_BANDS per 1 / SPEC_RATE
+  // seconds, a ring buffer SPEC_ROWS long. specClock counts the rows owed
+  // since the last one written; specNewest is that row's index.
+  let specTex: WebGLTexture | null = null;
+  const specRow = new Uint8Array(NUM_BANDS);
+  const specPeak = new Float32Array(NUM_BANDS);
+  let specNewest = 0;
+  let specClock = 0;
+  // Beat waves: the last wave to start — see advanceWave.
+  let wave: WaveState = { count: 0, at: 0 };
   let read = 0;
   let side = 1;
   let grainCount = 0;
@@ -1888,13 +2286,37 @@ function createChladniScene(): Scene {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        // The memory starts at zero: cold sand, dyed the first ink, no wave yet.
+        const mem = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, mem);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, side, side, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         const fbo = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, mem, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
         posTex[i] = tex;
+        memTex[i] = mem;
         posFbo[i] = fbo;
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      // Rows wrap (REPEAT on t) as the ring buffer does; bands don't (CLAMP on s).
+      specTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, specTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NUM_BANDS, SPEC_ROWS, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      specNewest = 0;
+      specClock = 0;
+      specPeak.fill(0);
+      wave = { count: 0, at: 0 };
       gl.bindTexture(gl.TEXTURE_2D, null);
 
       blankAtlas = gl.createTexture();
@@ -1943,6 +2365,38 @@ function createChladniScene(): Scene {
         prog.setF("uTossPower", toss?.power ?? 0);
         prog.setF("uTossSeed", toss?.seed ?? 0);
       };
+
+      // Beat waves: asked every frame, as the toss is, so the jack's edge is
+      // consumed whatever the slider says.
+      const waveStep = advanceWave(wave, frame.time, drives.fired("beatWaves", anim.onset));
+      wave = waveStep.wave;
+      const setWave = (prog: GLProgram): void => {
+        prog.setF("uWaveId", waveStep.radius >= 0 ? wave.count % 256 : -1);
+        prog.setF("uWaveRadius", waveStep.radius);
+        prog.setF("uWaveInk", wave.count % 4);
+      };
+
+      // Spectrum rings: each band as a share of its own recent peak (see
+      // SPEC_PEAK_SEC), then the rows owed since the last frame (all the
+      // same, this frame's; a long stall writes at most the whole buffer).
+      const peakFall = Math.exp(-dt / SPEC_PEAK_SEC);
+      for (let i = 0; i < NUM_BANDS; i++) {
+        const level = Math.max(0, Math.min(1, frame.bands[i] ?? 0));
+        specPeak[i] = Math.max(level, specPeak[i] * peakFall, SPEC_PEAK_FLOOR);
+        specRow[i] = Math.round((level / specPeak[i]) * 255);
+      }
+      specClock += dt * SPEC_RATE;
+      const owed = Math.min(SPEC_ROWS, Math.floor(specClock));
+      if (owed > 0 && specTex) {
+        gl.activeTexture(gl.TEXTURE3);
+        gl.bindTexture(gl.TEXTURE_2D, specTex);
+        for (let k = 0; k < owed; k++) {
+          specNewest = (specNewest + 1) % SPEC_ROWS;
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, specNewest, NUM_BANDS, 1, gl.RED, gl.UNSIGNED_BYTE, specRow);
+        }
+        gl.activeTexture(gl.TEXTURE0);
+        specClock -= Math.floor(specClock);
+      }
 
       const modes = response!.advance(dt, frame.bands, {
         complexity: resolveSceneSetting(ID, settingFor("complexity")),
@@ -2034,6 +2488,10 @@ function createChladniScene(): Scene {
       simProg.setF("uSimDt", dt);
       simProg.setF("uSeed", Math.random() * 100);
       setToss(simProg);
+      setWave(simProg);
+      simProg.setF("uEmberCool", Math.exp(-dt / Math.max(1e-3, resolveSceneSetting(ID, settingFor("emberFade")))));
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, memTex[read]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
       gl.uniform1i(progs.simPos, 0);
@@ -2052,6 +2510,8 @@ function createChladniScene(): Scene {
       setModes(bgProg, modes);
       setOutline(bgProg);
       if (zoomOn) setZoom(bgProg, layers);
+      powderBuf.set(powderInk(palette));
+      bgProg.setV3v("uPowderInk", powderBuf);
       drawFullscreenQuad(gl, quadVao);
 
       // Sand: one point per grain, up to drawnGrainCount — see file header
@@ -2067,8 +2527,12 @@ function createChladniScene(): Scene {
       pointProg.setF("uSide", side);
       pointProg.setF("uGrainGain", grainGain(grainCount));
       setToss(pointProg);
-      powderBuf.set(powderInk(palette));
       pointProg.setV3v("uPowderInk", powderBuf);
+      pointProg.setF("uSpecNewest", specNewest - 1 + specClock);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, memTex[read]);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, specTex);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
       gl.uniform1i(progs.pointPos, 0);
@@ -2084,6 +2548,10 @@ function createChladniScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE0);
     },
 
@@ -2096,9 +2564,13 @@ function createChladniScene(): Scene {
       for (let i = 0; i < 2; i++) {
         if (posFbo[i]) gl.deleteFramebuffer(posFbo[i]);
         if (posTex[i]) gl.deleteTexture(posTex[i]);
+        if (memTex[i]) gl.deleteTexture(memTex[i]);
         posFbo[i] = null;
         posTex[i] = null;
+        memTex[i] = null;
       }
+      if (specTex) gl.deleteTexture(specTex);
+      specTex = null;
       for (const atlas of atlases.values()) gl.deleteTexture(atlas.tex);
       atlases.clear();
       atlasBytes = 0;

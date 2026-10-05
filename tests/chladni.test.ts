@@ -33,8 +33,16 @@ import {
   powderShare,
   POWDER_SPLIT,
   POWDER_EDGE,
+  advanceWave,
+  THROWN_TO,
+  WAVE_REACH,
+  WAVE_SPEED,
+  SPEC_RATE,
+  SPEC_ROWS,
+  SPEC_SPEED,
   type PlateResponseInputs,
   type TossEvent,
+  type WaveState,
 } from "../src/render/scenes/chladni.ts";
 import {
   distanceFromGrit,
@@ -710,6 +718,66 @@ describe("toss frames (advanceToss)", () => {
       toss = f.toss;
       prev = now;
     }
+  });
+});
+
+describe("sand colour settings", () => {
+  const spec = (key: string) => (chladniScene.settings ?? []).find((s) => s.key === key)!;
+
+  it("default to the plate as it was: thrown grains toward white by their hop, every new look off", () => {
+    expect(spec("thrownColour").default).toBe(1);
+    expect(spec("thrownTo").default).toBe(0);
+    expect(THROWN_TO[0]).toBe("Toward white");
+    for (const key of ["twoSides", "embers", "spectrumRings", "beatWaves", "glitter"]) expect(spec(key).default).toBe(0);
+  });
+
+  it("Thrown to picks between exactly the THROWN_TO choices", () => {
+    const s = spec("thrownTo");
+    expect(s.type).toBe("enum");
+    expect(s.options).toEqual(THROWN_TO);
+    expect([s.min, s.max, s.step]).toEqual([0, THROWN_TO.length - 1, 1]);
+  });
+
+  it("Ember fade is a time, so the Master dial never moves it", () => {
+    expect(spec("emberFade").masterScale).toBe(false);
+  });
+
+  it("the spectrum history outlasts a ring's run to the square plate's corner", () => {
+    expect(SPEC_ROWS / SPEC_RATE).toBeGreaterThan(Math.SQRT2 / SPEC_SPEED);
+  });
+});
+
+describe("beat waves", () => {
+  const none: WaveState = { count: 0, at: 0 };
+
+  it("has no wave until the first edge", () => {
+    expect(advanceWave(none, 5, false)).toEqual({ wave: none, radius: -1 });
+  });
+
+  it("an edge starts the next wave from the centre, which runs out at WAVE_SPEED", () => {
+    const start = advanceWave(none, 10, true);
+    expect(start.wave).toEqual({ count: 1, at: 10 });
+    expect(start.radius).toBe(0);
+    const later = advanceWave(start.wave, 10.25, false);
+    expect(later.radius).toBeCloseTo(0.25 * WAVE_SPEED, 9);
+  });
+
+  it("stops dyeing once it has run past WAVE_REACH", () => {
+    const start = advanceWave(none, 0, true).wave;
+    expect(advanceWave(start, (WAVE_REACH / WAVE_SPEED) * 0.99, false).radius).toBeGreaterThan(0);
+    expect(advanceWave(start, (WAVE_REACH / WAVE_SPEED) * 1.01, false).radius).toBe(-1);
+  });
+
+  it("a new edge restarts from the centre with the next id, even mid-run", () => {
+    const first = advanceWave(none, 0, true).wave;
+    const second = advanceWave(first, 0.1, true);
+    expect(second.wave.count).toBe(2);
+    expect(second.radius).toBe(0);
+  });
+
+  it("drops the wave when the audio clock goes back past its start (a new source)", () => {
+    const start = advanceWave(none, 20, true).wave;
+    expect(advanceWave(start, 3, false).radius).toBe(-1);
   });
 });
 
