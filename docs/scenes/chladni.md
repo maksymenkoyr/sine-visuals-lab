@@ -175,6 +175,20 @@ measured from a reference clip.
   already identity at drive 0 (`shake*(0.25+2.4*d)`, the `(0.3+d)` glow
   floor, every other term a pure additive reaction amount), so unplugging a
   jack already just stops the reaction — nothing else changes.
+- 2026-10-05 — Treble glow renamed **Glow**, and it starts on two real
+  wires instead of a built-in. The user's rule: a setting is either
+  connected or not. The built-in drew dimmed ghost wires to Treble level and
+  Treble hit, with a live graph but no plugged jack, which read as neither.
+  `drive.default` may now be a patch (`defaultDriveSetting` in
+  `src/render/drives.ts`), so Glow defaults to Treble level + Treble hit,
+  `add`, weighted by `GLOW_LEVEL_WEIGHT`/`GLOW_HIT_WEIGHT` — the same sum
+  `POINT_VERT`'s `vGlow` used, so the default picture is unchanged (a test
+  in `tests/drives.test.ts` checks the sum). Glow now follows Master
+  Expansion like every other wired setting. Audit of the rest: Vibration,
+  Bass kick, Plate glow and Flash already start on one real wire; no other
+  setting has a built-in. One reaction still has no wire: the spectrum picks
+  the figure (`createPlateResponse` reads `frame.bands` directly). It is the
+  scene's core, so it stays as is.
 - 2026-10-02 — Treble-glow cost fix, same picture: a glint's sprite is
   enlarged by the halo margin, so most of its fragments are halo ring that
   contributes no grain (the polygon distance `rn` is never smaller than the
@@ -425,3 +439,5 @@ measured from a reference clip.
   settings with a draggable gauge in the Scene card; Settling pull removed.
 - 2026-10-04 (draft) — Figure hold: how much stronger a new figure must ring
   to take the plate.
+- 2026-10-05 (draft) — Treble glow renamed Glow; it starts on two real wires
+  (Treble level + Treble hit) instead of a built-in.

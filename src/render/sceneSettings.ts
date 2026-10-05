@@ -135,9 +135,11 @@ export interface SceneSetting {
    *  (reused as the drive catalogue, not a parallel enum — see that file's
    *  header), `{ source: "beat", grid }` for a beat-grid tick
    *  (src/audio/beatGrid.ts), `{ source: "line" }` for this setting's own
-   *  drawn frequency line (src/audio/bandLine.ts), or `"scene"` for a
-   *  coupling that mixes more than one signal and can't be reduced to a
-   *  single catalogue pick without changing the look — see drives.ts's
+   *  drawn frequency line (src/audio/bandLine.ts), a `DrivePatch` for a
+   *  coupling that sums several catalogue signals (one weighted source per
+   *  term, `add` — real wires from the start, so nothing is drawn as a
+   *  ghost), or `"scene"` for a coupling that mixes more than one signal and
+   *  can't be written as such a patch without changing the look — see drives.ts's
    *  header for why `mix(sceneDefault, drive, 0)` makes that choice exactly
    *  as bit-identical as any catalogue default. `sceneLabel` names the
    *  Scene composite in the picker (e.g. "Scene: treble hits + line") —
@@ -151,7 +153,7 @@ export interface SceneSetting {
    *  unplugged jack must do instead: leave the setting exactly where its
    *  slider puts it, never collapse, vanish or run backwards). */
   drive?: {
-    default: import("./drives.ts").DriveChoice;
+    default: import("./drives.ts").DriveChoice | import("./drives.ts").DrivePatch;
     sceneLabel?: string;
     gain?: number;
     /** Display-only, for a `default: "scene"` setting: the meters its own
