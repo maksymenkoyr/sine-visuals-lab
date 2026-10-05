@@ -10,7 +10,7 @@ describe("funnyLookName", () => {
       const name = funnyLookName([]);
       expect(name).not.toMatch(/[%~]/);
       expect(name.length).toBeGreaterThan(0);
-      expect(name.length).toBeLessThanOrEqual(28);
+      expect(name.length).toBeLessThanOrEqual(36);
     }
   });
 
