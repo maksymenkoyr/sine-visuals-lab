@@ -145,6 +145,22 @@ Quality and Resolution, in a smaller box), and the output has its own Quality,
 Resolution and Energy saving, set from the Output Power card;
 `src/render/outputPower.ts` owns those settings.
 
+## Drawing a frame: crossfades and held effects
+
+`app.ts` (`drawScene`), `output.ts` and `tv.ts` no longer call `scene.render`
+themselves; each hands the frame to `src/render/compositor.ts`. With nothing in
+play that is exactly a bare `scene.render`. A change to a different scene keeps
+the old one mounted next to the new one and blends them (timing in
+`src/render/crossfade.ts`: from the next beat of the metronome, over a bar); the
+caller unmounts the old scene when the compositor says the blend is over. The
+held effects (`src/render/heldEffects.ts`) ride on the same pass. They belong to
+the main window (`src/ui/effectControls.ts`: keys and the `#fxBar` buttons) and
+reach the pop-out as their own `effects` message (`src/net/outputSync.ts`) —
+never part of the look, so Cue does not hold them, and a TV does not get them.
+A frame with two scenes in it is skipped by the quality governor. The
+compositor's header says how it captures a scene without redirecting its
+framebuffer.
+
 ## Where the quality/perf ceiling comes from
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at
