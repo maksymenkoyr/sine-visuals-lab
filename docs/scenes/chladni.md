@@ -7,7 +7,10 @@ own resonant frequency, with a bed of sand grains that bounce on the
 antinodes and settle on the nodal lines. The classic Chladni figures aren't
 drawn — they emerge from grain motion and re-form grain by grain as a
 different mode takes over. A drop can toss the whole bed into the air, and
-the square plate can zoom out forever.
+the square plate can zoom out forever. The sand's colour can follow more than
+how hard a grain is thrown: the side of its line it lies by, its own heat,
+the spectrum flowing out in rings, waves dyed in on the beat, or a light
+circling the plate.
 Featured, on main.
 
 ## Where the code is
@@ -48,6 +51,14 @@ Featured, on main.
   colour (`powderInk`) and the grit colour it must stand apart from.
 - The toss lives in `chladni.ts`: `nextToss`/`advanceToss` (pure, tested) and
   `TOSS_GLSL` (each grain's stateless flight, `foldIntoPlate`).
+- Sand colour lives in `chladni.ts` too (the file header's "More sand colour"
+  paragraph): `POINT_VERT`'s colour section draws Thrown colour/Thrown to
+  (`THROWN_TO`), Two sides, Spectrum rings, Embers and Glitter; `BG_FRAG`
+  tints the plate's glow for Two sides. Embers' heat and Beat waves' dye live
+  in a second RGBA8 texture per grain (`MEMORY_GLSL`), written by `SIM_FRAG`
+  (`stepMemory`) as a second render target of the position framebuffers.
+  `advanceWave` (pure, tested) steps the beat wave; `render()` keeps the
+  spectrum history (`specTex`, an R8 ring buffer of the bands).
 - `src/render/scenes/chladniZoom.ts` — Zoom out: the octave layers and their
   weights, the speed, and the sand's shrink and refill. `chladni.ts` builds the
   zoom's shader programs separately (`makePrograms`, compiled the first time
@@ -187,6 +198,23 @@ hexagon and decagon.
   of even with no trend over 2.85 octaves. Before the edge fold it was
   2.5–2.7 in the centre and 0.5 at the edges. Frames across a wrap are
   continuous.
+- 2026-10-05 (sand colour): with every new setting at its default, seeded
+  bench frames (`tools/gpu-bench.mjs --seed 7`, 1280×720) against #361's head:
+  frame 30 one pixel by 1/255, frame 90 four pixels by up to 4/255, frame 150
+  none, of 921,600. The bench wasn't repeatable for this scene before
+  `--seed` (the same build differed by 81% between runs, since the scene
+  seeds and steps its grains from `Math.random`). GPU time at 3024×1890:
+  3.18 and 3.20 ms before, 3.21 and 3.22 ms after, interleaved: the memory
+  texture's extra write costs about 0.02 ms. Why Thrown to needed
+  `THROWN_REACH`: on Neon, Toward white reads white from about a quarter of a
+  throw (the ramp's bright end times the brightness gain clips), so a straight
+  mix to the second colour showed nothing. A same-moment A/B on synthetic
+  audio, white to second colour 120 ms apart: 8,233 of 13,660 lit pixels
+  white before, 0 blue after. Spectrum rings on absolute band levels lit only
+  the bass end; each band as a share of its own peak lights the whole circle
+  (Tarantula through the fake mic). Embers' halo at one carrier in three and
+  full strength flooded the screen with colour when Tarantula's drop tossed
+  the bed; one in `EMBER_HALO_ONE_IN` at `EMBER_HALO_MAX` doesn't.
 
 ## Decisions and pivots
 
@@ -535,6 +563,59 @@ hexagon and decagon.
     one program left 3 to 35 pixels changed with the zoom off, because the
     Metal compiler reordered the maths, so the plain programs keep the old
     source exactly.
+- 2026-10-05 (sand colour) — eight Look settings after Powder colour, every
+  one off or at the plate as it was by default. The user asked what the
+  whitish, "bleached" sand means (thrown grains run up the ramp to its
+  near-white end, and the brightness gain clips them), asked to expose it and
+  for "not trivial" ways the colour could change, and picked from the Chladni
+  Colour Bench (see Materials): keep Thrown grains with all its modes, Two
+  sides, Embers as "actual glowing, kind of like neon, also can get near
+  dark", Beat waves, a circular spectrogram or waveform "shown through
+  colour", and Glitter. Figure colours and Dyed sand's patterns weren't picked.
+  - **Thrown colour** (0 to 2, default 1) and **Thrown to** (Toward white,
+    Second colour, Through the palette, Into shadow). Toward white is the old
+    ramp with the slider in it, so 1 is the plate as it was. The others use
+    Powder colour's second colour, the palette's inks or a dimming, lit to
+    keep their hue, along `THROWN_REACH` (see Measurements for why).
+  - **Two sides**: the sign of the plate's value under a grain (one side of a
+    still line moves up while the other moves down). One side keeps the sand
+    colour, the other takes the second colour, and the plate's glow shows the
+    same checkerboard. On the bench it read as whole stretches of a line in
+    one colour, because sand reaches a line from one side; in the scene, on
+    real music, lines read as two-colour seams.
+  - **Embers** and **Ember fade** (seconds, not scaled by the Master dial).
+    Heat needs memory, and the positions have no spare bits (the toss is
+    stateless for the same reason), so the sim writes a second RGBA8 texture
+    as a second render target of the same framebuffers: core WebGL2, no
+    extension. Heat is 16-bit, because at 8 bits a slow fade stalls (one step
+    of rounding outweighs a frame's cooling). A hot grain takes its own
+    colour, whatever the other settings made it, with the brightest channel
+    pinned at 1, so it glows like a neon tube instead of clipping to white,
+    plus a halo on one grain in `EMBER_HALO_ONE_IN`. A cold one keeps
+    `EMBER_COLD` of its brightness. Glow follows the square root of heat
+    (`EMBER_GLOW_POWER`), so sand rattling on a line under loud music still
+    glows a little.
+  - **Spectrum rings**: the spectrogram as "rings out" (the user's pick over
+    a radar sweep and plain loudness rings). Each moment's bands leave the
+    centre as a ring at `SPEC_SPEED`; the angle is pitch, bass at the top,
+    mirrored so the plate stays symmetric; colour runs along the palette's
+    inks by pitch, brightness by level. The bands, not the waveform, because
+    raw samples exist only on the laptop for the panel's scope, while the
+    bands reach every screen and room TV. The history is a small texture each
+    screen keeps from its own bands, so nothing new is sent.
+  - **Beat waves**: a jack (Beat by default) whose edge runs a ring out from
+    the centre, dyeing what it passes in the next ink. Each grain stores the
+    ink and the wave's id, so it is dyed once per wave and carries the dye as
+    it moves. On a jack rather than the beat clock, so it can be rewired to a
+    bar or a drop. `WAVE_SPEED` reaches the plate's edge in about a beat at
+    120 BPM, so the last wave's colour still shows outside the new one.
+  - **Glitter**: the shard's rotation is the way it faces, and a light goes
+    round once a bar (`uBarPhase`). A grain facing it flashes and grows, in
+    the ink its angle picks, so the flashes run through the palette once a
+    bar. A thrown grain jumps to a new angle `TUMBLE_HZ` times a second, so
+    it twinkles, while resting sand keeps its angle. The rest of the sand
+    dims under it (`GLITTER_DIM`), as on the bench, or white-ish flashes
+    vanished into a white-ish bed.
 
 ## Tuning notes
 
@@ -636,6 +717,19 @@ hexagon and decagon.
   rescales where stored grains sit, so the sand re-forms, and the first
   switch-on compiles three programs, which can hitch briefly.
 
+- Sand colour (2026-10-05) is tuned from headless shots on Tarantula and the
+  synthetic feed only, and is meant for the user to experiment with. Open
+  points: with Embers up, a drop's toss heats the whole bed at once, so the
+  landed bed glows everywhere for about Ember fade (a strong look; halos are
+  capped). Spectrum rings' contrast (`SPEC_QUIET`/`SPEC_LOUD`), speed and
+  peak window are first guesses, and since every band is scaled to its own
+  peak, a band that is nearly silent can flare from noise. Beat waves on a
+  busy beat recolour the plate every beat; on a bar jack it's calmer.
+  Glitter's light follows the bar clock, so without a tempo it stops and only
+  thrown grains twinkle. Two sides and Thrown to: Second colour use the same
+  second colour, so together they read as one. The seeded bench showed up to
+  4 pixels changed by 4/255 with everything off (compiler reordering, as
+  Zoom out found); not chased further.
 - Under a room mic with full auto-gain, the shared bands still read steady
   noise as bass-heavy (see the 2026-10-02 decision). This scene now cancels
   that, but every other scene that reads `bands` still sees it. The fix
@@ -667,7 +761,12 @@ hexagon and decagon.
   source of the "Chladni Idea Bench"
   (https://claude.ai/artifact/4WUt3sJwWDvNSk5Rc4FVjy): five ideas, each with a
   live CPU plate running a copy of the sand rule on a fake 124 BPM song. It's
-  where Toss, Powder colour and the plates were picked.
+  where Toss, Powder colour and the plates were picked. And
+  `docs/scenes/chladni/artifacts/colour-bench.html`, the source of the
+  "Chladni Colour Bench" (https://claude.ai/artifact/5ozY7wuKZD31JzPiN7kyE9):
+  six plates drawing one shared CPU sand bed with the app's palettes, each
+  coloured another way (thrown grains, two sides, figure colours, embers,
+  dyed sand, glitter). It's where the sand colour settings were picked.
 - `tools/chladni-plate-modes.py` generates `chladniPlateModes.ts` (the
   hexagon, decagon and triangle tables). `--check` compares them against a
   finite-element solve and writes nothing. It needs numpy and scipy, which are
@@ -684,7 +783,12 @@ hexagon and decagon.
   clarity across Figure hold on the tempo-eval tracks; copy into `tests/` to
   run) and `plate-shots.mjs` / `plate-lines.py` (real-music shots of every
   plate, and the share of light on the lines) and `weight-split.mjs` (where a
-  grain of each weight ends up, lines or heaps; `POWDER_SPLIT` comes from it).
+  grain of each weight ends up, lines or heaps; `POWDER_SPLIT` comes from it)
+  and `colour-ab-shots.mjs` (each sand colour setting switched on 120 ms
+  after a shot of the plate without it, so both see the same sand, on a song
+  through the fake mic or the synthetic feed). For pixel checks,
+  `tools/gpu-bench.mjs --seed N` seeds `Math.random`, without which this
+  scene's dumps never repeat.
   The toss's share-on-lines readback relied on temporary in-scene hooks and
   wasn't kept.
   Captured screenshots are session output, not
@@ -727,4 +831,5 @@ hexagon and decagon.
   (Treble level + Treble hit) instead of a built-in.
 - `#366` (2026-10-05, draft; replaces #361) — Toss on the drop, Powder colour, the
   Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
-  an endless pull-back on the square plate.
+  an endless pull-back on the square plate. Then sand colour: Thrown colour
+  and Thrown to, Two sides, Embers, Spectrum rings, Beat waves and Glitter.
