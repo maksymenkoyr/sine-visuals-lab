@@ -1,5 +1,6 @@
 import { listScenes, registerScene } from "../scene.ts";
 import { collectPrivateScenes } from "./privateScenes.ts";
+import { codeRainScene } from "./coderain/index.ts";
 import { longPlayScene } from "./longplay/index.ts";
 import { swarmScene } from "./swarm/index.ts";
 import { coilScene } from "./coil/index.ts";
@@ -42,6 +43,7 @@ import { toonraveScene } from "./toonrave/index.ts";
 // `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(codeRainScene);
 registerScene(toonraveScene);
 registerScene(longPlayScene);
 registerScene(swarmScene);
@@ -77,6 +79,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "coderain",
   "toonrave",
   "longplay",
   "swarm",
@@ -127,6 +130,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  codeRainScene,
   toonraveScene,
   longPlayScene,
   swarmScene,
