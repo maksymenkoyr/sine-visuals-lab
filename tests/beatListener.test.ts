@@ -46,6 +46,7 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     centroid: 0,
     centroidRaw: 0,
     bpm: 0,
+    tapGuided: false,
     metronomeOn: false,
     metronomeBpm: 0,
     metronomeBeats: 0,

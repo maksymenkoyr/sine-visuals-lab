@@ -25,6 +25,11 @@ import {
 import type { SceneLook } from "../render/sceneLooks.ts";
 import type { Scene } from "../render/scene.ts";
 import { createLooksCard } from "./looksCard.ts";
+import { createMidiCard } from "./midiCard.ts";
+import type { MidiController } from "./midiInput.ts";
+import { MASTER_EXPANSION_TARGET, MASTER_SCALE_TARGET, sceneTargetId } from "./midiMap.ts";
+import { createSetCard, type SetCardDeps } from "./setCard.ts";
+import { createOverlayCard, type OverlayCardDeps } from "./overlayCard.ts";
 // Side-effect import: registers every built-in widget (registerWidget) so a
 // scene's Scene.panel sections resolve — see widgets/registry.ts's header
 // for the panel/widget split this file is the one place that renders.
@@ -405,8 +410,8 @@ import {
  * slider also takes Home/End to its min/max — the browser's own native
  * range-input behavior, left alone by onKeyDown below — plus z/x/c
  * (wireSliderQuickJump) to jump straight to the middle of the track, the
- * top, or wherever the pointer last hovered along it. Digit
- * keys 1-9 jump to a numbered block —
+ * top, or wherever the pointer last hovered along it. Shift+1 to Shift+9
+ * (the bare digits fire the Set's pads, app.ts) jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
  * every renderSceneSettings) — and focus the first control inside it,
@@ -456,6 +461,8 @@ export interface PaletteMenuItem extends MenuItem {
 }
 
 export interface DeviceMenuDeps {
+  /** The MIDI session (ui/midiInput.ts), wired in app.ts. Absent: no MIDI card. */
+  midi?: MidiController;
   getPalettes: () => PaletteMenuItem[];
   currentSceneId: () => string;
   currentPaletteId: () => string;
@@ -541,6 +548,11 @@ export interface DeviceMenuDeps {
   buildShareLink: (look: SceneLook) => string;
   hasLookUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
+  /** The Set card's pads and Autopilot — see src/ui/setCard.ts for what each
+   *  call means; the card's scene names come from `getScene` above. */
+  set: Omit<SetCardDeps, "sceneName">;
+  /** The Overlay card (text and a logo over the visuals) — see ui/overlayCard.ts. */
+  overlay: OverlayCardDeps;
   /** Low/mid/high crossover, global per device (not per scene) — fixed, not
    *  user-facing, and unrelated to the faders: it only colors the spectrum
    *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
@@ -610,6 +622,9 @@ export interface DeviceMenuDeps {
   /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
+  /** The Tempo card's Tap chip — one tap tempo tap at this timeStamp (see
+   *  audioMeters.ts's AudioMetersDeps.onTap). */
+  onTap: (timeStamp: number) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
@@ -788,9 +803,16 @@ export interface DeviceMenu {
     gate: SilenceGateReading | null,
     drives: SceneDrives | null,
   ): void;
+  /** Moves the slider a MIDI mapping aims at (ui/midiCard.ts's applyCc), by
+   *  target id and controller value 0..127. Works with the panel shut. */
+  applyMidiCc(target: string, cc: number): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
+  /** The scene (or its palette) changed from outside the panel — a Set pad,
+   *  a key, Autopilot: rebuilds everything that follows the active scene, as
+   *  open() does. No-op while closed (open() does it then). */
+  sceneChanged(): void;
   /** Whether the Master card's Picture block is on screen (panel open and
    *  the controls column not scrolled past it) — app.ts samples the frame
    *  for it only then (see onScreen.ts for why that sample is not free). */
@@ -1144,6 +1166,10 @@ function unmarkBlock(heading: HTMLElement): void {
 export interface ControlRowSpec {
   label: string;
   accent: string;
+  /** Makes the row mappable to a MIDI knob (ui/midiCard.ts): `id` is the
+   *  target a mapping stores (ui/midiMap.ts), `label` what the mapping list
+   *  calls it. */
+  midi?: { id: string; label: string };
   min: number;
   max: number;
   /** Linear rows only — the slider's native step. */
@@ -1424,7 +1450,7 @@ function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | u
  *  intercept it), so the only capabilities worth adding are the ones
  *  Home/End don't cover. Plain single keys, not a chord — z/x/c collide with
  *  nothing else live while a slider has focus (A/R/T/D, the panel's
- *  H/M/Tab/1-9, the arrows, and Home/End are all spoken for). c no-ops when
+ *  H/M/Tab/Shift+1-9, the arrows, and Home/End are all spoken for). c no-ops when
  *  pointerFraction returns undefined, rather than falling back to some other
  *  value — see its comment for why. Sets .value then redispatches "input"
  *  rather than duplicating each slider's own commit logic, so this stays a
@@ -1672,6 +1698,12 @@ export function createControlRow(spec: ControlRowSpec) {
     slider.max = String(spec.max);
   }
   slider.step = discrete ? String(spec.step) : "any";
+  if (spec.midi) {
+    el.dataset.midiRow = "";
+    slider.dataset.midiId = spec.midi.id;
+    slider.dataset.midiLabel = spec.midi.label;
+    if (!isLog && spec.step !== undefined) slider.dataset.midiStep = String(spec.step);
+  }
 
   // Two lines: the setting's own description, always present when it has
   // one, and beneath it the auto takeover note, shown only while auto holds
@@ -2187,6 +2219,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
     onLufsReset: deps.onLufsReset,
+    onTap: deps.onTap,
     getSilenceGate: () => deps.getSilenceGate(),
     hitShape: {
       get: () => deps.getHitShape(),
@@ -4828,6 +4861,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const masterRow = createControlRow({
     label: "Scale",
     accent: SCENE_VIOLET,
+    midi: { id: MASTER_SCALE_TARGET, label: "Master · Scale" },
     min: SCENE_MASTER_MIN,
     max: SCENE_MASTER_MAX,
     step: 0.05,
@@ -4844,6 +4878,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const masterExpansionRow = createControlRow({
     label: "Expansion",
     accent: SCENE_VIOLET,
+    midi: { id: MASTER_EXPANSION_TARGET, label: "Master · Expansion" },
     min: SCENE_EXPANSION_MIN,
     max: SCENE_EXPANSION_MAX,
     defaultValue: SCENE_EXPANSION_DEFAULT,
@@ -5894,6 +5929,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // patchChanged's syncLinkedDriveSetting below).
   let linkedByKey: Map<string, { ownLabel?: string; linked: readonly LinkedSetting[] }> = new Map();
 
+  // The scene the Scene card's rows were last built for. They are rebuilt
+  // when the panel opens, so with it shut after a scene change the rows are
+  // the previous scene's until something asks (midiCard.ts's applyCc).
+  let renderedSceneId: string | null = null;
+
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
   // active scene has no settings to snapshot (renderSceneSettings below).
@@ -5915,6 +5955,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       renderSceneSettings();
     },
   });
+
+  // The Set: pads of looks from any scene, fired live (src/ui/setCard.ts).
+  // Always shown, unlike Looks: a pad can switch scene, so it doesn't depend
+  // on the active scene having settings.
+  const setCard = createSetCard({
+    ...deps.set,
+    sceneName: (sceneId) => deps.getScene(sceneId)?.name ?? sceneId,
+  });
+  // Overlay: a text line and a logo drawn over the visuals (ui/overlayCard.ts);
+  // independent of the scene, so it is always shown.
+  const overlayCard = createOverlayCard(deps.overlay);
 
   // Walks every .vc-block heading in document order and writes its digit —
   // called whenever the block set can change (only renderSceneSettings does:
@@ -6198,6 +6249,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const row = createControlRow({
       label: spec.label,
       accent,
+      midi: { id: sceneTargetId(sceneId, spec.key), label: `${deps.getScene(sceneId)?.name ?? sceneId} · ${spec.label}` },
       min: spec.min,
       max: spec.max,
       step: spec.step,
@@ -6340,6 +6392,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
+    renderedSceneId = sceneId;
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneWidgetCardsHost.innerHTML = "";
@@ -6628,7 +6681,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // `[data-key="<id>"]` control it names (targetsFor/flashOn — capped,
   // since a busy scene can carry many rows' worth of A/R/T chips); clicking
   // it performs the action for the handful of ids with exactly one
-  // (singleAction), or just re-flashes for the rest (1–9, A/R/T, Z X C,
+  // (singleAction), or just re-flashes for the rest (⇧1–9, 1–9, A/R/T, Z X C,
   // Esc — nothing single to do for those from a click).
   const keysCard = document.createElement("div");
   keysCard.className = "vc-keys";
@@ -6853,7 +6906,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
+  // MIDI: a controller's knobs and pads (ui/midiCard.ts). Hidden where the
+  // browser has no Web MIDI; absent entirely when app.ts wired no session.
+  const midiCard = deps.midi
+    ? createMidiCard({
+        midi: deps.midi,
+        currentSceneId: deps.currentSceneId,
+        ensureSceneRows: () => {
+          if (renderedSceneId !== deps.currentSceneId()) renderSceneSettings();
+        },
+      })
+    : null;
+
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -6993,18 +7058,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       handleTab(e);
       return;
     }
-    if (e.key.length === 1 && e.key >= "1" && e.key <= "9") {
+    // Shift+digit, matched on the physical key (Shift turns e.key into "!",
+    // "@", …): the bare digits fire the Set's pads (app.ts), panel open or not.
+    if (e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
       e.preventDefault();
       noteKeyUse("block");
-      jumpToBlock(Number(e.key));
+      jumpToBlock(Number(e.code.slice(5)));
     }
   }
 
-  function open() {
-    welcomeOnce();
-    refreshSpectrumHeader();
+  // Everything in the panel that follows the active scene or palette — what
+  // open() brings up to date, and what a scene change from outside (a Set
+  // pad, Autopilot) does again while the panel stays open.
+  function syncToScene(): void {
     renderPalettes();
-    sourceRow.refresh();
     syncInputRows();
     // The panel may have been closed on a different scene since `pinned`
     // was last checked — renderSceneSettings()'s own tail unpins it if so,
@@ -7015,8 +7082,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     masterRow.sync(() => deps.getSceneMaster());
     masterExpansionRow.sync(() => deps.getSceneExpansion());
     masterShapeRow.sync();
+    setCard.refresh();
     // Whatever was rebuilt above comes in unmarked.
     applySolo();
+  }
+
+  function open() {
+    welcomeOnce();
+    refreshSpectrumHeader();
+    sourceRow.refresh();
+    overlayCard.refresh();
+    syncToScene();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
     deps.toggleButton.title = "Close controls (S)";
@@ -7081,6 +7157,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
+    sceneChanged() {
+      if (isOpen) syncToScene();
+    },
+    applyMidiCc: (target, cc) => midiCard?.applyCc(target, cc),
     isPictureOnScreen: () => isOpen && pictureOnScreen(),
     update(
       frame: FeatureFrame | null,
@@ -7283,6 +7363,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // external change (a paired device, a drag elsewhere) can flip.
       refreshAutoMaster();
       refreshMicAuto();
+      // The Set's markers move when Play or Autopilot acts, and a paired
+      // device or the pop-out can change its pads; it redraws only on change.
+      setCard.refresh();
       // The pinned setting's patch panel — re-synced here rather than every
       // tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the

@@ -1,5 +1,7 @@
 import { FeatureExtractor } from "../../src/audio/features.ts";
-import { createAnimClock } from "../../src/render/animClock.ts";
+import { createAnimClock, type AnimFrame } from "../../src/render/animClock.ts";
+import type { FeatureFrame } from "../../src/audio/types.ts";
+import { releaseTapTempo, tapTempoAt } from "../../src/render/tapTempo.ts";
 import { getHitShape } from "../../src/audio/hitStrength.ts";
 import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
 import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
@@ -174,6 +176,18 @@ export interface EvalOptions {
    *  tracking; that's exactly what this option, combined with `mic`, is
    *  here to measure). */
   gate?: boolean;
+  /** Tap tempo (src/render/tapTempo.ts): tap times in seconds on the
+   *  track's own clock. Each is tapped just before the first frame at or
+   *  after it, the way a keydown lands between two render ticks, and the
+   *  anim clock is handed each frame's time as its `tapNowMs`. The store is
+   *  released first, so nothing from an earlier evaluate() carries over.
+   *  Omitted, the tap path is never reached and every metric is exactly
+   *  what it was before taps existed. */
+  taps?: readonly number[];
+  /** Called after every frame with its time, the extractor's frame (raw
+   *  bpm) and the AnimFrame — for a test scoring something EvalMetrics
+   *  doesn't (tests/tapTempoEval.test.ts). */
+  onFrame?: (time: number, frame: FeatureFrame, anim: AnimFrame) => void;
 }
 
 export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
@@ -189,6 +203,9 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   const shape = getHitShape();
   const analyzer = opts.analyzer ? new TempoAnalyzer(SR) : null;
   let analyzerSamplesPushed = 0;
+  const taps = opts.taps;
+  let tapNext = 0;
+  if (taps) releaseTapTempo();
 
   const segPtr = { i: 0 };
   let framesInSeg = 0;
@@ -251,7 +268,9 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
       if (!opts.hostFeed) tempoHits = onsets.map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
     }
 
-    const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits });
+    if (taps) while (tapNext < taps.length && taps[tapNext]! <= time) tapTempoAt(taps[tapNext++]! * 1000);
+    const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits }, taps ? time * 1000 : undefined);
+    opts.onFrame?.(time, frame, anim);
 
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {

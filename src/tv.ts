@@ -26,6 +26,7 @@ import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import type { FeatureFrame } from "./audio/types.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookReplica, type LookReplica } from "./net/lookSync.ts";
@@ -196,6 +197,8 @@ let sceneCtx: SceneContext;
 /** Draws every frame (render/compositor.ts): here only to crossfade a scene
  *  change (the held effects are the laptop's and pop-out's, not a TV's). */
 let compositor: Compositor | null = null;
+/** Drawn right after the scene each frame; made once the GL context is up. */
+let overlay: OverlayLayer | null = null;
 let join: JoinScreen;
 
 /** True from the canvas's `webglcontextlost` until the page reloads on the
@@ -721,6 +724,9 @@ async function main(): Promise<void> {
   detectedPreset = await detectQuality();
   quality = qualitySettings(resolvePreset());
   sceneCtx = { gl, quality };
+  // The text-and-logo overlay (render/overlayLayer.ts); its settings ride in
+  // the room's look like any synced store.
+  overlay = createOverlayLayer(gl);
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   compositor = createCompositor(gl, {
@@ -883,6 +889,7 @@ async function main(): Promise<void> {
       drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
       nowMs: nowRafMs,
     });
+    overlay?.draw();
     // Two scenes at once (a crossfade) say nothing about what one costs.
     if (outcome.governable) governor?.recordFrame(nowRafMs);
   }
