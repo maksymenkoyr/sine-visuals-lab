@@ -67,6 +67,12 @@
 // locked), more gradually while it's climbing (LOCK_RISE_RATE, so one good
 // hit doesn't flash it to full), and drops out at LOCK_FALL_RATE once bpm
 // itself returns to 0 (features.ts's TEMPO_DECAY_SEC).
+//
+// seed() is the one exception to "never assigned": a tap tempo
+// (src/render/tapTempo.ts) sets the smoothed tempo and moves the phase the
+// short way (at most half a beat, either way) onto the tapped beat. Every
+// rule above then carries on from there: the comb keeps judging the hits
+// against the new tempo and phase, and corrects it like any other offset.
 const BPM_TRACK_RATE = 2; // how fast the internal tempo estimate follows frame.bpm
 const BEATS_PER_BAR = 4;
 
@@ -199,6 +205,12 @@ export interface BeatClock {
    *  HIT_LATENCY_FRAMES back-dating (these times are already exact) — see
    *  the file header. */
   advance(dtSec: number, bpm: number, beatFired: boolean, hitWeight?: number, tempoHits?: TempoHit[]): void;
+  /** Tap tempo's seed (see the file header): runs at `bpm` from now on and
+   *  moves the phase the short way so beatPhase reads `beatPhase` — a
+   *  backward move of up to half a beat is allowed here, unlike advance().
+   *  Any correction still pending is dropped; the hit window and the lock
+   *  are kept. The readings above update at once. */
+  seed(bpm: number, beatPhase: number): void;
 }
 
 export function createBeatClock(): BeatClock {
@@ -286,6 +298,15 @@ export function createBeatClock(): BeatClock {
       (clock as { bpm: number }).bpm = smoothedBpm;
       (clock as { confidence: number }).confidence = confidence;
       (clock as { tempoLock: number }).tempoLock = tempoLock;
+    },
+    seed(bpm: number, beatPhase: number): void {
+      smoothedBpm = bpm;
+      phase += wrapHalf(beatPhase - phase);
+      pending = 0;
+      (clock as { beatPhase: number }).beatPhase = wrap01(phase);
+      (clock as { barPhase: number }).barPhase = wrap01(phase / BEATS_PER_BAR);
+      (clock as { beats: number }).beats = phase;
+      (clock as { bpm: number }).bpm = smoothedBpm;
     },
   };
 

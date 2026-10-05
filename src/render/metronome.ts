@@ -29,6 +29,13 @@ import { createTempoSettle } from "./tempoSettle.ts";
 // phase stays continuous across that retune, only the beats/sec rate
 // changes.
 //
+// A tap tempo (src/render/tapTempo.ts) reaches this through seed(): the
+// tapped tempo is held in tempoSettle.ts as one the tracker is sure of, and
+// `beats` moves onto the tapped beat by the same short-way rule as the
+// first confident phase check below (forward at once, or hold still), so
+// the tick stays monotonic. From then on nothing is special: corrections,
+// tempo follow and retunes all run as described here.
+//
 // This is deliberately a separate module from the Beat grid: gridPulse.ts's
 // job is still "the tracker's beat when it's sure of the tempo, the raw
 // hits when it isn't" (see that file's own header) — a source for scenes
@@ -79,6 +86,14 @@ export interface Metronome {
    *  Call once per render tick, same placement as beatClock's own
    *  advance(). */
   advance(dtSec: number, clock: MetronomeClockInput, rawBpm: number): void;
+  /** Tap tempo's seed (see the file header): ticks at `bpm` from now on,
+   *  held in tempoSettle.ts as a tempo the tracker is sure of, with `beats`
+   *  moved the short way onto `beatPhase` — forward at once, or held still
+   *  for the difference, never backward. Starts the metronome if it was
+   *  idle, from `clockBeats` (beatClock's own count, already seeded to the
+   *  same phase) the way a normal start adopts the clock's count. Call
+   *  before this tick's advance(). */
+  seed(bpm: number, beatPhase: number, clockBeats: number): void;
 }
 
 /** How many beats make a bar, for barPhase/barTick — matches beatClock.ts's
@@ -251,6 +266,29 @@ export function createMetronome(): Metronome {
       (metronome as { level: number }).level = level;
       (metronome as { beatTick: boolean }).beatTick = beatTick;
       (metronome as { barTick: boolean }).barTick = barTick;
+    },
+    seed(nextBpm: number, beatPhase: number, clockBeats: number): void {
+      settle.hold(nextBpm);
+      lastTarget = settle.bpm;
+      bpm = nextBpm;
+      // The tap is this run's phase check: no later snap away from it.
+      phaseChecked = true;
+      if (!running) {
+        running = true;
+        beats = clockBeats + wrapHalf(beatPhase - clockBeats);
+        pauseBeats = 0;
+        armTickDetection();
+      } else {
+        const err = wrapHalf(beatPhase - beats);
+        if (err > 0) {
+          beats += err;
+          pauseBeats = 0;
+        } else {
+          pauseBeats = -err;
+        }
+      }
+      (metronome as { running: boolean }).running = running;
+      (metronome as { bpm: number }).bpm = bpm;
     },
   };
 

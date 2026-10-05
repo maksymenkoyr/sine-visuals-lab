@@ -4,6 +4,7 @@ import { createFlowClock, type FlowClock } from "./flowClock.ts";
 import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./beatClock.ts";
 import { createMetronome, type Metronome } from "./metronome.ts";
 import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
+import { createTapGuide, type TapGuide } from "./tapTempo.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
@@ -125,12 +126,19 @@ export interface AnimFrame {
    *  spectralCentroid.ts. */
   centroidRaw: number;
   /** FeatureFrame.bpm × beatTrim.ts's own multiplier (1 by default — see
-   *  that file) — beatListener.ts's resolveHold reads this (alongside
-   *  tempoLock) to size a hold in beats rather than a fixed duration, so a
-   *  hold sized in beats keeps its real-time length in step with a ×2/÷2
-   *  correction. The BPM card's RAW mode reads FeatureFrame.bpm directly
-   *  instead of this field — deliberately left raw/unmultiplied. */
+   *  that file), folded onto a tapped tempo first while `tapGuided` (see
+   *  tapTempo.ts's fold()) — beatListener.ts's resolveHold reads this
+   *  (alongside tempoLock) to size a hold in beats rather than a fixed
+   *  duration, so a hold sized in beats keeps its real-time length in step
+   *  with a ×2/÷2 correction or a tap. The BPM card's RAW mode reads
+   *  FeatureFrame.bpm directly instead of this field — deliberately left
+   *  raw/unmultiplied. */
   bpm: number;
+  /** True while a tap tempo guides the tracker: from the tap taking effect
+   *  until the tracker moves on to a tempo of its own (tapTempo.ts's
+   *  follow()). Always false on a clock whose advance() is never given
+   *  `tapNowMs`. */
+  tapGuided: boolean;
   /** metronome.ts's own flywheel clock, also corrected by beatTrim.ts (its
    *  own second BeatTrimmer instance, "metroTrim" — see animClock.ts's own
    *  wiring and beatTrim.ts's header) — see metronome.ts's file header for
@@ -239,13 +247,19 @@ export interface AnimClock {
    *  omitted (every other caller), today's render-tick-only behavior.
    *  `hit.wavePeak` is this tick's instantaneous waveform peak
    *  (src/audio/waveform.ts's `peak()` over app.ts's lastMono) — solo/host
-   *  only, feeding AnimFrame.wavePeak's own peak-hold. */
+   *  only, feeding AnimFrame.wavePeak's own peak-hold. `tapNowMs` is this
+   *  tick's performance.now(): given, this clock follows the tap-tempo
+   *  store (tapTempo.ts — a tap seeds beatClock and the metronome, and the
+   *  raw bpm folds onto the tapped tempo while it guides); omitted, taps
+   *  are ignored entirely. Only app.ts's live clock passes it — the beat
+   *  keys' own reach, see tapTempo.ts's header. */
   advance(
     dtSec: number,
     frame: FeatureFrame,
     smoothing?: number,
     gate?: SilenceGateMarks,
     hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
+    tapNowMs?: number,
   ): AnimFrame;
 }
 
@@ -296,6 +310,9 @@ export function createAnimClock(): AnimClock {
   const clockTrim: BeatTrimmer = createBeatTrimmer();
   const metroTrim: BeatTrimmer = createBeatTrimmer();
   let wasRunning = false;
+  // tapTempo.ts's guide — see that file's header for why a tap meets the
+  // tracker here: a seed into beatClock/metronome and a fold of the raw bpm.
+  const tapGuide: TapGuide = createTapGuide();
   const bandEnergy: BandEnergy = createBandEnergy();
   // AnimFrame.hitTail, cached against the HitShape it was built from.
   let tailShape: HitShape | undefined;
@@ -324,6 +341,7 @@ export function createAnimClock(): AnimClock {
       smoothing = SMOOTHING_DEFAULT,
       gate?: SilenceGateMarks,
       hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
+      tapNowMs?: number,
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       // getHitShape() hands back the same frozen snapshot until a field
@@ -352,12 +370,23 @@ export function createAnimClock(): AnimClock {
       const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
       const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
       const hitWeight = strength * (1 + PHASE_BASS * bass);
+      // Tap tempo (tapTempo.ts's header). The seed lands before either
+      // clock advances, so its phase is the tapped beat's at the previous
+      // tick: this tick's advance() carries both clocks on to now, and a
+      // tapped beat falling inside it ticks like any other. `bpmIn` is
+      // frame.bpm itself unless a tap guides the tracker.
+      const tap = tapNowMs !== undefined ? tapGuide.poll(tapNowMs - dtSec * 1000) : null;
+      if (tap) {
+        beat.seed(tap.bpm, tap.beatPhase);
+        metronome.seed(tap.bpm, tap.beatPhase, beat.beats);
+      }
+      const bpmIn = tapGuide.fold(frame.bpm);
       // See beatClock.ts's own file header and its advance()'s doc: the
       // fixed-hop feed (app.ts's solo mode, when a tempo source is live)
       // replaces the render-tick beatFired/hitWeight pair entirely rather
       // than combining with it.
       if (hit?.tempoHits !== undefined) {
-        beat.advance(dtSec, frame.bpm, false, 1, hit.tempoHits);
+        beat.advance(dtSec, bpmIn, false, 1, hit.tempoHits);
       } else {
         // frame.pulseOnset, not frame.onset — the phase comb is tempo
         // tracking, not a visual hit, and must not be starved by the
@@ -366,9 +395,10 @@ export function createAnimClock(): AnimClock {
         // ran the Metronome only ~21-26% of the time on real songs through
         // a mic, against solo mode's ~94%, because their only feed here was
         // the gated `onset`).
-        beat.advance(dtSec, frame.bpm, frame.pulseOnset, hitWeight);
+        beat.advance(dtSec, bpmIn, frame.pulseOnset, hitWeight);
       }
-      metronome.advance(dtSec, { bpm: beat.bpm, beats: beat.beats, tempoLock: beat.tempoLock }, frame.bpm);
+      metronome.advance(dtSec, { bpm: beat.bpm, beats: beat.beats, tempoLock: beat.tempoLock }, bpmIn);
+      tapGuide.follow(metronome.running, metronome.bpm);
       // beatTrim.ts's correction layer, one trimmer per clock — see that
       // file's header and this module's own AnimFrame field docs. Both
       // trimmers read the same settings snapshot this tick.
@@ -446,7 +476,8 @@ export function createAnimClock(): AnimClock {
         },
         centroid: centroid.centroid,
         centroidRaw: centroid.raw,
-        bpm: frame.bpm * trim.multiplier,
+        bpm: bpmIn * trim.multiplier,
+        tapGuided: tapGuide.guided,
         metronomeOn: metronome.running,
         metronomeBpm: mt.bpm,
         metronomeBeats: mt.beats,
