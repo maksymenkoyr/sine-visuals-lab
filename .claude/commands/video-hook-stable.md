@@ -67,7 +67,12 @@ noting what it replaced.
   site, so the release must be live.
 - **Song**: `--song <file or link>`. Without it, the last release's song is reused. Say once that
   posting needs its rights. When the user names several songs, measure each one's tempo and drop
-  (`song.py`) and recommend one; a song without a drop, or without a steady tempo, can't carry the Shape.
+  (`song.py`, then the bass by bar around the drop) and cut each drop, one bar before to eight after,
+  into `<out>/song-review/` at one loudness so the user can listen; a song without a drop, or without a
+  steady tempo, can't carry the Shape.
+- **Several songs** in one video: write `<work>/mix.json` (its shape is in `tools/promo/mix.py`) and run
+  `song` without `--song`. They must share a tempo within a few bpm. Before recording, make a review
+  copy of the mix and check that each drop and switch lands on its planned beat.
 - **Look**: `--look "<Looks-card share link>"` opens the video. Without it, the last release's look is
   reused; with none at all the opening is a plain Physarum 2 stand-in, and you say so.
 - Output goes to `~/Movies/sine-visuals-lab-v<version>-promo/`.
@@ -158,8 +163,10 @@ Vertical 9:16 for phone Stories, at most 30 s, every cut on a beat.
    - Put the strongest first. Alternate scene and interface proofs, so every cut changes the picture.
      The two-screen proofs go last.
    - Each proof is two bars; a two-screen proof gets as many whole bars as its action needs.
-   - The caption is one line in plain words about what the viewer sees, not the panel's name for the
-     feature. It slides in as the last one leaves, on a translucent card with a white hairline.
+   - Interface proofs carry a caption: one line in plain words about what the viewer sees, not the
+     panel's name for the feature. It slides in as the last one leaves, on a translucent card with a
+     white hairline. Scene proofs carry none; the picture speaks.
+   - The palette proof taps a few palettes, each on a beat.
    - Scene proofs keep a steady camera and hear the song itself, never the synthetic feed (on that feed
      Chladni held one figure and Physarum barely pulsed: "flat, low sync to the music").
    - Interface proofs: the camera leans toward the part that changes.
@@ -168,8 +175,13 @@ Vertical 9:16 for phone Stories, at most 30 s, every cut on a beat.
      laptop's look on it and flashes green on Play. Cue is a peek: it shows only while Space is held
      (`src/ui/outputKeys.ts`). Room: add the TV by its code, then a palette and Play, twice; the TV
      follows each time.
-3. **End**: the version card (a green tag icon, the version, the app name) over the opening's scene,
-   held about two bars. The video stops on a bar line.
+3. **End**: the opening's scene alone for a bar, then a slim version card (a green tag icon, the version,
+   the app name) over it for about three bars. With several songs, the song switches a couple of times
+   under the card, a bar of each next song from its drop, so the look shows it follows any track. The
+   video stops on a bar line.
+
+**Songs**: one, or a few on one tempo, cut into one soundtrack (`mix.json`). A second song comes in
+mid-video on a bar line, into its last build bar, so its drop lands on a scene proof.
 
 Nothing fades out, picture or music. The style is half as GitHub-ish as a release page: white accents
 (the app's own), no icons or pills on captions. Only the version card keeps GitHub's tag.
@@ -180,7 +192,8 @@ Nothing fades out, picture or music. The style is half as GitHub-ish as a releas
 - slogans as the hook ("Your music, drawn live.", 2026-10-05): a statement about the product opens no
   loop. Replaced by the viral hook above, picked for an audience (steps 1–2).
 - keeping the last release's opening line by default (2026-10-05);
-- the "Latest" badge on the version card;
+- the "Latest" badge on the version card, and its first, 420 px tall size ("slimmer", 2026-10-05);
+- captions on scene proofs ("Slime mold that dances to your set" and the like, 2026-10-05);
 - one-beat cuts ("too dynamic");
 - fades;
 - screen captures without device frames.

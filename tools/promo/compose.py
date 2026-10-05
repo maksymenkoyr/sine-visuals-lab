@@ -13,15 +13,18 @@
 #      interface camera leans toward the tracked part that changes; scene footage keeps a steady camera.
 #      The two-screen proofs (Cue/Play with the pop-out, the room with a TV) are drawn as devices: a
 #      laptop with its Cue/Play keys over the second screen;
-#   3. the end: the version card over the opening's scene, held to a bar line counted from the drop.
+#   3. the end: the opening's scene alone for a bar, then the version card over it, held to a bar line
+#      counted from the drop.
 #      Nothing fades out (the user's call).
 # The song's drop goes on the first proof (meta.dropBeat, which promo.mjs uses) — make that proof a
 # Physarum 2 take from a beat where it re-rolls.
 # plan.json can override the timing, in beats:
 #
-#   { "opening": {"take": "intro", "t0": 0}, "look": 4, "end": 8 }
+#   { "opening": {"take": "intro", "t0": 0}, "look": 4, "end": 16, "hold": 4 }
 #
-# look = beats of the opening before the drop, end = the least beats the version card holds. Scene takes
+# look = beats of the opening before the drop, end = the least beats of the end, hold = how many of
+# them show the opening's scene alone before the version card comes in. A proof without `text` in
+# lines.json runs without a caption. Scene takes
 # heard the song (record.mjs), so each is cut at the song time the video plays at that moment, and its
 # picture moves with the music you hear; panel takes are cut by their own beats.
 import bisect, json, os, shutil
@@ -33,7 +36,7 @@ P = 60.0 / song["bpm"]
 FPS = 30
 W, H = 1080, 1920
 plan = json.load(open(f"{WORK}/plan.json")) if os.path.exists(f"{WORK}/plan.json") else {}
-LOOK, END = plan.get("look", 4), plan.get("end", 8)
+LOOK, END, HOLD = plan.get("look", 4), plan.get("end", 16), plan.get("hold", 4)
 META = json.load(open(f"{WORK}/cards/meta.json"))
 LINES = json.load(open(f"{WORK}/lines.json"))
 DROP_BEAT = int(os.environ.get("DROP_BEAT") or LOOK)
@@ -121,8 +124,8 @@ OPENING = plan.get("opening") or {"take": "intro", "t0": 0}
 SEGS = [("opening", (OPENING["take"], OPENING["t0"]), None, LOOK)]
 for i, h in enumerate(LINES.get("proofs", [])):
     SEGS.append(("proof", (h["take"], h.get("from", 0)), i, h["beats"]))
-# The end: the version card over the opening's scene, stretched to a bar line counted from the drop, so
-# the song stops on a beat.
+# The end: the opening's scene alone for `hold` beats, then the version card over it, stretched to a bar
+# line counted from the drop, so the song stops on a beat.
 end = END
 while (sum(sg[3] for sg in SEGS) + end - DROP_BEAT) % 4: end += 1
 SEGS.append(("end", (OPENING["take"], OPENING["t0"]), None, end))
@@ -170,14 +173,16 @@ def darken(im, top, strength): return Image.composite(Image.new("RGB", im.size, 
 
 # a caption's bottom sits where Stories' own UI starts (the bottom ~19 %); slide distance (px) and time (s)
 CAP_X, CAP_Y, CAP_SLIDE, CAP_T = 70, 1530 - META["cap"]["h"], 300, 0.4
+def cap_png(i): return png(f"proof_{i}.png") if i >= 0 and os.path.exists(f"{WORK}/cards/proof_{i}.png") else None
 def caption(im, i, local):
-    im = darken(im, CAP_Y - 160, 150)
     a = ease(local * P / CAP_T)
-    if i > 0 and a < 1:
-        c = png(f"proof_{i - 1}.png")
-        im.paste(c.convert("RGB"), (int(CAP_X - a * CAP_SLIDE), CAP_Y), c.getchannel("A").point(lambda v: int(v * (1 - a))))
-    c = png(f"proof_{i}.png")
-    im.paste(c.convert("RGB"), (int(CAP_X + (1 - a) * CAP_SLIDE), CAP_Y), c.getchannel("A").point(lambda v: int(v * a)))
+    prev, cur = cap_png(i - 1) if a < 1 else None, cap_png(i)
+    if not prev and not cur: return im
+    im = darken(im, CAP_Y - 160, int(150 * (1 if cur else 1 - a)))   # the band fades with a caption that leaves alone
+    if prev:
+        im.paste(prev.convert("RGB"), (int(CAP_X - a * CAP_SLIDE), CAP_Y), prev.getchannel("A").point(lambda v: int(v * (1 - a))))
+    if cur:
+        im.paste(cur.convert("RGB"), (int(CAP_X + (1 - a) * CAP_SLIDE), CAP_Y), cur.getchannel("A").point(lambda v: int(v * a)))
     return im
 def dim(im, amount, t_in): return Image.blend(im, Image.new("RGB", im.size, (4, 6, 12)), amount * min(1.0, t_in / 0.3))
 HAS_OPENING = os.path.exists(f"{WORK}/cards/opening.png")
@@ -201,8 +206,9 @@ for i in range(n_frames):
         im = over(im, png("opening.png"))
     elif kind == "proof":
         im = caption(im, arg, local)
-    elif kind == "end":
-        im = over(dim(im, 0.30, t_in), with_alpha(png("version.png"), min(1.0, t_in / 0.18)))
+    elif kind == "end" and local >= HOLD:
+        t_card = (local - HOLD) * P
+        im = over(dim(im, 0.30, t_card), with_alpha(png("version.png"), min(1.0, t_card / 0.18)))
     im.save(f"{FRAMES}/{i:05d}.jpg", quality=94, subsampling=0)
     if i % 150 == 0: print(i, f"beat {bp:.1f}", kind, flush=True)
 json.dump(dict(total=n_frames / FPS, frames=n_frames, fps=FPS, dropBeat=DROP_BEAT), open(f"{FRAMES}/meta.json", "w"))

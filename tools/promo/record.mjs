@@ -212,9 +212,9 @@ const T = {
     track: "palettes", beats: 8, view: UI_VIEW,
     setup: async (page) => { await openPanel(page); await sleep(900); await scrollTextTo(page, "Palette", "center"); await sleep(700); },
     script: async (page, bc) => {
-      const names = ["Sunset", "Ice", "Amethyst", "Ember", "Acid"];
+      const names = ["Sunset", "Ice", "Amethyst", "Ember"];   // a tap every other beat, so each colour lands on a beat
       for (let i = 0; i < names.length; i++) {
-        const b = i * 1.6;
+        const b = i * 2;
         await at(bc, b - 0.5);
         const c = await centerOf(page, names[i], { minX: PX });
         if (c) await moveTo(page, c.x, c.y, 0.4 * P);

@@ -13,7 +13,8 @@
 //
 // steps (in order):
 //   notes    writes <work>/release-notes.md, the Stable release's page, for drafting lines.json
-//   song     beat grid + first drop of the song → song.json (song.py)
+//   song     beat grid + first drop of the song → song.json (song.py); with <work>/mix.json and no
+//            --song, several songs cut into one soundtrack on one grid instead (mix.py)
 //   record   headless Chromium on the live site, one take per shot, cut on the song's beats (record.mjs);
 //            scene takes hear the song itself through a fake mic (<work>/mic.wav). `record <take>…`
 //            re-records only those takes
@@ -96,6 +97,10 @@ const steps = {
   },
   song() {
     const wav = join(work, "song.wav");
+    if (!o.song && existsSync(join(work, "mix.json"))) {   // several songs cut into one soundtrack (mix.py)
+      run("uv", ["run", "-q", "--with", "numpy", "--with", "soundfile", "python", join(here, "mix.py")], { FFMPEG: ffmpeg() });
+      return;
+    }
     if (o.song) {
       let src = o.song;
       if (/^https?:/.test(src)) {   // a link: yt-dlp fetches the audio as is (it can't convert without a system ffmpeg)
