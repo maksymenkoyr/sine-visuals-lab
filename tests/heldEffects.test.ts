@@ -24,6 +24,7 @@ describe("effects list", () => {
   });
   it("finds an effect by its key code", () => {
     expect(effectForCode("KeyQ")?.id).toBe("blackout");
+    expect(effectForCode("KeyD")?.id).toBe("invert");
     expect(effectForCode("KeyZ")).toBeUndefined();
   });
 });

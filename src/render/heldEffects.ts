@@ -33,7 +33,7 @@ export const EFFECTS: readonly EffectDef[] = [
   { id: "blackout", label: "Blackout", code: "KeyQ", key: "Q", hint: "Hold to fade the picture to black" },
   { id: "strobe", label: "Strobe", code: "KeyW", key: "W", hint: "Press for white flashes on every eighth note, press again to stop", latch: true },
   { id: "freeze", label: "Freeze", code: "KeyE", key: "E", hint: "Hold to freeze the picture" },
-  { id: "invert", label: "Invert", code: "KeyI", key: "I", hint: "Hold for negative colours" },
+  { id: "invert", label: "Invert", code: "KeyD", key: "D", hint: "Hold for negative colours" },
 ];
 
 export type HeldEffects = Record<EffectId, boolean>;
