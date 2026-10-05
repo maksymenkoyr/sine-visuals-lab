@@ -21,7 +21,7 @@ import soundfile as sf
 WORK = os.environ["PROMO_WORK"]
 FF = os.environ.get("FFMPEG", "ffmpeg")
 SR = 44100
-LEAD = 48           # beats of the first part before video beat 0 (record.mjs needs a few bars of lead-in)
+LEAD = 48           # beats of the first part before video beat 0 (the take recorder needs a few bars of lead-in)
 TAIL = 160          # beats the last part runs past its entry, longer than any video
 TARGET_DB = -11.0   # each part's loudness (rms over its stretch in the video), before the limiter
 

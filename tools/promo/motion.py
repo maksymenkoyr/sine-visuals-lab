@@ -26,6 +26,9 @@ names = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or 
 song = json.load(open(f"{WORK}/song.json"))
 P = song["period"]
 import librosa
+if not os.path.exists(song["file"]):
+    print(f"note: song.json file {song['file']} is gone; using {WORK}/song.wav", file=sys.stderr)
+    song["file"] = f"{WORK}/song.wav"
 y, sr = librosa.load(song["file"], sr=22050, mono=True)
 HOP = 256
 onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP)

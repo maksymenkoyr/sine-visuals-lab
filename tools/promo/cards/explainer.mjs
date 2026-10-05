@@ -1,9 +1,10 @@
-// Renders the showcase's caption overlays (transparent full-frame PNGs) and its two opaque cards.
+// The explainer's text (cards.mjs dispatches here; /video-explainer-stable approved this look): the showcase's
+// caption overlays (transparent full-frame PNGs) and its opaque end card.
 //
-//   node tools/promo/showcase/captions.mjs <showcase.json>
+//   node tools/promo/cards.mjs --work <work> --video explainer
 //
-// Input: config "captions" (items: id, big, small, pos per format; cards: end, or). Output:
-// <work>/caps/<id>-<v|h>.png for each caption, end-<fmt>.png, or-<fmt>.png. edit.py overlays the
+// Input: <work>/showcase.json "captions" (items: id, big, small, pos per format; cards: end). Output:
+// <work>/caps/<id>-<v|h>.png for each caption and end-<fmt>.png. edit.py overlays the
 // captions (timing is in the same config) and ends on the end card. These are renders of text, but
 // they are still media: they live in the work dir, never in the repo.
 //
@@ -13,20 +14,19 @@
 // "lowleft" / "topright" a corner, "top" / "toptight" near the top edge.
 import { chromium } from "playwright";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const cfg = JSON.parse(readFileSync(process.argv[2], "utf8"));
-const workRel = cfg.work ?? "tools/.cache/showcase";
-const work = isAbsolute(workRel) ? workRel : join(REPO, workRel);
+// Renders the captions for the work dir; the lines are the whole body below, unindented to stay byte for byte.
+export async function render(work) {
+const cfg = JSON.parse(readFileSync(`${work}/showcase.json`, "utf8"));
 const OUT = join(work, "caps") + "/";
 mkdirSync(OUT, { recursive: true });
 
 const SANS = `"SF Pro Display", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif`;
 const CAPS = cfg.captions.items;
 const END = cfg.captions.cards.end;
-const OR = cfg.captions.cards.or;
 const LOGO = `file://${join(REPO, END.logo)}`;
 
 const load = async (page, html) => { const f = OUT + "_tmp.html"; writeFileSync(f, "<!doctype html><meta charset=utf-8>" + html); await page.goto("file://" + f); };
@@ -72,11 +72,7 @@ for (const [fmt, W, H] of [["v", 1080, 1920], ["h", 1920, 1080]]) {
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(200);
   await page.screenshot({ path: `${OUT}end-${fmt}.png` });
-  // "or" card: opaque black, one word
-  await load(page, `<style>${css(W, H)} body{background:#000}
-    .or{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:${SANS};font-weight:700;color:#fff;font-size:${W < H ? 150 : 130}px}</style>
-    <div class="or">${OR.text}</div>`);
-  await page.screenshot({ path: `${OUT}or-${fmt}.png` });
 }
 await browser.close();
 console.log("captions ->", OUT);
+}

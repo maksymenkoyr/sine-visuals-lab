@@ -19,6 +19,8 @@ before adding a note here; this file doesn't restate them.
 - [Vocabulary](vocabulary.md) — the words the panel uses for wiring the sound
   into a scene (signal, jack, wire, port, reactive setting), mapped to the
   code's own names.
+- [Video house style](video-house-style.md) — the three promo videos (release,
+  hook, explainer) and the taste calls every one of them follows.
 - [Status](status.md) — what's in flight right now. The one note here that's
   expected to be rewritten wholesale each session.
 - [Scene records](scenes/) — one note per scene, `scenes/<id>.md`: what it
