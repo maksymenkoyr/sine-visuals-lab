@@ -442,6 +442,37 @@
       body.controller #outBar {
         top: 100px;
       }
+      /* Record (src/ui/recordControls.ts): a red dot and the elapsed time while
+       * a take runs, and the button stays visible then even when the chrome
+       * idles, so a performer can see they are recording. A phone's controller has no
+       * canvas of its own to record. */
+      #recBtn.recording {
+        color: #fff;
+        border-color: rgba(239, 68, 68, 0.7);
+      }
+      .recDot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 2px;
+        border-radius: 50%;
+        background: #ef4444;
+        animation: recPulse 1.2s ease-in-out infinite;
+      }
+      @keyframes recPulse {
+        50% { opacity: 0.35; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .recDot { animation: none; }
+      }
+      #recAspectBtn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      body.controller #recBtn,
+      body.controller #recAspectBtn {
+        display: none !important;
+      }
       body.chrome-idle #outBar:not(.attn) {
         opacity: 0;
         pointer-events: none;
@@ -479,7 +510,7 @@
       body.chrome-idle {
         cursor: none;
       }
-      body.chrome-idle .iconBtn,
+      body.chrome-idle .iconBtn:not(.recording),
       body.chrome-idle #roomCode,
       body.chrome-idle #sceneVersion {
         opacity: 0;
@@ -706,6 +737,8 @@
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="This room's devices">&#9638; ROOM</button>
       <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
+      <button id="recBtn" class="iconBtn" aria-pressed="false">RECORD</button>
+      <button id="recAspectBtn" class="iconBtn">SCREEN</button>
       <span id="sceneVersion" tabindex="0"></span>
     </div>
     <!-- Output controls (src/ui/outputControls.ts), top centre: shown only
