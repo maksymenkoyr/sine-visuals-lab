@@ -9,12 +9,7 @@ import {
   parseEffects,
   sameEffects,
   stepFade,
-  STROBE_FALLBACK_BPM,
-  STROBE_FLASHES_PER_BEAT,
-  STROBE_ON_FRACTION,
   STROBE_PEAK,
-  strobeBeatPhase,
-  strobeLevel,
 } from "../src/render/heldEffects.ts";
 
 describe("effects list", () => {
@@ -24,6 +19,7 @@ describe("effects list", () => {
   });
   it("finds an effect by its key code", () => {
     expect(effectForCode("KeyQ")?.id).toBe("blackout");
+    expect(effectForCode("KeyD")?.id).toBe("invert");
     expect(effectForCode("KeyZ")).toBeUndefined();
   });
 });
@@ -54,42 +50,10 @@ describe("stepFade", () => {
   });
 });
 
-describe("strobeLevel", () => {
-  it("is lit at the start of every eighth note and dark after it", () => {
-    for (let i = 0; i < STROBE_FLASHES_PER_BEAT; i++) {
-      const start = i / STROBE_FLASHES_PER_BEAT;
-      expect(strobeLevel(start)).toBe(STROBE_PEAK);
-      expect(strobeLevel(start + (STROBE_ON_FRACTION * 0.9) / STROBE_FLASHES_PER_BEAT)).toBe(STROBE_PEAK);
-      expect(strobeLevel(start + (STROBE_ON_FRACTION * 1.1) / STROBE_FLASHES_PER_BEAT)).toBe(0);
-    }
-  });
-  it("flashes STROBE_FLASHES_PER_BEAT times across one beat", () => {
-    let edges = 0;
-    let prev = 0;
-    for (let p = 0; p < 1; p += 0.001) {
-      const v = strobeLevel(p);
-      if (v > 0 && prev === 0) edges++;
-      prev = v;
-    }
-    expect(edges).toBe(STROBE_FLASHES_PER_BEAT);
-  });
-});
-
-describe("strobeBeatPhase", () => {
-  it("follows the metronome while a tempo is settled", () => {
-    expect(strobeBeatPhase({ tempoOn: true, metronomePhase: 0.37, timeSec: 99 })).toBe(0.37);
-  });
-  it("free-runs at the fallback tempo otherwise", () => {
-    const beatSec = 60 / STROBE_FALLBACK_BPM;
-    expect(strobeBeatPhase({ tempoOn: false, metronomePhase: 0.9, timeSec: beatSec * 3 })).toBeCloseTo(0, 5);
-    expect(strobeBeatPhase({ tempoOn: false, metronomePhase: 0.9, timeSec: beatSec * 3.25 })).toBeCloseTo(0.25, 5);
-  });
-});
-
 describe("effectLook", () => {
   it("passes engaged effects through and flashes only with Strobe", () => {
     const e = { ...NO_EFFECTS, invert: true };
-    expect(effectLook(e, 0.4, 0)).toEqual({ invert: true, flash: 0, black: 0.4 });
-    expect(effectLook({ ...NO_EFFECTS, strobe: true }, 0, 0).flash).toBe(STROBE_PEAK);
+    expect(effectLook(e, 0.4)).toEqual({ invert: true, flash: 0, black: 0.4 });
+    expect(effectLook({ ...NO_EFFECTS, strobe: true }, 0).flash).toBe(STROBE_PEAK);
   });
 });

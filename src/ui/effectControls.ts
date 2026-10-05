@@ -1,4 +1,4 @@
-import { EFFECTS, effectForCode, NO_EFFECTS, sameEffects, type EffectId, type HeldEffects } from "../render/heldEffects.ts";
+import { EFFECTS, effectForCode, NO_EFFECTS, sameEffects, STROBE_FLASH_MS, type EffectId, type HeldEffects } from "../render/heldEffects.ts";
 
 /**
  * The hold-to-use half of the held effects (render/heldEffects.ts says what
@@ -15,10 +15,11 @@ import { EFFECTS, effectForCode, NO_EFFECTS, sameEffects, type EffectId, type He
  * typing in a field is left alone. A button and its key can both hold an
  * effect; it stays on until both let go.
  *
- * An effect marked `latch` (EffectDef) is the exception: a key down or a
- * pointer down on its button flips it, and nothing but the next press or
- * leaving the scene turns it off. Losing focus does not, since clicking into
- * the pop-out output window is exactly that.
+ * An effect marked `flash` (EffectDef) is the exception: a key down or a
+ * pointer down on its button turns it on for STROBE_FLASH_MS, then it goes off
+ * by itself. A held key or button fires once (key repeat is ignored), and a
+ * press during a flash starts the flash over. Losing focus does not cut a
+ * flash short; leaving the scene does.
  *
  * `onChange` hears the combined set of engaged effects whenever it changes —
  * app.ts hands it to the compositor and to the output window. The buttons
@@ -41,7 +42,7 @@ export interface EffectControlsOptions {
 export interface EffectControls {
   /** Show the bar only while a scene is on screen; hiding lets everything go. */
   setVisible(visible: boolean): void;
-  /** Lets every effect go, a latched one included (leaving the scene). */
+  /** Lets every effect go, a running flash included (leaving the scene). */
   releaseAll(): void;
   engaged(): HeldEffects;
 }
@@ -55,13 +56,14 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
   const { bar } = opts;
   const byKey: Record<EffectId, boolean> = { ...NO_EFFECTS };
   const byPointer: Record<EffectId, boolean> = { ...NO_EFFECTS };
-  const latched: Record<EffectId, boolean> = { ...NO_EFFECTS };
+  const flashing: Record<EffectId, boolean> = { ...NO_EFFECTS };
+  const flashTimers = new Map<EffectId, ReturnType<typeof setTimeout>>();
   const buttons = new Map<EffectId, HTMLButtonElement>();
   let current: HeldEffects = { ...NO_EFFECTS };
 
   function recompute(): void {
     const next = { ...NO_EFFECTS };
-    for (const d of EFFECTS) next[d.id] = d.latch ? latched[d.id] : byKey[d.id] || byPointer[d.id];
+    for (const d of EFFECTS) next[d.id] = d.flash ? flashing[d.id] : byKey[d.id] || byPointer[d.id];
     if (sameEffects(next, current)) return;
     current = next;
     for (const d of EFFECTS) {
@@ -74,7 +76,7 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     opts.onChange({ ...next });
   }
 
-  /** Lets go of everything a key or pointer holds; a latched effect stays on. */
+  /** Lets go of everything a key or pointer holds; a flash runs out by itself. */
   function releaseHeld(): void {
     for (const d of EFFECTS) {
       byKey[d.id] = false;
@@ -84,8 +86,24 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
   }
 
   function releaseAll(): void {
-    for (const d of EFFECTS) latched[d.id] = false;
+    for (const t of flashTimers.values()) clearTimeout(t);
+    flashTimers.clear();
+    for (const d of EFFECTS) flashing[d.id] = false;
     releaseHeld();
+  }
+
+  /** Turns a `flash` effect on, or starts its flash over, for STROBE_FLASH_MS. */
+  function fire(id: EffectId): void {
+    clearTimeout(flashTimers.get(id));
+    flashing[id] = true;
+    flashTimers.set(
+      id,
+      setTimeout(() => {
+        flashTimers.delete(id);
+        flashing[id] = false;
+        recompute();
+      }, STROBE_FLASH_MS),
+    );
   }
 
   function releaseKeys(): void {
@@ -109,7 +127,7 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     b.append(name, key);
     const down = (e: PointerEvent): void => {
       if (e.button > 0) return;
-      if (d.latch) latched[d.id] = !latched[d.id];
+      if (d.flash) fire(d.id);
       else byPointer[d.id] = true;
       recompute();
     };
@@ -134,7 +152,7 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     e.preventDefault();
     if (e.repeat || byKey[d.id]) return;
     byKey[d.id] = true;
-    if (d.latch) latched[d.id] = !latched[d.id];
+    if (d.flash) fire(d.id);
     opts.onKeyUse?.(d.id);
     recompute();
   });

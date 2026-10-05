@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NO_EFFECTS, type HeldEffects } from "../src/render/heldEffects.ts";
+import { NO_EFFECTS, STROBE_FLASH_MS, type HeldEffects } from "../src/render/heldEffects.ts";
 
 // effectControls.ts builds its buttons and listens on window/document; the
 // tests run in node, so both are small fakes that keep the listeners.
@@ -80,29 +80,54 @@ describe("effect controls", () => {
     expect(now().blackout).toBe(false);
   });
 
-  it("Strobe latches: one press turns it on, the next press off", async () => {
+  it("one Strobe press is one flash that goes off by itself", async () => {
+    vi.useFakeTimers();
+    const { key, now } = await build();
+    key("keydown", "KeyW");
+    expect(now().strobe).toBe(true);
+    key("keydown", "KeyW", true);
+    vi.advanceTimersByTime(STROBE_FLASH_MS - 1);
+    expect(now().strobe).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(now().strobe).toBe(false);
+    // Still holding the key, and its repeats, fire nothing more.
+    key("keydown", "KeyW", true);
+    expect(now().strobe).toBe(false);
+    key("keyup", "KeyW");
+    key("keydown", "KeyW");
+    expect(now().strobe).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("a press during a flash starts it over", async () => {
+    vi.useFakeTimers();
     const { key, now } = await build();
     key("keydown", "KeyW");
     key("keyup", "KeyW");
-    expect(now().strobe).toBe(true);
-    key("keydown", "KeyW", true);
-    expect(now().strobe).toBe(true);
+    vi.advanceTimersByTime(STROBE_FLASH_MS - 10);
     key("keydown", "KeyW");
-    key("keyup", "KeyW");
+    vi.advanceTimersByTime(STROBE_FLASH_MS - 1);
+    expect(now().strobe).toBe(true);
+    vi.advanceTimersByTime(1);
     expect(now().strobe).toBe(false);
+    vi.useRealTimers();
   });
 
-  it("the Strobe button latches the same way", async () => {
+  it("the Strobe button flashes once per press, held or not", async () => {
+    vi.useFakeTimers();
     const { button, now } = await build();
     button("strobe").fire("pointerdown", { button: 0 });
-    button("strobe").fire("pointerup");
-    button("strobe").fire("pointerleave");
     expect(now().strobe).toBe(true);
-    button("strobe").fire("pointerdown", { button: 0 });
+    vi.advanceTimersByTime(STROBE_FLASH_MS);
     expect(now().strobe).toBe(false);
+    button("strobe").fire("pointerup");
+    button("strobe").fire("pointerdown", { button: 0 });
+    expect(now().strobe).toBe(true);
+    vi.useRealTimers();
   });
 
-  it("a latched Strobe survives blur and a hidden tab, not leaving the scene", async () => {
+  it("blur and a hidden tab do not cut a flash short; leaving the scene does", async () => {
+    vi.useFakeTimers();
     const { controls, key, now } = await build();
     key("keydown", "KeyW");
     win.fire("blur");
@@ -111,5 +136,8 @@ describe("effect controls", () => {
     expect(now().strobe).toBe(true);
     controls.setVisible(false);
     expect(now().strobe).toBe(false);
+    vi.advanceTimersByTime(STROBE_FLASH_MS);
+    expect(now().strobe).toBe(false);
+    vi.useRealTimers();
   });
 });
