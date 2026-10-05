@@ -95,6 +95,7 @@ import {
 } from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import {
   getSceneExpansion,
@@ -236,6 +237,7 @@ import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBri
 import { thisDevice } from "./net/deviceKind.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
+import { createEffectControls, effectShortcutId, type EffectControls } from "./ui/effectControls.ts";
 import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
@@ -261,6 +263,7 @@ const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
 const outStateEl = document.getElementById("outState") as HTMLSpanElement;
 const takeBtn = document.getElementById("takeBtn") as HTMLButtonElement;
 const outBarEl = document.getElementById("outBar") as HTMLElement;
+const fxBarEl = document.getElementById("fxBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -567,6 +570,12 @@ let outputBridge: OutputBridge | null = null;
  *  room. */
 let roomBridge: RoomBridge | null = null;
 let outputControls: OutputControls | null = null;
+/** The held-effect buttons and keys (ui/effectControls.ts), built at boot. */
+let effectControls: EffectControls | null = null;
+/** Draws every frame (render/compositor.ts): the scene alone, or the crossfade
+ *  between two, with whatever held effects are engaged. Created with the main
+ *  GL context in boot(). */
+let compositor: Compositor | null = null;
 let outputSens = 1;
 let outputExp = 1;
 let lastRenderFpsMs = 0;
@@ -739,7 +748,7 @@ function wireOutputKeys(controls: OutputControls): void {
       const result = controls.go(glideMs ?? undefined);
       noteKeyUse("go");
       if (result === "glide" && glideMs !== null) showHud(`Play: gliding over ${(glideMs / 1000).toFixed(1)} s`);
-      else if (glideMs !== null) showHud("Play: sent at once — a glide only runs within one scene");
+      else if (glideMs !== null) showHud("Play: sent at once");
       else showHud("Play: sent to output");
     },
     true,
@@ -807,17 +816,26 @@ function updateSceneVersionLabel(next: Scene): void {
   bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
 }
 
-/** Puts `next` on the main host (clearing whatever was mounted first), or, if
+/** Puts `next` on the main host (clearing whatever was mounted first, unless
+ *  `crossfade` asks to blend from `prev`, which then stays), or, if
  *  its init() throws (a shader this GPU won't compile, a float target it
  *  lacks), says so and leaves it: back to the gallery, or to `prev` when there
  *  is no gallery (a `?room=` renderer). Returns whether `next` is running.
  *  Callers keep `scene` pointing at `next` until this answers, and must stop
  *  when it returns false: `scene` has been put back and the HUD explains. */
-function mountOrBail(next: Scene, prev: Scene): boolean {
+function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   const host = mainHost!;
-  host.unmountAll();
+  // A crossfade still running ends here, its outgoing scene dropped at once.
+  compositor?.cancel();
+  // A different scene on screen already: it stays mounted, drawn under the new
+  // one, until the compositor's blend is done (render/crossfade.ts has the
+  // timing). The floor preset cuts on the beat instead of blending: two
+  // scenes at once are too much for it.
+  const fade = crossfade && prev !== next && host.isMounted(prev);
+  if (!fade) host.unmountAll();
   try {
     host.mount(next);
+    if (fade) compositor?.begin(prev, { cut: quality.preset === "floor" });
     return true;
   } catch (err) {
     console.error(`"${next.name}" failed to start:`, err);
@@ -846,7 +864,7 @@ function applyScene(next: Scene): void {
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ from the last one's while previewing.
   if (previewActive) applyRenderQuality();
-  if (!mountOrBail(next, prev)) return;
+  if (!mountOrBail(next, prev, inViz)) return;
   updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
@@ -2168,6 +2186,9 @@ function setLaptopWaiting(waiting: boolean): void {
 async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
   document.body.classList.remove("in-gallery");
+  // Already in a scene (a link or the back/forward buttons changed the route):
+  // the new one crossfades in; from the gallery it just appears.
+  const fromScene = inViz;
   inViz = true;
   canvas.style.display = "block";
   // The resize observer's cache still says 0x0 from while the canvas was
@@ -2180,7 +2201,7 @@ async function enterViz(next: Scene): Promise<void> {
   // Before the mount (see applyScene); previewActive is still false on a
   // fresh entry and turns on at the next tick, which remounts if needed.
   if (previewActive) applyRenderQuality();
-  if (!mountOrBail(next, prev)) return;
+  if (!mountOrBail(next, prev, fromScene)) return;
   updateSceneVersionLabel(next);
 
   showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
@@ -2191,6 +2212,7 @@ async function enterViz(next: Scene): Promise<void> {
   if (!bypassGallery) backBtn.style.display = "block";
   sceneVersion.style.display = "inline";
   outputControls?.setVisible(true);
+  effectControls?.setVisible(true);
 
   if (ownInput()) void ensureAudio();
   updateMicPrompt();
@@ -2211,8 +2233,10 @@ function exitToGallery(): void {
   stopBtn.style.display = "none";
   sceneVersion.style.display = "none";
   outputControls?.setVisible(false);
+  effectControls?.setVisible(false);
   hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
+  compositor?.cancel();
   mainHost?.unmountAll();
   canvas.style.display = "none";
   immersive?.pause();
@@ -2385,6 +2409,8 @@ async function boot(): Promise<void> {
   detectedPreset = devPin ?? (await detectQuality());
   quality = qualitySettings(renderPreset());
   mainHost = createSceneHost(gl, quality);
+  const host = mainHost;
+  compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   resourceMeter = createResourceMeter(gl);
   if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
@@ -2546,6 +2572,19 @@ async function boot(): Promise<void> {
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
   }
+  // The held effects: on this window through the compositor, and on the
+  // pop-out as their own message. Not part of the look, so Cue never holds them.
+  effectControls = createEffectControls({
+    bar: fxBarEl,
+    enabled: () => inViz,
+    isTyping: isTypingTarget,
+    onChange: (effects) => {
+      compositor?.setEffects(effects);
+      outputBridge?.sendEffects(effects);
+    },
+    onKeyUse: (id) => noteKeyUse(effectShortcutId(id)),
+  });
+  effectControls.setVisible(inViz);
 
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
@@ -3182,8 +3221,21 @@ function drawScene(
   if (picturePolled) pollPicture();
   // The timer query only runs while the panel is open to show it.
   resourceMeter?.beginGpu(deviceMenu?.isOpen() ?? false);
+  let governable = true;
   try {
-    scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
+    // A crossfade or a held effect draws through the compositor; with neither
+    // in play this is just scene.render(...).
+    governable = compositor!.render({
+      ctx: mainHost!.ctx,
+      scene,
+      frame: displayFrame,
+      viewport,
+      palette,
+      anim: latchedAnim,
+      drives,
+      drivesFor: (s) => engine.forScene(s.id, s.settings ?? [], latchedAnim),
+      nowMs: nowRafMs,
+    }).governable;
   } finally {
     resourceMeter?.endGpu();
   }
@@ -3195,7 +3247,9 @@ function drawScene(
   // worth paying only while the Master card's Picture block is actually
   // visible or a headless sweep asked for it (pictureForced).
   if (picturePolled) capturePicture(nowRafMs);
-  governor?.recordFrame(nowRafMs);
+  // A frame with two scenes (a crossfade) or none (Freeze) says nothing about
+  // what one scene costs, so the governor does not see it.
+  if (governable) governor?.recordFrame(nowRafMs);
 }
 
 /** Whether anything currently wants a live picture reading — the Master

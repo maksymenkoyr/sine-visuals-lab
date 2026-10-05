@@ -21,7 +21,7 @@ import type { Scene, SceneContext, Viewport } from "./scene.ts";
  * default framebuffer into a texture (legal because the canvas is not
  * multisampled — see pictureReadback.ts's header), render the next, then draw
  * a tiny pass of our own into the default framebuffer that mixes the two
- * captures and applies the effects (invert, mirror, strobe flash, blackout).
+ * captures and applies the effects (heldEffects.ts's EffectLook).
  * The default framebuffer is cleared before each scene of a pair, since a
  * scene that does not clear would otherwise paint over the other one's picture.
  *

@@ -1,7 +1,6 @@
 /**
- * The held effects — Blackout, Strobe, Freeze, Invert, Mirror — as plain data
- * and pure functions. Each is on only while its key or on-screen button is
- * held. They are not part of the look: never saved, never held by Cue, never
+ * The held effects (the list is EFFECTS below) as plain data and pure
+ * functions. Each is on only while its key or on-screen button is held. They are not part of the look: never saved, never held by Cue, never
  * in a Look's share code. The main window keeps its own set
  * (ui/effectControls.ts) and sends it to the pop-out output as its own message
  * (net/outputSync.ts's `effects`, like `power`); src/render/compositor.ts is
