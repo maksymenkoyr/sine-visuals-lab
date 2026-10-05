@@ -4,7 +4,7 @@ One grey alien dancing as a glowing green wireframe on black, in three short
 loops: each loop is one captured dance seen from its own angle. The music pays
 for the frames: the Play setting's wire sets how fast the loop on screen plays,
 and silence holds the frame. The Cut setting's wire cuts to another loop when
-it rises over the line under its graph. A draft, not on main yet (#373).
+it rises over the line under its graph. A draft, not on main yet (#374).
 
 ## Where the code is
 
@@ -137,4 +137,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 ## History
 
-- #373 (draft, 2026-10-05): the scene, built on #368 for the Level signal.
+- #373 (2026-10-05, closed): the scene, built on #368 for the Level signal.
+- #374 (draft, 2026-10-05): the same, rebased after #368 merged, plus the Play readout.
