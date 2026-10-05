@@ -173,7 +173,10 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * plain catalogue/grid/line default into exactly the one-source, weight-1,
  * Graded `add` patch that reproduces it, and every combine/height rule
  * collapses to a no-op at that shape (Σ of one weight-1 term is that term;
- * Graded is the untouched catalogue/grid/line reading). See
+ * Graded is the untouched catalogue/grid/line reading). A coupling that
+ * sums several catalogue signals declares that sum as a patch default
+ * (`add`, one weighted source per term) instead of `"scene"`, so it starts
+ * on real wires the user can see and unplug — Chladni's Glow. See
  * tests/drives.test.ts's identity check, which walks every registered
  * scene's drive settings and asserts exactly this.
  *
@@ -708,13 +711,16 @@ export function driveSettingFromChoice(choice: DriveChoice): DriveSetting {
   return { mix: "add", sources: [{ choice, weight: DRIVE_WEIGHT_DEFAULT }] };
 }
 
-/** A default of `"scene"` stays `"scene"`; any other default becomes the
+/** A default of `"scene"` stays `"scene"`; a patch default is normalized
+ *  as-is (several real wires from the start); any other default becomes the
  *  one-source patch `driveSettingFromChoice` builds for it — see this
  *  file's header's Identity paragraph for why that reproduces today's
  *  coupling bit-for-bit. */
 export function defaultDriveSetting(spec: SceneSetting): DriveSetting {
   const def = spec.drive?.default;
-  return def === undefined ? "scene" : driveSettingFromChoice(def);
+  if (def === undefined) return "scene";
+  if (typeof def === "object" && "mix" in def) return normalizeDriveSetting(def);
+  return driveSettingFromChoice(def);
 }
 
 /** Clamps every source's weight, drops a source whose key collides with an

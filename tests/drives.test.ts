@@ -431,6 +431,33 @@ describe("drives: identity at defaults, across every registered scene", () => {
     }
     expect(checked).toBeGreaterThan(0);
   });
+
+  it("a patch default reads exactly its weighted sum of catalogue signals (the sum it replaced on Scene)", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    clock.advance(DT, frame({ bands, onset: true }));
+    const f = frame({ bands, onset: true });
+    const anim = clock.advance(DT, f);
+    const engine = createDriveEngine();
+
+    let checked = 0;
+    for (const scene of listScenes()) {
+      const settings = scene.settings ?? [];
+      engine.accumulate(DT, f, 0.5, anim, scene.id, settings);
+      const drives = engine.forScene(scene.id, settings, anim);
+      for (const spec of settings) {
+        const def = spec.drive?.default;
+        if (typeof def !== "object" || !("mix" in def)) continue;
+        checked++;
+        expect(def.mix, `${scene.id}'s "${spec.key}"`).toBe("add");
+        let sum = 0;
+        for (const src of def.sources) sum += src.weight * SIGNALS[src.choice as SignalId].read(f, anim);
+        expect(sum, `${scene.id}'s "${spec.key}" reads 0 here, so this check would be vacuous`).toBeGreaterThan(0);
+        expect(drives.valueOf(spec.key), `${scene.id}'s "${spec.key}"`).toBeCloseTo(sum * (spec.drive!.gain ?? 1), 6);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
 });
 
 // The lexical backstop for rule 1 of the 2026-09-28 audit (this file's

@@ -14,7 +14,9 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    header): read it through the generated `<key>Drive(signal)` in GLSL or
    `drives.value`/`drives.fired` in JS, never the signal directly, so the
    user can pick what it reacts to. Default it to the one signal it reads,
-   or `"scene"` with a `sceneLabel` when it mixes several.
+   or, when it sums several, to an `add` patch with one weighted source per
+   signal, so it starts on real wires. Keep `"scene"` with a `sceneLabel`
+   for a mix no patch can write; the panel shows it as dimmed ghost wires.
 3. Register it: add to `src/render/scenes/index.ts` (`registerScene(...)`) —
    first among the drafts, per that file's header comment — and export it
    alongside its neighbours.

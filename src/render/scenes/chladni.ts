@@ -405,6 +405,12 @@ export function drawnGrainCount(
   return Math.max(1, Math.min(desired, fits));
 }
 
+// Glow's default wires: the slewed treble level and the treble onset pulse,
+// summed with these weights. POINT_VERT's vGlow sum uses the same pair, so
+// the default patch draws exactly what the old built-in reaction did.
+const GLOW_LEVEL_WEIGHT = 0.8;
+const GLOW_HIT_WEIGHT = 1.4;
+
 const SETTINGS: SceneSetting[] = [
   {
     key: "complexity",
@@ -584,8 +590,8 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "highGlow",
-    label: "Treble glow",
-    description: "Hats and cymbals make the sand glow — each grain blooms with a soft halo",
+    label: "Glow",
+    description: "Each grain blooms with a soft halo when its wires light up — the treble (hats and cymbals) to start",
     group: "Look",
     min: 0,
     max: 1,
@@ -593,9 +599,18 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Directly the hats/cymbals dial, as caustics' sparkle.
     auto: { brightness: 0.35, attack: 0.15 },
-    // Two signals (the slewed high level and its onset pulse), not one —
-    // see the vGlow formula in POINT_VERT — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: treble level + hits", sceneSources: ["anim.high", "anim.highOnset"] },
+    // Two real wires (the slewed high level and its onset pulse), weighted
+    // as POINT_VERT's vGlow sum — never a built-in, so nothing shows as a
+    // ghost wire: it's either plugged in or not.
+    drive: {
+      default: {
+        mix: "add",
+        sources: [
+          { choice: "anim.high", weight: GLOW_LEVEL_WEIGHT },
+          { choice: "anim.highOnset", weight: GLOW_HIT_WEIGHT },
+        ],
+      },
+    },
   },
   {
     key: "beatFlash",
@@ -721,7 +736,7 @@ const STREAM_RATE = 0.3;
 // A grain hopping this far (grainHopScale x grainBounce) is drawn at the
 // palette ramp's brightest end: an antinode under a loud drive or a kick.
 const MOTION_FULL = 1.0;
-// Treble glow (see POINT_VERT / POINT_FRAG): hats make the sand glint. One
+// Glow (see POINT_VERT / POINT_FRAG): hats make the sand glint. One
 // grain in GLINT_ONE_IN (times the Sand amount above 1, so piling on sand
 // doesn't pile on bloom) carries a halo of HALO_PX pixels (at 720p) — a
 // fixed pixel radius, not a multiple of the grain size, so the halo is a
@@ -906,11 +921,11 @@ void main() {
   vec2 shard = hash22(vec2(texel) * 0.911 + 5.7);
   vFacets = shard.x < 0.5 ? 3.0 : 4.0;
   vRot = shard.y * 6.2832;
-  // Treble glow: the sprite grows by a fixed pixel margin to make room for
+  // Glow: the sprite grows by a fixed pixel margin to make room for
   // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
   // flashes rather than fogs.
   float glint = step(1.0 - 1.0 / (${GLINT_ONE_IN.toFixed(1)} * max(1.0, uSandAmount)), hash21(vec2(texel) * 0.517 + 9.1));
-  vGlow = glint * clamp(uHighGlow * highGlowDrive(0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
+  vGlow = glint * clamp(uHighGlow * highGlowDrive(${GLOW_LEVEL_WEIGHT.toFixed(2)} * uHigh + ${GLOW_HIT_WEIGHT.toFixed(2)} * uHighPulse), 0.0, 1.0);
   float resScale = max(1.0, uResolution.y / 720.0);
   // A shard inscribed in the old disc covers less area than it (a triangle
   // 0.41x, a square 0.64x); grow the size by the matching factor so a faceted
@@ -962,7 +977,7 @@ void main() {
   // The sprite was enlarged by vScale for the halo; the grain itself keeps
   // its own size at the centre, so measure the core in grain radii.
   float r = sqrt(r2) * vScale;
-  // Treble glow: a soft halo across the enlarged sprite, tinted toward
+  // Glow: a soft halo across the enlarged sprite, tinted toward
   // white, falling to zero at the sprite edge. Normalised by sprite area
   // (in 720p pixels) so the bloom a line reaches depends on how many grains
   // glint there, not on grain size or resolution.
