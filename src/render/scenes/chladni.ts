@@ -47,7 +47,14 @@ import {
 // One departure from a real plate: the excitation is that band energy less
 // most of its own running average, because music is always loudest in the
 // bass (and a room mic adds a floor of its own), and a plate that answered
-// absolute energy showed its lowest mode nearly all the time.
+// absolute energy showed its lowest mode nearly all the time. How much of
+// the average comes off is the Loud ↔ New setting (`newness`, default
+// SURPRISE_SHARE): at 0 the plate answers each band's level as it arrives,
+// so the loudest part wins; at 1 only the part above the average counts, so
+// a steady sound stops scoring at all. The bands arrive already evened out
+// by the analyser's per-band auto-gain (audio/features.ts), so Loud doesn't
+// simply mean bass: on the tempo-eval tracks it mostly made the figure
+// change less (docs/scenes/chladni.md, Measurements).
 // The strongest few modes by response are summed in the shader, weighted
 // by that response, so mode changes are the plate's own dynamics rather
 // than a scripted crossfade.
@@ -188,6 +195,11 @@ export interface PlateResponseInputs {
   /** Figure hold setting, [0,1]: how much stronger a new mode must ring to
    *  take the plate — see holdMargin. Omitted = 0, the plain model. */
   figureHold?: number;
+  /** Loud ↔ New setting, [0,1]: the share of each mode's running average
+   *  taken off its excitation — 0 = each band's level as it arrives, the
+   *  loudest part wins; 1 = only what is above its average counts.
+   *  Omitted = SURPRISE_SHARE. */
+  newness?: number;
 }
 
 export interface ActiveMode extends PlateMode {
@@ -215,10 +227,11 @@ const ATTACK_SEC_MIN = 0.03;
  *  last active set holds, so silence freezes the figure rather than
  *  collapsing it to nothing. */
 const RESPONSE_FLOOR = 1e-9;
-/** Each mode is excited by its band energy minus SURPRISE_SHARE of that
- *  energy's own running average over BASELINE_SEC — see createPlateResponse. */
+/** Each mode is excited by its band energy minus a share of that energy's
+ *  own running average over BASELINE_SEC — see createPlateResponse. The
+ *  share is the Loud ↔ New setting; SURPRISE_SHARE is its default. */
 const BASELINE_SEC = 4;
-const SURPRISE_SHARE = 0.8;
+export const SURPRISE_SHARE = 0.8;
 /** The top mode's head start at full Figure hold. */
 const HOLD_MARGIN_MAX = 3;
 /** Figure hold's curve: on the tempo-eval tracks most of the effect sits in
@@ -269,6 +282,7 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
       const release = ringSeconds(inputs.ring);
       const attack = Math.max(ATTACK_SEC_MIN, release * ATTACK_FRACTION);
       const margin = holdMargin(inputs.figureHold ?? 0);
+      const surprise = Math.max(0, Math.min(1, inputs.newness ?? SURPRISE_SHARE));
       const bandCount = Math.min(bands.length, NUM_BANDS);
 
       for (let k = 0; k < table.length; k++) {
@@ -291,11 +305,11 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
         // spectral tilt — the music's bass-heavy balance, or a mic's noise
         // floor — can't hand one mode the plate for good: what wins is the
         // mode whose part of the spectrum is busier than usual right now. A
-        // held tone keeps 1 - SURPRISE_SHARE of its level, so it still holds
-        // its figure rather than fading to nothing.
+        // held tone keeps 1 - surprise of its level, so below New's end of
+        // the slider it still holds its figure rather than fading to nothing.
         if (Number.isNaN(baseline[k])) baseline[k] = raw;
         baseline[k] += (raw - baseline[k]) * (1 - Math.exp(-dt / BASELINE_SEC));
-        const excitation = Math.max(0, raw - SURPRISE_SHARE * baseline[k]);
+        const excitation = Math.max(0, raw - surprise * baseline[k]);
         const tau = excitation > amplitudes[k] ? attack : release;
         amplitudes[k] += (excitation - amplitudes[k]) * (1 - Math.exp(-dt / tau));
         sharpened[k] = Math.pow(k === top ? amplitudes[k] * margin : amplitudes[k], sharpen);
@@ -459,6 +473,18 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0,
+  },
+  {
+    key: "newness",
+    label: "Loud ↔ New",
+    description: "Which part of the music takes the plate: toward Loud, whichever part is loudest right now; toward New, whichever part just got louder than usual",
+    // Manual, like Figure hold: how the plate should listen is a taste call,
+    // not a property of the track.
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: SURPRISE_SHARE,
   },
   {
     key: "squarePlate",
@@ -1134,6 +1160,7 @@ function createChladniScene(): Scene {
         resonance: resolveSceneSetting(ID, settingFor("resonance")),
         ring: resolveSceneSetting(ID, settingFor("ring")),
         figureHold: resolveSceneSetting(ID, settingFor("figureHold")),
+        newness: resolveSceneSetting(ID, settingFor("newness")),
       });
       let maxOrder = 1;
       for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.m);
