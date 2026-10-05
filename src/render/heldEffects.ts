@@ -1,6 +1,8 @@
 /**
  * The held effects (the list is EFFECTS below) as plain data and pure
- * functions. Each is on only while its key or on-screen button is held. They are not part of the look: never saved, never held by Cue, never
+ * functions. Each is on only while its key or on-screen button is held,
+ * except one marked `latch`, which a press turns on and the next press turns
+ * off. They are not part of the look: never saved, never held by Cue, never
  * in a Look's share code. The main window keeps its own set
  * (ui/effectControls.ts) and sends it to the pop-out output as its own message
  * (net/outputSync.ts's `effects`, like `power`); src/render/compositor.ts is
@@ -11,7 +13,7 @@
  * (`code`), so a Cyrillic or German layout reaches them too.
  */
 
-export type EffectId = "blackout" | "strobe" | "freeze" | "invert" | "mirror";
+export type EffectId = "blackout" | "strobe" | "freeze" | "invert";
 
 export interface EffectDef {
   id: EffectId;
@@ -23,19 +25,20 @@ export interface EffectDef {
   key: string;
   /** What the keys card says it does. */
   hint: string;
+  /** A press turns it on and the next press off, instead of on only while held. */
+  latch?: boolean;
 }
 
 export const EFFECTS: readonly EffectDef[] = [
   { id: "blackout", label: "Blackout", code: "KeyQ", key: "Q", hint: "Hold to fade the picture to black" },
-  { id: "strobe", label: "Strobe", code: "KeyW", key: "W", hint: "Hold for white flashes on every eighth note" },
+  { id: "strobe", label: "Strobe", code: "KeyW", key: "W", hint: "Press for white flashes on every eighth note, press again to stop", latch: true },
   { id: "freeze", label: "Freeze", code: "KeyE", key: "E", hint: "Hold to freeze the picture" },
   { id: "invert", label: "Invert", code: "KeyI", key: "I", hint: "Hold for negative colours" },
-  { id: "mirror", label: "Mirror", code: "KeyU", key: "U", hint: "Hold to mirror the left half onto the right" },
 ];
 
 export type HeldEffects = Record<EffectId, boolean>;
 
-export const NO_EFFECTS: HeldEffects = { blackout: false, strobe: false, freeze: false, invert: false, mirror: false };
+export const NO_EFFECTS: HeldEffects = { blackout: false, strobe: false, freeze: false, invert: false };
 
 export function anyEffect(e: HeldEffects): boolean {
   return EFFECTS.some((d) => e[d.id]);
@@ -100,7 +103,6 @@ export function strobeBeatPhase(clock: { tempoOn: boolean; metronomePhase: numbe
  *  smoothed blackout level. */
 export interface EffectLook {
   invert: boolean;
-  mirror: boolean;
   /** 0..1 mix toward white. */
   flash: number;
   /** 0..1 dim toward black. */
@@ -110,7 +112,6 @@ export interface EffectLook {
 export function effectLook(e: HeldEffects, blackLevel: number, beatPhase01: number): EffectLook {
   return {
     invert: e.invert,
-    mirror: e.mirror,
     flash: e.strobe ? strobeLevel(beatPhase01) : 0,
     black: blackLevel,
   };

@@ -105,21 +105,18 @@ uniform sampler2D uB;
 uniform sampler2D uA;
 uniform float uMix;
 uniform float uInvert;
-uniform float uMirror;
 uniform float uFlash;
 uniform float uBlack;
 out vec4 o;
 void main() {
-  vec2 uv = vUv;
-  if (uMirror > 0.5 && uv.x > 0.5) uv.x = 1.0 - uv.x;
-  vec3 c = mix(texture(uA, uv).rgb, texture(uB, uv).rgb, uMix);
+  vec3 c = mix(texture(uA, vUv).rgb, texture(uB, vUv).rgb, uMix);
   if (uInvert > 0.5) c = 1.0 - c;
   c = mix(c, vec3(1.0), uFlash);
   c *= 1.0 - uBlack;
   o = vec4(c, 1.0);
 }`;
 
-const NO_LOOK: EffectLook = { invert: false, mirror: false, flash: 0, black: 0 };
+const NO_LOOK: EffectLook = { invert: false, flash: 0, black: 0 };
 /** A frame gap longer than this is a stall, not time passing for a fade. */
 const MAX_FADE_STEP_MS = 100;
 
@@ -224,7 +221,6 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
     p.use();
     p.setF("uMix", mix);
     p.setF("uInvert", look.invert ? 1 : 0);
-    p.setF("uMirror", look.mirror ? 1 : 0);
     p.setF("uFlash", look.flash);
     p.setF("uBlack", look.black);
     gl.activeTexture(gl.TEXTURE1);
@@ -282,7 +278,7 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
       }
       const blend = !broken && view !== null && view.stage === "blend";
       const fx = broken ? NO_EFFECTS : effects;
-      const needsPass = blend || fx.invert || fx.mirror || fx.strobe || fx.freeze || blackLevel > 0;
+      const needsPass = blend || fx.invert || fx.strobe || fx.freeze || blackLevel > 0;
 
       if (!needsPass) {
         // The outgoing scene alone while a blend waits for its beat, else the scene.

@@ -15,6 +15,11 @@ import { EFFECTS, effectForCode, NO_EFFECTS, sameEffects, type EffectId, type He
  * typing in a field is left alone. A button and its key can both hold an
  * effect; it stays on until both let go.
  *
+ * An effect marked `latch` (EffectDef) is the exception: a key down or a
+ * pointer down on its button flips it, and nothing but the next press or
+ * leaving the scene turns it off. Losing focus does not, since clicking into
+ * the pop-out output window is exactly that.
+ *
  * `onChange` hears the combined set of engaged effects whenever it changes —
  * app.ts hands it to the compositor and to the output window. The buttons
  * light while their effect is engaged. This file builds the buttons itself
@@ -36,7 +41,7 @@ export interface EffectControlsOptions {
 export interface EffectControls {
   /** Show the bar only while a scene is on screen; hiding lets everything go. */
   setVisible(visible: boolean): void;
-  /** Lets every effect go (window blur, leaving the scene). */
+  /** Lets every effect go, a latched one included (leaving the scene). */
   releaseAll(): void;
   engaged(): HeldEffects;
 }
@@ -50,12 +55,13 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
   const { bar } = opts;
   const byKey: Record<EffectId, boolean> = { ...NO_EFFECTS };
   const byPointer: Record<EffectId, boolean> = { ...NO_EFFECTS };
+  const latched: Record<EffectId, boolean> = { ...NO_EFFECTS };
   const buttons = new Map<EffectId, HTMLButtonElement>();
   let current: HeldEffects = { ...NO_EFFECTS };
 
   function recompute(): void {
     const next = { ...NO_EFFECTS };
-    for (const d of EFFECTS) next[d.id] = byKey[d.id] || byPointer[d.id];
+    for (const d of EFFECTS) next[d.id] = d.latch ? latched[d.id] : byKey[d.id] || byPointer[d.id];
     if (sameEffects(next, current)) return;
     current = next;
     for (const d of EFFECTS) {
@@ -68,12 +74,18 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     opts.onChange({ ...next });
   }
 
-  function releaseAll(): void {
+  /** Lets go of everything a key or pointer holds; a latched effect stays on. */
+  function releaseHeld(): void {
     for (const d of EFFECTS) {
       byKey[d.id] = false;
       byPointer[d.id] = false;
     }
     recompute();
+  }
+
+  function releaseAll(): void {
+    for (const d of EFFECTS) latched[d.id] = false;
+    releaseHeld();
   }
 
   function releaseKeys(): void {
@@ -97,7 +109,8 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     b.append(name, key);
     const down = (e: PointerEvent): void => {
       if (e.button > 0) return;
-      byPointer[d.id] = true;
+      if (d.latch) latched[d.id] = !latched[d.id];
+      else byPointer[d.id] = true;
       recompute();
     };
     const up = (): void => {
@@ -121,6 +134,7 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     e.preventDefault();
     if (e.repeat || byKey[d.id]) return;
     byKey[d.id] = true;
+    if (d.latch) latched[d.id] = !latched[d.id];
     opts.onKeyUse?.(d.id);
     recompute();
   });
@@ -138,9 +152,9 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     byKey[d.id] = false;
     recompute();
   });
-  window.addEventListener("blur", releaseAll);
+  window.addEventListener("blur", releaseHeld);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) releaseAll();
+    if (document.hidden) releaseHeld();
   });
 
   return {

@@ -524,9 +524,9 @@
           height: 52px;
         }
       }
-      /* Held effects (src/ui/effectControls.ts), bottom centre: Blackout,
-       * Strobe, Freeze, Invert, Mirror, each on only while its button or key is
-       * held. Up whenever a scene is, with or without an output window (unlike
+      /* Held effects (src/ui/effectControls.ts), bottom centre: the list in
+       * src/render/heldEffects.ts's EFFECTS, each on only while its button or
+       * key is held, or until pressed again for one that latches. Up whenever a scene is, with or without an output window (unlike
        * the Cue/Play bar above). A lit button is an engaged effect; the bar
        * stays visible through the idle fade while one is (.attn). */
       #fxBar {
