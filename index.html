@@ -442,10 +442,29 @@
       body.controller #outBar {
         top: 100px;
       }
-      /* Record (src/ui/recordControls.ts): a red dot and the elapsed time while
+      /* Record (src/ui/recordControls.ts), bottom right, left of the fullscreen
+       * button (#fsBtn's right offset plus its width and a gap): the shape chip
+       * and the RECORD button, squared like the scene row's. A red dot and the elapsed time while
        * a take runs, and the button stays visible then even when the chrome
        * idles, so a performer can see they are recording. A phone's controller has no
        * canvas of its own to record. */
+      #recRow {
+        position: fixed;
+        bottom: 16px;
+        right: 100px;
+        z-index: 5;
+        display: flex;
+        gap: 4px;
+      }
+      #recRow .iconBtn {
+        position: static;
+        width: auto;
+        padding: 0 12px 0 10px;
+        border-radius: 3px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        white-space: nowrap;
+      }
       #recBtn.recording {
         color: #fff;
         border-color: rgba(239, 68, 68, 0.7);
@@ -469,9 +488,8 @@
         opacity: 0.5;
         cursor: default;
       }
-      body.controller #recBtn,
-      body.controller #recAspectBtn {
-        display: none !important;
+      body.controller #recRow {
+        display: none;
       }
       body.chrome-idle #outBar:not(.attn) {
         opacity: 0;
@@ -737,8 +755,6 @@
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="This room's devices">&#9638; ROOM</button>
       <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
-      <button id="recBtn" class="iconBtn" aria-pressed="false">RECORD</button>
-      <button id="recAspectBtn" class="iconBtn">SCREEN</button>
       <span id="sceneVersion" tabindex="0"></span>
     </div>
     <!-- Output controls (src/ui/outputControls.ts), top centre: shown only
@@ -751,6 +767,13 @@
       </div>
       <span id="outState"></span>
       <button id="takeBtn" type="button" title="Drop your unplayed changes and show what is on the Main screens now">TAKE MAIN</button>
+    </div>
+    <!-- Record (src/ui/recordControls.ts), bottom right beside the fullscreen
+         button: not in the scene-nav row, whose end runs under the CUE / PLAY
+         bar once an output is open. -->
+    <div id="recRow">
+      <button id="recAspectBtn" class="iconBtn">SCREEN</button>
+      <button id="recBtn" class="iconBtn" aria-pressed="false">RECORD</button>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">

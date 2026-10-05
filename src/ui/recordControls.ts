@@ -11,8 +11,9 @@ import type { ClipRecorder } from "./clipRecorder.ts";
 
 /**
  * The on-screen half of the clip recorder (index.html's #recBtn and
- * #recAspectBtn, in the scene-nav row beside POP OUT, where a performer
- * already looks for the output): RECORD starts and stops a take, and while one
+ * #recAspectBtn, bottom right beside the fullscreen button, where a performer's
+ * hands already are; the scene-nav row beside POP OUT would run under the CUE /
+ * PLAY bar): RECORD starts and stops a take, and while one
  * runs the button shows a red dot and the elapsed time. The button next to it
  * says what shape the clip has (Screen, 9:16, 1:1) and cycles on a click;
  * it is locked during a take. What is recorded and how it ends is
