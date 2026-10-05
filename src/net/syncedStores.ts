@@ -38,6 +38,9 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.bakeToast",
   "vibe.audioSource",
   "vibe.audioInputDevice",
+  // Which controller knob or pad does what: a controller is plugged into one
+  // machine (ui/midiInput.ts).
+  "vibe.midiMap",
   "vibe.quality",
   "vibe.powerMode",
   "vibe.output.quality",

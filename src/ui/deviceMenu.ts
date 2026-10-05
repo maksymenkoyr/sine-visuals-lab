@@ -25,6 +25,9 @@ import {
 import type { SceneLook } from "../render/sceneLooks.ts";
 import type { Scene } from "../render/scene.ts";
 import { createLooksCard } from "./looksCard.ts";
+import { createMidiCard } from "./midiCard.ts";
+import type { MidiController } from "./midiInput.ts";
+import { MASTER_EXPANSION_TARGET, MASTER_SCALE_TARGET, sceneTargetId } from "./midiMap.ts";
 // Side-effect import: registers every built-in widget (registerWidget) so a
 // scene's Scene.panel sections resolve — see widgets/registry.ts's header
 // for the panel/widget split this file is the one place that renders.
@@ -455,6 +458,8 @@ export interface PaletteMenuItem extends MenuItem {
 }
 
 export interface DeviceMenuDeps {
+  /** The MIDI session (ui/midiInput.ts), wired in app.ts. Absent: no MIDI card. */
+  midi?: MidiController;
   getPalettes: () => PaletteMenuItem[];
   currentSceneId: () => string;
   currentPaletteId: () => string;
@@ -785,6 +790,9 @@ export interface DeviceMenu {
     gate: SilenceGateReading | null,
     drives: SceneDrives | null,
   ): void;
+  /** Moves the slider a MIDI mapping aims at (ui/midiCard.ts's applyCc), by
+   *  target id and controller value 0..127. Works with the panel shut. */
+  applyMidiCc(target: string, cc: number): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
@@ -1137,6 +1145,10 @@ function unmarkBlock(heading: HTMLElement): void {
 export interface ControlRowSpec {
   label: string;
   accent: string;
+  /** Makes the row mappable to a MIDI knob (ui/midiCard.ts): `id` is the
+   *  target a mapping stores (ui/midiMap.ts), `label` what the mapping list
+   *  calls it. */
+  midi?: { id: string; label: string };
   min: number;
   max: number;
   /** Linear rows only — the slider's native step. */
@@ -1665,6 +1677,12 @@ export function createControlRow(spec: ControlRowSpec) {
     slider.max = String(spec.max);
   }
   slider.step = discrete ? String(spec.step) : "any";
+  if (spec.midi) {
+    el.dataset.midiRow = "";
+    slider.dataset.midiId = spec.midi.id;
+    slider.dataset.midiLabel = spec.midi.label;
+    if (!isLog && spec.step !== undefined) slider.dataset.midiStep = String(spec.step);
+  }
 
   // Two lines: the setting's own description, always present when it has
   // one, and beneath it the auto takeover note, shown only while auto holds
@@ -4821,6 +4839,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const masterRow = createControlRow({
     label: "Scale",
     accent: SCENE_VIOLET,
+    midi: { id: MASTER_SCALE_TARGET, label: "Master · Scale" },
     min: SCENE_MASTER_MIN,
     max: SCENE_MASTER_MAX,
     step: 0.05,
@@ -4837,6 +4856,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const masterExpansionRow = createControlRow({
     label: "Expansion",
     accent: SCENE_VIOLET,
+    midi: { id: MASTER_EXPANSION_TARGET, label: "Master · Expansion" },
     min: SCENE_EXPANSION_MIN,
     max: SCENE_EXPANSION_MAX,
     defaultValue: SCENE_EXPANSION_DEFAULT,
@@ -5885,6 +5905,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // patchChanged's syncLinkedDriveSetting below).
   let linkedByKey: Map<string, { ownLabel?: string; linked: readonly LinkedSetting[] }> = new Map();
 
+  // The scene the Scene card's rows were last built for. They are rebuilt
+  // when the panel opens, so with it shut after a scene change the rows are
+  // the previous scene's until something asks (midiCard.ts's applyCc).
+  let renderedSceneId: string | null = null;
+
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
   // active scene has no settings to snapshot (renderSceneSettings below).
@@ -6188,6 +6213,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const row = createControlRow({
       label: spec.label,
       accent,
+      midi: { id: sceneTargetId(sceneId, spec.key), label: `${deps.getScene(sceneId)?.name ?? sceneId} · ${spec.label}` },
       min: spec.min,
       max: spec.max,
       step: spec.step,
@@ -6330,6 +6356,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
+    renderedSceneId = sceneId;
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneWidgetCardsHost.innerHTML = "";
@@ -6843,7 +6870,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
+  // MIDI: a controller's knobs and pads (ui/midiCard.ts). Hidden where the
+  // browser has no Web MIDI; absent entirely when app.ts wired no session.
+  const midiCard = deps.midi
+    ? createMidiCard({
+        midi: deps.midi,
+        currentSceneId: deps.currentSceneId,
+        ensureSceneRows: () => {
+          if (renderedSceneId !== deps.currentSceneId()) renderSceneSettings();
+        },
+      })
+    : null;
+
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, ...(midiCard ? [midiCard.el] : []), dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -7071,6 +7110,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
+    applyMidiCc: (target, cc) => midiCard?.applyCc(target, cc),
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,

@@ -72,6 +72,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.bakeToast": false,
   "vibe.audioSource": false,
   "vibe.audioInputDevice": false,
+  "vibe.midiMap": false,
   "vibe.quality": false,
   "vibe.powerMode": false,
   "vibe.output.": false,

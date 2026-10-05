@@ -224,6 +224,7 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { browserMidiEnv, createMidiController } from "./ui/midiInput.ts";
 import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
@@ -1535,7 +1536,20 @@ const micAutoMembers = {
 };
 
 function wireDeviceMenu(): void {
+  // The MIDI session is made here, before any of the key handlers registered
+  // later in boot, because learning takes keyboard presses in the window's
+  // capture phase and must come first (ui/midiInput.ts). It asks for nothing
+  // until the MIDI card's button is pressed, unless the browser already
+  // granted MIDI on an earlier visit.
+  const midi = createMidiController(
+    browserMidiEnv({
+      currentSceneId: () => scene.id,
+      applyCc: (target, cc) => deviceMenu?.applyMidiCc(target, cc),
+    }),
+  );
+  void midi.autoConnect();
   deviceMenu = createDeviceMenu({
+    midi,
     getPalettes: () => PALETTES.map((p) => ({ id: p.id, name: p.name, group: p.group, swatch: paletteRampHex(p, 6) })),
     currentSceneId: () => scene.id,
     currentPaletteId: () => palette.id,
