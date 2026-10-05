@@ -7,6 +7,7 @@ This project bundles the following third-party packages and data into its client
 - The data used in this project was obtained from mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217.
 - License: the database's terms of use — the motion capture data "may be copied, modified, or redistributed without permission" and may be included in commercially-sold products; it may not be resold directly, even in converted form.
 - Source: http://mocap.cs.cmu.edu — BVH conversion by Bruce Hahne (cgspeed), https://sites.google.com/a/cgspeed.com/cgspeed/motion-capture, mirrored at https://github.com/una-dinosauria/cmu-mocap. The trials used, and how they are cut, are listed in `tools/clip-cuts.json`; `tools/clip-convert.mjs` does the conversion.
+- Used by the Dancers scene and the Alien scene (`src/render/scenes/alien/reel.ts` names the clips it dances).
 
 ## Green alien-cat meme (the look icon in `src/ui/lookIcon.ts`)
 
@@ -204,7 +205,8 @@ THE SOFTWARE.
   intersector), `src/render/scenes/dancers/sdf.ts` (the ellipsoid, rounded
   box, segment, and smooth min/max), `src/render/scenes/dancers/rig.ts` (the
   along-axis capsule distance), `src/render/scenes/dancers/index.ts` (the
-  tetrahedral normal), `src/render/scenes/crystal/glsl.ts` (the rounded box,
+  tetrahedral normal), `src/render/scenes/alien/body.ts` (the ellipsoid and
+  the smooth min, in TypeScript), `src/render/scenes/crystal/glsl.ts` (the rounded box,
   hexagon, hex-prism extrusion and capsule distance), `src/render/scenes/petri.ts`
   (the HSV-to-RGB conversion). Each site carries its own credit comment.
 - Source: https://iquilezles.org/articles/ (distance functions, intersectors,
