@@ -168,4 +168,4 @@ beat; the bar wave moved the resting size between pops.
 
 ## History
 
-- (this PR) — first draft from `/ref` on the live-coding reference.
+- #369 — first draft from `/ref` on the live-coding reference.
