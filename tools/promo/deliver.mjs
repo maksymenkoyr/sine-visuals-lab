@@ -12,9 +12,9 @@
 //   preview-<fmt>-<short side>.mp4
 //                              small enough to send in a chat (delivery.preview, its crf raised until under
 //                              delivery.sendLimitMB)
-// plus CUES.md (cuts.py cues: what plays when, with the song and its time). Files already in the folder
-// move into the next free vN/ first, so an earlier set is never overwritten. It prints each file with its
-// size and length and posts nothing.
+// plus CUES.md (cuts.py cues: what plays when, with the song and its time). Those files, when already in
+// the folder, move into the next free vN/ first, so an earlier set is never overwritten; any other file
+// there is left alone. It prints each file with its size and length and posts nothing.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -31,8 +31,10 @@ const style = JSON.parse(readFileSync(join(here, "style.json"), "utf8")).deliver
 const dest = resolve(arg("--dest") || join(homedir(), "Movies", `sine-visuals-lab-${cuts.video}-${basename(work)}`));
 mkdirSync(dest, { recursive: true });
 
-// an earlier set moves into the next free vN/
-const old = readdirSync(dest).filter((f) => statSync(join(dest, f)).isFile());
+// an earlier set moves into the next free vN/: only the files this script writes
+const fmtAlt = cuts.formats.join("|");
+const mine = new RegExp(`^(${cuts.video}-(${fmtAlt})(-share|-silent)?\\.mp4|preview-(${fmtAlt})-\\d+\\.mp4|CUES\\.md)$`);
+const old = readdirSync(dest).filter((f) => mine.test(f) && statSync(join(dest, f)).isFile());
 if (old.length) {
   let n = 1;
   while (existsSync(join(dest, `v${n}`))) n++;

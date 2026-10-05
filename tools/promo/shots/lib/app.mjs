@@ -13,37 +13,13 @@ export const P = 60000 / BPM; // beat period, ms
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const OVERLAY_CSS = `
-.pv-cap{position:fixed;left:50%;top:60px;transform:translate(-50%,-8px);z-index:2147483000;pointer-events:none;
-  font-family:"Chakra Petch",system-ui,sans-serif;text-align:center;color:#fff;opacity:0;
-  transition:opacity .22s ease,transform .22s ease;padding:16px 40px 18px;border-radius:16px;
-  background:rgba(8,10,18,.62);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  border:1px solid rgba(255,255,255,.14);white-space:nowrap}
-.pv-cap.on{opacity:1;transform:translate(-50%,0)}
-.pv-cap.static{transition:none}
-.pv-cap .k{font-size:19px;letter-spacing:.42em;text-transform:uppercase;color:#7ff3ff;margin-bottom:6px}
-.pv-cap .t{font-size:60px;font-weight:700;letter-spacing:.03em;line-height:1.05}
-.pv-cap .s{font-size:24px;opacity:.82;margin-top:8px;letter-spacing:.04em}
-.pv-cap.low{top:auto;bottom:64px}
-.pv-title{position:fixed;inset:0;z-index:2147483000;pointer-events:none;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;font-family:"Chakra Petch",system-ui,sans-serif;color:#fff;text-align:center;
-  opacity:0;transition:opacity .35s ease}
-.pv-title.on{opacity:1}
-.pv-title .box{padding:36px 80px 40px;border-radius:22px;background:rgba(8,10,18,.58);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.16)}
-.pv-title .a{font-size:112px;font-weight:700;letter-spacing:.08em;line-height:1}
-.pv-title .b{font-size:34px;letter-spacing:.34em;text-transform:uppercase;color:#7ff3ff;margin-top:20px}
-.pv-title .c{font-size:30px;margin-top:14px;opacity:.85;letter-spacing:.1em}
-.pv-dim{position:fixed;inset:0;z-index:2147482000;pointer-events:none;background:#000;opacity:0;transition:opacity .5s ease}
-.pv-dim.on{opacity:.62}
-.pv-black{position:fixed;inset:0;z-index:2147483600;pointer-events:none;background:#000;opacity:0;transition:opacity .45s ease}
-.pv-black.on{opacity:1}
 .pv-cur{position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;z-index:2147483500;
   pointer-events:none;background:rgba(255,255,255,.92);border:3px solid rgba(20,24,40,.85);
   box-shadow:0 0 0 2px rgba(255,255,255,.55),0 4px 14px rgba(0,0,0,.5);transition:transform .08s ease;transform:translate(-100px,-100px)}
 .pv-cur.down{width:20px;height:20px;margin:-10px 0 0 -10px;background:#7ff3ff}
 `;
 
-/** Navigate, wait for boot, inject overlay helpers + fake cursor. */
+/** Navigate, wait for boot, inject the fake cursor and hide the hint. */
 export async function open(page, scene, { query = "", music = false } = {}) {
   if (music) {
     // the app opens the mic only on a gesture: click the canvas, as a visitor would
@@ -64,20 +40,7 @@ export async function open(page, scene, { query = "", music = false } = {}) {
     addEventListener("mousemove", (e) => { cur.style.transform = `translate(${e.clientX}px,${e.clientY}px)`; }, true);
     addEventListener("mousedown", () => cur.classList.add("down"), true);
     addEventListener("mouseup", () => cur.classList.remove("down"), true);
-    window.__mk = (cls, html, id) => {
-      document.getElementById(id)?.remove();
-      const d = document.createElement("div");
-      d.id = id; d.className = cls; d.innerHTML = html;
-      document.documentElement.appendChild(d);
-      return d;
-    };
-    window.__cap = (k, t, s, opts = {}) => {
-      const d = window.__mk("pv-cap" + (opts.low ? " low" : "") + (opts.static ? " static" : ""),
-        `<div class="k">${k}</div><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ""}`, "pv-cap-el");
-      void d.offsetWidth; d.classList.add("on");
-    };
     setInterval(() => document.querySelectorAll("div,span").forEach((e) => { if (e.children.length === 0 && /Press \? for shortcuts/.test(e.textContent)) e.style.setProperty("display", "none", "important"); }), 80);
-    window.__capOff = () => document.getElementById("pv-cap-el")?.classList.remove("on");
   });
 }
 
@@ -149,7 +112,6 @@ export const clickText = (page, text) => page.evaluate(([text, OWN]) => {
 /** A real press: down, hold, up (the panel can rebuild DOM under a too-quick click). */
 export async function press(page, holdMs = 260) { await page.mouse.down(); await sleep(holdMs); await page.mouse.up(); }
 export const setMouse = (x, y) => { mx = x; my = y; };
-export const getMouse = () => [mx, my];
 
 export const PX = 250; // the phone panel column starts around here
 export const FB_SETUP = async (page) => { await openPanel(page); await sleep(1200); await hideChrome(page); await sleep(500); };

@@ -16,7 +16,7 @@
   "bed": { "song": "songA", "bpm": 136, "drop": 55.35, "note": "drop = song time of the bass entering, on the bed's beat grid" },
 
   "clips": {
-    "dir": "clips/scenes",
+    "dir": "clips",
     "note": "<dir>/<name>-<fmt>.mp4; window = song time at clip t=0 (the recorder already shifted for the app's reaction lag)",
     "windows": {
       "A1q": 54, "A2": 54, "A3-mig": 54,
@@ -25,7 +25,7 @@
   },
 
   "intro": {
-    "recording": "recordings/intro.mov",
+    "recording": "rec/intro.mov",
     "size": [3248, 1944],
     "note": "Two shots from a screen recording, a camera move and a speed curve each. Camera keys: [t, point, width, swell]; a value that differs per format is {\"h\":..,\"v\":..}. Speed keys: [t, speed]; slow-mo is added around 'click'.",
     "points": {
@@ -71,7 +71,7 @@
   },
 
   "gallery": {
-    "recording": "recordings/gallery.mov",
+    "recording": "rec/gallery.mov",
     "size": [3024, 1964],
     "fps": 51.43,
     "note": "Gallery part then a scene part, source seconds. page / scene = the crop areas (x0,y0,x1,y1) without browser chrome. zoomIn eases from the whole page to the pointer; zoomOut eases the scene back to its framing; pointerRest = where the pointer sits on the scene (erased there).",
@@ -106,9 +106,9 @@
     "note": "t0 = song time at take t=0; the wiring starts where the drop shots end and runs 'beats' beats. Horizontal is one camera-moved take (camera.py makes 'cam' in the work dir); vertical cuts between two takes by [column, from beat, to beat].",
     "t0": 62.00,
     "beats": 24,
-    "h": { "take": "clips/wiring-h.mp4", "cam": "wiring-h-cam.mp4" },
+    "h": { "take": "clips/wiringH-h.mp4", "cam": "wiring-h-cam.mp4" },
     "v": {
-      "takes": { "L": "clips/wiring-vL.mp4", "R": "clips/wiring-vR.mp4" },
+      "takes": { "L": "clips/wiringL-v.mp4", "R": "clips/wiringR-v.mp4" },
       "plan": [["R", 0, 1], ["L", 1, 4], ["R", 4, 12], ["L", 12, 14], ["R", 14, 24]]
     }
   },

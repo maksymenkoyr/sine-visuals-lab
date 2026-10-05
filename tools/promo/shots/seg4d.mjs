@@ -1,10 +1,26 @@
-// Promo segment 4d, wiring + scene: seg4c's one wire at a brisker pace (every
-// slider drag 1.3 s, not 1.9 s), then three SCENE settings changed so the
+// Promo segment 4d, wiring + scene: one wire at a brisk pace (every
+// slider drag 1.3 s), then three SCENE settings changed so the
 // picture visibly answers, and the monitors column scrolled so the Hits, Tempo
 // and Character cards are seen alive as well as Bands and Dynamics.
-// Same three takes as seg4c-slow.mjs (pick with --keys; its header and
-// seg4b-wiring.mjs's explain the panel setup, the hidden-column trick, the
-// cable-zoom fix and the cable layer's pointer events off, all reused here):
+// Panel setup: both panel columns stay open (no --folds: an absent key = open).
+// The monitors column is made one scrollable piece, because the app caps it at
+// 100vh, which under CSS zoom is taller than the frame, and with Bands and
+// Dynamics open the Hits, Tempo and Character cards sit below the fold; it is
+// scrolled through during the shot, like the settings column. The panel's hover
+// hints are hidden: a hint opening under the cursor grows a card by a paragraph.
+// The hidden-column trick: in a vertical frame only one column fits, so the
+// other is slid off the frame's edge with its pointer events off, and its
+// controls are driven in the page at the instants the cursor would act, so the
+// cables still run out of the jacks toward the edge where the ports sit.
+// The cable-zoom fix: under --zoom the app's cable layer (an svg in <body>,
+// drawn in viewport pixels) would be scaled by the zoom and land in the wrong
+// place, so its zoom is cancelled here. The cable layer's pointer events are
+// also off: a cable path lies over the Bass hits jack and would swallow the
+// real press, so the jack never plugged.
+// The window starts at an exact song time: the page waits until DELTA seconds
+// after the mic stamp before ctx.startAt(), so clip t=0 is --wav-start + DELTA.
+// The takes share this script and the song window, so cutting between them
+// lines up; pick one with --keys (none, L or R):
 //   (none)  both columns on screen: every action is real. Recorded at
 //           2880x1620 --zoom 1.5 (the 1920x1080 layout at 1.5x the pixels, so
 //           an edit can push in on a column without blur).

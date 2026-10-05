@@ -35,7 +35,9 @@ fs.mkdirSync(OUT, { recursive: true });
 
 // The list card: X/Y of its top-left corner on the 1080x1920 frame, header and row heights, rows shown.
 const X = 70, W = 940, HEAD = 96, ROW = 80, VISIBLE = STYLE.videos.release.list.visible, CAP_H = 190;
-const Y = 1545 - (HEAD + VISIBLE * ROW);        // its bottom sits just above the band Stories covers
+// Y: the card's bottom, as approved in v0.2.0, sits a little inside the band Stories covers (style.json
+// storiesBand.bottomPx); check.py safe does not check lists.
+const Y = 1545 - (HEAD + VISIBLE * ROW);
 const fontStack = `-apple-system,"SF Pro Text","Segoe UI","Noto Sans",Helvetica,Arial,sans-serif`;
 const base = `html,body{margin:0;background:transparent}*{box-sizing:border-box}
 body{font-family:${fontStack};color:#eef1f5;-webkit-font-smoothing:antialiased}`;

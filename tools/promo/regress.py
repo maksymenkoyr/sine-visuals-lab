@@ -3,7 +3,7 @@
     uv run -q --with numpy --with pillow==12.3.0 --with imageio-ffmpeg==0.6.0 --with soundfile --with pyloudnorm \
         python tools/promo/regress.py <subcommand> ...        (run from the repo root; the pins are the versions that made the masters)
 
-All logic lives here because the worktree shell rejects loops and $VAR. Baseline code is a `git archive` copy
+One file holds every comparison the promo engine's rebuilds were proved with. Baseline code is a `git archive` copy
 of an approved revision (tools/promo plus public/icon-512.png) under tools/.cache/promo-baseline/<rev>/, so
 the old scripts run unchanged and find the logo three levels above themselves. Regression data is cloned
 into tools/.cache/promo/regress/<name>/, never edited in place.
@@ -36,15 +36,18 @@ Comparing results
                                     with no rate control (edit.py), where equal input must give equal bits.
   psnr A B                          Frame counts, durations and per-frame PSNR (min, mean) of two encodes of
                                     the same picture; for encodes that vary run to run (x264 with VBV).
-  repeats FILE [--from S]           Share of consecutive frames that read as repeats (showcase check.py rule).
+  repeats FILE [--from S]           Share of consecutive frames that read as repeats (check.py repeats rule).
 
 Stand-ins for media that no longer exist (the explainer's approved clips)
-  standins CONFIG OUT               From the real explainer config builds test-pattern clips, wiring takes,
-                                    intro and gallery files, with the real songs' audio, and writes
+  standins CONFIG LISTS_PATTERN OUT
+                                    From the real explainer config (CONFIG) builds test-pattern clips, wiring
+                                    takes, intro and gallery files, with the real songs' audio, and writes
                                     showcase.C0.json / showcase.C1.json for two work dirs beside OUT.
-  v10-lists OUT                     Runs the baseline cut arithmetic on the real config with the approved
-                                    cut's own intro and gallery lengths and compares the cut list with the
-                                    approved video's (informational: that video came from another script).
+                                    LISTS_PATTERN is the approved cut lists' path with {fmt} in it.
+  v10-lists CONFIG LISTS_PATTERN OUT
+                                    Runs the baseline cut arithmetic on CONFIG with the approved cut's own
+                                    intro and gallery lengths and compares the cut list with the approved
+                                    video's (informational: that video came from another script).
 
 Looking
   sheet A B --beats b1,b2,... OUT.png
@@ -54,8 +57,6 @@ Looking
 import fnmatch, glob, hashlib, json, math, os, re, runpy, shutil, subprocess, sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-REAL_SHOWCASE = "/Users/yaro/projects/audio-visualization-promo-capture/tools/.cache/showcase/showcase.json"
-REAL_LISTS = "/Users/yaro/Movies/sine-visuals-lab-promo-2026-10-03/project/promo-{fmt}.mp4.json"
 BASELINE = os.path.join(REPO, "tools", ".cache", "promo-baseline")
 SIZES = {"v": (1080, 1920), "h": (1920, 1080)}
 TEXT_EXT = (".json", ".txt", ".md")
@@ -338,8 +339,8 @@ def make_clip(out, w, h, dur, hue=0, audio=None, rate=60):
     run(args)
 
 
-def approved_lists():
-    return {f: json.load(open(REAL_LISTS.format(fmt=f))) for f in "vh"}
+def approved_lists(pattern):
+    return {f: json.load(open(pattern.format(fmt=f))) for f in "vh"}
 
 
 def write_intro_gallery(work, fmt, lists, media):
@@ -356,10 +357,10 @@ def write_intro_gallery(work, fmt, lists, media):
 
 
 def standins(argv):
-    cfg = json.load(open(REAL_SHOWCASE))
-    out = os.path.abspath(argv[1])
+    cfg = json.load(open(argv[0]))
+    out = os.path.abspath(argv[2])
     root = os.path.dirname(out)
-    lists = approved_lists()
+    lists = approved_lists(argv[1])
     clips, wiring = f"{out}/clips", f"{out}/wiring"
     BED = cfg["bed"]
     BAR = 4 * 60 / BED["bpm"]
@@ -411,13 +412,13 @@ def same(a, b):
 
 
 def v10_lists(argv):
-    out = os.path.abspath(argv[0])
+    out = os.path.abspath(argv[2])
     work = f"{out}/Cv10"
     os.makedirs(work, exist_ok=True)
-    cfg = json.load(open(REAL_SHOWCASE))
+    cfg = json.load(open(argv[0]))
     cfg["work"] = work
     json.dump(cfg, open(f"{work}/showcase.json", "w"), indent=1)
-    lists = approved_lists()
+    lists = approved_lists(argv[1])
     editpy = f"{BASELINE}/main/tools/promo/showcase/edit.py"
     report = []
     for fmt in "vh":

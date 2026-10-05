@@ -6,7 +6,7 @@
 Reads <work>/cuts.json (which video, its renderer, fps, formats) and the videos the renderer wrote
 (<work>/out/<video>-<fmt>.mp4; the graph renderer's cut list sits beside each as .mp4.json). Formats default
 to the video's own, from the cuts. Nothing is written except the strip's PNG (put it in the work dir).
-PASS is a command that prints no line starting with WARN; a WARN names what to fix.
+PASS is a command that prints no line containing WARN; a WARN names what to fix.
 
 sync     Does each scene piece's own audio match the bed at its in-point? Graph video: the clip's audio is
          what the app heard, already lag-corrected by the recorder, so in the finished video the bed under

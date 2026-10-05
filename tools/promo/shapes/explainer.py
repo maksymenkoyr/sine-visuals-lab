@@ -5,8 +5,8 @@
 The explainer is a calm 9:16 + 16:9 video for someone already interested: intro, gallery, the drop, the
 wiring, optional feature chapters, a shuffle of scene shots, an end card (.claude/commands/video-explainer-stable.md
 says why). This file turns showcase.json (showcase/showcase.example.json is the schema) into one cut list per
-format, copying showcase/edit.py's timeline arithmetic verbatim, in the same order, so the floats are
-bit-equal and edit.py can render the result without recomputing it.
+format. It replays the timeline arithmetic of the approved v10 edit.py (main 3dc5a92f) in the same order, so
+the floats are bit-equal (edit.py itself now reads cuts.json instead of recomputing it).
 
 Added to that arithmetic:
 - `chapters` [{id, shots:[[clip, bars]]}] are cut on the bed's beat grid right after the wiring, like the
@@ -21,18 +21,9 @@ must be DIR.
 import json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import cuts
-
-REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-
-
-def _work(cfg):
-    work = cfg.get("work", "tools/.cache/showcase")
-    return work if os.path.isabs(work) else os.path.join(REPO, work)
-
-
-def _p(cfg, rel):
-    """A config path: absolute stays, relative is under the work dir (showcase/config.py p)."""
-    return rel if os.path.isabs(rel) else os.path.join(cfg["_work"], rel)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "showcase"))
+import config
+_p = config.p
 
 
 def _windows(cfg, fmt):
@@ -113,8 +104,7 @@ def caption_text(item):
 
 def compile_explainer(work):
     sty = cuts.style()["videos"]["explainer"]
-    cfg = json.load(open(f"{work}/showcase.json"))
-    cfg["_work"] = _work(cfg)
+    cfg = config.load(f"{work}/showcase.json")
     if os.path.abspath(cfg["_work"]) != os.path.abspath(work):
         sys.exit(f"showcase.json work is {cfg['_work']}, not {work}")
     graph = dict(songs={k: _p(cfg, v) for k, v in cfg["songs"].items()}, loudnessLufs=cfg["loudnessLufs"],

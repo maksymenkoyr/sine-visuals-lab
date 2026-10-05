@@ -1,13 +1,13 @@
 {
   "title": "0.2.0 - beta",
   "subtitle": "Sine Visuals Lab",
-  "opening": "Your music, drawn live.",
+  "opening": "Nobody animated this.\nIt's hearing the song.",
   "proofs": [
-    { "take": "song_p2r", "beats": 8, "text": "Slime mold that moves to the beat" },
+    { "take": "song_p2r", "beats": 8 },
     { "take": "ui_palettes", "beats": 8, "text": "One tap, new colours" },
-    { "take": "song_chl", "beats": 8, "text": "Sand on a plate, shaken by the music" },
+    { "take": "song_chl", "beats": 8 },
     { "take": "ui_pads", "beats": 8, "text": "Drag a pad: one strain follows another" },
-    { "take": "song_cau", "beats": 8, "text": "Light through water, on the beat" },
+    { "take": "song_cau", "beats": 8 },
     { "take": "cuep", "beats": 8, "text": "Cue with Space, play with Option" },
     { "take": "room", "beats": 12, "text": "Add a TV by its code; it plays your look" }
   ]

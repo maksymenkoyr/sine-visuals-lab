@@ -25,8 +25,8 @@
 // It reads tools/promo/takes.json (its `defaults`, then the entry NAME, then
 // the entry of the same name in DIR/takes.json) and DIR/record.json (written
 // by promo.mjs record: bpm, P, base, look, mic, slots). The launch is
-// launch (Metal Chromium, the throttling flags for a second page, fake audio
-// from the wav only for a `song` feed); the screencast writes
+// Metal Chromium, the throttling flags for a second page, fake audio
+// from the wav only for a `song` feed; the screencast writes
 // DIR/takes/<cast>/f%05d.jpg + frames.json {meta, frames}.
 // Per size, up to `tries` attempts; an attempt passes when the first cast, in
 // the gate window, reaches SMOOTH_FPS with at most SMOOTH_SLOW of its gaps
@@ -114,6 +114,7 @@ import { chromium } from "playwright";
 import { pathToFileURL } from "node:url";
 import { ffmpeg } from "./ffmpeg.mjs";
 import { chromeInitScript, cursorInitScript, makeCtx } from "./ui.mjs";
+import { sceneLook } from "./shots/lib/sceneLook.mjs";
 
 const args = process.argv.slice(2);
 const wavArg = args.find((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
@@ -179,7 +180,7 @@ async function startCast(page, dir, { quality = CAST_QUALITY } = {}) {
     },
   };
 }
-// lib.launch's flags; a song feed adds the wav as the fake microphone.
+// The take launch flags (Metal Chromium, fake media devices); a song feed adds the wav as the fake microphone.
 const takeLaunchArgs = (wav) => [
   "--enable-gpu", "--use-angle=metal", "--enable-gpu-rasterization", "--ignore-gpu-blocklist",
   "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
@@ -190,21 +191,11 @@ const takeLaunchArgs = (wav) => [
 ];
 
 const readJson = (f) => JSON.parse(readFileSync(f, "utf8"));
-// The share code of the record's look, and the scene it was made on.
-function takeLook(rec) {
-  if (!rec.look) return { code: null, scene: null };
-  const u = new URL(rec.look);
-  return { code: u.searchParams.get("look"), scene: (u.hash.match(/#\/v\/([\w-]+)/) || [])[1] || null };
-}
-// The page URL a scene take opens, as shots/lib/app.mjs open() builds it. A
-// take's `look` says when the record's look applies: 'always', 'ifScene' (only
-// when the look was made on the take's own scene) or never; an entry with
-// `lookScene` takes its scene from the look's own hash.
+// The page URL a scene take opens, as shots/lib/app.mjs open() builds it; the
+// scene and look rule is shots/lib/sceneLook.mjs, the one shots/take-scene.mjs
+// opens the page with.
 function takeUrl(entry, rec) {
-  const look = takeLook(rec);
-  const scene = entry.lookScene ? look.scene || entry.scene || "physarum2" : entry.scene;
-  const useLook = look.code && (entry.look === "always" || (entry.look === "ifScene" && look.scene === entry.scene) || (entry.lookScene && look.scene));
-  const query = useLook ? `&look=${look.code}` : "";
+  const { scene, query } = sceneLook(entry, rec);
   if (entry.feed === "song") return `${rec.base}/?${query.replace(/^&/, "")}#/v/${scene}`;
   return `${rec.base}/?audio=synthetic&bpm=${rec.bpm}${query}#/v/${scene}`;
 }
@@ -453,14 +444,17 @@ async function take(dir) {
   for (;;) {
     const f = winFrom();
     if (f != null && clock() >= f + seconds + lagS + 0.1) break;
-    if (finished) {
-      if (f == null) { console.log("WARNING: --from auto but the actions never called ctx.startAt(); using 0"); }
-      break;
-    }
+    if (finished) break;
     await sleepMs(50);
   }
   const err = await actionsErr;
-  if (err) { console.log("ACTIONS ERROR", err.stack || err.message); }
+  // A failed actions module (or --from auto with no ctx.startAt()) makes no clip: the caller prints it and stops.
+  const fatal = err ? `ACTIONS ERROR ${err.stack || err.message}` : fromAuto && winFrom() == null ? "--from auto but the actions never called ctx.startAt()" : null;
+  if (fatal) {
+    clearInterval(probeTimer);
+    await browser.close();
+    return { fatal };
+  }
   const from = winFrom() ?? 0, until = from + seconds;
   const capUntil = until + lagS + 0.1;
   if (clock() < capUntil) await sleepMs((capUntil - clock()) * 1000);
@@ -491,6 +485,13 @@ let bestDir = null;
 for (let n = 0; n <= retries; n++) {
   const dir = keepDir && n === 0 ? resolve(keepDir) : join(tmpdir(), `promo-frames-${process.pid}-${n}`);
   const t = await take(dir);
+  if (t.fatal) {   // a broken shot fails the same way every time: no retries, and no clip unless an earlier take passed
+    console.error(t.fatal);
+    if (!(keepDir && dir === resolve(keepDir))) rmSync(dir, { recursive: true, force: true });
+    if (best) { console.error("keeping the best earlier take"); break; }
+    if (wav !== wavOrig) rmSync(wav, { force: true });
+    process.exit(1);
+  }
   console.log(`take ${n + 1}: ${t.fps.toFixed(1)} fps, longest gap ${t.maxGap.toFixed(0)} ms, gaps >25 ms: ${t.longGaps}, new pictures ${t.fresh.toFixed(1)}/s`);
   if (!best || t.maxGap < best.maxGap) {
     if (bestDir && bestDir !== dir && !keepDir) rmSync(bestDir, { recursive: true, force: true });

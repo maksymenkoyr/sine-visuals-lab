@@ -27,8 +27,9 @@ import bisect, json, math, os, shutil, sys
 from PIL import Image, ImageDraw, ImageFilter
 
 argv = sys.argv[1:]
-WORK = (os.path.abspath(argv[argv.index("--work") + 1]) if "--work" in argv else
-        os.environ.get("PROMO_WORK") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cache", "promo"))
+_work = argv[argv.index("--work") + 1] if "--work" in argv else os.environ.get("PROMO_WORK")
+if not _work: sys.exit("usage: compose.py --work DIR")
+WORK = os.path.abspath(_work)
 CUTS = json.load(open(f"{WORK}/cuts.json"))
 if CUTS.get("renderer") != "frames": sys.exit(f"compose.py draws renderer 'frames', not {CUTS.get('renderer')!r}")
 FPS = CUTS["fps"]

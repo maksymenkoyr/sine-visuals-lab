@@ -10,10 +10,11 @@ order, so the floats match.
 Reads <work>: song.json (tempo), lines.json {title, subtitle, opening ('\n' = break), proofs:[{take, beats,
 from?, text?}]} (shapes/hook.example.json is a copy), plan.json (optional):
 
-  { "opening": {"take": "intro", "t0": 0}, "look": 4, "end": 16, "hold": 4 }
+  { "opening": {take, t0}, "look", "end", "hold" }
 
-The defaults are the constants below. look = beats of the opening before the drop, end = the least beats of
-the end, hold = how many of them show the opening's scene alone before the version card comes in. A proof
+Defaults: DEFAULTS below. opening = the take (and its start) behind the opening and the end, look =
+beats of the opening before the drop, end = the least beats of the end, hold = how many of them show the
+opening's scene alone before the version card comes in. A proof
 without `text` runs without a caption. The captions end where style.json's storiesBand ends. The drop goes
 on the first proof: --drop-beat or look.
 
@@ -24,6 +25,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import cuts
 
 
+DEFAULTS = dict(opening={"take": "intro", "t0": 0}, look=4, end=16, hold=4)   # what a plan.json key left out falls back to
+
+
 def compile_hook(work, drop_beat=None):
     sty = cuts.style()
     vid = sty["videos"]["hook"]
@@ -31,13 +35,13 @@ def compile_hook(work, drop_beat=None):
     P = 60.0 / song["bpm"]
     FPS = vid["fps"]
     plan = json.load(open(f"{work}/plan.json")) if os.path.exists(f"{work}/plan.json") else {}
-    LOOK, END, HOLD = plan.get("look", 4), plan.get("end", 16), plan.get("hold", 4)
+    LOOK, END, HOLD = plan.get("look", DEFAULTS["look"]), plan.get("end", DEFAULTS["end"]), plan.get("hold", DEFAULTS["hold"])
     LINES = json.load(open(f"{work}/lines.json"))
     DROP_BEAT = int(drop_beat or LOOK)
     SS = song["dropTime"] - DROP_BEAT * P
     proofs = LINES.get("proofs", [])
 
-    OPENING = plan.get("opening") or {"take": "intro", "t0": 0}
+    OPENING = plan.get("opening") or DEFAULTS["opening"]
     SEGS = [("opening", (OPENING["take"], OPENING["t0"]), None, LOOK)]
     for i, h in enumerate(proofs):
         SEGS.append(("proof", (h["take"], h.get("from", 0)), i, h["beats"]))

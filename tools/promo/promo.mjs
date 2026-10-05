@@ -26,9 +26,9 @@
 //
 // <video> is --video, else the video in <work>/cuts.json, else hook. <work> is --work, else
 // tools/.cache/promo/<video>/<tag> (git-ignored), the tag being v<Stable's version> for release and hook
-// (--version overrides what Stable serves) and today's date for the explainer. song.wav, look.txt and
-// mix.json carry over from the same video's earlier tags, then the other videos', then the older
-// tools/.cache/promo/v* folders (remembered()).
+// (--version overrides what Stable serves) and today's date for the explainer. song.wav and look.txt carry
+// over from the same video's earlier tags, then the older tools/.cache/promo/v* folders, then the other
+// videos' folders (remembered()). A mix is built only when <work>/mix.json exists.
 //
 // The data files and who reads them (each file's own header has the format):
 //   lines.json     written by hand per video (release: demos and groups; hook: opening and proofs); read by
@@ -40,10 +40,20 @@
 //                  edit.py, check.py, deliver.mjs and the steps here
 //   record.json    written by `record` here; read by capture.mjs --take (its header) and the shots
 //   takes.json     tools/promo/takes.json is the take table, <work>/takes.json overrides entries by name and
-//                  holds the explainer's clip entries (capture.mjs header)
+//                  holds the explainer's clip entries (the paragraph below)
 //   style.json     the tokens more than one file reads (safe band, per-video fps and length, delivery)
 //
-// --print-plan on record lists the captures it would make and launches nothing.
+// A clip entry (explainer only) in <work>/takes.json `takes`: mode 'clip'; song, a showcase.json `songs` key or
+// a path from <work> (it is the fake mic); scene, optional when the flags' --actions shot opens its own scene;
+// sizes {<fmt>: 'WxH'}, each giving <clips.dir>/<name>-<fmt>.mp4 + .json (showcase.json clips.dir, relative to
+// <work>, default clips; unlike the take table's [[w,h]]); look {code: a Stable share code}; flags, the
+// capture.mjs flags shared by every size (a shot whose flags differ per size, like seg4d's --keys L / R, is two
+// entries); env, what the shot reads (the shot's header lists it). look.code also reaches the shot as
+// PROMO_LOOK_CODE, so a scene-look clip names its share code once. The explainer runs step by step, not
+// through `all`.
+//
+// --print-plan on record lists the captures it would make and launches nothing (it does rewrite
+// record.json, which is derived from cuts.json and song.json).
 // Needs macOS (the recorder runs on the Metal GPU, software rendering stutters), uv, Playwright's
 // Chromium, and records the DEPLOYED site (--base, default Stable), so run it after the release is live.
 import { execFileSync, spawnSync } from "node:child_process";
@@ -58,7 +68,7 @@ const { values: o, positionals } = parseArgs({
   options: {
     video: { type: "string" }, work: { type: "string" }, fmt: { type: "string" }, dest: { type: "string" },
     "print-plan": { type: "boolean" },
-    version: { type: "string" }, song: { type: "string" }, look: { type: "string" }, out: { type: "string" },
+    version: { type: "string" }, song: { type: "string" }, look: { type: "string" },
     "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" },
   },
 });
@@ -66,8 +76,8 @@ const STEPS = ["notes", "song", "plan", "record", "cards", "compose", "encode", 
 const step = positionals[0];
 if (!STEPS.includes(step)) { console.error(`usage: node tools/promo/promo.mjs <${STEPS.join("|")}> [--video release|hook|explainer] [--work DIR] [flags]`); process.exit(2); }
 
-// Every uv call takes its packages from here. pillow and imageio-ffmpeg are the versions that made the
-// approved masters (regress.py pins the same), so a re-render reproduces them.
+// The packages for the uv calls made here. pillow and imageio-ffmpeg are the versions that made the
+// approved masters; ffmpeg.mjs and check.py's MOTION_DEPS repeat these pins and must change with them.
 const UV_DEPS = {
   pillow: "pillow==12.3.0", ffmpeg: "imageio-ffmpeg==0.6.0", numpy: "numpy", soundfile: "soundfile",
   pyloudnorm: "pyloudnorm", librosa: "librosa",
@@ -97,14 +107,14 @@ const work = o.work ? resolve(o.work)
   : join(cache, video, frames ? `v${await version()}` : today());
 mkdirSync(work, { recursive: true });
 
-// <work>/<file>, else the same video's other tags, then the other videos', then the older v* folders:
-// the song, the look and the mix carry over between runs.
+// <work>/<file>, else the same video's other tags, then the older v* folders, then the other videos':
+// the song and the look carry over between runs.
 function remembered(file) {
   if (existsSync(join(work, file))) return join(work, file);
   const dirsOf = (root, keep) => existsSync(root)
     ? readdirSync(root).filter(keep).map((d) => join(root, d)).filter((d) => statSync(d).isDirectory() && resolve(d) !== work) : [];
   const newest = (dirs) => dirs.filter((d) => existsSync(join(d, file))).map((d) => join(d, file)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  const groups = [dirsOf(join(cache, video), () => true), ...VIDEOS.filter((v) => v !== video).map((v) => dirsOf(join(cache, v), () => true)), dirsOf(cache, (d) => /^v\d/.test(d))];
+  const groups = [dirsOf(join(cache, video), () => true), dirsOf(cache, (d) => /^v\d/.test(d)), ...VIDEOS.filter((v) => v !== video).map((v) => dirsOf(join(cache, v), () => true))];
   for (const g of groups) {
     const hit = newest(g)[0];
     if (hit) { copyFileSync(hit, join(work, file)); console.log(`${file}: reusing ${hit}`); return join(work, file); }
@@ -165,7 +175,7 @@ const steps = {
   song() {
     if (!frames) { console.log("the explainer's songs are listed in showcase.json; no song step"); return; }
     const wav = join(work, "song.wav");
-    if (!o.song && (existsSync(join(work, "mix.json")) || (!existsSync(wav) && remembered("mix.json")))) {   // several songs cut into one soundtrack (mix.py)
+    if (!o.song && existsSync(join(work, "mix.json"))) {   // several songs cut into one soundtrack (mix.py)
       run("uv", uvArgs(["numpy", "soundfile"], join(here, "mix.py"), []), { FFMPEG: ffmpegPath() });
       return;
     }
@@ -183,25 +193,37 @@ const steps = {
   plan() {
     need(join(work, frames ? "lines.json" : "showcase.json"), frames ? "write lines.json (see the video's skill)" : "write showcase.json (see showcase.example.json)");
     if (frames) need(join(work, "song.json"), "run the song step first");
+    else {
+      for (const f of readJson(join(here, "style.json")).videos.explainer.formats)   // shapes/explainer.py compiles them all
+        for (const g of ["intro", "gallery"]) need(join(work, `${g}-${f}.mp4.json`), "run intro.py and gallery.py first (the header of showcase/edit.py lists the prep)");
+    }
     run("python3", [join(here, "shapes", `${video}.py`), "--work", work, ...(o["drop-beat"] ? ["--drop-beat", o["drop-beat"]] : [])]);
     run("python3", [join(here, "cuts.py"), "table", "--work", work]);
   },
   record() {
     const names = positionals.slice(1);
     if (!frames) {   // explainer: every clip entry in <work>/takes.json, in each of its sizes
+      if (o.look) { console.error("set look.code per clip entry in <work>/takes.json"); process.exit(2); }
       const f = join(work, "takes.json");
       need(f, "list the clip entries (mode 'clip') in <work>/takes.json");
       const showcase = existsSync(join(work, "showcase.json")) ? readJson(join(work, "showcase.json")) : {};
-      mkdirSync(join(work, "clips"), { recursive: true });
+      const clipDir = resolve(work, showcase.clips?.dir || "clips");   // where shapes/explainer.py reads them
       const entries = Object.entries(readJson(f).takes || {}).filter(([n, e]) => e.mode === "clip" && (!names.length || names.includes(n)));
+      for (const [n, e] of entries) {   // validate everything before any launch
+        const bad = !e.song ? "missing song" : (!e.sizes || typeof e.sizes !== "object" || Array.isArray(e.sizes)) ? "sizes must be an object {fmt: 'WxH'}"
+          : Object.values(e.sizes).some((z) => !/^\d+x\d+$/.test(z)) ? "a size is not 'WxH'"
+          : (e.look != null && (typeof e.look !== "object" || Array.isArray(e.look))) ? "look must be an object {code}" : "";
+        if (bad) { console.error(`clip ${n}: ${bad}`); process.exit(2); }
+      }
+      mkdirSync(clipDir, { recursive: true });
       let count = 0;
       for (const [n, e] of entries) {
         const song = (showcase.songs || {})[e.song] || e.song;
-        for (const [fmt, size] of Object.entries(e.sizes || {})) {
-          const args = [join(here, "capture.mjs"), resolve(work, song), "--scene", e.scene, "--size", size, "--out", join(work, "clips", `${n}-${fmt}.mp4`),
+        for (const [fmt, size] of Object.entries(e.sizes)) {
+          const args = [join(here, "capture.mjs"), resolve(work, song), ...(e.scene ? ["--scene", e.scene] : []), "--size", size, "--out", join(clipDir, `${n}-${fmt}.mp4`),
             "--base", base, ...(e.look?.code ? ["--look", e.look.code] : []), ...(e.flags || []), ...(o["print-plan"] ? ["--print-plan"] : [])];
           console.log(`clip ${n}-${fmt}`);
-          run("node", args, e.env || {});
+          run("node", args, { ...(e.look?.code ? { PROMO_LOOK_CODE: e.look.code } : {}), ...(e.env || {}) });
           count++;
         }
       }
@@ -265,10 +287,11 @@ const steps = {
     if (r.status !== 0) console.error(`check exited ${r.status}`);
   },
   deliver() {
-    run("node", [join(here, "deliver.mjs"), "--work", work, ...((o.dest || o.out) ? ["--dest", o.dest || o.out] : [])]);
+    run("node", [join(here, "deliver.mjs"), "--work", work, ...(o.dest ? ["--dest", o.dest] : [])]);
   },
   async all() {
-    if (frames && !existsSync(join(work, "song.json"))) steps.song();
+    if (!frames) { console.error("the explainer runs step by step: record, the prep scripts, plan, cards, render, check, deliver (see /video-explainer-stable)"); process.exit(2); }
+    if (o.song || o.bpm || !existsSync(join(work, "song.json"))) steps.song();
     for (const s of ["plan", "record", "cards", "render", "check", "deliver"]) await steps[s]();
   },
 };

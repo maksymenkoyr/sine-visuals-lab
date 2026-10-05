@@ -65,7 +65,8 @@ open loops (curiosity gap, pattern interrupt, POV, before/after) whose picture, 
   and cut each drop, one bar before to eight after, into a `song-review/` folder at one loudness so the
   user can listen; a song without a drop, or without a steady tempo, can't carry the Shape.
 - **Several songs** in one video: write `<work>/mix.json` (its shape is in `tools/promo/mix.py`) and run
-  `song` without `--song`. They must share a tempo within a few bpm. Before recording, make a review
+  `song` without `--song`. A mix.json is not carried to a new work folder: copy it there before `song`.
+  They must share a tempo within a few bpm. Before recording, make a review
   copy of the mix and check that each drop and switch lands on its planned beat.
 - **Look**: `--look "<Looks-card share link>"` opens the video. Without it, the last run's look is
   reused; with none at all the opening is a plain Physarum 2 stand-in, and you say so.
@@ -113,7 +114,8 @@ re-records only those takes.
   re-record them after a reorder. In their footage, the second screen must change only during Cue and
   on Play.
 - `cards`: no `WARN` lines.
-- `render`, then `check`: tile about 16 frames across the video. Cuts land on beats, each caption
+- `render`, then `check`: look at about 16 frames across the video (`check.py strip`, its header has
+  the call). Cuts land on beats, each caption
   names what its clip shows, `safe` prints no `WARN`. Then watch the first two seconds muted and alone:
   they must open the loop and make you want the rest. Confirm the drop lands on the first proof and the
   length is within `style.json` `videos.hook.maxSec`.

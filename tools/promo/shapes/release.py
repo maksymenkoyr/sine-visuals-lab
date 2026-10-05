@@ -10,14 +10,14 @@ beats, replaying the arithmetic of the approved v0.2.0 compose.py in the same or
 Reads <work>: song.json (tempo), lines.json {title, subtitle, demos:[{take, from?, beats, group, text}],
 groups:[{key, title, rows}]} (shapes/release.example.json is a copy), plan.json (optional):
 
-  { "intro": {"take": "intro", "t0": 0}, "look": 3, "version": 6, "dwell": 2, "row": 0.5, "hold": 2,
-    "end": 6, "scenes": ["intro", "song_cau", "song_chl", "song_p2r"] }
+  { "intro": {take, t0}, "look", "version", "dwell", "row", "hold", "end", "scenes": [take, ...] }
 
-The defaults are the constants below. look/version = beats of the opening and of the version card, dwell =
-beats a list shows its first rows before it scrolls, row = beats per scroll step, hold = beats it rests on
-its last rows, end = the least beats held after the last list, scenes = the takes behind the groups, in
-turn. The rows a list shows at once come from style.json (videos.release.list.visible). The drop goes on
-the first demo: --drop-beat or look + version.
+Defaults: DEFAULTS below. intro = the take (and its start) behind the opening and the version card,
+look/version = beats of the opening and of the version card, dwell = beats a list shows its first rows before
+it scrolls, row = beats per scroll step, hold = beats it rests on its last rows, end = the least beats held
+after the last list, scenes = the takes behind the groups, in turn. The rows a list shows at once come
+from style.json (videos.release.list.visible). The drop goes on the first demo: --drop-beat or look +
+version.
 
 --print-segs prints the segments in the shape tools/promo/regress.py compares and writes nothing.
 """
@@ -25,6 +25,8 @@ import json, math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import cuts
 
+DEFAULTS = dict(intro={"take": "intro", "t0": 0}, look=3, version=6, dwell=2, row=0.5, hold=2, end=6,
+                scenes=["intro", "song_cau", "song_chl", "song_p2r"])   # what a plan.json key left out falls back to
 CAP_Y = 1340     # the caption's top: above the band Stories covers (2b1faf9b compose.py CAP_Y)
 
 
@@ -34,8 +36,9 @@ def compile_release(work, drop_beat=None):
     P = 60.0 / song["bpm"]
     FPS = sty["fps"]
     plan = json.load(open(f"{work}/plan.json")) if os.path.exists(f"{work}/plan.json") else {}
-    LOOK, VERSION, ROW, HOLD = plan.get("look", 3), plan.get("version", 6), plan.get("row", 0.5), plan.get("hold", 2)
-    DWELL, END = plan.get("dwell", 2), plan.get("end", 6)
+    LOOK, VERSION = plan.get("look", DEFAULTS["look"]), plan.get("version", DEFAULTS["version"])
+    ROW, HOLD = plan.get("row", DEFAULTS["row"]), plan.get("hold", DEFAULTS["hold"])
+    DWELL, END = plan.get("dwell", DEFAULTS["dwell"]), plan.get("end", DEFAULTS["end"])
     VISIBLE = sty["list"]["visible"]
     LINES = json.load(open(f"{work}/lines.json"))
     groups = [dict(key=g["key"], n=len(g["rows"])) for g in LINES.get("groups", [])]
@@ -44,8 +47,8 @@ def compile_release(work, drop_beat=None):
     DROP_BEAT = int(drop_beat or LOOK + VERSION)
     SS = song["dropTime"] - DROP_BEAT * P
 
-    INTRO = plan.get("intro") or {"take": "intro", "t0": 0}
-    SCENE_POOL = plan.get("scenes") or ["intro", "song_cau", "song_chl", "song_p2r"]
+    INTRO = plan.get("intro") or DEFAULTS["intro"]
+    SCENE_POOL = plan.get("scenes") or DEFAULTS["scenes"]
 
     SEGS = [("look", (INTRO["take"], INTRO["t0"]), None, LOOK), ("version", (INTRO["take"], INTRO["t0"] + LOOK), None, VERSION)]
     for i, d in enumerate(LINES.get("demos", [])):

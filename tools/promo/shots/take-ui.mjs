@@ -1,4 +1,4 @@
-// The six interface takes (`ui_*`): the phone panel at a control while the scene pulses behind it on the
+// The interface takes (`ui_*`, the entries of the UI table below): the phone panel at a control while the scene pulses behind it on the
 // synthetic feed. Each take's entry here holds its setup, its script (the control moves, each on a beat)
 // and its track kind (the rectangle installTracker follows); its scene and sizes are in
 // tools/promo/takes.json. Run by `capture.mjs --take NAME --work DIR` (shot contract: ctx in, {casts,

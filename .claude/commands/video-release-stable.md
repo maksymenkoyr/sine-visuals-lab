@@ -49,7 +49,8 @@ only those takes.
   re-record them after a reorder; their second screen must change only on Cue (while Space is held)
   and Play.
 - `cards`: no `WARN` lines.
-- `render`, then `check`: tile about 16 frames; cuts on beats, each caption names what its clip shows,
+- `render`, then `check`: look at about 16 frames across the video (`check.py strip`, its header has
+  the call); cuts on beats, each caption names what its clip shows,
   the drop on the first demo, lists complete. When the video runs long, ask what to cut rather than
   trimming lines.
 
@@ -57,8 +58,8 @@ Then `deliver`.
 
 ## Shape
 
-Vertical 9:16 for phone Stories, every cut on a beat, calm cuts. Agreed over six rounds on the v0.2.0
-video (2026-10-03/04).
+Vertical 9:16 for phone Stories, about 30 s plus the end hold (v0.2.0: 31.9 s), every cut on a beat,
+calm cuts. Agreed over six rounds on the v0.2.0 video (2026-10-03/04).
 
 1. **Opening look**: the user's look, a second, untouched, reacting to the song.
 2. **Version card**: held a couple of seconds over the look. GitHub-release flavoured: a green tag
