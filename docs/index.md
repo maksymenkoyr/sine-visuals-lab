@@ -24,4 +24,5 @@ before adding a note here; this file doesn't restate them.
   [the template](scenes/_template.md).
 
 The session rituals that walk these notes live in `.claude/commands/` — run `/`
-in Claude Code to see them.
+in Claude Code to see them. Research handed on to later build sessions lives in
+`plans/<topic>.md`; `/handoff` writes those plans and picks them up.
