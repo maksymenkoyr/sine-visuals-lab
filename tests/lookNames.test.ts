@@ -5,8 +5,13 @@ import { funnyLookName } from "../src/render/lookNames.ts";
 const stuck = () => 0;
 
 describe("funnyLookName", () => {
-  it("makes a two-part name", () => {
-    expect(funnyLookName([])).toMatch(/^\S.* \S.*$/);
+  it("fills every slot and keeps names short", () => {
+    for (let i = 0; i < 200; i++) {
+      const name = funnyLookName([]);
+      expect(name).not.toMatch(/[%~]/);
+      expect(name.length).toBeGreaterThan(0);
+      expect(name.length).toBeLessThanOrEqual(24);
+    }
   });
 
   it("never returns a taken name", () => {

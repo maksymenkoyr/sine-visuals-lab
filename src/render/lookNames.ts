@@ -1,44 +1,37 @@
 /**
  * Names for a Look saved with one click (the Looks card's "Save look" chip).
- * Nobody types a name up front any more, so the look gets a silly one
- * instead of "Look 7": a mood out of `MOODS` pinned on a piece of club gear
- * out of `GEAR`, e.g. "Judgmental Cowbell". A daft name is easier to tell
- * apart and remember in a list than a number, and the visitor can rename it
- * with a double-click whenever a real name comes to mind.
+ * Nobody types a name up front any more, so the look gets a short, stupid,
+ * faintly postmodern one instead of "Look 7": a form out of `FORMS` wrapped
+ * around one dumb word out of `THINGS` — "Untitled (Soup)", "Post-Toast",
+ * "Ham Discourse" — or, now and then, a form with no slot that is a whole
+ * name by itself ("Look (Derogatory)"). In a form, `%` takes the word as is
+ * and `~` takes it lowercased, for the file-name jokes. A daft name is easier
+ * to tell apart in a list than a number, and the visitor can rename it with
+ * a double-click whenever a real name comes to mind.
  *
  * Pure — no store, no DOM. The caller passes the names this scene already
  * has, and funnyLookName returns one that isn't among them: it tries random
- * pairs first, and once those keep colliding (a scene hoarding looks) falls
+ * picks first, and once those keep colliding (a scene hoarding looks) falls
  * back to the first free "name (2)", "name (3)", … — the same suffix
  * sceneLooks.ts's saveSharedLook uses for a clashing shared name.
  */
 
-const MOODS = [
-  "Overcaffeinated", "Suspicious", "Emotional", "Retired", "Haunted", "Sleepy",
-  "Smug", "Unbothered", "Dramatic", "Philosophical", "Sweaty", "Feral",
-  "Bashful", "Grumpy", "Polite", "Unlicensed", "Lukewarm", "Existential",
-  "Clingy", "Petty", "Wobbly", "Confused", "Tipsy", "Sarcastic",
-  "Melancholy", "Spicy", "Jittery", "Judgmental", "Nostalgic", "Overdressed",
-  "Underpaid", "Self-Aware", "Hungover", "Gossiping", "Sentimental",
-  "Disco-Curious", "Unreasonable", "Off-Brand", "Chaotic", "Bewildered",
-  "Lovesick", "Paranoid", "Sleep-Deprived", "Theatrical", "Passive-Aggressive",
-  "Recently Promoted", "Mildly Cursed", "Tax-Deductible", "Gluten-Free",
-  "Emotionally Available",
+const FORMS = [
+  "Untitled (%)", "Post-%", "Neo-%", "Meta-%", "Not %", "%?", "% Again",
+  "%, Ironically", "% (Remix)", "% (Live)", "Diet %", "Late %", "Lo-Fi %",
+  "% Discourse", "%-Adjacent", "~core", "~_final_v2", "~.png",
+  "Look (Derogatory)", "A Look", "This One", "The Other One", "Content",
+  "Vibes Pending", "Same But Louder", "Okay", "Art?", "final_FINAL",
 ];
 
-const GEAR = [
-  "Fog Machine", "Disco Ball", "Subwoofer", "Strobe", "Lava Lamp", "Glowstick",
-  "Bassline", "Hi-Hat", "Laser", "Kick Drum", "Oscillator", "Pixel",
-  "Spotlight", "Mixtape", "Turntable", "Crowd Surfer", "Bouncer", "Afterparty",
-  "Encore", "Coat Check", "Smoke Alarm", "Waveform", "Echo", "Dancefloor",
-  "Headliner", "Roadie", "Soundcheck", "DJ Booth", "Glitter Cannon",
-  "Neon Sign", "Cowbell", "Tambourine", "Theremin", "Metronome", "Tweeter",
-  "Feedback Loop", "Remix", "B-Side", "Night Owl", "Hologram", "Shader",
-  "Moonwalk", "Tape Loop", "Drop", "Light Rig", "Rave Uncle", "Bucket Hat",
-  "Earplug", "Setlist", "Smoke Break",
+const THINGS = [
+  "Soup", "Ham", "Toast", "Sock", "Egg", "Goo", "Fog", "Void", "Blob",
+  "Lamp", "Duck", "Bean", "Gum", "Dust", "Spoon", "Chair", "Beige", "Mood",
+  "Vibe", "Bass", "Loop", "Fizz", "Blur", "Static", "Tuesday", "Disco",
+  "Glitter", "Jelly", "Moon", "Nothing", "Rave", "Noise",
 ];
 
-/** Random pairs tried before giving up and numbering one. */
+/** Random picks tried before giving up and numbering one. */
 const RANDOM_TRIES = 24;
 
 function pick<T>(list: readonly T[], random: () => number): T {
@@ -50,7 +43,8 @@ export function funnyLookName(taken: readonly string[], random: () => number = M
   const used = new Set(taken);
   let name = "";
   for (let i = 0; i < RANDOM_TRIES; i++) {
-    name = `${pick(MOODS, random)} ${pick(GEAR, random)}`;
+    const thing = pick(THINGS, random);
+    name = pick(FORMS, random).replace("%", thing).replace("~", thing.toLowerCase());
     if (!used.has(name)) return name;
   }
   let numbered = name;
