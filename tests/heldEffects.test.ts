@@ -31,12 +31,12 @@ describe("effects list", () => {
 describe("effect sets", () => {
   it("anyEffect and sameEffects", () => {
     expect(anyEffect(NO_EFFECTS)).toBe(false);
-    expect(anyEffect({ ...NO_EFFECTS, mirror: true })).toBe(true);
+    expect(anyEffect({ ...NO_EFFECTS, invert: true })).toBe(true);
     expect(sameEffects(NO_EFFECTS, { ...NO_EFFECTS })).toBe(true);
     expect(sameEffects(NO_EFFECTS, { ...NO_EFFECTS, freeze: true })).toBe(false);
   });
   it("parses a message strictly: only true switches an effect on", () => {
-    expect(parseEffects({ invert: true, mirror: 1, freeze: "yes" })).toEqual({ ...NO_EFFECTS, invert: true });
+    expect(parseEffects({ invert: true, strobe: 1, freeze: "yes", mirror: true })).toEqual({ ...NO_EFFECTS, invert: true });
     expect(parseEffects(null)).toEqual(NO_EFFECTS);
     expect(parseEffects("x")).toEqual(NO_EFFECTS);
   });
@@ -88,8 +88,8 @@ describe("strobeBeatPhase", () => {
 
 describe("effectLook", () => {
   it("passes engaged effects through and flashes only with Strobe", () => {
-    const e = { ...NO_EFFECTS, invert: true, mirror: true };
-    expect(effectLook(e, 0.4, 0)).toEqual({ invert: true, mirror: true, flash: 0, black: 0.4 });
+    const e = { ...NO_EFFECTS, invert: true };
+    expect(effectLook(e, 0.4, 0)).toEqual({ invert: true, flash: 0, black: 0.4 });
     expect(effectLook({ ...NO_EFFECTS, strobe: true }, 0, 0).flash).toBe(STROBE_PEAK);
   });
 });
