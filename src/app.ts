@@ -797,7 +797,9 @@ function wireOutputKeys(controls: OutputControls): void {
         if (!chargeRaf) chargeRaf = requestAnimationFrame(chargeTick);
         return;
       }
-      playKey.cancel(); // any other key while a Play key is down: a chord, not a Play
+      // Any other key pressed while a Play key is down is a chord, not a Play; the
+      // auto-repeat of a key already held (a held effect's, say) is no new press.
+      if (!e.repeat) playKey.cancel();
     },
     true,
   );

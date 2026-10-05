@@ -76,6 +76,11 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     recompute();
   }
 
+  function releaseKeys(): void {
+    for (const d of EFFECTS) byKey[d.id] = false;
+    recompute();
+  }
+
   for (const d of EFFECTS) {
     const b = document.createElement("button");
     b.type = "button";
@@ -119,8 +124,15 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     opts.onKeyUse?.(d.id);
     recompute();
   });
-  // Released by the key itself, whatever modifiers are down by then.
+  // Released by the key itself, whatever modifiers are down by then. macOS
+  // delivers no key-up for a key let go while Command is down (as it is during
+  // a right-Command Play, ui/outputKeys.ts), so Command's own key-up lets go of
+  // every effect a key holds: one ended early beats one stuck on.
   window.addEventListener("keyup", (e) => {
+    if (e.key === "Meta") {
+      releaseKeys();
+      return;
+    }
     const d = effectForCode(e.code);
     if (!d || !byKey[d.id]) return;
     byKey[d.id] = false;
