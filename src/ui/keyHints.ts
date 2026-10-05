@@ -16,7 +16,8 @@ import { hideTooltip, showTooltip } from "./tooltip.ts";
  * control that already shows its own key some other way skips it — the
  * .vc-block digit badge (deviceMenu.ts's markBlock) carries `data-key`
  * (for the hover tooltip) but never `data-keycap`, since it's already
- * showing its own digit as plain text.
+ * showing its own digit as plain text; a Set pad (ui/setCard.ts) does the
+ * same under `data-key="pad"`.
  *
  * installKeyHints(), called once from deviceMenu.ts, wires three
  * independent, document-level behaviours that don't know about each other:
@@ -70,7 +71,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "O", id: "solo", label: "Solo", hint: "Show only the pinned setting (or the Scene card)" },
   { key: "F", id: "fullscreen", label: "Fullscreen", hint: "Fullscreen" },
   { key: "Tab", id: "tab", label: "Next control", hint: "Next control (⇧ previous)" },
-  { key: "1–9", id: "block", label: "Jump to block", hint: "Jump to a numbered block" },
+  { key: "⇧ 1–9", id: "block", label: "Jump to block", hint: "Jump to a numbered block (Shift + a digit)" },
   { key: "A", id: "auto", label: "Auto", hint: "Auto-tune the focused row" },
   { key: "R", id: "reset", label: "Reset", hint: "Reset the focused row" },
   { key: "T", id: "mute", label: "Mute", hint: "Mute the focused row, press again to restore" },
@@ -82,6 +83,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
   { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
   { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
+  { key: "1–9", id: "pad", label: "Fire pad", hint: "Fire pad 1–9 of the Set, panel open or closed" },
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {
@@ -98,14 +100,17 @@ let hovered: HTMLElement | null = null;
 
 /** "<label> · <key>" for anything in SHORTCUTS, or "Jump to block · <n>"
  *  for a .vc-block badge, which has no SHORTCUTS entry of its own (many
- *  badges, one shared "block" id, each with a different digit). */
+ *  badges, one shared "block" id, each with a different digit) — likewise
+ *  a Set pad, which names its own digit. */
 function hintLine(el: HTMLElement): string | null {
   const id = el.dataset.key;
   if (!id) return null;
   if (id === "block") {
     const digit = el.textContent?.trim();
-    return digit ? `Jump to block · ${digit}` : null;
+    return digit ? `Jump to block · ⇧ ${digit}` : null;
   }
+  // The Set card's pads: each one answers to its own digit (setCard.ts).
+  if (id === "pad") return el.dataset.padKey ? `Fire pad · ${el.dataset.padKey}` : null;
   const s = shortcutFor(id);
   // The gear turns into a close cross while the panel is open (index.html's
   // #menuBtn rules) — the hint follows it.

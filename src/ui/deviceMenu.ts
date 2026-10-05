@@ -25,6 +25,7 @@ import {
 import type { SceneLook } from "../render/sceneLooks.ts";
 import type { Scene } from "../render/scene.ts";
 import { createLooksCard } from "./looksCard.ts";
+import { createSetCard, type SetCardDeps } from "./setCard.ts";
 // Side-effect import: registers every built-in widget (registerWidget) so a
 // scene's Scene.panel sections resolve — see widgets/registry.ts's header
 // for the panel/widget split this file is the one place that renders.
@@ -404,8 +405,8 @@ import {
  * slider also takes Home/End to its min/max — the browser's own native
  * range-input behavior, left alone by onKeyDown below — plus z/x/c
  * (wireSliderQuickJump) to jump straight to the middle of the track, the
- * top, or wherever the pointer last hovered along it. Digit
- * keys 1-9 jump to a numbered block —
+ * top, or wherever the pointer last hovered along it. Shift+1 to Shift+9
+ * (the bare digits fire the Set's pads, app.ts) jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
  * every renderSceneSettings) — and focus the first control inside it,
@@ -538,6 +539,9 @@ export interface DeviceMenuDeps {
   buildShareLink: (look: SceneLook) => string;
   hasLookUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
+  /** The Set card's pads and Autopilot — see src/ui/setCard.ts for what each
+   *  call means; the card's scene names come from `getScene` above. */
+  set: Omit<SetCardDeps, "sceneName">;
   /** Low/mid/high crossover, global per device (not per scene) — fixed, not
    *  user-facing, and unrelated to the faders: it only colors the spectrum
    *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
@@ -788,6 +792,10 @@ export interface DeviceMenu {
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
+  /** The scene (or its palette) changed from outside the panel — a Set pad,
+   *  a key, Autopilot: rebuilds everything that follows the active scene, as
+   *  open() does. No-op while closed (open() does it then). */
+  sceneChanged(): void;
 }
 
 // ---- styles --------------------------------------------------------------
@@ -1417,7 +1425,7 @@ function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | u
  *  intercept it), so the only capabilities worth adding are the ones
  *  Home/End don't cover. Plain single keys, not a chord — z/x/c collide with
  *  nothing else live while a slider has focus (A/R/T/D, the panel's
- *  H/M/Tab/1-9, the arrows, and Home/End are all spoken for). c no-ops when
+ *  H/M/Tab/Shift+1-9, the arrows, and Home/End are all spoken for). c no-ops when
  *  pointerFraction returns undefined, rather than falling back to some other
  *  value — see its comment for why. Sets .value then redispatches "input"
  *  rather than duplicating each slider's own commit logic, so this stays a
@@ -5906,6 +5914,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
   });
 
+  // The Set: pads of looks from any scene, fired live (src/ui/setCard.ts).
+  // Always shown, unlike Looks: a pad can switch scene, so it doesn't depend
+  // on the active scene having settings.
+  const setCard = createSetCard({
+    ...deps.set,
+    sceneName: (sceneId) => deps.getScene(sceneId)?.name ?? sceneId,
+  });
+
   // Walks every .vc-block heading in document order and writes its digit —
   // called whenever the block set can change (only renderSceneSettings does:
   // group headings come and go with the active scene). Blanks anything past
@@ -6843,7 +6859,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -6983,18 +6999,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       handleTab(e);
       return;
     }
-    if (e.key.length === 1 && e.key >= "1" && e.key <= "9") {
+    // Shift+digit, matched on the physical key (Shift turns e.key into "!",
+    // "@", …): the bare digits fire the Set's pads (app.ts), panel open or not.
+    if (e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
       e.preventDefault();
       noteKeyUse("block");
-      jumpToBlock(Number(e.key));
+      jumpToBlock(Number(e.code.slice(5)));
     }
   }
 
-  function open() {
-    welcomeOnce();
-    refreshSpectrumHeader();
+  // Everything in the panel that follows the active scene or palette — what
+  // open() brings up to date, and what a scene change from outside (a Set
+  // pad, Autopilot) does again while the panel stays open.
+  function syncToScene(): void {
     renderPalettes();
-    sourceRow.refresh();
     syncInputRows();
     // The panel may have been closed on a different scene since `pinned`
     // was last checked — renderSceneSettings()'s own tail unpins it if so,
@@ -7005,8 +7023,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     masterRow.sync(() => deps.getSceneMaster());
     masterExpansionRow.sync(() => deps.getSceneExpansion());
     masterShapeRow.sync();
+    setCard.refresh();
     // Whatever was rebuilt above comes in unmarked.
     applySolo();
+  }
+
+  function open() {
+    welcomeOnce();
+    refreshSpectrumHeader();
+    sourceRow.refresh();
+    syncToScene();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
     deps.toggleButton.title = "Close controls (S)";
@@ -7071,6 +7097,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
+    sceneChanged() {
+      if (isOpen) syncToScene();
+    },
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,
@@ -7266,6 +7295,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // external change (a paired device, a drag elsewhere) can flip.
       refreshAutoMaster();
       refreshMicAuto();
+      // The Set's markers move when Play or Autopilot acts, and a paired
+      // device or the pop-out can change its pads; it redraws only on change.
+      setCard.refresh();
       // The pinned setting's patch panel — re-synced here rather than every
       // tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the

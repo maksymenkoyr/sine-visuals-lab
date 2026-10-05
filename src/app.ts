@@ -131,6 +131,17 @@ import {
   saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
+import {
+  AUTOPILOT_EVERY_BARS,
+  SET_MAX_PADS,
+  addCapturedPad,
+  getAutopilot,
+  listPads,
+  removeStoredPad,
+  renameStoredPad,
+  setAutopilot,
+} from "./render/sceneSet.ts";
+import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import {
@@ -567,6 +578,15 @@ let outputBridge: OutputBridge | null = null;
  *  room. */
 let roomBridge: RoomBridge | null = null;
 let outputControls: OutputControls | null = null;
+/** The Set card's two markers (ui/setCard.ts): the pad loaded in this window's
+ *  preview, and the pad Play last sent to the output. Ids, not indices, so a
+ *  deleted or added pad can't move them. Read through currentPadId() /
+ *  `padMarkers`, which drop a pad whose scene is no longer the one showing. */
+let setPreviewPadId: string | null = null;
+let setLivePadId: string | null = null;
+let setPopOutWasOpen = false;
+/** Autopilot's bar count and cursor (render/setAutopilot.ts). */
+const setAutopilotState = createAutopilot();
 let outputSens = 1;
 let outputExp = 1;
 let lastRenderFpsMs = 0;
@@ -858,6 +878,82 @@ function applyPalette(next: Palette): void {
   controllerLook?.notePalette(next.id);
   showHud(`palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
+}
+
+// ---- The Set: pads of looks, keys 1-9, Autopilot ----
+// Model and store: render/sceneSet.ts; the card: ui/setCard.ts; the timing:
+// render/setAutopilot.ts. A pad is fired through applyScene/applyPalette like
+// any other change — so the pop-out's Cue/Play, a paired room's Main and a
+// scene crossfade all see an ordinary scene change.
+
+/** The pad this window last loaded, while its scene is still the one showing. */
+function currentPadId(): string | null {
+  const pad = listPads().find((p) => p.id === setPreviewPadId);
+  return pad && pad.look.sceneId === scene.id ? pad.id : null;
+}
+
+/** Autopilot runs only on the device that hears the music, never on a phone
+ *  controller (the TV is its own page and never gets here). */
+function setAutopilotRuns(): boolean {
+  return !isController && ownInput();
+}
+
+/** Loads a pad's clip into this window: its look, then its palette, then its
+ *  scene (the order startMainPlay applies a room's look in, so the scene
+ *  mounts already tuned). With an output open this is the preview, and Play
+ *  sends it; Autopilot plays it itself. A manual press restarts Autopilot's
+ *  bar count; Autopilot's own change keeps the count it just re-anchored. */
+function firePad(id: string, byAutopilot = false): void {
+  const pads = listPads();
+  const at = pads.findIndex((p) => p.id === id);
+  if (at < 0 || !inViz) return;
+  const pad = pads[at]!;
+  const next = getScene(pad.look.sceneId);
+  if (!next || !presetAllows(next, effectivePreset())) {
+    showHud(next ? "scene unavailable on this device" : "that pad's scene is gone", true);
+    return;
+  }
+  applyLook(pad.look, next.settings ?? []);
+  if (pad.paletteId && pad.paletteId !== palette.id && PALETTES.some((p) => p.id === pad.paletteId)) {
+    applyPalette(getPalette(pad.paletteId));
+  }
+  if (next.id !== scene.id) applyScene(next);
+  setPreviewPadId = pad.id;
+  if (!byAutopilot) restartAutopilot(setAutopilotState, pad.id);
+  showHud(`pad ${at + 1}: ${scene.name}`);
+  if (byAutopilot) outputControls?.go();
+  deviceMenu?.sceneChanged();
+}
+
+/** "+ Add": the scene on screen and its palette become a new pad. Returns why
+ *  it was refused, in words for the card, or null. */
+function addPadFromScreen(): string | null {
+  const result = addCapturedPad(scene.id, scene.settings ?? [], palette.id);
+  if (result.ok) {
+    setPreviewPadId = result.pad.id;
+    return null;
+  }
+  return result.reason === "full"
+    ? `The Set is full (${SET_MAX_PADS} pads). Delete one to add another.`
+    : "This look is too big to keep in the Set.";
+}
+
+const NO_PADS: readonly string[] = [];
+
+/** Autopilot's per-tick step; fires the pad it names. */
+function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
+  if (!inViz || !setAutopilotRuns()) {
+    setAutopilotState.counting = null; // counts only while it can fire
+    return;
+  }
+  const config = getAutopilot();
+  const id = stepAutopilot(
+    setAutopilotState,
+    { timeSec: nowMs / 1000, beats: anim.metronomeBeats, tempo: anim.metronomeOn },
+    config,
+    config.on ? listPads().map((p) => p.id) : NO_PADS,
+  );
+  if (id) firePad(id, true);
 }
 
 function fatalError(message: string): void {
@@ -1629,6 +1725,25 @@ function wireDeviceMenu(): void {
     onUndoLook: (sceneId) => {
       const look = takeUndo(sceneId);
       if (look) applyLook(look, getScene(sceneId)?.settings ?? []);
+    },
+    set: {
+      pads: () => listPads(),
+      onAddPad: addPadFromScreen,
+      onFirePad: (id) => firePad(id),
+      onRenamePad: renameStoredPad,
+      onDeletePad: removeStoredPad,
+      previewPadId: currentPadId,
+      livePadId: () => (listPads().some((p) => p.id === setLivePadId) ? setLivePadId : null),
+      outputOpen: () => outputControls?.active() ?? false,
+      autopilot: getAutopilot,
+      onAutopilotChange: (change) => {
+        setAutopilot(change);
+        restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
+      },
+      autopilotRuns: setAutopilotRuns,
+      everyChoices: AUTOPILOT_EVERY_BARS,
+      minPads: AUTOPILOT_MIN_PADS,
+      maxPads: SET_MAX_PADS,
     },
     getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
@@ -2545,6 +2660,10 @@ async function boot(): Promise<void> {
     });
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
+    // The Set card's live marker: whatever pad was loaded when Play sent it.
+    outputControls.onPlay(() => {
+      setLivePadId = currentPadId();
+    });
   }
 
   void requestWakeLock();
@@ -2589,6 +2708,17 @@ async function boot(): Promise<void> {
     // key), not e.key like f/s above, so a Cyrillic or German layout still
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
+    // The Set: 1-9 fire pads 1-9, panel open or closed (Shift+digit is the
+    // panel's block jump, deviceMenu.ts). Not on auto-repeat: a held key
+    // would reload the same pad on every repeat.
+    if (inViz && !typing && !e.shiftKey && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
+      const pad = listPads()[Number(e.code.slice(5)) - 1];
+      if (pad) {
+        e.preventDefault();
+        noteKeyUse("pad");
+        firePad(pad.id);
+      }
+    }
     if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
       // letter twins of Space and Option, which wireOutputKeys below owns.
@@ -3022,6 +3152,11 @@ function tick(): void {
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
+  // Autopilot (the Set card) off last tick's clock, before this tick's frame
+  // is built: a pad it fires switches scene here, so nothing below is
+  // computed for the scene it just left.
+  if (lastAnim) stepSetAutopilot(lastAnim, nowRafMs);
+
   // Resolved once per tick and reused everywhere below (extractor, anim
   // clock, the meters) — a second call would be harmless (autoTune.ts steps
   // each auto value once per tick, on its own clock), just wasted work.
@@ -3042,6 +3177,11 @@ function tick(): void {
   // The preview transition sits outside the bridge check because a phone
   // controller has no bridge yet still previews, whenever a scene is showing.
   const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  // A pop-out that just opened starts on this window's preview (net/outputSync.ts's
+  // outputOpened), so the pad loaded here is live on it.
+  const popOutOpen = outputBridge?.status().open ?? false;
+  if (popOutOpen && !setPopOutWasOpen) setLivePadId = currentPadId();
+  setPopOutWasOpen = popOutOpen;
   if (nextActive !== previewActive) {
     previewActive = nextActive;
     applyRenderQuality(true);

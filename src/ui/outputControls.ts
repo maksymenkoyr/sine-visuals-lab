@@ -62,6 +62,10 @@ export interface OutputControls {
   holdCue(on: boolean): boolean;
   /** While Option is held: how long, or null when it isn't (clears the charge). */
   charge(holdMs: number | null): void;
+  /** Called after every Play that reached an output, whichever way it was
+   *  pressed (key, button, or app.ts's Autopilot) — the Set card's "live"
+   *  marker follows it. */
+  onPlay(cb: () => void): void;
 }
 
 const FLASH_MS = 220;
@@ -81,6 +85,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
   let glideEnd = 0;
   let glideLen = 0;
   let glideRaf = 0;
+  const playListeners: Array<() => void> = [];
 
   function flash(btn: HTMLElement): void {
     btn.classList.add("pressed");
@@ -160,6 +165,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     if (glided && glideMs) startGlideIndicator(glideMs);
     else glideEnd = 0;
     render(bridge.status());
+    for (const cb of playListeners) cb();
     return glided ? "glide" : "sent";
   }
 
@@ -252,6 +258,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     cueActive,
     go,
     holdCue,
+    onPlay: (cb) => void playListeners.push(cb),
     charge(ms) {
       holdMs = ms;
       // A glide in flight owns the fill; only a hold that's really charging takes it over.
