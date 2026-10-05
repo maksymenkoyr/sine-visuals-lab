@@ -30,6 +30,15 @@ import {
 } from "./chladniPlates.ts";
 
 import { GRIT_CHALK, GRIT_RAMP_LO, GRIT_RAMP_SPAN, powderInk } from "./chladniPowder.ts";
+import {
+  ZOOM_LAYERS,
+  zoomFinestScale,
+  zoomLayers,
+  zoomPhaseStep,
+  zoomRespawnShare,
+  zoomShrink,
+  type ZoomLayer,
+} from "./chladniZoom.ts";
 
 export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladniPlates.ts";
 
@@ -72,6 +81,26 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // fixed grain pool still covers the plate). Sand respawns evenly over the shape's area (respawnOnPlate)
 // and spills off its true rim (insidePlate); the plate surface, glow and rim
 // follow the true outline (plateGauge).
+//
+// Zoom out (the square plate only; chladniZoom.ts has the layers and why).
+// An endless pull-back, which no real plate can do: a Shepard-style
+// illusion. The plate rings its music-picked blend at ZOOM_LAYERS sizes an
+// octave apart (zoomField, weights summing to 1 so |f| <= 2 as before), each
+// growing finer as the zoom runs while a bell hands the plate from the finer
+// layers to the coarser ones, and the set repeats after every octave. While
+// it runs the plate has no edge: the cosines carry on past [-1,1]^2, which
+// is the plate mirrored across its edges, and it fills the frame at its true
+// aspect (Zoom still sets the base size; True shape doesn't apply; no rim).
+// So the sand lies on the frame instead of the plate: grains are stored in
+// grain space, the frame as [-1,1]^2 (GRAIN_TO_PLATE), the sim steps them in
+// plate space, and spills, respawns and the toss's landings use the frame
+// as the square's outline. Each frame every grain shrinks toward the centre
+// by the zoom's step, so a formed figure shrinks as one piece with the field;
+// the share of the bed that shrink frees goes to the strip it opened at the
+// edges, so the bed stays even; and a half-step dither keeps packPos's
+// rounding from eating a slow shrink. The zoom is compiled in as its own
+// programs (ZOOM_OUT, makePrograms): without it the shaders are the source
+// as it was, so the plate is bit for bit what it was and pays nothing.
 //
 // The response. A real plate under broadband music answers as a sum of
 // every mode near any energy in the signal, each ringing with its own
@@ -808,6 +837,19 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.dropOnset" },
   },
   {
+    key: "zoomOut",
+    label: "Zoom out",
+    description: "Square plate only: the plate pulls back for ever, its figure shrinking as a bigger one grows in; higher is faster, 0 is off",
+    // Manual: how fast to drift is taste. Speed is the slider times its jack
+    // (zoomPhaseStep), so silence stops the zoom as it freezes the figure.
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    drive: { default: "anim.energy" },
+  },
+  {
     key: "freezeEdge",
     label: "Freeze edge",
     description: "Plate drive below which the sand holds still and the figure stays put",
@@ -931,6 +973,11 @@ uniform vec4 uOutline;
 uniform float uOutlineTurn;
 // A baked plate's figures, one layer each: R = f, G,B = df/dx, df/dy.
 uniform highp sampler2DArray uPlateAtlas;
+#ifdef ZOOM_OUT
+// Zoom out's layers (chladniZoom.ts), coarsest first: x = scale, y = weight
+// (summing to 1).
+uniform vec2 uZoomLayer[${ZOOM_LAYERS}];
+#endif
 const float PI = 3.14159265;
 
 float chladni(vec2 p, vec4 mode) {
@@ -958,37 +1005,95 @@ vec3 atlasField(vec2 p) {
   return s;
 }
 
+#ifdef ZOOM_OUT
+// Zoom out: the square's active modes at every layer's scale, summed by the
+// layers' weights (which sum to 1, so |f| <= 2 still); the gradient by the
+// chain rule. Off the plate's [-1,1]^2 the cosines just carry on, which is
+// the plate mirrored across its edges: an unbounded plate.
+vec3 zoomField(vec2 p) {
+  vec3 s = vec3(0.0);
+  for (int j = 0; j < ${ZOOM_LAYERS}; j++) {
+    vec2 layer = uZoomLayer[j];
+    if (layer.y <= 0.0) continue;
+    vec2 q = p * layer.x;
+    vec3 f = vec3(0.0);
+    for (int k = 0; k < ACTIVE_MODES; k++) f += uModes[k].w * vec3(chladni(q, uModes[k]), chladniGrad(q, uModes[k]));
+    s += layer.y * vec3(f.x, layer.x * f.yz);
+  }
+  return s;
+}
+#endif
+
 // The plate's motion: the active modes summed by their share of the
 // response. Weights sum to 1, so |field| <= 2 and amp() stays in [0,1].
 // uPlateShape 0 is the square, analytic as it always was.
 float field(vec2 p) {
   if (uPlateShape > 0.5) return atlasField(p).x;
+#ifdef ZOOM_OUT
+  return zoomField(p).x;
+#else
   float f = 0.0;
   for (int k = 0; k < ACTIVE_MODES; k++) f += uModes[k].w * chladni(p, uModes[k]);
   return f;
+#endif
 }
 vec2 fieldGrad(vec2 p) {
   if (uPlateShape > 0.5) return atlasField(p).yz;
+#ifdef ZOOM_OUT
+  return zoomField(p).yz;
+#else
   vec2 g = vec2(0.0);
   for (int k = 0; k < ACTIVE_MODES; k++) g += uModes[k].w * chladniGrad(p, uModes[k]);
   return g;
+#endif
 }
-// Both at once: one atlas read per figure instead of two.
+// Both at once: one atlas read (or one pass over the zoom's layers) per
+// figure instead of two.
 vec3 fieldWithGrad(vec2 p) {
   if (uPlateShape > 0.5) return atlasField(p);
+#ifdef ZOOM_OUT
+  return zoomField(p);
+#else
   return vec3(field(p), fieldGrad(p));
+#endif
 }
 float amp(vec2 p) { return abs(field(p)) * 0.5; }
 
 // Half-extent of the plate's [-1,1]^2 in room uv, times Zoom. The square
-// with True shape on, and every other plate: fits the shorter axis with a
-// margin, centred. The square with it off: the whole frame.
+// with True shape on, every other plate, and the square while Zoom out runs:
+// fits the shorter axis with a margin, centred. The square with it off: the
+// whole frame.
 vec2 plateHalf() {
   float aspect = uResolution.x / uResolution.y;
   float h = ${SQUARE_PLATE_HALF.toFixed(2)};
   vec2 square = aspect >= 1.0 ? vec2(h / aspect, h) : vec2(h, h * aspect);
+#ifdef ZOOM_OUT
+  return square * uPlateZoom;
+#else
   return (uSquarePlate > 0.5 || uPlateShape > 0.5 ? square : vec2(0.5)) * uPlateZoom;
+#endif
 }
+
+// Where grains live. Normally that is plate space itself. While Zoom out runs
+// the plate has no edge, so the sand lies on the whole frame instead: grain
+// space [-1,1]^2 is the frame, and a grain's plate point is its grain point
+// times the frame's half-extent in plate units (true aspect, no stretch).
+// insidePlate, respawnOnPlate and the toss's landing all work in grain space,
+// where the frame is the square's outline. Macros, so the shaders without
+// the zoom read exactly as they did before it.
+#ifdef ZOOM_OUT
+vec2 grainExtent() { return 0.5 / plateHalf(); }
+#define GRAIN_TO_PLATE(q) ((q) * grainExtent())
+#define PLATE_TO_GRAIN(p) ((p) / grainExtent())
+// Grain space's half-extent in room uv.
+#define GRAIN_HALF vec2(0.5)
+// Zoom's grain growth (POINT_VERT): none, the sand covers the frame at any Zoom.
+#define GRAIN_ZOOM 1.0
+#else
+#define GRAIN_TO_PLATE(q) q
+#define GRAIN_HALF plateHalf()
+#define GRAIN_ZOOM uPlateZoom
+#endif
 
 // <= 1 on the plate, 1 on its rim (the outline's gauge). Mirrors plateGauge
 // in chladniPlates.ts.
@@ -1197,16 +1302,40 @@ ${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSimDt;
 uniform float uSeed;
-uniform float uMaxOrder; // highest m among the active modes, for the step cap
+uniform float uMaxOrder; // highest m among the active modes (times the finest zoom layer's scale), for the step cap
 ${CHLADNI_GLSL}
 ${GRAIN_MOTION_GLSL}
 ${TOSS_GLSL}
+
+#ifdef ZOOM_OUT
+// Zoom out (chladniZoom.ts): this frame's shrink toward the centre, and the
+// share of the bed moved to the strip it freed.
+uniform float uZoomShrink;
+uniform float uZoomRespawn;
+
+// A spot in the strip the zoom's shrink freed at the frame's edges (grain
+// space [-1,1]^2 less the shrunk [-c,c]^2), evenly over its area: the top and
+// bottom strips hold 1 / (1 + c) of it, the side strips the rest.
+vec2 respawnInRim(vec2 seed, float c) {
+  vec2 u = hash22(seed);
+  vec2 v = hash22(seed + 4.13);
+  float side = v.y < 0.5 ? -1.0 : 1.0;
+  float depth = c + (1.0 - c) * u.y;
+  if (u.x * (1.0 + c) < 1.0) return vec2(v.x * 2.0 - 1.0, side * depth);
+  return vec2(side * depth, (v.x * 2.0 - 1.0) * c);
+}
+#endif
 
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
   vec4 stored = texelFetch(uPosTex, texel, 0);
   vec2 p = unpackPos(stored);
   vec2 seed = gl_FragCoord.xy * 0.173 + uSeed;
+#ifdef ZOOM_OUT
+  // The bed shrinks with the field, as one piece (a grain in the air too:
+  // where it took off shrinks under it).
+  p *= uZoomShrink;
+#endif
 
   // Tossed (see TOSS_GLSL): in the air the plate can't move a grain, so its
   // stored spot stays where it took off; on the one pass its flight ends it
@@ -1214,7 +1343,11 @@ void main() {
   if (tossLive(uTossPrevAge)) {
     vec4 fl = tossFlight(vec2(texel));
     if (uTossAge >= 0.0 && uTossAge < fl.x) {
+#ifdef ZOOM_OUT
+      outColor = packPos(p);
+#else
       outColor = stored;
+#endif
       return;
     }
     if (uTossPrevAge < fl.x && fl.x <= uTossAge) {
@@ -1223,6 +1356,16 @@ void main() {
     }
   }
 
+#ifdef ZOOM_OUT
+  // A share of the bed moves to the freed strip at the edges, so the shrink
+  // doesn't pile the sand up in the middle.
+  if (hash21(seed * 1.31 + 4.7) < uZoomRespawn) {
+    outColor = packPos(respawnInRim(seed + 2.9, uZoomShrink));
+    return;
+  }
+  // The sim steps in plate space; grain space is the frame, not to plate scale.
+  p = GRAIN_TO_PLATE(p);
+#endif
   float drive = plateDrive();
 
   vec3 fg = fieldWithGrad(p);
@@ -1264,12 +1407,21 @@ void main() {
   if (streamLen > stepCap) stream *= stepCap / streamLen;
 
   p += hop - dir * pull + stream;
+#ifdef ZOOM_OUT
+  p = PLATE_TO_GRAIN(p);
+#endif
 
   // Off the edge: spilled. Respawn somewhere on the plate.
   if (!insidePlate(p)) {
     p = respawnOnPlate(seed + 7.31);
   }
 
+#ifdef ZOOM_OUT
+  // packPos rounds to the nearest 16-bit step, which would round a slow
+  // shrink away for a grain lying still on a line. Half a step of random
+  // dither either way makes the rounding fair, so the shrink survives on average.
+  p += (hash22(seed + 9.71) - 0.5) * (2.0 / 65535.0);
+#endif
   outColor = packPos(p);
 }
 `;
@@ -1290,7 +1442,12 @@ void main() {
   vec2 p = (uv - 0.5) / ph;
   float border = plateGauge(p);
   float aa = fwidth(border) * 1.5 + 1e-4;
+#ifdef ZOOM_OUT
+  // While Zoom out runs the plate has no edge: it fills the frame.
+  float inside = 1.0;
+#else
   float inside = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, border);
+#endif
 
   float a = amp(p);
   vec3 plate = vec3(0.030, 0.031, 0.036);
@@ -1300,8 +1457,12 @@ void main() {
   // A faint rim along the plate's true outline, the same width in plate
   // units on every shape (one minus the gauge, times the apothem, is the
   // distance to the nearest edge). The stretched full-frame square has no
-  // edge to show.
+  // edge to show, nor does the square while Zoom out runs.
+#ifdef ZOOM_OUT
+  float rimOn = 0.0;
+#else
   float rimOn = uPlateShape > 0.5 ? 1.0 : uSquarePlate;
+#endif
   float rim = (1.0 - smoothstep(0.0, 0.012, (1.0 - border) * uOutline.z)) * rimOn;
   vec3 col = (plate + glow + rim * 0.10) * inside;
   // The plate is near black, so a gain alone barely shows: the flash also
@@ -1354,8 +1515,9 @@ void main() {
       airborne = true;
     }
   }
-  vec2 room = 0.5 + p * plateHalf();
-  room.y += tossRise * plateHalf().y;
+  // Grain space to the room (the frame itself while Zoom out runs).
+  vec2 room = 0.5 + p * GRAIN_HALF;
+  room.y += tossRise * GRAIN_HALF.y;
   // The arc's height relative to the top of a full toss's mean arc.
   float rise = tossRise / ${glslFloat(TOSS_LIFT)};
   // The growth and brightness a rising grain gains, divided by the Sand
@@ -1370,7 +1532,7 @@ void main() {
   vec2 jitter = hash22(vec2(texel) * 0.731 + 3.17);
   float w = grainWeight(vec2(texel));
   // How far this grain is being thrown right now — see GRAIN_MOTION_GLSL.
-  vMotion = clamp(grainHopScale(w) * grainBounce(amp(p) * plateDrive(), grainLift(w)) / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0);
+  vMotion = clamp(grainHopScale(w) * grainBounce(amp(GRAIN_TO_PLATE(p)) * plateDrive(), grainLift(w)) / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0);
   // A grain in the air runs up the ramp the higher it is, to its brightest
   // end by TOSS_WHITE_RISE.
   if (airborne) vMotion = max(vMotion, clamp(rise / ${glslFloat(TOSS_WHITE_RISE)}, 0.0, 1.0));
@@ -1392,8 +1554,9 @@ void main() {
   // bed reads as bright as the round one it replaced.
   float shardGrow = vFacets < 3.5 ? 1.556 : 1.253;
   // Zoom above 1 is a closer look, so the grains grow with the plate (see
-  // drawnGrainCount's caller); below 1 they keep their size and fewer are drawn.
-  float size = uGrainSize * shardGrow * grainSizeFactor(w) * resScale * max(1.0, uPlateZoom)
+  // drawnGrainCount's caller); below 1 they keep their size and fewer are
+  // drawn. Not while Zoom out runs: the sand then covers the frame at any Zoom.
+  float size = uGrainSize * shardGrow * grainSizeFactor(w) * resScale * max(1.0, GRAIN_ZOOM)
     * (1.0 + ${glslFloat(TOSS_GROW)} * riseGrow);
   vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
   vScale = vSizePx / size;
@@ -1518,16 +1681,52 @@ function seedPositions(side: number): Uint8Array {
   return data;
 }
 
+/** The scene's three programs, and where each grain pass reads positions. */
+interface Programs {
+  sim: GLProgram;
+  bg: GLProgram;
+  point: GLProgram;
+  simPos: WebGLUniformLocation | null;
+  pointPos: WebGLUniformLocation | null;
+}
+
+/** The programs with Zoom out compiled in (the shaders' ZOOM_OUT blocks) or
+ *  without it, which is the shader source exactly as it was before the zoom:
+ *  a separate build rather than a runtime switch, so the plate without the
+ *  zoom renders bit for bit as before and pays nothing for it. */
+function makePrograms(gl: WebGL2RenderingContext, zoom: boolean): Programs {
+  const src = (s: string) => (zoom ? s.replace("#version 300 es\n", "#version 300 es\n#define ZOOM_OUT\n") : s);
+  const sim = createProgram(gl, src(SIM_FRAG));
+  const bg = createProgram(gl, src(BG_FRAG));
+  const point = createProgram(gl, src(POINT_FRAG), src(POINT_VERT));
+  // The atlas sits on unit 1 in all three programs (uPosTex has unit 0).
+  for (const prog of [sim, bg, point]) {
+    prog.use();
+    gl.uniform1i(gl.getUniformLocation(prog.program, "uPlateAtlas"), 1);
+  }
+  return {
+    sim,
+    bg,
+    point,
+    simPos: gl.getUniformLocation(sim.program, "uPosTex"),
+    pointPos: gl.getUniformLocation(point.program, "uPosTex"),
+  };
+}
+
+function disposePrograms(p: Programs | null): void {
+  p?.sim.dispose();
+  p?.bg.dispose();
+  p?.point.dispose();
+}
+
 function createChladniScene(): Scene {
-  let simProg: GLProgram | null = null;
-  let bgProg: GLProgram | null = null;
-  let pointProg: GLProgram | null = null;
+  // Without Zoom out, and with it (built the first time it's asked for).
+  let plain: Programs | null = null;
+  let zoomed: Programs | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
   let pointVao: WebGLVertexArrayObject | null = null;
   const posTex: (WebGLTexture | null)[] = [null, null];
   const posFbo: (WebGLFramebuffer | null)[] = [null, null];
-  let simPosLoc: WebGLUniformLocation | null = null;
-  let pointPosLoc: WebGLUniformLocation | null = null;
   let read = 0;
   let side = 1;
   let grainCount = 0;
@@ -1552,6 +1751,11 @@ function createChladniScene(): Scene {
   let lastBakeMs = 0;
   let atlasBytes = 0;
   const powderBuf = new Float32Array(3);
+  // Zoom out's phase in octaves (its fractional part is all the field needs;
+  // the total is for probe()), and the layer stack it gives.
+  let zoomPhase = 0;
+  let zoomTotal = 0;
+  const zoomBuf: ZoomLayer[] = [];
 
   function setModes(prog: GLProgram, modes: readonly ActiveMode[]): void {
     for (let k = 0; k < ACTIVE_MODES; k++) {
@@ -1559,6 +1763,10 @@ function createChladniScene(): Scene {
       if (mode.layer < 0) prog.setV4(`uModes[${k}]`, mode.n, mode.m, mode.sign, mode.weight);
       else prog.setV4(`uModes[${k}]`, mode.layer, 0, 0, mode.weight);
     }
+  }
+
+  function setZoom(prog: GLProgram, layers: readonly ZoomLayer[]): void {
+    for (let k = 0; k < ZOOM_LAYERS; k++) prog.setV2(`uZoomLayer[${k}]`, layers[k].scale, layers[k].weight);
   }
 
   function setOutline(prog: GLProgram): void {
@@ -1625,16 +1833,12 @@ function createChladniScene(): Scene {
     ],
 
     probe() {
-      return { drive: lastRawDrive, bakeMs: lastBakeMs, atlasMB: atlasBytes / 1e6 };
+      return { drive: lastRawDrive, bakeMs: lastBakeMs, atlasMB: atlasBytes / 1e6, zoomOctaves: zoomTotal };
     },
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
-      simProg = createProgram(gl, SIM_FRAG);
-      bgProg = createProgram(gl, BG_FRAG);
-      pointProg = createProgram(gl, POINT_FRAG, POINT_VERT);
-      simPosLoc = gl.getUniformLocation(simProg.program, "uPosTex");
-      pointPosLoc = gl.getUniformLocation(pointProg.program, "uPosTex");
+      plain = makePrograms(gl, false);
       quadVao = createFullscreenQuad(gl);
       // The point pass has no vertex attributes at all — every grain is
       // addressed by gl_VertexID into the position texture — so it draws
@@ -1670,21 +1874,20 @@ function createChladniScene(): Scene {
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
       gl.activeTexture(gl.TEXTURE0);
-      // The atlas sits on unit 1 in all three programs (uPosTex has unit 0).
-      for (const prog of [simProg, bgProg, pointProg]) {
-        prog.use();
-        gl.uniform1i(gl.getUniformLocation(prog.program, "uPlateAtlas"), 1);
-      }
 
       read = 0;
-      // A plate picked in saved settings is baked now, not on the first frame.
+      // A plate picked in saved settings is baked now, not on the first frame,
+      // and a zoom turned on in them is built now too.
       usePlate(gl, plateSetting());
+      if (shape === SQUARE && resolveSceneSetting(ID, settingFor("zoomOut")) > 0) zoomed = makePrograms(gl, true);
       lastFrameTime = null;
       toss = null;
+      zoomPhase = 0;
+      zoomTotal = 0;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
-      if (!simProg || !bgProg || !pointProg || !quadVao || !pointVao || !response) return;
+      if (!plain || !quadVao || !pointVao || !response) return;
       const { gl } = ctx;
 
       // See file header for why frame.time and not anim.dtSec.
@@ -1719,6 +1922,17 @@ function createChladniScene(): Scene {
       });
       let maxOrder = 1;
       for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.cells);
+
+      // Zoom out (chladniZoom.ts): the square plate only. Speed is the
+      // slider times its jack, so silence stops it.
+      const zoomSetting = resolveSceneSetting(ID, settingFor("zoomOut"));
+      const zoomOn = shape === SQUARE && zoomSetting > 0;
+      const zoomStep = zoomOn ? zoomPhaseStep(dt, zoomSetting, drives.value("zoomOut", frame.energy)) : 0;
+      zoomPhase = (zoomPhase + zoomStep) % 1;
+      zoomTotal += zoomStep;
+      const layers = zoomLayers(zoomPhase, zoomBuf);
+      // The step cap must count the finest layer still showing.
+      if (zoomOn) maxOrder *= zoomFinestScale(layers);
       lastRawDrive = rawPlateDrive(
         resolveSceneSetting(ID, settingFor("shake")),
         drives.value("shake", frame.energy),
@@ -1736,12 +1950,15 @@ function createChladniScene(): Scene {
       // look rather than a thinner bed: the grain pool is fixed, so with
       // grains of a fixed size it would run out of sand to cover the plate.
       const zoom = resolveSceneSetting(ID, settingFor("plateZoom"));
-      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale * Math.max(1, zoom);
+      // While Zoom out runs the sand covers the frame, at any Zoom.
+      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale * Math.max(1, zoomOn ? 1 : zoom);
       const fitted = shape !== SQUARE || resolveSceneSetting(ID, settingFor("squarePlate")) > 0.5;
       const squarePx2 = fitted
         ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
         : gl.drawingBufferWidth * gl.drawingBufferHeight;
-      const platePx2 = ((squarePx2 * plateArea(plateOutline(shape))) / 4) * zoom * zoom;
+      const platePx2 = zoomOn
+        ? gl.drawingBufferWidth * gl.drawingBufferHeight
+        : ((squarePx2 * plateArea(plateOutline(shape))) / 4) * zoom * zoom;
       const sandAmount = resolveSceneSetting(ID, settingFor("sandAmount"));
       const sizeM2 = grainSizeMoment(
         resolveSceneSetting(ID, settingFor("grainWeight")),
@@ -1753,6 +1970,8 @@ function createChladniScene(): Scene {
       // The scissor keeps it to the rows that prefix occupies (the sim
       // indexes grains by gl_FragCoord), so the SAND_AMOUNT_MAX pool only
       // costs what is actually on the plate.
+      const progs = zoomOn ? (zoomed ??= makePrograms(gl, true)) : plain;
+      const { sim: simProg, bg: bgProg, point: pointProg } = progs;
       const write = 1 - read;
       // The plate's atlas on unit 1 for all three passes (the stand-in on
       // the square, which never reads it).
@@ -1767,13 +1986,18 @@ function createChladniScene(): Scene {
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(simProg, modes);
       setOutline(simProg);
+      if (zoomOn) {
+        setZoom(simProg, layers);
+        simProg.setF("uZoomShrink", zoomShrink(zoomStep));
+        simProg.setF("uZoomRespawn", zoomRespawnShare(zoomStep));
+      }
       simProg.setF("uMaxOrder", maxOrder);
       simProg.setF("uSimDt", dt);
       simProg.setF("uSeed", Math.random() * 100);
       setToss(simProg);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
-      gl.uniform1i(simPosLoc, 0);
+      gl.uniform1i(progs.simPos, 0);
       drawFullscreenQuad(gl, quadVao);
       gl.disable(gl.SCISSOR_TEST);
       // Both hosts (app.ts / tv.ts) size the viewport to the drawing buffer
@@ -1788,6 +2012,7 @@ function createChladniScene(): Scene {
       uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(bgProg, modes);
       setOutline(bgProg);
+      if (zoomOn) setZoom(bgProg, layers);
       drawFullscreenQuad(gl, quadVao);
 
       // Sand: one point per grain, up to drawnGrainCount — see file header
@@ -1799,6 +2024,7 @@ function createChladniScene(): Scene {
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(pointProg, modes);
       setOutline(pointProg);
+      if (zoomOn) setZoom(pointProg, layers);
       pointProg.setF("uSide", side);
       pointProg.setF("uGrainGain", grainGain(grainCount));
       setToss(pointProg);
@@ -1806,7 +2032,7 @@ function createChladniScene(): Scene {
       pointProg.setV3v("uPowderInk", powderBuf);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
-      gl.uniform1i(pointPosLoc, 0);
+      gl.uniform1i(progs.pointPos, 0);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(pointVao);
@@ -1824,9 +2050,8 @@ function createChladniScene(): Scene {
 
     dispose(ctx: SceneContext) {
       const { gl } = ctx;
-      simProg?.dispose();
-      bgProg?.dispose();
-      pointProg?.dispose();
+      disposePrograms(plain);
+      disposePrograms(zoomed);
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (pointVao) gl.deleteVertexArray(pointVao);
       for (let i = 0; i < 2; i++) {
@@ -1841,13 +2066,10 @@ function createChladniScene(): Scene {
       if (blankAtlas) gl.deleteTexture(blankAtlas);
       blankAtlas = null;
       shape = -1;
-      simProg = null;
-      bgProg = null;
-      pointProg = null;
+      plain = null;
+      zoomed = null;
       quadVao = null;
       pointVao = null;
-      simPosLoc = null;
-      pointPosLoc = null;
       response = null;
       lastFrameTime = null;
       toss = null;
