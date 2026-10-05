@@ -6,7 +6,8 @@ one) whose resonant modes are each driven by the music's energy at that mode's
 own resonant frequency, with a bed of sand grains that bounce on the
 antinodes and settle on the nodal lines. The classic Chladni figures aren't
 drawn — they emerge from grain motion and re-form grain by grain as a
-different mode takes over. A drop can toss the whole bed into the air.
+different mode takes over. A drop can toss the whole bed into the air, and
+the square plate can zoom out forever.
 Featured, on main.
 
 ## Where the code is
@@ -47,6 +48,11 @@ Featured, on main.
   colour (`powderInk`) and the grit colour it must stand apart from.
 - The toss lives in `chladni.ts`: `nextToss`/`advanceToss` (pure, tested) and
   `TOSS_GLSL` (each grain's stateless flight, `foldIntoPlate`).
+- `src/render/scenes/chladniZoom.ts` — Zoom out: the octave layers and their
+  weights, the speed, and the sand's shrink and refill. `chladni.ts` builds the
+  zoom's shader programs separately (`makePrograms`, compiled the first time
+  the zoom turns on). `tests/chladniZoom.test.ts` checks that the zoom has no
+  seam at the octave wrap and that the bed stays even.
 - `tests/chladni.test.ts` covers the mode table ordering/symmetry, resonance
   mapping, ring timing, grain-texture sizing, `grainGain`,
   `drawnGrainCount`'s coverage cap and Sand amount scaling, the toss trigger
@@ -171,6 +177,16 @@ hexagon and decagon.
   plates in the first build (smaller atlas): square 1.94 ms, round 1.52,
   hexagon 1.45, triangle 1.19, decagon 1.52, clamped 2.52. The default plate
   is pixel-identical to main; with True shape on, one pixel differs by 1/255.
+- 2026-10-05 (zoom out): with the zoom off, 0 of 921,600 pixels changed
+  (seeded bench at frames 30 and 90, default and True shape + Zoom 1.5 + Toss
+  1). GPU time at 3024×1890: 3.17 ms off, 3.91 ms at Zoom out 1 near an
+  octave wrap, where two layers are drawn (4.52 ms before `ZOOM_WEIGHT_FLOOR`).
+  The All level read about 0.5–0.8 on tarantula and billie-jean, so full speed
+  on music is about 2 octaves a minute, roughly 30 s per halving. Sand density
+  by ring on the real GPU (tarantula, Zoom out 1) stayed between 0.74 and 1.37
+  of even with no trend over 2.85 octaves. Before the edge fold it was
+  2.5–2.7 in the centre and 0.5 at the edges. Frames across a wrap are
+  continuous.
 
 ## Decisions and pivots
 
@@ -458,6 +474,53 @@ hexagon and decagon.
     and Sunset's violet and Phosphor's pink washed to near-white heaps. Powder
     is now lit, then scaled back by the bed's brightness times its brightest
     shade so its hue survives; shade and Flash still show on it.
+- 2026-10-05 (zoom out) — **Zoom out** (Motion, after Toss, default 0 = off,
+  pixel-identical). The user asked for "some very long zoom out and autoscale
+  plate size or something". Of three kinds offered (endless loop, one long
+  pull-back, plate size following the music) they picked the endless loop,
+  like the Kaleidoscope's infinite zoom.
+  - It is an illusion, not physics: a real plate has an edge, and pulling back
+    would only show it getting smaller. It borrows one true thing: a bigger
+    plate rings finer figures (Pattern complexity is in effect the plate's
+    size). The plate rings its music-picked blend at `ZOOM_LAYERS` sizes an
+    octave apart. Each layer is weighted by a bell over its place in the stack,
+    zero at both ends, so a coarse layer grows in as a fine one fades out,
+    and after one octave the set equals itself shifted by one layer. The idea
+    is the Kaleidoscope's `zfbm`; the code is this scene's own.
+  - Square plate only, because the other plates' outlines would shrink to a
+    dot. While the zoom runs, the square has no edge: its cosines carry on past
+    the plate, which is the plate mirrored across its edges. It fills the frame
+    at its true aspect (the user dislikes stretching), so True shape does
+    nothing and the panel says so. Zoom still sets the base size.
+  - Speed is the setting times its jack (All level by default) times
+    `ZOOM_OCTAVES_PER_MIN`, so silence stops it as it freezes the figure, and
+    every mover has a visible driver. Whether the zoom is on reads the slider
+    before the Master card's Scale (`resolveSceneSettingUnscaled`), so Scale 0
+    stops it without changing the framing; Scale still sets the speed.
+  - Sand rides the zoom: each frame every grain shrinks toward the centre by
+    the frame's zoom step, so a formed figure shrinks as one piece. The share
+    of the bed the shrink frees moves to the strip it opened at the edges and
+    then hops like any grain. A grain that hops off the sand's area folds back
+    in at that edge (`foldIntoPlate`), because re-seeding it anywhere fed the
+    middle, which piled up. The sand lies on the frame grown by
+    `ZOOM_SAND_MARGIN`, with that much more sand drawn, because sand still
+    settling at the very edge read as a bright fringe. Packing positions
+    rounds them, which swallowed a slow shrink for grains lying still on a
+    line, so a half-step random dither keeps the shrink right on average. A
+    toss under the zoom throws a plate distance (divided by `grainExtent()`),
+    as round as on the plain plate.
+  - Look: a plain bell with the strongest layer at the plate's own scale read
+    as a busy, fuzzy lattice. `ZOOM_BELL_POWER` makes one layer carry the plate
+    for most of each octave, with a short morph at the handover (3 left a
+    second size visible for a third of every octave; 6 is about 13%).
+    `ZOOM_PEAK_SCALE` sits half an octave coarser than the plate's own scale,
+    because the mirrored, true-aspect frame read twice as busy.
+    `ZOOM_WEIGHT_FLOOR` drops near-zero layers from the sum, which made it
+    cheaper with no visible change.
+  - The zoom is built as separate shader programs. Switching it at run time in
+    one program left 3 to 35 pixels changed with the zoom off, because the
+    Metal compiler reordered the maths, so the plain programs keep the old
+    source exactly.
 
 ## Tuning notes
 
@@ -526,6 +589,11 @@ hexagon and decagon.
   Figure hold 1 gives the cleanest A/B. The colour never touches the sim, so 0
   and 1 a moment apart are the same bed. To move `POWDER_SPLIT`, re-run
   `weight-split.mjs`, not the default bed.
+- Zoom out: `ZOOM_OCTAVES_PER_MIN` was set to the "very long" target, not yet
+  by the user's eye. Judge the look at fixed zoom phases on a quiet, crisp
+  section, then across a wrap at full speed; Figure hold and Resonance high
+  make it read as one figure shrinking. `ZOOM_BELL_POWER` trades a clean
+  single figure against a longer morph at each handover.
 
 ## Known issues and next steps
 
@@ -545,6 +613,14 @@ hexagon and decagon.
   where they took off. Airborne grains are drawn in grain order, not by height.
 - Switching to the hexagon or decagon re-bakes its atlas on the main thread
   (about 0.2 s), because only the plate on screen keeps one.
+- Zoom out: dark straight bars show where the plate's edges mirror, running
+  the full height or width of the frame and drifting inward with the zoom. If
+  they're disliked, alternate layers could be offset or rotated so their edges
+  don't line up. At each octave handover the figure is briefly a sum of two
+  sizes and reads busier. The music's re-picks change the figure every few
+  seconds, but the inward drift still reads. Turning the zoom on or off
+  rescales where stored grains sit, so the sand re-forms, and the first
+  switch-on compiles three programs, which can hitch briefly.
 
 - Under a room mic with full auto-gain, the shared bands still read steady
   noise as bass-heavy (see the 2026-10-02 decision). This scene now cancels
@@ -633,5 +709,6 @@ hexagon and decagon.
   settings with a draggable gauge in the Scene card; Settling pull removed.
 - 2026-10-04 (draft) — Figure hold: how much stronger a new figure must ring
   to take the plate.
-- `#361` (2026-10-05, draft) — Toss on the drop, Powder colour, and the
-  Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom.
+- `#361` (2026-10-05, draft) — Toss on the drop, Powder colour, the
+  Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
+  an endless pull-back on the square plate.
