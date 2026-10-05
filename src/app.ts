@@ -95,7 +95,20 @@ import {
 } from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
+import {
+  clearOverlayLogo,
+  getOverlay,
+  getOverlayLogoScope,
+  setOverlayLogo,
+  setOverlayOpacity,
+  setOverlayPosition,
+  setOverlaySize,
+  setOverlayText,
+} from "./render/overlayStore.ts";
+import { encodeLogoFile } from "./render/overlayLogoFile.ts";
 import {
   getSceneExpansion,
   getSceneExpansionShape,
@@ -127,10 +140,23 @@ import {
   hasUndo as hasLookUndo,
   listLooks,
   primeUndo,
+  renameLook,
   saveLook,
   saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
+import {
+  AUTOPILOT_EVERY_BARS,
+  SET_MAX_PADS,
+  addCapturedPad,
+  getAutopilot,
+  listPads,
+  removeStoredPad,
+  renameStoredPad,
+  setAutopilot,
+} from "./render/sceneSet.ts";
+import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
+import { funnyLookName } from "./render/lookNames.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import {
@@ -232,11 +258,14 @@ import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
-import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
+import { createBroadcastTransport, createOutputBridge, type PopOutBridge } from "./net/outputBridge.ts";
 import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
 import { thisDevice } from "./net/deviceKind.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
+import { createEffectControls, effectShortcutId, type EffectControls } from "./ui/effectControls.ts";
+import { createClipRecorder, type ClipRecorder } from "./ui/clipRecorder.ts";
+import { createRecordControls, type RecordControls } from "./ui/recordControls.ts";
 import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
@@ -257,11 +286,14 @@ const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
+const recBtn = document.getElementById("recBtn") as HTMLButtonElement;
+const recAspectBtn = document.getElementById("recAspectBtn") as HTMLButtonElement;
 const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
 const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
 const outStateEl = document.getElementById("outState") as HTMLSpanElement;
 const takeBtn = document.getElementById("takeBtn") as HTMLButtonElement;
 const outBarEl = document.getElementById("outBar") as HTMLElement;
+const fxBarEl = document.getElementById("fxBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -432,6 +464,9 @@ function renderScale(): number {
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
+/** The text-and-logo overlay (render/overlayLayer.ts), drawn on the main
+ *  canvas right after the scene; made at boot, kept for the session. */
+let overlayLayer: OverlayLayer | null = null;
 /** True from the main canvas's `webglcontextlost` until the page reloads on
  *  the restore (see boot()): drawScene() draws nothing, and the picture
  *  readback isn't rebuilt against a dead context. */
@@ -562,12 +597,29 @@ let lastAnim: AnimFrame | null = null;
 /** The pop-out output window (net/outputBridge.ts), created at boot. The two
  *  numbers are this window's last resolved Sensitivity/Expansion, which the
  *  bridge streams along with each frame (net/outputSync.ts's `p`). */
-let outputBridge: OutputBridge | null = null;
+let outputBridge: PopOutBridge | null = null;
 /** A keyed room's Main as an output (net/roomBridge.ts): PLAY sends this
  *  device's look to every Main screen, like the pop-out's. Null outside a keyed
  *  room. */
 let roomBridge: RoomBridge | null = null;
 let outputControls: OutputControls | null = null;
+/** The Set card's two markers (ui/setCard.ts): the pad loaded in this window's
+ *  preview, and the pad Play last sent to the output. Ids, not indices, so a
+ *  deleted or added pad can't move them. Read through currentPadId() /
+ *  `padMarkers`, which drop a pad whose scene is no longer the one showing. */
+let setPreviewPadId: string | null = null;
+let setLivePadId: string | null = null;
+let setPopOutWasOpen = false;
+/** Autopilot's bar count and cursor (render/setAutopilot.ts). */
+const setAutopilotState = createAutopilot();
+/** The held-effect buttons and keys (ui/effectControls.ts), built at boot. */
+let effectControls: EffectControls | null = null;
+/** Draws every frame (render/compositor.ts): the scene alone, or the crossfade
+ *  between two, with whatever held effects are engaged. Created with the main
+ *  GL context in boot(). */
+let compositor: Compositor | null = null;
+let clipRecorder: ClipRecorder | null = null;
+let recordControls: RecordControls | null = null;
 let outputSens = 1;
 let outputExp = 1;
 let lastRenderFpsMs = 0;
@@ -740,7 +792,7 @@ function wireOutputKeys(controls: OutputControls): void {
       const result = controls.go(glideMs ?? undefined);
       noteKeyUse("go");
       if (result === "glide" && glideMs !== null) showHud(`Play: gliding over ${(glideMs / 1000).toFixed(1)} s`);
-      else if (glideMs !== null) showHud("Play: sent at once — a glide only runs within one scene");
+      else if (glideMs !== null) showHud("Play: sent at once");
       else showHud("Play: sent to output");
     },
     true,
@@ -808,17 +860,26 @@ function updateSceneVersionLabel(next: Scene): void {
   bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
 }
 
-/** Puts `next` on the main host (clearing whatever was mounted first), or, if
+/** Puts `next` on the main host (clearing whatever was mounted first, unless
+ *  `crossfade` asks to blend from `prev`, which then stays), or, if
  *  its init() throws (a shader this GPU won't compile, a float target it
  *  lacks), says so and leaves it: back to the gallery, or to `prev` when there
  *  is no gallery (a `?room=` renderer). Returns whether `next` is running.
  *  Callers keep `scene` pointing at `next` until this answers, and must stop
  *  when it returns false: `scene` has been put back and the HUD explains. */
-function mountOrBail(next: Scene, prev: Scene): boolean {
+function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   const host = mainHost!;
-  host.unmountAll();
+  // A crossfade still running ends here, its outgoing scene dropped at once.
+  compositor?.cancel();
+  // A different scene on screen already: it stays mounted, drawn under the new
+  // one, until the compositor's blend is done (render/crossfade.ts has the
+  // timing). The floor preset cuts on the beat instead of blending: two
+  // scenes at once are too much for it.
+  const fade = crossfade && prev !== next && host.isMounted(prev);
+  if (!fade) host.unmountAll();
   try {
     host.mount(next);
+    if (fade) compositor?.begin(prev, { cut: quality.preset === "floor" });
     return true;
   } catch (err) {
     console.error(`"${next.name}" failed to start:`, err);
@@ -847,7 +908,7 @@ function applyScene(next: Scene): void {
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ from the last one's while previewing.
   if (previewActive) applyRenderQuality();
-  if (!mountOrBail(next, prev)) return;
+  if (!mountOrBail(next, prev, inViz)) return;
   updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
@@ -859,6 +920,82 @@ function applyPalette(next: Palette): void {
   controllerLook?.notePalette(next.id);
   showHud(`palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
+}
+
+// ---- The Set: pads of looks, keys 1-9, Autopilot ----
+// Model and store: render/sceneSet.ts; the card: ui/setCard.ts; the timing:
+// render/setAutopilot.ts. A pad is fired through applyScene/applyPalette like
+// any other change — so the pop-out's Cue/Play, a paired room's Main and a
+// scene crossfade all see an ordinary scene change.
+
+/** The pad this window last loaded, while its scene is still the one showing. */
+function currentPadId(): string | null {
+  const pad = listPads().find((p) => p.id === setPreviewPadId);
+  return pad && pad.look.sceneId === scene.id ? pad.id : null;
+}
+
+/** Autopilot runs only on the device that hears the music, never on a phone
+ *  controller (the TV is its own page and never gets here). */
+function setAutopilotRuns(): boolean {
+  return !isController && ownInput();
+}
+
+/** Loads a pad's clip into this window: its look, then its palette, then its
+ *  scene (the order startMainPlay applies a room's look in, so the scene
+ *  mounts already tuned). With an output open this is the preview, and Play
+ *  sends it; Autopilot plays it itself. A manual press restarts Autopilot's
+ *  bar count; Autopilot's own change keeps the count it just re-anchored. */
+function firePad(id: string, byAutopilot = false): void {
+  const pads = listPads();
+  const at = pads.findIndex((p) => p.id === id);
+  if (at < 0 || !inViz) return;
+  const pad = pads[at]!;
+  const next = getScene(pad.look.sceneId);
+  if (!next || !presetAllows(next, effectivePreset())) {
+    showHud(next ? "scene unavailable on this device" : "that pad's scene is gone", true);
+    return;
+  }
+  applyLook(pad.look, next.settings ?? []);
+  if (pad.paletteId && pad.paletteId !== palette.id && PALETTES.some((p) => p.id === pad.paletteId)) {
+    applyPalette(getPalette(pad.paletteId));
+  }
+  if (next.id !== scene.id) applyScene(next);
+  setPreviewPadId = pad.id;
+  if (!byAutopilot) restartAutopilot(setAutopilotState, pad.id);
+  showHud(`pad ${at + 1}: ${scene.name}`);
+  if (byAutopilot) outputControls?.go();
+  deviceMenu?.sceneChanged();
+}
+
+/** "+ Add": the scene on screen and its palette become a new pad. Returns why
+ *  it was refused, in words for the card, or null. */
+function addPadFromScreen(): string | null {
+  const result = addCapturedPad(scene.id, scene.settings ?? [], palette.id);
+  if (result.ok) {
+    setPreviewPadId = result.pad.id;
+    return null;
+  }
+  return result.reason === "full"
+    ? `The Set is full (${SET_MAX_PADS} pads). Delete one to add another.`
+    : "This look is too big to keep in the Set.";
+}
+
+const NO_PADS: readonly string[] = [];
+
+/** Autopilot's per-tick step; fires the pad it names. */
+function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
+  if (!inViz || !setAutopilotRuns()) {
+    setAutopilotState.counting = null; // counts only while it can fire
+    return;
+  }
+  const config = getAutopilot();
+  const id = stepAutopilot(
+    setAutopilotState,
+    { timeSec: nowMs / 1000, beats: anim.metronomeBeats, tempo: anim.metronomeOn },
+    config,
+    config.on ? listPads().map((p) => p.id) : NO_PADS,
+  );
+  if (id) firePad(id, true);
 }
 
 function fatalError(message: string): void {
@@ -1629,7 +1766,12 @@ function wireDeviceMenu(): void {
     },
     onSceneSettingsReset: (sceneId) => resetSceneSettings(sceneId, getScene(sceneId)?.settings ?? []),
     listLooks,
-    onSaveLook: (sceneId, name) => saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? [])),
+    onSaveLook: (sceneId) => {
+      const name = funnyLookName(listLooks(sceneId).map((l) => l.name));
+      saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? []));
+      return name;
+    },
+    onRenameLook: renameLook,
     onApplyLook: (look) => {
       const specs = getScene(look.sceneId)?.settings ?? [];
       primeUndo(look.sceneId, specs);
@@ -1643,6 +1785,37 @@ function wireDeviceMenu(): void {
     onUndoLook: (sceneId) => {
       const look = takeUndo(sceneId);
       if (look) applyLook(look, getScene(sceneId)?.settings ?? []);
+    },
+    set: {
+      pads: () => listPads(),
+      onAddPad: addPadFromScreen,
+      onFirePad: (id) => firePad(id),
+      onRenamePad: renameStoredPad,
+      onDeletePad: removeStoredPad,
+      previewPadId: currentPadId,
+      livePadId: () => (listPads().some((p) => p.id === setLivePadId) ? setLivePadId : null),
+      outputOpen: () => outputControls?.active() ?? false,
+      autopilot: getAutopilot,
+      onAutopilotChange: (change) => {
+        setAutopilot(change);
+        restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
+      },
+      autopilotRuns: setAutopilotRuns,
+      everyChoices: AUTOPILOT_EVERY_BARS,
+      minPads: AUTOPILOT_MIN_PADS,
+      maxPads: SET_MAX_PADS,
+    },
+    overlay: {
+      getState: () => ({ ...getOverlay(), logoScope: getOverlayLogoScope() }),
+      onText: setOverlayText,
+      onPosition: setOverlayPosition,
+      onSize: setOverlaySize,
+      onOpacity: setOverlayOpacity,
+      onLogoFile: async (file) => {
+        const logo = await encodeLogoFile(file);
+        return logo && setOverlayLogo(logo.dataUrl, logo.scope) ? logo.scope : "failed";
+      },
+      onRemoveLogo: clearOverlayLogo,
     },
     getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
@@ -2182,6 +2355,9 @@ function setLaptopWaiting(waiting: boolean): void {
 async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
   document.body.classList.remove("in-gallery");
+  // Already in a scene (a link or the back/forward buttons changed the route):
+  // the new one crossfades in; from the gallery it just appears.
+  const fromScene = inViz;
   inViz = true;
   canvas.style.display = "block";
   // The resize observer's cache still says 0x0 from while the canvas was
@@ -2194,7 +2370,7 @@ async function enterViz(next: Scene): Promise<void> {
   // Before the mount (see applyScene); previewActive is still false on a
   // fresh entry and turns on at the next tick, which remounts if needed.
   if (previewActive) applyRenderQuality();
-  if (!mountOrBail(next, prev)) return;
+  if (!mountOrBail(next, prev, fromScene)) return;
   updateSceneVersionLabel(next);
 
   showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
@@ -2205,6 +2381,8 @@ async function enterViz(next: Scene): Promise<void> {
   if (!bypassGallery) backBtn.style.display = "block";
   sceneVersion.style.display = "inline";
   outputControls?.setVisible(true);
+  effectControls?.setVisible(true);
+  recordControls?.setVisible(true);
 
   if (ownInput()) void ensureAudio();
   updateMicPrompt();
@@ -2225,8 +2403,11 @@ function exitToGallery(): void {
   stopBtn.style.display = "none";
   sceneVersion.style.display = "none";
   outputControls?.setVisible(false);
+  effectControls?.setVisible(false);
+  recordControls?.setVisible(false); // ends a take, saving it
   hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
+  compositor?.cancel();
   mainHost?.unmountAll();
   canvas.style.display = "none";
   immersive?.pause();
@@ -2399,7 +2580,10 @@ async function boot(): Promise<void> {
   detectedPreset = devPin ?? (await detectQuality());
   quality = qualitySettings(renderPreset());
   mainHost = createSceneHost(gl, quality);
+  const host = mainHost;
+  compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   resourceMeter = createResourceMeter(gl);
+  overlayLayer = createOverlayLayer(gl);
   if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
@@ -2547,6 +2731,20 @@ async function boot(): Promise<void> {
       showRoom: () => roomCodeEl.click(),
     });
   }
+  // Record sits beside POP OUT; a controller has no canvas of its own to record.
+  if (!isController) {
+    clipRecorder = createClipRecorder({
+      mainCanvas: canvas,
+      outputWindow: () => outputBridge?.popupWindow() ?? null,
+      audioStream: () => capture?.stream ?? null,
+      sceneId: () => scene.id,
+      aspect: () => recordControls?.aspect() ?? "screen",
+      onChange: () => recordControls?.refresh(),
+      onMessage: (text) => showHud(text),
+    });
+    recordControls = createRecordControls(() => clipRecorder!, { recBtn, aspectBtn: recAspectBtn });
+    recordControls.setVisible(inViz);
+  }
   const controlsBridge = outputBridge && roomBridge ? combineBridges([outputBridge, roomBridge]) : (outputBridge ?? roomBridge);
   if (controlsBridge) {
     outputControls = createOutputControls(controlsBridge, {
@@ -2559,7 +2757,24 @@ async function boot(): Promise<void> {
     });
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
+    // The Set card's live marker: whatever pad was loaded when Play sent it.
+    outputControls.onPlay(() => {
+      setLivePadId = currentPadId();
+    });
   }
+  // The held effects: on this window through the compositor, and on the
+  // pop-out as their own message. Not part of the look, so Cue never holds them.
+  effectControls = createEffectControls({
+    bar: fxBarEl,
+    enabled: () => inViz,
+    isTyping: isTypingTarget,
+    onChange: (effects) => {
+      compositor?.setEffects(effects);
+      outputBridge?.sendEffects(effects);
+    },
+    onKeyUse: (id) => noteKeyUse(effectShortcutId(id)),
+  });
+  effectControls.setVisible(inViz);
 
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
@@ -2603,6 +2818,17 @@ async function boot(): Promise<void> {
     // key), not e.key like f/s above, so a Cyrillic or German layout still
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
+    // The Set: 1-9 fire pads 1-9, panel open or closed (Shift+digit is the
+    // panel's block jump, deviceMenu.ts). Not on auto-repeat: a held key
+    // would reload the same pad on every repeat.
+    if (inViz && !typing && !e.shiftKey && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
+      const pad = listPads()[Number(e.code.slice(5)) - 1];
+      if (pad) {
+        e.preventDefault();
+        noteKeyUse("pad");
+        firePad(pad.id);
+      }
+    }
     if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
       // letter twins of Space and Option, which wireOutputKeys below owns.
@@ -3036,6 +3262,11 @@ function tick(): void {
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
+  // Autopilot (the Set card) off last tick's clock, before this tick's frame
+  // is built: a pad it fires switches scene here, so nothing below is
+  // computed for the scene it just left.
+  if (lastAnim) stepSetAutopilot(lastAnim, nowRafMs);
+
   // Resolved once per tick and reused everywhere below (extractor, anim
   // clock, the meters) — a second call would be harmless (autoTune.ts steps
   // each auto value once per tick, on its own clock), just wasted work.
@@ -3056,6 +3287,11 @@ function tick(): void {
   // The preview transition sits outside the bridge check because a phone
   // controller has no bridge yet still previews, whenever a scene is showing.
   const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  // A pop-out that just opened starts on this window's preview (net/outputSync.ts's
+  // outputOpened), so the pad loaded here is live on it.
+  const popOutOpen = outputBridge?.status().open ?? false;
+  if (popOutOpen && !setPopOutWasOpen) setLivePadId = currentPadId();
+  setPopOutWasOpen = popOutOpen;
   if (nextActive !== previewActive) {
     previewActive = nextActive;
     applyRenderQuality(true);
@@ -3196,8 +3432,21 @@ function drawScene(
   if (picturePolled) pollPicture();
   // The timer query only runs while the panel is open to show it.
   resourceMeter?.beginGpu(deviceMenu?.isOpen() ?? false);
+  let governable = true;
   try {
-    scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
+    // A crossfade or a held effect draws through the compositor; with neither
+    // in play this is just scene.render(...).
+    governable = compositor!.render({
+      ctx: mainHost!.ctx,
+      scene,
+      frame: displayFrame,
+      viewport,
+      palette,
+      anim: latchedAnim,
+      drives,
+      drivesFor: (s) => engine.forScene(s.id, s.settings ?? [], latchedAnim),
+      nowMs: nowRafMs,
+    }).governable;
   } finally {
     resourceMeter?.endGpu();
   }
@@ -3209,15 +3458,25 @@ function drawScene(
   // worth paying only while the Master card's Picture block is actually
   // visible or a headless sweep asked for it (pictureForced).
   if (picturePolled) capturePicture(nowRafMs);
-  governor?.recordFrame(nowRafMs);
+  // After the picture capture, so the Master card's Picture block still
+  // measures the scene alone, not the overlay on top of it. Drawn after the
+  // compositor's render (crossfade, held effects), so the overlay sits on top
+  // of those and stays visible over Freeze and Blackout.
+  overlayLayer?.draw();
+  // A frame with two scenes (a crossfade) or none (Freeze) says nothing about
+  // what one scene costs, so the governor does not see it.
+  if (governable) governor?.recordFrame(nowRafMs);
 }
 
 /** Whether anything currently wants a live picture reading — the Master
- *  card's Picture block while it's open, or a headless driver that forced it
+ *  card's Picture block while it's on screen (not merely while the panel is
+ *  open: each sample ends in a synchronous getBufferSubData, which waits
+ *  behind the GPU's backlog — ~15 ms a call under the Panel blur on a heavy
+ *  scene, 2026-10-04), or a headless driver that forced it
  *  on (tuning/debug.ts's `picture.force`, tools/master-sweep.mjs's own
  *  `__viz.pictureForce(true)`). */
 function pictureWanted(): boolean {
-  return pictureForced || (deviceMenu?.isOpen() ?? false);
+  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false);
 }
 
 /** The readback is created lazily, on mainHost's own GL context, the first

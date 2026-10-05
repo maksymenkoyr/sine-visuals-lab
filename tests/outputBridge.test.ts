@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createOutputBridge, type Transport } from "../src/net/outputBridge.ts";
+import { NO_EFFECTS } from "../src/render/heldEffects.ts";
 import type { OutputPower, OutputRenderStatus, ToMain, ToOutput } from "../src/net/outputSync.ts";
 
 function fakeTransport() {
@@ -53,11 +54,44 @@ describe("outputBridge status and power", () => {
     const { posted, receive } = setup();
     receive({ t: "hello", haveState: false });
     expect(posted[0].t).toBe("state");
-    expect(posted[posted.length - 1]).toEqual({ t: "power", power: POWER });
-    // A heartbeat from a window that has its state only re-sends power.
+    expect(posted[posted.length - 2]).toEqual({ t: "power", power: POWER });
+    // A heartbeat from a window that has its state only re-sends power and effects.
     posted.length = 0;
     receive({ t: "hello", haveState: true });
-    expect(posted.map((m) => m.t)).toEqual(["power"]);
+    expect(posted.map((m) => m.t)).toEqual(["power", "effects"]);
+  });
+
+  it("sendEffects posts only while an output is open, and every heartbeat reply repeats the last set", () => {
+    const { bridge, posted, receive } = setup();
+    const held = { ...NO_EFFECTS, freeze: true };
+    bridge.sendEffects(held);
+    expect(posted).toEqual([]);
+    receive({ t: "hello", haveState: false });
+    expect(posted[posted.length - 1]).toEqual({ t: "effects", effects: held });
+    posted.length = 0;
+    bridge.sendEffects(NO_EFFECTS);
+    expect(posted).toEqual([{ t: "effects", effects: NO_EFFECTS }]);
+    posted.length = 0;
+    receive({ t: "hello", haveState: true });
+    expect(posted[posted.length - 1]).toEqual({ t: "effects", effects: NO_EFFECTS });
+  });
+
+  it("a Play with a glide length keeps it across a scene change, for the output's crossfade", () => {
+    let scene = "spectrum";
+    const t = fakeTransport();
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene, palette: "neon" }),
+      storage,
+      power: () => POWER,
+    });
+    t.receive({ t: "hello", haveState: false });
+    t.posted.length = 0;
+    scene = "mesh";
+    expect(bridge.go(3000)).toBe(true);
+    const state = t.posted.find((m) => m.t === "state");
+    expect(state && state.t === "state" && state.glideMs).toBe(3000);
+    expect(state && state.t === "state" && state.state.scene).toBe("mesh");
   });
 
   it("a Play pressed while presence had lapsed reaches the output when it returns", () => {

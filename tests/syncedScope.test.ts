@@ -56,6 +56,13 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.hitTailLow": true,
   "vibe.hitTailMid": true,
   "vibe.hitTailHigh": true,
+  // The Overlay (render/overlayStore.ts): text/position/size/opacity and a
+  // room-sized logo ride in the look; a logo too big for it stays on the device.
+  "vibe.overlay": true,
+  "vibe.overlayLogo": true,
+  "vibe.overlayLogoLocal": false,
+  // The Set card's pads and Autopilot dials: a shelf, but one a paired phone must get.
+  "vibe.set": true,
   // Rewritten by the laptop's own analysis (the extractor), so it stays there.
   "vibe.silenceGate": false,
   "vibe.silenceGateClosed": false,
@@ -73,6 +80,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.audioSource": false,
   "vibe.audioInputDevice": false,
   "vibe.midiMap": false,
+  "vibe.recordAspect": false,
   "vibe.quality": false,
   "vibe.powerMode": false,
   "vibe.output.": false,

@@ -53,6 +53,7 @@ function fakeBridge(init: Partial<OutputStatus>, withTake: boolean) {
     update: () => {},
     pushFrame: () => {},
     sendPower: () => {},
+    sendEffects: () => {},
     outputStatus: () => null,
     ...(withTake ? { take: () => void calls.push("take") } : {}),
   };

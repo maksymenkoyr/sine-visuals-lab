@@ -182,8 +182,8 @@ export { ATTRACT_ROWS };
 //
 // - **Auto level** (`level`): his renderer scales each species' grid to its
 //   own brightness range before colouring. Here LEVEL_FRAG max-pools the
-//   trail into LEVEL_SIDE² blocks, read back through the same non-blocking
-//   createPixelReadback as Territory — but on every device while `level` is
+//   trail into LEVEL_SIDE² blocks, read back as one part of the same census
+//   as Territory (createPixelReadback, kickCensus) — but on every device while `level` is
 //   above 0, since it changes the picture. levelPeaks/levelGainsFull turn
 //   that into one gain per strain that evens their brightest roads out
 //   around the geometric mean (so Exposure still owns the overall
@@ -211,14 +211,14 @@ export { ATTRACT_ROWS };
 // - **Territory** per strain: SIM_FRAG's trail, box-downsampled by
 //   TERRITORY_FRAG into a 16x16 RGBA8 target, read back through a
 //   PIXEL_PACK_BUFFER + fenceSync (never a synchronous readPixels — see
-//   ensureTerritoryReadback) at most every TERRITORY_INTERVAL_MS, and only
+//   createPixelReadback) at most every TERRITORY_INTERVAL_MS, and only
 //   while probe() has actually been called within PROBE_IDLE_MS (a closed
 //   panel or the TV never triggers a single readback). `classifyTerritory`
 //   (pure, tested) turns the 256 texels into a share per strain — the cells
 //   where that strain's channel reads largest, above TERRITORY_THRESHOLD.
 // - **Population** per strain (the Headcount): *measured* — POP_FRAG counts
 //   the agents' strain channel into a POP_SIDE-square target of block fractions, read
-//   back through the same non-blocking `createPixelReadback` as Territory
+//   back in the same census as Territory (`createPixelReadback`)
 //   every POP_INTERVAL_MS while the panel is open *or* Switching is on
 //   (recruiting reads the shares every step), and `populationFromBlocks`
 //   (pure, tested) turns the blocks into shares. Since agents can change
@@ -2058,7 +2058,7 @@ void main() {
 
 /** Territory (Phase 3): a plain box downsample of the live trail into a
  *  TERRITORY_SIDE x TERRITORY_SIDE target, read back async (see the file
- *  header's Territory paragraph and createPhysarum2Scene's pollTerritory).
+ *  header's Territory paragraph and createPhysarum2Scene's kickCensus).
  *  No COMMON_UNIFORMS_GLSL/settings/drive splice — this pass is a standalone
  *  utility over the trail texture, not part of the scene's own uniform
  *  budget. A dynamic GLSL ES 3.00 loop is fine: at most 16x16 fragments, run
@@ -2087,8 +2087,8 @@ void main() {
 `;
 
 /** Auto level: each output texel is the per-channel *peak* over one block of
- *  trail texels (a max-pool, where TERRITORY_FRAG averages), read back the
- *  same non-blocking way — levelPeaks reads the strains' levels off it. The
+ *  trail texels (a max-pool, where TERRITORY_FRAG averages), read back in
+ *  the same census — levelPeaks reads the strains' levels off it. The
  *  block wraps on the torus, so a side that isn't a multiple of LEVEL_SIDE
  *  just counts a few texels twice, which a max doesn't mind. */
 const LEVEL_FRAG = `#version 300 es
@@ -2170,44 +2170,67 @@ function seedAgents(side: number): AgentSeed {
   return { pos, dir };
 }
 
-/** A small render target read back without ever stalling the CPU: the target
- *  is drawn, `readPixels` goes to a PIXEL_PACK_BUFFER (returns immediately),
- *  and the bytes are only drained once `fenceSync` says the GPU is done — never
- *  a synchronous readPixels. Territory and Headcount each own one. Built lazily
- *  on the first `begin`, so a session that never needs it never allocates it. */
+/** Small render targets read back together without ever stalling the CPU on
+ *  a synchronous readPixels: each part is drawn into its own target, its
+ *  `readPixels` goes to its own offset in ONE PIXEL_PACK_BUFFER (returns
+ *  immediately), and one `fenceSync` covers them all; the bytes are only
+ *  drained once the fence says the GPU is done. That drain is still a
+ *  getBufferSubData, which in Chrome is a synchronous round trip queued
+ *  behind everything the GPU process has not got through yet — this scene's
+ *  sim steps, the Panel blur's re-filtering of the canvas — so the parts
+ *  share one fence and one drain instead of each paying that wait
+ *  (Territory, Headcount and Auto level each owned one until 2026-10-04: up
+ *  to ten waits a second with the panel open), and render() drains it
+ *  before queuing the frame's steps rather than after. Built lazily on the
+ *  first `begin`, so a session that never needs it never allocates it. */
 interface PixelReadback {
   /** A readback is in flight. */
   readonly busy: boolean;
-  /** The finished pixels the moment they land (once), else null. */
-  poll(gl: WebGL2RenderingContext): Uint8Array | null;
-  /** Binds the target, runs `draw` into it, and starts the readback. */
-  begin(gl: WebGL2RenderingContext, draw: () => void): void;
+  /** The moment a readback lands (once): each part's pixels, or null for a
+   *  part it didn't include. Null while nothing has landed. */
+  poll(gl: WebGL2RenderingContext): readonly (Uint8Array | null)[] | null;
+  /** Runs each non-null `draws[i]` into part i's target and starts one
+   *  readback of all of them. */
+  begin(gl: WebGL2RenderingContext, draws: readonly ((() => void) | null)[]): void;
   dispose(gl: WebGL2RenderingContext): void;
 }
 
-function createPixelReadback(side: number): PixelReadback {
-  let tex: WebGLTexture | null = null;
-  let fbo: WebGLFramebuffer | null = null;
+function createPixelReadback(sides: readonly number[]): PixelReadback {
+  const tex: (WebGLTexture | null)[] = sides.map(() => null);
+  const fbo: (WebGLFramebuffer | null)[] = sides.map(() => null);
   let pbo: WebGLBuffer | null = null;
   let sync: WebGLSync | null = null;
-  const out = new Uint8Array(side * side * 4);
+  const offsets: number[] = [];
+  let bytes = 0;
+  for (const side of sides) {
+    offsets.push(bytes);
+    bytes += side * side * 4;
+  }
+  const out = new Uint8Array(bytes);
+  const views = sides.map((side, i) => out.subarray(offsets[i]!, offsets[i]! + side * side * 4));
+  const included = sides.map(() => false);
+  const landed: (Uint8Array | null)[] = sides.map(() => null);
   function ensure(gl: WebGL2RenderingContext): void {
-    if (tex && fbo && pbo) return;
-    tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, side, side, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (pbo) return;
+    sides.forEach((side, i) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, side, side, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      tex[i] = t;
+      fbo[i] = f;
+    });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
     pbo = gl.createBuffer();
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, side * side * 4, gl.STREAM_READ);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   }
   return {
@@ -2223,7 +2246,8 @@ function createPixelReadback(side: number): PixelReadback {
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
         gl.deleteSync(sync);
         sync = null;
-        return out;
+        for (let i = 0; i < sides.length; i++) landed[i] = included[i] ? views[i]! : null;
+        return landed;
       }
       if (status === gl.WAIT_FAILED) {
         gl.deleteSync(sync);
@@ -2231,26 +2255,33 @@ function createPixelReadback(side: number): PixelReadback {
       }
       return null;
     },
-    begin(gl, draw) {
+    begin(gl, draws) {
       ensure(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.viewport(0, 0, side, side);
-      draw();
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-      gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      sides.forEach((side, i) => {
+        const draw = draws[i];
+        included[i] = !!draw;
+        if (!draw) return;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo[i]!);
+        gl.viewport(0, 0, side, side);
+        draw();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+        gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, offsets[i]!);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      });
       sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.bindTexture(gl.TEXTURE_2D, null);
     },
     dispose(gl) {
       if (sync) gl.deleteSync(sync);
-      if (fbo) gl.deleteFramebuffer(fbo);
-      if (tex) gl.deleteTexture(tex);
+      for (let i = 0; i < sides.length; i++) {
+        if (fbo[i]) gl.deleteFramebuffer(fbo[i]!);
+        if (tex[i]) gl.deleteTexture(tex[i]!);
+        fbo[i] = null;
+        tex[i] = null;
+      }
       if (pbo) gl.deleteBuffer(pbo);
       sync = null;
-      fbo = null;
-      tex = null;
       pbo = null;
     },
   };
@@ -2365,14 +2396,12 @@ function createPhysarum2Scene(): Scene {
   // in render()): drives.fired() consumes its trigger on read, so a frame that
   // owes zero sim steps must not be the one that swallows it.
   let pendingSeed = false;
-  // Territory: a 16x16 downsample of the trail, read back through a
-  // PIXEL_PACK_BUFFER + fenceSync so the GPU never stalls the CPU (the file
-  // header's own paragraph) — kicked off at most every TERRITORY_INTERVAL_MS,
-  // and only while probe() has been called within the last PROBE_IDLE_MS.
+  // Territory: a 16x16 downsample of the trail, read back (the census below)
+  // at most every TERRITORY_INTERVAL_MS, and only while probe() has been
+  // called within the last PROBE_IDLE_MS.
   let territory: number[] = equalPopulation(SPECIES_COUNT);
   let territoryProg: GLProgram | null = null;
   const TERRITORY_SIDE = 16;
-  const territoryRb = createPixelReadback(TERRITORY_SIDE);
   let lastProbeMs = -Infinity;
   let lastTerritoryKickMs = -Infinity;
   const TERRITORY_INTERVAL_MS = 500;
@@ -2387,7 +2416,6 @@ function createPhysarum2Scene(): Scene {
   // many fragments; the shares are the same, since populationFromBlocks
   // normalises by the total and texels past the agent grid write 0.
   const POP_SIDE = 128;
-  const popRb = createPixelReadback(POP_SIDE);
   let lastPopKickMs = -Infinity;
   // Bumped by every command() that sets `population` outright (pipette tap,
   // Rebalance); a readback remembers the value it was kicked under, and one
@@ -2402,8 +2430,17 @@ function createPhysarum2Scene(): Scene {
   // full-level gain as shown (log, gliding toward levelTargetLog at
   // LEVEL_TAU); the setting's blend is applied at upload (levelGain).
   let levelProg: GLProgram | null = null;
-  const levelRb = createPixelReadback(LEVEL_SIDE);
   let lastLevelKickMs = -Infinity;
+  // The census: Territory, Headcount and Auto level read back as the parts
+  // of ONE createPixelReadback, so they share one fence and one drain (its
+  // own doc comment says why that matters). A kick takes every part that is
+  // due, plus any part past CENSUS_JOIN of its own interval, so parts on the
+  // same cadence stay in one readback instead of drifting into two.
+  const CENSUS_TERRITORY = 0;
+  const CENSUS_POP = 1;
+  const CENSUS_LEVEL = 2;
+  const census = createPixelReadback([TERRITORY_SIDE, POP_SIDE, LEVEL_SIDE]);
+  const CENSUS_JOIN = 0.5;
   const levelLog = new Float32Array(SPECIES_COUNT);
   const levelTargetLog = new Float32Array(SPECIES_COUNT);
   const levelNow = new Float32Array(SPECIES_COUNT).fill(1);
@@ -2560,83 +2597,92 @@ function createPhysarum2Scene(): Scene {
     trailReadIdx = 0;
   }
 
-  /** Territory (Phase 3): polls any in-flight readback (never a blocking
-   *  wait — see createPixelReadback), and kicks off at most one more every
-   *  TERRITORY_INTERVAL_MS, only while probe() has actually been called within
-   *  the last PROBE_IDLE_MS — see the file header. */
-  function pollTerritory(gl: WebGL2RenderingContext, nowMs: number): void {
-    const done = territoryRb.poll(gl);
-    if (done) territory = classifyTerritory(done, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
-    if (done || territoryRb.busy) return; // one readback in flight at a time
-    if (nowMs - lastProbeMs > PROBE_IDLE_MS) return;
-    if (nowMs - lastTerritoryKickMs < TERRITORY_INTERVAL_MS) return;
-    if (!territoryProg || !quadVao || trailSideCur === 0) return;
-    lastTerritoryKickMs = nowMs;
-    const block = Math.max(1, Math.floor(trailSideCur / TERRITORY_SIDE));
-    const prog = territoryProg;
-    const quad = quadVao;
-    territoryRb.begin(gl, () => {
-      prog.use();
-      prog.setF("uTrailSide", trailSideCur);
-      prog.setF("uBlock", block);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-      gl.uniform1i(samplerLoc(gl, prog, "terr.uTrail", "uTrail"), 0);
-      drawFullscreenQuad(gl, quad);
-    });
-  }
-
-  /** Headcount: the same non-blocking readback as territory, over the agents'
-   *  strain channel (POP_FRAG). Runs while the panel is open (probe() called
-   *  recently) or while Switching is on — recruiting reads the shares every
-   *  step, panel or not. */
-  function pollPopulation(gl: WebGL2RenderingContext, nowMs: number, recruiting: boolean): void {
-    const done = popRb.poll(gl);
-    if (done) {
-      if (popKickGen === popGen) population = populationFromBlocks(done, POP_SIDE * POP_SIDE, SPECIES_COUNT);
-      // A stale result is dropped; let the next frame kick a fresh read.
+  /** Hands a landed census to its readers: Territory's shares, the
+   *  Headcount (unless a command set `population` outright after that
+   *  readback was kicked — see popGen) and Auto level's target gains. Called
+   *  at the top of render(), before the frame's sim steps are queued: the
+   *  drain is a synchronous round trip that waits for whatever the GPU
+   *  process has queued ahead of it (createPixelReadback). */
+  function drainCensus(gl: WebGL2RenderingContext): void {
+    const done = census.poll(gl);
+    if (!done) return;
+    const terr = done[CENSUS_TERRITORY];
+    if (terr) territory = classifyTerritory(terr, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
+    const pop = done[CENSUS_POP];
+    if (pop) {
+      if (popKickGen === popGen) population = populationFromBlocks(pop, POP_SIDE * POP_SIDE, SPECIES_COUNT);
+      // A stale result is dropped; let the next kick take a fresh read.
       else lastPopKickMs = -Infinity;
     }
-    if (done || popRb.busy) return;
-    // A command's one-shot hasn't reached the agents yet (a zero-step frame):
-    // reading now would measure the pre-command population.
-    if (pendingInject || pendingRebalance) return;
-    if (!recruiting && nowMs - lastProbeMs > PROBE_IDLE_MS) return;
-    if (nowMs - lastPopKickMs < POP_INTERVAL_MS) return;
-    if (!popProg || !quadVao) return;
-    lastPopKickMs = nowMs;
-    popKickGen = popGen;
-    const block = Math.max(1, Math.ceil(agentSide / POP_SIDE));
-    const prog = popProg;
-    const quad = quadVao;
-    popRb.begin(gl, () => {
-      prog.use();
-      prog.setF("uAgentSide", agentSide);
-      prog.setF("uBlock", block);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
-      gl.uniform1i(samplerLoc(gl, prog, "pop.uAgentDir", "uAgentDir"), 0);
-      drawFullscreenQuad(gl, quad);
-    });
-  }
-
-  /** Auto level: polls LEVEL_FRAG's readback (never a blocking wait) into
-   *  each strain's target gain, kicks off at most one more every
-   *  LEVEL_INTERVAL_MS while `level` is above 0, and glides the shown gain
-   *  toward the target. levelNow is what the composite uploads — exactly 1
-   *  per strain at level 0. */
-  function updateLevel(gl: WebGL2RenderingContext, nowMs: number, dt: number, level: number): void {
-    const done = levelRb.poll(gl);
-    if (done) {
-      const gains = levelGainsFull(levelPeaks(done, LEVEL_SIDE * LEVEL_SIDE, SPECIES_COUNT));
+    const lvl = done[CENSUS_LEVEL];
+    if (lvl) {
+      const gains = levelGainsFull(levelPeaks(lvl, LEVEL_SIDE * LEVEL_SIDE, SPECIES_COUNT));
       for (let k = 0; k < SPECIES_COUNT; k++) levelTargetLog[k] = Math.log(gains[k]!);
     }
-    if (level > 0 && !done && !levelRb.busy && nowMs - lastLevelKickMs >= LEVEL_INTERVAL_MS && levelProg && quadVao && trailSideCur > 0) {
+  }
+
+  /** Kicks off the next census, once nothing is in flight and any part is
+   *  due, using the freshest trail and agents this frame produced:
+   *  - Territory every TERRITORY_INTERVAL_MS, only while probe() has been
+   *    called within PROBE_IDLE_MS (the panel is showing it);
+   *  - Headcount every POP_INTERVAL_MS while the panel is open (probe()) or
+   *    Switching is on — recruiting reads the shares every step, panel or
+   *    not — but never while a command's one-shot hasn't reached the agents
+   *    yet (a zero-step frame: reading now would measure the pre-command
+   *    population);
+   *  - Auto level every LEVEL_INTERVAL_MS while `level` is above 0, on every
+   *    device, since it changes the picture.
+   *  A part that isn't due yet still joins once past CENSUS_JOIN of its own
+   *  interval (see the census's comment). */
+  function kickCensus(gl: WebGL2RenderingContext, nowMs: number, recruiting: boolean, level: number): void {
+    if (census.busy || !quadVao) return;
+    const probed = nowMs - lastProbeMs <= PROBE_IDLE_MS;
+    const terrOk = probed && !!territoryProg && trailSideCur > 0;
+    const popOk = (recruiting || probed) && !pendingInject && !pendingRebalance && !!popProg;
+    const levelOk = level > 0 && !!levelProg && trailSideCur > 0;
+    const terrAge = (nowMs - lastTerritoryKickMs) / TERRITORY_INTERVAL_MS;
+    const popAge = (nowMs - lastPopKickMs) / POP_INTERVAL_MS;
+    const levelAge = (nowMs - lastLevelKickMs) / LEVEL_INTERVAL_MS;
+    const due = (terrOk && terrAge >= 1) || (popOk && popAge >= 1) || (levelOk && levelAge >= 1);
+    if (!due) return;
+    const quad = quadVao;
+    let drawTerritory: (() => void) | null = null;
+    let drawPop: (() => void) | null = null;
+    let drawLevel: (() => void) | null = null;
+    if (terrOk && terrAge >= CENSUS_JOIN) {
+      lastTerritoryKickMs = nowMs;
+      const prog = territoryProg!;
+      const block = Math.max(1, Math.floor(trailSideCur / TERRITORY_SIDE));
+      drawTerritory = () => {
+        prog.use();
+        prog.setF("uTrailSide", trailSideCur);
+        prog.setF("uBlock", block);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+        gl.uniform1i(samplerLoc(gl, prog, "terr.uTrail", "uTrail"), 0);
+        drawFullscreenQuad(gl, quad);
+      };
+    }
+    if (popOk && popAge >= CENSUS_JOIN) {
+      lastPopKickMs = nowMs;
+      popKickGen = popGen;
+      const prog = popProg!;
+      const block = Math.max(1, Math.ceil(agentSide / POP_SIDE));
+      drawPop = () => {
+        prog.use();
+        prog.setF("uAgentSide", agentSide);
+        prog.setF("uBlock", block);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
+        gl.uniform1i(samplerLoc(gl, prog, "pop.uAgentDir", "uAgentDir"), 0);
+        drawFullscreenQuad(gl, quad);
+      };
+    }
+    if (levelOk && levelAge >= CENSUS_JOIN) {
       lastLevelKickMs = nowMs;
+      const prog = levelProg!;
       const block = Math.max(1, Math.ceil(trailSideCur / LEVEL_SIDE));
-      const prog = levelProg;
-      const quad = quadVao;
-      levelRb.begin(gl, () => {
+      drawLevel = () => {
         prog.use();
         prog.setF("uTrailSide", trailSideCur);
         prog.setF("uBlock", block);
@@ -2644,8 +2690,15 @@ function createPhysarum2Scene(): Scene {
         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
         gl.uniform1i(samplerLoc(gl, prog, "level.uTrail", "uTrail"), 0);
         drawFullscreenQuad(gl, quad);
-      });
+      };
     }
+    census.begin(gl, [drawTerritory, drawPop, drawLevel]);
+  }
+
+  /** Auto level's glide: eases each strain's shown gain toward the target
+   *  the last census set. levelNow is what the composite uploads — exactly 1
+   *  per strain at level 0. */
+  function glideLevel(dt: number, level: number): void {
     const a = 1 - Math.exp(-dt / LEVEL_TAU);
     for (let k = 0; k < SPECIES_COUNT; k++) {
       levelLog[k] = levelLog[k]! + (levelTargetLog[k]! - levelLog[k]!) * a;
@@ -2814,6 +2867,8 @@ function createPhysarum2Scene(): Scene {
         pendingFresh = false;
         freshDish(gl);
       }
+      // Before any of this frame's steps are queued — see drainCensus.
+      drainCensus(gl);
 
       // Cached for command("inject") (screenToFieldUv), which can be called
       // between render()s from a UI click, well outside this function's own
@@ -3009,14 +3064,14 @@ function createPhysarum2Scene(): Scene {
         pendingSeed = false;
       }
 
-      // Territory (Phase 3): poll any in-flight readback and maybe kick off
-      // another, using the freshest trail this frame produced — see the file
-      // header and pollTerritory's own doc comment. Never affects the
-      // uniforms/bindings the composite pass below sets up itself.
+      // The census (Territory, Headcount, Auto level): maybe kick off the
+      // next one from the freshest trail this frame produced — see
+      // kickCensus. Never affects the uniforms/bindings the composite pass
+      // below sets up itself.
       const nowMs = performance.now();
-      pollTerritory(gl, nowMs);
-      pollPopulation(gl, nowMs, resolveSceneSetting(ID, settingFor("switching")) > 0);
-      updateLevel(gl, nowMs, dt, resolveSceneSetting(ID, settingFor("level")));
+      const level = resolveSceneSetting(ID, settingFor("level"));
+      kickCensus(gl, nowMs, resolveSceneSetting(ID, settingFor("switching")) > 0, level);
+      glideLevel(dt, level);
 
       // 4. Composite to the default framebuffer — always, even when this
       //    frame owed zero steps (the picture just doesn't advance).
@@ -3145,9 +3200,7 @@ function createPhysarum2Scene(): Scene {
         agentDirTex[i] = null;
       }
       freeTrailTargets(gl);
-      territoryRb.dispose(gl);
-      popRb.dispose(gl);
-      levelRb.dispose(gl);
+      census.dispose(gl);
       samplerLocs.clear();
       diffuseProg = null;
       simProg = null;

@@ -4,7 +4,8 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
 /**
  * The on-screen half of the pop-out output (index.html's #outBtn in the
  * scene-nav row, and #outBar — CUE, PLAY and the state line — top centre,
- * big, CUE orange and PLAY green; the keys are src/ui/outputKeys.ts).
+ * round pads after a CDJ's, CUE orange and PLAY green; the keys are
+ * src/ui/outputKeys.ts).
  *
  * POP OUT opens (or focuses) the output window. Once one is alive the bar
  * appears, and works like a DJ mixer's Cue and Play: the output window is the
@@ -27,8 +28,10 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
  * off the button cancels.
  *
  * Press feedback lives here too: a Play key or click flashes PLAY (`pressed`),
- * CUE stays lit while it's held, a held Option fills PLAY while it charges (`charging`, the
- * `--charge` fill) and a glide in flight fills it back up over its length.
+ * CUE stays lit while it's held, PLAY's ring blinks while the output differs
+ * (`differs`), a held Option draws an arc round PLAY while it charges
+ * (`charging`, the `--charge` arc) and a glide in flight draws it round again
+ * over its length.
  */
 
 export interface OutputControlElements {
@@ -62,6 +65,10 @@ export interface OutputControls {
   holdCue(on: boolean): boolean;
   /** While Option is held: how long, or null when it isn't (clears the charge). */
   charge(holdMs: number | null): void;
+  /** Called after every Play that reached an output, whichever way it was
+   *  pressed (key, button, or app.ts's Autopilot) — the Set card's "live"
+   *  marker follows it. */
+  onPlay(cb: () => void): void;
 }
 
 const FLASH_MS = 220;
@@ -81,6 +88,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
   let glideEnd = 0;
   let glideLen = 0;
   let glideRaf = 0;
+  const playListeners: Array<() => void> = [];
 
   function flash(btn: HTMLElement): void {
     btn.classList.add("pressed");
@@ -160,6 +168,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     if (glided && glideMs) startGlideIndicator(glideMs);
     else glideEnd = 0;
     render(bridge.status());
+    for (const cb of playListeners) cb();
     return glided ? "glide" : "sent";
   }
 
@@ -252,6 +261,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     cueActive,
     go,
     holdCue,
+    onPlay: (cb) => void playListeners.push(cb),
     charge(ms) {
       holdMs = ms;
       // A glide in flight owns the fill; only a hold that's really charging takes it over.

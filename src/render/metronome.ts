@@ -85,6 +85,15 @@ export interface Metronome {
  *  own (unexported) BEATS_PER_BAR. */
 export const METRONOME_BEATS_PER_BAR = 4;
 
+/** Whether an unwrapped beat count passed a whole multiple of `every` beats
+ *  between two ticks (prev -> now): the "next bar / phrase start" test that
+ *  longplay's tour (a phrase of PHRASE_BEATS) and the Set's Autopilot
+ *  (setAutopilot.ts, a bar) both use. Reads the count itself rather than a
+ *  one-shot flag, so a tick a render cap skipped can't lose the edge. */
+export function crossedBeatMultiple(prevBeats: number, beats: number, every: number): boolean {
+  return Math.floor(beats / every) > Math.floor(prevBeats / every);
+}
+
 // ---- Corrections while running -------------------------------------------
 // tempoLock the clock has to hold for the metronome to accept *any*
 // correction — below it, it free-runs untouched (the flywheel). As a clock
