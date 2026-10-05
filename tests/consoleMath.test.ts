@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SIGNALS, type SignalId } from "../src/render/signals.ts";
+import { DIAL_SIGNALS, SIGNALS, type SignalId } from "../src/render/signals.ts";
 import {
   applyEdit,
   arrowStep,
@@ -150,6 +150,7 @@ describe("randomPatch (the console's Random wiring)", () => {
     expect([...mixes].sort()).toEqual(["add", "gate", "max"]);
     expect(RANDOM_WIRE_SIGNALS).not.toContain("anim.tempo");
     expect(RANDOM_WIRE_SIGNALS).not.toContain("anim.tempoLock");
+    for (const id of DIAL_SIGNALS) expect(RANDOM_WIRE_SIGNALS).not.toContain(id);
   });
 
   it("gives a hit its height and Beat wave its beats per swing, and nothing else either", () => {
