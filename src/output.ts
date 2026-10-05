@@ -15,6 +15,7 @@ import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects.ts";
 import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer } from "./render/overlayLayer.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
@@ -302,6 +303,9 @@ async function main(): Promise<void> {
   sceneCtx = host.ctx;
   compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   compositor.setEffects(heldEffects);
+  // The text-and-logo overlay (render/overlayLayer.ts): its settings are a
+  // synced store, so the main window's reach this window like any look.
+  const overlay = createOverlayLayer(gl);
   // Back from a context-loss reload: take the parked look first, so the very
   // first hello says haveState and the main window keeps its program.
   try {
@@ -393,6 +397,7 @@ async function main(): Promise<void> {
       drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
       nowMs,
     });
+    overlay.draw();
     // Two scenes at once (a crossfade) or none (Freeze) say nothing about what one costs.
     if (outcome.governable) governor?.recordFrame(nowMs);
   }

@@ -38,6 +38,9 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.bakeToast",
   "vibe.audioSource",
   "vibe.audioInputDevice",
+  // Which controller knob or pad does what: a controller is plugged into one
+  // machine (ui/midiInput.ts).
+  "vibe.midiMap",
   "vibe.recordAspect",
   "vibe.quality",
   "vibe.powerMode",
@@ -60,6 +63,13 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
  *  never read as a difference between preview and output. */
 export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.autoGain"];
 
+/** Shelves: stores that list things to pick from (the saved Looks, the Set's
+ *  pads and its Autopilot dials) rather than describe the picture. Mirrored
+ *  like any key, but outputSync.ts's stateKey leaves them out, so filling a
+ *  shelf never reads as a difference between preview and output. Exact keys,
+ *  not prefixes: "vibe.set" is a prefix of unrelated keys. */
+export const SHELF_KEYS: ReadonlySet<string> = new Set(["vibe.looks", "vibe.set"]);
+
 /** Keys under `vibe.*` that are one device's own and so never join the room
  *  look, though the pop-out still mirrors them: the Looks library (a shelf of
  *  looks, not the look on screen), dev pins, each window's output/preview
@@ -72,6 +82,9 @@ export const ROOM_EXCLUDED_PREFIXES: readonly string[] = [
   "vibe.output.",
   "vibe.preview.",
   "vibe.panelBlur",
+  // A logo too detailed for a room's look (render/overlayStore.ts): shown on
+  // this device and its pop-out only. The room-sized logo key is a look key.
+  "vibe.overlayLogoLocal",
 ];
 
 /** Whether `key` belongs to the room look. Only `vibe.` keys ever do, which

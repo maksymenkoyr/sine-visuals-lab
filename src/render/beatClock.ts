@@ -67,6 +67,20 @@
 // locked), more gradually while it's climbing (LOCK_RISE_RATE, so one good
 // hit doesn't flash it to full), and drops out at LOCK_FALL_RATE once bpm
 // itself returns to 0 (features.ts's TEMPO_DECAY_SEC).
+//
+// seed() is the one exception to "never assigned": a tap tempo
+// (src/render/tapTempo.ts) sets the smoothed tempo and moves the phase the
+// short way (at most half a beat, either way) onto the tapped beat. Every
+// rule above then carries on from there: the comb keeps judging the hits
+// against the new tempo and phase, and corrects it like any other offset.
+// One addition for a tap at half the tempo the tracker hears
+// (setDivision(2)): the comb then judges the hits against every half beat,
+// in half-beat units — exactly the comb it would run at the tracker's own
+// tempo — so it still corrects the timing but can't move the tapped beat
+// onto the other half. Measured on the tap eval's half-tempo dnb run
+// (tests/tapTempoEval.test.ts): judged per whole tapped beat, the comb saw
+// as many of dnb's kicks a quarter beat late as on the beat, and settled
+// the metronome between dnb's beats.
 const BPM_TRACK_RATE = 2; // how fast the internal tempo estimate follows frame.bpm
 const BEATS_PER_BAR = 4;
 
@@ -199,6 +213,16 @@ export interface BeatClock {
    *  HIT_LATENCY_FRAMES back-dating (these times are already exact) — see
    *  the file header. */
   advance(dtSec: number, bpm: number, beatFired: boolean, hitWeight?: number, tempoHits?: TempoHit[]): void;
+  /** Tap tempo's seed (see the file header): runs at `bpm` from now on and
+   *  moves the phase the short way so beatPhase reads `beatPhase` — a
+   *  backward move of up to half a beat is allowed here, unlike advance().
+   *  Any correction still pending is dropped; the hit window and the lock
+   *  are kept. The readings above update at once. */
+  seed(bpm: number, beatPhase: number): void;
+  /** How many parts of a beat the comb judges hits against — 1 (every
+   *  beat, the default) or 2 (every half beat, while a tap sits at half the
+   *  tempo the tracker hears; see the file header). Kept until changed. */
+  setDivision(division: 1 | 2): void;
 }
 
 export function createBeatClock(): BeatClock {
@@ -210,6 +234,29 @@ export function createBeatClock(): BeatClock {
   let stability = STABILITY_START;
   let confidence = 0;
   let hits: Hit[] = [];
+  let division = 1; // see setDivision()
+
+  // The comb at `division` parts of a beat (see the file header): the same
+  // search as runPhaseComb's in units of that part — offsets, kernel and
+  // stability alike — with the winning offset turned back into beats.
+  function runDividedComb(): void {
+    let bestOffset = 0;
+    let bestScore = -Infinity;
+    for (let o = -0.5; o < 0.5; o += PHASE_STEP) {
+      let score = 0;
+      for (const hit of hits) {
+        const predicted = phase - (clockSec - hit.t) * (smoothedBpm / 60);
+        const d = wrapHalf(predicted * division - o);
+        score += hit.w * Math.max(0, 1 - Math.abs(d) / PHASE_KERNEL);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestOffset = o;
+      }
+    }
+    pending = bestOffset / division;
+    stability += (Math.abs(bestOffset) - stability) * STABILITY_ALPHA;
+  }
 
   // The phase-comb search itself — factored out since advance() now runs it
   // from two different feeds (see the file header). Reads/writes the
@@ -217,6 +264,10 @@ export function createBeatClock(): BeatClock {
   // pending/stability), same as when this was inline.
   function runPhaseComb(): void {
     if (hits.length < PHASE_MIN_HITS) return;
+    if (division !== 1) {
+      runDividedComb();
+      return;
+    }
     let bestOffset = 0;
     let bestScore = -Infinity;
     for (let o = -0.5; o < 0.5; o += PHASE_STEP) {
@@ -286,6 +337,18 @@ export function createBeatClock(): BeatClock {
       (clock as { bpm: number }).bpm = smoothedBpm;
       (clock as { confidence: number }).confidence = confidence;
       (clock as { tempoLock: number }).tempoLock = tempoLock;
+    },
+    seed(bpm: number, beatPhase: number): void {
+      smoothedBpm = bpm;
+      phase += wrapHalf(beatPhase - phase);
+      pending = 0;
+      (clock as { beatPhase: number }).beatPhase = wrap01(phase);
+      (clock as { barPhase: number }).barPhase = wrap01(phase / BEATS_PER_BAR);
+      (clock as { beats: number }).beats = phase;
+      (clock as { bpm: number }).bpm = smoothedBpm;
+    },
+    setDivision(next: 1 | 2): void {
+      division = next;
     },
   };
 

@@ -29,6 +29,11 @@ describe("stateKey", () => {
     expect(stateKey(state("x", { a: "2" }))).not.toBe(base);
     expect(stateKey(state("x", { a: "1" }, "mono"))).not.toBe(base);
   });
+  it("leaves the shelves out: a saved Look or a new pad changes nothing on screen", () => {
+    const base = stateKey(state("x", { a: "1" }));
+    expect(stateKey(state("x", { a: "1", "vibe.looks": "[1]", "vibe.set": "{}" }))).toBe(base);
+    expect(stateKey(state("x", { a: "1", "vibe.settings": "1" }))).not.toBe(base);
+  });
 });
 
 describe("createCueController", () => {

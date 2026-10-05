@@ -69,6 +69,7 @@ import {
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
 import { getBeatTrim, requestBarResync, resetBeatTrim, stepTempoMultiplier, nudgeBeatOffset } from "./render/beatTrim.ts";
+import { releaseTapTempo, tapTempoAt } from "./render/tapTempo.ts";
 import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
 import { createDriveEngine, type DriveEngine } from "./render/drives.ts";
 import {
@@ -97,6 +98,18 @@ import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
+import {
+  clearOverlayLogo,
+  getOverlay,
+  getOverlayLogoScope,
+  setOverlayLogo,
+  setOverlayOpacity,
+  setOverlayPosition,
+  setOverlaySize,
+  setOverlayText,
+} from "./render/overlayStore.ts";
+import { encodeLogoFile } from "./render/overlayLogoFile.ts";
 import {
   getSceneExpansion,
   getSceneExpansionShape,
@@ -133,6 +146,17 @@ import {
   saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
+import {
+  AUTOPILOT_EVERY_BARS,
+  SET_MAX_PADS,
+  addCapturedPad,
+  getAutopilot,
+  listPads,
+  removeStoredPad,
+  renameStoredPad,
+  setAutopilot,
+} from "./render/sceneSet.ts";
+import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
 import { funnyLookName } from "./render/lookNames.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
@@ -227,6 +251,7 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { browserMidiEnv, createMidiController } from "./ui/midiInput.ts";
 import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
@@ -440,6 +465,9 @@ function renderScale(): number {
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
+/** The text-and-logo overlay (render/overlayLayer.ts), drawn on the main
+ *  canvas right after the scene; made at boot, kept for the session. */
+let overlayLayer: OverlayLayer | null = null;
 /** True from the main canvas's `webglcontextlost` until the page reloads on
  *  the restore (see boot()): drawScene() draws nothing, and the picture
  *  readback isn't rebuilt against a dead context. */
@@ -576,6 +604,15 @@ let outputBridge: PopOutBridge | null = null;
  *  room. */
 let roomBridge: RoomBridge | null = null;
 let outputControls: OutputControls | null = null;
+/** The Set card's two markers (ui/setCard.ts): the pad loaded in this window's
+ *  preview, and the pad Play last sent to the output. Ids, not indices, so a
+ *  deleted or added pad can't move them. Read through currentPadId() /
+ *  `padMarkers`, which drop a pad whose scene is no longer the one showing. */
+let setPreviewPadId: string | null = null;
+let setLivePadId: string | null = null;
+let setPopOutWasOpen = false;
+/** Autopilot's bar count and cursor (render/setAutopilot.ts). */
+const setAutopilotState = createAutopilot();
 /** The held-effect buttons and keys (ui/effectControls.ts), built at boot. */
 let effectControls: EffectControls | null = null;
 /** Draws every frame (render/compositor.ts): the scene alone, or the crossfade
@@ -679,6 +716,21 @@ function showHud(text: string, persist = false): void {
       hud.style.opacity = "0";
     }, 3000);
   }
+}
+
+/** One tap tempo tap (src/render/tapTempo.ts): Ctrl, or the Tempo card's Tap
+ *  chip. `timeStamp` is the event's own, on performance.now()'s clock. In a
+ *  room this window draws the room's frames a picture delay late (see
+ *  currentVisual), so the tap moves by that much to land on the beat it
+ *  shows. `hud`: a key tap answers on the HUD — the chip's card shows its
+ *  own count — and only from a run's second tap, so a lone stray Ctrl (a
+ *  Ctrl+<key> chord) shows nothing. */
+function tapTempo(timeStamp: number, hud: boolean): void {
+  const conn = mode === "solo" ? null : activeConn();
+  const res = tapTempoAt(timeStamp + (conn ? conn.pictureDelayMs() : 0));
+  if (!hud) return;
+  if (res.bpm > 0) showHud(`Tap tempo: ${Math.round(res.bpm)} BPM`);
+  else if (res.taps > 1) showHud(`Tap tempo: ${res.more} more ${res.more === 1 ? "tap" : "taps"}`);
 }
 
 /** Space = Cue (held), Option = Play (tap sends at once, hold glides) — the why, and
@@ -884,6 +936,82 @@ function applyPalette(next: Palette): void {
   controllerLook?.notePalette(next.id);
   showHud(`palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
+}
+
+// ---- The Set: pads of looks, keys 1-9, Autopilot ----
+// Model and store: render/sceneSet.ts; the card: ui/setCard.ts; the timing:
+// render/setAutopilot.ts. A pad is fired through applyScene/applyPalette like
+// any other change — so the pop-out's Cue/Play, a paired room's Main and a
+// scene crossfade all see an ordinary scene change.
+
+/** The pad this window last loaded, while its scene is still the one showing. */
+function currentPadId(): string | null {
+  const pad = listPads().find((p) => p.id === setPreviewPadId);
+  return pad && pad.look.sceneId === scene.id ? pad.id : null;
+}
+
+/** Autopilot runs only on the device that hears the music, never on a phone
+ *  controller (the TV is its own page and never gets here). */
+function setAutopilotRuns(): boolean {
+  return !isController && ownInput();
+}
+
+/** Loads a pad's clip into this window: its look, then its palette, then its
+ *  scene (the order startMainPlay applies a room's look in, so the scene
+ *  mounts already tuned). With an output open this is the preview, and Play
+ *  sends it; Autopilot plays it itself. A manual press restarts Autopilot's
+ *  bar count; Autopilot's own change keeps the count it just re-anchored. */
+function firePad(id: string, byAutopilot = false): void {
+  const pads = listPads();
+  const at = pads.findIndex((p) => p.id === id);
+  if (at < 0 || !inViz) return;
+  const pad = pads[at]!;
+  const next = getScene(pad.look.sceneId);
+  if (!next || !presetAllows(next, effectivePreset())) {
+    showHud(next ? "scene unavailable on this device" : "that pad's scene is gone", true);
+    return;
+  }
+  applyLook(pad.look, next.settings ?? []);
+  if (pad.paletteId && pad.paletteId !== palette.id && PALETTES.some((p) => p.id === pad.paletteId)) {
+    applyPalette(getPalette(pad.paletteId));
+  }
+  if (next.id !== scene.id) applyScene(next);
+  setPreviewPadId = pad.id;
+  if (!byAutopilot) restartAutopilot(setAutopilotState, pad.id);
+  showHud(`pad ${at + 1}: ${scene.name}`);
+  if (byAutopilot) outputControls?.go();
+  deviceMenu?.sceneChanged();
+}
+
+/** "+ Add": the scene on screen and its palette become a new pad. Returns why
+ *  it was refused, in words for the card, or null. */
+function addPadFromScreen(): string | null {
+  const result = addCapturedPad(scene.id, scene.settings ?? [], palette.id);
+  if (result.ok) {
+    setPreviewPadId = result.pad.id;
+    return null;
+  }
+  return result.reason === "full"
+    ? `The Set is full (${SET_MAX_PADS} pads). Delete one to add another.`
+    : "This look is too big to keep in the Set.";
+}
+
+const NO_PADS: readonly string[] = [];
+
+/** Autopilot's per-tick step; fires the pad it names. */
+function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
+  if (!inViz || !setAutopilotRuns()) {
+    setAutopilotState.counting = null; // counts only while it can fire
+    return;
+  }
+  const config = getAutopilot();
+  const id = stepAutopilot(
+    setAutopilotState,
+    { timeSec: nowMs / 1000, beats: anim.metronomeBeats, tempo: anim.metronomeOn },
+    config,
+    config.on ? listPads().map((p) => p.id) : NO_PADS,
+  );
+  if (id) firePad(id, true);
 }
 
 function fatalError(message: string): void {
@@ -1561,7 +1689,20 @@ const micAutoMembers = {
 };
 
 function wireDeviceMenu(): void {
+  // The MIDI session is made here, before any of the key handlers registered
+  // later in boot, because learning takes keyboard presses in the window's
+  // capture phase and must come first (ui/midiInput.ts). It asks for nothing
+  // until the MIDI card's button is pressed, unless the browser already
+  // granted MIDI on an earlier visit.
+  const midi = createMidiController(
+    browserMidiEnv({
+      currentSceneId: () => scene.id,
+      applyCc: (target, cc) => deviceMenu?.applyMidiCc(target, cc),
+    }),
+  );
+  void midi.autoConnect();
   deviceMenu = createDeviceMenu({
+    midi,
     getPalettes: () => PALETTES.map((p) => ({ id: p.id, name: p.name, group: p.group, swatch: paletteRampHex(p, 6) })),
     currentSceneId: () => scene.id,
     currentPaletteId: () => palette.id,
@@ -1661,6 +1802,37 @@ function wireDeviceMenu(): void {
       const look = takeUndo(sceneId);
       if (look) applyLook(look, getScene(sceneId)?.settings ?? []);
     },
+    set: {
+      pads: () => listPads(),
+      onAddPad: addPadFromScreen,
+      onFirePad: (id) => firePad(id),
+      onRenamePad: renameStoredPad,
+      onDeletePad: removeStoredPad,
+      previewPadId: currentPadId,
+      livePadId: () => (listPads().some((p) => p.id === setLivePadId) ? setLivePadId : null),
+      outputOpen: () => outputControls?.active() ?? false,
+      autopilot: getAutopilot,
+      onAutopilotChange: (change) => {
+        setAutopilot(change);
+        restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
+      },
+      autopilotRuns: setAutopilotRuns,
+      everyChoices: AUTOPILOT_EVERY_BARS,
+      minPads: AUTOPILOT_MIN_PADS,
+      maxPads: SET_MAX_PADS,
+    },
+    overlay: {
+      getState: () => ({ ...getOverlay(), logoScope: getOverlayLogoScope() }),
+      onText: setOverlayText,
+      onPosition: setOverlayPosition,
+      onSize: setOverlaySize,
+      onOpacity: setOverlayOpacity,
+      onLogoFile: async (file) => {
+        const logo = await encodeLogoFile(file);
+        return logo && setOverlayLogo(logo.dataUrl, logo.scope) ? logo.scope : "failed";
+      },
+      onRemoveLogo: clearOverlayLogo,
+    },
     getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
@@ -1688,6 +1860,7 @@ function wireDeviceMenu(): void {
     onSetDriveThresholdOn: (sceneId, spec, on) => setDriveThresholdOn(sceneId, spec, on),
     setDriveLineStrength: (sceneId, spec, value) => setDriveLineStrength(sceneId, spec, value),
     onLufsReset: () => lufsAnalyser?.reset(),
+    onTap: (timeStamp) => tapTempo(timeStamp, false),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
@@ -2427,6 +2600,7 @@ async function boot(): Promise<void> {
   const host = mainHost;
   compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   resourceMeter = createResourceMeter(gl);
+  overlayLayer = createOverlayLayer(gl);
   if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
@@ -2600,6 +2774,10 @@ async function boot(): Promise<void> {
     });
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
+    // The Set card's live marker: whatever pad was loaded when Play sent it.
+    outputControls.onPlay(() => {
+      setLivePadId = currentPadId();
+    });
   }
   // The held effects: on this window through the compositor, and on the
   // pop-out as their own message. Not part of the look, so Cue never holds them.
@@ -2621,6 +2799,19 @@ async function boot(): Promise<void> {
   });
 
   window.addEventListener("keydown", (e) => {
+    // Tap tempo: a bare Ctrl press is a tap on this beat (tapTempo below).
+    // Ahead of the modifier guard, since Ctrl's own keydown carries ctrlKey.
+    // Counted at keydown, because the press is the beat; a Ctrl+<key> chord
+    // is then one stray tap, which the estimate leaves out. Only in a viz and
+    // not while typing, like the beat keys below; never preventDefault, so
+    // every Ctrl shortcut still works.
+    if (e.key === "Control") {
+      if (!e.repeat && !e.shiftKey && !e.altKey && !e.metaKey && inViz && !isTypingTarget(e.target)) {
+        noteKeyUse("tap");
+        tapTempo(e.timeStamp, true);
+      }
+      return;
+    }
     // Modifier guard so ⌘/Ctrl+F (browser find) and ⌘/Ctrl+S (save page)
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
@@ -2657,6 +2848,17 @@ async function boot(): Promise<void> {
     // key), not e.key like f/s above, so a Cyrillic or German layout still
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
+    // The Set: 1-9 fire pads 1-9, panel open or closed (Shift+digit is the
+    // panel's block jump, deviceMenu.ts). Not on auto-repeat: a held key
+    // would reload the same pad on every repeat.
+    if (inViz && !typing && !e.shiftKey && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
+      const pad = listPads()[Number(e.code.slice(5)) - 1];
+      if (pad) {
+        e.preventDefault();
+        noteKeyUse("pad");
+        firePad(pad.id);
+      }
+    }
     if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
       // letter twins of Space and Option, which wireOutputKeys below owns.
@@ -2675,8 +2877,11 @@ async function boot(): Promise<void> {
         e.preventDefault();
         noteKeyUse("beat-one");
         if (e.shiftKey) {
+          // Also hands a tapped tempo back to the tracker (tapTempo.ts).
+          const wasTapped = !!lastAnim?.tapGuided;
           resetBeatTrim();
-          showHud("Tempo ×1, beat timing reset");
+          releaseTapTempo();
+          showHud(wasTapped ? "Tapped tempo released, tempo ×1, beat timing reset" : "Tempo ×1, beat timing reset");
         } else {
           requestBarResync();
           showHud("This beat is the 1");
@@ -3090,6 +3295,11 @@ function tick(): void {
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
+  // Autopilot (the Set card) off last tick's clock, before this tick's frame
+  // is built: a pad it fires switches scene here, so nothing below is
+  // computed for the scene it just left.
+  if (lastAnim) stepSetAutopilot(lastAnim, nowRafMs);
+
   // Resolved once per tick and reused everywhere below (extractor, anim
   // clock, the meters) — a second call would be harmless (autoTune.ts steps
   // each auto value once per tick, on its own clock), just wasted work.
@@ -3110,6 +3320,11 @@ function tick(): void {
   // The preview transition sits outside the bridge check because a phone
   // controller has no bridge yet still previews, whenever a scene is showing.
   const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  // A pop-out that just opened starts on this window's preview (net/outputSync.ts's
+  // outputOpened), so the pad loaded here is live on it.
+  const popOutOpen = outputBridge?.status().open ?? false;
+  if (popOutOpen && !setPopOutWasOpen) setLivePadId = currentPadId();
+  setPopOutWasOpen = popOutOpen;
   if (nextActive !== previewActive) {
     previewActive = nextActive;
     applyRenderQuality(true);
@@ -3148,14 +3363,23 @@ function tick(): void {
   // module state above) and switches beatClock.ts's phase comb onto the
   // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
   // own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
-  // its drive jack); null on any device with no local mic.
+  // its drive jack); null on any device with no local mic. `nowRafMs` makes
+  // this the one clock that follows a tap tempo (src/render/tapTempo.ts):
+  // like the beat keys, a tap only ever reaches this window's own clock.
   const anim = gained
-    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
-        shape: getHitShape(),
-        beatRatio: lastFluxRatio,
-        tempoHits: lastTempoHits,
-        wavePeak: lastMono ? peak(lastMono) : null,
-      })
+    ? animClock.advance(
+        dtSec,
+        gained,
+        smoothing,
+        resolveSilenceGate(),
+        {
+          shape: getHitShape(),
+          beatRatio: lastFluxRatio,
+          tempoHits: lastTempoHits,
+          wavePeak: lastMono ? peak(lastMono) : null,
+        },
+        nowRafMs,
+      )
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
@@ -3276,6 +3500,11 @@ function drawScene(
   // worth paying only while the Master card's Picture block is actually
   // visible or a headless sweep asked for it (pictureForced).
   if (picturePolled) capturePicture(nowRafMs);
+  // After the picture capture, so the Master card's Picture block still
+  // measures the scene alone, not the overlay on top of it. Drawn after the
+  // compositor's render (crossfade, held effects), so the overlay sits on top
+  // of those and stays visible over Freeze and Blackout.
+  overlayLayer?.draw();
   // A frame with two scenes (a crossfade) or none (Freeze) says nothing about
   // what one scene costs, so the governor does not see it.
   if (governable) governor?.recordFrame(nowRafMs);

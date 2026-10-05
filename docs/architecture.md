@@ -165,6 +165,20 @@ A frame with two scenes in it is skipped by the quality governor. The
 compositor's header says how it captures a scene without redirecting its
 framebuffer.
 
+## Text and logo over the picture
+
+The Overlay (an event or DJ name and a logo) is drawn by `src/render/
+overlayLayer.ts` right after the compositor's pass (the section above) in all
+three renderers — `src/app.ts`, `src/output.ts` and `src/tv.ts` — so it sits
+over crossfades and held effects (Blackout and Freeze included) on the main
+canvas, the pop-out and a TV without any scene knowing, and it is in whatever
+records the canvas. Its
+settings are a `vibe.*` store (`src/render/overlayStore.ts`) registered with
+`syncedStores.ts`, so they reach the pop-out and ride in the room's look like any
+other store; the exception is a logo too big for the look's size limits
+(`server/lookDoc.ts`), which the store keeps on the device. The panel's card is
+`src/ui/overlayCard.ts`; the layout and limits are `src/render/overlayLayout.ts`.
+
 ## Where the quality/perf ceiling comes from
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at

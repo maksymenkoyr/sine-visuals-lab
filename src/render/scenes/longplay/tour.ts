@@ -15,6 +15,8 @@
 // (Pro, src/render/pro.ts) is never toured to, and the tour walks the views
 // in order, skipping locked ones.
 
+import { crossedBeatMultiple } from "../../metronome.ts";
+
 export const PHRASE_BEATS = 16;
 /** The mix's length in beats — two bars. */
 export const MIX_BEATS = 8;
@@ -121,7 +123,7 @@ export function stepTour(s: TourState, input: TourInput): TourState {
     s.heldSec += input.dtSec;
     if (input.auto && s.heldSec >= input.holdSec) {
       if (s.waitStartSec === null) s.waitStartSec = timeSec;
-      const phraseStart = Math.floor(beats / PHRASE_BEATS) > Math.floor(s.lastBeats / PHRASE_BEATS);
+      const phraseStart = crossedBeatMultiple(s.lastBeats, beats, PHRASE_BEATS);
       if (phraseStart || timeSec - s.waitStartSec >= PHRASE_WAIT_SEC) {
         startMix(s, nextOpenView(s.cur, count, locked), input);
       }

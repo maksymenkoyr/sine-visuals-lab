@@ -40,6 +40,10 @@ const FILES = [
   "src/ui/joinScreen.ts",
   "src/ui/wakeLock.ts", // was inline in tv.ts until it was shared with the app
   "src/tv.ts",
+  // The Overlay a TV draws over the scene (the settings arrive in the room's look).
+  "src/render/overlayLayout.ts",
+  "src/render/overlayStore.ts",
+  "src/render/overlayLayer.ts",
 ];
 
 /** Methods newer than the target, banned on any receiver (the receiver's type
