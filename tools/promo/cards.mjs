@@ -3,13 +3,13 @@
 //
 // Reads <work>/lines.json:
 //   { "title": "0.2.0 - beta", "subtitle": "Sine Visuals Lab", "opening": "Your music, drawn live.",
-//     "hooks": [{ "take": "song_p2r", "beats": 8, "text": "…" }, …] }
-// `opening` is the line over the first bar; a hook is a clip (a take from record.mjs, `from` its first
-// beat for a panel take) with one caption along the bottom; title and subtitle make the version card at
-// the end. The opening may wrap to two lines, a caption must fit on one: this script warns when not.
+//     "proofs": [{ "take": "song_p2r", "beats": 8, "text": "…" }, …] }
+// `opening` is the hook's line, over the first bar; a proof is a clip that proves it (a take from
+// record.mjs, `from` its first beat for a panel take) with one caption along the bottom; title and
+// subtitle make the version card at the end. The opening may wrap to two lines, a caption must fit on one: this script warns when not.
 //
-// Writes <work>/cards/: meta.json {hooks, cap}, opening.png, hook_<i>.png, version.png.
-// Also the two-screen hooks' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
+// Writes <work>/cards/: meta.json {proofs, cap}, opening.png, proof_<i>.png, version.png.
+// Also the two-screen proofs' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
 // the laptop's Cue and Play keys.
 // The look: the version card is a GitHub release in miniature (a green tag icon); a caption keeps that
 // family's translucent card with a white hairline, without its icons or colours.
@@ -23,7 +23,8 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
 const W = 940, CAP_H = 112, PAD = 32;           // card width, caption height (one line) and side padding
-const OPEN_PX = 92, OPEN_LH = 1.1;              // the opening line's font size and line height
+const OPEN_PX = 92, OPEN_MIN = 56, OPEN_LH = 1.1;   // the opening line's font size (shrinks to fit, not below
+                                                   // OPEN_MIN) and line height
 const fontStack = `-apple-system,"SF Pro Text","Segoe UI","Noto Sans",Helvetica,Arial,sans-serif`;
 const base = `html,body{margin:0;background:transparent}*{box-sizing:border-box}
 body{font-family:${fontStack};color:#eef1f5;-webkit-font-smoothing:antialiased}`;
@@ -39,13 +40,14 @@ body{width:1080px;height:1920px;position:relative}
 .o p{margin:0;text-align:center;text-wrap:balance;font-size:${OPEN_PX}px;line-height:${OPEN_LH};font-weight:700;letter-spacing:-.02em;
  text-shadow:0 2px 24px rgba(0,0,0,.85),0 0 6px rgba(0,0,0,.6)}
 `;
-// GitHub's release header: a green tag and the version (its "Latest" badge was tried; the user cut it)
+// GitHub's release header: a green tag and the version (its "Latest" badge was tried; the user cut it),
+// on a card the user asked to be "slimmer" than the first, a 420 px block
 const versionCss = `${base}
 body{width:1080px;height:1920px;position:relative}
-.v{position:absolute;left:70px;top:760px;width:${W}px;height:420px;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
- display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
-.t{display:flex;align-items:center;gap:26px;font-size:112px;font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 16px rgba(0,0,0,.7)}
-.s{display:flex;align-items:center;gap:20px;font-size:36px;color:#b6c0cc;font-weight:500;text-shadow:0 1px 8px rgba(0,0,0,.7)}
+.v{position:absolute;left:140px;top:860px;width:800px;height:220px;border-radius:12px;background:rgba(13,17,23,.5);border:1.5px solid rgba(240,246,252,.22);
+ display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.t{display:flex;align-items:center;gap:20px;font-size:76px;font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 16px rgba(0,0,0,.7)}
+.s{display:flex;align-items:center;gap:20px;font-size:30px;color:#b6c0cc;font-weight:500;text-shadow:0 1px 8px rgba(0,0,0,.7)}
 `;
 const tag = (c, n) => `<svg width="${n}" height="${n}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.4" stroke-linejoin="round"><path d="M2 2.8v4.5c0 .3.1.5.3.7l6.2 6.2c.4.4 1 .4 1.4 0l4.1-4.1c.4-.4.4-1 0-1.4L8 2.5a1 1 0 0 0-.7-.3H2.8c-.4 0-.8.3-.8.6Z"/><circle cx="5" cy="5" r="1" fill="${c}" stroke="none"/></svg>`;
 const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -57,27 +59,36 @@ async function shot(html, path, style) {
   await p.evaluate(() => document.fonts.ready);
   await p.screenshot({ path, omitBackground: true });
 }
-const meta = { hooks: 0, cap: { w: W, h: CAP_H } };
+const meta = { proofs: 0, cap: { w: W, h: CAP_H } };
 const warn = [];
 
-const hooks = lines.hooks || [];
+const proofs = lines.proofs || [];
 await p.setViewportSize({ width: W, height: CAP_H });
-for (let i = 0; i < hooks.length; i++) {
-  await shot(`<div class="c"><div class="t">${esc(hooks[i].text)}</div></div>`, `${OUT}/hook_${i}.png`, capCss);
+for (let i = 0; i < proofs.length; i++) {
+  if (!proofs[i].text) continue;   // a proof without text runs without a caption
+  await shot(`<div class="c"><div class="t">${esc(proofs[i].text)}</div></div>`, `${OUT}/proof_${i}.png`, capCss);
   const wide = await p.evaluate((max) => document.querySelector(".t").getBoundingClientRect().right > max, W - PAD);
-  if (wide) warn.push(`hook #${i + 1} is too wide for one line: "${hooks[i].text}"`);
+  if (wide) warn.push(`proof #${i + 1} is too wide for one line: "${proofs[i].text}"`);
 }
-meta.hooks = hooks.length;
+meta.proofs = proofs.length;
 
 await p.setViewportSize({ width: 1080, height: 1920 });
 if (lines.opening) {
-  await shot(`<div class="o"><p>${esc(lines.opening)}</p></div>`, `${OUT}/opening.png`, openCss);
-  const tall = await p.evaluate((max) => document.querySelector(".o p").getBoundingClientRect().height > max, OPEN_PX * OPEN_LH * 2 + 4);
-  if (tall) warn.push(`the opening wraps past two lines: "${lines.opening}"`);
+  // a "\n" in the opening breaks the line there (one sentence a line); the type then shrinks until no
+  // line wraps on its own
+  const rows = lines.opening.split("\n"), html = `<div class="o"><p>${rows.map(esc).join("<br>")}</p></div>`;
+  let px = OPEN_PX, tall = true;
+  for (; px >= OPEN_MIN; px -= 4) {
+    await shot(html, `${OUT}/opening.png`, `${openCss}.o p{font-size:${px}px}`);
+    tall = await p.evaluate((max) => document.querySelector(".o p").getBoundingClientRect().height > max, px * OPEN_LH * Math.max(rows.length, 2) + 4);
+    if (!tall) break;
+  }
+  if (tall) warn.push(`the opening wraps past ${Math.max(rows.length, 2)} lines even at ${OPEN_MIN}px: "${lines.opening}"`);
+  if (rows.length > 2) warn.push(`the opening has ${rows.length} lines; keep it to two`);
 } else warn.push("lines.json has no opening line");
-await shot(`<div class="v"><div class="t">${tag("#3fb950", 84)}<span>${esc(lines.title)}</span></div>
+await shot(`<div class="v"><div class="t">${tag("#3fb950", 58)}<span>${esc(lines.title)}</span></div>
   <div class="s"><span>${esc(lines.subtitle || "")}</span></div></div>`, `${OUT}/version.png`, versionCss);
-// device tags for the two-screen hooks
+// device tags for the two-screen proofs
 await p.setViewportSize({ width: 320, height: 56 });
 for (const [k, t] of [["laptop", "Laptop"], ["tv", "TV"], ["popout", "Pop-out window"]])
   await shot(`<div class="l">${t}</div>`, `${OUT}/label_${k}.png`, `${base}
@@ -95,4 +106,4 @@ for (const [k, w, cap, word, lit] of [["space", 300, "space", "CUE", "#f5a524"],
 fs.writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta));
 await b.close();
 for (const w of warn) console.log("WARN", w);
-console.log(`cards ok: opening, ${meta.hooks} hooks, version`);
+console.log(`cards ok: opening, ${meta.proofs} proofs, version`);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Builds a release's promo video — a vertical 1080x1920 run of hooks, the best of current Stable, cut to a song.
+// Builds a release's promo video, vertical 1080x1920 and cut to a song: one hook (a line over the
+// opening) and the proofs, clips of the best of current Stable that each prove it.
 // The playbook (what to ask the user, how to judge each step) is .claude/commands/video-hook-stable.md; this file
 // only runs the steps, one at a time or all together.
 //
@@ -12,13 +13,14 @@
 //
 // steps (in order):
 //   notes    writes <work>/release-notes.md, the Stable release's page, for drafting lines.json
-//   song     beat grid + first drop of the song → song.json (song.py)
+//   song     beat grid + first drop of the song → song.json (song.py); with <work>/mix.json and no
+//            --song, several songs cut into one soundtrack on one grid instead (mix.py)
 //   record   headless Chromium on the live site, one take per shot, cut on the song's beats (record.mjs);
 //            scene takes hear the song itself through a fake mic (<work>/mic.wav). `record <take>…`
 //            re-records only those takes
 //   cards    the text cards from <work>/lines.json (cards.mjs)
 //   compose  frames: footage + cards + camera (compose.py)
-//   encode   frames + the song, starting so the drop lands on the drop beat (default: the first hook;
+//   encode   frames + the song, starting so the drop lands on the drop beat (default: the first proof;
 //            --drop-beat moves it, for record and compose too) → <out>/…-promo.mp4
 //   all      song, record, cards, compose, encode
 // <work> is tools/.cache/promo/v<version> (git-ignored); lines.json is the one file written by hand.
@@ -70,14 +72,14 @@ const run = (cmd, args, extra = {}) => {
 };
 const need = (f, why) => { if (!existsSync(f)) { console.error(`missing ${f} — ${why}`); process.exit(2); } };
 
-// The video beat the song's first drop lands on: the first hook, after the opening (compose.py's `look`,
+// The video beat the song's first drop lands on: the first proof, after the opening (compose.py's `look`,
 // from plan.json), unless --drop-beat says otherwise.
 // record (the song stretch the scene takes hear), compose and encode must all agree on it.
-function hooksStart() {   // the first hook's video beat
+function proofsStart() {   // the first proof's video beat
   const f = join(work, "plan.json"), plan = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : {};
   return plan.look ?? 4;
 }
-function dropBeat() { return o["drop-beat"] ? Number(o["drop-beat"]) : hooksStart(); }
+function dropBeat() { return o["drop-beat"] ? Number(o["drop-beat"]) : proofsStart(); }
 // Scene takes hear the song from MIC_PRE beats before the video starts, for MIC_SPAN beats (longer than
 // any cut), after up to MIC_LEAD beats of the song before that so the app's analyser has settled.
 const MIC_PRE = 3, MIC_LEAD = 32, MIC_SPAN = 120;
@@ -95,6 +97,10 @@ const steps = {
   },
   song() {
     const wav = join(work, "song.wav");
+    if (!o.song && existsSync(join(work, "mix.json"))) {   // several songs cut into one soundtrack (mix.py)
+      run("uv", ["run", "-q", "--with", "numpy", "--with", "soundfile", "python", join(here, "mix.py")], { FFMPEG: ffmpeg() });
+      return;
+    }
     if (o.song) {
       let src = o.song;
       if (/^https?:/.test(src)) {   // a link: yt-dlp fetches the audio as is (it can't convert without a system ffmpeg)
@@ -117,7 +123,7 @@ const steps = {
     run(ffmpeg(), ["-y", "-loglevel", "error", "-ss", wavT0.toFixed(4), "-t", ((lead + MIC_SPAN) * P + 2).toFixed(3), "-i", resolve(song.file),
       "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", wav]);   // the format Chromium's fake mic reads
     run("node", [join(here, "record.mjs"), ...(positionals.length > 1 ? positionals.slice(1) : ["all"])], {
-      BPM: String(song.bpm), DROP_BEAT: String(drop), HOOKS_START: String(hooksStart()),
+      BPM: String(song.bpm), DROP_BEAT: String(drop), PROOFS_START: String(proofsStart()),
       MIC_WAV: wav, MIC_SONG_T0: String(wavT0), MIC_LEAD: String(lead), MIC_PRE: String(MIC_PRE), MIC_SPAN: String(MIC_SPAN),
     });
   },
