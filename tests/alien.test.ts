@@ -1,9 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { buildAlienMesh, MAX_INFLUENCES } from "../src/render/scenes/alien/mesh.ts";
 import { PARTS, compileSet, partDistance } from "../src/render/scenes/alien/body.ts";
-import { advanceReel, clipFps, createReel, LOOPS, MIN_SHOT_SEC, pickOther, type ReelInput } from "../src/render/scenes/alien/reel.ts";
-import { packSkin } from "../src/render/scenes/alien/index.ts";
+import {
+  BOUNCE_MAX,
+  clipSeconds,
+  createBounce,
+  createReel,
+  easeSpeed,
+  LOOPS,
+  MIN_SHOT_SEC,
+  pickOther,
+  stepBounce,
+  stepCut,
+  type CutInput,
+} from "../src/render/scenes/alien/reel.ts";
+import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
+import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
 import { decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
 import { BONE_COUNT } from "../src/render/scenes/dancers/rig.ts";
 
@@ -80,67 +93,54 @@ describe("alien mesh", () => {
 });
 
 describe("alien reel", () => {
-  const FRAMES = [128, 64, 128];
-  const FPS = [32, 26.7, 38.4];
-  const input = (over: Partial<ReelInput>): ReelInput => ({
-    dtSec: 1 / 60,
-    speed: 1,
-    cutOn: true,
-    cutSignal: 0,
-    cutLine: 0.85,
-    frames: FRAMES,
-    fps: FPS,
-    ...over,
+  const input = (over: Partial<CutInput>): CutInput => ({ dtSec: 1 / 60, cutOn: true, cutSignal: 0, cutLine: 0.5, ...over });
+  const run = (seconds: number, fn: (dt: number) => void): void => {
+    for (let i = 0; i < Math.round(seconds * 60); i++) fn(1 / 60);
+  };
+
+  it("eases the speed toward the music instead of jumping, and down to 0 in silence", () => {
+    let speed = 0;
+    speed = easeSpeed(speed, 1, 1 / 60);
+    expect(speed).toBeGreaterThan(0);
+    expect(speed).toBeLessThan(0.1);
+    run(3, (dt) => (speed = easeSpeed(speed, 1, dt)));
+    expect(speed).toBeCloseTo(1, 2);
+    run(5, (dt) => (speed = easeSpeed(speed, 0, dt)));
+    expect(speed).toBeLessThan(0.001);
   });
 
-  it("buys no frames in silence: the alien holds the frame it was on", () => {
-    const reel = createReel();
-    for (let i = 0; i < 30; i++) advanceReel(reel, input({}));
-    const held = reel.heads[0];
-    for (let i = 0; i < 600; i++) advanceReel(reel, input({ speed: 0 }));
-    expect(reel.heads[0]).toBe(held);
+  it("eases the same over a second however it is sliced into frames", () => {
+    let a = 0;
+    let b = 0;
+    run(1, (dt) => (a = easeSpeed(a, 1, dt)));
+    for (let i = 0; i < 30; i++) b = easeSpeed(b, 1, 1 / 30);
+    expect(a).toBeCloseTo(b, 6);
   });
 
-  it("plays the clip's own frames per second at speed 1, half as many at 0.5, and wraps", () => {
+  it("keeps looping until the signal rises over the line, and never cuts within the minimum shot", () => {
     const reel = createReel();
-    advanceReel(reel, input({ dtSec: 1 }));
-    expect(reel.heads[0]).toBeCloseTo(FPS[0], 6);
-    advanceReel(reel, input({ dtSec: 1, speed: 0.5 }));
-    expect(reel.heads[0]).toBeCloseTo(FPS[0] * 1.5, 6);
-    advanceReel(reel, input({ dtSec: 4 }));
-    expect(reel.heads[0]).toBeGreaterThanOrEqual(0);
-    expect(reel.heads[0]).toBeLessThan(FRAMES[0]);
-  });
-
-  it("cuts to another loop when the signal rises over the line, and never within the minimum shot", () => {
-    const reel = createReel();
-    // Long enough on the first shot, then a rise over the line.
-    advanceReel(reel, input({ dtSec: MIN_SHOT_SEC, cutSignal: 0.5 }));
-    expect(advanceReel(reel, input({ cutSignal: 0.9 }), () => 0.3)).toBe(true);
+    // No trigger, however long: the loop repeats.
+    for (let i = 0; i < 60 * 30; i++) stepCut(reel, input({ cutSignal: 0.2 }));
+    expect(reel.cuts).toBe(0);
+    expect(stepCut(reel, input({ cutSignal: 0.9 }), () => 0.3)).toBe(true);
     expect(reel.loop).not.toBe(0);
     const after = reel.loop;
     // Falls and rises again at once: too soon for another cut.
-    advanceReel(reel, input({ cutSignal: 0.5 }));
-    expect(advanceReel(reel, input({ cutSignal: 0.9 }))).toBe(false);
+    stepCut(reel, input({ cutSignal: 0.2 }));
+    expect(stepCut(reel, input({ cutSignal: 0.9 }))).toBe(false);
     expect(reel.loop).toBe(after);
     // Staying above the line is not a rise, however long it lasts.
-    expect(advanceReel(reel, input({ dtSec: MIN_SHOT_SEC * 2, cutSignal: 0.95 }))).toBe(false);
-    advanceReel(reel, input({ cutSignal: 0.5 }));
-    expect(advanceReel(reel, input({ cutSignal: 0.9 }))).toBe(true);
+    expect(stepCut(reel, input({ dtSec: MIN_SHOT_SEC * 2, cutSignal: 0.95 }))).toBe(false);
+    stepCut(reel, input({ cutSignal: 0.2 }));
+    expect(stepCut(reel, input({ cutSignal: 0.9 }))).toBe(true);
     expect(reel.cuts).toBe(2);
   });
 
-  it("never cuts with Cut off, and each loop keeps its own playhead", () => {
+  it("never cuts with Cut off", () => {
     const reel = createReel();
-    advanceReel(reel, input({ dtSec: MIN_SHOT_SEC, cutSignal: 0 }));
-    advanceReel(reel, input({ cutOn: false, cutSignal: 1 }));
+    stepCut(reel, input({ dtSec: MIN_SHOT_SEC, cutSignal: 0 }));
+    stepCut(reel, input({ cutOn: false, cutSignal: 1 }));
     expect(reel.cuts).toBe(0);
-    const head0 = reel.heads[0];
-    advanceReel(reel, input({ cutSignal: 0 }));
-    advanceReel(reel, input({ cutSignal: 1 }), () => 0);
-    expect(reel.loop).toBe(1);
-    expect(reel.heads[0]).toBeCloseTo(head0 + FPS[0] / 60, 6);
-    expect(reel.heads[1]).toBeCloseTo(FPS[1] / 60, 6);
   });
 
   it("picks every other loop and never the current one", () => {
@@ -151,13 +151,49 @@ describe("alien reel", () => {
     }
   });
 
-  it("names clips that are in the shipped library", () => {
+  it("bounces: squashes on a hit, overshoots into a stretch, settles, and stays still with no hits", () => {
+    const b = createBounce();
+    run(2, (dt) => stepBounce(b, 0, dt));
+    expect(b.squash).toBe(0);
+    // A hit that decays like a bass pulse.
+    let pulse = 1;
+    let deepest = 0;
+    let tallest = 0;
+    run(1.5, (dt) => {
+      stepBounce(b, BOUNCE_MAX * pulse, dt);
+      pulse *= Math.exp(-dt * 8);
+      deepest = Math.max(deepest, b.squash);
+      tallest = Math.min(tallest, b.squash);
+    });
+    expect(deepest).toBeGreaterThan(BOUNCE_MAX * 0.3);
+    expect(deepest).toBeLessThan(BOUNCE_MAX * 1.5);
+    expect(tallest).toBeLessThan(0);
+    run(3, (dt) => stepBounce(b, 0, dt));
+    expect(Math.abs(b.squash)).toBeLessThan(1e-3);
+  });
+});
+
+describe("alien bake", () => {
+  it("has a baked video for every loop, of that loop's clip, at its captured length", () => {
     const bin = readFileSync(new URL("../src/render/scenes/dancers/clips.bin", import.meta.url));
     const library = decodeClipLibrary(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
-    for (const loop of LOOPS) {
+    expect(BAKED.loops.length).toBe(LOOPS.length);
+    LOOPS.forEach((loop, i) => {
+      const baked = BAKED.loops[i];
       const clip = library.byName.get(loop.clip);
       expect(clip, loop.clip).toBeDefined();
-      expect(clipFps(clip!)).toBeGreaterThan(0);
-    }
+      expect(baked.clip).toBe(loop.clip);
+      expect(baked.frames).toBe(Math.round(clipSeconds(clip!) * BAKED.fps));
+      expect(statSync(new URL(`../src/render/scenes/alien/loops/${baked.file}`, import.meta.url)).size).toBeGreaterThan(10_000);
+    });
+  });
+
+  it("puts each loop's Bounce pivot where its camera sees the floor under the alien", () => {
+    LOOPS.forEach((loop, i) => {
+      const [u, v] = projectToFrame(loop.camera, BAKED.width / BAKED.height, [0, 0, 0]);
+      // The bake averages the pelvis's floor point; the dances barely leave the origin.
+      expect(Math.abs(BAKED.loops[i].pivot[0] - u)).toBeLessThan(0.1);
+      expect(Math.abs(BAKED.loops[i].pivot[1] - v)).toBeLessThan(0.15);
+    });
   });
 });

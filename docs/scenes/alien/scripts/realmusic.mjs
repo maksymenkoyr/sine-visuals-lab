@@ -40,7 +40,8 @@ while ((Date.now() - t0) / 1000 < seconds) {
   const s = await page.evaluate(() => {
     const a = window.__alien;
     if (!a) return null;
-    return { loop: a.reel.loop, head: a.reel.heads[a.reel.loop], cuts: a.reel.cuts, ...a.last };
+    const v = a.videos ? a.videos[a.reel.loop] : null;
+    return { loop: a.reel.loop, head: v ? v.currentTime * 120 : null, paused: v ? v.paused : null, ready: v ? v.readyState : null, cuts: a.reel.cuts, ...a.last };
   });
   if (s) rows.push({ t: +t.toFixed(2), ...s });
   if (shots && nextShot < shots.at.length && t >= shots.at[nextShot]) {

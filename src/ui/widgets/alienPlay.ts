@@ -5,16 +5,17 @@ import type { PanelSection } from "../../render/scene.ts";
 import { LOOPS } from "../../render/scenes/alien/reel.ts";
 
 /**
- * The Play readout (Alien, src/render/scenes/alien/): the Play row, then what
+ * The Move readout (Alien, src/render/scenes/alien/): the Move row, then what
  * the music is buying right now, all from the scene's probe() every tick.
  *   - speed: the playback speed, × the dance as captured;
- *   - buying: frames of the loop paid for per second at that speed;
+ *   - buying: frames of the baked loop paid for per second at that speed;
  *   - the loop on screen (of LOOPS) and its clip;
  *   - the loop as a strip of its frames, filled up to the playhead, and the
  *     frame number. In silence nothing is bought, so the strip stops and
  *     greys out.
- * The row is the device menu's own (`ctx.mountRows`: port, wire panel,
- * slider, reset); the section's `settings` name it.
+ * The rows are the device menu's own (`ctx.mountRows`: port, wire panel,
+ * slider, reset). The section's `settings` name them: the first goes above
+ * the readout, the rest below it.
  */
 
 /** Frame ticks are drawn only while one frame is at least this many device
@@ -24,7 +25,7 @@ const HELD_GREY = "rgba(255,255,255,0.28)";
 
 function buildAlienPlay(container: HTMLElement, section: PanelSection, ctx: WidgetCtx): void {
   const specs = (section.settings ?? []).map((k) => ctx.specs.find((s) => s.key === k)).filter((s): s is NonNullable<typeof s> => !!s);
-  if (specs.length) ctx.mountRows(container, specs.map((spec) => ({ spec })));
+  if (specs.length) ctx.mountRows(container, [{ spec: specs[0] }]);
 
   const box = document.createElement("div");
   box.style.cssText = `display:flex;flex-direction:column;gap:4px;padding:2px 0 8px;font:400 11px/1.2 ${FONT_MONO};color:rgba(255,255,255,0.62);`;
@@ -47,6 +48,7 @@ function buildAlienPlay(container: HTMLElement, section: PanelSection, ctx: Widg
   const [frameRow, frameOut] = line();
   box.append(head, loopRow, strip, frameRow);
   container.appendChild(box);
+  if (specs.length > 1) ctx.mountRows(container, specs.slice(1).map((spec) => ({ spec })));
 
   // Observed, not read every tick: a clientWidth read after the text writes
   // below would force a layout pass (onScreen.ts).

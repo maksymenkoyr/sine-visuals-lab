@@ -20,7 +20,9 @@
  * reference's green-to-teal.
  *
  * The bloom is BLUR_FRAG on two smaller targets; COMPOSITE_FRAG adds them
- * to the sharp picture through a soft knee (index.ts owns the passes).
+ * to the sharp picture through a soft knee (renderer.ts owns the passes).
+ * All of that runs only when the loops are baked (bakePage.ts); the scene
+ * itself draws one pass, PLAYER_FRAG, over the baked frames.
  */
 import { BONE_COUNT } from "../dancers/rig.ts";
 
@@ -155,6 +157,40 @@ void main() {
   c += (texture(uTex, vUv + uBlurStep * 3.0).rgb + texture(uTex, vUv - uBlurStep * 3.0).rgb) * 0.0540541;
   c += (texture(uTex, vUv + uBlurStep * 4.0).rgb + texture(uTex, vUv - uBlurStep * 4.0).rgb) * 0.0162162;
   outColor = vec4(c, 1.0);
+}
+`;
+
+/** The scene's one pass: the baked frame of the loop on screen, scaled to
+ *  cover the room (cropping what overflows, never stretching) and seen
+ *  through this device's slice of it, then squashed about the loop's pivot
+ *  (the floor under the alien, in frame coordinates — below the frame for a
+ *  close-up) by uScale for Bounce. Outside the frame is black. */
+export const PLAYER_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform vec2 uResolution;
+uniform vec4 uViewport; // x,y,w,h slice of the shared room-space canvas (sceneCommon.ts)
+uniform sampler2D uVideo;
+uniform vec2 uVideoSize;
+uniform vec2 uPivot;
+uniform vec2 uScale;
+uniform float uHasFrame;
+
+void main() {
+  vec2 room = uViewport.xy + vUv * uViewport.zw;
+  float roomAspect = (uResolution.x / max(uViewport.z, 0.0001)) / (uResolution.y / max(uViewport.w, 0.0001));
+  float frameAspect = uVideoSize.x / uVideoSize.y;
+  vec2 uv = room - 0.5;
+  if (roomAspect > frameAspect) uv.y *= frameAspect / roomAspect;
+  else uv.x *= roomAspect / frameAspect;
+  uv += 0.5;
+  // Bounce: the picture scaled about the pivot, so sample the inverse.
+  uv = uPivot + (uv - uPivot) / uScale;
+  bool inside = all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
+  // Video rows run top-down; uv's y runs up.
+  vec3 c = inside ? texture(uVideo, vec2(uv.x, 1.0 - uv.y)).rgb : vec3(0.0);
+  outColor = vec4(c * uHasFrame, 1.0);
 }
 `;
 
