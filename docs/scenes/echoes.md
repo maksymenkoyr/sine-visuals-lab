@@ -202,5 +202,7 @@ beat; the bar wave moved the resting size between pops.
 
 ## History
 
-- #369 — first draft from `/ref` on the live-coding reference; then 3D and
-  4D wireframe figures as more Shape chips.
+- #369 — first draft from `/ref` on the live-coding reference (closed
+  unmerged, replaced by #376).
+- #376 — the same rebased onto main, plus 3D and 4D wireframe figures as
+  more Shape chips.
