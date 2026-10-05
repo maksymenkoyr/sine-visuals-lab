@@ -127,10 +127,12 @@ import {
   hasUndo as hasLookUndo,
   listLooks,
   primeUndo,
+  renameLook,
   saveLook,
   saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
+import { funnyLookName } from "./render/lookNames.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import {
@@ -1615,7 +1617,12 @@ function wireDeviceMenu(): void {
     },
     onSceneSettingsReset: (sceneId) => resetSceneSettings(sceneId, getScene(sceneId)?.settings ?? []),
     listLooks,
-    onSaveLook: (sceneId, name) => saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? [])),
+    onSaveLook: (sceneId) => {
+      const name = funnyLookName(listLooks(sceneId).map((l) => l.name));
+      saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? []));
+      return name;
+    },
+    onRenameLook: renameLook,
     onApplyLook: (look) => {
       const specs = getScene(look.sceneId)?.settings ?? [];
       primeUndo(look.sceneId, specs);
