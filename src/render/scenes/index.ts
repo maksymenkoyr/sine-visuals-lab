@@ -33,6 +33,7 @@ import { skyScene } from "./sky/sky.ts";
 import { gatesScene } from "./gates/index.ts";
 import { toonraveScene } from "./toonrave/index.ts";
 import { tangleScene } from "./tangle/index.ts";
+import { chaikinScene } from "./chaikin/index.ts";
 import { alienScene } from "./alien/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
@@ -44,6 +45,7 @@ import { alienScene } from "./alien/index.ts";
 // `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(chaikinScene);
 registerScene(alienScene);
 registerScene(tangleScene);
 registerScene(toonraveScene);
@@ -81,6 +83,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "chaikin",
   "alien",
   "tangle",
   "toonrave",
@@ -133,6 +136,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  chaikinScene,
   alienScene,
   tangleScene,
   toonraveScene,
