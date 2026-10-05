@@ -21,8 +21,33 @@ import {
   FUNDAMENTAL_HZ_LARGE,
   holdMargin,
   SURPRISE_SHARE,
+  nextToss,
+  advanceToss,
+  glslFloat,
+  tossLaunch,
+  tossLongestFlight,
+  TOSS_ARM_SEC,
+  TOSS_IDLE_AGE,
+  TOSS_REFRACTORY_SEC,
+  chladniScene,
+  powderShare,
+  POWDER_SPLIT,
+  POWDER_EDGE,
   type PlateResponseInputs,
+  type TossEvent,
 } from "../src/render/scenes/chladni.ts";
+import {
+  distanceFromGrit,
+  litGrit,
+  litPowder,
+  powderInk,
+  POWDER_L_MIN,
+  POWDER_MIN_DISTANCE,
+} from "../src/render/scenes/chladniPowder.ts";
+import { resolveSceneSetting } from "../src/render/autoTune.ts";
+import { setSceneMaster, SCENE_MASTER_DEFAULT } from "../src/render/sceneSettings.ts";
+import { PALETTES, getPalette } from "../src/render/palette.ts";
+import { hexToRgb, oklabDistance, oklabLightness, rgbToHex } from "../src/render/oklab.ts";
 import { clampZoneEdges, zoneDrive, FREEZE_REF, SNAP_REF, ZONE_MIN_GAP } from "../src/render/scenes/chladniSand.ts";
 import { qualitySettings } from "../src/render/quality.ts";
 import { MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
@@ -490,5 +515,215 @@ describe("sand zones", () => {
   it("keeps the edges apart when they cross", () => {
     const { freeze, snap } = clampZoneEdges(1.2, 0.8);
     expect(snap - freeze).toBeCloseTo(ZONE_MIN_GAP, 9);
+  });
+});
+
+describe("toss trigger", () => {
+  const tossed: TossEvent = { at: 10, seed: 3, power: 0.5 };
+
+  it("tosses only on a fired edge", () => {
+    expect(nextToss(null, 10, false, 0.5, 1)).toBeNull();
+    expect(nextToss(null, 10, true, 0.5, 1)).toEqual({ at: 10, seed: 1, power: 0.5 });
+  });
+
+  it("never tosses at 0", () => {
+    expect(nextToss(null, 10, true, 0, 1)).toBeNull();
+    expect(nextToss(null, 10, true, -0.2, 1)).toBeNull();
+  });
+
+  it("takes its power from the setting, clamped to the slider", () => {
+    expect(nextToss(null, 10, true, 0.25, 1)?.power).toBe(0.25);
+    expect(nextToss(null, 10, true, 1.7, 1)?.power).toBe(1);
+  });
+
+  it("throws once per drop: edges inside the refractory are ignored", () => {
+    expect(nextToss(tossed, tossed.at + 1, true, 0.5, 2)).toBeNull();
+    expect(nextToss(tossed, tossed.at + TOSS_REFRACTORY_SEC - 0.01, true, 0.5, 2)).toBeNull();
+    expect(nextToss(tossed, tossed.at + TOSS_REFRACTORY_SEC, true, 0.5, 2)).toEqual({
+      at: tossed.at + TOSS_REFRACTORY_SEC,
+      seed: 2,
+      power: 0.5,
+    });
+  });
+
+  it("a clock that went backwards doesn't hold the refractory", () => {
+    expect(nextToss(tossed, TOSS_ARM_SEC + 0.5, true, 0.5, 2)?.at).toBe(TOSS_ARM_SEC + 0.5);
+  });
+
+  it("never tosses while the audio clock is young (every new source starts it at 0)", () => {
+    expect(nextToss(null, 0.4, true, 0.5, 1)).toBeNull();
+    expect(nextToss(null, TOSS_ARM_SEC - 0.01, true, 1, 1)).toBeNull();
+    expect(nextToss(null, TOSS_ARM_SEC, true, 0.5, 1)?.at).toBe(TOSS_ARM_SEC);
+    // An old toss doesn't open the gate early on a restarted clock either.
+    expect(nextToss(tossed, 0.4, true, 0.5, 1)).toBeNull();
+  });
+
+  it("the refractory outlasts every flight, so one toss lands before the next", () => {
+    expect(TOSS_REFRACTORY_SEC).toBeGreaterThan(tossLongestFlight());
+  });
+
+  it("shaders get the flight constants at full precision", () => {
+    expect(glslFloat(0.875)).toBe("0.875");
+    expect(glslFloat(0.075)).toBe("0.075");
+    expect(glslFloat(1)).toBe("1.0");
+    expect(glslFloat(1e-7)).toBe("1e-7");
+    expect(Number(glslFloat(tossLongestFlight()))).toBe(tossLongestFlight());
+  });
+
+  it("a harder toss flies longer", () => {
+    expect(tossLaunch(1)).toBe(1);
+    expect(tossLaunch(0)).toBeGreaterThan(0);
+    for (let p = 0; p < 1; p += 0.1) expect(tossLaunch(p + 0.1)).toBeGreaterThan(tossLaunch(p));
+  });
+});
+
+describe("powder colour", () => {
+  // Readable as small dust on the plate: far enough from the palette's ground.
+  const GROUND_MIN_DISTANCE = 0.4;
+
+  for (const p of PALETTES) {
+    it(`${p.id}: powder stands apart from every grit colour and reads on the ground`, () => {
+      const c = powderInk(p);
+      expect(distanceFromGrit(p, c)).toBeGreaterThanOrEqual(POWDER_MIN_DISTANCE);
+      expect(oklabLightness(c)).toBeGreaterThanOrEqual(POWDER_L_MIN);
+      expect(oklabDistance(c, hexToRgb(p.roles.ground))).toBeGreaterThanOrEqual(GROUND_MIN_DISTANCE);
+    });
+  }
+
+  it("takes a palette's own ink when one stands apart (Neon's blue against its pink sand)", () => {
+    expect(rgbToHex(powderInk(getPalette("neon")))).toBe(getPalette("neon").roles.inks[1]);
+  });
+
+  it("makes one for the single-hue palettes", () => {
+    for (const id of ["fire", "amber", "phosphor"]) {
+      const p = getPalette(id);
+      expect([...p.roles.inks, p.roles.accent]).not.toContain(rgbToHex(powderInk(p)));
+    }
+  });
+
+  it("lit powder keeps its hue where lit grit clips", () => {
+    const blue = hexToRgb("#1870f3");
+    const lit = litPowder(blue);
+    expect(Math.max(...lit)).toBeCloseTo(1, 9);
+    expect(lit[0] / lit[2]).toBeCloseTo(blue[0] / blue[2], 9);
+    expect(litGrit(blue)[2]).toBe(1);
+  });
+
+  it("splits the bed at POWDER_SPLIT with a short edge", () => {
+    expect(powderShare(0)).toBe(1);
+    expect(powderShare(1)).toBe(0);
+    expect(powderShare(POWDER_SPLIT)).toBeCloseTo(0.5, 9);
+    expect(powderShare(POWDER_SPLIT - POWDER_EDGE)).toBe(1);
+    expect(powderShare(POWDER_SPLIT + POWDER_EDGE)).toBe(0);
+  });
+
+  it("colours almost none of the default bed and about half of a light mixed one", () => {
+    const meanShare = (weight: number, mix: number): number => {
+      let s = 0;
+      const N = 1000;
+      for (let i = 0; i < N; i++) s += powderShare(grainWeightAt((i + 0.5) / N, weight, mix));
+      return s / N;
+    };
+    expect(meanShare(WEIGHT_REF, SIZE_MIX_DEFAULT)).toBeLessThan(0.01);
+    const mixed = meanShare(0.5, 1);
+    expect(mixed).toBeGreaterThan(0.35);
+    expect(mixed).toBeLessThan(0.55);
+  });
+});
+
+describe("toss frames (advanceToss)", () => {
+  const FRAME = 1 / 60;
+  const seed = () => 42;
+
+  /** Steps frames from `from` to `to` (exclusive) with no edge, returning
+   *  each frame's ages and the toss left at the end. */
+  function run(start: TossEvent | null, from: number, to: number, prev: number | null) {
+    let toss = start;
+    let p = prev;
+    const ages: { now: number; age: number; prevAge: number }[] = [];
+    for (let now = from; now < to; now += FRAME) {
+      const f = advanceToss(toss, now, p, false, 0.5, seed);
+      toss = f.toss;
+      ages.push({ now, age: f.age, prevAge: f.prevAge });
+      p = now;
+    }
+    return { toss, ages };
+  }
+
+  it("starts on an edge with a drawn seed, prevAge -1 only on that frame", () => {
+    let draws = 0;
+    const f = advanceToss(null, 10, 10 - FRAME, true, 0.5, () => (draws++, 7));
+    expect(f.toss).toEqual({ at: 10, seed: 7, power: 0.5 });
+    expect(f.age).toBe(0);
+    expect(f.prevAge).toBe(-1);
+    expect(draws).toBe(1);
+    const next = advanceToss(f.toss, 10 + FRAME, 10, false, 0.5, seed);
+    expect(next.prevAge).toBe(0);
+    expect(next.age).toBeCloseTo(FRAME, 9);
+  });
+
+  it("an edge it ignores draws no seed", () => {
+    let draws = 0;
+    const count = () => (draws++, 1);
+    advanceToss(null, 10, 9.9, true, 0, count); // Toss 0
+    advanceToss(null, 0.5, 0.4, true, 0.5, count); // clock too young
+    advanceToss({ at: 9, seed: 1, power: 0.5 }, 10, 9.9, true, 0.5, count); // refractory
+    expect(draws).toBe(0);
+  });
+
+  it("goes idle once the longest flight has passed", () => {
+    const { ages } = run({ at: 10, seed: 1, power: 1 }, 10 + FRAME, 12, 10);
+    for (const a of ages) {
+      if (a.now - FRAME > 10 + tossLongestFlight()) {
+        expect(a.age).toBe(TOSS_IDLE_AGE);
+        expect(a.prevAge).toBe(TOSS_IDLE_AGE);
+      } else {
+        expect(a.age).toBeCloseTo(a.now - 10, 9);
+      }
+    }
+  });
+
+  it("a clock that went backwards ends the toss: idle ages, and it never replays", () => {
+    // A toss at 10, landed, then a new source restarts the clock near 0 and
+    // runs past 10 again with no edge.
+    const landed = run(null, 9, 12, null);
+    expect(landed.toss).toBeNull();
+    const first = advanceToss(null, 10, 10 - FRAME, true, 1, seed);
+    const after = run(first.toss, 10 + FRAME, 12, 10);
+    const rewound = run(after.toss, 0.3, 12, 12 - FRAME);
+    expect(rewound.toss).toBeNull();
+    for (const a of rewound.ages) {
+      expect(a.age).toBe(TOSS_IDLE_AGE);
+      expect(a.prevAge).toBe(TOSS_IDLE_AGE);
+    }
+  });
+
+  it("a rewind mid-flight ends it too, even with Toss since set to 0", () => {
+    const first = advanceToss(null, 10, 10 - FRAME, true, 1, seed);
+    const mid = advanceToss(first.toss, 10.2, 10, false, 1, seed);
+    expect(mid.toss).not.toBeNull();
+    let toss = mid.toss;
+    let prev: number | null = 10.2;
+    for (let now = 0.5; now < 11; now += FRAME) {
+      const f = advanceToss(toss, now, prev, false, 0, seed);
+      expect(f.age).toBe(TOSS_IDLE_AGE);
+      toss = f.toss;
+      prev = now;
+    }
+  });
+});
+
+describe("Zoom", () => {
+  it("is framing, so the Master dial never moves it", () => {
+    const spec = (chladniScene.settings ?? []).find((s) => s.key === "plateZoom")!;
+    expect(spec.masterScale).toBe(false);
+    try {
+      for (const m of [0, 0.6, 1.5, 2]) {
+        setSceneMaster(m);
+        expect(resolveSceneSetting("chladni", spec)).toBeCloseTo(spec.default, 9);
+      }
+    } finally {
+      setSceneMaster(SCENE_MASTER_DEFAULT);
+    }
   });
 });
