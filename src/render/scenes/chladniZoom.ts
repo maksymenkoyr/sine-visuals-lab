@@ -17,8 +17,10 @@
 // own music-picked modes. The sand rides it: each frame the sim shrinks
 // every grain toward the centre by zoomShrink, so a formed figure shrinks as
 // one piece with the field, and moves a random zoomRespawnShare of the bed to
-// the strip that shrinking freed at the edges, which keeps the sand's
-// density even.
+// the strip that shrinking freed at the edges; those grains then hop like the
+// rest, and a grain that hops off the frame comes back in at that edge.
+// Together that keeps the sand's density even (tests/chladniZoom.test.ts
+// walks the rule).
 //
 // Speed is the setting times its drive (the All level jack by default), at
 // ZOOM_OCTAVES_PER_MIN for both at 1: silence stops the zoom, as it freezes
@@ -35,8 +37,10 @@ export const ZOOM_OCTAVES_PER_MIN = 3;
 /** How peaked the layer bell is: zoomBell is sin(pi x) to twice this power.
  *  Peaked, so most of the time one layer carries the plate and the figure
  *  reads as one figure: the plain sin^2 bell kept two or three layers mixed
- *  and the sum read as a busy lattice. */
-export const ZOOM_BELL_POWER = 3;
+ *  and the sum read as a busy lattice, and a milder peak still left two sizes
+ *  summed for about a third of every octave, where the sand settled on
+ *  neither. This one leaves a short morph around each handover. */
+export const ZOOM_BELL_POWER = 6;
 
 /** Bell values under this count as nothing: subtracted from every layer's
  *  bell (so the weights stay continuous), which drops the layers on the
@@ -109,6 +113,13 @@ export function zoomShrink(du: number): number {
 export function zoomRespawnShare(du: number): number {
   return 1 - 2 ** (-2 * du);
 }
+
+/** While the zoom runs the sand lies on the frame grown by this share of its
+ *  half-size on every side. Sand coming in at the edge takes a few seconds to
+ *  find the lines, and sand drifting toward a line just past the edge is
+ *  turned back at it; either way the outermost strip reads brighter than the
+ *  settled bed, and the margin keeps that strip off screen. */
+export const ZOOM_SAND_MARGIN = 0.1;
 
 /** The finest scale among the layers with any weight, for the sim's step
  *  cap (chladni.ts's STEP_CELL_FRACTION of the finest cell on the plate). */
