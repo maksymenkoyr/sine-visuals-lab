@@ -4,7 +4,7 @@ import { evaluate, type EvalOptions } from "./tempoEval/run.ts";
 
 // Tap tempo (src/render/tapTempo.ts) through the same offline harness as
 // tests/tempoEval.test.ts — the real extractor, the fixed-hop analyzer and
-// the anim clock, solo mode at 60 fps — with taps scripted on the track's
+// the anim clock, solo mode at FPS — with taps scripted on the track's
 // own clock. A separate file so `npm run eval:tempo`, which must print the
 // same table before and after any tap work, is untouched. The numbers each
 // scenario measured are printed as one table; the assertions hold the
@@ -146,14 +146,14 @@ const steady = play(hiphopTwice, steadyTaps);
 // The same run with one stray tap between the second and third beats.
 const strayTaps = [...steadyTaps.slice(0, 2), steadyTaps[1]! + 0.4 * (60 / 90), ...steadyTaps.slice(2)];
 const stray = play(hiphopTwice, strayTaps);
-// dnb's tracker reads 174; the taps say half of it.
+// dnb's tracker reads dnb's own tempo; the taps say half of it.
 const halfTaps = taps(dnbThrice, 87, 6, 8, 15, 12);
 const half = play(dnbThrice, halfTaps);
-// hiphop's tracker reads 90; the taps say twice that (every eighth note).
+// hiphop's tracker reads hiphop's own tempo; the taps say twice that (every eighth note).
 const doubleTaps = taps(hiphopTwice, 180, 8, 10, 10, 15);
 const double = play(hiphopTwice, doubleTaps);
 const hiphopEighths = hiphopTwice.beats.flatMap((b) => [b, b + 30 / 90]);
-// Taps at hiphop's tempo, then the music turns into house: 124, outside the tap's family.
+// Taps at hiphop's tempo, then the music turns into house, whose tempo is outside the tap's family.
 const changeTaps = taps(hiphopThenHouse, 90, 6, 10, 15, 13);
 const change = play(hiphopThenHouse, changeTaps);
 // A deliberately wrong tap on hiphop.
@@ -193,7 +193,7 @@ for (const [name, r, track, changedAt] of [
   };
 }
 // eslint-disable-next-line no-console
-console.log("tap tempo, solo mode, 60 fps (hold = the HOLD_SEC from 2 s after the tap took effect)");
+console.log(`tap tempo, solo mode, ${FPS} fps (hold = the ${HOLD_SEC} s from 2 s after the tap took effect)`);
 // eslint-disable-next-line no-console
 console.table(table);
 

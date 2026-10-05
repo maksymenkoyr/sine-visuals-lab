@@ -77,10 +77,10 @@
 // (setDivision(2)): the comb then judges the hits against every half beat,
 // in half-beat units — exactly the comb it would run at the tracker's own
 // tempo — so it still corrects the timing but can't move the tapped beat
-// onto the other half. Measured on the tap eval's dnb run
-// (tests/tapTempoEval.test.ts): judged per whole beat at 87, the comb sees
-// as many kicks a quarter beat late as on the beat and settled the
-// metronome between dnb's beats.
+// onto the other half. Measured on the tap eval's half-tempo dnb run
+// (tests/tapTempoEval.test.ts): judged per whole tapped beat, the comb saw
+// as many of dnb's kicks a quarter beat late as on the beat, and settled
+// the metronome between dnb's beats.
 const BPM_TRACK_RATE = 2; // how fast the internal tempo estimate follows frame.bpm
 const BEATS_PER_BAR = 4;
 
