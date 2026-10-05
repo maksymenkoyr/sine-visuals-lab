@@ -1,5 +1,5 @@
 ---
-description: Make the release promo — the best parts of the current Stable version as a short vertical video built from hooks, cut to the user's song
+description: Make a short vertical video of the best parts of the current Stable version, built around one hook and cut to the user's song
 ---
 
 **The idea:** a short vertical video that shows the best parts of the current Stable version, built

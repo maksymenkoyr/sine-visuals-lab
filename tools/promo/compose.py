@@ -6,7 +6,7 @@
 # Writes <work>/frames/00000.jpg … + frames/meta.json {total, frames, fps, dropBeat}: 1080x1920, constant
 # 30 fps, each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
 #
-# Shape of the video (.claude/commands/release-promo.md says why):
+# Shape of the video (.claude/commands/video-hook-stable.md says why):
 #   1. the opening: the user's look with the opening line over it, until the song's drop;
 #   2. the hooks from lines.json, back to back from the drop — clips where something visibly changes on
 #      the beat, each with one caption along the bottom that slides in as the last one leaves. The

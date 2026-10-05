@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds a release's promo video — a vertical 1080x1920 run of hooks, the best of current Stable, cut to a song.
-// The playbook (what to ask the user, how to judge each step) is .claude/commands/release-promo.md; this file
+// The playbook (what to ask the user, how to judge each step) is .claude/commands/video-hook-stable.md; this file
 // only runs the steps, one at a time or all together.
 //
 //   node tools/promo/promo.mjs <step> [--version 0.3.0] [--song file|link] [--look link] [--out dir]
@@ -121,7 +121,7 @@ const steps = {
       MIC_WAV: wav, MIC_SONG_T0: String(wavT0), MIC_LEAD: String(lead), MIC_PRE: String(MIC_PRE), MIC_SPAN: String(MIC_SPAN),
     });
   },
-  cards() { need(join(work, "lines.json"), "write lines.json (see .claude/commands/release-promo.md)"); run("node", [join(here, "cards.mjs")]); },
+  cards() { need(join(work, "lines.json"), "write lines.json (see .claude/commands/video-hook-stable.md)"); run("node", [join(here, "cards.mjs")]); },
   compose() {
     need(join(work, "song.json"), "run the song step first");
     need(join(work, "cards", "meta.json"), "run the cards step first");
