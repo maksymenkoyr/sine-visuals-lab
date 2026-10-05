@@ -1,4 +1,5 @@
-// Echoes — one regular outline (a circle, or a polygon of a few corners)
+// Echoes — one regular outline (a circle, a polygon of a few corners, or a
+// 3D or 4D wireframe figure from solids.ts, turned and projected flat)
 // drawn into a feedback loop that a drifting noise field warps every frame,
 // so the outline sheds a fan of evenly spaced echo lines that peel off along
 // the flow, bunch into sheets where the flow stalls, and fade out. Built from
@@ -38,6 +39,7 @@ import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { wrapFlow } from "../../noiseHash.ts";
 import type { QualityPreset } from "../../quality.ts";
 import { buildStepFrag, buildDisplayFrag } from "./glsl.ts";
+import { MAX_SOLID_EDGES, projectSolid, SOLIDS, type SolidId } from "./solids.ts";
 
 const ID = "echoes";
 
@@ -46,8 +48,23 @@ const ID = "echoes";
 const TARGET_SCALE: Record<QualityPreset, number> = { high: 1, mid: 0.75, low: 0.6, floor: 0.45 };
 const MAX_TARGET_DIM = 1600;
 
-/** Corner counts behind the Shape chips; 0 draws a circle. */
-const SHAPE_CORNERS = [0, 3, 4, 5, 6] as const;
+/** What each Shape chip draws, in chip order: a flat outline by corner
+ *  count (0 is a circle), or a 3D/4D figure from solids.ts. New entries go
+ *  at the end — a saved look stores the chip's index. */
+const SHAPES: readonly { name: string; corners: number; solid?: SolidId }[] = [
+  { name: "Circle", corners: 0 },
+  { name: "Triangle", corners: 3 },
+  { name: "Square", corners: 4 },
+  { name: "Pentagon", corners: 5 },
+  { name: "Hexagon", corners: 6 },
+  { name: "Tetrahedron", corners: 0, solid: "tetrahedron" },
+  { name: "Cube", corners: 0, solid: "cube" },
+  { name: "Octahedron", corners: 0, solid: "octahedron" },
+  { name: "Icosahedron", corners: 0, solid: "icosahedron" },
+  { name: "Tesseract", corners: 0, solid: "tesseract" },
+  { name: "16-cell", corners: 0, solid: "cell16" },
+  { name: "24-cell", corners: 0, solid: "cell24" },
+];
 
 /** Half the line's width, in half-heights — the reference's outline against
  *  its circle's radius (docs/scenes/echoes.md). Never thinner than
@@ -73,14 +90,15 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "shape",
     label: "Shape",
-    description: "The outline the echoes come from",
+    description:
+      "The outline the echoes come from: a flat shape, a 3D solid, or a 4D shape (a tesseract is a 4D cube) turning through the fourth dimension",
     group: "Form",
     min: 0,
-    max: SHAPE_CORNERS.length - 1,
+    max: SHAPES.length - 1,
     step: 1,
     default: 0,
     type: "enum",
-    options: ["Circle", "Triangle", "Square", "Pentagon", "Hexagon"],
+    options: SHAPES.map((s) => s.name),
   },
   {
     key: "size",
@@ -160,7 +178,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "spin",
     label: "Spin",
-    description: "How fast the outline turns, in degrees a second",
+    description: "How fast the outline turns, in degrees a second — 3D and 4D shapes tumble at this pace",
     group: "Motion",
     min: 0,
     max: 60,
@@ -210,6 +228,14 @@ function createEchoesScene(): Scene {
   let lastTime: number | null = null;
   let angleDeg = 0;
   let fieldPhase = 0;
+  // A 3D/4D figure's turn phase, in radians and never wrapped: solids.ts
+  // turns each plane at a different multiple of it, so wrapping it would
+  // jump every plane but the first.
+  let solidPhase = 0;
+  // One texel per projected edge (solids.ts): x1, y1, x2, y2.
+  let edgeTex: WebGLTexture | null = null;
+  let stepEdgesLoc: WebGLUniformLocation | null = null;
+  const edgeBuf = new Float32Array(MAX_SOLID_EDGES * 4);
 
   function freeTargets(gl: WebGL2RenderingContext): void {
     for (const t of targets) {
@@ -274,11 +300,20 @@ function createEchoesScene(): Scene {
       displayProg = createProgram(gl, DISPLAY_FRAG);
       stepPrevLoc = gl.getUniformLocation(stepProg.program, "uPrev");
       displayFrameLoc = gl.getUniformLocation(displayProg.program, "uFrame");
+      stepEdgesLoc = gl.getUniformLocation(stepProg.program, "uEdges");
       quadVao = createFullscreenQuad(gl);
+      edgeTex = gl.createTexture();
+      if (!edgeTex) throw new Error("echoes: createTexture failed");
+      gl.bindTexture(gl.TEXTURE_2D, edgeTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, MAX_SOLID_EDGES, 1, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       freeTargets(gl);
       lastTime = null;
       angleDeg = 0;
       fieldPhase = 0;
+      solidPhase = 0;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -310,13 +345,24 @@ function createEchoesScene(): Scene {
 
       const radius = size * (1 + breathe * wave + kick * pop);
       angleDeg = (angleDeg + spin * dt) % 360;
+      solidPhase += spin * DEG2RAD * dt;
       fieldPhase += drift * DRIFT_PER_SEC * dt;
       const fadeStep = 1 / Math.max(echoes, 1);
       const step = flow * STEP_PER_FLOW * (0.5 + flowReading);
 
       const pxHH = 2 / targetH;
       const stroke = Math.max(STROKE_HALF_HH, MIN_STROKE_PX * pxHH);
-      const corners = SHAPE_CORNERS[Math.max(0, Math.min(SHAPE_CORNERS.length - 1, shape))];
+      const shapeSpec = SHAPES[Math.max(0, Math.min(SHAPES.length - 1, shape))];
+
+      let edgeCount = 0;
+      let bound = 0;
+      if (shapeSpec.solid && edgeTex) {
+        const { count, extent } = projectSolid(SOLIDS[shapeSpec.solid], solidPhase, radius, edgeBuf);
+        edgeCount = count;
+        bound = extent + 2 * stroke + 2 * pxHH;
+        gl.bindTexture(gl.TEXTURE_2D, edgeTex);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_SOLID_EDGES, 1, gl.RGBA, gl.FLOAT, edgeBuf);
+      }
 
       const write = 1 - read;
       const writeTarget = targets[write]!;
@@ -330,7 +376,9 @@ function createEchoesScene(): Scene {
       stepProg.setV2("uResolution", targetW, targetH);
       stepProg.setF("uRadius", radius);
       stepProg.setF("uAngle", angleDeg * DEG2RAD);
-      stepProg.setF("uCorners", corners);
+      stepProg.setF("uCorners", shapeSpec.corners);
+      stepProg.setF("uEdgeCount", edgeCount);
+      stepProg.setF("uBound", bound);
       stepProg.setF("uStroke", stroke);
       stepProg.setF("uPx", pxHH);
       stepProg.setF("uStep", step);
@@ -338,10 +386,18 @@ function createEchoesScene(): Scene {
       stepProg.setF("uFieldFreq", FIELD_FREQ * detail);
       stepProg.setF("uFieldZ", wrapFlow(fieldPhase));
       stepProg.setV2("uFieldOffset", 3.7, 11.3);
+      // Bound even for a flat shape, which never reads it, so the sampler
+      // always has a complete texture behind it.
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, edgeTex);
+      gl.uniform1i(stepEdgesLoc, 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, readTarget.tex);
       gl.uniform1i(stepPrevLoc, 0);
       drawFullscreenQuad(gl, quadVao);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -365,10 +421,13 @@ function createEchoesScene(): Scene {
       stepProg?.dispose();
       displayProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
+      if (edgeTex) gl.deleteTexture(edgeTex);
       stepProg = null;
       displayProg = null;
       quadVao = null;
+      edgeTex = null;
       stepPrevLoc = null;
+      stepEdgesLoc = null;
       displayFrameLoc = null;
     },
   };
