@@ -15,10 +15,10 @@
 //
 // Drives (drives.ts's header). Every continuous knob has a jack. Three start
 // on a real wire:
-// - Speed moves the head along its path by its level (All level): no
-//   signal, no movement.
-// - Colour flow scrolls the palette through the stack by its level (Mid
-//   level).
+// - Speed moves the head along its path by its level (Level — the input's
+//   absolute loudness, 0 in a silent room, where the auto-gained levels lift
+//   mic hiss): no signal, no movement.
+// - Colour flow scrolls the palette through the stack by the same Level.
 // - New path re-rolls the path on the beat grid's coarsest stop, counting
 //   NEW_PATH_GRID_DIVISOR ticks per path in JS (beatGrid.ts has no phrase
 //   stop) — a phrase at the default amount.
@@ -228,7 +228,7 @@ const SETTINGS: SceneSetting[] = [
     max: 2,
     step: 0.05,
     default: 1,
-    drive: { default: "anim.energy" },
+    drive: { default: "feature.level" },
   },
   {
     key: "colourFlow",
@@ -240,7 +240,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.2,
-    drive: { default: "anim.mid" },
+    drive: { default: "feature.level" },
   },
   {
     key: "newPath",
@@ -526,8 +526,8 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
       }
     }
 
-    progress += SPEED_GAIN * get("speed") * clamp01(drives.value("speed", frame.energy, 0)) * dt;
-    phase += FLOW_GAIN * get("colourFlow") * clamp01(drives.value("colourFlow", anim.mid, 0)) * dt;
+    progress += SPEED_GAIN * get("speed") * clamp01(drives.value("speed", frame.level, 0)) * dt;
+    phase += FLOW_GAIN * get("colourFlow") * clamp01(drives.value("colourFlow", frame.level, 0)) * dt;
     phase -= Math.floor(phase);
 
     const k: Knobs = {
