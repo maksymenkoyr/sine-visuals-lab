@@ -1,4 +1,5 @@
 import { expansionReach } from "../render/drives.ts";
+import { createCanvasSizer } from "./canvasSizer.ts";
 import { FONT_MONO } from "./controlsTheme.ts";
 
 /**
@@ -17,6 +18,10 @@ import { FONT_MONO } from "./controlsTheme.ts";
  * notch to an end is GAUGE_FULL_SWING reading units, whatever the scene
  * does. The band ignores the Shape chip on purpose — it shows the dial, the
  * needle shows what the shape did with it.
+ *
+ * It is drawn on every panel tick, so its width comes from canvasSizer.ts's
+ * observed width, never a per-draw `clientWidth`: reading layout between the
+ * panel's other DOM writes forced a full style and layout pass each tick.
  */
 
 const GAUGE_FULL_SWING = 0.5;
@@ -41,19 +46,12 @@ export function createLeashGauge(accent: string): { el: HTMLCanvasElement; draw:
   el.setAttribute("role", "img");
   el.setAttribute("aria-label", "Where the picture sits now against its normal line");
   const tail: number[] = [];
+  const g = el.getContext("2d");
+  const sizer = g ? createCanvasSizer(el, g, { heightCssPx: HEIGHT_PX }) : null;
 
   function draw({ normal, expansion, excursion }: LeashGaugeState): void {
-    const w = el.clientWidth;
-    if (w === 0) return;
-    const dpr = window.devicePixelRatio || 1;
-    const pw = Math.round(w * dpr), ph = Math.round(HEIGHT_PX * dpr);
-    if (el.width !== pw || el.height !== ph) {
-      el.width = pw;
-      el.height = ph;
-    }
-    const g = el.getContext("2d");
-    if (!g) return;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!g || !sizer || !sizer.ensure()) return;
+    const w = sizer.width;
     g.clearRect(0, 0, w, HEIGHT_PX);
 
     const R = (w / 2 - SIDE_PAD_PX) / Math.sin(HALF_SWEEP);

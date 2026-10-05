@@ -31,7 +31,8 @@ the Strains block and the Affinity card. The colour
 harmony fit is `physarum2Synergy.ts` (pure, `tests/physarum2Synergy.test.ts`),
 the recruiting rule is `SIM_FRAG`'s Headcount block (`SWITCH_MAX`'s comment
 has the rule), and the measured headcount is `POP_FRAG` through
-`createPixelReadback` (the same non-blocking readback Territory uses).
+`createPixelReadback` (one census with Territory and Auto level: one fence,
+one drain).
 
 Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
 packing round trip and the same beat-rise detector with its own refractory),
@@ -225,6 +226,32 @@ configs are used.
   with Random every 8 beats on top (Random keeps the drives). The first promo
   cut re-rolled presets every 2 beats on the synthetic feed; the user found
   half of it flat — a dish needs a few beats to grow into its pattern.
+- 2026-10-04, "strong lags" with the panel open (user's Power card: High
+  pinned, 2912×1804, 24 fps falling to 11, main thread 54%, GPU 16.2 ms, Panel
+  blur on). Headless Chromium on the same M1 Pro (ANGLE/Metal, 1456×902 at
+  dpr 2, synthetic 124 BPM, panel open, 6 s CPU profiles plus a wrapped
+  `getBufferSubData` timer):
+  - Panel closed: 120 fps rAF, every readback ≈ 0.3 ms. Panel open with blur
+    off: ≈ 1 ms a readback. Panel open with blur on: 10–15 ms a readback —
+    each one waits behind the GPU process's backlog (the blur re-filters the
+    canvas every frame). The main thread then shows ~35% in
+    `getBufferSubData`: the Master card's Picture meter (15 a second,
+    whenever the panel was open) and this scene's Territory/Headcount/Auto
+    level (up to ten a second between them, drained after the frame's steps).
+  - Forced layouts: the leash gauge read `clientWidth` every tick (≈ 5% of
+    the main thread); the strain boxes wrote `--c` and then read the preview
+    canvases' size every tick (≈ 10%). The spectrum strip's axis text ≈ 2%.
+  - Fixed in one PR: the Picture meter samples only while its block is on
+    screen, the three readbacks are one census (one fence, one drain, before
+    the steps), observed sizes instead of per-tick reads, boxes redraw only
+    on the ticks they step, the axis is cached, and the box sim uses one
+    cos/sin pair per agent. Scrolled to the Scene card, blur on: renderer
+    main thread 84% → 60% busy (Chrome trace), readbacks 136–152 → 23–24
+    per 6 s and 1.5–2.1 s → 0.3–0.4 s of stall, preview `step` 754 → 490 ms.
+    fps was too noisy to call on a shared machine (main 63–101, fix
+    100–112). Still open: the sim's own ≈ 5 ms/step GPU cost (the spatial
+    re-sort below), and the panel redrawing at the display's rate (120 Hz
+    on ProMotion) while the scene renders at its cap.
 
 ## Decisions and pivots
 
@@ -1202,7 +1229,10 @@ applies there too. Tuned so far only against the synthetic feed at
     now documents, rather than links to a stale diff for, the temporary
     forced-step-count hook a Touch/War perf run needs in `physarum2.ts`'s
     `render()` — copy it in by hand, measure, then `git diff` must show
-    physarum2.ts untouched again; never commit it.
+    physarum2.ts untouched again; never commit it. `panelprof.mjs`
+    (panel-open CPU profile + every blocking GL read timed by caller) and
+    `paneltrace.mjs` (the main thread's own style/layout/paint from a Chrome
+    trace) are the 2026-10-04 panel-lag measurements.
   - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
     down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
     switch, the Affinity card's rows waking on hover and pinning on a press

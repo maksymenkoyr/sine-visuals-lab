@@ -149,6 +149,10 @@ and are not recorded here yet.
   near the floor. The move drives the groove's existing poses (their bounce
   curve), so the cel swaps, the hair's lag and the crowd's offset rows all
   follow it. The gags and the build keep their script.
+- 2026-10-04: the Dance card's two canvases take their size from
+  `src/ui/onScreen.ts`'s `watchSize` instead of reading `clientWidth` every
+  tick (a forced layout per read; found while chasing Physarum 2's panel
+  lag). No visible change.
 
 ## Tuning notes
 
