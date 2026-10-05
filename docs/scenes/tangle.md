@@ -182,3 +182,5 @@ the reference's sparse still state while the music plays, by design.
 ## History
 
 - `5ba77502` — first version (WIP).
+- #371 — draft PR: two-scale knot flares, the crinkle envelope, tests and
+  this record.
