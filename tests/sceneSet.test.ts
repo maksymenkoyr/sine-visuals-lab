@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
 import { applyLook, type SceneLook } from "../src/render/sceneLooks.ts";
+import { applyRoomStorage, captureRoomStorage, isRoomKey } from "../src/net/syncedStores.ts";
 import {
   AUTOPILOT_EVERY_DEFAULT,
   SET_MAX_CHARS,
@@ -190,5 +191,39 @@ describe("the store", () => {
     setAutopilot({ everyBars: 7 });
     expect(getAutopilot().everyBars).toBe(AUTOPILOT_EVERY_DEFAULT);
     setAutopilot({ on: false });
+  });
+});
+
+describe("reaching a paired phone", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function fakeStorage(init: Record<string, string> = {}) {
+    const m = new Map<string, string>(Object.entries(init));
+    return {
+      m,
+      get length() {
+        return m.size;
+      },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    };
+  }
+
+  it("is part of the room's look, so a phone is sent it", () => {
+    expect(isRoomKey("vibe.set")).toBe(true);
+  });
+
+  it("re-seeds from a room snapshot: the pads a laptop played show up on the phone", () => {
+    const laptop = filled(2);
+    const phone = fakeStorage();
+    vi.stubGlobal("localStorage", phone);
+    applyRoomStorage({ "vibe.set": serializeSet(laptop) }, phone);
+    expect(listPads().map((p) => p.id)).toEqual(laptop.pads.map((p) => p.id));
+    expect(captureRoomStorage(phone)["vibe.set"]).toBe(serializeSet(laptop));
+    // And a snapshot without it empties the phone's Set, as for any other store.
+    applyRoomStorage({}, phone);
+    expect(listPads()).toEqual([]);
   });
 });

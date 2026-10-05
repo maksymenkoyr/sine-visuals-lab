@@ -11,7 +11,8 @@ import { chipBtnLitStyle, chipBtnStyle, createCard, createChipButton, spacer } f
  * "+ Add" captures what is on screen now as a new pad. A pad's label is
  * "<scene name> · <its own name>"; a click fires it, a double-click on the
  * name renames it in place (the click handler skips the double-click's second
- * click, so the pad isn't fired twice), and the cross deletes it. A pad is its
+ * click, so the pad isn't fired twice; the pencil does the same rename), and
+ * the cross deletes it. A pad is its
  * own copy, so nothing done in the Looks card can break it.
  *
  * Two markers say where a pad is: a ring (the CUE orange of the output bar)
@@ -273,6 +274,15 @@ export function createSetCard(deps: SetCardDeps): SetCard {
       });
       nameBtn.addEventListener("dblclick", () => startRename(pad, nameBtn));
 
+      // The same rename as the double-click, for the moment that fails: the
+      // first click of a double-click fires the pad, and a scene change above
+      // this card can move the row from under the pointer before the second.
+      const renameBtn = document.createElement("button");
+      renameBtn.textContent = "✎";
+      renameBtn.title = `Rename "${label}"`;
+      renameBtn.style.cssText = iconBtnStyle;
+      renameBtn.addEventListener("click", () => startRename(pad, nameBtn));
+
       const deleteBtn = document.createElement("button");
       deleteBtn.textContent = "✕";
       deleteBtn.title = `Delete "${label}"`;
@@ -282,7 +292,7 @@ export function createSetCard(deps: SetCardDeps): SetCard {
         refresh(true);
       });
 
-      row.append(key, markers, nameBtn, deleteBtn);
+      row.append(key, markers, nameBtn, renameBtn, deleteBtn);
       list.appendChild(row);
     });
   }

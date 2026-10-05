@@ -6634,7 +6634,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // `[data-key="<id>"]` control it names (targetsFor/flashOn — capped,
   // since a busy scene can carry many rows' worth of A/R/T chips); clicking
   // it performs the action for the handful of ids with exactly one
-  // (singleAction), or just re-flashes for the rest (1–9, A/R/T, Z X C,
+  // (singleAction), or just re-flashes for the rest (⇧1–9, 1–9, A/R/T, Z X C,
   // Esc — nothing single to do for those from a click).
   const keysCard = document.createElement("div");
   keysCard.className = "vc-keys";
