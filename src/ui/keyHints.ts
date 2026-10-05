@@ -1,3 +1,4 @@
+import { isMacAgent } from "./outputKeys.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 
 /**
@@ -68,6 +69,10 @@ export interface Shortcut {
   hint: string;
 }
 
+// On a Mac the right Command key plays too, and Play's row names it: the thumb
+// key next to Space (outputKeys.ts's header). Guarded for the node tests.
+const MAC = typeof navigator !== "undefined" && isMacAgent(navigator.userAgent ?? "");
+
 export const SHORTCUTS: readonly Shortcut[] = [
   { key: "S", id: "panel", label: "Panel", hint: "Open / close the panel" },
   { key: "H", id: "hide", label: "Hide UI", hint: "Hide the interface" },
@@ -86,7 +91,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "[ ]", id: "tempo-x", label: "Tempo ÷2 ×2", hint: "Halve / double the beat" },
   { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
   { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
-  { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
+  MAC
+    ? { key: "Right ⌘", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (⌥ Option does the same, G sends at once)" }
+    : { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {

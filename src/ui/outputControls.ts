@@ -22,16 +22,20 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
  * someone else played over unplayed edits it reads MAIN CHANGED BY <NAME> and
  * TAKE MAIN (#takeBtn, optional in the markup) drops the edits and shows Main.
  *
- * PLAY also answers a pointer, for a touch screen with no Option key: a tap
+ * PLAY also answers a pointer, for a touch screen with no keyboard: a tap
  * sends at once, holding charges the fill and glides on release, exactly as a
- * held Option does (outputKeys.ts's createPlayKey, glideMsForHold). Sliding
+ * held Play key does (outputKeys.ts's createPlayKey, glideMsForHold). Sliding
  * off the button cancels.
  *
  * Press feedback lives here too: a Play key or click flashes PLAY (`pressed`),
  * CUE stays lit while it's held, PLAY's ring blinks while the output differs
- * (`differs`), a held Option draws an arc round PLAY while it charges
+ * (`differs`), a held Play key draws an arc round PLAY while it charges
  * (`charging`, the `--charge` arc) and a glide in flight draws it round again
  * over its length.
+ *
+ * The key name under PLAY's pad is Option, Play's key everywhere (index.html);
+ * on a Mac labelPlayKey switches it to the right Command key, the thumb key
+ * next to Space (outputKeys.ts's header says why both play).
  */
 
 export interface OutputControlElements {
@@ -63,7 +67,7 @@ export interface OutputControls {
   /** Cue down (true) or up (false): the preview is on the output only while
    *  it's down. Idempotent; false when no output is open (an up still lets go). */
   holdCue(on: boolean): boolean;
-  /** While Option is held: how long, or null when it isn't (clears the charge). */
+  /** While a Play key is held: how long, or null when it isn't (clears the charge). */
   charge(holdMs: number | null): void;
 }
 
@@ -73,6 +77,16 @@ const CHARGE_FULL_MS = 15_000;
 
 function fmtSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** On a Mac, PLAY names the right Command key instead of Option: the key name
+ *  under its pad and its tooltip. */
+export function labelPlayKey(goBtn: HTMLButtonElement, mac: boolean): void {
+  if (!mac) return;
+  const keyName = goBtn.querySelector("small");
+  if (keyName) keyName.textContent = "RIGHT ⌘";
+  goBtn.title =
+    "Send this scene and its settings to the output — tap the right ⌘ to send at once, hold it to glide there (Option does the same)";
 }
 
 export function createOutputControls(bridge: OutputBridge, els: OutputControlElements): OutputControls {
@@ -190,7 +204,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
   cueBtn.addEventListener("pointerup", () => holdCue(false));
   cueBtn.addEventListener("pointercancel", () => holdCue(false));
 
-  // PLAY under a pointer is Option held: down starts the charge, up decides
+  // PLAY under a pointer is a Play key held: down starts the charge, up decides
   // tap or glide. The click that follows a handled press is swallowed; a
   // keyboard activation (Enter on the focused button) has no press and still sends.
   const pointerKey = createPlayKey();
