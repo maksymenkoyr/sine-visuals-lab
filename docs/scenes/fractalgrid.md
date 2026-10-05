@@ -149,5 +149,5 @@ beat and a drop inverts the picture for a few bars. Draft scene.
 
 ## History
 
-- First version, 2026-10-05: the scene, its motion module and tests, and
-  this record.
+- #377 (2026-10-05) — first version: the scene, its motion module and
+  tests, and this record.
