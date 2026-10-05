@@ -1,140 +1,165 @@
 import { describe, it, expect } from "vitest";
 import {
   HEAD_START,
-  MAX_PATHS,
-  RECIPES,
+  MAX_STACKS,
+  PALETTES,
+  ROOM_PALETTE,
   SHAPE_REACH,
   SW,
   bezier,
-  copySpan,
-  createRng,
-  createSweepState,
+  endScales,
   headOf,
-  newPieceDivisor,
-  nextRecipe,
-  packPiece,
+  newPathDivisor,
+  packFrame,
   progressFor,
-  rollPiece,
-  stepSweep,
-  type SweepInputs,
-} from "../src/render/scenes/sweep/pieces.ts";
+  rollPath,
+  span,
+  stackGeometry,
+  type Knobs,
+} from "../src/render/scenes/sweep/stack.ts";
 import { SWEEP_FRAG_BODY } from "../src/render/scenes/sweep/glsl.ts";
+import { sweepScene } from "../src/render/scenes/sweep/index.ts";
+import { COMMON_UNIFORMS_GLSL, settingUniformName } from "../src/render/sceneCommon.ts";
 
-const QUIET: SweepInputs = { dt: 1 / 60, rate: 0.2, tick: false, ticksPerPiece: 2, pick: -1 };
+const KNOBS: Knobs = {
+  shape: 4,
+  stretch: 1,
+  copies: 40,
+  size: 0.17,
+  taper: -0.9,
+  twist: 0,
+  pair: true,
+  travel: 0.85,
+  bend: 0.3,
+  aim: 0,
+  spread: 0,
+  trail: 1,
+  palette: 1,
+  bands: 1.5,
+  head: 1,
+  rim: 0.3,
+  sheen: 0,
+  faces: 1,
+  opacity: 1,
+  multiply: 0,
+  outline: 0.008,
+  outlineStyle: 1,
+  outlineReach: 1,
+  blur: 0.1,
+  headBlur: 0,
+  fade: 0,
+  steps: 0,
+};
 
 describe("sweep head motion", () => {
   it("headOf and progressFor invert each other, and the head never reaches the end", () => {
-    for (const h of [0, 0.12, 0.5, 0.9]) expect(headOf(progressFor(h))).toBeCloseTo(h, 6);
+    for (const h of [0, HEAD_START, 0.5, 0.9]) expect(headOf(progressFor(h))).toBeCloseTo(h, 6);
     expect(headOf(1e6)).toBeLessThanOrEqual(1);
     expect(headOf(2)).toBeGreaterThan(headOf(1));
   });
 
-  it("progress grows by rate × dt and stands still at rate 0 (no signal, no movement)", () => {
-    const rng = createRng(1);
-    let s = createSweepState(rng);
-    const p0 = s.progress;
-    for (let i = 0; i < 60; i++) s = stepSweep(s, QUIET, rng);
-    expect(s.progress - p0).toBeCloseTo(0.2, 6);
-    const p1 = s.progress;
-    for (let i = 0; i < 60; i++) s = stepSweep(s, { ...QUIET, rate: 0 }, rng);
-    expect(s.progress).toBe(p1);
-  });
-
-  it("copies span from head × (1 − trail) to the head", () => {
-    expect(copySpan(0.6, 1)).toEqual([0, 0.6]);
-    const [a, b] = copySpan(0.6, 0.25);
-    expect(a).toBeCloseTo(0.45, 9);
-    expect(b).toBe(0.6);
+  it("New path's divisor: the default waits the base count, right waits fewer, 0 never re-rolls", () => {
+    expect(newPathDivisor(0.5, 0.5, 2)).toBe(2);
+    expect(newPathDivisor(1, 0.5, 2)).toBe(1);
+    expect(newPathDivisor(0.25, 0.5, 2)).toBe(4);
+    expect(newPathDivisor(0, 0.5, 2)).toBe(0);
   });
 });
 
-describe("sweep pieces", () => {
-  it("cuts to a new piece after ticksPerPiece ticks and restarts the head", () => {
-    const rng = createRng(2);
-    let s = createSweepState(rng);
-    s = stepSweep(s, { ...QUIET, dt: 2 }, rng);
-    const first = s.piece;
-    s = stepSweep(s, { ...QUIET, tick: true }, rng);
-    expect(s.piece).toBe(first);
-    s = stepSweep(s, { ...QUIET, tick: true }, rng);
-    expect(s.piece).not.toBe(first);
-    expect(s.piece.recipe).not.toBe(first.recipe);
-    expect(headOf(s.progress)).toBeCloseTo(HEAD_START, 6);
+describe("sweep span", () => {
+  it("Spread 0 grows from the path's start; Spread 1 spreads both ways from its middle", () => {
+    expect(span(0, 0, 1)).toEqual([0, 0]);
+    expect(span(0.6, 0, 1)).toEqual([0, 0.6]);
+    expect(span(0, 1, 1)).toEqual([0.5, 0.5]);
+    const [t, h] = span(0.5, 1, 1);
+    expect(t).toBeCloseTo(0.25, 9);
+    expect(h).toBeCloseTo(0.75, 9);
   });
 
-  it("never cuts with ticksPerPiece 0", () => {
-    const rng = createRng(3);
-    let s = createSweepState(rng);
-    const first = s.piece;
-    for (let i = 0; i < 20; i++) s = stepSweep(s, { ...QUIET, tick: true, ticksPerPiece: 0 }, rng);
-    expect(s.piece).toBe(first);
+  it("Trail keeps only the head's end of the span", () => {
+    const [t, h] = span(0.8, 0, 0.25);
+    expect(h).toBeCloseTo(0.8, 9);
+    expect(t).toBeCloseTo(0.6, 9);
   });
 
-  it("a Look pick cuts at once to that recipe and holds it", () => {
-    const rng = createRng(4);
-    let s = createSweepState(rng);
-    s = stepSweep(s, { ...QUIET, pick: 6 }, rng);
-    expect(s.piece.recipe).toBe(6);
-    for (let i = 0; i < 5; i++) s = stepSweep(s, { ...QUIET, pick: 6, tick: true, ticksPerPiece: 1 }, rng);
-    expect(s.piece.recipe).toBe(6);
-  });
-
-  it("Mix never picks the current recipe again", () => {
-    const rng = createRng(5);
-    for (let cur = 0; cur < RECIPES.length; cur++) {
-      for (let i = 0; i < 50; i++) expect(nextRecipe(cur, -1, rng)).not.toBe(cur);
-    }
-  });
-
-  it("New piece's divisor: the default waits the base count, right waits fewer, 0 never cuts", () => {
-    expect(newPieceDivisor(0.5, 0.5, 2)).toBe(2);
-    expect(newPieceDivisor(1, 0.5, 2)).toBe(1);
-    expect(newPieceDivisor(0.25, 0.5, 2)).toBe(4);
-    expect(newPieceDivisor(0, 0.5, 2)).toBe(0);
-  });
-
-  it("a roll is deterministic for a seed and keeps the palette phase within its jitter", () => {
-    for (let r = 0; r < RECIPES.length; r++) {
-      const a = rollPiece(r, createRng(9));
-      const b = rollPiece(r, createRng(9));
-      expect(a).toEqual(b);
-      const look = RECIPES[r].look;
-      expect(a.stripePhase).toBeGreaterThanOrEqual(look.phase);
-      expect(a.stripePhase).toBeLessThan(look.phase + look.phaseJitter + 1e-9);
-    }
+  it("Size is the geometric middle of the two end scales; Taper −1 makes the head a quarter of the tail", () => {
+    const [a, b] = endScales(0.2, -1);
+    expect(Math.sqrt(a * b)).toBeCloseTo(0.2, 9);
+    expect(b / a).toBeCloseTo(0.25, 9);
   });
 });
 
-describe("sweep recipes and packing", () => {
-  it("every recipe fits the shader: paths, palette, copies", () => {
-    for (const r of RECIPES) {
-      expect(r.paths.length).toBeGreaterThan(0);
-      expect(r.paths.length).toBeLessThanOrEqual(MAX_PATHS);
-      for (const hex of [...r.look.palette, r.look.ground, r.look.ink, r.look.head]) expect(hex).toMatch(/^#[0-9a-f]{6}$/);
-      expect(r.look.copies).toBeGreaterThanOrEqual(2);
-    }
+describe("sweep paths", () => {
+  it("a seed always rolls the same path", () => {
+    expect(rollPath(42)).toEqual(rollPath(42));
+    expect(rollPath(42)).not.toEqual(rollPath(43));
   });
 
-  it("each path's box holds every copy at the packed span", () => {
-    for (let r = 0; r < RECIPES.length; r++) {
-      const piece = rollPiece(r, createRng(11 + r));
-      const out = packPiece(piece, { head: 0.7, trail: 1, copies: 1, blur: 1, outlines: 1 });
+  it("Aim −1 ends the path at the centre, +1 starts it there, and Travel is its length", () => {
+    const roll = { ...rollPath(7), centre: [0, 0] as const };
+    const end = stackGeometry(roll, { ...KNOBS, aim: -1, bend: 0 }, 0).p;
+    expect(end[3][0]).toBeCloseTo(0, 9);
+    expect(end[3][1]).toBeCloseTo(0, 9);
+    const start = stackGeometry(roll, { ...KNOBS, aim: 1, bend: 0 }, 0).p;
+    expect(start[0][0]).toBeCloseTo(0, 9);
+    expect(start[0][1]).toBeCloseTo(0, 9);
+    expect(Math.hypot(start[3][0] - start[0][0], start[3][1] - start[0][1])).toBeCloseTo(KNOBS.travel, 9);
+  });
+
+  it("each stack's box holds every copy of its span", () => {
+    for (let seed = 1; seed < 20; seed++) {
+      const roll = rollPath(seed);
+      const out = packFrame({ roll, head: 0.7, phase: 0 }, KNOBS);
       expect(out.length).toBe(SW.LEN * 4);
-      expect(out[SW.LOOK3 * 4 + 1]).toBe(piece.paths.length);
-      piece.paths.forEach((path, j) => {
+      expect(out[SW.LOOK3 * 4 + 1]).toBe(2);
+      for (let j = 0; j < MAX_STACKS; j++) {
+        const g = stackGeometry(roll, KNOBS, j);
         const box = out.slice((SW.BOX0 + j) * 4, (SW.BOX0 + j) * 4 + 4);
-        const sTail = out[(SW.PATH0 + j * 4 + 3) * 4];
-        const head = out[(SW.PATH0 + j * 4 + 3) * 4 + 1];
-        for (let i = 0; i <= 40; i++) {
-          const s = sTail + ((head - sTail) * i) / 40;
-          const [x, y] = bezier(path.p, s);
-          const reach = (path.scale[0] + (path.scale[1] - path.scale[0]) * s) * SHAPE_REACH;
-          expect(x - reach).toBeGreaterThanOrEqual(box[0] - 1e-6);
-          expect(y - reach).toBeGreaterThanOrEqual(box[1] - 1e-6);
-          expect(x + reach).toBeLessThanOrEqual(box[2] + 1e-6);
-          expect(y + reach).toBeLessThanOrEqual(box[3] + 1e-6);
+        const st = SW.STACK0 + j * 4 + 3;
+        const [uTail, uHead] = [out[st * 4], out[st * 4 + 1]];
+        const [a, b] = endScales(KNOBS.size, KNOBS.taper);
+        for (let i = 0; i <= 50; i++) {
+          const s = uTail + ((uHead - uTail) * i) / 50;
+          const [x, y] = bezier(g.p, s);
+          const r = a * Math.pow(b / a, s) * SHAPE_REACH;
+          expect(x - r).toBeGreaterThanOrEqual(box[0] - 1e-6);
+          expect(y - r).toBeGreaterThanOrEqual(box[1] - 1e-6);
+          expect(x + r).toBeLessThanOrEqual(box[2] + 1e-6);
+          expect(y + r).toBeLessThanOrEqual(box[3] + 1e-6);
         }
-      });
+      }
+    }
+  });
+
+  it("the Room choice sets the shader's room flag", () => {
+    const roll = rollPath(3);
+    expect(packFrame({ roll, head: 0.5, phase: 0 }, { ...KNOBS, palette: 1 })[SW.FLAGS * 4]).toBe(0);
+    expect(packFrame({ roll, head: 0.5, phase: 0 }, { ...KNOBS, palette: ROOM_PALETTE })[SW.FLAGS * 4]).toBe(1);
+  });
+});
+
+describe("sweep settings", () => {
+  it("the palettes are valid and the enum offers each plus Room", () => {
+    for (const p of PALETTES) for (const hex of [...p.stops, p.ground, p.ink, p.accent]) expect(hex).toMatch(/^#[0-9a-f]{6}$/);
+    const palette = sweepScene.settings!.find((s) => s.key === "palette")!;
+    expect(palette.options).toEqual([...PALETTES.map((p) => p.name), "Room"]);
+  });
+
+  it("only Speed, Colour flow and New path start on a wire; every other jack starts unplugged", () => {
+    const wired = new Set(["speed", "colourFlow", "newPath"]);
+    for (const s of sweepScene.settings!) {
+      if (!s.drive) continue;
+      const def = s.drive.default;
+      const empty = typeof def === "object" && "mix" in def && def.sources.length === 0;
+      expect(empty, s.key).toBe(!wired.has(s.key));
+    }
+  });
+
+  it("no setting's uniform collides with a common one (a `bands` key once redefined uBands)", () => {
+    const common = new Set([...COMMON_UNIFORMS_GLSL.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((m) => m[1]));
+    for (const s of sweepScene.settings!) {
+      const u = settingUniformName(s.key);
+      for (const name of [u, `${u}Drive`, `${u}Custom`]) expect(common.has(name), name).toBe(false);
     }
   });
 
