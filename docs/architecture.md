@@ -145,6 +145,18 @@ Quality and Resolution, in a smaller box), and the output has its own Quality,
 Resolution and Energy saving, set from the Output Power card;
 `src/render/outputPower.ts` owns those settings.
 
+## Text and logo over the picture
+
+The Overlay (an event or DJ name and a logo) is drawn by `src/render/
+overlayLayer.ts` right after `scene.render` in all three renderers — `src/app.ts`,
+`src/output.ts` and `src/tv.ts` — so it is on the main canvas, the pop-out and a
+TV without any scene knowing, and it is in whatever records the canvas. Its
+settings are a `vibe.*` store (`src/render/overlayStore.ts`) registered with
+`syncedStores.ts`, so they reach the pop-out and ride in the room's look like any
+other store; the exception is a logo too big for the look's size limits
+(`server/lookDoc.ts`), which the store keeps on the device. The panel's card is
+`src/ui/overlayCard.ts`; the layout and limits are `src/render/overlayLayout.ts`.
+
 ## Where the quality/perf ceiling comes from
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at

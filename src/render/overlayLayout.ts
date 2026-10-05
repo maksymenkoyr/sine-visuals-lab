@@ -136,7 +136,7 @@ export const LOGO_LOCAL_MAX_CHARS = LOOK_LIMITS.maxValueBytes * 2;
  *  encodes within LOGO_ROOM_MAX_CHARS wins. */
 export const LOGO_ROOM_SIDES: readonly number[] = [384, 256, 192, 128, 96];
 /** The same for a logo that stays on this device. */
-export const LOGO_LOCAL_SIDES: readonly number[] = [768, 512, 384, 256];
+export const LOGO_LOCAL_SIDES: readonly number[] = [768, 512, 384, 256, 192, 128];
 
 /** The sizes to try, largest first, for an image of this natural size: each
  *  scaled so its longest side is one of `sides`, never above the image's own
