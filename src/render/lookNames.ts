@@ -1,13 +1,22 @@
 /**
  * Names for a Look saved with one click (the Looks card's "Save look" chip).
- * Nobody types a name up front any more, so the look gets a short, stupid,
- * faintly postmodern one instead of "Look 7": a form out of `FORMS` wrapped
- * around one dumb word out of `THINGS` — "Untitled (Soup)", "Post-Toast",
- * "Ham Discourse" — or, now and then, a form with no slot that is a whole
- * name by itself ("Look (Derogatory)"). In a form, `%` takes the word as is
- * and `~` takes it lowercased, for the file-name jokes. A daft name is easier
- * to tell apart in a list than a number, and the visitor can rename it with
- * a double-click whenever a real name comes to mind.
+ * Nobody types a name up front any more, so the look gets a short brain-rot
+ * one instead of "Look 7". No meme is quoted whole: the names borrow the
+ * internet's grammar and fill it with our own dumb nouns and the alien
+ * words in `ALIEN` (the right-hand column of an "alien language" cat meme
+ * the user picked), three ways —
+ *
+ * - a slang form out of `FORMS` wrapped around one word, from `THINGS` or
+ *   `ALIEN` ("Toaster Arc", "Average Zibzidi Enjoyer", "Chat Is Fog Real").
+ *   In a form, `%` takes the word as is and `~` takes it lowercased;
+ * - `CHANT_SHARE` of the time, a chant of a few `ALIEN` words ("Zeb Zab
+ *   Zib", "Bleb Bleb");
+ * - `CREATURE_SHARE` of the time, a made-up pseudo-Italian creature: two
+ *   `STEMS`, each given one of the `ENDINGS` ("Blebardo Fogucci").
+ *
+ * A daft name is easier to tell apart in a list than a number, and the
+ * visitor can rename it with a double-click whenever a real name comes to
+ * mind.
  *
  * Pure — no store, no DOM. The caller passes the names this scene already
  * has, and funnyLookName returns one that isn't among them: it tries random
@@ -17,19 +26,41 @@
  */
 
 const FORMS = [
-  "Untitled (%)", "Post-%", "Neo-%", "Meta-%", "Not %", "%?", "% Again",
-  "%, Ironically", "% (Remix)", "% (Live)", "Diet %", "Late %", "Lo-Fi %",
-  "% Discourse", "%-Adjacent", "~core", "~_final_v2", "~.png",
-  "Look (Derogatory)", "A Look", "This One", "The Other One", "Content",
-  "Vibes Pending", "Same But Louder", "Okay", "Art?", "final_FINAL",
+  "% Arc", "% Era", "% Lore", "~maxxing", "%-Pilled", "It's Giving %",
+  "% Goes Hard", "% Is Cooked", "Chat Is % Real", "% Final Boss",
+  "Lowkey %", "Delulu %", "NPC %", "% Speedrun", "Certified % Moment",
+  "% Rizz", "Sigma %", "Me When %", "% Jumpscare", "% Simulator",
+  "The % Is Him", "Average % Enjoyer", "Deep Fried %", "% Ascended",
+  "%, Unfortunately", "% (Gone Wrong)", "% at 3am", "%: +1000 Aura",
+  "% (Derogatory)", "Not The %",
 ];
 
 const THINGS = [
-  "Soup", "Ham", "Toast", "Sock", "Egg", "Goo", "Fog", "Void", "Blob",
-  "Lamp", "Duck", "Bean", "Gum", "Dust", "Spoon", "Chair", "Beige", "Mood",
-  "Vibe", "Bass", "Loop", "Fizz", "Blur", "Static", "Tuesday", "Disco",
-  "Glitter", "Jelly", "Moon", "Nothing", "Rave", "Noise",
+  "Toaster", "Fog", "Strobe", "Sub", "Lamp", "Goose", "Shrimp", "Spoon",
+  "Fridge", "Pigeon", "Bean", "Sock", "Beige", "Crab", "Ham", "Kick",
+  "Bass", "Moon", "Pixel", "Disco", "Lasagna", "Raccoon", "Cereal", "Frog",
+  "Gravy", "Noodle", "Printer", "Glorp", "Zorb",
 ];
+
+const ALIEN = [
+  "Zab", "Zup", "Zap", "Zibzidi", "Zub", "Zib", "Bleb", "Zeb", "Vip", "Vop",
+  "Blab", "Zob", "Zep",
+];
+
+const STEMS = [
+  "Strob", "Bass", "Fog", "Pix", "Glitt", "Disc", "Toast", "Spoon", "Wob",
+  "Bonk", "Woof", "Lamp", "Shrimp", "Frog", "Glorp", "Zorb",
+  "Zab", "Zib", "Bleb", "Vip", "Zob", "Blab",
+];
+
+const ENDINGS = ["ino", "ello", "oni", "ardo", "etta", "ucci", "ini", "ola", "otto", "eroni"];
+
+/** How often a name is an alien chant, and how often a pseudo-Italian
+ *  creature; the rest are slang forms. */
+const CHANT_SHARE = 0.25;
+const CREATURE_SHARE = 0.25;
+/** Most words a chant strings together. */
+const CHANT_MAX_WORDS = 3;
 
 /** Random picks tried before giving up and numbering one. */
 const RANDOM_TRIES = 24;
@@ -38,13 +69,28 @@ function pick<T>(list: readonly T[], random: () => number): T {
   return list[Math.min(list.length - 1, Math.floor(random() * list.length))];
 }
 
+function slang(random: () => number): string {
+  const thing = pick(random() < 0.5 ? THINGS : ALIEN, random);
+  return pick(FORMS, random).replace("%", thing).replace("~", thing.toLowerCase());
+}
+
+function chant(random: () => number): string {
+  const count = 2 + Math.floor(random() * (CHANT_MAX_WORDS - 1));
+  return Array.from({ length: count }, () => pick(ALIEN, random)).join(" ");
+}
+
+function creature(random: () => number): string {
+  const half = () => pick(STEMS, random) + pick(ENDINGS, random);
+  return `${half()} ${half()}`;
+}
+
 /** A funny name not in `taken`. `random` is injectable for tests. */
 export function funnyLookName(taken: readonly string[], random: () => number = Math.random): string {
   const used = new Set(taken);
   let name = "";
   for (let i = 0; i < RANDOM_TRIES; i++) {
-    const thing = pick(THINGS, random);
-    name = pick(FORMS, random).replace("%", thing).replace("~", thing.toLowerCase());
+    const kind = random();
+    name = kind < CHANT_SHARE ? chant(random) : kind < CHANT_SHARE + CREATURE_SHARE ? creature(random) : slang(random);
     if (!used.has(name)) return name;
   }
   let numbered = name;
