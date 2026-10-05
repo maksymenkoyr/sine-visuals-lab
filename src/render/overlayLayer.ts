@@ -191,6 +191,11 @@ export function createOverlayLayer(gl: WebGL2RenderingContext): OverlayLayer {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
+    // Unpack state is shared with whatever scene drew this frame, so the
+    // upload names the flip and alpha handling it needs (the vertex shader
+    // flips; FRAG premultiplies) rather than trusting a scene left defaults.
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, raster);
     gl.bindTexture(gl.TEXTURE_2D, null);
 
