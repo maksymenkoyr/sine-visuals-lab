@@ -1,5 +1,6 @@
 import { listScenes, registerScene } from "../scene.ts";
 import { collectPrivateScenes } from "./privateScenes.ts";
+import { codeRainScene } from "./coderain/index.ts";
 import { longPlayScene } from "./longplay/index.ts";
 import { swarmScene } from "./swarm/index.ts";
 import { coilScene } from "./coil/index.ts";
@@ -46,6 +47,7 @@ import { alienScene } from "./alien/index.ts";
 // link when you start `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(codeRainScene);
 registerScene(sweepScene);
 registerScene(chaikinScene);
 registerScene(alienScene);
@@ -100,6 +102,7 @@ const inDevelopmentIds = new Set([
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "coderain",
   "sweep",
   "silk",
   "slats",
@@ -156,6 +159,7 @@ export function sceneStage(id: string): SceneStage {
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  codeRainScene,
   sweepScene,
   chaikinScene,
   alienScene,
