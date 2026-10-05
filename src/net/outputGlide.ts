@@ -21,9 +21,10 @@ import type { OutputParams, OutputState } from "./outputSync.ts";
  * per-item widgets, whole-number steppers, a slider that declares
  * `glide: false`, the palette, every other stored key — stays exactly as the
  * output had it for the whole glide and switches to the new value in one
- * step when the glide ends. A different scene is never glided at all: the
- * caller (outputBridge.ts's go) sends that instantly, and createGlide
- * returns null for it as a second line of defence.
+ * step when the glide ends. A different scene is never glided: createGlide
+ * returns null for it, and the output crossfades into it instead
+ * (render/compositor.ts, over the same length the hold earned — outputBridge.ts's
+ * go passes it through).
  *
  * Pure: no DOM, no clock of its own — `lookAt(nowMs)` is the look to show then.
  */

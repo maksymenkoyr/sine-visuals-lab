@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const tip = vi.hoisted(() => ({ show: vi.fn(), hide: vi.fn() }));
+vi.mock("../src/ui/tooltip.ts", () => ({ showTooltip: tip.show, hideTooltip: tip.hide }));
+
 // keyHints.ts keeps its tip state (cache, click counts, cooldown) at module
 // level, so each test imports a fresh copy. localStorage doesn't exist in
 // the node env, which its persist() already tolerates.
@@ -65,5 +68,64 @@ describe("noteMouseUse tips", () => {
     noteMouseUse(id);
     noteMouseUse(id);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("lists every held effect under the id its on-screen button carries", async () => {
+    const { SHORTCUTS } = await load();
+    const { EFFECTS } = await import("../src/render/heldEffects.ts");
+    const { effectShortcutId } = await import("../src/ui/effectControls.ts");
+    for (const e of EFFECTS) {
+      expect(SHORTCUTS.find((s) => s.id === effectShortcutId(e.id))?.key).toBe(e.key);
+    }
+  });
+
+  it("never gives two rows the same single-letter key", async () => {
+    const { SHORTCUTS } = await load();
+    const letters = SHORTCUTS.map((s) => s.key).filter((k) => k.length === 1);
+    expect(new Set(letters).size).toBe(letters.length);
+  });
+});
+
+describe("hover badge", () => {
+  const listeners = new Map<string, (e: unknown) => void>();
+  class FakeEl {
+    classList = { contains: () => false };
+    constructor(
+      public dataset: Record<string, string>,
+      private attrs: string[] = [],
+    ) {}
+    closest(): FakeEl {
+      return this;
+    }
+    hasAttribute(a: string): boolean {
+      return this.attrs.includes(a);
+    }
+    getAttribute(): string | null {
+      return null;
+    }
+  }
+  beforeEach(() => {
+    listeners.clear();
+    tip.show.mockClear();
+    vi.stubGlobal("Element", FakeEl);
+    vi.stubGlobal("document", {
+      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
+      hidden: false,
+      body: { classList: { contains: () => false, add() {}, remove() {} } },
+    });
+    vi.stubGlobal("window", { addEventListener() {} });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names the key on hover, but not on a control that prints its own (data-key-shown)", async () => {
+    await load();
+    const over = listeners.get("pointerover")!;
+    over({ pointerType: "mouse", target: new FakeEl({ key: "panel" }) });
+    expect(tip.show).toHaveBeenCalledTimes(1);
+    over({ pointerType: "mouse", target: new FakeEl({ key: "go" }, ["data-key-shown"]) });
+    over({ pointerType: "mouse", target: new FakeEl({ key: "cue" }, ["data-key-shown"]) });
+    expect(tip.show).toHaveBeenCalledTimes(1);
   });
 });

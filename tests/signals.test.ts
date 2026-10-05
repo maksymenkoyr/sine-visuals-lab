@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { SIGNALS, type SignalId } from "../src/render/signals.ts";
+import { DIAL_SIGNALS, SIGNALS, dialSignalId, type SignalId } from "../src/render/signals.ts";
+import { MUSIC_DIALS } from "../src/render/musicProfile.ts";
+import type { AnimFrame } from "../src/render/animClock.ts";
 import { listScenes } from "../src/render/scene.ts";
 import { SOURCE_SIGNAL } from "../src/render/beatListener.ts";
 import { CUT_MODE } from "../src/render/scenes/shards/layout.ts";
@@ -24,11 +26,23 @@ describe("signals registry", () => {
     // and fails loudly if they ever drift — the two are meant to change
     // together, rarely, both by hand.
     const knownCards = new Set(["signal", "hits", "tempo", "character"]);
-    const knownRows = new Set(["section", "tempo", "hits", "centroid", "wave", "lock", "timing", "waveform"]);
+    const knownRows = new Set(["section", "tempo", "hits", "centroid", "wave", "lock", "timing", "waveform", ...DIAL_SIGNALS]);
     for (const spec of Object.values(SIGNALS)) {
       if (!spec.monitor) continue;
       expect(knownCards.has(spec.monitor.card)).toBe(true);
       expect(knownRows.has(spec.monitor.row)).toBe(true);
+    }
+  });
+
+  it("every music dial is a level signal reading its own eased dial, anchored to its own cell", () => {
+    expect(DIAL_SIGNALS).toEqual(MUSIC_DIALS.map(dialSignalId));
+    for (const [i, dial] of MUSIC_DIALS.entries()) {
+      const spec = SIGNALS[dialSignalId(dial)];
+      expect(spec.kind).toBe("level");
+      expect(spec.monitor).toEqual({ card: "character", row: dialSignalId(dial) });
+      const profile = Object.fromEntries(MUSIC_DIALS.map((d, j) => [d, j / 10]));
+      const anim = { profile } as unknown as AnimFrame;
+      expect(spec.read({} as never, anim)).toBe(i / 10);
     }
   });
 

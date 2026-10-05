@@ -1,4 +1,4 @@
-import { SIGNALS, type SignalId } from "../../render/signals.ts";
+import { DIAL_SIGNALS, SIGNALS, type SignalId } from "../../render/signals.ts";
 import { DRIVE_EVERY_VALUES, type DriveMix, type DrivePatch, type DriveSource, type HitHeight } from "../../render/drives.ts";
 
 /**
@@ -103,10 +103,11 @@ export function valuesMatch(values: readonly number[], target: readonly number[]
 }
 
 /** The signals the console's Random wires a lane to: every catalogue signal
- *  but the two that hardly move while a song plays (Tempo, Tempo lock) —
- *  wired in, they would only hold a setting off its slider. */
+ *  but the ones that hardly move while a song plays (Tempo, Tempo lock and
+ *  the slow Character dials in DIAL_SIGNALS) — wired in, they would only
+ *  hold a setting off its slider. */
 export const RANDOM_WIRE_SIGNALS: readonly SignalId[] = (Object.keys(SIGNALS) as SignalId[]).filter(
-  (id) => id !== "anim.tempo" && id !== "anim.tempoLock",
+  (id) => id !== "anim.tempo" && id !== "anim.tempoLock" && !(DIAL_SIGNALS as readonly SignalId[]).includes(id),
 );
 /** How often Random gives a lane a second wire instead of one. */
 export const RANDOM_SECOND_WIRE = 0.4;

@@ -149,6 +149,7 @@ function fakeBridge(init: OutputStatus) {
     update: () => calls.push("update"),
     pushFrame: () => calls.push("frame"),
     sendPower: () => calls.push("power"),
+    sendEffects: () => calls.push("effects"),
     outputStatus: () => null,
     take: () => void calls.push("take"),
   };

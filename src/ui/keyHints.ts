@@ -1,3 +1,5 @@
+import { EFFECTS } from "../render/heldEffects.ts";
+import { effectShortcutId } from "./effectControls.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 
 /**
@@ -16,7 +18,12 @@ import { hideTooltip, showTooltip } from "./tooltip.ts";
  * control that already shows its own key some other way skips it — the
  * .vc-block digit badge (deviceMenu.ts's markBlock) carries `data-key`
  * (for the hover tooltip) but never `data-keycap`, since it's already
- * showing its own digit as plain text.
+ * showing its own digit as plain text. A control that prints its own key
+ * and has nothing to add by hover also wears `data-key-shown` — the pop-out
+ * bar's CUE and PLAY pads (index.html's #outBar), whose key sits under each
+ * pad — and gets no hover/focus badge either: the badge would only repeat
+ * it, over the bar's state line. It still counts toward the light
+ * suggestions below.
  *
  * installKeyHints(), called once from deviceMenu.ts, wires three
  * independent, document-level behaviours that don't know about each other:
@@ -82,6 +89,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
   { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
   { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
+  // The held effects (render/heldEffects.ts): one row per effect, tagged on its
+  // on-screen button in #fxBar (ui/effectControls.ts).
+  ...EFFECTS.map((e) => ({ key: e.key, id: effectShortcutId(e.id), label: e.label, hint: e.hint })),
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {
@@ -101,7 +111,7 @@ let hovered: HTMLElement | null = null;
  *  badges, one shared "block" id, each with a different digit). */
 function hintLine(el: HTMLElement): string | null {
   const id = el.dataset.key;
-  if (!id) return null;
+  if (!id || el.hasAttribute("data-key-shown")) return null;
   if (id === "block") {
     const digit = el.textContent?.trim();
     return digit ? `Jump to block · ${digit}` : null;

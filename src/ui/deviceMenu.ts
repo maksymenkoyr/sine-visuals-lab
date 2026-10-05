@@ -108,6 +108,7 @@ import { inputKind, isInputHidden, INPUT_KIND_TEXT, type InputDeviceOption, type
 import type { InputHealthReading } from "../audio/inputHealth.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import { createLeashGauge } from "./leashGauge.ts";
+import { watchOnScreen } from "./onScreen.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -532,7 +533,9 @@ export interface DeviceMenuDeps {
   /** Named, shareable snapshots of the Scene card's own settings — see
    *  src/render/sceneLooks.ts. Rendered by the Looks card, next to Scene. */
   listLooks: (sceneId: string) => SceneLook[];
-  onSaveLook: (sceneId: string, name: string) => void;
+  /** Saves the current tuning under a generated name and returns it. */
+  onSaveLook: (sceneId: string) => string;
+  onRenameLook: (sceneId: string, from: string, to: string) => boolean;
   onApplyLook: (look: SceneLook) => void;
   onDeleteLook: (sceneId: string, name: string) => void;
   decodeLook: (code: string) => SceneLook | null;
@@ -791,6 +794,10 @@ export interface DeviceMenu {
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
+  /** Whether the Master card's Picture block is on screen (panel open and
+   *  the controls column not scrolled past it) — app.ts samples the frame
+   *  for it only then (see onScreen.ts for why that sample is not free). */
+  isPictureOnScreen(): boolean;
 }
 
 // ---- styles --------------------------------------------------------------
@@ -4891,6 +4898,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const leashRow = document.createElement("div");
   leashRow.className = "vc-row";
   leashRow.append(leashGauge.el);
+  const leashOnScreen = watchOnScreen(leashRow);
   masterCard.body.append(masterRow.el, masterExpansionRow.el, masterShapeRow.el, leashRow);
 
   // Picture block — see the comment above const masterCard. A plain
@@ -5011,6 +5019,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   pictureBlock.append(pictureSummary, pictureLegend, pictureFold, pictureHint);
   masterCard.body.append(pictureHeading, pictureBlock);
+  const pictureOnScreen = watchOnScreen(pictureBlock);
 
   // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
   // undefined (no typable readout) whenever devPin itself is, i.e. every
@@ -5895,6 +5904,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     currentSceneId: deps.currentSceneId,
     listLooks: deps.listLooks,
     onSaveLook: deps.onSaveLook,
+    onRenameLook: deps.onRenameLook,
     onApplyLook: (look) => {
       deps.onApplyLook(look);
       renderSceneSettings();
@@ -7079,6 +7089,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
+    isPictureOnScreen: () => isOpen && pictureOnScreen(),
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,
@@ -7209,11 +7220,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // write is what's throttled). deps.getPictureReading() is null
       // whenever the meter's gone stale, which a null level draws as a gap
       // in the trace and "--" in the readout, same as every other meter row.
-      leashGauge.draw({
-        normal: deps.getSceneMaster() / SCENE_MASTER_MAX,
-        expansion: deps.getSceneExpansion(),
-        excursion: drives?.masterExcursion() ?? null,
-      });
+      // While the controls column is scrolled past them, the traces still
+      // record and only skip the draw — and app.ts stops sampling the
+      // frame for them (isPictureOnScreen), so they record gaps.
+      const pictureShown = pictureOnScreen();
+      if (leashOnScreen()) {
+        leashGauge.draw({
+          normal: deps.getSceneMaster() / SCENE_MASTER_MAX,
+          expansion: deps.getSceneExpansion(),
+          excursion: drives?.masterExcursion() ?? null,
+        });
+      }
 
       const pictureReading = deps.getPictureReading();
       const pictureTextDue = nowMs - lastPictureTextMs >= PICTURE_TEXT_REFRESH_MS;
@@ -7223,7 +7240,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       );
       const pictureOverall = overallLevel(pictureLevels);
       pictureSummaryStrip.push([...pictureLevels, pictureOverall], nowMs);
-      pictureSummaryStrip.draw();
+      if (pictureShown) pictureSummaryStrip.draw();
       if (pictureTextDue) {
         const text = pictureOverall === null ? "--" : String(Math.round(pictureOverall * 100));
         if (text !== pictureSummaryText) {
@@ -7237,7 +7254,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         // Folded rows still record (see the Picture block's comment); they
         // only skip the redraw and the readout nobody can see.
         row.strip.push([level], nowMs);
-        if (!pictureOpen) return;
+        if (!pictureOpen || !pictureShown) return;
         row.strip.draw();
         if (!pictureTextDue) return;
         const text = level === null ? "--" : String(Math.round(level * 100));

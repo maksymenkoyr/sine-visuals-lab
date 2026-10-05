@@ -38,6 +38,7 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.bakeToast",
   "vibe.audioSource",
   "vibe.audioInputDevice",
+  "vibe.recordAspect",
   "vibe.quality",
   "vibe.powerMode",
   "vibe.output.quality",

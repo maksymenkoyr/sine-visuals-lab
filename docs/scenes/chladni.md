@@ -296,6 +296,10 @@ measured from a reference clip.
   measure: at hold 0 on broadband music the top flickers every few frames
   inside a near-even four-way blend that hardly changes, and a small hold
   turned that into fewer but visible switches.
+- 2026-10-04: the Sand zones gauge takes its width from
+  `src/ui/onScreen.ts`'s `watchSize` instead of reading `clientWidth` every
+  tick (a forced layout per read; found while chasing Physarum 2's panel
+  lag). No visible change.
 
 ## Tuning notes
 

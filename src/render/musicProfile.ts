@@ -10,7 +10,8 @@ import { warmRate } from "../audio/warmStart.ts";
  * start and silence both read as "unremarkable" rather than pinning to an
  * extreme. This is what autoTune.ts multiplies against each SceneSetting's
  * weights; see that file for why all-dials-neutral must resolve to a
- * setting's plain default.
+ * setting's plain default. Each dial is also a signal a setting can be
+ * wired to directly (signals.ts's DIAL_SIGNALS, a jack on its meter cell).
  *
  * `loudness` is the one deliberate exception to "holds at NEUTRAL through
  * silence": it describes a state (how loud the room is right now), not a
