@@ -633,3 +633,5 @@ hexagon and decagon.
   settings with a draggable gauge in the Scene card; Settling pull removed.
 - 2026-10-04 (draft) — Figure hold: how much stronger a new figure must ring
   to take the plate.
+- `#361` (2026-10-05, draft) — Toss on the drop, Powder colour, and the
+  Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom.
