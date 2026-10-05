@@ -145,6 +145,10 @@ Quality and Resolution, in a smaller box), and the output has its own Quality,
 Resolution and Energy saving, set from the Output Power card;
 `src/render/outputPower.ts` owns those settings.
 
+The Record button (bottom right) saves a clip of the picture with the sound: it
+records the output's canvas while a pop-out is open, because the main window
+shows only the preview then. Why and how is the header of `src/ui/clipRecorder.ts`.
+
 ## Where the quality/perf ceiling comes from
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at
