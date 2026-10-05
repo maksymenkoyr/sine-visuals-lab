@@ -250,7 +250,8 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * the "All level" catalogue source and as Loud height's own level for Any
  * hit/beat-grid) separately, because they're deliberately different frames —
  * see sceneCommon.ts's `uploadCommonUniforms` and app.ts's `loop()` for the
- * exact pipeline each one matches.
+ * exact pipeline each one matches. The "Level" source reads `gainedFrame`'s
+ * own `level`, which neither frame's gain or sensitivity ever shapes.
  *
  * **Reading.** `forScene(sceneId, settings, anim)` returns a `SceneDrives`
  * view — cheap to build (closes over three references, no new state) — for
@@ -1213,6 +1214,7 @@ export function createDriveEngine(): DriveEngine {
   return {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
+      driveFrameScratch.level = gainedFrame.level;
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();
       for (const spec of settings) {

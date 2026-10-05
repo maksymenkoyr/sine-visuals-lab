@@ -48,8 +48,8 @@ on the app's bar lines. Draft scene, not on main yet.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
   the golden in `tests/toonraveMotion.golden.ts`.
 - Plugs into: drives (`dance` and `energyPump` on `anim.lowOnset`,
-  `energyBoost` and `clock` on `anim.energy` (`clock` with a scene-handled
-  threshold `CLOCK_RUN_MARK`), `lights` on the treble level, `dropHits` on
+  `energyBoost` and `clock` on `feature.level`, the absolute input Level
+  (`clock` with a scene-handled threshold `CLOCK_RUN_MARK`), `lights` on the treble level, `dropHits` on
   `anim.dropOnset`), `animClock` (`beats`, `tempoLock`), quality
   (`MAX_CANVAS_WIDTH` caps the canvas width). The build is es2017, so nothing
   at module scope touches `document`, `Path2D` or `window`.
@@ -153,6 +153,19 @@ and are not recorded here yet.
   `src/ui/onScreen.ts`'s `watchSize` instead of reading `clientWidth` every
   tick (a forced layout per read; found while chasing Physarum 2's panel
   lag). No visible change.
+- 2026-10-05 — "toon rave. no music but they moves". Measured on a fake mic
+  playing only hiss: All level read 0.06–0.17 (auto-gain lifts hiss to
+  mid-range; about 0.4 through the drive), over Clock on signal's 0.05 mark,
+  so the clock ran the whole cycle (gags, build, drops) with no music. Energy
+  boost on All level held energy at the ¼x step, and the learned move kept
+  learning the silence, so a stopped cast's pose drifted and then snapped
+  flat. Now Clock on signal and Energy boost default to a new signal, Level
+  (the Dynamics card's Level row, the input's absolute loudness, never
+  auto-gained: 0 on hiss, 0.32–0.67 on a real song through the fake mic); the
+  run mark is 0.1 in Level units; and the move learns nothing while its beat
+  holds. With a song that stops mid-groove, the clock holds on the same frame,
+  and the cast slows through 1x, ½x and ¼x and holds one pose about 13 s
+  later (Energy drop's drain at its default).
 
 ## Tuning notes
 
@@ -178,6 +191,11 @@ and are not recorded here yet.
   stutter. Nothing wired = held.
 
 ## Known issues and next steps
+
+- After the music stops, the cast winds down for about 13 s at the default
+  Energy drop: the drain slows near the bottom, and "stop" engages only
+  below `SPEED_STEPS`' first line minus its hysteresis, deep in that tail,
+  so the last stretch plays at ¼x.
 
 - The groove is repetitive: whole-rig squash and stretch plus cel swaps, with
   few new in-betweens, so it reads mechanical after a few cycles.

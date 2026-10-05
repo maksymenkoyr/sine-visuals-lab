@@ -551,13 +551,13 @@ describeScene("toonrave settings", () => {
 
   itScene("the reactive settings have drives, and the trigger reads the drop edge", () => {
     expectScene(byKey("dance").drive?.default).toBe("anim.lowOnset");
-    expectScene(byKey("energyBoost").drive?.default).toBe("anim.energy");
+    expectScene(byKey("energyBoost").drive?.default).toBe("feature.level");
     expectScene(byKey("energyPump").drive?.default).toBe("anim.lowOnset");
     expectScene(byKey("energy").drive).toBeUndefined();
     expectScene(byKey("energyDrop").drive).toBeUndefined();
     expectScene(byKey("lights").drive).toBeDefined();
     expectScene(byKey("dropHits").drive?.default).toBe("anim.dropOnset");
-    expectScene(byKey("clock").drive?.default).toBe("anim.energy");
+    expectScene(byKey("clock").drive?.default).toBe("feature.level");
     expectScene(byKey("clock").drive?.threshold?.default).toBeGreaterThan(0);
     expectScene(byKey("clock").default).toBe(1);
   });
@@ -813,7 +813,7 @@ describeMoves("toonrave dance (dance.ts)", () => {
     expectMoves(p.value(d, 9.9)).toBe(0); // nothing learned yet: the move is flat
   });
 
-  itMoves("a kick at 120 BPM is found and learned as four peaks on the beats; without it the beat holds", () => {
+  itMoves("a kick at 120 BPM is found and learned as four peaks on the beats; without it the beat and the move hold", () => {
     const d = createDance();
     let pulse = 0;
     for (let i = 0; i < FPS * 16; i++) {
@@ -836,6 +836,11 @@ describeMoves("toonrave dance (dance.ts)", () => {
     for (let i = 0; i < FPS * 3; i++) d.step(1 / FPS, false, 0);
     expectMoves(d.status()).toBe("holding");
     expectMoves(d.bpm).toBeGreaterThan(115);
+    // silence teaches nothing: a long quiet leaves the learned move exactly as it was
+    const before = Array.from(d.shape);
+    for (let i = 0; i < FPS * 60; i++) d.step(1 / FPS, false, 0);
+    expectMoves(Array.from(d.shape)).toEqual(before);
+    expectMoves(Math.max(...before)).toBe(1);
   });
 });
 
