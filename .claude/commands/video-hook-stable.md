@@ -15,7 +15,8 @@ Who the app is for (the user, 2026-10-05):
   or a few monitors is a bonus, not the pitch.
 
 What both get: visuals that look like a pro made them, for no money and no effort. A video speaks to
-one of them, in their situation and their words, never the panel's.
+one of them first, in their situation and their words, never the panel's. The other can come along
+when the hook is about what they share: a party or concert people remember.
 
 ## Hook
 
