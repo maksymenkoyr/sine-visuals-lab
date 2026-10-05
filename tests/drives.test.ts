@@ -452,6 +452,12 @@ describe("drives: identity at defaults, across every registered scene", () => {
         if (typeof def !== "object" || !("mix" in def)) continue;
         checked++;
         expect(def.mix, `${scene.id}'s "${spec.key}"`).toBe("add");
+        if (def.sources.length === 0) {
+          // A jack that starts unplugged (drives.ts's header, rule 1's
+          // exception) reads its caller's rest — nothing — until wired.
+          expect(drives.valueOf(spec.key), `${scene.id}'s "${spec.key}"`).toBe(0);
+          continue;
+        }
         let sum = 0;
         for (const src of def.sources) sum += src.weight * SIGNALS[src.choice as SignalId].read(f, anim);
         expect(sum, `${scene.id}'s "${spec.key}" reads 0 here, so this check would be vacuous`).toBeGreaterThan(0);

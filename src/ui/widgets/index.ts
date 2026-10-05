@@ -6,5 +6,6 @@ import "./itemBoxes.ts";
 import "./sandZones.ts";
 import "./danceMove.ts";
 import "./alienPlay.ts";
+import "./sweepPath.ts";
 
 export * from "./registry.ts";
