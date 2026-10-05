@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { channelBadge, versionHint, versionLabel, versionHref, type BuildInfo } from "../src/version.ts";
 
-const SOURCE_URL = "https://github.com/maksymenkoyr/sine-visuals-lab";
+const VERSIONS_URL = "https://insiders.sinevisualslab.com/versions";
 
 const base: BuildInfo = {
   channel: "dev",
@@ -41,24 +41,16 @@ describe("versionLabel", () => {
 });
 
 describe("versionHref", () => {
-  it("links to the release tag on a released stable build", () => {
-    expect(versionHref(withCommit({ channel: "stable", version: "0.3.0" }))).toBe(`${SOURCE_URL}/releases/tag/v0.3.0`);
+  it("opens Insiders' own version picture on an insider build", () => {
+    expect(versionHref(withCommit({ channel: "insider", version: "0.0.11" }))).toBe("/versions");
+    expect(versionHref(withCommit({ channel: "insider" }))).toBe("/versions");
   });
 
-  it("links to the pre-release tag on a versioned insider build", () => {
-    expect(versionHref(withCommit({ channel: "insider", version: "0.0.11" }))).toBe(
-      `${SOURCE_URL}/releases/tag/v0.0.11-beta`,
-    );
-  });
-
-  it("links to the commit otherwise, for every channel", () => {
-    for (const channel of ["stable", "insider", "preview", "dev"] as const) {
-      expect(versionHref(withCommit({ channel }))).toBe(`${SOURCE_URL}/commit/da38a37f0000000000000000000000000000000`);
+  it("opens the Insiders copy from every other channel, which has none of its own", () => {
+    for (const channel of ["stable", "preview", "dev"] as const) {
+      expect(versionHref(withCommit({ channel, version: channel === "stable" ? "0.3.0" : null }))).toBe(VERSIONS_URL);
     }
-  });
-
-  it("falls back to the bare repo when there is no commit", () => {
-    expect(versionHref(base)).toBe(SOURCE_URL);
+    expect(versionHref(base)).toBe(VERSIONS_URL);
   });
 });
 
