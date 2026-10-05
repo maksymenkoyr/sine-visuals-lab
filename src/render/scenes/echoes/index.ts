@@ -1,8 +1,10 @@
-// Echoes — one regular outline (a circle, a polygon of a few corners, or a
-// 3D or 4D wireframe figure from solids.ts, turned and projected flat)
+// Echoes — one regular outline (a circle or a polygon of a few corners)
 // drawn into a feedback loop that a drifting noise field warps every frame,
 // so the outline sheds a fan of evenly spaced echo lines that peel off along
-// the flow, bunch into sheets where the flow stalls, and fade out. Built from
+// the flow, bunch into sheets where the flow stalls, and fade out. A 3D or
+// 4D wireframe figure instead leaves its echoes in its own space — pushed
+// back into depth or through the fourth axis — built and drawn without the
+// loop (solids.ts's header has why and how). Built from
 // `/ref` on a live-coding set filmed at a venue (r/creativecoding, "Live
 // coding generative visuals during our show"; bundle `livecode-wall`, the
 // wall projection cropped out of the room) — docs/scenes/echoes.md has the
@@ -19,8 +21,9 @@
 // distance per frame, not per second, so the picture is the same at any
 // frame rate; only how quickly a change ripples down the fan follows it.
 //
-// The two passes (glsl.ts): STEP_FRAG writes one generation into the
-// ping-pong pair's other half, DISPLAY_FRAG colours it onto the screen.
+// The passes (glsl.ts): STEP_FRAG writes one generation into the ping-pong
+// pair's other half — or, for a figure, SEGMENT_VERT/SEGMENT_FRAG draw its
+// whole trail there fresh — and DISPLAY_FRAG colours it onto the screen.
 //
 // Sync mapping (drives, see drives.ts's header). The reference itself syncs
 // to almost nothing — its size swings on a timer typed into the set's code,
@@ -38,8 +41,8 @@ import { COMMON_UNIFORMS_GLSL, uploadCommonUniforms } from "../../sceneCommon.ts
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { wrapFlow } from "../../noiseHash.ts";
 import type { QualityPreset } from "../../quality.ts";
-import { buildStepFrag, buildDisplayFrag } from "./glsl.ts";
-import { MAX_SOLID_EDGES, projectSolid, SOLIDS, type SolidId } from "./solids.ts";
+import { buildStepFrag, buildDisplayFrag, SEGMENT_FRAG, SEGMENT_VERT } from "./glsl.ts";
+import { buildTrail, MAX_SOLID_EDGES, orbitYaw, SEGMENT_FLOATS, SOLIDS, type SolidId } from "./solids.ts";
 
 const ID = "echoes";
 
@@ -83,6 +86,13 @@ const STEP_PER_FLOW = 0.28;
 const FIELD_FREQ = 2.2;
 /** Drift phase per second at Drift = 1, in noise cells. */
 const DRIFT_PER_SEC = 0.5;
+// A 3D/4D figure's trail (solids.ts): how far each echo moves from the one
+// before at Flow = 1 and a mid reading of 0.5, in circumradii; the flow's
+// waves per circumradius at Detail = 1; and how fast the flow changes per
+// unit of the drift phase the flat shapes' noise also runs on.
+const TRAIL_STEP_PER_FLOW = 0.45;
+const TRAIL_FREQ = 1.2;
+const TRAIL_TIME_PER_PHASE = 3;
 const DEG2RAD = Math.PI / 180;
 
 const SETTINGS: SceneSetting[] = [
@@ -91,7 +101,7 @@ const SETTINGS: SceneSetting[] = [
     key: "shape",
     label: "Shape",
     description:
-      "The outline the echoes come from: a flat shape, a 3D solid, or a 4D shape (a tesseract is a 4D cube) turning through the fourth dimension",
+      "The outline the echoes come from: a flat shape, a 3D solid whose echoes trail back into depth, or a 4D shape (a tesseract is a 4D cube) whose echoes trail through the fourth dimension",
     group: "Form",
     min: 0,
     max: SHAPES.length - 1,
@@ -135,7 +145,8 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "flow",
     label: "Flow",
-    description: "How far each echo is pushed from the one before — right spreads the lines further apart",
+    description:
+      "How far each echo is pushed from the one before — right spreads the lines further apart; a 3D or 4D shape's echoes go back into depth",
     group: "Motion",
     min: 0,
     max: 1,
@@ -204,6 +215,11 @@ function settingFor(key: string): SceneSetting {
   return s;
 }
 
+/** The most echoes a figure's trail can have (the Echoes setting's own
+ *  max), and how many frames of the figure's turn and size are kept for it. */
+const MAX_ECHOES = settingFor("echoes").max;
+const HISTORY_FRAMES = MAX_ECHOES + 1;
+
 const STEP_FRAG = buildStepFrag(SETTINGS, COMMON_UNIFORMS_GLSL);
 const DISPLAY_FRAG = buildDisplayFrag(SETTINGS, COMMON_UNIFORMS_GLSL);
 
@@ -232,10 +248,49 @@ function createEchoesScene(): Scene {
   // turns each plane at a different multiple of it, so wrapping it would
   // jump every plane but the first.
   let solidPhase = 0;
-  // One texel per projected edge (solids.ts): x1, y1, x2, y2.
-  let edgeTex: WebGLTexture | null = null;
-  let stepEdgesLoc: WebGLUniformLocation | null = null;
-  const edgeBuf = new Float32Array(MAX_SOLID_EDGES * 4);
+  // The figure's turn phase and size over the last HISTORY_FRAMES frames,
+  // newest at `historyHead` — echo k of a figure's trail is the figure as it
+  // was k frames ago (solids.ts's buildTrail), so a Kick pop ripples down
+  // the trail the way it runs down a flat shape's echoes.
+  const phaseHistory = new Float64Array(HISTORY_FRAMES);
+  const radiusHistory = new Float64Array(HISTORY_FRAMES);
+  let historyHead = 0;
+  let historyLen = 0;
+  // The trail's segments for the segment pass, and the instanced VAO that
+  // reads them (a static quad corner buffer plus this, per instance).
+  const segBuf = new Float32Array(MAX_SOLID_EDGES * MAX_ECHOES * SEGMENT_FLOATS);
+  let segProg: GLProgram | null = null;
+  let segVao: WebGLVertexArrayObject | null = null;
+  let segCornerVbo: WebGLBuffer | null = null;
+  let segInstVbo: WebGLBuffer | null = null;
+
+  function historyAt(buf: Float64Array, k: number): number {
+    const back = Math.min(k, Math.max(historyLen - 1, 0));
+    return buf[(historyHead - back + HISTORY_FRAMES) % HISTORY_FRAMES];
+  }
+
+  function createSegmentVao(gl: WebGL2RenderingContext): void {
+    segVao = gl.createVertexArray();
+    segCornerVbo = gl.createBuffer();
+    segInstVbo = gl.createBuffer();
+    if (!segVao || !segCornerVbo || !segInstVbo) throw new Error("echoes: segment buffers failed");
+    gl.bindVertexArray(segVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, segCornerVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, segInstVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, segBuf.byteLength, gl.DYNAMIC_DRAW);
+    const stride = SEGMENT_FLOATS * 4;
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribDivisor(1, 1);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 16);
+    gl.vertexAttribDivisor(2, 1);
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  }
 
   function freeTargets(gl: WebGL2RenderingContext): void {
     for (const t of targets) {
@@ -300,20 +355,16 @@ function createEchoesScene(): Scene {
       displayProg = createProgram(gl, DISPLAY_FRAG);
       stepPrevLoc = gl.getUniformLocation(stepProg.program, "uPrev");
       displayFrameLoc = gl.getUniformLocation(displayProg.program, "uFrame");
-      stepEdgesLoc = gl.getUniformLocation(stepProg.program, "uEdges");
+      segProg = createProgram(gl, SEGMENT_FRAG, SEGMENT_VERT);
       quadVao = createFullscreenQuad(gl);
-      edgeTex = gl.createTexture();
-      if (!edgeTex) throw new Error("echoes: createTexture failed");
-      gl.bindTexture(gl.TEXTURE_2D, edgeTex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, MAX_SOLID_EDGES, 1, 0, gl.RGBA, gl.FLOAT, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      createSegmentVao(gl);
       freeTargets(gl);
       lastTime = null;
       angleDeg = 0;
       fieldPhase = 0;
       solidPhase = 0;
+      historyHead = 0;
+      historyLen = 0;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -348,21 +399,16 @@ function createEchoesScene(): Scene {
       solidPhase += spin * DEG2RAD * dt;
       fieldPhase += drift * DRIFT_PER_SEC * dt;
       const fadeStep = 1 / Math.max(echoes, 1);
-      const step = flow * STEP_PER_FLOW * (0.5 + flowReading);
+      const flowAmount = flow * (0.5 + flowReading);
+
+      historyHead = (historyHead + 1) % HISTORY_FRAMES;
+      historyLen = Math.min(historyLen + 1, HISTORY_FRAMES);
+      phaseHistory[historyHead] = solidPhase;
+      radiusHistory[historyHead] = radius;
 
       const pxHH = 2 / targetH;
       const stroke = Math.max(STROKE_HALF_HH, MIN_STROKE_PX * pxHH);
       const shapeSpec = SHAPES[Math.max(0, Math.min(SHAPES.length - 1, shape))];
-
-      let edgeCount = 0;
-      let bound = 0;
-      if (shapeSpec.solid && edgeTex) {
-        const { count, extent } = projectSolid(SOLIDS[shapeSpec.solid], solidPhase, radius, edgeBuf);
-        edgeCount = count;
-        bound = extent + 2 * stroke + 2 * pxHH;
-        gl.bindTexture(gl.TEXTURE_2D, edgeTex);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_SOLID_EDGES, 1, gl.RGBA, gl.FLOAT, edgeBuf);
-      }
 
       const write = 1 - read;
       const writeTarget = targets[write]!;
@@ -371,33 +417,61 @@ function createEchoesScene(): Scene {
       gl.disable(gl.BLEND);
       gl.bindFramebuffer(gl.FRAMEBUFFER, writeTarget.fbo);
       gl.viewport(0, 0, targetW, targetH);
-      stepProg.use();
-      uploadCommonUniforms(stepProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
-      stepProg.setV2("uResolution", targetW, targetH);
-      stepProg.setF("uRadius", radius);
-      stepProg.setF("uAngle", angleDeg * DEG2RAD);
-      stepProg.setF("uCorners", shapeSpec.corners);
-      stepProg.setF("uEdgeCount", edgeCount);
-      stepProg.setF("uBound", bound);
-      stepProg.setF("uStroke", stroke);
-      stepProg.setF("uPx", pxHH);
-      stepProg.setF("uStep", step);
-      stepProg.setF("uFadeStep", fadeStep);
-      stepProg.setF("uFieldFreq", FIELD_FREQ * detail);
-      stepProg.setF("uFieldZ", wrapFlow(fieldPhase));
-      stepProg.setV2("uFieldOffset", 3.7, 11.3);
-      // Bound even for a flat shape, which never reads it, so the sampler
-      // always has a complete texture behind it.
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, edgeTex);
-      gl.uniform1i(stepEdgesLoc, 1);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, readTarget.tex);
-      gl.uniform1i(stepPrevLoc, 0);
-      drawFullscreenQuad(gl, quadVao);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.activeTexture(gl.TEXTURE0);
+
+      if (shapeSpec.solid && segProg && segVao && segInstVbo) {
+        // A figure's echoes live in its own space (solids.ts's header): the
+        // whole trail is rebuilt each frame and drawn fresh, no feedback.
+        const count = buildTrail(
+          SOLIDS[shapeSpec.solid],
+          {
+            echoes: Math.max(1, Math.min(MAX_ECHOES, Math.round(echoes))),
+            step: flowAmount * TRAIL_STEP_PER_FLOW,
+            freq: TRAIL_FREQ * detail,
+            time: fieldPhase * TRAIL_TIME_PER_PHASE,
+            yaw: orbitYaw(solidPhase),
+            radius,
+            phaseAt: (k) => historyAt(phaseHistory, k),
+            radiusAt: (k) => historyAt(radiusHistory, k),
+          },
+          segBuf,
+        );
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.BLEND);
+        gl.blendEquation(gl.MAX);
+        segProg.use();
+        segProg.setV4("uViewport", viewport.x, viewport.y, viewport.w, viewport.h);
+        segProg.setF("uAspect", targetW / targetH);
+        segProg.setF("uStroke", stroke);
+        segProg.setF("uPx", pxHH);
+        gl.bindVertexArray(segVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, segInstVbo);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, segBuf, 0, count * SEGMENT_FLOATS);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
+        gl.bindVertexArray(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        // Back to the defaults the gallery's other scenes expect.
+        gl.blendEquation(gl.FUNC_ADD);
+        gl.disable(gl.BLEND);
+      } else {
+        stepProg.use();
+        uploadCommonUniforms(stepProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        stepProg.setV2("uResolution", targetW, targetH);
+        stepProg.setF("uRadius", radius);
+        stepProg.setF("uAngle", angleDeg * DEG2RAD);
+        stepProg.setF("uCorners", shapeSpec.corners);
+        stepProg.setF("uStroke", stroke);
+        stepProg.setF("uPx", pxHH);
+        stepProg.setF("uStep", flowAmount * STEP_PER_FLOW);
+        stepProg.setF("uFadeStep", fadeStep);
+        stepProg.setF("uFieldFreq", FIELD_FREQ * detail);
+        stepProg.setF("uFieldZ", wrapFlow(fieldPhase));
+        stepProg.setV2("uFieldOffset", 3.7, 11.3);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, readTarget.tex);
+        gl.uniform1i(stepPrevLoc, 0);
+        drawFullscreenQuad(gl, quadVao);
+      }
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -420,14 +494,19 @@ function createEchoesScene(): Scene {
       freeTargets(gl);
       stepProg?.dispose();
       displayProg?.dispose();
+      segProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
-      if (edgeTex) gl.deleteTexture(edgeTex);
+      if (segVao) gl.deleteVertexArray(segVao);
+      if (segCornerVbo) gl.deleteBuffer(segCornerVbo);
+      if (segInstVbo) gl.deleteBuffer(segInstVbo);
       stepProg = null;
       displayProg = null;
+      segProg = null;
       quadVao = null;
-      edgeTex = null;
+      segVao = null;
+      segCornerVbo = null;
+      segInstVbo = null;
       stepPrevLoc = null;
-      stepEdgesLoc = null;
       displayFrameLoc = null;
     },
   };

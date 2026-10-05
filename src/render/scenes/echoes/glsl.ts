@@ -16,13 +16,20 @@
 // It also keeps an RGBA8 target honest: a proportional fade rounds its last
 // few levels back up and never reaches black.
 //
+// A 3D or 4D figure skips pass 1: its echoes are built in its own space by
+// solids.ts's buildTrail and drawn by SEGMENT_VERT/SEGMENT_FRAG instead, one
+// instanced quad per segment, into the same two channels (a MAX blend, so
+// crossing lines merge like pass 1's screen instead of adding up). Each
+// segment carries its two ends' magnification: the line is drawn wider where
+// it's nearer and dimmed by distance (SEGMENT_FOG_*), the two depth cues a
+// wireframe has besides perspective itself.
+//
 // Pass 2 (DISPLAY_FRAG) turns those two channels into colour: the measured
 // warm white on black, or — with Colours raised — the room palette's ramp by
 // freshness over its ground.
 import { DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName } from "../../sceneCommon.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
-import { MAX_SOLID_EDGES } from "./solids.ts";
 
 /** The line colour measured on the reference's wall projection (bright
  *  pixels minus the local wall, normalised — docs/scenes/echoes.md's
@@ -74,35 +81,15 @@ vec2 flowField(vec2 p) {
 }
 `;
 
-/** Distance from p to the outline. A 3D or 4D figure (uEdgeCount > 0) is
- *  already turned and projected by solids.ts: its edges arrive as 2D
- *  segments, one per texel of uEdges (x1, y1, x2, y2), and the distance is
- *  to the nearest one — skipped entirely beyond uBound, the farthest any
- *  vertex reached, since no line is out there.
- *
- *  Otherwise a regular polygon with uCorners corners (a circle below 3),
- *  circumradius uRadius, turned by uAngle. Edge normals sit at
- *  k·(2π/n) − π/2, so every polygon rests on a flat bottom edge. Within one
- *  edge's angular sector the nearest point of the outline is on that edge
- *  (the sector borders run through the corners, where the two edge lines
- *  are equidistant), so the distance is just to that one segment. */
+/** Distance from p to the outline of a regular polygon with uCorners
+ *  corners (a circle below 3), circumradius uRadius, turned by uAngle.
+ *  Edge normals sit at k·(2π/n) − π/2, so every polygon rests on a flat
+ *  bottom edge. Within one edge's angular sector the nearest point of the
+ *  outline is on that edge (the sector borders run through the corners,
+ *  where the two edge lines are equidistant), so the distance is just to
+ *  that one segment. */
 const OUTLINE_GLSL = `
-float segmentsDist(vec2 p) {
-  if (length(p) > uBound) return 1e3;
-  float d = 1e3;
-  for (int i = 0; i < ${MAX_SOLID_EDGES}; i++) {
-    if (float(i) >= uEdgeCount) break;
-    vec4 e = texelFetch(uEdges, ivec2(i, 0), 0);
-    vec2 pa = p - e.xy;
-    vec2 ba = e.zw - e.xy;
-    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
-    d = min(d, length(pa - ba * h));
-  }
-  return d;
-}
-
 float outlineDist(vec2 p) {
-  if (uEdgeCount > 0.5) return segmentsDist(p);
   float c = cos(uAngle), s = sin(uAngle);
   vec2 q = vec2(c * p.x + s * p.y, -s * p.x + c * p.y);
   if (uCorners < 2.5) return abs(length(q) - uRadius);
@@ -132,9 +119,6 @@ uniform sampler2D uPrev;
 uniform float uRadius;
 uniform float uAngle;
 uniform float uCorners;
-uniform sampler2D uEdges;
-uniform float uEdgeCount;
-uniform float uBound;
 uniform float uStroke;
 uniform float uPx;
 uniform float uStep;
@@ -173,6 +157,72 @@ void main() {
 }
 `;
 }
+
+/** Magnification (solids.ts's per-vertex depth factor, 1 at the figure's
+ *  centre depth) at and below which a line is dimmed to SEGMENT_FOG_FLOOR,
+ *  rising linearly to full brightness at 1 and nearer. */
+const SEGMENT_FOG_FAR = 0.35;
+const SEGMENT_FOG_FLOOR = 0.15;
+
+/** One trail segment per instance (solids.ts's SEGMENT_FLOATS layout, split
+ *  across two attributes), expanded to a quad around it in the same
+ *  room-space half-heights pass 1 works in, then mapped to this device's
+ *  slice of the room. */
+export const SEGMENT_VERT = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aCorner;
+layout(location = 1) in vec4 aSeg;
+layout(location = 2) in vec4 aDepth;
+uniform vec4 uViewport;
+uniform float uAspect;
+uniform float uStroke;
+uniform float uPx;
+out vec2 vP;
+flat out vec4 vSeg;
+flat out vec4 vDepth;
+
+void main() {
+  vec2 a = aSeg.xy;
+  vec2 b = aSeg.zw;
+  vec2 ab = b - a;
+  float len = length(ab);
+  vec2 dir = len > 1e-6 ? ab / len : vec2(1.0, 0.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+  float hw = max(uStroke * max(aDepth.x, aDepth.y), uPx) + 2.0 * uPx;
+  vec2 end = aCorner.x < 0.0 ? a - dir * hw : b + dir * hw;
+  vec2 p = end + nrm * aCorner.y * hw;
+  vP = p;
+  vSeg = aSeg;
+  vDepth = aDepth;
+  vec2 roomUv = vec2(p.x / uAspect, p.y) * 0.5 + 0.5;
+  vec2 uv = (roomUv - uViewport.xy) / uViewport.zw;
+  gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+}
+`;
+
+export const SEGMENT_FRAG = `#version 300 es
+precision highp float;
+in vec2 vP;
+flat in vec4 vSeg;
+flat in vec4 vDepth;
+uniform float uStroke;
+uniform float uPx;
+out vec4 outColor;
+
+void main() {
+  vec2 pa = vP - vSeg.xy;
+  vec2 ba = vSeg.zw - vSeg.xy;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-10), 0.0, 1.0);
+  float d = length(pa - ba * h);
+  float m = mix(vDepth.x, vDepth.y, h);
+  float hw = max(uStroke * m, 0.6 * uPx);
+  float cover = clamp(0.5 + (hw - d) / uPx, 0.0, 1.0);
+  if (cover <= 0.0) discard;
+  float fog = mix(${SEGMENT_FOG_FLOOR.toFixed(3)}, 1.0, clamp((m - ${SEGMENT_FOG_FAR.toFixed(3)}) / ${(1 - SEGMENT_FOG_FAR).toFixed(3)}, 0.0, 1.0));
+  float fade = vDepth.z;
+  outColor = vec4(cover * fade * fog, fade * min(1.0, cover * 4.0), 0.0, 1.0);
+}
+`;
 
 export function buildDisplayFrag(settings: readonly SceneSetting[], commonUniformsGlsl: string): string {
   return `#version 300 es

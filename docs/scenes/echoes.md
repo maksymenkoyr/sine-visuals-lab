@@ -1,8 +1,11 @@
 # Echoes (`echoes`)
 
-One warm-white outline — a circle, a regular polygon, or a 3D or 4D
-wireframe figure turning in space — drawn into a feedback loop that a drifting noise field warps every frame, so it sheds a
-fan of echo lines that peel off, bend, pinch to points and fade. The music
+One warm-white outline — a circle or a regular polygon — drawn into a
+feedback loop that a drifting noise field warps every frame, so it sheds a
+fan of echo lines that peel off, bend, pinch to points and fade. A 3D or 4D
+wireframe figure instead leaves its echoes in its own space: a trail of
+copies pushed back into depth (or through the fourth dimension), seen in
+perspective from a slowly swinging camera. The music
 swings its size once a bar, pops it outward on bass hits (a ripple that runs
 down the fan) and spreads the echoes further apart as the mids get louder.
 Draft, not yet on main.
@@ -21,15 +24,18 @@ Draft, not yet on main.
   freshness with Colours raised). Its header owns the R/G channel meaning and
   why the fade is linear.
 - `src/render/scenes/echoes/solids.ts` — the 3D and 4D figures in `SOLIDS`
-  (vertices only; edges are derived as nearest pairs) and `projectSolid`,
-  which turns one through 3D/4D planes and projects it to 2D segments. Its
-  header owns the turning and projection; `index.ts` maps the Shape chips
-  (`SHAPES`) to flat corner counts or figures and uploads the segments as a
-  one-row float texture that `segmentsDist` in glsl.ts reads.
+  (vertices only; edges are derived as nearest pairs) and `buildTrail`,
+  which builds a figure's whole echo trail in its own space and projects it
+  to 2D segments carrying each end's magnification. Its header owns the
+  turning, the trail, the flow and the projection. `index.ts` maps the Shape
+  chips (`SHAPES`) to flat corner counts or figures, keeps the figure's
+  recent turn and size for the trail, and draws the segments with glsl.ts's
+  `SEGMENT_VERT`/`SEGMENT_FRAG` as instanced quads instead of the step pass.
 - Shared systems: drives (Flow, Breathe, Kick), `noiseHash.ts`
   (`NOISE_HASH_GLSL` for the field, `wrapFlow` for the drift phase).
 - Tests: `tests/echoesSolids.test.ts` (each figure's vertex and edge counts,
-  equal edges, projected size); the cross-scene tests (`tests/drives.test.ts`,
+  equal edges, projected size, and that a trail really recedes); the
+  cross-scene tests (`tests/drives.test.ts`,
   `tests/settingGroups.test.ts`, …) cover the rest through `listScenes()`.
 
 ## References
@@ -149,6 +155,39 @@ beat; the bar wave moved the resting size between pops.
   machine the GPU clock and the shared Chrome swing more than the figure
   costs, so no optimisation was made. Pixels beyond the figure's reach skip
   the edge loop.
+
+2026-10-05 — the user, on the figures: "can we just try to have different
+effect when we add dimension, so that this echo effect would actually go in
+new dimension too … we can't really see/feel the depth and complexity that
+3d/4d figures brings":
+
+- **The echoes go into the figure's own space.** Projected flat first and
+  then fed to the screen-space loop, a figure's echoes were flat copies of a
+  flat picture, so nothing showed its depth. Now each echo is the figure as
+  it was a frame earlier, carried one more step along a smooth flow of the
+  figure's own dimension — pushed back into depth for a 3D figure, along
+  the fourth axis for a 4D one — and the whole trail is projected in
+  perspective (`buildTrail`). A 3D trail recedes into a tunnel; a 4D trail
+  shrinks inward through the fourth dimension, its echoes nesting like a
+  tesseract's inner cube.
+- **Depth cues on every line**: each segment end carries its magnification,
+  so near lines draw wider and far ones thinner and fogged (`SEGMENT_FOG_*`),
+  and the camera swings side to side on the turn phase (`orbitYaw`) so the
+  trail shows parallax. A swing, not a full orbit, which would bring the
+  trail through the camera.
+- **No feedback loop for figures.** The trail is rebuilt each frame from a
+  short history of the figure's turn and size (so Kick still ripples down
+  it) and drawn as instanced quads with a max blend; the per-pixel segment
+  loop and its edge texture are gone, so the GPU-cost note above no longer
+  applies. Flat shapes are unchanged.
+- **The flow bends sideways, not back toward the viewer.** At full
+  strength along the push axis (and along z, the view's depth, for a 4D
+  figure) the flow could cancel the recession and grow an echo toward the
+  camera; the tests caught it (`tests/echoesSolids.test.ts`'s recession
+  check), so those components are damped (`PUSH_AXIS_BEND`).
+- **Step doubled after a look.** At the first `TRAIL_STEP_PER_FLOW` the
+  copies packed into a solid-looking mass on synthetic audio; doubled, they
+  read as distinct copies going back.
 
 ## Tuning notes
 
