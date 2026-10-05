@@ -6,7 +6,7 @@ white core. It opens on one big cell; births fill in from a ring that closes
 on the centre while the zoom starts. The music sets how fast the cells fly
 (Speed), seeds a pulse of extra cells near the centre on each bass hit
 (Births), pulls the field back into one big cell on a drop (Relaunch) and
-brightens the lines with the treble (Lines). Draft scene, not on main yet.
+brightens the lines with the treble (Lines). Draft scene, draft PR #380, not on main yet.
 
 ## Where the code is
 
@@ -202,4 +202,4 @@ and `ours-chaikin/cells-ours.json`):
 
 ## History
 
-- Draft PR (this change): the scene, its clock, seed texture and record.
+- #380 (draft): the scene, its clock, seed texture, record and materials.
