@@ -5,8 +5,7 @@ neon look on black (a strobing square tunnel, a ring-pulsing reactor HUD, an
 edge-lit sea, …), and Auto change mixes from one to the next every few
 minutes on a phrase start. Hits launch squares or rings out of the centre and
 flash the picture; a glitch layer blinks parts of it off on its own timer.
-Some views are Pro content and locked outside a dev build. Draft, not yet on
-main.
+Some views are Pro content and locked outside a dev build.
 
 ## Where the code is
 
@@ -29,7 +28,8 @@ main.
   `src/render/sceneSettings.ts` are the lock, and `createPickerRow`'s
   `pro`/`locked` (`src/ui/controlsKit.ts`) draw it.
 - `tests/longplay.test.ts` — the tour and the Pro lock.
-- Drives: Launch and Flash both default to the onset (`feature.onset`).
+- Drives: Launch and Flash both default to the onset (`feature.onset`);
+  Lift defaults to the Treble level (`anim.high`).
 
 ## References
 
@@ -80,39 +80,52 @@ main.
   1.9 and 6.7 px; glow e-fold ~12 px; 63 hard cuts in 40 s (median 333 ms);
   activity flashes on onsets z +0.47; paint ring grows centre → edge in ~5 s
   (slit-scan). Ours: onset 88%, tempo ×1 82%.
+- **Wings (`alt-wings`)**: magenta 300° 76–90% / violet 270°; a mirrored
+  mass like two wings or a ribcage (2-fold 0.96–0.99), ≈1 100–1 800 lit
+  objects, mostly short vertical bars and dots; glow e-fold 12–30 px; no
+  hard cuts, no onset flash; brightness and colour change at phrase starts
+  (z +0.47, +0.80); zoom mixed, averaging near zero (|zoom| 0.08 log/s).
+  Full frame, close up (2026-10-05): the "dots" are moiré of parallel wires
+  2–3 px apart that bunch into bright fibres — a wire mesh, not points.
+  Colour by brightness band (max channel, `framestats.py`): dim
+  (0.08, 0.02, 0.10), mid (0.20, 0.10, 0.22), bright (0.35, 0.24, 0.37) up
+  to pink-white (0.77, 0.66, 0.79); mean max channel 0.13–0.19; fine detail
+  runs vertical (x/y gradient ratio 1.25–1.31). The composition swings
+  between phrases: full wings, small wings high up, the centre column
+  alone on black. Ours (2026-10-05, synthetic 129 bpm): mean 0.12–0.15,
+  mid (0.18, 0.07, 0.21), x/y 1.7. Ours: onset 94%, tempo ×4/3.
+- **Circuit (`alt-circuit`)**: blue 240° 86–99% (azure and cyan in its
+  brightest stretch); 729–864 bars of ≈900–1 200 objects; 2-fold
+  0.92–0.98; strokes 1.9 px, glow e-fold 9–11 px (halo/core only 0.05 at
+  4 px); slow mixed drift 0.06–0.09 half-heights/s; no hard cuts; activity
+  follows the high band (r +0.36), brightness too (r +0.27); zoom
+  direction reverses on bar/phrase starts. Full frame (2026-10-05): it is
+  filmed footage — a sports ground seen from above (a court with dashed
+  markings, seat stands, a car park) through an edge filter and horizontal
+  streaking. Frame statistics: almost half the pixels above 0.7, saturated
+  blue (0.10, 0.09, 0.88); max-channel mean 0.55–0.59; detail runs
+  horizontal (x/y 0.43–0.45). Ours (2026-10-05): mean 0.55, 38% above 0.7,
+  x/y 0.2. Ours: onset 95%, tempo ×1 86%.
+- **Chip (`alt-chip`)**: a CPU-die square tunnel — nested squares with
+  pins round a white-hot core, red/rose/magenta in the bright phase (8-fold
+  0.91, glow ≈30 px), small shapes on black between. Zooms in +1.6 log/s,
+  118 hard cuts in 40 s (median hold 67 ms); brightness and colour jump at
+  phrase starts (z +1.51, +1.06); no onset flash. The measured −97°/s
+  rotation is 4-fold aliasing — every frame is square to the screen.
+  Bright-phase frame: max-channel mean 0.27–0.47, 23–43% above 0.7, 34–59%
+  near-black. At the same beats (`ref-shoot`, 2026-10-05) most frames show
+  the chip small to middling, warm (red, pink, white) far more often than
+  blue, with a bracket under it and red-and-yellow posts either side; the
+  full red corridor shows in 2 of 12 beats, and many frames are black.
+  Ours: onset 90%, tempo ×1 100%.
 - **Views not built yet** — what each measured as, and how to build it.
   "Seen" means its `look.png` was checked by eye; the others have only
   their numbers and a 15-second survey thumbnail, so open their
-  `look.png` (and `slitscan.png` if motion matters) before designing.
+  `look.png` (and `slitscan.png` if motion matters) before designing —
+  Circuit's numbers read as a circuit board until the full frame showed a
+  filmed sports ground.
   Every one is mirrored left/right unless noted, strokes ≈1.9 px, near-black
   ground.
-  - **Wings** (`alt-wings`, seen): magenta 300° 76–90% / violet 270°;
-    dense fibrous wire mesh shaped like two mirrored wings or a ribcage
-    (2-fold 0.96–0.99), made of thousands of short vertical bars and dots
-    (≈1 100–1 800 objects, lit 5–17% of pixels); glow e-fold 12–30 px; slow
-    backward fly-through (0.06–0.25 half-heights/s). No hard cuts and no
-    onset flash; brightness and colour change at phrase starts (z +0.47,
-    +0.80). Build: an anisotropic noise field (stretched vertically),
-    mirrored, drawn as fine contour strokes with a soft magenta halo,
-    receding slowly; phrase start lifts and shifts hue. Our tempo read
-    ×4/3 here.
-  - **Circuit** (`alt-circuit`): blue 240° 86–99%, ground dark navy
-    (`#010149`-ish, not black); a top-down circuit-board/city grid of short
-    bars (729–864 bars of ≈900–1 200 objects), mirrored 2-fold 0.92–0.98,
-    rings of structure at r 0.67–0.75 and 1.06–1.34; glow 9–11 px; slow
-    mixed drift 0.06–0.09 half-heights/s. No hard cuts. Activity follows
-    the high band (r +0.36), brightness too (r +0.27); zoom direction
-    reverses on bar/phrase starts. Build: a rectilinear trace grid (cells
-    with random trace segments + pads), mirrored, flying slowly with zoom
-    that flips direction every phrase; `high` drives trace brightness.
-  - **Chip** (`alt-chip`, seen): a CPU-die square tunnel — nested squares
-    with greeble "pins" around a white-hot core; red/rose/magenta in the
-    bright phase (8-fold 0.91, glow ≈30 px), dimming to small cyan 180°
-    bracket shapes (4-fold) between bursts. Zooms in +1.6 log/s, 118 hard
-    cuts in 40 s (median hold 67 ms); brightness and colour jump at phrase
-    starts (z +1.51, +1.06). Build: Tunnel's flight math plus a die
-    texture (rect greebles on the square's sides, hashed per ring), a
-    bright phase on phrase starts decaying to the cyan brackets.
   - **Acid** (`alt-rings`, seen): concentric neon rings (green 120–150°,
     magenta, blue, cyan) under a full-screen grid of scrolling digits with
     horizontal scanlines; a posterised white blob at the centre; 2-fold
@@ -184,6 +197,33 @@ main.
   settings are shared instead.
 - Bloom shipped in the first PR as the first Pro view so the lock can be seen
   working (dim PRO chip on a build, selectable in dev).
+- 2026-10-05 — Wings, Circuit and Chip built as Pro views, in the record's
+  suggested order. The pivots, each from a full frame or a `ref-shoot`:
+  - Wings was first drawn as a displaced wire grid with large folds; the
+    wires curled into fingerprint swirls. Gentle folds plus a fine field
+    stretched ~20:1 along y gave fibres, but read as a woven curtain; the
+    reference is a crumpled lit surface, so a rough ridged relief now
+    lights the mesh, darkens its hollows and shifts the wires by height.
+    The silhouette came from the frames (centre column, dark dome from the
+    bottom, channel, lobe with spiky tips), and from the `ref-shoot` each
+    phrase picks its own composition (`wPick`), because the reference
+    swings from full wings to the centre column alone.
+  - Circuit: the record's sketch said "circuit-board grid"; the full frame
+    is filmed footage of a sports ground. Built as a drawn site in the same
+    edge filter — court, seat banks, rounded rectangles, torn rows over
+    saturated blue — not the footage. Its one audio link (the high band)
+    became a new shared setting, Lift, wired by default to the Treble level
+    (a real wire, not a built-in).
+  - Flicker on views the reference never cuts: the Circuit `ref-shoot` showed
+    whole seat banks blinking between frames 80 ms apart — a hard cut the
+    reference never makes. Circuit and Wings now blink only a minor layer
+    (Circuit's rounded rectangles, Wings's faint background bands).
+  - Chip was first hot for a third of each phrase with a large core and a
+    blue cool phase; the `ref-shoot` at the same beats showed the full
+    corridor rarely, a warm small chip most of the time, and many black
+    frames. Now: a 1.2 s hot hold, warm cool phase on most phrases (blue on
+    some), a bracket and posts, and Flicker's layer 2 blacks out the whole
+    picture.
 
 ## Tuning notes
 
@@ -192,14 +232,27 @@ main.
   rings and bursts, Bloom squares); turn it to 0 for a calm look.
 - Judge Tunnel at the beat, not between beats — it is meant to be black
   between flashes.
+- Lift (wired to the Treble level) brightens the lines of the views that
+  measured a sustained lift — today only Circuit's edges and tearing; 0
+  keeps Circuit steady.
+- Chip is meant to sit dark and small most of a phrase; judge it across a
+  whole phrase (`shot.mjs --frames 10 --every 600`), not one frame.
 
 ## Known issues and next steps
 
 - Pro views still to build — each one's measured picture and build sketch
-  is under Measurements, "Views not built yet". Suggested order: Wings,
-  Circuit, Chip (straightforward), then Marble, Earth, Acid, Star (Star
-  builds on Kaleidoscope's code). Ink and
-  Reactor Blue are better as options on Tunnel and Reactor. Per view: add
+  is under Measurements, "Views not built yet". Suggested order: Marble,
+  Earth, Acid, Star (Star builds on Kaleidoscope's code). Ink and
+  Reactor Blue are better as options on Tunnel and Reactor. Marble follows
+  loudness (r +0.43) — Lift with another wire, or its own setting.
+- Wings: the reference's lobes read as thin bright contours with sparse
+  insides; ours are filled lit lumps. Its fine detail runs more vertical
+  than the reference's (x/y 1.7 vs 1.3).
+- Circuit: the reference's ground is busier, with many more small vertical
+  edges (x/y 0.44 vs our 0.2), and has black patches (trees, shadows).
+- Chip: the reference's cool chip has ragged red bursts round it; ours is
+  clean. Blue phrases came up more often than warm ones in one 24 s run —
+  a chance run of `hash11`, but worth watching. Per view: add
   `views/<name>.ts` (`viewColor` + `FLASH_W`/`STROBE_W`), add it to `VIEWS`
   with `pro: true`, shoot with `scripts/shot.mjs`, compare with
   `tools/ref-shoot.mjs` against its bundle (`--settings '{"view":N,"auto":0}'`),
@@ -218,10 +271,13 @@ main.
 ## Materials
 
 - `longplay/alt-tunnel/`, `longplay/alt-hud/`, `longplay/alt-ocean/`,
-  `longplay/alt-bloom/` — our half of each bundle (report, data, our shots),
+  `longplay/alt-bloom/`, `longplay/alt-wings/`, `longplay/alt-circuit/`,
+  `longplay/alt-chip/` — our half of each bundle (report, data, our shots),
   saved with `tools/ref-keep.py`.
 - `longplay/scripts/` — `survey.py` (contact sheets of a long video every N
-  seconds), `cadence.py` (view-change vs track-change cadence), `digest.py`
+  seconds), `cadence.py` (view-change vs track-change cadence), `framestats.py` (a
+  frame's colour by brightness band and detail direction, ours beside the
+  reference's by number), `digest.py`
   (Findings + picture lines of many bundles at once), `shot.mjs` (headless
   shots per view), `tour.mjs` (Auto change check), `panel.mjs` (the View
   row's chips and the Pro lock).
@@ -244,4 +300,5 @@ main.
 ## History
 
 - 2026-10-03 — first draft: tour, Pro lock, Tunnel, Reactor, Ocean, Bloom
-  (this PR).
+  (PR #298).
+- 2026-10-05 — Wings, Circuit, Chip (Pro), and the Lift setting.
