@@ -32,6 +32,7 @@ import { silkScene } from "./silk/index.ts";
 import { skyScene } from "./sky/sky.ts";
 import { gatesScene } from "./gates/index.ts";
 import { toonraveScene } from "./toonrave/index.ts";
+import { sweepScene } from "./sweep/index.ts";
 import { tangleScene } from "./tangle/index.ts";
 import { chaikinScene } from "./chaikin/index.ts";
 import { alienScene } from "./alien/index.ts";
@@ -45,6 +46,7 @@ import { alienScene } from "./alien/index.ts";
 // `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(sweepScene);
 registerScene(chaikinScene);
 registerScene(alienScene);
 registerScene(tangleScene);
@@ -83,6 +85,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "sweep",
   "chaikin",
   "alien",
   "tangle",
@@ -136,6 +139,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  sweepScene,
   chaikinScene,
   alienScene,
   tangleScene,
