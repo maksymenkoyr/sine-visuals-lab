@@ -25,6 +25,7 @@ import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import type { FeatureFrame } from "./audio/types.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookReplica, type LookReplica } from "./net/lookSync.ts";
@@ -192,6 +193,8 @@ let detectedPreset: QualityPreset | null = null;
  *  a roster says otherwise, which is how a TV rendered before the choice. */
 let qualityChoice: QualityChoice = "auto";
 let sceneCtx: SceneContext;
+/** Drawn right after the scene each frame; made once the GL context is up. */
+let overlay: OverlayLayer | null = null;
 let join: JoinScreen;
 
 /** True from the canvas's `webglcontextlost` until the page reloads on the
@@ -706,6 +709,9 @@ async function main(): Promise<void> {
   detectedPreset = await detectQuality();
   quality = qualitySettings(resolvePreset());
   sceneCtx = { gl, quality };
+  // The text-and-logo overlay (render/overlayLayer.ts); its settings ride in
+  // the room's look like any synced store.
+  overlay = createOverlayLayer(gl);
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   if (!mountFirstScene()) {
@@ -849,6 +855,7 @@ async function main(): Promise<void> {
     const latchedAnim = renderLatch.consume(anim, nowRafMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
     scene.render(sceneCtx, displayFrame, viewport, palette, latchedAnim, drives);
+    overlay?.draw();
     governor?.recordFrame(nowRafMs);
   }
 

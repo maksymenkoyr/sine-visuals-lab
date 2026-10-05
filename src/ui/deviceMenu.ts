@@ -25,6 +25,7 @@ import {
 import type { SceneLook } from "../render/sceneLooks.ts";
 import type { Scene } from "../render/scene.ts";
 import { createLooksCard } from "./looksCard.ts";
+import { createOverlayCard, type OverlayCardDeps } from "./overlayCard.ts";
 // Side-effect import: registers every built-in widget (registerWidget) so a
 // scene's Scene.panel sections resolve — see widgets/registry.ts's header
 // for the panel/widget split this file is the one place that renders.
@@ -538,6 +539,8 @@ export interface DeviceMenuDeps {
   buildShareLink: (look: SceneLook) => string;
   hasLookUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
+  /** The Overlay card (text and a logo over the visuals) — see ui/overlayCard.ts. */
+  overlay: OverlayCardDeps;
   /** Low/mid/high crossover, global per device (not per scene) — fixed, not
    *  user-facing, and unrelated to the faders: it only colors the spectrum
    *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
@@ -5906,6 +5909,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
   });
 
+  // Overlay: a text line and a logo drawn over the visuals (ui/overlayCard.ts);
+  // independent of the scene, so it is always shown.
+  const overlayCard = createOverlayCard(deps.overlay);
+
   // Walks every .vc-block heading in document order and writes its digit —
   // called whenever the block set can change (only renderSceneSettings does:
   // group headings come and go with the active scene). Blanks anything past
@@ -6843,7 +6850,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, overlayCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -6994,6 +7001,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     welcomeOnce();
     refreshSpectrumHeader();
     renderPalettes();
+    overlayCard.refresh();
     sourceRow.refresh();
     syncInputRows();
     // The panel may have been closed on a different scene since `pinned`

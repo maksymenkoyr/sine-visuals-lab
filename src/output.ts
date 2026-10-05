@@ -13,6 +13,7 @@ import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer } from "./render/overlayLayer.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
@@ -277,6 +278,9 @@ async function main(): Promise<void> {
   governor?.setEnabled(power.mode === "auto");
   host = createSceneHost(gl, quality);
   sceneCtx = host.ctx;
+  // The text-and-logo overlay (render/overlayLayer.ts): its settings are a
+  // synced store, so the main window's reach this window like any look.
+  const overlay = createOverlayLayer(gl);
   // Back from a context-loss reload: take the parked look first, so the very
   // first hello says haveState and the main window keeps its program.
   try {
@@ -358,6 +362,7 @@ async function main(): Promise<void> {
     const latchedAnim = renderLatch.consume(anim, nowMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
     scene.render(sceneCtx, displayFrame, FULL_VIEWPORT, palette, latchedAnim, drives);
+    overlay.draw();
     governor?.recordFrame(nowMs);
   }
 

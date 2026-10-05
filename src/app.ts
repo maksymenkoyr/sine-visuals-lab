@@ -96,6 +96,18 @@ import {
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
+import {
+  clearOverlayLogo,
+  getOverlay,
+  getOverlayLogoScope,
+  setOverlayLogo,
+  setOverlayOpacity,
+  setOverlayPosition,
+  setOverlaySize,
+  setOverlayText,
+} from "./render/overlayStore.ts";
+import { encodeLogoFile } from "./render/overlayLogoFile.ts";
 import {
   getSceneExpansion,
   getSceneExpansionShape,
@@ -431,6 +443,9 @@ function renderScale(): number {
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
+/** The text-and-logo overlay (render/overlayLayer.ts), drawn on the main
+ *  canvas right after the scene; made at boot, kept for the session. */
+let overlayLayer: OverlayLayer | null = null;
 /** True from the main canvas's `webglcontextlost` until the page reloads on
  *  the restore (see boot()): drawScene() draws nothing, and the picture
  *  readback isn't rebuilt against a dead context. */
@@ -1630,6 +1645,18 @@ function wireDeviceMenu(): void {
       const look = takeUndo(sceneId);
       if (look) applyLook(look, getScene(sceneId)?.settings ?? []);
     },
+    overlay: {
+      getState: () => ({ ...getOverlay(), logoScope: getOverlayLogoScope() }),
+      onText: setOverlayText,
+      onPosition: setOverlayPosition,
+      onSize: setOverlaySize,
+      onOpacity: setOverlayOpacity,
+      onLogoFile: async (file) => {
+        const logo = await encodeLogoFile(file);
+        return logo && setOverlayLogo(logo.dataUrl, logo.scope) ? logo.scope : "failed";
+      },
+      onRemoveLogo: clearOverlayLogo,
+    },
     getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
@@ -2386,6 +2413,7 @@ async function boot(): Promise<void> {
   quality = qualitySettings(renderPreset());
   mainHost = createSceneHost(gl, quality);
   resourceMeter = createResourceMeter(gl);
+  overlayLayer = createOverlayLayer(gl);
   if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
@@ -3195,6 +3223,9 @@ function drawScene(
   // worth paying only while the Master card's Picture block is actually
   // visible or a headless sweep asked for it (pictureForced).
   if (picturePolled) capturePicture(nowRafMs);
+  // After the picture capture, so the Master card's Picture block still
+  // measures the scene alone, not the overlay on top of it.
+  overlayLayer?.draw();
   governor?.recordFrame(nowRafMs);
 }
 

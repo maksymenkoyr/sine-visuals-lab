@@ -71,6 +71,9 @@ export const ROOM_EXCLUDED_PREFIXES: readonly string[] = [
   "vibe.output.",
   "vibe.preview.",
   "vibe.panelBlur",
+  // A logo too detailed for a room's look (render/overlayStore.ts): shown on
+  // this device and its pop-out only. The room-sized logo key is a look key.
+  "vibe.overlayLogoLocal",
 ];
 
 /** Whether `key` belongs to the room look. Only `vibe.` keys ever do, which
