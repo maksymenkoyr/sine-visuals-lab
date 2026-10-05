@@ -1,5 +1,6 @@
 import { listScenes, registerScene } from "../scene.ts";
 import { collectPrivateScenes } from "./privateScenes.ts";
+import { echoesScene } from "./echoes/index.ts";
 import { longPlayScene } from "./longplay/index.ts";
 import { swarmScene } from "./swarm/index.ts";
 import { coilScene } from "./coil/index.ts";
@@ -43,6 +44,7 @@ import { tangleScene } from "./tangle/index.ts";
 // `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(echoesScene);
 registerScene(tangleScene);
 registerScene(toonraveScene);
 registerScene(longPlayScene);
@@ -79,6 +81,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "echoes",
   "tangle",
   "toonrave",
   "longplay",
@@ -130,6 +133,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  echoesScene,
   tangleScene,
   toonraveScene,
   longPlayScene,
