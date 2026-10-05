@@ -1,5 +1,5 @@
 import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts";
-import { SIGNALS, surgeAtThreshold, type MeterCardId, type MeterRowId } from "../render/signals.ts";
+import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, jackKey } from "./driveSources.ts";
@@ -159,8 +159,7 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *    smooth swing, for a setting that wants to sway in time rather than
  *    pulse on a hit.
  *  - Character: first, Section — sectionIntensity with a drop flash, the
- *    phrase-level trend the dials below are the instant-by-instant texture
- *    of. Then a 2-column grid of every entry in MUSIC_DIALS except
+ *    phrase-level trend. Then a 2-column grid of every entry in MUSIC_DIALS except
  *    brightness (never a hardcoded list — filtered, so a new dial can't
  *    ship without a cell here), each marking NEUTRAL with a tick — what
  *    autoTune.ts resolves every "A" chip against, otherwise invisible. Copy
@@ -202,7 +201,8 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
  * drive source can feed — Waveform and Energy (Signal), Section's own
- * Song+Drop pair and Centroid, on the Brightness row (Character), the BPM
+ * Song+Drop pair, one per dial cell and the Brightness row's own
+ * dial+Centroid pair (Character — signals.ts's DIAL_SIGNALS), the BPM
  * block's own Metronome+Tempo pair, Lock, the Timing strip's own
  * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
  * (Tempo), and one per hits-history lane plus one for the Surge lane
@@ -2388,7 +2388,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   }));
   const dialGrid = document.createElement("div");
   dialGrid.style.cssText = characterGridStyle;
-  dialRows.forEach(({ row }) => dialGrid.appendChild(row.el));
+  dialRows.forEach(({ dial, row }) => {
+    mountJack(dialSignalId(dial), row.right, row.el);
+    dialGrid.appendChild(row.el);
+  });
 
   // Brightness: the dial's own meter row (readout = the slow, eased dial
   // value, same as every other dialRows entry), with spectralCentroid.ts's
@@ -2401,6 +2404,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description: DIAL_LABELS.brightness.description,
     ticks: [{ at: NEUTRAL.brightness }],
   });
+  // Two jacks, bar first: the slow dial the bar shows, then the live
+  // Centroid the trace under it shows — the Section row's own pair order.
+  mountJack(dialSignalId("brightness"), brightnessRow.right, brightnessRow.el);
   mountJack("anim.centroid", brightnessRow.right, brightnessRow.el);
   // Inserted before the hint (el's 3rd child), so it sits under the meter
   // like the Dynamics card's History. RAW briefly mixes raw/processed samples
@@ -2546,6 +2552,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["tempo", tempo.el],
     ["hits", hitsHistory.el],
     ["centroid", brightnessRow.el],
+    [dialSignalId("brightness"), brightnessRow.el],
+    ...dialRows.map(({ dial, row }): [MeterRowId, HTMLElement] => [dialSignalId(dial), row.el]),
     ["wave", wave.el],
     ["lock", lock.el],
     ["timing", timingStrip.el],
