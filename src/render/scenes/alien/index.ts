@@ -5,7 +5,8 @@
  * sets how fast the loop on screen plays, and silence holds the frame. The
  * Cut setting's wire cuts to another loop each time it rises over the line
  * under its graph. Those two are the whole interface; reel.ts owns both
- * rules and the LOOPS table.
+ * rules and the LOOPS table. Under the Play row, a readout shows what the
+ * music is buying (src/ui/widgets/alienPlay.ts, fed by probe()).
  *
  * Built from parts the repo already has: the dancers' rig, captured clips
  * and clip format (../dancers/), drawn as a real skinned triangle mesh
@@ -19,7 +20,7 @@
  * DEV: `?loop=<n>` pins one loop of LOOPS (no cuts), and
  * `window.__alien` exposes the reel so a headless run can seek a frame.
  */
-import type { Scene, SceneContext, Viewport } from "../../scene.ts";
+import type { PanelSection, Scene, SceneContext, Viewport } from "../../scene.ts";
 import type { FeatureFrame } from "../../../audio/types.ts";
 import type { Palette } from "../../palette.ts";
 import type { AnimFrame } from "../../animClock.ts";
@@ -106,6 +107,10 @@ const SETTINGS: SceneSetting[] = [
 ];
 
 const SETTING_BY_KEY = new Map(SETTINGS.map((s) => [s.key, s]));
+
+/** The Play row with a live readout under it: speed, frames bought per
+ *  second, and the loop as a strip with its playhead (alienPlay.ts). */
+const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["play"] }];
 
 const scratchInv = new Float32Array(4);
 const scratchQ = new Float32Array(4);
@@ -289,9 +294,21 @@ export const alienScene: Scene = (() => {
     name: "Alien",
     minQuality: "low",
     settings: SETTINGS,
+    panel: PANEL,
 
+    // For the Play readout (src/ui/widgets/alienPlay.ts): the loop on screen,
+    // where its playhead is, and what the music is buying right now.
     probe() {
-      return { loop: reel.loop, frame: reel.heads[reel.loop], cuts: reel.cuts };
+      const clip = loopClips[reel.loop];
+      const fps = clip ? clipFps(clip) : 0;
+      return {
+        loop: reel.loop,
+        frame: reel.heads[reel.loop],
+        frames: clip?.frames ?? 0,
+        speed: last.speed,
+        bought: last.speed * fps,
+        cuts: reel.cuts,
+      };
     },
 
     init(ctx: SceneContext) {

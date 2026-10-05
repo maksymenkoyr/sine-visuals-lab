@@ -22,6 +22,10 @@ it rises over the line under its graph. A draft, not on main yet (#373).
   relaxation, normals, skin weights, de-indexing.
 - `glsl.ts`: GPU skinning, the barycentric wireframe, the fresnel rim and
   outline, the blur and composite.
+- `src/ui/widgets/alienPlay.ts`: the Play readout under the Play row. It
+  shows speed, frames bought per second, the loop on screen, and the loop as
+  a strip of its frames with the playhead. It is fed by the scene's
+  `probe()` and declared in `PANEL`.
 - Reused, not copied: the dancers' rig, clip format and `clips.bin`
   (`../dancers/`); the drive system (`drives.value`, `drives.threshold`);
   the Level signal (`feature.level`) from PR #368.
@@ -84,6 +88,11 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   as mid-range (PR #368), so the alien would keep dancing in silence.
 - Cut: Bass level, rising crossing, a minimum shot (Measurements has why).
   First built on Bass hit with a hysteresis band; both cut far too often.
+- 2026-10-05, the user: "expose more info on this part that makes alien
+  move". Asked whether that meant an explanation or the panel, they picked a
+  live readout under Play (the mockup's lines: speed, "buying N fr/s", loop,
+  a strip with the playhead, the frame number). In silence it reads 0 and
+  the strip greys and stops, with "held" after the frame number.
 
 ## Tuning notes
 
