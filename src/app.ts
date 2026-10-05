@@ -263,11 +263,19 @@ import { createBroadcastTransport, createOutputBridge, type PopOutBridge } from 
 import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
 import { thisDevice } from "./net/deviceKind.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
-import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
+import { createOutputControls, labelPlayKey, type OutputControls } from "./ui/outputControls.ts";
 import { createEffectControls, effectShortcutId, type EffectControls } from "./ui/effectControls.ts";
 import { createClipRecorder, type ClipRecorder } from "./ui/clipRecorder.ts";
 import { createRecordControls, type RecordControls } from "./ui/recordControls.ts";
-import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
+import {
+  createPlayKey,
+  glideMsForHold,
+  isMacAgent,
+  isPlayKey,
+  PLAY_TAP_MAX_MS,
+  RIGHT_CMD,
+  spaceIsCue,
+} from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
@@ -733,16 +741,20 @@ function tapTempo(timeStamp: number, hud: boolean): void {
   else if (res.taps > 1) showHud(`Tap tempo: ${res.more} more ${res.more === 1 ? "tap" : "taps"}`);
 }
 
-/** Space = Cue (held), Option = Play (tap sends at once, hold glides) — the why, and
- *  what a glide touches, is src/ui/outputKeys.ts's header. Capture phase, so a
- *  focused button or checkbox never also sees the Space. Option plays whenever
+/** Space = Cue (held), a Play key = Play (tap sends at once, hold glides): Enter,
+ *  Option, and on a Mac the right Command key too — the why, and what a glide
+ *  touches, is src/ui/outputKeys.ts's header. Capture phase, so a focused button
+ *  or checkbox never also sees the Space or the Enter. A Play key plays whenever
  *  the bar is up (a pop-out is open, or another device is in the keyed room);
- *  Space is Cue and only claimed while a pop-out can cue, leaving Space to the
- *  page as before everywhere else. */
+ *  Space is Cue and only claimed while a pop-out can cue, leaving Space and Enter
+ *  to the page as before everywhere else. */
 function wireOutputKeys(controls: OutputControls): void {
   const playKey = createPlayKey();
+  const mac = isMacAgent(navigator.userAgent);
   let chargeRaf = 0;
   let spaceHeld = false;
+  /** The `code` of the key holding a Play down (spaceIsCue reads it), or null. */
+  let playHeldBy: string | null = null;
 
   function chargeTick(): void {
     const ms = playKey.holdMs(performance.now());
@@ -759,17 +771,10 @@ function wireOutputKeys(controls: OutputControls): void {
   window.addEventListener(
     "keydown",
     (e) => {
-      // Option is allowed here: Play is pressed while Cue is held, and Space's
-      // auto-repeat then carries altKey — it must stay a Cue, not cancel the Play.
-      if (
-        e.code === "Space" &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.shiftKey &&
-        inViz &&
-        !isTypingTarget(e.target) &&
-        controls.cueActive()
-      ) {
+      // A held Play key is allowed here: Play is pressed while Cue is held, and
+      // Space's auto-repeat then carries its modifier — it must stay a Cue, not
+      // cancel the Play.
+      if (spaceIsCue(e, playHeldBy) && inViz && !isTypingTarget(e.target) && controls.cueActive()) {
         e.preventDefault();
         e.stopImmediatePropagation();
         spaceHeld = true;
@@ -778,14 +783,23 @@ function wireOutputKeys(controls: OutputControls): void {
         controls.holdCue(true);
         return;
       }
-      if (e.key === "Alt") {
-        if (e.repeat || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (isPlayKey(e, mac)) {
         if (!inViz || isTypingTarget(e.target) || !controls.active()) return;
+        // Enter would also press the focused button, once per auto-repeat:
+        // while the bar is up it's Play's alone.
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        if (e.repeat) return;
         playKey.down(performance.now());
+        playHeldBy ??= e.code;
         if (!chargeRaf) chargeRaf = requestAnimationFrame(chargeTick);
         return;
       }
-      playKey.cancel(); // any other key while Option is down: a chord, not a Play
+      // Any other key pressed while a Play key is down is a chord, not a Play; the
+      // auto-repeat of a key already held (a held effect's, say) is no new press.
+      if (!e.repeat) playKey.cancel();
     },
     true,
   );
@@ -801,15 +815,24 @@ function wireOutputKeys(controls: OutputControls): void {
         return;
       }
       if (e.code === "KeyK") controls.holdCue(false);
-      if (e.key !== "Alt") return;
+      const rightCmd = mac && e.code === RIGHT_CMD;
+      if (e.key !== "Enter" && e.key !== "Alt" && !rightCmd) return;
       const hold = playKey.up(performance.now());
-      if (hold === null || !controls.active()) return;
-      const glideMs = glideMsForHold(hold);
-      const result = controls.go(glideMs ?? undefined);
-      noteKeyUse("go");
-      if (result === "glide" && glideMs !== null) showHud(`Play: gliding over ${(glideMs / 1000).toFixed(1)} s`);
-      else if (glideMs !== null) showHud("Play: sent at once");
-      else showHud("Play: sent to output");
+      playHeldBy = null;
+      if (hold !== null && controls.active()) {
+        const glideMs = glideMsForHold(hold);
+        const result = controls.go(glideMs ?? undefined);
+        noteKeyUse("go");
+        if (result === "glide" && glideMs !== null) showHud(`Play: gliding over ${(glideMs / 1000).toFixed(1)} s`);
+        else if (glideMs !== null) showHud("Play: sent at once");
+        else showHud("Play: sent to output");
+      }
+      // macOS sent no key-up for a Space or K let go while Command was down, so
+      // the Cue goes now (outputKeys.ts's header).
+      if (rightCmd) {
+        spaceHeld = false;
+        controls.holdCue(false);
+      }
     },
     true,
   );
@@ -817,6 +840,7 @@ function wireOutputKeys(controls: OutputControls): void {
   window.addEventListener("pointerdown", () => playKey.cancel(), true);
   const drop = (): void => {
     playKey.reset();
+    playHeldBy = null;
     spaceHeld = false;
     controls.holdCue(false); // the key-up will never arrive: the master goes back
   };
@@ -2772,6 +2796,7 @@ async function boot(): Promise<void> {
       stateEl: outStateEl,
       barEl: outBarEl,
     });
+    labelPlayKey(goBtn, isMacAgent(navigator.userAgent));
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
     // The Set card's live marker: whatever pad was loaded when Play sent it.
@@ -2861,7 +2886,7 @@ async function boot(): Promise<void> {
     }
     if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
-      // letter twins of Space and Option, which wireOutputKeys below owns.
+      // letter twins of Space and the Play keys, which wireOutputKeys owns.
       // No-ops unless an output window is open.
       if (e.code === "KeyG" && outputControls?.go()) {
         e.preventDefault();

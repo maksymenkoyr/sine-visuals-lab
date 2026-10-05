@@ -288,7 +288,7 @@
        * PLAY green, each key's name printed under its pad. The state line
        * under them reads as plain text. Cue on = solid orange pad; a key/click
        * flashes its pad (.pressed); PLAY's ring blinks while the output and
-       * the preview differ (.differs); a held Option draws an arc round PLAY
+       * the preview differ (.differs); a held Play key draws an arc round PLAY
        * like a clock (.charging) and a glide in flight draws it again
        * (.gliding), both through --charge. The bar fades with the rest of the
        * chrome when idle, except while it has something to say (.attn: cue
@@ -853,7 +853,7 @@
     <div id="outBar">
       <div id="outKeys">
         <button id="cueBtn" class="outKey" aria-pressed="false" title="Hold to hear the preview on the output — let go and it goes back; PLAY sends it for good (hold Space)" data-key="cue" data-key-shown><span class="outFace"><b>CUE</b></span><small>SPACE</small></button>
-        <button id="goBtn" class="outKey" aria-label="Play" title="Send this scene and its settings to the output — tap Option to send at once, hold it to glide there (Option)" data-key="go" data-key-shown><span class="outFace"><svg viewBox="0 0 26 22" aria-hidden="true"><path d="M2 2l11 9-11 9z" /><rect x="16" y="3" width="3" height="16" /><rect x="21" y="3" width="3" height="16" /></svg></span><small>⌥ OPTION</small></button>
+        <button id="goBtn" class="outKey" aria-label="Play" title="Send this scene and its settings to the output — tap Enter to send at once, hold it to glide there (Alt does the same)" data-key="go" data-key-shown><span class="outFace"><svg viewBox="0 0 26 22" aria-hidden="true"><path d="M2 2l11 9-11 9z" /><rect x="16" y="3" width="3" height="16" /><rect x="21" y="3" width="3" height="16" /></svg></span><small>ENTER</small></button>
       </div>
       <span id="outState"></span>
       <button id="takeBtn" type="button" title="Drop your unplayed changes and show what is on the Main screens now">TAKE MAIN</button>
