@@ -2,7 +2,7 @@ import { NUM_BANDS } from "../../audio/types.ts";
 import { MIN_HZ, MAX_HZ_CAP } from "../../audio/bandScale.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import { resolveSceneSetting } from "../autoTune.ts";
+import { resolveSceneSetting, resolveSceneSettingUnscaled } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
@@ -32,6 +32,7 @@ import {
 import { GRIT_CHALK, GRIT_RAMP_LO, GRIT_RAMP_SPAN, powderInk } from "./chladniPowder.ts";
 import {
   ZOOM_LAYERS,
+  ZOOM_SAND_MARGIN,
   zoomFinestScale,
   zoomLayers,
   zoomPhaseStep,
@@ -91,16 +92,24 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // it runs the plate has no edge: the cosines carry on past [-1,1]^2, which
 // is the plate mirrored across its edges, and it fills the frame at its true
 // aspect (Zoom still sets the base size; True shape doesn't apply; no rim).
-// So the sand lies on the frame instead of the plate: grains are stored in
-// grain space, the frame as [-1,1]^2 (GRAIN_TO_PLATE), the sim steps them in
-// plate space, and spills, respawns and the toss's landings use the frame
-// as the square's outline. Each frame every grain shrinks toward the centre
-// by the zoom's step, so a formed figure shrinks as one piece with the field;
-// the share of the bed that shrink frees goes to the strip it opened at the
-// edges, so the bed stays even; and a half-step dither keeps packPos's
-// rounding from eating a slow shrink. The zoom is compiled in as its own
-// programs (ZOOM_OUT, makePrograms): without it the shaders are the source
-// as it was, so the plate is bit for bit what it was and pays nothing.
+// So the sand lies on the frame instead of the plate, grown by
+// ZOOM_SAND_MARGIN past every edge: grains are stored in grain space, that
+// area as [-1,1]^2 (GRAIN_TO_PLATE), the sim steps them in plate space, and
+// the toss's landings use that area as the square's outline (its throw
+// still a plate distance). Each frame every grain shrinks toward the centre
+// by the zoom's step, so a formed figure shrinks as one piece with the
+// field; the share of the bed that shrink frees goes to the strip it opened
+// at the edges; a grain that hops off the area comes back in at that edge
+// (foldIntoPlate) rather than anywhere on it, since an even respawn would
+// feed the middle, where the shrink piles sand up; together they keep the
+// bed even. The sand still finding its lines near the edge, and any turned
+// back there, reads brighter than the settled bed: the margin keeps it off
+// screen. A half-step dither keeps packPos's rounding from
+// eating a slow shrink. Whether the zoom is on reads the slider before the
+// Master card's Scale (zoomWanted), which sets only its speed, so Scale 0
+// can't flip the framing. The zoom is compiled in as its own programs
+// (ZOOM_OUT, makePrograms): without it the shaders are the source as it
+// was, so the plate is bit for bit what it was and pays nothing.
 //
 // The response. A real plate under broadband music answers as a sum of
 // every mode near any energy in the signal, each ringing with its own
@@ -839,7 +848,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "zoomOut",
     label: "Zoom out",
-    description: "Square plate only: the plate pulls back for ever, its figure shrinking as a bigger one grows in; higher is faster, 0 is off",
+    description: "Square plate only: the plate pulls back for ever, its figure shrinking as a bigger one grows in; higher is faster, 0 is off. While on, the plate fills the screen unstretched, so True shape does nothing",
     // Manual: how fast to drift is taste. Speed is the slider times its jack
     // (zoomPhaseStep), so silence stops the zoom as it freezes the figure.
     group: "Motion",
@@ -1075,18 +1084,19 @@ vec2 plateHalf() {
 }
 
 // Where grains live. Normally that is plate space itself. While Zoom out runs
-// the plate has no edge, so the sand lies on the whole frame instead: grain
-// space [-1,1]^2 is the frame, and a grain's plate point is its grain point
-// times the frame's half-extent in plate units (true aspect, no stretch).
-// insidePlate, respawnOnPlate and the toss's landing all work in grain space,
-// where the frame is the square's outline. Macros, so the shaders without
-// the zoom read exactly as they did before it.
+// the plate has no edge, so the sand lies on the whole frame instead, grown
+// by ZOOM_SAND_MARGIN on every side: grain space [-1,1]^2 is that area, and
+// a grain's plate point is its grain point times the area's half-extent in
+// plate units (true aspect, no stretch). insidePlate, respawnOnPlate and the
+// toss's landing all work in grain space, where that area is the square's
+// outline. Macros, so the shaders without the zoom read exactly as they did
+// before it.
 #ifdef ZOOM_OUT
-vec2 grainExtent() { return 0.5 / plateHalf(); }
+// Grain space's half-extent in room uv.
+#define GRAIN_HALF vec2(${glslFloat(0.5 * (1 + ZOOM_SAND_MARGIN))})
+vec2 grainExtent() { return GRAIN_HALF / plateHalf(); }
 #define GRAIN_TO_PLATE(q) ((q) * grainExtent())
 #define PLATE_TO_GRAIN(p) ((p) / grainExtent())
-// Grain space's half-extent in room uv.
-#define GRAIN_HALF vec2(0.5)
 // Zoom's grain growth (POINT_VERT): none, the sand covers the frame at any Zoom.
 #define GRAIN_ZOOM 1.0
 #else
@@ -1242,7 +1252,8 @@ bool tossLive(float age) {
   return age < ${glslFloat(tossLongestFlight())};
 }
 // x: flight time (s), y: peak height (plate half-heights), zw: where it
-// lands relative to where it took off (plate units). Mirrors tossLaunch.
+// lands relative to where it took off (plate units; grain space while Zoom
+// out runs). Mirrors tossLaunch.
 vec4 tossFlight(vec2 texel) {
   vec2 a = hash22(texel * 0.613 + uTossSeed);
   vec2 b = hash22(texel * 1.37 + uTossSeed * 1.91 + 5.3);
@@ -1253,7 +1264,13 @@ vec4 tossFlight(vec2 texel) {
   // Uniform over a disc: sqrt of the draw for the radius.
   float r = ${glslFloat(TOSS_SPREAD)} * uTossPower * sqrt(b.x);
   float ang = b.y * 6.2831853;
+#ifdef ZOOM_OUT
+  // Grains lie in grain space while Zoom out runs: the throw is a plate
+  // distance, so it lands as far, and as round, as on the true-shape plate.
+  return vec4(t, lift, vec2(r * cos(ang), r * sin(ang)) / grainExtent());
+#else
   return vec4(t, lift, r * cos(ang), r * sin(ang));
+#endif
 }
 // A point past the plate's rim reflected back in across the rim it crossed
 // (uOutline, as plateGauge reads it): the square folds each axis, the circle
@@ -1358,11 +1375,11 @@ void main() {
 
 #ifdef ZOOM_OUT
   // A share of the bed moves to the freed strip at the edges, so the shrink
-  // doesn't pile the sand up in the middle.
-  if (hash21(seed * 1.31 + 4.7) < uZoomRespawn) {
-    outColor = packPos(respawnInRim(seed + 2.9, uZoomShrink));
-    return;
-  }
+  // doesn't pile the sand up in the middle. It then steps like every other
+  // grain: had it come in from past the frame it would have been shaking
+  // too, and if it sat still while the rest hopped out into the strip, the
+  // strip would end up denser than the bed.
+  if (hash21(seed * 1.31 + 4.7) < uZoomRespawn) p = respawnInRim(seed + 2.9, uZoomShrink);
   // The sim steps in plate space; grain space is the frame, not to plate scale.
   p = GRAIN_TO_PLATE(p);
 #endif
@@ -1413,7 +1430,15 @@ void main() {
 
   // Off the edge: spilled. Respawn somewhere on the plate.
   if (!insidePlate(p)) {
+#ifdef ZOOM_OUT
+    // While Zoom out runs the plate has no edge, so what hops off the sand's
+    // area comes back in at that edge (reflected across it). A respawn over
+    // the whole area would carry sand from the edges to the middle, where
+    // the shrink then piles it up.
+    p = clamp(foldIntoPlate(p), -1.0, 1.0);
+#else
     p = respawnOnPlate(seed + 7.31);
+#endif
   }
 
 #ifdef ZOOM_OUT
@@ -1515,7 +1540,7 @@ void main() {
       airborne = true;
     }
   }
-  // Grain space to the room (the frame itself while Zoom out runs).
+  // Grain space to the room (the frame and its margin while Zoom out runs).
   vec2 room = 0.5 + p * GRAIN_HALF;
   room.y += tossRise * GRAIN_HALF.y;
   // The arc's height relative to the top of a full toss's mean arc.
@@ -1819,6 +1844,12 @@ function createChladniScene(): Scene {
     return Math.max(0, Math.min(PLATE_SHAPES.length - 1, v));
   }
 
+  /** Is Zoom out on (its programs and frame in use)? The slider before the
+   *  Master card's Scale, which only sets its speed. */
+  function zoomWanted(): boolean {
+    return shape === SQUARE && resolveSceneSettingUnscaled(ID, settingFor("zoomOut")) > 0;
+  }
+
   return {
     id: ID,
     name: "Chladni",
@@ -1879,7 +1910,7 @@ function createChladniScene(): Scene {
       // A plate picked in saved settings is baked now, not on the first frame,
       // and a zoom turned on in them is built now too.
       usePlate(gl, plateSetting());
-      if (shape === SQUARE && resolveSceneSetting(ID, settingFor("zoomOut")) > 0) zoomed = makePrograms(gl, true);
+      if (zoomWanted()) zoomed = makePrograms(gl, true);
       lastFrameTime = null;
       toss = null;
       zoomPhase = 0;
@@ -1924,9 +1955,11 @@ function createChladniScene(): Scene {
       for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.cells);
 
       // Zoom out (chladniZoom.ts): the square plate only. Speed is the
-      // slider times its jack, so silence stops it.
+      // slider times its jack, so silence stops it. Whether it is on at all
+      // changes the framing, so that reads the slider before the Master
+      // card's Scale: Scale 0 stops the zoom but keeps its frame.
       const zoomSetting = resolveSceneSetting(ID, settingFor("zoomOut"));
-      const zoomOn = shape === SQUARE && zoomSetting > 0;
+      const zoomOn = zoomWanted();
       const zoomStep = zoomOn ? zoomPhaseStep(dt, zoomSetting, drives.value("zoomOut", frame.energy)) : 0;
       zoomPhase = (zoomPhase + zoomStep) % 1;
       zoomTotal += zoomStep;
@@ -1956,15 +1989,21 @@ function createChladniScene(): Scene {
       const squarePx2 = fitted
         ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
         : gl.drawingBufferWidth * gl.drawingBufferHeight;
+      // While Zoom out runs the sand covers the frame and its margin: that
+      // much more area, and that many more grains for it (from the
+      // SAND_AMOUNT_MAX pool), so the bed on screen is as dense as on the
+      // plate without the zoom.
+      const sandArea = zoomOn ? (1 + ZOOM_SAND_MARGIN) ** 2 : 1;
       const platePx2 = zoomOn
-        ? gl.drawingBufferWidth * gl.drawingBufferHeight
+        ? gl.drawingBufferWidth * gl.drawingBufferHeight * sandArea
         : ((squarePx2 * plateArea(plateOutline(shape))) / 4) * zoom * zoom;
       const sandAmount = resolveSceneSetting(ID, settingFor("sandAmount"));
       const sizeM2 = grainSizeMoment(
         resolveSceneSetting(ID, settingFor("grainWeight")),
         resolveSceneSetting(ID, settingFor("sizeMix")),
       );
-      const drawn = drawnGrainCount(grainCount, grainPx, platePx2, sandAmount, sizeM2);
+      // Never past the pool (only a Sand amount near the top under the zoom reaches it).
+      const drawn = Math.min(side * side, drawnGrainCount(grainCount * sandArea, grainPx, platePx2, sandAmount, sizeM2));
 
       // Sim pass: step the drawn prefix from posTex[read] into posTex[write].
       // The scissor keeps it to the rows that prefix occupies (the sim

@@ -134,13 +134,17 @@ describe("zoom out sand", () => {
     }
   });
 
-  it("shrinking, then moving that share to the freed strip, keeps an even bed even", () => {
-    // A seeded walk of the sim's rule on an even bed over the frame [-1,1]^2:
-    // shrink, then the respawn share to a uniform spot in the strip outside
-    // the shrunk square (as SIM_FRAG's respawnInRim). Density must stay even.
+  /** Ring densities (1 = even, centre first, equal-area rings by Chebyshev
+   *  radius) after a seeded walk of SIM_FRAG's zoom rule on an even bed over
+   *  the frame [-1,1]^2, octaves at `du` a frame: shrink; the respawn share to
+   *  a uniform spot in the freed strip (respawnInRim); then a random hop of up
+   *  to `hop` per axis for every grain, a refilled one too unless
+   *  `refillSitsStill`; a grain hopped off the frame folded back in across
+   *  the edge (foldIntoPlate), or, with `spillAnywhere`, respawned anywhere. */
+  function walkBed(opts: { hop: number; spillAnywhere?: boolean; refillSitsStill?: boolean }): number[] {
     let s = 7;
     const rnd = () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646;
-    const N = 60000;
+    const N = 30000;
     const xs = new Float64Array(N);
     const ys = new Float64Array(N);
     for (let i = 0; i < N; i++) {
@@ -150,33 +154,68 @@ describe("zoom out sand", () => {
     const du = 0.02;
     const c = zoomShrink(du);
     const share = zoomRespawnShare(du);
-    for (let step = 0; step < 50; step++) {
+    const fold = (q: number) => Math.max(-1, Math.min(1, q > 1 ? 2 - q : q < -1 ? -2 - q : q));
+    // Three octaves.
+    for (let step = 0; step < 3 / du; step++) {
       for (let i = 0; i < N; i++) {
-        xs[i] *= c;
-        ys[i] *= c;
+        let x = xs[i] * c;
+        let y = ys[i] * c;
         if (rnd() < share) {
           // Mirrors respawnInRim: top/bottom strips hold 1 / (1 + c) of the area.
           const u = rnd(), v = rnd(), w = rnd(), z = rnd();
           const side = z < 0.5 ? -1 : 1;
           const depth = c + (1 - c) * u;
           if (w * (1 + c) < 1) {
-            xs[i] = v * 2 - 1;
-            ys[i] = side * depth;
+            x = v * 2 - 1;
+            y = side * depth;
           } else {
-            xs[i] = side * depth;
-            ys[i] = (v * 2 - 1) * c;
+            x = side * depth;
+            y = (v * 2 - 1) * c;
+          }
+          if (opts.refillSitsStill) {
+            xs[i] = x;
+            ys[i] = y;
+            continue;
           }
         }
+        x += (rnd() - 0.5) * 2 * opts.hop;
+        y += (rnd() - 0.5) * 2 * opts.hop;
+        if (Math.abs(x) > 1 || Math.abs(y) > 1) {
+          if (opts.spillAnywhere) {
+            x = rnd() * 2 - 1;
+            y = rnd() * 2 - 1;
+          } else {
+            x = fold(x);
+            y = fold(y);
+          }
+        }
+        xs[i] = x;
+        ys[i] = y;
       }
     }
-    // Rings by Chebyshev radius, equal area each: sqrt-spaced edges.
     const RINGS = 5;
     const counts = new Array(RINGS).fill(0);
     for (let i = 0; i < N; i++) {
       const r = Math.max(Math.abs(xs[i]), Math.abs(ys[i]));
       counts[Math.min(RINGS - 1, Math.floor(r * r * RINGS))]++;
     }
-    for (const n of counts) expect(Math.abs(n / (N / RINGS) - 1)).toBeLessThan(0.04);
+    return counts.map((n) => n / (N / RINGS));
+  }
+
+  it("shrinking, then moving that share to the freed strip, keeps an even bed even", () => {
+    for (const d of walkBed({ hop: 0 })) expect(Math.abs(d - 1)).toBeLessThan(0.04);
+  });
+
+  it("stays even with the sand hopping and spilling off the frame's edges", () => {
+    for (const hop of [0.02, 0.05]) {
+      for (const d of walkBed({ hop })) expect(Math.abs(d - 1)).toBeLessThan(0.04);
+    }
+  });
+
+  it("would not stay even if spills respawned anywhere, or refilled grains sat still", () => {
+    // The two ways the rule above can go wrong, so this walk can see them.
+    expect(walkBed({ hop: 0.05, spillAnywhere: true })[0]).toBeGreaterThan(1.3);
+    expect(walkBed({ hop: 0.05, refillSitsStill: true })[4]).toBeGreaterThan(1.05);
   });
 });
 
