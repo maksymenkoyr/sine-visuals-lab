@@ -23,7 +23,9 @@ import { captureLook, decodeLook, encodeLook, type SceneLook } from "./sceneLook
  * excluded list (unlike the Looks shelf): the Set has to reach a paired phone,
  * and a phone gets only what `isRoomKey` accepts, as part of the room's Main
  * look (so a pad added on the laptop reaches the phone with the laptop's next
- * Play, like every other setting). The store registers a reload hook so the
+ * Play, like every other setting). It is a shelf (syncedStores.ts's
+ * SHELF_KEYS), so adding a pad never reads as the output differing from the
+ * preview. The store registers a reload hook so the
  * pop-out and a room's applyRoomStorage re-seed the cache. Each pad's Look is
  * stored in sceneLooks.ts's share-code form (encodeLook/decodeLook), not as
  * raw JSON: that format is version-tagged, already sanitises drive settings

@@ -3,7 +3,7 @@ import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import type { SilenceGateMarks } from "../audio/silenceGate.ts";
-import { VOLATILE_PREFIXES } from "./syncedStores.ts";
+import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
 
 /**
  * The pop-out output window's message layer: what the main window
@@ -129,10 +129,12 @@ export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" } | { t: "s
 /** Identity of what the output is showing, for "does the output match the
  *  preview" — scene, palette and the stored settings. `params` and the keys
  *  the main window rewrites on its own (VOLATILE_PREFIXES) are left out:
- *  Auto slews them continuously, which would read as a permanent difference. */
+ *  Auto slews them continuously, which would read as a permanent difference.
+ *  So are the shelves (SHELF_KEYS): saving a Look or adding a pad changes
+ *  nothing on screen. */
 export function stateKey(s: OutputState): string {
   const keys = Object.keys(s.storage)
-    .filter((k) => !VOLATILE_PREFIXES.some((p) => k.startsWith(p)))
+    .filter((k) => !SHELF_KEYS.has(k) && !VOLATILE_PREFIXES.some((p) => k.startsWith(p)))
     .sort();
   return JSON.stringify([s.scene, s.palette, keys.map((k) => [k, s.storage[k]])]);
 }
