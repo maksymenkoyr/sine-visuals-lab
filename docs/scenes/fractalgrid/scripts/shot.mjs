@@ -6,7 +6,7 @@
 //        [--wait MS] [--bpm N] [--quality Q]
 //
 // --settings pins scene settings through __viz.setParams. --state takes one
-// or more dive-state overrides (phase, targetIndex, grid, gridTarget, fold,
+// or more dive-state overrides (depth, hold, targetIndex, grid, gridTarget, fold,
 // foldTarget, invert, invertHold — motion.ts's DiveState), separated by ';',
 // one shot each. It needs a DEV-only hook the scene doesn't ship; to use it,
 // paste this under `let lastTime` in src/render/scenes/fractalgrid/index.ts
@@ -19,7 +19,7 @@
 //     };
 //   }
 //
-// Freeze the camera with --settings '{"dive":0}' so a pinned phase stays put.
+// Freeze the camera with --settings '{"dive":0}' so a pinned depth stays put.
 // Pin grid/gridTarget/fold/foldTarget too when diffing two builds (diff.py):
 // hits move them between page load and the settings landing.
 import { chromium } from "playwright";

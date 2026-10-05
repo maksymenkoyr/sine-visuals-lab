@@ -4,23 +4,24 @@
 // the picture is. index.ts resolves settings and drives into DiveInputs once
 // a frame and uploads what stepDive returns; the GLSL owns the picture.
 //
-// **The dive.** One dive is a round trip: from the whole set (log-zoom 0)
-// down to the target's own depth (DiveTarget.depth, scaled by Dive depth)
-// and back out, on a raised-cosine path so the camera eases at both ends —
-// it lingers on the whole set and at the bottom, and moves fastest in
-// between. The phase advances at `rate / (2 · depth)` per second, which
-// makes `rate` the average zoom speed in e-folds per second whatever the
-// depth. When a dive ends (back at the
-// whole set) the next target in DIVE_TARGETS takes over; at the whole-set
-// framing every target puts the camera in the same place (see the GLSL's
-// camera note in index.ts), so the switch can't be seen.
+// **The dive** goes one way: from the whole set straight down into one
+// target at `rate` e-folds of zoom per second, easing in off the whole set
+// and out at the bottom (EASE_EFOLDS), down to the target's own depth
+// (DiveTarget.depth, scaled by Dive depth). It holds there for HOLD_SEC, then
+// cuts back to the whole set and starts on the next target in DIVE_TARGETS.
+// At the whole-set framing every target puts the camera in the same place
+// (the camera note in index.ts), so the cut always lands on the same picture.
 //
-// **The targets** are the roots of bulbs: where a bulb touches the one it
-// grew from. The iteration slows to a crawl there (the point is parabolic),
-// so a fixed iteration count leaves the orbit mid-way, and the grid drawn on
-// it folds into the circles and petals the reference dives through. Main-
-// cardioid roots are c = e^{iθ}/2 − e^{2iθ}/4 and the period-2 bulb's are
-// c = −1 + e^{iθ}/4, θ = 2πp/q for the p/q bulb.
+// **The targets** are Misiurewicz points: c values whose critical orbit
+// lands on a repelling cycle, the centres of the set's spirals. Near one the
+// set repeats itself, scaled and turned, however far you zoom, so a dive
+// never runs out of picture — unlike a bulb's root, which flattens into a
+// few giant cells within a handful of e-folds. Each is stored as a
+// double-double pair per coordinate (hi + lo, about 32 digits), which is what
+// deep.ts computes the reference orbit in, and with the iterations a pixel
+// near it needs per e-fold of zoom to escape (p / ln|λ| for an M(k, p) point
+// with cycle multiplier λ). docs/scenes/fractalgrid/scripts/find_targets.py
+// found and refined them and prints these lines.
 //
 // **Steps, folds and inversion** are eased targets: a hit moves the target
 // and the shown value follows it with its own time constant, so a step reads
@@ -29,45 +30,59 @@
 // together with their targets so they never grow.
 
 export interface DiveTarget {
-  x: number;
-  y: number;
-  /** How deep a dive here goes at Dive depth's default, in e-folds below
-   *  the whole set: where the grid is still richest, picked from shots of
-   *  every root at several depths (docs/scenes/fractalgrid.md). Past it a
-   *  root's view is a few giant cells; the cusp stays busy much deeper. */
+  /** The target as double-double pairs: re = reHi + reLo, im = imHi + imLo. */
+  reHi: number;
+  reLo: number;
+  imHi: number;
+  imLo: number;
+  /** Iterations a pixel near the target needs per e-fold of zoom. */
+  itersPerEfold: number;
+  /** How deep a dive here goes at Dive depth's default, e-folds below the
+   *  whole set. */
   depth: number;
 }
 
-/** Root of the main cardioid's p/q bulb (q = 1 is the cusp). */
-export function cardioidRoot(p: number, q: number, depth: number): DiveTarget {
-  const t = (2 * Math.PI * p) / q;
-  return { x: Math.cos(t) / 2 - Math.cos(2 * t) / 4, y: Math.sin(t) / 2 - Math.sin(2 * t) / 4, depth };
+/** The depth every target dives to at Dive depth's default, e-folds. */
+export const TARGET_DEPTH = 45;
+
+export function deepTarget(reHi: number, reLo: number, imHi: number, imLo: number, itersPerEfold: number): DiveTarget {
+  return { reHi, reLo, imHi, imLo, itersPerEfold, depth: TARGET_DEPTH };
 }
 
-/** Root of the period-2 bulb's p/q satellite. */
-export function twoBulbRoot(p: number, q: number, depth: number): DiveTarget {
-  const t = (2 * Math.PI * p) / q;
-  return { x: -1 + Math.cos(t) / 4, y: Math.sin(t) / 4, depth };
-}
-
-/** Dive order: the cusp first (the reference's own last dive), then roots
- *  alternating above and below the axis so consecutive dives don't land on
- *  the same side. */
+/** Dive order: alternating valleys, spins and shapes so consecutive dives
+ *  don't look alike. find_targets.py prints these lines. */
 export const DIVE_TARGETS: readonly DiveTarget[] = [
-  cardioidRoot(0, 1, 7),
-  cardioidRoot(1, 3, 5),
-  cardioidRoot(1, 2, 4),
-  cardioidRoot(-2, 5, 5),
-  twoBulbRoot(1, 2, 4),
-  cardioidRoot(1, 4, 5),
-  twoBulbRoot(-1, 3, 5),
-  cardioidRoot(-1, 5, 5),
-  cardioidRoot(3, 7, 5),
+  // elephant valley, slow spin: M(11,3), |λ| 9.656, turns 9.57° per e-fold
+  deepTarget(0.3045141924763035, 1.9971779293362468e-17, 0.020036558149489864, 1.5137785363774377e-18, 1.323),
+  // seahorse valley, slow reverse spin: M(21,3), |λ| 7.08, turns -27.2° per e-fold
+  deepTarget(-0.7776270099068777, -5.0629784125657207e-17, 0.13777341966976073, -9.123780981819498e-18, 1.533),
+  // period-3 bulb, dendrite: M(9,3), |λ| 19.24, turns 8.66° per e-fold
+  deepTarget(-0.14233282922624627, 9.28968587946176e-18, 0.9785860380998128, -3.1587682567113824e-17, 1.015),
+  // elephant valley, upper slow spin: M(19,3), |λ| 9.57, turns 10.7° per e-fold
+  deepTarget(0.3249009725216071, -5.323325744085071e-18, 0.045908570906938645, 1.0957704814497071e-18, 1.328),
+  // west seahorse valley, reverse spin: M(19,3), |λ| 7.357, turns -33.1° per e-fold
+  deepTarget(-1.300596281597996, -9.138356608714281e-17, 0.07721036189209265, -3.1689026691820946e-18, 1.503),
+  // elephant valley, fast reverse spin: M(10,1), |λ| 1.338, turns -97.9° per e-fold
+  deepTarget(0.34394893541599236, -1.6449791962953398e-17, 0.05607182997787478, 6.478019723304548e-19, 3.437),
+  // antenna, flips each repeat: M(3,1), |λ| 1.679, turns 348.0° per e-fold
+  deepTarget(-1.5436890126920764, 6.156766738133783e-18, 0.0, 0.0, 1.931),
+  // elephant valley, four arms: M(7,4), |λ| 14.28, turns 16.4° per e-fold
+  deepTarget(0.33598829354908605, -2.7294744796871246e-17, 0.04390895596122453, 2.504805317324845e-18, 1.504),
+  // west seahorse valley, whirl: M(15,1), |λ| 1.488, turns 447.0° per e-fold
+  deepTarget(-1.2941017670715493, 8.817860265822383e-17, 0.08085905686745473, -1.4969669159191175e-18, 2.518),
+  // elephant valley, lower slow spin: M(11,3), |λ| 10.26, turns 8.67° per e-fold
+  deepTarget(0.3177458774814111, 1.2566343099433917e-17, -0.028768463150400148, -1.6351946366295786e-18, 1.289),
+  // period-3 bulb tip, whirl: M(4,1), |λ| 1.328, turns 421.0° per e-fold
+  deepTarget(-0.10109636384562216, 3.1312710426818716e-18, 0.9562865108091415, -9.287754541577357e-18, 3.522),
+  // elephant valley, outer four arms: M(5,4), |λ| 13.23, turns 19.6° per e-fold
+  deepTarget(0.37363256928102, -5.852786361674973e-18, 0.08504535015303125, 4.116095671150155e-18, 1.549),
 ];
 
-/** The deepest any dive may go, e-folds: past it 32-bit floats run out of
- *  room to tell neighbouring pixels apart. */
-export const MAX_DEPTH = 9;
+/** The deepest any dive may go, e-folds. Two limits meet here: the GPU's
+ *  32-bit offsets from the reference reach their smallest normal value a
+ *  little past this, and the double-double reference orbit has to stay a
+ *  few thousand times finer than a pixel. */
+export const MAX_DEPTH = 55;
 
 /** The current target's dive depth, scaled by Dive depth relative to its
  *  default (`depthScale`). */
@@ -87,6 +102,13 @@ export const HOME_HALF_H = 1.29;
  *  of every short cycle length, so a turn-around never lands mid-cycle. */
 export const FOLD_SPAN = 12;
 
+/** The dive eases in over its first EASE_EFOLDS and out over its last,
+ *  never slower than EASE_FLOOR of full speed. */
+export const EASE_EFOLDS = 1.5;
+export const EASE_FLOOR = 0.15;
+/** Seconds the dive holds at the bottom before cutting back. */
+export const HOLD_SEC = 3;
+
 export const STEP_EASE_SEC = 0.09;
 export const FOLD_EASE_SEC = 0.35;
 export const INVERT_EASE_SEC = 0.12;
@@ -95,8 +117,10 @@ export const INVERT_EASE_SEC = 0.12;
 export const MAX_STEP_SEC = 0.25;
 
 export interface DiveState {
-  /** 0..1 through the current dive; 0 and 1 are the whole set. */
-  phase: number;
+  /** E-folds below the whole set. */
+  depth: number;
+  /** Seconds left at the bottom; 0 while diving. */
+  hold: number;
   targetIndex: number;
   /** Grid offset in cells (both line families step together). */
   grid: number;
@@ -111,12 +135,12 @@ export interface DiveState {
 }
 
 export function createDiveState(): DiveState {
-  return { phase: 0, targetIndex: 0, grid: 0, gridTarget: 0, fold: 0, foldTarget: 0, invertHold: 0, invert: 0 };
+  return { depth: 0, hold: 0, targetIndex: 0, grid: 0, gridTarget: 0, fold: 0, foldTarget: 0, invertHold: 0, invert: 0 };
 }
 
 export interface DiveInputs {
   dt: number;
-  /** Average zoom speed, e-folds per second. */
+  /** Zoom speed, e-folds per second, between the eased ends. */
   rate: number;
   /** Dive depth relative to its default: scales every target's own depth. */
   depthScale: number;
@@ -134,16 +158,33 @@ function ease(current: number, target: number, dt: number, tau: number): number 
   return current + (target - current) * (1 - Math.exp(-dt / tau));
 }
 
+/** Share of full speed at `depth` on the way down to `bottom`. */
+export function diveSpeedShare(depth: number, bottom: number): number {
+  const fromTop = Math.min(1, depth / EASE_EFOLDS);
+  const toBottom = Math.min(1, Math.max(0, bottom - depth) / EASE_EFOLDS);
+  return Math.max(EASE_FLOOR, Math.min(fromTop, toBottom));
+}
+
 export function stepDive(s: DiveState, inp: DiveInputs): DiveState {
   const dt = Math.min(MAX_STEP_SEC, Math.max(0, inp.dt));
 
-  let phase = s.phase;
+  let depth = s.depth;
+  let hold = s.hold;
   let targetIndex = s.targetIndex;
-  const depth = targetDepth(targetIndex, inp.depthScale);
-  if (depth > 0) phase += (dt * Math.max(0, inp.rate)) / (2 * depth);
-  while (phase >= 1) {
-    phase -= 1;
-    targetIndex = (targetIndex + 1) % DIVE_TARGETS.length;
+  const bottom = targetDepth(targetIndex, inp.depthScale);
+  if (hold > 0) {
+    hold -= dt;
+    if (hold <= 0) {
+      hold = 0;
+      depth = 0;
+      targetIndex = (targetIndex + 1) % DIVE_TARGETS.length;
+    }
+  } else {
+    depth += dt * Math.max(0, inp.rate) * diveSpeedShare(depth, bottom);
+    if (depth >= bottom) {
+      depth = bottom;
+      hold = HOLD_SEC;
+    }
   }
 
   let gridTarget = s.gridTarget + inp.stepCells;
@@ -161,12 +202,13 @@ export function stepDive(s: DiveState, inp: DiveInputs): DiveState {
   const invertHold = inp.dropFired ? inp.invertHoldSec : Math.max(0, s.invertHold - dt);
   const invert = ease(s.invert, invertHold > 0 ? 1 : 0, dt, INVERT_EASE_SEC);
 
-  return { phase, targetIndex, grid, gridTarget, fold, foldTarget, invertHold, invert };
+  return { depth, hold, targetIndex, grid, gridTarget, fold, foldTarget, invertHold, invert };
 }
 
-/** Log-zoom relative to the whole set: 0 there, −depth at the bottom. */
-export function diveLogZoom(phase: number, depth: number): number {
-  return -depth * (0.5 - 0.5 * Math.cos(2 * Math.PI * phase));
+/** Iterations a pixel gets at this depth: the base (Iterations) plus what
+ *  escaping near the target costs, with `margin` for the slower pixels. */
+export function diveIterations(base: number, s: DiveState, margin: number): number {
+  return base + Math.ceil(s.depth * DIVE_TARGETS[s.targetIndex].itersPerEfold * margin);
 }
 
 /** The fold's ping-pong over FOLD_SPAN: rises 0 → FOLD_SPAN, then falls back. */

@@ -17,12 +17,23 @@
 // but never thinner than MIN_LINE_PX: that floor is what turns crowded
 // regions and the set's edge white, as in the reference.
 //
+// **Going deep** (deep.ts has the why): every pixel iterates its offset δ
+// from one dive target's orbit Z, read from a texture deep.ts filled in
+// double-double precision — δ → 2Zδ + δ² + δc. When a pixel's own z gets
+// closer to 0 than its offset (|Z + δ| < |δ|), or the reference orbit runs
+// out, the pixel rebases: δ becomes its whole z and it carries on from the
+// orbit's start. That keeps every pixel right without a second reference, at
+// any depth down to motion.ts's MAX_DEPTH. Near the whole set the offsets
+// are large and pixels rebase often, which is the plain iteration again.
+// dz/dc is carried in screen units (scaled by the view size), so it stays an
+// ordinary number however deep the view is.
+//
 // **The camera** (motion.ts owns the clock): the view's half-height is the
-// whole-set framing times e^{logZoom}, and the dive target sits at a screen
-// position that shrinks toward the centre as √(e^{logZoom}) — at the whole
-// set every target lands the camera on the same framing, deep in a dive the
-// target is centred. The set is computed in 32-bit floats, so Dive depth's
-// range stops before pixels run out of precision.
+// whole-set framing times e^{−depth}, and the dive target sits at a screen
+// position that shrinks toward the centre as √(e^{−depth}) — at the whole set
+// every target lands the camera on the same framing, deep in a dive the
+// target is centred. Pixels need more iterations to escape the deeper the
+// view (diveIterations), on top of Iterations.
 //
 // **Fold** mixes the orbit's last two points, z_N and z_{N+1}, by the fold's
 // fraction, and steps N by its whole part: a bulb whose orbit cycles through
@@ -33,29 +44,37 @@
 // bass level, the grid steps on bass hits, folds land on the bar grid, lines
 // thicken on any beat, and a drop inverts the picture for a few bars.
 import { createFullscreenScene } from "../../fullscreenScene.ts";
+import type { Scene } from "../../scene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
+import { MAX_REF_LEN, REF_ESCAPE_R2, referenceOrbit, type ReferenceOrbit } from "./deep.ts";
 import {
   DIVE_TARGETS,
   FOLD_SPAN,
   HOME_HALF_H,
   HOME_HALF_W,
   HOME_X,
+  MAX_DEPTH,
+  TARGET_DEPTH,
   createDiveState,
-  diveLogZoom,
+  diveIterations,
   foldPosition,
   stepDive,
-  targetDepth,
 } from "./motion.ts";
 
 const ID = "fractalgrid";
 
 /** Iterations at uDetail = 1; the quality proxy scales it down. */
-const ITER_CAP = 400;
+const ITER_CAP = 1200;
+/** Extra iterations per e-fold, as a multiple of what escaping near the
+ *  target costs (DiveTarget.itersPerEfold), for pixels slower than it. */
+const ITER_MARGIN = 2;
+/** The reference orbit texture's width; its rows hold the rest. */
+const REF_TEX_W = 1024;
 /** Lines never get thinner than this many pixels. */
 const MIN_LINE_PX = 1.5;
 /** Escape radius², large enough for a smooth distance estimate. */
-const ESCAPE_R2 = 1024;
+const ESCAPE_R2 = REF_ESCAPE_R2;
 /** Width of the edge line on escaped points, pixels. */
 const EDGE_PX = 1.0;
 
@@ -166,10 +185,10 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "depth",
     label: "Dive depth",
-    description: "How far each dive zooms in before pulling back — right goes deeper, up to where the picture runs out of precision",
+    description: "How far each dive zooms in before cutting back to the whole set — right goes deeper",
     group: "Camera",
-    min: 0.3,
-    max: 1.25,
+    min: 0.25,
+    max: Math.floor((MAX_DEPTH / TARGET_DEPTH) * 20) / 20,
     step: 0.05,
     default: 1,
   },
@@ -190,6 +209,7 @@ const float EDGE_PX = ${EDGE_PX.toFixed(3)};
 const float HOME_X = ${HOME_X.toFixed(4)};
 const float HOME_HALF_W = ${HOME_HALF_W.toFixed(4)};
 const float HOME_HALF_H = ${HOME_HALF_H.toFixed(4)};
+const int REF_TEX_W = ${REF_TEX_W};
 
 vec2 cmul(vec2 a, vec2 b) {
   return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
@@ -206,39 +226,59 @@ float lineCover(float x, float w, float fp) {
   return clamp((b - a) / (2.0 * h), 0.0, 1.0);
 }
 
+// The reference orbit, one texel per point: x, y.
+vec2 refAt(int m) {
+  return texelFetch(uRef, ivec2(m % REF_TEX_W, m / REF_TEX_W), 0).rg;
+}
+
 void main() {
   vec2 res = uResolution;
   float aspect = res.x / res.y;
   vec2 uv = (roomUv(vUv) - 0.5) * 2.0;
   uv.x *= aspect;
 
-  // Camera — see the header.
+  // Camera — see the header. dc is this pixel's offset from the target,
+  // which is the reference orbit's c.
   float sHome = HOME_HALF_H * max(1.0, HOME_HALF_W / (HOME_HALF_H * aspect));
-  float k = exp(uLogZoom);
+  float k = exp(-uDiveDepth);
   float s = sHome * k;
-  vec2 target = vec2(uTargetX, uTargetY);
-  vec2 p = (target - vec2(HOME_X, 0.0)) / sHome * sqrt(k);
-  vec2 c = target + (uv - p) * s;
-  float pixel = 2.0 * s / res.y;
+  vec2 p = (vec2(uTargetX, uTargetY) - vec2(HOME_X, 0.0)) / sHome * sqrt(k);
+  vec2 dc = (uv - p) * s;
+  float pixel = 2.0 / res.y;
 
-  int base = int(min(uIterations, float(ITER_CAP) * uDetail));
+  int base = int(min(uIterTotal, float(ITER_CAP) * uDetail));
   float fold = uFoldPos;
   int total = base + int(floor(fold)) + 1;
+  int refLen = int(uRefLen);
 
-  vec2 z = vec2(0.0);
+  // Perturbation with rebasing — see the header. z is the pixel's whole
+  // orbit point Z_m + δ; der is dz/d(uv), dz/dc scaled by the view size.
   vec2 dz = vec2(0.0);
+  vec2 Zm = vec2(0.0);
+  int m = 0;
+  vec2 z = vec2(0.0);
+  vec2 der = vec2(0.0);
   vec2 zPrev = z;
-  vec2 dzPrev = dz;
+  vec2 derPrev = der;
   bool escaped = false;
   for (int i = 0; i < ITER_CAP + FOLD_SPAN + 1; i++) {
     if (i >= total) break;
     zPrev = z;
-    dzPrev = dz;
-    dz = 2.0 * cmul(z, dz) + vec2(1.0, 0.0);
-    z = cmul(z, z) + c;
-    if (dot(z, z) > ESCAPE_R2) {
+    derPrev = der;
+    der = 2.0 * cmul(z, der) + vec2(s, 0.0);
+    dz = 2.0 * cmul(Zm, dz) + cmul(dz, dz) + dc;
+    m++;
+    Zm = refAt(m);
+    z = Zm + dz;
+    float r2 = dot(z, z);
+    if (r2 > ESCAPE_R2) {
       escaped = true;
       break;
+    }
+    if (m >= refLen || r2 < dot(dz, dz)) {
+      dz = z;
+      m = 0;
+      Zm = vec2(0.0);
     }
   }
 
@@ -246,14 +286,14 @@ void main() {
   if (escaped) {
     // Distance to the set in pixels, from the escaped orbit.
     float r = length(z);
-    float de = 0.5 * r * log(r) / max(length(dz), 1e-20) / pixel;
+    float de = 0.5 * r * log(r) / max(length(der), 1e-30) / pixel;
     cover = clamp(1.0 - de / EDGE_PX, 0.0, 1.0);
   } else {
     float f = fract(fold);
     vec2 zf = mix(zPrev, z, f);
-    vec2 dzf = mix(dzPrev, dz, f);
+    vec2 derf = mix(derPrev, der, f);
     vec2 g = zf * uDensity + vec2(uGridOffset);
-    float fp = length(dzf) * pixel * uDensity;
+    float fp = length(derf) * pixel * uDensity;
     float w = clamp(max(uLineW, MIN_LINE_PX * fp), 0.0, 1.0);
     float lx = lineCover(g.x, w, fp);
     float ly = lineCover(g.y, w, fp);
@@ -270,13 +310,47 @@ void main() {
 // Every mount starts a fresh dive from the whole set (onInit below).
 let state = createDiveState();
 let lastTime: number | null = null;
+// The reference orbit texture (withReferenceTexture below binds it around
+// each draw) and which target it holds (−1: none yet).
+let refGl: WebGL2RenderingContext | null = null;
+let refTex: WebGLTexture | null = null;
+let refFor = -1;
+const refCache = new Map<number, ReferenceOrbit>();
 
-export const fractalGridScene = createFullscreenScene(ID, "Fractal Grid", FRAG, {
+function orbitFor(index: number): ReferenceOrbit {
+  let orbit = refCache.get(index);
+  if (!orbit) {
+    orbit = referenceOrbit(DIVE_TARGETS[index], MAX_REF_LEN);
+    refCache.set(index, orbit);
+  }
+  return orbit;
+}
+
+/** Puts the target's orbit in the texture if it isn't there yet. Called
+ *  after the dive steps and before the draw, so a cut never draws a frame
+ *  against the previous target's orbit. */
+function uploadOrbit(index: number, orbit: ReferenceOrbit): void {
+  const gl = refGl;
+  if (!gl || !refTex || refFor === index) return;
+  const rows = Math.ceil(orbit.points.length / 2 / REF_TEX_W);
+  const data = new Float32Array(REF_TEX_W * rows * 2);
+  data.set(orbit.points);
+  gl.bindTexture(gl.TEXTURE_2D, refTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, REF_TEX_W, rows, 0, gl.RG, gl.FLOAT, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  refFor = index;
+}
+
+const base = createFullscreenScene(ID, "Fractal Grid", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: [
+    "uniform highp sampler2D uRef;",
+    "uniform float uRefLen;",
     "uniform float uTargetX;",
     "uniform float uTargetY;",
-    "uniform float uLogZoom;",
+    "uniform float uDiveDepth;",
+    "uniform float uIterTotal;",
     "uniform float uGridOffset;",
     "uniform float uFoldPos;",
     "uniform float uLineW;",
@@ -285,6 +359,7 @@ export const fractalGridScene = createFullscreenScene(ID, "Fractal Grid", FRAG, 
   onInit: () => {
     state = createDiveState();
     lastTime = null;
+    refFor = -1;
   },
   extraUniforms: (frame, anim, _getSetting, drives) => {
     // Own delta from anim.timeSec, as coil does: the gallery preview hands
@@ -298,6 +373,7 @@ export const fractalGridScene = createFullscreenScene(ID, "Fractal Grid", FRAG, 
     const fold = resolveSceneSetting(ID, settingFor("fold"));
     const weight = resolveSceneSetting(ID, settingFor("weight"));
     const invert = resolveSceneSetting(ID, settingFor("invert"));
+    const iterations = resolveSceneSetting(ID, settingFor("iterations"));
 
     const bass = Math.min(1.5, Math.max(0, drives.value("dive", anim.low, DIVE_REST)));
     const stepFired = step > 0 && drives.fired("step", anim.lowOnset);
@@ -315,12 +391,16 @@ export const fractalGridScene = createFullscreenScene(ID, "Fractal Grid", FRAG, 
       invertHoldSec: beatSec > 0 ? INVERT_BARS * 4 * beatSec : INVERT_FALLBACK_SEC,
     });
 
+    const ref = orbitFor(state.targetIndex);
+    uploadOrbit(state.targetIndex, ref);
     const target = DIVE_TARGETS[state.targetIndex];
     const lineW = weight * (1 + WEIGHT_PULSE * Math.max(0, drives.value("weight", anim.beatPulse)));
     return {
-      uTargetX: target.x,
-      uTargetY: target.y,
-      uLogZoom: diveLogZoom(state.phase, targetDepth(state.targetIndex, depth)),
+      uRefLen: ref.length,
+      uTargetX: target.reHi,
+      uTargetY: target.imHi,
+      uDiveDepth: state.depth,
+      uIterTotal: diveIterations(iterations, state, ITER_MARGIN),
       uGridOffset: state.grid,
       uFoldPos: foldPosition(state.fold),
       uLineW: lineW,
@@ -328,3 +408,35 @@ export const fractalGridScene = createFullscreenScene(ID, "Fractal Grid", FRAG, 
     };
   },
 });
+
+/** createFullscreenScene plus the reference orbit texture, bound to unit 0
+ *  (the sampler's default) around the draw and unbound after, since the
+ *  gallery shares one context between scenes. extraUniforms fills it. */
+function withReferenceTexture(scene: Scene): Scene {
+  return {
+    ...scene,
+    init(ctx) {
+      scene.init(ctx);
+      refGl = ctx.gl;
+      refTex = ctx.gl.createTexture();
+      refFor = -1;
+    },
+    render(ctx, frame, viewport, palette, anim, drives) {
+      const { gl } = ctx;
+      refGl = gl;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, refTex);
+      scene.render(ctx, frame, viewport, palette, anim, drives);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    },
+    dispose(ctx) {
+      if (refTex) ctx.gl.deleteTexture(refTex);
+      refTex = null;
+      refGl = null;
+      refFor = -1;
+      scene.dispose(ctx);
+    },
+  };
+}
+
+export const fractalGridScene = withReferenceTexture(base);

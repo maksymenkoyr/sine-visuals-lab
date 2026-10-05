@@ -3,27 +3,34 @@
 The Mandelbrot set drawn as graph paper: white lines on black, every bulb
 filled with a square grid of its own that bends and crowds into fans,
 circles and petals where the orbit slows down, and turns solid white where
-the lines crowd past a pixel. The camera dives into the root of one bulb and
-back out to the whole set, again and again. The music sets how fast it
-dives; the grid steps on bass hits, folds on the bar, lines thicken on the
+the lines crowd past a pixel. The camera dives one way from the whole set
+deep into the centre of a spiral — about 3×10¹⁹ times by default — holds,
+and cuts back to the whole set for the next spiral. The music sets how fast
+it dives; the grid steps on bass hits, folds on the bar, lines thicken on the
 beat and a drop inverts the picture for a few bars. Draft scene.
 
 ## Where the code is
 
 - `src/render/scenes/fractalgrid/motion.ts` — the pure clocks, pinned by
   `tests/fractalgrid.test.ts`: `stepDive`/`createDiveState`/`DiveState`
-  (dive phase, target, grid offset, fold, inversion), `diveLogZoom` (the
-  raised-cosine round trip), `foldPosition` (the fold's ping-pong over
-  `FOLD_SPAN`), `DIVE_TARGETS` built from `cardioidRoot`/`twoBulbRoot` with a
-  depth each, `targetDepth`/`MAX_DEPTH`, and the whole-set framing
-  `HOME_X`/`HOME_HALF_W`/`HOME_HALF_H`.
-- `src/render/scenes/fractalgrid/index.ts` — the `Scene` via
-  `createFullscreenScene`: `SETTINGS`, `FRAG` (camera, the iteration with
-  dz/dc, `lineCover`'s box-filtered lines, the escaped points' edge line,
-  invert and Colours), and `extraUniforms`, which resolves settings and
-  drives into `stepDive`'s inputs once a frame. `MIN_LINE_PX` is the floor
-  that makes crowded lines read white; `ITER_CAP` times the quality proxy
-  `uDetail` caps Iterations.
+  (depth, hold, target, grid offset, fold, inversion), `diveSpeedShare`
+  (the eased ends), `diveIterations` (iterations grow with depth),
+  `foldPosition` (the fold's ping-pong over `FOLD_SPAN`), `DIVE_TARGETS`
+  (Misiurewicz points as double-double pairs via `deepTarget`, each with
+  its iterations per e-fold), `TARGET_DEPTH`/`targetDepth`/`MAX_DEPTH`, and
+  the whole-set framing `HOME_X`/`HOME_HALF_W`/`HOME_HALF_H`.
+- `src/render/scenes/fractalgrid/deep.ts` — the high-precision half:
+  double-double arithmetic (`ddAdd`, `ddMul`) and `referenceOrbit`, the
+  target's orbit the GPU perturbs around, `MAX_REF_LEN` long at most.
+- `src/render/scenes/fractalgrid/index.ts` — the `Scene`:
+  `createFullscreenScene` wrapped by `withReferenceTexture` (the orbit as an
+  RG32F texture, uploaded by `uploadOrbit` when the target changes, cached
+  per target), `SETTINGS`, `FRAG` (camera, perturbation with rebasing and
+  dz/dc in screen units, `lineCover`'s box-filtered lines, the escaped
+  points' edge line, invert and Colours), and `extraUniforms`, which
+  resolves settings and drives into `stepDive`'s inputs once a frame.
+  `MIN_LINE_PX` is the floor that makes crowded lines read white;
+  `ITER_CAP` times the quality proxy `uDetail` caps the iterations.
 - Plugs into: drives (`drives.value`/`drives.fired` for Dive speed, Step,
   Fold, Line weight and Invert), the room palette roles (`uPalGround`,
   `palRamp`, for Colours), and the quality proxy `uDetail`.
@@ -71,6 +78,18 @@ beat and a drop inverts the picture for a few bars. Draft scene.
 - **GPU** (`tools/gpu-bench.mjs --app --dpr 2`, 3024×1890): 12.7 ms per
   frame at the whole set, 14.3–15.6 ms deep in a dive, against Caustics
   14.6 ms and Crystal 28.8 ms in the same session.
+- **Deep dives** (2026-10-06): perturbation renders cleanly at every depth
+  shot, 0 to 55 e-folds (~8×10²³×), on the period-3 dendrite, the seahorse
+  valley and an elephant valley target. A float64 CPU render of the
+  seahorse target at 15 e-folds put the structure in the same place as the
+  GPU's (and its centre pixel escapes there too: a Misiurewicz point is a
+  tip, its own filaments too thin to draw). GPU at 3024×1890: 8.4 ms
+  (seahorse) and 8.7 ms (elephant, fast spin) at 45 e-folds — cheaper than
+  the whole set's 11.9 ms, because deep views are mostly fast-escaping
+  black. Synthetic feed: ~0.6 e-fold/s, 20 e-folds in 40 s.
+- **Target cost** (find_targets.py): iterations per e-fold p / ln|λ| run
+  from about 1 (period-3 dendrite) to 3.5 (the whirls); the classic seahorse
+  spiral M(23,2), |λ| 1.043, costs about 47 and was left out.
 
 ## Decisions and pivots
 
@@ -97,6 +116,17 @@ beat and a drop inverts the picture for a few bars. Draft scene.
   a fixed iteration count leaves it mid-way; diving exactly at a root at
   the cusp's depth went flat for every other root, hence a depth per target
   and Dive depth as a scale on all of them.
+- 2026-10-06 — The user asked "is it a fractal actually… why it goes in out
+  all the time" and, told the dives stopped at ~10⁴× for precision, "i
+  thought u would be able to actually go deep". Rebuilt the camera as a
+  one-way dive into Misiurewicz points (spiral centres, never run out of
+  picture) with perturbation: a double-double reference orbit on the CPU,
+  each pixel's offset on the GPU, rebasing when a pixel nears 0 or the
+  orbit ends. Double-double rather than BigInt because the build targets
+  TV browsers older than BigInt. Bulb roots dropped: they flatten within a
+  few e-folds. Targets picked from a search for cheap ones (p / ln|λ|) and
+  a shot of each at 30 e-folds: three look-alike dendrites swapped for
+  seahorse, west-seahorse and more elephant valley spirals.
 - 2026-10-05 — Tried an early stop for orbits that settle on a fixed point
   or a 2-cycle (lossless: max 20/255 on 0.8 % of pixels). Checking every
   step cut the whole-set view to 8.1 ms but slowed deep dives to 19 ms;
@@ -116,11 +146,14 @@ beat and a drop inverts the picture for a few bars. Draft scene.
 
 ## Known issues and next steps
 
-- Dive depth stops where 32-bit floats run out; the reference's opening is
-  deeper on the cusp. Perturbation (a high-precision reference orbit on the
-  CPU, deltas on the GPU) would lift that.
-- Every dive returns to the whole set; the reference also travels between
-  regions at depth.
+- `MAX_DEPTH` is where the 32-bit offsets and the double-double orbit run
+  out. Deeper needs offsets with a separate exponent and a finer orbit.
+- Deep down, the grid survives only in the tiny bulbs on the spirals; the
+  rest is white decoration on black. An outside grid (lines of equal escape
+  potential and external angle, the "potential field" a commenter on the
+  post guessed at) would keep a grid at every depth — offered, not built.
+- The filaments running into a target are too thin to draw, so the
+  decorations circle the screen centre rather than meet in it.
 - Check on real music: Dive speed's floor and gain, and whether Step on
   every bass hit is too busy.
 
@@ -131,6 +164,9 @@ beat and a drop inverts the picture for a few bars. Draft scene.
 - `fractalgrid/scripts/shot.mjs` — headless shots on the real GPU, with
   pinned settings and dive states (its header has the DEV hook it needs);
   `tile.py` sheets them; `diff.py` compares two runs shot by shot.
+- `fractalgrid/scripts/find_targets.py` — finds Misiurewicz points by
+  Newton's method in mpmath, `--search` over valleys or the chosen
+  `SELECTED`, printed as `DIVE_TARGETS` lines.
 - The reference video and the full bundle: the local `/ref` cache
   (`tools/.cache/refs/mandelgrid/`, the clip in `_downloads/`), and the
   private archive if `tools/ref-archive.py` is run.
@@ -140,14 +176,18 @@ beat and a drop inverts the picture for a few bars. Draft scene.
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/fractalgrid`.
 - Pin the camera to look at one depth: paste the hook from
   `scripts/shot.mjs`'s header, then for example
-  `node docs/scenes/fractalgrid/scripts/shot.mjs out/a --settings '{"dive":0}' --state '{"phase":0.3,"targetIndex":1}'`.
+  `node docs/scenes/fractalgrid/scripts/shot.mjs out/a --settings '{"dive":0}' --state '{"depth":30,"hold":0,"targetIndex":1}'`.
 - `/ref` bundle `mandelgrid`; the reference was fetched with `uvx yt-dlp`
   from the post URL (reddit.com itself blocks scripts).
-- Gotchas: a setting keyed `detail` would collide with the common `uDetail`
-  uniform; a per-step check in the loop costs more than it saves where
-  orbits never settle (the dives).
+- Gotchas: a setting's key becomes `u<Key>`, so `detail` would collide with
+  the common `uDetail`, and `depth` (Dive depth) owns `uDepth` — the dive's
+  own uniform is `uDiveDepth`; a shader that fails to compile falls back to
+  Spectrum (grep the shot log for "failed to start"); a per-step check in
+  the loop costs more than it saves where orbits never settle.
 
 ## History
 
 - #377 (2026-10-05) — first version: the scene, its motion module and
   tests, and this record.
+- #377 (2026-10-06) — deep zoom: one-way dives into Misiurewicz points with
+  perturbation, down to `MAX_DEPTH`.
