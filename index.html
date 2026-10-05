@@ -465,6 +465,55 @@
       body.controller #outBar {
         top: 100px;
       }
+      /* Record (src/ui/recordControls.ts), bottom right, left of the fullscreen
+       * button (#fsBtn's right offset plus its width and a gap): the shape chip
+       * and the RECORD button, squared like the scene row's. A red dot and the elapsed time while
+       * a take runs, and the button stays visible then even when the chrome
+       * idles, so a performer can see they are recording. A phone's controller has no
+       * canvas of its own to record. */
+      #recRow {
+        position: fixed;
+        bottom: 16px;
+        right: 100px;
+        z-index: 5;
+        display: flex;
+        gap: 4px;
+      }
+      #recRow .iconBtn {
+        position: static;
+        width: auto;
+        padding: 0 12px 0 10px;
+        border-radius: 3px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        white-space: nowrap;
+      }
+      #recBtn.recording {
+        color: #fff;
+        border-color: rgba(239, 68, 68, 0.7);
+      }
+      .recDot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 2px;
+        border-radius: 50%;
+        background: #ef4444;
+        animation: recPulse 1.2s ease-in-out infinite;
+      }
+      @keyframes recPulse {
+        50% { opacity: 0.35; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .recDot { animation: none; }
+      }
+      #recAspectBtn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      body.controller #recRow {
+        display: none;
+      }
       body.chrome-idle #outBar:not(.attn) {
         opacity: 0;
         pointer-events: none;
@@ -473,6 +522,77 @@
         .outFace {
           width: 52px;
           height: 52px;
+        }
+      }
+      /* Held effects (src/ui/effectControls.ts), bottom centre: Blackout,
+       * Strobe, Freeze, Invert, Mirror, each on only while its button or key is
+       * held. Up whenever a scene is, with or without an output window (unlike
+       * the Cue/Play bar above). A lit button is an engaged effect; the bar
+       * stays visible through the idle fade while one is (.attn). */
+      #fxBar {
+        position: fixed;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        z-index: 6;
+        display: none;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+        max-width: calc(100vw - 32px);
+        transition: opacity 0.4s;
+      }
+      .fxKey {
+        min-width: 78px;
+        height: 40px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(8, 11, 10, 0.3);
+        -webkit-backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        color: rgba(255, 255, 255, 0.8);
+        font-family: "Share Tech Mono", ui-monospace, monospace;
+        text-align: center;
+        cursor: pointer;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        transition: background 0.1s, color 0.1s, border-color 0.1s, box-shadow 0.1s;
+      }
+      .fxKey b {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        line-height: 1.1;
+      }
+      .fxKey small {
+        display: block;
+        margin-top: 2px;
+        font-size: 9px;
+        letter-spacing: 0.2em;
+        opacity: 0.6;
+      }
+      .fxKey:hover {
+        border-color: rgba(255, 255, 255, 0.4);
+      }
+      .fxKey.on {
+        background: #fff;
+        border-color: #fff;
+        color: #0a0d0c;
+        box-shadow: 0 0 18px rgba(255, 255, 255, 0.55);
+      }
+      body.chrome-idle #fxBar:not(.attn) {
+        opacity: 0;
+        pointer-events: none;
+      }
+      @media (max-width: 520px) {
+        .fxKey {
+          min-width: 60px;
+          padding: 0 6px;
         }
       }
       #stopBtn::before {
@@ -498,7 +618,7 @@
       body.chrome-idle {
         cursor: none;
       }
-      body.chrome-idle .iconBtn,
+      body.chrome-idle .iconBtn:not(.recording),
       body.chrome-idle #roomCode,
       body.chrome-idle #sceneVersion {
         opacity: 0;
@@ -737,6 +857,14 @@
       </div>
       <span id="outState"></span>
       <button id="takeBtn" type="button" title="Drop your unplayed changes and show what is on the Main screens now">TAKE MAIN</button>
+    </div>
+    <div id="fxBar"></div>
+    <!-- Record (src/ui/recordControls.ts), bottom right beside the fullscreen
+         button: not in the scene-nav row, whose end runs under the CUE / PLAY
+         bar once an output is open. -->
+    <div id="recRow">
+      <button id="recAspectBtn" class="iconBtn">SCREEN</button>
+      <button id="recBtn" class="iconBtn" aria-pressed="false">RECORD</button>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">

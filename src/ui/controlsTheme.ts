@@ -481,6 +481,12 @@ body.vc-keys-reveal [data-keycap]::after {
  * is focusable — a tap unfolds its hint the way tapping a slider does. The
  * hover/focus ring below is the focus indicator; no second outline. */
 .vc-row[tabindex]:focus { outline: none; }
+/* MIDI learn (midiCard.ts): while a session is on, every row a controller can
+ * be mapped to shows a dashed edge and a pointing cursor, and the row picked
+ * for the next knob keeps a solid one. */
+.vc-midi-learning [data-midi-row] { outline: 1px dashed color-mix(in srgb, var(--vc-accent) 70%, transparent); outline-offset: 1px; cursor: crosshair; }
+.vc-midi-learning [data-midi-row] * { cursor: crosshair; }
+.vc-midi-learning [data-midi-row].vc-midi-picked { outline: 2px solid var(--vc-accent); }
 .vc-row:hover, .vc-row:focus-within {
   background-color: color-mix(in srgb, var(--vc-accent) 6%, transparent);
   box-shadow:

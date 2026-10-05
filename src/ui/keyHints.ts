@@ -1,3 +1,5 @@
+import { EFFECTS } from "../render/heldEffects.ts";
+import { effectShortcutId } from "./effectControls.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 
 /**
@@ -16,7 +18,8 @@ import { hideTooltip, showTooltip } from "./tooltip.ts";
  * control that already shows its own key some other way skips it — the
  * .vc-block digit badge (deviceMenu.ts's markBlock) carries `data-key`
  * (for the hover tooltip) but never `data-keycap`, since it's already
- * showing its own digit as plain text. A control that prints its own key
+ * showing its own digit as plain text; a Set pad (ui/setCard.ts) does the
+ * same under `data-key="pad"`. A control that prints its own key
  * and has nothing to add by hover also wears `data-key-shown` — the pop-out
  * bar's CUE and PLAY pads (index.html's #outBar), whose key sits under each
  * pad — and gets no hover/focus badge either: the badge would only repeat
@@ -75,7 +78,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "O", id: "solo", label: "Solo", hint: "Show only the pinned setting (or the Scene card)" },
   { key: "F", id: "fullscreen", label: "Fullscreen", hint: "Fullscreen" },
   { key: "Tab", id: "tab", label: "Next control", hint: "Next control (⇧ previous)" },
-  { key: "1–9", id: "block", label: "Jump to block", hint: "Jump to a numbered block" },
+  { key: "⇧ 1–9", id: "block", label: "Jump to block", hint: "Jump to a numbered block (Shift + a digit)" },
   { key: "A", id: "auto", label: "Auto", hint: "Auto-tune the focused row" },
   { key: "R", id: "reset", label: "Reset", hint: "Reset the focused row" },
   { key: "T", id: "mute", label: "Mute", hint: "Mute the focused row, press again to restore" },
@@ -88,6 +91,10 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "⌃ Ctrl", id: "tap", label: "Tap tempo", hint: "Tap on every beat to set the tempo (the Tempo card's Tap does the same)" },
   { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
   { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
+  { key: "1–9", id: "pad", label: "Fire pad", hint: "Fire pad 1–9 of the Set, panel open or closed" },
+  // The held effects (render/heldEffects.ts): one row per effect, tagged on its
+  // on-screen button in #fxBar (ui/effectControls.ts).
+  ...EFFECTS.map((e) => ({ key: e.key, id: effectShortcutId(e.id), label: e.label, hint: e.hint })),
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {
@@ -104,14 +111,17 @@ let hovered: HTMLElement | null = null;
 
 /** "<label> · <key>" for anything in SHORTCUTS, or "Jump to block · <n>"
  *  for a .vc-block badge, which has no SHORTCUTS entry of its own (many
- *  badges, one shared "block" id, each with a different digit). */
+ *  badges, one shared "block" id, each with a different digit) — likewise
+ *  a Set pad, which names its own digit. */
 function hintLine(el: HTMLElement): string | null {
   const id = el.dataset.key;
   if (!id || el.hasAttribute("data-key-shown")) return null;
   if (id === "block") {
     const digit = el.textContent?.trim();
-    return digit ? `Jump to block · ${digit}` : null;
+    return digit ? `Jump to block · ⇧ ${digit}` : null;
   }
+  // The Set card's pads: each one answers to its own digit (setCard.ts).
+  if (id === "pad") return el.dataset.padKey ? `Fire pad · ${el.dataset.padKey}` : null;
   const s = shortcutFor(id);
   // The gear turns into a close cross while the panel is open (index.html's
   // #menuBtn rules) — the hint follows it.

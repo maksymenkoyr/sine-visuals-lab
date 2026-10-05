@@ -12,8 +12,8 @@ import type { MainPlay } from "./mainPlay.ts";
  * bar's words:
  *
  *  - Play sends this device's look to Main: a tap switches every Main screen at
- *    once, a hold glides there within a scene (a scene change always switches
- *    at once). The glide is walked by the TV and the pop-out; a laptop's or an
+ *    once, a hold glides there within a scene (a scene change crossfades over one
+ *    bar instead: render/compositor.ts). The glide is walked by the TV and the pop-out; a laptop's or an
  *    iPad's own main window follows a glide with a plain switch (known limit).
  *  - There is no Cue for the room: `canCue` is false, so the bar hides CUE
  *    unless the pop-out (which does have one) is open next to it.
@@ -98,6 +98,8 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
     // the Room view (server/roomDevices.ts `quality`).
     pushFrame() {},
     sendPower() {},
+    // Held effects are not part of a TV's look; they reach the pop-out only.
+    sendEffects() {},
     outputStatus: () => null,
   };
 }
@@ -164,6 +166,7 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
     },
     pushFrame: (frame, extras, params) => first.pushFrame(frame, extras, params),
     sendPower: () => first.sendPower(),
+    sendEffects: (effects) => first.sendEffects(effects),
     outputStatus: () => first.outputStatus(),
   };
 }

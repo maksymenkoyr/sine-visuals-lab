@@ -1,5 +1,6 @@
 import type { SilenceGateMarks } from "../audio/silenceGate.ts";
 import type { FeatureFrame } from "../audio/types.ts";
+import { NO_EFFECTS, type HeldEffects } from "../render/heldEffects.ts";
 import {
   createCueController,
   createOutputPresence,
@@ -79,8 +80,9 @@ export interface OutputBridge {
   onStatus(cb: (s: OutputStatus) => void): void;
   setCue(on: boolean): void;
   /** Send the preview across. With `glideMs` > 0 the output arrives over that
-   *  long — but only within one scene (never across a scene change, which goes
-   *  instantly). Returns whether a glide was actually asked for. */
+   *  long: its settings glide within one scene, and a different scene
+   *  crossfades over it (render/crossfade.ts). Returns whether the output was
+   *  asked to take that long. */
   go(glideMs?: number): boolean;
   update(nowMs: number): void;
   pushFrame(
@@ -91,6 +93,10 @@ export interface OutputBridge {
   /** Send the output its Quality / Energy saving now (it also gets them on
    *  every heartbeat reply). No-op while no output is open. */
   sendPower(): void;
+  /** The held effects now engaged on this window (render/heldEffects.ts), sent
+   *  on as their own message — never part of the look, never held by Cue. Kept
+   *  and re-sent with every heartbeat reply. No-op while no output is open. */
+  sendEffects(effects: HeldEffects): void;
   /** The output's last reported render readouts, null while it is closed. */
   outputStatus(): OutputRenderStatus | null;
   /** Drop this device's unplayed edits and show what Main shows now (the room
@@ -115,7 +121,15 @@ export interface OutputBridgeOptions {
   power: () => OutputPower;
 }
 
-export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
+/** The pop-out's own bridge: an `OutputBridge` that also hands out the output's
+ *  Window, so the clip recorder (ui/clipRecorder.ts) can reach its canvas. The
+ *  room's bridge has no such window. */
+export interface PopOutBridge extends OutputBridge {
+  /** The output window while it is open and reachable, else null. */
+  popupWindow(): Window | null;
+}
+
+export function createOutputBridge(opts: OutputBridgeOptions): PopOutBridge {
   const { transport } = opts;
   const storage = opts.storage ?? localStorage;
   const presence = createOutputPresence();
@@ -130,6 +144,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   const listeners: Array<(s: OutputStatus) => void> = [];
   let win: Window | null = null;
   let latestParams: OutputParams = { sens: 1, exp: 1, smoothing: 1 };
+  let latestEffects: HeldEffects = NO_EFFECTS;
   let lastPollMs = -Infinity;
   let lastStatusKey = "";
   let lastStatus: OutputRenderStatus | null = null;
@@ -171,6 +186,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       cue.resync();
     }
     transport.post({ t: "power", power: opts.power() });
+    transport.post({ t: "effects", effects: latestEffects });
   });
 
   function status(): OutputStatus {
@@ -195,6 +211,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
         ? opts.openWindow()
         : window.open(OUTPUT_URL + qualityPinQuery(), OUTPUT_WINDOW_NAME, "popup=yes,width=1280,height=720");
     },
+    popupWindow: () => (win && !win.closed ? win : null),
     status,
     onStatus: (cb) => listeners.push(cb),
     setCue(on) {
@@ -204,9 +221,9 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     },
     go(glideMs) {
       preview();
-      // A glide never crosses a scene change: that goes instantly.
+      // Across a scene change the length becomes a crossfade on the output.
       const held = cue.held();
-      const glide = !!glideMs && glideMs > 0 && !cue.cueOn() && held !== null && held.scene === opts.look().scene;
+      const glide = !!glideMs && glideMs > 0 && !cue.cueOn() && held !== null;
       cue.go(glide ? glideMs : undefined);
       emitIfChanged();
       return glide;
@@ -222,6 +239,10 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     },
     sendPower() {
       if (outputOpen) transport.post({ t: "power", power: opts.power() });
+    },
+    sendEffects(effects) {
+      latestEffects = effects;
+      if (outputOpen) transport.post({ t: "effects", effects });
     },
     outputStatus: () => (outputOpen ? lastStatus : null),
     pushFrame(frame, extras, params) {

@@ -69,6 +69,21 @@ describe("noteMouseUse tips", () => {
     noteMouseUse(id);
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it("lists every held effect under the id its on-screen button carries", async () => {
+    const { SHORTCUTS } = await load();
+    const { EFFECTS } = await import("../src/render/heldEffects.ts");
+    const { effectShortcutId } = await import("../src/ui/effectControls.ts");
+    for (const e of EFFECTS) {
+      expect(SHORTCUTS.find((s) => s.id === effectShortcutId(e.id))?.key).toBe(e.key);
+    }
+  });
+
+  it("never gives two rows the same single-letter key", async () => {
+    const { SHORTCUTS } = await load();
+    const letters = SHORTCUTS.map((s) => s.key).filter((k) => k.length === 1);
+    expect(new Set(letters).size).toBe(letters.length);
+  });
 });
 
 describe("hover badge", () => {
