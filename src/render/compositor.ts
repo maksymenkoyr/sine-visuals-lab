@@ -3,7 +3,7 @@ import type { AnimFrame } from "./animClock.ts";
 import { createCrossfade, type Crossfade, type CrossfadeOptions, type CrossfadeView } from "./crossfade.ts";
 import type { SceneDrives } from "./drives.ts";
 import { createFullscreenQuad, createProgram, drawFullscreenQuad, type GLProgram } from "./gl.ts";
-import { effectLook, NO_EFFECTS, stepFade, strobeBeatPhase, type EffectLook, type HeldEffects } from "./heldEffects.ts";
+import { effectLook, NO_EFFECTS, stepFade, type EffectLook, type HeldEffects } from "./heldEffects.ts";
 import type { Palette } from "./palette.ts";
 import type { Scene, SceneContext, Viewport } from "./scene.ts";
 
@@ -289,11 +289,7 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
 
       try {
         ensureProgram();
-        const look = effectLook(
-          fx,
-          blackLevel,
-          strobeBeatPhase({ tempoOn: f.anim.metronomeOn, metronomePhase: f.anim.metronomePhase, timeSec: f.anim.timeSec }),
-        );
+        const look = effectLook(fx, blackLevel);
         if (fx.freeze && frozen) {
           pass(null, frozen, frozen, 1, look);
           return { governable: false };

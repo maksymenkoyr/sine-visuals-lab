@@ -1,8 +1,10 @@
 /**
  * The held effects (the list is EFFECTS below) as plain data and pure
  * functions. Each is on only while its key or on-screen button is held,
- * except one marked `latch`, which a press turns on and the next press turns
- * off. They are not part of the look: never saved, never held by Cue, never
+ * except one marked `flash` (Strobe), which a press turns on for
+ * STROBE_FLASH_MS and which then goes off by itself, however long the press:
+ * one flash per tap, so the strobing is the user's own tapping. They are not
+ * part of the look: never saved, never held by Cue, never
  * in a Look's share code. The main window keeps its own set
  * (ui/effectControls.ts) and sends it to the pop-out output as its own message
  * (net/outputSync.ts's `effects`, like `power`); src/render/compositor.ts is
@@ -25,13 +27,14 @@ export interface EffectDef {
   key: string;
   /** What the keys card says it does. */
   hint: string;
-  /** A press turns it on and the next press off, instead of on only while held. */
-  latch?: boolean;
+  /** A press turns it on for STROBE_FLASH_MS, then it goes off by itself,
+   *  instead of staying on while held. */
+  flash?: boolean;
 }
 
 export const EFFECTS: readonly EffectDef[] = [
   { id: "blackout", label: "Blackout", code: "KeyQ", key: "Q", hint: "Hold to fade the picture to black" },
-  { id: "strobe", label: "Strobe", code: "KeyW", key: "W", hint: "Press for white flashes on every eighth note, press again to stop", latch: true },
+  { id: "strobe", label: "Strobe", code: "KeyW", key: "W", hint: "Tap for one white flash, keep tapping to strobe", flash: true },
   { id: "freeze", label: "Freeze", code: "KeyE", key: "E", hint: "Hold to freeze the picture" },
   { id: "invert", label: "Invert", code: "KeyD", key: "D", hint: "Hold for negative colours" },
 ];
@@ -71,33 +74,10 @@ export function stepFade(level: number, on: boolean, dtMs: number): number {
   return on ? Math.min(1, level + step) : Math.max(0, level - step);
 }
 
-/** Flashes per (quarter-note) beat: an eighth note is half a beat. */
-export const STROBE_FLASHES_PER_BEAT = 2;
-/** How much of each eighth note the flash stays lit. */
-export const STROBE_ON_FRACTION = 0.3;
+/** How long one Strobe flash stays lit. */
+export const STROBE_FLASH_MS = 75;
 /** How white a flash gets (1 = pure white). */
 export const STROBE_PEAK = 0.9;
-/** The tempo a flash follows while there is no settled one to lock to. */
-export const STROBE_FALLBACK_BPM = 120;
-
-/** The Strobe flash level (0..STROBE_PEAK) for a position within the current
- *  beat, `beatPhase01` in [0,1): lit at the start of each eighth note, dark for
- *  the rest. */
-export function strobeLevel(beatPhase01: number): number {
-  const p = beatPhase01 * STROBE_FLASHES_PER_BEAT;
-  const within = p - Math.floor(p);
-  return within < STROBE_ON_FRACTION ? STROBE_PEAK : 0;
-}
-
-/** The beat position Strobe locks to: the metronome's own while it has a
- *  settled tempo (the flashes then land on the beat clock the scenes use),
- *  else a free-running clock at STROBE_FALLBACK_BPM so the effect still works
- *  with no music. */
-export function strobeBeatPhase(clock: { tempoOn: boolean; metronomePhase: number; timeSec: number }): number {
-  if (clock.tempoOn) return clock.metronomePhase;
-  const beats = (clock.timeSec * STROBE_FALLBACK_BPM) / 60;
-  return beats - Math.floor(beats);
-}
 
 /** The values the compositor's effect pass takes, from the engaged set and the
  *  smoothed blackout level. */
@@ -109,10 +89,10 @@ export interface EffectLook {
   black: number;
 }
 
-export function effectLook(e: HeldEffects, blackLevel: number, beatPhase01: number): EffectLook {
+export function effectLook(e: HeldEffects, blackLevel: number): EffectLook {
   return {
     invert: e.invert,
-    flash: e.strobe ? strobeLevel(beatPhase01) : 0,
+    flash: e.strobe ? STROBE_PEAK : 0,
     black: blackLevel,
   };
 }
