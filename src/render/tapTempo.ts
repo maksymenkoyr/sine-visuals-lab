@@ -29,10 +29,13 @@ import { RESYNC_RATIO } from "./metronome.ts";
  * keeps the most taps wins, so a stray first tap can't throw off the rest;
  * then every tap is numbered again against that first line (the closest
  * tap wins a number) and the line fitted once more. Taps are beats, not bar
- * starts: B still says where the 1 is. A tempo outside the tracker's own
- * range (BPM_MIN..BPM_MAX) is halved or doubled into it rather than clamped:
- * the tracker can't hold a tempo outside it, and halving or doubling keeps
- * every tapped beat on a beat line, where a clamp would tick off the taps.
+ * starts: B still says where the 1 is. The result has to sit in the
+ * tracker's own range (BPM_MIN..BPM_MAX), which it can't hold a tempo
+ * outside of. A tap just past an end — within metronome.ts's RESYNC_RATIO,
+ * its line for "the same tempo" — is clamped to it; one further out is
+ * halved or doubled into it instead, which keeps every tapped beat on a beat
+ * line where a clamp would tick off the taps (eighth notes tapped on a fast
+ * song, a very slow song tapped at its own pace).
  *
  * THE STORE. Once TAP_MIN_TAPS taps fit, and again on every tap after that,
  * the fitted tempo and the time of the latest tapped beat take effect:
@@ -59,17 +62,17 @@ import { RESYNC_RATIO } from "./metronome.ts";
  *    everything finer still comes from the music: the clock eases to the
  *    reading's exact tempo, the comb corrects the phase, the metronome
  *    follows both, and the guided tempo follows the metronome as it drifts.
+ *    When the reading sits at twice the tap, the comb is also told to judge
+ *    the hits against every half beat (beatClock.setDivision — see that
+ *    file's header for the measured reason), so the music's faster pulse
+ *    still corrects the timing but the tap alone says which pulse is the
+ *    beat.
  * Not inside the estimator itself: it runs on the audio thread, and its
  * reading rides the wire to every paired device, which the beat keys never
  * touch. Guidance ends (follow()) when the metronome stops — the tracker
  * hears no tempo at all — or retunes to a tempo outside the family, so the
  * existing retune rule (tempoSettle.ts's RETUNE_SURE_SEC/RETUNE_UNSURE_SEC)
  * decides when the music has really moved on; there is no timer of its own.
- *
- * One limit: tapped at half the tempo of music whose kicks fall on every
- * beat of the faster tempo, the comb sees as many kicks between the tapped
- * beats as on them, and may pull the beat half a beat off the taps. ÷2 ([)
- * on the faster tempo is the tool for that.
  */
 
 /** Taps that have to fit before a tap tempo takes effect. */
@@ -220,8 +223,9 @@ export interface TapEstimate {
 function estimateFromFit(fit: TapFit): TapEstimate | null {
   if (fit.kept < TAP_MIN_TAPS || !(fit.beat > 0)) return null;
   let bpm = 60000 / fit.beat;
-  while (bpm > BPM_MAX) bpm /= 2;
-  while (bpm < BPM_MIN) bpm *= 2;
+  if (bpm > BPM_MAX * (1 + RESYNC_RATIO)) while (bpm > BPM_MAX) bpm /= 2;
+  else if (bpm < BPM_MIN / (1 + RESYNC_RATIO)) while (bpm < BPM_MIN) bpm *= 2;
+  else bpm = Math.min(BPM_MAX, Math.max(BPM_MIN, bpm));
   return { bpm, anchorMs: fit.anchor };
 }
 
@@ -311,6 +315,9 @@ export interface TapSeed {
 export interface TapGuide {
   /** True from a tap taking effect until the tracker moves on (or Shift+B). */
   readonly guided: boolean;
+  /** 2 while the last fold() found the reading at twice the guided tempo,
+   *  else 1 — beatClock.setDivision's argument (see the file header). */
+  readonly division: 1 | 2;
   /** Reads the store once per tick. A tap tempo that took effect since the
    *  last call comes back as the tempo and the beat phase at `atMs` (on
    *  performance.now()'s clock) for the caller to seed; otherwise null. The
@@ -339,10 +346,16 @@ export function createTapGuide(): TapGuide {
 
   function setGuided(on: boolean): void {
     (guide as { guided: boolean }).guided = on;
+    if (!on) setDivision(1);
+  }
+
+  function setDivision(division: 1 | 2): void {
+    (guide as { division: 1 | 2 }).division = division;
   }
 
   const guide: TapGuide = {
     guided: false,
+    division: 1,
     poll(atMs: number): TapSeed | null {
       const s = getTapTempo();
       if (lastSeq === null) {
@@ -362,10 +375,16 @@ export function createTapGuide(): TapGuide {
       return { bpm: s.bpm, beatPhase: wrap01(((atMs - s.anchorMs) * s.bpm) / 60000) };
     },
     fold(rawBpm: number): number {
-      if (!guide.guided || !(rawBpm > 0)) return rawBpm;
-      for (const ratio of TAP_FAMILY) {
-        if (Math.abs(rawBpm / (ref * ratio) - 1) <= RESYNC_RATIO) return rawBpm / ratio;
+      if (!guide.guided) return rawBpm;
+      if (rawBpm > 0) {
+        for (const ratio of TAP_FAMILY) {
+          if (Math.abs(rawBpm / (ref * ratio) - 1) <= RESYNC_RATIO) {
+            setDivision(ratio === 2 ? 2 : 1);
+            return rawBpm / ratio;
+          }
+        }
       }
+      setDivision(1);
       return rawBpm;
     },
     follow(running: boolean, metronomeBpm: number): void {

@@ -374,13 +374,15 @@ export function createAnimClock(): AnimClock {
       // clock advances, so its phase is the tapped beat's at the previous
       // tick: this tick's advance() carries both clocks on to now, and a
       // tapped beat falling inside it ticks like any other. `bpmIn` is
-      // frame.bpm itself unless a tap guides the tracker.
+      // frame.bpm itself, and the comb judges whole beats, unless a tap
+      // guides the tracker.
       const tap = tapNowMs !== undefined ? tapGuide.poll(tapNowMs - dtSec * 1000) : null;
       if (tap) {
         beat.seed(tap.bpm, tap.beatPhase);
         metronome.seed(tap.bpm, tap.beatPhase, beat.beats);
       }
       const bpmIn = tapGuide.fold(frame.bpm);
+      beat.setDivision(tapGuide.division);
       // See beatClock.ts's own file header and its advance()'s doc: the
       // fixed-hop feed (app.ts's solo mode, when a tempo source is live)
       // replaces the render-tick beatFired/hitWeight pair entirely rather
