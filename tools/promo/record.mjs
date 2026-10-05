@@ -162,7 +162,7 @@ const installTracker = (page, kind) => page.evaluate((kind) => {
     wire: () => { const e = document.querySelector(".vc-row.vc-drive-pinned"); const r = e && R(e); return r && vis(r) ? union([r]) : null; },
     hits: () => union(["Envelope", "Beat", "Low", "Mid", "High"].map(row)),
     master: () => union([card("Scale")]),
-    cuep: () => union(["CUE", "PLAY"].map((t) => { const e = byText(t)[0]; const b = e && (e.closest("button") || e.parentElement); return b ? R(b) : null; })),
+    cuep: () => union(["cueBtn", "goBtn"].map((id) => { const e = document.getElementById(id); const r = e && R(e); return r && vis(r) ? r : null; })),
     room: () => { const g = (t) => { const e = byText(t)[0]; if (!e) return null; let n = e; for (let i = 0; i < 3 && n.parentElement; i++) n = n.parentElement; return R(n); }; const m = byText("the room's look")[0]; return union([m && R(m.parentElement), g("Mac"), g("TV")]); },
   }[kind];
   window.__trk = [];
