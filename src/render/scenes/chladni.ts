@@ -17,6 +17,21 @@ import {
   ZONE_AXIS_MAX,
   ZONE_DRIVE_GLSL,
 } from "./chladniSand.ts";
+import {
+  FUNDAMENTAL_ORDER,
+  MODE_TABLE,
+  PLATE_SHAPES,
+  SQUARE,
+  bakePlate,
+  plateArea,
+  plateModeTable,
+  plateOutline,
+  type PlateMode,
+} from "./chladniPlates.ts";
+
+import { GRIT_CHALK, GRIT_RAMP_LO, GRIT_RAMP_SPAN, powderInk } from "./chladniPowder.ts";
+
+export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladniPlates.ts";
 
 // A Chladni plate, simulated rather than painted: a plate whose resonant
 // modes are each driven by the music's energy at that mode's own resonant
@@ -27,8 +42,8 @@ import {
 // mode takes over. Contrast cymatics.ts, which is an analytic circular-plate
 // sum rendered per pixel; this one has state.
 //
-// The plate. Plate space is p in [-1,1]^2. The mode shape is the standard
-// square-plate approximation
+// The plate. Plate space is p in [-1,1]^2. The square's mode shape is the
+// standard square-plate approximation
 //     chladni(p; n, m, s) = cos(n pi x) cos(m pi y) + s cos(m pi x) cos(n pi y)
 // with s = +/-1 picking one of the two symmetry families (the mixing of the
 // two degenerate modes is real physics — it's where the diagonal symmetry
@@ -36,11 +51,34 @@ import {
 // zero, so buildModeTable only holds pairs with n < m, sorted by n^2 + m^2,
 // which is also each mode's resonant frequency relative to the fundamental.
 //
+// Other plates. The Plate setting picks one of PLATE_SHAPES; chladniPlates.ts
+// has each shape's figures and their physics (the round plate is a true free
+// plate; the polygons are free-edge membranes, the usual stand-in where no
+// plate solution exists; Clamped is the square with held edges). The square
+// stays analytic in the shader, exactly as before. Every other shape's
+// figures are baked when the shape is picked (or at init if a saved look
+// picked it; only the plate on screen keeps its atlas), into a TEXTURE_2D_ARRAY (one layer per figure;
+// R = f, G,B = its gradient, at ATLAS_SIDE texels a side over plate space,
+// RGBA16F uploaded from floats: filterable in core WebGL2, and never
+// rendered into, so no float-colour extension is needed), and field() sums
+// the active layers instead of the cosines; uModes then carries each active
+// figure's layer. Each layer peaks at |f| = 2 like one square mode, so the
+// sand rule below needs no change per plate. Each shape gets its own createPlateResponse (switching
+// shape starts that shape's response fresh). A non-square plate always keeps
+// its true shape, fitted like the square plate (SQUARE_PLATE_HALF) and
+// centred; True shape (key squarePlate, kept for saved looks) only chooses
+// between that and the stretched full-screen square. Zoom scales every plate
+// (plateHalf), and above 1 the drawn grains with it, a closer look (so the
+// fixed grain pool still covers the plate). Sand respawns evenly over the shape's area (respawnOnPlate)
+// and spills off its true rim (insidePlate); the plate surface, glow and rim
+// follow the true outline (plateGauge).
+//
 // The response. A real plate under broadband music answers as a sum of
 // every mode near any energy in the signal, each ringing with its own
 // damping — a pure tone gives one clean figure, a chord blurs neighbours
 // together. createPlateResponse models exactly that: each table mode has a
-// resonant frequency f1 * (n^2 + m^2) / 5 (Pattern complexity sets f1 —
+// resonant frequency f1 * (n^2 + m^2) / FUNDAMENTAL_ORDER on the square, f1
+// times its table ratio on the other plates (Pattern complexity sets f1 —
 // physically the plate's size), is excited by the band energy under a
 // resonance window at that frequency (Resonance sets the window's
 // sharpness), and rings with a fast attack and a Ring-controlled release.
@@ -100,6 +138,48 @@ import {
 // WEIGHT_REF every weight factor is exactly 1, which is the plate as it was
 // before grains had a weight.
 //
+// Powder colour shows that sorting. Grains lighter than POWDER_SPLIT (the
+// weight where, on a CPU port of the sim, grains stop ending up on the lines
+// and start heaping between them) are drawn in a second colour, with a soft
+// edge POWDER_EDGE wide so a mixed bed reads as two materials. The colour is
+// one per palette, picked in chladniPowder.ts to stand apart from every colour
+// grit takes. At 0 the grain colour is exactly what it was; the default bed
+// has almost no grains that light, so the dial shows only on a light, mixed
+// bed (the setting's description says how to get one). Powder is never
+// clipped toward white by brightness, which would wash it into the grit's
+// colour: it is scaled back so its brightest shade just fits, so past that
+// point Grain brightness stops brightening it (only Flash and a toss still
+// clip it, briefly). The colour is drawing only: the sim never reads it.
+//
+// The toss. Sand on a nodal line never hops, so no kick can disturb a formed
+// figure; at a drop (the Toss jack's edge, the app's Drop signal by default)
+// the whole bed is thrown up instead, lands scattered, and the next figure
+// grows out of an even spread. It doesn't rebuild faster than the plain
+// drift; it changes how the change looks. nextToss starts one, at most once
+// per TOSS_REFRACTORY_SEC, with the Toss setting as its power, and never
+// while the audio clock is younger than TOSS_ARM_SEC: frame.time is the
+// capture's clock, restarted at 0 by every new source, and the app's Drop
+// fires right as the first figure forms. advanceToss steps it per frame and
+// drops it if that clock goes back past its start, so an old toss can never
+// replay on a new source's clock. The shaders' copy of the flight constants is
+// printed at full precision (glslFloat) so it lands every grain the TS
+// tossLongestFlight window covers. The flight is
+// stateless, because the RGBA8 positions have no spare bits: a toss is a
+// time and a seed, and each grain's flight time, height and landing offset
+// are hashed from its texel and that seed (tossFlight), so the sim and the
+// point pass agree without storing anything. While a grain is in the air
+// the sim leaves its stored spot alone (where it took off); on the one sim
+// pass where its flight ends it is put down at its landing spot
+// (tossLanding, which keeps it on the plate's true outline, whatever the
+// shape: a landing past the rim is reflected back in across it,
+// foldIntoPlate, before any fallback). The point pass draws it along
+// the arc between the two: sideways on the square of the flight's progress,
+// so the bed lifts off as one shape and spreads on the way down; up the
+// screen on a parabola; bigger and brighter the higher it is. Grit in the
+// air runs up the palette's ramp; a powder grain keeps its powder colour,
+// lifted only POWDER_THROWN_LIFT of the way to white, so the two stay apart
+// in flight.
+//
 // Grains never interact — the sim has no notion of a grain's radius, so
 // nothing stops two from occupying the same spot. Rendered at a fixed count,
 // a big Grain size therefore just paints over itself: covered area grows
@@ -123,52 +203,28 @@ import {
 // dtSec under-counts the wall time a rendered frame actually covers.
 const ID = "chladni";
 
-/** One plate mode: the (n, m) orders and the symmetry-family sign. */
-export interface PlateMode {
-  n: number;
-  m: number;
-  sign: 1 | -1;
-}
-
-/** Highest mode order the table reaches. (8, 9) is already a fine lattice
- *  at TV distance; past that the nodal cells fall below grain size. */
-export const MAX_ORDER = 9;
-
-/** Every (n, m) with 1 <= n < m <= maxOrder, ascending by n^2 + m^2 (the
- *  square plate's eigenfrequency proxy), signs alternating so neighbouring
- *  resonances come from both symmetry families. See the file header for
- *  why n == m is excluded. */
-export function buildModeTable(maxOrder: number = MAX_ORDER): PlateMode[] {
-  const pairs: { n: number; m: number }[] = [];
-  for (let n = 1; n < maxOrder; n++) {
-    for (let m = n + 1; m <= maxOrder; m++) pairs.push({ n, m });
-  }
-  pairs.sort((a, b) => a.n * a.n + a.m * a.m - (b.n * b.n + b.m * b.m) || a.n - b.n);
-  return pairs.map((p, i) => ({ ...p, sign: i % 2 === 0 ? -1 : 1 }));
-}
-
-export const MODE_TABLE: readonly PlateMode[] = buildModeTable();
-
 /** Side of the square position texture that holds `count` grains. */
 export function grainTextureSide(count: number): number {
   return Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count))));
 }
 
-// The plate's fundamental — the (1, 2) mode's resonance — across the
-// Pattern complexity slider. Every mode sits at (n^2 + m^2) / FUNDAMENTAL_ORDER
-// times the fundamental, so complexity slides the whole table across the band
+// The plate's fundamental — its lowest table mode's resonance, the square's
+// (1, 2) — across the Pattern complexity slider. Every mode sits at its
+// `ratio` times the fundamental ((n^2 + m^2) / FUNDAMENTAL_ORDER on the
+// square), so complexity slides the whole table across the band
 // ladder: a small stiff plate (0) needs treble to reach even its low modes,
 // a big plate (1) has its finest lattices ringing already in the mids.
 export const FUNDAMENTAL_HZ_SMALL = 560;
 export const FUNDAMENTAL_HZ_LARGE = MIN_HZ;
-/** n^2 + m^2 of the fundamental (1, 2) mode. */
-const FUNDAMENTAL_ORDER = 5;
 
 /** Resonant frequency of `mode` on a plate at `complexity` (0..1). */
 export function modeFrequencyHz(mode: PlateMode, complexity: number): number {
   const c = Math.max(0, Math.min(1, complexity));
   const f1 = FUNDAMENTAL_HZ_SMALL * Math.pow(FUNDAMENTAL_HZ_LARGE / FUNDAMENTAL_HZ_SMALL, c);
-  return (f1 * (mode.n * mode.n + mode.m * mode.m)) / FUNDAMENTAL_ORDER;
+  // The square's own arithmetic, bit for bit as it always was; the baked
+  // plates carry their ratio.
+  if (mode.layer < 0) return (f1 * (mode.n * mode.n + mode.m * mode.m)) / FUNDAMENTAL_ORDER;
+  return f1 * mode.ratio;
 }
 
 /** Where `hz` falls on the band ladder, in band units: MIN_HZ -> 0,
@@ -312,6 +368,10 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
         slot.n = mode.n;
         slot.m = mode.m;
         slot.sign = mode.sign;
+        slot.ratio = mode.ratio;
+        slot.cells = mode.cells;
+        slot.layer = mode.layer;
+        slot.desc = mode.desc;
         slot.weight = sharpened[order[k]] / sum;
       }
       top = order[0];
@@ -352,6 +412,28 @@ export const SIZE_MIX_DEFAULT = 0.45;
  *  (grainLightness in CHLADNI_GLSL). Below WEIGHT_REF, so the default bed
  *  is all sand except its lightest few grains. */
 const GRAIN_HEAVY = 0.6;
+/** Powder colour: grains lighter than POWDER_SPLIT are drawn as powder, with a
+ *  soft edge POWDER_EDGE either side so a mixed bed reads as two materials,
+ *  not a gradient. The split is where the sorting flips: on a CPU port of
+ *  SIM_FRAG, lighter grains end up heaped on the antinodes and heavier ones
+ *  on the lines, at every drive from near the freeze edge to the snap edge
+ *  (docs/scenes/chladni.md, Measurements). */
+export const POWDER_SPLIT = 0.45;
+export const POWDER_EDGE = 0.05;
+/** A thrown powder grain runs this far toward white, as thrown grit runs up
+ *  to the ramp's bright end. */
+const POWDER_THROWN_LIFT = 0.2;
+/** Every grain's fixed shade runs from SHADE_LO to SHADE_LO + SHADE_SPAN
+ *  times the bed's brightness, so a pile reads as grains (POINT_VERT). */
+const SHADE_LO = 0.8;
+const SHADE_SPAN = 0.4;
+
+/** How much a grain of weight `w` is drawn in the powder colour at Powder
+ *  colour 1. Mirrors powderShare in CHLADNI_GLSL. */
+export function powderShare(w: number): number {
+  const t = Math.max(0, Math.min(1, (w - (POWDER_SPLIT - POWDER_EDGE)) / (2 * POWDER_EDGE)));
+  return 1 - t * t * (3 - 2 * t);
+}
 
 /** One grain's weight in [0,1] (0 = fine powder, 1 = heavy grit), from its
  *  fixed per-grain draw `u` in [0,1]: the bed's Grain weight, spread by Size
@@ -411,6 +493,124 @@ export function drawnGrainCount(
 const GLOW_LEVEL_WEIGHT = 0.8;
 const GLOW_HIT_WEIGHT = 1.4;
 
+/** After a toss, further toss edges are ignored for this long, so one drop
+ *  throws the bed once. Longer than any flight (tossLongestFlight). */
+export const TOSS_REFRACTORY_SEC = 4;
+/** No toss while the audio clock is younger than this. frame.time is the
+ *  capture's AudioContext clock, which starts at 0 for every new source
+ *  (page load, clicking Mic, a new input), and the app's Drop fires about
+ *  half a second into any music, just as the first figure forms: without
+ *  this, every start would throw that figure into the air. */
+export const TOSS_ARM_SEC = 2;
+/** A grain's flight time at full Toss, for the mean grain; each grain's own
+ *  is spread by TOSS_TIME_SPREAD around it, and a weaker toss is shorter
+ *  (tossLaunch). */
+export const TOSS_FLIGHT_SEC = 0.9;
+/** Spread of the grains' flight times, as a fraction of the mean: narrow,
+ *  so the bed rises and lands as one shape. */
+const TOSS_TIME_SPREAD = 0.06;
+/** tossLaunch at Toss 0+: the weakest toss still flies this share of a
+ *  full one's time. */
+const TOSS_LAUNCH_MIN = 0.4;
+/** Peak height of the mean grain's arc at full Toss, in plate half-heights,
+ *  drawn as a lift up the screen. Ballistic: it grows with the square of
+ *  the flight time. */
+const TOSS_LIFT = 0.6;
+/** Radius of the disc a grain lands in around where it took off, in plate
+ *  units (the plate is 2 across) at full Toss; scales with the power. */
+const TOSS_SPREAD = 0.8;
+/** How much bigger a grain is drawn at the top of a full toss's arc (divided
+ *  by the Sand amount above 1, as TOSS_BRIGHT is). */
+const TOSS_GROW = 0.6;
+/** How much brighter a grain is drawn at the top of a full toss's arc. */
+const TOSS_BRIGHT = 0.5;
+/** The arc height (relative to a full toss's mean peak) at which a grain in
+ *  the air is drawn at the palette ramp's brightest end, as a thrown grain. */
+const TOSS_WHITE_RISE = 0.5;
+/** The ages the shaders get while no toss is in the air: past every
+ *  flight, so no grain reads as airborne or landing. */
+export const TOSS_IDLE_AGE = 1e4;
+
+/** One toss: when it started (frame.time, seconds), the seed every grain's
+ *  flight is hashed from, and its power (the Toss setting when it fired). */
+export interface TossEvent {
+  at: number;
+  seed: number;
+  power: number;
+}
+
+/** A new toss, or null for none: only on a fired edge, only with Toss above
+ *  0, only once the audio clock is TOSS_ARM_SEC old, and only
+ *  TOSS_REFRACTORY_SEC after the last one. */
+export function nextToss(
+  last: TossEvent | null,
+  now: number,
+  fired: boolean,
+  toss: number,
+  seed: number,
+): TossEvent | null {
+  if (!fired) return null;
+  if (now < TOSS_ARM_SEC) return null;
+  const power = Math.max(0, Math.min(1, toss));
+  if (power <= 0) return null;
+  // A clock that went backwards (a new audio source) ends the refractory
+  // rather than holding it until the clock catches up.
+  if (last && now >= last.at && now - last.at < TOSS_REFRACTORY_SEC) return null;
+  return { at: now, seed, power };
+}
+
+/** How hard a toss of `power` launches the sand, relative to a full one:
+ *  flight time scales with it, height with its square. Mirrored by tossFlight
+ *  in TOSS_GLSL. */
+export function tossLaunch(power: number): number {
+  return TOSS_LAUNCH_MIN + (1 - TOSS_LAUNCH_MIN) * Math.max(0, Math.min(1, power));
+}
+
+/** The longest any grain stays in the air, at full Toss. */
+export function tossLongestFlight(): number {
+  return TOSS_FLIGHT_SEC * tossLaunch(1) * (1 + TOSS_TIME_SPREAD);
+}
+
+/** A rendered frame's toss: the toss in play (null for none) and the ages
+ *  the shaders get, seconds since it started on this frame and the one
+ *  before, both TOSS_IDLE_AGE while nothing of it is in the air. */
+export interface TossFrame {
+  toss: TossEvent | null;
+  age: number;
+  prevAge: number;
+}
+
+/** Steps the toss by one rendered frame: drops it if the audio clock went
+ *  back past its start (a new source restarts frame.time at 0, so the old
+ *  toss is over and must never play again when the new clock reaches it),
+ *  starts a new one if nextToss says so (drawing its seed only then, so an
+ *  ignored edge takes nothing from Math.random), and works out the ages. */
+export function advanceToss(
+  last: TossEvent | null,
+  now: number,
+  prevFrameTime: number | null,
+  fired: boolean,
+  power: number,
+  drawSeed: () => number,
+): TossFrame {
+  let toss = last && now < last.at ? null : last;
+  const started = nextToss(toss, now, fired, power, 0);
+  if (started) toss = { ...started, seed: drawSeed() };
+  if (!toss) return { toss, age: TOSS_IDLE_AGE, prevAge: TOSS_IDLE_AGE };
+  // The frame the toss starts on has no "before": -1 puts it before every
+  // flight's end.
+  const prevAge = prevFrameTime === null || prevFrameTime < toss.at ? -1 : prevFrameTime - toss.at;
+  if (prevAge > tossLongestFlight()) return { toss, age: TOSS_IDLE_AGE, prevAge: TOSS_IDLE_AGE };
+  return { toss, age: Math.min(now - toss.at, TOSS_IDLE_AGE), prevAge };
+}
+
+/** A number as a GLSL float literal at full precision, so a shader's copy of
+ *  a constant is the TS value exactly (toFixed would round a retune). */
+export function glslFloat(x: number): string {
+  const s = String(x);
+  return /[.eE]/.test(s) ? s : `${s}.0`;
+}
+
 const SETTINGS: SceneSetting[] = [
   {
     key: "complexity",
@@ -461,15 +661,42 @@ const SETTINGS: SceneSetting[] = [
     default: 0,
   },
   {
+    key: "plateShape",
+    label: "Plate",
+    description: "The plate the sand lies on; each shape rings its own figures. Clamped is the square held at its edges",
+    // Manual, like every enum: which plate is a choice, not a property of the track.
+    group: "Form",
+    min: 0,
+    max: PLATE_SHAPES.length - 1,
+    step: 1,
+    default: SQUARE,
+    type: "enum",
+    options: PLATE_SHAPES,
+  },
+  {
+    // The key predates the other plates; saved looks and share codes carry it.
     key: "squarePlate",
-    label: "Square plate",
-    description: "On: the classic square plate, centered. Off: the plate is the whole screen",
+    label: "True shape",
+    description: "For the square plate only. On, it keeps its square shape in the middle of the screen; off, it stretches to fill the screen. The other plates always keep their shape",
     group: "Form",
     min: 0,
     max: 1,
     step: 1,
     default: 0,
     type: "boolean",
+  },
+  {
+    key: "plateZoom",
+    label: "Zoom",
+    description: "How big the plate is: 1 fits it on screen, higher looks closer into its middle, lower shrinks it",
+    // Manual: framing is taste.
+    group: "Form",
+    min: 0.5,
+    max: 3,
+    step: 0.05,
+    default: 1,
+    // Framing, not an amount: the Master dial must not crop the plate.
+    masterScale: false,
   },
   {
     key: "grainSize",
@@ -542,6 +769,19 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.lowOnset" },
   },
   {
+    key: "toss",
+    label: "Toss",
+    description: "On a drop the bed is thrown up and lands scattered; higher throws it higher and wider; 0 never tosses",
+    // Manual — how hard a drop throws the sand is taste, not a property of
+    // the track. The jack's edge starts a toss (nextToss); the slider is its power.
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    drive: { default: "anim.dropOnset" },
+  },
+  {
     key: "freezeEdge",
     label: "Freeze edge",
     description: "Plate drive below which the sand holds still and the figure stays put",
@@ -587,6 +827,17 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { loudness: 0.15 },
+  },
+  {
+    key: "powderColour",
+    label: "Powder colour",
+    description: "Draws the light grains, which the air heaps between the lines, in a second colour. Shows only when the bed has light grains: move Grain weight left and Size mix right",
+    // Manual like Grain weight: which colours the sand comes in is taste.
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
   },
   {
     key: "highGlow",
@@ -645,7 +896,15 @@ const SQUARE_PLATE_HALF = 0.46;
 // plate-to-room mapping and the position packing can't drift apart.
 const CHLADNI_GLSL = `
 const int ACTIVE_MODES = ${ACTIVE_MODES};
-uniform vec4 uModes[ACTIVE_MODES]; // n, m, sign, weight
+// Square: n, m, sign, weight. A baked plate: atlas layer, 0, 0, weight.
+uniform vec4 uModes[ACTIVE_MODES];
+// The plate's outline (chladniPlates.ts's PlateOutline): centre, apothem,
+// sides (0 = a circle, 4 = the square [-1,1]^2), and the angle of the first
+// edge's outward normal from +y.
+uniform vec4 uOutline;
+uniform float uOutlineTurn;
+// A baked plate's figures, one layer each: R = f, G,B = df/dx, df/dy.
+uniform highp sampler2DArray uPlateAtlas;
 const float PI = 3.14159265;
 
 float chladni(vec2 p, vec4 mode) {
@@ -662,28 +921,61 @@ vec2 chladniGrad(vec2 p, vec4 mode) {
   return g1 + mode.z * g2;
 }
 
+// A baked plate's active figures at p, summed by weight: f, df/dx, df/dy.
+// Each layer peaks at |f| = 2 like one square mode (chladniPlates.ts).
+vec3 atlasField(vec2 p) {
+  vec2 uv = p * 0.5 + 0.5;
+  vec3 s = vec3(0.0);
+  for (int k = 0; k < ACTIVE_MODES; k++) {
+    if (uModes[k].w > 0.0) s += uModes[k].w * texture(uPlateAtlas, vec3(uv, uModes[k].x)).rgb;
+  }
+  return s;
+}
+
 // The plate's motion: the active modes summed by their share of the
 // response. Weights sum to 1, so |field| <= 2 and amp() stays in [0,1].
+// uPlateShape 0 is the square, analytic as it always was.
 float field(vec2 p) {
+  if (uPlateShape > 0.5) return atlasField(p).x;
   float f = 0.0;
   for (int k = 0; k < ACTIVE_MODES; k++) f += uModes[k].w * chladni(p, uModes[k]);
   return f;
 }
 vec2 fieldGrad(vec2 p) {
+  if (uPlateShape > 0.5) return atlasField(p).yz;
   vec2 g = vec2(0.0);
   for (int k = 0; k < ACTIVE_MODES; k++) g += uModes[k].w * chladniGrad(p, uModes[k]);
   return g;
 }
+// Both at once: one atlas read per figure instead of two.
+vec3 fieldWithGrad(vec2 p) {
+  if (uPlateShape > 0.5) return atlasField(p);
+  return vec3(field(p), fieldGrad(p));
+}
 float amp(vec2 p) { return abs(field(p)) * 0.5; }
 
-// Half-extent of the plate in room uv. Square: fits the shorter axis with
-// a margin. Otherwise the plate is the whole frame.
+// Half-extent of the plate's [-1,1]^2 in room uv, times Zoom. The square
+// with True shape on, and every other plate: fits the shorter axis with a
+// margin, centred. The square with it off: the whole frame.
 vec2 plateHalf() {
   float aspect = uResolution.x / uResolution.y;
   float h = ${SQUARE_PLATE_HALF.toFixed(2)};
   vec2 square = aspect >= 1.0 ? vec2(h / aspect, h) : vec2(h, h * aspect);
-  return uSquarePlate > 0.5 ? square : vec2(0.5);
+  return (uSquarePlate > 0.5 || uPlateShape > 0.5 ? square : vec2(0.5)) * uPlateZoom;
 }
+
+// <= 1 on the plate, 1 on its rim (the outline's gauge). Mirrors plateGauge
+// in chladniPlates.ts.
+float plateGauge(vec2 p) {
+  float sides = uOutline.w;
+  if (sides > 3.5 && sides < 4.5) return max(abs(p.x), abs(p.y));
+  vec2 q = p - uOutline.xy;
+  if (sides < 0.5) return length(q) / uOutline.z;
+  float k = PI / sides;
+  float a = atan(q.x, q.y) - uOutlineTurn;
+  return length(q) * cos(mod(a + k, 2.0 * k) - k) / uOutline.z;
+}
+bool insidePlate(vec2 p) { return plateGauge(p) <= 1.0; }
 
 // 16-bit fixed point per axis across RGBA8 — see file header.
 vec2 unpackPos(vec4 c) {
@@ -701,6 +993,29 @@ vec4 packPos(vec2 p) {
 
 ${FLOAT_HASH_GLSL}
 
+// A fresh spot for spilled sand, spread evenly over the plate's area. Mirrors
+// respawnPoint in chladniPlates.ts: a polygon picks one of its equal
+// centre-to-edge triangles and folds the unit square onto it, so no draw is
+// ever thrown away.
+vec2 respawnOnPlate(vec2 seed) {
+  vec2 u = hash22(seed);
+  float sides = uOutline.w;
+  if (sides > 3.5 && sides < 4.5) return u * 2.0 - 1.0;
+  if (sides < 0.5) {
+    float r = sqrt(u.x) * uOutline.z;
+    float a = 2.0 * PI * u.y;
+    return uOutline.xy + r * vec2(sin(a), cos(a));
+  }
+  float s = u.x * sides;
+  float i = min(floor(s), sides - 1.0);
+  vec2 ab = vec2(s - i, u.y);
+  if (ab.x + ab.y > 1.0) ab = 1.0 - ab;
+  float k = PI / sides;
+  float r = uOutline.z / cos(k);
+  float t = uOutlineTurn + 2.0 * k * i;
+  return uOutline.xy + r * (ab.x * vec2(sin(t - k), cos(t - k)) + ab.y * vec2(sin(t + k), cos(t + k)));
+}
+
 // A grain's weight, 0 = fine powder .. 1 = heavy grit, from a fixed per-grain
 // draw keyed by its texel — the sim and the point pass read the same one, so
 // a grain's size and its physics are one property. Mirrors grainWeightAt.
@@ -716,6 +1031,10 @@ float grainSizeFactor(float w) {
 // anything at least as heavy as GRAIN_HEAVY.
 float grainLightness(float w) {
   return 1.0 - smoothstep(0.0, ${GRAIN_HEAVY.toFixed(2)}, w);
+}
+// How much a grain is drawn as powder at full Powder colour. Mirrors powderShare.
+float powderShare(float w) {
+  return 1.0 - smoothstep(${(POWDER_SPLIT - POWDER_EDGE).toFixed(2)}, ${(POWDER_SPLIT + POWDER_EDGE).toFixed(2)}, w);
 }
 `;
 
@@ -777,6 +1096,71 @@ float grainBounce(float accel, float lift) {
 }
 `;
 
+// The toss (see the file header): every grain's flight is hashed from its
+// texel and the toss's seed, so the sim (which lands it) and the point pass
+// (which draws it in the air) agree with nothing stored. The ages are
+// seconds since the toss on this rendered frame and the one before; both sit
+// at TOSS_IDLE_AGE while nothing is in the air.
+const TOSS_GLSL = `
+uniform float uTossAge;
+uniform float uTossPrevAge;
+uniform float uTossPower;
+uniform float uTossSeed;
+// Is any grain of the current toss still in the air (or landing) at this age?
+bool tossLive(float age) {
+  return age < ${glslFloat(tossLongestFlight())};
+}
+// x: flight time (s), y: peak height (plate half-heights), zw: where it
+// lands relative to where it took off (plate units). Mirrors tossLaunch.
+vec4 tossFlight(vec2 texel) {
+  vec2 a = hash22(texel * 0.613 + uTossSeed);
+  vec2 b = hash22(texel * 1.37 + uTossSeed * 1.91 + 5.3);
+  float launch = ${glslFloat(TOSS_LAUNCH_MIN)} + ${glslFloat(1 - TOSS_LAUNCH_MIN)} * uTossPower;
+  float t = ${glslFloat(TOSS_FLIGHT_SEC)} * launch * (1.0 + ${glslFloat(TOSS_TIME_SPREAD)} * (a.x - 0.5) * 2.0);
+  float rel = t / ${glslFloat(TOSS_FLIGHT_SEC)};
+  float lift = ${glslFloat(TOSS_LIFT)} * rel * rel;
+  // Uniform over a disc: sqrt of the draw for the radius.
+  float r = ${glslFloat(TOSS_SPREAD)} * uTossPower * sqrt(b.x);
+  float ang = b.y * 6.2831853;
+  return vec4(t, lift, r * cos(ang), r * sin(ang));
+}
+// A point past the plate's rim reflected back in across the rim it crossed
+// (uOutline, as plateGauge reads it): the square folds each axis, the circle
+// folds its radius, a polygon reflects across the edge facing the point. Near
+// a corner the result can still be outside; tossLanding then falls back.
+vec2 foldIntoPlate(vec2 q) {
+  float sides = uOutline.w;
+  if (sides > 3.5 && sides < 4.5) {
+    if (q.x > 1.0) q.x = 2.0 - q.x;
+    if (q.x < -1.0) q.x = -2.0 - q.x;
+    if (q.y > 1.0) q.y = 2.0 - q.y;
+    if (q.y < -1.0) q.y = -2.0 - q.y;
+    return q;
+  }
+  vec2 d = q - uOutline.xy;
+  float r = length(d);
+  if (sides < 0.5) return r > uOutline.z ? uOutline.xy + d * ((2.0 * uOutline.z - r) / r) : q;
+  float k = PI / sides;
+  float i = floor((atan(d.x, d.y) - uOutlineTurn + k) / (2.0 * k));
+  float t = uOutlineTurn + 2.0 * k * i;
+  vec2 n = vec2(sin(t), cos(t));
+  float past = dot(d, n) - uOutline.z;
+  return past > 0.0 ? q - 2.0 * past * n : q;
+}
+// Where a grain that took off at p comes down: the plain landing, else
+// reflected back off the plate's edge, else straight back across where it
+// started, else (last resort) a seeded spot on the plate.
+vec2 tossLanding(vec2 p, vec2 disp, vec2 texel) {
+  vec2 q = p + disp;
+  if (insidePlate(q)) return q;
+  vec2 m = foldIntoPlate(q);
+  if (insidePlate(m)) return m;
+  vec2 back = p - disp;
+  if (insidePlate(back)) return back;
+  return respawnOnPlate(texel * 0.37 + uTossSeed);
+}
+`;
+
 const SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -790,15 +1174,33 @@ uniform float uSeed;
 uniform float uMaxOrder; // highest m among the active modes, for the step cap
 ${CHLADNI_GLSL}
 ${GRAIN_MOTION_GLSL}
+${TOSS_GLSL}
 
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
-  vec2 p = unpackPos(texelFetch(uPosTex, texel, 0));
+  vec4 stored = texelFetch(uPosTex, texel, 0);
+  vec2 p = unpackPos(stored);
   vec2 seed = gl_FragCoord.xy * 0.173 + uSeed;
+
+  // Tossed (see TOSS_GLSL): in the air the plate can't move a grain, so its
+  // stored spot stays where it took off; on the one pass its flight ends it
+  // comes down at its landing spot.
+  if (tossLive(uTossPrevAge)) {
+    vec4 fl = tossFlight(vec2(texel));
+    if (uTossAge >= 0.0 && uTossAge < fl.x) {
+      outColor = stored;
+      return;
+    }
+    if (uTossPrevAge < fl.x && fl.x <= uTossAge) {
+      outColor = packPos(tossLanding(p, fl.zw, vec2(texel)));
+      return;
+    }
+  }
 
   float drive = plateDrive();
 
-  float f = field(p);
+  vec3 fg = fieldWithGrad(p);
+  float f = fg.x;
   float a = abs(f) * 0.5;
 
   // This grain's weight (see file header): how far it hops, how hard the
@@ -820,7 +1222,7 @@ void main() {
   // plate barely moves, a small fraction of the bounce on an antinode. A
   // velocity, so it scales with dt. Capped per step so a high mode can't
   // overshoot a line.
-  vec2 g = fieldGrad(p);
+  vec2 g = fg.yz;
   vec2 dir = g / (length(g) + 1e-4) * sign(f);
   float cells = max(uMaxOrder, 1.0);
   float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / cells;
@@ -838,8 +1240,8 @@ void main() {
   p += hop - dir * pull + stream;
 
   // Off the edge: spilled. Respawn somewhere on the plate.
-  if (abs(p.x) > 1.0 || abs(p.y) > 1.0) {
-    p = hash22(seed + 7.31) * 2.0 - 1.0;
+  if (!insidePlate(p)) {
+    p = respawnOnPlate(seed + 7.31);
   }
 
   outColor = packPos(p);
@@ -860,7 +1262,7 @@ void main() {
   vec2 uv = roomUv(vUv);
   vec2 ph = plateHalf();
   vec2 p = (uv - 0.5) / ph;
-  float border = max(abs(p.x), abs(p.y));
+  float border = plateGauge(p);
   float aa = fwidth(border) * 1.5 + 1e-4;
   float inside = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, border);
 
@@ -869,8 +1271,12 @@ void main() {
   // The middle of the room palette's ramp: bright enough to read on the
   // plate, darker than the grains that sit on top of it.
   vec3 glow = palRamp(0.35 + 0.3 * a) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
-  // The rim only exists on the square plate; the full-frame plate has no edge to show.
-  float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
+  // A faint rim along the plate's true outline, the same width in plate
+  // units on every shape (one minus the gauge, times the apothem, is the
+  // distance to the nearest edge). The stretched full-frame square has no
+  // edge to show.
+  float rimOn = uPlateShape > 0.5 ? 1.0 : uSquarePlate;
+  float rim = (1.0 - smoothstep(0.0, 0.012, (1.0 - border) * uOutline.z)) * rimOn;
   vec3 col = (plate + glow + rim * 0.10) * inside;
   // The plate is near black, so a gain alone barely shows: the flash also
   // lifts it toward the palette's middle.
@@ -888,8 +1294,10 @@ ${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSide;
 uniform float uGrainGain;
+uniform vec3 uPowderInk; // powderInk(palette), chladniPowder.ts
 ${CHLADNI_GLSL}
 ${GRAIN_MOTION_GLSL}
+${TOSS_GLSL}
 out float vMotion;
 out float vGlow;
 out float vSizePx;
@@ -904,7 +1312,30 @@ void main() {
   int side = int(uSide);
   ivec2 texel = ivec2(gl_VertexID % side, gl_VertexID / side);
   vec2 p = unpackPos(texelFetch(uPosTex, texel, 0));
+  // Tossed (see TOSS_GLSL): drawn along its arc from where it took off (its
+  // stored spot until it lands) to where it comes down, lifted up the screen
+  // on a parabola, and bigger and brighter the higher it is. 0 on the plate.
+  float tossRise = 0.0;
+  bool airborne = false;
+  if (tossLive(uTossAge) && uTossAge >= 0.0) {
+    vec4 fl = tossFlight(vec2(texel));
+    if (uTossAge < fl.x) {
+      float u = uTossAge / fl.x;
+      // Sideways on u^2, not u: the bed rises as one shape and spreads on
+      // the way down (a kick from below throws mostly up).
+      p = mix(p, tossLanding(p, fl.zw, vec2(texel)), u * u);
+      tossRise = 4.0 * u * (1.0 - u) * fl.y;
+      airborne = true;
+    }
+  }
   vec2 room = 0.5 + p * plateHalf();
+  room.y += tossRise * plateHalf().y;
+  // The arc's height relative to the top of a full toss's mean arc.
+  float rise = tossRise / ${glslFloat(TOSS_LIFT)};
+  // The growth and brightness a rising grain gains, divided by the Sand
+  // amount above 1 as the glints are: a thick bed already covers the plate,
+  // and grown it would white out the screen.
+  float riseGrow = rise / max(1.0, uSandAmount);
   vec2 dev = (room - uViewport.xy) / uViewport.zw;
   gl_Position = vec4(dev * 2.0 - 1.0, 0.0, 1.0);
   // No two grains of sand are alike: a fixed per-grain size (its weight —
@@ -914,7 +1345,10 @@ void main() {
   float w = grainWeight(vec2(texel));
   // How far this grain is being thrown right now — see GRAIN_MOTION_GLSL.
   vMotion = clamp(grainHopScale(w) * grainBounce(amp(p) * plateDrive(), grainLift(w)) / ${MOTION_FULL.toFixed(2)}, 0.0, 1.0);
-  vShade = 0.8 + 0.4 * jitter.y;
+  // A grain in the air runs up the ramp the higher it is, to its brightest
+  // end by TOSS_WHITE_RISE.
+  if (airborne) vMotion = max(vMotion, clamp(rise / ${glslFloat(TOSS_WHITE_RISE)}, 0.0, 1.0));
+  vShade = ${glslFloat(SHADE_LO)} + ${glslFloat(SHADE_SPAN)} * jitter.y;
   // Each grain is a faceted shard (3 or 4 sides, POINT_FRAG), not a disc —
   // real sand is angular. Random facet count and rotation per grain, same
   // hash family as the size/shade jitter above.
@@ -931,7 +1365,10 @@ void main() {
   // 0.41x, a square 0.64x); grow the size by the matching factor so a faceted
   // bed reads as bright as the round one it replaced.
   float shardGrow = vFacets < 3.5 ? 1.556 : 1.253;
-  float size = uGrainSize * shardGrow * grainSizeFactor(w) * resScale;
+  // Zoom above 1 is a closer look, so the grains grow with the plate (see
+  // drawnGrainCount's caller); below 1 they keep their size and fewer are drawn.
+  float size = uGrainSize * shardGrow * grainSizeFactor(w) * resScale * max(1.0, uPlateZoom)
+    * (1.0 + ${glslFloat(TOSS_GROW)} * riseGrow);
   vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
   vScale = vSizePx / size;
   gl_PointSize = vSizePx;
@@ -941,15 +1378,32 @@ void main() {
   // Grains take the bright half of the room palette's ramp, which every
   // palette keeps bright (see palette.ts): settled grains sit in its middle,
   // thrown grains run up to its brightest end.
-  vec3 col = palRamp(0.55 + 0.45 * vMotion);
+  // chladniPowder.ts's gritColour mirrors these two lines.
+  vec3 col = palRamp(${GRIT_RAMP_LO.toFixed(2)} + ${GRIT_RAMP_SPAN.toFixed(2)} * vMotion);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
-  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vMotion));
-  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 2.0);
-  vCol = col * bright;
+  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), ${GRIT_CHALK.toFixed(2)} * (1.0 - vMotion));
+  // The bed's brightness (Grain brightness on this quality tier), then this
+  // grain's shade, the beat's flash and the toss's lift on top.
+  float brightBase = (0.8 + 1.7 * uGrainGlow) * uGrainGain;
+  float bright = brightBase * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 2.0)
+    * (1.0 + ${glslFloat(TOSS_BRIGHT)} * riseGrow);
+  // Powder colour: the light grains, which the air heaps between the lines,
+  // in the palette's second sand colour (chladniPowder.ts), running toward
+  // white when thrown. Grit's brightness gain clips it toward white, which
+  // would wash the two colours into one; powder is scaled back so that the
+  // bed's brightest shade sits just in range, so it keeps its hue at any
+  // Grain brightness while its shades still differ, and only a flash or a
+  // throw clips it toward white, briefly, as grit. At 0 both mixes take
+  // nothing from the powder: the grit colour, unchanged.
+  float powder = uPowderColour * powderShare(w);
+  vec3 dust = mix(uPowderInk, vec3(1.0), ${POWDER_THROWN_LIFT.toFixed(2)} * vMotion);
+  float dustTop = max(dust.r, max(dust.g, dust.b)) * brightBase * ${glslFloat(SHADE_LO + SHADE_SPAN)};
+  vec3 dustLit = dust * bright / max(1.0, dustTop);
+  vCol = mix(col * bright, dustLit, powder);
   // The halo's tint and its area normalisation (see POINT_FRAG), without the
   // falloff across the sprite: the fragment only multiplies that in.
   float haloNorm = ${HALO_GAIN.toFixed(1)} * resScale * resScale / (vSizePx * vSizePx);
-  vHaloCol = mix(col, vec3(1.0), 0.45) * haloNorm * bright;
+  vHaloCol = mix(mix(col, dust, powder), vec3(1.0), 0.45) * haloNorm * bright;
 }
 `;
 
@@ -1056,13 +1510,79 @@ function createChladniScene(): Scene {
   // The plate's drive before the Sand zones' remap, as of the last render —
   // the Sand zones gauge's needle (probe()).
   let lastRawDrive = 0;
+  // The last toss, null before the first — see nextToss and TOSS_GLSL.
+  let toss: TossEvent | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
+  // The plate on the screen (an index into PLATE_SHAPES) and its atlas, if it
+  // is a baked plate (see the file header): only the plate on screen keeps
+  // one, so picking through the plates never holds every atlas at once. A
+  // 1-texel stand-in sits on the atlas unit while the square shows, so no
+  // sampler ever points at an empty unit.
+  let shape = -1;
+  const atlases = new Map<number, { tex: WebGLTexture; bytes: number }>();
+  let blankAtlas: WebGLTexture | null = null;
+  // How long the last bake took on this thread, and the GPU memory the
+  // atlases hold, for probe().
+  let lastBakeMs = 0;
+  let atlasBytes = 0;
+  const powderBuf = new Float32Array(3);
 
   function setModes(prog: GLProgram, modes: readonly ActiveMode[]): void {
     for (let k = 0; k < ACTIVE_MODES; k++) {
       const mode = modes[k];
-      prog.setV4(`uModes[${k}]`, mode.n, mode.m, mode.sign, mode.weight);
+      if (mode.layer < 0) prog.setV4(`uModes[${k}]`, mode.n, mode.m, mode.sign, mode.weight);
+      else prog.setV4(`uModes[${k}]`, mode.layer, 0, 0, mode.weight);
     }
+  }
+
+  function setOutline(prog: GLProgram): void {
+    const o = plateOutline(shape);
+    prog.setV4("uOutline", o.cx, o.cy, o.apothem, o.sides);
+    prog.setF("uOutlineTurn", o.turn);
+  }
+
+  /** The atlas array for a baked plate, made when it's first asked for. */
+  function atlasFor(gl: WebGL2RenderingContext, s: number): WebGLTexture | null {
+    if (s === SQUARE) return blankAtlas;
+    let tex = atlases.get(s)?.tex;
+    if (!tex) {
+      const t0 = performance.now();
+      const bake = bakePlate(s);
+      tex = gl.createTexture()!;
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA16F, bake.side, bake.side, bake.layers, 0, gl.RGBA, gl.FLOAT, bake.data);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+      gl.activeTexture(gl.TEXTURE0);
+      const bytes = bake.side * bake.side * bake.layers * 8;
+      atlases.set(s, { tex, bytes });
+      atlasBytes += bytes;
+      lastBakeMs = performance.now() - t0;
+    }
+    return tex;
+  }
+
+  /** Puts `s` on the screen: its atlas (the previous plate's is let go), and
+   *  a fresh response over its table. */
+  function usePlate(gl: WebGL2RenderingContext, s: number): void {
+    for (const [other, atlas] of atlases) {
+      if (other === s) continue;
+      gl.deleteTexture(atlas.tex);
+      atlasBytes -= atlas.bytes;
+      atlases.delete(other);
+    }
+    atlasFor(gl, s);
+    shape = s;
+    response = createPlateResponse(plateModeTable(s));
+  }
+
+  function plateSetting(): number {
+    const v = Math.round(resolveSceneSetting(ID, settingFor("plateShape")));
+    return Math.max(0, Math.min(PLATE_SHAPES.length - 1, v));
   }
 
   return {
@@ -1079,7 +1599,7 @@ function createChladniScene(): Scene {
     ],
 
     probe() {
-      return { drive: lastRawDrive };
+      return { drive: lastRawDrive, bakeMs: lastBakeMs, atlasMB: atlasBytes / 1e6 };
     },
 
     init(ctx: SceneContext) {
@@ -1116,9 +1636,25 @@ function createChladniScene(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.bindTexture(gl.TEXTURE_2D, null);
 
+      blankAtlas = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, blankAtlas);
+      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA16F, 1, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+      gl.activeTexture(gl.TEXTURE0);
+      // The atlas sits on unit 1 in all three programs (uPosTex has unit 0).
+      for (const prog of [simProg, bgProg, pointProg]) {
+        prog.use();
+        gl.uniform1i(gl.getUniformLocation(prog.program, "uPlateAtlas"), 1);
+      }
+
       read = 0;
-      response = createPlateResponse();
+      // A plate picked in saved settings is baked now, not on the first frame.
+      usePlate(gl, plateSetting());
       lastFrameTime = null;
+      toss = null;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -1127,16 +1663,35 @@ function createChladniScene(): Scene {
 
       // See file header for why frame.time and not anim.dtSec.
       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.1, frame.time - lastFrameTime));
+      const prevFrameTime = lastFrameTime;
       lastFrameTime = frame.time;
 
-      const modes = response.advance(dt, frame.bands, {
+      const picked = plateSetting();
+      if (picked !== shape) usePlate(gl, picked);
+      const atlas = atlasFor(gl, shape);
+
+      // Toss: asked every frame so the jack's edge is consumed even while the
+      // refractory or the arm time ignores it. The seed is only drawn when a
+      // toss really starts (advanceToss), so a seeded bench run that never
+      // tosses stays the same as before the toss existed.
+      const tossFired = drives.fired("toss", anim.dropOnset);
+      const tossStep = advanceToss(toss, frame.time, prevFrameTime, tossFired, resolveSceneSetting(ID, settingFor("toss")), () => Math.random() * 100);
+      toss = tossStep.toss;
+      const setToss = (prog: GLProgram): void => {
+        prog.setF("uTossAge", tossStep.age);
+        prog.setF("uTossPrevAge", tossStep.prevAge);
+        prog.setF("uTossPower", toss?.power ?? 0);
+        prog.setF("uTossSeed", toss?.seed ?? 0);
+      };
+
+      const modes = response!.advance(dt, frame.bands, {
         complexity: resolveSceneSetting(ID, settingFor("complexity")),
         resonance: resolveSceneSetting(ID, settingFor("resonance")),
         ring: resolveSceneSetting(ID, settingFor("ring")),
         figureHold: resolveSceneSetting(ID, settingFor("figureHold")),
       });
       let maxOrder = 1;
-      for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.m);
+      for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.cells);
       lastRawDrive = rawPlateDrive(
         resolveSceneSetting(ID, settingFor("shake")),
         drives.value("shake", frame.energy),
@@ -1148,11 +1703,18 @@ function createChladniScene(): Scene {
 
       // How many grains lie on the plate — see drawnGrainCount.
       const resScale = Math.max(1, gl.drawingBufferHeight / 720);
-      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale;
-      const squarePlate = resolveSceneSetting(ID, settingFor("squarePlate")) > 0.5;
-      const platePx2 = squarePlate
+      // The plate's real area on screen at this Zoom: its share of the fitted
+      // (or stretched) square, as plateHalf() places it. Above Zoom 1 the
+      // grains are drawn bigger by the same factor (POINT_VERT), a closer
+      // look rather than a thinner bed: the grain pool is fixed, so with
+      // grains of a fixed size it would run out of sand to cover the plate.
+      const zoom = resolveSceneSetting(ID, settingFor("plateZoom"));
+      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale * Math.max(1, zoom);
+      const fitted = shape !== SQUARE || resolveSceneSetting(ID, settingFor("squarePlate")) > 0.5;
+      const squarePx2 = fitted
         ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
         : gl.drawingBufferWidth * gl.drawingBufferHeight;
+      const platePx2 = ((squarePx2 * plateArea(plateOutline(shape))) / 4) * zoom * zoom;
       const sandAmount = resolveSceneSetting(ID, settingFor("sandAmount"));
       const sizeM2 = grainSizeMoment(
         resolveSceneSetting(ID, settingFor("grainWeight")),
@@ -1165,6 +1727,11 @@ function createChladniScene(): Scene {
       // indexes grains by gl_FragCoord), so the SAND_AMOUNT_MAX pool only
       // costs what is actually on the plate.
       const write = 1 - read;
+      // The plate's atlas on unit 1 for all three passes (the stand-in on
+      // the square, which never reads it).
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas);
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, posFbo[write]);
       gl.viewport(0, 0, side, side);
       gl.enable(gl.SCISSOR_TEST);
@@ -1172,9 +1739,11 @@ function createChladniScene(): Scene {
       simProg.use();
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(simProg, modes);
+      setOutline(simProg);
       simProg.setF("uMaxOrder", maxOrder);
       simProg.setF("uSimDt", dt);
       simProg.setF("uSeed", Math.random() * 100);
+      setToss(simProg);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
       gl.uniform1i(simPosLoc, 0);
@@ -1191,6 +1760,7 @@ function createChladniScene(): Scene {
       bgProg.use();
       uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(bgProg, modes);
+      setOutline(bgProg);
       drawFullscreenQuad(gl, quadVao);
 
       // Sand: one point per grain, up to drawnGrainCount — see file header
@@ -1201,8 +1771,12 @@ function createChladniScene(): Scene {
       pointProg.use();
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(pointProg, modes);
+      setOutline(pointProg);
       pointProg.setF("uSide", side);
       pointProg.setF("uGrainGain", grainGain(grainCount));
+      setToss(pointProg);
+      powderBuf.set(powderInk(palette));
+      pointProg.setV3v("uPowderInk", powderBuf);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
       gl.uniform1i(pointPosLoc, 0);
@@ -1216,6 +1790,9 @@ function createChladniScene(): Scene {
       // must not leak blend state or a bound texture onto the next tile.
       gl.disable(gl.BLEND);
       gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+      gl.activeTexture(gl.TEXTURE0);
     },
 
     dispose(ctx: SceneContext) {
@@ -1231,6 +1808,12 @@ function createChladniScene(): Scene {
         posFbo[i] = null;
         posTex[i] = null;
       }
+      for (const atlas of atlases.values()) gl.deleteTexture(atlas.tex);
+      atlases.clear();
+      atlasBytes = 0;
+      if (blankAtlas) gl.deleteTexture(blankAtlas);
+      blankAtlas = null;
+      shape = -1;
       simProg = null;
       bgProg = null;
       pointProg = null;
@@ -1240,6 +1823,7 @@ function createChladniScene(): Scene {
       pointPosLoc = null;
       response = null;
       lastFrameTime = null;
+      toss = null;
     },
   };
 }
