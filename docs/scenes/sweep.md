@@ -93,6 +93,8 @@ has a jack to wire. Draft scene (draft PR #370).
 - Re-analysis for polish: Multiply between the stacks and onto the ground, the
   Bevel outline, the Room palette as a real option.
 - The copy skip (`boundarySpeed`): same picture, 2–4× fewer iterations.
+- 2026-10-06: #368 landed Level (`feature.level`, 0 in silence); Speed and
+  Colour flow moved onto it from All level and Mid level, which read mic hiss.
 - A setting keyed `bands` compiled to `uBands`, the common band array — the
   shader failed and the app fell back to Spectrum. Renamed `bandCount`;
   `tests/sweep.test.ts` checks no setting uniform collides with a common one.
@@ -102,16 +104,15 @@ has a jack to wire. Draft scene (draft PR #370).
 - Each reel piece's knob values are in `sweep/scripts/pieces.json`;
   `lookcodes.ts` prints a Look link for each (`?look=…#/v/sweep` after the
   app's address). They are starting points: Smear is the furthest off.
-- Speed and Colour flow read levels, so silence holds the picture still;
-  synthetic audio always reads loud.
+- Speed and Colour flow read Level, so silence holds the picture still;
+  synthetic audio always reads loud — check silence with a hiss wav on a
+  fake mic.
 - Quality: copies scale down on weaker presets (`uDetail`); blur and outlines
   keep the look.
 
 ## Known issues and next steps
 
 - Smear's two lobes (teal head, ink trail) aren't reproduced.
-- Speed's default should move from All level to Level (`feature.level`) once
-  #368 merges — All level reads mic hiss.
 - A `/tune` pass on real music; per-piece values are by eye.
 - Haze and Flame are the costliest pieces; heavy Blur defeats the copy skip.
 - The reference media isn't archived yet (`ref-archive.py` is blocked from a
