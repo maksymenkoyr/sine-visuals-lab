@@ -19,8 +19,9 @@ different mode takes over. Featured, on main.
   lattice up to `MAX_ORDER`), `modeFrequencyHz`/`bandPosition` (mode-to-band
   mapping), `createPlateResponse` (the per-mode resonance/ring/attack model
   that picks `ACTIVE_MODES` strongest modes each frame, each mode excited
-  by its band energy less `SURPRISE_SHARE` of that energy's own running
-  average over `BASELINE_SEC`, and giving last frame's top mode
+  by its band energy less a share of that energy's own running average
+  over `BASELINE_SEC` (the Loud ↔ New setting, `newness`, default
+  `SURPRISE_SHARE`), and giving last frame's top mode
   `holdMargin`'s head start), `grainTextureSide`,
   `grainGain`, `drawnGrainCount` (the fixed-sand-budget logic — see
   "Known issues" for why it exists), and the grain-weight helpers
@@ -112,6 +113,20 @@ measured from a reference clip.
   onset strength 0.56 at a 20 ms lag, pulse 1.27 (64 beats after the drop). The
   user had called the synthetic footage "bad … low dynamic movement"; never
   judge or film Chladni on the synthetic feed — it has no spectrum to follow.
+- 2026-10-05 (Loud ↔ New): `docs/scenes/chladni/scripts/loud-new-measure.test.ts`,
+  the same tracks, chain and measures as figure hold, at default settings with
+  hold 0, plus the share of frames the fundamental (1,2) is on top. Values
+  0 / 0.5 / 0.8 (default) / 1, ranges over the five tracks. Clean: turnover
+  0.36–0.72 / 0.51–0.85 / 0.61–0.88 / 0.54–0.85, clarity 0.26–0.30 at every
+  value, fundamental on top 0.01–0.14 / 0.15–0.27 / 0.16–0.42 / 0.12–0.41.
+  Through the mic: turnover 0.06–0.14 / 0.14–0.42 / 0.23–0.62 / 0.30–0.75,
+  clarity 0.32–0.35 / 0.34–0.37 / 0.35–0.41 / 0.36–0.48, fundamental on top
+  0.40–0.61 / 0.43–0.58 / 0.43–0.63 / 0.39–0.71. The default's rows match the
+  figure-hold run's hold 0. So Loud calms the figure, most through the mic,
+  without making it cleaner (clarity stays a four-way blend), and it doesn't
+  hand the plate to the bass: per-band auto-gain has already evened the bands
+  out before the plate sees them. Through the mic the fundamental sits near
+  half the frames at every value, the mic-hiss lean from 2026-10-02.
 
 ## Decisions and pivots
 
@@ -310,6 +325,21 @@ measured from a reference clip.
   measure: at hold 0 on broadband music the top flickers every few frames
   inside a near-even four-way blend that hardly changes, and a small hold
   turned that into fewer but visible switches.
+- 2026-10-05 (Loud ↔ New): the user asked whether a frequency's absolute
+  power should count too ("there is frequency that pushes 4 times more"). It
+  already did: a steady level keeps `1 - SURPRISE_SHARE` of its credit, and a
+  rise is scored in band units, not as a ratio. So the share became a
+  setting, **Loud ↔ New** (Form, after Figure hold, key `newness`), with
+  `SURPRISE_SHARE` as its default, so the plate is unchanged until it is
+  moved. 0 answers each band's level as it arrives (the plate before the
+  2026-10-02 fix); 1 scores only the rise above the running average. Manual,
+  no `auto`, like Figure hold. Named for its two ends after the user agreed
+  to "Loud ↔ New"; it is the first panel label with two ends. The prediction
+  that Loud would mostly hand the plate to the bass was wrong on the
+  tempo-eval tracks: it calmed the figure instead (see Measurements). Asked the same
+  day whether the 4 s memory (`BASELINE_SEC`) should be longer: left as is.
+  A longer memory only keeps a new section counting as new for longer, and
+  Figure hold already covers "stay longer".
 - 2026-10-04: the Sand zones gauge takes its width from
   `src/ui/onScreen.ts`'s `watchSize` instead of reading `clientWidth` every
   tick (a forced layout per read; found while chasing Physarum 2's panel
@@ -344,10 +374,11 @@ measured from a reference clip.
   is how long a figure stays, independent of the spectrum. Judge it on a long
   stretch of real music: at the top a figure should still give way to a new
   section, not stick through a whole track.
-- `BASELINE_SEC`/`SURPRISE_SHARE` decide how strongly a constant spectral
-  tilt is cancelled. Raising the share cancels more of it but trades away how
-  firmly a held tone keeps its figure, and figures change more often. Judge
-  through a room mic with auto-gain on Auto, where the tilt is worst.
+- `BASELINE_SEC` and Loud ↔ New (`newness`, default `SURPRISE_SHARE`) decide
+  how strongly a constant spectral tilt is cancelled. Moving toward New
+  cancels more of it but trades away how firmly a held tone keeps its
+  figure, and figures change more often. Judge through a room mic with
+  auto-gain on Auto, where the tilt is worst.
 - Sand amount (`sandAmount`) and Grain size both set the bed through
   `drawnGrainCount` — amount scales the budget first, the coverage cap
   (`MAX_BED_COVERAGE`, grown by the amount above 1) binds second — and neither touches `grainGain`, so
@@ -402,7 +433,15 @@ measured from a reference clip.
   (the sim rule on the CPU at steady drives, where `FREEZE_REF` and
   `SNAP_REF` come from) and `figure-hold-measure.test.ts` (figure turnover and
   clarity across Figure hold on the tempo-eval tracks; copy into `tests/` to
-  run).
+  run) and `loud-new-measure.test.ts` (the same, plus the fundamental's share
+  on top, across Loud ↔ New).
+- Artifacts: `docs/scenes/chladni/artifacts/figure-explainer.html`, the
+  source of "How Chladni Picks a Figure"
+  (https://claude.ai/artifact/FZke5yTbwq4tJ1WNDacyX3). A toy copy of
+  `createPlateResponse`'s rule with 8 pitch slices, a mixer of toy parts,
+  each slice's level, usual level and score, and a 20 s figure timeline. It
+  answers what a held figure says about the audio. Self-contained; open it
+  in a browser.
   Captured screenshots are session output, not
   kept in the repo.
 
@@ -441,3 +480,5 @@ measured from a reference clip.
   to take the plate.
 - 2026-10-05 (draft) — Treble glow renamed Glow; it starts on two real wires
   (Treble level + Treble hit) instead of a built-in.
+- 2026-10-05 (draft) — Loud ↔ New: how much of each band's usual level comes
+  off before the plate picks a figure.

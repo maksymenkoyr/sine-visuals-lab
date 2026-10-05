@@ -20,6 +20,7 @@ import {
   FUNDAMENTAL_HZ_SMALL,
   FUNDAMENTAL_HZ_LARGE,
   holdMargin,
+  SURPRISE_SHARE,
   type PlateResponseInputs,
 } from "../src/render/scenes/chladni.ts";
 import { clampZoneEdges, zoneDrive, FREEZE_REF, SNAP_REF, ZONE_MIN_GAP } from "../src/render/scenes/chladniSand.ts";
@@ -392,6 +393,38 @@ describe("figure hold", () => {
     const during = run(r, tone(8), 1, plate(1));
     const after = run(r, SILENCE, 2, plate(1));
     expect(after[0]).toMatchObject({ n: during[0].n, m: during[0].m });
+  });
+});
+
+describe("loud ↔ new", () => {
+  // As in figure hold: band 5 sits on (1, 2) and band 8 on (1, 3).
+  const plate = (newness?: number) => inputs({ complexity: 0.5, newness });
+
+  it("omitted is the default share, bit for bit", () => {
+    const plain = createPlateResponse();
+    const set = createPlateResponse();
+    for (const bands of [tone(5), twoTones(5, 8, 0.6), tone(12), SILENCE, tone(15)]) {
+      expect(run(set, bands, 1.5, plate(SURPRISE_SHARE))).toEqual(run(plain, bands, 1.5, plate()));
+      expect(Array.from(set.amplitudes)).toEqual(Array.from(plain.amplitudes));
+    }
+  });
+
+  it("toward Loud, a louder steady tone keeps the plate against a quieter new one the default hands it to", () => {
+    const after = (newness: number) => {
+      const r = createPlateResponse();
+      run(r, tone(5), 10, plate(newness));
+      return run(r, twoTones(5, 8, 0.5), 1, plate(newness))[0];
+    };
+    expect(after(SURPRISE_SHARE)).toMatchObject({ n: 1, m: 3 });
+    expect(after(0)).toMatchObject({ n: 1, m: 2 });
+  });
+
+  it("at New, a held tone stops scoring but its figure stays", () => {
+    const r = createPlateResponse();
+    const early = run(r, tone(10), 1, plate(1));
+    const late = run(r, tone(10), 20, plate(1));
+    expect(Math.max(...r.amplitudes)).toBeLessThan(0.01);
+    expect(late[0]).toMatchObject({ n: early[0].n, m: early[0].m });
   });
 });
 
