@@ -90,6 +90,17 @@ describe("isMacAgent", () => {
 });
 
 describe("isPlayKey", () => {
+  it("Enter plays everywhere, the main keyboard's and the keypad's", () => {
+    expect(isPlayKey(ev("Enter", "Enter"), true)).toBe(true);
+    expect(isPlayKey(ev("Enter", "Enter"), false)).toBe(true);
+    expect(isPlayKey(ev("Enter", "NumpadEnter"), false)).toBe(true);
+  });
+  it("Enter with any modifier held is a chord, not a Play", () => {
+    expect(isPlayKey(ev("Enter", "Enter", { metaKey: true }), true)).toBe(false);
+    expect(isPlayKey(ev("Enter", "Enter", { ctrlKey: true }), false)).toBe(false);
+    expect(isPlayKey(ev("Enter", "Enter", { altKey: true }), true)).toBe(false);
+    expect(isPlayKey(ev("Enter", "Enter", { shiftKey: true }), true)).toBe(false);
+  });
   it("Option plays everywhere", () => {
     expect(isPlayKey(OPTION, true)).toBe(true);
     expect(isPlayKey(OPTION, false)).toBe(true);

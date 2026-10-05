@@ -72,8 +72,9 @@ export interface Shortcut {
   hint: string;
 }
 
-// On a Mac the right Command key plays too, and Play's row names it: the thumb
-// key next to Space (outputKeys.ts's header). Guarded for the node tests.
+// Play's row names the key as the keyboard prints it (Return on a Mac, Enter
+// elsewhere) and the other keys that play (outputKeys.ts's header). Guarded for
+// the node tests.
 const MAC = typeof navigator !== "undefined" && isMacAgent(navigator.userAgent ?? "");
 
 export const SHORTCUTS: readonly Shortcut[] = [
@@ -96,8 +97,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "⌃ Ctrl", id: "tap", label: "Tap tempo", hint: "Tap on every beat to set the tempo (the Tempo card's Tap does the same)" },
   { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
   MAC
-    ? { key: "Right ⌘", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (⌥ Option does the same, G sends at once)" }
-    : { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
+    ? { key: "Return", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (the right ⌘ and ⌥ Option do the same, G sends at once)" }
+    : { key: "Enter", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (Alt does the same, G sends at once)" },
   { key: "1–9", id: "pad", label: "Fire pad", hint: "Fire pad 1–9 of the Set, panel open or closed" },
   // The held effects (render/heldEffects.ts): one row per effect, tagged on its
   // on-screen button in #fxBar (ui/effectControls.ts).

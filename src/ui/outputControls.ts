@@ -33,9 +33,10 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
  * (`charging`, the `--charge` arc) and a glide in flight draws it round again
  * over its length.
  *
- * The key name under PLAY's pad is Option, Play's key everywhere (index.html);
- * on a Mac labelPlayKey switches it to the right Command key, the thumb key
- * next to Space (outputKeys.ts's header says why both play).
+ * The key name under PLAY's pad is ENTER, Play's main key everywhere
+ * (index.html); on a Mac labelPlayKey switches it to RETURN, the name on a Mac
+ * keyboard. Option and, on a Mac, the right Command key play too
+ * (outputKeys.ts's header says why), named in the tooltip.
  */
 
 export interface OutputControlElements {
@@ -83,14 +84,14 @@ function fmtSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
-/** On a Mac, PLAY names the right Command key instead of Option: the key name
- *  under its pad and its tooltip. */
+/** On a Mac, PLAY's key is called Return, and the right Command key plays too:
+ *  the key name under its pad and its tooltip say so. */
 export function labelPlayKey(goBtn: HTMLButtonElement, mac: boolean): void {
   if (!mac) return;
   const keyName = goBtn.querySelector("small");
-  if (keyName) keyName.textContent = "RIGHT ⌘";
+  if (keyName) keyName.textContent = "RETURN";
   goBtn.title =
-    "Send this scene and its settings to the output — tap the right ⌘ to send at once, hold it to glide there (Option does the same)";
+    "Send this scene and its settings to the output — tap Return to send at once, hold it to glide there (the right ⌘ and Option do the same)";
 }
 
 export function createOutputControls(bridge: OutputBridge, els: OutputControlElements): OutputControls {

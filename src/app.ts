@@ -741,13 +741,13 @@ function tapTempo(timeStamp: number, hud: boolean): void {
   else if (res.taps > 1) showHud(`Tap tempo: ${res.more} more ${res.more === 1 ? "tap" : "taps"}`);
 }
 
-/** Space = Cue (held), a Play key = Play (tap sends at once, hold glides): Option,
- *  and on a Mac the right Command key too — the why, and what a glide touches, is
- *  src/ui/outputKeys.ts's header. Capture phase, so a focused button or checkbox
- *  never also sees the Space. A Play key plays whenever the bar is up (a pop-out
- *  is open, or another device is in the keyed room); Space is Cue and only
- *  claimed while a pop-out can cue, leaving Space to the page as before
- *  everywhere else. */
+/** Space = Cue (held), a Play key = Play (tap sends at once, hold glides): Enter,
+ *  Option, and on a Mac the right Command key too — the why, and what a glide
+ *  touches, is src/ui/outputKeys.ts's header. Capture phase, so a focused button
+ *  or checkbox never also sees the Space or the Enter. A Play key plays whenever
+ *  the bar is up (a pop-out is open, or another device is in the keyed room);
+ *  Space is Cue and only claimed while a pop-out can cue, leaving Space and Enter
+ *  to the page as before everywhere else. */
 function wireOutputKeys(controls: OutputControls): void {
   const playKey = createPlayKey();
   const mac = isMacAgent(navigator.userAgent);
@@ -784,8 +784,14 @@ function wireOutputKeys(controls: OutputControls): void {
         return;
       }
       if (isPlayKey(e, mac)) {
-        if (e.repeat) return;
         if (!inViz || isTypingTarget(e.target) || !controls.active()) return;
+        // Enter would also press the focused button, once per auto-repeat:
+        // while the bar is up it's Play's alone.
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        if (e.repeat) return;
         playKey.down(performance.now());
         playHeldBy ??= e.code;
         if (!chargeRaf) chargeRaf = requestAnimationFrame(chargeTick);
@@ -808,7 +814,7 @@ function wireOutputKeys(controls: OutputControls): void {
       }
       if (e.code === "KeyK") controls.holdCue(false);
       const rightCmd = mac && e.code === RIGHT_CMD;
-      if (e.key !== "Alt" && !rightCmd) return;
+      if (e.key !== "Enter" && e.key !== "Alt" && !rightCmd) return;
       const hold = playKey.up(performance.now());
       playHeldBy = null;
       if (hold !== null && controls.active()) {
@@ -2878,7 +2884,7 @@ async function boot(): Promise<void> {
     }
     if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
-      // letter twins of Space and Option, which wireOutputKeys below owns.
+      // letter twins of Space and the Play keys, which wireOutputKeys owns.
       // No-ops unless an output window is open.
       if (e.code === "KeyG" && outputControls?.go()) {
         e.preventDefault();

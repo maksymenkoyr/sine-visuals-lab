@@ -14,18 +14,27 @@ import { GLIDE_MAX_MS, GLIDE_MIN_MS } from "../net/outputGlide.ts";
  *    Play (spaceIsCue). Play while Cue is held sends what the Cue shows as the
  *    new look, and Space's auto-repeat then carries that Play key's modifier —
  *    it must not read as the chord that cancels the Play.
- *  - Play is a bare press of a Play key (isPlayKey): Option (Alt) everywhere,
- *    and on a Mac also the right Command key, the one touching Space, so both
- *    thumbs sit on Cue and Play. A quick tap sends the look across at once, a
- *    longer hold charges and, on release, glides there over GLIDE_PER_HOLD
- *    times the hold (net/outputGlide.ts says what moves smoothly). A Play key
- *    held together with another key or a click is a chord, not a Play —
- *    Option+M (tuning/debug.ts), Option+click and every right-Command
- *    shortcut keep working — and losing window focus while it's down drops
- *    it too. The left Command key is left alone on purpose: it starts nearly
- *    every shortcut, so a bare press of it is far too easy to do by accident
- *    on a live output. Off a Mac the right Command position is the Windows /
- *    Super key, which opens the system's own menu, so there only Option plays.
+ *  - Play is a bare press of a Play key (isPlayKey). Enter (Return on a Mac)
+ *    is the main one on every platform: a big key, the same on a Mac and a PC
+ *    keyboard, and no system anywhere does anything with Enter+Space, so
+ *    Play while Cue is held is safe — every modifier next to Space is taken
+ *    with Space by some system (⌘ Spotlight, ⌃ input source on a Mac; Alt the
+ *    window menu, Win the input language on a PC). app.ts claims it in the
+ *    capture phase too, so it doesn't also press the focused button. Option
+ *    (Alt) plays everywhere as well — on a Mac Option+Space is free — and on a
+ *    Mac so does the right Command key, the thumb key touching Space, though
+ *    ⌘+Space may open Spotlight when it's pressed with Cue held. GitHub issue
+ *    #341 is the task to tell people about these two and let them turn them
+ *    off. A quick tap sends the look across at once, a longer hold charges and,
+ *    on release, glides there over GLIDE_PER_HOLD times the hold
+ *    (net/outputGlide.ts says what moves smoothly). A Play key held together
+ *    with another key or a click is a chord, not a Play — Option+M
+ *    (tuning/debug.ts), Option+click and every right-Command shortcut keep
+ *    working — and losing window focus while it's down drops it too. The left
+ *    Command key is left alone on purpose: it starts nearly every shortcut, so
+ *    a bare press of it is far too easy to do by accident on a live output.
+ *    Off a Mac the right Command position is the Windows / Super key, which
+ *    opens the system's own menu, so it never plays there.
  *  - macOS delivers no key-up for any other key while Command is down, so a
  *    Space (or K) let go during a right-Command Play would leave the Cue held
  *    for good. app.ts lets the Cue go when the right Command key comes up:
@@ -45,7 +54,7 @@ export interface KeyLike {
   shiftKey: boolean;
 }
 
-/** The right Command key, Play's second key on a Mac. */
+/** The right Command key, a Play key on a Mac. */
 export const RIGHT_CMD = "MetaRight";
 
 /** True for a Mac's user agent — iPadOS Safari's desktop agent included: an
@@ -54,17 +63,19 @@ export function isMacAgent(userAgent: string): boolean {
   return /Macintosh|Mac OS X/.test(userAgent);
 }
 
-/** A key-down that starts a Play: Option, or on a Mac the right Command key,
- *  with no other modifier held. */
+/** A key-down that starts a Play: Enter (the main keyboard's or the
+ *  keypad's), Option, or on a Mac the right Command key, with no other
+ *  modifier held. */
 export function isPlayKey(e: KeyLike, mac: boolean): boolean {
+  if (e.key === "Enter") return !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
   if (e.key === "Alt") return !e.ctrlKey && !e.metaKey && !e.shiftKey;
   if (mac && e.code === RIGHT_CMD) return !e.ctrlKey && !e.altKey && !e.shiftKey;
   return false;
 }
 
 /** Whether a Space key-down is Cue's, given which key is holding a Play down
- *  (its `code`, or null). Option may ride along always; Command only while it
- *  is the right Command key held as Play. */
+ *  (its `code`, or null). Option may ride along always (Enter sets no
+ *  modifier); Command only while it is the right Command key held as Play. */
 export function spaceIsCue(e: KeyLike, playHeldBy: string | null): boolean {
   if (e.code !== "Space" || e.ctrlKey || e.shiftKey) return false;
   return !e.metaKey || playHeldBy === RIGHT_CMD;
