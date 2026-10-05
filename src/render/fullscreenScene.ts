@@ -4,7 +4,7 @@ import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram
 import { PALETTE_GLSL } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
-import type { Scene, SceneContext } from "./scene.ts";
+import type { Scene, SceneContext, Viewport } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "./drives.ts";
 import {
@@ -61,6 +61,14 @@ export function createFullscreenScene(
        *  against it being undefined. */
       drives: SceneDrives,
     ) => Record<string, ExtraUniformValue>;
+    /** Called after every uniform is uploaded and just before the draw,
+     *  with the program in use — for what a uniform can't carry, such as a
+     *  data texture the scene fills itself (bind it here, creating it on the
+     *  first call; scenes/chaikin/index.ts's seed texture is the example). */
+    beforeDraw?: (ctx: SceneContext, prog: GLProgram, viewport: Viewport) => void;
+    /** Called from dispose(), before the program is freed — release what
+     *  beforeDraw created. */
+    onDispose?: (ctx: SceneContext) => void;
   } = {},
 ): Scene {
   let prog: GLProgram | null = null;
@@ -116,10 +124,12 @@ ${fragBody}
           else prog.setV4v(name, value.vec4);
         }
       }
+      opts.beforeDraw?.(ctx, prog, viewport);
       drawFullscreenQuad(gl, vao);
     },
 
     dispose(ctx: SceneContext) {
+      opts.onDispose?.(ctx);
       prog?.dispose();
       if (vao) ctx.gl.deleteVertexArray(vao);
       prog = null;

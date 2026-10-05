@@ -20,12 +20,14 @@
 //   node tools/gpu-bench.mjs --compare a.rgba b.rgba
 //     counts the pixels that changed and by how much.
 //
-//   node tools/gpu-bench.mjs --port P --app --scene caustics [--seconds 4] [--dpr 2]
+//   node tools/gpu-bench.mjs --port P --app --scene caustics [--seconds 4] [--dpr 2] [--wait 2.5]
 //     Times every draw call inside the running app instead (timer queries
 //     wrapped around drawArrays & co.), grouped by shader program, on a
 //     1512x945 viewport at the given devicePixelRatio (2 = a MacBook's
 //     Retina canvas). This is what the user actually sees, render cap and
-//     all — the fps it prints is draws per second.
+//     all — the fps it prints is draws per second. Timing starts --wait
+//     seconds after the scene loads (raise it for a scene whose opening
+//     costs differently from its steady state).
 //
 // Why each bench frame is followed by a 1-pixel readPixels: a tile-based GPU
 // (every Apple GPU) skips shading opaque fragments that a later draw in the
@@ -147,7 +149,7 @@ async function appMode() {
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
   await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=124#/v/${scene}`);
   await page.waitForFunction(() => window.__viz, null, { timeout: 30_000 });
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(Number(get("wait", "2.5")) * 1000);
   await page.evaluate(() => { window.__gpuDraws.length = 0; window.__gpuOn = true; });
   await page.waitForTimeout(seconds * 1000);
   await page.evaluate(() => { window.__gpuOn = false; });
