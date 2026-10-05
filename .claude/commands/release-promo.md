@@ -3,10 +3,33 @@ description: Make the release promo — the best parts of the current Stable ver
 ---
 
 **The idea:** a short vertical video that shows the best parts of the current Stable version, built
-from hooks and cut to the user's song.
+around one hook and cut to the user's song.
 
-A **hook** is a clip a few bars long in which something visibly changes on a beat, with one caption
-that says what the viewer sees. The video is an opening, a row of hooks and an end card. Nothing else goes in.
+## Hook
+
+The hook is the one idea the video is built around, and it is also what stops the scroll. It works as
+a promise: the first second makes it, every later shot proves it, and the end pays it off.
+
+- **One idea.** Write it as one line a stranger understands, about what they get rather than what the
+  panel calls it ("Your music, drawn live."). If the release suggests two ideas, keep one.
+- **It lands in the first second.** Viewers decide whether to swipe in about 1.5 s. So frame 1 shows
+  the video's best moment with the line on screen, and the song's drop hits within the first bar.
+  Nothing comes before it: no logo, title or version card, which all read as an ad.
+- **It works with the sound on and off.** The picture changes on the drop for viewers with sound; the
+  line carries it for viewers without.
+- **The video keeps the promise.** Every later shot proves the line in a new way, with a new picture
+  every 3–5 s. Cut any shot that doesn't prove it: a promise the video doesn't keep is worse than a
+  weak hook, because viewers feel baited.
+- **The end pays it off.** The version card names what made the promise come true. Nothing follows it.
+
+To pick the hook, take the one thing the current Stable can promise and show in a single shot. Make
+it the first line of the plan, together with its frame-1 shot, and plan nothing else until the user
+agrees. Before rendering, watch the first two seconds muted and alone. They must say what the video is
+and make you want the rest.
+
+Sources (2026-10-05): TikTok's Hook → Body → Close, and most ad recall landing in the first six seconds
+(ads.tiktok.com/business/en-US/blog/creative-best-practices-top-performing-ads); the 1.5 s swipe
+decision and a change every 3–5 s (socialync.io/blog/short-form-video-structure-guide-2026).
 
 The machinery is `tools/promo/`; read the header of `tools/promo/promo.mjs` first. Its defaults already
 play the Shape below. Change only what the user asks for, and record each new call in the Shape,
