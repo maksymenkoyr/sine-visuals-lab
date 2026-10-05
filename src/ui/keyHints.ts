@@ -82,9 +82,10 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "Z X C", id: "zxc", label: "Slider jump", hint: "Slider to middle · max · pointer" },
   { key: "Esc", id: "esc", label: "Unpin", hint: "Unpin the pinned setting" },
   { key: "?", id: "keys", label: "Keys", hint: "This list" },
-  { key: "B", id: "beat-one", label: "The 1", hint: "This beat is the 1 (⇧ clears ×2/÷2 and nudge)" },
+  { key: "B", id: "beat-one", label: "The 1", hint: "This beat is the 1 (⇧ clears ×2/÷2, nudge and a tapped tempo)" },
   { key: "[ ]", id: "tempo-x", label: "Tempo ÷2 ×2", hint: "Halve / double the beat" },
   { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
+  { key: "⌃ Ctrl", id: "tap", label: "Tap tempo", hint: "Tap on every beat to set the tempo (the Tempo card's Tap does the same)" },
   { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
   { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
 ];

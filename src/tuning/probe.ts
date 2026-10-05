@@ -76,8 +76,17 @@ export interface ProbeSnapshot {
    *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a
    *  headless check can confirm a bar resync / ×2 / ÷2 landed without
    *  capturing pixels (see this file's own header, "answer with numbers,
-   *  not pixels"). */
-  beat: { fired: boolean; bpm: number; phase: number; barPhase: number; metronomeBpm: number };
+   *  not pixels"). metronomePhase and tapGuided do the same for a tap tempo
+   *  (src/render/tapTempo.ts). */
+  beat: {
+    fired: boolean;
+    bpm: number;
+    phase: number;
+    barPhase: number;
+    metronomeBpm: number;
+    metronomePhase: number;
+    tapGuided: boolean;
+  };
   section: number;
   drop: number;
   centroid: number;
@@ -127,6 +136,8 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
       phase: anim?.beatPhase ?? 0,
       barPhase: anim?.barPhase ?? 0,
       metronomeBpm: anim?.metronomeBpm ?? 0,
+      metronomePhase: anim?.metronomePhase ?? 0,
+      tapGuided: anim?.tapGuided ?? false,
     },
     section: anim?.sectionIntensity ?? 0,
     drop: anim?.dropPulse ?? 0,

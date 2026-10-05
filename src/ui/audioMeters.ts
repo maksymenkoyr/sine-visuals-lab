@@ -1,4 +1,5 @@
 import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts";
+import { getTapRun } from "../render/tapTempo.ts";
 import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
@@ -157,7 +158,8 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *    reads as locked, one between ticks reads as a double, and a tick with
  *    nothing under it reads as a miss. Last, Wave: beatWave/barWave's own
  *    smooth swing, for a setting that wants to sway in time rather than
- *    pulse on a hit.
+ *    pulse on a hit. The header carries tap tempo's Tap chip and how many
+ *    taps it still needs (tapStatusStyle's comment).
  *  - Character: first, Section — sectionIntensity with a drop flash, the
  *    phrase-level trend. Then a 2-column grid of every entry in MUSIC_DIALS except
  *    brightness (never a hardcoded list — filtered, so a new dial can't
@@ -297,6 +299,9 @@ export interface AudioMetersDeps {
   /** The Dynamics card's Reset chip (its header, beside Loudness): start the
    *  integrated reading over. */
   onLufsReset: () => void;
+  /** The Tempo card's Tap chip: one tap tempo tap, at the pointerdown's own
+   *  timeStamp (src/render/tapTempo.ts) — the same path app.ts's Ctrl takes. */
+  onTap: (timeStamp: number) => void;
   /** The Dynamics card's Gate row's trace guides and the Hits card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
    *  Silence below/Sound above rows edit (src/audio/silenceGate.ts). Read
@@ -472,7 +477,14 @@ const tickLabelStyle = `
 const LUFS_TITLE =
   "Short-term loudness: the last 3 s, K-weighted like a broadcast meter. I is the gated average since Reset.";
 const TEMPO_TITLE =
-  "Tempo. The dot flashes white on every metronome tick and settles back to its colour, brighter as the tracker gets sure.";
+  "Tempo. The dot flashes white on every metronome tick and settles back to its colour, brighter as the tracker gets sure. TAPPED under the number: you tapped this tempo, and the tracker follows the music from it.";
+// Tap tempo (src/render/tapTempo.ts) in the Tempo card's header: a Tap chip
+// that taps on pointerdown — the press is the beat, as with Ctrl (app.ts) —
+// and, beside it while a run of taps is still short of enough, how many more
+// it needs. While a tap guides the tracker, the BPM block's caption reads
+// TAPPED instead of BPM.
+const tapStatusStyle = `font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.7); white-space: nowrap;`;
+const tapRightStyle = `display: flex; align-items: center; gap: 8px;`;
 // The settle rule that decides the digits below (a majority-agreement window
 // over the raw estimate, so 124/125 flicker and half/double-time candidates
 // don't reach the display) now lives in tempoSettle.ts, shared with
@@ -933,6 +945,7 @@ function createTempoBlock(accent: string) {
   let lit = false;
   let lastLockStep = -1;
   let shownBpm = 0;
+  let shownCaption = caption.textContent;
   digits.textContent = "--";
 
   function settle(): void {
@@ -985,6 +998,14 @@ function createTempoBlock(accent: string) {
       if (next === shownBpm) return;
       shownBpm = next;
       digits.textContent = shownBpm > 0 ? String(shownBpm) : "--";
+    },
+    /** At the text tick: "TAPPED" while a tap guides the tempo shown, "BPM"
+     *  otherwise. Keyed like setBpm. */
+    setTapped(tapped: boolean): void {
+      const next = tapped ? "TAPPED" : "BPM";
+      if (next === shownCaption) return;
+      shownCaption = next;
+      caption.textContent = next;
     },
   };
 }
@@ -2360,7 +2381,28 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   mountJack("anim.beatWave", wave.right, wave.el);
   mountJack("anim.barWave", wave.right, wave.el);
 
-  const tempoCard = createCard({ title: "Tempo", accent: NEUTRAL_ACCENT, foldId: "tempo" });
+  // See tapStatusStyle's own comment. Built by hand rather than with
+  // createChipButton: it taps on pointerdown, not click, and its hover hint
+  // is keyHints.ts's (data-key), not a title.
+  const tapStatus = document.createElement("span");
+  tapStatus.style.cssText = tapStatusStyle;
+  const tapChip = document.createElement("button");
+  tapChip.type = "button";
+  tapChip.textContent = "Tap";
+  tapChip.style.cssText = chipBtnStyle;
+  tapChip.dataset.key = "tap";
+  tapChip.dataset.keycap = "Ctrl";
+  tapChip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    // No focus move: a tap shouldn't take the keyboard's place in the panel.
+    e.preventDefault();
+    deps.onTap(e.timeStamp);
+  });
+  const tapRight = document.createElement("div");
+  tapRight.style.cssText = tapRightStyle;
+  tapRight.append(tapStatus, tapChip);
+  let shownTapStatus = "";
+  const tempoCard = createCard({ title: "Tempo", accent: NEUTRAL_ACCENT, foldId: "tempo", right: tapRight });
   tempoCard.body.append(tempoWelded, spacer(), timingStrip.el, spacer(), wave.el);
 
   // ---- Character ----
@@ -2726,6 +2768,15 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
 
       // ---- Tempo ----
+      // The Tap chip's count sits in the header, so it updates folded too.
+      if (text) {
+        const run = getTapRun(nowMs);
+        const status = run && run.more > 0 ? `${run.more} more ${run.more === 1 ? "tap" : "taps"}` : "";
+        if (status !== shownTapStatus) {
+          shownTapStatus = status;
+          tapStatus.textContent = status;
+        }
+      }
       if (!tempoCard.fold?.isFolded()) {
         // The dot flashes on the metronome's own tick, not a raw hit — the
         // dot and digits both come from the same tempoSettle.ts reading
@@ -2735,6 +2786,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           // RAW / Smoothing Off show the unsettled raw estimate, exactly as
           // before this block's own settle pass moved into tempoSettle.ts.
           tempo.setBpm(raw || smoothingOff ? (frame?.bpm ?? 0) : (anim?.metronomeBpm ?? 0));
+          tempo.setTapped(!raw && !smoothingOff && !!anim?.tapGuided);
         }
         // Fed through SIGNALS[id].read() itself, not a hand-copied formula,
         // so this row and a setting driven by the same signal always agree

@@ -69,6 +69,7 @@ import {
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
 import { getBeatTrim, requestBarResync, resetBeatTrim, stepTempoMultiplier, nudgeBeatOffset } from "./render/beatTrim.ts";
+import { releaseTapTempo, tapTempoAt } from "./render/tapTempo.ts";
 import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
 import { createDriveEngine, type DriveEngine } from "./render/drives.ts";
 import {
@@ -664,6 +665,21 @@ function showHud(text: string, persist = false): void {
       hud.style.opacity = "0";
     }, 3000);
   }
+}
+
+/** One tap tempo tap (src/render/tapTempo.ts): Ctrl, or the Tempo card's Tap
+ *  chip. `timeStamp` is the event's own, on performance.now()'s clock. In a
+ *  room this window draws the room's frames a picture delay late (see
+ *  currentVisual), so the tap moves by that much to land on the beat it
+ *  shows. `hud`: a key tap answers on the HUD — the chip's card shows its
+ *  own count — and only from a run's second tap, so a lone stray Ctrl (a
+ *  Ctrl+<key> chord) shows nothing. */
+function tapTempo(timeStamp: number, hud: boolean): void {
+  const conn = mode === "solo" ? null : activeConn();
+  const res = tapTempoAt(timeStamp + (conn ? conn.pictureDelayMs() : 0));
+  if (!hud) return;
+  if (res.bpm > 0) showHud(`Tap tempo: ${Math.round(res.bpm)} BPM`);
+  else if (res.taps > 1) showHud(`Tap tempo: ${res.more} more ${res.more === 1 ? "tap" : "taps"}`);
 }
 
 /** Space = Cue (held), Option = Play (tap sends at once, hold glides) — the why, and
@@ -1664,6 +1680,7 @@ function wireDeviceMenu(): void {
     onSetDriveThresholdOn: (sceneId, spec, on) => setDriveThresholdOn(sceneId, spec, on),
     setDriveLineStrength: (sceneId, spec, value) => setDriveLineStrength(sceneId, spec, value),
     onLufsReset: () => lufsAnalyser?.reset(),
+    onTap: (timeStamp) => tapTempo(timeStamp, false),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
@@ -2560,6 +2577,19 @@ async function boot(): Promise<void> {
   });
 
   window.addEventListener("keydown", (e) => {
+    // Tap tempo: a bare Ctrl press is a tap on this beat (tapTempo below).
+    // Ahead of the modifier guard, since Ctrl's own keydown carries ctrlKey.
+    // Counted at keydown, because the press is the beat; a Ctrl+<key> chord
+    // is then one stray tap, which the estimate leaves out. Only in a viz and
+    // not while typing, like the beat keys below; never preventDefault, so
+    // every Ctrl shortcut still works.
+    if (e.key === "Control") {
+      if (!e.repeat && !e.shiftKey && !e.altKey && !e.metaKey && inViz && !isTypingTarget(e.target)) {
+        noteKeyUse("tap");
+        tapTempo(e.timeStamp, true);
+      }
+      return;
+    }
     // Modifier guard so ⌘/Ctrl+F (browser find) and ⌘/Ctrl+S (save page)
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
@@ -2614,8 +2644,11 @@ async function boot(): Promise<void> {
         e.preventDefault();
         noteKeyUse("beat-one");
         if (e.shiftKey) {
+          // Also hands a tapped tempo back to the tracker (tapTempo.ts).
+          const wasTapped = !!lastAnim?.tapGuided;
           resetBeatTrim();
-          showHud("Tempo ×1, beat timing reset");
+          releaseTapTempo();
+          showHud(wasTapped ? "Tapped tempo released, tempo ×1, beat timing reset" : "Tempo ×1, beat timing reset");
         } else {
           requestBarResync();
           showHud("This beat is the 1");
@@ -3087,14 +3120,23 @@ function tick(): void {
   // module state above) and switches beatClock.ts's phase comb onto the
   // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
   // own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
-  // its drive jack); null on any device with no local mic.
+  // its drive jack); null on any device with no local mic. `nowRafMs` makes
+  // this the one clock that follows a tap tempo (src/render/tapTempo.ts):
+  // like the beat keys, a tap only ever reaches this window's own clock.
   const anim = gained
-    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
-        shape: getHitShape(),
-        beatRatio: lastFluxRatio,
-        tempoHits: lastTempoHits,
-        wavePeak: lastMono ? peak(lastMono) : null,
-      })
+    ? animClock.advance(
+        dtSec,
+        gained,
+        smoothing,
+        resolveSilenceGate(),
+        {
+          shape: getHitShape(),
+          beatRatio: lastFluxRatio,
+          tempoHits: lastTempoHits,
+          wavePeak: lastMono ? peak(lastMono) : null,
+        },
+        nowRafMs,
+      )
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —

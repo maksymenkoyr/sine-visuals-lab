@@ -610,6 +610,9 @@ export interface DeviceMenuDeps {
   /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
+  /** The Tempo card's Tap chip — one tap tempo tap at this timeStamp (see
+   *  audioMeters.ts's AudioMetersDeps.onTap). */
+  onTap: (timeStamp: number) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
@@ -2187,6 +2190,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
     onLufsReset: deps.onLufsReset,
+    onTap: deps.onTap,
     getSilenceGate: () => deps.getSilenceGate(),
     hitShape: {
       get: () => deps.getHitShape(),
