@@ -19,8 +19,7 @@ because the prep between `record` and `plan` needs the user's recordings.
 
 ## 1. What to show
 
-The functions come from the feature map, `docs/feature-map.md` (while PR #360 is open:
-`git show origin/worktree-feature-map:docs/feature-map.md`). Take its Core lines, then its Key ones,
+The functions come from the feature map, `docs/feature-map.md`. Take its Core lines, then its Key ones,
 that a viewer can see working within two bars, and say each as what it does for a host or a DJ (a use
 case), not the panel's name. Propose which Shape sections stay and which `chapters` to add between the
 wiring and the shuffle, as a draft time table; the user picks.
