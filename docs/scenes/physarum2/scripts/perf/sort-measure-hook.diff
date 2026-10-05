@@ -1,0 +1,106 @@
+diff --git a/src/render/scenes/physarum2.ts b/src/render/scenes/physarum2.ts
+index 6df3857..9d3fcad 100644
+--- a/src/render/scenes/physarum2.ts
++++ b/src/render/scenes/physarum2.ts
+@@ -2814,6 +2814,62 @@ function createPhysarum2Scene(): Scene {
+       if (!diffuseProg || !simProg || !depositProg || !depositProgMrt || !compositeProg) return;
+       if (!quadVao || !depositVao || !seedEmission) return;
+       const { gl } = ctx;
++      // TEMP measurement hook (agent re-sort session) — never commit.
++      const dbgFlags = (globalThis as { __p2flags?: { steps?: number; nosort?: boolean; timer?: boolean; sync?: boolean } }).__p2flags;
++      // eslint-disable-next-line @typescript-eslint/no-explicit-any
++      const g = globalThis as any;
++      const dbg = (g.__p2dbg ??= { frames: [], pending: [], landed: 0 });
++      dbg.kickSort = () => sorter.reset();
++      dbg.readAgents = () => {
++        const n = agentSide * agentSide;
++        const pos = new Uint8Array(n * 4);
++        const dir = new Uint8Array(n * 4);
++        gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbo[agentRead]);
++        gl.readBuffer(gl.COLOR_ATTACHMENT0);
++        gl.readPixels(0, 0, agentSide, agentSide, gl.RGBA, gl.UNSIGNED_BYTE, pos);
++        gl.readBuffer(gl.COLOR_ATTACHMENT1);
++        gl.readPixels(0, 0, agentSide, agentSide, gl.RGBA, gl.UNSIGNED_BYTE, dir);
++        gl.readBuffer(gl.COLOR_ATTACHMENT0);
++        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
++        let sum = 0;
++        let xor = 0;
++        let dist = 0;
++        let px = 0;
++        let py = 0;
++        for (let i = 0; i < n; i++) {
++          const o = i * 4;
++          const p32 = ((pos[o]! << 24) | (pos[o + 1]! << 16) | (pos[o + 2]! << 8) | pos[o + 3]!) >>> 0;
++          const d32 = ((dir[o]! << 24) | (dir[o + 1]! << 16) | (dir[o + 2]! << 8) | dir[o + 3]!) >>> 0;
++          let h = Math.imul(p32 ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul((d32 + 0x632be5ab) >>> 0, 0xc2b2ae35);
++          h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
++          sum = (sum + h) >>> 0;
++          xor = (xor ^ h) >>> 0;
++          const x = ((pos[o]! << 8) | pos[o + 1]!) / 65535;
++          const y = ((pos[o + 2]! << 8) | pos[o + 3]!) / 65535;
++          if (i > 0 && i < agentCount) {
++            let dx = Math.abs(x - px);
++            let dy = Math.abs(y - py);
++            dx = Math.min(dx, 1 - dx);
++            dy = Math.min(dy, 1 - dy);
++            dist += Math.sqrt(dx * dx + dy * dy);
++          }
++          px = x;
++          py = y;
++        }
++        return { n, count: agentCount, sum, xor, meanStep: dist / (agentCount - 1) };
++      };
++      const tExt = dbgFlags?.timer ? (gl.getExtension("EXT_disjoint_timer_query_webgl2") as { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null) : null;
++      let tq: WebGLQuery | null = null;
++      if (tExt) {
++        while (dbg.pending.length && gl.getQueryParameter(dbg.pending[0].q, gl.QUERY_RESULT_AVAILABLE)) {
++          const { q, sorting } = dbg.pending.shift();
++          const disjoint = gl.getParameter(tExt.GPU_DISJOINT_EXT);
++          if (!disjoint) dbg.frames.push({ ms: gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6, sorting });
++          gl.deleteQuery(q);
++        }
++        tq = gl.createQuery();
++        gl.beginQuery(tExt.TIME_ELAPSED_EXT, tq!);
++      }
+       ensureTrailTargets(gl);
+       if (pendingFresh) {
+         pendingFresh = false;
+@@ -2883,8 +2939,9 @@ function createPhysarum2Scene(): Scene {
+         level: d.value(boostSpec.key, frame.energy),
+         pumpVel: crawlPump.vel,
+       });
+-      const { steps, acc } = stepAccumulator(stepAcc, dt, stepRate);
+-      stepAcc = acc;
++      const sa = stepAccumulator(stepAcc, dt, stepRate);
++      const steps = typeof dbgFlags?.steps === "number" ? dbgFlags.steps : sa.steps;
++      stepAcc = sa.acc;
+ 
+       gl.disable(gl.BLEND);
+ 
+@@ -2941,7 +2998,13 @@ function createPhysarum2Scene(): Scene {
+       // This frame's share of the agent re-sort, ahead of the steps it
+       // speeds up; when one lands, the sorted agents are in the other half.
+       const sortTarget = { posTex: agentPosTex[agentRead]!, dirTex: agentDirTex[agentRead]!, dstFbo: agentFbo[1 - agentRead]!, side: agentSide };
+-      if (sorter.advance(gl, sortTarget, quadVao, steps)) agentRead = 1 - agentRead;
++      const busyBefore = sorter.busy;
++      const landedNow = !dbgFlags?.nosort && sorter.advance(gl, sortTarget, quadVao, steps);
++      if (landedNow) {
++        agentRead = 1 - agentRead;
++        dbg.landed++;
++      }
++      const sortingThisFrame = !dbgFlags?.nosort && (busyBefore || sorter.busy || landedNow);
+ 
+       for (let step = 0; step < steps; step++) {
+         const trailWrite = 1 - trailReadIdx;
+@@ -3063,6 +3126,11 @@ function createPhysarum2Scene(): Scene {
+         gl.activeTexture(gl.TEXTURE0 + unit);
+         gl.bindTexture(gl.TEXTURE_2D, null);
+       }
++      if (tExt && tq) {
++        gl.endQuery(tExt.TIME_ELAPSED_EXT);
++        dbg.pending.push({ q: tq, sorting: sortingThisFrame });
++      }
++      if (dbgFlags?.sync) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+     },
+ 
+     // Phase 3 — phone-local only, never called for the TV (see scene.ts's

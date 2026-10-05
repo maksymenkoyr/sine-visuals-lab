@@ -33,6 +33,11 @@ the recruiting rule is `SIM_FRAG`'s Headcount block (`SWITCH_MAX`'s comment
 has the rule), and the measured headcount is `POP_FRAG` through
 `createPixelReadback` (the same non-blocking readback Territory uses).
 
+The agent re-sort (2026-10-05): `src/render/scenes/physarum2Sort.ts` (its
+header is the source: key pass, bitonic network, gather), called from
+`render()` just ahead of the step loop; its pure twins are tested in
+`tests/physarum2Sort.test.ts`.
+
 Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
 packing round trip and the same beat-rise detector with its own refractory),
 and `grainTextureSide` from `chladni.ts` for the agent-state texture sizing.
@@ -225,6 +230,29 @@ configs are used.
   with Random every 8 beats on top (Random keeps the drives). The first promo
   cut re-rolled presets every 2 beats on the synthetic feed; the user found
   half of it flat — a dish needs a few beats to grow into its pattern.
+- 2026-10-05, the GPU agent re-sort (`physarum2Sort.ts`; `scripts/perf/sortbench.mjs`
+  with `sort-measure-hook.diff` applied). Headless Chromium, ANGLE/Metal, M1
+  Pro, quality high (800k agents), 1456×902 at dpr 2 (the user's 2912×1804
+  window), synthetic 124 BPM; every row three interleaved runs, sort off vs on:
+  - Correctness on the GPU: with the sim frozen, a forced sort kept the
+    order-free checksum of every agent's position and direction (a true
+    permutation), and the mean screen distance between storage neighbours
+    fell from 0.38 of the field (random) to 0.0035 (≈ 3 trail texels); with
+    the sim running and re-sorting, it hovers ≈ 0.045.
+  - Forced 10 steps a frame, vsync off, GPU synced per frame: 5.02–5.24 →
+    1.79–1.87 ms/step (≈ 2.8×), with the sort running back to back — its
+    own cost is inside the "on" figure.
+  - Normal pacing, panel closed, GPU timer around `render()` (ANGLE's timer
+    carries a fixed offset, so read the difference): 11.8–12.1 → 7.6–8.0 ms a
+    frame, p95 15.6–15.9 → 12.1–13.3. Frames with sort stages cost ≈ 1.5 ms
+    more and were about a quarter of all frames.
+  - Panel open, Panel blur on: rAF 85–86 → 120 (the display cap); the GPU
+    process's main thread 97–98% → 51–53% busy; each readback's wait 12.5–13.2
+    → 0.9–1.0 ms — the stall the 2026-10-04 panel-lag entry chased was this
+    GPU backlog.
+  - The look: the app's Picture meter over 30 s, 450 samples a run —
+    brightness 0.217–0.227 off vs 0.218–0.229 on; colour, motion, detail and
+    flashes within 0.003.
 
 ## Decisions and pivots
 
@@ -983,6 +1011,19 @@ configs are used.
   Assumed, not asked: every lane is rewired (not only the rolled rows),
   and Nutrient, Excitability, Trail life and Stain values stay unrolled as
   before.
+- 2026-10-05, the agent re-sort built (user: "lets apply it and then … compare
+  actual increase in performance"), on the GPU rather than the CPU prototype's
+  way: the prototype read every agent's position back (a getBufferSubData of
+  the whole agent texture, which waits behind the GPU's backlog — 10–15 ms a
+  call with the panel and its blur open) and sorted on the main thread. A
+  bitonic sort of (Morton cell, slot) pairs in RG32UI targets needs no
+  readback and no extension, is spread over a few frames
+  (`SORT_PASSES_PER_FRAME`), and lands as one gather into the agents' other
+  ping-pong half. The keys are a few frames stale by then, which only makes
+  the order slightly less tidy; it is still a permutation. Cadence
+  (`SORT_EVERY_STEPS`) and grid (`SORT_GRID_BITS`) kept from the prototype;
+  not tuned further, since the sort's own share is already small next to the
+  saving (Measurements).
 
 ## Tuning notes
 
@@ -1040,10 +1081,14 @@ applies there too. Tuned so far only against the synthetic feed at
   colony per trigger (default a beat-pulse rise), and the share each Pipette
   tap converts. At 0.48 half the dish jumps every beat and the rest goes
   dark. The label and description don't say that plainly yet.
-- Performance: the spatial re-sort in Measurements (≈ 3.5× cheaper steps,
-  look unchanged) is prototyped, not built. A real version needs an async
-  readback (PBO + fence) and the sort off the main thread; the same fix
-  likely applies to `physarum.ts`.
+- Performance: the agent re-sort is built (2026-10-05, `physarum2Sort.ts`);
+  `physarum.ts` (Mesh Grid) stores its agents the same random way and would
+  likely gain the same from it.
+- Chrome logs "performance warning: READ-usage buffer was written, then
+  fenced, but written again before being read back" several times a second
+  on this scene, with or without the re-sort (seen 2026-10-05) — one of the
+  `createPixelReadback` buffers is re-armed before its result is read.
+  Harmless for the picture; not traced yet.
 - The reseed burst's brightness/size still trades off against `DEPOSIT` and
   `GLOW_MIN`/`GLOW_MAX`; a future pass might want its own exposure term
   instead of sharing the composite's global exposure, if a louder track needs
@@ -1202,7 +1247,10 @@ applies there too. Tuned so far only against the synthetic feed at
     now documents, rather than links to a stale diff for, the temporary
     forced-step-count hook a Touch/War perf run needs in `physarum2.ts`'s
     `render()` — copy it in by hand, measure, then `git diff` must show
-    physarum2.ts untouched again; never commit it.
+    physarum2.ts untouched again; never commit it. `sortbench.mjs` (modes
+    steps/natural/panel/picture/check) with `sort-measure-hook.diff` is the
+    2026-10-05 re-sort measurement — the same apply, measure, check out
+    routine.
   - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
     down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
     switch, the Affinity card's rows waking on hover and pinning on a press
