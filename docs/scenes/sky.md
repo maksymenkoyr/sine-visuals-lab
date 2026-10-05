@@ -2,9 +2,11 @@
 
 Looking straight up at a soft sky: fluid-sim clouds drift on their own,
 while the music plays through illusions of the viewer's own eye — streaks
-of floaters a wandering brush stamps on each beat, a pale ring of light
-that glints through them on each beat, and Haidinger's brush turning over
-the centre of view. The sky runs a 24-hour day with no night. Featured,
+of floaters a wandering brush stamps on each beat, a ring of light (pale,
+or split into a spectrum by Rainbow) that glints through them on each beat,
+Haidinger's brush turning over the centre of view and swelling on the beat,
+and blue-field sprites darting all over the sky, surging on each beat. The
+sky runs a 24-hour day with no night. Featured,
 registered right after Physarum 2 and absent from `draftIds` in
 `src/render/scenes/index.ts`.
 
@@ -20,13 +22,18 @@ registered right after Physarum 2 and absent from `draftIds` in
     `pickSwarmCenter` (nudges a stamp to the clearest spot near the
     brush), `spawnFloaters`, `floaterCountFromEnergy`, `createWavePool`
     (per-stamp `life`), `waveLifeSec`, `floaterGain`; in the shader
-    `streakDensity`, `floaterPath`, `floaterStrand` and `floaterProfile`,
-    sized by `FLOATER_SCALE`.
-  - Beat light waves: `sweepSlot` and the shader's `lightWaveAt`.
+    `streakDensity`, `floaterPath`, `floaterStrand`, `floaterProfile` and
+    `drawFloater`, sized by `FLOATER_SCALE`. Floater glide shifts each
+    stamp's grid by its own drift (step 4 of `main`).
+  - Beat light waves: `sweepSlot` and the shader's `lightWaveAt`; Rainbow's
+    colour comes from `spectrumAt` (ring spectrum, floater rim fringe).
+  - Blue-field sprites: `spriteSpeed`, `advanceSpritePhase`
+    (`SPRITE_PERIOD_SEC`); in the shader `spritesAt` and `spriteArc`.
+  - Gradient dither: the last step of `main`.
   - Day cycle: `dayRatePerSec`, `advanceDayOffset`, `nightSpeedup`,
     `sunElevation`; in the shader `dayWeights` and `dayMix` over the
     `DAY_KEY_E` keys.
-  - Haidinger's brush: `advanceBrushPhase`.
+  - Haidinger's brush: `advanceBrushPhase`; its beat swell `brushSwell`.
 - `src/render/scenes/fluidSim.ts` — the stable-fluids solver, shared with Neon
   Fluid. Sky passes `SKY_SPLAT_SLOTS` as its `splatSlots` and `edge: false`.
 - `tests/sky.test.ts`; the solver's pure helpers are tested in
@@ -137,6 +144,17 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - 2026-09-28 — frame rate, real GPU, 2560×1600: 120 fps before (the
   display cap), 48 with the cumulus round's edge noise, 120 again once
   clear sky skipped it.
+- 2026-10-04 — banding: a contrast-stretched patch of the early-evening sky
+  (default look, 1600×1000, real GPU) showed clean 8-bit steps, each a
+  row band with a faint colour cast where the channels stepped on different
+  rows. With Gradient dither at its default the same patch is even grain.
+- 2026-10-04 — GPU cost of the rainbow/sprites/glide/dither round,
+  `tools/gpu-bench.mjs` at 2560×1600, interleaved with main's `sky.ts`: the
+  GPU kept switching between two clock states, so read the ratio, not the
+  ms. In the fast state main 5.7 ms, this round 7.1–7.2 ms; in the slow
+  state 15.0–15.4 against 18.5–22. Sprites were the first draft's big cost
+  (+6.5 ms in the slow state with a 3×3 cell search); the 2×2 search and
+  the reach cull brought that down to the numbers above.
 
 ## Decisions and pivots
 
@@ -355,6 +373,44 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   30/75/200 and live shots) but the exact pattern differs, so those frames
   changed by design. Not checked on a real phone.
 
+- 2026-10-04 — "Look at the sky, think if there is anything we can
+  change to make it better. I want the wave to have a bit of rainbowish
+  effect, and add this optical illusion where we have dots all around."
+  I named four improvements from a desktop screenshot: banding, floaters on
+  a rigid grid, invisible beat effects, and cloud smoke tails. Asked which
+  wave and which dots; the answers were "both" (the light wave and the
+  floater streaks) and blue-field sprites (the dots cut on 2026-09-23). The
+  user took dither, glide and visible beat effects but not the smoke tails,
+  "all with controls exposed". Four new settings:
+  - **Rainbow** (Look, no jack): the light ring's tint is pulled toward a
+    spectrum laid across its width, red leading and violet trailing. The
+    floaters get a prism fringe (the tube profile read further out for red,
+    further in for blue) plus a rim tint that drifts through the spectrum
+    along a streak. At the default the rims show colour between beats too.
+  - **Blue-field sprites** (Look, jack default plain Beat): comets with
+    short tails on curved paths, one per screen cell at most, sparse at the
+    centre of view and mostly hidden by solid cloud. The beat pulse surges
+    their clock (`spriteSpeed`, 1 at drive 0) and stretches their tails.
+    The v1 dots read as noise; these move like the real thing and carry
+    the beat.
+  - **Floater glide** (Motion, no jack): each stamp's grid is the shared
+    screen grid shifted by glide × its own drift, so at 1 a streak's
+    floaters keep their shapes and glide with the wind (0 is the old
+    switching grid, pixel for pixel). Once grids differ, overlapping streaks
+    clipped each other's floaters at cell edges, so a pixel now draws the
+    runner-up streak too whenever its cell isn't the winner's.
+  - **Gradient dither** (Look, no jack): triangular per-channel noise of up
+    to `DITHER_LSB` 8-bit steps as the last step.
+
+  Beat effects, on the existing sliders: the light glint now also lights a
+  pixel-or-two halo around each tube (`SWEEP_HALO_PX`, cut well inside the
+  cell — a wider halo showed the cell squares) at a higher `SWEEP_ALPHA`.
+  Haidinger's brush swells on each light-wave beat (`brushSwell`). Its tint
+  became an additive warm/cool lift: the first try, multiplying the blue
+  sky by yellow, made a big olive propeller. Checked headless on the real
+  GPU at 1600×1000 with Floaters and Light waves wired to the Metronome:
+  defaults, Rainbow 1 with pinned floaters, sprites at 1.
+
 ## Tuning notes
 
 - Scene-default stamps ride the broadband onset detector, which the
@@ -386,13 +442,24 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
     Either Day drift defaults to 0, or the drift should be far slower
     (`dayRatePerSec`).
   - Floaters sit on a fixed screen grid (`FLOATER_CELL`), so a drifting
-    streak moves by cells switching on and off. The streak drifts right
+    streak moves by cells switching on and off. Fixed 2026-10-04 by
+    Floater glide (default 1). Still open: the streak drifts right
     (`STREAK_DRIFT`) whatever the clouds are doing, so the two layers
     don't share a wind.
   - The two beat-driven effects besides the stamps are hard to see:
     light-wave glints only light pixels inside tubes a few pixels wide,
     and Haidinger's brush wasn't visible in any frame at default opacity.
-    On real music the stamps are the only visible reaction.
+    On real music the stamps are the only visible reaction. Addressed
+    2026-10-04 (glint halo, brush beat swell, sprites surging on the
+    beat), checked only on the synthetic feed so far.
+- Not yet seen on real music: the sprites' beat surge, the brush swell and
+  the default Rainbow amount. Sprite size (`SPRITE_R`) is about 1.6 px on a
+  1000-px-tall frame; on a TV across a room it may want to grow.
+- The smoke-tail strands that sometimes trail off a cloud (the drifters'
+  push shearing a puff) were raised 2026-10-04 and left as they are.
+- Where three or more gliding streaks overlap, only the two densest draw,
+  so a third can still be clipped at a cell edge (seen only with Brush
+  move 0, which piles every stamp in one spot).
   - Wiring a pulsing source to Floaters (from code, not seen): the shader
     reads `uFloaterDensity * floaterDensityDrive(1.0)` every frame for
     both streak size and the off-gate, so every live streak shrinks and
@@ -502,3 +569,5 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench;
   sun further out (`SUN_DISTANCE`); palette-matched darkest key; a
   cumulus round from a photo, reverted; bench cut to six controls.
+- Rainbow, Blue-field sprites, Floater glide, Gradient dither; light-wave
+  halo and Haidinger's brush beat swell (2026-10-04).

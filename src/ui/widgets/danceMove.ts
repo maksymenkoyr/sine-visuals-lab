@@ -1,5 +1,6 @@
 import { BANDS_AMBER, FONT_MONO, INPUT_GREEN, withAlpha } from "../controlsTheme.ts";
 import { registerWidget, type WidgetCtx } from "./registry.ts";
+import { watchSize, type WatchedSize } from "../onScreen.ts";
 import type { PanelSection } from "../../render/scene.ts";
 
 /**
@@ -60,10 +61,18 @@ function buildDanceMove(container: HTMLElement, section: PanelSection, ctx: Widg
   speedBox.append(speedHead, speedCanvas);
   container.appendChild(speedBox);
 
-  const fit = (cv: HTMLCanvasElement): CanvasRenderingContext2D | null => {
+  // Observed, not read in fit(): it runs every tick, after the readouts'
+  // text writes, where a clientWidth read forces a layout pass (onScreen.ts).
+  const moveSize = watchSize(moveCanvas);
+  const speedSize = watchSize(speedCanvas);
+  ctx.onDispose(() => {
+    moveSize.disconnect();
+    speedSize.disconnect();
+  });
+  const fit = (cv: HTMLCanvasElement, size: WatchedSize): CanvasRenderingContext2D | null => {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.max(1, Math.round(cv.clientWidth * dpr));
-    const h = Math.max(1, Math.round(cv.clientHeight * dpr));
+    const w = Math.max(1, Math.round(size.w * dpr));
+    const h = Math.max(1, Math.round(size.h * dpr));
     if (cv.width !== w || cv.height !== h) {
       cv.width = w;
       cv.height = h;
@@ -81,11 +90,11 @@ function buildDanceMove(container: HTMLElement, section: PanelSection, ctx: Widg
     const stepNames = Array.from({ length: nSteps }, (_, i) => stepName(p["stepMultiple" + i] ?? 0));
     speedOut.textContent = stepNames[p.speedStep] ?? "";
 
-    const g = fit(moveCanvas);
+    const g = fit(moveCanvas, moveSize);
     if (g) {
       const w = moveCanvas.width;
       const h = moveCanvas.height;
-      const pad = 4 * (w / Math.max(1, moveCanvas.clientWidth));
+      const pad = 4 * (w / Math.max(1, moveSize.w));
       const y = (v: number) => h - pad - v * (h - 2 * pad);
       g.clearRect(0, 0, w, h);
       g.fillStyle = "rgba(242,139,208,0.35)";
@@ -126,7 +135,7 @@ function buildDanceMove(container: HTMLElement, section: PanelSection, ctx: Widg
       }
     }
 
-    const s = fit(speedCanvas);
+    const s = fit(speedCanvas, speedSize);
     if (s) {
       const w = speedCanvas.width;
       const h = speedCanvas.height;

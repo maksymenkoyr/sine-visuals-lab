@@ -121,7 +121,15 @@ export interface OutputBridgeOptions {
   power: () => OutputPower;
 }
 
-export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
+/** The pop-out's own bridge: an `OutputBridge` that also hands out the output's
+ *  Window, so the clip recorder (ui/clipRecorder.ts) can reach its canvas. The
+ *  room's bridge has no such window. */
+export interface PopOutBridge extends OutputBridge {
+  /** The output window while it is open and reachable, else null. */
+  popupWindow(): Window | null;
+}
+
+export function createOutputBridge(opts: OutputBridgeOptions): PopOutBridge {
   const { transport } = opts;
   const storage = opts.storage ?? localStorage;
   const presence = createOutputPresence();
@@ -203,6 +211,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
         ? opts.openWindow()
         : window.open(OUTPUT_URL + qualityPinQuery(), OUTPUT_WINDOW_NAME, "popup=yes,width=1280,height=720");
     },
+    popupWindow: () => (win && !win.closed ? win : null),
     status,
     onStatus: (cb) => listeners.push(cb),
     setCue(on) {

@@ -1,6 +1,6 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { sourceSlot, type DriveSourceChoice } from "../render/drives.ts";
-import type { SignalId } from "../render/signals.ts";
+import { DIAL_SIGNALS, type DialSignalId, type SignalId } from "../render/signals.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
 /**
@@ -19,6 +19,21 @@ import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, ST
  * division chips show just the division on its own.
  */
 
+/** The Character card's dials (signals.ts's DIAL_SIGNALS) as wires: "Song"
+ *  in front, the way Song intensity already reads, so a slow dial can't be
+ *  mistaken for the live signal its row name would otherwise collide with
+ *  (Tempo, Loudness). Loudness is "Room" instead — it follows the input
+ *  level, not anything about the track (musicProfile.ts's header). */
+const DIAL_SOURCE_LABEL: Record<DialSignalId, string> = {
+  "dial.pulse": "Song pulse",
+  "dial.tempo": "Song tempo",
+  "dial.brightness": "Song brightness",
+  "dial.density": "Song density",
+  "dial.dynamics": "Song dynamics",
+  "dial.attack": "Song attack",
+  "dial.loudness": "Room loudness",
+};
+
 const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "feature.onset": "Any hit",
   "feature.flux": "Onset surge",
@@ -31,7 +46,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.high": "Treble level",
   "anim.energy": "Loudness",
   "anim.sectionIntensity": "Song intensity",
-  "anim.centroid": "Brightness",
+  "anim.centroid": "Centroid",
   "anim.wavePeak": "Waveform",
   "anim.beatWave": "Beat wave",
   "anim.barWave": "Bar wave",
@@ -39,6 +54,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.tempoLock": "Tempo lock",
   "anim.metronome": "Metronome",
   "anim.metronomeBar": "Metronome bar",
+  ...DIAL_SOURCE_LABEL,
 };
 
 /** Plain-language descriptions for every source a jack can plug in — the
@@ -70,6 +86,13 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
   "anim.metronome": "a tick on every beat at the Tempo card's own BPM — the same pulse every beat, silent while it reads '--'.",
   "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
+  "dial.pulse": "how steadily the beat keeps hitting, judged over several seconds.",
+  "dial.tempo": "slow to fast on a dance-music scale, settling over many seconds; it rests in the middle (house tempo) until a tempo locks.",
+  "dial.brightness": "dark and bassy to bright and airy, settling over several seconds. Centroid is the live version.",
+  "dial.density": "sparse and open to wall-of-sound busy, settling over several seconds.",
+  "dial.dynamics": "flat and even to big swings between quiet and loud, judged over a long stretch of the track.",
+  "dial.attack": "soft swells to sharp hits, settling over several seconds.",
+  "dial.loudness": "how loud the room is, following the input level over a few seconds and keeping its last reading through silence.",
 };
 
 const GRID_SOURCE_DESCRIPTION = "the tracker's beat when it's sure of the tempo; the raw hits while it isn't.";
@@ -99,6 +122,7 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.tempoLock": DRIVE_WHITE,
   "anim.metronome": DRIVE_WHITE,
   "anim.metronomeBar": DRIVE_WHITE,
+  ...(Object.fromEntries(DIAL_SIGNALS.map((id) => [id, AUTO_SKY])) as Record<DialSignalId, string>),
 };
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: number } {
@@ -189,8 +213,11 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
   { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
-    choices: ["anim.energy", "anim.wavePeak", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
+    choices: ["anim.energy", "dial.loudness", "anim.wavePeak", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.centroid"],
   },
+  // Room loudness sits by Loudness under Levels, not here: it follows the
+  // input level, not the track.
+  { label: "Song", choices: ["anim.sectionIntensity", ...DIAL_SIGNALS.filter((id) => id !== "dial.loudness")] },
   {
     label: "Tempo",
     choices: [

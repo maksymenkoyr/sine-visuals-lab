@@ -2,20 +2,17 @@
 //   node tools/promo/cards.mjs
 //
 // Reads <work>/lines.json:
-//   { "title": "0.2.0 - beta", "subtitle": "Sine Visuals Lab",
-//     "demos":  [{ "take": "ui_strains", "from": 0, "beats": 3, "group": "Scenes", "text": "…" }, …],
-//     "groups": [{ "key": "scenes", "title": "Scenes", "rows": ["…", …] }] }
-// A demo is a clip that shows a change happening (a take from record.mjs, `from` its first beat) with
-// one caption along the bottom; a group is the full list of changes, shown as a list card held low in
-// the frame whose rows scroll through it (compose.py). Rows must stay short: a list row is one line
-// (~40 characters), a caption wraps to two. This script warns when text does not fit.
+//   { "title": "0.2.0 - beta", "subtitle": "Sine Visuals Lab", "opening": "Your music, drawn live.",
+//     "hooks": [{ "take": "song_p2r", "beats": 8, "text": "…" }, …] }
+// `opening` is the line over the first bar; a hook is a clip (a take from record.mjs, `from` its first
+// beat for a panel take) with one caption along the bottom; title and subtitle make the version card at
+// the end. The opening may wrap to two lines, a caption must fit on one: this script warns when not.
 //
-// Writes <work>/cards/: meta.json {demos, visible, groups: [{key, n}]}, intro.png, demo_<i>.png, and per
-// group chrome_<key>.png (the card and its header, sized for VISIBLE rows) + row_<key>_<i>.png.
-// Also the two-screen demos' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
+// Writes <work>/cards/: meta.json {hooks, cap}, opening.png, hook_<i>.png, version.png.
+// Also the two-screen hooks' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
 // the laptop's Cue and Play keys.
-// The look: the version card is a GitHub release in miniature (a green tag icon); the rest
-// keeps that family's translucent card, header bar and row rules, without its icons or colours.
+// The look: the version card is a GitHub release in miniature (a green tag icon); a caption keeps that
+// family's translucent card with a white hairline, without its icons or colours.
 import { chromium } from "playwright";
 import fs from "node:fs";
 
@@ -25,32 +22,25 @@ const OUT = `${WORK}/cards`;
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
-// The list card: X/Y of its top-left corner on the 1080x1920 frame, header and row heights, rows shown.
-const X = 70, W = 940, HEAD = 96, ROW = 80, VISIBLE = 5, CAP_H = 190;
-const Y = 1545 - (HEAD + VISIBLE * ROW);        // its bottom sits just above the band Stories covers
+const W = 940, CAP_H = 112, PAD = 32;           // card width, caption height (one line) and side padding
+const OPEN_PX = 92, OPEN_LH = 1.1;              // the opening line's font size and line height
 const fontStack = `-apple-system,"SF Pro Text","Segoe UI","Noto Sans",Helvetica,Arial,sans-serif`;
 const base = `html,body{margin:0;background:transparent}*{box-sizing:border-box}
 body{font-family:${fontStack};color:#eef1f5;-webkit-font-smoothing:antialiased}`;
-const css = `${base}
-body{width:1080px;height:1920px;position:relative}
-.card{position:absolute;left:${X}px;top:${Y}px;width:${W}px;height:${HEAD + VISIBLE * ROW + 2}px;border-radius:14px;
- background:rgba(10,13,18,.5);border:1.5px solid rgba(255,255,255,.24);overflow:hidden}
-.head{height:${HEAD}px;display:flex;align-items:center;gap:20px;padding:0 32px;background:rgba(22,26,32,.55);border-bottom:1.5px solid rgba(255,255,255,.18)}
-.head h2{margin:0;font-size:40px;font-weight:650;letter-spacing:-.01em;flex:1;text-shadow:0 1px 8px rgba(0,0,0,.6)}
-.count{min-width:56px;height:44px;border-radius:22px;padding:0 16px;display:flex;align-items:center;justify-content:center;font-size:25px;font-weight:600;background:rgba(255,255,255,.14)}
-.row{position:absolute;left:0;top:0;width:${W}px;height:${ROW}px;display:flex;align-items:center;gap:20px;padding:0 32px;border-top:1.5px solid rgba(255,255,255,.12);font-size:35px;font-weight:500;white-space:nowrap;text-shadow:0 1px 8px rgba(0,0,0,.75)}
-.row i{flex:none;width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55)}
-`;
 const capCss = `${base}
-.c{width:${W}px;height:${CAP_H}px;border-radius:18px;padding:22px 32px;display:flex;flex-direction:column;gap:12px;
+.c{width:${W}px;height:${CAP_H}px;border-radius:18px;padding:0 ${PAD}px;display:flex;align-items:center;
  background:rgba(8,10,14,.62);border:1.5px solid rgba(255,255,255,.34)}
-.top{display:flex;align-items:center;gap:14px;font-size:23px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.62);font-weight:600}
-.top span:first-of-type{flex:1}
-.top span:last-of-type{letter-spacing:.04em}
-.t{font-size:40px;line-height:1.2;font-weight:600;text-shadow:0 1px 10px rgba(0,0,0,.8);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.t{font-size:44px;font-weight:600;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.8)}
+`;
+// the opening line: big, centred in the band Stories leaves free, no card, so the look shows through
+const openCss = `${base}
+body{width:1080px;height:1920px;position:relative}
+.o{position:absolute;left:70px;top:700px;width:${W}px;height:400px;display:flex;align-items:center;justify-content:center}
+.o p{margin:0;text-align:center;text-wrap:balance;font-size:${OPEN_PX}px;line-height:${OPEN_LH};font-weight:700;letter-spacing:-.02em;
+ text-shadow:0 2px 24px rgba(0,0,0,.85),0 0 6px rgba(0,0,0,.6)}
 `;
 // GitHub's release header: a green tag and the version (its "Latest" badge was tried; the user cut it)
-const introCss = `${base}
+const versionCss = `${base}
 body{width:1080px;height:1920px;position:relative}
 .v{position:absolute;left:70px;top:760px;width:${W}px;height:420px;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
@@ -67,36 +57,27 @@ async function shot(html, path, style) {
   await p.evaluate(() => document.fonts.ready);
   await p.screenshot({ path, omitBackground: true });
 }
-const meta = { demos: 0, visible: VISIBLE, card: { x: X, y: Y + HEAD, w: W, row: ROW }, groups: [] };
+const meta = { hooks: 0, cap: { w: W, h: CAP_H } };
 const warn = [];
 
-const demos = lines.demos || [];
+const hooks = lines.hooks || [];
 await p.setViewportSize({ width: W, height: CAP_H });
-for (let i = 0; i < demos.length; i++) {
-  const d = demos[i];
-  await shot(`<div class="c"><div class="top"><span>${esc(d.group || "")}</span><span>${i + 1} / ${demos.length}</span></div><div class="t">${esc(d.text)}</div></div>`,
-    `${OUT}/demo_${i}.png`, capCss);
-  const cut = await p.evaluate(() => { const t = document.querySelector(".t"); return t.scrollHeight > t.clientHeight + 1; });
-  if (cut) warn.push(`demo #${i + 1} is cut off after two lines: "${d.text}"`);
+for (let i = 0; i < hooks.length; i++) {
+  await shot(`<div class="c"><div class="t">${esc(hooks[i].text)}</div></div>`, `${OUT}/hook_${i}.png`, capCss);
+  const wide = await p.evaluate((max) => document.querySelector(".t").getBoundingClientRect().right > max, W - PAD);
+  if (wide) warn.push(`hook #${i + 1} is too wide for one line: "${hooks[i].text}"`);
 }
-meta.demos = demos.length;
+meta.hooks = hooks.length;
 
-for (const g of lines.groups) {
-  await p.setViewportSize({ width: 1080, height: 1920 });
-  await shot(`<div class="card" style="height:${HEAD + Math.min(VISIBLE, g.rows.length) * ROW + 2}px"><div class="head"><h2>${esc(g.title)}</h2><div class="count">${g.rows.length}</div></div></div>`, `${OUT}/chrome_${g.key}.png`, css);
-  await p.setViewportSize({ width: W, height: ROW });
-  for (let i = 0; i < g.rows.length; i++) {
-    await shot(`<div class="row"><i></i><span>${esc(g.rows[i])}</span></div>`, `${OUT}/row_${g.key}_${i}.png`, css.replace("width:1080px;height:1920px;", ""));
-    const wide = await p.evaluate(() => document.querySelector(".row span").getBoundingClientRect().right > 940 - 28);
-    if (wide) warn.push(`${g.key}: too wide for one line: "${g.rows[i]}"`);
-  }
-  meta.groups.push({ key: g.key, n: g.rows.length });
-}
 await p.setViewportSize({ width: 1080, height: 1920 });
+if (lines.opening) {
+  await shot(`<div class="o"><p>${esc(lines.opening)}</p></div>`, `${OUT}/opening.png`, openCss);
+  const tall = await p.evaluate((max) => document.querySelector(".o p").getBoundingClientRect().height > max, OPEN_PX * OPEN_LH * 2 + 4);
+  if (tall) warn.push(`the opening wraps past two lines: "${lines.opening}"`);
+} else warn.push("lines.json has no opening line");
 await shot(`<div class="v"><div class="t">${tag("#3fb950", 84)}<span>${esc(lines.title)}</span></div>
-  <div class="s"><span>${esc(lines.subtitle || "")}</span></div></div>`, `${OUT}/intro.png`, introCss);
-// device tags for the room's split view
-await p.setViewportSize({ width: 220, height: 56 });
+  <div class="s"><span>${esc(lines.subtitle || "")}</span></div></div>`, `${OUT}/version.png`, versionCss);
+// device tags for the two-screen hooks
 await p.setViewportSize({ width: 320, height: 56 });
 for (const [k, t] of [["laptop", "Laptop"], ["tv", "TV"], ["popout", "Pop-out window"]])
   await shot(`<div class="l">${t}</div>`, `${OUT}/label_${k}.png`, `${base}
@@ -114,4 +95,4 @@ for (const [k, w, cap, word, lit] of [["space", 300, "space", "CUE", "#f5a524"],
 fs.writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta));
 await b.close();
 for (const w of warn) console.log("WARN", w);
-console.log(`cards ok: ${meta.demos} demos; groups ${meta.groups.map((g) => `${g.key} (${g.n})`).join(", ")}`);
+console.log(`cards ok: opening, ${meta.hooks} hooks, version`);
