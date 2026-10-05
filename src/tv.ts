@@ -11,6 +11,7 @@ import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
@@ -25,6 +26,7 @@ import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import type { FeatureFrame } from "./audio/types.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookReplica, type LookReplica } from "./net/lookSync.ts";
@@ -192,6 +194,11 @@ let detectedPreset: QualityPreset | null = null;
  *  a roster says otherwise, which is how a TV rendered before the choice. */
 let qualityChoice: QualityChoice = "auto";
 let sceneCtx: SceneContext;
+/** Draws every frame (render/compositor.ts): here only to crossfade a scene
+ *  change (the held effects are the laptop's and pop-out's, not a TV's). */
+let compositor: Compositor | null = null;
+/** Drawn right after the scene each frame; made once the GL context is up. */
+let overlay: OverlayLayer | null = null;
 let join: JoinScreen;
 
 /** True from the canvas's `webglcontextlost` until the page reloads on the
@@ -295,13 +302,21 @@ function onQualityChoice(choice: QualityChoice | undefined): void {
 
 /** Swaps the running scene for `next`. If `next`'s init() throws (a shader
  *  this TV's GPU won't compile) the scene it replaced is brought back, rather
- *  than leaving a half-built one whose render() throws every frame. */
-function switchScene(next: Scene): void {
+ *  than leaving a half-built one whose render() throws every frame. With
+ *  `crossfade` the replaced scene stays up under the new one until the
+ *  compositor's blend is done (render/crossfade.ts: one bar from the next
+ *  beat, a cut on the floor preset); the room's look carries no glide length
+ *  for a scene change, so a TV always takes the one-bar default. */
+function switchScene(next: Scene, crossfade = false): void {
   const prev = scene;
-  prev.dispose(sceneCtx);
+  // A crossfade still running ends here, its outgoing scene dropped at once.
+  compositor?.cancel();
+  const fade = crossfade && prev !== next;
+  if (!fade) prev.dispose(sceneCtx);
   try {
     next.init(sceneCtx);
     scene = next;
+    if (fade) compositor?.begin(prev, { cut: quality.preset === "floor" });
   } catch (err) {
     console.error(`TV: "${next.name}" failed to start:`, err);
     try {
@@ -309,10 +324,12 @@ function switchScene(next: Scene): void {
     } catch {
       // Whatever init() half-built; the original error is the one to report.
     }
-    try {
-      prev.init(sceneCtx);
-    } catch (err2) {
-      console.error(`TV: "${prev.name}" failed to restart:`, err2);
+    if (!fade) {
+      try {
+        prev.init(sceneCtx);
+      } catch (err2) {
+        console.error(`TV: "${prev.name}" failed to restart:`, err2);
+      }
     }
   }
   announce();
@@ -672,7 +689,8 @@ function applyDoc(doc: LookDoc): void {
     lastDocScene = doc.scene;
     const next = doc.scene === "" ? undefined : getScene(doc.scene);
     if (next && next !== scene && presetAllows(next, quality.preset)) {
-      switchScene(next); // announces the new palette with it
+      // Only a picture that is up crossfades; a TV still waiting for its frames just switches.
+      switchScene(next, phase === "live"); // announces the new palette with it
       return;
     }
   }
@@ -706,8 +724,20 @@ async function main(): Promise<void> {
   detectedPreset = await detectQuality();
   quality = qualitySettings(resolvePreset());
   sceneCtx = { gl, quality };
+  // The text-and-logo overlay (render/overlayLayer.ts); its settings ride in
+  // the room's look like any synced store.
+  overlay = createOverlayLayer(gl);
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  compositor = createCompositor(gl, {
+    onOutgoingDone: (outgoing) => {
+      try {
+        outgoing.dispose(sceneCtx);
+      } catch {
+        // A crossfade's old scene failing to let go must not stop the new one.
+      }
+    },
+  });
   if (!mountFirstScene()) {
     badge.textContent = "No scene can run on this TV's GPU";
     badge.style.display = "block";
@@ -848,8 +878,20 @@ async function main(): Promise<void> {
     const displayFrame = applySensitivity(gained, sensitivity, expansion);
     const latchedAnim = renderLatch.consume(anim, nowRafMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
-    scene.render(sceneCtx, displayFrame, viewport, palette, latchedAnim, drives);
-    governor?.recordFrame(nowRafMs);
+    const outcome = compositor!.render({
+      ctx: sceneCtx,
+      scene,
+      frame: displayFrame,
+      viewport,
+      palette,
+      anim: latchedAnim,
+      drives,
+      drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
+      nowMs: nowRafMs,
+    });
+    overlay?.draw();
+    // Two scenes at once (a crossfade) say nothing about what one costs.
+    if (outcome.governable) governor?.recordFrame(nowRafMs);
   }
 
   requestAnimationFrame(loop);

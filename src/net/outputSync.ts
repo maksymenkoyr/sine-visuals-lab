@@ -1,4 +1,5 @@
 import type { FeatureFrame } from "../audio/types.ts";
+import type { HeldEffects } from "../render/heldEffects.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
@@ -35,7 +36,9 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    window owns. Sent when an output (re)connects, on Go (Play in the UI),
  *    while Cue is held (the preview, following live) and when Cue is released
  *    (the program Play last put there). A Go may carry `glideMs`: the output
- *    then arrives over that long instead of switching (outputGlide.ts). The
+ *    then arrives over that long instead of switching (outputGlide.ts) — within
+ *    one scene a glide of the settings, across a scene change a crossfade
+ *    (render/compositor.ts; with no `glideMs`, one bar). The
  *    output is the master, as on a DJ mixer: tuning the preview sends nothing
  *    (createCueController).
  *  - `frame`: one per main render tick — the band-gained feature frame (the
@@ -53,6 +56,12 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    (render/outputPower.ts). Not part of the look, so Cue never holds it and
  *    the synced snapshot never carries it: it is how this window renders.
  *    Re-sent with every heartbeat reply, so a missed one heals.
+ *  - `effects`: the held effects (render/heldEffects.ts's EFFECTS) the main
+ *    window's keys and buttons are holding right now. Like `power` it is not part of the look: Cue never holds it
+ *    and the synced snapshot never carries it, so an effect shows on the
+ *    output the moment it is held whatever the output's program is. Sent on
+ *    every change and re-sent with every heartbeat reply, so a lost one heals
+ *    and a reloaded main window releases whatever it can no longer release.
  *  - `hello`/`bye` from the output: a once-a-second heartbeat (so the main
  *    window's button reflects a closed window) and a goodbye on unload.
  *  - `status` from the output: its live render readouts (preset, fps,
@@ -119,11 +128,14 @@ export interface OutputRenderStatus {
 
 /** `glideMs` (state only): the output arrives at this look over that long
  *  instead of switching at once — src/net/outputGlide.ts says what moves
- *  smoothly and what waits. Absent is the plain instant send. */
+ *  smoothly and what waits, and a different scene crossfades over it
+ *  (render/crossfade.ts). Absent is the plain send: instant within a scene, a
+ *  one-bar crossfade across a scene change. */
 export type ToOutput =
   | { t: "state"; state: OutputState; glideMs?: number }
   | { t: "frame"; f: WireFrame }
-  | { t: "power"; power: OutputPower };
+  | { t: "power"; power: OutputPower }
+  | { t: "effects"; effects: HeldEffects };
 export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" } | { t: "status"; s: OutputRenderStatus };
 
 /** Identity of what the output is showing, for "does the output match the

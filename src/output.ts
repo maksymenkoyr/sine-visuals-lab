@@ -11,8 +11,11 @@ import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects.ts";
 import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer } from "./render/overlayLayer.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
@@ -33,6 +36,11 @@ import { requestWakeLock } from "./ui/wakeLock.ts";
  * crosses, why tv.ts itself couldn't be reused, Cue/Go) is that file's
  * header; the output's settings never touch the real localStorage
  * (net/outputStorage.ts).
+ *
+ * What it draws goes through src/render/compositor.ts: a Play that changes
+ * scene crossfades (one bar, or over the glide length a held Play earned), and
+ * the main window's held effects (net/outputSync.ts's `effects`) are drawn on
+ * top.
  *
  * Audio stays in the main window. With no frames for STALE_MS (main window
  * reloading, closed, or throttled) the output goes quietly black rather
@@ -120,6 +128,10 @@ const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ?
  *  open()): like app.ts, a pinned preset means no governor. */
 let pinned = false;
 let host: SceneHost;
+let compositor: Compositor | null = null;
+/** The held effects the main window last sent; kept for the moment before the
+ *  compositor exists. */
+let heldEffects: HeldEffects = NO_EFFECTS;
 let sceneCtx: SceneContext;
 let scene: Scene | null = null;
 let palette: Palette = getPalette("neon");
@@ -176,16 +188,22 @@ function applyQuality(): void {
   if (syncQuality() && scene && presetAllows(scene, quality.preset)) mountScene(scene);
 }
 
-/** Puts `next` on the host. If its init() throws (a shader this GPU won't
- *  compile, a missing float target) the output carries on with the scene it
- *  had, or goes black when there is none or it is `next` itself being
- *  re-initialised: never a half-built scene whose render() throws every frame. */
-function mountScene(next: Scene): void {
+/** Puts `next` on the host. With `crossfade`, and a different scene already
+ *  showing a picture, that scene stays mounted under it until the compositor's
+ *  blend is done (`lengthMs`: the glide a held Play earned; absent: one bar).
+ *  If init() throws (a shader this GPU won't compile, a missing float target)
+ *  the output carries on with the scene it had, or goes black when there is
+ *  none or it is `next` itself being re-initialised: never a half-built scene
+ *  whose render() throws every frame. */
+function mountScene(next: Scene, crossfade?: { lengthMs?: number }): void {
   const prev = scene;
-  host.unmountAll();
+  compositor?.cancel();
+  const fade = crossfade !== undefined && prev !== null && prev !== next && !blank && host.isMounted(prev);
+  if (!fade) host.unmountAll();
   try {
     host.mount(next);
     scene = next;
+    if (fade) compositor?.begin(prev, { lengthMs: crossfade.lengthMs, cut: quality.preset === "floor" });
     return;
   } catch (err) {
     console.error(`Output: "${next.name}" failed to start:`, err);
@@ -200,7 +218,7 @@ function mountScene(next: Scene): void {
   }
 }
 
-function applyState(state: OutputState): void {
+function applyState(state: OutputState, crossfadeMs?: number): void {
   current = state;
   // Stores first, so a scene's init() and first render already see the
   // settings that go with it.
@@ -213,7 +231,8 @@ function applyState(state: OutputState): void {
   const next = getScene(state.scene);
   if (next && presetAllows(next, quality.preset) && (next !== scene || qualityChanged)) {
     // A quality change re-inits the scene too: geometry is sized at init.
-    mountScene(next);
+    // A different scene crossfades in; a re-init of the same one does not.
+    mountScene(next, next !== scene && !qualityChanged ? { lengthMs: crossfadeMs } : undefined);
   }
   haveState = true;
 }
@@ -228,7 +247,9 @@ transport.onMessage((m) => {
       if (started) glide = started;
       else {
         glide = null;
-        applyState(m.state);
+        // A glide never walks across a scene change; its length becomes the
+        // crossfade's (mountScene).
+        applyState(m.state, m.glideMs);
       }
     }
   } else if (m.t === "frame") {
@@ -241,6 +262,9 @@ transport.onMessage((m) => {
   } else if (m.t === "power") {
     power = m.power;
     if (host) applyQuality();
+  } else if (m.t === "effects") {
+    heldEffects = parseEffects(m.effects);
+    compositor?.setEffects(heldEffects);
   }
 });
 
@@ -277,6 +301,11 @@ async function main(): Promise<void> {
   governor?.setEnabled(power.mode === "auto");
   host = createSceneHost(gl, quality);
   sceneCtx = host.ctx;
+  compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
+  compositor.setEffects(heldEffects);
+  // The text-and-logo overlay (render/overlayLayer.ts): its settings are a
+  // synced store, so the main window's reach this window like any look.
+  const overlay = createOverlayLayer(gl);
   // Back from a context-loss reload: take the parked look first, so the very
   // first hello says haveState and the main window keeps its program.
   try {
@@ -357,8 +386,20 @@ async function main(): Promise<void> {
 
     const latchedAnim = renderLatch.consume(anim, nowMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
-    scene.render(sceneCtx, displayFrame, FULL_VIEWPORT, palette, latchedAnim, drives);
-    governor?.recordFrame(nowMs);
+    const outcome = compositor!.render({
+      ctx: sceneCtx,
+      scene,
+      frame: displayFrame,
+      viewport: FULL_VIEWPORT,
+      palette,
+      anim: latchedAnim,
+      drives,
+      drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
+      nowMs,
+    });
+    overlay.draw();
+    // Two scenes at once (a crossfade) or none (Freeze) say nothing about what one costs.
+    if (outcome.governable) governor?.recordFrame(nowMs);
   }
 
   requestAnimationFrame(loop);

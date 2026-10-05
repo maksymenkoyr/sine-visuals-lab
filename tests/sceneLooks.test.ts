@@ -11,6 +11,7 @@ import {
   deleteLook,
   encodeLook,
   listLooks,
+  renameLook,
   saveLook,
   saveSharedLook,
   type SceneLook,
@@ -238,6 +239,21 @@ describe("saveLook / listLooks / deleteLook", () => {
 
     expect(listLooks(sceneId).map((l) => l.name)).toEqual(["B"]);
     expect(listLooks(otherScene).map((l) => l.name)).toEqual(["A"]);
+  });
+
+  it("renames in place, and refuses a blank or taken name", () => {
+    const sceneId = "look-store-3";
+    saveLook({ name: "A", sceneId, manual: { focus: 0.2 } });
+    saveLook({ name: "B", sceneId, manual: {} });
+
+    expect(renameLook(sceneId, "A", "C")).toBe(true);
+    expect(listLooks(sceneId).map((l) => l.name)).toEqual(["C", "B"]);
+    expect(listLooks(sceneId)[0].manual.focus).toBe(0.2);
+
+    expect(renameLook(sceneId, "C", "B")).toBe(false);
+    expect(renameLook(sceneId, "C", "")).toBe(false);
+    expect(renameLook(sceneId, "missing", "D")).toBe(false);
+    expect(listLooks(sceneId).map((l) => l.name)).toEqual(["C", "B"]);
   });
 });
 

@@ -4,7 +4,8 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
 /**
  * The on-screen half of the pop-out output (index.html's #outBtn in the
  * scene-nav row, and #outBar — CUE, PLAY and the state line — top centre,
- * big, CUE orange and PLAY green; the keys are src/ui/outputKeys.ts).
+ * round pads after a CDJ's, CUE orange and PLAY green; the keys are
+ * src/ui/outputKeys.ts).
  *
  * POP OUT opens (or focuses) the output window. Once one is alive the bar
  * appears, and works like a DJ mixer's Cue and Play: the output window is the
@@ -27,8 +28,10 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
  * off the button cancels.
  *
  * Press feedback lives here too: a Play key or click flashes PLAY (`pressed`),
- * CUE stays lit while it's held, a held Option fills PLAY while it charges (`charging`, the
- * `--charge` fill) and a glide in flight fills it back up over its length.
+ * CUE stays lit while it's held, PLAY's ring blinks while the output differs
+ * (`differs`), a held Option draws an arc round PLAY while it charges
+ * (`charging`, the `--charge` arc) and a glide in flight draws it round again
+ * over its length.
  */
 
 export interface OutputControlElements {

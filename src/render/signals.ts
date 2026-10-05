@@ -1,6 +1,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "./animClock.ts";
 import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
+import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /**
  * The seam between the meters (src/ui/audioMeters.ts), scene settings
@@ -77,6 +78,13 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
  * setting row's live pill) with the plain band-gained frame instead, so that
  * pill can read very slightly ahead of Sensitivity/Expansion — an accepted
  * cosmetic gap, not a claim this file makes about the render path.
+ *
+ * The `dial.*` entries (DIAL_SIGNALS) are generated from MUSIC_DIALS, one
+ * per dial, so a new dial gets a jack by construction. Each reads the eased
+ * dial straight off AnimFrame.profile — the slow track description Auto
+ * resolves against (musicProfile.ts) — so a wire on one moves over seconds,
+ * not per hit, and does what its dial does through silence: rests at
+ * NEUTRAL, except `dial.loudness`, which keeps its last reading.
  */
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
@@ -98,10 +106,23 @@ export type MeterCardId = "signal" | "hits" | "tempo" | "character";
  *  "wave" above (the beat/bar swing trace, a different row entirely).
  *  "centroid" is the Character card's Brightness row (dialRows' own
  *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
- *  draws directly under that dial's bar rather than a row of its own. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform";
+ *  draws directly under that dial's bar rather than a row of its own. Each
+ *  dial's own cell is its DialSignalId, "dial.brightness" naming the same
+ *  Brightness row as "centroid". */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform" | DialSignalId;
+
+/** One Character-card dial as a signal — see this file's header. */
+export type DialSignalId = `dial.${MusicDial}`;
+
+export function dialSignalId(dial: MusicDial): DialSignalId {
+  return `dial.${dial}`;
+}
+
+/** Every dial signal, in MUSIC_DIALS order. */
+export const DIAL_SIGNALS: readonly DialSignalId[] = MUSIC_DIALS.map(dialSignalId);
 
 export type SignalId =
+  | DialSignalId
   | "feature.onset"
   | "feature.flux"
   | "anim.lowOnset"
@@ -376,4 +397,21 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     edge: (anim) => anim.metronomeBar,
     monitor: { card: "tempo", row: "timing" },
   }),
+  ...dialSignals(),
 };
+
+function dialSignals(): Record<DialSignalId, SignalSpec> {
+  const out = {} as Record<DialSignalId, SignalSpec>;
+  for (const dial of MUSIC_DIALS) {
+    const id = dialSignalId(dial);
+    out[id] = signal({
+      id,
+      label: DIAL_LABELS[dial].label,
+      description: `The ${DIAL_LABELS[dial].label} dial (AnimFrame.profile.${dial}, musicProfile.ts) — the eased track description Auto resolves against and its Character-card cell shows (under RAW the cell shows the pre-ease target; the wire still reads the eased one), so it moves over seconds rather than per hit.`,
+      kind: "level",
+      read: (_frame, anim) => anim.profile[dial],
+      monitor: { card: "character", row: id },
+    });
+  }
+  return out;
+}

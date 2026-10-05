@@ -12,6 +12,7 @@ import {
 import { registerWidget, type WidgetCtx } from "./registry.ts";
 import { FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "../controlsTheme.ts";
 import { setHintText } from "../hintSwatches.ts";
+import { watchSize } from "../onScreen.ts";
 
 /**
  * Chladni's Sand zones gauge (`Scene.panel` widget "sandZones"): the plate's
@@ -97,7 +98,9 @@ registerWidget("sandZones", (container, section, ctx: WidgetCtx) => {
   let active: "freeze" | "snap" | null = null; // being dragged
   let hover: "freeze" | "snap" | null = null;
 
-  const width = () => canvas.clientWidth;
+  // Observed, not read: tick() and draw() run every frame (onScreen.ts).
+  const canvasSize = watchSize(canvas);
+  const width = () => canvasSize.w;
   const span = () => Math.max(1, width() - 2 * SIDE_PAD_PX);
   const xOf = (d: number) => SIDE_PAD_PX + Math.sqrt(Math.max(0, Math.min(d, ZONE_AXIS_MAX)) / ZONE_AXIS_MAX) * span();
   const dOf = (x: number) => ZONE_AXIS_MAX * Math.max(0, Math.min(1, (x - SIDE_PAD_PX) / span())) ** 2;
@@ -384,6 +387,7 @@ registerWidget("sandZones", (container, section, ctx: WidgetCtx) => {
 
   syncHandles();
   ctx.onTick(tick);
+  ctx.onDispose(() => canvasSize.disconnect());
   // The first layout lands after mount; place the handles once it has.
   requestAnimationFrame(() => {
     syncHandles();
