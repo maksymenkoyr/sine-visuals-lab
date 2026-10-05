@@ -228,6 +228,16 @@ describe("learning", () => {
     expect(t.midi.snapshot().mappings[0]).toMatchObject({ key: "Alt", code: "AltLeft" });
   });
 
+  it("can learn Control alone (Tap), but not a Control chord", async () => {
+    const t = setup();
+    await t.midi.connect();
+    t.midi.toggleLearn();
+    expect(t.midi.learnKey(key({ key: "k", code: "KeyK", ctrlKey: true }))).toBe(false);
+    expect(t.midi.learnKey(key({ key: "Control", code: "ControlLeft", ctrlKey: true }))).toBe(true);
+    t.send(0x99, 41, 90);
+    expect(t.midi.snapshot().mappings[0]).toMatchObject({ key: "Control", code: "ControlLeft" });
+  });
+
   it("leaves keys alone when not learning, passes Tab, and cancels on Escape", async () => {
     const t = setup();
     await t.midi.connect();

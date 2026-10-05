@@ -260,8 +260,9 @@ export function createMidiController(env: MidiEnv): MidiController {
     }
     if (e.key === "Tab") return false;
     // Chords are shortcuts of the browser or the panel, not keys to learn;
-    // Option alone is learnable (it is Play), Option with a letter is not.
-    if (e.ctrlKey || e.metaKey || (e.altKey && e.key !== "Alt")) return false;
+    // Option alone is learnable (it is Play), and so is Control alone (it is
+    // Tap); either one with a letter is not.
+    if (e.metaKey || (e.ctrlKey && e.key !== "Control") || (e.altKey && e.key !== "Alt")) return false;
     swallowUp = e.code;
     if (e.repeat) return true;
     const key: KeySpec = { key: e.key, code: e.code };
