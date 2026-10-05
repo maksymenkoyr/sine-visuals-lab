@@ -7,15 +7,15 @@
 # 30 fps, each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
 #
 # Shape of the video (.claude/commands/video-hook-stable.md says why):
-#   1. the opening: the user's look with the opening line over it, until the song's drop;
-#   2. the hooks from lines.json, back to back from the drop — clips where something visibly changes on
-#      the beat, each with one caption along the bottom that slides in as the last one leaves. The
+#   1. the opening: the user's look with the hook's line over it, until the song's drop;
+#   2. the proofs from lines.json, back to back from the drop — clips that prove the hook, where
+#      something visibly changes on the beat, each with one caption along the bottom that slides in as the last one leaves. The
 #      interface camera leans toward the tracked part that changes; scene footage keeps a steady camera.
-#      The two-screen hooks (Cue/Play with the pop-out, the room with a TV) are drawn as devices: a
+#      The two-screen proofs (Cue/Play with the pop-out, the room with a TV) are drawn as devices: a
 #      laptop with its Cue/Play keys over the second screen;
 #   3. the end: the version card over the opening's scene, held to a bar line counted from the drop.
 #      Nothing fades out (the user's call).
-# The song's drop goes on the first hook (meta.dropBeat, which promo.mjs uses) — make that hook a
+# The song's drop goes on the first proof (meta.dropBeat, which promo.mjs uses) — make that proof a
 # Physarum 2 take from a beat where it re-rolls.
 # plan.json can override the timing, in beats:
 #
@@ -71,7 +71,7 @@ def fit(im): return im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS
 def tag_at(base, key, pos):
     t = png(f"label_{key}.png"); base.paste(t.convert("RGB"), pos, t.getchannel("A")); return base
 
-# The two-screen hooks (record.mjs twoScreens): drawn as devices — a laptop with its Cue (Space) and
+# The two-screen proofs (record.mjs twoScreens): drawn as devices — a laptop with its Cue (Space) and
 # Play (Option) keys on the deck, lit while held, over the second screen it plays to, whose frame glows
 # orange while Cue shows the laptop's look there and flashes green when Play sends it. Everything stays
 # above the caption.
@@ -119,8 +119,8 @@ def backdrop(name, b, video_beat):
 # Song takes (record.mjs) cover the whole video, so a segment needs only the take's name.
 OPENING = plan.get("opening") or {"take": "intro", "t0": 0}
 SEGS = [("opening", (OPENING["take"], OPENING["t0"]), None, LOOK)]
-for i, h in enumerate(LINES.get("hooks", [])):
-    SEGS.append(("hook", (h["take"], h.get("from", 0)), i, h["beats"]))
+for i, h in enumerate(LINES.get("proofs", [])):
+    SEGS.append(("proof", (h["take"], h.get("from", 0)), i, h["beats"]))
 # The end: the version card over the opening's scene, stretched to a bar line counted from the drop, so
 # the song stops on a beat.
 end = END
@@ -174,9 +174,9 @@ def caption(im, i, local):
     im = darken(im, CAP_Y - 160, 150)
     a = ease(local * P / CAP_T)
     if i > 0 and a < 1:
-        c = png(f"hook_{i - 1}.png")
+        c = png(f"proof_{i - 1}.png")
         im.paste(c.convert("RGB"), (int(CAP_X - a * CAP_SLIDE), CAP_Y), c.getchannel("A").point(lambda v: int(v * (1 - a))))
-    c = png(f"hook_{i}.png")
+    c = png(f"proof_{i}.png")
     im.paste(c.convert("RGB"), (int(CAP_X + (1 - a) * CAP_SLIDE), CAP_Y), c.getchannel("A").point(lambda v: int(v * a)))
     return im
 def dim(im, amount, t_in): return Image.blend(im, Image.new("RGB", im.size, (4, 6, 12)), amount * min(1.0, t_in / 0.3))
@@ -199,7 +199,7 @@ for i in range(n_frames):
     if tk not in TWO: im = camera(im, tk, local, tb + local)   # the two-screen layout stays put
     if kind == "opening" and HAS_OPENING:
         im = over(im, png("opening.png"))
-    elif kind == "hook":
+    elif kind == "proof":
         im = caption(im, arg, local)
     elif kind == "end":
         im = over(dim(im, 0.30, t_in), with_alpha(png("version.png"), min(1.0, t_in / 0.18)))

@@ -22,10 +22,7 @@ a promise: the first second makes it, every later shot proves it, and the end pa
   weak hook, because viewers feel baited.
 - **The end pays it off.** The version card names what made the promise come true. Nothing follows it.
 
-To pick the hook, take the one thing the current Stable can promise and show in a single shot. Make
-it the first line of the plan, together with its frame-1 shot, and plan nothing else until the user
-agrees. Before rendering, watch the first two seconds muted and alone. They must say what the video is
-and make you want the rest.
+The hook is worked out afresh for every video (step 1); the clips after the opening are its **proofs**.
 
 Sources (2026-10-05): TikTok's Hook → Body → Close, and most ad recall landing in the first six seconds
 (ads.tiktok.com/business/en-US/blog/creative-best-practices-top-performing-ads); the 1.5 s swipe
@@ -45,9 +42,22 @@ noting what it replaced.
   reused; with none at all the opening is a plain Physarum 2 stand-in, and you say so.
 - Output goes to `~/Movies/sine-visuals-lab-v<version>-promo/`.
 
-## 1. Pick the hooks
+## 1. Pick the hook
 
-Candidates are what the current Stable does best on screen:
+Work the hook out from two things:
+
+- the app's core value: what a stranger gets from it, as the README's opening and the site's
+  description (`index.html`) put it;
+- what the current Stable shows best on screen: the candidates in step 2.
+
+Offer two to four lines. For each, give its frame-1 shot and the proofs that would keep its promise,
+and say which one you'd pick and why. The last release's line is one candidate, not the default. Show
+them in a message of their own, then plan nothing else until the user picks one or writes their own.
+
+## 2. Pick the proofs
+
+A proof is a clip after the opening that shows the hook coming true in a new way. Candidates are what
+the current Stable does best on screen:
 
 - the featured scenes (those not in `DRAFT_SCENE_IDS` in Stable's `src/render/scenes/index.ts`),
   reacting to the song;
@@ -55,18 +65,19 @@ Candidates are what the current Stable does best on screen:
   It holds only PR titles, and the best changes hide in PR bodies, so read every body (a Sonnet
   subagent). Check each change against the release's final state, because a later PR may undo it.
 
-Keep a candidate only if its change shows within two bars at phone size, and rank the keepers by how
-hard they grab. Leave out paid scenes, draft scenes and internal work. The available takes are the
-`T` table in `tools/promo/record.mjs`; a new hook may need a new take (copy a `ui_*` one).
+Keep a candidate only if it proves the hook and its change shows within two bars at phone size, and
+rank the keepers by how hard they grab. Leave out paid scenes, draft scenes and internal work. The
+available takes are the `T` table in `tools/promo/record.mjs`; a new proof may need a new take (copy a
+`ui_*` one).
 
-## 2. Show the plan, then wait
+## 3. Show the plan, then wait
 
 Before recording, show the user the plan as a table in a message of its own. A question tool in the
 same message hides the table ("I didn't see any list"). Give times in seconds, from the song's bpm:
 
 | Time | On screen | Caption |
 |---|---|---|
-| 0.0–1.4 s | Opening: the user's look | Your music, drawn live. |
+| 0.0–1.4 s | Opening: the user's look | The hook's line |
 | 1.4–4.1 s | Drop: Physarum 2 re-rolls | Slime mold that moves to the beat |
 | … | … | … |
 | 22.0–24.7 s | End: version card over the look | — |
@@ -74,7 +85,7 @@ same message hides the table ("I didn't see any list"). Give times in seconds, f
 Then ask in at most five plain lines. Let the user add, cut, reorder and reword. Then write
 `<work>/lines.json`, shaped like `tools/promo/lines.v0.2.0.json`.
 
-## 3. Build and check
+## 4. Build and check
 
 `node tools/promo/promo.mjs all [--song …] [--look …]`, or step by step: `song` → `record` → `cards` →
 `compose` → `encode`. `record <take>…` re-records only those takes. Look at every step:
@@ -91,8 +102,9 @@ Then ask in at most five plain lines. Let the user add, cut, reorder and reword.
 - `cards`: no `WARN` lines.
 - `compose`: tile about 16 frames across the video. Check that cuts land on beats, that each caption
   names what its clip shows, and that text stays in the middle band (Stories covers the top ~13 % and
-  the bottom ~19 %).
-- `encode`: confirm the length, that the drop lands on the first hook (the audio's rms jumps there),
+  the bottom ~19 %). Then watch the first two seconds muted and alone: they must say what the video is
+  and make you want the rest.
+- `encode`: confirm the length, that the drop lands on the first proof (the audio's rms jumps there),
   and that the music plays at full level to the last frame. The full file is over the 30 MB send
   limit, so send a 720p preview copy.
 
@@ -104,19 +116,19 @@ CI.
 
 Vertical 9:16 for phone Stories, at most 30 s, every cut on a beat.
 
-1. **Opening** (one bar): the user's look, untouched, reacting to the song, with the opening line big in
-   the middle. Keep the line between releases unless the user changes it.
-2. **Hooks**, back to back:
+1. **Opening** (one bar): the user's look, untouched, reacting to the song, with the hook's line big in
+   the middle.
+2. **Proofs**, back to back:
    - The song's drop lands on the first: Physarum 2 re-rolling from the user's look. Its takes re-roll
      every two bars from the drop; a dish re-rolled every two beats never grows.
-   - Put the strongest first. Alternate scene and interface hooks, so every cut changes the picture.
-     The two-screen hooks go last.
-   - Each hook is two bars; a two-screen hook gets as many whole bars as its action needs.
+   - Put the strongest first. Alternate scene and interface proofs, so every cut changes the picture.
+     The two-screen proofs go last.
+   - Each proof is two bars; a two-screen proof gets as many whole bars as its action needs.
    - The caption is one line in plain words about what the viewer sees, not the panel's name for the
      feature. It slides in as the last one leaves, on a translucent card with a white hairline.
-   - Scene hooks keep a steady camera and hear the song itself, never the synthetic feed (on that feed
+   - Scene proofs keep a steady camera and hear the song itself, never the synthetic feed (on that feed
      Chladni held one figure and Physarum barely pulsed: "flat, low sync to the music").
-   - Interface hooks: the camera leans toward the part that changes.
+   - Interface proofs: the camera leans toward the part that changes.
    - Pop-out and Room are drawn as devices: a laptop, with its Space (Cue) and Option (Play) keys lit
      while pressed, above the second screen. That screen's frame glows orange while Cue shows the
      laptop's look on it and flashes green on Play. Cue is a peek: it shows only while Space is held
@@ -131,6 +143,8 @@ Nothing fades out, picture or music. The style is half as GitHub-ish as a releas
 **Rejected:**
 - the changelog montage, replaced on 2026-10-05 by this shape. It had the version card second and
   every change in scrolling lists.
+- keeping the last release's opening line by default, replaced on 2026-10-05: the hook is worked out
+  for every video from the app's core value and Stable's features (step 1);
 - the "Latest" badge on the version card;
 - one-beat cuts ("too dynamic");
 - fades;

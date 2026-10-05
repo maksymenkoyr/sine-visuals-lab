@@ -65,24 +65,24 @@ async function run(name, scene, cfg) {
 
 const FB_SETUP = async (page) => { await openPanel(page); await sleep(1200); await hideChrome(page); await sleep(500); };
 const every = (step, names, from = 0) => names.map((n, i) => [from + i * step, n]);
-// Video beat where the first hook using `take` starts: hooks run in lines.json order from HOOKS_START.
-const hookStart = (take) => {
+// Video beat where the first proof using `take` starts: proofs run in lines.json order from PROOFS_START.
+const proofStart = (take) => {
   const lines = JSON.parse(fs.readFileSync(`${WORK}/lines.json`, "utf8"));
-  let b = Number(process.env.HOOKS_START);
-  for (const h of lines.hooks || []) { if (h.take === take) return b; b += h.beats; }
+  let b = Number(process.env.PROOFS_START);
+  for (const h of lines.proofs || []) { if (h.take === take) return b; b += h.beats; }
   return null;
 };
-// A two-screen hook: a landscape laptop (on a phone layout the panel covers the PLAY bar), its panel at
+// A two-screen proof: a landscape laptop (on a phone layout the panel covers the PLAY bar), its panel at
 // the palettes, and the second screen it plays to (`second` opens it and returns its page), both on the
 // song (a room's TV never gets the synthetic feed) and both cast — <name>_main and <name>_out. Timed to
-// where the take's hooks sit in the video (lines.json), since compose cuts it by song time; `script`
+// where the take's proofs sit in the video (lines.json), since compose cuts it by song time; `script`
 // counts beats from the first of them and returns where it ends. Key presses go into meta.keys
 // ([epoch s, key, down]) so compose can light the laptop's Space and Option keys.
 async function twoScreens(name, second, script) {
   if (!MIC) { console.log(`${name}: no MIC_WAV — run it through promo.mjs record`); return; }
-  const d0 = hookStart(name);
-  if (d0 == null) { console.log(`${name}: no hook in lines.json uses it`); return; }
-  const vb = (b) => d0 + b + MIC.pre;   // take beat of hook beat b
+  const d0 = proofStart(name);
+  if (d0 == null) { console.log(`${name}: no proof in lines.json uses it`); return; }
+  const vb = (b) => d0 + b + MIC.pre;   // take beat of proof beat b
   for (let tryN = 0; tryN < 2; tryN++) {
     const { browser, ctx, page } = await launch({ width: 1280, height: 720, dsf: 1, wav: MIC.wav });
     try {
@@ -95,7 +95,7 @@ async function twoScreens(name, second, script) {
       await page.bringToFront();
       await page.mouse.move(640, 400);
       const bc = await beatClock(page, 0, { at: MIC.lead, late: true });   // the action starts well after
-      if (await page.evaluate(() => performance.now()) > bc.T0 + vb(-1.5) * P) throw new Error(`${name}: setup ran past the hook's start`);
+      if (await page.evaluate(() => performance.now()) > bc.T0 + vb(-1.5) * P) throw new Error(`${name}: setup ran past the proof's start`);
       const castA = await startCast(page, `${OUT}${name}_main`);
       const castB = await startCast(other, `${OUT}${name}_out`);
       const keys = [];

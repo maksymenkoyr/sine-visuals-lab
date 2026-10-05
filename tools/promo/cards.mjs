@@ -3,13 +3,13 @@
 //
 // Reads <work>/lines.json:
 //   { "title": "0.2.0 - beta", "subtitle": "Sine Visuals Lab", "opening": "Your music, drawn live.",
-//     "hooks": [{ "take": "song_p2r", "beats": 8, "text": "…" }, …] }
-// `opening` is the line over the first bar; a hook is a clip (a take from record.mjs, `from` its first
-// beat for a panel take) with one caption along the bottom; title and subtitle make the version card at
-// the end. The opening may wrap to two lines, a caption must fit on one: this script warns when not.
+//     "proofs": [{ "take": "song_p2r", "beats": 8, "text": "…" }, …] }
+// `opening` is the hook's line, over the first bar; a proof is a clip that proves it (a take from
+// record.mjs, `from` its first beat for a panel take) with one caption along the bottom; title and
+// subtitle make the version card at the end. The opening may wrap to two lines, a caption must fit on one: this script warns when not.
 //
-// Writes <work>/cards/: meta.json {hooks, cap}, opening.png, hook_<i>.png, version.png.
-// Also the two-screen hooks' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
+// Writes <work>/cards/: meta.json {proofs, cap}, opening.png, proof_<i>.png, version.png.
+// Also the two-screen proofs' parts: label_<laptop|tv|popout>.png device tags, and key_<space|option>_<on|off>.png,
 // the laptop's Cue and Play keys.
 // The look: the version card is a GitHub release in miniature (a green tag icon); a caption keeps that
 // family's translucent card with a white hairline, without its icons or colours.
@@ -57,17 +57,17 @@ async function shot(html, path, style) {
   await p.evaluate(() => document.fonts.ready);
   await p.screenshot({ path, omitBackground: true });
 }
-const meta = { hooks: 0, cap: { w: W, h: CAP_H } };
+const meta = { proofs: 0, cap: { w: W, h: CAP_H } };
 const warn = [];
 
-const hooks = lines.hooks || [];
+const proofs = lines.proofs || [];
 await p.setViewportSize({ width: W, height: CAP_H });
-for (let i = 0; i < hooks.length; i++) {
-  await shot(`<div class="c"><div class="t">${esc(hooks[i].text)}</div></div>`, `${OUT}/hook_${i}.png`, capCss);
+for (let i = 0; i < proofs.length; i++) {
+  await shot(`<div class="c"><div class="t">${esc(proofs[i].text)}</div></div>`, `${OUT}/proof_${i}.png`, capCss);
   const wide = await p.evaluate((max) => document.querySelector(".t").getBoundingClientRect().right > max, W - PAD);
-  if (wide) warn.push(`hook #${i + 1} is too wide for one line: "${hooks[i].text}"`);
+  if (wide) warn.push(`proof #${i + 1} is too wide for one line: "${proofs[i].text}"`);
 }
-meta.hooks = hooks.length;
+meta.proofs = proofs.length;
 
 await p.setViewportSize({ width: 1080, height: 1920 });
 if (lines.opening) {
@@ -77,7 +77,7 @@ if (lines.opening) {
 } else warn.push("lines.json has no opening line");
 await shot(`<div class="v"><div class="t">${tag("#3fb950", 84)}<span>${esc(lines.title)}</span></div>
   <div class="s"><span>${esc(lines.subtitle || "")}</span></div></div>`, `${OUT}/version.png`, versionCss);
-// device tags for the two-screen hooks
+// device tags for the two-screen proofs
 await p.setViewportSize({ width: 320, height: 56 });
 for (const [k, t] of [["laptop", "Laptop"], ["tv", "TV"], ["popout", "Pop-out window"]])
   await shot(`<div class="l">${t}</div>`, `${OUT}/label_${k}.png`, `${base}
@@ -95,4 +95,4 @@ for (const [k, w, cap, word, lit] of [["space", 300, "space", "CUE", "#f5a524"],
 fs.writeFileSync(`${OUT}/meta.json`, JSON.stringify(meta));
 await b.close();
 for (const w of warn) console.log("WARN", w);
-console.log(`cards ok: opening, ${meta.hooks} hooks, version`);
+console.log(`cards ok: opening, ${meta.proofs} proofs, version`);
