@@ -69,15 +69,18 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * *value* uploads (u<Key>Drive, drives.value()) go through this same
  * envelope read — only its edge-latched `fired()` needs the raw boolean.
  *
- * "All level" (`anim.energy`) is the one entry whose `read()` actually uses
- * its `frame` argument (`frame.energy`, not anything off `anim`) — every
- * other entry ignores `frame` entirely. drives.ts feeds it the
- * sensitivity-applied frame (matching what a scene's own `uEnergy` sees —
- * see that file's header), so a setting driven by "All level" and a scene's
- * plain `uEnergy` uniform read the identical number. Called elsewhere (a
- * setting row's live pill) with the plain band-gained frame instead, so that
- * pill can read very slightly ahead of Sensitivity/Expansion — an accepted
- * cosmetic gap, not a claim this file makes about the render path.
+ * "All level" (`anim.energy`) and "Level" (`feature.level`) are the two
+ * entries whose `read()` actually uses its `frame` argument (`frame.energy`
+ * and `frame.level`, not anything off `anim`) — every other entry ignores
+ * `frame` entirely. drives.ts feeds them the sensitivity-applied frame
+ * (matching what a scene's own `uEnergy` sees — see that file's header), so
+ * a setting driven by "All level" and a scene's plain `uEnergy` uniform read
+ * the identical number. Called elsewhere (a setting row's live pill) with
+ * the plain band-gained frame instead, so that pill can read very slightly
+ * ahead of Sensitivity/Expansion — an accepted cosmetic gap, not a claim
+ * this file makes about the render path. `level` comes through both frames
+ * raw (src/audio/sensitivity.ts's applySensitivity never shapes it), which
+ * is why Level, unlike All level, reads 0 in a silent room.
  *
  * The `dial.*` entries (DIAL_SIGNALS) are generated from MUSIC_DIALS, one
  * per dial, so a new dial gets a jack by construction. Each reads the eased
@@ -125,6 +128,7 @@ export type SignalId =
   | DialSignalId
   | "feature.onset"
   | "feature.flux"
+  | "feature.level"
   | "anim.lowOnset"
   | "anim.midOnset"
   | "anim.highOnset"
@@ -303,6 +307,15 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The plain mean of every band (FeatureFrame.energy) — see this file's header for why this is the one entry whose read() actually uses its `frame` argument.",
     kind: "level",
     read: (frame) => frame.energy,
+    bandRange: "all",
+  }),
+  "feature.level": signal({
+    id: "feature.level",
+    label: "Level",
+    description:
+      "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), the Dynamics card's Level row — never auto-gained, so a silent room reads 0 where All level's auto-gain lifts mic hiss back to mid-range.",
+    kind: "level",
+    read: (frame) => frame.level,
     bandRange: "all",
   }),
   "anim.sectionIntensity": signal({

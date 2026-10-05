@@ -2022,6 +2022,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description:
       "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low.",
   });
+  mountJack("feature.level", level.right, level.el);
 
   // Loudness: the broadcast measurement — BS.1770 / EBU R128 LUFS from
   // lufsAnalyser.ts (math in lufs.ts). The bar and this row's own readout

@@ -23,9 +23,13 @@
 // With no signal energy drains and they stop. The gags and the build keep their
 // script on the clock. The Dance card (src/ui/widgets/danceMove.ts) shows the
 // learned move from probe(). Off: the groove's own choreography on the clock.
-// Clock on signal (on by default) pauses the conductor while its signal (All level by
-// default) is below the threshold line under its graph, so in silence the whole
-// picture holds: drops, cuts, lights and the cast's script all read the one clock.
+// Clock on signal (on by default) pauses the conductor while its signal is below
+// the threshold line under its graph, so in silence the whole picture holds: drops,
+// cuts, lights and the cast's script all read the one clock.
+// Clock on signal and Energy boost are wired to Level (the input's absolute
+// loudness) by default, not All level: All level is auto-gained, so a silent room's
+// mic hiss reads mid-range on it, which ran the clock and held energy above "stop"
+// with no music playing.
 // Settings that reshape the frame after frameAt(), so the prototype's own numbers
 // stay untouched at the defaults:
 //   - Lights scales the lasers', lamps' and rays' opacity (capped at fully on); a
@@ -74,8 +78,10 @@ export const HERO_C = 2 / 12;
 const DANCE_BEAT_AT = 4;
 const DANCE_PHASE = 0.2;
 /** Clock on signal's default mark: the clock runs while its signal reads above
- *  this (the threshold line under its graph, which the viewer can move). */
-const CLOCK_RUN_MARK = 0.05;
+ *  this (the threshold line under its graph, which the viewer can move). On
+ *  Level, the default wire, a quiet room's hiss reads about 0 and music well
+ *  above this. */
+const CLOCK_RUN_MARK = 0.1;
 /** Once running, the clock stops only below this share of the mark, so a level
  *  hovering at the line doesn't stutter the picture. */
 const CLOCK_STOP_SHARE = 0.6;
@@ -125,7 +131,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.4,
-    drive: { default: "anim.energy" },
+    drive: { default: "feature.level" },
   },
   {
     key: "energyPump",
@@ -187,7 +193,7 @@ const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     drive: {
-      default: "anim.energy",
+      default: "feature.level",
       threshold: {
         default: CLOCK_RUN_MARK,
         label: "Runs above",
@@ -451,7 +457,7 @@ function createToonRaveScene(): Scene {
       // graph (or above 0 with that line off), and holds below it; nothing wired = no
       // signal = held. The gallery preview has no drive engine and always runs.
       const clockOn = resolveSceneSetting(ID, settingFor("clock")) >= 0.5;
-      const clockSignal = drives.value("clock", frame.energy, 0);
+      const clockSignal = drives.value("clock", frame.level, 0);
       const mark = drives.threshold("clock");
       if (!clockOn || mark === undefined) clockRunning = true;
       else {
@@ -488,7 +494,7 @@ function createToonRaveScene(): Scene {
         energy.step(dt, {
           base: resolveSceneSetting(ID, settingFor("energy")),
           boost: resolveSceneSetting(ID, settingFor("energyBoost")),
-          level: drives.value("energyBoost", frame.energy, 0),
+          level: drives.value("energyBoost", frame.level, 0),
           pump: resolveSceneSetting(ID, settingFor("energyPump")),
           pumpFired,
           drop: resolveSceneSetting(ID, settingFor("energyDrop")),

@@ -15,6 +15,10 @@
  *     average shape through a bar (a kick learns four sharp peaks, a hi-hat its
  *     off-beat ticks, a breakbeat its own pattern). at() reads that loop
  *     smoothed and stretched to 0..1; a loop flatter than FLAT_RANGE reads 0.
+ *     While the beat is "holding" (no fire for HOLD_BEATS) nothing is learned:
+ *     silence keeps the last move. Learning the quiet used to reshape the
+ *     stretched loop under a stopped cast (a held pose drifting) and then flatten
+ *     it (the pose snapping to 0), all with no music.
  *   - createEnergy(): base, boost, pump and drop, as Caustics' Drift speed
  *     family does speed: the floor is base + boost × the boost signal's level,
  *     each pump hit kicks energy up, and above the floor it drains back at a
@@ -118,6 +122,10 @@ export function createDance(): Dance {
       if (clock.bpm <= 0) return;
       // learn: every slot the playhead crossed this frame moves toward the value
       const bin = Math.floor(frac(clock.beats / BAR_BEATS) * MOVE_BINS) % MOVE_BINS;
+      if (d.status() === "holding") {
+        lastBin = bin; // silence teaches nothing (see the header)
+        return;
+      }
       const a = 1 - Math.exp(-LEARN_RATE_PER_SEC * dt);
       const v = Math.min(1, Math.max(0, value));
       if (lastBin < 0) lastBin = bin;

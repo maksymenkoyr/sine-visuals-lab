@@ -74,11 +74,13 @@ describe("drives: catalogue identity", () => {
     const anim = clock.advance(DT, frame({ bands, onset: true }));
 
     const engine = createDriveEngine();
-    // "anim.energy" is the one entry whose read() actually uses `frame`
-    // (see signals.ts's header) — the engine only ever feeds it the
-    // sensitivity-applied `driveEnergy` accumulate() was given, never a
-    // plain FeatureFrame, so it has to be seeded through accumulate() here
-    // rather than compared against an ad-hoc frame() the engine never saw.
+    // "anim.energy" and "feature.level" are the entries whose read() actually
+    // uses `frame` (see signals.ts's header) — the engine only ever feeds the
+    // first the sensitivity-applied `driveEnergy` accumulate() was given,
+    // never a plain FeatureFrame, so it has to be seeded through accumulate()
+    // here rather than compared against an ad-hoc frame() the engine never
+    // saw; the second reads the gained frame's own `level`, which is that
+    // same frame({ bands })'s.
     const driveEnergy = 0.42;
     engine.accumulate(DT, frame({ bands }), driveEnergy, anim, "identity-scene", []);
 
