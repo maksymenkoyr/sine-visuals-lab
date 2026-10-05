@@ -5,7 +5,9 @@
 //     --wav-start <window start - lead> --from auto --seconds 10 --actions tools/promo/shots/scene-look.mjs ...
 // The look file is a JSON array of { label, palette, settings } entries. The
 // mic starts at clock 0 (mic mode), so the window opens at clock = PROMO_LEAD,
-// which is song second wav-start + lead. Physarum 2 gets "Fresh dish" first so
+// which is song second wav-start + lead. A look entry with `code` (a Stable
+// share code) was already loaded by capture.mjs --look, so the palette click
+// and __viz.setParams are skipped for it. Physarum 2 gets "Fresh dish" first so
 // its colony grows from a clean plate during the lead.
 import { readFileSync } from "node:fs";
 
@@ -25,8 +27,10 @@ export default async function (ctx) {
   await page.evaluate(() => document.getElementById("menuBtn")?.click());
   await ctx.wait(500);
   await ctx.css("body > :not(canvas), body > :not(canvas) * { visibility: hidden !important; } #__cur { display: none !important; }");
-  if (look.palette && !(await clickBtn(look.palette))) console.log("palette button not found", look.palette);
-  await page.evaluate(({ s, scene }) => window.__viz.setParams({ scene, autoPin: true, settings: s }), { s: look.settings, scene });
+  if (!look.code) {
+    if (look.palette && !(await clickBtn(look.palette))) console.log("palette button not found", look.palette);
+    await page.evaluate(({ s, scene }) => window.__viz.setParams({ scene, autoPin: true, settings: s }), { s: look.settings, scene });
+  }
   if (scene === "physarum2") console.log("fresh dish", await clickBtn("Fresh dish"));
   await ctx.wait(400);
   await page.evaluate(() => document.getElementById("menuBtn")?.click());

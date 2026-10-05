@@ -1,13 +1,15 @@
 // A working ffmpeg for the promo tools. Homebrew's ffmpeg on this machine is
 // broken (missing libx265), so the default is imageio-ffmpeg's static build,
-// fetched through uv; set FFMPEG to use another binary.
+// fetched through uv and pinned to the version that made the approved masters;
+// set FFMPEG to use another binary. promo.mjs and deliver.mjs resolve ffmpeg
+// only through here.
 import { execFileSync } from "node:child_process";
 
 let cached = process.env.FFMPEG || null;
 
 export function ffmpegPath() {
   if (!cached) {
-    cached = execFileSync("uv", ["run", "--quiet", "--with", "imageio-ffmpeg", "python", "-c", "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())"], { encoding: "utf8" }).trim();
+    cached = execFileSync("uv", ["run", "--quiet", "--with", "imageio-ffmpeg==0.6.0", "python", "-c", "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())"], { encoding: "utf8" }).trim();
   }
   return cached;
 }

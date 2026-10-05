@@ -1,0 +1,9 @@
+{
+  "storiesBand": { "topPx": 250, "bottomPx": 1530 },
+  "videos": {
+    "release": { "renderer": "frames", "fps": 30, "formats": ["v"], "maxSec": null, "lag": "none", "safeBand": true, "list": { "visible": 5 } },
+    "hook": { "renderer": "frames", "fps": 30, "formats": ["v"], "maxSec": 30, "lag": "none", "safeBand": true },
+    "explainer": { "renderer": "graph", "fps": 60, "formats": ["v", "h"], "maxSec": 60, "safeBand": false }
+  },
+  "delivery": { "shareCrf": 21, "preview": { "shortSide": 720, "crf": 26, "audioKbps": 128 }, "sendLimitMB": 30 }
+}

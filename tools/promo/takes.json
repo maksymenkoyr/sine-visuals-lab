@@ -1,0 +1,27 @@
+{
+  "note": "The take table read by `capture.mjs --take NAME --work DIR` (its header says how entries merge with <work>/takes.json): record.mjs's T table as data. shot = the module under tools/promo/shots that runs the take; feed = what the scene hears (song: the fake microphone plays the song; synthetic: the grid only); sizes = [width, height] tried in order, tries each; look = when the record's Stable look applies to a scene take; flips = a button pressed every `every` beats from the drop.",
+  "defaults": { "tries": 2, "feed": "synthetic", "sizes": [[576, 1024]] },
+  "takes": {
+    "intro": { "shot": "take-scene.mjs", "feed": "song", "lookScene": true, "look": "always", "sizes": [[720, 1280], [576, 1024]] },
+    "song_p2r": {
+      "shot": "take-scene.mjs", "feed": "song", "scene": "physarum2", "look": "ifScene", "sizes": [[720, 1280], [576, 1024]],
+      "flips": { "every": 8, "from": "drop", "names": ["Random", "Random", "Random", "Random", "Random", "Random", "Random", "Random", "Random", "Random", "Random", "Random"] }
+    },
+    "song_chl": {
+      "shot": "take-scene.mjs", "feed": "song", "scene": "chladni", "sizes": [[720, 1280], [576, 1024]],
+      "flips": { "every": 8, "from": "drop", "names": ["Ice", "Fire", "Acid", "Amethyst", "Sunset", "Malachite", "Arcade", "Ember", "Ice", "Fire", "Acid", "Amethyst"] }
+    },
+    "song_cau": {
+      "shot": "take-scene.mjs", "feed": "song", "scene": "caustics", "sizes": [[720, 1280], [576, 1024]],
+      "flips": { "every": 8, "from": "drop", "names": ["Sunset", "Ice", "Amethyst", "Ember", "Acid", "Halation", "Fire", "Arcade", "Sunset", "Ice", "Amethyst", "Ember"] }
+    },
+    "ui_strains": { "shot": "take-ui.mjs", "scene": "physarum2" },
+    "ui_palettes": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_pads": { "shot": "take-ui.mjs", "scene": "physarum2", "sizes": [[576, 1024], [504, 896], [432, 768]] },
+    "ui_wire": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_hits": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_master": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "cuep": { "shot": "take-two-screens.mjs", "feed": "song", "scene": "caustics", "sizes": [[1280, 720]] },
+    "room": { "shot": "take-two-screens.mjs", "feed": "song", "scene": "caustics", "sizes": [[1280, 720]] }
+  }
+}

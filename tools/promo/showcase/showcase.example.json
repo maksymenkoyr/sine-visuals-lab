@@ -1,5 +1,5 @@
 {
-  "note": "Everything that is per-video data for the showcase edit; see the header of edit.py for the pipeline and what each section feeds. Relative paths are relative to the work dir; 'work' itself is absolute or relative to the repo root. Song keys are only names used in this file; copy this file to <work>/showcase.json and put the real audio paths in.",
+  "note": "The explainer video's input: its cut (intro, gallery, drop, wiring, chapters, shuffle, end), captions and the prep config the showcase scripts read; see the header of edit.py for the pipeline and what each section feeds, and shapes/explainer.py for how it becomes cuts.json. Relative paths are relative to the work dir; 'work' itself is absolute or relative to the repo root. Song keys are only names used in this file; copy this file to <work>/showcase.json and put the real audio paths in.",
   "work": "tools/.cache/showcase",
 
   "songs": {
@@ -113,6 +113,9 @@
     }
   },
 
+  "chapters": [],
+  "chaptersNote": "Optional feature chapters cut on the bed's grid right after the wiring: [{\"id\": \"quickstart\", \"shots\": [[\"clip\", bars]]}]; each id is a caption anchor (a caption's from/to may name it). Empty: the v10 cut.",
+
   "camera": {
     "note": "Eased crops over the horizontal wiring take. Views are [centre x, centre y, crop width] in source pixels; keys are [clip time, view].",
     "sourceSize": [2880, 1620],
@@ -156,8 +159,7 @@
       { "id": "shuffle", "big": "Any song.<br>Any scene.", "small": "", "pos": { "v": "low", "h": "low" }, "from": ["shuffleStart", 0.15], "to": ["shuffleStart", 2.6], "fade": 0.2 }
     ],
     "cards": {
-      "end": { "logo": "public/icon-512.png", "url": "sinevisualslab.com", "tag": "Real-time music visuals in your browser" },
-      "or": { "text": "or" }
+      "end": { "logo": "public/icon-512.png", "url": "sinevisualslab.com", "tag": "Real-time music visuals in your browser" }
     }
   }
 }

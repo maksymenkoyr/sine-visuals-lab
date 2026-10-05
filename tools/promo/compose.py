@@ -1,55 +1,59 @@
-# Lays the cards over the recorded takes and writes the video's frames, every cut on a beat of the song.
+# Draws the video's frames from the resolved cut list: the cards laid over the recorded takes, every cut on a
+# beat of the song. The Shape compilers (shapes/release.py, shapes/hook.py) decide what plays when; this file
+# only draws it, so a new frames video needs a Shape and no change here.
 #
-#   uv run -q --with pillow python tools/promo/compose.py          (promo.mjs runs this)
+#   uv run -q --with pillow==12.3.0 python tools/promo/compose.py --work DIR      (promo.mjs runs this)
 #
-# Reads <work>: song.json (tempo), lines.json, cards/ (cards.mjs), takes/ (record.mjs), plan.json (optional).
-# Writes <work>/frames/00000.jpg … + frames/meta.json {total, frames, fps, dropBeat}: 1080x1920, constant
-# 30 fps, each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
+# Reads <work>: cuts.json (renderer 'frames': fps, dropBeat, song tempo and drop time, lag, and
+# frames.segments, each a take, its start beat, its length in beats and its layers), cards/ (cards.mjs, with
+# its meta.json) and takes/ (capture.mjs --take). PROMO_WORK stands in for --work.
+# Writes <work>/frames/00000.jpg ... + frames/meta.json {total, frames, fps, dropBeat}: constant frame rate,
+# each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
 #
-# Shape of the video (.claude/commands/video-hook-stable.md says why):
-#   1. the opening: the user's look with the hook's line over it, until the song's drop;
-#   2. the proofs from lines.json, back to back from the drop — clips that prove the hook, where
-#      something visibly changes on the beat, each with one caption along the bottom that slides in as the last one leaves. The
-#      interface camera leans toward the tracked part that changes; scene footage keeps a steady camera.
-#      The two-screen proofs (Cue/Play with the pop-out, the room with a TV) are drawn as devices: a
-#      laptop with its Cue/Play keys over the second screen;
-#   3. the end: the opening's scene alone for a bar, then the version card over it, held to a bar line
-#      counted from the drop.
-#      Nothing fades out (the user's call).
-# The song's drop goes on the first proof (meta.dropBeat, which promo.mjs uses) — make that proof a
-# Physarum 2 take from a beat where it re-rolls.
-# plan.json can override the timing, in beats:
-#
-#   { "opening": {"take": "intro", "t0": 0}, "look": 4, "end": 16, "hold": 4 }
-#
-# look = beats of the opening before the drop, end = the least beats of the end, hold = how many of
-# them show the opening's scene alone before the version card comes in. A proof without `text` in
-# lines.json runs without a caption. Scene takes
-# heard the song (record.mjs), so each is cut at the song time the video plays at that moment, and its
-# picture moves with the music you hear; panel takes are cut by their own beats.
-import bisect, json, os, shutil
+# A segment's backdrop is the take's frame at the song time the video plays at that moment (scene takes heard
+# the song, so the picture moves with the music you hear) or at the take's own beat (panel takes). A segment
+# with backdrop 'devices' is the two-screen layout: a laptop with its Cue/Play keys over the second screen
+# the segment names, from the takes <take>_main and <take>_out. Camera 'lean' zooms toward the tracked part
+# of an interface take; any other camera is steady. Then the segment's layers, in order:
+#   title    the PNG over the frame, when the file exists;
+#   caption  {png, prev, y, bottom}: the caption slides in as the last one leaves, over a scrim. y is its
+#            top, or bottom minus the card's height from cards/meta.json;
+#   card     {png, at}: from beat `at` of the segment the frame dims and the card fades in over it;
+#   list     {key, n}: the release's change list, a card whose rows scroll (scroller); its dwell and row
+#            pace come from frames.list in cuts.json, its window from cards/meta.json.
+# Nothing fades out unless a Shape says so. cuts.lag 'take' shifts a song take's source time by the
+# reaction lag its frames.json records (meta.lagMs); 'none' draws the take as recorded.
+import bisect, json, math, os, shutil, sys
 from PIL import Image, ImageDraw, ImageFilter
 
-WORK = os.environ.get("PROMO_WORK") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cache", "promo")
-song = json.load(open(f"{WORK}/song.json"))
-P = 60.0 / song["bpm"]
-FPS = 30
+argv = sys.argv[1:]
+WORK = (os.path.abspath(argv[argv.index("--work") + 1]) if "--work" in argv else
+        os.environ.get("PROMO_WORK") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cache", "promo"))
+CUTS = json.load(open(f"{WORK}/cuts.json"))
+if CUTS.get("renderer") != "frames": sys.exit(f"compose.py draws renderer 'frames', not {CUTS.get('renderer')!r}")
+FPS = CUTS["fps"]
 W, H = 1080, 1920
-plan = json.load(open(f"{WORK}/plan.json")) if os.path.exists(f"{WORK}/plan.json") else {}
-LOOK, END, HOLD = plan.get("look", 4), plan.get("end", 16), plan.get("hold", 4)
+P = 60.0 / CUTS["song"]["bpm"]
+DROP_BEAT = CUTS["dropBeat"]
+SS = CUTS["song"]["dropTime"] - DROP_BEAT * P    # song time at video beat 0 (promo.mjs encode starts the song there)
+LAG = CUTS.get("lag") == "take"
+FR = CUTS["frames"]
+SEGS = FR["segments"]
 META = json.load(open(f"{WORK}/cards/meta.json"))
-LINES = json.load(open(f"{WORK}/lines.json"))
-DROP_BEAT = int(os.environ.get("DROP_BEAT") or LOOK)
-SS = song["dropTime"] - DROP_BEAT * P    # song time at video beat 0 (promo.mjs encode starts the song there)
+CARD, VISIBLE = META.get("card"), META.get("visible")             # the list card's row window (cards.mjs)
+DWELL, ROW = (FR.get("list") or {}).get("dwell"), (FR.get("list") or {}).get("row")
+def list_steps(n): return max(0, n - VISIBLE)
 
-REAL = {"cuep": "cuep_main", "room": "room_main"}           # composited takes: the controller's own take
+# the takes drawn as two screens: the controller's own take is <take>_main, the second screen's <take>_out
+TWO = {s["take"]: s["second"] for s in SEGS if s["backdrop"] == "devices"}     # take -> the second screen's label
 
 def load_take(name):
-    real = REAL.get(name, name)
+    real = f"{name}_main" if name in TWO else name
     d = f"{WORK}/takes/{real}"
     j = json.load(open(f"{d}/frames.json"))
     tk = dict(dir=d, t0=j["meta"]["epochT0"], ts=[f["t"] for f in j["frames"]], files=[f["file"] for f in j["frames"]],
-              vw=(j["meta"].get("view") or {}).get("width", 576), songT0=j["meta"].get("songT0"), keys=j["meta"].get("keys", []))
+              vw=(j["meta"].get("view") or {}).get("width", 576), songT0=j["meta"].get("songT0"), keys=j["meta"].get("keys", []),
+              lagMs=j["meta"].get("lagMs"))
     tf = f"{d}/track.json"
     tk["track"] = json.load(open(tf)) if os.path.exists(tf) else []
     tk["track_ts"] = [r[0] for r in tk["track"]]
@@ -61,7 +65,10 @@ def get(name):
 
 def src_time(tk, beat, video_beat=None):
     # a take that heard the song is cut at the song time the video plays here; others by their own beat
-    return tk["t0"] + (SS + video_beat * P - tk["songT0"] if tk["songT0"] is not None and video_beat is not None else beat * P)
+    t = tk["t0"] + (SS + video_beat * P - tk["songT0"] if tk["songT0"] is not None and video_beat is not None else beat * P)
+    # the app reacts a little after the sound it hears (cuts.lag 'take'); a take with a key log is cut by its keys
+    if LAG and tk["lagMs"] is not None and tk["songT0"] is not None and not tk["keys"]: t += tk["lagMs"] / 1000
+    return t
 def frame_at(name, beat, video_beat=None):
     tk = get(name)
     src_t = src_time(tk, beat, video_beat)
@@ -74,11 +81,10 @@ def fit(im): return im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS
 def tag_at(base, key, pos):
     t = png(f"label_{key}.png"); base.paste(t.convert("RGB"), pos, t.getchannel("A")); return base
 
-# The two-screen proofs (record.mjs twoScreens): drawn as devices — a laptop with its Cue (Space) and
+# The two-screen proofs (capture.mjs take mode): drawn as devices — a laptop with its Cue (Space) and
 # Play (Option) keys on the deck, lit while held, over the second screen it plays to, whose frame glows
 # orange while Cue shows the laptop's look there and flashes green when Play sends it. Everything stays
 # above the caption.
-TWO = {"cuep": "popout", "room": "tv"}                       # take → the second screen's label
 DEV_X, DEV_W, DEV_H, BEZEL, LAP_Y, OUT_Y = 120, 840, 473, 14, 262, 850
 CUE_RGB, PLAY_RGB = (245, 165, 36), (63, 185, 80)              # the app's CUE and PLAY bar colours
 def device(base, im, y, glow=0.0, rgb=PLAY_RGB):
@@ -118,19 +124,6 @@ def backdrop(name, b, video_beat):
     if name in TWO: return two_screens(name, b, video_beat)
     return fit(frame_at(name, b, video_beat))
 
-# ---- segments ---------------------------------------------------------------------------------------
-# Song takes (record.mjs) cover the whole video, so a segment needs only the take's name.
-OPENING = plan.get("opening") or {"take": "intro", "t0": 0}
-SEGS = [("opening", (OPENING["take"], OPENING["t0"]), None, LOOK)]
-for i, h in enumerate(LINES.get("proofs", [])):
-    SEGS.append(("proof", (h["take"], h.get("from", 0)), i, h["beats"]))
-# The end: the opening's scene alone for `hold` beats, then the version card over it, stretched to a bar
-# line counted from the drop, so the song stops on a beat.
-end = END
-while (sum(sg[3] for sg in SEGS) + end - DROP_BEAT) % 4: end += 1
-SEGS.append(("end", (OPENING["take"], OPENING["t0"]), None, end))
-TOTAL_BEATS = sum(sg[3] for sg in SEGS)
-
 # ---- camera -----------------------------------------------------------------------------------------
 def ease(t): t = max(0.0, min(1.0, t)); return t * t * (3 - 2 * t)
 def zoom(im, z, cx, cy):
@@ -152,7 +145,7 @@ def camera(im, name, local, take_beat):
         return zoom(im, 1.0 + 0.40 * ease(local / 3), cx, cy)
     return im   # scene footage: a steady camera
 
-# ---- text layers ------------------------------------------------------------------------------------
+# ---- layers -----------------------------------------------------------------------------------------
 _png = {}
 def png(path):
     if path not in _png: _png[path] = Image.open(f"{WORK}/cards/{path}").convert("RGBA")
@@ -171,44 +164,69 @@ def scrim(top, strength):   # darkens the bottom of the frame from `top` down, s
     return _scrims[(top, strength)]
 def darken(im, top, strength): return Image.composite(Image.new("RGB", im.size, (3, 5, 10)), im, scrim(top, strength))
 
-# a caption's bottom sits where Stories' own UI starts (the bottom ~19 %); slide distance (px) and time (s)
-CAP_X, CAP_Y, CAP_SLIDE, CAP_T = 70, 1530 - META["cap"]["h"], 300, 0.4
-def cap_png(i): return png(f"proof_{i}.png") if i >= 0 and os.path.exists(f"{WORK}/cards/proof_{i}.png") else None
-def caption(im, i, local):
+def scroller(im, g, local):
+    key, n, rh = g["key"], g["n"], CARD["row"]
+    im = darken(im, CARD["y"] - 380, 170)
+    o = im.convert("RGBA")
+    fade = min(1.0, local * P / 0.2)
+    chrome = png(f"chrome_{key}.png")
+    o.alpha_composite(with_alpha(chrome, fade) if fade < 1 else chrome)
+    k = (local - DWELL) / ROW
+    s = 0.0 if k <= 0 else min(list_steps(n), math.floor(k) + ease((k % 1) / 0.6))   # ticks on each step
+    win = Image.new("RGBA", (CARD["w"], (VISIBLE + 2) * rh), (0, 0, 0, 0))          # a row of margin each side
+    for j in range(int(s), min(n, int(s) + VISIBLE + 1)):
+        y = (j - s) * rh
+        a = max(0.0, min(1.0, 1 + y / rh, 1 - (y - (VISIBLE - 1) * rh) / rh))       # out at the top, in at the bottom
+        if a > 0: win.alpha_composite(with_alpha(png(f"row_{key}_{j}.png"), a * fade), (0, int(round(y)) + rh))
+    o.alpha_composite(win.crop((0, rh, CARD["w"], (VISIBLE + 1) * rh)), (CARD["x"], CARD["y"]))
+    return o.convert("RGB")
+
+# a caption's slide-in: its distance (px) and time (s), and its left edge
+CAP_X, CAP_SLIDE, CAP_T = 70, 300, 0.4
+def caption(im, L, local):
     a = ease(local * P / CAP_T)
-    prev, cur = cap_png(i - 1) if a < 1 else None, cap_png(i)
+    prev, cur = png(L["prev"]) if L.get("prev") and a < 1 else None, png(L["png"]) if L.get("png") else None
     if not prev and not cur: return im
-    im = darken(im, CAP_Y - 160, int(150 * (1 if cur else 1 - a)))   # the band fades with a caption that leaves alone
+    y = L["y"] if L.get("y") is not None else L["bottom"] - META["cap"]["h"]
+    im = darken(im, y - 160, int(150 * (1 if cur else 1 - a)))   # the band fades with a caption that leaves alone
     if prev:
-        im.paste(prev.convert("RGB"), (int(CAP_X - a * CAP_SLIDE), CAP_Y), prev.getchannel("A").point(lambda v: int(v * (1 - a))))
+        im.paste(prev.convert("RGB"), (int(CAP_X - a * CAP_SLIDE), y), prev.getchannel("A").point(lambda v: int(v * (1 - a))))
     if cur:
-        im.paste(cur.convert("RGB"), (int(CAP_X + (1 - a) * CAP_SLIDE), CAP_Y), cur.getchannel("A").point(lambda v: int(v * a)))
+        im.paste(cur.convert("RGB"), (int(CAP_X + (1 - a) * CAP_SLIDE), y), cur.getchannel("A").point(lambda v: int(v * a)))
     return im
 def dim(im, amount, t_in): return Image.blend(im, Image.new("RGB", im.size, (4, 6, 12)), amount * min(1.0, t_in / 0.3))
-HAS_OPENING = os.path.exists(f"{WORK}/cards/opening.png")
+def card(im, L, local):
+    if local < L["at"]: return im
+    t = (local - L["at"]) * P
+    return over(dim(im, 0.30, t), with_alpha(png(L["png"]), min(1.0, t / 0.18)))
+def title(im, L):
+    return over(im, png(L["png"])) if os.path.exists(f"{WORK}/cards/{L['png']}") else im
+def layer(im, L, local):
+    op = L["op"]
+    if op == "caption": return caption(im, L, local)
+    if op == "card": return card(im, L, local)
+    if op == "title": return title(im, L)
+    if op == "list": return scroller(im, L, local)
+    raise SystemExit(f"cuts.json: unknown layer op {op!r}")
 
 # ---- frames -----------------------------------------------------------------------------------------
+TOTAL_BEATS, end = FR["totalBeats"], FR["endBeats"]
 n_frames = round(TOTAL_BEATS * P * FPS)
 print(f"{TOTAL_BEATS} beats ({end} held at the end) = {TOTAL_BEATS * P:.3f}s = {n_frames} frames @ {FPS}; drop on beat {DROP_BEAT}")
 bounds, b0 = [], 0
-for sg in SEGS: bounds.append(b0); b0 += sg[3]
+for sg in SEGS: bounds.append(b0); b0 += sg["beats"]
 FRAMES = f"{WORK}/frames"
 shutil.rmtree(FRAMES, ignore_errors=True); os.makedirs(FRAMES)
 si = 0
 for i in range(n_frames):
     bp = (i / FPS) / P
     while si + 1 < len(SEGS) and bp >= bounds[si + 1] - 1e-9: si += 1
-    kind, (tk, tb), arg, dur = SEGS[si]
-    local = bp - bounds[si]; t_in = local * P
+    sg = SEGS[si]
+    tk, tb = sg["take"], sg["t0"]
+    local = bp - bounds[si]
     im = backdrop(tk, tb + local, bp)
-    if tk not in TWO: im = camera(im, tk, local, tb + local)   # the two-screen layout stays put
-    if kind == "opening" and HAS_OPENING:
-        im = over(im, png("opening.png"))
-    elif kind == "proof":
-        im = caption(im, arg, local)
-    elif kind == "end" and local >= HOLD:
-        t_card = (local - HOLD) * P
-        im = over(dim(im, 0.30, t_card), with_alpha(png("version.png"), min(1.0, t_card / 0.18)))
+    if sg["backdrop"] != "devices" and sg["camera"] == "lean": im = camera(im, tk, local, tb + local)   # the two-screen layout stays put
+    for L in sg["layers"]: im = layer(im, L, local)
     im.save(f"{FRAMES}/{i:05d}.jpg", quality=94, subsampling=0)
-    if i % 150 == 0: print(i, f"beat {bp:.1f}", kind, flush=True)
+    if i % 150 == 0: print(i, f"beat {bp:.1f}", sg["kind"], flush=True)
 json.dump(dict(total=n_frames / FPS, frames=n_frames, fps=FPS, dropBeat=DROP_BEAT), open(f"{FRAMES}/meta.json", "w"))
