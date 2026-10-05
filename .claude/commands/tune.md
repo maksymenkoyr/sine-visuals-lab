@@ -17,6 +17,12 @@ or 120 if not given). Read `docs/tuning.md` first if you haven't this session.
    read isn't enough to judge the change.
 4. Mark (`Alt+M` in-browser, or the mark endpoint) anything worth keeping as a
    before/after reference.
+5. Before calling it done, run the real-audio check:
+   `node tools/tune-real.mjs $1 --wav <song.wav> --sheet <prefix>` (its header
+   says where songs live and what it measures). On silence, nothing that
+   reacts to music may move and no hit may fire — only motion the scene has
+   by design; on the song, the change p95 must stand well above silence.
+   Look at both sheets and report the table. If either fails, keep tuning.
 
 At the end, append any phrase → param mapping this session settled on to
 `tuning/VOCAB.md`, and note it in `docs/status.md` if the work is unfinished.

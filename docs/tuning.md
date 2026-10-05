@@ -94,6 +94,10 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    glance, instead of scrubbing frame by frame.
 6. **A/B.** `tools/tune-ab.mjs` runs two param sets in parallel pages against the
    same synthetic-audio timecode, for a direct side-by-side.
+7. **Real audio.** `tools/tune-real.mjs` is the final check Reproducibility above
+   asks for: it plays a real song, then silence, as the microphone and prints
+   how much the picture changes and how many hits fire under each. Its header
+   owns the method and where the songs live.
 
 ## The debug surface
 
