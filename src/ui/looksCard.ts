@@ -1,6 +1,7 @@
 import type { SceneLook } from "../render/sceneLooks.ts";
 import { FONT_LABEL, FONT_MONO, SCENE_VIOLET } from "./controlsTheme.ts";
 import { chipBtnStyle, createCard, createChipButton, spacer } from "./controlsKit.ts";
+import { createLookIcon } from "./lookIcon.ts";
 
 /**
  * The Looks card — named, shareable snapshots of the Scene card's own
@@ -16,7 +17,8 @@ import { chipBtnStyle, createCard, createChipButton, spacer } from "./controlsKi
  * up a silly one) and the card says what it was called. A double-click on a
  * look's name renames it in place; the click handler skips the double-click's
  * second click, which would otherwise apply the look again and overwrite its
- * Undo snapshot with the look itself.
+ * Undo snapshot with the look itself. Each row starts with the look's
+ * icon, tinted from its name (lookIcon.ts).
  *
  * Renaming and "Paste a look code" use an inline <input> rather than
  * prompt(): this panel runs over a fullscreen canvas on a phone or TV, and a
@@ -250,7 +252,7 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
         refresh();
       });
 
-      row.append(nameBtn, copyBtn, deleteBtn);
+      row.append(createLookIcon(look.name), nameBtn, copyBtn, deleteBtn);
       list.appendChild(row);
     }
   }
