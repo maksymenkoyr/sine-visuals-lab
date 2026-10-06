@@ -76,6 +76,15 @@ import {
 import { createControlRow } from "./deviceMenu.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
+import {
+  cycleHistorySpan,
+  formatHistorySpan,
+  getHistorySpan,
+  HISTORY_SPAN_DEFAULT,
+  HISTORY_SPAN_MAX,
+  HISTORY_SPANS,
+} from "./historySpan.ts";
+import { createColumnStore } from "./columnStore.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -109,7 +118,7 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *    post-AGC sibling — the only way to see features.ts's adaptive
  *    floor/peak doing its job, since its whole point is to make that
  *    invisible downstream — and under it a History trace of both Level and
- *    Energy over the last HISTORY_SPAN_SEC, with FeatureExtractor.fixedEnergy
+ *    Energy over the card's span, with FeatureExtractor.fixedEnergy
  *    (energy as it would read with auto-gain at its minimum) as a dim
  *    reference line. The gap between Energy and that reference is exactly
  *    what the Input card's Auto-gain amount is adding; sliding it down
@@ -181,8 +190,15 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *
  * Each card is independently collapsible (controlsKit.ts's createCard
  * foldId, remembered in panelFolds.ts) and update() skips a folded card's
- * work entirely — folding buys back the per-frame cost, not just the
- * screen space.
+ * drawing and DOM writes — folding buys back the per-frame cost, not just
+ * the screen space.
+ *
+ * Every time-axis trace (Waveform, History, Gate, Hits, Timing, Wave,
+ * Centroid) records into a time store (createColumnRing) on every tick,
+ * folded card or closed panel alike, so opening a card shows what it
+ * missed. A span chip in each card's header (historySpan.ts) picks how
+ * much of that the card's traces squeeze into its width, from
+ * HISTORY_SPANS, remembered per card.
  *
  * setRaw (called by deviceMenu.ts's one merged RAW chip, in the column head
  * above "Sound" — see that file's own comment for why one chip drives this
@@ -237,7 +253,9 @@ import { createCanvasSizer } from "./canvasSizer.ts";
 
 export interface AudioMeters {
   el: HTMLElement;
-  /** Fed every frame while the panel is open. `frame`/`anim` null before
+  /** Fed every frame, panel open or closed: `onScreen` false (the panel
+   *  closed) only records the traces — see this function's own recording
+   *  block — and skips every draw and DOM write. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono` is the local mic's samples, or on a
    *  following device the feed's [min, max] (app.ts's waveSamples), null with
    *  neither (the Dynamics card's Waveform row hidden); `rawBands` null on any
@@ -246,9 +264,9 @@ export interface AudioMeters {
    *  any device without a local FeatureExtractor (the History trace drops
    *  its reference line); `lufs` null on any device without a local
    *  lufsAnalyser (the Dynamics card's Loudness row and header Reset chip
-   *  hidden). A folded card skips its computation and DOM writes for the
-   *  frame — folding buys back the layout/canvas cost, not just the screen
-   *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
+   *  hidden). A folded card skips its draws and DOM writes for the frame
+   *  (its traces still record) — folding buys back the layout/canvas cost,
+   *  not just the screen space. `rateScale` is app.ts's already-resolved sensitivity.ts's
    *  smoothingRateScale for this tick — non-finite (the Smoothing row's Off
    *  stop) bypasses this file's own BPM display (showing the raw estimate
    *  instead of tempoSettle.ts's settled reading), the same way `raw`
@@ -275,6 +293,7 @@ export interface AudioMeters {
     lufs: LufsReading | null,
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
+    onScreen: boolean,
   ): void;
   /** Sets the meters' own raw mode (this file's own showRaw flag — see file
    *  header for what it changes per row). Called by deviceMenu.ts's one
@@ -390,23 +409,12 @@ const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
 const WAVE_HEIGHT_CSS_PX = 64;
 // The waveform is a rolling history, not a snapshot: one analyser buffer is
 // ~40ms — a single kick — and at speech level it drew as a flat hairline.
-// Each column holds the min/max over WAVE_COLUMN_MS, so a card's width
-// spans the last several seconds regardless of frame rate, and beats read
-// as blobs the way they do in an audio editor. The vertical range zooms to
-// the loudest column on screen, floored at WAVE_RANGE_FLOOR so silence and
-// mic hiss aren't blown up to look like signal.
-const WAVE_COLUMN_MS = 16;
+// Each column holds the min/max over its share of the Dynamics card's span
+// (the same column store as every trace, createColumnRing below), so beats
+// read as blobs the way they do in an audio editor. The vertical range zooms
+// to the loudest column on screen, floored at WAVE_RANGE_FLOOR so silence
+// and mic hiss aren't blown up to look like signal.
 const WAVE_RANGE_FLOOR = 0.05;
-// Both this waveform and createTraceStrip below close more than one column
-// in a single push() whenever a frame outlasts a column — routine once a
-// scene is GPU-bound, since a column follows the strip's pixel width while
-// push() follows rAF, uncapped by the render-rate cap (see app.ts's loop()).
-// Rather than commit those extra columns empty, the sample that closed the
-// burst is held across all of them: the reading was there for that whole
-// stretch, we just weren't asked for it more often. Past COLUMN_CARRY_MS the
-// hold would be a lie — rAF was paused (a hidden tab), not slow — so those
-// columns stay empty and draw the same gap they always have.
-const COLUMN_CARRY_MS = 250;
 const FADE = "background-color 0.3s ease-out";
 
 // The meter sits where a row's slider would, at the slider's height, so meter
@@ -497,20 +505,19 @@ const tapRightStyle = `display: flex; align-items: center; gap: 8px;`;
 // metronome.ts — see that file's own header. This card just formats
 // anim.metronomeBpm; the RAW chip / Smoothing Off bypass that settle and
 // show the raw estimate instead (see this file's own header).
-const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 // The Dynamics card's history trace: level, energy, and the fixed-mapping
-// reference over the last HISTORY_SPAN_SEC, one column per CSS pixel so the
-// card's width always spans exactly that long. Each column keeps the max of
-// what it saw, so a beat's peak survives however many frames a column
-// covers. Long enough to see the adaptive window re-settle after a change
-// in room level (a couple of seconds — see features.ts's FLOOR_RISE_RATE)
-// with the before and after both still on screen. traceLegend below reads
+// reference over the card's span (its span chip, historySpan.ts), one
+// column per CSS pixel so the card's width always spans exactly that long.
+// Each column keeps the max of what it saw, so a beat's peak survives
+// however many frames a column covers. The shortest span is long enough to
+// see the adaptive window re-settle after a change in room level (a couple
+// of seconds — see features.ts's FLOOR_RISE_RATE) with the before and after
+// both still on screen. traceLegend below reads
 // its swatch colours from the same HISTORY_*_COLOR constants the strokes
 // use, so the two can't drift apart; its reference entry dims when this
 // frame's source has no fixed-mapping reading to show (see createTraceStrip's
 // push). The Character card's Centroid trace (below, no legend — one series
-// needs none) shares this same span and the createTraceStrip machinery.
-const HISTORY_SPAN_SEC = 10;
+// needs none) shares the createTraceStrip machinery, on its own card's span.
 const HISTORY_HEIGHT_CSS_PX = 48;
 const CENTROID_TRACE_HEIGHT_CSS_PX = 28;
 const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
@@ -556,6 +563,13 @@ function gateLevelTop(marks: SilenceGateMarks): number {
   return Math.min(1, Math.max(GATE_LEVEL_TOP_MIN, marks.open * GATE_LEVEL_TOP_PER_OPEN));
 }
 
+/** A card's span chip as a trace reads it: what it shows now, and the most
+ *  it can ever show (how long the trace keeps). */
+interface TraceSpan {
+  sec: () => number;
+  max: number;
+}
+
 interface TraceStripSeries {
   color: string;
   width: number;
@@ -567,112 +581,77 @@ interface TraceStripGuide {
   color: string;
 }
 
-/** The ring-buffer bookkeeping shared by every trace/history strip in this
- *  file: a canvas sized to one column per CSS pixel over HISTORY_SPAN_SEC,
- *  `seriesCount` parallel ring buffers, and push()/resetColumn() to fill
- *  them — factored out of createTraceStrip below so createHitsHistory's
- *  per-column shading/ticks can share the exact same column timing instead
- *  of re-deriving it.
+/** The canvas side of every trace/history strip in this file: a
+ *  columnStore.ts store (one bucket per BUCKET_MS per series, kept for
+ *  `maxSpanSec`) drawn as one column per CSS pixel over `spanSec()` —
+ *  factored out of createTraceStrip below so createHitsHistory's per-column
+ *  shading/ticks and the Waveform share the exact same timing instead of
+ *  re-deriving it.
  *
- *  Each series' column is a max-hold of what push() saw since the column
- *  before last closed, so a transient survives however many frames the
- *  column spans; when push() closes several columns in one call (see
- *  COLUMN_CARRY_MS above) the sample that closed them is held across all
- *  but blank past the carry bound. A column stays NaN when nothing was ever
- *  sampled for it — a null reading this series had no value for, or a carry
- *  bound stretch with no reading at all — which a caller reads as "lift the
+ *  push() records whether or not anything is on screen; prepare() resamples
+ *  the store into this tick's columns and returns false while the canvas
+ *  has no layout (the caller skips its draw). Each column is a max-hold of
+ *  what push() saw across it, so a transient survives however many frames
+ *  it spans. A column stays NaN when nothing was ever sampled for it — a
+ *  null reading this series had no value for, or a stall with no reading at
+ *  all (see columnStore.ts's header) — which a caller reads as "lift the
  *  pen" rather than a reading of zero, the same gap HISTORY_FIXED_COLOR
  *  relies on for a source with no fixed-mapping reading this tick. */
-function createColumnRing(seriesCount: number, heightPx: number) {
+function createColumnRing(
+  seriesCount: number,
+  heightPx: number,
+  spanSec: () => number = () => HISTORY_SPAN_DEFAULT,
+  maxSpanSec: number = HISTORY_SPAN_DEFAULT,
+) {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = `display: block; width: 100%; height: ${heightPx}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
-
-  let bufs: Float32Array[] = [];
-  let head = 0;
-  // The column being accumulated, one slot per series — NaN means "nothing
-  // folded in yet this column", not "zero". commitColumn() below relies on
-  // Number.isNaN to tell first-touch-this-column apart from a genuine 0.
-  let colVals: number[] = new Array(seriesCount).fill(Number.NaN);
-  // A burst's filler once past COLUMN_CARRY_MS — never mutated.
-  const blank: number[] = new Array(seriesCount).fill(Number.NaN);
-  let colStartMs: number | null = null;
-  // Follows the width so the trace always spans exactly HISTORY_SPAN_SEC.
-  let columnMs = 1000;
-
-  // The history is one column per CSS pixel, so a width change rebuilds
-  // (clears) it; a devicePixelRatio-only change keeps it — see canvasSizer.ts.
-  const sizer = createCanvasSizer(canvas, ctx, {
-    heightCssPx: heightPx,
-    onWidthChange(w) {
-      bufs = [];
-      for (let i = 0; i < seriesCount; i++) bufs.push(new Float32Array(w).fill(Number.NaN));
-      head = 0;
-      columnMs = (HISTORY_SPAN_SEC * 1000) / w;
-    },
-  });
-  const ensureSize = sizer.ensure;
-
-  function commitColumn(vals: number[]): void {
-    for (let i = 0; i < seriesCount; i++) bufs[i][head] = vals[i];
-    head = (head + 1) % bufs[0].length;
-  }
+  const S = seriesCount;
+  const store = createColumnStore(S, maxSpanSec);
+  // This tick's columns (prepare()), pixel-major, S floats per column.
+  let cols = new Float32Array(0);
+  let colsW = 0;
+  // Only sizes the pixels: the store keeps time, so a width change doesn't
+  // touch it — see canvasSizer.ts.
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: heightPx });
 
   return {
     canvas,
     ctx,
-    /** CSS pixel width the ring is currently sized to (0 before first
+    /** CSS pixel width the canvas is currently sized to (0 before first
      *  layout). */
     get width(): number {
       return sizer.width;
     },
-    /** Number of closed columns — equals width, one per CSS pixel. */
+    /** Number of whole columns before the live one at the right edge —
+     *  at(x, s) takes 0..length-1, live(s) is column `length`. Valid after
+     *  a prepare() that returned true. */
     get length(): number {
-      return bufs[0]?.length ?? 0;
+      return Math.max(0, colsW - 1);
     },
-    /** Closed column value at ring-relative index x (0 = oldest,
-     *  length-1 = newest), series s. */
+    /** Column x (0 = oldest), series s, as of the last prepare(). */
     at(x: number, s: number): number {
-      const len = bufs[0].length;
-      return bufs[s][(head + x) % len];
+      return cols[x * S + s];
     },
-    /** The in-progress (not yet closed) column's current reading for series
-     *  s — a caller draws this at the right edge, same shape as
-     *  traceHistory's own `live` param below. */
+    /** The newest column, still filling — a caller draws this at the right
+     *  edge, same shape as traceHistory's own `live` param below. */
     live(s: number): number {
-      return colVals[s];
+      return cols[(colsW - 1) * S + s];
     },
     /** One sample per series, `null` where this tick has no reading for that
-     *  series (e.g. no fixed-mapping reference) — max-held into the current
-     *  column, closing it (or several, after a stall) once `columnMs` has
-     *  passed. Call every tick the card is open; skip entirely while folded,
-     *  same as resetColumn() below. */
-    push(values: (number | null)[], nowMs: number): void {
-      if (!ensureSize()) return;
-      for (let i = 0; i < seriesCount; i++) {
-        const v = values[i];
-        if (v === null) continue;
-        colVals[i] = Number.isNaN(colVals[i]) ? v : Math.max(colVals[i], v);
+     *  series (e.g. no fixed-mapping reference). Call every tick, drawn or
+     *  not. */
+    push: store.push,
+    resetColumn: store.resetColumn,
+    prepare(): boolean {
+      if (!sizer.ensure()) return false;
+      const w = sizer.width;
+      if (w !== colsW) {
+        cols = new Float32Array(w * S);
+        colsW = w;
       }
-      if (colStartMs === null) colStartMs = nowMs;
-      const elapsed = nowMs - colStartMs;
-      if (elapsed < columnMs) return;
-      let n = Math.min(bufs[0].length, Math.floor(elapsed / columnMs));
-      // A frame that outlasts a column closes several at once (see
-      // COLUMN_CARRY_MS above) — this push's sample is a reading for now, so
-      // it lands in the newest column, while the ones before it in the same
-      // burst hold that same sample (ordinary frame pacing) or go blank (a
-      // stall: nothing was actually sampled through that stretch).
-      const filler = elapsed > COLUMN_CARRY_MS ? blank : colVals;
-      for (; n > 1; n--) commitColumn(filler);
-      commitColumn(colVals);
-      colVals = colVals.map(() => Number.NaN);
-      colStartMs = nowMs - (elapsed % columnMs);
-    },
-    /** Don't accumulate a column while the card holding this strip is
-     *  hidden (folded) — same reasoning as the waveform's own fold guard. */
-    resetColumn(): void {
-      colStartMs = null;
+      store.resample(cols, w, spanSec());
+      return true;
     },
   };
 }
@@ -687,9 +666,16 @@ function createColumnRing(seriesCount: number, heightPx: number) {
  *  `guides`, when given, replaces draw()'s own fixed mid-height line with
  *  dashed horizontal lines at each entry's `at` (0..1, the same y scale the
  *  series use) — the Gate trace's two Input-card marks. Read fresh every
- *  draw() call (not cached), since a mark can move while the card is open. */
-export function createTraceStrip(series: TraceStripSeries[], heightPx: number, guides?: () => TraceStripGuide[]) {
-  const ring = createColumnRing(series.length, heightPx);
+ *  draw() call (not cached), since a mark can move while the card is open.
+ *  `span`, when given, is the card's span chip (TraceSpan); without it the
+ *  strip shows and keeps HISTORY_SPAN_DEFAULT, as the Picture block does. */
+export function createTraceStrip(
+  series: TraceStripSeries[],
+  heightPx: number,
+  opts: { guides?: () => TraceStripGuide[]; span?: TraceSpan } = {},
+) {
+  const { guides, span } = opts;
+  const ring = createColumnRing(series.length, heightPx, span?.sec, span?.max);
   const { canvas, ctx } = ring;
   const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (heightPx - 2);
 
@@ -726,6 +712,7 @@ export function createTraceStrip(series: TraceStripSeries[], heightPx: number, g
      *  draws those instead (a mid-height line would read as an unlabeled
      *  third mark on top of them). */
     draw(): void {
+      if (!ring.prepare()) return;
       const w = ring.width;
       const h = heightPx;
       ctx.clearRect(0, 0, w, h);
@@ -1018,7 +1005,7 @@ function createTempoBlock(accent: string) {
 
 // The Hits card's own hit history: one lane each for Beat (the broadband
 // onset) and Low/Mid/High (bandEnergy.ts's per-group onsets), one canvas,
-// one column per CSS pixel over HISTORY_SPAN_SEC (createColumnRing above).
+// one column per CSS pixel over the card's span (createColumnRing above).
 // A history, not just an instant reading, so a tuning session can see *why*
 // a hit did or didn't count. A fifth, trace-only Surge lane sits under them
 // (not part of HITS_LANES: it has no hits, strengths or fires of its own) —
@@ -1115,8 +1102,8 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
   ].join(" ");
 }
 
-function laneNote(ratio: number | null, fires: number): string {
-  return `${ratio === null ? "--" : ratio.toFixed(2)} · ${fires}/${HISTORY_SPAN_SEC}s`;
+function laneNote(ratio: number | null, fires: number, spanSec: number): string {
+  return `${ratio === null ? "--" : ratio.toFixed(2)} · ${fires}/${formatHistorySpan(spanSec)}`;
 }
 
 /** The Hits card's per-lane legend note while Shape is open — that lane's
@@ -1150,14 +1137,14 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
  *  column's strength/standout/loudness come from `anim.hitStrength.*`
  *  (src/audio/hitStrength.ts) — see this function's own draw() for how
  *  they're used. */
-function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: MountJack) {
+function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: MountJack, span: TraceSpan) {
   const row = createMeterRow({
     label: "Hits",
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description: `${hitsRuleHint(getSilenceGate)} A fired tick's height is its graded strength (Shape).`,
   });
-  const ring = createColumnRing(HITS_SERIES_COUNT, HITS_HEIGHT_PX);
+  const ring = createColumnRing(HITS_SERIES_COUNT, HITS_HEIGHT_PX, span.sec, span.max);
   const ctx = ring.ctx;
   // HITS_LANES' own lane jacks mount absolutely inside this wrapper rather
   // than the row itself (which is `position: relative` too, but its own top
@@ -1171,7 +1158,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
-  row.setReadout(String(HISTORY_SPAN_SEC));
+  row.setReadout(String(span.sec()));
 
   const surgeColor = driveSourceColor(SURGE_CHOICE);
   const legend = createTraceLegend([
@@ -1215,14 +1202,15 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   laneMounts.push({ choice: SURGE_CHOICE, glowEl: surgeGlow });
 
   // Fire timestamps per lane, for the legend's "N fires in the last span"
-  // note — pruned to HISTORY_SPAN_SEC, same window the trace shows. Pruned
-  // when a fire is logged as well as on read: the legend (the only reader)
-  // is skipped while the Shape disclosure is open, and a log that is only
-  // pruned on read would grow for as long as Shape stays open.
+  // note — kept for the longest span (`span.max`), counted over the shown
+  // one, so switching span counts the fires already on screen. Pruned when
+  // a fire is logged as well as on read: the legend (the only reader) is
+  // skipped while the Shape disclosure is open or nothing is on screen, and
+  // a log that is only pruned on read would grow all that time.
   const fireLog: number[][] = HITS_LANES.map(() => []);
   function pruneFires(lane: number, nowMs: number): number[] {
     const log = fireLog[lane];
-    const cutoff = nowMs - HISTORY_SPAN_SEC * 1000;
+    const cutoff = nowMs - span.max * 1000;
     let stale = 0;
     while (stale < log.length && log[stale] < cutoff) stale++;
     if (stale > 0) log.splice(0, stale);
@@ -1232,7 +1220,11 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
     pruneFires(lane, nowMs).push(nowMs);
   }
   function firesInSpan(lane: number, nowMs: number): number {
-    return pruneFires(lane, nowMs).length;
+    const log = pruneFires(lane, nowMs);
+    const cutoff = nowMs - span.sec() * 1000;
+    let n = 0;
+    for (let i = log.length - 1; i >= 0 && log[i] >= cutoff; i--) n++;
+    return n;
   }
 
   function laneTop(laneIdx: number): number {
@@ -1251,6 +1243,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   /** `shapeOpen`/`floor` gate the Shape-only drawing in step 5 below — see
    *  createHitsHistory's own update() for who supplies them. */
   function draw(shapeOpen: boolean, floor: number): void {
+    if (!ring.prepare()) return;
     const w = ring.width;
     const len = ring.length;
     ctx.clearRect(0, 0, w, HITS_HEIGHT_PX);
@@ -1425,19 +1418,8 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   let lastHint = "";
   return {
     el: row.el,
-    /** `shapeOpen`/`floor` gate the extra Shape-only drawing and switch the
-     *  legend's own notes between laneNote (closed) and hitStrengthNote
-     *  (open) — the Curve itself is drawn separately (createHitCurve, in
-     *  createAudioMeters), since it isn't part of this row's own canvas. */
-    update(
-      frame: FeatureFrame | null,
-      anim: AnimFrame | null,
-      beatDiag: OnsetDiag | null,
-      nowMs: number,
-      text: boolean,
-      shapeOpen: boolean,
-      floor: number,
-    ): void {
+    /** Every tick, on screen or not: this tick's column and fires. */
+    record(frame: FeatureFrame | null, anim: AnimFrame | null, beatDiag: OnsetDiag | null, nowMs: number): void {
       if (anim) {
         const beatFired = !!frame?.onset;
         const beatVerdict = verdictOf(beatFired, beatDiag ?? NULL_DIAG);
@@ -1479,6 +1461,21 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
       } else {
         ring.push(new Array(HITS_SERIES_COUNT).fill(null), nowMs);
       }
+    },
+    /** Only while on screen, after record(). `shapeOpen`/`floor` gate the
+     *  extra Shape-only drawing and switch the legend's own notes between
+     *  laneNote (closed) and hitStrengthNote (open) — the Curve itself is
+     *  drawn separately (createHitCurve, in createAudioMeters), since it
+     *  isn't part of this row's own canvas. */
+    render(
+      frame: FeatureFrame | null,
+      anim: AnimFrame | null,
+      beatDiag: OnsetDiag | null,
+      nowMs: number,
+      text: boolean,
+      shapeOpen: boolean,
+      floor: number,
+    ): void {
       draw(shapeOpen, floor);
 
       if (text) {
@@ -1494,10 +1491,11 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
             legend.setNote(li, hitStrengthNote(parts ? parts[li] : null));
           }
         } else {
-          legend.setNote(0, laneNote(beatDiag ? beatDiag.ratio : null, firesInSpan(0, nowMs)));
-          legend.setNote(1, laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs)));
-          legend.setNote(2, laneNote(anim ? anim.hits.mid.ratio : null, firesInSpan(2, nowMs)));
-          legend.setNote(3, laneNote(anim ? anim.hits.high.ratio : null, firesInSpan(3, nowMs)));
+          const sec = span.sec();
+          legend.setNote(0, laneNote(beatDiag ? beatDiag.ratio : null, firesInSpan(0, nowMs), sec));
+          legend.setNote(1, laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
+          legend.setNote(2, laneNote(anim ? anim.hits.mid.ratio : null, firesInSpan(2, nowMs), sec));
+          legend.setNote(3, laneNote(anim ? anim.hits.high.ratio : null, firesInSpan(3, nowMs), sec));
         }
         // The two marks in the hint can move (the Input card's Silence
         // below/Sound above rows) — recompute and only touch the DOM when
@@ -1509,8 +1507,9 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
         }
       }
     },
-    resetColumn(): void {
-      ring.resetColumn();
+    /** The card's span chip moved: the row's readout follows. */
+    refreshSpan(): void {
+      row.setReadout(String(span.sec()));
     },
     laneMounts,
   };
@@ -1560,7 +1559,7 @@ const TIMING_LANES: readonly TimingLane[] = [
  *  Beat lane marks as fired. A detection landing under a grid tick reads as
  *  locked; one between ticks reads as a double; a grid tick with nothing
  *  under it reads as a miss. */
-function createTimingStrip(mountJack: MountJack) {
+function createTimingStrip(mountJack: MountJack, span: TraceSpan) {
   const row = createMeterRow({
     label: "Timing",
     accent: NEUTRAL_ACCENT,
@@ -1569,7 +1568,7 @@ function createTimingStrip(mountJack: MountJack) {
       "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above: faint on each beat, bright on the bar, and only the bar goes out its jack; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
-  const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX);
+  const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX, span.sec, span.max);
   const ctx = ring.ctx;
   // Padded on the right like createHitsHistory's own vizWrap, so the jacks
   // below sit past the end of the trace rather than on top of it.
@@ -1578,7 +1577,7 @@ function createTimingStrip(mountJack: MountJack) {
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
-  row.setReadout(String(HISTORY_SPAN_SEC));
+  row.setReadout(String(span.sec()));
 
   const legend = createTraceLegend(TIMING_LANES.map((l) => ({ color: l.color, label: l.label })));
   vizWrap.after(legend.el);
@@ -1601,6 +1600,7 @@ function createTimingStrip(mountJack: MountJack) {
   let prevBeatPhase: number | null = null;
 
   function draw(): void {
+    if (!ring.prepare()) return;
     const w = ring.width;
     const len = ring.length;
     ctx.clearRect(0, 0, w, TIMING_HEIGHT_PX);
@@ -1641,7 +1641,9 @@ function createTimingStrip(mountJack: MountJack) {
 
   return {
     el: row.el,
-    update(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
+    /** Every tick, on screen or not — so a wrap is never read across a
+     *  stretch nothing looked at. */
+    record(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
       if (anim) {
         const wrapped = prevBeatPhase !== null && anim.beatPhase < prevBeatPhase;
         prevBeatPhase = anim.beatPhase;
@@ -1657,14 +1659,11 @@ function createTimingStrip(mountJack: MountJack) {
         prevBeatPhase = null;
         ring.push([null, null, null], nowMs);
       }
-      draw();
     },
-    /** Also forgets the last phase, same reasoning as the old Beat row's own
-     *  fold guard — unfolding mid-track shouldn't read the jump across the
-     *  fold as a wrap. */
-    resetColumn(): void {
-      ring.resetColumn();
-      prevBeatPhase = null;
+    draw,
+    /** The card's span chip moved: the row's readout follows. */
+    refreshSpan(): void {
+      row.setReadout(String(span.sec()));
     },
   };
 }
@@ -2008,6 +2007,27 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // RAW chip of its own.
   let showRaw = false;
 
+  // Each card's span chip (historySpan.ts), keyed by the card's foldId. A
+  // trace reads its card's span at every draw, so a click redraws on the
+  // next tick from what's already recorded; `onChange` only refreshes the
+  // rows' "s" readouts.
+  const cardSpan = (cardId: string): TraceSpan => ({ sec: () => getHistorySpan(cardId), max: HISTORY_SPAN_MAX });
+  function createSpanChip(cardId: string, onChange: () => void): HTMLButtonElement {
+    const chip = createChipButton(
+      formatHistorySpan(getHistorySpan(cardId)),
+      `How much time this card's traces show — click for ${HISTORY_SPANS.map(formatHistorySpan).join(", ")}. They keep recording while the panel is closed.`,
+      () => {
+        chip.textContent = formatHistorySpan(cycleHistorySpan(cardId));
+        onChange();
+      },
+    );
+    return chip;
+  }
+  const signalSpan = cardSpan("signal");
+  const hitsSpan = cardSpan("hits");
+  const tempoSpan = cardSpan("tempo");
+  const characterSpan = cardSpan("character");
+
   // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
   // Waveform leads the card — see file header. The trace takes the meter's
   // place under the head, like History/Gate's own traces below.
@@ -2016,10 +2036,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "%",
   });
-  const waveCanvas = document.createElement("canvas");
-  waveCanvas.style.cssText = waveCanvasStyle;
-  waveform.el.children[1].replaceWith(waveCanvas);
-  const waveCtx = waveCanvas.getContext("2d")!;
+  // Per column: the loudest positive and negative swing (both as heights
+  // above zero, so one max-hold serves both) and whether anything clipped.
+  const waveRing = createColumnRing(3, WAVE_HEIGHT_CSS_PX, signalSpan.sec, signalSpan.max);
+  waveform.el.children[1].replaceWith(waveRing.canvas);
+  const waveCtx = waveRing.ctx;
   mountJack("anim.wavePeak", waveform.right, waveform.el);
   // Row + its own trailing spacer, toggled together with no samples to draw
   // (mono === null) — see update()'s own Signal block.
@@ -2090,9 +2111,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: HISTORY_LEVEL_COLOR, width: 1 },
     ],
     HISTORY_HEIGHT_CSS_PX,
+    { span: signalSpan },
   );
   history.el.children[1].replaceWith(historyStrip.canvas);
-  history.setReadout(String(HISTORY_SPAN_SEC));
+  history.setReadout(String(signalSpan.sec()));
   const histLegend = createTraceLegend([
     { color: HISTORY_LEVEL_COLOR, label: "Level" },
     { color: HISTORY_ENERGY_COLOR, label: "Energy" },
@@ -2120,13 +2142,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: HISTORY_LEVEL_COLOR, width: 1 },
     ],
     GATE_HISTORY_HEIGHT_CSS_PX,
-    () => {
-      const marks = deps.getSilenceGate();
-      const top = gateLevelTop(marks);
-      return [
-        { at: marks.closed / top, color: GATE_GUIDE_COLOR },
-        { at: marks.open / top, color: GATE_GUIDE_COLOR },
-      ];
+    {
+      guides: () => {
+        const marks = deps.getSilenceGate();
+        const top = gateLevelTop(marks);
+        return [
+          { at: marks.closed / top, color: GATE_GUIDE_COLOR },
+          { at: marks.open / top, color: GATE_GUIDE_COLOR },
+        ];
+      },
+      span: signalSpan,
     },
   );
   gateRow.el.insertBefore(gateHistoryStrip.canvas, gateRow.el.children[2]);
@@ -2135,11 +2160,17 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: GATE_DIMMER_COLOR, label: "Dimmer" },
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
+  const signalRight = document.createElement("div");
+  signalRight.style.cssText = tapRightStyle;
+  signalRight.append(
+    lufsResetChip,
+    createSpanChip("signal", () => history.setReadout(String(signalSpan.sec()))),
+  );
   const signalCard = createCard({
     title: "Dynamics",
     accent: INPUT_GREEN,
     foldId: "signal",
-    right: lufsResetChip,
+    right: signalRight,
   });
   signalCard.body.append(
     waveform.el,
@@ -2155,8 +2186,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     gateRow.el,
   );
   // Row-level visibility (mono null with no samples to draw, lufs null on a
-  // device with no local analyser) — see update()'s own Signal block for the toggles and the
-  // "don't accumulate a column while hidden" behaviour they carry.
+  // device with no local analyser) — see update()'s own Signal block for the
+  // toggles.
   // null until the first unfolded tick applies the real state: the rows are
   // built visible, so a mic-less device (where nothing ever shows) must still
   // get its first setShown(false) rather than compare false !== false.
@@ -2164,7 +2195,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   let lufsShown: boolean | null = null;
 
   // ---- Hits ----
-  const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack);
+  const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack, hitsSpan);
   // Shape: the sliders that turn a fired tick's fixed height into its own
   // graded strength (src/audio/hitStrength.ts), folded away by default —
   // see createAdvancedSection's own header for why a disclosure like this
@@ -2339,7 +2370,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const lastHitMs: (number | null)[] = [null, null, null, null];
   const sinceHitSec: (number | null)[] = [null, null, null, null];
 
-  const hitsCard = createCard({ title: "Hits", accent: NEUTRAL_ACCENT, foldId: "hits" });
+  const hitsCard = createCard({
+    title: "Hits",
+    accent: NEUTRAL_ACCENT,
+    foldId: "hits",
+    right: createSpanChip("hits", () => hitsHistory.refreshSpan()),
+  });
   hitsCard.body.append(hitsHistory.el, spacer(), hitsShape.el);
 
   // ---- Tempo ----
@@ -2364,7 +2400,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   tempoWelded.style.cssText = weldedRowStyle;
   tempoWelded.append(lock.el, tempo.el);
 
-  const timingStrip = createTimingStrip(mountJack);
+  const timingStrip = createTimingStrip(mountJack, tempoSpan);
 
   // The two "shape of the beat" drives that read straight off the
   // metronome — a smooth swing rather than a hit — traced on one shared row
@@ -2383,9 +2419,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: BEAT_GRID_COLOR, width: 1.5 },
     ],
     BEAT_TRACE_HEIGHT_CSS_PX,
+    { span: tempoSpan },
   );
   wave.el.children[1].replaceWith(waveTrace.canvas);
-  wave.setReadout(String(HISTORY_SPAN_SEC));
+  wave.setReadout(String(tempoSpan.sec()));
   mountJack("anim.beatWave", wave.right, wave.el);
   mountJack("anim.barWave", wave.right, wave.el);
 
@@ -2408,7 +2445,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   const tapRight = document.createElement("div");
   tapRight.style.cssText = tapRightStyle;
-  tapRight.append(tapStatus, tapChip);
+  tapRight.append(
+    tapStatus,
+    tapChip,
+    createSpanChip("tempo", () => {
+      timingStrip.refreshSpan();
+      wave.setReadout(String(tempoSpan.sec()));
+    }),
+  );
   let shownTapStatus = "";
   const tempoCard = createCard({ title: "Tempo", accent: NEUTRAL_ACCENT, foldId: "tempo", right: tapRight });
   tempoCard.body.append(tempoWelded, spacer(), timingStrip.el, spacer(), wave.el);
@@ -2460,16 +2504,25 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   mountJack("anim.centroid", brightnessRow.right, brightnessRow.el);
   // Inserted before the hint (el's 3rd child), so it sits under the meter
   // like the Dynamics card's History. RAW briefly mixes raw/processed samples
-  // in the same trace right after a toggle, until HISTORY_SPAN_SEC rolls the
+  // in the same trace right after a toggle, until the span rolls the
   // pre-toggle column out — harmless, and self-heals. The small legend under
   // it is what tells the two readings (the bar's own Brightness value, the
   // trace's live Centroid) apart.
-  const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX);
+  const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX, {
+    span: characterSpan,
+  });
   brightnessRow.el.insertBefore(centroidTrace.canvas, brightnessRow.el.children[2]);
   const centroidLegend = createTraceLegend([{ color: AUTO_SKY, label: "Centroid (live)" }]);
   centroidTrace.canvas.after(centroidLegend.el);
 
-  const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character" });
+  // No row here reads out its span (Brightness's readout is the dial), so
+  // the chip itself is the only label.
+  const characterCard = createCard({
+    title: "Character",
+    accent: AUTO_SKY,
+    foldId: "character",
+    right: createSpanChip("character", () => {}),
+  });
   characterCard.body.append(section.el, spacer(), dialGrid, spacer(), brightnessRow.el);
 
   // Sound/Beat/Song, per the file header. Signal leads Sound: it's the raw
@@ -2484,98 +2537,45 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     characterCard.el,
   );
 
-  // Ring buffer of columns, one pixel each — oldest at `head`, newest just
-  // before it — plus the column currently being accumulated.
-  let histMin = new Float32Array(0);
-  let histMax = new Float32Array(0);
-  let histClip = new Uint8Array(0);
-  let head = 0;
-  let colMin = 0;
-  let colMax = 0;
-  let colClip = false;
-  let colStartMs: number | null = null;
-
-  // devicePixelRatio-scaled backing store, resized whenever the card's
-  // layout width changes — same as spectrumStrip.ts (both via canvasSizer.ts,
-  // which returns false while the canvas has no layout: the card is folded or
-  // the panel is closed, so the wave history isn't rebuilt against a clamped
-  // 1px). The history is one column per CSS pixel, so it's rebuilt (cleared)
-  // with the width; a ratio-only change keeps it.
-  const waveSizer = createCanvasSizer(waveCanvas, waveCtx, {
-    heightCssPx: WAVE_HEIGHT_CSS_PX,
-    onWidthChange(w) {
-      histMin = new Float32Array(w);
-      histMax = new Float32Array(w);
-      histClip = new Uint8Array(w);
-      head = 0;
-    },
-  });
-  const ensureWaveSize = waveSizer.ensure;
-
-  function commitColumn(min: number, max: number, clip: boolean): void {
-    histMin[head] = min;
-    histMax[head] = max;
-    histClip[head] = clip ? 1 : 0;
-    head = (head + 1) % histMin.length;
-  }
-
-  /** Folds this frame's buffer into the current column, and closes it (or
-   *  several, after a frame that outlasts WAVE_COLUMN_MS — held across the
-   *  burst, or blank past COLUMN_CARRY_MS — once WAVE_COLUMN_MS has
-   *  passed). */
+  /** Folds this frame's buffer into the Waveform's current column (see
+   *  waveRing above). */
   function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
-    if (!ensureWaveSize()) return;
     const { min, max } = downsampleForDisplay(mono, 1);
-    colMin = Math.min(colMin, min[0]);
-    colMax = Math.max(colMax, max[0]);
-    colClip = colClip || clipped;
-    if (colStartMs === null) colStartMs = nowMs;
-    const elapsed = nowMs - colStartMs;
-    if (elapsed < WAVE_COLUMN_MS) return;
-    // A long stall (tab hidden) shouldn't paint a screen of stale columns:
-    // cap the catch-up at the visible width, and rest at silence rather than
-    // holding a reading through time nothing was actually sampled.
-    let n = Math.min(histMin.length, Math.floor(elapsed / WAVE_COLUMN_MS));
-    const stalled = elapsed > COLUMN_CARRY_MS;
-    for (; n > 1; n--) commitColumn(stalled ? 0 : colMin, stalled ? 0 : colMax, !stalled && colClip);
-    commitColumn(colMin, colMax, colClip);
-    colMin = 0;
-    colMax = 0;
-    colClip = false;
-    colStartMs = nowMs - (elapsed % WAVE_COLUMN_MS);
+    waveRing.push([Math.max(0, max[0]), Math.max(0, -min[0]), clipped ? 1 : 0], nowMs);
   }
 
   /** Zooms to the loudest column on screen, in both RAW and processed modes
    *  — this is a drawing choice (what range fills the card), not audio
    *  processing, so unlike the rest of the RAW chip it never changes with
-   *  it (see file header). */
+   *  it (see file header). A column nothing was sampled for (a stall, no
+   *  mic) rests at silence. */
   function drawWave(): void {
-    const w = waveSizer.width;
+    if (!waveRing.prepare()) return;
+    const w = waveRing.width;
     const h = WAVE_HEIGHT_CSS_PX;
     const mid = h / 2;
-    const len = histMin.length;
+    const len = waveRing.length;
     waveCtx.clearRect(0, 0, w, h);
+    const col = (x: number, s: number): number => {
+      const v = x === len ? waveRing.live(s) : waveRing.at(x, s);
+      return Number.isNaN(v) ? 0 : v;
+    };
 
     let range = WAVE_RANGE_FLOOR;
-    for (let i = 0; i < len; i++) range = Math.max(range, histMax[i], -histMin[i]);
-    range = Math.max(range, colMax, -colMin);
+    for (let x = 0; x <= len; x++) range = Math.max(range, col(x, 0), col(x, 1));
     const scale = (mid * 0.92) / range;
 
     // Oldest on the left; the live, still-open column at the right edge.
     let lastClip = -1;
     for (let x = 0; x <= len; x++) {
-      const live = x === len;
-      const i = (head + x) % len;
-      const lo = live ? colMin : histMin[i];
-      const hi = live ? colMax : histMax[i];
-      const clip = live ? (colClip ? 1 : 0) : histClip[i];
+      const clip = col(x, 2) > 0 ? 1 : 0;
       if (clip !== lastClip) {
         waveCtx.fillStyle = clip ? HOT_RED : "rgba(255,255,255,0.8)";
         lastClip = clip;
       }
-      const y0 = mid - hi * scale;
-      const y1 = mid - lo * scale;
-      waveCtx.fillRect(live ? w - 1 : x, y0, 1, Math.max(1, y1 - y0));
+      const y0 = mid - col(x, 0) * scale;
+      const y1 = mid + col(x, 1) * scale;
+      waveCtx.fillRect(x === len ? w - 1 : x, y0, 1, Math.max(1, y1 - y0));
     }
 
     waveCtx.fillStyle = "rgba(255,255,255,0.18)";
@@ -2612,7 +2612,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   return {
     el: root,
-    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate): void {
+    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, onScreen): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
@@ -2627,6 +2627,54 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // has nothing left to show that the processed reading doesn't already
       // match (see file header).
       const smoothingOff = !Number.isFinite(rateScale);
+
+      // ---- Every trace records, every tick ----
+      // On screen or not — a folded card, or the panel closed (onScreen
+      // false) — so a card opens on what it missed. Recording is a few
+      // compares per series; the drawing and DOM writes below are the cost,
+      // and they still skip whatever isn't on screen.
+      const clipped = mono !== null && isClipping(mono);
+      if (mono) pushWave(mono, clipped, nowMs);
+      // Nothing to sample: on mono's return the Waveform starts a fresh
+      // column instead of reading the gap as a stall's catch-up burst.
+      else waveRing.resetColumn();
+      if (frame) historyStrip.push([fixedEnergy, frame.energy, frame.level], nowMs);
+      // Level plots off `frame` regardless of `gate` — it doesn't need a
+      // local extractor — while Dimmer goes null wherever `gate` itself
+      // does (see AudioMeters.update's own doc comment).
+      if (frame || gate) {
+        gateHistoryStrip.push(
+          [gate ? gate.dimmer : null, frame ? frame.level / gateLevelTop(deps.getSilenceGate()) : null],
+          nowMs,
+        );
+      }
+      hitsHistory.record(frame, anim, beatDiag, nowMs);
+      if (anim) {
+        // Each lane's dot on the Curve tracks its own *last-hit* ratio,
+        // not this tick's live reading (which wanders below the firing
+        // line between hits and would put the dot somewhere a real hit
+        // never landed) — only overwritten on the exact tick that lane
+        // fires, same convention the hits history's own strength bars use.
+        if (frame?.onset) lastHitRatio[0] = beatDiag ? beatDiag.ratio : null;
+        if (anim.lowOnset) lastHitRatio[1] = anim.hits.low.ratio;
+        if (anim.midOnset) lastHitRatio[2] = anim.hits.mid.ratio;
+        if (anim.highOnset) lastHitRatio[3] = anim.hits.high.ratio;
+        if (frame?.onset) lastHitMs[0] = nowMs;
+        if (anim.lowOnset) lastHitMs[1] = nowMs;
+        if (anim.midOnset) lastHitMs[2] = nowMs;
+        if (anim.highOnset) lastHitMs[3] = nowMs;
+      }
+      timingStrip.record(frame, anim, nowMs);
+      // Fed through SIGNALS[id].read() itself, not a hand-copied formula,
+      // so this trace and a setting driven by the same signal always agree.
+      waveTrace.push(
+        frame && anim
+          ? [SIGNALS["anim.beatWave"].read(frame, anim), SIGNALS["anim.barWave"].read(frame, anim)]
+          : [null, null],
+        nowMs,
+      );
+      centroidTrace.push([anim ? (raw ? anim.centroidRaw : anim.centroid) : null], nowMs);
+      if (!onScreen) return;
 
       // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
       // Level is already raw and doesn't change; Energy's raw counterpart
@@ -2643,8 +2691,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           setShown(waveformSpacer, showWaveform);
         }
         if (mono) {
-          const clipped = isClipping(mono);
-          pushWave(mono, clipped, nowMs);
           drawWave();
           const instPeak = peak(mono);
           // The held reading is AnimFrame.wavePeak (animClock.ts), not local
@@ -2660,12 +2706,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
               });
             else waveform.setReadout(pct(raw ? instPeak : anim ? anim.wavePeak : instPeak));
           }
-        } else {
-          // Don't accumulate a column while there's nothing to sample — on
-          // mono's return this starts a fresh one instead of the elapsed gap
-          // reading as a stall and committing a burst of catch-up columns
-          // (see pushWave).
-          colStartMs = null;
         }
 
         const energyVal = raw
@@ -2685,7 +2725,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           );
         }
         if (frame) {
-          historyStrip.push([fixedEnergy, frame.energy, frame.level], nowMs);
           historyStrip.draw();
           histLegend.setEntryEnabled(2, fixedEnergy !== null);
         }
@@ -2712,22 +2751,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
         gateRow.setValue(gate ? gate.dimmer : null, dtSec);
         if (text) gateRow.setReadout(gate ? pct(gate.dimmer) : "--", gate ? {} : IDLE);
-        // Level plots off `frame` regardless of `gate` — it doesn't need a
-        // local extractor — while Dimmer goes null wherever `gate` itself
-        // does (see AudioMeters.update's own doc comment).
-        if (frame || gate) {
-          gateHistoryStrip.push(
-            [gate ? gate.dimmer : null, frame ? frame.level / gateLevelTop(deps.getSilenceGate()) : null],
-            nowMs,
-          );
-          gateHistoryStrip.draw();
-        }
-      } else {
-        // Folded: don't accumulate a column while hidden, same as every
-        // other trace below.
-        colStartMs = null;
-        historyStrip.resetColumn();
-        gateHistoryStrip.resetColumn();
+        if (frame || gate) gateHistoryStrip.draw();
       }
 
       // ---- Hits ----
@@ -2740,22 +2764,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // Local diagnostic, same availability as fixedEnergy (null on a
         // mic-less renderer or the synthetic feed) — see AudioMeters.update's
         // own doc.
-        hitsHistory.update(frame, anim, beatDiag, nowMs, text, shapeOpen, shape.floor);
-        if (anim) {
-          // Each lane's dot on the Curve tracks its own *last-hit* ratio,
-          // not this tick's live reading (which wanders below the firing
-          // line between hits and would put the dot somewhere a real hit
-          // never landed) — only overwritten on the exact tick that lane
-          // fires, same convention the hits history's own strength bars use.
-          if (frame?.onset) lastHitRatio[0] = beatDiag ? beatDiag.ratio : null;
-          if (anim.lowOnset) lastHitRatio[1] = anim.hits.low.ratio;
-          if (anim.midOnset) lastHitRatio[2] = anim.hits.mid.ratio;
-          if (anim.highOnset) lastHitRatio[3] = anim.hits.high.ratio;
-          if (frame?.onset) lastHitMs[0] = nowMs;
-          if (anim.lowOnset) lastHitMs[1] = nowMs;
-          if (anim.midOnset) lastHitMs[2] = nowMs;
-          if (anim.highOnset) lastHitMs[3] = nowMs;
-        }
+        hitsHistory.render(frame, anim, beatDiag, nowMs, text, shapeOpen, shape.floor);
         // The Curve and Envelope aren't part of the hits history's own
         // canvas, so they only need drawing while Shape is actually open.
         if (shapeOpen) {
@@ -2770,9 +2779,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             else tailEnvelopeRow.setReadout("Off", { textual: true, unit: "" });
           }
         }
-      } else {
-        // Folded: don't accumulate a column while hidden, same as Signal's History.
-        hitsHistory.resetColumn();
       }
 
       // ---- Tempo ----
@@ -2807,20 +2813,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         if (text) {
           lock.setReadout(anim ? pct(anim.tempoLock) : "--", anim ? {} : IDLE);
         }
-        timingStrip.update(frame, anim, nowMs);
-        if (frame && anim) {
-          waveTrace.push([SIGNALS["anim.beatWave"].read(frame, anim), SIGNALS["anim.barWave"].read(frame, anim)], nowMs);
-        } else {
-          waveTrace.push([null, null], nowMs);
-        }
+        timingStrip.draw();
         waveTrace.draw();
-      } else {
-        // Folded: don't accumulate a column while hidden, same as History
-        // and Centroid — the Timing strip's own resetColumn also forgets its
-        // last phase, so unfolding mid-track doesn't read the jump across
-        // the fold as a wrap.
-        timingStrip.resetColumn();
-        waveTrace.resetColumn();
       }
 
       // ---- Character ----
@@ -2853,12 +2847,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             brightnessVal === null ? "--" : brightnessVal.toFixed(2),
             brightnessVal === null ? IDLE : {},
           );
-        const cv = anim ? (raw ? anim.centroidRaw : anim.centroid) : null;
-        centroidTrace.push([cv], nowMs);
         centroidTrace.draw();
-      } else {
-        // Folded: don't accumulate a column while hidden, same as History.
-        centroidTrace.resetColumn();
       }
     },
     setRaw(on): void {

@@ -5051,12 +5051,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // as the readout. A click (or Enter/Space) unfolds one grid row per
   // measure: caption · 10s trace (createTraceStrip, exported from
   // audioMeters.ts for this) · 0-100 readout, each caption in its trace's
-  // colour so the rows double as the legend. They fold to zero height, not
-  // display: none — a trace strip only records while its canvas has a width
-  // (createColumnRing's ensureSize), so this way each row unfolds with its
-  // last 10 s already drawn. caption uses the same register as powerCard.ts's
-  // own readoutCaptionStyle (kept local — the two files' row shapes
-  // otherwise share nothing worth a third file).
+  // colour so the rows double as the legend. Each row records while folded,
+  // so it unfolds with its last 10 s already drawn. caption uses the same
+  // register as powerCard.ts's own readoutCaptionStyle (kept local — the two
+  // files' row shapes otherwise share nothing worth a third file).
   const pictureHeading = groupHeading("Picture");
   const pictureCaptionStyle = `
     font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
@@ -7291,9 +7289,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       gate: SilenceGateReading | null,
       drives: SceneDrives | null,
     ) {
-      // Skip the DOM write while closed — the panel is re-opened via open()
-      // anyway, and this runs every rAF tick while in a viz.
-      if (!isOpen) return;
+      // Closed, only the meters' traces record (audioMeters.ts's update(),
+      // onScreen false), so they open on what they missed; every DOM write
+      // here is skipped — this runs every rAF tick while in a viz.
+      if (!isOpen) {
+        audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
+        return;
+      }
       // A scene switch (or a renderer with nothing playing) leaves `pinned`
       // pointing at a setting that no longer belongs to the active scene —
       // checked here rather than at every scene-change call site, since this
@@ -7302,7 +7304,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // pinned or the scene hasn't changed — togglePin() only actually
       // rebuilds anything on the rare tick this fires.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
       // Unthrottled, same reasoning as the Bands strip a few lines below —
       // the live row's meter should track frame.level as closely as any
       // other live meter in this panel, not just at the row list's own
