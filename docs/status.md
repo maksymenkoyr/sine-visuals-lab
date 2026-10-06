@@ -33,5 +33,6 @@ _2026-10-04_
 - Merge #313, then run `/release-promo` after the next Stable release — it
   takes the release, reuses the last song and look unless given new ones,
   and starts from the changelog.
-- Prune worktrees whose PRs merged (47 besides `main`; check each one's PR
-  with `gh pr view`).
+- Prune worktrees whose PRs merged: `npm run prune-worktrees -- --yes`
+  (dry run without `--yes`); once it's on main the SessionStart hook runs it
+  in the background every session.
