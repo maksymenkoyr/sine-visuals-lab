@@ -18,7 +18,18 @@
  * Playback: one muted <video> per loop, only the one on screen playing, its
  * playbackRate set from the eased speed (paused below MIN_RATE — browsers
  * won't play slower). Each keeps its own place, so a cut back finds the
- * alien where it was left. The frame on screen is uploaded to a texture when
+ * alien where it was left.
+ *
+ * iPhone and iPad (WebKit on iOS) are stricter than desktop browsers. They
+ * pause an inline video they count as off-screen, and a video outside the
+ * page always is, so the videos sit in the page as one invisible pixel
+ * (`VIDEO_HOLDER_STYLE`). They may refuse play() on a video no tap has
+ * touched (always in Low Power Mode, which is why Move once froze on a
+ * room's iPad while Bounce, a shader effect, kept working). So the first
+ * tap or key anywhere starts and stops every loop, which lifts that limit
+ * for good (`unlockOnGesture`). Until then, and wherever play() is refused,
+ * the scene moves the paused video's playhead itself each frame (`scrub`):
+ * the same speed, at the cost of a seek per frame. The frame on screen is uploaded to a texture when
  * it changes and drawn to cover the room (Panorama-aware via uViewport),
  * squashed about the loop's pivot for Bounce.
  *
@@ -61,6 +72,10 @@ const MAX_RATE = 4;
 const RATE_STEP = 0.02;
 /** Squash the spring may reach either way, as a share of the height. */
 const SQUASH_LIMIT = 0.35;
+/** Where the videos sit in the page: inside the viewport (iOS pauses a video
+ *  it counts as off-screen) but one see-through pixel nobody can click. */
+const VIDEO_HOLDER_STYLE =
+  "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0.01;pointer-events:none";
 
 const SETTINGS: SceneSetting[] = [
   {
@@ -145,6 +160,12 @@ export const alienScene: Scene = (() => {
   const bounce = createBounce();
   let speed = 0;
   let videos: HTMLVideoElement[] | null = null;
+  /** Per loop: a play() is in flight, or the browser refused it (then
+   *  `scrub` moves the playhead until a tap lets play() through). */
+  let playPending: boolean[] = [];
+  let playRefused: boolean[] = [];
+  /** Per loop: seconds of dance `scrub` owes while a seek is still landing. */
+  let scrubOwed: number[] = [];
   let lastTime: number | null = null;
 
   const pinnedLoop = (() => {
@@ -166,6 +187,9 @@ export const alienScene: Scene = (() => {
       v.loop = true;
       v.playsInline = true;
       v.preload = "auto";
+      // As attributes too: iOS WebKit has read these from the markup.
+      v.setAttribute("muted", "");
+      v.setAttribute("playsinline", "");
       asset
         .url("video/mp4")
         .then((url) => {
@@ -174,12 +198,47 @@ export const alienScene: Scene = (() => {
         .catch((err: unknown) => console.warn("alien: loop video unavailable", err));
       return v;
     });
-    if (import.meta.env.DEV) (window as unknown as { __alien: unknown }).__alien = { reel, last, videos };
+    playPending = videos.map(() => false);
+    playRefused = videos.map(() => false);
+    scrubOwed = videos.map(() => 0);
+    const holder = document.createElement("div");
+    holder.setAttribute("aria-hidden", "true");
+    holder.style.cssText = VIDEO_HOLDER_STYLE;
+    videos.forEach((v) => holder.appendChild(v));
+    document.body.appendChild(holder);
+    unlockOnGesture(videos);
+    if (import.meta.env.DEV) (window as unknown as { __alien: unknown }).__alien = { reel, last, videos, playRefused };
     return videos;
   }
 
+  /** On the first tap or key, plays and stops every loop inside the gesture:
+   *  iOS then lets each play without one. Listens again if any refused. */
+  function unlockOnGesture(vs: HTMLVideoElement[]): void {
+    const events = ["click", "touchend", "keydown"] as const;
+    const onGesture = (): void => {
+      events.forEach((e) => window.removeEventListener(e, onGesture, true));
+      let refused = false;
+      void Promise.all(
+        vs.map((v, i) =>
+          v
+            .play()
+            .then(() => {
+              playRefused[i] = false;
+              if (i !== reel.loop || last.rate < MIN_RATE) v.pause();
+            })
+            .catch((err: unknown) => {
+              if ((err as { name?: string }).name !== "AbortError") refused = true;
+            }),
+        ),
+      ).then(() => {
+        if (refused) events.forEach((e) => window.addEventListener(e, onGesture, true));
+      });
+    };
+    events.forEach((e) => window.addEventListener(e, onGesture, true));
+  }
+
   /** Plays the loop on screen at `rate` (paused below MIN_RATE) and holds the rest. */
-  function drivePlayback(vs: HTMLVideoElement[], rate: number): void {
+  function drivePlayback(vs: HTMLVideoElement[], rate: number, dt: number): void {
     vs.forEach((v, i) => {
       if (i !== reel.loop) {
         if (!v.paused) v.pause();
@@ -190,9 +249,35 @@ export const alienScene: Scene = (() => {
         return;
       }
       const r = Math.min(MAX_RATE, rate);
+      if (playRefused[i]) {
+        scrub(v, i, r, dt);
+        return;
+      }
       if (Math.abs(v.playbackRate - r) > RATE_STEP) v.playbackRate = r;
-      if (v.paused) v.play().catch(() => {});
+      if (v.paused && !playPending[i]) {
+        playPending[i] = true;
+        v.play()
+          .then(() => {
+            playPending[i] = false;
+          })
+          .catch((err: unknown) => {
+            playPending[i] = false;
+            // AbortError: a pause() overtook the play — not a refusal.
+            if ((err as { name?: string }).name !== "AbortError") playRefused[i] = true;
+          });
+      }
     });
+  }
+
+  /** Where play() is refused: steps the paused video's playhead by `rate`
+   *  × dt, wrapping at the loop's end. While a seek is still landing it only
+   *  adds up what it owes, so seeks don't pile up and the speed holds. */
+  function scrub(v: HTMLVideoElement, i: number, rate: number, dt: number): void {
+    scrubOwed[i] += rate * dt;
+    if (v.readyState < 1 || v.seeking) return;
+    const len = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : BAKED.loops[i].seconds;
+    v.currentTime = (v.currentTime + scrubOwed[i]) % len;
+    scrubOwed[i] = 0;
   }
 
   return {
@@ -261,7 +346,7 @@ export const alienScene: Scene = (() => {
       let hasFrame = 0;
       const vs = videos;
       if (vs) {
-        drivePlayback(vs, last.rate);
+        drivePlayback(vs, last.rate, dt);
         const v = vs[reel.loop];
         if (v.readyState >= 2) {
           gl.activeTexture(gl.TEXTURE0);

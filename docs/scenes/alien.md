@@ -149,6 +149,18 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   back up between hits. A peak hold on the signal was tried in a sim first:
   a hold shorter than the hit pulse's own decay does nothing, a longer one
   left the alien squashed with almost no swing.
+- 2026-10-06, the user: Move "doesn't work on ipad in room… bounce works,
+  but no movements". Move is the only setting that needs the `<video>` to
+  play; Bounce is a shader effect on whatever frame is up. WebKit on iOS
+  pauses an inline video it counts as off-screen (a video outside the page
+  always is) and can refuse play() on a video no tap has touched (always in
+  Low Power Mode). The old code swallowed that refusal, so the frame sat
+  still. Now the videos sit in the page as one invisible pixel, the first tap
+  or key starts and stops every loop (iOS then lets each play), and wherever
+  play() is still refused the scene moves the paused video's playhead itself.
+  Checked headlessly with play() stubbed to refuse until a click (Chromium
+  and WebKit): the playhead advanced 0.86 s per second at speed 0.85, and
+  after a click play() took over. Not yet seen on a real iPad.
 
 ## Tuning notes
 
@@ -170,6 +182,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   would need the deploy-skew rule in `src/pinnedAssets.ts` solved another way.
 - Video playback rate can't go below about 0.07×; slower than that the loop
   pauses.
+- On an iPhone or iPad that no one has tapped, or one in Low Power Mode, the
+  loop moves by a seek per frame instead of playing, which may stutter on an
+  older device. The iOS fix (see Decisions) is unconfirmed on real hardware.
 - In the close-up the Bounce pivot is far below the frame, so a squash
   reads as the whole picture dipping.
 - A head nod can push the neck's top through the back of the skull: the
@@ -187,6 +202,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   builds the music/hiss/music test file. `summarize.py` and `simhold.py`
   read the logs. `meshcheck.ts` and `clipcheck.ts` run under
   `node --experimental-strip-types`, and `tile.py` makes contact sheets.
+  `playcheck.mjs` checks playback in Chromium or WebKit, optionally with
+  play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
 
 ## Resume here
@@ -206,4 +223,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #373 (2026-10-05, closed): the scene, built on #368 for the Level signal.
 - #374 (merged 2026-10-05): the same, rebased after #368 merged, plus the
   Play readout; then baked loops, Move, Bounce, and Cut on Drop.
-- #389 (draft, 2026-10-06): Bounce smoothness.
+- #389 (merged 2026-10-06): Bounce smoothness.
+- 2026-10-06: Move on iPhone and iPad (videos in the page, unlock on the
+  first tap, a playhead scrub where play() is refused).
