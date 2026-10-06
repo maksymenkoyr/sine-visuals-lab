@@ -1,3 +1,4 @@
+import { mixPalettes, type Palette } from "../render/palette.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import {
   SCENE_EXPANSION_DEFAULT,
@@ -19,12 +20,17 @@ import type { OutputParams, OutputState } from "./outputSync.ts";
  *  - the resolved Sensitivity / Expansion / Smoothing (`OutputParams`).
  * Everything else — toggles, choice chips, a scene's Style (its variant),
  * per-item widgets, whole-number steppers, a slider that declares
- * `glide: false`, the palette, every other stored key — stays exactly as the
- * output had it for the whole glide and switches to the new value in one
- * step when the glide ends. A different scene is never glided: createGlide
- * returns null for it, and the output crossfades into it instead
- * (render/compositor.ts, over the same length the hold earned — outputBridge.ts's
- * go passes it through).
+ * `glide: false`, every other stored key — stays exactly as the output had it
+ * for the whole glide and switches to the new value in one step when the
+ * glide ends. A different scene is never glided: createGlide returns null for
+ * it, and the output crossfades into it instead (render/compositor.ts, over
+ * the same length the hold earned — outputBridge.ts's go passes it through).
+ *
+ * The palette fades on its own clock, createPaletteFade below, over the same
+ * length: a palette is only colours, so every step between two is a fine
+ * picture, and it fades whether or not createGlide found anything to walk —
+ * a palette-only Play included, and across a scene's crossfade too. The page
+ * keeps the look's palette id as it was; only what it draws with moves.
  *
  * Pure: no DOM, no clock of its own — `lookAt(nowMs)` is the look to show then.
  */
@@ -162,6 +168,25 @@ export function createGlide(
         smoothing: lerp(from.params.smoothing, to.params.smoothing, e),
       };
       return { state: { scene: from.scene, palette: from.palette, storage, params }, done: false };
+    },
+  };
+}
+
+export interface PaletteFade {
+  /** The palette to draw with at `nowMs`: `to` itself once the fade is over. */
+  paletteAt(nowMs: number): Palette;
+}
+
+/** Fades the colours from `from` (what the screen draws with now, a fade's
+ *  half-way mix included) to `to`, on the same curve and clamp as a glide, or
+ *  null when they are the same palette. */
+export function createPaletteFade(from: Palette, to: Palette, startMs: number, durMs: number): PaletteFade | null {
+  if (from === to) return null;
+  const dur = Math.min(GLIDE_MAX_MS, Math.max(1, durMs));
+  return {
+    paletteAt(nowMs) {
+      const t = Math.min(1, Math.max(0, (nowMs - startMs) / dur));
+      return t >= 1 ? to : mixPalettes(from, to, smoothstep(t));
     },
   };
 }

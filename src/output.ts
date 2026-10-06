@@ -21,7 +21,7 @@ import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
-import { createGlide, type Glide } from "./net/outputGlide.ts";
+import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
 import { clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
@@ -150,9 +150,14 @@ let current: OutputState | null = null;
 /** A smooth arrival in progress (net/outputGlide.ts). Any state message
  *  without `glideMs` ends it by jumping straight to that look. */
 let glide: Glide | null = null;
+/** The colours a held Play is fading to (net/outputGlide.ts's
+ *  createPaletteFade), drawn instead of `palette` until the next whole look is
+ *  applied. */
+let paletteFade: PaletteFade | null = null;
 
 /** One step of a glide: stores and params only — scene, palette and quality
- *  are exactly as they were until the glide lands through applyState(). */
+ *  are exactly as they were until the glide lands through applyState(); the
+ *  colours fade on their own meanwhile (paletteFade). */
 function stepGlide(nowMs: number): void {
   if (!glide) return;
   const { state, done } = glide.lookAt(nowMs);
@@ -220,6 +225,7 @@ function mountScene(next: Scene, crossfade?: { lengthMs?: number }): void {
 
 function applyState(state: OutputState, crossfadeMs?: number): void {
   current = state;
+  paletteFade = null;
   // Stores first, so a scene's init() and first render already see the
   // settings that go with it.
   applySyncedStorage(state.storage, outputStorage);
@@ -242,8 +248,9 @@ transport.onMessage((m) => {
     // Frames and states can arrive before the GL context is up (detectQuality
     // runs first); the main window re-sends on the next heartbeat.
     if (host) {
-      const started =
-        m.glideMs && current && scene ? createGlide(current, m.state, scene.settings ?? [], performance.now(), m.glideMs) : null;
+      const nowMs = performance.now();
+      const drawn = paletteFade?.paletteAt(nowMs) ?? palette;
+      const started = m.glideMs && current && scene ? createGlide(current, m.state, scene.settings ?? [], nowMs, m.glideMs) : null;
       if (started) glide = started;
       else {
         glide = null;
@@ -251,6 +258,8 @@ transport.onMessage((m) => {
         // crossfade's (mountScene).
         applyState(m.state, m.glideMs);
       }
+      // Glide or not, a held Play's palette fades over the same length.
+      paletteFade = m.glideMs ? createPaletteFade(drawn, getPalette(m.state.palette), nowMs, m.glideMs) : null;
     }
   } else if (m.t === "frame") {
     // While a glide runs it owns Sensitivity/Expansion/Smoothing: the
@@ -391,7 +400,7 @@ async function main(): Promise<void> {
       scene,
       frame: displayFrame,
       viewport: FULL_VIEWPORT,
-      palette,
+      palette: paletteFade?.paletteAt(nowMs) ?? palette,
       anim: latchedAnim,
       drives,
       drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),

@@ -38,7 +38,8 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    (the program Play last put there). A Go may carry `glideMs`: the output
  *    then arrives over that long instead of switching (outputGlide.ts) — within
  *    one scene a glide of the settings, across a scene change a crossfade
- *    (render/compositor.ts; with no `glideMs`, one bar). The
+ *    (render/compositor.ts; with no `glideMs`, one bar), and a fade of the
+ *    palette either way. The
  *    output is the master, as on a DJ mixer: tuning the preview sends nothing
  *    (createCueController).
  *  - `frame`: one per main render tick — the band-gained feature frame (the
