@@ -2,7 +2,7 @@ import type { SignalId, SignalLink } from "./signals.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
 import { registerSyncedStore } from "../net/syncedStores.ts";
 import { proUnlocked } from "./pro.ts";
-import { clearCustomValue } from "./customValues.ts";
+import { clearCustomValue, resetCustomValue } from "./customValues.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -356,7 +356,10 @@ export function setSceneSetting(sceneId: string, spec: SceneSetting, value: numb
  *  itself is reset too, first, so what follows lands in the default
  *  option's profile. */
 export function resetSceneSettings(sceneId: string, specs: SceneSetting[]): void {
-  for (const spec of variantFirst(specs)) setSceneSetting(sceneId, spec, settingDefault(sceneId, spec));
+  for (const spec of variantFirst(specs)) {
+    setSceneSetting(sceneId, spec, settingDefault(sceneId, spec));
+    resetCustomValue(sceneId, spec.key); // a stretched slider too (customValues.ts)
+  }
 }
 
 /** The specs with the scene's variant (if any) moved to the front: anything

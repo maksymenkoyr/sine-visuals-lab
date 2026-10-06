@@ -1,7 +1,7 @@
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
-import { fitCustom, getCustomValue, setCustomValue } from "./customValues.ts";
+import { fitCustom, getCustomValue, resetCustomValue, setCustomValue, stretchSlider } from "./customValues.ts";
 import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
 
@@ -194,15 +194,20 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
     const value = look.manual[spec.key];
     if (value !== undefined) {
       setAutoEnabled(look.sceneId, spec.key, false);
-      // The store takes the slider's nearest end (and drops any custom value
-      // already set); a value past it goes back on top as a custom value,
-      // bounded like a typed one, since a share link can carry any number.
+      // The store takes the slider's nearest end; a value past it goes back
+      // on top as a custom value, its slider stretched to it, bounded like a
+      // typed one since a share link can carry any number. Without one, the
+      // setting's custom value and stretch go (authoritative, as above).
       setSceneSetting(look.sceneId, spec, value);
       const custom = fitCustom(spec, value);
-      if (custom !== null) setCustomValue(look.sceneId, spec.key, custom);
+      if (custom !== null) {
+        setCustomValue(look.sceneId, spec.key, custom);
+        stretchSlider(look.sceneId, spec.key, custom);
+      } else resetCustomValue(look.sceneId, spec.key);
     } else {
       const base = settingDefault(look.sceneId, spec);
       setSceneSetting(look.sceneId, spec, base);
+      resetCustomValue(look.sceneId, spec.key);
       seedAuto(look.sceneId, spec.key, base);
       setAutoEnabled(look.sceneId, spec.key, true);
     }

@@ -115,7 +115,7 @@ import { createLeashGauge } from "./leashGauge.ts";
 import { watchOnScreen } from "./onScreen.ts";
 import { allowedChar, fitTyped, parseTyped } from "./typedValue.ts";
 import { setLiveText } from "./liveText.ts";
-import { customReach, fitCustom } from "../render/customValues.ts";
+import { customReach, fitCustom, sliderSpan } from "../render/customValues.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -386,13 +386,14 @@ import {
  * readout types a value into it in place (createControlRow's typed entry,
  * typedValue.ts for what the text means), committed like a drag; past the
  * slider's ends a Scene-card setting keeps it as a custom value, marked ⚠
- * beside the number (render/customValues.ts). A chip's letter
- * *is* its hotkey once the row's control has keyboard focus — and
- * wireHoverFocus gives it that focus on genuine pointer movement over the
- * row, matching the identical hover/focus styling below, so pointing at a
- * row is enough; no click needed first. The hint under a row (a setting's
- * `description`) stays collapsed until hover/focus, and while auto holds the
- * row a second line beneath it invites the user to take over. Each card's accent
+ * left of the number, its slider stretched to it (render/customValues.ts).
+ * A chip's letter *is* its hotkey once the row's control has keyboard
+ * focus — and wireHoverFocus gives it that focus on genuine pointer
+ * movement over the row, matching the identical hover/focus styling
+ * below, so pointing at a row is enough; no click needed first. The hint
+ * under a row (a setting's `description`) stays collapsed until
+ * hover/focus, and while auto holds the row a second line beneath it
+ * invites the user to take over. Each card's accent
  * names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
@@ -672,12 +673,16 @@ export interface DeviceMenuDeps {
    *  last value. See src/render/pictureMeter.ts for what each measure
    *  means. */
   getPictureReading: () => PictureReading | null;
-  /** Read/write/clear a scene setting's custom value — one typed into its
-   *  readout past the slider's ends (render/customValues.ts). */
+  /** A scene setting's custom value — one typed into its readout past the
+   *  slider's ends — and how far its slider is stretched to fit one
+   *  (render/customValues.ts). */
   customValues: {
     get(sceneId: string, key: string): number | undefined;
     set(sceneId: string, key: string, value: number): void;
     clear(sceneId: string, key: string): void;
+    stretch(sceneId: string, key: string): number | undefined;
+    stretchTo(sceneId: string, key: string, to: number): void;
+    reset(sceneId: string, key: string): void;
   };
   /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
    *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
@@ -1224,7 +1229,13 @@ export interface ControlRowSpec {
   custom?: {
     get(): number | undefined;
     set(value: number): void;
+    /** Drops the custom value, keeping the slider's stretch. */
     clear(): void;
+    /** Where the slider is stretched to past one of its ends, if it is. */
+    stretch(): number | undefined;
+    stretchTo(to: number): void;
+    /** Drops the custom value and the stretch. */
+    reset(): void;
     /** `raw` as this row's custom value, or null when it takes none: inside
      *  the slider (the store takes it) or a count (render/customValues.ts's
      *  fitCustom). */
@@ -1643,35 +1654,48 @@ export function createControlRow(spec: ControlRowSpec) {
   function commitTyped(text: string): void {
     const typed = parseTyped(text);
     if (typed === null) {
-      // Emptying the field is how a custom value is dropped.
-      if (spec.custom && text.trim() === "" && spec.custom.get() !== undefined) {
-        spec.custom.clear();
+      // Emptying the field is how a custom value is dropped, and the
+      // slider's stretch with it.
+      if (spec.custom && text.trim() === "" && (spec.custom.get() ?? spec.custom.stretch()) !== undefined) {
+        spec.custom.reset();
         display(spec.custom.resolve(), false);
       } else display(lastValue, lastAuto);
       return;
     }
-    const value = fitTyped(typed, {
-      min: spec.min,
-      max: spec.max,
-      step: isLog ? undefined : spec.step,
-      scale: spec.typedScale,
-      zeroAtMin: spec.zeroAtMin,
-    });
     const custom = spec.custom?.fit(typed / (spec.typedScale ?? 1)) ?? null;
     clearOff();
+    // A value typed past the slider's end moves the end there, thumb and all
+    // (customValues.ts's stretch).
+    if (custom !== null) spec.custom!.stretchTo(custom);
+    commitValue(
+      custom ??
+        fitTyped(typed, {
+          min: spec.min,
+          max: spec.max,
+          step: isLog ? undefined : spec.step,
+          scale: spec.typedScale,
+          zeroAtMin: spec.zeroAtMin,
+        }),
+    );
+  }
+  // Every value the row's own controls set goes through here: a typed value,
+  // a drag (a stretched slider reaches past spec.min/max), a T restore. Past
+  // the slider's own range it is a custom value — the nearest end goes
+  // through commit() first (Auto off, the store, the room and the pop-out,
+  // and what a reader that doesn't know custom values falls back to), then
+  // the custom value over it. Inside, a plain commit drops any custom value
+  // (setSceneSetting does too) and keeps the stretch. An Off stop's 0 is
+  // inside, whatever its min.
+  function commitValue(v: number): void {
+    const custom = spec.zeroAtMin && v <= 0 ? null : (spec.custom?.fit(v) ?? null);
     if (custom !== null) {
-      // The slider's nearest end goes through commit() first — Auto off, the
-      // store, the room and the pop-out, and what a reader that doesn't know
-      // custom values falls back to — then the custom value over it.
-      commit(value);
+      commit(Math.min(spec.max, Math.max(spec.min, v)));
       spec.custom!.set(custom);
       display(custom, false);
       return;
     }
-    // Any of the row's own controls taking over drops a custom value — see
-    // the slider/reset handlers below.
     spec.custom?.clear();
-    commit(value);
+    commit(v);
   }
 
   const chip = document.createElement("button");
@@ -1919,13 +1943,24 @@ export function createControlRow(spec: ControlRowSpec) {
     // (.vc-row-off, controlsTheme.ts) instead of sliding to the left end.
     const muted = offStoredValue !== null && !auto;
     const shown = muted ? offStoredValue! : value;
+    // A stretched slider (customValues.ts) spans its own range plus the
+    // stretch and any custom value — set before the value, which the input
+    // clamps to its range. Linear rows only; the log rows' 0..100 track
+    // never takes a custom value outside a dev build.
+    if (!isLog && spec.custom) {
+      const span = sliderSpan(spec, spec.custom.stretch(), spec.custom.get());
+      if (Number(slider.min) !== span.lo) slider.min = String(span.lo);
+      if (Number(slider.max) !== span.hi) slider.max = String(span.hi);
+    }
     slider.value = String(valueToSlider(shown));
     slider.style.setProperty("--vc-fill", `${valueToPercent(shown)}%`);
     el.classList.toggle("vc-row-off", muted);
     renderTicks();
     setReadout(value, muted);
     if (customMark) customMark.style.display = spec.custom!.get() !== undefined ? "inline-flex" : "none";
-    resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
+    // ↺ also stays while the slider is stretched: it is what shrinks it back.
+    const changed = Math.abs(value - spec.defaultValue) > 1e-6 || spec.custom?.stretch() !== undefined;
+    resetBtn.style.visibility = changed ? "visible" : "hidden";
     setHint(auto);
   }
 
@@ -1965,26 +2000,24 @@ export function createControlRow(spec: ControlRowSpec) {
   });
   slider.addEventListener("input", () => {
     clearOff();
-    spec.custom?.clear();
-    commit(sliderToValue());
+    commitValue(sliderToValue());
   });
   resetBtn.addEventListener("click", () => {
     clearOff();
-    spec.custom?.clear();
+    spec.custom?.reset();
     commit(spec.defaultValue);
   });
   offChip.addEventListener("click", () => {
-    // Any of the row's own controls taking over drops a custom value the same way —
-    // see the slider/reset handlers above.
-    spec.custom?.clear();
     if (offStoredValue !== null) {
+      // Restores through commitValue, so a custom value comes back as one.
       const restore = offStoredValue;
       offStoredValue = null;
-      commit(restore);
+      commitValue(restore);
       refreshOffChip();
     } else {
       offStoredValue = sliderToValue();
       refreshOffChip();
+      spec.custom?.clear(); // muted runs at the floor; the stretch stays
       commit(spec.zeroAtMin ? 0 : spec.min);
     }
   });
@@ -1998,8 +2031,9 @@ export function createControlRow(spec: ControlRowSpec) {
         clearOff();
         // A custom value beats auto in resolve()'s precedence, so without this the
         // chip would light up while the row visibly stayed put — clearing it
-        // here is what actually hands the row to auto.
-        spec.custom?.clear();
+        // here is what actually hands the row to auto. Auto stays inside the
+        // slider's own range, so the stretch goes too.
+        spec.custom?.reset();
       }
       refreshChip();
       display(on ? auto.resolveLive() : auto.getManual(), on);
@@ -5159,6 +5193,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       get: () => store.get(sceneId(), spec().key),
       set: (value) => store.set(sceneId(), spec().key, value),
       clear: () => store.clear(sceneId(), spec().key),
+      stretch: () => store.stretch(sceneId(), spec().key),
+      stretchTo: (to) => store.stretchTo(sceneId(), spec().key, to),
+      reset: () => store.reset(sceneId(), spec().key),
       fit: (raw) => fitCustom(spec(), raw, import.meta.env.DEV),
       reach: () => {
         const reach = customReach(spec(), import.meta.env.DEV);

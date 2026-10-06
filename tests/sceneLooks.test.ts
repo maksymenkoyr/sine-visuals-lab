@@ -16,7 +16,7 @@ import {
   saveSharedLook,
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
-import { clearCustomValue, getCustomValue, setCustomValue } from "../src/render/customValues.ts";
+import { clearCustomValue, getCustomValue, getSliderStretch, setCustomValue, stretchSlider } from "../src/render/customValues.ts";
 
 // Vitest runs under environment: "node" (vitest.config.ts) — no localStorage
 // global at all, mirroring panelFolds.test.ts. Proves the module tolerates
@@ -298,6 +298,7 @@ describe("custom values in a Look", () => {
     applyLook({ name: "L", sceneId, manual: { focus: 1.4, breathe: 0.2 } }, SPECS);
     expect(getSceneSetting(sceneId, FOCUS)).toBe(1);
     expect(getCustomValue(sceneId, FOCUS.key)).toBe(1.4);
+    expect(getSliderStretch(sceneId, FOCUS.key)).toBe(1.4);
     expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
   });
 
@@ -310,9 +311,13 @@ describe("custom values in a Look", () => {
   it("drops a custom value the Look doesn't carry, whether listed in range or absent", () => {
     const sceneId = "look-custom-drop";
     setCustomValue(sceneId, FOCUS.key, 1.5);
+    stretchSlider(sceneId, FOCUS.key, 1.5);
     setCustomValue(sceneId, BREATHE.key, 1.5);
+    stretchSlider(sceneId, BREATHE.key, 1.5);
     applyLook({ name: "L", sceneId, manual: { focus: 0.4 } }, SPECS);
     expect(getCustomValue(sceneId, FOCUS.key)).toBeUndefined();
     expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
+    expect(getSliderStretch(sceneId, FOCUS.key)).toBeUndefined();
+    expect(getSliderStretch(sceneId, BREATHE.key)).toBeUndefined();
   });
 });
