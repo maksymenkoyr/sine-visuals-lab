@@ -183,8 +183,11 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * **Nothing plugged in.** Two rules a jack's `drive.default` and a scene's
  * own coupling formula both have to hold for (2026-09-28): (1) a jack's
  * default always reacts to the music — never a constant, and never a Scene
- * composite that turns out to be one in disguise; a setting nothing in the
- * catalogue genuinely fits simply declares no `drive` at all. (2) with
+ * composite that turns out to be one in disguise. A setting nothing in the
+ * catalogue genuinely fits either declares no `drive` at all or, when the
+ * scene wants it wireable anyway, starts on an empty patch — a jack with
+ * nothing plugged in, reading its slider until the user wires it (Sweep's
+ * knobs, 2026-10-05: the user asked for every knob to be wireable). (2) with
  * nothing plugged in — every source unplugged (an empty patch), muted, or
  * (in a `gate` mix) only a `when` condition left with no source actually
  * "playing", see `hasLiveSource` below — the music stops moving the
