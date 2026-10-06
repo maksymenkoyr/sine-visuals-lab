@@ -349,7 +349,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
     monitor: { card: "signal", row: "waveform" },

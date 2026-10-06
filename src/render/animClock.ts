@@ -61,9 +61,11 @@ export interface AnimFrame {
    *  card's RAW reading). It's the one number the Dynamics card's Waveform
    *  readout shows and the `anim.wavePeak` drive source (signals.ts) reads —
    *  computed here once so both read the same thing. Linear amplitude [0,1]
-   *  of the raw capture (before auto-gain/sensitivity), not normalized. 0
-   *  whenever `hit.wavePeak` is omitted/null (TV, renderer, previews — no
-   *  local mic), same as `beatRatio` above. */
+   *  of the raw capture (before auto-gain/sensitivity), not normalized. On a
+   *  device following another one's input, the capture is that device's, off
+   *  the frame's wave tail (src/net/protocol.ts; app.ts's waveSamples). 0
+   *  whenever `hit.wavePeak` is omitted/null (no mic and no wave from the
+   *  feed, previews), same as `beatRatio` above. */
   wavePeak: number;
   /** Phase-locked beat/bar clock — see beatClock.ts — corrected by
    *  beatTrim.ts (a bar resync, a ×2/÷2 tracking-error fix, a small
@@ -352,7 +354,7 @@ export function createAnimClock(): AnimClock {
       }
       const hitTail = tailScales;
       // AnimFrame.wavePeak's own peak-hold — see that field's own doc
-      // comment. `hit.wavePeak` omitted/null (no local mic) holds nothing:
+      // comment. `hit.wavePeak` omitted/null (no mic, no feed wave) holds nothing:
       // it snaps straight to 0, the same as `beatRatio` above. Otherwise a
       // finite `inst` minus a non-finite Infinity rateScale (Smoothing's Off
       // stop) is exactly -Infinity (IEEE754), so Math.max against that lands

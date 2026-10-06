@@ -93,9 +93,11 @@ import { createCanvasSizer } from "./canvasSizer.ts";
  *  - Signal (first): everything this device's own mic measures, before any
  *    beat/tempo logic runs — Waveform leads it off: a rolling picture of the
  *    last few seconds with a clip warning, read straight off this device's
- *    mic by waveformAnalyser.ts. Local-only by construction — samples never
- *    cross src/net/protocol.ts's wire frame, so a mic-less renderer has
- *    nothing to show here and the row hides itself. (No stereo
+ *    mic by waveformAnalyser.ts. A phone or iPad following another device
+ *    draws that device's waveform instead: the feed sends one min/max pair
+ *    per wire frame (src/net/protocol.ts's wave tail), handed in here as a
+ *    two-sample `mono`, so each column shows the frame covering it. With
+ *    neither (a synthetic feed) the row hides itself. (No stereo
  *    width/balance: a phone or laptop mic is mono, so they'd read "mono"
  *    nearly always.) Then Level: FeatureFrame.level (pre-AGC, absolute).
  *    Loudness next — the broadcast measurement, BS.1770 / EBU R128 LUFS
@@ -236,9 +238,11 @@ import { createCanvasSizer } from "./canvasSizer.ts";
 export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
-   *  audio is up (idle readouts); `mono`/`rawBands` null on any device
-   *  without a local analyser (the Dynamics card's Waveform row hidden;
-   *  Energy reads idle under RAW — see file header); `fixedEnergy` null on
+   *  audio is up (idle readouts); `mono` is the local mic's samples, or on a
+   *  following device the feed's [min, max] (app.ts's waveSamples), null with
+   *  neither (the Dynamics card's Waveform row hidden); `rawBands` null on any
+   *  device without a local analyser (Energy reads idle under RAW — see file
+   *  header); `fixedEnergy` null on
    *  any device without a local FeatureExtractor (the History trace drops
    *  its reference line); `lufs` null on any device without a local
    *  lufsAnalyser (the Dynamics card's Loudness row and header Reset chip
@@ -2017,8 +2021,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   waveform.el.children[1].replaceWith(waveCanvas);
   const waveCtx = waveCanvas.getContext("2d")!;
   mountJack("anim.wavePeak", waveform.right, waveform.el);
-  // Row + its own trailing spacer, toggled together on any device with no
-  // local mic (mono === null) — see update()'s own Signal block.
+  // Row + its own trailing spacer, toggled together with no samples to draw
+  // (mono === null) — see update()'s own Signal block.
   const waveformSpacer = spacer();
 
   const level = createMeterRow({
@@ -2150,8 +2154,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     spacer(),
     gateRow.el,
   );
-  // Row-level visibility (mono/lufs null on a device with no local
-  // analyser) — see update()'s own Signal block for the toggles and the
+  // Row-level visibility (mono null with no samples to draw, lufs null on a
+  // device with no local analyser) — see update()'s own Signal block for the toggles and the
   // "don't accumulate a column while hidden" behaviour they carry.
   // null until the first unfolded tick applies the real state: the rows are
   // built visible, so a mic-less device (where nothing ever shows) must still
@@ -2630,8 +2634,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // branch: it's already an instant, local reading with no pre-smoothing
       // counterpart threaded through AnimFrame to switch to.
       if (!signalCard.fold?.isFolded()) {
-        // Waveform — hidden (with its own trailing spacer) on any device
-        // with no local mic; see AudioMeters.update's own doc comment.
+        // Waveform — hidden (with its own trailing spacer) with no samples
+        // to draw; see AudioMeters.update's own doc comment.
         const showWaveform = mono !== null;
         if (showWaveform !== waveformShown) {
           waveformShown = showWaveform;

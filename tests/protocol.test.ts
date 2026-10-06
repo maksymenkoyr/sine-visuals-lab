@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { encodeFeatureFrame, decodeFeatureFrame } from "../src/net/protocol.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
+import { isClipping } from "../src/audio/waveform.ts";
 
 describe("protocol", () => {
   it("round-trips every field within quantization tolerance", () => {
@@ -116,4 +117,44 @@ describe("protocol", () => {
     expect(decoded!.roomTimeMs).toBe(42);
     expect(decoded!.bpm).toBeCloseTo(120, 1);
   });
+
+  it("leaves the wave tail off without a waveform, and decodes that as none", () => {
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    const buf = encodeFeatureFrame(frame, 1000);
+    expect(buf.byteLength).toBe(1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8);
+    expect(decodeFeatureFrame(buf)!.wave).toBeNull();
+  });
+
+  it("round-trips the waveform, finer near silence than near full scale", () => {
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.3, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0, level: 0.4 };
+    const loud = decodeFeatureFrame(encodeFeatureFrame(frame, 1000, { min: -0.7, max: 0.65 }))!;
+    expect(loud.wave!.min).toBeCloseTo(-0.7, 1);
+    expect(loud.wave!.max).toBeCloseTo(0.65, 1);
+    expect(loud.roomTimeMs).toBe(1000); // the tail doesn't move the fields before it
+    expect(loud.level).toBeCloseTo(0.4, 2);
+    const quiet = decodeFeatureFrame(encodeFeatureFrame(frame, 1000, { min: -0.01, max: 0.02 }))!;
+    expect(quiet.wave!.min).toBeCloseTo(-0.01, 3);
+    expect(quiet.wave!.max).toBeCloseTo(0.02, 3);
+  });
+
+  it("keeps a clipped sample clipped and a quiet one quiet", () => {
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    const clipped = decodeFeatureFrame(encodeFeatureFrame(frame, 0, { min: -1, max: 0.99 }))!;
+    expect(isClipping(new Float32Array([clipped.wave!.min, clipped.wave!.max]))).toBe(true);
+    const below = decodeFeatureFrame(encodeFeatureFrame(frame, 0, { min: -0.9, max: 0.9 }))!;
+    expect(isClipping(new Float32Array([below.wave!.min, below.wave!.max]))).toBe(false);
+    const silent = decodeFeatureFrame(encodeFeatureFrame(frame, 0, { min: 0, max: 0 }))!;
+    expect(silent.wave).toEqual({ min: 0, max: 0 });
+  });
+
+  it("reads the known prefix of a frame longer than this layout", () => {
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.5, onset: false, pulseOnset: false, bpm: 90, onsetPhase: 0, level: 0.5 };
+    const buf = encodeFeatureFrame(frame, 777, { min: -0.25, max: 0.25 });
+    const longer = new Uint8Array(buf.byteLength + 3);
+    longer.set(new Uint8Array(buf));
+    const decoded = decodeFeatureFrame(longer.buffer);
+    expect(decoded!.roomTimeMs).toBe(777);
+    expect(decoded!.wave!.max).toBeCloseTo(0.25, 2);
+  });
 });
+

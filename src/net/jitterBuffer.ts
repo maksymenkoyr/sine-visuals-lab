@@ -1,4 +1,5 @@
 import { NUM_BANDS } from "../audio/types.ts";
+import type { WaveEnvelope } from "./protocol.ts";
 
 export interface TimedFrame {
   bands: Float32Array;
@@ -8,6 +9,9 @@ export interface TimedFrame {
   bpm: number;
   level: number;
   roomTimeMs: number;
+  /** The sender's waveform since its previous frame (protocol.ts's wave
+   *  tail); null, or absent, when it sent none. */
+  wave?: WaveEnvelope | null;
 }
 
 export interface Sample {
@@ -15,6 +19,10 @@ export interface Sample {
   energy: number;
   bpm: number;
   level: number;
+  /** Not interpolated: the envelope of the frame that covers this instant,
+   *  the first one at or after it, since a frame's envelope spans the time
+   *  since the frame before. */
+  wave: WaveEnvelope | null;
 }
 
 const MAX_HISTORY_MS = 2000;
@@ -47,7 +55,7 @@ export class JitterBuffer {
   // synchronously — copied into a scene's own uniform buffer — before the
   // next call, never retained past that.
   private readonly scratchBands = new Float32Array(NUM_BANDS);
-  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5 };
+  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5, wave: null };
 
   push(frame: TimedFrame): void {
     // Network delivery can reorder; insert in timestamp order rather than
@@ -89,6 +97,7 @@ export class JitterBuffer {
     this.scratchSample.energy = a.energy + (b.energy - a.energy) * t;
     this.scratchSample.bpm = t < 0.5 ? a.bpm : b.bpm;
     this.scratchSample.level = a.level + (b.level - a.level) * t;
+    this.scratchSample.wave = b.wave ?? null;
     return this.scratchSample;
   }
 
@@ -97,6 +106,7 @@ export class JitterBuffer {
     this.scratchSample.energy = f.energy;
     this.scratchSample.bpm = f.bpm;
     this.scratchSample.level = f.level;
+    this.scratchSample.wave = f.wave ?? null;
     return this.scratchSample;
   }
 
