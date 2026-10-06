@@ -62,7 +62,7 @@ https://claude.ai/artifact/5qcGsBrmY6ZytbfuSeM78B
 
 Each phase is one build session and one PR.
 
-- [ ] **1. The user's party recordings become a test set, with a short report on what a real loud room does to the sound**
+- [x] **1. The user's party recordings become a test set, with a short report on what a real loud room does to the sound** — PR #404
   - Touches: a `tools/` script that pulls mono 48 kHz audio from the
     videos into gitignored `tools/.cache/mic-recordings/<slug>/{audio.wav,meta.json}`
     (never commit them: private recordings of copyrighted music);
