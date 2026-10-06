@@ -244,4 +244,6 @@ new dimension too … we can't really see/feel the depth and complexity that
 - #369 — first draft from `/ref` on the live-coding reference (closed
   unmerged, replaced by #376).
 - #376 — the same rebased onto main, plus 3D and 4D wireframe figures as
-  more Shape chips.
+  more Shape chips and their trails in depth (closed unmerged after it
+  conflicted with main's In development section, replaced by #400).
+- #400 — the same rebased onto main again.
