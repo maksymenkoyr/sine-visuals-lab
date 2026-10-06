@@ -128,9 +128,18 @@ export const scanlineStyle = `
 const STYLE_ID = "vc-controls-styles";
 
 const stylesheet = `
+/* The screen height every panel column is sized from. A plain 100vh is
+ * Safari's taller, toolbar-hidden height, so on an iPad (or iPhone) a
+ * column sized from it ran past the visible bottom: over the gear that
+ * closes the panel, and with its last rows out of scroll reach. 100dvh
+ * follows the toolbar; browsers without dvh keep 100vh. */
 :root {
+  --vc-vh: 100vh;
   --vc-glass-bg: rgba(8, 11, 10, 0.82);
   --vc-glass-filter: none;
+}
+@supports (height: 100dvh) {
+  :root { --vc-vh: 100dvh; }
 }
 :root.vc-glass-blur {
   --vc-glass-bg: rgba(8, 11, 10, 0.2);
@@ -149,7 +158,8 @@ const stylesheet = `
  * "inside the panel") but docks itself independently to the opposite
  * (top-left) corner of the screen in the wide layout — see .vc-spectrum-col
  * below. Both sides stop short of the bottom-right chrome buttons
- * (index.html) so the gear that closes the panel stays reachable.
+ * (index.html) so the gear that closes the panel stays reachable — which
+ * holds only while their heights come from --vc-vh (above), not 100vh.
  *
  * pointer-events: none plus "> *" restoring auto on direct children: a flex
  * row's own box is always as tall as its tallest child (align-items can't
@@ -168,7 +178,7 @@ const stylesheet = `
 .vc-root {
   position: fixed; top: 16px; right: 16px; z-index: 30;
   display: none; gap: 4px; align-items: flex-start;
-  max-height: calc(100vh - 74px);
+  max-height: calc(var(--vc-vh) - 74px);
   color: #fff; font-family: ${FONT_LABEL};
   pointer-events: none;
 }
@@ -184,7 +194,7 @@ const stylesheet = `
  * that same media query, overridden below. */
 .vc-power-col {
   width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 74px);
+  max-height: calc(var(--vc-vh) - 74px);
 }
 .vc-power-col > * { flex-shrink: 0; }
 /* The power glyph button shown only while the card is folded (in the wide
@@ -206,7 +216,7 @@ const stylesheet = `
  * by an 8px gap rather than covering it. */
 .vc-spectrum-col {
   width: 377px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 76px);
+  max-height: calc(var(--vc-vh) - 76px);
   position: fixed; top: 60px; left: 16px; z-index: 30;
 }
 .vc-spectrum-col > * { flex-shrink: 0; }
@@ -215,7 +225,7 @@ const stylesheet = `
 .vc-meters > * { flex-shrink: 0; }
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 74px); overflow-y: auto;
+  max-height: calc(var(--vc-vh) - 74px); overflow-y: auto;
 }
 /* Solo (deviceMenu.ts's setSolo/applySolo): the column takes its full
  * height and what's left in it sits at the bottom, just above the footer
@@ -223,7 +233,7 @@ const stylesheet = `
  * an auto top margin rather than justify-content: flex-end, which would
  * make an overflowing pane's top unreachable by scrolling. */
 @media (min-width: ${STACK_BELOW_PX + 1}px) {
-  .vc-root.vc-solo .vc-controls-col { height: calc(100vh - 74px); }
+  .vc-root.vc-solo .vc-controls-col { height: calc(var(--vc-vh) - 74px); }
   .vc-root.vc-solo .vc-controls-col > :not(.vc-solo-hidden):not(.vc-dock) { margin-top: auto; }
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
@@ -309,15 +319,11 @@ const stylesheet = `
    * scrolls. iOS WebKit won't touch-scroll a scroller whose own box has
    * pointer-events: none, even when the finger lands on an auto child, so
    * leaving the base rule in place made the whole panel unscrollable on
-   * iPhone. 100dvh follows Safari's collapsing toolbar (a plain 100vh is
-   * the taller, toolbar-hidden height, so the panel's tail — and the end of
-   * its scroll range — hid under the toolbar); browsers without dvh keep
-   * the vh line. */
+   * iPhone. */
   .vc-root {
     flex-direction: column; width: min(320px, 88vw); overflow-y: auto;
     pointer-events: auto;
-    max-height: calc(100vh - 74px);
-    max-height: calc(100dvh - 74px);
+    max-height: calc(var(--vc-vh) - 74px);
   }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
   /* Dissolve the spectrum column so its bands block (.vc-spectrum-card —
