@@ -21,8 +21,10 @@ Press **F** for fullscreen and **S** for settings.
   contrast and smoothing to the music's character in real time, and every
   control can be taken over by hand.
 
-Scenes absent from `DRAFT_SCENE_IDS` (in `src/render/scenes/index.ts`) are
-featured; the rest sit behind the gallery's draft toggle.
+The gallery has three sections, set in `src/render/scenes/index.ts`: scenes
+in `IN_DEVELOPMENT_SCENE_IDS` show below the featured ones, and scenes in
+`DRAFT_SCENE_IDS` sit greyed out behind the gallery's draft toggle. Every other
+scene is featured.
 
 It's early and built by one person. Criticism, device reports, scene ideas and
 pull requests are all welcome: open an issue, start a

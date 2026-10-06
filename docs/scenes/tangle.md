@@ -4,8 +4,8 @@ A sphere of thin white light that a noise field folds, within a second or
 two, into long straight chords and triangles meeting in flaring white knots,
 with a colour fringe on whatever moves. A bass hit pulls the lines part of
 the way back out toward a crinkled sphere and they fold up again; a drop
-brings back the whole sphere; the mids speed up how the shape drifts. Draft;
-on its own branch, not yet on main.
+brings back the whole sphere; the mids speed up how the shape drifts. In
+development, on main.
 
 ## Where the code is
 

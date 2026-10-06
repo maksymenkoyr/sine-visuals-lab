@@ -6,8 +6,8 @@ video. The music pays for the frames: the Move setting's wire sets how fast the
 loop on screen plays, and silence holds the frame. Bounce squashes him toward
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A loop repeats
-until the Cut setting's wire rises over the line under its graph. On main
-since #374.
+until the Cut setting's wire rises over the line under its graph. In
+development, on main since #374.
 
 ## Where the code is
 

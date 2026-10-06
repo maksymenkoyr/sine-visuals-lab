@@ -1,5 +1,6 @@
 import { BRAND_RED } from "./brandMark.ts";
 import { FONT_LABEL, FONT_MONO, SCENE_VIOLET } from "./controlsTheme.ts";
+import type { SceneStage } from "../render/scenes/index.ts";
 import {
   TRANSITION_BARS,
   getSceneTransition,
@@ -11,8 +12,9 @@ import {
 /**
  * The scene list: the scene's name in the top-left row (`#sceneBtn` in
  * index.html) opens every scene in a drop-down, so a scene can be changed
- * without going back to the gallery. Same order as the gallery, the released
- * scenes first and the drafts under their own heading; one this device can't
+ * without going back to the gallery. Same order and sections as the gallery:
+ * the released scenes first, then In development and Draft under their own
+ * headings, the drafts greyed; one this device can't
  * run is shown but can't be picked, with the gallery's reason as its hint.
  * A filter box at the top takes the focus: typing narrows the list, the arrow
  * keys move through it, Enter picks and Escape closes (claimed in the capture
@@ -30,11 +32,19 @@ import {
  * :focus-visible.
  */
 
+const STAGE_ORDER: readonly SceneStage[] = ["released", "development", "draft"];
+/** The heading over each section; the released scenes come first, unheaded. */
+const STAGE_HEADING: Record<SceneStage, string | null> = {
+  released: null,
+  development: "In development",
+  draft: "Draft",
+};
+
 export interface ScenePickEntry {
   id: string;
   name: string;
-  /** Listed under the Draft heading (scenes/index.ts's DRAFT_SCENE_IDS). */
-  draft: boolean;
+  /** Which heading it's listed under — scenes/index.ts's sceneStage. */
+  stage: SceneStage;
   /** Whether this device can run it; a disabled entry shows `reason`. */
   enabled: boolean;
   reason?: string;
@@ -100,6 +110,8 @@ const stylesheet = `
   margin: 8px 12px 4px; font: 400 10px/1 ${FONT_MONO}; letter-spacing: .18em; text-transform: uppercase;
   color: ${SCENE_VIOLET};
 }
+.sp-head[data-stage="draft"] { color: rgba(255,255,255,.45); }
+.sp-item[data-stage="draft"] { color: rgba(255,255,255,.55); }
 .sp-item {
   display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer;
   border-left: 2px solid transparent;
@@ -229,8 +241,8 @@ export function createScenePicker(deps: ScenePickerDeps): ScenePicker {
   function renderList(): void {
     const all = deps.scenes();
     const matches = filterScenes(all, filter.value);
-    // Released first, then the drafts, each in gallery order.
-    shown = [...matches.filter((e) => !e.draft), ...matches.filter((e) => e.draft)];
+    // The gallery's sections in its order, each in gallery order.
+    shown = STAGE_ORDER.flatMap((stage) => matches.filter((e) => e.stage === stage));
     const current = deps.currentId();
     list.replaceChildren();
     items = [];
@@ -239,15 +251,16 @@ export function createScenePicker(deps: ScenePickerDeps): ScenePicker {
       list.append(el("li", "sp-empty", "No scene matches."));
       return;
     }
-    let draftHeadDone = false;
     shown.forEach((entry, i) => {
-      if (entry.draft && !draftHeadDone) {
-        draftHeadDone = true;
-        const head = el("li", "sp-head", "Draft");
+      const heading = STAGE_HEADING[entry.stage];
+      if (heading && entry.stage !== shown[i - 1]?.stage) {
+        const head = el("li", "sp-head", heading);
+        head.dataset.stage = entry.stage;
         head.setAttribute("role", "presentation");
         list.append(head);
       }
       const li = el("li", "sp-item");
+      li.dataset.stage = entry.stage;
       li.id = `sp-item-${entry.id}`;
       li.setAttribute("role", "option");
       li.setAttribute("aria-selected", String(entry.id === current));

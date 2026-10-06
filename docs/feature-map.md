@@ -86,10 +86,13 @@ Darker means more important.
 
 - ●●● **Gallery** — the first screen: a tile per scene, each playing a
   synthetic demo feed until live audio starts · `src/ui/gallery.ts`
-  - ●●● **Featured scenes** — the scenes not in `DRAFT_SCENE_IDS`, shown first
-    · `src/render/scenes/index.ts`
-  - ●●○ **Draft scenes** — rougher scenes behind the gallery's draft toggle.
-    Measured: more than half of all scene views land here · `DRAFT_SCENE_IDS`
+  - ●●● **Featured scenes** — the Released section, shown first: the scenes
+    `sceneStage` calls released · `src/render/scenes/index.ts`
+  - ●●○ **In development scenes** — scenes being worked on now, shown open
+    below Released as small tiles · `IN_DEVELOPMENT_SCENE_IDS`
+  - ●●○ **Draft scenes** — rougher scenes, greyed out behind the gallery's
+    draft toggle. Measured: more than half of all scene views land on drafts
+    or scenes in development · `DRAFT_SCENE_IDS`
   - ●○○ **Source picker** — Mic or Screen, chosen before a scene opens ·
     `src/audio/sourcePref.ts`
   - ○○○ **Version label and channel badge** — Stable or Insiders, links to the

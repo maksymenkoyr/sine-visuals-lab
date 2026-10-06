@@ -3,7 +3,7 @@
 A close cluster of flat-colour, extruded triangular plates — big panels, thin
 blades, small fragments — on a star field, hard-cutting to a new arrangement
 on a beat. Between cuts the plates extend along their own axes and the camera
-rolls slowly clockwise. On main, registered as a draft scene.
+rolls slowly clockwise. On main, in the gallery's In development section.
 
 ## Where the code is
 
