@@ -47,10 +47,10 @@ https://claude.ai/artifact/5qcGsBrmY6ZytbfuSeM78B
 
 ## Open questions
 
-- What tempo is true in each party video: does the user know the songs or
-  the set's BPM, or should the session tap it out by ear with the user? —
-  blocks phase 1's scoring (the recordings can still be cut and measured
-  without it).
+- What tempo is true in each party video? Phase 1 measured 130 BPM for all
+  four (one clip sharply, the rest 129–131) and scores them at that; the
+  user hasn't confirmed it. A wrong guess by even 2 BPM changes every
+  party row's % right.
 - In a loud room, should Auto pick what the user does by hand (Expansion
   well above 1×, Sensitivity near 1×, Smoothing low), accepting more twitch
   on crowd noise for punchier hits? — blocks phase 4.
@@ -77,7 +77,7 @@ Each phase is one build session and one PR.
     echo rings, compared with the defaults in `micChain.ts`, and retunes
     those defaults if the real room differs. The ffmpeg recipe that works
     here: imageio-ffmpeg via `uv` (Homebrew ffmpeg is broken on this machine).
-- [ ] **2. Tempo reads the same from a near or a far mic** — draft PR #403 (with the echo half of phase 3; its costs need the user's call)
+- [ ] **2. Tempo reads the same from a near or a far mic** — draft PR #403 (with the echo half of phase 3; the user accepted its costs 2026-10-06)
   - Touches: `src/audio/tempoAnalyzer.ts` (`analyseHop`, `pickOnset`),
     the render-tick path in `src/audio/features.ts` if it shares the flaw;
     a level-sweep table in `tests/tempoEval.test.ts`.
@@ -227,3 +227,24 @@ Each phase is one build session and one PR.
   each synthetic track at 8 small start offsets (prepend 0–401 samples,
   shift `tempo`/`beats`/`gridBeats`) and average before calling a change a
   win or a loss.
+- 2026-10-06, phase 1: four phone videos from the user's party (16–34 s
+  each, one DJ set at ~130 BPM) are the `mic-recordings` set;
+  `npm run eval:tempo:real` scores them next to the 6 songs clean and
+  through `micChain`. Today's tracker reads the party right 6–18% of the
+  time; #403 reads it right 42–54%, with fewer off-beat hits. The phone
+  video's audio went through the phone's own processing (likely gain
+  control), unlike the app's mic (`autoGainControl` off), so treat its
+  level and dynamics as approximate.
+- 2026-10-06, phase 1, the room against `micChain`: the party PA kept far
+  more bass than the simulated small speaker, and the phone heard the
+  music about 20 dB louder, so `micChain`'s `hpHz` and `gainDb` defaults
+  were refitted. The party's hits fade slower than the simulated room's,
+  but the combs can't slow the fade without filling the gaps between hits
+  well past the party's, and the fade depends on the (unknown) music, so
+  `wet` and `noiseDb` stay. The refit made today's tracker worse through
+  the mic (drum & bass 54 → 2%: with the bass back, the kick is heard and
+  the old 100 ms lockout drops the snare) and #403's better; together they
+  pass the scoreboard.
+- 2026-10-06, phase 1: through the refitted room #403 flips Tarantula
+  (174) to half time for about half the clip, where today's tracker holds
+  174 — an octave tie for phase 5's tracker (the snare's place in the bar).

@@ -340,9 +340,9 @@ describe("tempo eval scoreboard — host/TV path", () => {
 // Through a mic — see MIC_PATHS/micGateOn above for the bug this guards.
 // What is asserted is the bug itself: the gate must not stop the Metronome.
 // Absolute accuracy through this crude chain is printed, not asserted: its
-// reverb smears hit timing, and the synthetic hip-hop kick is a pure tone
-// below the chain's high-pass, so that track loses its kick entirely (real
-// songs through the same chain keep plenty of beat above it).
+// reverb smears hit timing, and its comb echoes are sharper than a real
+// room's. tests/tempoRecordings.test.ts scores real songs through it and a
+// real party recording next to each other.
 describe("tempo eval scoreboard — through a mic, silence gate on", () => {
   it("turning the gate on never stops the Metronome, on any path", () => {
     for (const label of Object.keys(MIC_PATHS)) {
