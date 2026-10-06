@@ -24,6 +24,15 @@
 // ways), and `trail` keeps only the head's end of that span (a comet when
 // low).
 //
+// Shape drift and Morph. A copy's shape is a place on the cyclic SHAPES
+// list, blended between its two neighbours (glsl.ts's copy loop, a
+// smoothstep between the two shapes' distance fields): the picked Shape,
+// plus Morph's phase (index.ts — the same for every copy, so the whole stack
+// morphs together), plus Shape drift's steps per unit of the path parameter
+// counted from where the span starts (`spanOrigin`). Drift ties a shape to
+// a place on the path, so only movement changes it: the head turns into the
+// next shapes as it travels and the trail keeps the ones it passed.
+//
 // Coordinates are half-heights from the frame centre, y up.
 
 export const SHAPES = ["Blob", "Disc", "Box", "Cube", "Drop"] as const;
@@ -73,6 +82,11 @@ export const SHAPE_REACH = 1.3;
 export const MAX_COPIES = 160;
 export const MAX_STACKS = 2;
 
+/** The steepest a smoothstep blend between two shapes gets per unit of
+ *  its own input — boundarySpeed's bound on how fast a drifting shape
+ *  changes along the path. */
+export const SHAPE_BLEND_SLOPE = 1.5;
+
 /** Steps' band height at Steps = 1, half-heights. */
 export const STEP_MAX = 0.09;
 
@@ -81,6 +95,8 @@ export type Vec2 = readonly [number, number];
 /** Effective knob values (settings with their drives applied). */
 export interface Knobs {
   shape: number;
+  /** −1..1: ±1 goes once round SHAPES over the whole path. */
+  shapeDrift: number;
   stretch: number;
   copies: number;
   size: number;
@@ -201,9 +217,15 @@ export function bezier(p: StackGeom["p"], s: number): [number, number] {
   return [a * p[0][0] + b * p[1][0] + c * p[2][0] + d * p[3][0], a * p[0][1] + b * p[1][1] + c * p[2][1] + d * p[3][1]];
 }
 
+/** The path parameter a stack starts from: both ends of its span begin
+ *  here, and Shape drift counts from here. */
+export function spanOrigin(spread: number): number {
+  return 0.5 * Math.min(1, Math.max(0, spread));
+}
+
 /** Path parameters the copies span, [tail, head], for head progress h. */
 export function span(h: number, spread: number, trail: number): [number, number] {
-  const v0 = 0.5 * Math.min(1, Math.max(0, spread));
+  const v0 = spanOrigin(spread);
   const hh = Math.min(1, Math.max(0, h));
   const head = v0 + (1 - v0) * hh;
   const tail = v0 * (1 - hh);
@@ -215,6 +237,11 @@ export function span(h: number, spread: number, trail: number): [number, number]
  *  the log2 of half their ratio (−1: the head is a quarter of the tail). */
 export function endScales(size: number, taper: number): [number, number] {
   return [size * Math.pow(2, -taper), size * Math.pow(2, taper)];
+}
+
+/** Shape drift as SHAPES steps per unit of the path parameter. */
+export function driftRate(shapeDrift: number): number {
+  return shapeDrift * SHAPES.length;
 }
 
 // ---------------------------------------------------------------- motion
@@ -252,7 +279,7 @@ export function hexToRgb(hex: string): [number, number, number] {
 /** vec4 slots of the shader's `uSw` array. glsl.ts generates its #defines
  *  from this table, so the two cannot drift apart. */
 export const SW = {
-  GROUND: 0, // rgb, shape
+  GROUND: 0, // rgb, -
   PAL: 1, // five slots: rgb
   HEAD: 6, // accent rgb, head
   INK: 7, // rgb, outline style
@@ -261,9 +288,10 @@ export const SW = {
   LOOK3: 10, // copies, stack count, palette phase, sheen
   LOOK4: 11, // head blur, stretch, multiply, step height
   FLAGS: 12, // room palette (0/1), -, -, -
-  STACK0: 13, // per stack, four slots: p0 p1 | p2 p3 | tailScale log2(head/tail) angle0 twist | uTail uHead palOffset boundarySpeed
-  BOX0: 21, // per stack: minX minY maxX maxY
-  LEN: 23,
+  SHAPE: 13, // shape (picked + Morph phase, in [0, SHAPES.length)), drift rate (shapes per unit of path), drift origin (path parameter), -
+  STACK0: 14, // per stack, four slots: p0 p1 | p2 p3 | tailScale log2(head/tail) angle0 twist | uTail uHead palOffset boundarySpeed
+  BOX0: 22, // per stack: minX minY maxX maxY
+  LEN: 24,
 } as const;
 
 export interface FrameState {
@@ -272,6 +300,8 @@ export interface FrameState {
   head: number;
   /** Palette phase from Colour flow, cycles. */
   phase: number;
+  /** Morph's phase, in shapes. */
+  morph: number;
 }
 
 export function copiesFor(copies: number): number {
@@ -304,14 +334,16 @@ export function stackBounds(g: StackGeom, s0: number, s1: number, k: Knobs): [nu
 
 /** How far any point of a copy's boundary can move per unit of the path
  *  parameter, at most, over [s0, s1] — the centre's own speed, the reach
- *  growing or shrinking with the scale, and the reach swinging with the
- *  twist. The shader divides it by the copy count to get the most one copy
+ *  growing or shrinking with the scale, the reach swinging with the twist,
+ *  and a drifting shape blending into the next (inside a copy's reach two
+ *  shapes' distance fields differ by less than the reach). The shader divides it by the copy count to get the most one copy
  *  can differ from the next, and skips copies that cannot reach a pixel yet
  *  (glsl.ts's copy loop). */
 export function boundarySpeed(g: StackGeom, s0: number, s1: number, k: Knobs): number {
   const [tailScale, headScale] = endScales(k.size, k.taper);
   const reach = SHAPE_REACH * Math.max(1, k.stretch);
   const lnRatio = Math.log(headScale / tailScale);
+  const morph = SHAPE_BLEND_SLOPE * Math.abs(driftRate(k.shapeDrift));
   const steps = 32;
   const ds = (s1 - s0) / steps;
   let best = 0;
@@ -322,7 +354,7 @@ export function boundarySpeed(g: StackGeom, s0: number, s1: number, k: Knobs): n
     const [xb, yb] = bezier(g.p, b);
     const scale = Math.max(tailScale * Math.pow(headScale / tailScale, a), tailScale * Math.pow(headScale / tailScale, b));
     const move = ds === 0 ? 0 : Math.hypot(xb - xa, yb - ya) / Math.abs(ds);
-    best = Math.max(best, move + scale * reach * (Math.abs(lnRatio) + Math.abs(k.twist)));
+    best = Math.max(best, move + scale * reach * (Math.abs(lnRatio) + Math.abs(k.twist) + morph));
   }
   // Sampling can miss the fastest point between two samples.
   return best * 1.1 + 1e-4;
@@ -340,7 +372,7 @@ export function packFrame(state: FrameState, k: Knobs, out: Float32Array = new F
   const room = palIndex >= ROOM_PALETTE;
   const pal = PALETTES[Math.min(PALETTES.length - 1, Math.max(0, palIndex))];
   const g = hexToRgb(pal.ground);
-  set(SW.GROUND, g[0], g[1], g[2], Math.round(k.shape));
+  set(SW.GROUND, g[0], g[1], g[2], 0);
   pal.stops.forEach((hex, i) => {
     const c = hexToRgb(hex);
     set(SW.PAL + i, c[0], c[1], c[2], 0);
@@ -355,6 +387,9 @@ export function packFrame(state: FrameState, k: Knobs, out: Float32Array = new F
   set(SW.LOOK3, copiesFor(k.copies), nStacks, state.phase, k.sheen);
   set(SW.LOOK4, k.headBlur, k.stretch, k.multiply, k.steps * STEP_MAX);
   set(SW.FLAGS, room ? 1 : 0, 0, 0, 0);
+  const n = SHAPES.length;
+  const shapeBase = (((Math.round(k.shape) + state.morph) % n) + n) % n;
+  set(SW.SHAPE, shapeBase, driftRate(k.shapeDrift), spanOrigin(k.spread), 0);
   const [uTail, uHead] = span(state.head, k.spread, k.trail);
   const [tailScale, headScale] = endScales(k.size, k.taper);
   for (let j = 0; j < nStacks; j++) {

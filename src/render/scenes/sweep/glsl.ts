@@ -8,6 +8,9 @@
 // its depth inside the shape (Rim) and a linear Sheen, and its outline is
 // drawn on top in one of stack.ts's OUTLINE_STYLES. Pixels outside a
 // stack's bounding box (stack.ts's stackBounds, sent per frame) skip it.
+// A copy's shape is a place on the cyclic SHAPES list (stack.ts's Shape
+// drift and Morph): between two shapes, their distance fields are blended
+// by a smoothstep, so each shape holds a moment before the next takes over.
 //
 // Two stacks (a Pair) are composited as layers: the first over the second
 // and the ground, mixed by Multiply toward the first darkening what it
@@ -112,7 +115,7 @@ void main() {
   float px = 2.0 / max(uResolution.y, 1.0);
 
   vec4 g = uSw[SW_GROUND];
-  int shape = int(g.a + 0.5);
+  vec4 shapeC = uSw[SW_SHAPE];
   bool room = uSw[SW_FLAGS].x > 0.5;
   vec3 ground = room ? uPalGround : g.rgb;
   vec4 headC = uSw[SW_HEAD];
@@ -186,7 +189,14 @@ void main() {
       }
       vec2 q = turn2(-(xf.z + xf.w * s)) * d0 / sc;
       vec2 qs = vec2(q.x / stretch, q.y);
-      float d = shapeSdf(qs, shape) * min(stretch, 1.0) * sc;
+      float sx = shapeC.x + shapeC.y * (s - shapeC.z);
+      float sfl = floor(sx);
+      int sa = int(mod(sfl, ${SHAPES.length.toFixed(1)}) + 0.5) % ${SHAPES.length};
+      int sb = (sa + 1) % ${SHAPES.length};
+      float sf = smoothstep(0.0, 1.0, sx - sfl);
+      float d = shapeSdf(qs, sa);
+      if (sf > 0.0) d = mix(d, shapeSdf(qs, sb), sf);
+      d *= min(stretch, 1.0) * sc;
       if (d > margin) {
         k += max(1, int((d - margin) / max(stride, 1e-5)));
         continue;
@@ -194,7 +204,8 @@ void main() {
 
       float t = st.z + phase + age * bands + rim * sqrt(clamp(-d / sc, 0.0, 1.0)) + sheen * (0.35 * q.x + 0.2 * q.y);
       vec3 col = room ? roomPal(t) : pal5(t);
-      if (faces > 0.0 && shape == ${shape("Cube")}) col *= mix(1.0, cubeFace(qs), faces);
+      float cubeW = (sa == ${shape("Cube")} ? 1.0 - sf : 0.0) + (sb == ${shape("Cube")} ? sf : 0.0);
+      if (faces > 0.0 && cubeW > 0.0) col *= mix(1.0, cubeFace(qs), faces * cubeW);
       float alphaBase = opacity;
       if (k == 0) {
         col = mix(col, accent, headAmt);
