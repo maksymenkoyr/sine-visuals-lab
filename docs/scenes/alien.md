@@ -236,3 +236,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #374 (merged 2026-10-05): the same, rebased after #368 merged, plus the
   Play readout; then baked loops, Move, Bounce, and Cut on Drop.
 - #389 (draft, 2026-10-06): Bounce smoothness.
+- #405 (draft, 2026-10-06): Cut fires on the shared standout detector
+  (`src/render/standout.ts`), with a Cut threshold row and the "reach to cut"
+  line on its graph.

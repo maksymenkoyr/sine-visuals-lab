@@ -1408,3 +1408,6 @@ panel rendering in system fonts headlessly (not needed for the scripts to pass).
 - #213 (draft, 2026-09-29): the Strain Console in the app — Lanes and Knobs,
   Sensor angle, Trail life, Switching (Headcount) and Synergy; the box
   selection and its rows went.
+- #405 (draft, 2026-10-06): Dose on the shared `StandoutTrigger`
+  (`src/render/standout.ts`), same behaviour; its graph's dots keyed
+  "colony started".
