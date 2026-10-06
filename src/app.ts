@@ -2,7 +2,7 @@
 // controller it puts the in-memory look overlay over localStorage — see the
 // header of net/controllerStorageBoot.ts. A no-op for every other page.
 import "./net/controllerStorageBoot.ts";
-import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
+import { PAID_SCENE_IDS, sceneStage } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
 import {
   getInputDevicePref,
@@ -3005,7 +3005,7 @@ async function boot(): Promise<void> {
           return {
             scene: s,
             enabled,
-            draft: DRAFT_SCENE_IDS.has(s.id),
+            stage: sceneStage(s.id),
             reason: enabled ? undefined : "Needs a faster device",
           };
         }),
@@ -3112,7 +3112,14 @@ async function boot(): Promise<void> {
       },
       setMaster: (v: number) => setSceneMaster(v),
       scenes: () =>
-        listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
+        listScenes().map((s) => ({
+          id: s.id,
+          name: s.name,
+          // master-sweep's "featured" means Released only, so a scene in
+          // development counts as a draft here.
+          draft: sceneStage(s.id) !== "released",
+          paid: PAID_SCENE_IDS.has(s.id),
+        })),
     });
     // For headless room tests (tools/ and the e2e runs): what this page is
     // doing about its ears right now, read live off the connection. Added to

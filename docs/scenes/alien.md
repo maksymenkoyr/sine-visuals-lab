@@ -5,7 +5,7 @@ loops: each loop is one captured dance seen from its own angle, baked to a
 video. The music pays for the frames: the Move setting's wire sets how fast the
 loop on screen plays, and silence holds the frame. Bounce squashes him toward
 the floor and springs him back on its wire's hits. A loop repeats until the Cut
-setting's wire rises over the line under its graph. A draft, not on main yet
+setting's wire rises over the line under its graph. In development, on main
 (#374).
 
 ## Where the code is

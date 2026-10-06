@@ -7,8 +7,8 @@ lives as a sheet — rippling, bending, tumbling, stretched, seen in
 perspective from a camera that sweeps between poses on bar boundaries — but
 is really a set of dots free to take any formation (dot, line, sheet, tube,
 cube, tesseract). A musical hit sends a swell running along one row or
-column that balloons and merges the discs inside it into one blob. Draft, on
-main.
+column that balloons and merges the discs inside it into one blob. In
+development, on main.
 
 ## Where the code is
 

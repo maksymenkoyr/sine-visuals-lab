@@ -6,7 +6,8 @@ white core. It opens on one big cell; births fill in from a ring that closes
 on the centre while the zoom starts. The music sets how fast the cells fly
 (Speed), seeds a pulse of extra cells near the centre on each bass hit
 (Births), pulls the field back into one big cell on a drop (Relaunch) and
-brightens the lines with the treble (Lines). Draft scene, draft PR #380, not on main yet.
+brightens the lines with the treble (Lines). In development, on main; draft PR
+#380 is still open.
 
 ## Where the code is
 
