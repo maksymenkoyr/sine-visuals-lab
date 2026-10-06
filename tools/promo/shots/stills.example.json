@@ -1,0 +1,16 @@
+[
+  {"name": "set-card", "scene": "kaleidoscope", "size": [960, 600], "panel": "Set",
+   "steps": [{"click": "+ Add"}, {"scene": "silk"}, {"wait": 1500}, {"click": "+ Add"}, {"scene": "tangle"}, {"wait": 1500}, {"click": "+ Add"}, {"scene": "crystal"}, {"wait": 1500}, {"click": "+ Add"}, {"key": "2"}, {"scroll": "Set"}],
+   "css": "#fxBar,#recRow{display:none!important}"},
+  {"name": "effects", "scene": "kaleidoscope", "wait": 3000},
+  {"name": "scene-list", "scene": "silk", "size": [960, 600], "steps": [{"sel": "#sceneBtn"}]},
+  {"name": "midi", "scene": "kaleidoscope", "size": [960, 600], "panel": "MIDI", "steps": [{"scroll": "MIDI"}], "css": "#fxBar,#recRow{display:none!important}"},
+  {"name": "record", "scene": "kaleidoscope", "steps": [{"sel": "#recAspectBtn"}, {"sel": "#recBtn"}], "wait": 3500},
+  {"name": "overlay", "scene": "kaleidoscope", "panel": "Overlay", "steps": [{"scroll": "Overlay"}, {"type": ["Event or DJ name", "SATURDAY · ROOFTOP"]}, {"click": "Centre"}, {"sel": "#menuBtn"}], "wait": 2500},
+  {"name": "scene-swarm", "scene": "swarm", "hide": true, "wait": 6000},
+  {"name": "scene-toonrave", "scene": "toonrave", "hide": true, "wait": 6000},
+  {"name": "scene-longplay", "scene": "longplay", "hide": true, "panel": "View", "click": ["Reactor"], "steps": [{"sel": "#menuBtn"}], "wait": 9000},
+  {"name": "scene-tangle", "scene": "tangle", "hide": true, "wait": 6000},
+  {"name": "scene-alien", "scene": "alien", "hide": true, "wait": 6000},
+  {"name": "scene-chaikin", "scene": "chaikin", "hide": true, "wait": 14000}
+]
