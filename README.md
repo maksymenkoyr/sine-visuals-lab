@@ -46,7 +46,8 @@ deployed channels: pushing to `main` ships the **Insiders** channel
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
 channel (sinevisualslab.com)
 only updates when `main` is merged into the `production` branch
-(`npm run release` opens that pull request; merge it with a merge commit) —
+(`npm run release` opens that pull request — `/release` writes its notes,
+which become the GitHub Release; merge it with a merge commit) —
 see [`.github/workflows/release.yml`](.github/workflows/release.yml) and
 `src/version.ts`. Every merge to `main` bumps the patch version, every release
 bumps the minor, and the major is set by hand in `package.json`. Every open pull request also gets its own throwaway preview

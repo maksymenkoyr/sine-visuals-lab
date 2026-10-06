@@ -4,34 +4,37 @@ This file is expected to be rewritten wholesale each session — it's a snapshot
 not a history. Keep it short enough to read in one glance. Use `/wrap` to
 regenerate it at session close.
 
-_2026-10-04_
+_2026-10-06_
 
 ## In flight
 
-- **Release promo** — draft #313 (`worktree-promo-demo-first`). The v0.2.0
-  video: `~/Movies/sine-visuals-lab-v0.2.0-promo/`, 31.9 s. The PR makes
-  `tools/promo` produce it: scene takes hear the song through a fake mic,
-  demos first, pop-out/Cue/Play and the room drawn as a laptop with lit keys
-  over its second screen, the list card scrolling low in the frame, no fades.
-  `/release-promo` (`.claude/commands/release-promo.md`, its "Scenario")
-  records every call the user made, so the next run comes out the same.
-- **Other open PRs:** #317 CLAUDE.md review (draft); #307 Toon Rave "Energy"
-  label; #236 Output Cast mode (draft); #160 magnet slider; #74 architecture
-  doc (draft).
+- **Release notes** — draft #396: `/release` writes a plain-words release
+  story into the release PR, a picture for every change that can show one
+  (two across per area; no hand-picked highlights, the user's call on
+  2026-10-06). It opens the GitHub Release (the generated list folds under
+  it) and is where `/video-release-stable` starts. Also fixes the generated
+  list, which showed every commit since PRs began landing as merge commits.
+  The 0.3.0 notes are drafted in a private preview artifact,
+  claude.ai/artifact/MSZD7camR95HSvs5CHfBsp, whose `notes.md` is the source;
+  its pictures are on the `pr-screenshots` branch only, for review.
+- **Scenes:** #395 Sweep Shape drift and Morph; #377 Fractal Grid; #376
+  Echoes; #367 Long Play Pro views and Lift; #366 Chladni Toss, plates and
+  sand colour; #335 Physarum 2 agent sort.
+- **App:** #387 typed slider values; #385 owner-only Play in a room; #236
+  Cast mode; #160 magnet slider.
+- **Plans and docs:** #384 tempo and mic plan; #378 real-song tuning check;
+  #74 architecture doc.
 
 ## Open questions
 
-- Physarum 2's defaults barely pulse with real music (beat pulse 1.08 vs 1.48
-  for the user's look, whose drives are Speed boost/pump, Seed and Flash on
-  the beat and low onset) — make those drives the defaults? (Physarum 2
-  record, Known issues.)
-- The video was not posted; posting it needs the song's rights (a Primate
-  bootleg).
+- 0.3.0 notes: are the pictures, the headline and the lines right? Approving
+  them means uploading the pictures to the Insiders pre-release and opening
+  the release PR.
+- Physarum 2's defaults barely pulse with real music — make the user's
+  look's drives the defaults? (Physarum 2 record, Known issues.)
 
 ## Next up
 
-- Merge #313, then run `/release-promo` after the next Stable release — it
-  takes the release, reuses the last song and look unless given new ones,
-  and starts from the changelog.
-- Prune worktrees whose PRs merged (47 besides `main`; check each one's PR
-  with `gh pr view`).
+- Merge #396, then `/release` for 0.3.0 from the drafted notes; after the
+  release, `/video-release-stable`.
+- Prune worktrees whose PRs merged (check each with `gh pr view`).

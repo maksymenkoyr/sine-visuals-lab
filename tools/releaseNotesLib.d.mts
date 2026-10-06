@@ -32,8 +32,27 @@ export function categorize(change: {
   sceneNames?: string[];
 }): CategoryKey;
 export function formatEntry(entry: Pick<NoteEntry, "subject" | "pr" | "author" | "sha">): string;
+export interface LogCommit {
+  sha: string;
+  parents: string[];
+  subject: string;
+  body?: string;
+}
+
+export interface Change {
+  sha: string;
+  /** A merged pull request's first parent; null for a single commit. */
+  base: string | null;
+  pr: number | null;
+  subject: string;
+}
+
+export const NOTES_END: string;
+export function extractReleaseNotes(body: string | null | undefined): string;
+export function parsePrMerge(subject: string | null | undefined, body?: string | null): { pr: number; branch: string; title: string | null } | null;
+export function changesFromLog(log: LogCommit[], commitsOf: (sha: string) => string[]): Change[];
 export function renderNotes(input: {
-  highlights?: string;
+  notes?: string;
   entries: NoteEntry[];
   sceneVersions?: SceneVersionNote[];
   repo?: string | null;
