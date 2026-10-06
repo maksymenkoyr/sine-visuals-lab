@@ -72,7 +72,8 @@ Whether a video shows pairing a TV is that video's call.
 
 ## Content
 
-- Never a paid scene, never a scene in Stable's `DRAFT_SCENE_IDS`, never internal work.
+- Never a paid scene, never a scene Stable's `sceneStage` doesn't call released (a draft or one
+  in development), never internal work.
 - What changed comes from PR bodies, not titles: the best changes hide in bodies, and the user caught
   missed lines twice ("I'm pretty sure something was missed"). Check each claim against the release's
   final state, since a later PR may undo it.

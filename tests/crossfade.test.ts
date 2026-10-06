@@ -83,6 +83,28 @@ describe("createCrossfade", () => {
     expect(c.step(4300, TEMPO).stage).toBe("done");
   });
 
+  it("stretches the blend over several bars, still starting on the beat", () => {
+    const c = createCrossfade({ bars: 2 });
+    expect(c.step(0, TEMPO).stage).toBe("wait");
+    c.step(300, { ...TEMPO, beat: true });
+    const two = 2 * barLengthMs(120);
+    expect(c.step(300 + two / 2, TEMPO).mix).toBeCloseTo(0.5, 5);
+    expect(c.step(300 + two, TEMPO).stage).toBe("done");
+  });
+
+  it("takes its bars from the fallback length with no tempo", () => {
+    const c = createCrossfade({ bars: 0.5 });
+    c.step(0, NO_TEMPO);
+    expect(c.step(CROSSFADE_FALLBACK_MS / 4, NO_TEMPO).mix).toBeCloseTo(0.5, 5);
+    expect(c.step(CROSSFADE_FALLBACK_MS / 2, NO_TEMPO).stage).toBe("done");
+  });
+
+  it("an explicit length beats bars", () => {
+    const c = createCrossfade({ lengthMs: 4000, bars: 4 });
+    c.step(0, { ...TEMPO, beat: true });
+    expect(c.step(4000, TEMPO).stage).toBe("done");
+  });
+
   it("cuts on the beat with no blend", () => {
     const c = createCrossfade({ cut: true });
     expect(c.step(0, TEMPO).stage).toBe("wait");

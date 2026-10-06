@@ -92,6 +92,10 @@ export const POWER_SQUARE_PX = 26;
 /** A folded card's title-bar height; the Auto master bar (deviceMenu.ts)
  *  is set to it so it sits in the same register as the cards below it. */
 export const FOLDED_BAR_PX = 32;
+/** The room the Hits and Timing strips (audioMeters.ts) keep free at their
+ *  right edge for their lane jacks: the trace canvas and a lane's glow both
+ *  stop this far short, so no trace runs under a jack or its usage dots. */
+export const LANE_JACK_GUTTER_PX = 20;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -128,9 +132,18 @@ export const scanlineStyle = `
 const STYLE_ID = "vc-controls-styles";
 
 const stylesheet = `
+/* The screen height every panel column is sized from. A plain 100vh is
+ * Safari's taller, toolbar-hidden height, so on an iPad (or iPhone) a
+ * column sized from it ran past the visible bottom: over the gear that
+ * closes the panel, and with its last rows out of scroll reach. 100dvh
+ * follows the toolbar; browsers without dvh keep 100vh. */
 :root {
+  --vc-vh: 100vh;
   --vc-glass-bg: rgba(8, 11, 10, 0.82);
   --vc-glass-filter: none;
+}
+@supports (height: 100dvh) {
+  :root { --vc-vh: 100dvh; }
 }
 :root.vc-glass-blur {
   --vc-glass-bg: rgba(8, 11, 10, 0.2);
@@ -149,7 +162,8 @@ const stylesheet = `
  * "inside the panel") but docks itself independently to the opposite
  * (top-left) corner of the screen in the wide layout — see .vc-spectrum-col
  * below. Both sides stop short of the bottom-right chrome buttons
- * (index.html) so the gear that closes the panel stays reachable.
+ * (index.html) so the gear that closes the panel stays reachable — which
+ * holds only while their heights come from --vc-vh (above), not 100vh.
  *
  * pointer-events: none plus "> *" restoring auto on direct children: a flex
  * row's own box is always as tall as its tallest child (align-items can't
@@ -168,7 +182,7 @@ const stylesheet = `
 .vc-root {
   position: fixed; top: 16px; right: 16px; z-index: 30;
   display: none; gap: 4px; align-items: flex-start;
-  max-height: calc(100vh - 74px);
+  max-height: calc(var(--vc-vh) - 74px);
   color: #fff; font-family: ${FONT_LABEL};
   pointer-events: none;
 }
@@ -184,7 +198,7 @@ const stylesheet = `
  * that same media query, overridden below. */
 .vc-power-col {
   width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 74px);
+  max-height: calc(var(--vc-vh) - 74px);
 }
 .vc-power-col > * { flex-shrink: 0; }
 /* The power glyph button shown only while the card is folded (in the wide
@@ -206,7 +220,7 @@ const stylesheet = `
  * by an 8px gap rather than covering it. */
 .vc-spectrum-col {
   width: 377px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 76px);
+  max-height: calc(var(--vc-vh) - 76px);
   position: fixed; top: 60px; left: 16px; z-index: 30;
 }
 .vc-spectrum-col > * { flex-shrink: 0; }
@@ -215,7 +229,7 @@ const stylesheet = `
 .vc-meters > * { flex-shrink: 0; }
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 74px); overflow-y: auto;
+  max-height: calc(var(--vc-vh) - 74px); overflow-y: auto;
 }
 /* Solo (deviceMenu.ts's setSolo/applySolo): the column takes its full
  * height and what's left in it sits at the bottom, just above the footer
@@ -223,7 +237,7 @@ const stylesheet = `
  * an auto top margin rather than justify-content: flex-end, which would
  * make an overflowing pane's top unreachable by scrolling. */
 @media (min-width: ${STACK_BELOW_PX + 1}px) {
-  .vc-root.vc-solo .vc-controls-col { height: calc(100vh - 74px); }
+  .vc-root.vc-solo .vc-controls-col { height: calc(var(--vc-vh) - 74px); }
   .vc-root.vc-solo .vc-controls-col > :not(.vc-solo-hidden):not(.vc-dock) { margin-top: auto; }
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
@@ -309,15 +323,11 @@ const stylesheet = `
    * scrolls. iOS WebKit won't touch-scroll a scroller whose own box has
    * pointer-events: none, even when the finger lands on an auto child, so
    * leaving the base rule in place made the whole panel unscrollable on
-   * iPhone. 100dvh follows Safari's collapsing toolbar (a plain 100vh is
-   * the taller, toolbar-hidden height, so the panel's tail — and the end of
-   * its scroll range — hid under the toolbar); browsers without dvh keep
-   * the vh line. */
+   * iPhone. */
   .vc-root {
     flex-direction: column; width: min(320px, 88vw); overflow-y: auto;
     pointer-events: auto;
-    max-height: calc(100vh - 74px);
-    max-height: calc(100dvh - 74px);
+    max-height: calc(var(--vc-vh) - 74px);
   }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
   /* Dissolve the spectrum column so its bands block (.vc-spectrum-card —
@@ -751,17 +761,33 @@ body.vc-keys-reveal [data-keycap]::after {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }
 
-/* Dev-only typed-value field (deviceMenu.ts's pinOpenEdit), swapped in over a
- * row's digits on click. Inputs don't inherit color from an ancestor span the
- * way inline text does, so this needs its own color rather than relying on
- * readoutStyle's — and living here rather than in the inline cssText lets the
- * row's --vc-accent reach it, matching the underline to whichever card the
- * row belongs to. */
-.vc-pin-input {
-  box-sizing: border-box; color: #fff; caret-color: var(--vc-accent);
-  border: none; border-bottom: 1px solid var(--vc-accent); border-radius: 1px;
-  outline: none; padding: 0 2px 1px; margin: 0 -2px;
-  background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
+/* A row's readout digits, typable in place (deviceMenu.ts's createControlRow
+ * typed entry). They look as they always have — at rest, on hover and while
+ * typing — bar the text cursor, a caret in the row's --vc-accent, and the
+ * highlight on what's selected: never an input box, an underline or a
+ * background. */
+.vc-digits-typable { cursor: text; }
+.vc-digits-edit { outline: none; caret-color: var(--vc-accent); min-width: 0.6em; }
+.vc-digits-edit::selection {
+  color: #fff; background: color-mix(in srgb, var(--vc-accent) 45%, transparent);
+}
+
+/* The ⚠ left of a row's number while it holds a custom value (deviceMenu.ts's
+ * createControlRow, render/customValues.ts), in the row's --vc-accent. Its
+ * faint glow is a blurred, thicker copy under the crisp icon, and only that
+ * copy's opacity pulses: an opacity animation runs on the compositor, so it
+ * repaints nothing, and it only exists while a custom value does. Reduced
+ * motion holds the glow still. */
+.vc-custom-mark { position: relative; align-self: center; line-height: 0; color: var(--vc-accent); }
+.vc-custom-icon { position: relative; }
+.vc-custom-glow {
+  position: absolute; left: 0; top: 0; filter: blur(1.5px); opacity: 0.35;
+  animation: vc-custom-glow 2.4s ease-in-out infinite alternate; will-change: opacity;
+}
+.vc-custom-glow path { stroke-width: 2.4; }
+@keyframes vc-custom-glow { from { opacity: 0.15; } to { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-custom-glow { animation: none; }
 }
 
 /* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane
@@ -819,7 +845,7 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-row-fed-soft { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 45%, transparent); }
 .vc-row-fed-faint { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 25%, transparent); }
 .vc-lane-glow {
-  position: absolute; left: 0; right: 20px; pointer-events: none; border-radius: 2px;
+  position: absolute; left: 0; right: ${LANE_JACK_GUTTER_PX}px; pointer-events: none; border-radius: 2px;
   background: color-mix(in srgb, var(--c) 22%, transparent); opacity: 0; transition: opacity 0.15s ease;
 }
 .vc-lane-glow.on { opacity: 1; }

@@ -41,6 +41,7 @@ import {
   FONT_MONO,
   HOT_RED,
   INPUT_GREEN,
+  LANE_JACK_GUTTER_PX,
   STRIP_HIGH,
   STRIP_LOW,
   STRIP_MID,
@@ -58,6 +59,7 @@ import {
   groupHeading,
   groupHeadingFirstStyle,
   groupHeadingStyle,
+  percentReadout,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -1157,9 +1159,11 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   // than the row itself (which is `position: relative` too, but its own top
   // edge is above the head and shifts with font metrics) — the wrapper's
   // own top edge is exactly the canvas's, so `i * HITS_LANE_HEIGHT_PX`
-  // lands each jack on its own lane without measuring anything.
+  // lands each jack on its own lane without measuring anything. Its right
+  // padding (LANE_JACK_GUTTER_PX) ends the canvas short of the jacks, which
+  // sit in that padding, so no lane's trace runs on under its jack.
   const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = "position: relative; margin-top: 4px;";
+  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
@@ -1563,8 +1567,10 @@ function createTimingStrip(mountJack: MountJack) {
   });
   const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX);
   const ctx = ring.ctx;
+  // Padded on the right like createHitsHistory's own vizWrap, so the jacks
+  // below sit past the end of the trace rather than on top of it.
   const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = "position: relative; margin-top: 4px;";
+  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
@@ -2170,8 +2176,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     max: HIT_AMOUNT_MAX,
     defaultValue: HIT_AMOUNT_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description:
       "How much a hit's size counts. Off: every hit lands at full strength, exactly as before. Full: a hit's pulse height on the hits history above is its own graded strength.",
   });
@@ -2199,8 +2204,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     max: HIT_LOUDNESS_MAX,
     defaultValue: HIT_LOUDNESS_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description:
       "How much of a hit's strength comes from how loud it actually was, rather than how far it stood out from the recent average. 0: stand-out only. 100: loudness only.",
   });
@@ -2214,8 +2218,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     max: HIT_FLOOR_MAX,
     defaultValue: HIT_FLOOR_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description:
       "Hits graded weaker than this count as nothing; the rest are rescaled to fill 0 to 100. 0: nothing is discarded — the dashed line on the hits history above marks where it sits.",
   });

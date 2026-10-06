@@ -64,21 +64,21 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
 export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.autoGain"];
 
 /** Shelves: stores that list things to pick from (the saved Looks, the Set's
- *  pads and its Autopilot dials) rather than describe the picture. Mirrored
- *  like any key, but outputSync.ts's stateKey leaves them out, so filling a
- *  shelf never reads as a difference between preview and output. Exact keys,
- *  not prefixes: "vibe.set" is a prefix of unrelated keys. */
-export const SHELF_KEYS: ReadonlySet<string> = new Set(["vibe.looks", "vibe.set"]);
+ *  pads and its Autopilot dials) rather than describe the picture — and, for
+ *  the same reason, how a scene change arrives (render/sceneTransition.ts).
+ *  Mirrored like any key, but outputSync.ts's stateKey leaves them out, so
+ *  filling a shelf never reads as a difference between preview and output.
+ *  Exact keys, not prefixes: "vibe.set" is a prefix of unrelated keys. */
+export const SHELF_KEYS: ReadonlySet<string> = new Set(["vibe.looks", "vibe.set", "vibe.transition"]);
 
 /** Keys under `vibe.*` that are one device's own and so never join the room
  *  look, though the pop-out still mirrors them: the Looks library (a shelf of
- *  looks, not the look on screen), dev pins, each window's output/preview
+ *  looks, not the look on screen), each window's output/preview
  *  settings and the panel's own chrome (the glass blur, ui/glassPref.ts). Every `vibe.` key literal
  *  in src is classified in tests/syncedScope.test.ts, so a new key cannot
  *  slip into the room unseen — add it here if it is device-local. */
 export const ROOM_EXCLUDED_PREFIXES: readonly string[] = [
   "vibe.looks",
-  "vibe.devPins",
   "vibe.output.",
   "vibe.preview.",
   "vibe.panelBlur",

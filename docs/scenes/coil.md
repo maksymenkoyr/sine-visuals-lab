@@ -5,7 +5,7 @@ stacked into itself by the shell-coiling rule (each copy smaller and turned a
 little), streaming outward from the centre, over a background that is the
 previous frame shrunk by half, turned a quarter and tiled — so every earlier
 frame recurses into it. The music sets how fast the paste flows, when the coil
-falls back, and when it resets to a new small shape. Draft scene.
+falls back, and when it resets to a new small shape. In development, on main.
 
 ## Where the code is
 

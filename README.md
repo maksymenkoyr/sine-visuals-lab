@@ -21,8 +21,10 @@ Press **F** for fullscreen and **S** for settings.
   contrast and smoothing to the music's character in real time, and every
   control can be taken over by hand.
 
-Scenes absent from `DRAFT_SCENE_IDS` (in `src/render/scenes/index.ts`) are
-featured; the rest sit behind the gallery's draft toggle.
+The gallery has three sections, set in `src/render/scenes/index.ts`: scenes
+in `IN_DEVELOPMENT_SCENE_IDS` show below the featured ones, and scenes in
+`DRAFT_SCENE_IDS` sit greyed out behind the gallery's draft toggle. Every other
+scene is featured.
 
 It's early and built by one person. Criticism, device reports, scene ideas and
 pull requests are all welcome: open an issue, start a
@@ -44,7 +46,8 @@ deployed channels: pushing to `main` ships the **Insiders** channel
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
 channel (sinevisualslab.com)
 only updates when `main` is merged into the `production` branch
-(`npm run release` opens that pull request; merge it with a merge commit) —
+(`npm run release` opens that pull request — `/release` writes its notes,
+which become the GitHub Release; merge it with a merge commit) —
 see [`.github/workflows/release.yml`](.github/workflows/release.yml) and
 `src/version.ts`. Every merge to `main` bumps the patch version, every release
 bumps the minor, and the major is set by hand in `package.json`. Every open pull request also gets its own throwaway preview

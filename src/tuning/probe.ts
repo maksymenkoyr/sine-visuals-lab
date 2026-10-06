@@ -9,7 +9,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneExpansion, getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
 import { getOverride, isAutoPinned } from "./overrides.ts";
-import { getPin } from "./pins.ts";
+import { getCustomValue } from "../render/customValues.ts";
 import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
 
 export interface ProbeInput {
@@ -46,7 +46,7 @@ export interface ProbeSettingValue {
   base: number;
   resolved: number;
   /** "override" (pinned by the tuning bus, incl. auto-pin), "pin" (typed
-   *  into the row past its spec range — see tuning/pins.ts), "auto"
+   *  into the row past its slider — a custom value, render/customValues.ts), "auto"
    *  (music-driven), or "manual" (auto disabled for this key — base is the
    *  stored value; `resolved` is that value once resolveSceneSetting has
    *  applied the device-wide scene master, so the two only match while the
@@ -110,7 +110,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     const mode: ProbeSettingValue["mode"] =
       getOverride(sceneId, spec.key) !== undefined
         ? "override"
-        : getPin(sceneId, spec.key) !== undefined
+        : getCustomValue(sceneId, spec.key) !== undefined
           ? "pin"
           : isAutoPinned()
             ? "override"

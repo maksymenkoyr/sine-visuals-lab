@@ -8,6 +8,7 @@ import {
   type RecordAspect,
 } from "./clipFormat.ts";
 import type { ClipRecorder } from "./clipRecorder.ts";
+import { setLiveText } from "./liveText.ts";
 
 /**
  * The on-screen half of the clip recorder (index.html's #recBtn and
@@ -63,6 +64,9 @@ export function createRecordControls(recorder: () => ClipRecorder, els: RecordCo
   let aspect = loadRecordAspect();
   let visible = false;
   let tick = 0;
+  const recDot = document.createElement("span");
+  recDot.className = "recDot";
+  const recClock = document.createTextNode("");
 
   function render(): void {
     const rec = recorder().recording();
@@ -72,11 +76,14 @@ export function createRecordControls(recorder: () => ClipRecorder, els: RecordCo
     recBtn.setAttribute("aria-pressed", String(rec));
     recBtn.title = rec ? "Stop recording and save the clip" : "Record a clip of the visuals with the sound, saved when you stop";
     if (rec) {
-      const dot = document.createElement("span");
-      dot.className = "recDot";
-      recBtn.replaceChildren(dot, ` ${formatElapsed(recorder().elapsedMs())}`);
+      // The clock ticks inside the Stop button, so it's one dot and one text
+      // node kept across ticks, written in place (liveText.ts) — a fresh node
+      // per tick made Safari drop a Stop press that straddled one.
+      if (recBtn.firstChild !== recDot || recBtn.lastChild !== recClock) recBtn.replaceChildren(recDot, recClock);
+      const text = ` ${formatElapsed(recorder().elapsedMs())}`;
+      if (recClock.data !== text) recClock.data = text;
     } else {
-      recBtn.textContent = "RECORD";
+      setLiveText(recBtn, "RECORD");
     }
     aspectBtn.textContent = RECORD_ASPECT_LABELS[aspect].toUpperCase();
     aspectBtn.disabled = rec;

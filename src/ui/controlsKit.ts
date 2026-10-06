@@ -65,6 +65,14 @@ export const readoutStyle = `display: flex; align-items: baseline; gap: 4px; col
 export const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px; -webkit-text-stroke: 1px transparent;`;
 export const digitsTextStyle = `font: 400 11px/1 ${FONT_MONO};`;
 export const unitStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
+/** A 0..1 control row shown as a percent — spread into createControlRow's
+ *  spec (deviceMenu.ts). `typedScale` keeps a number typed into the readout
+ *  reading as the percent it shows. */
+export const percentReadout = {
+  unit: "%",
+  format: (value: number) => String(Math.round(value * 100)),
+  typedScale: 100,
+};
 
 const rowSpacerStyle = `height: 12px;`;
 // A divider-with-caption between blocks of rows — a step down from a card

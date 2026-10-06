@@ -16,6 +16,7 @@ import {
   saveSharedLook,
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
+import { clearCustomValue, getCustomValue, setCustomValue } from "../src/render/customValues.ts";
 
 // Vitest runs under environment: "node" (vitest.config.ts) — no localStorage
 // global at all, mirroring panelFolds.test.ts. Proves the module tolerates
@@ -280,5 +281,38 @@ describe("saveSharedLook", () => {
     saveLook(look);
     saveSharedLook({ ...look });
     expect(listLooks("shared-scene-c")).toHaveLength(1);
+  });
+});
+
+describe("custom values in a Look", () => {
+  it("captures a custom value as the number on screen, not the slider's end", () => {
+    const sceneId = "look-custom-capture";
+    setSceneSetting(sceneId, FOCUS, 1);
+    setCustomValue(sceneId, FOCUS.key, 1.4);
+    expect(captureLook("L", sceneId, SPECS).manual.focus).toBe(1.4);
+    clearCustomValue(sceneId, FOCUS.key);
+  });
+
+  it("applies a value past the slider as the slider's end plus a custom value", () => {
+    const sceneId = "look-custom-apply";
+    applyLook({ name: "L", sceneId, manual: { focus: 1.4, breathe: 0.2 } }, SPECS);
+    expect(getSceneSetting(sceneId, FOCUS)).toBe(1);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBe(1.4);
+    expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
+  });
+
+  it("bounds a shared link's custom value like a typed one", () => {
+    const sceneId = "look-custom-bound";
+    applyLook({ name: "L", sceneId, manual: { focus: 1e9 } }, SPECS);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBe(2);
+  });
+
+  it("drops a custom value the Look doesn't carry, whether listed in range or absent", () => {
+    const sceneId = "look-custom-drop";
+    setCustomValue(sceneId, FOCUS.key, 1.5);
+    setCustomValue(sceneId, BREATHE.key, 1.5);
+    applyLook({ name: "L", sceneId, manual: { focus: 0.4 } }, SPECS);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBeUndefined();
+    expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
   });
 });

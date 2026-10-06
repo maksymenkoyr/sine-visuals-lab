@@ -1,5 +1,7 @@
 import { listScenes, registerScene } from "../scene.ts";
 import { collectPrivateScenes } from "./privateScenes.ts";
+import { fractalGridScene } from "./fractalgrid/index.ts";
+import { codeRainScene } from "./coderain/index.ts";
 import { longPlayScene } from "./longplay/index.ts";
 import { swarmScene } from "./swarm/index.ts";
 import { coilScene } from "./coil/index.ts";
@@ -32,19 +34,23 @@ import { silkScene } from "./silk/index.ts";
 import { skyScene } from "./sky/sky.ts";
 import { gatesScene } from "./gates/index.ts";
 import { toonraveScene } from "./toonrave/index.ts";
+import { sweepScene } from "./sweep/index.ts";
 import { tangleScene } from "./tangle/index.ts";
 import { chaikinScene } from "./chaikin/index.ts";
 import { alienScene } from "./alien/index.ts";
 
-// Registration order is gallery display order (listScenes() preserves Map
-// insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
-// below) go first, drafts follow. Within each group the newest scene comes
-// first: a scene you just added goes at the top of the drafts, so it's the
-// first tile behind the gallery's draft toggle. (Registering it here is also
-// what lets vite-scene-links-plugin.ts print its link when you start
-// `npm run dev` with its files changed.)
+// Registration order is display order within each gallery section
+// (listScenes() preserves Map insertion order; sceneStage(), below, picks the
+// section) — the featured scenes go first, the rest follow. Within each group
+// the newest scene comes first: a scene you just added goes at the top of the
+// drafts, so it's the first tile behind the gallery's draft toggle.
+// (Registering it here is also what lets vite-scene-links-plugin.ts print its
+// link when you start `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(fractalGridScene);
+registerScene(codeRainScene);
+registerScene(sweepScene);
 registerScene(chaikinScene);
 registerScene(alienScene);
 registerScene(tangleScene);
@@ -79,10 +85,10 @@ registerScene(moire2Scene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
 
-/** Scenes still rough enough to sit behind the gallery's "draft" toggle —
- *  the featured scenes registered above it are deliberately absent. Paid
- *  scenes checked out locally add themselves below (see privateScenes.ts). */
-const draftIds = new Set([
+/** Scenes being worked on now: the gallery shows them open, in their own
+ *  "In development" section between the released scenes and the drafts. A
+ *  scene sits in this set or in draftIds below, never both. */
+const inDevelopmentIds = new Set([
   "chaikin",
   "alien",
   "tangle",
@@ -90,6 +96,17 @@ const draftIds = new Set([
   "longplay",
   "swarm",
   "coil",
+  "shards",
+  "ambience",
+]);
+
+/** Scenes still rough enough to sit behind the gallery's "draft" toggle —
+ *  the featured scenes registered above it are deliberately absent. Paid
+ *  scenes checked out locally add themselves below (see privateScenes.ts). */
+const draftIds = new Set([
+  "fractalgrid",
+  "coderain",
+  "sweep",
   "silk",
   "slats",
   "physarum",
@@ -108,9 +125,7 @@ const draftIds = new Set([
   "dancers",
   "powder",
   "storm",
-  "ambience",
   "kaleidoscope",
-  "shards",
   "petri",
   "crystal",
   "fluid",
@@ -129,6 +144,17 @@ for (const id of privateScenes.draftIds) draftIds.add(id);
 for (const error of privateScenes.errors) console.warn(`[private scenes] ${error}`);
 
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
+export const IN_DEVELOPMENT_SCENE_IDS: ReadonlySet<string> = inDevelopmentIds;
+
+/** Which gallery section a scene sits in: released (featured), in
+ *  development, or draft — the two sets above decide. */
+export type SceneStage = "released" | "development" | "draft";
+
+export function sceneStage(id: string): SceneStage {
+  if (draftIds.has(id)) return "draft";
+  if (inDevelopmentIds.has(id)) return "development";
+  return "released";
+}
 
 // Ids of the scenes collected from ./private/ above — tools/master-sweep.mjs
 // skips these by default (--include-paid opts back in): nothing measured
@@ -136,6 +162,9 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
 
 export {
+  fractalGridScene,
+  codeRainScene,
+  sweepScene,
   chaikinScene,
   alienScene,
   tangleScene,

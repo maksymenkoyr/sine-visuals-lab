@@ -204,6 +204,10 @@
         transform: rotate(var(--a)) scaleY(var(--bs, 0));
         transition: transform 0.36s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.24s ease;
       }
+      /* Open, the gear is the way out, so it sits above the panel's own
+       * z-index (.vc-root, controlsTheme.ts): if a column ever does reach
+       * this corner, it slides under the gear instead of covering it. */
+      #menuBtn[aria-pressed="true"] { z-index: 31; }
       #menuBtn[aria-pressed="true"] .mb-ring { --rs: 0.3; opacity: 0; }
       #menuBtn[aria-pressed="true"] .mb-tooth { --ts: 0; opacity: 0; }
       #menuBtn[aria-pressed="true"] .mb-bar { --bs: 1; opacity: 1; transition-delay: 0.14s; }
@@ -222,7 +226,8 @@
       }
       /* Top-left of a scene: a plain "back to gallery" chip and a stop — no
        * branding, the visual stays the hero. The room panel's button, shown
-       * only while a room exists, rides along at the end. Squared, unlike the round
+       * only while a room exists, rides along, then the scene's own name,
+       * which opens the scene list (src/ui/scenePicker.ts). Squared, unlike the round
        * buttons, and laid out by this flex row rather than fixed offsets
        * because the chip's width is its label's. */
       #sceneNav {
@@ -231,6 +236,8 @@
         left: 16px;
         z-index: 5;
         display: flex;
+        flex-wrap: wrap; /* a phone: the version drops under the chips rather than off the edge */
+        max-width: calc(100vw - 32px);
         align-items: center;
         gap: 4px;
       }
@@ -845,6 +852,7 @@
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="This room's devices">&#9638; ROOM</button>
       <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
+      <button id="sceneBtn" class="iconBtn" type="button"></button>
       <span id="sceneVersion" tabindex="0"></span>
     </div>
     <!-- Output controls (src/ui/outputControls.ts), top centre: shown only

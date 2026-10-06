@@ -33,11 +33,26 @@ import {
   ROW_LO,
   TEX_H,
   TEX_W,
+  INWARD_FLOOR,
+  MAX_SHIFT,
+  MAX_WEIGHT,
   fillSeeds,
   rowsFor,
   type Kicks,
   type SeedFrame,
+  type SeedMove,
 } from "../src/render/scenes/chaikin/seeds.ts";
+import {
+  addSwell,
+  createFireflies,
+  fireOrder,
+  firePop,
+  stepFireflies,
+  swellBar,
+  swellFrame,
+  type Fireflies,
+  type FirefliesInput,
+} from "../src/render/scenes/chaikin/motion.ts";
 
 const DT = 1 / 60;
 const DELTA = (2 * Math.PI) / 44;
@@ -243,5 +258,126 @@ describe("chaikin seeds", () => {
     const rows = rowsFor(rMax, 44);
     expect((rows - 1 + ROW_LO) * DELTA).toBeGreaterThan(latticeU(rMax));
     expect(rowsFor(100, 96)).toBe(MAX_ROWS);
+  });
+});
+
+describe("chaikin motion", () => {
+  const moveAt = (s: ReturnType<typeof swellFrame>, u: number, th: number, g: number, c: number): SeedMove => {
+    const out = { du: 0, dth: 0, dw: 0 };
+    addSwell(s, u, th, g, c, out);
+    return out;
+  };
+  const swell = (over: Partial<Parameters<typeof swellFrame>[0]> = {}) =>
+    swellFrame({ height: 1, wavelength: 7, arms: 3, travel: 1, order: 1, bar: 0.3, delta: DELTA, ...over });
+
+  it("eases each beat of the swell's bar clock without a jump between beats", () => {
+    expect(swellBar(0.3, 0.2, 0)).toBeCloseTo(0.3, 9);
+    let prev = swellBar(0, 0, 1);
+    for (let b = 0.01; b < 8; b += 0.01) {
+      const bar = swellBar((b / 4) % 1, b % 1, 1);
+      const step = bar - prev;
+      expect(Math.min(Math.abs(step), Math.abs(step + 1))).toBeLessThan(0.05);
+      prev = bar;
+    }
+  });
+
+  it("closes the swell round the circle even when Arms isn't whole", () => {
+    const s = swell({ arms: 2.6, travel: 1.4 });
+    const a = moveAt(s, 1.5, 0.4, 7, 3);
+    const b = moveAt(s, 1.5, 0.4 + 2 * Math.PI, 7, 3);
+    expect(b.du).toBeCloseTo(a.du, 9);
+    expect(b.dth).toBeCloseTo(a.dth, 9);
+    expect(b.dw).toBeCloseTo(a.dw, 9);
+    expect(Math.hypot(a.du, a.dth)).toBeGreaterThan(0);
+  });
+
+  it("moves every seed as one wave at Order 1, each on its own at Order 0, and not at all at height 0", () => {
+    const one = swell();
+    expect(moveAt(one, 1.2, 1, 3, 4).du).toBeCloseTo(moveAt(one, 1.2, 1, 90, 17).du, 12);
+    const own = swell({ order: 0 });
+    expect(moveAt(own, 1.2, 1, 3, 4).du).not.toBeCloseTo(moveAt(own, 1.2, 1, 90, 17).du, 3);
+    expect(moveAt(swell({ height: 0 }), 1.2, 1, 3, 4)).toEqual({ du: 0, dth: 0, dw: 0 });
+  });
+
+  it("caps a seed's move: within MAX_SHIFT cells, MAX_WEIGHT cell areas, never past INWARD_FLOOR", () => {
+    const base = new Float32Array(TEX_W * TEX_H * 4);
+    const moved = new Float32Array(TEX_W * TEX_H * 4);
+    fillSeeds(base, seedFrame());
+    for (const push of [50, -50]) {
+      fillSeeds(moved, seedFrame({ move: (_u, _th, _g, _t, _c, out) => ((out.du = push), (out.dth = push), (out.dw = 50)) }));
+      for (let t = 0; t < 30; t++) {
+        for (let c = 0; c < 44; c++) {
+          const [x0, y0, w0, a] = texel(base, c, t);
+          if (a <= 0) continue;
+          const [x1, y1, w1] = texel(moved, c, t);
+          const u0 = latticeU(Math.hypot(x0, y0));
+          const u1 = latticeU(Math.hypot(x1, y1));
+          const dth = Math.atan2(Math.sin(Math.atan2(y1, x1) - Math.atan2(y0, x0)), Math.cos(Math.atan2(y1, x1) - Math.atan2(y0, x0)));
+          expect(Math.abs(u1 - u0)).toBeLessThanOrEqual(MAX_SHIFT * DELTA + 1e-4);
+          expect(u1).toBeGreaterThanOrEqual(INWARD_FLOOR * u0 - 1e-4);
+          expect(Math.abs(dth)).toBeLessThanOrEqual(MAX_SHIFT * DELTA + 1e-4);
+          const S = CORE_R * Math.cosh(u0);
+          expect(w1 - w0).toBeLessThanOrEqual(MAX_WEIGHT * S * S * DELTA * DELTA * (1 + 1e-4));
+          expect(w1 - w0).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  const flyInput = (over: Partial<FirefliesInput> = {}): FirefliesInput => ({
+    dtSec: 1 / 60,
+    rows: 26,
+    cols: 44,
+    zRow: 500,
+    bpm: 120,
+    beatPhase: 0,
+    pull: 0.5,
+    lock: 0,
+    spread: 0.6,
+    snap: 0,
+    ...over,
+  });
+  const runFlies = (f: Fireflies, seconds: number, over: Partial<FirefliesInput> = {}): void => {
+    for (let i = 0; i < seconds * 60; i++) stepFireflies(f, flyInput({ ...over, beatPhase: (i / 30) % 1 }));
+  };
+  // Mean cos of the phase difference between neighbours along a row: 1 when
+  // each firefly is in step with the next, about 0 when they're scattered.
+  const localOrder = (f: Fireflies): number => {
+    let s = 0;
+    for (let t = 0; t < f.rows; t++)
+      for (let c = 0; c < f.cols; c++) s += Math.cos(f.grid[t * f.cols + c] - f.grid[t * f.cols + ((c + 1) % f.cols)]);
+    return s / (f.rows * f.cols);
+  };
+
+  it("fireflies fall into step with their neighbours under a strong pull and stay scattered without one", () => {
+    const pulled = createFireflies();
+    runFlies(pulled, 8, { pull: 1, spread: 0.2 });
+    expect(localOrder(pulled)).toBeGreaterThan(0.9);
+    const free = createFireflies();
+    runFlies(free, 8, { pull: 0, spread: 1 });
+    expect(Math.abs(localOrder(free))).toBeLessThan(0.3);
+  });
+
+  it("a strong beat lock puts every firefly on the beat", () => {
+    const f = createFireflies();
+    runFlies(f, 8, { pull: 0, lock: 1, spread: 0.2 });
+    expect(fireOrder(f)).toBeGreaterThan(0.9);
+  });
+
+  it("a full drop sync snaps every phase to the beat, so every cell pops on it", () => {
+    const f = createFireflies();
+    runFlies(f, 1, { pull: 0 });
+    expect(fireOrder(f)).toBeLessThan(0.3);
+    stepFireflies(f, flyInput({ dtSec: 0, beatPhase: 0, snap: 1 }));
+    expect(fireOrder(f)).toBeCloseTo(1, 6);
+    expect(firePop(f, 3, 7)).toBeCloseTo(1, 6);
+  });
+
+  it("a firefly keeps its phase as the zoom carries its row outward", () => {
+    const f = createFireflies();
+    runFlies(f, 0.5);
+    const row5 = f.grid.slice(5 * 44, 6 * 44);
+    stepFireflies(f, flyInput({ dtSec: 0, zRow: 501 }));
+    expect(Array.from(f.grid.slice(6 * 44, 7 * 44))).toEqual(Array.from(row5));
   });
 });

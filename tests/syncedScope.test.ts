@@ -35,6 +35,7 @@ function fakeStorage(init: Record<string, string> = {}) {
 const CLASSIFIED: Record<string, boolean> = {
   // Look state: what a scene looks like.
   "vibe.sceneSettings": true,
+  "vibe.customValues": true, // settings typed past their slider (render/customValues.ts)
   "vibe.sceneAuto": true,
   "vibe.sceneMaster": true,
   "vibe.sceneExpansion": true,
@@ -63,6 +64,8 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.overlayLogoLocal": false,
   // The Set card's pads and Autopilot dials: a shelf, but one a paired phone must get.
   "vibe.set": true,
+  // Cut or Fade between scenes (render/sceneTransition.ts): a TV switches the same way.
+  "vibe.transition": true,
   // Rewritten by the laptop's own analysis (the extractor), so it stays there.
   "vibe.silenceGate": false,
   "vibe.silenceGateClosed": false,
@@ -91,9 +94,8 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.preview.quality": false,
   "vibe.preview.size": false,
   "vibe.preview.resolution": false,
-  // A library and a dev tool, not the look on screen; and the panel's own chrome.
+  // A library, not the look on screen; and the panel's own chrome.
   "vibe.looks": false,
-  "vibe.devPins": false,
   "vibe.panelBlur": false,
 };
 
@@ -173,13 +175,13 @@ describe("scoped capture", () => {
     const live = fakeStorage({
       "vibe.sceneSettings": "{}",
       "vibe.looks": "[]",
-      "vibe.devPins": "{}",
+      "vibe.customValues": "{}",
       "vibe.preview.resolution": "1",
       "vibe.silenceGateClosed": "0.1",
       "vibe.bandFader.2": "{}",
       "svl.usageMe": "1",
     });
-    expect(captureRoomStorage(live)).toEqual({ "vibe.sceneSettings": "{}", "vibe.bandFader.2": "{}" });
+    expect(captureRoomStorage(live)).toEqual({ "vibe.sceneSettings": "{}", "vibe.customValues": "{}", "vibe.bandFader.2": "{}" });
   });
 
   it("without a scope still mirrors everything but the private keys", () => {

@@ -9,7 +9,7 @@ import {
   type OverlayPosition,
 } from "../render/overlayLayout.ts";
 import { FONT_LABEL, FONT_MONO, POWER_TEAL } from "./controlsTheme.ts";
-import { chipBtnLitStyle, chipBtnStyle, createCard, createChipButton, spacer } from "./controlsKit.ts";
+import { chipBtnLitStyle, chipBtnStyle, createCard, createChipButton, percentReadout, spacer } from "./controlsKit.ts";
 // Circular with deviceMenu.ts (it imports createOverlayCard below) — the same
 // pattern audioMeters.ts and bandLineEditor.ts use for createControlRow; safe
 // because neither side calls the other at module-eval time.
@@ -166,8 +166,7 @@ export function createOverlayCard(deps: OverlayCardDeps): OverlayCard {
     step: 0.05,
     defaultValue: OVERLAY_OPACITY_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description: "How solid the text and logo are over the picture.",
   });
   opacityRow.onChange((v) => deps.onOpacity(v));

@@ -7,6 +7,7 @@ import { watchSize, type WatchedSize } from "../onScreen.ts";
 import { getPreviewSource, type PreviewEffective } from "./previews.ts";
 import { buildPairPads } from "./pairPads.ts";
 import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
+import { setLiveText } from "../liveText.ts";
 
 /**
  * The generic "item boxes" widget: one live specimen box per item of a
@@ -505,9 +506,9 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
           // Prefer the scene's own reading: it includes the scene-default
           // source, which ctx.driveValue reports as 0 until a patch exists.
           const vig = probeData?.[`vig${i}`] ?? (nutrientSpec ? ctx.driveValue(nutrientSpec) : 0);
-          readout.pop.textContent = pop !== undefined ? `${Math.round(pop * 100)}%` : "—";
-          readout.terr.textContent = terr !== undefined ? `${Math.round(terr * 100)}%` : "—";
-          readout.vig.textContent = vig.toFixed(2);
+          setLiveText(readout.pop, pop !== undefined ? `${Math.round(pop * 100)}%` : "—");
+          setLiveText(readout.terr, terr !== undefined ? `${Math.round(terr * 100)}%` : "—");
+          setLiveText(readout.vig, vig.toFixed(2));
         }
       }
 

@@ -5,7 +5,7 @@ neon look on black (a strobing square tunnel, a ring-pulsing reactor HUD, an
 edge-lit sea, …), and Auto change mixes from one to the next every few
 minutes on a phrase start. Hits launch squares or rings out of the centre and
 flash the picture; a glitch layer blinks parts of it off on its own timer.
-Some views are Pro content and locked outside a dev build. Draft, not yet on
+Some views are Pro content and locked outside a dev build. In development, on
 main.
 
 ## Where the code is
