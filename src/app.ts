@@ -2266,6 +2266,19 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
   return play;
 }
 
+/** This laptop claimed its keyed room and the roster has listed it, so it
+ *  knows whether anyone else is online (net/roomBridge.ts `liveWhenAlone`). */
+function ownsRoom(): boolean {
+  return !!hostConn && hostConn === activeConn() && hostConn.keyed && hostConn.self !== null;
+}
+
+/** What the pop-out shows goes to Main too while the laptop is alone in its
+ *  room, where the bar's Play doesn't reach Main (nobody is there to see it),
+ *  so the first phone or iPad to join opens on the projector's picture. */
+function playMainWhileAlone(): void {
+  if (ownsRoom() && roomBridge && !roomBridge.status().open) mainPlay?.play();
+}
+
 /** Settles the first time this device shows the room's Main (startMainPlay's
  *  `apply`), which may come before boot() starts waiting for it. */
 let markMainShown: () => void = () => {};
@@ -2863,6 +2876,10 @@ async function boot(): Promise<void> {
       play,
       present: () => joinedConn.currentRoster.some((d) => d.online && d.deviceId !== joinedConn.deviceId),
       showRoom: () => roomCodeEl.click(),
+      // Alone in its room, the laptop's program is Main without a Play: this
+      // window, or the pop-out while it is open (its Play and its opening
+      // reach Main through playMainWhileAlone instead).
+      liveWhenAlone: () => ownsRoom() && !(outputBridge?.status().open ?? false),
     });
   }
   // Record sits beside POP OUT; a controller has no canvas of its own to record.
@@ -2895,6 +2912,7 @@ async function boot(): Promise<void> {
     // The Set card's live marker: whatever pad was loaded when Play sent it.
     outputControls.onPlay(() => {
       setLivePadId = currentPadId();
+      playMainWhileAlone();
     });
   }
   // The held effects: on this window through the compositor, and on the
@@ -3447,7 +3465,10 @@ function tick(): void {
   // A pop-out that just opened starts on this window's preview (net/outputSync.ts's
   // outputOpened), so the pad loaded here is live on it.
   const popOutOpen = outputBridge?.status().open ?? false;
-  if (popOutOpen && !setPopOutWasOpen) setLivePadId = currentPadId();
+  if (popOutOpen && !setPopOutWasOpen) {
+    setLivePadId = currentPadId();
+    playMainWhileAlone();
+  }
   setPopOutWasOpen = popOutOpen;
   if (nextActive !== previewActive) {
     previewActive = nextActive;
