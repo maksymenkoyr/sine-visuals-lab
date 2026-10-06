@@ -41,6 +41,7 @@ import {
   FONT_MONO,
   HOT_RED,
   INPUT_GREEN,
+  LANE_JACK_GUTTER_PX,
   STRIP_HIGH,
   STRIP_LOW,
   STRIP_MID,
@@ -1158,9 +1159,11 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   // than the row itself (which is `position: relative` too, but its own top
   // edge is above the head and shifts with font metrics) — the wrapper's
   // own top edge is exactly the canvas's, so `i * HITS_LANE_HEIGHT_PX`
-  // lands each jack on its own lane without measuring anything.
+  // lands each jack on its own lane without measuring anything. Its right
+  // padding (LANE_JACK_GUTTER_PX) ends the canvas short of the jacks, which
+  // sit in that padding, so no lane's trace runs on under its jack.
   const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = "position: relative; margin-top: 4px;";
+  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
@@ -1564,8 +1567,10 @@ function createTimingStrip(mountJack: MountJack) {
   });
   const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX);
   const ctx = ring.ctx;
+  // Padded on the right like createHitsHistory's own vizWrap, so the jacks
+  // below sit past the end of the trace rather than on top of it.
   const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = "position: relative; margin-top: 4px;";
+  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);

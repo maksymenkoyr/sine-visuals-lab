@@ -92,6 +92,10 @@ export const POWER_SQUARE_PX = 26;
 /** A folded card's title-bar height; the Auto master bar (deviceMenu.ts)
  *  is set to it so it sits in the same register as the cards below it. */
 export const FOLDED_BAR_PX = 32;
+/** The room the Hits and Timing strips (audioMeters.ts) keep free at their
+ *  right edge for their lane jacks: the trace canvas and a lane's glow both
+ *  stop this far short, so no trace runs under a jack or its usage dots. */
+export const LANE_JACK_GUTTER_PX = 20;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -841,7 +845,7 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-row-fed-soft { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 45%, transparent); }
 .vc-row-fed-faint { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 25%, transparent); }
 .vc-lane-glow {
-  position: absolute; left: 0; right: 20px; pointer-events: none; border-radius: 2px;
+  position: absolute; left: 0; right: ${LANE_JACK_GUTTER_PX}px; pointer-events: none; border-radius: 2px;
   background: color-mix(in srgb, var(--c) 22%, transparent); opacity: 0; transition: opacity 0.15s ease;
 }
 .vc-lane-glow.on { opacity: 1; }
