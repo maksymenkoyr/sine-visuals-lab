@@ -25,6 +25,17 @@
 // - Relaunch: a drop pulls the birth front back out, swallowing the inner
 //   cells into one central cell and replaying the opening from there.
 // - Lines: the lines between seeds brighten with the treble level.
+// - Swell: the waves' height rides the overall level (All level).
+// - Pull: how strongly the fireflies pull each other into step rides the
+//   overall level, squared — scattered in a quiet intro, in step in a loud
+//   section.
+// - Drop sync: a drop pulls every firefly's clock toward the beat.
+//
+// Motion on top of the zoom, in two layers mixed by their own amounts
+// (Swell, Fireflies): motion.ts steps them, and seeds.ts moves each seed by
+// them as it lays it out. Swell keeps the waves on the bar and Fireflies runs
+// near the tempo, both off the beat clock (anim.barPhase, anim.beatPhase,
+// anim.tempoBpm).
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import type { Scene, SceneContext, Viewport } from "../../scene.ts";
@@ -40,7 +51,21 @@ import {
   FRONT_START,
   type LaunchState,
 } from "./launch.ts";
-import { CHILD_BAND_HI, CHILD_BAND_LO, CHILD_BAND_SOFT, fillSeeds, rowsFor, TEX_H, TEX_W } from "./seeds.ts";
+import { CHILD_BAND_HI, CHILD_BAND_LO, CHILD_BAND_SOFT, fillSeeds, PHASE_COL, rowsFor, TEX_H, TEX_W, type SeedMove } from "./seeds.ts";
+import {
+  addPop,
+  addSwell,
+  createFireflies,
+  fireOrder,
+  resetFireflies,
+  stepFireflies,
+  swellBar,
+  swellFrame,
+  SWELL_FLOOR,
+  SWELL_GAIN,
+  SWELL_REST,
+  type Swell,
+} from "./motion.ts";
 
 const ID = "chaikin";
 const NAME = "Chaikin Curves";
@@ -117,6 +142,132 @@ export const CHAIKIN_SETTINGS: SceneSetting[] = [
     default: 0.7,
     drive: { default: "anim.dropOnset" },
   },
+  {
+    key: "swell",
+    label: "Swell",
+    description: "How tall the waves rolling across the field are — 0 stills them",
+    group: "Motion",
+    family: "Swell",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    drive: { default: "anim.energy" },
+  },
+  {
+    key: "swellLength",
+    label: "Wavelength",
+    description: "How many cells lie between one crest and the next",
+    group: "Motion",
+    family: "Swell",
+    min: 3,
+    max: 16,
+    step: 0.5,
+    default: 7,
+  },
+  {
+    key: "swellArms",
+    label: "Arms",
+    description: "How the waves wind round the centre — 0 rolls them out in rings, right winds more spiral arms",
+    group: "Motion",
+    family: "Swell",
+    min: 0,
+    max: 8,
+    step: 1,
+    default: 3,
+    masterScale: false,
+  },
+  {
+    key: "swellTravel",
+    label: "Travel",
+    description: "Which way the waves roll, in crests per bar — left rolls them inward, right outward, 0 holds them in place",
+    group: "Motion",
+    family: "Swell",
+    min: -3,
+    max: 3,
+    step: 1,
+    default: 1,
+    masterScale: false,
+  },
+  {
+    key: "swellOrder",
+    label: "Order",
+    description: "How much the cells move as one wave — left gives every cell its own timing",
+    group: "Motion",
+    family: "Swell",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.85,
+  },
+  {
+    key: "swellPunch",
+    label: "Punch",
+    description: "How the waves move through each beat — left glides, right surges on the beat and settles",
+    group: "Motion",
+    family: "Swell",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
+  {
+    key: "fireflies",
+    label: "Fireflies",
+    description: "How big each cell's pop is when its own clock comes round — 0 stops them",
+    group: "Motion",
+    family: "Fireflies",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.7,
+  },
+  {
+    key: "fliesPull",
+    label: "Pull",
+    description: "How strongly each cell's clock pulls its neighbours' into step — left lets each pop on its own",
+    group: "Motion",
+    family: "Fireflies",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    drive: { default: "anim.energy" },
+  },
+  {
+    key: "fliesLock",
+    label: "Beat lock",
+    description: "How strongly the beat pulls every cell's clock — left lets them run free",
+    group: "Motion",
+    family: "Fireflies",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.1,
+  },
+  {
+    key: "fliesSpread",
+    label: "Spread",
+    description: "How far the cells' own tempos differ — left gives them all the beat's",
+    group: "Motion",
+    family: "Fireflies",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+  },
+  {
+    key: "fliesSnap",
+    label: "Drop sync",
+    description: "How far a drop pulls every cell's clock into step with the beat — 0 never does",
+    group: "Motion",
+    family: "Fireflies",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 1,
+    drive: { default: "anim.dropOnset" },
+  },
   // Look
   {
     key: "edges",
@@ -170,6 +321,18 @@ let lastTimeSec = -1;
 let timeSec = 0;
 const kickDZ = new Float32Array(KICK_SLOTS);
 
+// Motion (motion.ts): this frame's swell, the fireflies' phases, and what
+// step() read for them from the settings and drives, for beforeDraw to use.
+let swell: Swell | null = null;
+const flies = createFireflies();
+const fly = { dt: 0, pull: 0, lock: 0, spread: 0, bpm: 0, beatPhase: 0, snap: 0 };
+let popAmount = 0;
+
+function moveSeed(u: number, th: number, g: number, t: number, c: number, out: SeedMove): void {
+  if (swell) addSwell(swell, u, th, g, c, out);
+  addPop(flies, popAmount, t, c, out);
+}
+
 // The seed texture: filled once a frame (or again if a later viewport of
 // the same frame needs more rows), uploaded, and bound to unit 0.
 const seedData = new Float32Array(TEX_W * TEX_H * 4);
@@ -187,6 +350,8 @@ function reset(): void {
   rate = 0;
   lastTimeSec = -1;
   filledAt = -1;
+  resetFireflies(flies);
+  fly.snap = 0;
 }
 
 type Drives = NonNullable<Parameters<Scene["render"]>[5]>;
@@ -218,6 +383,31 @@ function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Dr
   front = out.front;
   frontU = out.frontU;
   rate = out.k;
+
+  const height = get("swell") * (SWELL_FLOOR + SWELL_GAIN * drives.value("swell", frame.energy, SWELL_REST));
+  swell =
+    height > 0
+      ? swellFrame({
+          height,
+          wavelength: get("swellLength"),
+          arms: get("swellArms"),
+          travel: get("swellTravel"),
+          order: get("swellOrder"),
+          bar: swellBar(anim.barPhase, anim.beatPhase, get("swellPunch")),
+          delta: deltaFor(get("cells")),
+        })
+      : null;
+  // Pull's drive rests at 1, so with nothing plugged in the slider alone
+  // sets the pull.
+  const pullDrive = drives.value("fliesPull", frame.energy, 1);
+  fly.dt = Math.min(anim.dtSec, MAX_STEP_SEC);
+  fly.pull = get("fliesPull") * pullDrive * pullDrive;
+  fly.lock = get("fliesLock");
+  fly.spread = get("fliesSpread");
+  fly.bpm = anim.tempoBpm;
+  fly.beatPhase = anim.beatPhase;
+  const snap = get("fliesSnap");
+  if (snap > 0 && drives.fired("fliesSnap", anim.dropOnset)) fly.snap = Math.max(fly.snap, snap);
 }
 
 /** The span of U where a live kick's children can be, padded by two rows —
@@ -265,7 +455,23 @@ function beforeDraw(ctx: SceneContext, prog: GLProgram, viewport: Viewport): voi
   if (filledAt !== timeSec || rows > filledRows) {
     const zoom = splitZoom(state.z, deltaFor(cells));
     const kicks = { dz: kickDeltaZ(state, kickDZ), age: state.kickAge, amp: state.kickAmp };
-    fillSeeds(seedData, { cols: cells, jitter: getSetting("jitter"), zRow: zoom.row, zFrac: zoom.frac, frontU, rows, kicks });
+    // The fireflies step once a frame; a later viewport that needs more rows
+    // only brings the new rows in.
+    popAmount = getSetting("fireflies");
+    if (popAmount > 0) {
+      const newFrame = filledAt !== timeSec;
+      stepFireflies(flies, {
+        ...fly,
+        dtSec: newFrame ? fly.dt : 0,
+        snap: newFrame ? fly.snap : 0,
+        rows,
+        cols: Math.min(Math.round(cells), PHASE_COL),
+        zRow: zoom.row,
+      });
+      if (newFrame) fly.snap = 0;
+    }
+    const move = swell || popAmount > 0 ? moveSeed : undefined;
+    fillSeeds(seedData, { cols: cells, jitter: getSetting("jitter"), zRow: zoom.row, zFrac: zoom.frac, frontU, rows, kicks, move });
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEX_W, TEX_H, gl.RGBA, gl.FLOAT, seedData);
     filledAt = timeSec;
     filledRows = rows;
@@ -306,5 +512,5 @@ const inner = createFullscreenScene(ID, NAME, CHAIKIN_FRAG, {
 
 export const chaikinScene: Scene = {
   ...inner,
-  probe: () => ({ front, tau: state.tau, k: rate, z: state.z }),
+  probe: () => ({ front, tau: state.tau, k: rate, z: state.z, sync: fireOrder(flies) }),
 };

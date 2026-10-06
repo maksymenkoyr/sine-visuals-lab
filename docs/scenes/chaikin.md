@@ -6,8 +6,11 @@ white core. It opens on one big cell; births fill in from a ring that closes
 on the centre while the zoom starts. The music sets how fast the cells fly
 (Speed), seeds a pulse of extra cells near the centre on each bass hit
 (Births), pulls the field back into one big cell on a drop (Relaunch) and
-brightens the lines with the treble (Lines). In development, on main; draft PR
-#380 is still open.
+brightens the lines with the treble (Lines). On top of the zoom the cells
+move in two layers, each with its own amount: Swell rolls water waves across
+the field, locked to the bar and rising with the level, and Fireflies gives
+every cell its own clock that pops it, pulled into step by its neighbours, by
+the level and by the drop. In development, on main.
 
 ## Where the code is
 
@@ -24,7 +27,15 @@ brightens the lines with the treble (Lines). In development, on main; draft PR
   weight, kick children via `childAlive`), `rowsFor` (rows that reach the
   screen's corner), and the texture layout (`TEX_W`, `PHASE_COL`,
   `MAX_ROWS`, `ROW_LO`). Hashes with the same integer hash as
-  `noiseHash.ts`, on integer rows wrapped at `ROW_PERIOD`.
+  `noiseHash.ts`, on integer rows wrapped at `ROW_PERIOD`. A frame's `move`
+  callback offsets each seed and changes its weight, under the soft caps
+  `MAX_SHIFT` and `MAX_WEIGHT`.
+- `src/render/scenes/chaikin/motion.ts` — the two motion layers, pinned by
+  `tests/chaikin.test.ts`: Swell (`swellBar`, the eased bar clock;
+  `swellFrame`, the wave trains of `SWELL_WAVES`; `addSwell`, one seed's
+  move) and Fireflies (`stepFireflies`, Kuramoto phases in a ring of rows
+  keyed by global row; `addPop`; `fireOrder`, how in step they are). Its
+  header has the formulas and why they're shaped that way.
 - `src/render/scenes/chaikin/glsl.ts` — `CHAIKIN_FRAG`: reads candidates
   back with `texelFetch` (`eachCandidate`, written out once per pass), then
   three passes — `nearest` (power distance), `survey` (two nearest
@@ -36,9 +47,12 @@ brightens the lines with the treble (Lines). In development, on main; draft PR
 - `src/render/scenes/chaikin/index.ts` — the `Scene` (`chaikinScene`),
   `CHAIKIN_SETTINGS`, `step` (settings and drives into `stepLaunch`),
   `kidSpan` (where the shader should look for children), and the seed
-  texture (`ensureTexture`, `beforeDraw` uploads it once a frame).
-- Plugs into: drives (`drives.fired`/`drives.value` for Births, Relaunch and
-  Speed; `linesDrive` in GLSL for Lines), the palette roles (`uPalGround`,
+  texture (`ensureTexture`, `beforeDraw` uploads it once a frame). `step`
+  also reads the motion settings and drives; `beforeDraw` steps the
+  fireflies once a frame and hands `fillSeeds` the `moveSeed` callback. The
+  probe reports the fireflies' `sync` (`fireOrder`).
+- Plugs into: drives (`drives.fired`/`drives.value` for Births, Relaunch,
+  Speed, Swell, Pull and Drop sync; `linesDrive` in GLSL for Lines), the palette roles (`uPalGround`,
   `palRamp`, `uPalAccent`, for Colours), and `createFullscreenScene`'s
   `beforeDraw`/`onDispose` hooks, added for this scene's texture.
 
@@ -106,6 +120,27 @@ and `ours-chaikin/cells-ours.json`):
   alone 16 ms); seeds from the CPU in a texture, 8.5 ms opening / 12.6 ms
   steady.
 
+2026-10-06, the motion layers:
+
+- In the prototype page (`chaikin/artifacts/motion-lab.html`, its own
+  synthetic 16-bar song: intro, groove, build, drop), seed offsets as RMS in
+  cells over a whole song, Speed 0 and Births 0 so only the motion moves:
+  Swell 0.16 in the intro, 0.20 groove, 0.21 build, 0.27 drop, flat across
+  the beat; Fireflies' pops smeared across the beat in the intro (0.07–0.12
+  in every eighth), bunched toward the beat in the groove and build, and all
+  on it after the drop (0.18–0.20 at the beat, 0.00 between).
+- At every motion at full strength, a shader searching two columns each side
+  instead of one changed at most ~200 white pixels a frame at 1148×646 (a
+  wedge's shape here and there), so `MAX_SHIFT` 0.6 fits the scene's
+  search; the white wedges at junctions are the tangent-circle rounding of
+  acute corners, which squeezed cells make more often, not missed seeds.
+- In the app (synthetic audio, 124 BPM, 1280×720, Metal): fps the same with
+  both layers on or off (~60, headless vsync); the fireflies' sync
+  (`fireOrder`) 0.15–0.30 on that steady audio, never a full lock without a
+  drop. CPU for the seed layout (`fillSeeds` and the fireflies' step), per
+  frame in Chromium: 0.05 → 0.32 ms at Cells 44 and 0.20 → 1.29 ms at Cells
+  96 with both layers on.
+
 ## Decisions and pivots
 
 - 2026-10-05: measured with `/ref`; the user picked "build as proposed" and
@@ -141,6 +176,23 @@ and `ours-chaikin/cells-ours.json`):
   brightness), `CORE_R` 0.155 → 0.2 and cruise zoom 0.2 → 0.24 (radial
   speed with typical synthetic levels), children's life shortened so each
   kick reads as a pulse instead of a constant swell.
+- 2026-10-06: the user asked for the cells to move — "some kind of bounce,
+  waving … complexed and synced" — with controls and quick prototypes. Four
+  were built in one page on a JS copy of the scene (Materials): Shockwave (a
+  damped spring on a ring each kick sends out), Drum skin (circular-membrane
+  Bessel modes struck by kick, snare and hats), Ocean swell (Gerstner waves
+  locked to the bar) and Fireflies (Kuramoto oscillators). The user picked
+  Ocean swell ("great") and Fireflies ("amazing"), as layers that can run
+  together, each with its own amount, both on by default.
+- 2026-10-06, from the prototype's measurements: the swell's height first
+  ignored the music (flat through the song), so it now rides All level; the
+  fireflies first locked fully in every section, so the pull went from
+  linear in the level to its square and the Beat lock default came down —
+  scattered in a quiet intro, in step after the drop. Pull reads its drive
+  with a rest of 1, so with nothing plugged in the slider alone sets it, and
+  Swell's rest leaves the slider's own height. Arms and Travel are whole
+  numbers and kept off the Master Scale (`masterScale: false`), or the
+  waves would tear at the angle's seam and stop repeating on the bar.
 
 ## Tuning notes
 
@@ -154,6 +206,12 @@ and `ours-chaikin/cells-ours.json`):
 - Speed rides All level over a floor, so a quiet passage still drifts.
 - Cells changes the lattice itself, so moving it reshuffles the pattern
   rather than resizing it.
+- Swell and Fireflies: compare against both at 0 to see what they add, and
+  set Speed 0 to watch them without the zoom. Swell repeats on every bar, so
+  judge it over a few bars; its Punch shows best near 1. Fireflies tell their
+  story over a song: watch a quiet passage drift apart and a drop pull them
+  together. In full step every cell's weight rises at once, which moves no
+  walls, so a fully synced field only breathes outward.
 
 ## Known issues and next steps
 
@@ -168,6 +226,14 @@ and `ours-chaikin/cells-ours.json`):
   as they fly out — would match the reference's mid-radius sizes without
   the fade, at the cost of seeds changing identity.
 - Not yet run on a phone; the seed texture is RGBA32F, uploaded every frame.
+  The fireflies' step is the heaviest CPU part, worst at high Cells.
+- The motion layers are checked on synthetic audio only, and the app's
+  synthetic audio has no drop, so Drop sync was seen only in the prototype.
+- With motion on, white wedges at acute corners show more often (Measurements).
+  If they read as glitches on a real screen, a smaller corner radius on cells
+  being squeezed would be the next thing to try.
+- Not taken from the prototype: Shockwave and Drum skin (the page still has
+  them, with formulas).
 
 ## Materials
 
@@ -182,6 +248,11 @@ and `ours-chaikin/cells-ours.json`):
   wiring), `record.mjs` (a square recording for `cells.py`),
   `probe-auto.mjs` (the auto/manual sign-off), `rings.py` (ring
   brightness).
+- `chaikin/artifacts/motion-lab.html` — the motion prototype page
+  (2026-10-06): the scene's shader and a JS copy of its seed layout and
+  clock, four motions with their dials and formulas, a synthetic 16-bar song
+  with a Web Audio drum kit on the same clock. Opens straight from disk; it
+  was also published as a private claude.ai artifact.
 - The reference media (the video, frames, bursts, sheets): only in the local
   `/ref` cache, `tools/.cache/refs/hebt-ab/` and `_downloads/hebt-ab.mp4`.
   Not yet in the private archive (`python3 tools/ref-archive.py hebt-ab`).
@@ -195,7 +266,8 @@ and `ours-chaikin/cells-ours.json`):
   less than the steady state).
 - Re-measure: `scripts/record.mjs` then `uv run
   docs/scenes/chaikin/hebt-ab/scripts/cells.py <webm> 3 out.json`; set
-  `--settings '{"births":0}'` to compare with the silent reference.
+  `--settings '{"births":0,"swell":0,"fireflies":0}'` to compare with the
+  silent reference, which has none of the motion.
 - Gotchas: a `Float32Array` stores `Math.min(LIFE, age)` as slightly under
   `LIFE`, so compare before storing (the kick ring buffer never retired
   until that was fixed); seed data built inside the shader was the slow
@@ -204,3 +276,5 @@ and `ours-chaikin/cells-ours.json`):
 ## History
 
 - #380 (draft): the scene, its clock, seed texture, record and materials.
+- (this PR): the Swell and Fireflies motion layers, from the motion
+  prototype page.
