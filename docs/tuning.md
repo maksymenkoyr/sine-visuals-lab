@@ -9,8 +9,8 @@ Everything here is dev-only. `src/tuning/overrides.ts` is gated on
 `import.meta.env.DEV`, so none of it compiles into a production build, and it can
 never clobber a real user's saved settings (`sceneSettings.ts`'s localStorage
 store) — overrides sit in front of that store, not inside it. `src/tuning/pins.ts`
-is the same idea with one difference: a pin is set by hand, from the panel's own
-typed-entry field (below), not by the param bus, and it persists across a
+is the same idea with one difference: a pin is set by hand, by typing a value past
+a slider's end into its readout (below), not by the param bus, and it persists across a
 reload where an override doesn't. `resolve()` (`src/render/autoTune.ts`) checks
 an override first, then a pin, then auto-pin, so a value the param bus explicitly
 sets always wins over a pin left over from an earlier by-hand session.
@@ -45,12 +45,14 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    after the edit. `src/tuning/bus.ts` applies the payload to the override layer
    on the next frame. Audio keeps playing; nothing reloads.
 
-   The controls panel is a second, by-hand entry point into the same idea: any
-   scene-setting or Input-card row's readout is a click-to-edit field. Type a
-   value inside the slider's range and it's just the setting, saved like a drag.
-   Type one outside that range and it becomes a pin instead (`src/tuning/pins.ts`)
-   — unclamped, marked with `*`, persisted, and cleared by dragging the slider,
-   pressing its ↺, or handing the row to auto.
+   The controls panel is a second, by-hand entry point into the same idea.
+   Every slider row's readout takes a typed value, in every build
+   (`src/ui/typedValue.ts`), and one inside the slider's range is just the
+   setting, saved like a drag. In a dev build, on a scene-setting or Input-card
+   row, one typed outside that range becomes a pin instead of clamping
+   (`src/tuning/pins.ts`) — unclamped, marked with `*`, persisted, and cleared
+   by emptying the field, dragging the slider, pressing its ↺, or handing the
+   row to auto.
 2. **Mark.** Alt+M (wired in `src/tuning/debug.ts`) captures one frame plus a
    probe snapshot and POSTs it to `/__tuning/mark`; the plugin writes
    `tuning/marks/<timestamp>.png` and `<timestamp>.json` (both gitignored — marks

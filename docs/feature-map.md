@@ -121,6 +121,8 @@ Darker means more important.
     `src/ui/wakeLock.ts`
 - ●○○ **Controls panel** — the left column, opened with the gear or S ·
   `src/ui/deviceMenu.ts`
+  - ●○○ **Typed values** — click any slider's number and type one in place ·
+    `src/ui/typedValue.ts`
   - ●○○ **Sound in**
     - ●○○ **Input card** — Source, device, Sensitivity, Expansion,
       Smoothing, the silence gate, and one Auto for the whole mic ·

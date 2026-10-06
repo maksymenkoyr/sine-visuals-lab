@@ -751,17 +751,28 @@ body.vc-keys-reveal [data-keycap]::after {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }
 
-/* Dev-only typed-value field (deviceMenu.ts's pinOpenEdit), swapped in over a
- * row's digits on click. Inputs don't inherit color from an ancestor span the
- * way inline text does, so this needs its own color rather than relying on
- * readoutStyle's — and living here rather than in the inline cssText lets the
- * row's --vc-accent reach it, matching the underline to whichever card the
- * row belongs to. */
-.vc-pin-input {
-  box-sizing: border-box; color: #fff; caret-color: var(--vc-accent);
-  border: none; border-bottom: 1px solid var(--vc-accent); border-radius: 1px;
-  outline: none; padding: 0 2px 1px; margin: 0 -2px;
+/* A row's readout digits, typable in place (deviceMenu.ts's createControlRow
+ * typed entry). At rest they look as they always have; hovering them draws a
+ * faint underline in the row's --vc-accent, and while typing the same span
+ * gets a caret, a solid underline and a light wash — never an input box. The
+ * underline is an inset shadow on a little padding that a negative margin
+ * pays back, so neither hovering nor typing moves a digit; it needs that
+ * padding below because DSEG7's bottom segments sit flush with the span's
+ * box (see digitsStyle, controlsKit.ts). */
+.vc-digits-typable {
+  cursor: text; border-radius: 1px;
+  padding: 0 2px 2px; margin: 0 -2px -2px;
+}
+.vc-digits-typable:hover {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--vc-accent) 55%, transparent);
+}
+.vc-digits-edit, .vc-digits-edit:hover {
+  outline: none; caret-color: var(--vc-accent); min-width: 0.6em;
+  box-shadow: inset 0 -1px 0 var(--vc-accent);
   background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
+}
+.vc-digits-edit::selection {
+  color: #fff; background: color-mix(in srgb, var(--vc-accent) 45%, transparent);
 }
 
 /* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane
