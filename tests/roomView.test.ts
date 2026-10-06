@@ -35,6 +35,7 @@ function entry(id: string, over: Partial<RosterEntry> = {}): RosterEntry {
     follow: null,
     screen: "main",
     quality: "auto",
+    canPlay: false,
     autoQuality: null,
     online: true,
     owner: false,
@@ -182,6 +183,7 @@ describe("rejectText", () => {
     expect(rejectText("tv-off")).toBe("A TV is always a screen.");
     expect(rejectText("bad-follow")).toBe("That device isn't on its own input.");
     expect(rejectText("rate")).toMatch(/Too many changes/);
+    expect(rejectText("owner-only")).toBe("Only the owner can change who may play.");
     expect(rejectText("shape")).toBe("The room refused that change.");
     expect(rejectText("anything")).toBe("The room refused that change.");
   });

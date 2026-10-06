@@ -2,7 +2,7 @@ import { statusKey, type OutputBridge, type OutputStatus } from "./outputBridge.
 import type { MainPlay } from "./mainPlay.ts";
 
 /**
- * Play to the room's Main screens, from any device, as an `OutputBridge` so the
+ * Play to the room's Main screens, from a device that may, as an `OutputBridge` so the
  * same bar (ui/outputControls.ts) and keys (ui/outputKeys.ts) drive it as drive
  * the pop-out window.
  *
@@ -15,6 +15,10 @@ import type { MainPlay } from "./mainPlay.ts";
  *    once, a hold glides there within a scene (a scene change crossfades over one
  *    bar instead: render/compositor.ts). The glide is walked by the TV and the pop-out; a laptop's or an
  *    iPad's own main window follows a glide with a plain switch (known limit).
+ *  - Play reaches Main only while this device may Play (`mayPlay`: the owner,
+ *    or a device the owner has allowed). Without the right the status says
+ *    `canPlay: false`, so the bar hides PLAY; it still says whether Main
+ *    matches this device and still offers Take Main, and `go` sends nothing.
  *  - There is no Cue for the room: `canCue` is false, so the bar hides CUE
  *    unless the pop-out (which does have one) is open next to it.
  *  - `differs` is "Main is not what this device shows" (MAIN ≠ YOURS), and only
@@ -42,6 +46,9 @@ export interface RoomBridgeOptions {
   play: MainPlay;
   /** Another member of the room is online right now. */
   present: () => boolean;
+  /** This device may Play to Main right now: the owner, or a device the owner
+   *  has allowed. */
+  mayPlay: () => boolean;
   /** Clicked "POP OUT" where there is nothing to open: show the room view. */
   showRoom: () => void;
 }
@@ -59,7 +66,7 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
     // A closed room can't be played to, so it never reads as differing or changed
     // (else a combined bar would stay on OUT ≠ PREVIEW after Play reached only the pop-out).
     const open = opts.present();
-    return { open, cue: false, differs: open && p.known && !p.onAir, canCue: false, changedBy: open ? p.changedBy : null };
+    return { open, cue: false, differs: open && p.known && !p.onAir, canCue: false, changedBy: open ? p.changedBy : null, canPlay: opts.mayPlay() };
   }
 
   function emitIfChanged(): void {
@@ -81,6 +88,7 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
     // The room has no Cue: a held key or button does nothing here.
     setCue() {},
     go(glideMs) {
+      if (!opts.mayPlay()) return false;
       const result = play.play(glideMs);
       emitIfChanged();
       return result === "glide";
@@ -108,7 +116,8 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
  *  the one that can be opened); Play goes to every output that is open and Cue
  *  only to those that can cue. The status says "open" while any is, "cue" while
  *  any is cued, "differs" while any shows something other than the preview and
- *  "canCue" while an open one can cue; `changedBy` is the first one set. `take`
+ *  "canCue" while an open one can cue, "canPlay" while any open one can (or
+ *  none is open, so the bar shows PLAY as it would alone); `changedBy` is the first one set. `take`
  *  reaches every output that has one. Frames, power and render readouts are
  *  the first output's, the pop-out's. */
 export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): OutputBridge {
@@ -119,6 +128,7 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
     let cue = false;
     let differs = false;
     let canCue = false;
+    let anyCanPlay = false;
     let changedBy: string | null = null;
     for (const b of bridges) {
       const s = b.status();
@@ -126,9 +136,10 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
       cue = cue || s.cue;
       differs = differs || s.differs;
       canCue = canCue || (s.open && s.canCue);
+      anyCanPlay = anyCanPlay || (s.open && s.canPlay !== false);
       changedBy = changedBy ?? s.changedBy ?? null;
     }
-    return { open, cue, differs, canCue, changedBy };
+    return { open, cue, differs, canCue, changedBy, canPlay: !open || anyCanPlay };
   }
   return {
     open: () => first.open(),

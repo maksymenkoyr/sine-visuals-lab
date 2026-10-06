@@ -23,6 +23,7 @@ const entry = (deviceId: string, role: RosterEntry["role"]): RosterEntry => ({
   follow: null,
   screen: "main",
   quality: "auto",
+  canPlay: role === "host",
   autoQuality: null,
   online: true,
   owner: role === "host",

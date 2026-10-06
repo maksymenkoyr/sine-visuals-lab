@@ -31,11 +31,17 @@
  * laptop, tablet or phone sets its own Quality in its panel. `auto` is the
  * default, which is how every TV rendered before the choice existed.
  *
- * Who decides. Any keyed member may change any device (the QR is the
- * permission: only people in the room can scan it); only the owner may forget
- * a device. The defaults for a newcomer come from what it is: the owner is on
- * its own input and shows Main, everyone else follows the owner, and a phone
- * starts as a remote.
+ * Play. Whether a device's Play reaches Main (the room's look document). The
+ * owner always may; every other device starts without it until the owner
+ * grants it, and the owner can take it back. A TV never plays. `mayPlay` is
+ * the one rule the room checks.
+ *
+ * Who decides. Any keyed member may change any device's name, ears, screen and
+ * quality (the QR is the permission: only people in the room can scan it); only
+ * the owner may grant or take back Play, or forget a device. The defaults for a
+ * newcomer come from what it is: the owner is on its own input, shows Main and
+ * may Play, everyone else follows the owner, only the owner may Play, and a
+ * phone starts as a remote.
  *
  * Plain TS with no DOM or Workers types (listed in the root tsconfig `files`
  * like server/roomRules.ts): the room, the client and the tests share it.
@@ -70,6 +76,10 @@ export interface DeviceSettings {
   screen: ScreenUse;
   /** The quality a TV renders at; see the header. */
   quality: ScreenQuality;
+  /** Whether this device's Play may change Main. The owner always may
+   *  (`mayPlay` ignores the field for it); every other device starts without
+   *  it, and only the owner can grant it (server/roomCore.ts `deviceSet`). */
+  canPlay: boolean;
 }
 
 /** What a device is, as it says itself when it joins (and may update in a hello). */
@@ -94,6 +104,7 @@ export interface DeviceSetPatch {
   follow?: string | null;
   screen?: ScreenUse;
   quality?: ScreenQuality;
+  canPlay?: boolean;
 }
 
 export const DEVICE_LIMITS = {
@@ -154,6 +165,7 @@ export function defaultSettings(role: RoomRole, traits: DeviceTraits, name?: str
     follow: null,
     screen: !own && traits.kind === "phone" ? "off" : "main",
     quality: "auto",
+    canPlay: own,
   };
 }
 
@@ -191,6 +203,10 @@ export function sanitizeDeviceSet(
     if (quality === undefined) return null;
     patch.quality = quality;
   }
+  if (msg.canPlay !== undefined) {
+    if (typeof msg.canPlay !== "boolean") return null;
+    patch.canPlay = msg.canPlay;
+  }
   if (Object.keys(patch).length === 0) return null;
   return { targetId: msg.targetId, patch };
 }
@@ -220,6 +236,9 @@ export function parseRecord(raw: string): DeviceRecord | null {
     screen,
     // A row stored before the choice existed has none: `auto`, as it rendered then.
     quality: parseQuality(r.quality) ?? "auto",
+    // A row stored before the choice existed has none: no Play, so a guest must
+    // be granted it; the owner is unaffected, `mayPlay` lets it through.
+    canPlay: r.canPlay === true,
     kind,
     hasMic: r.hasMic === true,
     role,
@@ -232,6 +251,15 @@ export function parseRecord(raw: string): DeviceRecord | null {
 export function ownerId(records: ReadonlyMap<string, DeviceRecord>): string | null {
   for (const [id, r] of records) if (r.role === "host") return id;
   return null;
+}
+
+/** Whether `deviceId`'s Play may change Main: a known device that is not a TV
+ *  and is either the owner (role `host`, whatever its `canPlay` says) or has
+ *  been granted `canPlay`. */
+export function mayPlay(records: ReadonlyMap<string, DeviceRecord>, deviceId: string): boolean {
+  const r = records.get(deviceId);
+  if (!r || r.role === "renderer") return false;
+  return r.role === "host" || r.canPlay;
 }
 
 /** The feed a device draws from: itself when on its own input, else the
@@ -305,6 +333,7 @@ export function applyDeviceSet(
   }
   if (patch.screen !== undefined) next.screen = patch.screen;
   if (patch.quality !== undefined) next.quality = patch.quality;
+  if (patch.canPlay !== undefined) next.canPlay = patch.canPlay;
 
   // Only what the patch sets is checked: a record that is already odd (an
   // owner without a mic, say) can still be renamed or given another screen.

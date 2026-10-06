@@ -43,8 +43,8 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
 /**
  * The paired display entry (tv.html). A renderer in the room's mould: the
  * device it follows (the laptop by default; any device the room's Room view
- * puts on its own input) streams feature frames, any device's Play sets the
- * room's look document (Main, net/mainPlay.ts), and this page draws what they
+ * puts on its own input) streams feature frames, a Play from the owner or a
+ * device it has allowed sets the room's look document (Main, net/mainPlay.ts), and this page draws what they
  * say — it has no panel and no audio of its own, so it always follows. Its one
  * choice is its screen in the Room view: `main` shows Main; `own` freezes the
  * picture on what it shows now and ignores the room's looks (the replica keeps

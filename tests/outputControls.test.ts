@@ -141,6 +141,36 @@ describe("the bar for the room's Main", () => {
   });
 });
 
+describe("the bar on a device the owner has not let Play", () => {
+  it("hides PLAY, keeps the state line asking for the owner's Play, and still offers TAKE MAIN", () => {
+    const { els, set } = setup({ canPlay: false });
+    expect(els.goBtn.style.display).toBe("none");
+    expect(els.stateEl.style.display).toBe("block");
+    expect(els.stateEl.textContent).toBe("MAIN = YOURS");
+    set({ differs: true });
+    expect(els.stateEl.textContent).toBe("MAIN ≠ YOURS — ASK THE OWNER FOR PLAY");
+    set({ changedBy: "iPad" });
+    expect(els.stateEl.textContent).toBe("MAIN CHANGED BY IPAD");
+    expect(els.takeBtn.style.display).toBe("block");
+    set({ canPlay: true, changedBy: null });
+    expect(els.goBtn.style.display).toBe("block");
+  });
+
+  it("a Play key, a PLAY press and a click do nothing at all: nothing sent, no flash", () => {
+    const { controls, els, calls } = setup({ canPlay: false });
+    expect(controls.active()).toBe(true);
+    expect(controls.playActive()).toBe(false);
+    expect(controls.go()).toBeNull();
+    els.goBtn.fire("pointerdown", { button: 0 });
+    nowMs += 3000;
+    els.goBtn.fire("pointerup");
+    els.goBtn.fire("click");
+    expect(calls).toEqual([]);
+    expect(els.goBtn.classList.contains("pressed")).toBe(false);
+    expect(els.goBtn.classList.contains("charging")).toBe(false);
+  });
+});
+
 describe("PLAY under a pointer", () => {
   it("a short press sends at once, and the click that follows does not send again", () => {
     const { els, calls } = setup();

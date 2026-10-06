@@ -784,7 +784,7 @@ function wireOutputKeys(controls: OutputControls): void {
         return;
       }
       if (isPlayKey(e, mac)) {
-        if (!inViz || isTypingTarget(e.target) || !controls.active()) return;
+        if (!inViz || isTypingTarget(e.target) || !controls.playActive()) return;
         // Enter would also press the focused button, once per auto-repeat:
         // while the bar is up it's Play's alone.
         if (e.key === "Enter") {
@@ -819,7 +819,7 @@ function wireOutputKeys(controls: OutputControls): void {
       if (e.key !== "Enter" && e.key !== "Alt" && !rightCmd) return;
       const hold = playKey.up(performance.now());
       playHeldBy = null;
-      if (hold !== null && controls.active()) {
+      if (hold !== null && controls.playActive()) {
         const glideMs = glideMsForHold(hold);
         const result = controls.go(glideMs ?? undefined);
         noteKeyUse("go");
@@ -2024,7 +2024,8 @@ function wireDeviceMenu(): void {
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
 }
 
-/** Any device can drive the room, not just the host: this builds the Room view
+/** Any device can open the room's view, not just the host (changing who may
+ *  Play is the owner's alone): this builds the Room view
  *  (src/ui/roomView.ts) for whichever connection (host, controller or
  *  renderer) is currently active, wires the #panelBtn that opens it, and
  *  announces this device's scene to the room. Only a keyed connection gets
@@ -2196,7 +2197,7 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
     else if (m.type === "lookAck") play.onAck(m.n, m.rev);
     else {
       play.onReject(m.n, m.reason);
-      showHud(m.reason === "size" ? "Settings too large to send to Main" : "Not allowed to change this room", true);
+      showHud(m.reason === "size" ? "Settings too large to send to Main" : "This device can't play to Main", true);
     }
   });
   conn.onState((s) => {
@@ -2715,8 +2716,9 @@ async function boot(): Promise<void> {
     }
   }
 
-  // Every member of a keyed room plays to and follows its Main (a controller
-  // started its own in startController). The laptop that claimed the room is
+  // Every member of a keyed room follows its Main and has a Play to it, which
+  // the room honours only from the owner or a device the owner allowed (a
+  // controller started its own in startController). The laptop that claimed the room is
   // its owner; a keyed spectator joined a room that someone else owns.
   const joined = activeConn();
   if (joined && joined.keyed && !isController) startMainPlay(joined, joined === hostConn);
@@ -2769,6 +2771,7 @@ async function boot(): Promise<void> {
     roomBridge = createRoomBridge({
       play,
       present: () => joinedConn.currentRoster.some((d) => d.online && d.deviceId !== joinedConn.deviceId),
+      mayPlay: () => joinedConn === hostConn || (joinedConn.self?.canPlay ?? false),
       showRoom: () => roomCodeEl.click(),
     });
   }

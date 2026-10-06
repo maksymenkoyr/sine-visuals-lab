@@ -5,7 +5,9 @@
  * the socket, the device's storage and the clock are injected — so the whole
  * story is tested without a browser (tests/mainPlay.test.ts). It replaces the
  * phone's old live publisher: nothing a device edits reaches the room until
- * it presses Play.
+ * it presses Play. Whether the room accepts a device's Play is the room's rule
+ * (server/roomDevices.ts `mayPlay`); net/roomBridge.ts keeps a device without
+ * the right from sending one, and a refusal that still comes back is `onReject`.
  *
  * What a device does with Main:
  * - **Play** sends the diff between Main and this device's look as one patch

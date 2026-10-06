@@ -70,6 +70,7 @@ import {
   followersOf,
   forgetDevice,
   kindForRole,
+  mayPlay,
   ownerId,
   parseKind,
   parsePreset,
@@ -557,9 +558,11 @@ export class RoomCore {
   }
 
   /** `deviceSet`: any member of a claimed room changes one device's name,
-   *  ears, screen or quality (server/roomDevices.ts `applyDeviceSet` has the rules). An
-   *  accepted change is stored and the roster goes to everyone; a refused one
-   *  is answered to the sender alone with `deviceReject` and the reason. */
+   *  ears, screen or quality (server/roomDevices.ts `applyDeviceSet` has the
+   *  rules); only the owner may set `canPlay`, anyone else carrying it is
+   *  answered `owner-only`. An accepted change is stored and the roster goes to
+   *  everyone; a refused one is answered to the sender alone with
+   *  `deviceReject` and the reason. */
   private deviceSet(ws: CoreSocket, sender: Attachment, msg: Record<string, unknown>): void {
     if (!canSend(sender.keyed, sender.role, "deviceSet")) return;
     const raw = typeof msg.targetId === "string" && msg.targetId.length <= 64 ? msg.targetId : null;
@@ -570,6 +573,10 @@ export class RoomCore {
     const clean = sanitizeDeviceSet(msg, validDeviceId);
     if (clean === null) {
       this.rejectDevice(ws, raw, "shape");
+      return;
+    }
+    if (clean.patch.canPlay !== undefined && sender.role !== "host") {
+      this.rejectDevice(ws, clean.targetId, "owner-only");
       return;
     }
     const result = applyDeviceSet(this.records, clean.targetId, clean.patch);
@@ -701,6 +708,12 @@ export class RoomCore {
       this.reject(ws, n, "role");
       return;
     }
+    // The role is the coarse check; whether this device may Play at all is its
+    // record's (server/roomDevices.ts `mayPlay`).
+    if (!mayPlay(this.records, sender.deviceId)) {
+      this.reject(ws, n, "role");
+      return;
+    }
     if (!this.takePatchToken(sender.sid)) {
       this.reject(ws, n, "size");
       return;
@@ -777,8 +790,8 @@ export class RoomCore {
 
   /** Who is in the room, to every live socket. A claimed room lists every
    *  device record, owner first and then in the order they were added, online
-   *  or not, with its name, ears, screen and quality (the Room view draws from
-   *  it); the scene, palette, viewport and a TV's autoQuality come from one of
+   *  or not, with its name, ears, screen, quality and `canPlay` (the effective
+   *  right, so the owner reads true; the Room view draws from it); the scene, palette, viewport and a TV's autoQuality come from one of
    *  the device's live sockets, and are empty / full / null while it is offline. Only keyed sockets are told: a
    *  keyless one left over from before the claim is being closed. A room
    *  nobody has claimed keeps the shape it always had: the live hosts and
@@ -808,6 +821,7 @@ export class RoomCore {
           follow: r.follow,
           screen: r.screen,
           quality: r.quality,
+          canPlay: mayPlay(this.records, id),
           autoQuality: a?.autoQuality ?? null,
           online: mine !== undefined,
           owner: r.role === "host",

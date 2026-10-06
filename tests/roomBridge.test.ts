@@ -44,10 +44,11 @@ function fakePlay(init: Partial<MainPlayStatus> = {}) {
 
 function setup(init: Partial<MainPlayStatus> = {}) {
   const fp = fakePlay(init);
-  const env = { present: true, roomShown: 0 };
+  const env = { present: true, mayPlay: true, roomShown: 0 };
   const bridge = createRoomBridge({
     play: fp.play,
     present: () => env.present,
+    mayPlay: () => env.mayPlay,
     showRoom: () => void env.roomShown++,
   });
   return { ...fp, bridge, env };
@@ -56,7 +57,7 @@ function setup(init: Partial<MainPlayStatus> = {}) {
 describe("createRoomBridge", () => {
   it("is open while another device is online, and never has a Cue", () => {
     const { bridge, env } = setup();
-    expect(bridge.status()).toEqual({ open: true, cue: false, differs: false, canCue: false, changedBy: null });
+    expect(bridge.status()).toEqual({ open: true, cue: false, differs: false, canCue: false, changedBy: null, canPlay: true });
     env.present = false;
     expect(bridge.status().open).toBe(false);
     bridge.setCue(true);
@@ -75,7 +76,7 @@ describe("createRoomBridge", () => {
     expect(bridge.status()).toMatchObject({ open: true, differs: true, changedBy: "iPad" });
     env.present = false;
     set({});
-    expect(bridge.status()).toEqual({ open: false, cue: false, differs: false, canCue: false, changedBy: null });
+    expect(bridge.status()).toEqual({ open: false, cue: false, differs: false, canCue: false, changedBy: null, canPlay: true });
   });
 
   it("Play goes through MainPlay with the glide, and says whether it glided", () => {
@@ -87,6 +88,32 @@ describe("createRoomBridge", () => {
     setResult(null);
     expect(bridge.go(2000)).toBe(false);
     expect(calls).toEqual(["play:4000", "play:undefined", "play:2000"]);
+  });
+
+  it("without the right to Play, says canPlay false, sends nothing, and still reports Main and offers Take Main", () => {
+    const { bridge, calls, env, set } = setup({ onAir: false, changedBy: "iPad" });
+    env.mayPlay = false;
+    expect(bridge.status()).toMatchObject({ open: true, canPlay: false, differs: true, changedBy: "iPad" });
+    expect(bridge.go(4000)).toBe(false);
+    expect(bridge.go()).toBe(false);
+    expect(calls).toEqual([]);
+    bridge.take?.();
+    expect(calls).toEqual(["take"]);
+    env.mayPlay = true;
+    set({});
+    expect(bridge.status().canPlay).toBe(true);
+    expect(bridge.go()).toBe(false);
+    expect(calls).toEqual(["take", "play:undefined"]);
+  });
+
+  it("tells listeners when the right to Play changes", () => {
+    const { bridge, env } = setup();
+    const seen: OutputStatus[] = [];
+    bridge.onStatus((s) => seen.push(s));
+    env.mayPlay = false;
+    bridge.update(1);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].canPlay).toBe(false);
   });
 
   it("update ticks MainPlay", () => {
@@ -171,8 +198,23 @@ describe("combineBridges", () => {
   it("is open while any output is, and differs or cues while any does", () => {
     const a = fakeBridge(closed);
     const b = fakeBridge({ open: true, cue: true, differs: true, canCue: true });
-    expect(combineBridges([a.bridge, b.bridge]).status()).toEqual({ open: true, cue: true, differs: true, canCue: true, changedBy: null });
-    expect(combineBridges([a.bridge, fakeBridge(closed).bridge]).status()).toEqual({ ...closed, changedBy: null });
+    expect(combineBridges([a.bridge, b.bridge]).status()).toEqual({ open: true, cue: true, differs: true, canCue: true, changedBy: null, canPlay: true });
+    expect(combineBridges([a.bridge, fakeBridge(closed).bridge]).status()).toEqual({ ...closed, changedBy: null, canPlay: true });
+  });
+
+  it("shows PLAY while any open output can play, or none is open, and hides it when only a refused room is open", () => {
+    const noPlay: OutputStatus = { ...room, canPlay: false };
+    const pop = fakeBridge(closed);
+    const rm = fakeBridge(noPlay);
+    const both = combineBridges([pop.bridge, rm.bridge]);
+    expect(both.status().canPlay).toBe(false);
+    pop.set(open);
+    expect(both.status().canPlay).toBe(true);
+    pop.set(closed);
+    rm.set({ ...noPlay, open: false });
+    expect(both.status().canPlay).toBe(true);
+    rm.set({ ...room, canPlay: true });
+    expect(both.status().canPlay).toBe(true);
   });
 
   it("sends Play to the open outputs only, and reports a glide if any glided", () => {
@@ -263,6 +305,6 @@ describe("combineBridges", () => {
     b.set(open);
     b.set({ ...open });
     a.set(open);
-    expect(seen).toEqual([{ ...open, changedBy: null }]);
+    expect(seen).toEqual([{ ...open, changedBy: null, canPlay: true }]);
   });
 });

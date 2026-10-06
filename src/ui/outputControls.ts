@@ -21,6 +21,9 @@ import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts"
  * reads MAIN = YOURS / MAIN ≠ YOURS instead of the pop-out's OUT wording. When
  * someone else played over unplayed edits it reads MAIN CHANGED BY <NAME> and
  * TAKE MAIN (#takeBtn, optional in the markup) drops the edits and shows Main.
+ * On a room device the owner has not let Play (`status.canPlay` false) PLAY is
+ * hidden and its keys and pointer do nothing at all; the state line still says
+ * whether Main matches and asks for the owner's Play, and TAKE MAIN still works.
  *
  * PLAY also answers a pointer, for a touch screen with no keyboard: a tap
  * sends at once, holding charges the fill and glides on release, exactly as a
@@ -60,6 +63,9 @@ export interface OutputControls {
   setVisible(visible: boolean): void;
   /** True when the keys mean something: a scene is up and an output is open. */
   active(): boolean;
+  /** True when a Play means something: `active()` and this device may Play
+   *  (`status.canPlay` is not false). The Play keys check it. */
+  playActive(): boolean;
   /** True when Cue means something: `active()` and a pop-out is open. */
   cueActive(): boolean;
   /** Keyboard paths — no-ops (null/false) unless an output window is open.
@@ -125,6 +131,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     // With a pop-out open it is the pop-out's program being compared; without
     // one, the room's Main.
     if (s.canCue) return s.differs ? "OUT ≠ PREVIEW — PLAY TO SEND" : "OUT = PREVIEW";
+    if (s.canPlay === false) return s.differs ? "MAIN ≠ YOURS — ASK THE OWNER FOR PLAY" : "MAIN = YOURS";
     return s.differs ? "MAIN ≠ YOURS — PLAY TO SEND" : "MAIN = YOURS";
   }
 
@@ -140,7 +147,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     popBtn.title = popOpen ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
     const show = visible && s.open;
     cueBtn.style.display = show && s.canCue ? "block" : "none";
-    goBtn.style.display = show ? "block" : "none";
+    goBtn.style.display = show && s.canPlay !== false ? "block" : "none";
     if (takeBtn) takeBtn.style.display = show && s.changedBy ? "block" : "none";
     stateEl.style.display = show ? "block" : "none";
     cueBtn.setAttribute("aria-pressed", String(s.cue));
@@ -176,8 +183,12 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     return visible && bridge.status().open;
   }
 
+  function playActive(): boolean {
+    return active() && bridge.status().canPlay !== false;
+  }
+
   function go(glideMs?: number): PlayResult {
-    if (!active()) return null;
+    if (!playActive()) return null;
     flash(goBtn);
     const glided = bridge.go(glideMs);
     if (glided && glideMs) startGlideIndicator(glideMs);
@@ -238,7 +249,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
   }
 
   goBtn.addEventListener("pointerdown", (e) => {
-    if (e.button > 0) return;
+    if (e.button > 0 || !playActive()) return;
     pressHandled = false;
     pointerKey.down(performance.now());
     if (!pointerRaf) pointerRaf = requestAnimationFrame(pointerCharge);
@@ -273,6 +284,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
       render(bridge.status());
     },
     active,
+    playActive,
     cueActive,
     go,
     holdCue,

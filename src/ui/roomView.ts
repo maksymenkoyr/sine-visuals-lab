@@ -27,6 +27,11 @@
  * `chipsFor`, `feedChoices` and friends) run in the unit tests; the DOM is
  * built inside `createRoomView`.
  *
+ * A Play row (every device but a TV) says whether that device’s Play reaches
+ * Main. The owner always may; for any other device the owner switches it, and
+ * everyone else sees the choice but can’t change it (server/roomDevices.ts
+ * `mayPlay`).
+ *
  * A TV also gets a Quality row: a TV page has no panel of its own, so this is
  * where its quality is chosen, with the Power card's choices
  * (render/qualityPref.ts `QUALITY_OPTIONS`).
@@ -303,6 +308,8 @@ export function rejectText(reason: string): string {
       return "That device isn't on its own input.";
     case "rate":
       return "Too many changes — wait a moment.";
+    case "owner-only":
+      return "Only the owner can change who may play.";
     default:
       return "The room refused that change.";
   }
@@ -616,6 +623,23 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
   );
   const screenNote = box(dimLine);
 
+  // Not a TV's: a TV only shows Main, it never plays to it.
+  const playRow = box("");
+  const playLabel = box(`${monoCaps} margin-top: 16px; margin-bottom: 4px; color: ${SCENE_VIOLET};`);
+  playLabel.textContent = "Play";
+  const playSeg = segmented(
+    [
+      { value: "yes", label: "Can play" },
+      { value: "no", label: "Can’t play" },
+    ],
+    (v) => {
+      const d = roster.find((r) => r.deviceId === selected);
+      if (d && (v === "yes" || v === "no")) deps.setDevice(d.deviceId, { canPlay: v === "yes" });
+    },
+  );
+  const playNote = box(dimLine);
+  playRow.append(playLabel, playSeg.el, playNote);
+
   // Only a TV's: every other device sets its own Quality in its panel.
   const qualityRow = box("");
   const qualityLabel = box(`${monoCaps} margin-top: 16px; margin-bottom: 4px; color: ${POWER_TEAL};`);
@@ -691,6 +715,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     screenLabel,
     screenSeg.el,
     screenNote,
+    playRow,
     qualityRow,
     timingRow,
     timingNote,
@@ -1001,6 +1026,26 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
           : "No picture. The device is a remote.",
     );
 
+    playRow.style.display = d.kind === "tv" ? "none" : "block";
+    if (d.kind !== "tv") {
+      const locked: Record<string, string> = {};
+      if (!deps.isOwner) {
+        locked.yes = "Only the owner can change this";
+        locked.no = "Only the owner can change this";
+      } else if (d.owner) locked.no = "The owner can always play";
+      playSeg.set(d.canPlay ? "yes" : "no", locked, (v) => (v === "yes" ? SCENE_VIOLET : GREY));
+      setText(
+        playNote,
+        d.owner
+          ? "The owner can always play to Main."
+          : d.canPlay
+            ? "Its Play changes Main."
+            : deps.isOwner
+              ? "Its Play does nothing until you allow it."
+              : "Its Play does nothing. Only the owner can allow it.",
+      );
+    }
+
     qualityRow.style.display = d.kind === "tv" ? "block" : "none";
     if (d.kind === "tv") {
       qualitySeg.set(d.quality, {}, () => POWER_TEAL);
@@ -1033,7 +1078,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
    *  it has landed: a refusal said about an earlier try is stale by then. */
   function selectedKey(): string {
     const d = roster.find((r) => r.deviceId === selected);
-    return d ? `${d.name}|${d.ears}|${d.follow ?? ""}|${d.screen}|${d.quality}` : "";
+    return d ? `${d.name}|${d.ears}|${d.follow ?? ""}|${d.screen}|${d.quality}|${d.canPlay}` : "";
   }
 
   deps.onRosterChange((r) => {
