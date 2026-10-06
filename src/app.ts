@@ -159,7 +159,14 @@ import {
 } from "./render/sceneSet.ts";
 import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
 import { funnyLookName } from "./render/lookNames.ts";
-import { clearCustomValue, getCustomValue, setCustomValue } from "./render/customValues.ts";
+import {
+  clearCustomValue,
+  getCustomValue,
+  getSliderStretch,
+  resetCustomValue,
+  setCustomValue,
+  stretchSlider,
+} from "./render/customValues.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import {
   getAutoGain,
@@ -2076,7 +2083,14 @@ function wireDeviceMenu(): void {
       bufferHeight: canvas.height,
       ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
     }),
-    customValues: { get: getCustomValue, set: setCustomValue, clear: clearCustomValue },
+    customValues: {
+      get: getCustomValue,
+      set: setCustomValue,
+      clear: clearCustomValue,
+      stretch: getSliderStretch,
+      stretchTo: stretchSlider,
+      reset: resetCustomValue,
+    },
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
