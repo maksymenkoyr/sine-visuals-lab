@@ -260,7 +260,7 @@ export const alienScene: Scene = (() => {
       // The panel draws the line a climb has to reach, and a dot per cut
       // (settingMarks.ts); no line while the threshold is off.
       last.cutLine = standoutMarks(reel.cut.detector)?.reach ?? 0;
-      publishSettingMarks(ALIEN_ID, "cut", standoutLine(reel.cut.detector, "reach to cut"), cut ? 1 : 0);
+      publishSettingMarks(ALIEN_ID, "cut", { lines: standoutLine(reel.cut.detector, "reach to cut"), reactionLabel: "cut" }, cut ? 1 : 0);
       const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.lowPulse, 0)));
       stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt, get("bounceSmooth"));
       const squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));

@@ -2888,7 +2888,12 @@ function createPhysarum2Scene(): Scene {
       const seedFresh = stepStandoutTrigger(seedTrigger, dt, drives.value("seed", anim.beatPulse), standoutThreshold(drives, "seed"));
       // The panel draws the line a climb has to reach, and a dot for each
       // colony started (settingMarks.ts); no line while the threshold is off.
-      publishSettingMarks(ID, "seed", standoutLine(seedTrigger.detector, "reach to start a colony"), seedFresh ? 1 : 0);
+      publishSettingMarks(
+        ID,
+        "seed",
+        { lines: standoutLine(seedTrigger.detector, "reach to start a colony"), reactionLabel: "colony started" },
+        seedFresh ? 1 : 0,
+      );
       if (seedFresh) {
         seedEpoch++;
         pendingSeed = true;

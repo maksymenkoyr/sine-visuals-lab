@@ -1513,7 +1513,7 @@ float softCeil(float x, float knee, float ceil) {
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
         // ring, and each ring actually sent.
-        publishSettingMarks("caustics", "ripple", standoutLine(emission, "reach to ring"), emitted);
+        publishSettingMarks("caustics", "ripple", { lines: standoutLine(emission, "reach to ring"), reactionLabel: "ring sent" }, emitted);
 
         // A drop is rarer and bigger than an ordinary beat — a stronger ring
         // emitted in addition to whatever the continuous driver above just

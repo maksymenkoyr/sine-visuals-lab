@@ -20,8 +20,15 @@ export interface SettingMarkLine {
   label: string;
 }
 
-interface Entry {
+/** What the graph shows for one setting, besides its own signal. */
+export interface SettingMarks {
   lines: SettingMarkLine[];
+  /** What the graph's key calls a reaction dot, in the setting's own words
+   *  ("ring sent", "cut"). */
+  reactionLabel: string;
+}
+
+interface Entry extends SettingMarks {
   /** Strongest reaction since each reader's last read, keyed by reader. */
   reactions: Map<string, number>;
 }
@@ -33,27 +40,30 @@ function entryFor(sceneId: string, key: string): Entry {
   const k = keyOf(sceneId, key);
   let e = entries.get(k);
   if (!e) {
-    e = { lines: [], reactions: new Map() };
+    e = { lines: [], reactionLabel: "", reactions: new Map() };
     entries.set(k, e);
   }
   return e;
 }
 
-/** Replaces the setting's reference lines, and records this frame's reaction
- *  strength (0 = none; kept as the max until the panel next reads). */
-export function publishSettingMarks(sceneId: string, key: string, lines: SettingMarkLine[], reaction: number): void {
+/** Replaces the setting's reference lines and reaction label, and records
+ *  this frame's reaction strength (0 = none; kept as the max until the panel
+ *  next reads). */
+export function publishSettingMarks(sceneId: string, key: string, marks: SettingMarks, reaction: number): void {
   const e = entryFor(sceneId, key);
-  e.lines = lines;
+  e.lines = marks.lines;
+  e.reactionLabel = marks.reactionLabel;
   for (const [reader, r] of e.reactions) if (reaction > r) e.reactions.set(reader, reaction);
 }
 
 /** A panel view's read (`reader` names the view, e.g. "graph" or "row"):
- *  current lines and the strongest reaction since that view's last read,
- *  which this clears. Null if the scene never published for this key. */
-export function takeSettingMarks(sceneId: string, key: string, reader: string): { lines: SettingMarkLine[]; reaction: number } | null {
+ *  current lines and reaction label, and the strongest reaction since that
+ *  view's last read, which this clears. Null if the scene never published for
+ *  this key. */
+export function takeSettingMarks(sceneId: string, key: string, reader: string): (SettingMarks & { reaction: number }) | null {
   const e = entries.get(keyOf(sceneId, key));
   if (!e) return null;
   const reaction = e.reactions.get(reader) ?? 0;
   e.reactions.set(reader, 0);
-  return { lines: e.lines, reaction };
+  return { lines: e.lines, reactionLabel: e.reactionLabel, reaction };
 }
