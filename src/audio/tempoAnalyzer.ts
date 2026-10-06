@@ -23,6 +23,26 @@ import { estimateTempo, TEMPO_DECAY_SEC, BPM_MIN, BPM_MAX } from "./tempoComb.ts
  * their scripted true beat times (tests/tempoEval/synth.ts) until the
  * measured offset centred on zero.
  *
+ * The detector reads the same from a near or a far mic. Before the log
+ * compression, every band magnitude is scaled by how far the input's held
+ * level sits from LEVEL_REF_DB, the level synth.ts's tracks play at and the
+ * level everything here was tuned at. Without that, a quiet input landed on
+ * the near-linear stretch of log1p, where the same hits voted with
+ * different strengths, so a far mic changed which tempo won. That old fixed
+ * knee was also what kept a far mic's room noise out, so a noise floor takes
+ * its place: no band's knee sits lower than NOISE_KNEE_DB above that band's
+ * own floor (the minimum of its smoothed magnitude over NOISE_WIN_SEC). The
+ * floor also settles on a song's sustained sound (a held bass line, pads,
+ * a vocal), so only what rises out of it counts as a hit; on real songs that
+ * fixed more wrong tempos than anything else here. The smoother starts at
+ * the first hop's level rather than at zero, so that holds from the first
+ * beat. Flux is measured against each band's maximum over the last
+ * FLUX_REF_HOPS hops, not just the previous hop, so a room's echo of a hit
+ * (a fainter copy a few tens of milliseconds later) can't climb past the
+ * hit and fire again. REFRACTORY_SEC stays under a sixteenth note at
+ * BPM_MAX: drum & bass puts a kick and a snare a sixteenth apart, and a
+ * longer lockout dropped the snare whenever the kick was heard.
+ *
  * Every picked onset then votes in tempoComb.ts's estimateTempo — the same
  * pair-comb features.ts's render-tick pipeline uses, but here with
  * RECENCY_SEC > 0 (a stale pairing fades out, so the estimate follows a
@@ -68,13 +88,29 @@ const LOG_C = 1e4;
 const PAIR_TOL_SEC = 0.03;
 const PAIR_REFINE_TOL_SEC = PAIR_TOL_SEC / 2;
 const RECENCY_SEC = 3;
-const ONSET_TIME_OFFSET_HOPS = 2.3;
+const ONSET_TIME_OFFSET_HOPS = 2.7;
 const TEMPO_SWITCH_MARGIN = 1.25; // matches the measured prototype's own hardcoded hysteresis margin
 const PERIOD_STEP_SEC = 0.0025;
 
+// Level and room (see this module's header). The input's short-term power
+// (a LEVEL_SHORT_SEC average) is peak-held with a slow LEVEL_RELEASE_SEC
+// fall; LEVEL_FLOOR_DB caps the boost, so digital silence is never pulled up
+// to music level. Each band's floor is the minimum of its magnitude, smoothed
+// over NOISE_SMOOTH_SEC, across NOISE_SUBWINS rolling slices of
+// NOISE_WIN_SEC.
+const LEVEL_SHORT_SEC = 0.3;
+const LEVEL_RELEASE_SEC = 10;
+const LEVEL_REF_DB = -19.5;
+const LEVEL_FLOOR_DB = -66;
+const NOISE_SMOOTH_SEC = 0.5;
+const NOISE_WIN_SEC = 6;
+const NOISE_SUBWINS = 4;
+const NOISE_KNEE_DB = 12;
+const FLUX_REF_HOPS = 5;
+
 const BASS_WEIGHT = 2; // how much harder the low bands count toward flux/onset "bass", not the tempo vote
 const ONSET_K = 1.5; // onset threshold: baseline + ONSET_K * deviation
-const REFRACTORY_SEC = 0.1;
+const REFRACTORY_SEC = 0.05;
 const ONSET_WIN_SEC = 6;
 const MAX_PAIR_ONSETS = 64; // hard cap on the onset window this hop's comb searches, mirrors features.ts's MAX_ONSETS
 
@@ -102,7 +138,26 @@ export class TempoAnalyzer {
   private ring = new Float32Array(FFT_SIZE);
   private ringPos = 0;
   private sinceHop = 0;
-  private prevLog = new Float64Array(NUM_BANDS);
+  // input level (power, not dB)
+  private hopSq = 0;
+  private shortPow = 0;
+  private heldPow = 0;
+  private readonly levelShortA: number;
+  private readonly levelRelease: number;
+  private readonly refPow = Math.pow(10, LEVEL_REF_DB / 10);
+  private readonly floorPow = Math.pow(10, LEVEL_FLOOR_DB / 10);
+  // per-band floor (smoothMag -1 = no hop seen yet)
+  private smoothMag = new Float64Array(NUM_BANDS).fill(-1);
+  private subMin = new Float64Array(NUM_BANDS).fill(Infinity);
+  private subMins = Array.from({ length: NOISE_SUBWINS }, () => new Float64Array(NUM_BANDS).fill(Infinity));
+  private subHop = 0;
+  private subPos = 0;
+  private readonly subHops: number;
+  private readonly noiseSmoothA: number;
+  private readonly noiseKnee = Math.pow(10, NOISE_KNEE_DB / 20);
+  // each band's log magnitude over the last FLUX_REF_HOPS hops (a ring)
+  private prevLogs = Array.from({ length: FLUX_REF_HOPS }, () => new Float64Array(NUM_BANDS));
+  private prevPos = 0;
   // onset picking
   private m = 0;
   private dev = 0;
@@ -116,6 +171,10 @@ export class TempoAnalyzer {
     this.sampleRate = sampleRate;
     this.hop = Math.round(sampleRate * (512 / 48000));
     this.hopSec = this.hop / sampleRate;
+    this.levelShortA = Math.min(1, this.hopSec / LEVEL_SHORT_SEC);
+    this.levelRelease = Math.exp(-this.hopSec / LEVEL_RELEASE_SEC);
+    this.noiseSmoothA = Math.min(1, this.hopSec / NOISE_SMOOTH_SEC);
+    this.subHops = Math.max(1, Math.round(NOISE_WIN_SEC / NOISE_SUBWINS / this.hopSec));
     for (let n = 0; n < FFT_SIZE; n++) this.win[n] = 0.42 - 0.5 * Math.cos((2 * Math.PI * n) / FFT_SIZE) + 0.08 * Math.cos((4 * Math.PI * n) / FFT_SIZE);
     for (let i = 0; i < FFT_SIZE; i++) {
       let r = 0;
@@ -147,7 +206,9 @@ export class TempoAnalyzer {
   /** Feed consecutive mono samples; `startTime` is the audio time of samples[0]. */
   push(samples: Float32Array, startTime: number): void {
     for (let i = 0; i < samples.length; i++) {
-      this.ring[this.ringPos] = samples[i]!;
+      const s = samples[i]!;
+      this.ring[this.ringPos] = s;
+      this.hopSq += s * s;
       this.ringPos = (this.ringPos + 1) % FFT_SIZE;
       if (++this.sinceHop >= this.hop) {
         this.sinceHop = 0;
@@ -189,18 +250,39 @@ export class TempoAnalyzer {
         }
       }
     }
+    this.shortPow += (this.hopSq / this.hop - this.shortPow) * this.levelShortA;
+    this.hopSq = 0;
+    this.heldPow = Math.max(this.shortPow, this.heldPow * this.levelRelease, this.floorPow);
+    // where LOG_C puts the log knee for input at LEVEL_REF_DB, moved with the input's level
+    const musicKnee = Math.sqrt(this.heldPow / this.refPow) / LOG_C;
+    const newSub = ++this.subHop >= this.subHops;
+    if (newSub) this.subHop = 0;
     let flux = 0;
     let bassFlux = 0;
     for (let b = 0; b < NUM_BANDS; b++) {
       let s = 0;
       for (let k = this.binLo[b]!; k < this.binHi[b]!; k++) s += Math.hypot(re[k]!, im[k]!);
       const mag = s / (this.binHi[b]! - this.binLo[b]!) / FFT_SIZE;
-      const l = Math.log1p(LOG_C * mag);
-      const d = Math.max(0, l - this.prevLog[b]!);
-      this.prevLog[b] = l;
+      const sm = this.smoothMag[b]! < 0 ? mag : this.smoothMag[b]! + (mag - this.smoothMag[b]!) * this.noiseSmoothA;
+      this.smoothMag[b] = sm;
+      let floor = Math.min(this.subMin[b]!, sm);
+      this.subMin[b] = floor;
+      for (let w = 0; w < NOISE_SUBWINS; w++) floor = Math.min(floor, this.subMins[w]![b]!);
+      const l = Math.log1p(mag / Math.max(musicKnee, this.noiseKnee * floor));
+      let ref = 0;
+      for (let j = 0; j < FLUX_REF_HOPS; j++) ref = Math.max(ref, this.prevLogs[j]![b]!);
+      const d = Math.max(0, l - ref);
+      this.prevLogs[this.prevPos]![b] = l;
       const isLow = b < this.lowBands;
       flux += d * (isLow ? BASS_WEIGHT : 1);
       if (isLow) bassFlux += d;
+    }
+    this.prevPos = (this.prevPos + 1) % FLUX_REF_HOPS;
+    if (newSub) {
+      const done = this.subMins[this.subPos]!;
+      done.set(this.subMin);
+      this.subPos = (this.subPos + 1) % NOISE_SUBWINS;
+      this.subMin.fill(Infinity);
     }
 
     this.pickOnset(flux, bassFlux, endTime);
