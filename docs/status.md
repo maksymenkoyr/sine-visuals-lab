@@ -8,33 +8,29 @@ _2026-10-06_
 
 ## In flight
 
-- **Release notes** — draft #396: `/release` writes a plain-words release
-  story into the release PR, a picture for every change that can show one
-  (two across per area; no hand-picked highlights, the user's call on
-  2026-10-06). It opens the GitHub Release (the generated list folds under
-  it) and is where `/video-release-stable` starts. Also fixes the generated
-  list, which showed every commit since PRs began landing as merge commits.
-  The 0.3.0 notes are drafted in a private preview artifact,
-  claude.ai/artifact/MSZD7camR95HSvs5CHfBsp, whose `notes.md` is the source;
-  its pictures are on the `pr-screenshots` branch only, for review.
-- **Scenes:** #395 Sweep Shape drift and Morph; #377 Fractal Grid; #376
-  Echoes; #367 Long Play Pro views and Lift; #366 Chladni Toss, plates and
-  sand colour; #335 Physarum 2 agent sort.
-- **App:** #387 typed slider values; #385 owner-only Play in a room; #236
-  Cast mode; #160 magnet slider.
-- **Plans and docs:** #384 tempo and mic plan; #378 real-song tuning check;
-  #74 architecture doc.
+- **Tempo + party mic** — draft #384, `plans/tempo-and-mic.md`. Research
+  only, no code yet. The simulated mic barely hurts the 6 real songs; what
+  hurts is a tempo detector that changes its answer with mic volume, room
+  echo that adds fake hits, and a detector that only hears kick and snare.
+  Six phases, starting with the user's party recordings as a test set.
+- **Other open PRs:** drafts #383 Room QR opens full screen, #379 Sweep,
+  #378 real-song tuning check, #377 Fractal Grid, #376 Echoes, #367 Long
+  Play views, #366 Chladni plates, #335 Physarum 2 agent sort, #236 Output
+  Cast mode, #74 architecture doc; #160 Magnet slider (ready).
 
 ## Open questions
 
-- 0.3.0 notes: are the pictures, the headline and the lines right? Approving
-  them means uploading the pictures to the Insiders pre-release and opening
-  the release PR.
-- Physarum 2's defaults barely pulse with real music — make the user's
-  look's drives the defaults? (Physarum 2 record, Known issues.)
+- The true tempo of each party video: known songs or set BPM, or tapped by
+  ear? (`plans/tempo-and-mic.md`, blocks phase 1's scoring.)
+- In a loud room, should Auto do what the user does by hand (Expansion up,
+  Sensitivity near 1×, Smoothing low), at the cost of more twitch on crowd
+  noise? (Blocks phase 4.)
+- Carry a DJ set's tempo from one song into the next? (Blocks part of
+  phase 6.)
 
 ## Next up
 
-- Merge #396, then `/release` for 0.3.0 from the drafted notes; after the
-  release, `/video-release-stable`.
-- Prune worktrees whose PRs merged (check each with `gh pr view`).
+- Merge #384, then the user sends the party videos and starts a new session
+  with `/handoff tempo-and-mic` (phase 1).
+- Prune worktrees whose PRs merged (72 besides `main`; check each one's PR
+  with `gh pr view`).
