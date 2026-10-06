@@ -93,7 +93,8 @@ export interface OutputState {
 export interface WireFrame extends FeatureFrame {
   /** features.ts's broadband ratio (animClock.advance's `beatRatio`), null off a local mic. */
   beatRatio: number | null;
-  /** Waveform peak for AnimFrame.wavePeak, null off a local mic. */
+  /** Waveform peak for AnimFrame.wavePeak: the local mic's, or a followed
+   *  feed's (app.ts's waveSamples); null with neither. */
   wavePeak: number | null;
   /** See the header; absent while the output shows its own look, not the preview. */
   p?: OutputParams;

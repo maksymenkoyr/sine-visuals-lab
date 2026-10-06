@@ -1,5 +1,5 @@
 import { WORKER_ORIGIN } from "./config.ts";
-import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame } from "./protocol.ts";
+import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame, type WaveEnvelope } from "./protocol.ts";
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
@@ -70,6 +70,9 @@ export interface VisualSample {
   timeSec: number;
   /** Absolute input loudness [0,1] — see FeatureFrame.level. */
   level: number;
+  /** The feed's waveform envelope at this instant (JitterBuffer.sampleAt);
+   *  null when the feed sends none. */
+  wave: WaveEnvelope | null;
 }
 
 /** The room's keys, as the laptop minted them. A host presents both; a phone
@@ -397,19 +400,22 @@ abstract class RoomConnectionBase {
    *  legacy room, whose roster only looks like records), or a roster that
    *  doesn't list this device yet, takes every frame and relays it as it
    *  always did. Whether this device is *allowed* to be a feed
-   *  is the room's call, by the same records. */
-  sendFrame(frame: EncodableFrame): void {
+   *  is the room's call, by the same records. `wave` is this tick's mic
+   *  envelope for a follower's Waveform row (protocol.ts's wave tail), null
+   *  with no mic samples; this device's own buffer never keeps it, since its
+   *  own panel reads the mic directly. */
+  sendFrame(frame: EncodableFrame, wave: WaveEnvelope | null = null): void {
     const roomTimeMs = this.clock.roomNow();
-    this.pushFrame({ ...frame, roomTimeMs });
+    this.pushFrame({ ...frame, roomTimeMs, wave: null });
 
-    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave);
     if (!d.send) return;
     // The latches are cleared even when nothing goes out (socket not open, no
     // follower), so a stale hit isn't replayed on reconnect or when a follower
     // arrives.
     const view = this.rosterView;
     if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
-    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
+    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs, d.wave));
   }
 
   /** Forget every frame this device has buffered or is about to send, as if
@@ -492,6 +498,7 @@ abstract class RoomConnectionBase {
       pulseFired: this.buffer.consumePulseIfDue(targetMs),
       timeSec: roomTimeToSeconds(targetMs),
       level: s.level,
+      wave: s.wave,
     };
   }
 

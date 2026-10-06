@@ -41,6 +41,20 @@ export function isClipping(samples: Float32Array, threshold = CLIP_THRESHOLD): b
   return false;
 }
 
+/** The lowest and highest sample — one column of downsampleForDisplay, without
+ *  its arrays. What a room host puts on the wire for its followers' Waveform
+ *  row (src/net/protocol.ts's wave tail). */
+export function minMax(samples: Float32Array): { min: number; max: number } {
+  let min = 0;
+  let max = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
 export interface Envelope {
   min: Float32Array; // length targetPoints
   max: Float32Array; // length targetPoints

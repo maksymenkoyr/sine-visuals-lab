@@ -54,7 +54,7 @@ describe("WireDecimator", () => {
     const d = new WireDecimator(INTERVAL);
     d.offer(0, false, false);
     d.offer(16, false, false);
-    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true });
+    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null });
   });
 
   it("after a long gap sends once, with no burst of catch-up sends", () => {
@@ -71,5 +71,21 @@ describe("WireDecimator", () => {
     expect(d.offer(400, false, false).send).toBe(true);
     expect(d.offer(416, false, false).send).toBe(false);
     expect(d.offer(433, false, false).send).toBe(true);
+  });
+
+  it("sends the min and max of every tick's waveform since the last send, then starts over", () => {
+    const d = new WireDecimator(INTERVAL);
+    d.offer(0, false, false, { min: -0.1, max: 0.1 });
+    expect(d.offer(16, false, false, { min: -0.9, max: 0.2 }).send).toBe(false);
+    expect(d.offer(33, false, false, { min: -0.3, max: 0.5 })).toMatchObject({ send: true, wave: { min: -0.9, max: 0.5 } });
+    d.offer(50, false, false, { min: -0.05, max: 0.05 });
+    expect(d.offer(67, false, false, { min: -0.02, max: 0.04 }).wave).toEqual({ min: -0.05, max: 0.05 });
+  });
+
+  it("sends no waveform when no tick since the last send had one", () => {
+    const d = new WireDecimator(INTERVAL);
+    d.offer(0, false, false, { min: -0.5, max: 0.5 });
+    d.offer(16, false, false, null);
+    expect(d.offer(33, false, false, null).wave).toBeNull();
   });
 });

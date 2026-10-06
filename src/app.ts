@@ -23,7 +23,7 @@ import {
 import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { peak, rms } from "./audio/waveform.ts";
+import { minMax, peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
 import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
@@ -548,6 +548,19 @@ let lastRawBands: Float32Array | null = null;
  *  solo/host-only availability as lastRawBands above, for the same reason
  *  (no local mic on a renderer device). Feeds the Dynamics card's Waveform row. */
 let lastMono: Float32Array | null = null;
+/** On a device following another one's input (a phone or iPad on the laptop):
+ *  the feed's waveform at this tick's sample as two samples, [min, max]
+ *  (src/net/protocol.ts's wave tail), written by sampleToVisual. Null
+ *  everywhere else, and when the feed sends none (a synthetic feed). It
+ *  stands in for lastMono wherever the Waveform row and AnimFrame.wavePeak
+ *  read samples — see waveSamples(). */
+let lastFeedWave: Float32Array | null = null;
+const feedWaveScratch = new Float32Array(2);
+/** The samples the Dynamics card's Waveform row and AnimFrame.wavePeak read
+ *  this tick: this device's own mic, else the feed's envelope. */
+function waveSamples(): Float32Array | null {
+  return lastMono ?? lastFeedWave;
+}
 /** This tick's deep waveform samples, straight off measureAnalyser — DEV
  *  only, see that variable's own comment. Same buffer identity every read;
  *  a consumer across a page.evaluate boundary must copy before it returns. */
@@ -3301,6 +3314,8 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // tempoSource) sets this back — see its own doc comment on the module
   // state above for why host/renderer/TV never do.
   lastTempoHits = undefined;
+  // Same reset: only sampleToVisual, on a page following a feed, sets it.
+  lastFeedWave = null;
   const conn = activeConn();
 
   if (mode === "solo" || !conn) {
@@ -3366,7 +3381,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       f.bpm = tempoSource.bpm;
       tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
     }
-    conn.sendFrame(f);
+    conn.sendFrame(f, lastMono ? minMax(lastMono) : null);
     return sampleToVisual(conn.sample());
   }
 
@@ -3404,6 +3419,11 @@ function currentVisual(rateScale: number): FeatureFrame | null {
 
 function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
   if (!s) return null;
+  if (s.wave) {
+    feedWaveScratch[0] = s.wave.min;
+    feedWaveScratch[1] = s.wave.max;
+    lastFeedWave = feedWaveScratch;
+  }
   return {
     time: s.timeSec,
     bands: s.bands,
@@ -3451,6 +3471,7 @@ function tick(): void {
   // so a paired TV/renderer keeps getting frames even while this device is
   // just sitting on the gallery with nothing on screen.
   lastVis = currentVisual(rateScale);
+  const wave = waveSamples();
 
   // The pop-out output (net/outputBridge.ts) keeps streaming even while this
   // window sits on the gallery, so a stray Esc never blanks the projector —
@@ -3475,7 +3496,7 @@ function tick(): void {
     applyRenderQuality(true);
     applyPreviewBox();
   }
-  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: wave ? peak(wave) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
@@ -3506,9 +3527,10 @@ function tick(): void {
   // real broadband reading to give it. `lastTempoHits` is solo-mode-only
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
-  // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
-  // own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
-  // its drive jack); null on any device with no local mic. `nowRafMs` makes
+  // fixed-hop feed for this tick when a tempo source is live. `wave`'s
+  // (waveSamples()) own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
+  // its drive jack): the local mic, or a followed feed's envelope; null when
+  // there is neither. `nowRafMs` makes
   // this the one clock that follows a tap tempo (src/render/tapTempo.ts):
   // like the beat keys, a tap only ever reaches this window's own clock.
   const anim = gained
@@ -3521,7 +3543,7 @@ function tick(): void {
           shape: getHitShape(),
           beatRatio: lastFluxRatio,
           tempoHits: lastTempoHits,
-          wavePeak: lastMono ? peak(lastMono) : null,
+          wavePeak: wave ? peak(wave) : null,
         },
         nowRafMs,
       )
@@ -3573,7 +3595,7 @@ function tick(): void {
   // Only built while the panel is open: update() returns before it touches
   // `drives` when closed, and forScene() allocates a Map and a dozen closures.
   const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);

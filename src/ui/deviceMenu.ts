@@ -770,8 +770,9 @@ export interface DeviceMenu {
   toggle(): void;
   close(): void;
   /** Fed every frame while in a viz (any may be null: frame/ungained/anim
-   *  before audio is up, rawBands/mono additionally on a mic-less renderer
-   *  device) — drives the Input card's level wash, the spectrum strip's
+   *  before audio is up, rawBands additionally on a mic-less renderer
+   *  device, mono there too unless the feed sends its waveform — see
+   *  AudioMeters.update) — drives the Input card's level wash, the spectrum strip's
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
    *  is the same frame before them (the strip's ghost bars); `pinnedBands`
    *  is which bands the gain stage clamped (bandGains.ts's own pinnedBands);

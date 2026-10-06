@@ -53,9 +53,12 @@ const QUIET_MS = 300; // for a message that should not
 
 // The wire frame (src/net/protocol.ts header): type byte, one byte per band
 // (src/audio/types.ts NUM_BANDS), energy, flags, onset phase (u16), bpm * 10
-// (u16), level, and the room time as a float64, all little-endian.
+// (u16), level, and the room time as a float64, all little-endian; then the
+// optional wave tail, the waveform's min and max as Int8 on a square-root
+// curve, which a following page draws as its Waveform row.
 const NUM_BANDS = 24;
 const FRAME_BYTES = 1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8;
+const WAVE_BYTES = 2;
 const HOST_HZ = 30;
 
 const [mode = "smoke", originArg] = process.argv.slice(2);
@@ -77,7 +80,7 @@ const u8 = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
 
 /** One feature frame, built by hand. `f` is 0..1 for everything but bpm and onset. */
 function frameBytes(f, roomTimeMs) {
-  const buf = new ArrayBuffer(FRAME_BYTES);
+  const buf = new ArrayBuffer(FRAME_BYTES + (f.wave ? WAVE_BYTES : 0));
   const v = new DataView(buf);
   let o = 0;
   v.setUint8(o++, 1);
@@ -90,10 +93,17 @@ function frameBytes(f, roomTimeMs) {
   o += 2;
   v.setUint8(o++, u8(f.level));
   v.setFloat64(o, roomTimeMs, true);
+  o += 8;
+  if (f.wave) {
+    const q = (x) => Math.round(Math.sign(x) * Math.sqrt(Math.abs(x)) * 127);
+    v.setInt8(o, q(f.wave.min));
+    v.setInt8(o + 1, q(f.wave.max));
+  }
   return buf;
 }
 
-/** A frame that moves a little and kicks on every beat of a steady tempo. */
+/** A frame that moves a little and kicks on every beat of a steady tempo, its
+ *  waveform swelling with each kick. */
 function syntheticFrame(t, bpm = 120) {
   const beat = (t * bpm) / 60;
   const phase = beat - Math.floor(beat);
@@ -104,7 +114,9 @@ function syntheticFrame(t, bpm = 120) {
     return Math.min(1, 0.15 + 0.35 * drift + 0.5 * kick * weight);
   });
   const energy = bands.reduce((a, b) => a + b, 0) / NUM_BANDS;
-  return { bands, energy, onset: phase < 1 / HOST_HZ / (60 / bpm), phase, bpm, level: 0.5 + 0.3 * kick };
+  const amp = 0.06 + 0.6 * kick;
+  const wave = { min: -amp * (0.85 + 0.15 * Math.sin(t * 9)), max: amp };
+  return { bands, energy, onset: phase < 1 / HOST_HZ / (60 / bpm), phase, bpm, level: 0.5 + 0.3 * kick, wave };
 }
 
 async function newRoomCode() {
@@ -240,7 +252,7 @@ async function runSmoke() {
     const entry = roster.devices.find((d) => d.deviceId === "smoke-phone");
     assertEqual(
       [entry.role, entry.kind, entry.name, entry.hasMic, entry.ears, entry.follow, entry.screen, entry.online, entry.owner],
-      ["controller", "phone", "Smoke phone", true, "follow", null, "off", true, false],
+      ["controller", "phone", "Smoke phone", true, "follow", null, "main", true, false],
       "a phone's default settings",
     );
     assertEqual(roster.devices[0].deviceId, "smoke-host", "the owner is listed first");
@@ -287,7 +299,7 @@ async function runSmoke() {
     const seenByTv = await tv.take("binary frame", isBinary);
     const seenByWatcher = await watcher.take("binary frame", isBinary);
     const seenByPhone = await phone.take("binary frame", isBinary);
-    assertEqual([seenByTv.binary, seenByWatcher.binary, seenByPhone.binary], [FRAME_BYTES, FRAME_BYTES, FRAME_BYTES], "relayed frame size");
+    assertEqual([seenByTv.binary, seenByWatcher.binary, seenByPhone.binary], [frame.byteLength, frame.byteLength, frame.byteLength], "relayed frame size");
     await host.expectNone("its own frame back", isBinary);
     for (const c of [tv, watcher, phone]) c.inbox = c.inbox.filter((m) => !isBinary(m));
     phone.sendBinary(frame); // the phone follows the laptop: it is not a feed
@@ -347,7 +359,7 @@ async function runSmoke() {
     for (const c of [host, phone, tv, watcher]) c.inbox = c.inbox.filter((m) => !isBinary(m));
     phone.sendBinary(frame);
     const got = await tv.take("binary frame from the phone", isBinary);
-    assertEqual(got.binary, FRAME_BYTES, "relayed frame size");
+    assertEqual(got.binary, frame.byteLength, "relayed frame size");
     await host.expectNone("a frame from a device nobody told the laptop to follow", isBinary);
     host.sendBinary(frame);
     await watcher.take("binary frame from the laptop", isBinary);
@@ -426,7 +438,7 @@ async function runSmoke() {
     assert(roster.devices.some((d) => d.deviceId === "smoke-lrend" && d.role === "renderer"), "roster should list the renderer");
     h.sendBinary(frame);
     const got = await r.take("binary frame", isBinary);
-    assertEqual(got.binary, FRAME_BYTES, "relayed frame size");
+    assertEqual(got.binary, frame.byteLength, "relayed frame size");
     r.send({ type: "lookGet" });
     await r.expectNone("look in an unclaimed room", isType("look"));
     h.close();
