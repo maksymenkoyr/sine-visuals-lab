@@ -5,8 +5,9 @@
  *  this at all for non-video elements, so `fullscreenSupported()` is false
  *  there and callers fall back to a chrome-hiding-only "immersed" look.
  *
- *  A page that opens as a screen (a phone that joined a room by its QR, see
- *  src/app.ts) starts immersed with its chrome already hidden (`enterHidden`).
+ *  A page that opens as a screen (a phone or iPad that joined a room by its QR,
+ *  see src/app.ts) starts immersed with its chrome already hidden
+ *  (`enterHidden`).
  *  Browsers grant fullscreen only inside a tap or a key press, and the page
  *  opened without one, so fullscreen is owed: every tap or key press asks for
  *  it again until it is granted, or until the page leaves immersion.

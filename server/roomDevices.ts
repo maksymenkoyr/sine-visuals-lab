@@ -35,9 +35,9 @@
  * permission: only people in the room can scan it); only the owner may forget
  * a device. The defaults for a newcomer come from what it is: the owner is on
  * its own input, everyone else follows the owner, and every device shows Main.
- * A phone that scans the laptop's QR opens as one more screen of the room, full
- * screen with its controls hidden until a tap (src/app.ts `phoneScreen`); the
- * Room view turns it into a remote with `off`.
+ * A phone or iPad that scans the laptop's QR opens as one more screen of the
+ * room, full screen with its controls hidden until a tap (src/app.ts
+ * `handheldScreen`); the Room view turns it into a remote with `off`.
  *
  * Plain TS with no DOM or Workers types (listed in the root tsconfig `files`
  * like server/roomRules.ts): the room, the client and the tests share it.
