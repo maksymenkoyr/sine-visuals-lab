@@ -2685,6 +2685,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return Math.max(1e-3, DRIVE_WEIGHT_MAX * (spec.drive?.gain ?? 1));
   }
 
+  /** The drive graphs' frame, drawn under their traces: a faint band over
+   *  the whole 0…top range, a line along its top (driveGraphTop — a trace
+   *  that touches it is at the most the graph shows) and a dimmer one at 0,
+   *  so how close a reading is to the top reads at a glance. */
+  function drawDriveGraphFrame(ctx: CanvasRenderingContext2D, w: number, yTop: number, yZero: number): void {
+    ctx.fillStyle = "rgba(255,255,255,0.035)";
+    ctx.fillRect(0, yTop, w, yZero - yTop);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.beginPath();
+    ctx.moveTo(0, yTop);
+    ctx.lineTo(w, yTop);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath();
+    ctx.moveTo(0, yZero);
+    ctx.lineTo(w, yZero);
+    ctx.stroke();
+  }
+
   function trackDriveCanvas(canvas: HTMLCanvasElement): CanvasSize {
     const size: CanvasSize = { w: 0, h: 0 };
     driveCanvasSizes.set(canvas, size);
@@ -3334,7 +3355,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "The last 4 seconds, on a scale that never changes: the top is one wire at full weight, the dotted line across the middle one wire at weight 1. White: what this setting receives. Thin coloured lines: each wire (dashed: a condition). Violet: what the Master card's Expansion moved — solid where it pushed this setting up, hatched where it pulled it down; none at 1× with Even. Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
+      "The last 4 seconds, on a scale that never changes: the top line is one wire at full weight (higher clips), the bottom line 0, the dotted line across the middle one wire at weight 1. White: what this setting receives. Thin coloured lines: each wire (dashed: a condition). Violet: what the Master card's Expansion moved — solid where it pushed this setting up, hatched where it pulled it down; none at 1× with Even. Dark: the gate was closed. Other dotted lines and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -3425,6 +3446,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const gain = spec.drive?.gain ?? 1;
       const top = driveGraphTop(spec);
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
+      drawDriveGraphFrame(ctx, w, ys(top), ys(0));
 
       if (isGate) {
         ctx.fillStyle = BLOCKED_FILL;
@@ -3796,7 +3818,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sparkCanvas = document.createElement("canvas");
     sparkCanvas.className = "vc-drive-spark";
     sparkCanvas.style.cssText = driveSparkCanvasStyle;
-    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). Colour shows which wire is contributing most.";
+    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). The top line is one wire at full weight; higher clips. Colour shows which wire is contributing most.";
     sparkCanvas.title = SPARK_TOOLTIP;
     sparkCanvas.addEventListener("pointerenter", () =>
       showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]),
@@ -3899,6 +3921,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const top = sparkTop;
       const pad = sparkHasMarks ? 3 : 1;
       const ys = (v: number) => h - pad - Math.max(0, Math.min(1, v / top)) * (h - 2 * pad);
+      drawDriveGraphFrame(sparkCtx, w, ys(top), ys(0));
       sparkCtx.lineWidth = 1.3;
       sparkCtx.lineJoin = "round";
       sparkCtx.globalAlpha = sparkHasMarks ? 0.45 : 1;
