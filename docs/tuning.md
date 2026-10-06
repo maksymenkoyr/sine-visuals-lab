@@ -8,12 +8,13 @@ audio, without reloading the page or stopping playback.
 Everything here is dev-only. `src/tuning/overrides.ts` is gated on
 `import.meta.env.DEV`, so none of it compiles into a production build, and it can
 never clobber a real user's saved settings (`sceneSettings.ts`'s localStorage
-store) — overrides sit in front of that store, not inside it. `src/tuning/pins.ts`
-is the same idea with one difference: a pin is set by hand, by typing a value past
-a slider's end into its readout (below), not by the param bus, and it persists across a
+store) — overrides sit in front of that store, not inside it. A custom value
+(`src/render/customValues.ts`) is the same idea, but public and set by hand: a
+value typed past a slider's end into its readout (below), which persists across a
 reload where an override doesn't. `resolve()` (`src/render/autoTune.ts`) checks
-an override first, then a pin, then auto-pin, so a value the param bus explicitly
-sets always wins over a pin left over from an earlier by-hand session.
+an override first, then a custom value, then auto-pin, so a value the param bus
+explicitly sets always wins over a custom value left over from an earlier
+by-hand session.
 
 `tuning/params.json`'s `autoPin` ships `false`, so a dev session resolves Auto
 exactly like the deployed site — the music keeps pushing auto-driven settings
@@ -48,11 +49,12 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    The controls panel is a second, by-hand entry point into the same idea.
    Every slider row's readout takes a typed value, in every build
    (`src/ui/typedValue.ts`), and one inside the slider's range is just the
-   setting, saved like a drag. In a dev build, on a scene-setting or Input-card
-   row, one typed outside that range becomes a pin instead of clamping
-   (`src/tuning/pins.ts`) — unclamped, marked with `*`, persisted, and cleared
-   by emptying the field, dragging the slider, pressing its ↺, or handing the
-   row to auto.
+   setting, saved like a drag. On a Scene-card row, one typed past the slider
+   becomes a custom value instead of clamping (`src/render/customValues.ts`),
+   marked with ⚠, persisted, and cleared by emptying the field, dragging the
+   slider, pressing its ↺, or handing the row to auto. The public build bounds
+   it (that file's header says how far, and which settings take none); a dev
+   build lifts the bound, and lets the Input card's rows take one too.
 2. **Mark.** Alt+M (wired in `src/tuning/debug.ts`) captures one frame plus a
    probe snapshot and POSTs it to `/__tuning/mark`; the plugin writes
    `tuning/marks/<timestamp>.png` and `<timestamp>.json` (both gitignored — marks
@@ -65,14 +67,14 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    the exact old→new numbers without writing anything; a second Alt+D within
    the window commits it, which triggers Vite's full reload (no scene module
    has an HMR boundary) — the confirmation survives that reload as a
-   persistent notice. A setting currently held by a pin or an override is
+   persistent notice. A setting currently held by a custom value or an override is
    skipped and named in the notice, since baking it would just be clamped
    back on the next load. Review the resulting `git diff` before committing —
    a trailing `// comment` explaining the old value survives the rewrite
    verbatim and can go stale.
 4. **Numeric probe.** `src/tuning/probe.ts` builds a compact per-frame snapshot:
    each setting's `base` (plain default), `resolved` (what actually reached the
-   shader), and `mode` (`ProbeSettingValue["mode"]` — override/pin/auto/manual),
+   shader), and `mode` (`ProbeSettingValue["mode"]` — override/pin/auto/manual, where pin is a custom value),
    plus the device-wide scene master's dials: `getSceneMaster`, which every
    `resolved` has already passed through, and `getSceneExpansion`, which
    reshapes every drive reading — leave them at their identity defaults
@@ -103,7 +105,7 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
 `capture()`, `mark()`, `setParams()`, `clearPins()`, `bakeDefaults()` — the same
 primitives the CLI tools above (and Alt+D) drive headlessly, available from the
 browser console for quick checks. `clearPins()` is for a scripted run: it drops
-every pin left over from an earlier by-hand panel session before that run pushes
+every custom value left over from an earlier by-hand panel session before that run pushes
 its own params. `bakeDefaults()` always dry-runs (mirrors Alt+D's first press,
 never writes) — a script that wants the actual write posts to `/__tuning/defaults`
 itself, the same endpoint the hotkey's second press calls.

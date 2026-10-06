@@ -115,6 +115,7 @@ import { createLeashGauge } from "./leashGauge.ts";
 import { watchOnScreen } from "./onScreen.ts";
 import { allowedChar, fitTyped, parseTyped } from "./typedValue.ts";
 import { setLiveText } from "./liveText.ts";
+import { customReach, fitCustom } from "../render/customValues.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -383,7 +384,9 @@ import {
  * point and unlights it — it's a toggle, not a memory. ↺ only appears once a value is
  * off its default, doubling as a "you changed this" marker. Clicking the
  * readout types a value into it in place (createControlRow's typed entry,
- * typedValue.ts for what the text means), committed like a drag. A chip's letter
+ * typedValue.ts for what the text means), committed like a drag; past the
+ * slider's ends a Scene-card setting keeps it as a custom value, marked ⚠
+ * beside the number (render/customValues.ts). A chip's letter
  * *is* its hotkey once the row's control has keyboard focus — and
  * wireHoverFocus gives it that focus on genuine pointer movement over the
  * row, matching the identical hover/focus styling below, so pointing at a
@@ -669,11 +672,9 @@ export interface DeviceMenuDeps {
    *  last value. See src/render/pictureMeter.ts for what each measure
    *  means. */
   getPictureReading: () => PictureReading | null;
-  /** Dev-only: read/write/clear an unclamped pin for a param row (see
-   *  tuning/pins.ts) — its presence is what lets a value typed into a row's
-   *  readout go past the slider's ends; its absence in a production build
-   *  is what clamps it instead. */
-  devPin?: {
+  /** Read/write/clear a scene setting's custom value — one typed into its
+   *  readout past the slider's ends (render/customValues.ts). */
+  customValues: {
     get(sceneId: string, key: string): number | undefined;
     set(sceneId: string, key: string, value: number): void;
     clear(sceneId: string, key: string): void;
@@ -1215,19 +1216,26 @@ export interface ControlRowSpec {
    *  master bar in sync (refreshAutoMaster). Omit for a row nothing else
    *  needs to hear about. */
   onAutoToggled?: () => void;
-  /** Dev-only: lets a typed value outside the slider's range through as an
-   *  unclamped pin, bound to a scene+key already — see DeviceMenuDeps.devPin.
-   *  Every row's readout is typable either way; without this (any prod
-   *  build, or a row with no scene setting behind it) a typed value clamps
-   *  to the slider's ends. */
-  pin?: {
+  /** Lets a value typed past the slider's ends through as a custom value
+   *  (render/customValues.ts), bound to a scene+key already, and shows ⚠ by
+   *  the number while one is set. Every row's readout is typable either way;
+   *  without this (a row with no scene setting behind it) a typed value
+   *  clamps to the slider's ends. */
+  custom?: {
     get(): number | undefined;
     set(value: number): void;
     clear(): void;
-    /** What to fall back to once a pin is cleared by an invalid/empty typed
-     *  value — the row's already-resolved live value (auto/override-aware,
-     *  same getter the row's own auto path uses), not a raw manual read, so
-     *  clearing a pin never fights whatever else currently owns the row. */
+    /** `raw` as this row's custom value, or null when it takes none: inside
+     *  the slider (the store takes it) or a count (render/customValues.ts's
+     *  fitCustom). */
+    fit(raw: number): number | null;
+    /** How far a custom value may go, for the ⚠'s tooltip — null for
+     *  unbounded (a dev build). */
+    reach(): { lo: number; hi: number } | null;
+    /** What to fall back to once emptying the field drops a custom value —
+     *  the row's already-resolved live value (auto/override-aware, same
+     *  getter the row's own auto path uses), not a raw manual read, so
+     *  dropping it never fights whatever else currently owns the row. */
     resolve(): number;
   };
   /** SceneSetting.reads (sceneSettings.ts), resolved to concrete signals and
@@ -1559,17 +1567,27 @@ export function createControlRow(spec: ControlRowSpec) {
   });
   digits.addEventListener("drop", (e) => e.preventDefault());
 
-  // Dev-only out-of-range pins — see ControlRowSpec.pin. A `*` marks a
-  // pinned value in BANDS_AMBER, a cross-card color chosen so it reads as
-  // "outside the slider" regardless of which card's own accent this row is
-  // using.
-  let pinMark: HTMLSpanElement | null = null;
-  if (spec.pin) {
-    pinMark = document.createElement("span");
-    pinMark.textContent = "*";
-    pinMark.title = "Pinned — typed value outside the slider's range";
-    pinMark.style.cssText = `color: ${BANDS_AMBER}; font: 400 11px/1 ${FONT_MONO}; display: none;`;
-    readout.appendChild(pinMark);
+  // ⚠ beside the number while a custom value is set (ControlRowSpec.custom),
+  // in BANDS_AMBER, a cross-card colour chosen so it reads as "past the
+  // slider" whichever card's own accent this row uses. A drawn triangle, not
+  // the ⚠ character, which some systems render as a colour emoji.
+  let customMark: HTMLSpanElement | null = null;
+  if (spec.custom) {
+    customMark = document.createElement("span");
+    customMark.className = "vc-custom-mark";
+    customMark.setAttribute("role", "img");
+    customMark.setAttribute("aria-label", "Custom value");
+    customMark.innerHTML =
+      `<svg width="12" height="11" viewBox="0 0 12 11" fill="none" aria-hidden="true">` +
+      `<path d="M6 1 11 10H1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>` +
+      `<path d="M6 4.2V6.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>` +
+      `<circle cx="6" cy="8.3" r="0.65" fill="currentColor"/></svg>`;
+    customMark.style.cssText = `color: ${BANDS_AMBER}; display: none; align-self: center; line-height: 0;`;
+    const reach = spec.custom.reach();
+    customMark.title =
+      "Custom value, past the slider's end. The scene wasn't tuned this far: if the picture breaks, drag the slider or press ↺." +
+      (reach ? ` Typed values here go from ${spec.format(reach.lo)} to ${spec.format(reach.hi)}.` : "");
+    readout.appendChild(customMark);
   }
 
   // Function declarations, hoisted within this call, so the listeners above
@@ -1623,10 +1641,10 @@ export function createControlRow(spec: ControlRowSpec) {
   function commitTyped(text: string): void {
     const typed = parseTyped(text);
     if (typed === null) {
-      // Dev: emptying the field is how a pin is dropped.
-      if (spec.pin && text.trim() === "" && spec.pin.get() !== undefined) {
-        spec.pin.clear();
-        display(spec.pin.resolve(), false);
+      // Emptying the field is how a custom value is dropped.
+      if (spec.custom && text.trim() === "" && spec.custom.get() !== undefined) {
+        spec.custom.clear();
+        display(spec.custom.resolve(), false);
       } else display(lastValue, lastAuto);
       return;
     }
@@ -1637,16 +1655,20 @@ export function createControlRow(spec: ControlRowSpec) {
       scale: spec.typedScale,
       zeroAtMin: spec.zeroAtMin,
     });
-    const raw = typed / (spec.typedScale ?? 1);
+    const custom = spec.custom?.fit(typed / (spec.typedScale ?? 1)) ?? null;
     clearOff();
-    if (spec.pin && value !== raw && (raw < spec.min || raw > spec.max)) {
-      spec.pin.set(raw);
-      display(raw, false);
+    if (custom !== null) {
+      // The slider's nearest end goes through commit() first — Auto off, the
+      // store, the room and the pop-out, and what a reader that doesn't know
+      // custom values falls back to — then the custom value over it.
+      commit(value);
+      spec.custom!.set(custom);
+      display(custom, false);
       return;
     }
-    // Any of the row's own controls taking over drops a pin — see the
-    // slider/reset handlers below.
-    spec.pin?.clear();
+    // Any of the row's own controls taking over drops a custom value — see
+    // the slider/reset handlers below.
+    spec.custom?.clear();
     commit(value);
   }
 
@@ -1900,7 +1922,7 @@ export function createControlRow(spec: ControlRowSpec) {
     el.classList.toggle("vc-row-off", muted);
     renderTicks();
     setReadout(value, muted);
-    if (spec.pin) pinMark!.style.display = spec.pin.get() !== undefined ? "" : "none";
+    if (customMark) customMark.style.display = spec.custom!.get() !== undefined ? "inline-flex" : "none";
     resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
     setHint(auto);
   }
@@ -1941,18 +1963,18 @@ export function createControlRow(spec: ControlRowSpec) {
   });
   slider.addEventListener("input", () => {
     clearOff();
-    spec.pin?.clear();
+    spec.custom?.clear();
     commit(sliderToValue());
   });
   resetBtn.addEventListener("click", () => {
     clearOff();
-    spec.pin?.clear();
+    spec.custom?.clear();
     commit(spec.defaultValue);
   });
   offChip.addEventListener("click", () => {
-    // Any of the row's own controls taking over clears a pin the same way —
+    // Any of the row's own controls taking over drops a custom value the same way —
     // see the slider/reset handlers above.
-    spec.pin?.clear();
+    spec.custom?.clear();
     if (offStoredValue !== null) {
       const restore = offStoredValue;
       offStoredValue = null;
@@ -1972,10 +1994,10 @@ export function createControlRow(spec: ControlRowSpec) {
       auto.toggle(on);
       if (on) {
         clearOff();
-        // A pin beats auto in resolve()'s precedence, so without this the
+        // A custom value beats auto in resolve()'s precedence, so without this the
         // chip would light up while the row visibly stayed put — clearing it
         // here is what actually hands the row to auto.
-        spec.pin?.clear();
+        spec.custom?.clear();
       }
       refreshChip();
       display(on ? auto.resolveLive() : auto.getManual(), on);
@@ -2013,9 +2035,9 @@ export function createControlRow(spec: ControlRowSpec) {
      *  only repaints the T chip. */
     clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
-     *  owns it (resolveLive() already reflects a pin ahead of auto — see
+     *  owns it (resolveLive() already reflects a custom value ahead of auto — see
      *  autoTune.ts's resolve() — so no separate check is needed there), a
-     *  pin ahead of the manual store otherwise. */
+     *  custom value ahead of the manual store otherwise. */
     sync(manualValue: () => number): void {
       refreshChip();
       if (spec.auto && spec.auto.isEnabled()) {
@@ -2025,7 +2047,7 @@ export function createControlRow(spec: ControlRowSpec) {
         // open() syncs every row, and a muted manual row must stay muted.
         clearOff();
         display(spec.auto.resolveLive(), true);
-      } else display(spec.pin?.get() ?? manualValue(), false);
+      } else display(spec.custom?.get() ?? manualValue(), false);
     },
     /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
      *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
@@ -5122,21 +5144,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   masterCard.body.append(pictureHeading, pictureBlock);
   const pictureOnScreen = watchOnScreen(pictureBlock);
 
-  // Binds a row's typed entry to deps.devPin for one (scene, key) —
-  // undefined (typed values clamp to the slider) whenever devPin itself is,
-  // i.e. every production build. `sceneId` is a getter rather than a plain string
-  // because the Input card's three rows are built once and outlive scene
-  // switches (see makeInputRow below); a scene-setting row is rebuilt fresh
-  // per scene by renderSceneSettings and could just close over a constant,
-  // but taking a getter here either way keeps this one function correct for
-  // both callers instead of needing two shapes.
-  function pinConfig(sceneId: () => string, key: string, resolve: () => number): ControlRowSpec["pin"] {
-    const pin = deps.devPin;
-    if (!pin) return undefined;
+  // Binds a row's typed entry to deps.customValues for one (scene, setting).
+  // `sceneId` and `spec` are getters because the Input card's three rows are
+  // built once and outlive scene switches (see makeInputRow below); a
+  // scene-setting row is rebuilt fresh per scene by renderSceneSettings and
+  // could just close over constants, but taking getters here either way
+  // keeps this one function correct for both callers instead of needing two
+  // shapes. A dev build lifts customReach's bound, for tuning.
+  function customConfig(sceneId: () => string, spec: () => SceneSetting, resolve: () => number): ControlRowSpec["custom"] {
+    const store = deps.customValues;
     return {
-      get: () => pin.get(sceneId(), key),
-      set: (value) => pin.set(sceneId(), key, value),
-      clear: () => pin.clear(sceneId(), key),
+      get: () => store.get(sceneId(), spec().key),
+      set: (value) => store.set(sceneId(), spec().key, value),
+      clear: () => store.clear(sceneId(), spec().key),
+      fit: (raw) => fitCustom(spec(), raw, import.meta.env.DEV),
+      reach: () => {
+        const reach = customReach(spec(), import.meta.env.DEV);
+        return reach && Number.isFinite(reach.lo) && Number.isFinite(reach.hi) ? reach : null;
+      },
       resolve,
     };
   }
@@ -5176,7 +5201,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // honest whenever a chip click could have changed it. It also
       // refreshes the Auto master bar (refreshMicAutoAndMaster).
       onAutoToggled: refreshMicAutoAndMaster,
-      pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
+      // Dev only: these rows keep their own store (audio/sensitivity.ts),
+      // which doesn't drop a custom value on a write the way
+      // setSceneSetting does, so the public build clamps them.
+      custom: import.meta.env.DEV ? customConfig(() => deps.currentSceneId(), spec, resolveLive) : undefined,
     });
     row.onChange(onChange);
     return { row, getManual, defaultValue: range.defaultValue, onChange };
@@ -6343,7 +6371,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // isSceneAuto is true only while EVERY auto-capable row is auto, so any
       // one row's A chip or a drag off auto flips the master bar's state.
       onAutoToggled: refreshAutoMaster,
-      pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
+      custom: customConfig(() => sceneId, () => spec, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
         ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
