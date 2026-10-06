@@ -12,6 +12,7 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects.ts";
 import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
@@ -195,7 +196,9 @@ function applyQuality(): void {
 
 /** Puts `next` on the host. With `crossfade`, and a different scene already
  *  showing a picture, that scene stays mounted under it until the compositor's
- *  blend is done (`lengthMs`: the glide a held Play earned; absent: one bar).
+ *  blend is done (`lengthMs`: the glide a held Play earned; absent: the
+ *  stored transition, render/sceneTransition.ts — already this Play's, since
+ *  applyState writes the stores before it mounts).
  *  If init() throws (a shader this GPU won't compile, a missing float target)
  *  the output carries on with the scene it had, or goes black when there is
  *  none or it is `next` itself being re-initialised: never a half-built scene
@@ -208,7 +211,7 @@ function mountScene(next: Scene, crossfade?: { lengthMs?: number }): void {
   try {
     host.mount(next);
     scene = next;
-    if (fade) compositor?.begin(prev, { lengthMs: crossfade.lengthMs, cut: quality.preset === "floor" });
+    if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor", crossfade.lengthMs));
     return;
   } catch (err) {
     console.error(`Output: "${next.name}" failed to start:`, err);

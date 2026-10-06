@@ -63,6 +63,8 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.overlayLogoLocal": false,
   // The Set card's pads and Autopilot dials: a shelf, but one a paired phone must get.
   "vibe.set": true,
+  // Cut or Fade between scenes (render/sceneTransition.ts): a TV switches the same way.
+  "vibe.transition": true,
   // Rewritten by the laptop's own analysis (the extractor), so it stays there.
   "vibe.silenceGate": false,
   "vibe.silenceGateClosed": false,
