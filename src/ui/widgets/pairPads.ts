@@ -38,6 +38,7 @@ import type { PreviewEffective, PreviewSource } from "./previews.ts";
 import { rowHeadStyle, rowLabelStyle, spacer } from "../controlsKit.ts";
 import { SCENE_VIOLET } from "../controlsTheme.ts";
 import { setHintText } from "../hintSwatches.ts";
+import { setLiveText } from "../liveText.ts";
 import { watchSize, type WatchedSize } from "../onScreen.ts";
 
 /**
@@ -1180,7 +1181,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
         // Numbers only (2026-09-27 feedback: the band words read as
         // "very confusing") — PAIR_WORDS' bands stay as data (like
         // showRelations, unused by default) rather than deleted.
-        f.valueEl.textContent = fmtSigned(v);
+        setLiveText(f.valueEl, fmtSigned(v));
       }
     }
 

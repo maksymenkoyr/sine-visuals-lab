@@ -114,6 +114,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import { createLeashGauge } from "./leashGauge.ts";
 import { watchOnScreen } from "./onScreen.ts";
 import { allowedChar, fitTyped, parseTyped } from "./typedValue.ts";
+import { setLiveText } from "./liveText.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -1827,16 +1828,9 @@ export function createControlRow(spec: ControlRowSpec) {
     return isLog ? valueToPos(value) : value;
   }
 
-  // Rewrites the digits' text node in place rather than swapping in a new
-  // one: WebKit drops a click whose press began on a node that has since left
-  // the DOM, and an Auto row repaints its readout every refresh, mid-press
-  // included — so on Safari a click on a live number never opened typed entry.
-  function setDigitsText(text: string): void {
-    const node = digits.firstChild;
-    if (node instanceof Text && node === digits.lastChild) {
-      if (node.data !== text) node.data = text;
-    } else digits.textContent = text;
-  }
+  // In place (liveText.ts): an Auto row repaints its readout every refresh,
+  // and on Safari a click on a live number otherwise never opened typed entry.
+  const setDigitsText = (text: string) => setLiveText(digits, text);
 
   function setReadout(value: number, muted: boolean): void {
     if (editing) return; // the digits are the typed field right now
@@ -5682,7 +5676,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           const label = row.name.textContent ?? "";
           const isHidden = row.deviceId !== null && !row.isMissing && isInputHidden(label);
           if (!row.isScreen && !row.isMissing && row.deviceId !== null) {
-            row.sub.textContent = editing
+            const sub = editing
               ? isLive
                 ? "listening — can't hide"
                 : isHidden
@@ -5695,7 +5689,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
                   : inputKind(label) === "loopback"
                     ? "this computer's own sound"
                     : "";
-            row.sub.style.display = row.sub.textContent ? "block" : "none";
+            // In place (liveText.ts): this runs every refresh tick, and the line
+            // sits inside the row's button.
+            setLiveText(row.sub, sub);
+            row.sub.style.display = sub ? "block" : "none";
           }
           row.btn.style.cssText = isLive ? sourceRowLiveStyle : row.isMissing || row.isScreen ? sourceRowDashedStyle : sourceRowStyle;
           if (editing && isHidden) row.btn.style.opacity = "0.45";
@@ -7389,7 +7386,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         const text = pictureOverall === null ? "--" : String(Math.round(pictureOverall * 100));
         if (text !== pictureSummaryText) {
           pictureSummaryText = text;
-          pictureSummaryReadout.textContent = text;
+          setLiveText(pictureSummaryReadout, text); // inside the Picture block's press target
           pictureSummaryReadout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
         }
       }
@@ -7404,7 +7401,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         const text = level === null ? "--" : String(Math.round(level * 100));
         if (text === row.lastText) return;
         row.lastText = text;
-        row.readout.textContent = text;
+        setLiveText(row.readout, text);
         row.readout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
       });
 

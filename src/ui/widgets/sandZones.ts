@@ -12,6 +12,7 @@ import {
 import { registerWidget, type WidgetCtx } from "./registry.ts";
 import { FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "../controlsTheme.ts";
 import { setHintText } from "../hintSwatches.ts";
+import { setLiveText } from "../liveText.ts";
 import { watchSize } from "../onScreen.ts";
 
 /**
@@ -377,11 +378,11 @@ registerWidget("sandZones", (container, section, ctx: WidgetCtx) => {
     }
     draw(drive);
     if (drive === null) {
-      status.textContent = "";
+      setLiveText(status, "");
     } else {
       const z = ZONES[zoneOf(drive)];
       status.style.color = withAlpha(z.colour, 0.95);
-      status.textContent = `drive ${drive.toFixed(2)} · sand ${z.word}`;
+      setLiveText(status, `drive ${drive.toFixed(2)} · sand ${z.word}`);
     }
   }
 
