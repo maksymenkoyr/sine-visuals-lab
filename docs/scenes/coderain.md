@@ -72,4 +72,5 @@ hear run but ~106.7 on the ref-shoot run.
 
 ## History
 
-- Branch `worktree-coderain-scene`: first version.
+- Branch `worktree-coderain-scene`: first version, never opened as a PR.
+- Draft PR #398 (`worktree-coderain-scene-v2`): the same version, rebased onto main.
