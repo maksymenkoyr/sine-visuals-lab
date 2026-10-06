@@ -2,13 +2,22 @@
 # beat of the song. The Shape compilers (shapes/release.py, shapes/hook.py) decide what plays when; this file
 # only draws it, so a new frames video needs a Shape and no change here.
 #
-#   uv run -q --with pillow==12.3.0 python tools/promo/compose.py --work DIR      (promo.mjs runs this)
+#   uv run -q --with pillow==12.3.0 python tools/promo/compose.py --work DIR [--segments A-B]   (promo.mjs runs this)
 #
 # Reads <work>: cuts.json (renderer 'frames': fps, dropBeat, song tempo and drop time, lag, and
 # frames.segments, each a take, its start beat, its length in beats and its layers), cards/ (cards.mjs, with
 # its meta.json) and takes/ (capture.mjs --take). PROMO_WORK stands in for --work.
 # Writes <work>/frames/00000.jpg ... + frames/meta.json {total, frames, fps, dropBeat}: constant frame rate,
 # each frame taken from the NEAREST source frame (a repeated or late frame reads as lag).
+#
+# Section by section: each segment's frames are drawn into <work>/frames-cache/<key>/, the key hashing all
+# that segment draws from (its entry in cuts.json and where it falls, the timing fields of cuts.json, the
+# card PNGs and take files it reads, cards/meta.json and this file's source), and frames/ is hard links into
+# the cache. So after an edit only the segments whose key changed are drawn again; a full run drops the
+# cache entries it no longer uses. --segments A-B (1-based, as the plan table numbers them; promo.mjs
+# render --section) draws only those segments and links them into <work>/preview/ instead, with
+# preview/meta.json {start, total, frames, fps, dropBeat, segments}, `start` being the video time of its
+# first frame; frames/ is left as it was.
 #
 # A segment's backdrop is the take's frame at the song time the video plays at that moment (scene takes heard
 # the song, so the picture moves with the music you hear) or at the take's own beat (panel takes). A segment
@@ -23,7 +32,7 @@
 #            pace come from frames.list in cuts.json, its window from cards/meta.json.
 # Nothing fades out unless a Shape says so. cuts.lag 'take' shifts a song take's source time by the
 # reaction lag its frames.json records (meta.lagMs); 'none' draws the take as recorded.
-import bisect, json, math, os, shutil, sys
+import bisect, hashlib, json, math, os, shutil, sys
 from PIL import Image, ImageDraw, ImageFilter
 
 argv = sys.argv[1:]
@@ -216,18 +225,95 @@ n_frames = round(TOTAL_BEATS * P * FPS)
 print(f"{TOTAL_BEATS} beats ({end} held at the end) = {TOTAL_BEATS * P:.3f}s = {n_frames} frames @ {FPS}; drop on beat {DROP_BEAT}")
 bounds, b0 = [], 0
 for sg in SEGS: bounds.append(b0); b0 += sg["beats"]
-FRAMES = f"{WORK}/frames"
-shutil.rmtree(FRAMES, ignore_errors=True); os.makedirs(FRAMES)
-si = 0
+seg_of, si = [], 0                                     # the segment each frame belongs to
 for i in range(n_frames):
     bp = (i / FPS) / P
     while si + 1 < len(SEGS) and bp >= bounds[si + 1] - 1e-9: si += 1
+    seg_of.append(si)
+first = {}
+for i, si in enumerate(seg_of): first.setdefault(si, i)
+count = {si: seg_of.count(si) for si in first}
+
+def draw(i):
+    bp = (i / FPS) / P
+    si = seg_of[i]
     sg = SEGS[si]
     tk, tb = sg["take"], sg["t0"]
     local = bp - bounds[si]
     im = backdrop(tk, tb + local, bp)
     if sg["backdrop"] != "devices" and sg["camera"] == "lean": im = camera(im, tk, local, tb + local)   # the two-screen layout stays put
     for L in sg["layers"]: im = layer(im, L, local)
-    im.save(f"{FRAMES}/{i:05d}.jpg", quality=94, subsampling=0)
-    if i % 150 == 0: print(i, f"beat {bp:.1f}", sg["kind"], flush=True)
-json.dump(dict(total=n_frames / FPS, frames=n_frames, fps=FPS, dropBeat=DROP_BEAT), open(f"{FRAMES}/meta.json", "w"))
+    return im
+
+# ---- the per-segment cache --------------------------------------------------------------------------
+def digest(path):
+    if not os.path.exists(path): return None
+    with open(path, "rb") as f: return hashlib.sha1(f.read()).hexdigest()
+def pngs_of(sg):   # every card PNG the segment's frames can read
+    out = []
+    if sg["backdrop"] == "devices":
+        out += [f"key_{k}_{s}.png" for k in ("space", "option") for s in ("on", "off")] + ["label_laptop.png", f"label_{TWO[sg['take']]}.png"]
+    for L in sg["layers"]:
+        if L["op"] in ("title", "card"): out.append(L["png"])
+        elif L["op"] == "caption": out += [x for x in (L.get("png"), L.get("prev")) if x]
+        elif L["op"] == "list": out += [f"chrome_{L['key']}.png"] + [f"row_{L['key']}_{j}.png" for j in range(L["n"])]
+    return out
+COMMON = dict(src=digest(os.path.abspath(__file__)), size=[W, H], fps=FPS, song=CUTS["song"], dropBeat=DROP_BEAT, lag=LAG,
+              list=FR.get("list"), meta=META)
+def seg_key(si):
+    sg = SEGS[si]
+    names = [f"{sg['take']}_main", f"{sg['take']}_out"] if sg["take"] in TWO else [sg["take"]]
+    takes = {n: [digest(f"{WORK}/takes/{n}/{f}") for f in ("frames.json", "track.json")] for n in names}
+    d = dict(common=COMMON, seg=sg, bound=bounds[si], first=first[si], count=count[si], second=TWO.get(sg["take"]),
+             takes=takes, pngs={p: digest(f"{WORK}/cards/{p}") for p in pngs_of(sg)})
+    return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:16]
+
+CACHE = f"{WORK}/frames-cache"
+os.makedirs(CACHE, exist_ok=True)
+def cached(si):
+    """The segment's frames, drawing them only when no cache entry has its key."""
+    key = seg_key(si)
+    d = f"{CACHE}/{key}"
+    if os.path.isdir(d): return key, d, False
+    part = f"{d}.part"
+    shutil.rmtree(part, ignore_errors=True); os.makedirs(part)
+    for j in range(count[si]):
+        i = first[si] + j
+        draw(i).save(f"{part}/{j:05d}.jpg", quality=94, subsampling=0)
+        if j % 150 == 0: print(f"  segment {si + 1} ({SEGS[si]['kind']}, {SEGS[si]['take']}): frame {j}/{count[si]}", flush=True)
+    os.replace(part, d)   # whole or not at all: an interrupted run leaves only a .part folder
+    return key, d, True
+
+def link_into(out, segs, start):
+    shutil.rmtree(out, ignore_errors=True); os.makedirs(out)
+    drawn, keys = [], set()
+    for si in segs:
+        key, d, new = cached(si)
+        keys.add(key)
+        if new: drawn.append(si + 1)
+        for j in range(count[si]):
+            src, dst = f"{d}/{j:05d}.jpg", f"{out}/{first[si] + j - start:05d}.jpg"
+            try: os.link(src, dst)
+            except OSError: shutil.copyfile(src, dst)
+    kept = [si + 1 for si in segs if si + 1 not in drawn]
+    print(f"segments drawn: {drawn or 'none'}; reused from the cache: {kept or 'none'}")
+    return keys
+
+argv_segs = argv[argv.index("--segments") + 1] if "--segments" in argv else None
+if argv_segs:
+    a, _, b = argv_segs.partition("-")
+    lo, hi = int(a) - 1, int(b or a) - 1
+    if not (0 <= lo <= hi < len(SEGS)): sys.exit(f"--segments {argv_segs}: the plan has segments 1-{len(SEGS)}")
+    segs = [si for si in range(lo, hi + 1) if si in first]
+    if not segs: sys.exit(f"--segments {argv_segs}: no frames fall in them")
+    PREVIEW = f"{WORK}/preview"
+    link_into(PREVIEW, segs, first[segs[0]])
+    n = sum(count[si] for si in segs)
+    json.dump(dict(start=first[segs[0]] / FPS, total=n / FPS, frames=n, fps=FPS, dropBeat=DROP_BEAT, segments=[lo + 1, hi + 1]),
+              open(f"{PREVIEW}/meta.json", "w"))
+else:
+    FRAMES = f"{WORK}/frames"
+    used = link_into(FRAMES, sorted(first), 0)
+    for e in os.listdir(CACHE):                         # entries this cut no longer uses, and interrupted ones
+        if e not in used: shutil.rmtree(f"{CACHE}/{e}", ignore_errors=True)
+    json.dump(dict(total=n_frames / FPS, frames=n_frames, fps=FPS, dropBeat=DROP_BEAT), open(f"{FRAMES}/meta.json", "w"))

@@ -41,10 +41,19 @@ Show the lines as a plain list and let the user add and cut.
 `song` (when the work folder has none yet), then `plan` prints the time table from the lines. Show
 it; the user approves or changes it.
 
-## 3. Build and check
+## 3. Build section by section
 
-`all`, or step by step `song` → `record` → `cards` → `render` → `check`. `record <take>…` re-records
-only those takes.
+`song` → `record` → `cards`, then the video one section at a time, then `render` → `check`.
+`record <take>…` re-records only those takes. (`all` runs every step in one go, with no reviews.)
+
+- A section is a row of the plan table, numbered in its `#` column. In order, a section or a short run
+  of them at a time: `render --section N` (or `N-M`) writes `out/release-section-N.mp4` with the song
+  under it. Send it; the user approves it or asks for a change.
+- A change: edit `lines.json`, re-run `plan` and `cards` (or `record --section N` for its takes), then
+  `render --section N` again. Only the sections an edit touched are drawn again (the `compose.py`
+  header). A change in length or order moves every later section: their frames are drawn again, but
+  approved sections need no second review unless their picture changed.
+- When every section is approved, `render` reuses their frames and encodes the whole video.
 
 - `song`: the bpm must match what the user counts (a half or double reading: `--bpm`), and `dropTime`
   must be the real drop.

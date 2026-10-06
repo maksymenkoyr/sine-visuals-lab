@@ -4,8 +4,9 @@
 
 A Shape compiler (shapes/<video>.py) turns a video's own input file into <work>/cuts.json; cards.mjs,
 compose.py, showcase/edit.py, check.py, promo.mjs, deliver.mjs and this file read it. `table` prints the
-approval table (| Time (s) | On screen | Caption | Song @ time |), `cues` writes <work>/CUES.md from the same
-rows, so the plan the user approves and the cue sheet cannot drift apart.
+approval table (| # | Time (s) | On screen | Caption | Song @ time |, the # only for a frames video: the
+segment numbers promo.mjs --section takes), `cues` writes <work>/CUES.md from the same rows, so the plan the
+user approves and the cue sheet cannot drift apart.
 
 cuts.json = {schema:1, video, renderer:'frames'|'graph', work, fps, formats, maxSec, lag:'none'|'take',
 dropBeat, song:{file (resolved), bpm, dropTime} (frames only),
@@ -106,9 +107,11 @@ def rows(d, fmt="v"):
 
 
 def table(cuts, fmt="v"):
-    lines = ["| Time (s) | On screen | Caption | Song @ time |", "|---|---|---|---|"]
-    for r in rows(cuts, fmt):
-        lines.append(f"| {fmt_t(r['t0'])}-{fmt_t(r['t1'])} | {r['picture']} | {r['text']} | {r['song']} @ {fmt_t(r['songTime'])}s |")
+    # a frames video numbers its segments: promo.mjs --section takes these numbers
+    num = cuts["renderer"] == "frames"
+    lines = [("| # " if num else "") + "| Time (s) | On screen | Caption | Song @ time |", ("|---" if num else "") + "|---|---|---|---|"]
+    for i, r in enumerate(rows(cuts, fmt), 1):
+        lines.append((f"| {i} " if num else "") + f"| {fmt_t(r['t0'])}-{fmt_t(r['t1'])} | {r['picture']} | {r['text']} | {r['song']} @ {fmt_t(r['songTime'])}s |")
     return "\n".join(lines)
 
 
