@@ -476,8 +476,11 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     `position: fixed; inset: 0; z-index: ${OVERLAY_Z}; display: none; align-items: center; justify-content: center;` +
       `background: rgba(0,0,0,0.55); color: #fff; font-family: ${FONT_LABEL};`,
   );
+  // 90dvh, not just 90vh: Safari's vh is the toolbar-hidden height, so a
+  // vh-sized dialog centred here could push its close button off the top.
+  // Browsers without dvh drop that declaration and keep the vh one.
   const panel = box(
-    `position: relative; box-sizing: border-box; width: min(980px, 96vw); max-height: 90vh; overflow-y: auto; padding: 16px 18px 18px;` +
+    `position: relative; box-sizing: border-box; width: min(980px, 96vw); max-height: 90vh; max-height: 90dvh; overflow-y: auto; padding: 16px 18px 18px;` +
       `background: ${GLASS_BG}; -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};` +
       `border: 1px solid rgba(255,255,255,0.13); border-top-color: rgba(255,255,255,0.22); border-radius: 3px;`,
   );
