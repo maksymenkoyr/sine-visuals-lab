@@ -23,28 +23,28 @@ list under it is built), and `docs/vocabulary.md` for the panel's own words.
 ## 2. The notes
 
 Write `<work>/notes.md` in the Shape below, with a work folder under the job's tmp directory. Show the
-user the skeleton first: the headline, the highlights, every row. They add, cut and reorder before any
-picture is taken.
+user the skeleton first: the headline, every line, and which lines get a picture. They add, cut and
+reorder before any picture is taken.
 
 ## 3. Pictures
 
-- One per highlight, plus one per new scene. Write `<work>/shots.json` and run
+- One for every change that can be shown (the Shape says which). Write `<work>/shots.json` and run
   `node tools/promo/shots/stills.mjs --shots <work>/shots.json --out <work>/stills`. Its header lists
-  the fields. It shoots Insiders on the synthetic feed (Sonnet subagent, low effort, may run and
-  re-run it).
-- Look at every picture yourself. It must show the thing its heading names, readable at phone width,
-  with no empty card or list, no debug overlay, nothing paid.
-- `npm run release-shots -- <work>/stills/*.jpg` hosts them on the Insiders pre-release and prints the
-  markdown lines for the notes.
-- Before anything is uploaded, show the user a preview: the notes with the local pictures, as a private
-  Artifact page.
+  the fields, and `tools/promo/shots/stills.example.json` is a past release's list. It shoots Insiders
+  on the synthetic feed (Sonnet subagent, low effort, may run and re-run it).
+- Look at every picture yourself. It must show the thing its line names, readable at phone width,
+  with no empty card or list, no debug overlay, nothing paid. A change whose picture can't be got
+  right becomes a text line.
+- The notes name each picture by its local path (`src="stills/<name>.jpg"`).
+  `npm run release-shots -- --notes <work>/notes.md <work>/stills/*.jpg` hosts the pictures on the
+  Insiders pre-release and points the notes at them.
 
 ## 4. The release pull request
 
 `npm run release -- --notes <work>/notes.md` opens the pull request into production, or rewrites the
 open one's title and body; re-run it after every change to the notes. Add `--print` to read the
-title and body first without opening anything. Give the user the link. Merging
-is the user's call. After the merge, `.github/workflows/release.yml` opens the GitHub Release with the
+title and body first without opening anything. Give the user the link: the PR is where they read
+the notes as they'll be published, pictures and all, and ask for changes. Merging is the user's call. After the merge, `.github/workflows/release.yml` opens the GitHub Release with the
 same notes, and `/video-release-stable` can start from them.
 
 ## Shape
@@ -57,44 +57,42 @@ No file names, PR numbers or code words: the folded list under the notes carries
 
 <Lead: two or three sentences: who gets what, and the one thing to try first.>
 
-## Highlights
+## <area title>
 
-### <area emoji> <Plain name of the change>
+<table>
+<tr>
+<td width="50%" valign="top"><img src="<url>" alt="<what the picture shows>" width="360"><br><b><Line></b><br><One or two sentences: what you can do now, and where.></td>
+<td width="50%" valign="top"><img …><br><b><Line></b><br>…</td>
+</tr>
+</table>
 
-![<what the picture shows>](<url>)
-
-<What you can do now, and where: the card, button or key. Two or three sentences.>
-
-## New scenes
-
-| ![<Name>](<url>) | ![<Name>](<url>) | ![<Name>](<url>) |
-|---|---|---|
-| **<Name>** — <one line> | … | … |
+- **<Line>** — <one more sentence, when it helps>
 
 ## Keys
 
 | Key | What it does |
 |---|---|
 | `<key>` | <…> |
-
-## Also in this release
-
-### <area title>
-
-- **<Row>** — <one more sentence, when it helps>
 ```
 
 - **Headline and lead**: what someone who has never opened the folded list should know.
-- **The areas** are the titles of `CATEGORIES` in `tools/releaseNotesLib.mjs`, in its order, leaving
-  out new scenes and docs: the same groups as the folded list under the notes.
-- **Highlights**: three to six, the most visible first. Each heading starts with its area's emoji,
-  which is how the release video groups its demos. A heading is short enough to be a video caption
-  (`tools/promo/cards/release.mjs` warns when it isn't).
-- **New scenes**: only when the release adds some. A scene in the gallery's In development section
-  says so in its line; one still under Draft stays out.
-- **Keys**: only when the release adds or moves keys.
-- **Also in this release**: every other change a visitor can notice, one bullet each, under its
-  area. The bold part alone must read as a complete
-  line. It's what a skimmer reads, and it's one row of the video's list, so it has to fit one
-  (`cards.mjs` warns). Fixes go here too, worded as what works now. Docs and tooling stay out: the
-  folded list has them.
+- **Every change** a visitor can notice is one line, under its area. Fixes count, worded as what
+  works now. Docs and tooling stay out: the folded list has them.
+- **A picture wherever one can show the change** — the new card, the new look, the button, the
+  open list. A new slider among others doesn't count: that change stays a text line. Never a
+  picture for some changes picked as highlights while other showable ones go without.
+- **Each area** is a grid two pictures wide (the change's picture, its line in bold, a sentence),
+  the most visible change first; an odd last cell gets an empty `<td>` beside it. A portrait
+  picture (a phone's screen, a long list) gets a narrower width, about half, so its row doesn't
+  tower over the rest. The changes
+  without a picture follow as a list under the grid. GitHub keeps this HTML. It sizes a table to its
+  content, so the fixed picture width is what keeps two across a PR comment's column without
+  scrolling sideways — and why a card's picture is cropped to the card (`stills.mjs`'s `clip`).
+- **The areas** are the titles of `CATEGORIES` in `tools/releaseNotesLib.mjs`, in its order, the same
+  groups as the folded list under the notes. New scenes that are still in the gallery's In
+  development section go last instead, under "New scenes, in development", and say so; a scene
+  still under Draft stays out.
+- **The line** (bold) must read as a complete line on its own. It's what a skimmer reads, and it's one
+  row of the release video's list, so it has to fit one (`tools/promo/cards/release.mjs` warns). A
+  pictured change is also a demo for that video, and its line the caption.
+- **Keys**: only when the release adds or moves keys, after the areas.

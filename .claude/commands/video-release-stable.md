@@ -26,10 +26,10 @@ made for this video by `/release` (its Shape): start `<work>/lines.json` from th
 read (a Sonnet subagent), each change checked against the release's final state.
 
 - `groups`: every change, in plain words, one per line, short enough to fit (`cards` warns): each
-  highlight's heading and each bold row of "Also in this release", under the area its emoji or heading
-  names. Group order: Scenes, Controls, Output and rooms, Sound and beat, Release.
-- `demos`: clips that show a visible change happening, one caption each; the highlights are the
-  first candidates, their headings the captions. The first stays the Physarum
+  bold line of the notes, under the area it sits in. Group order: Scenes, Controls, Output and
+  rooms, Sound and beat, Release.
+- `demos`: clips that show a visible change happening, one caption each; the notes' pictured changes
+  are the candidates, their bold lines the captions. The first stays the Physarum
   2 re-roll (`song_p2r`): the song's drop lands on it. The available takes are in
   `tools/promo/takes.json`; a new kind of change may need a new panel take (copy a `ui_*` entry there
   and its script in `tools/promo/shots/take-ui.mjs`).
