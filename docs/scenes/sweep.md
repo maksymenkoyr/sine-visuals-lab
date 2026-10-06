@@ -6,7 +6,7 @@ on a cyclic palette, outlined, the oldest ones blurred and faded, the head on
 top, on a light ground. The music moves the head along its path, scrolls the
 colours through the stack and re-rolls the path each phrase; every other knob
 has a jack to wire, and a Presets row at the top of the Scene card brings
-back each piece of the reel. Draft scene (draft PR #379).
+back each piece of the reel. Draft scene (draft PR #391).
 
 ## Where the code is
 
@@ -166,3 +166,4 @@ back each piece of the reel. Draft scene (draft PR #379).
   knobs wireable, the Path widget, the copy skip.
 - #379 — v2 again (#370's branch couldn't take the rebase), then the Presets
   row: the reel's pieces as pills at the top of the card.
+- #391 — #379 rebased onto main past its scene-list conflict with Chaikin.
