@@ -752,27 +752,32 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 
 /* A row's readout digits, typable in place (deviceMenu.ts's createControlRow
- * typed entry). At rest they look as they always have; hovering them draws a
- * faint underline in the row's --vc-accent, and while typing the same span
- * gets a caret, a solid underline and a light wash — never an input box. The
- * underline is an inset shadow on a little padding that a negative margin
- * pays back, so neither hovering nor typing moves a digit; it needs that
- * padding below because DSEG7's bottom segments sit flush with the span's
- * box (see digitsStyle, controlsKit.ts). */
-.vc-digits-typable {
-  cursor: text; border-radius: 1px;
-  padding: 0 2px 2px; margin: 0 -2px -2px;
-}
-.vc-digits-typable:hover {
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--vc-accent) 55%, transparent);
-}
-.vc-digits-edit, .vc-digits-edit:hover {
-  outline: none; caret-color: var(--vc-accent); min-width: 0.6em;
-  box-shadow: inset 0 -1px 0 var(--vc-accent);
-  background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
-}
+ * typed entry). They look as they always have — at rest, on hover and while
+ * typing — bar the text cursor, a caret in the row's --vc-accent, and the
+ * highlight on what's selected: never an input box, an underline or a
+ * background. */
+.vc-digits-typable { cursor: text; }
+.vc-digits-edit { outline: none; caret-color: var(--vc-accent); min-width: 0.6em; }
 .vc-digits-edit::selection {
   color: #fff; background: color-mix(in srgb, var(--vc-accent) 45%, transparent);
+}
+
+/* The ⚠ left of a row's number while it holds a custom value (deviceMenu.ts's
+ * createControlRow, render/customValues.ts), in the row's --vc-accent. Its
+ * faint glow is a blurred, thicker copy under the crisp icon, and only that
+ * copy's opacity pulses: an opacity animation runs on the compositor, so it
+ * repaints nothing, and it only exists while a custom value does. Reduced
+ * motion holds the glow still. */
+.vc-custom-mark { position: relative; align-self: center; line-height: 0; color: var(--vc-accent); }
+.vc-custom-icon { position: relative; }
+.vc-custom-glow {
+  position: absolute; left: 0; top: 0; filter: blur(1.5px); opacity: 0.35;
+  animation: vc-custom-glow 2.4s ease-in-out infinite alternate; will-change: opacity;
+}
+.vc-custom-glow path { stroke-width: 2.4; }
+@keyframes vc-custom-glow { from { opacity: 0.15; } to { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-custom-glow { animation: none; }
 }
 
 /* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane

@@ -1521,8 +1521,8 @@ export function createControlRow(spec: ControlRowSpec) {
   let lastAuto = false;
 
   // Typed entry: a click on the digits makes that same span editable in
-  // place — same seven-segment face, plus a caret and an accent underline
-  // (.vc-digits-edit, controlsTheme.ts), never an input box. typedValue.ts
+  // place — the same digits, with only a caret added (.vc-digits-edit,
+  // controlsTheme.ts): no input box, underline or background. typedValue.ts
   // says what the text means. Enter, Tab or a click away commits through
   // commit(), the same path as a drag; Escape puts the value back.
   // Pointer-only, like the thumb magnet: the panel's ring (ringElements()
@@ -1567,27 +1567,29 @@ export function createControlRow(spec: ControlRowSpec) {
   });
   digits.addEventListener("drop", (e) => e.preventDefault());
 
-  // ⚠ beside the number while a custom value is set (ControlRowSpec.custom),
-  // in BANDS_AMBER, a cross-card colour chosen so it reads as "past the
-  // slider" whichever card's own accent this row uses. A drawn triangle, not
-  // the ⚠ character, which some systems render as a colour emoji.
+  // ⚠ left of the number while a custom value is set (ControlRowSpec.custom),
+  // in the row's own accent, glowing faintly (.vc-custom-mark,
+  // controlsTheme.ts). A drawn triangle, not the ⚠ character, which some
+  // systems render as a colour emoji; drawn twice, the copy underneath
+  // blurred into the glow that pulses.
   let customMark: HTMLSpanElement | null = null;
   if (spec.custom) {
+    const triangle = (cls: string) =>
+      `<svg class="${cls}" width="12" height="11" viewBox="0 0 12 11" fill="none" aria-hidden="true">` +
+      `<path d="M6 1 11 10H1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>` +
+      `<path d="M6 4.2V6.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>` +
+      `<circle cx="6" cy="8.3" r="0.65" fill="currentColor"/></svg>`;
     customMark = document.createElement("span");
     customMark.className = "vc-custom-mark";
     customMark.setAttribute("role", "img");
     customMark.setAttribute("aria-label", "Custom value");
-    customMark.innerHTML =
-      `<svg width="12" height="11" viewBox="0 0 12 11" fill="none" aria-hidden="true">` +
-      `<path d="M6 1 11 10H1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>` +
-      `<path d="M6 4.2V6.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>` +
-      `<circle cx="6" cy="8.3" r="0.65" fill="currentColor"/></svg>`;
-    customMark.style.cssText = `color: ${BANDS_AMBER}; display: none; align-self: center; line-height: 0;`;
+    customMark.innerHTML = triangle("vc-custom-glow") + triangle("vc-custom-icon");
+    customMark.style.display = "none";
     const reach = spec.custom.reach();
     customMark.title =
       "Custom value, past the slider's end. The scene wasn't tuned this far: if the picture breaks, drag the slider or press ↺." +
       (reach ? ` Typed values here go from ${spec.format(reach.lo)} to ${spec.format(reach.hi)}.` : "");
-    readout.appendChild(customMark);
+    readout.insertBefore(customMark, digits);
   }
 
   // Function declarations, hoisted within this call, so the listeners above
