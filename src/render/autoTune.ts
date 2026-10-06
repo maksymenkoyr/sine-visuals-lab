@@ -25,7 +25,7 @@ import {
 } from "../audio/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
 import { getOverride, isAutoPinned } from "../tuning/overrides.ts";
-import { getPin } from "../tuning/pins.ts";
+import { getCustomValue } from "./customValues.ts";
 
 /**
  * Layers "let the music pick a good value" on top of sceneSettings.ts's
@@ -399,18 +399,18 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // Dev-only tuning override — see tuning/overrides.ts. Wrapped in DEV so a
   // prod build never pays for the check and the override module tree-shakes
   // out entirely (Vite replaces import.meta.env.DEV with a literal false).
-  // A pin (tuning/pins.ts — a typed-in out-of-range value, persisted) beats
-  // auto-pin but loses to a file override: applyTuningParams clears every
-  // override and rewrites only the keys in its payload, so a stale pin from
-  // an earlier manual session must never shadow a key a scripted run
-  // explicitly set.
+  // A custom value (customValues.ts — typed past the slider, persisted)
+  // beats auto and auto-pin but loses to a file override: applyTuningParams
+  // clears every override and rewrites only the keys in its payload, so a
+  // stale custom value from an earlier session must never shadow a key a
+  // scripted run explicitly set.
   if (import.meta.env.DEV) {
     const override = getOverride(sceneId, spec.key);
     if (override !== undefined) return override;
-    const pin = getPin(sceneId, spec.key);
-    if (pin !== undefined) return pin;
-    if (isAutoPinned()) return manualValue;
   }
+  const custom = getCustomValue(sceneId, spec.key);
+  if (custom !== undefined) return custom;
+  if (import.meta.env.DEV && isAutoPinned()) return manualValue;
 
   if ((!spec.auto && !spec.macro) || !isAutoEnabled(sceneId, spec.key)) return manualValue;
 
@@ -475,9 +475,9 @@ function resolveUnscaled(sceneId: string, spec: SceneSetting): number {
  *  - never to Sensitivity/Expansion/Smoothing, which resolve through
  *    resolveSensitivity and friends below and are audio gain, not scene
  *    params;
- *  - never over a DEV override or pin: those are deliberately typed,
- *    often out-of-range values (tuning/overrides.ts, tuning/pins.ts), and
- *    clamping them back in would break the tuning affordance.
+ *  - never over a custom value or a DEV override: those are deliberately typed,
+ *    often out-of-range values (customValues.ts, tuning/overrides.ts), and
+ *    clamping them back in would undo them.
  *  Scale is the picture's normal line, and nothing else moves it here: the
  *  master's Expansion dial (sceneSettings.ts's getSceneExpansion) acts on
  *  the music instead — how far a drive reading may pull the picture away
@@ -492,9 +492,8 @@ export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number
   if (master === SCENE_MASTER_DEFAULT) return value;
   if (spec.type === "boolean" || spec.type === "enum") return value;
   if (spec.masterScale === false) return value;
-  if (import.meta.env.DEV && (getOverride(sceneId, spec.key) !== undefined || getPin(sceneId, spec.key) !== undefined)) {
-    return value;
-  }
+  if (getCustomValue(sceneId, spec.key) !== undefined) return value;
+  if (import.meta.env.DEV && getOverride(sceneId, spec.key) !== undefined) return value;
   return clampToSpec(spec, value * master);
 }
 

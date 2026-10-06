@@ -1,6 +1,7 @@
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
+import { fitCustom, getCustomValue, setCustomValue } from "./customValues.ts";
 import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
 
@@ -167,7 +168,11 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
     // The variant (SceneSetting.variant) is always carried, auto or not:
     // every other key is stored per variant option, so a Look that left it
     // out would apply its keys into whatever option the receiver was on.
-    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) manual[spec.key] = getSceneSetting(sceneId, spec);
+    // A custom value (customValues.ts) is the number on screen, so it is the
+    // one carried; an app that predates custom values clamps it on apply.
+    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) {
+      manual[spec.key] = getCustomValue(sceneId, spec.key) ?? getSceneSetting(sceneId, spec);
+    }
     if (spec.drive) {
       const setting = getDriveSetting(sceneId, spec);
       if (!sameDriveSetting(setting, defaultDriveSetting(spec))) (drives ??= {})[spec.key] = setting;
@@ -189,7 +194,12 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
     const value = look.manual[spec.key];
     if (value !== undefined) {
       setAutoEnabled(look.sceneId, spec.key, false);
+      // The store takes the slider's nearest end (and drops any custom value
+      // already set); a value past it goes back on top as a custom value,
+      // bounded like a typed one, since a share link can carry any number.
       setSceneSetting(look.sceneId, spec, value);
+      const custom = fitCustom(spec, value);
+      if (custom !== null) setCustomValue(look.sceneId, spec.key, custom);
     } else {
       const base = settingDefault(look.sceneId, spec);
       setSceneSetting(look.sceneId, spec, base);

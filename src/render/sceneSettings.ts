@@ -2,6 +2,7 @@ import type { SignalId, SignalLink } from "./signals.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
 import { registerSyncedStore } from "../net/syncedStores.ts";
 import { proUnlocked } from "./pro.ts";
+import { clearCustomValue } from "./customValues.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -253,8 +254,8 @@ export function registerVariant(sceneId: string, specs: readonly SceneSetting[] 
 }
 
 // How the variant's *effective* value is read. The stored value by default;
-// autoTune.ts swaps in its resolver at load, so a dev override or pin on
-// the variant (tuning/overrides.ts, pins.ts) switches profiles the same way
+// autoTune.ts swaps in its resolver at load, so a custom value or dev override on
+// the variant (customValues.ts, tuning/overrides.ts) switches profiles the same way
 // a chip click does — the profile in effect is always the one the shader
 // is drawing. A callback rather than an import: autoTune.ts imports this
 // module, and the reverse edge would be a cycle.
@@ -345,6 +346,9 @@ export function getSceneSetting(sceneId: string, spec: SceneSetting): number {
 export function setSceneSetting(sceneId: string, spec: SceneSetting, value: number): void {
   (cache[settingScope(sceneId, spec.key)] ??= {})[spec.key] = clamp(spec, value);
   persist();
+  // Any write to the setting supersedes a custom value typed past its slider
+  // (customValues.ts), so one never shadows a later edit.
+  clearCustomValue(sceneId, spec.key);
 }
 
 /** Every listed spec back to its default — within the current variant's

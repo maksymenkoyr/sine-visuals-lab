@@ -159,7 +159,7 @@ import {
 } from "./render/sceneSet.ts";
 import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
 import { funnyLookName } from "./render/lookNames.ts";
-import { getPin, setPin, clearPin } from "./tuning/pins.ts";
+import { clearCustomValue, getCustomValue, setCustomValue } from "./render/customValues.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import {
   getAutoGain,
@@ -2076,12 +2076,7 @@ function wireDeviceMenu(): void {
       bufferHeight: canvas.height,
       ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
     }),
-    // Rollup replaces import.meta.env.DEV with a literal `false` in a
-    // production build, folding this to `undefined` and — since pins.ts
-    // carries no module-scope side effect (see its header) — letting the
-    // whole module tree-shake out, the same way autoTune.ts's own DEV-gated
-    // import of tuning/overrides.ts already does.
-    devPin: import.meta.env.DEV ? { get: getPin, set: setPin, clear: clearPin } : undefined,
+    customValues: { get: getCustomValue, set: setCustomValue, clear: clearCustomValue },
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());

@@ -757,17 +757,33 @@ body.vc-keys-reveal [data-keycap]::after {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }
 
-/* Dev-only typed-value field (deviceMenu.ts's pinOpenEdit), swapped in over a
- * row's digits on click. Inputs don't inherit color from an ancestor span the
- * way inline text does, so this needs its own color rather than relying on
- * readoutStyle's — and living here rather than in the inline cssText lets the
- * row's --vc-accent reach it, matching the underline to whichever card the
- * row belongs to. */
-.vc-pin-input {
-  box-sizing: border-box; color: #fff; caret-color: var(--vc-accent);
-  border: none; border-bottom: 1px solid var(--vc-accent); border-radius: 1px;
-  outline: none; padding: 0 2px 1px; margin: 0 -2px;
-  background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
+/* A row's readout digits, typable in place (deviceMenu.ts's createControlRow
+ * typed entry). They look as they always have — at rest, on hover and while
+ * typing — bar the text cursor, a caret in the row's --vc-accent, and the
+ * highlight on what's selected: never an input box, an underline or a
+ * background. */
+.vc-digits-typable { cursor: text; }
+.vc-digits-edit { outline: none; caret-color: var(--vc-accent); min-width: 0.6em; }
+.vc-digits-edit::selection {
+  color: #fff; background: color-mix(in srgb, var(--vc-accent) 45%, transparent);
+}
+
+/* The ⚠ left of a row's number while it holds a custom value (deviceMenu.ts's
+ * createControlRow, render/customValues.ts), in the row's --vc-accent. Its
+ * faint glow is a blurred, thicker copy under the crisp icon, and only that
+ * copy's opacity pulses: an opacity animation runs on the compositor, so it
+ * repaints nothing, and it only exists while a custom value does. Reduced
+ * motion holds the glow still. */
+.vc-custom-mark { position: relative; align-self: center; line-height: 0; color: var(--vc-accent); }
+.vc-custom-icon { position: relative; }
+.vc-custom-glow {
+  position: absolute; left: 0; top: 0; filter: blur(1.5px); opacity: 0.35;
+  animation: vc-custom-glow 2.4s ease-in-out infinite alternate; will-change: opacity;
+}
+.vc-custom-glow path { stroke-width: 2.4; }
+@keyframes vc-custom-glow { from { opacity: 0.15; } to { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-custom-glow { animation: none; }
 }
 
 /* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane

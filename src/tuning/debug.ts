@@ -29,7 +29,7 @@ import {
 } from "./capture.ts";
 import { buildProbeSnapshot, formatProbe, type ProbeInput, type ProbeSnapshot } from "./probe.ts";
 import { applyTuningParams, initTuningBus, type TuningParams } from "./bus.ts";
-import { clearAllPins } from "./pins.ts";
+import { clearAllCustomValues } from "../render/customValues.ts";
 import { mountTuningUI } from "./ui.ts";
 import { bakeDefaults, bakeEdits, type BakeResponse, type DefaultEdit } from "./bakeDefaults.ts";
 import { PICTURE_MEASURES, type PictureMeasure, type PictureReading } from "../render/pictureMeter.ts";
@@ -77,8 +77,8 @@ interface VizDebugApi {
   clip(opts?: ClipCaptureOpts): Promise<{ ok: boolean; ts: number }>;
   setParams(params: TuningParams): void;
   setClipBuffer(on: boolean): void;
-  /** Drops every typed-in dev pin (tuning/pins.ts) on every scene — for a
-   *  headless driver to neutralize a developer's leftover pins before a run. */
+  /** Drops every custom value (render/customValues.ts) on every scene — for a
+   *  headless driver to neutralize leftover typed values before a run. */
   clearPins(): void;
   /** Dry-runs a bake of the active scene's current settings (see
    *  bakeDefaults.ts) and returns the would-be result without writing —
@@ -270,7 +270,7 @@ export function initTuning(deps: TuningDeps): void {
     clip,
     setParams: (params) => applyTuningParams(params),
     setClipBuffer: (on) => (on ? startClipBuffer() : stopClipBuffer()),
-    clearPins: () => clearAllPins(),
+    clearPins: () => clearAllCustomValues(),
     bakeDefaults: dryRunBake,
     audioProbe: () => {
       const input = deps.getInput();

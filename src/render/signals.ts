@@ -213,7 +213,7 @@ export const surgeAtThreshold = clamp01((1 - SURGE_RATIO_FLOOR) / (SURGE_RATIO_C
  *  is ever "active" by construction. `get` reads a sibling setting's
  *  resolved value (auto-aware, the same number the shader sees) by key
  *  rather than by spec object, since the device menu already keys its
- *  settings that way for the pin/typed-entry path (src/tuning/pins.ts). */
+ *  settings that way for the typed-entry path (src/render/customValues.ts). */
 export type SignalLink =
   | SignalId
   | {

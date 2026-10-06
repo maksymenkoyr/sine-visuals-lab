@@ -58,6 +58,7 @@ import {
   groupHeading,
   groupHeadingFirstStyle,
   groupHeadingStyle,
+  percentReadout,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -2170,8 +2171,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     max: HIT_AMOUNT_MAX,
     defaultValue: HIT_AMOUNT_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description:
       "How much a hit's size counts. Off: every hit lands at full strength, exactly as before. Full: a hit's pulse height on the hits history above is its own graded strength.",
   });
@@ -2199,8 +2199,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     max: HIT_LOUDNESS_MAX,
     defaultValue: HIT_LOUDNESS_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description:
       "How much of a hit's strength comes from how loud it actually was, rather than how far it stood out from the recent average. 0: stand-out only. 100: loudness only.",
   });
@@ -2214,8 +2213,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     max: HIT_FLOOR_MAX,
     defaultValue: HIT_FLOOR_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (v) => String(Math.round(v * 100)),
+    ...percentReadout,
     description:
       "Hits graded weaker than this count as nothing; the rest are rescaled to fill 0 to 100. 0: nothing is discarded — the dashed line on the hits history above marks where it sits.",
   });

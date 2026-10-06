@@ -29,7 +29,7 @@
  */
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneSetting } from "../render/sceneSettings.ts";
-import { getPin } from "./pins.ts";
+import { getCustomValue } from "../render/customValues.ts";
 import { getOverride } from "./overrides.ts";
 
 export interface DefaultEdit {
@@ -126,7 +126,7 @@ export async function bakeDefaults(
   const skippedGeneratedKeys = specs.filter((s) => s.item).map((s) => s.key);
   const nonGenerated = specs.filter((s) => !s.item);
   const bakeable = nonGenerated.filter(
-    (spec) => getPin(sceneId, spec.key) === undefined && getOverride(sceneId, spec.key) === undefined,
+    (spec) => getCustomValue(sceneId, spec.key) === undefined && getOverride(sceneId, spec.key) === undefined,
   );
   const skippedKeys = nonGenerated.filter((s) => !bakeable.includes(s)).map((s) => s.key);
   const edits = buildDefaultEdits(bakeable, (spec) => getSceneSetting(sceneId, spec));

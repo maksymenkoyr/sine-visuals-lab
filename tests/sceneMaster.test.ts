@@ -24,7 +24,7 @@ import {
 } from "../src/render/autoTune.ts";
 import { setSensitivity } from "../src/audio/sensitivity.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
-import { clearAllPins, setPin } from "../src/tuning/pins.ts";
+import { clearAllCustomValues, setCustomValue } from "../src/render/customValues.ts";
 
 // The device-wide scene master: raw multiply at resolveSceneSetting, once,
 // on the final resolved value — see resolveSceneSetting's own doc and
@@ -60,7 +60,7 @@ const UNSCALED_SPEC: SceneSetting = { key: "touch01", label: "Touch", min: -1.5,
 afterEach(() => {
   setSceneMaster(SCENE_MASTER_DEFAULT);
   setSceneExpansion(SCENE_EXPANSION_DEFAULT);
-  clearAllPins();
+  clearAllCustomValues();
 });
 
 describe("scene master store", () => {
@@ -162,10 +162,10 @@ describe("resolveSceneSetting applies the master", () => {
     const sceneId = "master-pin";
     setAutoEnabled(sceneId, NUMERIC.key, false);
     setSceneSetting(sceneId, NUMERIC, 0.9);
-    setPin(sceneId, NUMERIC.key, 0.9);
+    setCustomValue(sceneId, NUMERIC.key, 0.9);
     setSceneMaster(0.5);
     expect(resolveSceneSetting(sceneId, NUMERIC)).toBe(0.9);
-    clearAllPins();
+    clearAllCustomValues();
     expect(resolveSceneSetting(sceneId, NUMERIC)).toBe(0.45);
   });
 });

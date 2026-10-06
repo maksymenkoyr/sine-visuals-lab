@@ -113,6 +113,9 @@ import type { InputHealthReading } from "../audio/inputHealth.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import { createLeashGauge } from "./leashGauge.ts";
 import { watchOnScreen } from "./onScreen.ts";
+import { allowedChar, fitTyped, parseTyped } from "./typedValue.ts";
+import { setLiveText } from "./liveText.ts";
+import { customReach, fitCustom } from "../render/customValues.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -150,6 +153,7 @@ import {
   paletteSwatchChipLitStyle,
   paletteSwatchChipStyle,
   paletteSwatchStyle,
+  percentReadout,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -376,9 +380,13 @@ import {
  * mutes the row to its floor (0 for a zeroAtMin row, spec.min otherwise) and
  * restores the value it had on a second press — the thumb stays put while
  * muted; only the readout (Off) and the colours change. Any other write to
- * the row (drag, ↺, a card Reset, auto taking over) forgets that restore
+ * the row (drag, a typed value, ↺, a card Reset, auto taking over) forgets that restore
  * point and unlights it — it's a toggle, not a memory. ↺ only appears once a value is
- * off its default, doubling as a "you changed this" marker. A chip's letter
+ * off its default, doubling as a "you changed this" marker. Clicking the
+ * readout types a value into it in place (createControlRow's typed entry,
+ * typedValue.ts for what the text means), committed like a drag; past the
+ * slider's ends a Scene-card setting keeps it as a custom value, marked ⚠
+ * beside the number (render/customValues.ts). A chip's letter
  * *is* its hotkey once the row's control has keyboard focus — and
  * wireHoverFocus gives it that focus on genuine pointer movement over the
  * row, matching the identical hover/focus styling below, so pointing at a
@@ -664,11 +672,9 @@ export interface DeviceMenuDeps {
    *  last value. See src/render/pictureMeter.ts for what each measure
    *  means. */
   getPictureReading: () => PictureReading | null;
-  /** Dev-only: read/write/clear an unclamped pin for a param row (see
-   *  tuning/pins.ts) — its presence is what turns a row's readout into a
-   *  typable field, and its absence in a production build is what hides
-   *  that affordance entirely. */
-  devPin?: {
+  /** Read/write/clear a scene setting's custom value — one typed into its
+   *  readout past the slider's ends (render/customValues.ts). */
+  customValues: {
     get(sceneId: string, key: string): number | undefined;
     set(sceneId: string, key: string, value: number): void;
     clear(sceneId: string, key: string): void;
@@ -1186,6 +1192,11 @@ export interface ControlRowSpec {
   /** Mono suffix after the digits ("×"). */
   unit?: string;
   format: (value: number) => string;
+  /** Set when `format` shows the value scaled (a % row shows value × 100):
+   *  a typed number is divided by it, so the row takes what its readout
+   *  shows. Spread controlsKit.ts's `percentReadout` rather than setting it
+   *  apart from `format`. */
+  typedScale?: number;
   description?: string;
   /** Wires the auto chip — see autoTune.ts. Omit to leave the row manual-only. */
   auto?: {
@@ -1205,18 +1216,26 @@ export interface ControlRowSpec {
    *  master bar in sync (refreshAutoMaster). Omit for a row nothing else
    *  needs to hear about. */
   onAutoToggled?: () => void;
-  /** Dev-only: makes the readout typable, bound to a scene+key already —
-   *  see DeviceMenuDeps.devPin. Omit to leave the readout the plain
-   *  non-interactive span it's always been (any prod build, or a row this
-   *  affordance doesn't apply to). */
-  pin?: {
+  /** Lets a value typed past the slider's ends through as a custom value
+   *  (render/customValues.ts), bound to a scene+key already, and shows ⚠ by
+   *  the number while one is set. Every row's readout is typable either way;
+   *  without this (a row with no scene setting behind it) a typed value
+   *  clamps to the slider's ends. */
+  custom?: {
     get(): number | undefined;
     set(value: number): void;
     clear(): void;
-    /** What to fall back to once a pin is cleared by an invalid/empty typed
-     *  value — the row's already-resolved live value (auto/override-aware,
-     *  same getter the row's own auto path uses), not a raw manual read, so
-     *  clearing a pin never fights whatever else currently owns the row. */
+    /** `raw` as this row's custom value, or null when it takes none: inside
+     *  the slider (the store takes it) or a count (render/customValues.ts's
+     *  fitCustom). */
+    fit(raw: number): number | null;
+    /** How far a custom value may go, for the ⚠'s tooltip — null for
+     *  unbounded (a dev build). */
+    reach(): { lo: number; hi: number } | null;
+    /** What to fall back to once emptying the field drops a custom value —
+     *  the row's already-resolved live value (auto/override-aware, same
+     *  getter the row's own auto path uses), not a raw manual read, so
+     *  dropping it never fights whatever else currently owns the row. */
     resolve(): number;
   };
   /** SceneSetting.reads (sceneSettings.ts), resolved to concrete signals and
@@ -1381,9 +1400,9 @@ const HOVER_SELECT_DELAY_MS = 150;
  *  Must use `preventScroll` — the panel's columns are `.vc-scroll`, and a bare
  *  focus() would scroll the row into view, sliding it out from under the
  *  cursor (see bandFaders.ts's own hit.focus() for the same reason). Never
- *  steals focus from a typing target (the pin input's blur commits its
+ *  steals focus from a typing target (a typed readout's blur commits its
  *  value, so mid-type is off limits) — checked against document.activeElement,
- *  not the event target, since the pointer is over this row, not the input
+ *  not the event target, since the pointer is over this row, not the readout
  *  holding focus elsewhere. */
 function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   row.addEventListener("mousemove", (e) => {
@@ -1496,108 +1515,163 @@ export function createControlRow(spec: ControlRowSpec) {
   if (!spec.unit) unit.style.display = "none";
   readout.append(digits, unit);
 
-  // Last value display() actually rendered — the typed field's prefill, and
-  // (with editingPin) whether display() needs to keep the field showing
-  // instead of the digits it would otherwise reassert every refresh.
+  // Last value display() rendered and whether auto owned it — what the typed
+  // field opens on, and what a cancelled edit puts back.
   let lastValue = spec.defaultValue;
-  let editingPin = false;
+  let lastAuto = false;
 
-  // Dev-only typed entry — see ControlRowSpec.pin. The digits span becomes
-  // the click trigger for a plain text field swapped in over it (not reached
-  // by Tab — the panel's ring (ringElements() below) only walks
-  // .vc-slider/.vc-toggle/.vc-fader, so this is mouse/touch-only, matching
-  // the rest of the row's pointer-only affordances like the thumb magnet). A
-  // `*` marks a pinned (out-of-range) value in BANDS_AMBER, a cross-card
-  // color chosen so it reads as "outside the slider" regardless of which
-  // card's own accent this row is using.
-  let pinMark: HTMLSpanElement | null = null;
-  let pinInput: HTMLInputElement | null = null;
-  if (spec.pin) {
-    pinMark = document.createElement("span");
-    pinMark.textContent = "*";
-    pinMark.title = "Pinned — typed value outside the slider's range";
-    pinMark.style.cssText = `color: ${BANDS_AMBER}; font: 400 11px/1 ${FONT_MONO}; display: none;`;
-    readout.appendChild(pinMark);
-
-    digits.style.cursor = "text";
-    digits.title = "Click to type a value";
-
-    pinInput = document.createElement("input");
-    pinInput.type = "text";
-    pinInput.inputMode = "decimal";
-    pinInput.className = "vc-pin-input";
-    // Color/border/background live in the .vc-pin-input rule (controlsTheme.ts),
-    // not here — an inline color would win over it and inputs don't inherit
-    // color the way a span does, which is how this used to render black
-    // text on the panel's dark glass.
-    pinInput.style.cssText = `${digitsStyle} width: 4.5em; display: none;`;
-    readout.insertBefore(pinInput, digits);
-
-    // stopPropagation on both the trigger and the field itself so el's own
-    // click-to-focus-slider handler (below) never steals focus back out.
-    digits.addEventListener("click", (e) => {
-      e.stopPropagation();
-      pinOpenEdit();
-    });
-    pinInput.addEventListener("click", (e) => e.stopPropagation());
-    // Escape sets this so the blur that display:none triggers on the
-    // focused field (browsers fire it automatically) is a no-op instead of
-    // re-committing whatever text was left in the box.
-    let suppressBlurCommit = false;
-    pinInput.addEventListener("blur", () => {
-      if (suppressBlurCommit) {
-        suppressBlurCommit = false;
-        return;
-      }
-      pinCommitTyped();
-    });
-    pinInput.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Enter") {
-        e.preventDefault();
-        pinInput!.blur(); // triggers the blur listener above -> commits
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        suppressBlurCommit = true;
-        pinCloseEdit();
-      }
-    });
-  }
-  // Bound to the assigned functions further down (pinOpenEdit etc. are
-  // function declarations, hoisted within this same call), once display(),
-  // commit(), and clearOff() exist below to close over.
-  function pinOpenEdit(): void {
-    if (!pinInput) return;
-    editingPin = true;
-    pinInput.value = String(lastValue);
-    digits.style.display = "none";
-    pinInput.style.display = "";
-    pinInput.focus();
-    pinInput.select();
-  }
-  function pinCloseEdit(): void {
-    if (!pinInput) return;
-    editingPin = false;
-    pinInput.style.display = "none";
-    digits.style.display = "";
-  }
-  function pinCommitTyped(): void {
-    if (!spec.pin || !pinInput) return;
-    const text = pinInput.value.trim();
-    const value = Number(text);
-    pinCloseEdit();
-    if (text === "" || !Number.isFinite(value)) {
-      spec.pin.clear();
-      display(spec.pin.resolve(), false);
-    } else if (value >= spec.min && value <= spec.max) {
-      spec.pin.clear();
-      clearOff();
-      commit(value);
-    } else {
-      clearOff();
-      spec.pin.set(value);
-      display(value, false);
+  // Typed entry: a click on the digits makes that same span editable in
+  // place — the same digits, with only a caret added (.vc-digits-edit,
+  // controlsTheme.ts): no input box, underline or background. typedValue.ts
+  // says what the text means. Enter, Tab or a click away commits through
+  // commit(), the same path as a drag; Escape puts the value back.
+  // Pointer-only, like the thumb magnet: the panel's ring (ringElements()
+  // below) walks the sliders, and Enter (Play) and the bare digits (the
+  // Set's pads) are already spoken for, so no key is left to open it. While
+  // `editing`, setReadout leaves the digits alone and refreshAuto skips the
+  // row, so a live value can't overwrite what's being typed.
+  let editing = false;
+  let openedText = "";
+  digits.classList.add("vc-digits-typable");
+  digits.title = "Click to type a value";
+  digits.addEventListener("click", (e) => {
+    // Never let el's click-to-focus-slider handler (below) pull focus out.
+    e.stopPropagation();
+    if (!editing) openEdit();
+  });
+  digits.addEventListener("blur", () => closeEdit(true));
+  digits.addEventListener("keydown", (e) => {
+    if (!editing) return;
+    // Typing must not reach the panel's keys or the Set's pads.
+    e.stopPropagation();
+    if (e.key === "Enter" || e.key === "Tab" || e.key === "Escape") {
+      e.preventDefault();
+      closeEdit(e.key !== "Escape");
+      slider.focus({ preventScroll: true });
     }
+  });
+  // Only characters parseTyped can read get in: anything else typed, pasted
+  // or dropped is filtered (a comma becomes the point), and a line break or
+  // formatting (contenteditable's own Enter/Cmd+B paths) never lands.
+  digits.addEventListener("beforeinput", (e) => {
+    if (e.inputType.startsWith("delete") || e.inputType.startsWith("history")) return;
+    if (e.inputType === "insertCompositionText") return; // not cancelable; parseTyped judges the result
+    const data = e.inputType === "insertText" ? e.data ?? "" : "";
+    if (data && [...data].every((c) => allowedChar(c) && c !== ",")) return;
+    e.preventDefault();
+    insertTyped(data);
+  });
+  digits.addEventListener("paste", (e) => {
+    e.preventDefault();
+    insertTyped(e.clipboardData?.getData("text/plain") ?? "");
+  });
+  digits.addEventListener("drop", (e) => e.preventDefault());
+
+  // ⚠ left of the number while a custom value is set (ControlRowSpec.custom),
+  // in the row's own accent, glowing faintly (.vc-custom-mark,
+  // controlsTheme.ts). A drawn triangle, not the ⚠ character, which some
+  // systems render as a colour emoji; drawn twice, the copy underneath
+  // blurred into the glow that pulses.
+  let customMark: HTMLSpanElement | null = null;
+  if (spec.custom) {
+    const triangle = (cls: string) =>
+      `<svg class="${cls}" width="12" height="11" viewBox="0 0 12 11" fill="none" aria-hidden="true">` +
+      `<path d="M6 1 11 10H1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>` +
+      `<path d="M6 4.2V6.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>` +
+      `<circle cx="6" cy="8.3" r="0.65" fill="currentColor"/></svg>`;
+    customMark = document.createElement("span");
+    customMark.className = "vc-custom-mark";
+    customMark.setAttribute("role", "img");
+    customMark.setAttribute("aria-label", "Custom value");
+    customMark.innerHTML = triangle("vc-custom-glow") + triangle("vc-custom-icon");
+    customMark.style.display = "none";
+    const reach = spec.custom.reach();
+    customMark.title =
+      "Custom value, past the slider's end. The scene wasn't tuned this far: if the picture breaks, drag the slider or press ↺." +
+      (reach ? ` Typed values here go from ${spec.format(reach.lo)} to ${spec.format(reach.hi)}.` : "");
+    readout.insertBefore(customMark, digits);
+  }
+
+  // Function declarations, hoisted within this call, so the listeners above
+  // can name them before display(), commit() and clearOff() exist below.
+  function openEdit(): void {
+    editing = true;
+    // An "Off" readout (muted, or a row's Off stop) is in the mono face —
+    // the field always opens on the number, in the digits' own face.
+    openedText = spec.format(lastValue);
+    setDigitsText(openedText);
+    digits.style.cssText = digitsStyle;
+    if (spec.unit) unit.style.display = "";
+    digits.contentEditable = "true";
+    // A phone's decimal pad has no minus key.
+    digits.inputMode = spec.min < 0 ? "text" : "decimal";
+    digits.classList.add("vc-digits-edit");
+    digits.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.selectNodeContents(digits);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }
+  function insertTyped(text: string): void {
+    const clean = [...text].filter(allowedChar).join("").replace(/,/g, ".");
+    const sel = getSelection();
+    if (!clean || !sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (!digits.contains(range.commonAncestorContainer)) return;
+    range.deleteContents();
+    const node = document.createTextNode(clean);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function closeEdit(keep: boolean): void {
+    if (!editing) return;
+    editing = false;
+    const text = digits.textContent ?? "";
+    digits.contentEditable = "false";
+    digits.classList.remove("vc-digits-edit");
+    const sel = getSelection();
+    if (sel && digits.contains(sel.anchorNode)) sel.removeAllRanges();
+    // Unchanged text commits nothing: the readout is rounded, and writing it
+    // back would round the real value off with it.
+    if (keep && text !== openedText) commitTyped(text);
+    else display(lastValue, lastAuto);
+  }
+  function commitTyped(text: string): void {
+    const typed = parseTyped(text);
+    if (typed === null) {
+      // Emptying the field is how a custom value is dropped.
+      if (spec.custom && text.trim() === "" && spec.custom.get() !== undefined) {
+        spec.custom.clear();
+        display(spec.custom.resolve(), false);
+      } else display(lastValue, lastAuto);
+      return;
+    }
+    const value = fitTyped(typed, {
+      min: spec.min,
+      max: spec.max,
+      step: isLog ? undefined : spec.step,
+      scale: spec.typedScale,
+      zeroAtMin: spec.zeroAtMin,
+    });
+    const custom = spec.custom?.fit(typed / (spec.typedScale ?? 1)) ?? null;
+    clearOff();
+    if (custom !== null) {
+      // The slider's nearest end goes through commit() first — Auto off, the
+      // store, the room and the pop-out, and what a reader that doesn't know
+      // custom values falls back to — then the custom value over it.
+      commit(value);
+      spec.custom!.set(custom);
+      display(custom, false);
+      return;
+    }
+    // Any of the row's own controls taking over drops a custom value — see
+    // the slider/reset handlers below.
+    spec.custom?.clear();
+    commit(value);
   }
 
   const chip = document.createElement("button");
@@ -1778,14 +1852,19 @@ export function createControlRow(spec: ControlRowSpec) {
     return isLog ? valueToPos(value) : value;
   }
 
+  // In place (liveText.ts): an Auto row repaints its readout every refresh,
+  // and on Safari a click on a live number otherwise never opened typed entry.
+  const setDigitsText = (text: string) => setLiveText(digits, text);
+
   function setReadout(value: number, muted: boolean): void {
+    if (editing) return; // the digits are the typed field right now
     if (muted || (spec.zeroAtMin && value <= 0)) {
-      digits.textContent = "Off";
+      setDigitsText("Off");
       digits.style.cssText = `${digitsTextStyle} color: ${FADER_OFF};`;
       unit.style.display = "none";
       return;
     }
-    digits.textContent = spec.format(value);
+    setDigitsText(spec.format(value));
     digits.style.cssText = digitsStyle;
     if (spec.unit) unit.style.display = "";
   }
@@ -1834,6 +1913,7 @@ export function createControlRow(spec: ControlRowSpec) {
 
   function display(value: number, auto: boolean): void {
     lastValue = value;
+    lastAuto = auto;
     // Muted (T): the setting runs at its floor, but the thumb stays where it
     // was — on the value a second T brings back — and the row greys out
     // (.vc-row-off, controlsTheme.ts) instead of sliding to the left end.
@@ -1844,17 +1924,7 @@ export function createControlRow(spec: ControlRowSpec) {
     el.classList.toggle("vc-row-off", muted);
     renderTicks();
     setReadout(value, muted);
-    // setReadout just overwrote digits.style.cssText wholesale, which would
-    // silently pop the digits back over an open typed-entry field on every
-    // refresh (e.g. an auto row's ~100ms tick) — reassert the field's
-    // visibility every call rather than only where it was opened.
-    if (spec.pin) {
-      if (editingPin) {
-        digits.style.display = "none";
-        pinInput!.style.display = "";
-      }
-      pinMark!.style.display = spec.pin.get() !== undefined ? "" : "none";
-    }
+    if (customMark) customMark.style.display = spec.custom!.get() !== undefined ? "inline-flex" : "none";
     resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
     setHint(auto);
   }
@@ -1895,18 +1965,18 @@ export function createControlRow(spec: ControlRowSpec) {
   });
   slider.addEventListener("input", () => {
     clearOff();
-    spec.pin?.clear();
+    spec.custom?.clear();
     commit(sliderToValue());
   });
   resetBtn.addEventListener("click", () => {
     clearOff();
-    spec.pin?.clear();
+    spec.custom?.clear();
     commit(spec.defaultValue);
   });
   offChip.addEventListener("click", () => {
-    // Any of the row's own controls taking over clears a pin the same way —
+    // Any of the row's own controls taking over drops a custom value the same way —
     // see the slider/reset handlers above.
-    spec.pin?.clear();
+    spec.custom?.clear();
     if (offStoredValue !== null) {
       const restore = offStoredValue;
       offStoredValue = null;
@@ -1926,10 +1996,10 @@ export function createControlRow(spec: ControlRowSpec) {
       auto.toggle(on);
       if (on) {
         clearOff();
-        // A pin beats auto in resolve()'s precedence, so without this the
+        // A custom value beats auto in resolve()'s precedence, so without this the
         // chip would light up while the row visibly stayed put — clearing it
         // here is what actually hands the row to auto.
-        spec.pin?.clear();
+        spec.custom?.clear();
       }
       refreshChip();
       display(on ? auto.resolveLive() : auto.getManual(), on);
@@ -1953,10 +2023,10 @@ export function createControlRow(spec: ControlRowSpec) {
     },
     /** Called from the throttled per-frame refresh — pulls the live
      *  auto-resolved value while auto is on and this row isn't being dragged
-     *  or mid-edit in the typed-entry field (editingPin — same reasoning as
+     *  or mid-edit in its typed readout (`editing` — same reasoning as
      *  dragging: don't overwrite what the user is actively doing). */
     refreshAuto(): void {
-      if (!spec.auto || dragging || editingPin || !spec.auto.isEnabled()) return;
+      if (!spec.auto || dragging || editing || !spec.auto.isEnabled()) return;
       display(spec.auto.resolveLive(), true);
     },
     refreshChip,
@@ -1967,9 +2037,9 @@ export function createControlRow(spec: ControlRowSpec) {
      *  only repaints the T chip. */
     clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
-     *  owns it (resolveLive() already reflects a pin ahead of auto — see
+     *  owns it (resolveLive() already reflects a custom value ahead of auto — see
      *  autoTune.ts's resolve() — so no separate check is needed there), a
-     *  pin ahead of the manual store otherwise. */
+     *  custom value ahead of the manual store otherwise. */
     sync(manualValue: () => number): void {
       refreshChip();
       if (spec.auto && spec.auto.isEnabled()) {
@@ -1979,7 +2049,7 @@ export function createControlRow(spec: ControlRowSpec) {
         // open() syncs every row, and a muted manual row must stay muted.
         clearOff();
         display(spec.auto.resolveLive(), true);
-      } else display(spec.pin?.get() ?? manualValue(), false);
+      } else display(spec.custom?.get() ?? manualValue(), false);
     },
     /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
      *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
@@ -5076,21 +5146,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   masterCard.body.append(pictureHeading, pictureBlock);
   const pictureOnScreen = watchOnScreen(pictureBlock);
 
-  // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
-  // undefined (no typable readout) whenever devPin itself is, i.e. every
-  // production build. `sceneId` is a getter rather than a plain string
-  // because the Input card's three rows are built once and outlive scene
-  // switches (see makeInputRow below); a scene-setting row is rebuilt fresh
-  // per scene by renderSceneSettings and could just close over a constant,
-  // but taking a getter here either way keeps this one function correct for
-  // both callers instead of needing two shapes.
-  function pinConfig(sceneId: () => string, key: string, resolve: () => number): ControlRowSpec["pin"] {
-    const pin = deps.devPin;
-    if (!pin) return undefined;
+  // Binds a row's typed entry to deps.customValues for one (scene, setting).
+  // `sceneId` and `spec` are getters because the Input card's three rows are
+  // built once and outlive scene switches (see makeInputRow below); a
+  // scene-setting row is rebuilt fresh per scene by renderSceneSettings and
+  // could just close over constants, but taking getters here either way
+  // keeps this one function correct for both callers instead of needing two
+  // shapes. A dev build lifts customReach's bound, for tuning.
+  function customConfig(sceneId: () => string, spec: () => SceneSetting, resolve: () => number): ControlRowSpec["custom"] {
+    const store = deps.customValues;
     return {
-      get: () => pin.get(sceneId(), key),
-      set: (value) => pin.set(sceneId(), key, value),
-      clear: () => pin.clear(sceneId(), key),
+      get: () => store.get(sceneId(), spec().key),
+      set: (value) => store.set(sceneId(), spec().key, value),
+      clear: () => store.clear(sceneId(), spec().key),
+      fit: (raw) => fitCustom(spec(), raw, import.meta.env.DEV),
+      reach: () => {
+        const reach = customReach(spec(), import.meta.env.DEV);
+        return reach && Number.isFinite(reach.lo) && Number.isFinite(reach.hi) ? reach : null;
+      },
       resolve,
     };
   }
@@ -5130,7 +5203,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // honest whenever a chip click could have changed it. It also
       // refreshes the Auto master bar (refreshMicAutoAndMaster).
       onAutoToggled: refreshMicAutoAndMaster,
-      pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
+      // Dev only: these rows keep their own store (audio/sensitivity.ts),
+      // which doesn't drop a custom value on a write the way
+      // setSceneSetting does, so the public build clamps them.
+      custom: import.meta.env.DEV ? customConfig(() => deps.currentSceneId(), spec, resolveLive) : undefined,
     });
     row.onChange(onChange);
     return { row, getManual, defaultValue: range.defaultValue, onChange };
@@ -5630,7 +5706,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           const label = row.name.textContent ?? "";
           const isHidden = row.deviceId !== null && !row.isMissing && isInputHidden(label);
           if (!row.isScreen && !row.isMissing && row.deviceId !== null) {
-            row.sub.textContent = editing
+            const sub = editing
               ? isLive
                 ? "listening — can't hide"
                 : isHidden
@@ -5643,7 +5719,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
                   : inputKind(label) === "loopback"
                     ? "this computer's own sound"
                     : "";
-            row.sub.style.display = row.sub.textContent ? "block" : "none";
+            // In place (liveText.ts): this runs every refresh tick, and the line
+            // sits inside the row's button.
+            setLiveText(row.sub, sub);
+            row.sub.style.display = sub ? "block" : "none";
           }
           row.btn.style.cssText = isLive ? sourceRowLiveStyle : row.isMissing || row.isScreen ? sourceRowDashedStyle : sourceRowStyle;
           if (editing && isHidden) row.btn.style.opacity = "0.45";
@@ -5738,8 +5817,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     max: AUTO_GAIN_MAX,
     defaultValue: AUTO_GAIN_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (value) => String(Math.round(value * 100)),
+    ...percentReadout,
     description:
       "How much each band is rescaled to fill the display. 0 shows the mic's real levels; higher flattens bass-vs-treble balance but converges different mics and rooms toward the same look.",
     auto: {
@@ -5780,8 +5858,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     defaultValue: SILENCE_GATE_CLOSED_DEFAULT,
     mapping: "linear",
     zeroAtMin: true,
-    unit: "%",
-    format: (value) => String(Math.round(value * 100)),
+    ...percentReadout,
     description:
       "Quieter than this on the Dynamics card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
     auto: {
@@ -5802,8 +5879,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     max: SILENCE_GATE_MAX,
     defaultValue: SILENCE_GATE_OPEN_DEFAULT,
     mapping: "linear",
-    unit: "%",
-    format: (value) => String(Math.round(value * 100)),
+    ...percentReadout,
     description:
       "Louder than this, beats are detected exactly as before. Between the two marks a hit has to stand out more the quieter the room is.",
     auto: {
@@ -6297,7 +6373,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // isSceneAuto is true only while EVERY auto-capable row is auto, so any
       // one row's A chip or a drag off auto flips the master bar's state.
       onAutoToggled: refreshAutoMaster,
-      pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
+      custom: customConfig(() => sceneId, () => spec, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
         ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
@@ -7340,7 +7416,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         const text = pictureOverall === null ? "--" : String(Math.round(pictureOverall * 100));
         if (text !== pictureSummaryText) {
           pictureSummaryText = text;
-          pictureSummaryReadout.textContent = text;
+          setLiveText(pictureSummaryReadout, text); // inside the Picture block's press target
           pictureSummaryReadout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
         }
       }
@@ -7355,7 +7431,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         const text = level === null ? "--" : String(Math.round(level * 100));
         if (text === row.lastText) return;
         row.lastText = text;
-        row.readout.textContent = text;
+        setLiveText(row.readout, text);
         row.readout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
       });
 
