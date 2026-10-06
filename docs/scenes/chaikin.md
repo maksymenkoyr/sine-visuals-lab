@@ -276,5 +276,5 @@ and `ours-chaikin/cells-ours.json`):
 ## History
 
 - #380 (draft): the scene, its clock, seed texture, record and materials.
-- (this PR): the Swell and Fireflies motion layers, from the motion
+- #394 (draft): the Swell and Fireflies motion layers, from the motion
   prototype page.
