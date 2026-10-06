@@ -97,9 +97,9 @@ describe("defaultSettings", () => {
     expect(defaultSettings("renderer", { kind: "tv", hasMic: false })).toEqual({ name: "TV", ears: "follow", follow: null, screen: "main", quality: "auto" });
   });
 
-  it("makes a tablet follow and show Main, but a phone follow and be a remote", () => {
+  it("makes a tablet and a phone follow and show Main", () => {
     expect(defaultSettings("controller", { kind: "tablet", hasMic: true })).toMatchObject({ ears: "follow", screen: "main" });
-    expect(defaultSettings("controller", { kind: "phone", hasMic: true })).toMatchObject({ ears: "follow", screen: "off" });
+    expect(defaultSettings("controller", { kind: "phone", hasMic: true })).toMatchObject({ ears: "follow", screen: "main" });
   });
 
   it("uses the asked-for name, cleaned, or the kind's name", () => {
