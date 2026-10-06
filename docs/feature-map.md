@@ -182,8 +182,10 @@ Darker means more important.
     `src/ui/outputKeys.ts`
 - ●●○ **Room** — devices that share one look over the network ·
   `src/ui/roomView.ts`, `server/roomCore.ts`
-  - ●●○ **Phone as controller** — scan the laptop's QR, get the whole panel on
-    the phone. Measured: a few sessions a month · `src/net/room.ts`
+  - ●●○ **Phone as controller** — scan the laptop's QR: the phone opens on
+    the room's picture, full screen, and a tap brings up the whole panel.
+    Measured: a few sessions a month · `src/net/room.ts`, `src/app.ts`
+    (`phoneScreen`)
   - ●●○ **TV** — a screen that draws the room's picture, paired by its own QR
     or a typed code. For hosts, as the bonus · `src/tv.ts`
   - ○○○ **Ears and screen per device** — whether a device listens itself or

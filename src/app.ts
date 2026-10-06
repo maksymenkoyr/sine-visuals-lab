@@ -328,6 +328,14 @@ let soloFallbackTriggered = false;
  *  controller is gated on this flag alone, so a solo, host or legacy-renderer
  *  page never takes a controller branch. */
 let isController = false;
+/** A controller running on a phone: one more screen of the room rather than a
+ *  remote. It opens on the room's scene and look, not on the gallery (boot()'s
+ *  routing waits for Main, `mainShown`), draws at full quality over the whole
+ *  screen, and starts with every control hidden; a tap asks for fullscreen and
+ *  shows the controls for a while (ui/fullscreen.ts `enterHidden`). The Room
+ *  view's screen `off` makes it a remote again (`fillsScreen`). An iPad stays a
+ *  remote with the panel at hand. */
+let phoneScreen = false;
 let controllerConn: ControllerConnection | null = null;
 /** The scene and palette ids this device holds for its room's look, even when
  *  it cannot show them (net/controllerLook.ts: a phone can be handed a scene it
@@ -449,10 +457,24 @@ let outputPower: OutputPower = {
   resolution: getOutputResolution(),
 };
 /** True while an output window is open and a scene is showing: recomputed
- *  every tick (render loop, right after outputBridge.update). A phone
- *  controller is always previewing whatever it shows — the room's TV is the
- *  real picture — so for it this is just "a scene is showing". */
+ *  every tick (render loop, right after outputBridge.update). A controller
+ *  that is a remote previews whatever it shows — the room's screens are the
+ *  real picture — so for it this is just "a scene is showing"; a phone that is
+ *  one of those screens (`fillsScreen`) never previews. */
 let previewActive = false;
+/** A phone controller is a screen of the room (see `phoneScreen`) unless the
+ *  Room view has turned its screen off, which makes it a remote. Before the
+ *  roster lists it, it is what the room gives a newcomer: a screen. */
+function fillsScreen(): boolean {
+  return phoneScreen && controllerConn?.self?.screen !== "off";
+}
+/** A phone screen whose controls are hidden (index.html's `chrome-idle`)
+ *  shows the picture alone: no HUD line for the scene it opens on, or for a
+ *  Main it follows. Once a tap shows the controls, a scene picked in its own
+ *  panel says its name as anywhere else. */
+function quietScreen(): boolean {
+  return phoneScreen && document.body.classList.contains("chrome-idle");
+}
 /** The preset this window actually renders at. effectivePreset() is the
  *  DEVICE's preset and stays the one every scene-availability check uses, so
  *  the preview's lower quality never hides a scene from the gallery; this is
@@ -950,7 +972,7 @@ function applyScene(next: Scene): void {
   if (previewActive) applyRenderQuality();
   if (!mountOrBail(next, prev, inViz)) return;
   updateSceneVersionLabel(next);
-  showHud(`scene: ${scene.name}`);
+  if (!quietScreen()) showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
 }
@@ -2180,6 +2202,7 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
     capture: look.io.read,
     apply(doc, glideMs) {
       look.io.write(doc);
+      markMainShown();
       // The pop-out is one more Main screen of the laptop: it follows too, and
       // walks the glide this window cannot.
       if (outputBridge?.status().open) outputBridge.go(glideMs);
@@ -2205,6 +2228,28 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
   conn.onRosterChange(() => play.onScreenKnown());
   mainPlay = play;
   return play;
+}
+
+/** Settles the first time this device shows the room's Main (startMainPlay's
+ *  `apply`), which may come before boot() starts waiting for it. */
+let markMainShown: () => void = () => {};
+const mainShown = new Promise<void>((resolve) => {
+  markMainShown = resolve;
+});
+
+/** How long a phone screen waits for the room's Main before it opens on the
+ *  scene it has. A join's look and roster come back within a round trip or
+ *  two; this is for a slow network, or a room with no Main yet. */
+const MAIN_WAIT_MS = 5000;
+
+/** A phone screen that opened on the laptop's QR (a link with no scene in it)
+ *  goes straight to the room's scene: once it shows Main, or after
+ *  MAIN_WAIT_MS on the scene it has. Until then the page stays blank. Pushed
+ *  over the gallery's entry, so Back still finds the gallery. */
+async function openOnMain(): Promise<void> {
+  await Promise.race([mainShown, new Promise<void>((resolve) => window.setTimeout(resolve, MAIN_WAIT_MS))]);
+  if (inViz || currentRoute().kind !== "gallery") return;
+  navigate({ kind: "viz", sceneId: scene.id }, "push");
 }
 
 /** How long the phone waits for a TV it has just handed to the room to show up
@@ -2336,7 +2381,9 @@ function startController(
   roomCode = target.room;
   ownRoomKey = target.key;
   document.body.classList.add("controller"); // index.html: the badge's place and cursor
-  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device: thisDevice() });
+  const device = thisDevice();
+  phoneScreen = device.kind === "phone";
+  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device });
   controllerConn = conn;
 
   if (target.keyFromUrl) {
@@ -2414,7 +2461,9 @@ async function enterViz(next: Scene): Promise<void> {
   if (!mountOrBail(next, prev, fromScene)) return;
   updateSceneVersionLabel(next);
 
-  showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+  if (!quietScreen()) {
+    showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+  }
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
@@ -2633,7 +2682,8 @@ async function boot(): Promise<void> {
   let hostRoomKey: string | null = null;
   if (controllerTarget) {
     // The laptop's QR (or a TV's, with a controller session already saved) —
-    // a phone that edits the room's look and previews it from the host's frames.
+    // a phone or iPad that shows the room's look from the host's frames and
+    // can edit it (a phone as a screen first, see `phoneScreen`).
     startController(controllerTarget, adoptRequest, badAdoptLink);
   } else if (plan.kind === "renderer") {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
@@ -2750,6 +2800,8 @@ async function boot(): Promise<void> {
     isMenuOpen: () => deviceMenu?.isOpen() ?? false,
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
+  // A phone screen shows nothing but the picture until it is tapped.
+  if (phoneScreen) immersive.enterHidden();
 
   // The bar (CUE / PLAY / state line). A laptop has the pop-out window, which
   // has a Cue and a Play of its own; a keyed room's Main is one more output next
@@ -3018,7 +3070,8 @@ async function boot(): Promise<void> {
 
     seedHistory();
     onRouteChange(applyRoute);
-    applyRoute(currentRoute());
+    if (phoneScreen && currentRoute().kind === "gallery") void openOnMain();
+    else applyRoute(currentRoute());
   }
   // The mic permission is known and the page routed: a screen already in the
   // room (a laptop that reloaded with its TV paired) can be fed now.
@@ -3342,9 +3395,10 @@ function tick(): void {
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   outputBridge?.update(nowRafMs);
   roomBridge?.update(nowRafMs);
-  // The preview transition sits outside the bridge check because a phone
-  // controller has no bridge yet still previews, whenever a scene is showing.
-  const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  // The preview transition sits outside the bridge check because a controller
+  // has no pop-out yet still previews whenever a scene is showing, unless it
+  // is a phone that is a screen of the room.
+  const nextActive = isController ? inViz && !fillsScreen() : inViz && !!outputBridge && outputBridge.status().open;
   // A pop-out that just opened starts on this window's preview (net/outputSync.ts's
   // outputOpened), so the pad loaded here is live on it.
   const popOutOpen = outputBridge?.status().open ?? false;
