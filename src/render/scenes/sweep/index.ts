@@ -8,10 +8,11 @@
 // knobs rather than a list of looks (the record's Deconstruction).
 //
 // Files: stack.ts is the pure model (palettes, paths from a seed, the span,
-// packing a frame); glsl.ts is the per-pixel composite; this file turns
-// settings and drives into stack.ts's Knobs each frame;
-// src/ui/widgets/sweepPath.ts is the Path section (the New path trigger row
-// and button).
+// packing a frame); glsl.ts is the per-pixel composite; pieces.ts holds the
+// reel's pieces as knob values, the Presets row at the top of the Scene card
+// (src/ui/widgets/presetPills.ts); this file turns settings and drives into
+// stack.ts's Knobs each frame; src/ui/widgets/sweepPath.ts is the Path
+// section (the New path trigger row and button).
 //
 // Drives (drives.ts's header). Every continuous knob has a jack. Three start
 // on a real wire:
@@ -50,6 +51,7 @@ import {
   type PathRoll,
 } from "./stack.ts";
 import { SWEEP_FRAG_BODY, SWEEP_UNIFORMS_GLSL } from "./glsl.ts";
+import { PIECES, presetValues } from "./pieces.ts";
 
 const ID = "sweep";
 
@@ -333,7 +335,7 @@ const SETTINGS: SceneSetting[] = [
     family: "Edges",
     min: 0.05,
     max: 1,
-    step: 0.05,
+    step: 0.01,
     default: 1,
     drive: EMPTY,
   },
@@ -441,7 +443,7 @@ const SETTINGS: SceneSetting[] = [
     group: "Look",
     min: 0,
     max: 1,
-    step: 0.05,
+    step: 0.01,
     default: 1,
     drive: EMPTY,
     advanced: true,
@@ -566,5 +568,12 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
 
 export const sweepScene: Scene = {
   ...base,
-  panel: [{ widget: "sweepPath", title: "Path", settings: ["newPath", "path"] }],
+  panel: [
+    {
+      widget: "presetPills",
+      title: "Presets",
+      options: { presets: PIECES.map((p) => ({ name: p.name, hint: p.hint, values: presetValues(p, SETTINGS) })) },
+    },
+    { widget: "sweepPath", title: "Path", settings: ["newPath", "path"] },
+  ],
 };

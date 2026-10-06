@@ -1,15 +1,16 @@
-// node node_modules/vite-node/vite-node.mjs docs/scenes/sweep/scripts/lookcodes.ts docs/scenes/sweep/scripts/pieces.json
-// — prints one Look share link per reel piece
-// (every Sweep setting at its default, then the piece's own values).
-import { readFileSync } from "node:fs";
-
+// node node_modules/vite-node/vite-node.mjs docs/scenes/sweep/scripts/lookcodes.ts [--json]
+// — prints one Look share link per reel piece (src/render/scenes/sweep/pieces.ts:
+// everything a Presets pill writes); with --json, the pieces as JSON instead
+// ({name, ref, s} each), the input shoot_pieces.mjs and pair_pieces.py read.
 const { encodeLook } = await import("../../../../src/render/sceneLooks.ts");
 const { sweepScene } = await import("../../../../src/render/scenes/sweep/index.ts");
-const pieces = JSON.parse(readFileSync(process.argv[2], "utf8"));
-for (const [i, p] of pieces.entries()) {
-  const manual = {};
-  for (const s of sweepScene.settings) manual[s.key] = s.default;
-  Object.assign(manual, p.s, { path: 100 + i });
-  const code = encodeLook({ name: `Colorem ${p.name}`, sceneId: "sweep", manual });
-  console.log(`${p.name}\t?look=${code}#/v/sweep`);
+const { PIECES, presetValues } = await import("../../../../src/render/scenes/sweep/pieces.ts");
+const pieces = PIECES.map((p) => ({ name: p.name, ref: p.ref, s: presetValues(p, sweepScene.settings ?? []) }));
+if (process.argv.includes("--json")) {
+  console.log(JSON.stringify(pieces, null, 1));
+} else {
+  for (const p of pieces) {
+    const code = encodeLook({ name: `Colorem ${p.name}`, sceneId: "sweep", manual: p.s });
+    console.log(`${p.name}\t?look=${code}#/v/sweep`);
+  }
 }

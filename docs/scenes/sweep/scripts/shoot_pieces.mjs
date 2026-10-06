@@ -1,7 +1,8 @@
-// node docs/scenes/sweep/scripts/shoot_pieces.mjs docs/scenes/sweep/scripts/pieces.json <outDir> --port P [--wait MS] [--size WxH] [--only Name,Name]
-// (with `npm run dev` running on P; pair the shots with the reel with pair_pieces.py)
-// Applies each piece's knob set (over the scene's defaults) with its own path
-// seed, waits, and screenshots ours as <outDir>/<i>-<name>.png.
+// node docs/scenes/sweep/scripts/shoot_pieces.mjs <pieces.json> <outDir> --port P [--wait MS] [--size WxH] [--only Name,Name]
+// (<pieces.json> from `lookcodes.ts --json`; with `npm run dev` running on P;
+// pair the shots with the reel with pair_pieces.py)
+// Applies each piece's knob set (everything its Presets pill writes, path seed
+// included), waits, and screenshots ours as <outDir>/<i>-<name>.png.
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 
@@ -35,7 +36,7 @@ const defaults = await page.evaluate(() => {
 });
 for (const [i, piece] of pieces.entries()) {
   if (only && !only.split(",").includes(piece.name)) continue;
-  const settings = { ...defaults, ...piece.s, newPath: 0, path: 100 + i };
+  const settings = { ...defaults, ...piece.s, newPath: 0 };
   await page.evaluate((s) => window.__viz.setParams({ scene: "sweep", autoPin: true, settings: s }), settings);
   await page.waitForTimeout(wait);
   await page.screenshot({ path: `${out}/${i}-${piece.name}.png` });

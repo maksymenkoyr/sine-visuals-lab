@@ -19,6 +19,9 @@ import {
 } from "../src/render/scenes/sweep/stack.ts";
 import { SWEEP_FRAG_BODY } from "../src/render/scenes/sweep/glsl.ts";
 import { sweepScene } from "../src/render/scenes/sweep/index.ts";
+import { KEPT_BY_PIECES, PIECES, presetValues } from "../src/render/scenes/sweep/pieces.ts";
+import { presetWrites, pressedPreset, type PresetPillsOptions } from "../src/ui/widgets/presetPills.ts";
+import { quantize } from "../src/ui/widgets/consoleMath.ts";
 import { COMMON_UNIFORMS_GLSL, settingUniformName } from "../src/render/sceneCommon.ts";
 
 const KNOBS: Knobs = {
@@ -165,5 +168,51 @@ describe("sweep settings", () => {
 
   it("the shader's slot defines come from the SW table", () => {
     for (const [k, v] of Object.entries(SW)) expect(SWEEP_FRAG_BODY).toContain(`#define SW_${k} ${v}`);
+  });
+});
+
+describe("sweep presets (the reel's pieces)", () => {
+  const settings = sweepScene.settings!;
+  const presets = (sweepScene.panel![0]!.options as PresetPillsOptions).presets;
+
+  it("the Presets row comes first in the card, one pill per piece", () => {
+    expect(sweepScene.panel![0]!.widget).toBe("presetPills");
+    expect(presets.map((p) => p.name)).toEqual(PIECES.map((p) => p.name));
+    expect(new Set(PIECES.map((p) => p.name)).size).toBe(PIECES.length);
+    expect(new Set(PIECES.map((p) => p.path)).size).toBe(PIECES.length);
+  });
+
+  it("every piece names real knobs, in range and on their steps", () => {
+    for (const piece of PIECES) {
+      for (const [key, v] of Object.entries(piece.values)) {
+        const spec = settings.find((s) => s.key === key);
+        expect(spec, `${piece.name}.${key}`).toBeDefined();
+        expect(quantize(v, spec!), `${piece.name}.${key}`).toBe(v);
+      }
+    }
+  });
+
+  it("a piece sets every setting but the kept ones: its own knobs and path, the rest at their defaults", () => {
+    for (const piece of PIECES) {
+      const values = presetValues(piece, settings);
+      for (const s of settings) {
+        if (KEPT_BY_PIECES.includes(s.key)) expect(values[s.key], s.key).toBeUndefined();
+        else expect(values[s.key], s.key).toBe(s.key === "path" ? piece.path : (piece.values[s.key] ?? s.default));
+      }
+    }
+  });
+
+  it("a press writes only what differs, and its pill then reads as pressed", () => {
+    const store = new Map(settings.map((s) => [s.key, s.default]));
+    const get = (s: { key: string }): number => store.get(s.key)!;
+    expect(pressedPreset(presets, settings, get)).toBe(-1);
+    const rings = presets.findIndex((p) => p.name === "Rings");
+    const writes = presetWrites(presets[rings]!, settings, get);
+    expect(writes.length).toBeGreaterThan(0);
+    for (const [spec, v] of writes) store.set(spec.key, v);
+    expect(pressedPreset(presets, settings, get)).toBe(rings);
+    expect(presetWrites(presets[rings]!, settings, get)).toEqual([]);
+    store.set("size", store.get("size")! + 0.1);
+    expect(pressedPreset(presets, settings, get)).toBe(-1);
   });
 });

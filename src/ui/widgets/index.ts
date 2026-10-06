@@ -7,5 +7,6 @@ import "./sandZones.ts";
 import "./danceMove.ts";
 import "./alienPlay.ts";
 import "./sweepPath.ts";
+import "./presetPills.ts";
 
 export * from "./registry.ts";
