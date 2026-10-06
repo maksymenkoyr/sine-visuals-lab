@@ -4,19 +4,20 @@ One grey alien dancing as a glowing green wireframe on black, in three short
 loops: each loop is one captured dance seen from its own angle, baked to a
 video. The music pays for the frames: the Move setting's wire sets how fast the
 loop on screen plays, and silence holds the frame. Bounce squashes him toward
-the floor and springs him back on its wire's hits. A loop repeats until the Cut
-setting's wire rises over the line under its graph. A draft, not on main yet
-(#374).
+the floor and springs him back on its wire's hits; Bounce smoothness turns
+that spring from a snap and a wobble into an ease and a glide. A loop repeats
+until the Cut setting's wire rises over the line under its graph. On main
+since #374.
 
 ## Where the code is
 
 - `src/render/scenes/alien/index.ts`: the scene, a video player. It holds the
-  three settings in `SETTINGS`, the Motion section in `PANEL`, one `<video>`
+  settings in `SETTINGS`, the Motion section in `PANEL`, one `<video>`
   per loop (pinned bytes), the frame upload, the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, videos).
 - `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
-  `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce). Its
-  header has them in words.
+  `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
+  `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: `PLAYER_FRAG`, the scene's one pass: the baked frame to cover
   the room, squashed about the loop's pivot. The rest of it is the live look,
   used only by the bake: GPU skinning, the barycentric wireframe, the fresnel
@@ -87,6 +88,17 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   One cut in 54 s, at the music's return after the hiss (Drop). Bounce
   squash 0.02–0.07 of the height on the kicks (143 bpm keeps it from
   settling between kicks), 0 in the hiss.
+- 2026-10-06, Bounce smoothness, `stepBounce` in node at 60 fps with Bounce
+  0.5 and a 0.88 Bass hit decaying at the low band's rate: one hit squashes
+  to 0.065 at every smoothness, reached at 133 ms at 0, 183 ms at 0.5 and
+  250 ms at 1, with no stretch past rest. The gain that keeps that depth is
+  1.47 at 0.5 and 2.03 at 1. On kick trains the swing narrows and rides
+  higher: 0.015–0.061 at 0, 0.054–0.078 at 1 (143 bpm). Ending the slider
+  at 2.0 or 2.4 Hz instead of 1.8 barely moved that floor (0.050, 0.043):
+  the damping and the gain set it, not the frequency.
+- Same day, the live app on synthetic audio at 128 bpm (Metal, 30 fps
+  render): squash 0.013–0.071 at smoothness 0, largest one-frame change
+  0.0215; 0.055–0.092 at 1, largest change 0.0097.
 
 ## Decisions and pivots
 
@@ -128,13 +140,24 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   until there was a trigger". Cut's default wire moved from Bass level
   (a cut every few seconds) to Drop, so a loop repeats until the music
   drops or changes section. Which trigger the user meant wasn't confirmed.
+- 2026-10-06, the user: "add parameter smoothenest for bounce". Added
+  **Bounce smoothness**, my reading (not asked): how the squash moves, from
+  today's snap and wobble (0, the default, unchanged) to a slow ease down and
+  a glide back (1). Not a filter on which hits bounce. A softer spring alone
+  shrank a hit's squash by half, so the target is scaled to keep one Bass
+  hit's depth; the cost is that on fast kicks a smooth bounce doesn't come
+  back up between hits. A peak hold on the signal was tried in a sim first:
+  a hold shorter than the hit pulse's own decay does nothing, a longer one
+  left the alien squashed with almost no swing.
 
 ## Tuning notes
 
 - Move's slider multiplies the wire: 1 plays a loud song at about captured
   speed. Raise it for a faster dance on quiet material.
 - Bounce's slider is the depth; its spring (`BOUNCE_HZ`, `BOUNCE_DAMPING`)
-  sets how snappy it is and how far it overshoots.
+  sets how snappy it is and how far it overshoots. Bounce smoothness eases
+  that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
+  too low on fast music, the damping is the knob that matters.
 - Cut's line on Drop: any drop clears it. Wire it to Bass level with a high
   line for regular cuts instead.
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
@@ -181,5 +204,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 ## History
 
 - #373 (2026-10-05, closed): the scene, built on #368 for the Level signal.
-- #374 (draft, 2026-10-05): the same, rebased after #368 merged, plus the
+- #374 (merged 2026-10-05): the same, rebased after #368 merged, plus the
   Play readout; then baked loops, Move, Bounce, and Cut on Drop.
+- 2026-10-06: Bounce smoothness.

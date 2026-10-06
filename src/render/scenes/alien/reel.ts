@@ -26,11 +26,16 @@
  * **Bounce: squash and stretch.** On top of the dance the whole picture
  * squashes toward the floor under the alien and springs back past rest
  * (`stepBounce`, a damped spring chasing the Bounce signal), the cartoon
- * squash-and-stretch done as a filter on the baked frame.
+ * squash-and-stretch done as a filter on the baked frame. Bounce smoothness
+ * (`bounceSpring`) softens that spring: slower and more damped, so the squash
+ * eases in and glides back without a wobble. A softer spring alone would
+ * never reach a short hit's depth, so the target is scaled up to match: one
+ * Bass hit squashes as deep at any smoothness.
  *
  * Pure and DOM/GL-free — tests/alien.test.ts drives it directly.
  */
 import type { Vec3 } from "../dancers/rig.ts";
+import { GROUP_TUNING } from "../../bandEnergy.ts";
 
 export interface LoopCamera {
   eye: Vec3;
@@ -125,10 +130,14 @@ export function stepCut(reel: Reel, input: CutInput, rand: () => number = Math.r
 /** The deepest squash, as a share of the picture's height, at Bounce 1 with
  *  its signal at 1. */
 export const BOUNCE_MAX = 0.14;
-/** The spring's natural frequency (Hz) and damping ratio: under 1, so it
- *  overshoots past rest into a stretch before it settles. */
+/** The spring's natural frequency (Hz) and damping ratio at smoothness 0:
+ *  under 1, so it overshoots past rest into a stretch before it settles. */
 const BOUNCE_HZ = 3.2;
 const BOUNCE_DAMPING = 0.32;
+/** The same at smoothness 1: slower, and critically damped, so the squash
+ *  glides back to rest without overshooting. */
+const SMOOTH_HZ = 1.8;
+const SMOOTH_DAMPING = 1;
 /** Sideways spread per unit of squash — the body keeps roughly its volume. */
 export const BOUNCE_WIDEN = 0.5;
 
@@ -142,16 +151,58 @@ export function createBounce(): Bounce {
   return { squash: 0, velocity: 0 };
 }
 
+export interface BounceSpring {
+  hz: number;
+  damping: number;
+  /** Scales the target so one Bass hit squashes as deep as at smoothness 0. */
+  gain: number;
+}
+
+// The slider sits still most of the time: one cached spring is enough.
+let lastSpring: { smooth: number; spring: BounceSpring } | null = null;
+
+/** The spring at `smooth` (0..1): frequency eased from BOUNCE_HZ to
+ *  SMOOTH_HZ, damping from BOUNCE_DAMPING to SMOOTH_DAMPING, and the gain
+ *  that keeps a hit's depth, measured on one Bass hit (a pulse decaying at
+ *  the low band's own rate). Smoothness 0 is the spring exactly as before. */
+export function bounceSpring(smooth: number): BounceSpring {
+  const s = Math.max(0, Math.min(1, smooth));
+  if (lastSpring && lastSpring.smooth === s) return lastSpring.spring;
+  const hz = BOUNCE_HZ * Math.pow(SMOOTH_HZ / BOUNCE_HZ, s);
+  const damping = BOUNCE_DAMPING + (SMOOTH_DAMPING - BOUNCE_DAMPING) * s;
+  const gain = s === 0 ? 1 : hitPeak(BOUNCE_HZ, BOUNCE_DAMPING) / hitPeak(hz, damping);
+  lastSpring = { smooth: s, spring: { hz, damping, gain } };
+  return lastSpring.spring;
+}
+
+/** The deepest squash one unit Bass hit drives a spring to. */
+function hitPeak(hz: number, damping: number): number {
+  const b = createBounce();
+  const h = 1 / 240;
+  let peak = 0;
+  for (let t = 0; t < 2; t += h) {
+    springStep(b, Math.exp(-t * GROUP_TUNING.low.pulseDecayRate), h, hz, damping);
+    peak = Math.max(peak, b.squash);
+  }
+  return peak;
+}
+
+function springStep(b: Bounce, target: number, h: number, hz: number, damping: number): void {
+  const w = 2 * Math.PI * hz;
+  const accel = w * w * (target - b.squash) - 2 * damping * w * b.velocity;
+  b.velocity += accel * h;
+  b.squash += b.velocity * h;
+}
+
 /** One tick of the spring chasing `target` (the squash the signal asks
- *  for), in small fixed substeps so a long frame can't blow it up. */
-export function stepBounce(b: Bounce, target: number, dtSec: number): void {
-  const w = 2 * Math.PI * BOUNCE_HZ;
+ *  for) at Bounce smoothness `smooth`, in small fixed substeps so a long
+ *  frame can't blow it up. */
+export function stepBounce(b: Bounce, target: number, dtSec: number, smooth = 0): void {
+  const { hz, damping, gain } = bounceSpring(smooth);
   let left = Math.min(0.25, Math.max(0, dtSec));
   while (left > 1e-6) {
     const h = Math.min(left, 1 / 240);
-    const accel = w * w * (target - b.squash) - 2 * BOUNCE_DAMPING * w * b.velocity;
-    b.velocity += accel * h;
-    b.squash += b.velocity * h;
+    springStep(b, target * gain, h, hz, damping);
     left -= h;
   }
 }
