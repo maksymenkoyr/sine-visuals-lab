@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, statSync } from "node:fs";
 import { buildAlienMesh, MAX_INFLUENCES } from "../src/render/scenes/alien/mesh.ts";
 import { PARTS, compileSet, partDistance } from "../src/render/scenes/alien/body.ts";
+import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import {
   BOUNCE_MAX,
+  bounceSpring,
   clipSeconds,
   createBounce,
   createReel,
@@ -170,6 +172,31 @@ describe("alien reel", () => {
     expect(tallest).toBeLessThan(0);
     run(3, (dt) => stepBounce(b, 0, dt));
     expect(Math.abs(b.squash)).toBeLessThan(1e-3);
+  });
+
+  it("smooths the bounce: as deep a squash on one Bass hit, reached later, with no stretch past rest", () => {
+    expect(bounceSpring(0).gain).toBe(1);
+    const hit = (smooth: number) => {
+      const b = createBounce();
+      let pulse = 1;
+      let t = 0;
+      let deepest = 0;
+      let deepestAt = 0;
+      let tallest = 0;
+      run(2, (dt) => {
+        stepBounce(b, BOUNCE_MAX * pulse, dt, smooth);
+        pulse *= Math.exp(-dt * GROUP_TUNING.low.pulseDecayRate);
+        t += dt;
+        if (b.squash > deepest) [deepest, deepestAt] = [b.squash, t];
+        tallest = Math.min(tallest, b.squash);
+      });
+      return { deepest, deepestAt, tallest };
+    };
+    const snappy = hit(0);
+    const smooth = hit(1);
+    expect(smooth.deepest).toBeCloseTo(snappy.deepest, 2);
+    expect(smooth.deepestAt).toBeGreaterThan(snappy.deepestAt * 1.5);
+    expect(smooth.tallest).toBeGreaterThan(-1e-4);
   });
 });
 

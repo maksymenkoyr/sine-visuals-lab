@@ -8,7 +8,9 @@
  *   - Cut: a loop repeats until its wire (Drop by default) rises over the
  *     line under its graph, then the scene cuts to another loop;
  *   - Bounce: its wire (Bass hit by default) squashes the picture toward the
- *     floor under the alien and springs it back, on top of the dance.
+ *     floor under the alien and springs it back, on top of the dance;
+ *     Bounce smoothness turns that spring from a snap and a wobble into an
+ *     ease and a glide.
  * reel.ts owns those rules and the LOOPS table; under the Move row a readout
  * shows what the music is buying (src/ui/widgets/alienPlay.ts, fed by
  * probe()).
@@ -86,6 +88,18 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.lowOnset" },
   },
   {
+    key: "bounceSmooth",
+    label: "Bounce smoothness",
+    description:
+      "How Bounce moves. Left: a quick snap down and a springy wobble back. Right: a slow ease down and a glide back to rest. " +
+      "A single hit squashes as deep either way; on fast kicks a smooth bounce doesn't fully come back up between hits",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
+  {
     key: "cut",
     label: "Cut",
     description:
@@ -111,8 +125,9 @@ const SETTINGS: SceneSetting[] = [
 const SETTING_BY_KEY = new Map(SETTINGS.map((s) => [s.key, s]));
 
 /** The Motion group as one section: the Move row with a live readout under
- *  it (speed, frames bought per second, the loop's playhead), then Bounce. */
-const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce"] }];
+ *  it (speed, frames bought per second, the loop's playhead), then Bounce
+ *  and its smoothness. */
+const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth"] }];
 
 export const alienScene: Scene = (() => {
   const get = (key: string): number => resolveSceneSetting(ALIEN_ID, SETTING_BY_KEY.get(key)!);
@@ -238,7 +253,7 @@ export const alienScene: Scene = (() => {
       last.cutLine = mark === undefined ? CUT_LINE_DEFAULT : (mark ?? 0);
       stepCut(reel, { dtSec: dt, cutOn: pinnedLoop === null && get("cut") >= 0.5, cutSignal: last.cutSignal, cutLine: last.cutLine });
       const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.lowPulse, 0)));
-      stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt);
+      stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt, get("bounceSmooth"));
       const squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));
       last.squash = squash;
 
