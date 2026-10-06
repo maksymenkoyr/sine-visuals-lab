@@ -206,4 +206,4 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #373 (2026-10-05, closed): the scene, built on #368 for the Level signal.
 - #374 (merged 2026-10-05): the same, rebased after #368 merged, plus the
   Play readout; then baked loops, Move, Bounce, and Cut on Drop.
-- 2026-10-06: Bounce smoothness.
+- #389 (draft, 2026-10-06): Bounce smoothness.
