@@ -1,7 +1,7 @@
 # <Scene name> (`<id>`)
 
 <One or two sentences: what the scene looks like and what the music does to
-it. Draft or featured, and whether it's on main.>
+it. Draft, in development or featured, and whether it's on main.>
 
 ## Where the code is
 

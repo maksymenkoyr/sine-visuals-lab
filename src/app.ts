@@ -2,7 +2,7 @@
 // controller it puts the in-memory look overlay over localStorage — see the
 // header of net/controllerStorageBoot.ts. A no-op for every other page.
 import "./net/controllerStorageBoot.ts";
-import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
+import { PAID_SCENE_IDS, sceneStage } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
 import {
   getInputDevicePref,
@@ -878,15 +878,16 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
 
-/** Every scene as the gallery shows it: drafts marked, and the ones this
- *  device's preset can't run disabled, with the reason. */
+/** Every scene as the gallery shows it: each with its section (released, in
+ *  development or draft), and the ones this device's preset can't run
+ *  disabled, with the reason. */
 function galleryEntries(): GallerySceneEntry[] {
   return listScenes().map((s) => {
     const enabled = presetAllows(s, effectivePreset());
     return {
       scene: s,
       enabled,
-      draft: DRAFT_SCENE_IDS.has(s.id),
+      stage: sceneStage(s.id),
       reason: enabled ? undefined : "Needs a faster device",
     };
   });
@@ -894,7 +895,7 @@ function galleryEntries(): GallerySceneEntry[] {
 
 /** The same scenes, in the same order, for the scene list (ui/scenePicker.ts). */
 function scenePickEntries(): ScenePickEntry[] {
-  return galleryEntries().map((e) => ({ id: e.scene.id, name: e.scene.name, draft: e.draft, enabled: e.enabled, reason: e.reason }));
+  return galleryEntries().map((e) => ({ id: e.scene.id, name: e.scene.name, stage: e.stage, enabled: e.enabled, reason: e.reason }));
 }
 
 /** A pick from the scene list: the same switch a Set pad makes (firePad
@@ -3154,7 +3155,14 @@ async function boot(): Promise<void> {
       },
       setMaster: (v: number) => setSceneMaster(v),
       scenes: () =>
-        listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
+        listScenes().map((s) => ({
+          id: s.id,
+          name: s.name,
+          // master-sweep's "featured" means Released only, so a scene in
+          // development counts as a draft here.
+          draft: sceneStage(s.id) !== "released",
+          paid: PAID_SCENE_IDS.has(s.id),
+        })),
     });
     // For headless room tests (tools/ and the e2e runs): what this page is
     // doing about its ears right now, read live off the connection. Added to

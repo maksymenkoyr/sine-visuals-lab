@@ -9,7 +9,7 @@ loosest tips orange-red and lime. A hit knocks a few particles out of step
 (they fly out to the rim and fall back in as they re-sync), loudness adds
 phase jitter, and a drop throws the whole swarm back out so it collapses
 again. On every bass hit the whole swarm thumps (swells on screen) and its
-lines flash. Draft; on its own branch, not yet on main.
+lines flash. In development, on main.
 
 ## Where the code is
 
