@@ -63,3 +63,10 @@ _2026-10-16_
 - #552 scene revisit freezes, #553 the Hats/Lead split running when nothing
   reads it, #555 the resource map in `npm run perf`.
 - 177 worktrees are on disk; #433's pruning would clear the merged ones.
+- Merge #477, then rerun Opus/high solo once on version 10 to see the
+  ready-with-fixes state and what the record-only review fixes.
+- The `fflate` package is missing from the local install (typecheck fails on
+  `src/render/sceneLooks.ts`); `npm ci` fixes it.
+- Merge #399: the SessionStart hook then removes worktrees whose PRs merged,
+  in the background every session (`npm run prune-worktrees` is the dry run;
+  add `-- --yes` to remove). Its first run on 2026-10-08 removed 43.

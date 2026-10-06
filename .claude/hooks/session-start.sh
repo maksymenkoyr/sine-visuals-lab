@@ -5,6 +5,8 @@
 #     never reads stale code as current;
 #   - the open PRs, so a session sees a change another session already has
 #     in flight (CLAUDE.md's before-starting rule says what to do with them).
+# It also starts tools/prune-worktrees.mjs in the background, which removes
+# worktrees whose PRs merged (its header says which ones and what it keeps).
 # Prints nothing it can't fetch: offline or without `gh` login it stays
 # silent and never blocks the session.
 
@@ -22,6 +24,10 @@ prs=$(gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' \
 if [ -n "$prs" ]; then
   echo "Open PRs:"
   echo "$prs"
+fi
+
+if [ -f tools/prune-worktrees.mjs ]; then
+  nohup node tools/prune-worktrees.mjs --yes --hook >/dev/null 2>&1 &
 fi
 
 exit 0
