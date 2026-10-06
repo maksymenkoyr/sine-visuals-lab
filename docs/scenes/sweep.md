@@ -5,7 +5,8 @@ from a tail end to a head end along a path, coloured by its place in the stack
 on a cyclic palette, outlined, the oldest ones blurred and faded, the head on
 top, on a light ground. The music moves the head along its path, scrolls the
 colours through the stack and re-rolls the path each phrase; every other knob
-has a jack to wire. Draft scene (draft PR #370).
+has a jack to wire, and a Presets row at the top of the Scene card brings
+back each piece of the reel. Draft scene (draft PR #379).
 
 ## Where the code is
 
@@ -23,6 +24,13 @@ has a jack to wire. Draft scene (draft PR #370).
   jack uses, the `EMPTY` jack default, `SPEED_GAIN`/`FLOW_GAIN`,
   `NEW_PATH_GRID_DIVISOR`, the path seed plus local re-rolls, and
   `Scene.panel`.
+- `src/render/scenes/sweep/pieces.ts` — `PIECES`, the reel's pieces as knob
+  values (each with its reel time, path seed and hint), and `presetValues`
+  (everything a Presets pill writes: every setting but `KEPT_BY_PIECES` at
+  its default, then the piece's own).
+- `src/ui/widgets/presetPills.ts` — the Presets section: one pill per piece,
+  written through the slider path, the matching pill pressed. Generic: any
+  scene can hand it presets.
 - `src/ui/widgets/sweepPath.ts` — the Path section: the New path row and a
   New path button that writes the path seed setting.
 - Shared systems: drives (`src/render/drives.ts` — its header's rule 1 now
@@ -63,7 +71,7 @@ has a jack to wire. Draft scene (draft PR #370).
 - Contours' band profile (`edgeprofile.py`): a white highlight about 6 px, a
   dark line about 3 px (luma 60–70), then a fill grading violet → teal → pale
   over about 25 px — the Bevel outline and Rim.
-- Cost, 1080p, each piece's values (`pieces.json`): loop iterations per pixel
+- Cost, 1080p, each piece's values (`PIECES`): loop iterations per pixel
   (a debug build writes the count as colour), copy skip off → on, mean / per
   8×4 block max: Smear 14.8/15.1 → 3.4/3.6, Contours 5.4/5.5 → 1.6/1.7, Halo
   1.7 → 0.9, Drip 11.8 → 2.7, Rings 6.8/7.2 → 3.3/3.6, Candy 8.4 → 2.8, Panels
@@ -98,12 +106,19 @@ has a jack to wire. Draft scene (draft PR #370).
 - A setting keyed `bands` compiled to `uBands`, the common band array — the
   shader failed and the app fell back to Spectrum. Renamed `bandCount`;
   `tests/sweep.test.ts` checks no setting uniform collides with a common one.
+- 2026-10-06, the user: a few presets on top, based on the reel. The reel's
+  pieces became a Presets row, the first section of the Scene card, one pill
+  per piece. A press sets every knob (the piece's values, the rest at their
+  defaults) and the piece's path seed, keeps New path's cadence and every
+  wire, and rebuilds the card like a Look apply. `pieces.json` moved into
+  `pieces.ts` so the pills and the shoot scripts read one list. Opacity and
+  Outline reach got a finer step so Panels' and Smear's values sit on it.
 
 ## Tuning notes
 
-- Each reel piece's knob values are in `sweep/scripts/pieces.json`;
-  `lookcodes.ts` prints a Look link for each (`?look=…#/v/sweep` after the
-  app's address). They are starting points: Smear is the furthest off.
+- Each reel piece's knob values are in `pieces.ts` (`PIECES`), the Presets
+  pills; `lookcodes.ts` prints a Look link for each (`?look=…#/v/sweep` after
+  the app's address). They are starting points: Smear is the furthest off.
 - Speed and Colour flow read Level, so silence holds the picture still;
   synthetic audio always reads loud — check silence with a hiss wav on a
   fake mic.
@@ -125,8 +140,9 @@ has a jack to wire. Draft scene (draft PR #370).
 - `sweep/scripts/`: `measure_pieces.py` (per-piece grounds, palettes, sizes),
   `deconstruct.py` and `slit.py` (the generator), `finetouch.py` and
   `edgeprofile.py` (blend, colour split, spacing, band profile), `crops.py`
-  (native-resolution crops), `pieces.json` + `lookcodes.ts` (each piece's
-  values and its Look link), `shoot_pieces.mjs` + `pair_pieces.py` (ours beside
+  (native-resolution crops), `lookcodes.ts` (each piece's Look link, or with
+  `--json` the pieces as the next two scripts read them), `shoot_pieces.mjs`
+  + `pair_pieces.py` (ours beside
   the reel; the paired sheet holds reference frames, so it stays in the local
   cache).
 - The reference media: the local `/ref` cache; the private archive once
@@ -135,8 +151,8 @@ has a jack to wire. Draft scene (draft PR #370).
 ## Resume here
 
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/sweep`.
-- Compare against the reel: `shoot_pieces.mjs` with `pieces.json`, then
-  `pair_pieces.py`.
+- Compare against the reel: `lookcodes.ts --json` into a file outside the
+  repo, `shoot_pieces.mjs` with it, then `pair_pieces.py`.
 - Cost: `tools/gpu-bench.mjs` reads Sweep at its defaults; to bench a piece,
   swap its values in as defaults for the run. With other GPU work on the
   machine, count loop iterations instead of timing.
@@ -148,3 +164,5 @@ has a jack to wire. Draft scene (draft PR #370).
 
 - #370 — v1: eight recipes and a Look picker; then v2: one generator, its
   knobs wireable, the Path widget, the copy skip.
+- #379 — v2 again (#370's branch couldn't take the rebase), then the Presets
+  row: the reel's pieces as pills at the top of the card.

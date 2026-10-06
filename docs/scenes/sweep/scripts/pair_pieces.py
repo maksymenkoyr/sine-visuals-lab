@@ -1,4 +1,5 @@
-# uv run -q --with pillow --with opencv-python-headless python docs/scenes/sweep/scripts/pair_pieces.py <video> docs/scenes/sweep/scripts/pieces.json <oursDir> <out.png>
+# uv run -q --with pillow --with opencv-python-headless python docs/scenes/sweep/scripts/pair_pieces.py <video> <pieces.json> <oursDir> <out.png>
+# (<pieces.json> from `lookcodes.ts --json`)
 # The output holds reference frames: keep it in the local cache, never in this repo.
 # Two columns per piece (reference at its time | ours), five pieces per row.
 import json
