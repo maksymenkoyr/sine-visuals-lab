@@ -6,9 +6,15 @@
 //
 //   node tools/promo/promo.mjs <step> [--video release|hook|explainer] [--work DIR] [--fmt v|h]
 //        [--version 0.3.0] [--song file|link] [--look link] [--dest DIR] [--drop-beat N] [--bpm N]
-//        [--base url] [--print-plan] [take|clip name ...]
+//        [--base url] [--print-plan] [--section N|N-M] [take|clip name ...]
 //
 // The pipeline:  song -> plan -> record -> cards -> render -> check -> deliver   (`all` runs them)
+//
+// Section by section (frames videos): --section N or N-M names segments by their # in the plan table.
+// `record --section` records only the takes those segments use; `render --section` (or compose/encode)
+// draws only them and encodes out/<video>-section-<N[-M]>.mp4 with the song under them, for review.
+// compose keeps every segment's frames in <work>/frames-cache/ (compose.py header), so after an edit a
+// section, or the whole `render`, draws again only the segments the edit changed.
 //
 //   step     what it does                                     file that runs it            writes (in <work>)
 //   notes    the Stable release's page, for drafting lines    gh                           release-notes.md
@@ -18,8 +24,10 @@
 //            Stable); `record <take>...` redoes only those    videos), capture.mjs clips   takes/, clips/
 //                                                             (explainer; entries in takes.json)
 //   cards    the text cards                                   cards.mjs -> cards/<video>.mjs   cards/ or caps/
-//   compose  frames from takes + cards (frames videos)        compose.py                   frames/
+//   compose  frames from takes + cards (frames videos)        compose.py                   frames/, frames-cache/
+//                                                                                          (preview/ with --section)
 //   encode   frames + the song's drop-aligned stretch         ffmpeg                       out/<video>-v.mp4
+//                                                                                          (out/<video>-section-*.mp4)
 //   render   compose + encode, or edit.py per format          (above), showcase/edit.py    out/<video>-<fmt>.mp4
 //   check    sync, repeats, loudness, length, safe band       check.py                     prints only
 //   deliver  master, share, silent, preview, CUES.md          deliver.mjs                  ~/Movies/sine-visuals-lab-<video>-<tag>/
@@ -67,7 +75,7 @@ const { values: o, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     video: { type: "string" }, work: { type: "string" }, fmt: { type: "string" }, dest: { type: "string" },
-    "print-plan": { type: "boolean" },
+    "print-plan": { type: "boolean" }, section: { type: "string" },
     version: { type: "string" }, song: { type: "string" }, look: { type: "string" },
     "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" },
   },
@@ -93,6 +101,9 @@ if (!video && o.work && existsSync(join(resolve(o.work), "cuts.json"))) video = 
 video ||= "hook";
 if (!VIDEOS.includes(video)) { console.error(`unknown video "${video}" (release, hook or explainer)`); process.exit(2); }
 const frames = video !== "explainer";
+if (o.section && !(frames && ["record", "compose", "encode", "render"].includes(step))) {
+  console.error("--section goes with record, compose, encode or render, on the release or hook video"); process.exit(2);
+}
 
 // Stable's version, fetched only when a release or hook step needs it and --version did not say.
 async function version() {
@@ -134,6 +145,14 @@ const need = (f, why) => { if (!existsSync(f)) { console.error(`missing ${f} —
 const cutsFile = join(work, "cuts.json");
 const loadCuts = () => { need(cutsFile, "run the plan step first"); return readJson(cutsFile); };
 const fmts = () => (o.fmt ? o.fmt.split(",") : loadCuts().formats);
+// --section N or N-M: the segments' 1-based numbers in the plan table, checked against the cut list.
+function section() {
+  if (!o.section) return null;
+  const m = /^(\d+)(?:-(\d+))?$/.exec(o.section), n = loadCuts().frames.segments.length;
+  const lo = m && +m[1], hi = m && +(m[2] ?? m[1]);
+  if (!m || lo < 1 || hi < lo || hi > n) { console.error(`--section ${o.section}: give N or N-M within 1-${n} (the # column of the plan table)`); process.exit(2); }
+  return { lo, hi, spec: lo === hi ? `${lo}` : `${lo}-${hi}` };
+}
 
 // Scene takes hear the song from MIC_PRE beats before the video starts, for at least MIC_SPAN beats (more when
 // the cut is longer), after up to MIC_LEAD beats of the song before that so the app's analyser has settled.
@@ -231,13 +250,15 @@ const steps = {
       return;
     }
     need(join(work, "song.json"), "run the song step first");
-    const cuts = loadCuts();
+    const cuts = loadCuts(), sec = section();
+    if (sec && names.length) { console.error("record: name takes or pass --section, not both"); process.exit(2); }
     const drop = cuts.dropBeat;
     const m = micPlan(drop, cuts.frames.totalBeats + 8);
     console.log(`mic: drop beat ${drop}, wavT0 ${m.wavT0}, lead ${m.lead}, pre ${MIC_PRE}, span ${m.span}`);
     const wav = o["print-plan"] ? join(work, "mic.wav") : cutMic(m, cuts.song.file);
     const slots = {};
     for (const sg of cuts.frames.segments) if (!(sg.take in slots)) slots[sg.take] = sg.start;
+    if (sec) names.push(...new Set(cuts.frames.segments.slice(sec.lo - 1, sec.hi).map((sg) => sg.take)));
     writeFileSync(join(work, "record.json"), JSON.stringify({
       bpm: m.song.bpm, P: 60000 / m.song.bpm, base, look: look || null,
       mic: { wav, songT0: m.wavT0, lead: m.lead, pre: MIC_PRE, span: m.span, drop },
@@ -254,23 +275,28 @@ const steps = {
     need(join(work, "song.json"), "run the song step first");
     need(join(work, "cards", "meta.json"), "run the cards step first");
     loadCuts();
-    run("uv", uvArgs(["pillow"], join(here, "compose.py"), ["--work", work]));
+    const sec = section();
+    run("uv", uvArgs(["pillow"], join(here, "compose.py"), ["--work", work, ...(sec ? ["--segments", sec.spec] : [])]));
   },
   encode() {
     if (!frames) { console.error("the explainer has no compose/encode step; use render"); process.exit(2); }
-    const cuts = loadCuts(), meta = readJson(join(work, "frames", "meta.json"));
+    const cuts = loadCuts(), sec = section(), dir = join(work, sec ? "preview" : "frames");
+    need(join(dir, "meta.json"), `run compose${sec ? ` --section ${sec.spec}` : ""} first`);
+    const meta = readJson(join(dir, "meta.json"));
+    if (sec && meta.segments.join("-") !== `${sec.lo}-${sec.hi}`) { console.error(`preview/ holds segments ${meta.segments.join("-")}, not ${sec.spec}; re-run compose --section ${sec.spec}`); process.exit(2); }
     const song = readJson(join(work, "song.json")), ss = song.dropTime - cuts.dropBeat * song.period;   // from song.json's own period, as the approved masters were cut
     if (song.dropTime == null || ss < 0) { console.error(`the drop is too early in the song for drop beat ${cuts.dropBeat}; pass a lower --drop-beat to plan`); process.exit(2); }
     if (meta.dropBeat !== cuts.dropBeat) { console.error(`the frames were composed for a drop on beat ${meta.dropBeat}, not ${cuts.dropBeat}; re-run compose`); process.exit(2); }
     mkdirSync(join(work, "out"), { recursive: true });
-    const file = join(work, "out", `${video}-v.mp4`);
+    const file = join(work, "out", sec ? `${video}-section-${sec.spec}.mp4` : `${video}-v.mp4`);
     rmSync(file, { force: true });
-    run(ffmpegPath(), ["-y", "-loglevel", "error", "-framerate", String(meta.fps), "-i", join(work, "frames", "%05d.jpg"),
-      "-ss", ss.toFixed(4), "-t", meta.total.toFixed(3), "-i", resolve(cuts.song.file),
-      // no fade-out (the user's call): the song stops on the bar line compose ends on; 40 ms only de-clicks it
-      "-af", `afade=t=in:st=0:d=0.5,afade=t=out:st=${(meta.total - 0.04).toFixed(3)}:d=0.04,aresample=48000`,
+    run(ffmpegPath(), ["-y", "-loglevel", "error", "-framerate", String(meta.fps), "-i", join(dir, "%05d.jpg"),
+      "-ss", (ss + (meta.start || 0)).toFixed(4), "-t", meta.total.toFixed(3), "-i", resolve(cuts.song.file),
+      // no fade-out (the user's call): the song stops on the bar line compose ends on; 40 ms only de-clicks it.
+      // A section preview starts mid-song, so it only de-clicks its start too.
+      "-af", `afade=t=in:st=0:d=${sec ? 0.04 : 0.5},afade=t=out:st=${(meta.total - 0.04).toFixed(3)}:d=0.04,aresample=48000`,
       "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
-      "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-maxrate", "15M", "-bufsize", "30M", "-profile:v", "high",
+      "-c:v", "libx264", "-preset", sec ? "veryfast" : "slow", "-crf", "20", "-maxrate", "15M", "-bufsize", "30M", "-profile:v", "high",
       "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
       "-r", String(meta.fps), "-g", "60", "-movflags", "+faststart", "-c:a", "aac", "-b:a", "224k", "-shortest", file]);
     console.log(`\n${file}  (${meta.total.toFixed(1)} s)`);
