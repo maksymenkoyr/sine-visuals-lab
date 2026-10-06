@@ -169,7 +169,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Dose was moved onto it unchanged. Cut is now a `StandoutTrigger` with
   `MIN_SHOT_SEC` as its gap, instead of a rise over a fixed line. Its row is
   "Cut threshold", worded like "Dose threshold", and the graph draws the
-  "reach to cut" line and a dot per cut. With the row Off every climb out of
+  "reach to cut" line and a dot per cut (keyed "cut"; the key had said
+  "ring sent" for every scene). With the row Off every climb out of
   near-silence cuts, as the line's floor did before. Two side effects: the
   first shot can now cut before `MIN_SHOT_SEC` (the trigger starts ready),
   and a "Cuts above" value someone had moved is read as a Cut threshold

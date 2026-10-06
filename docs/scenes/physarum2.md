@@ -1328,6 +1328,8 @@ Dose now holds a `StandoutTrigger` (`createStandoutTrigger` with
 instead of its own state and refractory counter; `standoutThreshold` and
 `standoutLine` replace the inline reads. Same behaviour; Alien's Cut fires on
 the same trigger. How to wire another setting to it is in that file's header.
+The graph's key now calls Dose's dots "colony started"; it had said "ring
+sent", Beat ripple's word, for every scene.
 
 ## Resume here
 
