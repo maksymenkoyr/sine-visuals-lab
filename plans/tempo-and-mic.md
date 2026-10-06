@@ -51,6 +51,10 @@ https://claude.ai/artifact/5qcGsBrmY6ZytbfuSeM78B
   four (one clip sharply, the rest 129–131) and scores them at that; the
   user hasn't confirmed it. A wrong guess by even 2 BPM changes every
   party row's % right.
+  A fifth clip, from an hour later (`pxl-20261001-014721110`, 77 s), is
+  cached without a `bpm`, so it isn't scored: no steady tempo measures in
+  it (15 s windows jump between ~90, 120 and 145; both trackers settle on
+  95 only in the last 15 s), and its bass drops out for 30 s mid-clip.
 - In a loud room, should Auto pick what the user does by hand (Expansion
   well above 1×, Sensitivity near 1×, Smoothing low), accepting more twitch
   on crowd noise for punchier hits? — blocks phase 4.
