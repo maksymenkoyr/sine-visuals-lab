@@ -77,7 +77,7 @@ Each phase is one build session and one PR.
     echo rings, compared with the defaults in `micChain.ts`, and retunes
     those defaults if the real room differs. The ffmpeg recipe that works
     here: imageio-ffmpeg via `uv` (Homebrew ffmpeg is broken on this machine).
-- [ ] **2. Tempo reads the same from a near or a far mic**
+- [ ] **2. Tempo reads the same from a near or a far mic** — draft PR #403 (with the echo half of phase 3; its costs need the user's call)
   - Touches: `src/audio/tempoAnalyzer.ts` (`analyseHop`, `pickOnset`),
     the render-tick path in `src/audio/features.ts` if it shares the flaw;
     a level-sweep table in `tests/tempoEval.test.ts`.
@@ -202,3 +202,28 @@ Each phase is one build session and one PR.
   0, `noiseDb` −300, `gainDb` 0). The real songs are mono 16-bit 48 kHz WAVs
   with a LIST chunk before `data`; score each one as a single tempo segment
   at its `meta.json` BPM. Node runs the repo's TS directly.
+- 2026-10-06, phase 2 (#403): the old fixed log knee was also the far
+  mic's noise gate: through `micChain` the music peaks only ~10 dB above
+  it and the room noise sits just under it, in every band. Scaling by
+  level alone lifted the noise and the comb echo into the vote, and every
+  mic row lost. So #403 adds a per-band noise floor (the knee never sits
+  below `NOISE_KNEE_DB` over it) and an echo guard (flux against each
+  band's max over `FLUX_REF_HOPS` hops). Phase 3 still owns crowd noise
+  and a real room's diffuse tail.
+- 2026-10-06, phase 2: the per-band floor also settles on a song's
+  sustained sound. That was the biggest real-song win (Levitating 38 → 95%
+  clean) and cost the first lock: house 0.52 → 1.02 s, ramp 0.57 → 1.13 s.
+  A floor starting from zero restores those locks but loses hip-hop
+  (93 → 77%). A single median-band floor keeps the kick but collapses
+  hip-hop clean to ~50%.
+- 2026-10-06, phase 2: `REFRACTORY_SEC` was 100 ms, longer than a
+  sixteenth at 174 BPM, so drum & bass lost its snare whenever the kick
+  before it was heard and read 116. The render-tick path in
+  `src/audio/features.ts` still has the same lockout
+  (`ONSET_REFRACTORY_SEC`) and still swings with level (dnb 5% right at
+  +10 dB, hip-hop 38% at −40 dB). Its onsets also drive visual hits.
+- 2026-10-06, method: single runs of the synthetic tracks flip on
+  near-ties (dnb clean read 91% on main at offset 0 but 78% averaged). Score
+  each synthetic track at 8 small start offsets (prepend 0–401 samples,
+  shift `tempo`/`beats`/`gridBeats`) and average before calling a change a
+  win or a loss.
