@@ -192,3 +192,4 @@ piece of the reel. Draft scene (draft PR #391).
 - #379 — v2 again (#370's branch couldn't take the rebase), then the Presets
   row: the reel's pieces as pills at the top of the card.
 - #391 — #379 rebased onto main past its scene-list conflict with Chaikin.
+- #395 — Shape drift along the path, and Morph on bass hits.
