@@ -868,7 +868,7 @@ hexagon and decagon.
   (Treble level + Treble hit) instead of a built-in.
 - 2026-10-05 (draft) — Loud ↔ New: how much of each band's usual level comes
   off before the plate picks a figure.
-- `#366` (2026-10-05, draft; replaces #361) — Toss on the drop, Powder colour, the
+- `#413` (2026-10-05, draft; replaces #366 and #361) — Toss on the drop, Powder colour, the
   Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
   an endless pull-back on the square plate. Then sand colour: Thrown colour
   and Thrown to, Two sides, Embers, Spectrum rings, Beat waves and Glitter.
