@@ -39,6 +39,11 @@
  * width is what makes a thin cable easy to press), and a click on the
  * stroke calls onPress — deviceMenu.ts wires it to the same patch toggle
  * the source line's own × button takes, so pressing a cable unplugs it.
+ * The hit stroke answers only in the open gap between the cable's jack card
+ * and its port card (pressBandFor; a `<clipPath>` per cable): the layer
+ * paints over every card, so a cable crossing a card (Bass level's runs
+ * straight over Mid and Treble) would otherwise take a press meant for the
+ * jack, fader or slider under it and unplug itself instead.
  * The group also carries the hover lift (controlsTheme.ts's
  * .vc-cable-g:hover rules — a neon-ish bloom in the cable's own colour,
  * a thicker core, a brighter glow, and the flow beads lightened so the
@@ -329,10 +334,12 @@ function attachPress(
   d: string,
   ends: { jackEl: HTMLElement; portEl: HTMLElement },
   reveal: RevealState,
+  clipId: string | null,
 ): void {
-  if (!onPress) return;
+  if (!onPress || clipId === null) return;
   const hit = pathEl("vc-cable-hit", d, "transparent");
   hit.addEventListener("mousedown", (e) => e.preventDefault());
+  hit.setAttribute("clip-path", `url(#${clipId})`);
   hit.addEventListener("click", (e) => {
     e.stopPropagation();
     onPress();
@@ -367,15 +374,35 @@ function attachPress(
 interface Resolved {
   src: CableSourceSpec;
   pt: { x: number; y: number };
+  /** Where this cable may answer a press: the open gap between its jack's
+   *  card and its port's card, or null when they leave none. */
+  pressBand: { left: number; right: number } | null;
+}
+
+/** The open gap between two ends' own cards — see this file's header for
+ *  why a cable answers the pointer only there. */
+function pressBandFor(jackEl: HTMLElement, portEl: HTMLElement): { left: number; right: number } | null {
+  const jackCard = jackEl.closest<HTMLElement>(".vc-card");
+  const portCard = portEl.closest<HTMLElement>(".vc-card");
+  if (!jackCard || !portCard) return null;
+  const j = jackCard.getBoundingClientRect();
+  const p = portCard.getBoundingClientRect();
+  if (j.right < p.left) return { left: j.right, right: p.left };
+  if (p.right < j.left) return { left: p.right, right: j.left };
+  return null;
 }
 
 function resolveGroup(group: CableGroupSpec): { portPt: { x: number; y: number }; resolved: Resolved[] } | null {
   if (!group.portEl || !group.sources.length) return null;
-  const portPt = endpointFor(group.portEl);
+  const portEl = group.portEl;
+  const portPt = endpointFor(portEl);
   if (!portPt) return null;
-  const resolved = group.sources
-    .map((src) => ({ src, pt: endpointFor(src.jackEl) }))
-    .filter((r): r is Resolved => r.pt !== null);
+  const resolved: Resolved[] = [];
+  for (const src of group.sources) {
+    const pt = endpointFor(src.jackEl);
+    if (!pt) continue;
+    resolved.push({ src, pt, pressBand: src.onPress ? pressBandFor(src.jackEl, portEl) : null });
+  }
   return { portPt, resolved };
 }
 
@@ -406,6 +433,25 @@ export function createCableLayer(): CableLayer {
     // ones, forget any carried flow offset nothing still uses.
     svg.textContent = "";
     flows = [];
+    const defs = document.createElementNS(NS, "defs");
+    svg.append(defs);
+    let clipCount = 0;
+    /** One cable's press band as a clip for its hit stroke (attachPress):
+     *  the band's full height, so only x limits where it answers. */
+    const pressClip = (band: { left: number; right: number }): string => {
+      const id = `vc-cable-press-${clipCount++}`;
+      const clip = document.createElementNS(NS, "clipPath");
+      clip.id = id;
+      clip.setAttribute("clipPathUnits", "userSpaceOnUse");
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", band.left.toFixed(1));
+      rect.setAttribute("y", "0");
+      rect.setAttribute("width", (band.right - band.left).toFixed(1));
+      rect.setAttribute("height", "100%");
+      clip.append(rect);
+      defs.append(clip);
+      return id;
+    };
     const liveKeys = new Set<string>();
 
     // The lit signal's fan first, so the pinned/preview cables it may
@@ -422,17 +468,18 @@ export function createCableLayer(): CableLayer {
       const { portPt, resolved } = pinnedResolved;
       // resolveGroup only resolves a group that has a port.
       const portEl = pinnedGroup.portEl!;
-      for (const { src, pt } of resolved) {
+      for (const { src, pt, pressBand } of resolved) {
         const key = `pinned:${src.key}`;
         liveKeys.add(key);
         const d = cablePathD(pt, portPt, avoidBand);
+        const clipId = pressBand ? pressClip(pressBand) : null;
         // A muted source draws once, flat — no glow/flow layer, no offset
         // to carry — overriding cond/soft outright (this file's own
         // CableSourceSpec.muted doc).
         if (src.muted) {
           const g = groupEl(src.color);
           g.append(pathEl("vc-cable-muted", d, src.color));
-          attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal);
+          attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal, clipId);
           svg.append(g);
           continue;
         }
@@ -453,7 +500,7 @@ export function createCableLayer(): CableLayer {
         flow.setAttribute("stroke-dashoffset", off.toFixed(2));
         const g = groupEl(src.color);
         g.append(glow, core, flow);
-        attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal);
+        attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal, clipId);
         svg.append(g);
         flows.push({ el: flow, key, getValue: src.getValue });
       }

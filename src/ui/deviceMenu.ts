@@ -2550,7 +2550,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }, EQ_HIDE_DELAY_MS);
     }
   }
-  fadersRow.addEventListener("pointerenter", () => {
+  // A finger has no hover: a press already shows the readouts (eqDragging
+  // below), and showing them as the tap lands moved what was under it.
+  fadersRow.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "touch") return;
     eqHovering = true;
     refreshEqLayer();
   });
@@ -2570,7 +2573,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     eqFocused = false;
     refreshEqLayer();
   });
-  fadersRow.addEventListener("pointerdown", () => {
+  fadersRow.addEventListener("pointerdown", (e) => {
+    // The Frequencies jack sits in this row, but pressing it isn't a fader
+    // drag: popping the readouts up under a tap cost the tap its click on
+    // iPad Safari.
+    if ((e.target as Element | null)?.closest(".vc-jack")) return;
     eqDragging = true;
     refreshEqLayer();
     const stopDrag = (): void => {
@@ -3875,7 +3882,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // this file's header's "cover everything with hints" pass). Reads
     // port.title live at hover/focus time (refreshMeta below keeps it
     // current), so this never needs its own state.
-    port.addEventListener("pointerenter", () => showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]));
+    // Not for a finger, as a jack's own (jack.ts): a tooltip popping up
+    // mid-tap could cost the tap its click on iPad Safari.
+    port.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "touch") showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]);
+    });
     port.addEventListener("pointerleave", hideTooltip);
     port.addEventListener("focus", () => showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]));
     port.addEventListener("blur", hideTooltip);
@@ -3890,9 +3901,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sparkCanvas.style.cssText = driveSparkCanvasStyle;
     const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). The top line is one wire at full weight; higher clips. Colour shows which wire is contributing most.";
     sparkCanvas.title = SPARK_TOOLTIP;
-    sparkCanvas.addEventListener("pointerenter", () =>
-      showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]),
-    );
+    sparkCanvas.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "touch") showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]);
+    });
     sparkCanvas.addEventListener("pointerleave", hideTooltip);
     sparkWrap.appendChild(sparkCanvas);
     const sparkCtx = sparkCanvas.getContext("2d")!;
@@ -4643,7 +4654,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     focusJackRow = focus;
     if (hadFan || hover || focus) scheduleCableRecompute();
   }
-  root.addEventListener("pointerover", (e) => setLitJackRows(jackRowOf(e.target), focusJackRow));
+  // Not for a finger: a tap is no hover, and drawing a wired jack's cables
+  // as the tap lands cost the tap its click on iPad Safari.
+  root.addEventListener("pointerover", (e) => {
+    if (e.pointerType !== "touch") setLitJackRows(jackRowOf(e.target), focusJackRow);
+  });
   root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
