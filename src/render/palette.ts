@@ -1,4 +1,4 @@
-import { hexToRgb, oklabToRgb, rgbToHex, rgbToOklab, sampleStops, type Rgb } from "./oklab.ts";
+import { hexToRgb, mixOklab, oklabToRgb, rgbToHex, rgbToOklab, sampleStops, type Rgb } from "./oklab.ts";
 
 /**
  * The room palette: one choice, shared by every scene that takes its colour
@@ -277,6 +277,48 @@ export function randomPalette(excludeId?: string): Palette {
 export function paletteRampHex(p: Palette, n: number): string[] {
   const stops = p.roles.ramp.map(hexToRgb);
   return Array.from({ length: n }, (_, i) => rgbToHex(sampleStops(stops, n === 1 ? 0 : i / (n - 1))));
+}
+
+/** `from` walked toward `to` by `t` (0..1), for a held Play's palette fade
+ *  (net/outputGlide.ts's createPaletteFade). Roles mix in OKLab, the ramps
+ *  baked to PALETTE_RAMP_STOPS first so ramps of different lengths line up
+ *  stop for stop. The cosine curve dissolves rather than sweeping: each
+ *  channel is a + b·cos(2π(c·x + d)), and two cosines of one frequency `c`
+ *  add up to one cosine, so `b` and `d` come from adding the two as phasors
+ *  (length b, angle 2πd). With equal `c` that is exactly the two curves'
+ *  blend, as a crossfade would show it; lerping `d` instead would walk the
+ *  hue through colours neither palette has. A `c` that differs moves
+ *  linearly. The mix carries `to`'s id, name and group. */
+export function mixPalettes(from: Palette, to: Palette, t: number): Palette {
+  const mix = (a: string, b: string): string => rgbToHex(mixOklab(hexToRgb(a), hexToRgb(b), t));
+  const mixVec = (a: Vec3, b: Vec3): Vec3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const rampFrom = paletteRampHex(from, PALETTE_RAMP_STOPS);
+  const rampTo = paletteRampHex(to, PALETTE_RAMP_STOPS);
+  const b: Vec3 = [0, 0, 0];
+  const d: Vec3 = [0, 0, 0];
+  for (let ch = 0; ch < 3; ch++) {
+    const p = 2 * Math.PI * from.d[ch];
+    const q = 2 * Math.PI * to.d[ch];
+    const x = (1 - t) * from.b[ch] * Math.cos(p) + t * to.b[ch] * Math.cos(q);
+    const y = (1 - t) * from.b[ch] * Math.sin(p) + t * to.b[ch] * Math.sin(q);
+    b[ch] = Math.hypot(x, y);
+    d[ch] = Math.atan2(y, x) / (2 * Math.PI);
+  }
+  return {
+    id: to.id,
+    name: to.name,
+    group: to.group,
+    roles: {
+      ground: mix(from.roles.ground, to.roles.ground),
+      ramp: rampFrom.map((h, i) => mix(h, rampTo[i])),
+      inks: from.roles.inks.map((h, i) => mix(h, to.roles.inks[i])) as unknown as PaletteRoles["inks"],
+      accent: mix(from.roles.accent, to.roles.accent),
+    },
+    a: mixVec(from.a, to.a),
+    b,
+    c: mixVec(from.c, to.c),
+    d,
+  };
 }
 
 export interface PaletteVecs {

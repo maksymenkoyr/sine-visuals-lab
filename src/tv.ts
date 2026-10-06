@@ -30,7 +30,7 @@ import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts"
 import { realStorage } from "./net/realStorage.ts";
 import { applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookReplica, type LookReplica } from "./net/lookSync.ts";
-import { createGlide, type Glide } from "./net/outputGlide.ts";
+import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
 import { DEFAULT_OUTPUT_PARAMS } from "./net/outputSync.ts";
 import { newKey, TV_SLOT_ROTATE_MS } from "./net/pairing.ts";
 import { clearSession, readSession, writeSession } from "./net/sessions.ts";
@@ -266,6 +266,10 @@ let shown: LookDoc | null = null;
 let glide: Glide | null = null;
 /** The look the running glide arrives at, applied whole when it lands. */
 let glideTarget: LookDoc | null = null;
+/** The colours a held Play is fading to (net/outputGlide.ts's
+ *  createPaletteFade), drawn instead of `palette` until the next whole look is
+ *  applied or the glide is cut. */
+let paletteFade: PaletteFade | null = null;
 
 function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
@@ -544,6 +548,7 @@ function joinRoom(room: string, key: string | null): void {
   shown = null;
   glide = null;
   glideTarget = null;
+  paletteFade = null;
   hostInRoom = null;
   screenOwn = false;
   // A room joined by a typed code has no records, so no screen choice to wait for.
@@ -597,11 +602,13 @@ function onScreenChoice(screen: string | undefined): void {
   if (screenOwn) {
     glide = null;
     glideTarget = null;
+    paletteFade = null;
     return;
   }
   if (wasShowing || !screenKnown) return;
   glide = null;
   glideTarget = null;
+  paletteFade = null;
   const doc = replica.doc();
   if (doc) applyDoc(doc);
   else if (lookHeld) applyRoomStorage({}, localStorage);
@@ -619,6 +626,7 @@ function onLook(m: LookServerMsg): void {
     }
     glide = null;
     glideTarget = null;
+    paletteFade = null;
     const doc = replica.doc();
     // An empty room (no look yet) is the defaults, not whatever was left from another room.
     if (doc) applyDoc(doc);
@@ -627,21 +635,29 @@ function onLook(m: LookServerMsg): void {
     const r = replica.onPatch(m.rev, m);
     if (r.status === "applied") {
       if (!followsMain()) return;
+      const nowMs = performance.now();
+      const drawn = paletteFade?.paletteAt(nowMs) ?? palette;
       if (!startGlide(r.doc, m.glideMs)) {
         glide = null;
         glideTarget = null;
         applyDoc(r.doc);
       }
+      // Glide or not, a held Play's palette fades over the same length.
+      paletteFade = isGlideMs(m.glideMs) ? createPaletteFade(drawn, docPalette(r.doc), nowMs, m.glideMs) : null;
     } else if (r.status === "gap") conn?.requestLook();
   }
   // lookAck / lookReject answer a controller's own patch; a TV never sends one.
+}
+
+function isGlideMs(ms: number | undefined): ms is number {
+  return typeof ms === "number" && ms > 0;
 }
 
 /** Starts walking to `doc` over `ms` when the look allows it: the same scene
  *  on screen, and a setting that is safe to move and does differ. False means
  *  switch at once. */
 function startGlide(doc: LookDoc, ms: number | undefined): boolean {
-  if (typeof ms !== "number" || !(ms > 0) || shown === null) return false;
+  if (!isGlideMs(ms) || shown === null) return false;
   const from = { scene: scene.id, palette: palette.id, storage: shown.storage, params: DEFAULT_OUTPUT_PARAMS };
   const to = { scene: doc.scene === "" ? scene.id : doc.scene, palette: doc.palette, storage: doc.storage, params: DEFAULT_OUTPUT_PARAMS };
   const started = createGlide(from, to, scene.settings ?? [], performance.now(), ms);
@@ -652,7 +668,8 @@ function startGlide(doc: LookDoc, ms: number | undefined): boolean {
 }
 
 /** One step of a glide: stores only. The scene and palette stay as they were
- *  until the glide lands through applyDoc(). */
+ *  until the glide lands through applyDoc(); the colours fade on their own
+ *  meanwhile (paletteFade). */
 function stepGlide(nowMs: number): void {
   if (!glide || !glideTarget) return;
   const { state, done } = glide.lookAt(nowMs);
@@ -667,6 +684,16 @@ function stepGlide(nowMs: number): void {
   applyRoomStorage(state.storage, localStorage);
 }
 
+/** The palette applyDoc() puts up for `doc`. The look re-asserts its palette
+ *  only when it differs from the last document's (lastDocPalette), and
+ *  getPalette() falls back to the first palette for an id it doesn't know: a
+ *  look naming one this build lacks must not repaint the screen. */
+function docPalette(doc: LookDoc): Palette {
+  if (doc.palette === lastDocPalette || doc.palette === "") return palette;
+  const named = getPalette(doc.palette);
+  return named.id === doc.palette ? named : palette;
+}
+
 /** Makes the page show this look: settings first, so a scene's init() and
  *  first render already see the settings that go with it, then palette, then
  *  scene. The whole storage is applied every time (once per message, and
@@ -674,17 +701,12 @@ function stepGlide(nowMs: number): void {
  *  re-seeded too. */
 function applyDoc(doc: LookDoc): void {
   shown = doc;
+  paletteFade = null;
   applyRoomStorage(doc.storage, localStorage);
-  let paletteChanged = false;
-  if (doc.palette !== lastDocPalette) {
-    lastDocPalette = doc.palette;
-    // getPalette() falls back to the first palette for an id it doesn't know;
-    // a look naming one this build lacks must not repaint the screen.
-    if (doc.palette !== "" && getPalette(doc.palette).id === doc.palette && palette.id !== doc.palette) {
-      palette = getPalette(doc.palette);
-      paletteChanged = true;
-    }
-  }
+  const nextPalette = docPalette(doc);
+  const paletteChanged = nextPalette !== palette;
+  palette = nextPalette;
+  lastDocPalette = doc.palette;
   if (doc.scene !== lastDocScene) {
     lastDocScene = doc.scene;
     const next = doc.scene === "" ? undefined : getScene(doc.scene);
@@ -883,7 +905,7 @@ async function main(): Promise<void> {
       scene,
       frame: displayFrame,
       viewport,
-      palette,
+      palette: paletteFade?.paletteAt(nowRafMs) ?? palette,
       anim: latchedAnim,
       drives,
       drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),

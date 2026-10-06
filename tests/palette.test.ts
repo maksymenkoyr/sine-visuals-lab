@@ -6,6 +6,7 @@ import {
   PALETTE_RAMP_STOPS,
   fitInkCycle,
   getPalette,
+  mixPalettes,
   paletteRampHex,
   paletteVecs,
 } from "../src/render/palette.ts";
@@ -116,6 +117,49 @@ describe("cosine curve", () => {
     for (let ch = 0; ch < 3; ch++) {
       expect(b.a[ch]).toBeCloseTo(a.a[ch], 6);
       expect(b.b[ch]).toBeCloseTo(a.b[ch], 6);
+    }
+  });
+});
+
+describe("mixPalettes", () => {
+  const from = getPalette("neon");
+  const to = getPalette("sodium");
+  const L = (hex: string) => oklabLightness(hexToRgb(hex));
+
+  it("starts at one palette and ends at the other", () => {
+    for (const [t, p] of [[0, from], [1, to]] as const) {
+      const m = mixPalettes(from, to, t);
+      expect(m.roles.ground).toBe(p.roles.ground);
+      expect(m.roles.accent).toBe(p.roles.accent);
+      expect(m.roles.inks).toEqual(p.roles.inks);
+      expect(m.roles.ramp).toEqual(paletteRampHex(p, PALETTE_RAMP_STOPS));
+      for (let ch = 0; ch < 3; ch++) {
+        expect(m.a[ch]).toBeCloseTo(p.a[ch], 9);
+        expect(m.c[ch]).toBeCloseTo(p.c[ch], 9);
+      }
+    }
+  });
+
+  it("keeps a half-way ramp rising and carries the target's id", () => {
+    const m = mixPalettes(from, to, 0.5);
+    expect(m.id).toBe(to.id);
+    for (let i = 1; i < m.roles.ramp.length; i++) expect(L(m.roles.ramp[i])).toBeGreaterThan(L(m.roles.ramp[i - 1]));
+    expect(L(m.roles.ground)).toBeGreaterThan(Math.min(L(from.roles.ground), L(to.roles.ground)) - 1e-9);
+    expect(L(m.roles.ground)).toBeLessThan(Math.max(L(from.roles.ground), L(to.roles.ground)) + 1e-9);
+  });
+
+  // The colour a palette() caller gets at x, channel by channel.
+  const curve = (p: { a: number[]; b: number[]; c: number[]; d: number[] }, x: number) =>
+    [0, 1, 2].map((ch) => p.a[ch] + p.b[ch] * Math.cos(2 * Math.PI * (p.c[ch] * x + p.d[ch])));
+
+  it("dissolves the cosine curve: same at the ends, the two curves' average half-way", () => {
+    // Both have c = 1 on every channel, so the blend is exact.
+    for (let k = 0; k <= 10; k++) {
+      const x = k / 10;
+      const [f, g] = [curve(from, x), curve(to, x)];
+      curve(mixPalettes(from, to, 0), x).forEach((v, ch) => expect(v).toBeCloseTo(f[ch], 9));
+      curve(mixPalettes(from, to, 1), x).forEach((v, ch) => expect(v).toBeCloseTo(g[ch], 9));
+      curve(mixPalettes(from, to, 0.5), x).forEach((v, ch) => expect(v).toBeCloseTo((f[ch] + g[ch]) / 2, 9));
     }
   });
 });
