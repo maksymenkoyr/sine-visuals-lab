@@ -13,10 +13,13 @@ import { METRONOME_BEATS_PER_BAR } from "./metronome.ts";
  * disappears or never produces a beat while waiting is given up on after
  * CROSSFADE_MAX_WAIT_MS, the same way.
  *
- * An explicit `lengthMs` (a held Play on the output window — ui/outputKeys.ts's
- * glideMsForHold) replaces the bar length but still starts on the beat. `cut`
- * (the floor quality preset, where two scenes at once cost too much) makes the
- * length zero: the new scene takes over on the beat, with no blend.
+ * `bars` (the scene list's Length, render/sceneTransition.ts) stretches the
+ * blend to that many bars, each the clamped bar above (CROSSFADE_FALLBACK_MS
+ * with no tempo). An explicit `lengthMs` (a held Play on the output window —
+ * ui/outputKeys.ts's glideMsForHold) replaces the bar length but still starts
+ * on the beat. `cut` (the scene list's Cut, or the floor quality preset, where
+ * two scenes at once cost too much) makes the length zero: the new scene takes
+ * over on the beat, with no blend.
  */
 
 /** Blend length when there is no tempo to take a bar from. */
@@ -54,6 +57,8 @@ export interface CrossfadeView {
 export interface CrossfadeOptions {
   /** Blend length in place of one bar; ignored with `cut`. */
   lengthMs?: number;
+  /** Blend over this many bars instead of one; ignored with `lengthMs` or `cut`. */
+  bars?: number;
   /** No blend: the incoming scene takes over on the beat. */
   cut?: boolean;
 }
@@ -81,7 +86,7 @@ export function createCrossfade(opts: CrossfadeOptions = {}): Crossfade {
         startMs = nowMs;
         if (opts.cut) lengthMs = 0;
         else if (opts.lengthMs !== undefined && opts.lengthMs > 0) lengthMs = opts.lengthMs;
-        else lengthMs = tempo ? barLengthMs(clock.bpm) : CROSSFADE_FALLBACK_MS;
+        else lengthMs = (opts.bars !== undefined && opts.bars > 0 ? opts.bars : 1) * (tempo ? barLengthMs(clock.bpm) : CROSSFADE_FALLBACK_MS);
       }
       if (lengthMs <= 0) return { stage: "done", mix: 1 };
       const t = (nowMs - startMs) / lengthMs;

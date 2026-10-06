@@ -97,6 +97,7 @@ import {
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import {
@@ -253,9 +254,10 @@ import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { browserMidiEnv, createMidiController } from "./ui/midiInput.ts";
 import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
-import { createGallery, type Gallery } from "./ui/gallery.ts";
+import { createGallery, type Gallery, type GallerySceneEntry } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { createScenePicker, type ScenePickEntry, type ScenePicker } from "./ui/scenePicker.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
@@ -294,6 +296,7 @@ const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
+const sceneBtn = document.getElementById("sceneBtn") as HTMLButtonElement;
 const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const recBtn = document.getElementById("recBtn") as HTMLButtonElement;
 const recAspectBtn = document.getElementById("recAspectBtn") as HTMLButtonElement;
@@ -524,6 +527,7 @@ let lastPictureKickMs = -Infinity;
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
 let immersive: ImmersiveMode | null = null;
+let scenePicker: ScenePicker | null = null;
 let inViz = false;
 /** `?room=CODE` (no role) — a mic-less renderer joining someone else's
  *  room. The scene is dictated by the host, so there's nothing to browse:
@@ -874,12 +878,47 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
 
+/** Every scene as the gallery shows it: drafts marked, and the ones this
+ *  device's preset can't run disabled, with the reason. */
+function galleryEntries(): GallerySceneEntry[] {
+  return listScenes().map((s) => {
+    const enabled = presetAllows(s, effectivePreset());
+    return {
+      scene: s,
+      enabled,
+      draft: DRAFT_SCENE_IDS.has(s.id),
+      reason: enabled ? undefined : "Needs a faster device",
+    };
+  });
+}
+
+/** The same scenes, in the same order, for the scene list (ui/scenePicker.ts). */
+function scenePickEntries(): ScenePickEntry[] {
+  return galleryEntries().map((e) => ({ id: e.scene.id, name: e.scene.name, draft: e.draft, enabled: e.enabled, reason: e.reason }));
+}
+
+/** A pick from the scene list: the same switch a Set pad makes (firePad
+ *  above), so the pop-out's Cue/Play, a room's Main and the crossfade all see
+ *  an ordinary scene change. */
+function pickSceneFromList(id: string): void {
+  const next = getScene(id);
+  if (!inViz || !next || next.id === scene.id) return;
+  if (!presetAllows(next, effectivePreset())) {
+    showHud("scene unavailable on this device", true);
+    return;
+  }
+  applyScene(next);
+  deviceMenu?.sceneChanged();
+}
+
 /** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
  *  index.html) for `next` — called from applyScene() and enterViz() below so
  *  it stays current across a scene switch, not just once at boot. Shows
  *  "<Scene name> <its version>" in brighter white (a `+dev` suffix in amber),
  *  a dim middle dot, then the build's own label (src/version.ts) in its
- *  usual place and colour — or, when the scene has no version of its own
+ *  usual place and colour; the name is left off where the scene list's
+ *  button already says it (every page but a `?room=` renderer, which has no
+ *  list: its scene is the room's) — or, when the scene has no version of its own
  *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
  *  for — src/render/sceneVersions.ts's header), just the build's own label,
  *  same as before per-scene versions existed. The hint is the scene's own
@@ -892,6 +931,7 @@ function updateSceneVersionLabel(next: Scene): void {
   const offStable = BUILD_INFO.channel !== "stable";
   const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
   const sceneVer = sceneVersionOf(next.id);
+  scenePicker?.setScene(next.name);
 
   sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
   sceneVersion.replaceChildren();
@@ -906,7 +946,7 @@ function updateSceneVersionLabel(next: Scene): void {
   const base = isDev ? sceneVer.slice(0, -"+dev".length) : sceneVer;
   const nameEl = document.createElement("span");
   nameEl.className = "svScene";
-  nameEl.textContent = `${next.name} ${base}`;
+  nameEl.textContent = bypassGallery ? `${next.name} ${base}` : base;
   if (isDev) {
     const dev = document.createElement("span");
     dev.className = "svDev";
@@ -935,13 +975,13 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   compositor?.cancel();
   // A different scene on screen already: it stays mounted, drawn under the new
   // one, until the compositor's blend is done (render/crossfade.ts has the
-  // timing). The floor preset cuts on the beat instead of blending: two
-  // scenes at once are too much for it.
+  // timing; render/sceneTransition.ts says Cut or Fade and how long). The
+  // floor preset always cuts on the beat: two scenes at once are too much for it.
   const fade = crossfade && prev !== next && host.isMounted(prev);
   if (!fade) host.unmountAll();
   try {
     host.mount(next);
-    if (fade) compositor?.begin(prev, { cut: quality.preset === "floor" });
+    if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
     return true;
   } catch (err) {
     console.error(`"${next.name}" failed to start:`, err);
@@ -2468,7 +2508,10 @@ async function enterViz(next: Scene): Promise<void> {
 
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
-  if (!bypassGallery) backBtn.style.display = "block";
+  if (!bypassGallery) {
+    backBtn.style.display = "block";
+    sceneBtn.style.display = "block";
+  }
   sceneVersion.style.display = "inline";
   outputControls?.setVisible(true);
   effectControls?.setVisible(true);
@@ -2491,6 +2534,8 @@ function exitToGallery(): void {
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
+  sceneBtn.style.display = "none";
+  scenePicker?.close();
   sceneVersion.style.display = "none";
   outputControls?.setVisible(false);
   effectControls?.setVisible(false);
@@ -2797,7 +2842,7 @@ async function boot(): Promise<void> {
 
   immersive = createImmersiveMode({
     button: fsBtn,
-    isMenuOpen: () => deviceMenu?.isOpen() ?? false,
+    isMenuOpen: () => (deviceMenu?.isOpen() ?? false) || (scenePicker?.isOpen() ?? false),
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
   // A phone screen shows nothing but the picture until it is tapped.
@@ -2995,20 +3040,17 @@ async function boot(): Promise<void> {
   audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));
 
   micPermission = await micPermissionReady;
+  scenePicker = createScenePicker({
+    button: sceneBtn,
+    scenes: scenePickEntries,
+    currentId: () => scene.id,
+    onPick: pickSceneFromList,
+  });
   if (bypassGallery) {
     void enterViz(scene);
   } else {
     gallery = createGallery({
-      scenes: () =>
-        listScenes().map((s) => {
-          const enabled = presetAllows(s, effectivePreset());
-          return {
-            scene: s,
-            enabled,
-            draft: DRAFT_SCENE_IDS.has(s.id),
-            reason: enabled ? undefined : "Needs a faster device",
-          };
-        }),
+      scenes: galleryEntries,
       quality: () => quality,
       liveFrame: () => lastVis,
       onPick: (id) => {

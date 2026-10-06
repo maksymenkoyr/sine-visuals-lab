@@ -50,6 +50,7 @@ flowchart LR
 
   picture --> crossfade["Crossfades"]
   corner --> fs["Fullscreen"]
+  corner --> sceneList["Scene list"]
   corner --> fx["Held effects"]
   corner --> rec["Record a clip"]
 
@@ -72,7 +73,7 @@ flowchart LR
   classDef hood fill:#eef1f4,stroke:#b9c2cb,color:#3a4652
 
   class app,gallery,view,start,picture,featured,fs,analysis,auto core
-  class drafts,out,popout,room,crossfade,fx,rec,corner,show key
+  class drafts,out,popout,room,crossfade,fx,rec,corner,show,sceneList key
   class panel,soundIn,look,wires depth
   class engine,power,governor hood
 ```
@@ -102,8 +103,9 @@ Darker means more important.
     from a DJ mixer · `src/audio/inputDevice.ts`
 - ●●● **The picture** — the scene itself, drawn on live audio ·
   `src/render/sceneHost.ts`
-  - ●●○ **Crossfades** — a scene change blends old into new, starting on a beat
-    · `src/render/crossfade.ts`
+  - ●●○ **Crossfades** — a scene change blends old into new, or cuts, starting
+    on a beat; Cut or Fade and the Length are picked at the foot of the scene
+    list · `src/render/crossfade.ts`, `src/render/sceneTransition.ts`
   - ●○○ **Pro options** — scene options locked until a Pro subscription exists;
     playable only in a dev build · `src/render/pro.ts`
 - ●●○ **Corner controls**
@@ -115,6 +117,9 @@ Darker means more important.
   - ●●○ **Record a clip** — saves the picture with its sound, cropped for a
     phone or a square post. For DJs, and for our own promos ·
     `src/ui/recordControls.ts`, `src/ui/clipRecorder.ts`
+  - ●●○ **Scene list** — the scene's name in the top-left row opens every
+    scene, to switch without going back to the gallery. For DJs ·
+    `src/ui/scenePicker.ts`
   - ●○○ **Back to gallery, Stop, Room badge** — the top-left row ·
     `src/app.ts`
   - ○○○ **Wake lock** — keeps the screen on while a scene plays ·
