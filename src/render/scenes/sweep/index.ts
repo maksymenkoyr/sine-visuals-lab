@@ -14,12 +14,14 @@
 // stack.ts's Knobs each frame; src/ui/widgets/sweepPath.ts is the Path
 // section (the New path trigger row and button).
 //
-// Drives (drives.ts's header). Every continuous knob has a jack. Three start
+// Drives (drives.ts's header). Every continuous knob has a jack. These start
 // on a real wire:
 // - Speed moves the head along its path by its level (Level — the input's
 //   absolute loudness, 0 in a silent room, where the auto-gained levels lift
 //   mic hiss): no signal, no movement.
 // - Colour flow scrolls the palette through the stack by the same Level.
+// - Morph moves every copy on through the shapes by Bass hit's decaying
+//   pulse, so each kick pushes the shapes on and they coast between kicks.
 // - New path re-rolls the path on the beat grid's coarsest stop, counting
 //   NEW_PATH_GRID_DIVISOR ticks per path in JS (beatGrid.ts has no phrase
 //   stop) — a phrase at the default amount.
@@ -35,6 +37,7 @@ import type { SceneSetting } from "../../sceneSettings.ts";
 import type { Scene } from "../../scene.ts";
 import type { DrivePatch } from "../../drives.ts";
 import { createFullscreenScene } from "../../fullscreenScene.ts";
+import { GROUP_TUNING } from "../../bandEnergy.ts";
 import {
   HEAD_START,
   MAX_COPIES,
@@ -63,6 +66,10 @@ const SPEED_GAIN = 0.4;
 /** Palette cycles per second at Colour flow 1 with its drive reading 1. */
 const FLOW_GAIN = 0.5;
 
+/** Shapes per second at Morph 1 with its drive reading 1: Bass hit's own
+ *  pulse decay rate, so one full-height bass hit integrates to one shape. */
+const MORPH_GAIN = GROUP_TUNING.low.pulseDecayRate;
+
 /** Two-bar grid ticks per path at New path's default amount: a phrase. */
 const NEW_PATH_GRID_DIVISOR = 2;
 
@@ -86,6 +93,18 @@ const SETTINGS: SceneSetting[] = [
     default: SHAPES.indexOf("Drop"),
     type: "enum",
     options: SHAPES,
+  },
+  {
+    key: "shapeDrift",
+    label: "Shape drift",
+    description: "How the shape changes along the path, so the head morphs as it travels and the trail keeps the shapes it passed — left steps back through the shapes, right forward, the middle keeps one",
+    group: "Form",
+    family: "Shape",
+    min: -1,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    drive: EMPTY,
   },
   {
     key: "stretch",
@@ -243,6 +262,18 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.2,
     drive: { default: "feature.level" },
+  },
+  {
+    key: "morph",
+    label: "Morph",
+    description: "How fast every copy morphs on through the shapes by itself — 0 holds them, right moves them on about a shape per bass hit",
+    group: "Motion",
+    family: "Pace",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "newPath",
@@ -477,6 +508,7 @@ const DEG2RAD = Math.PI / 180;
 
 let progress = progressFor(HEAD_START);
 let phase = 0;
+let morphPhase = 0;
 let ticks = 0;
 let storedSeed = -1;
 let localRolls = 0;
@@ -497,6 +529,7 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
     localRolls = 0;
     ticks = 0;
     phase = 0;
+    morphPhase = 0;
     lastTime = null;
   },
   extraUniforms(frame, anim, get, drives) {
@@ -531,9 +564,12 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
     progress += SPEED_GAIN * get("speed") * clamp01(drives.value("speed", frame.level, 0)) * dt;
     phase += FLOW_GAIN * get("colourFlow") * clamp01(drives.value("colourFlow", frame.level, 0)) * dt;
     phase -= Math.floor(phase);
+    morphPhase += MORPH_GAIN * get("morph") * clamp01(drives.value("morph", anim.lowPulse, 0)) * dt;
+    morphPhase %= SHAPES.length;
 
     const k: Knobs = {
       shape: get("shape"),
+      shapeDrift: knob("shapeDrift"),
       stretch: knob("stretch"),
       copies: knob("copies"),
       size: knob("size"),
@@ -561,7 +597,7 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
       fade: knob("fade"),
       steps: knob("steps"),
     };
-    packFrame({ roll, head: headOf(progress), phase: phase + knob("shift") }, k, packed);
+    packFrame({ roll, head: headOf(progress), phase: phase + knob("shift"), morph: morphPhase }, k, packed);
     return { uSw: { vec4: packed } };
   },
 });

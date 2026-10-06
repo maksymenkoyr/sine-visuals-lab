@@ -4,9 +4,12 @@ import {
   MAX_STACKS,
   PALETTES,
   ROOM_PALETTE,
+  SHAPE_BLEND_SLOPE,
   SHAPE_REACH,
+  SHAPES,
   SW,
   bezier,
+  boundarySpeed,
   endScales,
   headOf,
   newPathDivisor,
@@ -26,6 +29,7 @@ import { COMMON_UNIFORMS_GLSL, settingUniformName } from "../src/render/sceneCom
 
 const KNOBS: Knobs = {
   shape: 4,
+  shapeDrift: 0,
   stretch: 1,
   copies: 40,
   size: 0.17,
@@ -112,7 +116,7 @@ describe("sweep paths", () => {
   it("each stack's box holds every copy of its span", () => {
     for (let seed = 1; seed < 20; seed++) {
       const roll = rollPath(seed);
-      const out = packFrame({ roll, head: 0.7, phase: 0 }, KNOBS);
+      const out = packFrame({ roll, head: 0.7, phase: 0, morph: 0 }, KNOBS);
       expect(out.length).toBe(SW.LEN * 4);
       expect(out[SW.LOOK3 * 4 + 1]).toBe(2);
       for (let j = 0; j < MAX_STACKS; j++) {
@@ -134,10 +138,35 @@ describe("sweep paths", () => {
     }
   });
 
+  it("Shape drift and Morph: the picked shape plus Morph's phase, wrapped round SHAPES, drifting from where the span starts", () => {
+    const roll = rollPath(3);
+    const at = (k: Partial<Knobs>, morph: number) => {
+      const out = packFrame({ roll, head: 0.5, phase: 0, morph }, { ...KNOBS, ...k });
+      return [...out.slice(SW.SHAPE * 4, SW.SHAPE * 4 + 3)];
+    };
+    expect(at({ shape: 2 }, 0)).toEqual([2, 0, 0]);
+    const [base] = at({ shape: SHAPES.length - 1 }, 2.5);
+    expect(base).toBeCloseTo(1.5, 9);
+    const [, rate, origin] = at({ shapeDrift: -0.5, spread: 1 }, 0);
+    expect(rate).toBeCloseTo(-0.5 * SHAPES.length, 9);
+    expect(origin).toBeCloseTo(0.5, 9);
+  });
+
+  it("the copy skip's bound covers a drifting shape, and is unchanged without drift", () => {
+    const g = stackGeometry(rollPath(5), KNOBS, 0);
+    const still = boundarySpeed(g, 0, 0.8, KNOBS);
+    expect(boundarySpeed(g, 0, 0.8, { ...KNOBS, shapeDrift: 0 })).toBe(still);
+    const drifting = boundarySpeed(g, 0, 0.8, { ...KNOBS, shapeDrift: -1 });
+    // The two shapes' fields differ by up to the reach, blended at up to
+    // SHAPE_BLEND_SLOPE times the drift rate (a smoothstep's steepest slope).
+    const smallest = Math.min(...endScales(KNOBS.size, KNOBS.taper));
+    expect(drifting - still).toBeGreaterThanOrEqual(SHAPE_BLEND_SLOPE * SHAPES.length * smallest * SHAPE_REACH);
+  });
+
   it("the Room choice sets the shader's room flag", () => {
     const roll = rollPath(3);
-    expect(packFrame({ roll, head: 0.5, phase: 0 }, { ...KNOBS, palette: 1 })[SW.FLAGS * 4]).toBe(0);
-    expect(packFrame({ roll, head: 0.5, phase: 0 }, { ...KNOBS, palette: ROOM_PALETTE })[SW.FLAGS * 4]).toBe(1);
+    expect(packFrame({ roll, head: 0.5, phase: 0, morph: 0 }, { ...KNOBS, palette: 1 })[SW.FLAGS * 4]).toBe(0);
+    expect(packFrame({ roll, head: 0.5, phase: 0, morph: 0 }, { ...KNOBS, palette: ROOM_PALETTE })[SW.FLAGS * 4]).toBe(1);
   });
 });
 
@@ -148,8 +177,8 @@ describe("sweep settings", () => {
     expect(palette.options).toEqual([...PALETTES.map((p) => p.name), "Room"]);
   });
 
-  it("only Speed, Colour flow and New path start on a wire; every other jack starts unplugged", () => {
-    const wired = new Set(["speed", "colourFlow", "newPath"]);
+  it("only Speed, Colour flow, Morph and New path start on a wire; every other jack starts unplugged", () => {
+    const wired = new Set(["speed", "colourFlow", "morph", "newPath"]);
     for (const s of sweepScene.settings!) {
       if (!s.drive) continue;
       const def = s.drive.default;

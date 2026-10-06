@@ -3,25 +3,28 @@
 One shape drawn as a stack of copies, each copy's place, size and turn blended
 from a tail end to a head end along a path, coloured by its place in the stack
 on a cyclic palette, outlined, the oldest ones blurred and faded, the head on
-top, on a light ground. The music moves the head along its path, scrolls the
-colours through the stack and re-rolls the path each phrase; every other knob
-has a jack to wire, and a Presets row at the top of the Scene card brings
-back each piece of the reel. Draft scene (draft PR #391).
+top, on a light ground. A copy's shape can change with its place on the path
+(Shape drift) and morph on by itself (Morph). The music moves the head along
+its path, scrolls the colours through the stack, pushes the morph on with
+each bass hit and re-rolls the path each phrase; every other knob has a jack
+to wire, and a Presets row at the top of the Scene card brings back each
+piece of the reel. Draft scene (draft PR #391).
 
 ## Where the code is
 
 - `src/render/scenes/sweep/stack.ts` — the pure model, pinned by
   `tests/sweep.test.ts`: `PALETTES` (+ `ROOM_PALETTE`), `SHAPES`,
   `OUTLINE_STYLES`, `rollPath`/`PathRoll` (what a seed decides),
-  `stackGeometry` (Travel, Bend, Aim → the Bézier), `span` (Spread, Trail),
-  `endScales` (Size, Taper), `boundarySpeed` (the bound the shader's copy skip
-  relies on), `headOf`, `newPathDivisor`, and `SW`/`packFrame` (the one vec4
+  `stackGeometry` (Travel, Bend, Aim → the Bézier), `span` and `spanOrigin`
+  (Spread, Trail), `endScales` (Size, Taper), `driftRate` (Shape drift),
+  `boundarySpeed` (the bound the shader's copy skip relies on, with
+  `SHAPE_BLEND_SLOPE` for a drifting shape), `headOf`, `newPathDivisor`, and `SW`/`packFrame` (the one vec4
   array the shader reads).
-- `src/render/scenes/sweep/glsl.ts` — `SWEEP_FRAG_BODY`: `shapeSdf`,
-  `cubeFace`, `pal5`/`roomPal`, the per-stack front-to-back copy loop with its
+- `src/render/scenes/sweep/glsl.ts` — `SWEEP_FRAG_BODY`: `shapeSdf` and the
+  per-copy blend between two neighbouring shapes, `cubeFace`, `pal5`/`roomPal`, the per-stack front-to-back copy loop with its
   skip, the outline styles, Steps, and the Multiply layer combine.
 - `src/render/scenes/sweep/index.ts` — `SETTINGS`, the `LIFT` coupling every
-  jack uses, the `EMPTY` jack default, `SPEED_GAIN`/`FLOW_GAIN`,
+  jack uses, the `EMPTY` jack default, `SPEED_GAIN`/`FLOW_GAIN`/`MORPH_GAIN`,
   `NEW_PATH_GRID_DIVISOR`, the path seed plus local re-rolls, and
   `Scene.panel`.
 - `src/render/scenes/sweep/pieces.ts` — `PIECES`, the reel's pieces as knob
@@ -113,6 +116,23 @@ back each piece of the reel. Draft scene (draft PR #391).
   wire, and rebuilds the card like a Look apply. `pieces.json` moved into
   `pieces.ts` so the pills and the shoot scripts read one list. Opacity and
   Outline reach got a finer step so Panels' and Smear's values sit on it.
+- 2026-10-06, the user: "add shape drift + add movement affecting it". Asked
+  what drift should look like, they picked "morphs along the path" over the
+  whole stack morphing together and a wobbling outline. **Shape drift**
+  (Form) gives each copy a place on the Shape list by its path parameter,
+  counted from where the span starts, so only movement changes it: the head
+  turns into the next shapes as it travels and the trail keeps the ones it
+  passed. Then: "but also free morphing, and morphing influenced by music".
+  **Morph** (Motion, Pace) is a phase added to every copy, so the whole stack
+  morphs on by itself, or with drift the shapes scroll along it. Its jack
+  starts on Bass hit (my pick: Level already drives Speed and Colour flow),
+  and `MORPH_GAIN` is that pulse's decay rate, so a full-height hit moves the
+  shapes on by one. Between two shapes the distance fields blend by a
+  smoothstep, so each shape holds a moment. Both default to 0, so the pieces
+  and saved Looks stay as they were. The copy skip's bound gained a drift
+  term; with the skip forced off, three drift-heavy configs (Box, Blob with
+  Spread, Pair and Twist, Cube with 160 copies; Morph on) matched pixel for
+  pixel at three frames each (`gpu-bench --dump`).
 
 ## Tuning notes
 
@@ -130,6 +150,11 @@ back each piece of the reel. Draft scene (draft PR #391).
 - Smear's two lobes (teal head, ink trail) aren't reproduced.
 - A `/tune` pass on real music; per-piece values are by eye.
 - Haze and Flame are the costliest pieces; heavy Blur defeats the copy skip.
+- A copy's turn follows the picked Shape, not the drifted one: a Box or Cube
+  picked sits upright, any other picked shape lies along the path, whatever
+  each copy has morphed into.
+- Morph and Shape drift start at 0; whether Morph should be on by default
+  hasn't been judged.
 - The reference media isn't archived yet (`ref-archive.py` is blocked from a
   worktree session).
 
