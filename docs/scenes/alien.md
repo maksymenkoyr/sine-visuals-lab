@@ -6,8 +6,8 @@ video. The music pays for the frames: the Move setting's wire sets how fast the
 loop on screen plays, and silence holds the frame. Bounce squashes him toward
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A loop repeats
-until the Cut setting's wire rises over the line under its graph. In
-development, on main since #374.
+until the Cut setting's wire makes a hit that stands out from its everyday
+ones (the dotted line on its graph). In development, on main since #374.
 
 ## Where the code is
 
@@ -40,7 +40,9 @@ development, on main since #374.
   its frames with the playhead. Fed by the scene's `probe()`.
 - Reused, not copied: the dancers' rig, clip format and `clips.bin`
   (`../dancers/`); the drive system (`drives.value`, `drives.threshold`);
-  the Level signal (`feature.level`, #368).
+  the Level signal (`feature.level`, #368); the standout detector
+  (`src/render/standout.ts`, a `StandoutTrigger` held in the reel as `cut`),
+  shared with Caustics' Beat ripple and Physarum 2's Dose.
 - Tests: `tests/alien.test.ts`.
 
 ## References
@@ -99,6 +101,16 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Same day, the live app on synthetic audio at 128 bpm (Metal, 30 fps
   render): squash 0.013–0.071 at smoothness 0, largest one-frame change
   0.0215; 0.055–0.092 at 1, largest change 0.0097.
+- Same day, Cut on the standout detector, live app (Metal) with a fake mic
+  playing 45 s of `tools/.cache/promo-songs/deTJ513J07Y.mono48.wav`, logged
+  by `realmusic.mjs --cut <signal> --cut-threshold <t>` and read with
+  `cutsum.py`:
+  - Drop (the default wire): one drop in the 45 s, as the music came in, and
+    one cut on it.
+  - Bass hit, Cut threshold at its default: 148 hit peaks (median 0.94), 20
+    cuts, 2.06–2.89 s apart. The minimum shot still sets the pace; within
+    it, not every hit is a standout. Learned floor about 0.14, peak 0.67.
+  - Bass hit, Cut threshold 0.75: 3 cuts in the 45 s.
 
 ## Decisions and pivots
 
@@ -149,6 +161,19 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   back up between hits. A peak hold on the signal was tried in a sim first:
   a hold shorter than the hit pulse's own decay does nothing, a longer one
   left the alien squashed with almost no swing.
+- 2026-10-06, the user: "cut on alien should have the same logic as beat
+  ripple and dose. but lets first extract this logic and shape it properly
+  for future reuse". The standout detector moved out of Caustics'
+  `rippleEmitter.ts` into `src/render/standout.ts`, with a `StandoutTrigger`
+  (the detector plus a shortest gap between fires) for one-event settings;
+  Dose was moved onto it unchanged. Cut is now a `StandoutTrigger` with
+  `MIN_SHOT_SEC` as its gap, instead of a rise over a fixed line. Its row is
+  "Cut threshold", worded like "Dose threshold", and the graph draws the
+  "reach to cut" line and a dot per cut. With the row Off every climb out of
+  near-silence cuts, as the line's floor did before. Two side effects: the
+  first shot can now cut before `MIN_SHOT_SEC` (the trigger starts ready),
+  and a "Cuts above" value someone had moved is read as a Cut threshold
+  (not migrated; the scene was a day old).
 
 ## Tuning notes
 
@@ -158,8 +183,10 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   sets how snappy it is and how far it overshoots. Bounce smoothness eases
   that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
   too low on fast music, the damping is the knob that matters.
-- Cut's line on Drop: any drop clears it. Wire it to Bass level with a high
-  line for regular cuts instead.
+- Cut on Drop: every drop stands out (drops are rare, so nothing else on
+  that signal teaches the floor). For regular cuts wire it to Bass hit: it
+  cuts on a standout hit once each shot has lasted `MIN_SHOT_SEC`, and
+  Cut threshold thins those out (see Measurements).
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
 
@@ -184,8 +211,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   bake page `tools/alien-bake/index.html`.
 - Working scripts: `alien/scripts/`. `shot.mjs` takes headless shots,
   `realmusic.mjs` drives a fake mic and logs the player, and `mkwav.py`
-  builds the music/hiss/music test file. `summarize.py` and `simhold.py`
-  read the logs. `meshcheck.ts` and `clipcheck.ts` run under
+  builds the music/hiss/music test file. `summarize.py`, `simhold.py` and
+  `cutsum.py` (Cut: cut times, hit peaks, the dotted line) read the logs. `meshcheck.ts` and `clipcheck.ts` run under
   `node --experimental-strip-types`, and `tile.py` makes contact sheets.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
 
@@ -197,7 +224,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   running: `FFMPEG=<ffmpeg> node tools/alien-bake.mjs --port <p>`, then
   look at a decoded frame before committing the videos.
 - Real music: `node docs/scenes/alien/scripts/realmusic.mjs <wav> out.json
-  --port <p>`. Synthetic audio always reads loud, so it can't test silence.
+  --port <p>` (add `--cut anim.lowOnset` to wire Cut to Bass hit). Synthetic
+  audio always reads loud, so it can't test silence.
 - Gotcha: `__viz.probe()` doesn't carry drive readings. Read
   `window.__alien.last` instead.
 

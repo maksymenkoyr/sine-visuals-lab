@@ -1,9 +1,10 @@
 // Reference lines a scene draws onto one of its own settings' "What it
 // receives" graph in the panel (src/ui/deviceMenu.ts's buildOutputGraph), plus
 // the reactions that setting actually produced — so the user can see *why* a
-// hit did or didn't react, not just the signal going in. Caustics' Beat ripple
-// is the first user: its salience bar and full-ring height (rippleEmitter.ts)
-// and each ring it emitted.
+// hit did or didn't react, not just the signal going in. Every setting on
+// standout.ts publishes here: the line a climb must reach (standoutLine) and
+// each reaction — a ring for Caustics' Beat ripple, a colony for Physarum 2's
+// Dose, a cut for Alien's Cut.
 //
 // A scene publishes from its own render callback; the panel reads at its own
 // refresh rate. Reactions accumulate (max) between reads so a reaction

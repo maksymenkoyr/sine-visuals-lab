@@ -1322,6 +1322,13 @@ refractory (`SEED_RISE_REFRACTORY_SEC`, now exported). The pipette is
 untouched. Not yet judged on real music; the default line is
 `RING_THRESHOLD_DEFAULT`, the ripple's own.
 
+2026-10-06: the detector moved to the shared `src/render/standout.ts`, and
+Dose now holds a `StandoutTrigger` (`createStandoutTrigger` with
+`SEED_RISE_REFRACTORY_SEC` as its gap, stepped by `stepStandoutTrigger`)
+instead of its own state and refractory counter; `standoutThreshold` and
+`standoutLine` replace the inline reads. Same behaviour; Alien's Cut fires on
+the same trigger. How to wire another setting to it is in that file's header.
+
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what

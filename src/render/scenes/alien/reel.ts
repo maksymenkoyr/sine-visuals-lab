@@ -14,12 +14,14 @@
  * level. Silence reads 0: the speed eases down and the loop holds on the
  * frame it reached.
  *
- * **Cut: a trigger, not a timer.** A loop repeats until the Cut signal rises
- * over its line — below it one tick, above it the next — and then the reel
- * cuts to another loop, picked at random among the others, unless the shot
- * on screen is younger than MIN_SHOT_SEC. Nothing else ever changes the
- * loop. Each loop keeps its own place, so cutting back finds the alien where
- * it was left. (A hysteresis band was tried before the minimum shot: it
+ * **Cut: a trigger, not a timer.** A loop repeats until the Cut signal makes
+ * a climb that stands out from its everyday ones (src/render/standout.ts, the
+ * same detector Caustics' Beat ripple and Physarum 2's Dose read), and then
+ * the reel cuts to another loop, picked at random among the others, unless
+ * the shot on screen is younger than MIN_SHOT_SEC. Nothing else ever changes
+ * the loop. Each loop keeps its own place, so cutting back finds the alien
+ * where it was left. (Before that, a cut was the signal rising over a fixed
+ * line: on a hit signal nearly every hit cleared it, and a hysteresis band
  * either cut every beat or, under a sustained bassline, never; the scene
  * record has the measurements.)
  *
@@ -36,6 +38,7 @@
  */
 import type { Vec3 } from "../dancers/rig.ts";
 import { GROUP_TUNING } from "../../bandEnergy.ts";
+import { createStandoutTrigger, stepStandoutTrigger, type StandoutTrigger } from "../../standout.ts";
 
 export interface LoopCamera {
   eye: Vec3;
@@ -76,34 +79,33 @@ export function easeSpeed(speed: number, target: number, dtSec: number): number 
   return speed + (Math.max(0, target) - speed) * k;
 }
 
-/** The shortest a shot lasts before the next rise over the line can cut. */
+/** The shortest a shot lasts before the next standout can cut. */
 export const MIN_SHOT_SEC = 2;
-/** The lowest line a cut uses, so with the line switched off a cut still
- *  needs the signal to rise out of near-silence. */
-export const CUT_LINE_FLOOR = 0.02;
 
 export interface Reel {
   /** Index into LOOPS of the loop on screen. */
   loop: number;
-  /** The Cut signal on the previous tick (NaN before the first). */
-  prevSignal: number;
-  /** Seconds the shot on screen has lasted. */
-  shotSec: number;
+  /** The Cut rule: a standout in the Cut signal, at most once per
+   *  MIN_SHOT_SEC. Its detector is what the panel's dotted line reads. */
+  cut: StandoutTrigger;
   /** Cuts so far — a running count for probes and tests. */
   cuts: number;
 }
 
 export function createReel(): Reel {
-  return { loop: 0, prevSignal: NaN, shotSec: 0, cuts: 0 };
+  return { loop: 0, cut: createStandoutTrigger(MIN_SHOT_SEC), cuts: 0 };
 }
 
 /** What one tick of the music hands the reel's cut rule. */
 export interface CutInput {
   dtSec: number;
-  /** Whether the Cut setting is on. */
+  /** Whether the Cut setting is on. Off, the rule still listens, so the
+   *  everyday climbs are already learned when it comes back on. */
   cutOn: boolean;
   cutSignal: number;
-  cutLine: number;
+  /** Cut threshold, as standout.ts's standoutThreshold reads it: the slider,
+   *  or null while its switch is Off (every climb out of near-silence cuts). */
+  cutThreshold: number | null;
 }
 
 /** Another loop than `current`, uniformly among the rest. */
@@ -115,14 +117,9 @@ export function pickOther(current: number, count: number, rand: number): number 
 
 /** Advances the cut rule one tick. Returns true on the tick it cut. */
 export function stepCut(reel: Reel, input: CutInput, rand: () => number = Math.random): boolean {
-  reel.shotSec += Math.max(0, input.dtSec);
-  const line = Math.max(CUT_LINE_FLOOR, input.cutLine);
-  // NaN on the first tick compares false: no crossing without a tick before it.
-  const rose = reel.prevSignal <= line && input.cutSignal > line;
-  reel.prevSignal = input.cutSignal;
-  if (!input.cutOn || !rose || reel.shotSec < MIN_SHOT_SEC) return false;
+  const dt = Math.max(0, input.dtSec);
+  if (!stepStandoutTrigger(reel.cut, dt, input.cutSignal, input.cutThreshold, input.cutOn)) return false;
   reel.loop = pickOther(reel.loop, LOOPS.length, rand());
-  reel.shotSec = 0;
   reel.cuts++;
   return true;
 }
