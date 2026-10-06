@@ -224,5 +224,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #374 (merged 2026-10-05): the same, rebased after #368 merged, plus the
   Play readout; then baked loops, Move, Bounce, and Cut on Drop.
 - #389 (merged 2026-10-06): Bounce smoothness.
-- 2026-10-06: Move on iPhone and iPad (videos in the page, unlock on the
+- #407 (draft, 2026-10-06): Move on iPhone and iPad (videos in the page, unlock on the
   first tap, a playhead scrub where play() is refused).
