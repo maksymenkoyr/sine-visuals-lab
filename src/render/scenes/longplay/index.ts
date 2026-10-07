@@ -33,7 +33,13 @@
 // - Flicker: the glitch layer is a timer — holds of 67–333 ms (the
 //   measured median holds between hard cuts), never on the beat — plus a
 //   strobe stretch of one flash per beat for a bar after a phrase start
-//   (Tunnel's measured ≈1-beat strobe).
+//   (Tunnel's measured ≈1-beat strobe). Each view picks which of its
+//   layers the mask may blink: a view the reference never hard-cuts
+//   (Wings, Circuit) gives it only a minor layer, since a big one blinking
+//   reads as a cut.
+// - Lift: a sustained level brightens the lines, on the views that
+//   measured one — drive default the treble level (Circuit's edges
+//   followed the high band).
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import { isProLocked, type SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
@@ -45,6 +51,9 @@ import { TUNNEL_GLSL } from "./views/tunnel.ts";
 import { REACTOR_GLSL } from "./views/reactor.ts";
 import { OCEAN_GLSL } from "./views/ocean.ts";
 import { BLOOM_GLSL } from "./views/bloom.ts";
+import { WINGS_GLSL } from "./views/wings.ts";
+import { CIRCUIT_GLSL } from "./views/circuit.ts";
+import { CHIP_GLSL } from "./views/chip.ts";
 
 const ID = "longplay";
 const NAME = "Long Play";
@@ -61,6 +70,9 @@ export const VIEWS: readonly ViewDef[] = [
   { name: "Reactor", glsl: REACTOR_GLSL },
   { name: "Ocean", glsl: OCEAN_GLSL },
   { name: "Bloom", glsl: BLOOM_GLSL, pro: true },
+  { name: "Wings", glsl: WINGS_GLSL, pro: true },
+  { name: "Circuit", glsl: CIRCUIT_GLSL, pro: true },
+  { name: "Chip", glsl: CHIP_GLSL, pro: true },
 ];
 
 /** Shortest gap between two launches — a fast hi-hat run mustn't stack a
@@ -153,6 +165,17 @@ export const LONGPLAY_SETTINGS: SceneSetting[] = [
     max: 2,
     step: 0.05,
     default: 1,
+  },
+  {
+    key: "lift",
+    label: "Lift",
+    description: "How much the sound brightens the lines, on the views that react to it (Circuit's edges)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    drive: { default: "anim.high" },
   },
   // Post
   {
