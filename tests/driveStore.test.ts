@@ -6,6 +6,8 @@ import {
   getDriveThresholdState,
   setDriveThreshold,
   setDriveThresholdOn,
+  getDriveSmoothness,
+  setDriveSmoothness,
   sanitizeDriveSetting,
   encodeDriveSetting,
   togglePatchSource,
@@ -21,7 +23,7 @@ import {
   setDriveLineStrength,
   resetDriveLineStrength,
 } from "../src/render/driveStore.ts";
-import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
+import { driveSettingFromChoice, GENERIC_SMOOTHNESS_DEFAULT, type DrivePatch } from "../src/render/drives.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
@@ -265,6 +267,22 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: true, value: 0.6 });
     resetDriveSetting(sceneId, SPARKLE);
     expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
+  });
+
+  it("a generic gate's smoothness: the old knee by default, clamped to 0..1, NaN ignored, cleared by Reset to scene default", () => {
+    const sceneId = "smoothness-1";
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(GENERIC_SMOOTHNESS_DEFAULT);
+    setDriveSmoothness(sceneId, SPARKLE, 0.6);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.6);
+    setDriveSmoothness(sceneId, SPARKLE, 5);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(1);
+    setDriveSmoothness(sceneId, SPARKLE, -1);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0);
+    setDriveSmoothness(sceneId, SPARKLE, 0.3);
+    setDriveSmoothness(sceneId, SPARKLE, NaN);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.3);
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(GENERIC_SMOOTHNESS_DEFAULT);
   });
 
   it("an empty patch survives the storage round trip", () => {

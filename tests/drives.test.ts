@@ -21,7 +21,7 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
+import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -1428,6 +1428,41 @@ describe("drives: the generic engine gate — every drive setting without its ow
     setDriveThreshold(sceneId, spec, 1);
     const lineAt1 = tick(0.1).gateLine("k")!;
     expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
+  });
+
+  it("smoothness: a reading just under the line — 0 is a hard cut, the default is the old knee, high is a wider fade", () => {
+    // Settle on a flat reading (floor and peak equal, so the spread is nothing),
+    // then read just under it. The spread stays under GATE_KNEE_SPREAD_MIN's
+    // floor, so the knee is applyGenericGate's minimum width, read from the same
+    // smoothness-scaled formula it uses.
+    function readBelowLine(sceneId: string, smoothness?: number) {
+      const spec = energySetting();
+      setDriveThresholdOn(sceneId, spec, true);
+      if (smoothness !== undefined) setDriveSmoothness(sceneId, spec, smoothness);
+      const clock = createAnimClock();
+      const engine = createDriveEngine();
+      const tick = (e: number) => {
+        const anim = clock.advance(DT, frame());
+        engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+        return engine.forScene(sceneId, [spec], anim);
+      };
+      for (let i = 0; i < 120; i++) tick(0.1);
+      const drives = tick(0.099);
+      return { drives, line: drives.gateLine("k")! };
+    }
+
+    const hard = readBelowLine("gate-smoothness-hard", 0);
+    expect(hard.line).toBeGreaterThan(0.099);
+    expect(hard.drives.value("k", -1)).toBe(0);
+
+    const dflt = readBelowLine("gate-smoothness-default");
+    const knee = 0.04 * 0.1;
+    expect(dflt.drives.value("k", -1)).toBeCloseTo(0.099 * smoothstep(dflt.line - knee, dflt.line + knee, 0.099), 6);
+    expect(dflt.drives.value("k", -1)).toBeGreaterThan(0);
+
+    const wide = readBelowLine("gate-smoothness-wide", 1);
+    expect(wide.drives.value("k", -1)).toBeGreaterThan(0);
+    expect(wide.drives.value("k", -1)).toBeGreaterThan(dflt.drives.value("k", -1));
   });
 
   it("on: fired() blocks an edge whose own combined value falls under the line", () => {
