@@ -554,6 +554,7 @@ export interface DeviceMenuDeps {
   onDeleteLook: (sceneId: string, name: string) => void;
   decodeLook: (code: string) => SceneLook | null;
   buildShareLink: (look: SceneLook) => string;
+  buildShareCode: (look: SceneLook) => string;
   hasLookUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
   /** The Set card's pads and Autopilot — see src/ui/setCard.ts for what each
@@ -6064,6 +6065,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onDeleteLook: deps.onDeleteLook,
     decodeLook: deps.decodeLook,
     buildShareLink: deps.buildShareLink,
+    buildShareCode: deps.buildShareCode,
     hasUndo: deps.hasLookUndo,
     onUndoLook: (sceneId) => {
       deps.onUndoLook(sceneId);

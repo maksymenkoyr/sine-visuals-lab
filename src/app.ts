@@ -1897,6 +1897,7 @@ function wireDeviceMenu(): void {
     decodeLook,
     buildShareLink: (look) =>
       `${location.origin}${location.pathname}?look=${encodeLook(look)}#/v/${encodeURIComponent(look.sceneId)}`,
+    buildShareCode: encodeLook,
     hasLookUndo,
     onUndoLook: (sceneId) => {
       const look = takeUndo(sceneId);

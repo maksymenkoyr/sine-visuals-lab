@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { deflateSync, inflateSync, strFromU8 } from "fflate";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
 import { isAutoEnabled, setAutoEnabled } from "../src/render/autoTune.ts";
@@ -36,6 +37,12 @@ const FLASH: SceneSetting = {
 const SPECS = [FOCUS, BREATHE];
 const SPECS_WITH_DRIVE = [FOCUS, BREATHE, FLASH];
 
+/** The JSON inside a share code, plain or deflated (`Z`-prefixed). */
+const wireOf = (code: string) => {
+  const bytes = Uint8Array.from(atob(code.replace(/^Z/, "").replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  return JSON.parse(strFromU8(code.startsWith("Z") ? inflateSync(bytes) : bytes));
+};
+
 describe("encodeLook / decodeLook", () => {
   it("round-trips a look, including a non-ASCII name", () => {
     const look: SceneLook = { name: "Café Drift ✨", sceneId: "mesh", manual: { focus: 0.72, breathe: 0.1 } };
@@ -46,6 +53,30 @@ describe("encodeLook / decodeLook", () => {
   it("round-trips an empty manual set", () => {
     const look: SceneLook = { name: "Bare", sceneId: "mesh", manual: {} };
     expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  const bigLook = (): SceneLook => {
+    const manual: Record<string, number> = {};
+    for (let i = 0; i < 30; i++) manual[`setting${i}Amount`] = Math.round(i * 37.3) / 100;
+    return { name: "Big", sceneId: "chladni", manual };
+  };
+
+  it("deflates a long look into a shorter `Z` code that round-trips", () => {
+    const look = bigLook();
+    const code = encodeLook(look);
+    expect(code.startsWith("Z")).toBe(true);
+    expect(code.length).toBeLessThan(btoa(JSON.stringify({ v: 1, n: look.name, s: look.sceneId, m: look.manual })).length);
+    expect(decodeLook(code)).toEqual(look);
+  });
+
+  it("keeps the plain code when deflating wouldn't be shorter", () => {
+    const look: SceneLook = { name: "Bare", sceneId: "mesh", manual: {} };
+    expect(encodeLook(look).startsWith("ey")).toBe(true);
+  });
+
+  it("returns null for a deflated code that unpacks past the cap", () => {
+    const bomb = "Z" + btoa(String.fromCharCode(...deflateSync(new Uint8Array(5e6)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(decodeLook(bomb)).toBeNull();
   });
 
   it("returns null for garbage input", () => {
@@ -96,7 +127,7 @@ describe("encodeLook / decodeLook", () => {
   it("a one-source, weight-1, Graded patch encodes on the wire as the bare DriveChoice (old-app compatible)", () => {
     const look: SceneLook = { name: "D", sceneId: "caustics", manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } };
     const code = encodeLook(look);
-    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    const wire = wireOf(code);
     expect(wire.d).toEqual({ flash: "anim.lowOnset" });
   });
 
@@ -110,7 +141,7 @@ describe("encodeLook / decodeLook", () => {
     };
     const look: SceneLook = { name: "Gated", sceneId: "caustics", manual: {}, drives: { flash: patch } };
     const code = encodeLook(look);
-    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    const wire = wireOf(code);
     expect(wire.d.flash).toEqual({
       m: "gate",
       s: [
@@ -132,7 +163,7 @@ describe("encodeLook / decodeLook", () => {
     };
     const look: SceneLook = { name: "Gated when", sceneId: "caustics", manual: {}, drives: { flash: patch } };
     const code = encodeLook(look);
-    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    const wire = wireOf(code);
     expect(wire.d.flash.s[1].g).toBe(1);
     expect(wire.d.flash.s[2]).toMatchObject({ g: 1, o: 1 });
     expect(decodeLook(code)).toEqual(look);
@@ -141,7 +172,7 @@ describe("encodeLook / decodeLook", () => {
   it("an old look with no `d` at all still round-trips (the field is simply absent, not empty)", () => {
     const look: SceneLook = { name: "Old", sceneId: "mesh", manual: { focus: 0.3 } };
     const code = encodeLook(look);
-    expect(JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/"))).d).toBeUndefined();
+    expect(wireOf(code).d).toBeUndefined();
     expect(decodeLook(code)).toEqual(look);
   });
 
