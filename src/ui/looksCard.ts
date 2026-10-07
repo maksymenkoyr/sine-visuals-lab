@@ -38,6 +38,8 @@ export interface LooksCardDeps {
   /** The full share URL for a Look — app.ts owns the query-before-hash shape
    *  the boot()-time decode side expects. */
   buildShareLink: (look: SceneLook) => string;
+  /** The code alone — what the card's "Paste a look code" field takes. */
+  buildShareCode: (look: SceneLook) => string;
   hasUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
 }
@@ -217,31 +219,8 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
       });
       nameBtn.addEventListener("dblclick", () => startRename(sceneId, look, nameBtn));
 
-      const copyBtn = document.createElement("button");
-      copyBtn.textContent = "⧉";
-      copyBtn.title = "Copy a share link for this look";
-      copyBtn.style.cssText = iconBtnStyle;
-      copyBtn.addEventListener("click", async () => {
-        const link = deps.buildShareLink(look);
-        try {
-          await navigator.clipboard.writeText(link);
-          showFeedback(`Copied a link for "${look.name}".`);
-        } catch {
-          // Clipboard access can be unavailable (permissions, insecure
-          // context) — fall back to a selectable field instead of failing
-          // silently.
-          const fallback = document.createElement("input");
-          fallback.type = "text";
-          fallback.readOnly = true;
-          fallback.value = link;
-          fallback.style.cssText = inlineInputStyle;
-          feedback.textContent = "";
-          feedback.style.display = "";
-          feedback.appendChild(fallback);
-          fallback.focus();
-          fallback.select();
-        }
-      });
+      const copyBtn = copyButton("⧉", "Copy a share link for this look", "a link", look, deps.buildShareLink);
+      const codeBtn = copyButton("{}", "Copy only the code for this look", "the code", look, deps.buildShareCode);
 
       const deleteBtn = document.createElement("button");
       deleteBtn.textContent = "✕";
@@ -252,9 +231,40 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
         refresh();
       });
 
-      row.append(createLookIcon(look.name), nameBtn, copyBtn, deleteBtn);
+      row.append(createLookIcon(look.name), nameBtn, copyBtn, codeBtn, deleteBtn);
       list.appendChild(row);
     }
+  }
+
+  /** An icon button that copies `build(look)` — the share link or the bare
+   *  code — and says `what` it copied. */
+  function copyButton(glyph: string, title: string, what: string, look: SceneLook, build: (look: SceneLook) => string): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = glyph;
+    btn.title = title;
+    btn.style.cssText = iconBtnStyle;
+    btn.addEventListener("click", async () => {
+      const text = build(look);
+      try {
+        await navigator.clipboard.writeText(text);
+        showFeedback(`Copied ${what} for "${look.name}".`);
+      } catch {
+        // Clipboard access can be unavailable (permissions, insecure
+        // context) — fall back to a selectable field instead of failing
+        // silently.
+        const fallback = document.createElement("input");
+        fallback.type = "text";
+        fallback.readOnly = true;
+        fallback.value = text;
+        fallback.style.cssText = inlineInputStyle;
+        feedback.textContent = "";
+        feedback.style.display = "";
+        feedback.appendChild(fallback);
+        fallback.focus();
+        fallback.select();
+      }
+    });
+    return btn;
   }
 
   function refresh(): void {
