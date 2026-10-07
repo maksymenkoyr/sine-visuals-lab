@@ -15,7 +15,7 @@ that still have an unticked phase, each with its next phase, and asks.
 
 Paid-scene work never goes in this repo: its plan lives at
 `src/render/scenes/private/plans/<topic>.md`, and committing and pushing it
-is the user's.
+is the user's, and it gets no GitHub issue (issues are public).
 
 ## Write (end of a session)
 
@@ -30,10 +30,16 @@ is the user's.
    - Each phase is one build session and one PR, ordered so every phase
      leaves `main` working. Lead with what the user can see when it's done.
    - Every artifact URL on its own line, nothing after it.
-3. **Ship the plan on its own** with `/ship`, a docs-only PR. Then tell the
-   user to merge it and start each build session with `/handoff <topic>`. A
-   build branch cut before the plan reaches `main` would stack on an
-   unmerged PR.
+3. **Open or update the plan's tracking issue.** One issue per plan, found
+   by the plan's `Issue:` line. If the plan has none, `gh issue create`
+   with the plan's title, the opening paragraph, one `- [ ]` line per phase
+   (its "what the user can see" line), and the plan's path; then put the
+   number on the plan's `Issue: #<n>` line. If it has one, edit that issue
+   to match the phases and leave its comments alone.
+4. **Ship the plan on its own** with `/ship`, a docs-only PR that says
+   `Refs #<n>`. Then tell the user to merge it and start each build session
+   with `/handoff <topic>`. A build branch cut before the plan reaches
+   `main` would stack on an unmerged PR.
 
 ## Pick up (start of a session)
 
@@ -43,7 +49,8 @@ is the user's.
    PRs name their phase in the body (`Hand-off: plans/<topic>.md, phase
    <N>`), so `gh pr list --search "plans/<topic>.md in:body"` shows which
    phases are in flight.
-3. **Read before building:** the phase's "Read first", every artifact the
+3. **Read before building:** the plan's issue (`gh issue view`) for anything
+   added since, then the phase's "Read first", every artifact the
    plan links (Artifact `read`), and "Learned while building". Then do
    CLAUDE.md's `origin/main` and open-PR check for the phase itself.
 4. **Say which phase you're building, in one line.** If an open question
@@ -54,7 +61,9 @@ is the user's.
    `- [x] **<N>. …** — PR #<n>` (push that line once `/ship` has given the
    number), resolve the open questions it answered, and add to "Learned
    while building" whatever the next phase needs to know.
-7. **Finish with `/ship`**, with the `Hand-off:` line in the PR body.
+7. **Finish with `/ship`**, with the `Hand-off:` line in the PR body and
+   the plan's issue beside it: `Refs #<n>`, or `Closes #<n>` on the last
+   phase. Once the PR is open, tick the phase's line in the issue body.
 
 ## The plan's format
 
@@ -63,7 +72,7 @@ is the user's.
 
 <A short paragraph for the user: what this builds and why.>
 
-Researched <YYYY-MM-DD>.
+Researched <YYYY-MM-DD>. Issue: #<n>
 
 ## Decisions
 
