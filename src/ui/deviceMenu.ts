@@ -61,6 +61,7 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
+  GENERIC_SMOOTHNESS_DEFAULT,
   GENERIC_THRESHOLD_DEFAULT,
   sameDriveSetting,
   smoothstep,
@@ -627,6 +628,10 @@ export interface DeviceMenuDeps {
   getDriveThresholdState: (sceneId: string, spec: SceneSetting) => DriveThresholdState;
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
+  /** The generic gate's Smoothness (its knee width, 0..1) — driveStore.ts's
+   *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
+  getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
+  onSetDriveSmoothness: (sceneId: string, spec: SceneSetting, value: number) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
@@ -3126,6 +3131,57 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const GENERIC_THRESHOLD_HINT =
     "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
 
+  const GENERIC_SMOOTHNESS_HINT =
+    "How gradually the gate opens around the dotted line. Left: a sharp edge. Right: a slow fade.";
+
+  /** The generic gate's Smoothness row — a 0..1 slider for how wide the
+   *  knee around the dotted line is (driveStore.ts's getDriveSmoothness).
+   *  Same live-write, no-rebuild rule as buildThresholdRow; that row dims
+   *  it with setEnabled while its threshold is Off. */
+  function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): { el: HTMLElement; setEnabled: (on: boolean) => void } {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px;`;
+    setHint(wrap, GENERIC_SMOOTHNESS_HINT);
+
+    const name = document.createElement("span");
+    name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    name.textContent = "Smoothness";
+    const rng = document.createElement("input");
+    rng.type = "range";
+    rng.className = "vc-slider";
+    rng.min = "0";
+    rng.max = "1";
+    rng.step = "0.05";
+    rng.setAttribute("aria-label", "Smoothness");
+    rng.style.cssText = driveWeightRangeStyle;
+    const out = document.createElement("output");
+    out.style.cssText = driveWeightOutStyle;
+
+    const showValue = (v: number) => {
+      rng.value = String(v);
+      rng.style.setProperty("--vc-fill", `${v * 100}%`);
+      out.textContent = v.toFixed(2);
+    };
+    showValue(deps.getDriveSmoothness(sceneId, spec));
+
+    rng.addEventListener("input", () => {
+      const v = Number(rng.value);
+      showValue(v);
+      deps.onSetDriveSmoothness(sceneId, spec, v);
+      onLiveEdit();
+    });
+
+    wrap.append(name, rng, out);
+    return {
+      el: wrap,
+      setEnabled: (on: boolean) => {
+        rng.disabled = !on;
+        rng.style.opacity = on ? "1" : "0.4";
+        out.style.opacity = on ? "1" : "0.4";
+      },
+    };
+  }
+
   /** Every drive setting's own threshold row — On/Off + a labelled 0..1
    *  slider, right under its graph (or where the graph would be with
    *  nothing plugged in yet). Scene-handled (SceneSetting.drive.threshold
@@ -3133,9 +3189,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  and starts on; every other drive setting uses the generic label/hint
    *  and starts off, gated by drives.ts's own engine (that file's header's
    *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
-   *  setDriveThreshold/setDriveThresholdOn either way. Same live-write,
-   *  no-rebuild rule as buildWeightSlider below; the On/Off buttons share
-   *  buildHeightSeg's own mini-segment styling. */
+   *  setDriveThreshold/setDriveThresholdOn either way. A generic gate also
+   *  gets a Smoothness row under the threshold line (buildSmoothnessRow),
+   *  dimmed while the threshold is Off. Same live-write, no-rebuild rule
+   *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
+   *  own mini-segment styling. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
     const label = declared?.label ?? "Threshold";
@@ -3171,6 +3229,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
 
+    const smooth = declared === undefined ? buildSmoothnessRow(sceneId, spec, onLiveEdit) : undefined;
+
     const showValue = (v: number) => {
       rng.value = String(v);
       rng.style.setProperty("--vc-fill", `${v * 100}%`);
@@ -3184,6 +3244,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rng.disabled = !on;
       rng.style.opacity = on ? "1" : "0.4";
       out.style.opacity = on ? "1" : "0.4";
+      smooth?.setEnabled(on);
     };
 
     const state = deps.getDriveThresholdState(sceneId, spec);
@@ -3210,7 +3271,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
 
     wrap.append(seg, name, rng, out);
-    return wrap;
+    if (!smooth) return wrap;
+    const column = document.createElement("div");
+    column.style.cssText = `display: flex; flex-direction: column;`;
+    column.append(wrap, smooth.el);
+    return column;
   }
 
   function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
@@ -3760,13 +3825,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function refreshResetVisibility(): void {
       // A moved threshold counts too — on/off or value, scene-handled or
       // generic (this row's own default is "on" for the former, "off" for
-      // the latter, mirroring driveStore.ts's getDriveThresholdState).
+      // the latter, mirroring driveStore.ts's getDriveThresholdState). A
+      // generic gate's moved Smoothness counts as well.
       const declared = spec.drive?.threshold;
       const thresholdState = spec.drive ? deps.getDriveThresholdState(sceneId, spec) : undefined;
       const thresholdMoved =
         !!thresholdState &&
         (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
-      resetBtn.hidden = !thresholdMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+      const smoothnessMoved =
+        !!spec.drive && declared === undefined && deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT;
+      resetBtn.hidden = !thresholdMoved && !smoothnessMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
