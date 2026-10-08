@@ -4,6 +4,7 @@ import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STR
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
+import type { HitReadout } from "./standout.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
@@ -90,6 +91,8 @@ interface DriveEntry {
   thresholdOn?: boolean;
   /** The generic engine gate's knee width, 0..1 — see getDriveSmoothness. */
   smoothness?: number;
+  /** A hit driver's Reaction row, Flat or Sized — see getDriveReadout. */
+  readout?: HitReadout;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
@@ -420,6 +423,7 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   delete entry.threshold; // "Reset to scene default" covers the threshold row too
   delete entry.thresholdOn;
   delete entry.smoothness;
+  delete entry.readout;
   persist();
 }
 
@@ -577,5 +581,25 @@ export function getDriveSmoothness(sceneId: string, spec: SceneSetting): number 
 export function setDriveSmoothness(sceneId: string, spec: SceneSetting, value: number): void {
   if (!Number.isFinite(value)) return;
   entryFor(settingScope(sceneId, spec.key), spec.key).smoothness = Math.min(1, Math.max(0, value));
+  persist();
+}
+
+/** A hit driver's read-out (SceneSetting.drive.hit, standout.ts's
+ *  HitReadout): what the user picked in its Reaction row, else the
+ *  declaration's own `readout`, else Flat. A `flatOnly` setting is always
+ *  Flat, whatever is stored. Undefined for a setting that isn't a hit
+ *  driver. */
+export function getDriveReadout(sceneId: string, spec: SceneSetting): HitReadout | undefined {
+  const hit = spec.drive?.hit;
+  if (!hit) return undefined;
+  if (hit.flatOnly !== undefined) return "flat";
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.readout;
+  if (stored === "flat" || stored === "sized") return stored;
+  return hit.readout ?? "flat";
+}
+
+export function setDriveReadout(sceneId: string, spec: SceneSetting, readout: HitReadout): void {
+  if (readout !== "flat" && readout !== "sized") return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).readout = readout;
   persist();
 }

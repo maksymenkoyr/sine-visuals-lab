@@ -955,7 +955,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "toss" } },
   },
   {
     key: "zoomOut",
@@ -1107,7 +1107,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0,
     // The jack's edge starts a wave (advanceWave); the slider is how much of the dye shows.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { flatOnly: "A wave either runs or it doesn't, so it can't be sized.", reactionLabel: "wave" } },
   },
   {
     key: "glitter",
@@ -2357,7 +2357,7 @@ function createChladniScene(): Scene {
       // toss really starts (advanceToss), so a seeded bench run that never
       // tosses stays the same as before the toss existed.
       const tossFired = drives.fired("toss", anim.dropOnset);
-      const tossStep = advanceToss(toss, frame.time, prevFrameTime, tossFired, resolveSceneSetting(ID, settingFor("toss")), () => Math.random() * 100);
+      const tossStep = advanceToss(toss, frame.time, prevFrameTime, tossFired, resolveSceneSetting(ID, settingFor("toss")) * drives.hitSize("toss"), () => Math.random() * 100);
       toss = tossStep.toss;
       const setToss = (prog: GLProgram): void => {
         prog.setF("uTossAge", tossStep.age);

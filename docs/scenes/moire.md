@@ -123,6 +123,9 @@ worked around in this scene.
   `createFullscreenScene`'s new `onInit` option restarts it on every mount.
   Only the intro clock resets; the flicker, blackout, curtain and wander
   state keep their closure lifetime, so the tuned behaviour is unchanged.
+- 2026-10-08 — Blackout chance became a hit driver (the Reaction row;
+  drives.ts's header, "Hit drivers"). It is flat-only: a flip either happens
+  or it doesn't, so it can't be sized.
 
 ## Tuning notes
 

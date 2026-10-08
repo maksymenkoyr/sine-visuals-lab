@@ -187,6 +187,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Checked headlessly with play() stubbed to refuse until a click (Chromium
   and WebKit): the playhead advanced 0.86 s per second at speed 0.85, and
   after a click play() took over. Not yet seen on a real iPad.
+- 2026-10-08 — Cut gets a Reaction row under its graph (`drive.hit`, with
+  `ownDetector`), flat-only: a cut either happens or it doesn't, so Sized is
+  greyed out with that hint. The reel is unchanged.
 
 ## Tuning notes
 

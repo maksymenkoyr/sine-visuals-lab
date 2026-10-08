@@ -58,6 +58,10 @@ follows). No video or visual reference was studied for this scene.
   (`VIVID_SAT_BOOST`, `VIVID_SEPARATION`). 0 is the old look; the default is
   above 0, so the shipped look is more saturated than before. Checked on the
   synthetic feed only.
+- 2026-10-08 — Beat seeding became a hit driver (the Reaction row, Flat or
+  Sized; drives.ts's header, "Hit drivers"). Sized scales the share of agents
+  relocated (`uSeedFresh` multiplies `uSeed` in the sim shader) by how far the
+  hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

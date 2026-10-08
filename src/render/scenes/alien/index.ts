@@ -128,6 +128,8 @@ const SETTINGS: SceneSetting[] = [
     default: 1,
     drive: {
       default: "anim.dropOnset",
+      // A cut has no size, so its Reaction row stays on Flat.
+      hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
       // Scene-handled: the same standout as Physarum 2's Dose threshold
       // (standout.ts's header has how one is wired).
       threshold: {

@@ -8,8 +8,10 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import type { HitLane } from "../audio/hitStrength.ts";
-import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveSmoothness, getDriveThresholdState } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveThresholdState } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
+import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
+import { publishSettingMarks } from "./settingMarks.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -238,6 +240,28 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * or the generic gate simply off. Because a scene-handled setting is
  * skipped by the generic gate outright, and a generic setting has no scene
  * of its own reading `drives.threshold`, a setting is never gated twice.
+ * A hit driver (next paragraph) opts out of the generic gate too.
+ *
+ * **Hit drivers.** A setting that does one thing per hit (a burst, a jump, a
+ * reset) declares `SceneSetting.drive.hit`, reads `fired()`, and scales its
+ * reaction by `hitSize(key)`. Its threshold row is the standout detector
+ * (src/render/standout.ts) instead of the generic gate, so a hit counts the
+ * same way it does for Beat ripple, Dose and Cut. `fired()` runs that
+ * detector itself, once per AnimFrame, on the setting's reading (or, on its
+ * built-in reaction, on the `sceneSignal` the scene passes), and draws its
+ * reach line and a dot per reaction on the setting's graph through
+ * settingMarks.ts. The Reaction row picks the read-out (driveStore.ts's
+ * getDriveReadout). With the threshold On, Flat fires once per climb that
+ * earns half a standout, at size 1, and Sized once per climb that clears the
+ * line, at the size it earned. With the threshold Off, every edge fires
+ * exactly as before: at size 1 (Flat) or at its own climb (Sized). So a hit
+ * driver nobody has touched (Off, Flat) reads exactly what it did before hit
+ * drivers existed. A `flatOnly` setting always reads Flat. A built-in
+ * reaction whose scene passes no `sceneSignal` fires on the scene's own edge
+ * at size 1, as before. A setting with `hit.ownDetector` (Beat ripple, Dose,
+ * Cut) runs standout.ts itself and only reads `readout(key)`. The detector
+ * learns from every frame it sees, so a scene calls `fired()` for a hit
+ * driver every frame, never behind a check on its own amount.
  *
  * **Advancing.** Grid pulses, line peak-holds and Fixed/Loud height
  * envelopes are per-tick state that has to see every rAF tick, not just the
@@ -392,8 +416,21 @@ export interface SceneDrives {
    *  Schmitt trigger's own fire mark for a level/line source only (ignored
    *  by a hit-kind source's real edge) — defaults to
    *  `VALUE_TRIGGER_UPPER_DEFAULT` (valueTrigger.ts) when omitted, or a
-   *  scene can pass its own user-facing threshold setting through here. */
-  fired(key: string, sceneDefaultFired: boolean, upper?: number): boolean;
+   *  scene can pass its own user-facing threshold setting through here.
+   *  For a hit driver with its threshold On, the standout detector decides
+   *  instead of the edges (this file's header, "Hit drivers"). */
+  fired(key: string, sceneDefaultFired: boolean, upper?: number, sceneSignal?: number): boolean;
+  /** For a hit driver (this file's header, "Hit drivers"): how big the
+   *  reaction to the last hit `fired()` reported should be, 0..1 — 1 while
+   *  it reads Flat, the hit's size while it reads Sized. Holds until the
+   *  next hit. 1 for any other setting. `sceneSignal` on `fired()` is what
+   *  a hit driver's built-in reaction runs the detector on. */
+  hitSize(key: string): number;
+  /** A hit driver's read-out (driveStore.ts's getDriveReadout), for a scene
+   *  that runs standout.ts itself (`hit.ownDetector`). Undefined for a
+   *  setting that isn't a hit driver, or with no engine at all
+   *  (PASSTHROUGH_DRIVES), where the caller uses its own default. */
+  readout(key: string): HitReadout | undefined;
   /** Per-band excess behind this setting's line source (bandLine.ts's
    *  BandLineDrive.excess), for the panel's overlay — null unless the
    *  current patch has a source on Frequencies. */
@@ -465,6 +502,8 @@ export interface SceneDrives {
 export const PASSTHROUGH_DRIVES: SceneDrives = {
   value: (_key, sceneDefault, _rest) => sceneDefault,
   fired: (_key, sceneDefaultFired) => sceneDefaultFired,
+  hitSize: () => 1,
+  readout: () => undefined,
   excess: () => null,
   uniformPair: () => ({ drive: 0, custom: 0 }),
   sourceValues: () => null,
@@ -518,6 +557,25 @@ export const GENERIC_THRESHOLD_DEFAULT = 0.25;
  *  position of the Smoothness slider, and the knee every generic setting has
  *  always had. A scene-handled threshold never reads it. */
 export const GENERIC_SMOOTHNESS_DEFAULT = 0.1;
+
+/** The longest step a hit driver's standout detector takes between two
+ *  fired() calls — a stalled tab shouldn't read as one long decay. The same
+ *  clamp Physarum 2's Dose puts on its own detector's step. */
+const HIT_DT_MAX_SEC = 0.05;
+
+/** Whether the engine runs the standout detector for this setting (this
+ *  file's header, "Hit drivers"): a declared hit driver whose scene doesn't
+ *  run its own and that has no scene-handled threshold. */
+export function isEngineHitDriver(spec: SceneSetting | undefined): boolean {
+  const hit = spec?.drive?.hit;
+  return !!hit && !hit.ownDetector && spec!.drive!.threshold === undefined;
+}
+
+/** Whether the generic engine gate applies to this setting at all: not for a
+ *  scene-handled threshold, and not for an engine-run hit driver. */
+function usesGenericGate(spec: SceneSetting): boolean {
+  return spec.drive !== undefined && spec.drive.threshold === undefined && !isEngineHitDriver(spec);
+}
 // The generic gate tracker's own time constants (accumulate() below) — a
 // floor that chases a *lower* resting level quickly (so a quiet moment reads
 // as quiet almost at once) but a *higher* one slowly (so one loud passage
@@ -969,6 +1027,22 @@ function createSourceState(): SourceState {
  *  `line`/`floor`/`peak` back, never advances them itself, same split as
  *  `SourceState` above. Keyed per setting, not per source — there's one gate
  *  on the setting's own output, not one per source feeding it. */
+/** An engine-run hit driver's own standout detector (this file's header,
+ *  "Hit drivers"). fired() advances it once per AnimFrame — a scene may ask
+ *  more than once a frame, and gets the same answer. */
+interface HitDetector {
+  standout: StandoutState;
+  /** The AnimFrame the detector last advanced on, and what fired() said. */
+  anim: AnimFrame | null;
+  fired: boolean;
+  /** The last hit's size — what hitSize() reports until the next hit. */
+  size: number;
+}
+
+function createHitDetector(): HitDetector {
+  return { standout: createStandoutState(), anim: null, fired: false, size: 1 };
+}
+
 interface GateTrackerState {
   init: boolean;
   floor: number;
@@ -1152,6 +1226,9 @@ export function createDriveEngine(): DriveEngine {
   // Advanced every tick even at 1×, so turning the dial starts from a warm
   // `normal`/`usual` instead of the reading of that moment.
   const expansionTrackers = new Map<string, ExpansionTracker>();
+  // One standout detector per engine-run hit driver (this file's header,
+  // "Hit drivers"), advanced by fired() once per AnimFrame.
+  const hitDetectors = new Map<string, HitDetector>();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -1289,7 +1366,7 @@ export function createDriveEngine(): DriveEngine {
         // its own scene-handled threshold, and only once it's actually
         // switched on — an untouched setting costs nothing extra here. It
         // tracks the expanded reading, the one the scene gets.
-        if (spec.drive.threshold === undefined) {
+        if (usesGenericGate(spec)) {
           const thresholdState = getDriveThresholdState(sceneId, spec);
           if (thresholdState.on) {
             const v = expandReading(raw, ex, expansion, shape);
@@ -1331,7 +1408,7 @@ export function createDriveEngine(): DriveEngine {
       // gated, rather than manufacturing a fresh tracker just to answer this.
       function genericGate(key: string): GateTrackerState | undefined {
         const spec = specByKey.get(key);
-        if (!spec?.drive || spec.drive.threshold !== undefined) return undefined;
+        if (!spec || !usesGenericGate(spec)) return undefined;
         if (!getDriveThresholdState(sceneId, spec).on) return undefined;
         return gateTrackers.get(gateTrackerKey(sceneId, key));
       }
@@ -1401,7 +1478,7 @@ export function createDriveEngine(): DriveEngine {
       // yes/no with no level to compare.
       function gateBuiltIn(key: string, v: number): number {
         const spec = specByKey.get(key);
-        if (!spec?.drive || spec.drive.threshold !== undefined) return v;
+        if (!spec || !usesGenericGate(spec)) return v;
         const thresholdState = getDriveThresholdState(sceneId, spec);
         if (!thresholdState.on) return v;
         const k = gateTrackerKey(sceneId, key);
@@ -1412,6 +1489,87 @@ export function createDriveEngine(): DriveEngine {
         return applyGenericGate(key, v);
       }
 
+      // fired()'s edge rule for a patch, before any threshold: for `add`/
+      // `max` the OR of every non-muted source's own edge; for `gate`, the
+      // OR of every non-muted *plays* source's edge AND every condition open
+      // (the fired() doc above).
+      function patchEdge(key: string, setting: DrivePatch, upper: number): boolean {
+        let ok: boolean;
+        if (setting.mix === "gate") {
+          let anyPlays = false;
+          let open = 1;
+          let anyCondition = false;
+          for (let i = 0; i < setting.sources.length; i++) {
+            const src = setting.sources[i]!;
+            if (src.off) continue;
+            if (src.when) {
+              anyCondition = true;
+              const conditionValue = clampWeight(src.weight) * sourceRaw(key, src);
+              open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, conditionValue);
+              // A condition's own edge, if it has one, is never consumed.
+            } else if (sourceEdge(key, src, upper)) {
+              anyPlays = true;
+            }
+          }
+          const gateOpen = !anyCondition || open > 0.5;
+          ok = anyPlays && gateOpen;
+        } else {
+          ok = false;
+          for (const src of setting.sources) {
+            if (src.off) continue;
+            if (sourceEdge(key, src, upper)) ok = true;
+          }
+        }
+        return ok;
+      }
+
+      // An engine-run hit driver's fired() (this file's header, "Hit
+      // drivers"): `edge` is what fired() would have said before hit drivers
+      // existed, `signal` what the standout detector reads (undefined for a
+      // built-in reaction whose scene passes none — then the edge decides,
+      // at size 1, as before).
+      function hitFired(spec: SceneSetting, edge: boolean, signal: number | undefined): boolean {
+        const k = gateTrackerKey(sceneId, spec.key);
+        let det = hitDetectors.get(k);
+        if (!det) {
+          det = createHitDetector();
+          hitDetectors.set(k, det);
+        }
+        if (det.anim === anim) return det.fired;
+        det.anim = anim;
+        if (signal === undefined) {
+          det.fired = edge;
+          if (edge) det.size = 1;
+          return edge;
+        }
+        // A scene's render frame carries the time since its last render
+        // (renderLatch.ts), which is this detector's step.
+        const dt = Math.min(HIT_DT_MAX_SEC, Math.max(0, anim.dtSec));
+        const thresholdState = getDriveThresholdState(sceneId, spec);
+        const sized = getDriveReadout(sceneId, spec) === "sized";
+        const st = det.standout;
+        let size: number;
+        if (!thresholdState.on) {
+          // Off: the edges decide, exactly as before; the detector still
+          // learns, and a Sized hit is as big as its own climb.
+          advanceStandoutAmount(st, dt, signal, null);
+          size = !edge ? 0 : !sized ? 1 : st.climbing ? st.earnedThisClimb : 0;
+        } else if (sized) {
+          size = advanceStandoutSized(st, dt, signal, thresholdState.value);
+        } else {
+          size = advanceStandout(st, dt, signal, thresholdState.value) ? 1 : 0;
+        }
+        det.fired = size > 0;
+        if (det.fired) det.size = size;
+        publishSettingMarks(
+          sceneId,
+          spec.key,
+          { lines: standoutLine(st, "reach to react"), reactionLabel: spec.drive!.hit!.reactionLabel ?? "reaction" },
+          size,
+        );
+        return det.fired;
+      }
+
       return {
         value(key, sceneDefault, rest = 0) {
           const { setting, gain } = resolve(key);
@@ -1420,39 +1578,29 @@ export function createDriveEngine(): DriveEngine {
           return applyGenericGate(key, reading(key, setting, gain));
         },
 
-        fired(key, sceneDefaultFired, upper = VALUE_TRIGGER_UPPER_DEFAULT) {
+        fired(key, sceneDefaultFired, upper = VALUE_TRIGGER_UPPER_DEFAULT, sceneSignal) {
           const { setting, gain } = resolve(key);
-          if (setting === "scene") return sceneDefaultFired;
-          let ok: boolean;
-          if (setting.mix === "gate") {
-            let anyPlays = false;
-            let open = 1;
-            let anyCondition = false;
-            for (let i = 0; i < setting.sources.length; i++) {
-              const src = setting.sources[i]!;
-              if (src.off) continue;
-              if (src.when) {
-                anyCondition = true;
-                const conditionValue = clampWeight(src.weight) * sourceRaw(key, src);
-                open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, conditionValue);
-                // A condition's own edge, if it has one, is never consumed.
-              } else if (sourceEdge(key, src, upper)) {
-                anyPlays = true;
-              }
-            }
-            const gateOpen = !anyCondition || open > 0.5;
-            ok = anyPlays && gateOpen;
-          } else {
-            ok = false;
-            for (const src of setting.sources) {
-              if (src.off) continue;
-              if (sourceEdge(key, src, upper)) ok = true;
-            }
+          const spec = specByKey.get(key);
+          if (isEngineHitDriver(spec)) {
+            const edge = setting === "scene" ? sceneDefaultFired : patchEdge(key, setting, upper);
+            const signal = setting === "scene" ? sceneSignal : hasLiveSource(setting) ? reading(key, setting, gain) : 0;
+            return hitFired(spec!, edge, signal);
           }
+          if (setting === "scene") return sceneDefaultFired;
           // The generic gate's own hard cut, on top of whatever the mix
-          // above already required (this file's header's threshold
-          // paragraph) — a weak hit's edge is blocked even though it fired.
-          return ok && passesGenericGate(key, reading(key, setting, gain));
+          // already required (this file's header's threshold paragraph) — a
+          // weak hit's edge is blocked even though it fired.
+          return patchEdge(key, setting, upper) && passesGenericGate(key, reading(key, setting, gain));
+        },
+
+        hitSize(key) {
+          if (!isEngineHitDriver(specByKey.get(key))) return 1;
+          return hitDetectors.get(gateTrackerKey(sceneId, key))?.size ?? 1;
+        },
+
+        readout(key) {
+          const spec = specByKey.get(key);
+          return spec ? getDriveReadout(sceneId, spec) : undefined;
         },
 
         excess(key) {

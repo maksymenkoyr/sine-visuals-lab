@@ -449,7 +449,7 @@ const SETTINGS: SceneSetting[] = [
     // beat pulse, onset folded in as a bonus, its own refractory — see the
     // file header and createBeatSeeder), not a plain onset edge, so the
     // default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)", sceneSources: ["feature.onset"] },
+    drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)", sceneSources: ["feature.onset"], hit: { reactionLabel: "seeding" } },
   },
   {
     key: "reach",
@@ -749,9 +749,9 @@ void main() {
   // Seed on the beat: only on the exact tick uSeedFresh says the epoch
   // stepped — see the file header for why this can't run every frame the
   // epoch merely holds a value.
-  if (uSeedFresh > 0.5) {
+  if (uSeedFresh > 0.0) {
     float draw = hash21(seed + uSeedEpoch * 7.919 + 11.3);
-    if (draw < uSeed) {
+    if (draw < uSeed * uSeedFresh) {
       vec2 seed2 = seed + uNoiseSeed * 3.13 + 91.7;
       pos = hash22(seed2);
       heading = hash21(seed2 + 4.71) * TWO_PI;
@@ -1090,7 +1090,7 @@ function createPhysarumScene(): Scene {
       // seedEpoch (not beatSeeder.epoch) is what rotates which slice of
       // agents it picks, so a non-default choice still varies the slice
       // across repeated fires.
-      const seedFresh = drives.fired("seed", beatSeeder.advance(dt, anim.beatPulse, anim.onset));
+      const seedFresh = drives.fired("seed", beatSeeder.advance(dt, anim.beatPulse, anim.onset), undefined, anim.beatPulse);
       if (seedFresh) seedEpoch++;
       attractorPositions(anim.timeSec, attractorBuf);
 
@@ -1122,7 +1122,7 @@ function createPhysarumScene(): Scene {
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       simProg.setF("uSimDt", dt);
       simProg.setF("uSeedEpoch", seedEpoch);
-      simProg.setF("uSeedFresh", seedFresh ? 1 : 0);
+      simProg.setF("uSeedFresh", seedFresh ? drives.hitSize("seed") : 0);
       simProg.setF("uNoiseSeed", Math.random() * 100);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, agentPosTex[agentRead]);

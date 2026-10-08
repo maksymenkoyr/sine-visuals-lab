@@ -185,6 +185,8 @@ export interface EnergyInputs {
   /** The Energy pump slider, and whether its signal fired this frame. */
   pump: number;
   pumpFired: boolean;
+  /** How big the hit that fired the pump was, 0..1 (default 1): scales the kick. */
+  pumpSize?: number;
   /** The Energy drop slider (0..1): how fast energy drains to the floor. */
   drop: number;
 }
@@ -204,7 +206,7 @@ export function createEnergy(): Energy {
     step(dtSec, inp) {
       const dt = Math.max(0, dtSec);
       floor = Math.min(MAX_ENERGY, Math.max(0, inp.base + inp.boost * Math.min(1, Math.max(0, inp.level))));
-      if (inp.pumpFired) e += inp.pump * PUMP_KICK;
+      if (inp.pumpFired) e += inp.pump * PUMP_KICK * (inp.pumpSize ?? 1);
       if (e < floor) e += (floor - e) * Math.min(1, dt * RISE_PER_SEC);
       else e -= (e - floor) * Math.min(1, dt * drainPerSec(inp.drop));
       e = Math.min(MAX_ENERGY, Math.max(0, e));

@@ -28,14 +28,31 @@
 // detector: the floor is a noise-floor estimate, the bar sits a margin above
 // it.
 //
-// Wiring a new setting to it:
+// Three read-outs of the same climb:
+//   - the amount (advanceStandoutAmount): every frame, what the climb gained
+//     since the last one, so a climb's pieces add up to its size. For a
+//     reaction that can be any size and can add up (Beat ripple's rings).
+//   - flat (advanceStandout): yes once per climb, on the frame it has earned
+//     FIRE_LEVEL. For a reaction with no size of its own (a cut).
+//   - sized (advanceStandoutSized): once per climb, its size, on the frame
+//     the size is settled. For a one-off reaction that can be any size (a
+//     colony as big as the hit stood out).
+// A setting that reacts once per hit lets the user pick flat or sized (its
+// HitReadout, the panel's Reaction row; drives.ts's header, "Hit drivers").
+//
+// Wiring a new setting to it. A setting that does one thing per hit needs
+// none of this: declaring `drive.hit` and reading `drives.fired` gets it the
+// detector, the threshold row, the Reaction row and the graph's marks from
+// the engine (drives.ts's header, "Hit drivers"). For a scene that runs the
+// detector itself (`drive.hit.ownDetector`, as Dose and Cut do):
 //   - declare `drive.threshold` with `default: STANDOUT_THRESHOLD_DEFAULT`
 //     and the setting's own label and hint. That makes the threshold
 //     scene-handled (drives.ts's header): the panel shows the On/Off switch
 //     and slider under the graph, and the engine's generic gate stays out.
 //   - keep a StandoutTrigger, and step it every frame — armed or not, so the
-//     floor and peak keep learning — with `drives.value(key, …)` and
-//     `standoutThreshold(drives, key)`.
+//     floor and peak keep learning — with `drives.value(key, …)`,
+//     `standoutThreshold(drives, key)` and, through stepStandoutHit, the
+//     setting's `drives.readout(key)`.
 //   - publish `standoutLine(trigger.detector, "<reach to …>")` and each fire
 //     through settingMarks.ts, so the graph draws the dotted line a climb
 //     must reach and a dot for each fire.
@@ -157,6 +174,9 @@ export interface StandoutState {
   base: number;
   /** How much of a full standout the current climb has earned so far. */
   earnedThisClimb: number;
+  /** Whether advanceStandoutSized has already reported the current (or
+   *  last) climb. */
+  sizedSent: boolean;
   /** The bar and the climb above it that earns a full standout, frozen at
    *  the climb's start. */
   climbBar: number;
@@ -179,6 +199,7 @@ export function createStandoutState(): StandoutState {
     climbing: false,
     base: 0,
     earnedThisClimb: 0,
+    sizedSent: false,
     climbBar: 0,
     climbSpread: SPREAD_MIN,
     threshold: STANDOUT_THRESHOLD_DEFAULT,
@@ -247,6 +268,7 @@ export function advanceStandoutAmount(
     state.climbing = true;
     state.base = prev;
     state.earnedThisClimb = 0;
+    state.sizedSent = false;
     if (state.thresholdOn) {
       state.climbBar = standoutBar(state.floor, state.threshold);
       state.climbSpread = Math.max(state.peak - state.climbBar, SPREAD_MIN);
@@ -286,6 +308,41 @@ export function advanceStandout(
   const before = state.climbing ? state.earnedThisClimb : 0;
   advanceStandoutAmount(state, dtSec, signal, threshold);
   return state.climbing && state.earnedThisClimb >= level && before < level;
+}
+
+/** How a setting that reacts once per hit takes that hit: `flat`, a full
+ *  reaction for every climb that earns FIRE_LEVEL (advanceStandout); or
+ *  `sized`, one reaction per climb that clears the line, as big as it stood
+ *  out (advanceStandoutSized). */
+export type HitReadout = "flat" | "sized";
+
+/** The smallest size advanceStandoutSized reports: a climb that earned less
+ *  is a sliver of background, not a reaction. The same "an audible climb"
+ *  as FIRE_LEVEL_OFF. */
+const SIZED_MIN = FIRE_LEVEL_OFF;
+
+/** One frame of the detector, as a sized event: the climb's size (0..1) on
+ *  the frame that size is settled, once per climb, and 0 on every other
+ *  frame. A climb is settled when it has earned a full standout (it can't
+ *  grow further) or when it stops climbing, so a hit that stands out fully
+ *  reports on the frame it lands, a smaller hit one frame later (when its
+ *  pulse starts falling), and a smooth bump at its top. A climb that earned
+ *  less than SIZED_MIN reports nothing. Same arguments as
+ *  advanceStandoutAmount, `null` included: with the threshold Off a climb is
+ *  sized by its own height. */
+export function advanceStandoutSized(
+  state: StandoutState,
+  dtSec: number,
+  signal: number,
+  threshold: number | null = STANDOUT_THRESHOLD_DEFAULT,
+): number {
+  const wasClimbing = state.climbing;
+  advanceStandoutAmount(state, dtSec, signal, threshold);
+  if (state.sizedSent) return 0;
+  const settled = state.climbing ? state.earnedThisClimb >= 1 : wasClimbing;
+  if (!settled) return 0;
+  state.sizedSent = true;
+  return state.earnedThisClimb >= SIZED_MIN ? state.earnedThisClimb : 0;
 }
 
 /** Where the detector puts the line right now, as signal heights on the same
@@ -347,9 +404,28 @@ export function stepStandoutTrigger(
   threshold: number | null,
   armed = true,
 ): boolean {
+  return stepStandoutHit(trigger, dtSec, signal, threshold, "flat", armed) > 0;
+}
+
+/** stepStandoutTrigger with a read-out: 0 on a frame it doesn't fire, and on
+ *  a frame it does, 1 for `flat` or the climb's size for `sized`
+ *  (advanceStandoutSized). The gap and `armed` work the same either way. */
+export function stepStandoutHit(
+  trigger: StandoutTrigger,
+  dtSec: number,
+  signal: number,
+  threshold: number | null,
+  readout: HitReadout,
+  armed = true,
+): number {
   trigger.sinceFireSec += Math.max(0, dtSec);
-  const standout = advanceStandout(trigger.detector, dtSec, signal, threshold);
-  if (!standout || !armed || trigger.sinceFireSec < trigger.minGapSec) return false;
+  const size =
+    readout === "sized"
+      ? advanceStandoutSized(trigger.detector, dtSec, signal, threshold)
+      : advanceStandout(trigger.detector, dtSec, signal, threshold)
+        ? 1
+        : 0;
+  if (size <= 0 || !armed || trigger.sinceFireSec < trigger.minGapSec) return 0;
   trigger.sinceFireSec = 0;
-  return true;
+  return size;
 }

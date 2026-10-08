@@ -315,10 +315,12 @@ export function createParamDrift(rng: Rng = Math.random): ParamDrift {
   };
 }
 
-/** The horizontal-smear envelope: snaps to 1 on an onset, relaxes exponentially. */
-export function advanceStretch(env: number, dtSec: number, onset: boolean): number {
+/** The horizontal-smear envelope: `hit` is 0 for no onset, else the hit's size
+ *  (1 = full). A hit lifts the envelope to its size (never lowers it), then it
+ *  relaxes exponentially. */
+export function advanceStretch(env: number, dtSec: number, hit: number): number {
   const decayed = env * Math.exp(-dtSec * STRETCH_DECAY_PER_SEC);
-  return onset ? 1 : decayed;
+  return hit > 0 ? Math.max(decayed, hit) : decayed;
 }
 
 const SETTINGS: SceneSetting[] = [
@@ -411,7 +413,7 @@ const SETTINGS: SceneSetting[] = [
     auto: { attack: 0.3, pulse: 0.15 },
     // The trigger is anim.onset directly (advanceStretch's own decay
     // math is unaffected by which edge resets it) — a plain Beat default.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "stretch" } },
   },
   {
     key: "bassSwell",
@@ -637,7 +639,7 @@ export const inkScene = createFullscreenScene("ink", "Ink Synth", FRAG, {
       // — reduced here, in float64, before anything reaches the shader (file
       // header).
       const ph = flow.advance(anim.flowPhase, getSetting("flow"));
-      stretchEnv = advanceStretch(stretchEnv, anim.dtSec, drives.fired("stretch", anim.onset));
+      stretchEnv = advanceStretch(stretchEnv, anim.dtSec, drives.fired("stretch", anim.onset) ? drives.hitSize("stretch") : 0);
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       const params = drift.advance(anim.dtSec, anim.barPhase, anim.tempoLock, getSetting("morph"), drop, getSetting("ribbon"));

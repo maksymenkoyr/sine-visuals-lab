@@ -820,7 +820,7 @@ const SETTINGS: SceneSetting[] = [
     // term (POINT_VERT) — both anim.lowPulse/lowOnset directly, a plain
     // Bass hit default. A drop's own opposed-pair plume is unconditional,
     // independent of this choice, the same as caustics' drop ring.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "plume" } },
   },
   {
     key: "chunks",
@@ -840,6 +840,7 @@ const SETTINGS: SceneSetting[] = [
       default: "scene",
       sceneLabel: "Scene: this scene's own hit-strength detector",
       sceneSources: ["anim.low", "anim.lowOnset", "anim.sectionIntensity", "anim.dropOnset"],
+      hit: { reactionLabel: "burst" },
     },
   },
   {
@@ -1998,14 +1999,15 @@ function createPowderScene(): Scene {
       // in opposite directions, which is what makes it read as a burst rather
       // than as a louder kick.
       bursts.tick(anim.timeSec);
+      const kickFired = drives.fired("kick", lowRose);
       if (dropRose) {
         const s = Math.min(1, 1.3 * kickS);
         const seed = Math.random() * 100;
         bursts.trigger(anim.timeSec, s, seed);
         bursts.trigger(anim.timeSec, s, seed, true);
         shakeLeft = SHAKE_SEC;
-      } else if (drives.fired("kick", lowRose) && kickS >= 0.05) {
-        bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.lowPulse), Math.random() * 100);
+      } else if (kickFired && kickS >= 0.05) {
+        bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.lowPulse) * drives.hitSize("kick"), Math.random() * 100);
       }
 
       // The detector's baseline is stepped every frame regardless, so turning
@@ -2015,9 +2017,9 @@ function createPowderScene(): Scene {
       // many frames on a level or a decaying hit pulse, which would relaunch
       // the whole pool every frame. Called whether or not the cubes are on,
       // so a grid edge is consumed the same either way.
-      const chunkFire = drives.fired("chunks", hitStrength > 0);
+      const chunkFire = drives.fired("chunks", hitStrength > 0, undefined, hitStrength);
       chunks.tick(anim.timeSec);
-      const chunkStrength = chunkFire ? drives.value("chunks", hitStrength) : 0;
+      const chunkStrength = chunkFire ? drives.value("chunks", hitStrength) * drives.hitSize("chunks") : 0;
       if (chunksS >= 0.05 && chunkStrength > 0) {
         // Whichever plume fired most recently is the one the cubes belong to.
         let newest = bursts.bursts[0];

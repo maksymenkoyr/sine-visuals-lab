@@ -250,7 +250,7 @@ const SETTINGS: SceneSetting[] = [
     // Gates only the chance-rolled bass-hit flip (advanceBlackout) — a
     // plain Bass hit default. The section-drop flip alongside it is
     // unconditional, independent of this choice.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { flatOnly: "A flip either happens or it doesn't, so it can't be sized.", reactionLabel: "flip" } },
   },
   {
     key: "curtain",

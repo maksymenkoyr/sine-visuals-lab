@@ -172,7 +172,7 @@ const SETTINGS: SceneSetting[] = [
     default: 0.15,
     // Bass hits, not every onset: a DJ track fires onsets several times a
     // beat, and the lines would never get to fold (swarm measured the same).
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "inflate" } },
   },
   {
     key: "reset",
@@ -183,7 +183,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 1,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "reset" } },
   },
   {
     key: "drift",
@@ -486,14 +486,17 @@ function createTangleScene(): Scene {
 
       // Edges are consumed once a render, not once a step; the pull they
       // ask for runs over the next INFLATE_STEPS steps.
-      if (inflate > 0.02 && drives.fired("inflate", anim.lowOnset)) {
-        const pullHome = clamp01(inflate * drives.value("inflate", anim.lowPulse));
+      const inflateFired = drives.fired("inflate", anim.lowOnset);
+      if (inflate > 0.02 && inflateFired) {
+        const pullHome = clamp01(inflate * drives.value("inflate", anim.lowPulse) * drives.hitSize("inflate"));
         startGlide(glide, pullHome, INFLATE_STEPS);
         crinkle = Math.max(crinkle, clamp01(pullHome * CRINKLE_PER_PULL));
       }
-      if (reset > 0.02 && drives.fired("reset", anim.dropOnset)) {
-        startGlide(glide, clamp01(reset), INFLATE_STEPS);
-        crinkle = Math.max(crinkle, clamp01(reset));
+      const resetFired = drives.fired("reset", anim.dropOnset);
+      if (reset > 0.02 && resetFired) {
+        const resetAmount = reset * drives.hitSize("reset");
+        startGlide(glide, clamp01(resetAmount), INFLATE_STEPS);
+        crinkle = Math.max(crinkle, clamp01(resetAmount));
       }
 
       const mids = clamp01(drives.value("drift", anim.mid, DRIFT_REST));

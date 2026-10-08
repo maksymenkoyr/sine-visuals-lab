@@ -150,6 +150,8 @@ export interface DiveInputs {
   foldSteps: number;
   /** A drop fired this frame. */
   dropFired: boolean;
+  /** How far the inversion goes while held, 0..1 (default 1): the size of the drop that started it. */
+  invertSize?: number;
   /** How long a drop's inversion holds, seconds. */
   invertHoldSec: number;
 }
@@ -200,7 +202,7 @@ export function stepDive(s: DiveState, inp: DiveInputs): DiveState {
   foldTarget -= foldWrap;
 
   const invertHold = inp.dropFired ? inp.invertHoldSec : Math.max(0, s.invertHold - dt);
-  const invert = ease(s.invert, invertHold > 0 ? 1 : 0, dt, INVERT_EASE_SEC);
+  const invert = ease(s.invert, invertHold > 0 ? (inp.invertSize ?? 1) : 0, dt, INVERT_EASE_SEC);
 
   return { depth, hold, targetIndex, grid, gridTarget, fold, foldTarget, invertHold, invert };
 }

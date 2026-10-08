@@ -119,6 +119,7 @@ the reference's sparse still state while the music plays, by design.
   inside the sphere (the reference's late scribble has interior knots);
   it pulled the whole structure into one corner and shrank it.
 - **Detail** went 6 → 8 → 10 → 14 to reach the reference's vertex count.
+- 2026-10-08 — Re-inflate and Reset on drop became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the pull home and the reset amount by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

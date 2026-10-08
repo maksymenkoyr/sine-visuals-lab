@@ -139,7 +139,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "push" } },
   },
   {
     key: "breathe",
@@ -150,7 +150,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1.5,
     step: 0.05,
     default: 1,
-    drive: { default: { source: "beat", grid: 5 } },
+    drive: { default: { source: "beat", grid: 5 }, hit: { reactionLabel: "breathe" } },
   },
   {
     key: "newShape",
@@ -161,7 +161,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.8,
-    drive: { default: { source: "beat", grid: 5 } },
+    drive: { default: { source: "beat", grid: 5 }, hit: { flatOnly: "A new shape either starts or it doesn't, so it can't be sized.", reactionLabel: "new shape" } },
   },
   // Look
   {
@@ -321,7 +321,7 @@ function createCoilScene(): Scene {
       const flowRatePerSec = FLOW_FLOOR_PER_SEC + flowAmount * FLOW_GAIN * (0.3 + 0.7 * clamp01(flowLevel));
 
       const pushFired = drives.fired("push", anim.onset) && pushAmount > 0.02;
-      const pushJump = pushAmount * PUSH_JUMP_PER_UNIT * drives.value("push", anim.beatPulse);
+      const pushJump = pushAmount * PUSH_JUMP_PER_UNIT * drives.value("push", anim.beatPulse) * drives.hitSize("push");
 
       const breatheGridFired = drives.fired("breathe", anim.onset) && breatheAmount > 0.02;
 
@@ -330,7 +330,8 @@ function createCoilScene(): Scene {
       // itself down in JS, since beatGrid.ts's own stops top out at two
       // bars; a lower amount waits for more ticks, a higher one for fewer.
       let newShapeFired = false;
-      if (newShapeAmount > 0.02 && drives.fired("newShape", anim.onset)) {
+      const newShapeEdge = drives.fired("newShape", anim.onset);
+      if (newShapeAmount > 0.02 && newShapeEdge) {
         newShapePulses++;
         const resetEvery = newShapeDivisor(newShapeAmount, settingFor("newShape").default, NEW_SHAPE_GRID_DIVISOR);
         if (newShapePulses >= resetEvery) {
@@ -348,7 +349,7 @@ function createCoilScene(): Scene {
         pushFired,
         pushJump,
         breatheFired: breatheGridFired,
-        breatheDrop: BREATHE_DROP_PER_UNIT * breatheAmount,
+        breatheDrop: BREATHE_DROP_PER_UNIT * breatheAmount * drives.hitSize("breathe"),
         newShapeFired,
         spinRateDegPerSec,
       });

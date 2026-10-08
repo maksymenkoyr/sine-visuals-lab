@@ -133,7 +133,7 @@ const SETTINGS: SceneSetting[] = [
     // anim.onset directly (advanceCrystal's zoomVel/swell impulses) — a
     // plain Beat default. beatCount and the light layers still run off the
     // raw onset regardless of this choice — see CrystalInputs.pulseOnset.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "pulse" } },
   },
   {
     key: "flare",
@@ -396,6 +396,7 @@ function createCrystalSceneImpl(): Scene {
           low: anim.low,
           sectionIntensity: anim.sectionIntensity,
           pulseOnset: drives.fired("pulse", anim.onset),
+          pulseSize: drives.hitSize("pulse"),
         },
         {
           zoom: resolveSceneSetting(ID, settingFor("zoom")),

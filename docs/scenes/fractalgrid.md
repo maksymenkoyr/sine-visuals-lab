@@ -132,6 +132,7 @@ beat and a drop inverts the picture for a few bars. Draft scene.
   step cut the whole-set view to 8.1 ms but slowed deep dives to 19 ms;
   checking every 8th step was slower still (26.7 ms against 14.5 ms). The
   plain loop already sits in the app's range, so it was dropped.
+- 2026-10-08 — Step, Fold and Invert became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the grid jump, the fold amount and how far the drop inversion goes (DiveInputs.invertSize) by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

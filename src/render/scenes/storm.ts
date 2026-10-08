@@ -586,7 +586,7 @@ const SETTINGS: SceneSetting[] = [
     // Scene.
     // uStrike's own GLSL sites are all plain gain curves on the setting's
     // own resolved value, no live signal, so nothing there needs wrapping.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"], hit: { reactionLabel: "strike" } },
   },
   {
     key: "reach",
@@ -3441,8 +3441,8 @@ export const stormScene: Scene = (() => {
       };
       // Single catalogue source wouldn't cover the bass-or-beat union the
       // ordinary strike needs — see the "strike" setting's own comment.
-      if (drives.fired("strike", lowRose || beatRose)) {
-        lightStruck(pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false));
+      if (drives.fired("strike", lowRose || beatRose, undefined, Math.max(anim.lowPulse, anim.beatPulse))) {
+        lightStruck(pool.trigger((0.7 + 0.5 * (lowRose ? anim.lowPulse : 0)) * drives.hitSize("strike"), false));
       }
       // On top of whatever the strike lit: a beat picks its own sections, so
       // the cloud answers the beat even where no bolt reached, and a mid or

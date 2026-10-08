@@ -150,7 +150,7 @@ const SETTINGS: SceneSetting[] = [
     // Bass hits, not every onset: real music fires onsets several times a
     // beat, and a share flung that often never lets the core re-form
     // (measured 2026-10-03: a uniform disc on a 129 bpm DJ track).
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "scatter" } },
   },
   {
     key: "thump",
@@ -193,7 +193,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 1,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { flatOnly: "A re-collapse either starts or it doesn't, so it can't be sized.", reactionLabel: "re-collapse" } },
   },
   // Look
   {
@@ -411,10 +411,12 @@ function createSwarmScene(): Scene {
       lastWave = clamp01(drives.value("breath", halfWave, 0.5));
 
       // Edges (a hit, a drop) are consumed once a render, not once a step.
-      if (scatter > 0.02 && drives.fired("scatter", anim.lowOnset)) {
-        scatterPhases(s, Math.min(1, scatter * drives.value("scatter", anim.lowPulse)));
+      const scatterFired = drives.fired("scatter", anim.lowOnset);
+      const collapseFired = drives.fired("collapse", anim.dropOnset);
+      if (scatter > 0.02 && scatterFired) {
+        scatterPhases(s, Math.min(1, scatter * drives.value("scatter", anim.lowPulse) * drives.hitSize("scatter")));
       }
-      if (collapse > 0.02 && drives.fired("collapse", anim.dropOnset)) {
+      if (collapse > 0.02 && collapseFired) {
         rescatter(s, rng, spawnHalfW);
         startCollapse(collapse);
       }

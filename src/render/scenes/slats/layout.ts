@@ -293,8 +293,10 @@ export function createOnsetEnvelope(): OnsetEnvelope {
   return { value: 0 };
 }
 
-/** Decays `state.value` exponentially toward 0, then snaps it to 1 on
- *  `onset` — a fresh beat always wins even mid-decay. Pure aside from
+/** Decays `state.value` exponentially toward 0, then lifts it to the hit's
+ *  size on `onset` — a fresh beat always wins even mid-decay, unless it is
+ *  smaller than what is left. `onset` is false (no hit), true (a full-size
+ *  hit, 1) or a number 0..1 (the hit's size, 0 = no hit). Pure aside from
  *  `state`, and exported so tests/slats.test.ts can pin the decay/retrigger
  *  shape directly. A non-finite or backwards dt is treated as no time
  *  passing, the same guard caustics.ts's advancePump and ambience.ts's
@@ -302,12 +304,13 @@ export function createOnsetEnvelope(): OnsetEnvelope {
 export function advanceOnsetEnvelope(
   state: OnsetEnvelope,
   dtSec: number,
-  onset: boolean,
+  onset: boolean | number,
   tauSec: number = ONSET_ENV_TAU_SEC,
 ): number {
   const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 0;
   state.value *= Math.exp(-dt / tauSec);
-  if (onset) state.value = 1;
+  const size = onset === true ? 1 : onset === false ? 0 : Number.isFinite(onset) ? onset : 0;
+  if (size > 0) state.value = Math.max(state.value, size);
   return state.value;
 }
 

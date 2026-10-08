@@ -615,6 +615,13 @@ reference-measurement workflow used by later scenes.
   `standoutBar`, `RING_THRESHOLD_DEFAULT` → `STANDOUT_THRESHOLD_DEFAULT`,
   `salienceMarks` → `standoutMarks` (its `ringsAbove` is now `reach`), and
   the graph line comes from `standoutLine`. Same constants, same tests.
+- 2026-10-08 — Beat ripple gets a Reaction row under its graph (`drive.hit`,
+  with `ownDetector`: the scene still runs standout.ts itself). Sized, the
+  default, is the amount it always launched. Flat launches one full ring
+  per climb that earns half a standout (`advanceStandout` on the same
+  emission state, with Ring threshold), the one-ring-per-yes look of the
+  first ring pool. The Threshold row under the graph stays the generic gate,
+  as decided on 2026-10-03.
 
 ## Tuning notes
 

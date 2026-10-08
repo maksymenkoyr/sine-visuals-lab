@@ -16,7 +16,7 @@ import {
   STANDOUT_THRESHOLD_DEFAULT,
   standoutLine,
   standoutThreshold,
-  stepStandoutTrigger,
+  stepStandoutHit,
   type StandoutTrigger,
 } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
@@ -1294,6 +1294,9 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
       default: "scene",
       sceneLabel: "Scene: a beat hit that stands out",
       sceneSources: ["feature.onset"],
+      // Flat or Sized (the Reaction row): Sized moves a share of agents
+      // as big as the hit stood out, Dose times its size.
+      hit: { ownDetector: true },
       threshold: {
         default: STANDOUT_THRESHOLD_DEFAULT,
         label: "Dose threshold",
@@ -1852,16 +1855,17 @@ void main() {
 
   // Seed on the beat: only on the exact tick uSeedFresh says the epoch
   // stepped (physarum.ts's file header covers why), and only for the
-  // frame's first sim step — the caller only ever passes uSeedFresh=1 once
-  // per firing. Reseeded agents cluster around one hash-chosen point per
+  // frame's first sim step — the caller passes the firing's size (1 while
+  // Dose reads Flat) once per firing, and 0 otherwise; Sized scales the
+  // share moved. Reseeded agents cluster around one hash-chosen point per
   // epoch instead of scattering field-wide, so a beat reads as a colony
   // sprouting from a point — see the file header. Strain is untouched
   // ("Auto-inject from" only restricts which strain may be picked, unlike
   // the pipette's own inject block below, which always converts).
-  if (uSeedFresh > 0.5) {
+  if (uSeedFresh > 0.0) {
     float draw = hash21(seed + uSeedEpoch * 7.919 + 11.3);
     bool fromOk = uSeedFrom < 0.5 || k == int(uSeedFrom + 0.5) - 1;
-    if (draw < uSeed && fromOk) {
+    if (draw < uSeed * uSeedFresh && fromOk) {
       vec2 center = hash22(vec2(uSeedEpoch * 12.9898, uSeedEpoch * 78.233) + 17.0);
       vec2 seed2 = seed + uNoiseSeed * 3.13 + 91.7;
       float r = seedRadius * sqrt(hash21(seed2 + 3.7));
@@ -2394,8 +2398,9 @@ function createPhysarum2Scene(): Scene {
   const spotVis = new Float32Array(SPECIES_COUNT).fill(1);
   // The beat reseed's one-shot, held the same way (see the `steps > 0` block
   // in render()): drives.fired() consumes its trigger on read, so a frame that
-  // owes zero sim steps must not be the one that swallows it.
-  let pendingSeed = false;
+  // owes zero sim steps must not be the one that swallows it. Holds the
+  // firing's size (1 while Dose reads Flat), 0 for none.
+  let pendingSeed = 0;
   // Territory: a 16x16 downsample of the trail, read back (the census below)
   // at most every TERRITORY_INTERVAL_MS, and only while probe() has been
   // called within the last PROBE_IDLE_MS.
@@ -2841,7 +2846,7 @@ function createPhysarum2Scene(): Scene {
       territory = new Array(SPECIES_COUNT).fill(0);
       pendingInject = null;
       pendingRebalance = false;
-      pendingSeed = false;
+      pendingSeed = 0;
       popGen = 0;
       popKickGen = 0;
       lastProbeMs = -Infinity;
@@ -2885,18 +2890,24 @@ function createPhysarum2Scene(): Scene {
       // by default, or the patched source's envelope (a hit, a grid tick, a
       // level, a drawn line). seedEpoch rotates the reseed cluster's centre,
       // so every fire lands somewhere new.
-      const seedFresh = stepStandoutTrigger(seedTrigger, dt, drives.value("seed", anim.beatPulse), standoutThreshold(drives, "seed"));
+      const seedSize = stepStandoutHit(
+        seedTrigger,
+        dt,
+        drives.value("seed", anim.beatPulse),
+        standoutThreshold(drives, "seed"),
+        drives.readout("seed") ?? "flat",
+      );
       // The panel draws the line a climb has to reach, and a dot for each
       // colony started (settingMarks.ts); no line while the threshold is off.
       publishSettingMarks(
         ID,
         "seed",
         { lines: standoutLine(seedTrigger.detector, "reach to start a colony"), reactionLabel: "colony started" },
-        seedFresh ? 1 : 0,
+        seedSize,
       );
-      if (seedFresh) {
+      if (seedSize > 0) {
         seedEpoch++;
-        pendingSeed = true;
+        pendingSeed = seedSize;
       }
 
       resolveStrains(dt, frame, anim, drives);
@@ -3007,7 +3018,7 @@ function createPhysarum2Scene(): Scene {
         gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbo[agentWrite]);
         gl.viewport(0, 0, agentSide, agentSide);
         simProg.use();
-        simProg.setF("uSeedFresh", step === 0 && pendingSeed ? 1 : 0);
+        simProg.setF("uSeedFresh", step === 0 ? pendingSeed : 0);
         simProg.setF("uInjectFresh", step === 0 && pendingInject ? 1 : 0);
         simProg.setF("uRebalanceFresh", step === 0 && pendingRebalance ? 1 : 0);
         simProg.setF("uNoiseSeed", Math.random() * 100);
@@ -3053,7 +3064,7 @@ function createPhysarum2Scene(): Scene {
       if (steps > 0) {
         pendingInject = null;
         pendingRebalance = false;
-        pendingSeed = false;
+        pendingSeed = 0;
       }
 
       // The census (Territory, Headcount, Auto level): maybe kick off the
@@ -3212,7 +3223,7 @@ function createPhysarum2Scene(): Scene {
       trailSideCur = 0;
       pendingInject = null;
       pendingRebalance = false;
-      pendingSeed = false;
+      pendingSeed = 0;
       spotA = -1;
       spotB = -1;
       spotUntilMs = 0;

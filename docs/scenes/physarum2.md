@@ -1010,6 +1010,12 @@ configs are used.
   Assumed, not asked: every lane is rewired (not only the rolled rows),
   and Nutrient, Excitability, Trail life and Stain values stay unrolled as
   before.
+- 2026-10-08 — Dose gets a Reaction row under its graph (`drive.hit`, with
+  `ownDetector`). Flat, the default, starts a colony exactly as before.
+  Sized moves a share of agents as big as the hit stood out: the trigger is
+  stepped with `stepStandoutHit`, `pendingSeed` holds the firing's size, and
+  the sim's reseed draw tests `uSeed * uSeedFresh` with `uSeedFresh` set to
+  that size. The user, on why Dose isn't flat-only: it can take loudness.
 
 ## Tuning notes
 

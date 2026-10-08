@@ -740,7 +740,12 @@ const SETTINGS: SceneSetting[] = [
     // composite is the shared beat listener (one stamp per beat) with the
     // count riding loudness — see floaterCountFromEnergy — so sceneSources
     // names both halves a re-patch replaces.
-    drive: { default: "scene", sceneLabel: "Scene: every beat, count rides loudness", sceneSources: ["feature.onset", "anim.energy"] },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: every beat, count rides loudness",
+      sceneSources: ["feature.onset", "anim.energy"],
+      hit: { reactionLabel: "stamp" },
+    },
   },
   {
     key: "brushMove",
@@ -855,7 +860,12 @@ const SETTINGS: SceneSetting[] = [
     // slider's amount). Scene composite is the beat beatListener — its
     // one-per-beat hold still owns the cadence under Scene (see render());
     // its edge is the broadband onset, which is what sceneSources names.
-    drive: { default: "scene", sceneLabel: "Scene: every beat", sceneSources: ["feature.onset"] },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: every beat",
+      sceneSources: ["feature.onset"],
+      hit: { reactionLabel: "light wave" },
+    },
   },
   {
     key: "rainbow",
@@ -932,6 +942,7 @@ uniform float uBurstY[${MAX_WAVE_BURSTS}];
 uniform float uBurstLife[${MAX_WAVE_BURSTS}]; // each wave's own life, from Floater sustain when it fired
 uniform float uSweepT0[${MAX_SWEEPS}];
 uniform float uSweepSeed[${MAX_SWEEPS}];
+uniform float uSweepAmp[${MAX_SWEEPS}];
 uniform float uFloaterGain; // floaterGain(Floater visibility)
 uniform float uDayPhase; // 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset (see advanceDayOffset)
 uniform float uBrushSwell; // brushSwell(): 1 on a light-wave beat, decaying back to 0
@@ -1446,7 +1457,7 @@ vec3 lightWaveAt(vec2 p, float devAspect) {
     vec3 spectral = spectrumAt(clamp(-x / SWEEP_SPECTRUM_SPAN, 0.0, 1.0) * 0.8, RAINBOW_SAT);
     tint = mix(tint, spectral, uRainbow);
     float fade = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.6, 1.0, t));
-    glow += tint * band * fade;
+    glow += tint * band * fade * uSweepAmp[i];
   }
   return glow;
 }
@@ -1744,6 +1755,8 @@ function createSkyScene(): Scene {
   const beatListener = createBeatListener({ source: "beat", hold: ONE_BEAT_HOLD });
   const sweepT0 = new Float32Array(MAX_SWEEPS).fill(WAVE_DEAD_T0);
   const sweepSeed = new Float32Array(MAX_SWEEPS);
+  // Each wave's brightness, 1 unless the Light waves hit reaction is Sized.
+  const sweepAmp = new Float32Array(MAX_SWEEPS).fill(1);
   const cloudFlow = new Float32Array(CLOUD_FLOW_LEN);
   let sweepsFired = 0;
   let lastSweepSec: number | null = null;
@@ -1785,6 +1798,7 @@ function createSkyScene(): Scene {
       brushY = 0.5;
       brushHeading = BRUSH_HEADING_INIT;
       sweepT0.fill(WAVE_DEAD_T0);
+      sweepAmp.fill(1);
       sweepsFired = 0;
       lastSweepSec = null;
       spritePhase = 0;
@@ -1863,16 +1877,17 @@ function createSkyScene(): Scene {
       // slider hits 0 and no invisible pool slot is ever taken.
       wavePool.tick(anim.timeSec);
       const beatFired = beatListener.advance(anim).fired;
-      if (drives.fired("lightWaves", beatFired)) {
+      if (drives.fired("lightWaves", beatFired, undefined, anim.beatPulse)) {
         const slot = sweepSlot(sweepsFired);
         sweepT0[slot] = anim.timeSec;
+        sweepAmp[slot] = drives.hitSize("lightWaves");
         sweepSeed[slot] = wrapShaderSeed(sweepsFired) * 1.618 + 3.0;
         sweepsFired++;
         lastSweepSec = anim.timeSec;
       }
       const floaterAmount = resolveSceneSetting(ID, settingFor("floaterDensity")) * drives.value("floaterDensity", 1);
-      if (drives.fired("floaterDensity", beatFired)) {
-        const count = spawnFloaters(floaterAmount, drives.value("floaterDensity", floaterCountFromEnergy(frame.energy)));
+      if (drives.fired("floaterDensity", beatFired, undefined, anim.beatPulse)) {
+        const count = spawnFloaters(floaterAmount, drives.value("floaterDensity", floaterCountFromEnergy(frame.energy))) * drives.hitSize("floaterDensity");
         if (count > 0) {
           const seed = waveSeedCounter++;
           const stride = BRUSH_STRIDE_MAX * resolveSceneSetting(ID, settingFor("brushMove"));
@@ -1930,6 +1945,7 @@ function createSkyScene(): Scene {
       wavePool.upload(displayProg);
       displayProg.setFv("uSweepT0", sweepT0);
       displayProg.setFv("uSweepSeed", sweepSeed);
+      displayProg.setFv("uSweepAmp", sweepAmp);
       displayProg.setV4v("uCloudFlow", cloudNoiseFlows(anim.timeSec, cloudFlow));
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());

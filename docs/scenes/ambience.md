@@ -86,6 +86,10 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   ripple clock was `flowPhase * Wave speed`, which teleports the ripples
   whenever Wave speed (or its Auto drift) moves; it is now accumulated with
   `createScaledPhase`, so Wave speed only changes the ripple rate.
+- 2026-10-08 — Beat swell became a hit driver (the Reaction row, Flat or
+  Sized; drives.ts's header, "Hit drivers"). Sized scales the strength of the
+  swell a hit spawns by how far the hit stood out; Flat, the default, is
+  unchanged.
 
 ## Tuning notes
 

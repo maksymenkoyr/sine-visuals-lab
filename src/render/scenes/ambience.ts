@@ -676,7 +676,7 @@ const SETTINGS: SceneSetting[] = [
     // Spawns a swell on a bass hit OR a beat hit, unconditionally (render())
     // — no single catalogue source covers that union, so the default is
     // Scene. A drop's own burst is unconditional, independent of this choice.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"], hit: { reactionLabel: "swell" } },
   },
   {
     key: "swellSpeed",
@@ -1218,10 +1218,11 @@ export const ambienceScene: Scene = (() => {
       }
 
       // A hit fires a swell; a section drop fires a burst.
+      const swellFired = drives.fired("swell", anim.lowOnset || anim.onset, undefined, Math.max(anim.lowPulse, anim.beatPulse));
       if (anim.dropOnset) {
         for (let n = 0; n < 3; n++) pool.trigger(1, cols, rows, true);
-      } else if (drives.fired("swell", anim.lowOnset || anim.onset)) {
-        pool.trigger(0.7 + 0.3 * anim.low, cols, rows);
+      } else if (swellFired) {
+        pool.trigger((0.7 + 0.3 * anim.low) * drives.hitSize("swell"), cols, rows);
       }
       pool.tick(dt, resolveSceneSetting(ID, settingFor("swellSpeed")));
 
