@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildRows,
   costOf,
+  forkIndex,
   parseGrade,
   parseLabel,
   renderReport,
@@ -169,6 +170,46 @@ describe("buildRows", () => {
     expect(fixedItself).toMatchObject({ version: 6, converged: false, finishFixes: 1 });
     const [clean] = buildRows({ record, recordedAt: "", agents: agents([]) });
     expect(clean).toMatchObject({ converged: true, finishFixes: 0 });
+  });
+});
+
+describe("buildRows fork", () => {
+  it("prices and grades the reviewer-fix arm apart from the correction loop", () => {
+    const record = { runId: "wf_7", script: SCRIPT_V3.replace("= 3", "= 7"), args: { issues: [7], fork: true } };
+    const t = (m: string) => stage(m, "high", 1);
+    const review = (code: string, findings: unknown[], extra = {}) =>
+      ({ issue_resolved: true, ready_to_ship: true, plan_grade: "B", code_grade: code, findings, self_fixed: [], ...extra });
+    const [row] = buildRows({ record, recordedAt: "", agents: [
+      { label: "plan #7", result: PLAN, transcript: t("claude-sonnet-5-5") },
+      { label: "code #7", result: CODE, transcript: t("claude-haiku-5-5") },
+      { label: "review #7 r1", result: review("C", [finding("F1", "blocking", false), finding("F2", "should-fix", false)], { fork_commit: "f1", fork_fixed: ["F1", "F2"] }), transcript: t("claude-opus-5-5") },
+      { label: "opusfix #7", result: { fixed: ["F1", "F2"], commit: "f1" }, transcript: t("claude-opus-5-5") },
+      { label: "check #7", result: review("A-", [finding("F1", "blocking", true), finding("F2", "should-fix", false)]), transcript: t("claude-opus-5-5") },
+      { label: "fix #7 r1", result: { commit: "c2", addressed: ["F1", "F2"], blocked: "" }, transcript: t("claude-haiku-5-5") },
+      { label: "review #7 r2", result: review("B+", [finding("F1", "blocking", true), finding("F2", "should-fix", true)]), transcript: t("claude-opus-5-5") },
+    ] });
+    const cost = (label: string) => row.agents.find((a) => a.label === label)!.cost!.total;
+    expect(row).toMatchObject({ version: 7, forkRun: true, reviewRounds: 2, codeGrade: "C", finalCodeGrade: "B+", converged: true });
+    expect(row.fork).toMatchObject({ fixed: 2, codeGrade: "A-", open: 1, loopOpen: 0, readyToShip: true });
+    expect(row.fork!.fixCost).toBeCloseTo(cost("opusfix #7"), 8);
+    expect(row.fork!.loopCost).toBeCloseTo(cost("fix #7 r1") + cost("review #7 r2"), 8);
+    expect(setupKey(row)).toMatch(/Opus-fix fork$/);
+    expect(renderReport(summarize([row]), [row])).toContain("code grade after 3.70 · open after 1.0");
+  });
+});
+
+describe("forkIndex", () => {
+  it("cuts at the first entry of the request that made the copy", () => {
+    const bash = (requestId: string, command: string) =>
+      ({ type: "assistant", requestId, message: { content: [{ type: "tool_use", input: { command } }] } });
+    const entries = [
+      bash("a", "git worktree list"),
+      { type: "assistant", requestId: "b", message: { content: [{ type: "text", text: "now the copy" }] } },
+      bash("b", "git worktree add /wt-opusfix -b x-opusfix HEAD"),
+      bash("c", "npm ci"),
+    ];
+    expect(forkIndex(entries)).toBe(1);
+    expect(forkIndex(entries.slice(0, 2))).toBe(-1);
   });
 });
 

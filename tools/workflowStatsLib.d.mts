@@ -7,7 +7,7 @@ export const PRICES: Record<string, { input: number; output: number; cacheRead: 
 export const CACHE_WRITE_MULT: number;
 export const STAGES: readonly string[];
 
-export type StageName = "plan" | "replan" | "code" | "fix" | "review" | "finish";
+export type StageName = "plan" | "replan" | "code" | "fix" | "review" | "finish" | "opusfix" | "check";
 
 export interface Tokens {
   input: number;
@@ -76,6 +76,7 @@ export interface Row {
   workflow: string | null;
   version: number;
   maxRounds: number;
+  forkRun: boolean;
   runStartedAt: string | null;
   recordedAt: string;
   issue: number;
@@ -97,7 +98,20 @@ export interface Row {
   findingsByRound: { round: number; findings: Finding[] }[];
   finishFixes: number;
   stalledFixes: number;
+  fork: ForkArms | null;
   cost: number;
+}
+
+/** Both arms after a forked first review; costs in USD per issue. */
+export interface ForkArms {
+  fixed: number;
+  fixCost: number | null;
+  checkCost: number | null;
+  codeGrade: string | null;
+  open: number | null;
+  readyToShip: boolean | null;
+  loopCost: number;
+  loopOpen: number;
 }
 
 export interface StageSummary {
@@ -128,6 +142,15 @@ export interface Summary {
   weakTests: number;
   bugs: number;
   costPerIssue: number | null;
+  fork: {
+    issues: number;
+    fixCost: number | null;
+    checkCost: number | null;
+    codeGrade: number | null;
+    open: number | null;
+    loopCost: number | null;
+    loopOpen: number | null;
+  } | null;
   stages: Partial<Record<StageName, StageSummary>>;
 }
 
@@ -136,6 +159,8 @@ export function parseGrade(text: unknown): string | null;
 export function parseLabel(label: string | null | undefined): { stage: StageName; issue: number; round: number } | null;
 
 export function transcriptStats(entries: any[]): TranscriptStats;
+
+export function forkIndex(entries: any[]): number;
 
 export function costOf(model: string | null, tokens: Tokens): Cost | null;
 

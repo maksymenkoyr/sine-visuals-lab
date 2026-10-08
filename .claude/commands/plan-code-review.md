@@ -1,6 +1,6 @@
 ---
 description: Run GitHub issues through the plan → code → review workflow with correction rounds (one model plans, a cheaper one codes, a stronger one reviews) and record the results for model comparison
-argument-hint: <issue numbers> [plan=model/effort] [code=model/effort] [review=model/effort] [rounds=N] [tag=name]
+argument-hint: <issue numbers> [plan=model/effort] [code=model/effort] [review=model/effort] [rounds=N] [fork] [tag=name]
 ---
 
 Run `$ARGUMENTS` through the saved workflow `.claude/workflows/plan-code-review.js`.
@@ -9,7 +9,8 @@ Its header says what each stage does and how a correction round works. Its
 
 1. **Parse the arguments.** Numbers are issue numbers. A `plan=`, `code=` or
    `review=` override takes `model/effort`, such as `code=sonnet/medium`.
-   `rounds=N` caps the correction rounds. `tag=name` goes into the branch names,
+   `rounds=N` caps the correction rounds. `fork` turns on the Opus-fix fork the
+   workflow header describes. `tag=name` goes into the branch names,
    so a rerun of an issue gets fresh branches. Default it to a short tag that
    isn't in `git branch --list 'worktree-issue-*'` yet. With no issue numbers,
    ask which issues to run, and stop.
@@ -21,7 +22,7 @@ Its header says what each stage does and how a correction round works. Its
 3. **Launch from outside a worktree.** If this session entered one
    (EnterWorktree), leave it with ExitWorktree (keep) first. The workflow
    header says why. Then launch with the Workflow tool, `name: "plan-code-review"`, and `args` as
-   real JSON: `{ "issues": [346, 353], "tag": "r3", "maxRounds": 2, "models": { "code": { "model": "sonnet", "effort": "medium" } } }`.
+   real JSON: `{ "issues": [346, 353], "tag": "r3", "maxRounds": 2, "fork": true, "models": { "code": { "model": "sonnet", "effort": "medium" } } }`.
    Leave out what wasn't given. Tell the user the run ID and the setup, then
    wait for the completion notice.
 
@@ -37,6 +38,8 @@ Its header says what each stage does and how a correction round works. Its
    - each first-round finding with its severity, origin (plan or code) and
      outcome
    - any open decision the review raised
+   - with `fork`: the copy's branch, what the first review fixed there, and the
+     check's grade and open findings next to the loop's
 
    Then print `npm run workflow-stats -- tokens` for where the tokens and the
    estimated cost went per agent, and `npm run workflow-stats -- report` to put

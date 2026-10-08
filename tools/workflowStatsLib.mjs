@@ -31,6 +31,14 @@
 // first trial, before the workflow was saved) returned grades as free text
 // such as "B-: reason" under `haiku_grade`. `parseGrade` reads both that and
 // the later bare letter, so old rows stay comparable.
+//
+// A version 7 run with `fork` has two arms after the first review: the
+// correction loop, and a copy of the branch that the first review fixed
+// itself, graded by one `check` agent. The first review's transcript holds
+// both its review and that fixing, so the CLI cuts it at `forkIndex`, the
+// request that made the copy, and records the second half as its own
+// `opusfix` agent. A row's `fork` then holds each arm's cost and grade after
+// the first review, which is what the fork is for.
 
 /** Grade letters the review schema allows, best first, with their points. */
 export const GRADE_POINTS = {
@@ -47,7 +55,7 @@ export const PRICES = {
 export const CACHE_WRITE_MULT = 2;
 
 /** Every stage label the workflow uses, in run order. */
-export const STAGES = ["plan", "code", "review", "replan", "fix", "finish"];
+export const STAGES = ["plan", "code", "review", "replan", "fix", "finish", "opusfix", "check"];
 
 /** @param {unknown} text @returns {string | null} the grade letter it starts with */
 export function parseGrade(text) {
@@ -58,7 +66,7 @@ export function parseGrade(text) {
 
 /** "review #346 r2" → { stage: "review", issue: 346, round: 2 } */
 export function parseLabel(label) {
-  const m = /^(plan|replan|code|fix|review|finish)\s+#(\d+)(?:\s+r(\d+))?$/.exec(label ?? "");
+  const m = /^(plan|replan|code|fix|review|finish|opusfix|check)\s+#(\d+)(?:\s+r(\d+))?$/.exec(label ?? "");
   return m ? { stage: m[1], issue: Number(m[2]), round: m[3] ? Number(m[3]) : 1 } : null;
 }
 
@@ -105,6 +113,19 @@ export function transcriptStats(entries) {
   return { model, effort, requests: requests.size, tokens, peakContext, minutes };
 }
 
+/**
+ * Where the first review of a fork run started fixing its copy: the index of
+ * the first entry of the request that ran `git worktree add`, or -1.
+ * @param {any[]} entries
+ */
+export function forkIndex(entries) {
+  const at = entries.findIndex((e) => e.type === "assistant" && Array.isArray(e.message?.content) &&
+    e.message.content.some((c) => c.type === "tool_use" && /\bworktree\s+add\b/.test(String(c.input?.command ?? ""))));
+  if (at < 0) return -1;
+  const id = entries[at].requestId;
+  return id ? entries.findIndex((e) => e.requestId === id) : at;
+}
+
 /** API-list-price estimate in USD for one agent's tokens, split by kind. */
 export function costOf(model, tokens) {
   const p = PRICES[model ?? ""];
@@ -126,7 +147,7 @@ export function setupKey(row) {
     return s ? `${name} ${shortModel(s.model)}/${s.effort ?? "?"}` : `${name} -`;
   };
   const loops = row.maxRounds ? ` · up to ${row.maxRounds} correction round(s)` : "";
-  return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}${loops}`;
+  return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}${loops}${row.forkRun ? " · Opus-fix fork" : ""}`;
 }
 
 function shortModel(model) {
@@ -206,11 +227,15 @@ export function buildRows({ record, agents, recordedAt }) {
     }));
     const open = (r) => findingsOf(r).filter((f) => f.severity !== "nit" && !f.fixed).length;
     const selfFixed = (lastReview?.self_fixed ?? []).length;
+    const opusfix = one("opusfix");
+    const check = one("check");
+    const costOfStages = (pred) => list.filter(pred).reduce((s, a) => s + (a.cost?.total ?? 0), 0);
     rows.push({
       runId: record.runId,
       workflow: record.workflowName ?? null,
       version,
       maxRounds,
+      forkRun: version >= 7 && argsObject(record.args).fork === true,
       runStartedAt: record.timestamp ?? null,
       recordedAt,
       issue,
@@ -238,6 +263,18 @@ export function buildRows({ record, agents, recordedAt }) {
       // A fix round that was blocked or fixed nothing; a run with these
       // measured the sandbox, not the models.
       stalledFixes: list.filter((a) => a.stage === "fix" && (a.result?.blocked || !(a.result?.addressed ?? []).length)).length,
+      // Both arms after the first review, when it forked. The loop's grade is
+      // `finalCodeGrade`, taken before a last review's own fixes.
+      fork: opusfix || check ? {
+        fixed: (reviews[0]?.result?.fork_fixed ?? []).length,
+        fixCost: opusfix?.cost?.total ?? null,
+        checkCost: check?.cost?.total ?? null,
+        codeGrade: parseGrade(check?.result?.code_grade),
+        open: check ? open(check.result) : null,
+        readyToShip: check?.result?.ready_to_ship ?? null,
+        loopCost: costOfStages((a) => a.stage === "fix" || a.stage === "replan" || (a.stage === "review" && a.round > 1)),
+        loopOpen: open(lastReview) + selfFixed,
+      } : null,
       cost: list.reduce((s, a) => s + (a.cost?.total ?? 0), 0),
     });
   }
@@ -311,9 +348,24 @@ export function summarize(rows, prState = new Map()) {
       weakTests: count((f) => f.kind === "weak-test"),
       bugs: count((f) => f.kind === "bug"),
       costPerIssue: mean(rs.map((r) => r.cost)),
+      fork: forkSummary(rs.map((r) => r.fork).filter(Boolean)),
       stages,
     };
   });
+}
+
+function forkSummary(fs) {
+  if (!fs.length) return null;
+  const grade = (xs) => mean(xs.map((g) => GRADE_POINTS[g]).filter((x) => x !== undefined));
+  return {
+    issues: fs.length,
+    fixCost: mean(fs.map((f) => f.fixCost ?? 0)),
+    checkCost: mean(fs.map((f) => f.checkCost ?? 0)),
+    codeGrade: grade(fs.map((f) => f.codeGrade)),
+    open: mean(fs.map((f) => f.open ?? 0)),
+    loopCost: mean(fs.map((f) => f.loopCost)),
+    loopOpen: mean(fs.map((f) => f.loopOpen)),
+  };
 }
 
 function mean(xs) {
@@ -335,6 +387,12 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
     out.push(`  first-review findings per issue: blocking ${n(s.findingsPerIssue.blocking)} · should-fix ${n(s.findingsPerIssue.shouldFix)} · nit ${n(s.findingsPerIssue.nit)}` +
       ` · from the plan ${s.fromPlanShare === null ? "-" : `${Math.round(s.fromPlanShare * 100)}%`} · weak tests ${s.weakTests} · bugs ${s.bugs}`);
     out.push(`  est. cost per issue ${usd(s.costPerIssue)} (API list price; output tokens are a floor)`);
+    if (s.fork) {
+      const loopGrade = mean(rows.filter((r) => r.fork && setupKey(r) === s.setup).map((r) => GRADE_POINTS[r.finalCodeGrade]).filter((x) => x !== undefined));
+      out.push(`  after a first review with findings (${s.fork.issues} issue(s)), mean per issue:`);
+      out.push(`    reviewer fixes it  ${usd(s.fork.fixCost)} fixing (+ ${usd(s.fork.checkCost)} check) · code grade after ${n(s.fork.codeGrade, 2)} · open after ${n(s.fork.open)}`);
+      out.push(`    correction loop    ${usd(s.fork.loopCost)} fixes and re-reviews · code grade at last review ${n(loopGrade, 2)} · open at last review ${n(s.fork.loopOpen)}`);
+    }
     for (const [name, st] of Object.entries(s.stages)) {
       out.push(`  ${name.padEnd(7)} ${usd(st.cost)} · ${n(st.agents)} agent(s) · ${n(st.minutes)} min · ${n(st.requests, 0)} requests · ${mt(st.contextTokens)} context · ${n(st.outputSeen, 0)}+ output (mean per issue that ran it)`);
     }

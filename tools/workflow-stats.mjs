@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { buildRows, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
+import { buildRows, forkIndex, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
 
 const STORE = process.env.WORKFLOW_STATS_FILE ?? join(homedir(), ".claude", "workflow-stats", "runs.jsonl");
 const PROJECTS = join(homedir(), ".claude", "projects");
@@ -78,14 +78,17 @@ function record(runId) {
   const progress = new Map(
     (runRecord.workflowProgress ?? []).filter((p) => p.type === "workflow_agent").map((p) => [p.agentId, p]),
   );
-  const agents = [...labels].map(([agentId, label]) => {
+  const agents = [...labels].flatMap(([agentId, label]) => {
     const tpath = join(dir, `agent-${agentId}.jsonl`);
-    return {
-      label,
-      result: results.get(agentId) ?? null,
-      transcript: transcriptStats(existsSync(tpath) ? readJsonl(tpath) : []),
-      progress: progress.get(agentId),
-    };
+    const entries = existsSync(tpath) ? readJsonl(tpath) : [];
+    const result = results.get(agentId) ?? null;
+    // A forked first review also fixed its copy; that half is its own agent.
+    const cut = result?.fork_commit && /^review #\d+ r1$/.test(label) ? forkIndex(entries) : -1;
+    if (cut < 0) return [{ label, result, transcript: transcriptStats(entries), progress: progress.get(agentId) }];
+    return [
+      { label, result, transcript: transcriptStats(entries.slice(0, cut)) },
+      { label: label.replace(/^review (#\d+) r1$/, "opusfix $1"), result: { fixed: result.fork_fixed ?? [], commit: result.fork_commit }, transcript: transcriptStats(entries.slice(cut)) },
+    ];
   });
   const rows = buildRows({ record: runRecord, agents, recordedAt: new Date().toISOString() });
   const kept = readStore().filter((r) => r.runId !== runId);
