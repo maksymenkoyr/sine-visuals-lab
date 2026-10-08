@@ -1,6 +1,6 @@
 export const meta = {
   name: 'plan-code-review',
-  description: 'Per GitHub issue: one model plans, a cheaper one codes, a stronger one reviews; findings loop back for correction rounds',
+  description: 'Per GitHub issue: a strong model plans and reviews, a cheaper one codes; findings loop back for correction rounds',
   whenToUse: 'Run through /plan-code-review. Record every run with tools/workflow-stats.mjs so the stage models can be compared.',
   phases: [
     { title: 'Plan', detail: 'a detailed plan per issue, no edits' },
@@ -58,7 +58,7 @@ const WORKFLOW_VERSION = 7
 const DEFAULT_MAX_ROUNDS = 2
 
 const DEFAULT_MODELS = {
-  plan: { model: 'sonnet', effort: 'high' },
+  plan: { model: 'opus', effort: 'medium' },
   code: { model: 'haiku', effort: 'medium' },
   review: { model: 'opus', effort: 'high' },
 }

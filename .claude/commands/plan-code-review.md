@@ -1,5 +1,5 @@
 ---
-description: Run GitHub issues through the plan → code → review workflow with correction rounds (one model plans, a cheaper one codes, a stronger one reviews) and record the results for model comparison
+description: Run GitHub issues through the plan → code → review workflow with correction rounds (a strong model plans and reviews, a cheaper one codes) and record the results for model comparison
 argument-hint: <issue numbers> [plan=model/effort] [code=model/effort] [review=model/effort] [rounds=N] [fork] [tag=name]
 ---
 
