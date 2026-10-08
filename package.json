@@ -22,6 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:tempo": "vitest run tests/tempoEval.test.ts",
+    "eval:tempo:real": "vitest run tests/tempoRecordings.test.ts",
     "usage": "node tools/usage.mjs",
     "doc-check": "node tools/doc-check.mjs",
     "pr-shots": "node tools/pr-shots.mjs"
