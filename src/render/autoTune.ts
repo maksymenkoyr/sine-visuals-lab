@@ -497,6 +497,14 @@ export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number
   return clampToSpec(spec, value * master);
 }
 
+/** The effective value before the scene master's Scale: for a scene that
+ *  must decide whether a setting is on at all (a framing switch) apart from
+ *  how much of it the master lets through. Every amount reads
+ *  resolveSceneSetting. */
+export function resolveSceneSettingUnscaled(sceneId: string, spec: SceneSetting): number {
+  return resolveUnscaled(sceneId, spec);
+}
+
 // A scene's variant (SceneSetting.variant) is read through this resolver
 // too, so a dev override on it selects the matching profile — see
 // sceneSettings.ts's setVariantResolver.

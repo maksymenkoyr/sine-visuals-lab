@@ -80,4 +80,23 @@ describe("JitterBuffer", () => {
     expect(buf.consumePulseIfDue(1400)).toBe(false);
     expect(buf.consumePulseIfDue(1500)).toBe(true);
   });
+
+  it("hands back the waveform of the frame covering the instant, not a blend", () => {
+    const buf = new JitterBuffer();
+    buf.push({ ...frame(0, 0), wave: { min: -0.1, max: 0.1 } });
+    buf.push({ ...frame(33, 0), wave: { min: -0.8, max: 0.6 } });
+    buf.push({ ...frame(66, 0), wave: null });
+
+    expect(buf.sampleAt(10)!.wave).toEqual({ min: -0.8, max: 0.6 });
+    expect(buf.sampleAt(0)!.wave).toEqual({ min: -0.1, max: 0.1 });
+    expect(buf.sampleAt(50)!.wave).toBeNull();
+    expect(buf.sampleAt(9999)!.wave).toBeNull();
+  });
+
+  it("reads no waveform from a frame that never carried one", () => {
+    const buf = new JitterBuffer();
+    buf.push(frame(0, 0.5));
+    expect(buf.sampleAt(0)!.wave).toBeNull();
+  });
 });
+

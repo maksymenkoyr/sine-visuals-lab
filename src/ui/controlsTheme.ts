@@ -538,7 +538,14 @@ body.vc-keys-reveal [data-keycap]::after {
   transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
   font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.65);
 }
-.vc-row:hover .vc-hint, .vc-row:focus-within .vc-hint { max-height: 120px; opacity: 1; margin-top: 5px; }
+/* Hover unfolds it only where hover is real. On a touch screen (iPad
+ * Safari) a tap that makes something appear through :hover counts as a
+ * hover, and the tap's click is dropped, so a jack inside the row didn't
+ * plug in until a second tap. A tap still unfolds it through focus. */
+.vc-row:focus-within .vc-hint { max-height: 120px; opacity: 1; margin-top: 5px; }
+@media (hover: hover) {
+  .vc-row:hover .vc-hint { max-height: 120px; opacity: 1; margin-top: 5px; }
+}
 /* The auto takeover line under a slider's description (deviceMenu.ts,
  * AUTO_HOLDING_HINT) — a second line in the auto system's colour, shown only
  * while auto holds the row, so the description above it stays readable. */
@@ -559,14 +566,18 @@ body.vc-keys-reveal [data-keycap]::after {
  * of .vc-hint above, not nested inside it, so the two reveal independently:
  * while auto owns the row, deviceMenu.ts adds its takeover line inside the
  * hint (AUTO_HOLDING_HINT) but never touches this element, so the pills stay put.
- * Reveals on hover/focus like the hint, or pinned open by its own head chip
+ * Reveals on hover (where hover is real)/focus like the hint, or pinned open by its own head chip
  * (.vc-reads-open, toggled on click) regardless of hover state. */
 .vc-reads {
   max-height: 0; opacity: 0; overflow: hidden; margin-top: 0;
   transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
 }
-.vc-row:hover .vc-reads, .vc-row:focus-within .vc-reads, .vc-reads.vc-reads-open {
+.vc-row:focus-within .vc-reads, .vc-reads.vc-reads-open {
   max-height: 60px; opacity: 1; margin-top: 6px;
+}
+/* Hover only where hover is real, for the same dropped-tap reason as .vc-hint. */
+@media (hover: hover) {
+  .vc-row:hover .vc-reads { max-height: 60px; opacity: 1; margin-top: 6px; }
 }
 
 /* The whole input is the touch target (taller than the 3px track it draws).

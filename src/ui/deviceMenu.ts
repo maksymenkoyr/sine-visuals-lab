@@ -61,6 +61,7 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
+  GENERIC_SMOOTHNESS_DEFAULT,
   GENERIC_THRESHOLD_DEFAULT,
   sameDriveSetting,
   smoothstep,
@@ -554,6 +555,7 @@ export interface DeviceMenuDeps {
   onDeleteLook: (sceneId: string, name: string) => void;
   decodeLook: (code: string) => SceneLook | null;
   buildShareLink: (look: SceneLook) => string;
+  buildShareCode: (look: SceneLook) => string;
   hasLookUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
   /** The Set card's pads and Autopilot — see src/ui/setCard.ts for what each
@@ -626,6 +628,10 @@ export interface DeviceMenuDeps {
   getDriveThresholdState: (sceneId: string, spec: SceneSetting) => DriveThresholdState;
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
+  /** The generic gate's Smoothness (its knee width, 0..1) — driveStore.ts's
+   *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
+  getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
+  onSetDriveSmoothness: (sceneId: string, spec: SceneSetting, value: number) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
@@ -770,8 +776,9 @@ export interface DeviceMenu {
   toggle(): void;
   close(): void;
   /** Fed every frame while in a viz (any may be null: frame/ungained/anim
-   *  before audio is up, rawBands/mono additionally on a mic-less renderer
-   *  device) — drives the Input card's level wash, the spectrum strip's
+   *  before audio is up, rawBands additionally on a mic-less renderer
+   *  device, mono there too unless the feed sends its waveform — see
+   *  AudioMeters.update) — drives the Input card's level wash, the spectrum strip's
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
    *  is the same frame before them (the strip's ghost bars); `pinnedBands`
    *  is which bands the gain stage clamped (bandGains.ts's own pinnedBands);
@@ -2550,7 +2557,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }, EQ_HIDE_DELAY_MS);
     }
   }
-  fadersRow.addEventListener("pointerenter", () => {
+  // A finger has no hover: a press already shows the readouts (eqDragging
+  // below), and showing them as the tap lands moved what was under it.
+  fadersRow.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "touch") return;
     eqHovering = true;
     refreshEqLayer();
   });
@@ -2570,7 +2580,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     eqFocused = false;
     refreshEqLayer();
   });
-  fadersRow.addEventListener("pointerdown", () => {
+  fadersRow.addEventListener("pointerdown", (e) => {
+    // The Frequencies jack sits in this row, but pressing it isn't a fader
+    // drag: popping the readouts up under a tap cost the tap its click on
+    // iPad Safari.
+    if ((e.target as Element | null)?.closest(".vc-jack")) return;
     eqDragging = true;
     refreshEqLayer();
     const stopDrag = (): void => {
@@ -3117,6 +3131,57 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const GENERIC_THRESHOLD_HINT =
     "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
 
+  const GENERIC_SMOOTHNESS_HINT =
+    "How gradually the gate opens around the dotted line. Left: a sharp edge. Right: a slow fade.";
+
+  /** The generic gate's Smoothness row — a 0..1 slider for how wide the
+   *  knee around the dotted line is (driveStore.ts's getDriveSmoothness).
+   *  Same live-write, no-rebuild rule as buildThresholdRow; that row dims
+   *  it with setEnabled while its threshold is Off. */
+  function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): { el: HTMLElement; setEnabled: (on: boolean) => void } {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px;`;
+    setHint(wrap, GENERIC_SMOOTHNESS_HINT);
+
+    const name = document.createElement("span");
+    name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    name.textContent = "Smoothness";
+    const rng = document.createElement("input");
+    rng.type = "range";
+    rng.className = "vc-slider";
+    rng.min = "0";
+    rng.max = "1";
+    rng.step = "0.05";
+    rng.setAttribute("aria-label", "Smoothness");
+    rng.style.cssText = driveWeightRangeStyle;
+    const out = document.createElement("output");
+    out.style.cssText = driveWeightOutStyle;
+
+    const showValue = (v: number) => {
+      rng.value = String(v);
+      rng.style.setProperty("--vc-fill", `${v * 100}%`);
+      out.textContent = v.toFixed(2);
+    };
+    showValue(deps.getDriveSmoothness(sceneId, spec));
+
+    rng.addEventListener("input", () => {
+      const v = Number(rng.value);
+      showValue(v);
+      deps.onSetDriveSmoothness(sceneId, spec, v);
+      onLiveEdit();
+    });
+
+    wrap.append(name, rng, out);
+    return {
+      el: wrap,
+      setEnabled: (on: boolean) => {
+        rng.disabled = !on;
+        rng.style.opacity = on ? "1" : "0.4";
+        out.style.opacity = on ? "1" : "0.4";
+      },
+    };
+  }
+
   /** Every drive setting's own threshold row — On/Off + a labelled 0..1
    *  slider, right under its graph (or where the graph would be with
    *  nothing plugged in yet). Scene-handled (SceneSetting.drive.threshold
@@ -3124,9 +3189,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  and starts on; every other drive setting uses the generic label/hint
    *  and starts off, gated by drives.ts's own engine (that file's header's
    *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
-   *  setDriveThreshold/setDriveThresholdOn either way. Same live-write,
-   *  no-rebuild rule as buildWeightSlider below; the On/Off buttons share
-   *  buildHeightSeg's own mini-segment styling. */
+   *  setDriveThreshold/setDriveThresholdOn either way. A generic gate also
+   *  gets a Smoothness row under the threshold line (buildSmoothnessRow),
+   *  dimmed while the threshold is Off. Same live-write, no-rebuild rule
+   *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
+   *  own mini-segment styling. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
     const label = declared?.label ?? "Threshold";
@@ -3162,6 +3229,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
 
+    const smooth = declared === undefined ? buildSmoothnessRow(sceneId, spec, onLiveEdit) : undefined;
+
     const showValue = (v: number) => {
       rng.value = String(v);
       rng.style.setProperty("--vc-fill", `${v * 100}%`);
@@ -3175,6 +3244,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rng.disabled = !on;
       rng.style.opacity = on ? "1" : "0.4";
       out.style.opacity = on ? "1" : "0.4";
+      smooth?.setEnabled(on);
     };
 
     const state = deps.getDriveThresholdState(sceneId, spec);
@@ -3201,7 +3271,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
 
     wrap.append(seg, name, rng, out);
-    return wrap;
+    if (!smooth) return wrap;
+    const column = document.createElement("div");
+    column.style.cssText = `display: flex; flex-direction: column;`;
+    column.append(wrap, smooth.el);
+    return column;
   }
 
   function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
@@ -3753,13 +3827,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function refreshResetVisibility(): void {
       // A moved threshold counts too — on/off or value, scene-handled or
       // generic (this row's own default is "on" for the former, "off" for
-      // the latter, mirroring driveStore.ts's getDriveThresholdState).
+      // the latter, mirroring driveStore.ts's getDriveThresholdState). A
+      // generic gate's moved Smoothness counts as well.
       const declared = spec.drive?.threshold;
       const thresholdState = spec.drive ? deps.getDriveThresholdState(sceneId, spec) : undefined;
       const thresholdMoved =
         !!thresholdState &&
         (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
-      resetBtn.hidden = !thresholdMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+      const smoothnessMoved =
+        !!spec.drive && declared === undefined && deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT;
+      resetBtn.hidden = !thresholdMoved && !smoothnessMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
@@ -3877,7 +3954,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // this file's header's "cover everything with hints" pass). Reads
     // port.title live at hover/focus time (refreshMeta below keeps it
     // current), so this never needs its own state.
-    port.addEventListener("pointerenter", () => showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]));
+    // Not for a finger, as a jack's own (jack.ts): a tooltip popping up
+    // mid-tap could cost the tap its click on iPad Safari.
+    port.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "touch") showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]);
+    });
     port.addEventListener("pointerleave", hideTooltip);
     port.addEventListener("focus", () => showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]));
     port.addEventListener("blur", hideTooltip);
@@ -3892,9 +3973,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sparkCanvas.style.cssText = driveSparkCanvasStyle;
     const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). The top line is one wire at full weight; higher clips. Colour shows which wire is contributing most.";
     sparkCanvas.title = SPARK_TOOLTIP;
-    sparkCanvas.addEventListener("pointerenter", () =>
-      showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]),
-    );
+    sparkCanvas.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "touch") showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]);
+    });
     sparkCanvas.addEventListener("pointerleave", hideTooltip);
     sparkWrap.appendChild(sparkCanvas);
     const sparkCtx = sparkCanvas.getContext("2d")!;
@@ -4645,7 +4726,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     focusJackRow = focus;
     if (hadFan || hover || focus) scheduleCableRecompute();
   }
-  root.addEventListener("pointerover", (e) => setLitJackRows(jackRowOf(e.target), focusJackRow));
+  // Not for a finger: a tap is no hover, and drawing a wired jack's cables
+  // as the tap lands cost the tap its click on iPad Safari.
+  root.addEventListener("pointerover", (e) => {
+    if (e.pointerType !== "touch") setLitJackRows(jackRowOf(e.target), focusJackRow);
+  });
   root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
@@ -5037,12 +5122,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // as the readout. A click (or Enter/Space) unfolds one grid row per
   // measure: caption · 10s trace (createTraceStrip, exported from
   // audioMeters.ts for this) · 0-100 readout, each caption in its trace's
-  // colour so the rows double as the legend. They fold to zero height, not
-  // display: none — a trace strip only records while its canvas has a width
-  // (createColumnRing's ensureSize), so this way each row unfolds with its
-  // last 10 s already drawn. caption uses the same register as powerCard.ts's
-  // own readoutCaptionStyle (kept local — the two files' row shapes
-  // otherwise share nothing worth a third file).
+  // colour so the rows double as the legend. Each row records while folded,
+  // so it unfolds with its last 10 s already drawn. caption uses the same
+  // register as powerCard.ts's own readoutCaptionStyle (kept local — the two
+  // files' row shapes otherwise share nothing worth a third file).
   const pictureHeading = groupHeading("Picture");
   const pictureCaptionStyle = `
     font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
@@ -6050,6 +6133,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onDeleteLook: deps.onDeleteLook,
     decodeLook: deps.decodeLook,
     buildShareLink: deps.buildShareLink,
+    buildShareCode: deps.buildShareCode,
     hasUndo: deps.hasLookUndo,
     onUndoLook: (sceneId) => {
       deps.onUndoLook(sceneId);
@@ -7277,9 +7361,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       gate: SilenceGateReading | null,
       drives: SceneDrives | null,
     ) {
-      // Skip the DOM write while closed — the panel is re-opened via open()
-      // anyway, and this runs every rAF tick while in a viz.
-      if (!isOpen) return;
+      // Closed, only the meters' traces record (audioMeters.ts's update(),
+      // onScreen false), so they open on what they missed; every DOM write
+      // here is skipped — this runs every rAF tick while in a viz.
+      if (!isOpen) {
+        audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
+        return;
+      }
       // A scene switch (or a renderer with nothing playing) leaves `pinned`
       // pointing at a setting that no longer belongs to the active scene —
       // checked here rather than at every scene-change call site, since this
@@ -7288,7 +7376,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // pinned or the scene hasn't changed — togglePin() only actually
       // rebuilds anything on the rare tick this fires.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
       // Unthrottled, same reasoning as the Bands strip a few lines below —
       // the live row's meter should track frame.level as closely as any
       // other live meter in this panel, not just at the row list's own

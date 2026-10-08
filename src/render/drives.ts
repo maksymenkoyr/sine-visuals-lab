@@ -8,7 +8,7 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import type { HitLane } from "../audio/hitStrength.ts";
-import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveThresholdState } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveSmoothness, getDriveThresholdState } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
 /**
@@ -224,7 +224,10 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * 0 at the floor (everything through), 1 at the peak (only the standouts).
  * `value()`/`uniformPair()`/`valueOf()` fade a reading out smoothly below
  * that line (a soft knee, not a hard cut, so a hit riding right on the edge
- * doesn't flicker) and `fired()` blocks an edge whose own combined value
+ * doesn't flicker; the knee's width is the setting's Smoothness, see
+ * getDriveSmoothness in driveStore.ts, defaulting to
+ * GENERIC_SMOOTHNESS_DEFAULT, and at its far left it is a hard cut) and
+ * `fired()` blocks an edge whose own combined value
  * falls under it, on top of whatever that mix already required. A setting
  * still on its built-in reaction (`"scene"`) gets the same gate through
  * `value()` only — forScene()'s gateBuiltIn advances its tracker there, on
@@ -509,6 +512,12 @@ export const GATE_OPEN_HIGH = 0.55;
  *  every generic setting, since none of them shaped this gate on purpose the
  *  way a scene-handled setting shapes its own. */
 export const GENERIC_THRESHOLD_DEFAULT = 0.25;
+
+/** The generic engine gate's knee-width default (driveStore.ts's
+ *  getDriveSmoothness; the knee itself is applyGenericGate's) — the resting
+ *  position of the Smoothness slider, and the knee every generic setting has
+ *  always had. A scene-handled threshold never reads it. */
+export const GENERIC_SMOOTHNESS_DEFAULT = 0.1;
 // The generic gate tracker's own time constants (accumulate() below) — a
 // floor that chases a *lower* resting level quickly (so a quiet moment reads
 // as quiet almost at once) but a *higher* one slowly (so one loud passage
@@ -524,8 +533,11 @@ const GATE_PEAK_DECAY_TAU_SEC = 4;
 // The soft knee around the gate's own line (value()/uniformPair()/valueOf()
 // below): a fraction of the tracker's own floor-to-peak spread, with a
 // minimum so a dead-flat signal (peak == floor) still has *some* knee rather
-// than a hard step.
-const GATE_KNEE_FRACTION = 0.04;
+// than a hard step. The fraction is the generic gate's Smoothness setting
+// (driveStore.ts getDriveSmoothness, 0..1) scaled by GATE_KNEE_MAX_FRACTION,
+// so the setting's default, GENERIC_SMOOTHNESS_DEFAULT, is the knee every
+// generic gate had before the slider existed.
+const GATE_KNEE_MAX_FRACTION = 0.4;
 const GATE_KNEE_SPREAD_MIN = 0.1;
 
 // Master Expansion (this file's header): `normal`'s fixed averaging time,
@@ -1342,7 +1354,10 @@ export function createDriveEngine(): DriveEngine {
       function applyGenericGate(key: string, v: number): number {
         const tr = genericGate(key);
         if (!tr) return v;
-        const k = GATE_KNEE_FRACTION * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
+        const spec = specByKey.get(key)!;
+        const s = getDriveSmoothness(sceneId, spec);
+        const k = GATE_KNEE_MAX_FRACTION * s * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
+        if (k <= 0) return v >= tr.line ? v : 0;
         return v * smoothstep(tr.line - k, tr.line + k, v);
       }
 

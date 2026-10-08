@@ -6,8 +6,9 @@
  * analyser. An AnalyserNode downmixes its input to mono, which is exactly
  * what the scope draws — a phone or laptop mic is mono anyway.
  *
- * Display-only and local to this device: nothing here reaches
- * FeatureExtractor or the wire frame. The math over the samples lives in
+ * Display-only: nothing here reaches FeatureExtractor. In a room, a device
+ * on its own input also sends each frame's min and max to its followers
+ * (src/net/protocol.ts's wave tail), so a phone or iPad draws the same row. The math over the samples lives in
  * waveform.ts, kept pure so it's testable without an AudioContext.
  *
  * `fftSize` is also reused DEV-only at 32768 (app.ts's measureAnalyser) as a

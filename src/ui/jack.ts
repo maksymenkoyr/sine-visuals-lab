@@ -81,8 +81,15 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
     e.stopPropagation();
     onClick();
   });
-  el.addEventListener("pointerenter", () => onHover(true));
-  el.addEventListener("pointerleave", () => onHover(false));
+  // No hover for a finger: enter and leave both fire around the one tap, so
+  // the preview and tooltip would only flash, and on iPad Safari a tooltip
+  // appearing mid-tap could cost the tap its click.
+  el.addEventListener("pointerenter", (e) => {
+    if (e.pointerType !== "touch") onHover(true);
+  });
+  el.addEventListener("pointerleave", (e) => {
+    if (e.pointerType !== "touch") onHover(false);
+  });
   el.addEventListener("focus", () => onHover(true));
   el.addEventListener("blur", () => onHover(false));
 

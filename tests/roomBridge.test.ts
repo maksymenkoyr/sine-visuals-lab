@@ -44,11 +44,12 @@ function fakePlay(init: Partial<MainPlayStatus> = {}) {
 
 function setup(init: Partial<MainPlayStatus> = {}) {
   const fp = fakePlay(init);
-  const env = { present: true, roomShown: 0 };
+  const env = { present: true, roomShown: 0, live: false };
   const bridge = createRoomBridge({
     play: fp.play,
     present: () => env.present,
     showRoom: () => void env.roomShown++,
+    liveWhenAlone: () => env.live,
   });
   return { ...fp, bridge, env };
 }
@@ -93,6 +94,23 @@ describe("createRoomBridge", () => {
     const { bridge, calls } = setup();
     bridge.update(1234);
     expect(calls).toEqual(["tick:1234"]);
+  });
+
+  it("alone, a live owner plays its look to Main on update, with no Play", () => {
+    const { bridge, calls, env, set } = setup({ onAir: false });
+    env.live = true;
+    bridge.update(1); // someone else is online: Main waits for Play
+    env.present = false;
+    bridge.update(2);
+    expect(calls).toEqual(["tick:1", "tick:2", "play:undefined"]);
+    set({ onAir: true }); // in step: nothing to send
+    bridge.update(3);
+    set({ onAir: false, known: false }); // Main not known yet
+    bridge.update(4);
+    set({ known: true });
+    env.live = false; // not the owner, or the pop-out is open
+    bridge.update(5);
+    expect(calls).toEqual(["tick:1", "tick:2", "play:undefined", "tick:3", "tick:4", "tick:5"]);
   });
 
   it("carries changedBy, and Take Main calls MainPlay's take", () => {
