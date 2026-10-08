@@ -11,7 +11,7 @@ tracker that commits as soon as the music is clear, and swap it in only if
 it wins everywhere. One phase makes Auto pick mic settings that keep hits
 distinct in a loud room.
 
-Researched 2026-10-06.
+Researched 2026-10-06. Issue: #438
 
 ## Decisions
 
