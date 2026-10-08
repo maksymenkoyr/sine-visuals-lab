@@ -1,0 +1,2 @@
+fix-conflicts: npm run fix-conflicts — a cheap headless model resolves a stopped rebase/merge's conflicts (tools/fix-conflicts.sh)
+aliases: npm run aliases — print this list (tools/aliases.txt)

@@ -25,7 +25,9 @@
     "eval:tempo:real": "vitest run tests/tempoRecordings.test.ts",
     "usage": "node tools/usage.mjs",
     "doc-check": "node tools/doc-check.mjs",
-    "pr-shots": "node tools/pr-shots.mjs"
+    "pr-shots": "node tools/pr-shots.mjs",
+    "fix-conflicts": "bash tools/fix-conflicts.sh",
+    "aliases": "cat tools/aliases.txt"
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",
