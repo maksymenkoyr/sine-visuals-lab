@@ -209,8 +209,8 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * threshold` marks a setting scene-handled: the scene owns the whole idea of
  * "how far does this have to stand out before it counts" and reads the
  * user's own slider back with `drives.threshold(key)`, applying whatever
- * gate shape actually fits its signal — Physarum 2's Dose reads
- * rippleEmitter.ts's salience floor/peak trackers, not the generic one
+ * gate shape actually fits its signal — Physarum 2's Dose and Alien's Cut
+ * read standout.ts's learned floor/peak trackers, not the generic one
  * below. (Caustics' Beat ripple takes both instead: the generic gate on its
  * drive, then its own Ring threshold as a plain setting.) Declaring
  * `drive.threshold` is what opts a setting *out* of the engine's own gate;
@@ -525,7 +525,7 @@ export const GENERIC_SMOOTHNESS_DEFAULT = 0.1;
 // to a new high immediately but eases back down toward the floor at the same
 // slow rate. Picked to feel like a noise floor, not measured against any
 // reference — nothing here plays back a released ring the way
-// SALIENCE_*_RELAX_SEC (rippleEmitter.ts) does for Beat ripple's own,
+// standout.ts's FLOOR_RELAX_SEC/PEAK_RELAX_SEC do for its own,
 // unrelated trackers.
 const GATE_FLOOR_DOWN_TAU_SEC = 0.3;
 const GATE_FLOOR_UP_TAU_SEC = 4;

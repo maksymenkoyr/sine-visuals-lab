@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  advanceEmission,
-  advanceStandout,
   buildProfile,
-  createRippleEmissionState,
   createRippleEmitter,
   createRingRateState,
   advanceRingRate,
@@ -15,347 +12,21 @@ import {
   rippleSpeedFor,
   rippleWidthFor,
   ringStyleFor,
-  salienceMarks,
-  ringThresholdBar,
-  RING_THRESHOLD_DEFAULT,
   type RingStyle,
   type RippleProfileParams,
 } from "../src/render/scenes/rippleEmitter.ts";
+import { advanceStandoutAmount, createStandoutState } from "../src/render/standout.ts";
 
 // anim.beatPulse/lowPulse's own real shape (animClock.ts's BEAT_PULSE_DECAY_PER_SEC):
 // a step to 1 in a single tick, then exponential decay at 6/sec.
 const BEAT_PULSE_DECAY = 6;
 const DT = 1 / 60;
 
-/** Runs advanceEmission over a driver that sits at 0 (letting the smoothing
- *  settle there) and then jumps to 1 and decays like a real beat pulse,
- *  returning the total emitted. */
-function simulateSingleHit(totalSec = 3): number {
-  const state = createRippleEmissionState();
-  // Settle the smoothing at 0 before the hit, same as a quiet passage.
-  for (let i = 0; i < 10; i++) advanceEmission(state, DT, 0);
-  let total = 0;
-  for (let t = 0; t < totalSec; t += DT) {
-    total += advanceEmission(state, DT, Math.exp(-BEAT_PULSE_DECAY * t));
-  }
-  return total;
-}
-
-/** Same shape as simulateSingleHit, but a climb of `height` (not necessarily
- *  a full 0->1 jump) and a caller-chosen threshold — Ring threshold's own Off
- *  switch (`null`) included. */
-function simulateStepClimb(height: number, threshold: number | null, totalSec = 3): number {
-  const state = createRippleEmissionState();
-  for (let i = 0; i < 10; i++) advanceEmission(state, DT, 0, threshold);
-  let total = 0;
-  for (let t = 0; t < totalSec; t += DT) {
-    total += advanceEmission(state, DT, height * Math.exp(-BEAT_PULSE_DECAY * t), threshold);
-  }
-  return total;
-}
-
-describe("advanceEmission", () => {
-  it("a clean hit (0->1 jump, beat-pulse decay) emits a total close to 1 — one old-style ring's worth", () => {
-    const total = simulateSingleHit();
-    expect(total).toBeGreaterThan(0.85);
-    expect(total).toBeLessThan(1.05);
-  });
-
-  it("a constant signal emits nothing once settled", () => {
-    const state = createRippleEmissionState();
-    let total = 0;
-    for (let i = 0; i < 300; i++) total += advanceEmission(state, DT, 0.6);
-    expect(total).toBe(0);
-  });
-
-  it("a slow ramp (0->1 over 5s) emits close to nothing — too slow to clear the rise deadband", () => {
-    const state = createRippleEmissionState();
-    let total = 0;
-    const rampSec = 5;
-    for (let t = 0; t < rampSec; t += DT) {
-      total += advanceEmission(state, DT, Math.min(1, t / rampSec));
-    }
-    expect(total).toBeLessThan(0.1);
-  });
-
-  it("a fast pulse train ducks itself: every hit after the first emits noticeably less than a lone hit", () => {
-    const state = createRippleEmissionState();
-    for (let i = 0; i < 20; i++) advanceEmission(state, DT, 0); // settle at 0
-    const period = 0.15; // hits faster than the pulse's own ~1/6s decay area
-    const totalSec = 2;
-    const perPulse: number[] = [];
-    let current = 0;
-    let lastIdx = -1;
-    for (let t = 0; t < totalSec; t += DT) {
-      const idx = Math.floor(t / period);
-      if (idx !== lastIdx) {
-        if (lastIdx >= 0) perPulse.push(current);
-        current = 0;
-        lastIdx = idx;
-      }
-      current += advanceEmission(state, DT, Math.exp(-BEAT_PULSE_DECAY * (t % period)));
-    }
-    perPulse.push(current);
-
-    const first = perPulse[0]!;
-    const later = perPulse.slice(2, -1); // skip the first (settling from 0) and the last (partial window)
-    expect(first).toBeGreaterThan(0.85); // reads like the lone-hit case above
-    for (const p of later) {
-      expect(p).toBeLessThan(first * 0.75); // meaningfully ducked, not merely a lone hit repeated
-    }
-  });
-
-  it("never produces NaN or a negative amount across a broad random sweep, including dt=0", () => {
-    const state = createRippleEmissionState();
-    for (let i = 0; i < 500; i++) {
-      const out = advanceEmission(state, Math.random() < 0.05 ? 0 : Math.random() / 30, Math.random());
-      expect(Number.isFinite(out)).toBe(true);
-      expect(out).toBeGreaterThanOrEqual(0);
-    }
-  });
-});
-
 const TYPICAL_PARAMS: RippleProfileParams = {
   decayPerSec: rippleDecayFor(0.3), // Wave fade's own default
   speedUnitsPerSec: rippleSpeedFor(0.5), // Wave speed's own default
   widthGaussianW: rippleWidthFor(0.5), // Ring width's own default
 };
-
-describe("advanceEmission salience — a ring is sized by how much a hit stands out", () => {
-  /** A beat-pulse-shaped driver from a list of hits ({t, h}): each hit
-   *  raises the pulse to max(current, h), then it decays like anim.beatPulse.
-   *  Returns the total emitted around each hit (from the hit's tick until the
-   *  next hit), in hit order. */
-  function emitPerHit(hits: { t: number; h: number }[], endSec: number, state = createRippleEmissionState()): number[] {
-    const out = hits.map(() => 0);
-    let pulse = 0;
-    let next = 0;
-    let current = -1;
-    advanceEmission(state, DT, 0);
-    for (let t = 0; t < endSec; t += DT) {
-      pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
-      while (next < hits.length && hits[next]!.t <= t) {
-        pulse = Math.max(pulse, hits[next]!.h);
-        current = next++;
-      }
-      const e = advanceEmission(state, DT, pulse);
-      if (current >= 0) out[current]! += e;
-    }
-    return out;
-  }
-
-  // Deterministic "noise": small hits between kicks, heights in 0.2..0.4.
-  const noisyKicks = (seconds: number) => {
-    const hits: { t: number; h: number; kick: boolean }[] = [];
-    let seed = 11;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let t = 0; t < seconds; t += 0.1) {
-      const kick = Math.abs((t / 0.5) - Math.round(t / 0.5)) < 1e-6;
-      hits.push({ t, h: kick ? 1 : 0.2 + 0.2 * rnd(), kick });
-    }
-    return hits;
-  };
-
-  it("background hits between kicks emit ~nothing once the floor has settled, kicks still emit full rings", () => {
-    const hits = noisyKicks(12);
-    const emitted = emitPerHit(hits, 12.5);
-    const settled = hits.map((hit, i) => ({ ...hit, e: emitted[i]! })).filter((h) => h.t > 4);
-    const noise = settled.filter((h) => !h.kick).map((h) => h.e);
-    const kicks = settled.filter((h) => h.kick).map((h) => h.e);
-    // Most background hits emit exactly nothing; the odd louder blip may make
-    // a faint ring, never anything near a kick's.
-    expect(noise.reduce((a, b) => a + b, 0) / noise.length).toBeLessThan(0.05);
-    expect(Math.max(...noise)).toBeLessThan(0.3);
-    expect(Math.min(...kicks)).toBeGreaterThan(0.7);
-  });
-
-  it("a steady run of equal kicks keeps emitting full rings — the peak is the kick itself", () => {
-    const hits = Array.from({ length: 60 }, (_, i) => ({ t: i * 0.5, h: 1 }));
-    const emitted = emitPerHit(hits, 30.5);
-    for (const e of emitted.slice(-10)) expect(e).toBeGreaterThan(0.85);
-  });
-
-  it("after a quiet spell a modest hit stands out again", () => {
-    const state = createRippleEmissionState();
-    // A busy passage of 0.3 hits pushes the floor up to ~0.3...
-    emitPerHit(Array.from({ length: 40 }, (_, i) => ({ t: i * 0.1, h: 0.3 })), 4, state);
-    // ...then 8s of silence, then one 0.3 hit.
-    const [afterQuiet] = emitPerHit([{ t: 8, h: 0.3 }], 8.5, state);
-    expect(afterQuiet).toBeGreaterThan(0.7);
-  });
-
-  it("a noise-only passage settles to ~nothing instead of ringing on every blip", () => {
-    const hits = noisyKicks(10).filter((h) => !h.kick);
-    const emitted = emitPerHit(hits, 10.5);
-    const late = emitted.filter((_, i) => hits[i]!.t > 5);
-    const mean = late.reduce((a, b) => a + b, 0) / late.length;
-    expect(mean).toBeLessThan(0.3);
-  });
-});
-
-describe("advanceEmission on a smooth source — whole climbs, not frame steps", () => {
-  // A level sitting high with smooth raised-cosine bumps, alternating a big
-  // (0.25) and a small (0.06) one every second, each 0.5 s long — the shape a
-  // level or drawn-line source gives, not a hit envelope.
-  const bumpSignal = (t: number) => {
-    const k = Math.floor(t);
-    const ph = t - k;
-    const size = k % 2 === 0 ? 0.25 : 0.06;
-    return 0.75 + (ph < 0.5 ? size * 0.5 * (1 - Math.cos((ph / 0.5) * 2 * Math.PI)) : 0);
-  };
-
-  /** Per bump: total emitted and how many separate runs of emitting frames. */
-  function runBumps(dt: number, seconds: number) {
-    const state = createRippleEmissionState();
-    const totals: number[] = [];
-    const runs: number[] = [];
-    let wasEmitting = false;
-    for (let t = 0; t < seconds; t += dt) {
-      const k = Math.floor(t);
-      const e = advanceEmission(state, dt, bumpSignal(t));
-      totals[k] = (totals[k] ?? 0) + e;
-      if (e > 0 && !wasEmitting) runs[k] = (runs[k] ?? 0) + 1;
-      wasEmitting = e > 0;
-    }
-    return { totals, runs };
-  }
-
-  it("each big bump sends one ring, small bumps send nothing once it has learned the source", () => {
-    const { totals, runs } = runBumps(DT, 20);
-    for (let k = 6; k < 20; k++) {
-      if (k % 2 === 0) {
-        expect(totals[k]!).toBeGreaterThan(0.7);
-        expect(runs[k]).toBe(1);
-      } else {
-        expect(totals[k] ?? 0).toBeLessThan(0.15);
-      }
-    }
-  });
-
-  it("a bump's ring is the same size at 30 and 120 fps", () => {
-    const slow = runBumps(1 / 30, 12).totals;
-    const fast = runBumps(1 / 120, 12).totals;
-    for (let k = 6; k < 12; k += 2) expect(Math.abs(slow[k]! - fast[k]!)).toBeLessThan(0.1);
-  });
-
-  it("a ring only starts once the signal is above the drawn 'rings above' line", () => {
-    const state = createRippleEmissionState();
-    for (let t = 0; t < 12; t += DT) {
-      const e = advanceEmission(state, DT, bumpSignal(t));
-      const marks = salienceMarks(state)!; // Ring threshold is on (the default) throughout this test
-      if (e > 0) expect(state.smoothed).toBeGreaterThanOrEqual(marks.ringsAbove - 1e-9);
-      expect(marks.fullRing).toBeGreaterThan(marks.ringsAbove);
-    }
-  });
-});
-
-describe("Ring threshold (the adaptive threshold's margin)", () => {
-  it("the default is exactly the old fixed bar: 1.5x the floor, no minimum", () => {
-    expect(ringThresholdBar(0.2, RING_THRESHOLD_DEFAULT)).toBeCloseTo(0.3, 10);
-    expect(ringThresholdBar(0, RING_THRESHOLD_DEFAULT)).toBe(0);
-  });
-
-  it("its range is wide: no bar at the bottom, well past the old top (3x floor + 0.25) at the top", () => {
-    for (const floor of [0, 0.1, 0.2, 0.5]) expect(ringThresholdBar(floor, 0)).toBe(0);
-    expect(ringThresholdBar(0.2, 1)).toBeGreaterThan(3 * 0.2 + 0.25);
-    expect(ringThresholdBar(0, 1)).toBeGreaterThan(0.25);
-  });
-
-  it("raising it rings less on the busy kick-and-hi-hat case; lowering it rings more", () => {
-    const totalFaint = (threshold: number) => {
-      const state = createRippleEmissionState();
-      let pulse = 0;
-      let faint = 0;
-      let seed = 11;
-      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-      advanceEmission(state, DT, 0, threshold);
-      for (let f = 0; f < 60 * 12; f++) {
-        const t = f * DT;
-        pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
-        const tick = f % 6 === 0; // every 0.1 s
-        const kick = f % 30 === 0; // every 0.5 s
-        if (kick) pulse = 1;
-        else if (tick) pulse = Math.max(pulse, 0.2 + 0.2 * rnd());
-        const e = advanceEmission(state, DT, pulse, threshold);
-        if (t > 4 && !(f % 30 < 3)) faint += e; // emission not caused by a kick
-      }
-      return faint;
-    };
-    expect(totalFaint(0)).toBeGreaterThan(totalFaint(RING_THRESHOLD_DEFAULT));
-    expect(totalFaint(1)).toBeLessThan(totalFaint(RING_THRESHOLD_DEFAULT) + 1e-9);
-  });
-
-  it("at its top it still blocks small jumps on a clean source (floor 0)", () => {
-    const state = createRippleEmissionState();
-    advanceEmission(state, DT, 0, 1);
-    let total = 0;
-    for (let t = 0; t < 1; t += DT) total += advanceEmission(state, DT, 0.15 * Math.exp(-BEAT_PULSE_DECAY * t), 1);
-    expect(total).toBe(0);
-  });
-
-  it("the drawn line follows it", () => {
-    const low = createRippleEmissionState();
-    const high = createRippleEmissionState();
-    for (let t = 0; t < 1; t += DT) {
-      advanceEmission(low, DT, 0.2, 0);
-      advanceEmission(high, DT, 0.2, 1);
-    }
-    expect(salienceMarks(high)!.ringsAbove).toBeGreaterThan(salienceMarks(low)!.ringsAbove);
-  });
-});
-
-describe("Ring threshold Off (threshold: null) — every climb rings, sized by its own climb", () => {
-  it("a background-sized (0.3) climb rings ~0.3 and a clean (1.0) hit still rings ~1", () => {
-    const background = simulateStepClimb(0.3, null);
-    expect(background).toBeGreaterThan(0.25);
-    expect(background).toBeLessThan(0.35);
-    const full = simulateStepClimb(1, null);
-    expect(full).toBeGreaterThan(0.85);
-    expect(full).toBeLessThan(1.05);
-  });
-
-  it("the same busy kick-and-hi-hat background that reads as ~nothing at the default (see the salience describe above) rings for real once the threshold is off", () => {
-    // Same shape as noisyKicks/emitPerHit above (this file's own idiom for a
-    // busy track), inlined here since those are scoped to their own describe.
-    function noiseTotal(threshold: number | null): number {
-      const hits: { t: number; h: number; kick: boolean }[] = [];
-      let seed = 11;
-      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-      for (let t = 0; t < 12; t += 0.1) {
-        const kick = Math.abs(t / 0.5 - Math.round(t / 0.5)) < 1e-6;
-        hits.push({ t, h: kick ? 1 : 0.2 + 0.2 * rnd(), kick });
-      }
-      const state = createRippleEmissionState();
-      let pulse = 0;
-      let next = 0;
-      let current = -1;
-      advanceEmission(state, DT, 0, threshold);
-      let total = 0;
-      for (let t = 0; t < 12.5; t += DT) {
-        pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
-        while (next < hits.length && hits[next]!.t <= t) {
-          pulse = Math.max(pulse, hits[next]!.h);
-          current = next++;
-        }
-        const e = advanceEmission(state, DT, pulse, threshold);
-        if (current >= 0 && t > 4 && !hits[current]!.kick) total += e;
-      }
-      return total;
-    }
-    const atDefault = noiseTotal(RING_THRESHOLD_DEFAULT);
-    const off = noiseTotal(null);
-    expect(atDefault).toBeLessThan(2); // matches the salience describe's own "emit ~nothing" verdict
-    expect(off).toBeGreaterThan(atDefault * 2.5); // the very same hits ring for real once nothing is filtered
-  });
-
-  it("salienceMarks returns null (no bar to draw) while off, and the real bar again once back on", () => {
-    const state = createRippleEmissionState();
-    advanceEmission(state, DT, 0.2, null);
-    expect(salienceMarks(state)).toBeNull();
-    advanceEmission(state, DT, 0.2, RING_THRESHOLD_DEFAULT);
-    expect(salienceMarks(state)).not.toBeNull();
-  });
-});
 
 describe("rippleEnvelope", () => {
   it("is 0 at or before age 0, and stays within [0, 1]", () => {
@@ -419,13 +90,13 @@ describe("buildProfile", () => {
     const emitter = createRippleEmitter();
     const crest = new Float32Array(PROFILE_SAMPLES);
     const slope = new Float32Array(PROFILE_SAMPLES);
-    const emission = createRippleEmissionState();
-    for (let i = 0; i < 20; i++) advanceEmission(emission, DT, 0); // settle
+    const emission = createStandoutState();
+    for (let i = 0; i < 20; i++) advanceStandoutAmount(emission, DT, 0); // settle
     let maxCrest = 0;
     for (let t = 0; t < 5; t += DT) {
       emitter.tick(DT, TYPICAL_PARAMS);
       const signal = Math.exp(-BEAT_PULSE_DECAY * (t % 0.15));
-      emitter.emit(advanceEmission(emission, DT, signal));
+      emitter.emit(advanceStandoutAmount(emission, DT, signal));
       buildProfile(emitter, TYPICAL_PARAMS, crest, slope);
       for (let i = 0; i < PROFILE_SAMPLES; i++) maxCrest = Math.max(maxCrest, crest[i]!);
     }
@@ -754,55 +425,5 @@ describe("Ring style: Merge (close rings combine into one stronger ring)", () =>
       expect(merge.amp[i]).toBeCloseTo(bump.amp[i]!, 6);
       expect(merge.ageSec[i]).toBeCloseTo(bump.ageSec[i]!, 6);
     }
-  });
-});
-
-describe("advanceStandout — one yes per hit that stands out (Physarum 2's Dose reseed)", () => {
-  /** Fires counted per hit, for kicks (height 1 every 0.5s) with a small
-   *  background blip between each, like noisyKicks above. */
-  function firesFor(threshold: number | null): { kick: number; blip: number } {
-    const state = createRippleEmissionState();
-    let pulse = 0;
-    let kick = 0;
-    let blip = 0;
-    advanceStandout(state, DT, 0, threshold);
-    let seed = 7;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let t = 0; t < 12; t += DT) {
-      pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
-      const onKick = Math.abs(t / 0.5 - Math.round(t / 0.5)) < DT / 2 / 0.5;
-      const onBlip = !onKick && Math.abs((t - 0.25) / 0.5 - Math.round((t - 0.25) / 0.5)) < DT / 2 / 0.5;
-      if (onKick) pulse = Math.max(pulse, 1);
-      else if (onBlip) pulse = Math.max(pulse, 0.2 + 0.2 * rnd());
-      const fired = advanceStandout(state, DT, pulse, threshold);
-      if (fired && t > 4) {
-        if (pulse > 0.8) kick++;
-        else blip++;
-      }
-    }
-    return { kick, blip };
-  }
-
-  it("fires once per kick and stays quiet on the background blips", () => {
-    const { kick, blip } = firesFor(RING_THRESHOLD_DEFAULT);
-    // 16 kicks in the 8s after the floor settles; one fire each, never two.
-    expect(kick).toBeGreaterThanOrEqual(14);
-    expect(kick).toBeLessThanOrEqual(16);
-    expect(blip).toBeLessThanOrEqual(1);
-  });
-
-  it("with the threshold Off every climb counts, blips included", () => {
-    // Many blips sit under the decaying tail of the kick before them and make
-    // no climb at all; the ones that do climb all count with the line off.
-    const { blip } = firesFor(null);
-    expect(blip).toBeGreaterThanOrEqual(2);
-    expect(blip).toBeGreaterThan(firesFor(RING_THRESHOLD_DEFAULT).blip);
-  });
-
-  it("a steady level never fires", () => {
-    const state = createRippleEmissionState();
-    let fires = 0;
-    for (let i = 0; i < 300; i++) if (advanceStandout(state, DT, 0.6)) fires++;
-    expect(fires).toBe(0);
   });
 });

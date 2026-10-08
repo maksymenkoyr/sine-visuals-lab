@@ -3514,11 +3514,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     canvas.style.cssText = driveOutCanvasStyle;
     // Key for a scene's own marks (settingMarks.ts), shown only once the
     // scene has published some: the first line's label for the dotted trace,
-    // and the cyan dot for a reaction.
+    // and the cyan dot under the scene's own word for a reaction.
     const key = document.createElement("div");
     key.style.cssText = "display:none;gap:12px;margin-top:4px;font-size:11px;color:rgba(255,255,255,0.6);";
     const keyReaction = document.createElement("span");
-    keyReaction.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(110,235,225,0.95);margin-right:5px;vertical-align:0"></span>ring sent';
+    const keyReactionSwatch = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(110,235,225,0.95);margin-right:5px;vertical-align:0"></span>';
     const keyLine = document.createElement("span");
     const keyLineSwatch = '<span style="display:inline-block;width:14px;border-top:1px dotted rgba(255,255,255,0.7);margin-right:5px;vertical-align:3px"></span>';
     key.append(keyReaction, keyLine);
@@ -3788,6 +3788,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (key.style.display === "none" && (marks || gateLine !== undefined)) {
         key.style.display = "flex";
         keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
+        keyReaction.innerHTML = marks ? keyReactionSwatch : "";
+        keyReaction.append(marks?.reactionLabel ?? "");
         const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
         keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
       }

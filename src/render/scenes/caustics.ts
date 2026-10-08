@@ -2,12 +2,10 @@ import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
 import {
-  advanceEmission,
   advanceRingRate,
   autoNarrowWidthW,
   createRingRateState,
   buildProfile,
-  createRippleEmissionState,
   createRippleEmitter,
   PROFILE_MAX_RADIUS,
   PROFILE_SAMPLES,
@@ -15,10 +13,9 @@ import {
   ringStyleFor,
   rippleSpeedFor,
   rippleWidthFor,
-  salienceMarks,
-  RING_THRESHOLD_DEFAULT,
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
+import { advanceStandoutAmount, createStandoutState, STANDOUT_THRESHOLD_DEFAULT, standoutLine } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
@@ -207,7 +204,7 @@ const SETTINGS: SceneSetting[] = [
     // catalogue source reproduces that union, so the default is Scene (see
     // the `extraUniforms` closure below, and drives.ts's header for why a
     // Scene default is still bit-identical to today). Fed to
-    // rippleEmitter.ts's advanceEmission as a continuous envelope rather
+    // standout.ts's advanceStandoutAmount as a continuous envelope rather
     // than read as a one-shot trigger — see that file's header for why: a
     // busy driver naturally ducks itself there (each rise only launches a
     // ring for however far the envelope climbed since it last fell back),
@@ -240,9 +237,9 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: RING_THRESHOLD_DEFAULT,
+    default: STANDOUT_THRESHOLD_DEFAULT,
     // The adaptive line's margin over its learned noise floor
-    // (rippleEmitter.ts's ringThresholdBar), read only by advanceEmission —
+    // (standout.ts's standoutBar), read only by advanceStandoutAmount —
     // a response-shape, so no `auto` and no `drive`, like Ring width below.
   },
   {
@@ -1412,11 +1409,12 @@ export const causticsScene = createFullscreenScene(
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
     // Beat ripple's own emitter state: `emission` conditions the driver
-    // signal into a launched amount each frame (advanceEmission), `emitter`
-    // holds every ring still in flight, and `crestBuf`/`slopeBuf` are the
-    // persistent arrays buildProfile fills and extraUniforms uploads — see
-    // rippleEmitter.ts's header for how the three fit together.
-    const emission = createRippleEmissionState();
+    // signal into a launched amount each frame (standout.ts's
+    // advanceStandoutAmount), `emitter` holds every ring still in flight, and
+    // `crestBuf`/`slopeBuf` are the persistent arrays buildProfile fills and
+    // extraUniforms uploads — see rippleEmitter.ts's header for how the
+    // three fit together.
+    const emission = createStandoutState();
     const ringRate = createRingRateState();
     const emitter = createRippleEmitter();
     const crestBuf = new Float32Array(PROFILE_SAMPLES);
@@ -1502,7 +1500,7 @@ float softCeil(float x, float knee, float ceil) {
         // The Scene default this setting's drive picker reproduces — "bass
         // or beat hit" — read here as the two decaying pulses' max, a
         // continuous envelope rather than a one-shot edge (see the "ripple"
-        // setting's own comment and advanceEmission's own doc comment for
+        // setting's own comment and advanceStandoutAmount's own doc comment for
         // why a continuous rise-based read is what makes a busy driver duck
         // itself instead of stacking full rings).
         const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
@@ -1510,15 +1508,12 @@ float softCeil(float x, float knee, float ceil) {
         // rawSignal has already been through the shared Threshold gate (when
         // it's on); Ring threshold then sets how far a climb must stand out
         // from the learned everyday ones to send a ring.
-        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, getSetting("ringThreshold"));
+        const emitted = advanceStandoutAmount(emission, anim.dtSec, rawSignal, getSetting("ringThreshold"));
         emitter.emit(emitted, ringStyle);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
-        // ring, and each ring actually sent. Only the one line — a second
-        // "full ring" line made the graph harder to read, and a ring's dot
-        // already shows how strong it was.
-        const marks = salienceMarks(emission);
-        publishSettingMarks("caustics", "ripple", marks ? [{ value: marks.ringsAbove, label: "reach to ring" }] : [], emitted);
+        // ring, and each ring actually sent.
+        publishSettingMarks("caustics", "ripple", { lines: standoutLine(emission, "reach to ring"), reactionLabel: "ring sent" }, emitted);
 
         // A drop is rarer and bigger than an ordinary beat — a stronger ring
         // emitted in addition to whatever the continuous driver above just

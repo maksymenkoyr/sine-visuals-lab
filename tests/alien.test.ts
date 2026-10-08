@@ -18,6 +18,7 @@ import {
   type CutInput,
 } from "../src/render/scenes/alien/reel.ts";
 import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
+import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
 import { decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
 import { BONE_COUNT } from "../src/render/scenes/dancers/rig.ts";
@@ -95,7 +96,13 @@ describe("alien mesh", () => {
 });
 
 describe("alien reel", () => {
-  const input = (over: Partial<CutInput>): CutInput => ({ dtSec: 1 / 60, cutOn: true, cutSignal: 0, cutLine: 0.5, ...over });
+  const input = (over: Partial<CutInput>): CutInput => ({
+    dtSec: 1 / 60,
+    cutOn: true,
+    cutSignal: 0,
+    cutThreshold: STANDOUT_THRESHOLD_DEFAULT,
+    ...over,
+  });
   const run = (seconds: number, fn: (dt: number) => void): void => {
     for (let i = 0; i < Math.round(seconds * 60); i++) fn(1 / 60);
   };
@@ -119,30 +126,59 @@ describe("alien reel", () => {
     expect(a).toBeCloseTo(b, 6);
   });
 
-  it("keeps looping until the signal rises over the line, and never cuts within the minimum shot", () => {
+  /** A hit wire's pulse (anim's 6/s decay) with hits of `h` at times `t`. */
+  const pulseAt = (hits: { t: number; h: number }[], t: number): number => {
+    let v = 0;
+    for (const hit of hits) if (hit.t <= t) v = Math.max(v, hit.h * Math.exp(-6 * (t - hit.t)));
+    return v;
+  };
+  /** The time of every cut over `seconds` of `signal(t)`, at 60 fps. */
+  const cutTimes = (reel: ReturnType<typeof createReel>, seconds: number, signal: (t: number) => number, over: Partial<CutInput> = {}): number[] => {
+    const cuts: number[] = [];
+    for (let i = 0; i < Math.round(seconds * 60); i++) {
+      const t = i / 60;
+      if (stepCut(reel, input({ cutSignal: signal(t), ...over }))) cuts.push(t);
+    }
+    return cuts;
+  };
+
+  it("keeps looping on a held level, however long, and cuts on a hit", () => {
     const reel = createReel();
-    // No trigger, however long: the loop repeats.
-    for (let i = 0; i < 60 * 30; i++) stepCut(reel, input({ cutSignal: 0.2 }));
-    expect(reel.cuts).toBe(0);
-    expect(stepCut(reel, input({ cutSignal: 0.9 }), () => 0.3)).toBe(true);
+    expect(cutTimes(reel, 30, () => 0.2)).toEqual([]);
+    const cuts = cutTimes(reel, 1, (t) => Math.max(0.2, pulseAt([{ t: 0.5, h: 1 }], t)));
+    expect(cuts).toHaveLength(1);
+    expect(cuts[0]).toBeCloseTo(0.5, 1);
     expect(reel.loop).not.toBe(0);
-    const after = reel.loop;
-    // Falls and rises again at once: too soon for another cut.
-    stepCut(reel, input({ cutSignal: 0.2 }));
-    expect(stepCut(reel, input({ cutSignal: 0.9 }))).toBe(false);
-    expect(reel.loop).toBe(after);
-    // Staying above the line is not a rise, however long it lasts.
-    expect(stepCut(reel, input({ dtSec: MIN_SHOT_SEC * 2, cutSignal: 0.95 }))).toBe(false);
-    stepCut(reel, input({ cutSignal: 0.2 }));
-    expect(stepCut(reel, input({ cutSignal: 0.9 }))).toBe(true);
-    expect(reel.cuts).toBe(2);
   });
 
-  it("never cuts with Cut off", () => {
+  it("never cuts twice within the minimum shot, however fast the hits", () => {
     const reel = createReel();
-    stepCut(reel, input({ dtSec: MIN_SHOT_SEC, cutSignal: 0 }));
-    stepCut(reel, input({ cutOn: false, cutSignal: 1 }));
-    expect(reel.cuts).toBe(0);
+    const kicks = Array.from({ length: 24 }, (_, i) => ({ t: 0.5 + i * 0.5, h: 1 }));
+    const cuts = cutTimes(reel, 12.5, (t) => pulseAt(kicks, t));
+    for (let i = 1; i < cuts.length; i++) expect(cuts[i]! - cuts[i - 1]!).toBeGreaterThanOrEqual(MIN_SHOT_SEC);
+    expect(cuts.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("on a busy hit signal cuts on the accents, not on the everyday hits between them", () => {
+    // An accent every 2.5 s, a quieter hit every 0.25 s between (the hats a
+    // Bass or Mid hit wire also catches). A fixed line under 0.45 would cut
+    // on the hats as soon as each shot was old enough.
+    const hits: { t: number; h: number }[] = [];
+    for (let i = 0; i < 120; i++) {
+      const t = 0.25 + i * 0.25;
+      hits.push({ t, h: i % 10 === 9 ? 1 : 0.3 + 0.15 * ((i * 7) % 5) / 4 });
+    }
+    const accents = hits.filter((h) => h.h === 1 && h.t > 5).map((h) => h.t);
+    const cuts = cutTimes(createReel(), 30, (t) => pulseAt(hits, t)).filter((t) => t > 5);
+    for (const t of cuts) expect(accents.some((a) => Math.abs(a - t) < 0.1)).toBe(true);
+    expect(cuts.length).toBeGreaterThanOrEqual(accents.length - 1);
+  });
+
+  it("never cuts with Cut off, but keeps listening", () => {
+    const reel = createReel();
+    const kicks = Array.from({ length: 10 }, (_, i) => ({ t: 0.5 + i * 0.5, h: 1 }));
+    expect(cutTimes(reel, 5.5, (t) => pulseAt(kicks, t), { cutOn: false })).toEqual([]);
+    expect(reel.cut.detector.peak).toBeGreaterThan(0.5);
   });
 
   it("picks every other loop and never the current one", () => {

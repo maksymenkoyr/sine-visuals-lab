@@ -31,7 +31,7 @@ import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
-import { RING_THRESHOLD_DEFAULT } from "../src/render/scenes/rippleEmitter.ts";
+import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 
 const DT = 1 / 60;
 
@@ -574,7 +574,7 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     const ring = byKey("ringThreshold");
     expect(ring.label).toBe("Ring threshold");
     expect(ring.drive).toBeUndefined();
-    expect(ring.default).toBe(RING_THRESHOLD_DEFAULT);
+    expect(ring.default).toBe(STANDOUT_THRESHOLD_DEFAULT);
   });
 });
 

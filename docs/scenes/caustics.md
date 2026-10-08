@@ -16,15 +16,18 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
   `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
   `advancePump`, `driftFlows`, `advanceDensityFlow` (Caustic
   density's own glide — see Decisions), and the `sparkle*` helpers.
+- `src/render/standout.ts` — the shared standout detector:
+  `advanceStandoutAmount` conditions the driver's own rise each frame into a
+  launched ring amount, sized by how far it stands out from the everyday
+  climbs (Physarum 2's Dose and Alien's Cut fire on the same detector).
+  `tests/standout.test.ts` pins it.
 - `src/render/scenes/rippleEmitter.ts` — Beat ripple's own continuous ring
-  emitter: `advanceEmission` conditions the driver's own rise each frame into
-  a launched ring amount, `createRippleEmitter` keeps every ring in flight as
+  emitter: `createRippleEmitter` keeps every ring in flight as
   a plain `{ageSec, amp}` ring-buffer entry, and `buildProfile` sums them into
   the 1D radial crest/slope profile `caustics.ts` uploads as `uRippleCrest`/
   `uRippleSlope`; see its header for why (and for what it replaced: a fixed
   trigger-launched ring pool, then briefly a real 2D wave simulation).
-  `tests/rippleEmitter.test.ts` pins the emission and profile behaviour
-  directly.
+  `tests/rippleEmitter.test.ts` pins the profile behaviour directly.
 - Imports `NOISE_HASH_GLSL`, `NOISE_MASK`, `NOISE_PERIOD`, `wrapFlow` from
   `src/render/noiseHash.ts` — the shared mobile-safe lattice hash (see Decisions
   below; this scene is the reason that module exists).
@@ -605,6 +608,13 @@ reference-measurement workflow used by later scenes.
   threshold has that stored value read as the generic gate's instead. The
   "How Beat Ripple Listens" artifact still describes the old in-row slider
   and Off switch.
+- 2026-10-06 — the emission's detector moved out of `rippleEmitter.ts` into
+  the shared `src/render/standout.ts`, so Alien's Cut could fire on it the
+  way Physarum 2's Dose already did. Renamed, nothing else changed:
+  `advanceEmission` → `advanceStandoutAmount`, `ringThresholdBar` →
+  `standoutBar`, `RING_THRESHOLD_DEFAULT` → `STANDOUT_THRESHOLD_DEFAULT`,
+  `salienceMarks` → `standoutMarks` (its `ringsAbove` is now `reach`), and
+  the graph line comes from `standoutLine`. Same constants, same tests.
 
 ## Tuning notes
 
@@ -645,8 +655,10 @@ reference-measurement workflow used by later scenes.
   `RIPPLE_CEIL_MAX` in `caustics.ts` set how visible the profile reads on
   screen (a single full-strength ring is designed to peak at exactly the
   ceiling's own knee, so it's unaffected by the ceiling at all), and
-  `advanceEmission`'s own `EMISSION_SMOOTH_TAU_SEC`/`RISE_DEADBAND_PER_SEC`
-  set how much of a real hit's height survives conditioning and how slow a
+  `standout.ts`'s `SMOOTH_TAU_SEC`/`RISE_DEADBAND_PER_SEC` (until 2026-10-06
+  `advanceEmission`'s `EMISSION_SMOOTH_TAU_SEC`/`RISE_DEADBAND_PER_SEC` in
+  `rippleEmitter.ts`, same values) set how much of a real hit's height
+  survives conditioning and how slow a
   swell has to be before it's ignored entirely (see that function's own
   comment — its constants are picked against `anim.beatPulse`'s actual decay
   rate, `BEAT_PULSE_DECAY_PER_SEC` in `animClock.ts`, not a round number).
@@ -713,7 +725,7 @@ reference-measurement workflow used by later scenes.
 - Artifact: [Caustics Patch Bay](https://claude.ai/artifact/5mPSRq9Btjf373FDtsQ8kt). Source saved as `caustics/artifacts/caustics-patch-bay.html`.
 - Artifact: [Caustics Signal Recipe](https://claude.ai/artifact/WDRpyQyRzbFAXS58YQaLZX). Source saved as `caustics/artifacts/caustics-signal-recipe.html`.
 - Both artifacts are clickable prototypes for choosing what each reactive setting listens to — the UI behind the drives work (PR #130).
-- Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceEmission` or its `SALIENCE_*` constants change, the copy in that page has to change with them.
+- Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceStandoutAmount` (`src/render/standout.ts`; `advanceEmission` in `rippleEmitter.ts` until 2026-10-06) or its tracker constants (the old `SALIENCE_*`) change, the copy in that page has to change with them.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 - `caustics/scripts/shader-bisect.py` — the 2026-09-28 performance work: times FRAG with one part switched off at a time, and pixel-diffs the scene against any git ref. Runs on `tools/gpu-bench.mjs` (general: any scene, bench or in-app timing), whose header explains why each benchmark frame has to end its render pass on an Apple GPU.
@@ -724,10 +736,11 @@ reference-measurement workflow used by later scenes.
   `/?audio=synthetic&bpm=120#/v/caustics` (any query goes before the hash).
 - `tests/caustics.test.ts` pins the drift-rate, Fog pulse and loudness
   calibration (`advanceLoudSwell`) invariants directly; Beat ripple's own
-  emission and profile invariants
-  (`advanceEmission`, `rippleEnvelope`, `createRippleEmitter`, `buildProfile`)
-  are `tests/rippleEmitter.test.ts`'s job now — run both before touching any
-  of the exported pure functions rather than eyeballing the shader.
+  profile invariants (`rippleEnvelope`, `createRippleEmitter`, `buildProfile`)
+  are `tests/rippleEmitter.test.ts`'s job, and its emission
+  (`advanceStandoutAmount`) is `tests/standout.test.ts`'s — run all three
+  before touching any of the exported pure functions rather than eyeballing
+  the shader.
 - A headless check that Speed boost stays rate-only (no aperture zoom): run
   `caustics/scripts/swell-shot.mjs` against base and against this branch with
   `causticDensity` frozen — base's frame-to-frame distance carries the
@@ -777,3 +790,4 @@ reference-measurement workflow used by later scenes.
   zoom (see Decisions)
 - #154 (2026-09-27) — Beat ripple: rings always reach the edge, then a continuous ring emitter (`rippleEmitter.ts`) sized by salience, with its threshold drawn on the panel graph (`settingMarks.ts`); level/line drive sources fire through `valueTrigger.ts` (see Decisions)
 - #185 (2026-09-28) — Spray loop: 2x2 nozzle cells, far nozzles skipped, gated on its own brightness — the frame's GPU cost roughly halved, no pixel changed (see Decisions)
+- #405 (draft, 2026-10-06) — Beat ripple's detector moved to the shared `src/render/standout.ts`, renamed only (see Decisions)

@@ -5,8 +5,9 @@
  * renderer in renderer.ts); this scene plays them, and the music decides how:
  *   - Move: its wire (Level by default) times the slider is the playback
  *     speed, eased so it glides; silence buys no frames and the loop holds;
- *   - Cut: a loop repeats until its wire (Drop by default) rises over the
- *     line under its graph, then the scene cuts to another loop;
+ *   - Cut: a loop repeats until its wire (Drop by default) makes a climb
+ *     that stands out from its everyday ones (the dotted line on its graph,
+ *     src/render/standout.ts), then the scene cuts to another loop;
  *   - Bounce: its wire (Bass hit by default) squashes the picture toward the
  *     floor under the alien and springs it back, on top of the dance;
  *     Bounce smoothness turns that spring from a snap and a wobble into an
@@ -42,6 +43,8 @@ import type { Palette } from "../../palette.ts";
 import type { AnimFrame } from "../../animClock.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "../../drives.ts";
+import { publishSettingMarks } from "../../settingMarks.ts";
+import { STANDOUT_THRESHOLD_DEFAULT, standoutLine, standoutMarks, standoutThreshold } from "../../standout.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import { pinAsset } from "../../../pinnedAssets.ts";
@@ -62,9 +65,6 @@ export const ALIEN_ID = "alien";
 /** Scales Level (Move's default wire) so a loud song reads about 1 — the
  *  dance at its captured speed with Move at its default. */
 export const MOVE_GAIN = 2;
-/** Where the Cut line starts on its default wire, Drop: a drop's flash
- *  clears it, nothing else on that signal does. */
-export const CUT_LINE_DEFAULT = 0.5;
 /** Browsers won't play slower than about this; below it the loop pauses. */
 const MIN_RATE = 0.07;
 const MAX_RATE = 4;
@@ -118,8 +118,8 @@ const SETTINGS: SceneSetting[] = [
     key: "cut",
     label: "Cut",
     description:
-      "On: the loop repeats until the wired signal rises over the line under its graph, then cuts to another of the three angles " +
-      "(never twice within a couple of seconds). Off: the loop on screen repeats",
+      "On: the loop repeats until the wired signal jumps out from its everyday ones, over the dotted line on its graph, " +
+      "then cuts to another of the three angles (never twice within a couple of seconds). Off: the loop on screen repeats",
     group: "Camera",
     type: "boolean",
     min: 0,
@@ -128,10 +128,12 @@ const SETTINGS: SceneSetting[] = [
     default: 1,
     drive: {
       default: "anim.dropOnset",
+      // Scene-handled: the same standout as Physarum 2's Dose threshold
+      // (standout.ts's header has how one is wired).
       threshold: {
-        default: CUT_LINE_DEFAULT,
-        label: "Cuts above",
-        hint: "A cut each time the signal rises over this line",
+        default: STANDOUT_THRESHOLD_DEFAULT,
+        label: "Cut threshold",
+        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another angle. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
       },
     },
   },
@@ -333,10 +335,17 @@ export const alienScene: Scene = (() => {
       speed = easeSpeed(speed, last.target, dt);
       last.speed = speed;
       last.rate = speed < MIN_RATE ? 0 : Math.min(MAX_RATE, speed);
-      const mark = drives.threshold("cut");
       last.cutSignal = drives.value("cut", anim.dropPulse, 0);
-      last.cutLine = mark === undefined ? CUT_LINE_DEFAULT : (mark ?? 0);
-      stepCut(reel, { dtSec: dt, cutOn: pinnedLoop === null && get("cut") >= 0.5, cutSignal: last.cutSignal, cutLine: last.cutLine });
+      const cut = stepCut(reel, {
+        dtSec: dt,
+        cutOn: pinnedLoop === null && get("cut") >= 0.5,
+        cutSignal: last.cutSignal,
+        cutThreshold: standoutThreshold(drives, "cut"),
+      });
+      // The panel draws the line a climb has to reach, and a dot per cut
+      // (settingMarks.ts); no line while the threshold is off.
+      last.cutLine = standoutMarks(reel.cut.detector)?.reach ?? 0;
+      publishSettingMarks(ALIEN_ID, "cut", { lines: standoutLine(reel.cut.detector, "reach to cut"), reactionLabel: "cut" }, cut ? 1 : 0);
       const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.lowPulse, 0)));
       stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt, get("bounceSmooth"));
       const squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));
