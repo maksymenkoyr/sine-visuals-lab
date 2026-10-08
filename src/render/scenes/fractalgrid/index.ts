@@ -123,7 +123,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.25,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "step" } },
   },
   {
     key: "fold",
@@ -135,7 +135,7 @@ const SETTINGS: SceneSetting[] = [
     max: 2,
     step: 0.05,
     default: 1,
-    drive: { default: { source: "beat", grid: 4 } },
+    drive: { default: { source: "beat", grid: 4 }, hit: { reactionLabel: "fold" } },
   },
   // Look
   {
@@ -158,7 +158,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 1,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "invert" } },
   },
   {
     key: "colours",
@@ -376,18 +376,22 @@ const base = createFullscreenScene(ID, "Fractal Grid", FRAG, {
     const iterations = resolveSceneSetting(ID, settingFor("iterations"));
 
     const bass = Math.min(1.5, Math.max(0, drives.value("dive", anim.low, DIVE_REST)));
-    const stepFired = step > 0 && drives.fired("step", anim.lowOnset);
-    const foldFired = fold > 0 && drives.fired("fold", anim.onset);
-    const dropFired = invert > 0 && drives.fired("invert", anim.dropOnset);
+    const stepHit = drives.fired("step", anim.lowOnset);
+    const foldHit = drives.fired("fold", anim.onset);
+    const dropHit = drives.fired("invert", anim.dropOnset);
+    const stepFired = step > 0 && stepHit;
+    const foldFired = fold > 0 && foldHit;
+    const dropFired = invert > 0 && dropHit;
     const beatSec = frame.bpm > 0 ? 60 / frame.bpm : 0;
 
     state = stepDive(state, {
       dt,
       rate: dive * (DIVE_FLOOR + DIVE_GAIN * bass),
       depthScale: depth,
-      stepCells: stepFired ? step * drives.value("step", anim.lowPulse) : 0,
-      foldSteps: foldFired ? fold : 0,
+      stepCells: stepFired ? step * drives.value("step", anim.lowPulse) * drives.hitSize("step") : 0,
+      foldSteps: foldFired ? fold * drives.hitSize("fold") : 0,
       dropFired,
+      invertSize: drives.hitSize("invert"),
       invertHoldSec: beatSec > 0 ? INVERT_BARS * 4 * beatSec : INVERT_FALLBACK_SEC,
     });
 

@@ -193,6 +193,7 @@ and `ours-chaikin/cells-ours.json`):
   Swell's rest leaves the slider's own height. Arms and Travel are whole
   numbers and kept off the Master Scale (`masterScale: false`), or the
   waves would tear at the angle's seam and stop repeating on the bar.
+- 2026-10-08 — Births, Relaunch and Drop sync became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the birth kick, the relaunch amount and the snap amount by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

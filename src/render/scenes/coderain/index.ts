@@ -192,7 +192,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "downpour" } },
   },
   {
     key: "flicker",
@@ -258,7 +258,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.6,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "turn" } },
   },
   {
     key: "tilt",
@@ -453,11 +453,12 @@ function createCodeRainScene(): Scene {
       fallClock += speed * dt;
 
       // Bursts: a hit starts fresh heads at the top of the view.
-      if (downpour > 0.001 && drives.fired("downpour", anim.lowOnset) && anim.timeSec - lastBurstTime > BURST_MIN_GAP_SEC) {
+      const downpourFired = drives.fired("downpour", anim.lowOnset);
+      if (downpour > 0.001 && downpourFired && anim.timeSec - lastBurstTime > BURST_MIN_GAP_SEC) {
         const height = clamp01(drives.value("downpour", anim.lowPulse));
         const slot = burstCount % BURST_SLOTS;
         bursts[slot * 4] = fallClock;
-        bursts[slot * 4 + 1] = DOWNPOUR_SHARE * downpour * Math.max(0.35, height);
+        bursts[slot * 4 + 1] = DOWNPOUR_SHARE * downpour * Math.max(0.35, height) * drives.hitSize("downpour");
         bursts[slot * 4 + 2] = (burstCount % 65536) + 1;
         bursts[slot * 4 + 3] = anim.timeSec;
         burstCount++;
@@ -476,8 +477,9 @@ function createCodeRainScene(): Scene {
       const headLift = 1 + HEAD_LIFT * hitGlow * clamp01(drives.value("hitGlow", anim.lowPulse));
 
       // The camera: glide forward along the heading; a drop swings it.
-      if (turn > 0.001 && drives.fired("turn", anim.dropOnset)) {
-        const amount = turn * Math.max(0.4, clamp01(drives.value("turn", anim.dropPulse)));
+      const turnFired = drives.fired("turn", anim.dropOnset);
+      if (turn > 0.001 && turnFired) {
+        const amount = turn * Math.max(0.4, clamp01(drives.value("turn", anim.dropPulse))) * drives.hitSize("turn");
         yawTarget += (rng() < 0.5 ? -1 : 1) * (TURN_MIN + TURN_SPREAD * rng()) * amount;
       }
       yaw += (yawTarget - yaw) * (1 - Math.exp(-dt / TURN_TAU));

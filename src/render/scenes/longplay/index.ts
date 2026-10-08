@@ -142,7 +142,7 @@ export const LONGPLAY_SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.8,
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "launch" } },
   },
   // Look
   {
@@ -246,9 +246,10 @@ function step(anim: Anim, drives: Drives): void {
 
   for (let i = 0; i < LAUNCH_SLOTS; i++) launchAge[i] += dt * Math.max(speed, 0.05);
   const launch = get("launch");
-  if (launch > 0.02 && drives.fired("launch", anim.onset) && anim.timeSec - lastLaunchSec >= LAUNCH_MIN_GAP_SEC) {
+  const launchFired = drives.fired("launch", anim.onset);
+  if (launch > 0.02 && launchFired && anim.timeSec - lastLaunchSec >= LAUNCH_MIN_GAP_SEC) {
     launchAge[launchNext] = 0;
-    launchAmp[launchNext] = launch;
+    launchAmp[launchNext] = launch * drives.hitSize("launch");
     launchSeed[launchNext] = Math.random();
     launchNext = (launchNext + 1) % LAUNCH_SLOTS;
     lastLaunchSec = anim.timeSec;

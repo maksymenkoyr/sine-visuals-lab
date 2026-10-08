@@ -256,7 +256,7 @@ const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.2 },
     // anim.onset gates the stamp below — a plain Beat default. The stamp's
     // own strength still rides anim.beatPulse's graded hit shape, untouched.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "reseed" } },
   },
   {
     key: "wipe",
@@ -270,7 +270,7 @@ const SETTINGS: SceneSetting[] = [
     auto: { dynamics: 0.2 },
     // anim.lowOnset gates the stamp below — a plain Bass hit default. The
     // hole's own radius still rides anim.lowPulse's graded hit shape, untouched.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "wipe" } },
   },
   {
     key: "regime",
@@ -872,6 +872,7 @@ function createPetriScene(): Scene {
         slotsUsed++;
       };
 
+      const reseedFired = drives.fired("reseed", anim.onset);
       if (wantCut) {
         regimeIndex = pickRegimeIndex(regimeIndex);
         cutKick = 1;
@@ -882,9 +883,9 @@ function createPetriScene(): Scene {
         const cutSeedCount = MAX_SEEDS - 1;
         for (let i = 0; i < cutSeedCount; i++) stampSeed(1, seedRadius());
         anySeedThisFrame = true;
-      } else if (drives.fired("reseed", anim.onset) && reseedAmount > 0.02 && seedCooldown <= 0) {
+      } else if (reseedFired && reseedAmount > 0.02 && seedCooldown <= 0) {
         const stamps = 1 + Math.floor(reseedAmount * (MAX_SEEDS - 1));
-        const strength = 0.5 + 0.5 * anim.beatPulse * reseedAmount;
+        const strength = (0.5 + 0.5 * anim.beatPulse * reseedAmount) * drives.hitSize("reseed");
         for (let i = 0; i < stamps; i++) stampSeed(strength, seedRadius());
         seedCooldown = RESEED_COOLDOWN_SEC;
         timeSinceSeed = 0;
@@ -895,8 +896,9 @@ function createPetriScene(): Scene {
         anySeedThisFrame = true;
       }
 
-      if (drives.fired("wipe", anim.lowOnset) && wipeAmount > 0.02 && wipeCooldown <= 0 && slotsUsed < MAX_SEEDS) {
-        const radius = (0.015 + 0.05 * wipeAmount) * (0.6 + 0.4 * anim.lowPulse);
+      const wipeFired = drives.fired("wipe", anim.lowOnset);
+      if (wipeFired && wipeAmount > 0.02 && wipeCooldown <= 0 && slotsUsed < MAX_SEEDS) {
+        const radius = (0.015 + 0.05 * wipeAmount) * (0.6 + 0.4 * anim.lowPulse) * drives.hitSize("wipe");
         stampSeed(-1, radius);
         wipeCooldown = WIPE_COOLDOWN_SEC;
         anySeedThisFrame = true;

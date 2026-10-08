@@ -646,6 +646,11 @@ hexagon and decagon.
     it twinkles, while resting sand keeps its angle. The rest of the sand
     dims under it (`GLITTER_DIM`), as on the bench, or white-ish flashes
     vanished into a white-ish bed.
+- 2026-10-08 — Toss and Beat waves became hit drivers (the Reaction row,
+  Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the toss
+  power passed to `advanceToss` by how far the hit stood out; Flat, the
+  default, is unchanged. Beat waves is flat-only: a wave either runs or it
+  doesn't.
 
 ## Tuning notes
 

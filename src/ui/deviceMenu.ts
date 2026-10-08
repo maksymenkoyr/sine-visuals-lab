@@ -63,6 +63,7 @@ import {
   GATE_OPEN_LOW,
   GENERIC_SMOOTHNESS_DEFAULT,
   GENERIC_THRESHOLD_DEFAULT,
+  isEngineHitDriver,
   sameDriveSetting,
   smoothstep,
   sourceKey,
@@ -75,6 +76,7 @@ import {
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
+import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
   DRIVE_ADD_GROUPS,
@@ -632,6 +634,11 @@ export interface DeviceMenuDeps {
    *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
   getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
   onSetDriveSmoothness: (sceneId: string, spec: SceneSetting, value: number) => void;
+  /** A hit driver's Reaction row, Flat or Sized (SceneSetting.drive.hit) —
+   *  driveStore.ts's getDriveReadout/setDriveReadout. Undefined for a
+   *  setting that isn't a hit driver. */
+  getDriveReadout: (sceneId: string, spec: SceneSetting) => HitReadout | undefined;
+  onSetDriveReadout: (sceneId: string, spec: SceneSetting, readout: HitReadout) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
    *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
@@ -3131,6 +3138,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const GENERIC_THRESHOLD_HINT =
     "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
 
+  const HIT_THRESHOLD_HINT =
+    "Moves the dotted line: how far a hit has to stand out from the everyday ones to count. Left: more reactions, even from quiet sounds. Right: only clear standouts. Off: every hit counts.";
+
+  const READOUT_OPTIONS: { readout: HitReadout; label: string; hint: string }[] = [
+    { readout: "flat", label: "Flat", hint: "Every hit that counts gets the full reaction, however much it stood out." },
+    {
+      readout: "sized",
+      label: "Sized",
+      hint: "Each reaction is as big as its hit stood out: a hit that only just clears the dotted line gets a small one. With the threshold Off, as big as the hit itself.",
+    },
+  ];
+
   const GENERIC_SMOOTHNESS_HINT =
     "How gradually the gate opens around the dotted line. Left: a sharp edge. Right: a slow fade.";
 
@@ -3196,8 +3215,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  own mini-segment styling. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
+    const engineHit = isEngineHitDriver(spec);
     const label = declared?.label ?? "Threshold";
-    const hint = declared?.hint ?? GENERIC_THRESHOLD_HINT;
+    const hint = declared?.hint ?? (engineHit ? HIT_THRESHOLD_HINT : GENERIC_THRESHOLD_HINT);
 
     const wrap = document.createElement("div");
     wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;`;
@@ -3229,7 +3249,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
 
-    const smooth = declared === undefined ? buildSmoothnessRow(sceneId, spec, onLiveEdit) : undefined;
+    const smooth = declared === undefined && !engineHit ? buildSmoothnessRow(sceneId, spec, onLiveEdit) : undefined;
 
     const showValue = (v: number) => {
       rng.value = String(v);
@@ -3276,6 +3296,54 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     column.style.cssText = `display: flex; flex-direction: column;`;
     column.append(wrap, smooth.el);
     return column;
+  }
+
+  /** A hit driver's Reaction row (SceneSetting.drive.hit): Flat or Sized,
+   *  right under its threshold row — driveStore.ts's getDriveReadout/
+   *  setDriveReadout. A `flatOnly` setting shows Sized greyed out, with the
+   *  declaration's own hint saying why. Same live-write, no-rebuild rule as
+   *  buildThresholdRow. */
+  function buildReadoutRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement | null {
+    const hit = spec.drive?.hit;
+    if (!hit) return null;
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px;`;
+    const name = document.createElement("span");
+    name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    name.textContent = "Reaction";
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Reaction");
+    const buttons: { readout: HitReadout; btn: HTMLButtonElement; disabled: boolean }[] = [];
+    const show = (current: HitReadout | undefined) => {
+      for (const b of buttons) {
+        const pressed = b.readout === current;
+        b.btn.setAttribute("aria-pressed", String(pressed));
+        b.btn.style.cssText = b.disabled ? driveMiniSegBtnDisabledStyle : pressed ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      }
+    };
+    for (const opt of READOUT_OPTIONS) {
+      const disabled = opt.readout === "sized" && hit.flatOnly !== undefined;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      btn.disabled = disabled;
+      setHint(btn, disabled ? hit.flatOnly! : opt.hint);
+      if (!disabled) {
+        btn.addEventListener("click", () => {
+          if (deps.getDriveReadout(sceneId, spec) === opt.readout) return;
+          deps.onSetDriveReadout(sceneId, spec, opt.readout);
+          show(opt.readout);
+          onLiveEdit();
+        });
+      }
+      buttons.push({ readout: opt.readout, btn, disabled });
+      seg.appendChild(btn);
+    }
+    show(deps.getDriveReadout(sceneId, spec));
+    wrap.append(name, seg);
+    return wrap;
   }
 
   function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
@@ -3835,8 +3903,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         !!thresholdState &&
         (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
       const smoothnessMoved =
-        !!spec.drive && declared === undefined && deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT;
-      resetBtn.hidden = !thresholdMoved && !smoothnessMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+        !!spec.drive && declared === undefined && !isEngineHitDriver(spec) && deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT;
+      // And a hit driver's Reaction row, away from its declared read-out.
+      const hit = spec.drive?.hit;
+      const readoutMoved = !!hit && hit.flatOnly === undefined && deps.getDriveReadout(sceneId, spec) !== (hit.readout ?? "flat");
+      resetBtn.hidden =
+        !thresholdMoved && !smoothnessMoved && !readoutMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
@@ -3891,6 +3963,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       tick = graph.tick;
     }
     panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
+    const readoutRow = buildReadoutRow(sceneId, spec, refreshResetVisibility);
+    if (readoutRow) panel.appendChild(readoutRow);
 
     panel.appendChild(resetBtn);
     refreshResetVisibility();

@@ -183,6 +183,30 @@ export interface SceneSetting {
      *  gate instead (drives.ts's header's "The threshold" paragraph explains
      *  why a setting is never gated both ways). */
     threshold?: { default: number; label: string; hint: string };
+    /** Declares a hit driver: a setting that does one thing per hit (spawn,
+     *  jump, cut) rather than following a level. The panel adds a Reaction
+     *  row under its graph, Flat or Sized (standout.ts's HitReadout), saved
+     *  with the rest of the setting (driveStore.ts's getDriveReadout).
+     *  Unless `ownDetector` is set, the scene reads it with `drives.fired`
+     *  and scales its reaction by `drives.hitSize`, and the engine runs the
+     *  standout detector as this setting's threshold instead of the generic
+     *  gate (drives.ts's header, "Hit drivers"). */
+    hit?: {
+      /** The read-out an untouched setting uses. Flat when left out. */
+      readout?: import("./standout.ts").HitReadout;
+      /** The flag for a reaction that has no size (a cut, a new path): the
+       *  setting always reads Flat, and the panel greys out Sized with this
+       *  hint saying why. */
+      flatOnly?: string;
+      /** The scene runs standout.ts itself on `drives.value` and only reads
+       *  the choice back with `drives.readout` (Beat ripple, Dose, Cut). Its
+       *  threshold row is then whatever `threshold` above or the generic gate
+       *  makes it, as before. */
+      ownDetector?: boolean;
+      /** What the graph's key calls one reaction ("burst", "jump"), for an
+       *  engine-run hit driver. "reaction" when left out. */
+      reactionLabel?: string;
+    };
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).

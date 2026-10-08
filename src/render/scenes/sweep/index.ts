@@ -284,7 +284,10 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: { source: "beat", grid: 5 } },
+    drive: {
+      default: { source: "beat", grid: 5 },
+      hit: { flatOnly: "A new path either starts or it doesn't, so it can't be sized.", reactionLabel: "new path" },
+    },
   },
   {
     key: "path",
@@ -547,12 +550,13 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
 
     // The path: the stored seed (the button), plus local re-rolls (the wire).
     const seed = Math.round(get("path"));
+    const newPathFired = drives.fired("newPath", anim.metronomeBar);
     if (seed !== storedSeed) {
       storedSeed = seed;
       localRolls = 0;
       ticks = 0;
       restartPath(seed);
-    } else if (drives.fired("newPath", anim.metronomeBar)) {
+    } else if (newPathFired) {
       const every = newPathDivisor(get("newPath"), settingFor("newPath").default, NEW_PATH_GRID_DIVISOR);
       if (every > 0 && ++ticks >= every) {
         ticks = 0;

@@ -176,6 +176,7 @@ are one measurement run each, not standing specs):
   carried by `travel`, `roll`, the pan clock and the morph clock), the
   `hash01` helper, and the `nearMiss`/`hitMat` locals in the march loop
   that were written and never used.
+- 2026-10-08 — Beat pulse became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the zoom surge and swell impulses it starts (CrystalInputs.pulseSize) by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

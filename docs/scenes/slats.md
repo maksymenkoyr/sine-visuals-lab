@@ -111,6 +111,7 @@ layers never overlapped so nothing stacked toward white.
   mid-fade used to restart at `morphT = 0` against the untouched A buffer,
   popping the wall back to the old layout; `bakeMorph` now writes the mix
   that is on screen into A first, so the new fade starts from it.
+- 2026-10-08 — Beat kick became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the peak of the onset envelope (advanceOnsetEnvelope now takes true, false or a 0..1 size) by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

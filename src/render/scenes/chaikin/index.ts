@@ -129,7 +129,7 @@ export const CHAIKIN_SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { pulse: 0.3, attack: 0.2 },
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "birth" } },
   },
   {
     key: "relaunch",
@@ -140,7 +140,7 @@ export const CHAIKIN_SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.7,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "relaunch" } },
   },
   {
     key: "swell",
@@ -266,7 +266,7 @@ export const CHAIKIN_SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 1,
-    drive: { default: "anim.dropOnset" },
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "sync" } },
   },
   // Look
   {
@@ -366,12 +366,14 @@ function deltaFor(cells: number): number {
 
 function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Drives): void {
   const births = get("births");
+  const birthsFired = drives.fired("births", anim.lowOnset);
   const kick =
-    births > 0 && drives.fired("births", anim.lowOnset)
-      ? births * (0.5 + 0.5 * Math.min(1, drives.value("births", anim.lowPulse)))
+    births > 0 && birthsFired
+      ? births * (0.5 + 0.5 * Math.min(1, drives.value("births", anim.lowPulse))) * drives.hitSize("births")
       : null;
   const relaunch = get("relaunch");
-  const drop = relaunch > 0 && drives.fired("relaunch", anim.dropOnset) ? relaunch : null;
+  const relaunchFired = drives.fired("relaunch", anim.dropOnset);
+  const drop = relaunch > 0 && relaunchFired ? relaunch * drives.hitSize("relaunch") : null;
   const out = stepLaunch(state, {
     timeSec: anim.timeSec,
     dtSec: Math.min(anim.dtSec, MAX_STEP_SEC),
@@ -407,7 +409,8 @@ function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Dr
   fly.bpm = anim.tempoBpm;
   fly.beatPhase = anim.beatPhase;
   const snap = get("fliesSnap");
-  if (snap > 0 && drives.fired("fliesSnap", anim.dropOnset)) fly.snap = Math.max(fly.snap, snap);
+  const snapFired = drives.fired("fliesSnap", anim.dropOnset);
+  if (snap > 0 && snapFired) fly.snap = Math.max(fly.snap, snap * drives.hitSize("fliesSnap"));
 }
 
 /** The span of U where a live kick's children can be, padded by two rows —

@@ -171,6 +171,11 @@ onsets (106 in the window, ≈6.6/s):
     `THUMP_SCALE`) and **Beat flash** (lines and dots lift, `FLASH_GAIN`),
     both on bass hits. Beat flash on Any hit was tried first: at several
     onsets a beat it blurred into flicker.
+- 2026-10-08 — Scatter and Re-collapse became hit drivers (the Reaction row,
+  Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the share
+  `scatterPhases` knocks out of step by how far the hit stood out; Flat, the
+  default, is unchanged. Re-collapse is flat-only: a re-collapse either
+  starts or it doesn't.
 
 ## Tuning notes
 

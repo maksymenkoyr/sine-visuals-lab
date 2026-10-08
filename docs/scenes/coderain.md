@@ -51,6 +51,7 @@ hear run but ~106.7 on the ref-shoot run.
 - 2026-10-05: first ref-shoot showed a horizontal band of burst heads at the
   top on every bass hit; share lowered and each head now enters from its own
   height above the top.
+- 2026-10-08 — Downpour and Turn became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the burst share and the camera swing by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Known issues and next steps
 

@@ -225,6 +225,7 @@ main.
     frames. Now: a 1.2 s hot hold, warm cool phase on most phrases (blue on
     some), a bracket and posts, and Flicker's layer 2 blacks out the whole
     picture.
+- 2026-10-08 — Launch became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the launched square or ring's brightness (launchAmp) by how far the hit stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

@@ -108,7 +108,10 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 1,
     default: 1,
-    drive: { default: "anim.lowOnset" },
+    drive: {
+      default: "anim.lowOnset",
+      hit: { flatOnly: "The dance only uses when each hit lands, not how big it was, so it can't be sized.", reactionLabel: "beat" },
+    },
   },
   {
     key: "energy",
@@ -143,7 +146,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "pump" } },
   },
   {
     key: "energyDrop",
@@ -178,7 +181,10 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 1,
     default: 1,
-    drive: { default: "anim.dropOnset" },
+    drive: {
+      default: "anim.dropOnset",
+      hit: { flatOnly: "A drop either starts or it doesn't, so it can't be sized.", reactionLabel: "drop" },
+    },
   },
   {
     key: "clock",
@@ -497,6 +503,7 @@ function createToonRaveScene(): Scene {
           level: drives.value("energyBoost", frame.level, 0),
           pump: resolveSceneSetting(ID, settingFor("energyPump")),
           pumpFired,
+          pumpSize: drives.hitSize("energyPump"),
           drop: resolveSceneSetting(ID, settingFor("energyDrop")),
         });
       }

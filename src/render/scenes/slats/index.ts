@@ -343,7 +343,8 @@ export const slatsScene: Scene = (() => {
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
       lastTime = anim.timeSec;
 
-      advanceOnsetEnvelope(onsetEnv, dt, drives.fired("pulse", anim.onset));
+      const pulseFired = drives.fired("pulse", anim.onset);
+      advanceOnsetEnvelope(onsetEnv, dt, pulseFired ? drives.hitSize("pulse") : 0);
 
       const morphSeconds = resolveSceneSetting(ID, settingFor("morph"));
       const reshuffleProb = resolveSceneSetting(ID, settingFor("reshuffle"));

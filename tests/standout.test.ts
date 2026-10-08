@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   advanceStandout,
   advanceStandoutAmount,
+  advanceStandoutSized,
   createStandoutState,
   createStandoutTrigger,
   standoutBar,
   standoutLine,
   standoutMarks,
   standoutThreshold,
+  stepStandoutHit,
   stepStandoutTrigger,
   STANDOUT_THRESHOLD_DEFAULT,
 } from "../src/render/standout.ts";
@@ -456,5 +458,84 @@ describe("standoutThreshold / standoutLine", () => {
     expect(standoutLine(state, "reach to cut")).toEqual([{ value: standoutMarks(state)!.reach, label: "reach to cut" }]);
     advanceStandoutAmount(state, DT, 0.2, null);
     expect(standoutLine(state, "reach to cut")).toEqual([]);
+  });
+});
+
+describe("advanceStandoutSized — one sized report per climb (the Reaction row's Sized)", () => {
+  /** Settles at 0, then runs `signal(t)` and returns every non-zero report
+   *  with the tick it came on (tick 0 is the signal's first tick). */
+  function reports(signal: (t: number) => number, threshold: number | null, totalSec = 2) {
+    const state = createStandoutState();
+    for (let i = 0; i < 10; i++) advanceStandoutSized(state, DT, 0, threshold);
+    const out: { tick: number; size: number }[] = [];
+    for (let tick = 0; tick * DT < totalSec; tick++) {
+      const size = advanceStandoutSized(state, DT, signal(tick * DT), threshold);
+      if (size > 0) out.push({ tick, size });
+    }
+    return out;
+  }
+
+  it("a clean full hit reports about 1 on the tick it lands, once", () => {
+    const r = reports((t) => Math.exp(-BEAT_PULSE_DECAY * t), STANDOUT_THRESHOLD_DEFAULT);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.tick).toBe(0);
+    expect(r[0]!.size).toBeGreaterThan(0.95);
+  });
+
+  it("with the threshold Off, a smaller hit reports its own height one tick later, once", () => {
+    const r = reports((t) => 0.4 * Math.exp(-BEAT_PULSE_DECAY * t), null);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.tick).toBe(1);
+    expect(r[0]!.size).toBeCloseTo(0.4, 1);
+  });
+
+  it("a smooth bump reports once, at its top, for its whole climb", () => {
+    const bump = (t: number) => (t < 0.4 ? 0.3 * (1 - Math.cos((Math.PI * t) / 0.4)) : 0.6 * Math.exp(-3 * (t - 0.4)));
+    const r = reports(bump, null);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.tick * DT).toBeGreaterThan(0.3);
+    expect(r[0]!.size).toBeCloseTo(0.6, 1);
+  });
+
+  it("a sliver too small to be a reaction reports nothing", () => {
+    expect(reports((t) => 0.05 * Math.exp(-BEAT_PULSE_DECAY * t), null)).toHaveLength(0);
+  });
+});
+
+describe("stepStandoutHit — the trigger with a read-out", () => {
+  /** Half-height hits at `hitSec`, a 1 s gap, the threshold Off: what each
+   *  firing tick returned. */
+  function fires(readout: "flat" | "sized", hitSec: number[]) {
+    const trigger = createStandoutTrigger(1);
+    let pulse = 0;
+    const out: number[] = [];
+    for (let tick = 0; tick * DT < 3; tick++) {
+      const t = tick * DT;
+      pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
+      if (hitSec.some((h) => Math.abs(h - t) < DT / 2)) pulse = Math.max(pulse, 0.5);
+      const size = stepStandoutHit(trigger, DT, pulse, null, readout);
+      if (size > 0) out.push(size);
+    }
+    return out;
+  }
+  const HITS = [0.5, 0.75, 2];
+
+  it("Flat fires at 1, and drops the hit inside the gap", () => {
+    expect(fires("flat", HITS)).toEqual([1, 1]);
+  });
+
+  it("Sized fires at the hit's size, and drops the same hit", () => {
+    const sized = fires("sized", HITS);
+    expect(sized).toHaveLength(2);
+    for (const s of sized) expect(s).toBeCloseTo(0.5, 1);
+  });
+
+  it("stepStandoutTrigger is the Flat form", () => {
+    const a = createStandoutTrigger(0.2);
+    const b = createStandoutTrigger(0.2);
+    for (let tick = 0; tick < 600; tick++) {
+      const v = Math.exp(-BEAT_PULSE_DECAY * ((tick * DT) % 0.37)) * (tick % 3 === 0 ? 1 : 0.6);
+      expect(stepStandoutTrigger(a, DT, v, STANDOUT_THRESHOLD_DEFAULT)).toBe(stepStandoutHit(b, DT, v, STANDOUT_THRESHOLD_DEFAULT, "flat") > 0);
+    }
   });
 });

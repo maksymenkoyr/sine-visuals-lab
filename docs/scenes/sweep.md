@@ -133,6 +133,7 @@ piece of the reel. Draft scene (draft PR #391).
   term; with the skip forced off, three drift-heavy configs (Box, Blob with
   Spread, Pair and Twist, Cube with 160 copies; Morph on) matched pixel for
   pixel at three frames each (`gpu-bench --dump`).
+- 2026-10-08 — New path became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). It is flat-only: a new path either starts or it doesn't.
 
 ## Tuning notes
 

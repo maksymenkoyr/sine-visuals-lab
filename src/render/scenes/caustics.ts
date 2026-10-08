@@ -15,7 +15,7 @@ import {
   rippleWidthFor,
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
-import { advanceStandoutAmount, createStandoutState, STANDOUT_THRESHOLD_DEFAULT, standoutLine } from "../standout.ts";
+import { advanceStandout, advanceStandoutAmount, createStandoutState, STANDOUT_THRESHOLD_DEFAULT, standoutLine } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
@@ -220,11 +220,14 @@ const SETTINGS: SceneSetting[] = [
     // engine gate every other drive setting has (drives.ts's header's
     // threshold paragraph), applied to the signal before the emitter sees
     // it. What decides whether a climb that got through sends a ring is
-    // Ring threshold, the next setting.
+    // Ring threshold, the next setting. The Reaction row (`hit`) starts on
+    // Sized, the amount above; Flat launches one full ring per climb that
+    // earns half a standout instead.
     drive: {
       default: "scene",
       sceneLabel: "Scene: bass or beat hit",
       sceneSources: ["anim.lowOnset", "feature.onset"],
+      hit: { ownDetector: true, readout: "sized" },
     },
   },
   {
@@ -1508,7 +1511,15 @@ float softCeil(float x, float knee, float ceil) {
         // rawSignal has already been through the shared Threshold gate (when
         // it's on); Ring threshold then sets how far a climb must stand out
         // from the learned everyday ones to send a ring.
-        const emitted = advanceStandoutAmount(emission, anim.dtSec, rawSignal, getSetting("ringThreshold"));
+        // Sized (the default) launches the amount; Flat a full ring per
+        // climb that earns half a standout.
+        const ringThreshold = getSetting("ringThreshold");
+        const emitted =
+          (drives.readout("ripple") ?? "sized") === "flat"
+            ? advanceStandout(emission, anim.dtSec, rawSignal, ringThreshold)
+              ? 1
+              : 0
+            : advanceStandoutAmount(emission, anim.dtSec, rawSignal, ringThreshold);
         emitter.emit(emitted, ringStyle);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a

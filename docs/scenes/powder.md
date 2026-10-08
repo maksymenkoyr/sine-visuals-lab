@@ -99,6 +99,10 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   read from `value()`, the same edge rule the kick plume uses. On the
   default drive both reduce to `hitStrength`, so the default look is
   untouched.
+- 2026-10-08 — Bass kick and Chunk burst became hit drivers (the Reaction
+  row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the
+  plume strength and `chunkStrength` by how far the hit stood out; Flat, the
+  default, is unchanged.
 
 ## Tuning notes
 

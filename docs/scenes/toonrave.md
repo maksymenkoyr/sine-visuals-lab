@@ -166,6 +166,7 @@ and are not recorded here yet.
   holds. With a song that stops mid-groove, the clock holds on the same frame,
   and the cast slows through 1x, ½x and ¼x and holds one pose about 13 s
   later (Energy drop's drain at its default).
+- 2026-10-08 — Drop hits, Dance and Energy pump became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the energy pump's kick (EnergyInputs.pumpSize) by how far the hit stood out; Flat, the default, is unchanged. Drop hits is flat-only: a drop either starts or it doesn't. Dance is flat-only: the dance only uses when each hit lands, not how big it was.
 
 ## Tuning notes
 

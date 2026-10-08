@@ -410,6 +410,7 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   sky by yellow, made a big olive propeller. Checked headless on the real
   GPU at 1600×1000 with Floaters and Light waves wired to the Metronome:
   defaults, Rainbow 1 with pinned floaters, sprites at 1.
+- 2026-10-08 — Light waves and Floaters became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales each wave's brightness (a per-slot uSweepAmp next to the start times) and the floater count of a stamp by how far the hit stood out; Flat, the default, is unchanged. Their built-in Scene reaction feeds the detector the beat pulse.
 
 ## Tuning notes
 
