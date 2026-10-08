@@ -151,6 +151,10 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   layer is already empty (every non-Lightning style, the gaps between
   strikes), still doing the one clear and mip rebuild on the frame the last
   bolt dies.
+- 2026-10-08 — Legal audit: the app now carries a photosensitivity warning
+  (`src/ui/flashWarning.ts`, in the gallery footer and on a TV's pairing
+  screen), and `STROBE_PATTERN`'s comment describes the strobe cut plainly.
+  No change to the picture.
 
 ## Tuning notes
 
