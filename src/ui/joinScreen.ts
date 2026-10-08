@@ -1,6 +1,7 @@
 import { drawQrCode } from "./qr.ts";
 import { isValidRoomCode, normalizeRoomCodeInput } from "../net/roomCode.ts";
 import type { AdoptOutcome } from "../net/adopt.ts";
+import { FLASH_WARNING } from "./flashWarning.ts";
 
 /**
  * Which pairing screen this is, and so which link its QR encodes (what each
@@ -206,6 +207,15 @@ export function createJoinScreen(
   // On every kind, below the QR: a TV can't scan and a desktop has no camera.
   const entry = createRoomCodeEntry({ tv: options.tv, adoptTv: options.adoptTv, onEscape: dismissible ? () => api.hide() : undefined });
   root.appendChild(entry);
+
+  // A TV's screen is often the one an audience sees first.
+  if (kind === "adopt") {
+    const warn = document.createElement("div");
+    warn.textContent = FLASH_WARNING;
+    warn.style.cssText =
+      "opacity: 0.5; max-width: 36em; font-size: 12px; font-size: clamp(11px, 1.2vw, 14px); flex: none;";
+    root.appendChild(warn);
+  }
 
   if (options.reset) {
     const { label, confirm, run } = options.reset;

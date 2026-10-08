@@ -40,10 +40,15 @@
 # sign); the contributor re-authors those commits under their own account.
 # The flip side: whatever lands through the maintainer's own pull requests is
 # the maintainer's responsibility — don't carry someone else's unsigned
-# commits in that way. The allowlist below covers the maintainer's own commits
-# inside other people's pull requests, and bots. A plain name matches
-# exactly; a pattern with `*` is an unanchored regex. A commit authored with
-# an email linked to no GitHub account can't sign either and holds the check
+# commits in that way. There is deliberately no allowlist, for the same
+# reason: the action matches it against a commit's GitHub login, or, when the
+# commit's email is linked to no account, against the free-text author name
+# written into the commit — so any listed name, `maksymenkoyr` or a
+# `*[bot]` pattern alike, can be claimed by anyone. On someone else's pull
+# request the maintainer's own commits and bots' commits therefore hold the
+# check red; the maintainer merges over it (an admin can) after checking
+# that every other commit's author has signed. A commit authored with an
+# email linked to no GitHub account can't sign either and holds the check
 # red until its author fixes the commit's email.
 #
 # Security: pull_request_target runs this file as it is on main, with the
@@ -102,7 +107,6 @@ jobs:
           remote-repository-name: sine-visuals-lab-cla
           branch: main
           path-to-signatures: signatures/cla.json
-          allowlist: maksymenkoyr,*[bot]
           # Nothing triggers on `closed` anyway; stated so merged PRs are
           # never locked if someone adds it.
           lock-pullrequest-aftermerge: false

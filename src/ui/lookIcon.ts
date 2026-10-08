@@ -1,10 +1,11 @@
 /**
  * The little picture next to each saved look in the Looks card: a green
- * alien-cat meme the user picked to go with the alien-language look names
- * (src/render/lookNames.ts), shrunk to `ICON_W` × `ICON_H` pixels so it reads
- * as a blurry blob of a face, and drawn `ICON_SCALE` times larger with hard
- * pixel edges. Its author and license are unknown — THIRD-PARTY-NOTICES.md
- * says so; the full-size picture is not in this repo.
+ * alien face to go with the alien-language look names
+ * (src/render/lookNames.ts), `ICON_W` × `ICON_H` pixels so it reads as a
+ * blurry blob of a face, and drawn `ICON_SCALE` times larger with hard pixel
+ * edges. It was drawn for this project by tools/look-icon.py (a few shapes,
+ * blurred, box-downscaled and quantized to a small palette), which prints
+ * the PNG below.
  *
  * Every look tints it differently: one of the `FILTERS` (each a CSS filter
  * with a hue slot) and the hue it's turned to both come from a hash of the
@@ -14,13 +15,11 @@
  *
  * The PNG is inline (a data: URI in this module) rather than a file next to
  * it: an image the page fetched later could 404 after a deploy — see
- * src/pinnedAssets.ts's header. It was made with Pillow: a box-filter
- * downscale of the whole frame to `ICON_W` × `ICON_H`, quantized to a small
- * palette to keep the bytes down.
+ * src/pinnedAssets.ts's header.
  */
 
 const ICON_SRC =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAQCAMAAAAhxq8pAAAAYFBMVEXt7ubn6t3k59jb4svR1MTIycDEzLS3yp/Dw7y8wLK7u7OzsquoupKsrKGatoCIsmeXo4Z+o2GBmWp8jmpilEJkhkpmgVBSfjhMdjFAcyU3ax80Zxw1Yh8rVxcaMg4JEwT/XrIdAAAA3klEQVR42h3PWxLEEBAF0A5hSKS9CWLsf5fTmVs+1HG1AsZaNPo4z/N6E1L1GjSmlPC6nAsxOOc9SgFKYqo5lkKLEsh2Qmny/cyn1RLv8dxO7iClDGut75w92/Zdq0gOWshI2zXnSLbSaeGMUIQxKc+o6FuvuG2glTC19T7GaBaTRw5/1LESj9G98XbfqHkooVypb7UlJGSMwXEodbjcR+8tWfwwtgEhqQ6NHuvJSkaXAei/50nVNp/sPxz+IaIQthoM4cbfmUoJoWIl9Gh2BoxzINr3K9b7zoQf+Q74AY+MEvImAeZNAAAAAElFTkSuQmCC";
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAQCAMAAAAhxq8pAAAASFBMVEXo7ODn7N/l6t3e59TP38K70qqkyI2MxGSXvn+BuV10r1ByqlJsqkhqqEhqo0lgm0BZkDxUjDhRgDlHbTIzTCUgKBwVGxIUGhLygKCiAAAAmElEQVR42lXPSxaDIAxAUQSDoBHCN/vfaVNRS98gh3MHAZQaLQbALGrOgPOSAzPZhvsm7ehf1Q4HekSn73WAkr8M0Y7Fayi1hC9ch3VgYW4un2e2jbkMNLlzb70UGdwfPGpn5lpl9HqM+xcru1olklHCfZEyPkSKEsXweyggpSs64f2RtnFgtFpNSinnRLMNTeT+TBS8h8c+NTcJqNsLlI4AAAAASUVORK5CYII=";
 const ICON_W = 20;
 const ICON_H = 16;
 const ICON_SCALE = 1.5;

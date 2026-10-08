@@ -1060,8 +1060,9 @@ export const STROBE_WHITE = 0;
 export const STROBE_RED = 1;
 export const STROBE_BLACK = 2;
 /** One frame colour per render frame after a trigger, mostly white with a
- *  red and a black frame cut in twice each — the "epilepsy" read the user
- *  asked for. Starts white so the strike itself is the first thing seen. */
+ *  red and a black frame cut in twice each, for a hard strobe-cut read
+ *  (the app warns about flashing: ui/flashWarning.ts). Starts white so the
+ *  strike itself is the first thing seen. */
 export const STROBE_PATTERN: readonly number[] = [
   STROBE_WHITE,
   STROBE_WHITE,

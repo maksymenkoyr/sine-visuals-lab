@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FLOAT_HASH_GLSL, NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../src/render/noiseHash.ts";
 
@@ -82,6 +84,22 @@ describe("FLOAT_HASH_GLSL", () => {
     // The retired BigWings-shaped hash this replaces everywhere in the repo.
     expect(FLOAT_HASH_GLSL).not.toMatch(/fract\(/);
     expect(FLOAT_HASH_GLSL).not.toContain("123.34");
+  });
+
+  // That hash came from a Shadertoy author under unclear terms; it was
+  // removed once and came back with Sky, so look for it everywhere.
+  it("the retired BigWings-shaped hash appears nowhere in src/ or docs/", () => {
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(ts|js|mjs|html|glsl|frag|vert|py)$/.test(e.name) && /123\.34\s*,\s*456\.21/.test(readFileSync(p, "utf8"))) hits.push(p);
+      }
+    };
+    walk("src");
+    walk("docs");
+    expect(hits).toEqual([]);
   });
 
   it("uses a mixer distinct from NOISE_HASH_GLSL's uhash, so a scene can paste both", () => {

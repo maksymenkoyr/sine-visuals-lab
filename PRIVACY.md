@@ -57,14 +57,18 @@ who's in the room, which scene is showing — in memory while devices are
 connected. A room that a laptop has claimed with keys also keeps, in the
 Durable Object's storage, the hashed keys and the room's current settings
 (their values as text, plus the scene and palette names), so the next screen
-to connect gets them. No audio and no feature values are stored. Once
+to connect gets them. Those settings include any Overlay text and logo you
+add. It also keeps one record per device that has joined: the device's
+random id, the name shown in the Room view, what kind of device it is,
+whether it has a microphone, its role and Room-view choices, and when the
+room first and last saw it. No audio and no feature values are stored. Once
 everyone has left, the room waits a fixed period
 (`ROOM_IDLE_TTL_MS` in [`server/roomRules.ts`](server/roomRules.ts)) and then
 deletes all of it. The relay also reads your IP address from Cloudflare's
 `CF-Connecting-IP` header to rate-limit how often one visitor can create
 rooms or ask to pair a screen, keeping only recent timestamps per IP in
 memory for that purpose. It keeps no logs of the relayed data, and apart
-from a claimed room's settings and key hashes, the only thing it stores at
+from a claimed room's settings, device records and key hashes, the only thing it stores at
 all is the anonymous usage count described below.
 
 **Cloudflare hosts the site.** Serving and protecting the site and the relay
