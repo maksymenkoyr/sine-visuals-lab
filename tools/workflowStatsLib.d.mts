@@ -96,6 +96,7 @@ export interface Row {
   findings: Finding[];
   findingsByRound: { round: number; findings: Finding[] }[];
   finishFixes: number;
+  stalledFixes: number;
   cost: number;
 }
 
@@ -117,6 +118,7 @@ export interface Summary {
   readyToShip: number;
   merged: number;
   converged: number | null;
+  stalledFixes: number;
   reviewRounds: number | null;
   planGrade: number | null;
   codeGrade: number | null;

@@ -232,6 +232,9 @@ export function buildRows({ record, agents, recordedAt }) {
       findings: findingsOf(firstReview),
       findingsByRound: reviews.map((r) => ({ round: r.round, findings: findingsOf(r.result) })),
       finishFixes: finish ? findingsOf(finish).filter((f) => f.fixed).length : 0,
+      // A fix round that was blocked or fixed nothing; a run with these
+      // measured the sandbox, not the models.
+      stalledFixes: list.filter((a) => a.stage === "fix" && (a.result?.blocked || !(a.result?.addressed ?? []).length)).length,
       cost: list.reduce((s, a) => s + (a.cost?.total ?? 0), 0),
     });
   }
@@ -291,6 +294,7 @@ export function summarize(rows, prState = new Map()) {
       readyToShip: rs.filter((r) => r.readyToShip).length,
       merged: rs.filter((r) => prState.get(r.branch) === "MERGED").length,
       converged: v3.length ? v3.filter((r) => r.converged).length : null,
+      stalledFixes: rs.reduce((s, r) => s + (r.stalledFixes ?? 0), 0),
       reviewRounds: mean(rs.map((r) => r.reviewRounds)),
       planGrade: mean(rs.map((r) => GRADE_POINTS[r.planGrade]).filter((x) => x !== undefined)),
       codeGrade: mean(rs.map((r) => GRADE_POINTS[r.codeGrade]).filter((x) => x !== undefined)),
@@ -322,7 +326,8 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
   for (const s of summaries) {
     out.push(s.setup);
     out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} · merged ${s.merged}` +
-      (s.converged === null ? "" : ` · converged without a finish step ${s.converged}`));
+      (s.converged === null ? "" : ` · converged without a finish step ${s.converged}`) +
+      (s.stalledFixes ? ` · STALLED fix rounds ${s.stalledFixes}` : ""));
     out.push(`  grades (A = 4): plan ${n(s.planGrade, 2)} · code at first review ${n(s.codeGrade, 2)} · code at last review ${n(s.finalCodeGrade, 2)} · review rounds ${n(s.reviewRounds)}`);
     out.push(`  first-review findings per issue: blocking ${n(s.findingsPerIssue.blocking)} · should-fix ${n(s.findingsPerIssue.shouldFix)} · nit ${n(s.findingsPerIssue.nit)}` +
       ` · from the plan ${s.fromPlanShare === null ? "-" : `${Math.round(s.fromPlanShare * 100)}%`} · weak tests ${s.weakTests} · bugs ${s.bugs}`);

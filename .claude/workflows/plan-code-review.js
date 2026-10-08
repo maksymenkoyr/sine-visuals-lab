@@ -26,12 +26,19 @@ export const meta = {
 // old runs a different setup. Agent labels ("review #346 r2") are what the
 // recorder parses, so keep their shape.
 //
+// Launch it from a session that is NOT inside a worktree (EnterWorktree).
+// Only the code stage gets its own worktree; every later stage cds into that
+// one, and an agent spawned from a worktree-isolated session inherits the
+// sandbox and may not write anywhere else. The second trial run lost every
+// fix round that way. A fix round that didn't move the branch now stops the
+// loop and the run says so, instead of reviewing the same commit again.
+//
 // args: an array of issue numbers, or
 //   { issues: [346, 353], tag: 'r3', maxRounds: 2, models: { code: { model: 'sonnet', effort: 'medium' } } }
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
-const WORKFLOW_VERSION = 3
+const WORKFLOW_VERSION = 4
 const DEFAULT_MAX_ROUNDS = 2
 
 const DEFAULT_MODELS = {
@@ -117,16 +124,22 @@ const AMEND_SCHEMA = {
   required: ['amendment'],
 }
 
+// `blocked` lets an agent that couldn't reach the worktree say so and still
+// return valid output; without it a blocked agent burns its retries on the
+// schema and kills the issue's whole pipeline.
+const BLOCKED = { type: 'string', description: 'empty, or why you could not work in the worktree at all' }
+
 const FIX_SCHEMA = {
   type: 'object',
   properties: {
-    commit: { type: 'string' },
+    commit: { type: 'string', description: 'HEAD sha after your commit' },
     addressed: { type: 'array', items: { type: 'string' }, description: 'finding ids you fixed' },
     not_addressed: { type: 'string', description: 'finding ids you could not fix, and why' },
     typecheck_passed: { type: 'boolean' },
     tests_passed: { type: 'boolean' },
+    blocked: BLOCKED,
   },
-  required: ['commit', 'addressed', 'not_addressed', 'typecheck_passed', 'tests_passed'],
+  required: ['commit', 'addressed', 'not_addressed', 'blocked'],
 }
 
 const FINISH_SCHEMA = {
@@ -139,14 +152,17 @@ const FINISH_SCHEMA = {
     final_commit: { type: 'string' },
     ready_to_ship: { type: 'boolean' },
     notes: { type: 'string' },
+    blocked: BLOCKED,
   },
-  required: ['findings', 'issue_resolved', 'typecheck_passed', 'tests_passed', 'final_commit', 'ready_to_ship', 'notes'],
+  required: ['findings', 'issue_resolved', 'ready_to_ship', 'notes', 'blocked'],
 }
 
 const GIT_RULES = 'Never use git stash (refs/stash is shared with parallel agents), never push, never touch main. '
 const INDEPENDENT = 'This is an independent attempt: do not look at other worktrees under .claude/worktrees, other local branches for this issue, or earlier attempts at it. Work only from origin/main and what you are given here. '
 const TRAILER = 'Co-Authored-By: Claude <noreply@anthropic.com>'
 const open = (findings) => findings.filter(f => !f.fixed && f.severity !== 'nit')
+// Agents report short or full shas; a prefix only counts at abbreviation length.
+const sameSha = (a, b) => !!a && !!b && (a === b || (Math.min(a.length, b.length) >= 7 && (a.startsWith(b) || b.startsWith(a))))
 const listFindings = (fs) => fs.map(f => `- [${f.id}] ${f.severity}, ${f.origin}, ${f.kind}: ${f.file}${f.line ? `:${f.line}` : ''}: ${f.summary}`).join('\n')
 
 const results = await pipeline(
@@ -180,10 +196,12 @@ const results = await pipeline(
   async (prev, issue) => {
     if (!prev) return null
     const { plan, code } = prev
-    const where = `The work is on branch ${code.branch} in the worktree ${code.worktree_path}: cd there and run every command there. ${GIT_RULES}`
+    const where = `The work is on branch ${code.branch} in the worktree ${code.worktree_path}: cd there and run every command there. If you cannot cd there or write there, stop at once and say why in \`blocked\`; never do the work anywhere else. ${GIT_RULES}`
     let amendments = ''
     let history = []
     let review = null
+    let head = code.commit
+    let stalled = ''
     for (let round = 1; ; round++) {
       review = await agent(
         `Review and test the implementation of GitHub issue #${issue.n} ("${plan.title}"). ${where}\n` +
@@ -213,18 +231,25 @@ const results = await pipeline(
         if (amend) amendments += `${amendments ? '\n\n' : ''}Round ${round}:\n${amend.amendment}`
       }
 
-      await agent(
+      const fix = await agent(
         `Fix review findings on GitHub issue #${issue.n} ("${plan.title}"). ${where}\n` +
         `Fix every finding below. ${planFindings.length ? 'The ones marked plan follow the plan amendment, which overrides the plan. ' : ''}Then run \`npm run typecheck\` and \`npm test\`, break each test you touched for a moment to check it fails, and commit with a plain-words message ending with a blank line and:\n${TRAILER}\n\n` +
         `=== FINDINGS (round ${round}) ===\n${listFindings(todo)}` +
         (amendments ? `\n\n=== PLAN AMENDMENTS ===\n${amendments}` : '') + `\n\n=== ORIGINAL PLAN ===\n${plan.plan}`,
         { label: `fix #${issue.n} r${round}`, phase: 'Correct', ...models.code, schema: FIX_SCHEMA },
       )
+      // A round that didn't move the branch would only re-review the same
+      // commit, so stop the loop and say why.
+      if (!fix) stalled = `fix round ${round} returned nothing`
+      else if (fix.blocked) stalled = `fix round ${round} was blocked: ${fix.blocked}`
+      else if (sameSha(fix.commit, head)) stalled = `fix round ${round} made no commit`
+      if (stalled) { log(`#${issue.n}: STALLED, ${stalled}`); break }
+      head = fix.commit
     }
 
     let finish = null
     const left = open(review.findings)
-    if (left.length) {
+    if (left.length && !/blocked/.test(stalled)) {
       log(`#${issue.n}: ${left.length} finding(s) outlived ${maxRounds} round(s); finishing`)
       finish = await agent(
         `Finish GitHub issue #${issue.n} ("${plan.title}"). ${where}\n` +
@@ -233,7 +258,7 @@ const results = await pipeline(
         { label: `finish #${issue.n}`, phase: 'Finish', ...models.review, schema: FINISH_SCHEMA },
       )
     }
-    return { issue: issue.n, title: plan.title, branch: code.branch, worktree: code.worktree_path, base: code.base, review, finish }
+    return { issue: issue.n, title: plan.title, branch: code.branch, worktree: code.worktree_path, base: code.base, stalled, review, finish }
   },
 )
 

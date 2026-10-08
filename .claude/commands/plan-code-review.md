@@ -18,7 +18,9 @@ Its header says what each stage does and how a correction round works. Its
    drop any closed ones. Leave overlap with `origin/main` and open PRs to the
    plan stage, which checks for it.
 
-3. **Launch** with the Workflow tool, `name: "plan-code-review"`, and `args` as
+3. **Launch from outside a worktree.** If this session entered one
+   (EnterWorktree), leave it with ExitWorktree (keep) first. The workflow
+   header says why. Then launch with the Workflow tool, `name: "plan-code-review"`, and `args` as
    real JSON: `{ "issues": [346, 353], "tag": "r3", "maxRounds": 2, "models": { "code": { "model": "sonnet", "effort": "medium" } } }`.
    Leave out what wasn't given. Tell the user the run ID and the setup, then
    wait for the completion notice.

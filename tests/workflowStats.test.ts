@@ -129,12 +129,12 @@ describe("buildRows", () => {
     const review = (code: string, findings: unknown[]) =>
       ({ issue_resolved: true, ready_to_ship: true, plan_grade: "B", code_grade: code, findings });
     const t = (m: string) => stage(m, "high", 1);
-    const agents = (lastFindings: unknown[]) => [
+    const agents = (lastFindings: unknown[], fixResult: unknown = { commit: "c2", addressed: ["F1"], blocked: "" }) => [
       { label: "plan #7", result: PLAN, transcript: t("claude-sonnet-5-5") },
       { label: "code #7", result: CODE, transcript: t("claude-haiku-5-5") },
       { label: "review #7 r1", result: review("C", [finding("F1", "blocking", false, "plan"), finding("F2", "nit", false)]), transcript: t("claude-opus-5-5") },
       { label: "replan #7 r1", result: { amendment: "…" }, transcript: t("claude-sonnet-5-5") },
-      { label: "fix #7 r1", result: {}, transcript: t("claude-haiku-5-5") },
+      { label: "fix #7 r1", result: fixResult, transcript: t("claude-haiku-5-5") },
       { label: "review #7 r2", result: review("A-", lastFindings), transcript: t("claude-opus-5-5") },
     ];
     const record = { runId: "wf_3", script: SCRIPT_V3, args: { issues: [7] } };
@@ -147,6 +147,10 @@ describe("buildRows", () => {
 
     const [stuck] = buildRows({ record, recordedAt: "", agents: agents([finding("F1", "blocking", false, "plan")]) });
     expect(stuck.converged).toBe(false);
+    expect(stuck.stalledFixes).toBe(0);
+
+    const [blocked] = buildRows({ record, recordedAt: "", agents: agents([finding("F1", "blocking", false, "plan")], { commit: "none", addressed: [], blocked: "sandbox" }) });
+    expect(blocked.stalledFixes).toBe(1);
   });
 });
 
