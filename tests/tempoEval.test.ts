@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildTracks, type Track } from "./tempoEval/synth.ts";
+import { buildTracks, SR, type Track } from "./tempoEval/synth.ts";
 import { evaluate, type EvalMetrics } from "./tempoEval/run.ts";
+import { micChain } from "./tempoEval/micChain.ts";
 import { GRID_LOCK_ON } from "../src/render/gridPulse.ts";
 
 // Permanent offline scoreboard for the real FeatureExtractor + AnimClock
@@ -78,6 +79,22 @@ for (const [label, opts] of Object.entries(MIC_PATHS)) {
   }
 }
 
+// The fixed-hop path at every input level in LEVEL_SWEEP_DB, with no room in
+// the way (micChain as a pure gain): a far mic must read the same tempo as a
+// near one. tempoAnalyzer.ts's header says how. Before it, the detector's
+// log curve made quiet input vote differently, and hip-hop and drum & bass
+// lost their tempo entirely at the quiet end.
+const LEVEL_SWEEP_DB = [10, 0, -10, -20, -30, -40];
+const levelSweep: Record<string, Record<number, EvalMetrics>> = {};
+for (const track of tracks) {
+  if (track.name === "random") continue;
+  levelSweep[track.name] = {};
+  for (const gainDb of LEVEL_SWEEP_DB) {
+    const mono = micChain(track.mono, SR, { hpHz: 1, wet: 0, noiseDb: -300, gainDb });
+    levelSweep[track.name]![gainDb] = evaluate({ ...track, mono }, 60, { analyzer: true });
+  }
+}
+
 function fmt(v: number, digits = 3): string {
   return Number.isFinite(v) ? v.toFixed(digits) : "--";
 }
@@ -122,6 +139,17 @@ printTable("30 fps (host/TV)", metricsH30);
 for (const label of Object.keys(MIC_PATHS)) {
   printTable(`60 fps, through a mic, gate on (${label})`, micGateOn[label]!);
   printTable(`60 fps, through a mic, gate off (${label})`, micGateOff[label]!);
+}
+{
+  const table: Record<string, Record<string, string>> = {};
+  for (const [name, byLevel] of Object.entries(levelSweep)) {
+    table[name] = {};
+    for (const db of LEVEL_SWEEP_DB) table[name]![`${db > 0 ? "+" : ""}${db} dB`] = fmt(byLevel[db]!.tempoOk);
+  }
+  // eslint-disable-next-line no-console
+  console.log("60 fps (analyzer), tempoOk at each input level");
+  // eslint-disable-next-line no-console
+  console.table(table);
 }
 
 // Accuracy is scored after a WARMUP_SEC warm-up (tempoOkSteady), with the
@@ -365,6 +393,17 @@ describe("tempo eval scoreboard — through a mic, silence gate on", () => {
   it("random: run share still tracks how often the tracker reports any tempo at all", () => {
     for (const label of Object.keys(MIC_PATHS)) {
       expect(micGateOn[label]!.random!.metroRunShare, label).toBeCloseTo(micGateOn[label]!.random!.bpmPresentShare, 1);
+    }
+  });
+});
+
+describe("tempo eval scoreboard — input level", () => {
+  it("the fixed-hop path reads the same tempo at every input level", () => {
+    for (const [name, byLevel] of Object.entries(levelSweep)) {
+      const ref = byLevel[0]!.tempoOk;
+      for (const db of LEVEL_SWEEP_DB) {
+        expect(Math.abs(byLevel[db]!.tempoOk - ref), `${name} @ ${db} dB (0 dB: ${ref.toFixed(3)})`).toBeLessThanOrEqual(0.02);
+      }
     }
   });
 });
