@@ -59,7 +59,7 @@ const DEFAULT_MAX_ROUNDS = 2
 
 const DEFAULT_MODELS = {
   plan: { model: 'opus', effort: 'medium' },
-  code: { model: 'haiku', effort: 'medium' },
+  code: { model: 'haiku', effort: 'xhigh' },
   review: { model: 'opus', effort: 'high' },
 }
 
