@@ -205,6 +205,7 @@ export function buildRows({ record, agents, recordedAt }) {
       fixed: f.fixed ?? null, file: f.file ?? null, summary: f.summary ?? "",
     }));
     const open = (r) => findingsOf(r).filter((f) => f.severity !== "nit" && !f.fixed).length;
+    const selfFixed = (lastReview?.self_fixed ?? []).length;
     rows.push({
       runId: record.runId,
       workflow: record.workflowName ?? null,
@@ -219,9 +220,11 @@ export function buildRows({ record, agents, recordedAt }) {
       stages,
       agents: list.map(({ result, ...a }) => a),
       reviewRounds: reviews.length,
-      // Version 3 reviews don't fix; the run converged if the last review left
-      // nothing above a nit open before any finish step.
-      converged: version >= 3 ? open(lastReview) === 0 : null,
+      // From version 3 the loop's reviews don't fix; the run converged if the
+      // last review left nothing above a nit open before the reviewer's model
+      // fixed anything itself (a finish step, or from version 6 the last
+      // review's own `self_fixed`).
+      converged: version >= 3 ? open(lastReview) === 0 && !selfFixed : null,
       planGrade: parseGrade(firstReview?.plan_grade),
       codeGrade: parseGrade(firstReview?.code_grade ?? firstReview?.haiku_grade),
       finalCodeGrade: parseGrade(lastReview?.code_grade ?? lastReview?.haiku_grade),
@@ -231,7 +234,7 @@ export function buildRows({ record, agents, recordedAt }) {
       finalTests: (finish ?? lastReview)?.tests_passed ?? null,
       findings: findingsOf(firstReview),
       findingsByRound: reviews.map((r) => ({ round: r.round, findings: findingsOf(r.result) })),
-      finishFixes: finish ? findingsOf(finish).filter((f) => f.fixed).length : 0,
+      finishFixes: finish ? findingsOf(finish).filter((f) => f.fixed).length : selfFixed,
       // A fix round that was blocked or fixed nothing; a run with these
       // measured the sandbox, not the models.
       stalledFixes: list.filter((a) => a.stage === "fix" && (a.result?.blocked || !(a.result?.addressed ?? []).length)).length,
@@ -326,7 +329,7 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
   for (const s of summaries) {
     out.push(s.setup);
     out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} · merged ${s.merged}` +
-      (s.converged === null ? "" : ` · converged without a finish step ${s.converged}`) +
+      (s.converged === null ? "" : ` · converged without the reviewer fixing ${s.converged}`) +
       (s.stalledFixes ? ` · STALLED fix rounds ${s.stalledFixes}` : ""));
     out.push(`  grades (A = 4): plan ${n(s.planGrade, 2)} · code at first review ${n(s.codeGrade, 2)} · code at last review ${n(s.finalCodeGrade, 2)} · review rounds ${n(s.reviewRounds)}`);
     out.push(`  first-review findings per issue: blocking ${n(s.findingsPerIssue.blocking)} · should-fix ${n(s.findingsPerIssue.shouldFix)} · nit ${n(s.findingsPerIssue.nit)}` +

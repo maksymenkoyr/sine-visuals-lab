@@ -152,6 +152,24 @@ describe("buildRows", () => {
     const [blocked] = buildRows({ record, recordedAt: "", agents: agents([finding("F1", "blocking", false, "plan")], { commit: "none", addressed: [], blocked: "sandbox" }) });
     expect(blocked.stalledFixes).toBe(1);
   });
+
+  it("counts a version 6 last review's own fixes as reviewer fixes, not convergence", () => {
+    const record = { runId: "wf_6", script: SCRIPT_V3.replace("= 3", "= 6"), args: { issues: [7] } };
+    const t = (m: string) => stage(m, "high", 1);
+    const lastReview = (selfFixed: string[]) => ({
+      issue_resolved: true, ready_to_ship: true, plan_grade: "B", code_grade: "B",
+      findings: [finding("F1", "should-fix", true), finding("F2", "nit", false)], self_fixed: selfFixed,
+    });
+    const agents = (selfFixed: string[]) => [
+      { label: "plan #7", result: PLAN, transcript: t("claude-opus-5-5") },
+      { label: "code #7", result: CODE, transcript: t("claude-haiku-5-5") },
+      { label: "review #7 r1", result: lastReview(selfFixed), transcript: t("claude-opus-5-5") },
+    ];
+    const [fixedItself] = buildRows({ record, recordedAt: "", agents: agents(["F1"]) });
+    expect(fixedItself).toMatchObject({ version: 6, converged: false, finishFixes: 1 });
+    const [clean] = buildRows({ record, recordedAt: "", agents: agents([]) });
+    expect(clean).toMatchObject({ converged: true, finishFixes: 0 });
+  });
 });
 
 describe("summarize", () => {

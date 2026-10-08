@@ -5,9 +5,8 @@ export const meta = {
   phases: [
     { title: 'Plan', detail: 'a detailed plan per issue, no edits' },
     { title: 'Code', detail: 'implements the plan on a fresh branch in a fresh worktree' },
-    { title: 'Review', detail: 'typecheck, tests, graded review; the reviewer does not fix' },
+    { title: 'Review', detail: 'typecheck, tests, graded review; only the last review fixes what is left' },
     { title: 'Correct', detail: 'the coder fixes every finding, plan ones by the reviewer\'s amendment, then review again' },
-    { title: 'Finish', detail: 'only if findings outlive the rounds: the reviewer fixes them itself' },
   ],
 }
 
@@ -18,9 +17,13 @@ export const meta = {
 // reviewer writes the corrected instruction itself, as a plan amendment in the
 // same review. Until version 4 a separate planner agent wrote it, and that
 // agent cost about as much just to start up as the whole fix step (the
-// recorder's `tokens` view shows it). After `maxRounds` rounds, any findings still
-// open go to a finish step where the reviewer's model fixes them itself, so
-// every branch ends shippable and the stats show what the loop couldn't do.
+// recorder's `tokens` view shows it). The review after the last correction
+// round (or after a fix round that made no commit) is the last word: it grades
+// the branch as it found it, then fixes what is still open itself and lists
+// those ids in `self_fixed`, so every branch ends shippable and the stats show
+// what the loop couldn't do. Until version 6 a separate finish agent did that
+// fixing, at the price of starting one more reviewer-model agent; with
+// `maxRounds: 0` the first review is the last, as in the first trial run.
 //
 // The stage models come from `args.models` and default to `DEFAULT_MODELS`.
 // Different models in different runs are the experiment that
@@ -41,7 +44,7 @@ export const meta = {
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
-const WORKFLOW_VERSION = 5
+const WORKFLOW_VERSION = 6
 const DEFAULT_MAX_ROUNDS = 2
 
 const DEFAULT_MODELS = {
@@ -102,6 +105,11 @@ const CODE_SCHEMA = {
   required: ['worktree_path', 'branch', 'base', 'commit', 'typecheck_passed', 'tests_passed', 'deviations'],
 }
 
+// `blocked` lets an agent that couldn't reach the worktree say so and still
+// return valid output; without it a blocked agent burns its retries on the
+// schema and kills the issue's whole pipeline.
+const BLOCKED = { type: 'string', description: 'empty, or why you could not work in the worktree at all' }
+
 const REVIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -116,14 +124,12 @@ const REVIEW_SCHEMA = {
     ready_to_ship: { type: 'boolean' },
     notes: { type: 'string' },
     plan_amendment: { type: 'string', description: "empty when no open finding has origin 'plan'; otherwise, for each one, the corrected instruction the coder should follow, with code shapes and test inputs where they help" },
+    self_fixed: { type: 'array', items: { type: 'string' }, description: 'last round only: ids of the findings you fixed yourself; empty otherwise' },
+    final_commit: { type: 'string', description: 'last round only: HEAD sha after your own fixes; empty if you made none' },
+    blocked: BLOCKED,
   },
-  required: ['issue_resolved', 'plan_grade', 'plan_grade_reason', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes', 'plan_amendment'],
+  required: ['issue_resolved', 'plan_grade', 'plan_grade_reason', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes', 'plan_amendment', 'self_fixed'],
 }
-
-// `blocked` lets an agent that couldn't reach the worktree say so and still
-// return valid output; without it a blocked agent burns its retries on the
-// schema and kills the issue's whole pipeline.
-const BLOCKED = { type: 'string', description: 'empty, or why you could not work in the worktree at all' }
 
 const FIX_SCHEMA = {
   type: 'object',
@@ -136,21 +142,6 @@ const FIX_SCHEMA = {
     blocked: BLOCKED,
   },
   required: ['commit', 'addressed', 'not_addressed', 'blocked'],
-}
-
-const FINISH_SCHEMA = {
-  type: 'object',
-  properties: {
-    findings: { type: 'array', items: FINDING, description: 'the findings you were given, each marked fixed or not' },
-    issue_resolved: { type: 'boolean' },
-    typecheck_passed: { type: 'boolean' },
-    tests_passed: { type: 'boolean' },
-    final_commit: { type: 'string' },
-    ready_to_ship: { type: 'boolean' },
-    notes: { type: 'string' },
-    blocked: BLOCKED,
-  },
-  required: ['findings', 'issue_resolved', 'ready_to_ship', 'notes', 'blocked'],
 }
 
 const GIT_RULES = 'Never use git stash (refs/stash is shared with parallel agents), never push, never touch main. '
@@ -199,23 +190,34 @@ const results = await pipeline(
     let head = code.commit
     let stalled = ''
     for (let round = 1; ; round++) {
+      const last = round > maxRounds || !!stalled
       review = await agent(
         `Review and test the implementation of GitHub issue #${issue.n} ("${plan.title}"). ${where}\n` +
-        `This is review round ${round}. The plan and the code came from different models in an experiment that gets compared across runs, so grade each one honestly and on its own. Do NOT fix anything yourself: your findings go back to the coder.\n` +
+        `This is review round ${round}. The plan and the code came from different models in an experiment that gets compared across runs, so grade each one honestly and on its own. ` +
+        (last
+          ? `This is the LAST round: no coder comes after you. Grade the plan and the code as you found them, before any fix of yours, then do step 7.\n`
+          : `Do NOT fix anything yourself: your findings go back to the coder.\n`) +
         `1. Read the issue (\`gh issue view ${issue.n}\`) and the diff \`git diff origin/main...HEAD\`.\n` +
         `2. Run \`npm run typecheck\` and \`npm test\`.\n` +
         `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
         `4. Give each finding an origin: 'plan' when the coder faithfully followed a wrong or missing instruction, 'code' when the coder went wrong on its own. Write each summary so the coder can fix it without asking.\n` +
-        `5. If any open finding has origin 'plan', write \`plan_amendment\`: for each one, the corrected instruction that overrides the plan, read against origin/main (\`git show origin/main:<path>\`) where it matters. Otherwise leave it empty.\n` +
+        (last
+          ? `5. Leave \`plan_amendment\` empty.\n`
+          : `5. If any open finding has origin 'plan', write \`plan_amendment\`: for each one, the corrected instruction that overrides the plan, read against origin/main (\`git show origin/main:<path>\`) where it matters. Otherwise leave it empty.\n`) +
         (history.length ? `6. Earlier rounds found these. Re-check each by id: list it with fixed: true if resolved, or again with fixed: false (and a sharper summary) if not. Add new findings with new ids.\n${listFindings(history)}\n` : '') +
+        (last
+          ? `7. Fix every open finding that isn't a nit yourself (a nit too when it takes a line). Run \`npm run typecheck\` and \`npm test\`, break each test you touched for a moment to check it fails, and commit with a plain-words message ending with a blank line and:\n${TRAILER}\nReport those findings with fixed: true, their ids in \`self_fixed\`, your commit in \`final_commit\`, and \`ready_to_ship\`, typecheck and tests as they stand after your fixes.\n`
+          : `Leave \`self_fixed\` empty.\n`) +
         `\n=== PLAN ===\n${plan.plan}${amendments ? `\n\n=== PLAN AMENDMENTS ===\n${amendments}` : ''}`,
         { label: `review #${issue.n} r${round}`, phase: 'Review', ...models.review, schema: REVIEW_SCHEMA },
       )
       if (!review) return null
+      if (review.blocked) { stalled = `review round ${round} was blocked: ${review.blocked}`; log(`#${issue.n}: STALLED, ${stalled}`); break }
       history = review.findings
       const todo = open(review.findings)
-      if (!todo.length) { log(`#${issue.n}: review round ${round} passed`); break }
-      if (round > maxRounds) break
+      const selfFixed = (review.self_fixed || []).length
+      if (!todo.length) { log(`#${issue.n}: review round ${round} ${selfFixed ? `closed ${selfFixed} finding(s) itself` : 'passed'}`); break }
+      if (last) { log(`#${issue.n}: last review left ${todo.length} finding(s) open`); break }
       log(`#${issue.n}: round ${round} left ${todo.length} finding(s); correcting`)
 
       const planFindings = todo.filter(f => f.origin === 'plan')
@@ -230,27 +232,17 @@ const results = await pipeline(
         (amendments ? `\n\n=== PLAN AMENDMENTS ===\n${amendments}` : '') + `\n\n=== ORIGINAL PLAN ===\n${plan.plan}`,
         { label: `fix #${issue.n} r${round}`, phase: 'Correct', ...models.code, schema: FIX_SCHEMA },
       )
-      // A round that didn't move the branch would only re-review the same
-      // commit, so stop the loop and say why.
+      // A fix round that didn't move the branch hands the same commit to one
+      // last review, which fixes it itself; a blocked one stops here, since the
+      // reviewer would be blocked the same way.
+      if (fix?.blocked) { stalled = `fix round ${round} was blocked: ${fix.blocked}`; log(`#${issue.n}: STALLED, ${stalled}`); break }
       if (!fix) stalled = `fix round ${round} returned nothing`
-      else if (fix.blocked) stalled = `fix round ${round} was blocked: ${fix.blocked}`
       else if (sameSha(fix.commit, head)) stalled = `fix round ${round} made no commit`
-      if (stalled) { log(`#${issue.n}: STALLED, ${stalled}`); break }
-      head = fix.commit
+      if (stalled) log(`#${issue.n}: STALLED, ${stalled}; the last review fixes it`)
+      else head = fix.commit
     }
 
-    let finish = null
-    const left = open(review.findings)
-    if (left.length && !/blocked/.test(stalled)) {
-      log(`#${issue.n}: ${left.length} finding(s) outlived ${maxRounds} round(s); finishing`)
-      finish = await agent(
-        `Finish GitHub issue #${issue.n} ("${plan.title}"). ${where}\n` +
-        `Review rounds with another model ran out with these findings still open. Fix each yourself, run \`npm run typecheck\` and \`npm test\`, and commit with a plain-words message ending with a blank line and:\n${TRAILER}\n` +
-        `Return every finding below marked fixed or not.\n\n${listFindings(left)}`,
-        { label: `finish #${issue.n}`, phase: 'Finish', ...models.review, schema: FINISH_SCHEMA },
-      )
-    }
-    return { issue: issue.n, title: plan.title, branch: code.branch, worktree: code.worktree_path, base: code.base, stalled, review, finish }
+    return { issue: issue.n, title: plan.title, branch: code.branch, worktree: code.worktree_path, base: code.base, stalled, review }
   },
 )
 

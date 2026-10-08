@@ -32,8 +32,8 @@ Its header says what each stage does and how a correction round works. Its
 5. **Report** for each issue:
    - its branch and worktree
    - the plan grade, and the code grade at the first and the last review
-   - how many review rounds ran, and whether the loop converged or needed the
-     finish step
+   - how many review rounds ran, and whether the loop converged or the last
+     review had to fix findings itself (`self_fixed`)
    - each first-round finding with its severity, origin (plan or code) and
      outcome
    - any open decision the review raised
