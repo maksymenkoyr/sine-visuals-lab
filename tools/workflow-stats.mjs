@@ -8,6 +8,7 @@
 //   npm run workflow-stats -- report                  # per setup
 //   npm run workflow-stats -- report --issues         # plus one line per issue
 //   npm run workflow-stats -- report --json           # the raw rows
+//   npm run workflow-stats -- tokens [runId]           # per agent, latest run by default
 //
 // `record` finds the run under ~/.claude/projects/*/*/workflows/<runId>.json,
 // reads its journal and each agent's transcript next to it, and replaces any
@@ -74,12 +75,16 @@ function record(runId) {
     if (e.type === "started") labels.set(e.agentId, e.label);
     if (e.type === "result") results.set(e.agentId, e.result);
   }
+  const progress = new Map(
+    (runRecord.workflowProgress ?? []).filter((p) => p.type === "workflow_agent").map((p) => [p.agentId, p]),
+  );
   const agents = [...labels].map(([agentId, label]) => {
     const tpath = join(dir, `agent-${agentId}.jsonl`);
     return {
       label,
       result: results.get(agentId) ?? null,
       transcript: transcriptStats(existsSync(tpath) ? readJsonl(tpath) : []),
+      progress: progress.get(agentId),
     };
   });
   const rows = buildRows({ record: runRecord, agents, recordedAt: new Date().toISOString() });
@@ -88,8 +93,39 @@ function record(runId) {
   writeFileSync(STORE, [...kept, ...rows].map((r) => JSON.stringify(r)).join("\n") + "\n");
   console.log(`recorded ${rows.length} issue(s) from ${runId} into ${STORE}`);
   for (const r of rows) {
-    console.log(`  #${r.issue} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"} · ${r.findings.length} finding(s)${r.alreadyDone ? " · already done" : ""}`);
+    console.log(`  #${r.issue} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"}→${r.finalCodeGrade ?? "-"} · ${r.reviewRounds} review(s) · $${r.cost.toFixed(2)}${r.alreadyDone ? " · already done" : ""}`);
   }
+}
+
+// One line per agent of one recorded run (the latest when no ID is given):
+// where the tokens went and what they cost.
+function tokens(runId) {
+  const all = readStore();
+  const id = runId ?? all.at(-1)?.runId;
+  const rows = all.filter((r) => r.runId === id);
+  if (!rows.length) {
+    console.log(runId ? `no recorded run ${runId}` : "no runs recorded yet");
+    return;
+  }
+  const k = (x) => (x >= 1e6 ? `${(x / 1e6).toFixed(2)}M` : `${Math.round(x / 1e3)}k`);
+  const usd = (x) => (x == null ? "-" : `$${x.toFixed(3)}`);
+  console.log(`${id} · cost is an API-list-price estimate; output tokens are a floor`);
+  console.log("agent               model/effort         req tools  min    fresh  c.write   c.read  out+   peak    cost  (fresh / write / read / out)");
+  let total = 0;
+  for (const r of rows) {
+    for (const a of r.agents) {
+      const t = a.tokens;
+      const c = a.cost;
+      total += c?.total ?? 0;
+      console.log(
+        `${a.label.padEnd(19)} ${`${(a.model ?? "?").replace(/^claude-/, "")}/${a.effort ?? "?"}`.padEnd(20)}` +
+        ` ${String(a.requests).padStart(3)} ${String(a.toolCalls ?? "-").padStart(5)} ${a.minutes.toFixed(1).padStart(4)}` +
+        ` ${k(t.input).padStart(8)} ${k(t.cacheWrite).padStart(8)} ${k(t.cacheRead).padStart(8)} ${k(t.outputSeen).padStart(5)} ${k(a.peakContext).padStart(6)}` +
+        ` ${usd(c?.total).padStart(7)}  (${c ? [c.input, c.cacheWrite, c.cacheRead, c.output].map((x) => x.toFixed(3)).join(" / ") : "-"})`,
+      );
+    }
+  }
+  console.log(`total ${usd(total)}`);
 }
 
 function prStates() {
@@ -118,7 +154,8 @@ function report(flags) {
 
 if (cmd === "record") record(rest[0]);
 else if (cmd === "report") report(rest);
+else if (cmd === "tokens") tokens(rest[0]);
 else {
-  console.log("usage: workflow-stats record <runId> | report [--issues] [--json] [--no-gh]");
+  console.log("usage: workflow-stats record <runId> | report [--issues] [--json] [--no-gh] | tokens [runId]");
   process.exit(cmd ? 1 : 0);
 }

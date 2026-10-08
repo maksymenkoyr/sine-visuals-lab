@@ -4,23 +4,50 @@
 // is the workflow version plus the model and effort of each stage. Comparing
 // setups is the point: "does Sonnet code better than Haiku for the cost?"
 //
-// A row joins three sources. The run record gives the args, script and start
-// time. The journal gives each agent's label and its structured return value.
-// Each agent's transcript gives the model, effort, turns, tokens and minutes
-// it actually used. Agents can't report their own token use, so the
-// transcript is the only honest source for it. The CLI reads those files;
-// everything here works on already-parsed values, so tests can feed it
-// fixtures.
+// A row joins three sources. The run record gives the args, the script, and
+// each agent's tool calls, duration and peak context. The journal gives each
+// agent's label and its structured return value. Each agent's transcript
+// gives the model, effort and the tokens every API request was billed for.
+// Agents can't report their own token use, so these files are the only
+// honest source for it. The CLI reads them; everything here works on
+// already-parsed values, so tests can feed it fixtures.
 //
-// Version 1 runs (the first trial, before the workflow was saved) returned
-// grades as free text such as "B-: reason" under `haiku_grade`. `parseGrade`
-// reads both that and the later bare letter, so old rows stay comparable.
-// Their findings have no origin or kind, and those stay null.
+// Transcript gotchas, both measured on real runs:
+// - One API request is logged as several entries, one per content block, and
+//   each repeats the request's usage. `transcriptStats` counts each request
+//   once (by `requestId`) or context gets double-counted.
+// - `output_tokens` in an entry is a streaming snapshot taken before the
+//   request finished, so it undercounts. It is kept as `outputSeen`, a floor,
+//   and the cost estimate says so.
+//
+// Cost is an API-list-price estimate from `PRICES`, not a bill: a Claude Code
+// subscription doesn't charge per token, but the estimate still ranks stages
+// and setups fairly. Cache writes are priced at `CACHE_WRITE_MULT` × input,
+// the one-hour cache Claude Code uses.
+//
+// Agents are labelled "<stage> #<issue>", with " r<round>" on stages that run
+// once per correction round. Version 1 and 2 runs have one review that fixes
+// what it finds, and the report treats it as round 1. Version 1 runs (the
+// first trial, before the workflow was saved) returned grades as free text
+// such as "B-: reason" under `haiku_grade`. `parseGrade` reads both that and
+// the later bare letter, so old rows stay comparable.
 
 /** Grade letters the review schema allows, best first, with their points. */
 export const GRADE_POINTS = {
   A: 4, "A-": 3.7, "B+": 3.3, B: 3, "B-": 2.7, "C+": 2.3, C: 2, "C-": 1.7, D: 1, F: 0,
 };
+
+/** USD per million tokens, API list prices from the claude-api skill (2026-10). */
+export const PRICES = {
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
+  // The skill lists no Haiku cache-read price; this assumes the usual tenth of input.
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
+};
+export const CACHE_WRITE_MULT = 2;
+
+/** Every stage label the workflow uses, in run order. */
+export const STAGES = ["plan", "code", "review", "replan", "fix", "finish"];
 
 /** @param {unknown} text @returns {string | null} the grade letter it starts with */
 export function parseGrade(text) {
@@ -29,24 +56,24 @@ export function parseGrade(text) {
   return m && m[1] in GRADE_POINTS ? m[1] : null;
 }
 
-/** "plan #346" → { stage: "plan", issue: 346 } */
+/** "review #346 r2" → { stage: "review", issue: 346, round: 2 } */
 export function parseLabel(label) {
-  const m = /^(plan|code|review)\s+#(\d+)$/.exec(label ?? "");
-  return m ? { stage: m[1], issue: Number(m[2]) } : null;
+  const m = /^(plan|replan|code|fix|review|finish)\s+#(\d+)(?:\s+r(\d+))?$/.exec(label ?? "");
+  return m ? { stage: m[1], issue: Number(m[2]), round: m[3] ? Number(m[3]) : 1 } : null;
 }
 
 /**
- * Sums what one agent used, from its transcript's parsed JSONL entries.
+ * What one agent used, from its transcript's parsed JSONL entries.
  * @param {any[]} entries
  */
 export function transcriptStats(entries) {
-  const s = {
-    model: null, effort: null, turns: 0,
-    tokens: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
-    minutes: 0,
-  };
+  /** @type {Map<string, any>} */
+  const requests = new Map();
+  let model = null;
+  let effort = null;
   let first = null;
   let last = null;
+  let anon = 0;
   for (const e of entries) {
     if (e.timestamp) {
       const t = Date.parse(e.timestamp);
@@ -55,16 +82,41 @@ export function transcriptStats(entries) {
     }
     const usage = e.type === "assistant" ? e.message?.usage : null;
     if (!usage) continue;
-    s.turns++;
-    s.model ??= e.message.model ?? null;
-    s.effort ??= e.effort ?? null;
-    s.tokens.input += usage.input_tokens ?? 0;
-    s.tokens.cacheWrite += usage.cache_creation_input_tokens ?? 0;
-    s.tokens.cacheRead += usage.cache_read_input_tokens ?? 0;
-    s.tokens.output += usage.output_tokens ?? 0;
+    model ??= e.message.model ?? null;
+    effort ??= e.effort ?? null;
+    const key = e.requestId ?? e.message.id ?? `anon-${anon++}`;
+    const r = requests.get(key) ?? { input: 0, cacheWrite: 0, cacheRead: 0, outputSeen: 0 };
+    r.input = Math.max(r.input, usage.input_tokens ?? 0);
+    r.cacheWrite = Math.max(r.cacheWrite, usage.cache_creation_input_tokens ?? 0);
+    r.cacheRead = Math.max(r.cacheRead, usage.cache_read_input_tokens ?? 0);
+    r.outputSeen = Math.max(r.outputSeen, usage.output_tokens ?? 0);
+    requests.set(key, r);
   }
-  if (first !== null && last !== null) s.minutes = Math.round((last - first) / 600) / 100;
-  return s;
+  const tokens = { input: 0, cacheWrite: 0, cacheRead: 0, outputSeen: 0 };
+  let peakContext = 0;
+  for (const r of requests.values()) {
+    tokens.input += r.input;
+    tokens.cacheWrite += r.cacheWrite;
+    tokens.cacheRead += r.cacheRead;
+    tokens.outputSeen += r.outputSeen;
+    peakContext = Math.max(peakContext, r.input + r.cacheWrite + r.cacheRead);
+  }
+  const minutes = first !== null && last !== null ? Math.round((last - first) / 600) / 100 : 0;
+  return { model, effort, requests: requests.size, tokens, peakContext, minutes };
+}
+
+/** API-list-price estimate in USD for one agent's tokens, split by kind. */
+export function costOf(model, tokens) {
+  const p = PRICES[model ?? ""];
+  if (!p) return null;
+  const m = 1e6;
+  const cost = {
+    input: (tokens.input * p.input) / m,
+    cacheWrite: (tokens.cacheWrite * p.input * CACHE_WRITE_MULT) / m,
+    cacheRead: (tokens.cacheRead * p.cacheRead) / m,
+    output: (tokens.outputSeen * p.output) / m,
+  };
+  return { ...cost, total: cost.input + cost.cacheWrite + cost.cacheRead + cost.output };
 }
 
 /** The setup a row ran under, as one readable key. */
@@ -73,79 +125,125 @@ export function setupKey(row) {
     const s = row.stages[name];
     return s ? `${name} ${shortModel(s.model)}/${s.effort ?? "?"}` : `${name} -`;
   };
-  return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}`;
+  const loops = row.maxRounds ? ` · up to ${row.maxRounds} correction round(s)` : "";
+  return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}${loops}`;
 }
 
 function shortModel(model) {
   return (model ?? "?").replace(/^claude-/, "");
 }
 
+function addTokens(a, b) {
+  return {
+    input: a.input + b.input,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    cacheRead: a.cacheRead + b.cacheRead,
+    outputSeen: a.outputSeen + b.outputSeen,
+  };
+}
+
+const NO_TOKENS = { input: 0, cacheWrite: 0, cacheRead: 0, outputSeen: 0 };
+
 /**
  * One row per issue for a finished run.
  * @param {{
  *   record: { runId: string, workflowName?: string, timestamp?: string, script?: string, args?: unknown },
- *   agents: { label: string, result: any, transcript: ReturnType<typeof transcriptStats> }[],
+ *   agents: { label: string, result: any, transcript: ReturnType<typeof transcriptStats>, progress?: { toolCalls?: number, durationMs?: number } }[],
  *   recordedAt: string,
  * }} run
  */
 export function buildRows({ record, agents, recordedAt }) {
   const version = Number(/WORKFLOW_VERSION\s*=\s*(\d+)/.exec(record.script ?? "")?.[1] ?? 1);
   const titles = issueTitles(record.args);
-  /** @type {Map<number, any>} */
+  const maxRounds = version >= 3 ? Number(argsObject(record.args).maxRounds ?? /DEFAULT_MAX_ROUNDS\s*=\s*(\d+)/.exec(record.script ?? "")?.[1] ?? 0) : 0;
+  /** @type {Map<number, any[]>} */
   const byIssue = new Map();
   for (const a of agents) {
     const at = parseLabel(a.label);
     if (!at) continue;
-    if (!byIssue.has(at.issue)) byIssue.set(at.issue, {});
-    byIssue.get(at.issue)[at.stage] = a;
+    const t = a.transcript;
+    const entry = {
+      label: a.label, stage: at.stage, round: at.round,
+      model: t.model, effort: t.effort,
+      requests: t.requests, toolCalls: a.progress?.toolCalls ?? null,
+      minutes: a.progress?.durationMs ? Math.round(a.progress.durationMs / 600) / 100 : t.minutes,
+      peakContext: t.peakContext, tokens: t.tokens,
+      cost: costOf(t.model, t.tokens),
+      result: a.result,
+    };
+    if (!byIssue.has(at.issue)) byIssue.set(at.issue, []);
+    byIssue.get(at.issue).push(entry);
   }
   const rows = [];
-  for (const [issue, st] of [...byIssue].sort((x, y) => x[0] - y[0])) {
-    const plan = st.plan?.result ?? null;
-    const code = st.code?.result ?? null;
-    const review = st.review?.result ?? null;
-    const stage = (name, extra) =>
-      st[name] ? { ...st[name].transcript, ...extra } : null;
+  for (const [issue, list] of [...byIssue].sort((x, y) => x[0] - y[0])) {
+    const one = (stage, round = 1) => list.find((a) => a.stage === stage && a.round === round) ?? null;
+    const plan = one("plan")?.result ?? null;
+    const code = one("code")?.result ?? null;
+    const reviews = list.filter((a) => a.stage === "review").sort((a, b) => a.round - b.round);
+    const firstReview = reviews[0]?.result ?? null;
+    const lastReview = reviews.at(-1)?.result ?? null;
+    const finish = one("finish")?.result ?? null;
+    const stages = {};
+    for (const name of STAGES) {
+      const ss = list.filter((a) => a.stage === name);
+      if (!ss.length) continue;
+      stages[name] = {
+        model: ss[0].model, effort: ss[0].effort, agents: ss.length,
+        minutes: ss.reduce((s, a) => s + a.minutes, 0),
+        requests: ss.reduce((s, a) => s + a.requests, 0),
+        toolCalls: ss.reduce((s, a) => s + (a.toolCalls ?? 0), 0),
+        peakContext: Math.max(...ss.map((a) => a.peakContext)),
+        tokens: ss.reduce((s, a) => addTokens(s, a.tokens), NO_TOKENS),
+        cost: ss.reduce((s, a) => s + (a.cost?.total ?? 0), 0),
+      };
+      if (name === "code" && code) {
+        Object.assign(stages.code, { typecheckPassed: code.typecheck_passed ?? null, testsPassed: code.tests_passed ?? null, deviations: code.deviations ?? "" });
+      }
+    }
+    const findingsOf = (r) => (r?.findings ?? []).map((f) => ({
+      severity: f.severity ?? null, origin: f.origin ?? null, kind: f.kind ?? null,
+      fixed: f.fixed ?? null, file: f.file ?? null, summary: f.summary ?? "",
+    }));
+    const open = (r) => findingsOf(r).filter((f) => f.severity !== "nit" && !f.fixed).length;
     rows.push({
       runId: record.runId,
       workflow: record.workflowName ?? null,
       version,
+      maxRounds,
       runStartedAt: record.timestamp ?? null,
       recordedAt,
       issue,
       title: plan?.title ?? titles.get(issue) ?? null,
       branch: code?.branch ?? plan?.branch ?? null,
       alreadyDone: plan?.already_done ?? null,
-      stages: {
-        plan: stage("plan", {}),
-        code: stage("code", code ? {
-          typecheckPassed: code.typecheck_passed ?? null,
-          testsPassed: code.tests_passed ?? null,
-          deviations: code.deviations ?? "",
-        } : {}),
-        review: stage("review", {}),
-      },
-      planGrade: parseGrade(review?.plan_grade),
-      codeGrade: parseGrade(review?.code_grade ?? review?.haiku_grade),
-      issueResolved: review?.issue_resolved ?? null,
-      readyToShip: review?.ready_to_ship ?? null,
-      finalTypecheck: review?.typecheck_passed ?? null,
-      finalTests: review?.tests_passed ?? null,
-      findings: (review?.findings ?? []).map((f) => ({
-        severity: f.severity ?? null,
-        origin: f.origin ?? null,
-        kind: f.kind ?? null,
-        fixed: f.fixed ?? null,
-        file: f.file ?? null,
-        summary: f.summary ?? "",
-      })),
+      stages,
+      agents: list.map(({ result, ...a }) => a),
+      reviewRounds: reviews.length,
+      // Version 3 reviews don't fix; the run converged if the last review left
+      // nothing above a nit open before any finish step.
+      converged: version >= 3 ? open(lastReview) === 0 : null,
+      planGrade: parseGrade(firstReview?.plan_grade),
+      codeGrade: parseGrade(firstReview?.code_grade ?? firstReview?.haiku_grade),
+      finalCodeGrade: parseGrade(lastReview?.code_grade ?? lastReview?.haiku_grade),
+      issueResolved: (finish ?? lastReview)?.issue_resolved ?? null,
+      readyToShip: (finish ?? lastReview)?.ready_to_ship ?? null,
+      finalTypecheck: (finish ?? lastReview)?.typecheck_passed ?? null,
+      finalTests: (finish ?? lastReview)?.tests_passed ?? null,
+      findings: findingsOf(firstReview),
+      findingsByRound: reviews.map((r) => ({ round: r.round, findings: findingsOf(r.result) })),
+      finishFixes: finish ? findingsOf(finish).filter((f) => f.fixed).length : 0,
+      cost: list.reduce((s, a) => s + (a.cost?.total ?? 0), 0),
     });
   }
   return rows;
 }
 
+function argsObject(args) {
+  return args && typeof args === "object" && !Array.isArray(args) ? args : {};
+}
+
 function issueTitles(args) {
-  const list = Array.isArray(args) ? args : (args && typeof args === "object" ? args.issues ?? [] : []);
+  const list = Array.isArray(args) ? args : argsObject(args).issues ?? [];
   const m = new Map();
   for (const i of list) if (i && typeof i === "object" && i.title) m.set(Number(i.n), i.title);
   return m;
@@ -171,15 +269,20 @@ export function summarize(rows, prState = new Map()) {
     const count = (pred) => findings.filter(pred).length;
     const withOrigin = findings.filter((f) => f.origin);
     const stages = {};
-    for (const name of ["plan", "code", "review"]) {
+    for (const name of STAGES) {
       const ss = rs.map((r) => r.stages[name]).filter(Boolean);
+      if (!ss.length) continue;
       stages[name] = {
+        issuesUsing: ss.length,
+        agents: mean(ss.map((s) => s.agents)),
         minutes: mean(ss.map((s) => s.minutes)),
-        turns: mean(ss.map((s) => s.turns)),
+        requests: mean(ss.map((s) => s.requests)),
         contextTokens: mean(ss.map((s) => s.tokens.input + s.tokens.cacheWrite + s.tokens.cacheRead)),
-        outputTokens: mean(ss.map((s) => s.tokens.output)),
+        outputSeen: mean(ss.map((s) => s.tokens.outputSeen)),
+        cost: mean(ss.map((s) => s.cost)),
       };
     }
+    const v3 = rs.filter((r) => r.converged !== null);
     return {
       setup,
       issues: rs.length,
@@ -187,8 +290,11 @@ export function summarize(rows, prState = new Map()) {
       resolved: rs.filter((r) => r.issueResolved).length,
       readyToShip: rs.filter((r) => r.readyToShip).length,
       merged: rs.filter((r) => prState.get(r.branch) === "MERGED").length,
+      converged: v3.length ? v3.filter((r) => r.converged).length : null,
+      reviewRounds: mean(rs.map((r) => r.reviewRounds)),
       planGrade: mean(rs.map((r) => GRADE_POINTS[r.planGrade]).filter((x) => x !== undefined)),
       codeGrade: mean(rs.map((r) => GRADE_POINTS[r.codeGrade]).filter((x) => x !== undefined)),
+      finalCodeGrade: mean(rs.map((r) => GRADE_POINTS[r.finalCodeGrade]).filter((x) => x !== undefined)),
       findingsPerIssue: {
         blocking: count((f) => f.severity === "blocking") / rs.length,
         shouldFix: count((f) => f.severity === "should-fix") / rs.length,
@@ -197,6 +303,7 @@ export function summarize(rows, prState = new Map()) {
       fromPlanShare: withOrigin.length ? withOrigin.filter((f) => f.origin === "plan").length / withOrigin.length : null,
       weakTests: count((f) => f.kind === "weak-test"),
       bugs: count((f) => f.kind === "bug"),
+      costPerIssue: mean(rs.map((r) => r.cost)),
       stages,
     };
   });
@@ -209,25 +316,26 @@ function mean(xs) {
 /** The plain-text report the CLI prints. */
 export function renderReport(summaries, rows, { listIssues = false, prState = new Map() } = {}) {
   const out = [];
-  const n = (x, d = 1) => (x === null ? "-" : x.toFixed(d));
-  const k = (x) => (x === null ? "-" : `${(x / 1e6).toFixed(2)}M`);
+  const n = (x, d = 1) => (x === null || x === undefined ? "-" : x.toFixed(d));
+  const mt = (x) => (x === null ? "-" : `${(x / 1e6).toFixed(2)}M`);
+  const usd = (x) => (x === null ? "-" : `$${x.toFixed(2)}`);
   for (const s of summaries) {
     out.push(s.setup);
-    out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} · merged ${s.merged}`);
-    out.push(`  grades (A = 4): plan ${n(s.planGrade, 2)} · code ${n(s.codeGrade, 2)}`);
-    out.push(`  findings per issue: blocking ${n(s.findingsPerIssue.blocking)} · should-fix ${n(s.findingsPerIssue.shouldFix)} · nit ${n(s.findingsPerIssue.nit)}` +
+    out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} · merged ${s.merged}` +
+      (s.converged === null ? "" : ` · converged without a finish step ${s.converged}`));
+    out.push(`  grades (A = 4): plan ${n(s.planGrade, 2)} · code at first review ${n(s.codeGrade, 2)} · code at last review ${n(s.finalCodeGrade, 2)} · review rounds ${n(s.reviewRounds)}`);
+    out.push(`  first-review findings per issue: blocking ${n(s.findingsPerIssue.blocking)} · should-fix ${n(s.findingsPerIssue.shouldFix)} · nit ${n(s.findingsPerIssue.nit)}` +
       ` · from the plan ${s.fromPlanShare === null ? "-" : `${Math.round(s.fromPlanShare * 100)}%`} · weak tests ${s.weakTests} · bugs ${s.bugs}`);
-    for (const name of ["plan", "code", "review"]) {
-      const st = s.stages[name];
-      out.push(`  ${name.padEnd(6)} ${n(st.minutes)} min · ${n(st.turns, 0)} turns · ${k(st.contextTokens)} context · ${n(st.outputTokens, 0)} output tokens (mean per issue)`);
+    out.push(`  est. cost per issue ${usd(s.costPerIssue)} (API list price; output tokens are a floor)`);
+    for (const [name, st] of Object.entries(s.stages)) {
+      out.push(`  ${name.padEnd(7)} ${usd(st.cost)} · ${n(st.agents)} agent(s) · ${n(st.minutes)} min · ${n(st.requests, 0)} requests · ${mt(st.contextTokens)} context · ${n(st.outputSeen, 0)}+ output (mean per issue that ran it)`);
     }
     out.push("");
   }
   if (listIssues) {
     for (const r of rows) {
       const pr = prState.get(r.branch) ?? "no PR";
-      const f = r.findings.length;
-      out.push(`#${r.issue} ${r.runId} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"} · ${f} finding(s) · ${pr} · ${r.branch ?? ""}${r.alreadyDone ? " · already done" : ""}`);
+      out.push(`#${r.issue} ${r.runId} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"}→${r.finalCodeGrade ?? "-"} · ${r.reviewRounds} review(s) · ${r.findings.length} first finding(s) · ${usd(r.cost)} · ${pr} · ${r.branch ?? ""}${r.alreadyDone ? " · already done" : ""}`);
     }
   }
   return out.join("\n");

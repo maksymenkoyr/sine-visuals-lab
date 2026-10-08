@@ -3,13 +3,63 @@
 // Keep in sync with the JSDoc in workflowStatsLib.mjs by hand.
 
 export const GRADE_POINTS: Record<string, number>;
+export const PRICES: Record<string, { input: number; output: number; cacheRead: number }>;
+export const CACHE_WRITE_MULT: number;
+export const STAGES: readonly string[];
 
-export interface StageStats {
+export type StageName = "plan" | "replan" | "code" | "fix" | "review" | "finish";
+
+export interface Tokens {
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  outputSeen: number;
+}
+
+export interface Cost {
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  output: number;
+  total: number;
+}
+
+export interface TranscriptStats {
   model: string | null;
   effort: string | null;
-  turns: number;
-  tokens: { input: number; cacheWrite: number; cacheRead: number; output: number };
+  requests: number;
+  tokens: Tokens;
+  peakContext: number;
   minutes: number;
+}
+
+export interface AgentStats {
+  label: string;
+  stage: StageName;
+  round: number;
+  model: string | null;
+  effort: string | null;
+  requests: number;
+  toolCalls: number | null;
+  minutes: number;
+  peakContext: number;
+  tokens: Tokens;
+  cost: Cost | null;
+}
+
+export interface StageTotals {
+  model: string | null;
+  effort: string | null;
+  agents: number;
+  minutes: number;
+  requests: number;
+  toolCalls: number;
+  peakContext: number;
+  tokens: Tokens;
+  cost: number;
+  typecheckPassed?: boolean | null;
+  testsPassed?: boolean | null;
+  deviations?: string;
 }
 
 export interface Finding {
@@ -25,31 +75,38 @@ export interface Row {
   runId: string;
   workflow: string | null;
   version: number;
+  maxRounds: number;
   runStartedAt: string | null;
   recordedAt: string;
   issue: number;
   title: string | null;
   branch: string | null;
   alreadyDone: boolean | null;
-  stages: {
-    plan: StageStats | null;
-    code: (StageStats & { typecheckPassed?: boolean | null; testsPassed?: boolean | null; deviations?: string }) | null;
-    review: StageStats | null;
-  };
+  stages: Partial<Record<StageName, StageTotals>>;
+  agents: AgentStats[];
+  reviewRounds: number;
+  converged: boolean | null;
   planGrade: string | null;
   codeGrade: string | null;
+  finalCodeGrade: string | null;
   issueResolved: boolean | null;
   readyToShip: boolean | null;
   finalTypecheck: boolean | null;
   finalTests: boolean | null;
   findings: Finding[];
+  findingsByRound: { round: number; findings: Finding[] }[];
+  finishFixes: number;
+  cost: number;
 }
 
 export interface StageSummary {
+  issuesUsing: number;
+  agents: number | null;
   minutes: number | null;
-  turns: number | null;
+  requests: number | null;
   contextTokens: number | null;
-  outputTokens: number | null;
+  outputSeen: number | null;
+  cost: number | null;
 }
 
 export interface Summary {
@@ -59,26 +116,32 @@ export interface Summary {
   resolved: number;
   readyToShip: number;
   merged: number;
+  converged: number | null;
+  reviewRounds: number | null;
   planGrade: number | null;
   codeGrade: number | null;
+  finalCodeGrade: number | null;
   findingsPerIssue: { blocking: number; shouldFix: number; nit: number };
   fromPlanShare: number | null;
   weakTests: number;
   bugs: number;
-  stages: { plan: StageSummary; code: StageSummary; review: StageSummary };
+  costPerIssue: number | null;
+  stages: Partial<Record<StageName, StageSummary>>;
 }
 
 export function parseGrade(text: unknown): string | null;
 
-export function parseLabel(label: string | null | undefined): { stage: "plan" | "code" | "review"; issue: number } | null;
+export function parseLabel(label: string | null | undefined): { stage: StageName; issue: number; round: number } | null;
 
-export function transcriptStats(entries: any[]): StageStats;
+export function transcriptStats(entries: any[]): TranscriptStats;
+
+export function costOf(model: string | null, tokens: Tokens): Cost | null;
 
 export function setupKey(row: Row): string;
 
 export function buildRows(run: {
   record: { runId: string; workflowName?: string; timestamp?: string; script?: string; args?: unknown };
-  agents: { label: string; result: any; transcript: StageStats }[];
+  agents: { label: string; result: any; transcript: TranscriptStats; progress?: { toolCalls?: number; durationMs?: number } }[];
   recordedAt: string;
 }): Row[];
 
