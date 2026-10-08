@@ -10,6 +10,7 @@ import {
   followersOf,
   forgetDevice,
   kindForRole,
+  mayPlay,
   ownerId,
   parseEars,
   parseKind,
@@ -32,6 +33,7 @@ function rec(over: Partial<DeviceRecord> = {}): DeviceRecord {
     follow: null,
     screen: "main",
     quality: "auto",
+    canPlay: false,
     kind: "tablet",
     hasMic: true,
     role: "controller",
@@ -90,16 +92,23 @@ describe("cleanName", () => {
 
 describe("defaultSettings", () => {
   it("gives the owner its own input and Main", () => {
-    expect(defaultSettings("host", { kind: "laptop", hasMic: true })).toEqual({ name: "Laptop", ears: "own", follow: null, screen: "main", quality: "auto" });
+    expect(defaultSettings("host", { kind: "laptop", hasMic: true })).toEqual({ name: "Laptop", ears: "own", follow: null, screen: "main", quality: "auto", canPlay: true });
   });
 
   it("makes a TV follow the owner and show Main", () => {
-    expect(defaultSettings("renderer", { kind: "tv", hasMic: false })).toEqual({ name: "TV", ears: "follow", follow: null, screen: "main", quality: "auto" });
+    expect(defaultSettings("renderer", { kind: "tv", hasMic: false })).toEqual({ name: "TV", ears: "follow", follow: null, screen: "main", quality: "auto", canPlay: false });
   });
 
   it("makes a tablet and a phone follow and show Main", () => {
     expect(defaultSettings("controller", { kind: "tablet", hasMic: true })).toMatchObject({ ears: "follow", screen: "main" });
     expect(defaultSettings("controller", { kind: "phone", hasMic: true })).toMatchObject({ ears: "follow", screen: "main" });
+  });
+
+  it("starts only the owner with Play", () => {
+    expect(defaultSettings("host", { kind: "laptop", hasMic: true }).canPlay).toBe(true);
+    expect(defaultSettings("controller", { kind: "tablet", hasMic: true }).canPlay).toBe(false);
+    expect(defaultSettings("controller", { kind: "phone", hasMic: true }).canPlay).toBe(false);
+    expect(defaultSettings("renderer", { kind: "tv", hasMic: false }).canPlay).toBe(false);
   });
 
   it("uses the asked-for name, cleaned, or the kind's name", () => {
@@ -119,6 +128,13 @@ describe("sanitizeDeviceSet", () => {
     expect(clean({ targetId: "tv", ears: "follow", screen: "own" })).toEqual({ targetId: "tv", patch: { ears: "follow", screen: "own" } });
     expect(clean({ targetId: "tv", quality: "low" })).toEqual({ targetId: "tv", patch: { quality: "low" } });
     expect(clean({ targetId: "tv", quality: "auto" })).toEqual({ targetId: "tv", patch: { quality: "auto" } });
+  });
+
+  it("takes canPlay only as a boolean, and refuses any other present value", () => {
+    expect(clean({ targetId: "pad", canPlay: true })).toEqual({ targetId: "pad", patch: { canPlay: true } });
+    expect(clean({ targetId: "pad", canPlay: false })).toEqual({ targetId: "pad", patch: { canPlay: false } });
+    for (const bad of ["true", 1, 0, null, {}, []]) expect(clean({ targetId: "pad", canPlay: bad })).toBeNull();
+    expect(clean({ targetId: "pad", name: "Pad", canPlay: "yes" })).toBeNull();
   });
 
   it("takes follow: null as the owner", () => {
@@ -158,6 +174,13 @@ describe("parseRecord", () => {
     expect(parseRecord(JSON.stringify(old))?.quality).toBe("auto");
     expect(parseRecord(JSON.stringify({ ...rec(), quality: "ultra" }))?.quality).toBe("auto");
     expect(parseRecord(JSON.stringify(rec({ quality: "floor" })))?.quality).toBe("floor");
+  });
+
+  it("reads canPlay as false unless it is exactly true, so a row from before the choice has no Play", () => {
+    const { canPlay: _, ...old } = rec({ canPlay: true });
+    expect(parseRecord(JSON.stringify(old))?.canPlay).toBe(false);
+    expect(parseRecord(JSON.stringify({ ...rec(), canPlay: "yes" }))?.canPlay).toBe(false);
+    expect(parseRecord(JSON.stringify(rec({ canPlay: true })))?.canPlay).toBe(true);
   });
 
   it("reads hasMic as false unless it is exactly true", () => {
@@ -250,6 +273,15 @@ describe("applyDeviceSet", () => {
     const changed = ok(applyDeviceSet(room(), "tv", { quality: "low" }));
     expect([...changed.keys()]).toEqual(["tv"]);
     expect(changed.get("tv")?.quality).toBe("low");
+  });
+
+  it("sets and clears canPlay on the target alone", () => {
+    const on = ok(applyDeviceSet(room(), "pad", { canPlay: true }));
+    expect([...on.keys()]).toEqual(["pad"]);
+    expect(on.get("pad")?.canPlay).toBe(true);
+    const r = room();
+    r.set("pad", rec({ name: "Pad", canPlay: true, added: 3 }));
+    expect(ok(applyDeviceSet(r, "pad", { canPlay: false })).get("pad")?.canPlay).toBe(false);
   });
 
   it("refuses an unknown target", () => {
@@ -430,5 +462,32 @@ describe("pictureDelayMs", () => {
 
   it("an unknown device has no delay", () => {
     expect(pictureDelayMs(room(), online("nobody"), "nobody")).toBe(0);
+  });
+});
+
+describe("mayPlay", () => {
+  it("always lets the owner, whatever its canPlay says", () => {
+    const r = room();
+    expect(r.get("laptop")?.canPlay).toBe(false);
+    expect(mayPlay(r, "laptop")).toBe(true);
+  });
+
+  it("lets a controller only once it has been granted", () => {
+    const r = room();
+    expect(mayPlay(r, "pad")).toBe(false);
+    expect(mayPlay(r, "phone")).toBe(false);
+    r.set("pad", rec({ name: "Pad", canPlay: true, added: 3 }));
+    expect(mayPlay(r, "pad")).toBe(true);
+    expect(mayPlay(r, "phone")).toBe(false);
+  });
+
+  it("never lets a TV, even one marked canPlay", () => {
+    const r = room();
+    r.set("tv", rec({ name: "TV", role: "renderer", kind: "tv", hasMic: false, canPlay: true }));
+    expect(mayPlay(r, "tv")).toBe(false);
+  });
+
+  it("says no for an unknown id", () => {
+    expect(mayPlay(room(), "nobody")).toBe(false);
   });
 });

@@ -71,6 +71,9 @@ export interface OutputStatus {
   /** Who changed Main while this device had unplayed edits (a display name),
    *  null or absent otherwise. Only the room bridge sets it (roomBridge.ts). */
   changedBy?: string | null;
+  /** Play means something here. False on a room device the owner has not let
+   *  play (roomBridge.ts), so the bar hides PLAY; absent means true. */
+  canPlay?: boolean;
 }
 
 export interface OutputBridge {
@@ -107,7 +110,7 @@ export interface OutputBridge {
 /** The parts of an OutputStatus a listener cares about, as one comparable
  *  string: bridges call their listeners only when this changes. */
 export function statusKey(s: OutputStatus): string {
-  return `${s.open}|${s.cue}|${s.differs}|${s.canCue}|${s.changedBy ?? ""}`;
+  return `${s.open}|${s.cue}|${s.differs}|${s.canCue}|${s.changedBy ?? ""}|${s.canPlay ?? true}`;
 }
 
 export interface OutputBridgeOptions {

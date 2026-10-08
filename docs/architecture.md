@@ -79,7 +79,9 @@ Cloudflare Durable Object, and each has a role (`RoomRole`: host, controller or
 renderer). The laptop is the **host**: it listens, runs everything in the first
 section, and streams its `FeatureFrame`s (`HostConnection`). A phone is a
 **controller**: `src/app.ts` in its mic-less renderer mode, with the whole panel
-(`ControllerConnection`); what it edits becomes the room's *look*. A TV is a
+(`ControllerConnection`); what it edits is its own preview, and it reaches the
+room's *look* only when its Play does, which the owner allows per device (by
+default only the owner's does; `server/roomDevices.ts` `mayPlay`). A TV is a
 **renderer** (`src/tv.ts`, `tv.html`): it draws the host's frames with the room's
 look and has no panel or audio of its own.
 

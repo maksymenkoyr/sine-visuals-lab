@@ -23,7 +23,8 @@
 //          patch and an oversized patch is refused, that a late joiner receives
 //          the same look, that the roster lists every member with its device
 //          settings, that a deviceSet round trip changes one and a refused one is
-//          answered with deviceReject, that frames go from a device on its own
+//          answered with deviceReject, that only a device the owner has let
+//          Play can patch the look, that frames go from a device on its own
 //          input to the devices that follow it and from nobody else, that
 //          every wrong credential is closed with the denial code and told
 //          nothing, the TV adopt route (it reaches only the slot socket that
@@ -251,12 +252,27 @@ async function runSmoke() {
     const roster = await host.take("roster", (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-phone"));
     const entry = roster.devices.find((d) => d.deviceId === "smoke-phone");
     assertEqual(
-      [entry.role, entry.kind, entry.name, entry.hasMic, entry.ears, entry.follow, entry.screen, entry.online, entry.owner],
-      ["controller", "phone", "Smoke phone", true, "follow", null, "main", true, false],
+      [entry.role, entry.kind, entry.name, entry.hasMic, entry.ears, entry.follow, entry.screen, entry.online, entry.owner, entry.canPlay],
+      ["controller", "phone", "Smoke phone", true, "follow", null, "main", true, false, false],
       "a phone's default settings",
     );
     assertEqual(roster.devices[0].deviceId, "smoke-host", "the owner is listed first");
     await phone.take("roster", isType("roster")); // it receives one too
+  });
+
+  await step("a controller's patch is refused until the owner lets it Play, and only the owner can", async () => {
+    phone.send({ type: "lookPatch", n: 0, set: { "vibe.smoke": "early" } });
+    const rej = await phone.take("lookReject", isType("lookReject"));
+    assertEqual([rej.n, rej.reason], [0, "role"], "lookReject n, reason");
+    phone.send({ type: "deviceSet", targetId: "smoke-phone", canPlay: true });
+    const own = await phone.take("deviceReject", isType("deviceReject"));
+    assertEqual([own.targetId, own.reason], ["smoke-phone", "owner-only"], "deviceReject for a non-owner's canPlay");
+    host.send({ type: "deviceSet", targetId: "smoke-phone", canPlay: true });
+    const roster = await phone.take(
+      "roster with Play granted",
+      (m) => m.type === "roster" && m.devices.some((d) => d.deviceId === "smoke-phone" && d.canPlay === true),
+    );
+    assertEqual(roster.devices.find((d) => d.role === "host").canPlay, true, "the owner can always play");
   });
 
   await step("a controller's patch is acked with the next revision", async () => {

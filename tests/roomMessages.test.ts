@@ -50,6 +50,7 @@ function entry(over: Partial<RosterEntry> & { deviceId: string }): RosterEntry {
     follow: null,
     screen: "off",
     quality: "auto",
+    canPlay: false,
     autoQuality: null,
     online: true,
     owner: false,
@@ -90,10 +91,25 @@ describe("parseControlMessage: clock, roster, devices", () => {
     const [h, t, c] = msg.devices;
     expect(h).toEqual({
       deviceId: "h", role: "host", scene: "mesh", palette: "p", viewport: { x: 0, y: 0, w: 1, h: 1 },
-      kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", quality: "auto", autoQuality: null, online: true, owner: true,
+      kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", quality: "auto", canPlay: true, autoQuality: null, online: true, owner: true,
     });
     expect(t).toMatchObject({ kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main", online: true, owner: false });
     expect(c).toMatchObject({ kind: "phone", name: "Phone", hasMic: true, ears: "follow", screen: "main", owner: false });
+  });
+
+  it("keeps a roster entry's canPlay, and falls back to what an older room allowed when it is missing", () => {
+    const withFlag = parse({
+      type: "roster",
+      devices: [entry({ deviceId: "a", canPlay: true }), entry({ deviceId: "b", role: "renderer", kind: "tv", canPlay: false })],
+    }) as { devices: RosterEntry[] };
+    expect(withFlag.devices.map((d) => d.canPlay)).toEqual([true, false]);
+
+    const old = (deviceId: string, role: string, kind?: string) => ({ deviceId, role, scene: "mesh", palette: "p", ...(kind ? { kind } : {}) });
+    const msg = parse({
+      type: "roster",
+      devices: [old("c", "controller"), old("h", "host"), old("t", "renderer"), old("k", "controller", "tv"), { ...old("x", "controller"), canPlay: "yes" }],
+    }) as { devices: RosterEntry[] };
+    expect(msg.devices.map((d) => d.canPlay)).toEqual([true, true, false, false, true]);
   });
 
   it("repairs bad member fields to the defaults instead of dropping the entry", () => {
@@ -147,7 +163,7 @@ describe("parseControlMessage: clock, roster, devices", () => {
   });
 
   it("accepts a deviceReject with a known reason and keeps a target only when it is a string", () => {
-    for (const reason of ["unknown", "no-mic", "tv-off", "bad-follow", "shape", "rate"] as const) {
+    for (const reason of ["unknown", "no-mic", "tv-off", "bad-follow", "shape", "rate", "owner-only"] as const) {
       expect(parse({ type: "deviceReject", targetId: "d1", reason })).toEqual({ type: "deviceReject", targetId: "d1", reason });
     }
     expect(parse({ type: "deviceReject", targetId: null, reason: "shape" })).toEqual({ type: "deviceReject", targetId: null, reason: "shape" });
@@ -186,7 +202,7 @@ describe("recordsFromRoster", () => {
     const { records, online } = recordsFromRoster(roster);
     expect([...records.keys()]).toEqual(["laptop", "tv", "ipad", "phone"]);
     expect(records.get("ipad")).toEqual({
-      name: "iPad", ears: "follow", follow: null, screen: "main", quality: "auto", kind: "tablet", hasMic: true, role: "controller", added: 2, seen: 0,
+      name: "iPad", ears: "follow", follow: null, screen: "main", quality: "auto", canPlay: false, kind: "tablet", hasMic: true, role: "controller", added: 2, seen: 0,
     });
     expect(records.get("laptop")?.added).toBe(0);
     expect([...online].sort()).toEqual(["laptop", "phone", "tv"]);
