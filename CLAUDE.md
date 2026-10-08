@@ -44,6 +44,10 @@ A browser-based, real-time WebGL2 audio visualizer.
   | First pass of a review (finding candidates) | Sonnet, medium |
   | Plans, architecture, verifying findings, final review | Opus, high |
   | Look and shader work judged by eye, DSP and tempo | Opus |
+- Every issue you file gets a difficulty label (`high dif`, `mid dif`,
+  `low dif`: the model table above) and, when a person is needed at some
+  point or likely (over 30%), `human`. `docs/issue-labels.md` has the rules;
+  a hook refuses `gh issue create` without a difficulty label.
 - `/exec-cheap` runs only when the user types it: never suggest it or route
   work to it, and never use it for paid scenes.
 - Finish every change with `/ship`, and close a session with `/wrap`.
