@@ -5,7 +5,7 @@ giant red button, a crowd bounces on twos, lasers and lamps sweep, and the
 camera cuts between close shots on bar lines. Every cycle ends in the drop:
 a two-colour impact frame, then a held wide "hero" frame, then gags, a groove
 and a build back up. The beat clock drives the whole cycle, so the drops land
-on the app's bar lines. Draft scene, not on main yet.
+on the app's bar lines. In development, on main.
 
 ## Where the code is
 

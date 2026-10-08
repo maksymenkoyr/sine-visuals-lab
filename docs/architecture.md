@@ -63,7 +63,9 @@ diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
 that same extractor's `gateDimmer` diagnostic the same way. Its Loudness row
 is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
-this device's own capture, hidden on a mic-less renderer like the Waveform row.
+this device's own capture, hidden on a mic-less renderer. (The Waveform row
+is not: there it draws the followed device's waveform, off the frame's wave
+tail in `src/net/protocol.ts`.)
 
 `src/render/signals.ts` is the seam between those meters and a scene's own
 `settings`: a scene can mark a `SceneSetting` with `reads`, naming which of

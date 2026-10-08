@@ -12,6 +12,7 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
@@ -308,9 +309,10 @@ function onQualityChoice(choice: QualityChoice | undefined): void {
  *  this TV's GPU won't compile) the scene it replaced is brought back, rather
  *  than leaving a half-built one whose render() throws every frame. With
  *  `crossfade` the replaced scene stays up under the new one until the
- *  compositor's blend is done (render/crossfade.ts: one bar from the next
- *  beat, a cut on the floor preset); the room's look carries no glide length
- *  for a scene change, so a TV always takes the one-bar default. */
+ *  compositor's blend is done (render/crossfade.ts: from the next beat, a cut
+ *  on the floor preset); the room's look carries no glide length for a scene
+ *  change, so a TV takes the room's stored transition
+ *  (render/sceneTransition.ts, a room key applied before the scene). */
 function switchScene(next: Scene, crossfade = false): void {
   const prev = scene;
   // A crossfade still running ends here, its outgoing scene dropped at once.
@@ -320,7 +322,7 @@ function switchScene(next: Scene, crossfade = false): void {
   try {
     next.init(sceneCtx);
     scene = next;
-    if (fade) compositor?.begin(prev, { cut: quality.preset === "floor" });
+    if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
   } catch (err) {
     console.error(`TV: "${next.name}" failed to start:`, err);
     try {

@@ -8,6 +8,7 @@ import {
   defaultDriveSetting,
   driveSettingFromChoice,
   DRIVE_EVERY_VALUES,
+  GENERIC_SMOOTHNESS_DEFAULT,
   GENERIC_THRESHOLD_DEFAULT,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
@@ -87,6 +88,8 @@ interface DriveEntry {
    *  own default" (on for scene-handled, off for generic) — see
    *  getDriveThresholdState. */
   thresholdOn?: boolean;
+  /** The generic engine gate's knee width, 0..1 — see getDriveSmoothness. */
+  smoothness?: number;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
@@ -416,6 +419,7 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   }
   delete entry.threshold; // "Reset to scene default" covers the threshold row too
   delete entry.thresholdOn;
+  delete entry.smoothness;
   persist();
 }
 
@@ -557,5 +561,21 @@ export function setDriveThreshold(sceneId: string, spec: SceneSetting, value: nu
 
 export function setDriveThresholdOn(sceneId: string, spec: SceneSetting, on: boolean): void {
   entryFor(settingScope(sceneId, spec.key), spec.key).thresholdOn = on;
+  persist();
+}
+
+/** How wide the generic engine gate's soft knee is, 0..1 (drives.ts's header's
+ *  threshold paragraph) — the bottom of the range is a hard cut at the line.
+ *  Every drive setting starts at `GENERIC_SMOOTHNESS_DEFAULT`, which is the
+ *  knee the gate always had. Only the generic gate reads it: a scene-handled
+ *  threshold shapes its own gate. */
+export function getDriveSmoothness(sceneId: string, spec: SceneSetting): number {
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.smoothness;
+  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : GENERIC_SMOOTHNESS_DEFAULT;
+}
+
+export function setDriveSmoothness(sceneId: string, spec: SceneSetting, value: number): void {
+  if (!Number.isFinite(value)) return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).smoothness = Math.min(1, Math.max(0, value));
   persist();
 }

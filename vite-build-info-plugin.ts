@@ -61,10 +61,11 @@ function computeBuildInfo(): BuildInfo {
     const n = Number(process.env.SVL_PR);
     pr = Number.isFinite(n) ? n : null;
   } else {
-    // Squash-merge subjects end with "(#123)" — GitHub's own format, and the
-    // only way a `dev` build (no PR-scoped env var) can know it.
+    // GitHub's own subjects: a merge commit's "Merge pull request #123 from …",
+    // or a squash merge's trailing "(#123)" — the only way a build with no
+    // PR-scoped env var (a `dev` build, an Insiders push) can know it.
     const subject = git("log", "-1", "--format=%s");
-    const m = /\(#(\d+)\)\s*$/.exec(subject);
+    const m = /^Merge pull request #(\d+)\b/.exec(subject) ?? /\(#(\d+)\)\s*$/.exec(subject);
     pr = m ? Number(m[1]) : null;
   }
 

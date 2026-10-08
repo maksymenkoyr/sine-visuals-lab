@@ -4,6 +4,13 @@
  *  still needs the `webkit`-prefixed names; iPhone Safari exposes none of
  *  this at all for non-video elements, so `fullscreenSupported()` is false
  *  there and callers fall back to a chrome-hiding-only "immersed" look.
+ *
+ *  A page that opens as a screen (a phone or iPad that joined a room by its QR,
+ *  see src/app.ts) starts immersed with its chrome already hidden
+ *  (`enterHidden`).
+ *  Browsers grant fullscreen only inside a tap or a key press, and the page
+ *  opened without one, so fullscreen is owed: every tap or key press asks for
+ *  it again until it is granted, or until the page leaves immersion.
  */
 
 interface PrefixedFullscreenDoc extends Document {
@@ -51,6 +58,9 @@ async function exitFullscreen(): Promise<void> {
 
 export interface ImmersiveMode {
   toggle(): void;
+  /** Immersed with the chrome hidden at once, fullscreen owed to the next
+   *  tap or key press (see the header). */
+  enterHidden(): void;
   exit(): void;
   active(): boolean;
   /** Leaving the viz for the gallery: stop idle-hiding and show chrome again.
@@ -75,6 +85,8 @@ export function createImmersiveMode(deps: {
   let immersed = false;
   let paused = false;
   let idleTimer: number | undefined;
+  /** Fullscreen asked for without a tap to grant it (enterHidden). */
+  let fullscreenOwed = false;
 
   function setButtonState(): void {
     const state = immersed ? BTN_ACTIVE : BTN_INACTIVE;
@@ -100,16 +112,26 @@ export function createImmersiveMode(deps: {
     }, IDLE_MS);
   }
 
+  /** On `click`, not `pointerdown`: a touch's pointerdown is not a gesture
+   *  that may open fullscreen, and a click is in every browser. */
+  function payFullscreen(): void {
+    if (fullscreenOwed && immersed && !isFullscreen()) void requestFullscreen(document.documentElement);
+  }
+
   function addIdleListeners(): void {
     window.addEventListener("pointermove", wake);
     window.addEventListener("pointerdown", wake);
     window.addEventListener("keydown", wake);
+    window.addEventListener("click", payFullscreen);
+    window.addEventListener("keydown", payFullscreen);
   }
 
   function removeIdleListeners(): void {
     window.removeEventListener("pointermove", wake);
     window.removeEventListener("pointerdown", wake);
     window.removeEventListener("keydown", wake);
+    window.removeEventListener("click", payFullscreen);
+    window.removeEventListener("keydown", payFullscreen);
     window.clearTimeout(idleTimer);
     document.body.classList.remove("chrome-idle");
   }
@@ -122,8 +144,18 @@ export function createImmersiveMode(deps: {
     if (fullscreenSupported()) void requestFullscreen(document.documentElement);
   }
 
+  function enterHidden(): void {
+    if (immersed) return;
+    immersed = true;
+    setButtonState();
+    addIdleListeners();
+    if (!paused) document.body.classList.add("chrome-idle");
+    fullscreenOwed = fullscreenSupported();
+  }
+
   function leave(): void {
     immersed = false;
+    fullscreenOwed = false;
     setButtonState();
     removeIdleListeners();
     if (isFullscreen()) void exitFullscreen();
@@ -132,7 +164,8 @@ export function createImmersiveMode(deps: {
   // The user can also leave fullscreen via Esc or browser chrome — keep our
   // state (and the button glyph) truthful when that happens.
   const onFullscreenChange = () => {
-    if (!isFullscreen() && immersed && fullscreenSupported()) leave();
+    if (isFullscreen()) fullscreenOwed = false;
+    else if (immersed && fullscreenSupported()) leave();
   };
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
@@ -142,6 +175,7 @@ export function createImmersiveMode(deps: {
       if (immersed) leave();
       else enter();
     },
+    enterHidden,
     exit() {
       if (immersed) leave();
     },

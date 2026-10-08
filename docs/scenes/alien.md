@@ -4,19 +4,20 @@ One grey alien dancing as a glowing green wireframe on black, in three short
 loops: each loop is one captured dance seen from its own angle, baked to a
 video. The music pays for the frames: the Move setting's wire sets how fast the
 loop on screen plays, and silence holds the frame. Bounce squashes him toward
-the floor and springs him back on its wire's hits. A loop repeats until the Cut
-setting's wire rises over the line under its graph. A draft, not on main yet
-(#374).
+the floor and springs him back on its wire's hits; Bounce smoothness turns
+that spring from a snap and a wobble into an ease and a glide. A loop repeats
+until the Cut setting's wire makes a hit that stands out from its everyday
+ones (the dotted line on its graph). In development, on main since #374.
 
 ## Where the code is
 
 - `src/render/scenes/alien/index.ts`: the scene, a video player. It holds the
-  three settings in `SETTINGS`, the Motion section in `PANEL`, one `<video>`
+  settings in `SETTINGS`, the Motion section in `PANEL`, one `<video>`
   per loop (pinned bytes), the frame upload, the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, videos).
 - `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
-  `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce). Its
-  header has them in words.
+  `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
+  `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: `PLAYER_FRAG`, the scene's one pass: the baked frame to cover
   the room, squashed about the loop's pivot. The rest of it is the live look,
   used only by the bake: GPU skinning, the barycentric wireframe, the fresnel
@@ -39,7 +40,9 @@ setting's wire rises over the line under its graph. A draft, not on main yet
   its frames with the playhead. Fed by the scene's `probe()`.
 - Reused, not copied: the dancers' rig, clip format and `clips.bin`
   (`../dancers/`); the drive system (`drives.value`, `drives.threshold`);
-  the Level signal (`feature.level`, #368).
+  the Level signal (`feature.level`, #368); the standout detector
+  (`src/render/standout.ts`, a `StandoutTrigger` held in the reel as `cut`),
+  shared with Caustics' Beat ripple and Physarum 2's Dose.
 - Tests: `tests/alien.test.ts`.
 
 ## References
@@ -87,6 +90,27 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   One cut in 54 s, at the music's return after the hiss (Drop). Bounce
   squash 0.02–0.07 of the height on the kicks (143 bpm keeps it from
   settling between kicks), 0 in the hiss.
+- 2026-10-06, Bounce smoothness, `stepBounce` in node at 60 fps with Bounce
+  0.5 and a 0.88 Bass hit decaying at the low band's rate: one hit squashes
+  to 0.065 at every smoothness, reached at 133 ms at 0, 183 ms at 0.5 and
+  250 ms at 1, with no stretch past rest. The gain that keeps that depth is
+  1.47 at 0.5 and 2.03 at 1. On kick trains the swing narrows and rides
+  higher: 0.015–0.061 at 0, 0.054–0.078 at 1 (143 bpm). Ending the slider
+  at 2.0 or 2.4 Hz instead of 1.8 barely moved that floor (0.050, 0.043):
+  the damping and the gain set it, not the frequency.
+- Same day, the live app on synthetic audio at 128 bpm (Metal, 30 fps
+  render): squash 0.013–0.071 at smoothness 0, largest one-frame change
+  0.0215; 0.055–0.092 at 1, largest change 0.0097.
+- Same day, Cut on the standout detector, live app (Metal) with a fake mic
+  playing 45 s of `tools/.cache/promo-songs/deTJ513J07Y.mono48.wav`, logged
+  by `realmusic.mjs --cut <signal> --cut-threshold <t>` and read with
+  `cutsum.py`:
+  - Drop (the default wire): one drop in the 45 s, as the music came in, and
+    one cut on it.
+  - Bass hit, Cut threshold at its default: 148 hit peaks (median 0.94), 20
+    cuts, 2.06–2.89 s apart. The minimum shot still sets the pace; within
+    it, not every hit is a standout. Learned floor about 0.14, peak 0.67.
+  - Bass hit, Cut threshold 0.75: 3 cuts in the 45 s.
 
 ## Decisions and pivots
 
@@ -128,15 +152,54 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   until there was a trigger". Cut's default wire moved from Bass level
   (a cut every few seconds) to Drop, so a loop repeats until the music
   drops or changes section. Which trigger the user meant wasn't confirmed.
+- 2026-10-06, the user: "add parameter smoothenest for bounce". Added
+  **Bounce smoothness**, my reading (not asked): how the squash moves, from
+  today's snap and wobble (0, the default, unchanged) to a slow ease down and
+  a glide back (1). Not a filter on which hits bounce. A softer spring alone
+  shrank a hit's squash by half, so the target is scaled to keep one Bass
+  hit's depth; the cost is that on fast kicks a smooth bounce doesn't come
+  back up between hits. A peak hold on the signal was tried in a sim first:
+  a hold shorter than the hit pulse's own decay does nothing, a longer one
+  left the alien squashed with almost no swing.
+- 2026-10-06, the user: "cut on alien should have the same logic as beat
+  ripple and dose. but lets first extract this logic and shape it properly
+  for future reuse". The standout detector moved out of Caustics'
+  `rippleEmitter.ts` into `src/render/standout.ts`, with a `StandoutTrigger`
+  (the detector plus a shortest gap between fires) for one-event settings;
+  Dose was moved onto it unchanged. Cut is now a `StandoutTrigger` with
+  `MIN_SHOT_SEC` as its gap, instead of a rise over a fixed line. Its row is
+  "Cut threshold", worded like "Dose threshold", and the graph draws the
+  "reach to cut" line and a dot per cut (keyed "cut"; the key had said
+  "ring sent" for every scene). With the row Off every climb out of
+  near-silence cuts, as the line's floor did before. Two side effects: the
+  first shot can now cut before `MIN_SHOT_SEC` (the trigger starts ready),
+  and a "Cuts above" value someone had moved is read as a Cut threshold
+  (not migrated; the scene was a day old).
+- 2026-10-06, the user: Move "doesn't work on ipad in room… bounce works,
+  but no movements". Move is the only setting that needs the `<video>` to
+  play; Bounce is a shader effect on whatever frame is up. WebKit on iOS
+  pauses an inline video it counts as off-screen (a video outside the page
+  always is) and can refuse play() on a video no tap has touched (always in
+  Low Power Mode). The old code swallowed that refusal, so the frame sat
+  still. Now the videos sit in the page as one invisible pixel, the first tap
+  or key starts and stops every loop (iOS then lets each play), and wherever
+  play() is still refused the scene moves the paused video's playhead itself.
+  Checked headlessly with play() stubbed to refuse until a click (Chromium
+  and WebKit): the playhead advanced 0.86 s per second at speed 0.85, and
+  after a click play() took over. Not yet seen on a real iPad.
 
 ## Tuning notes
 
 - Move's slider multiplies the wire: 1 plays a loud song at about captured
   speed. Raise it for a faster dance on quiet material.
 - Bounce's slider is the depth; its spring (`BOUNCE_HZ`, `BOUNCE_DAMPING`)
-  sets how snappy it is and how far it overshoots.
-- Cut's line on Drop: any drop clears it. Wire it to Bass level with a high
-  line for regular cuts instead.
+  sets how snappy it is and how far it overshoots. Bounce smoothness eases
+  that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
+  too low on fast music, the damping is the knob that matters.
+- Cut on Drop: every drop stands out (drops are rare, so nothing else on
+  that signal teaches the floor). For regular cuts wire it to Bass hit: it
+  cuts on a standout hit once each shot has lasted `MIN_SHOT_SEC`, and
+  Cut threshold thins those out (see Measurements).
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
 
@@ -147,6 +210,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   would need the deploy-skew rule in `src/pinnedAssets.ts` solved another way.
 - Video playback rate can't go below about 0.07×; slower than that the loop
   pauses.
+- On an iPhone or iPad that no one has tapped, or one in Low Power Mode, the
+  loop moves by a seek per frame instead of playing, which may stutter on an
+  older device. The iOS fix (see Decisions) is unconfirmed on real hardware.
 - In the close-up the Bounce pivot is far below the frame, so a squash
   reads as the whole picture dipping.
 - A head nod can push the neck's top through the back of the skull: the
@@ -161,9 +227,11 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   bake page `tools/alien-bake/index.html`.
 - Working scripts: `alien/scripts/`. `shot.mjs` takes headless shots,
   `realmusic.mjs` drives a fake mic and logs the player, and `mkwav.py`
-  builds the music/hiss/music test file. `summarize.py` and `simhold.py`
-  read the logs. `meshcheck.ts` and `clipcheck.ts` run under
+  builds the music/hiss/music test file. `summarize.py`, `simhold.py` and
+  `cutsum.py` (Cut: cut times, hit peaks, the dotted line) read the logs. `meshcheck.ts` and `clipcheck.ts` run under
   `node --experimental-strip-types`, and `tile.py` makes contact sheets.
+  `playcheck.mjs` checks playback in Chromium or WebKit, optionally with
+  play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
 
 ## Resume here
@@ -174,12 +242,20 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   running: `FFMPEG=<ffmpeg> node tools/alien-bake.mjs --port <p>`, then
   look at a decoded frame before committing the videos.
 - Real music: `node docs/scenes/alien/scripts/realmusic.mjs <wav> out.json
-  --port <p>`. Synthetic audio always reads loud, so it can't test silence.
+  --port <p>` (add `--cut anim.lowOnset` to wire Cut to Bass hit). Synthetic
+  audio always reads loud, so it can't test silence.
 - Gotcha: `__viz.probe()` doesn't carry drive readings. Read
   `window.__alien.last` instead.
 
 ## History
 
 - #373 (2026-10-05, closed): the scene, built on #368 for the Level signal.
-- #374 (draft, 2026-10-05): the same, rebased after #368 merged, plus the
+- #374 (merged 2026-10-05): the same, rebased after #368 merged, plus the
   Play readout; then baked loops, Move, Bounce, and Cut on Drop.
+- #389 (draft, 2026-10-06): Bounce smoothness.
+- #405 (draft, 2026-10-06): Cut fires on the shared standout detector
+  (`src/render/standout.ts`), with a Cut threshold row and the "reach to cut"
+  line on its graph.
+- #389 (merged 2026-10-06): Bounce smoothness.
+- #407 (draft, 2026-10-06): Move on iPhone and iPad (videos in the page, unlock on the
+  first tap, a playhead scrub where play() is refused).

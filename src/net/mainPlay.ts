@@ -30,7 +30,10 @@
  *   (the laptop) keeps its own look and just reads "not on air"; in a room with
  *   no Main yet the owner plays its look as the first one. A room's Main that
  *   has no scene (the owner opened in the gallery, so it had none to play)
- *   gets the owner's scene, and only that, once the owner has one (`tick`). A
+ *   gets the owner's scene, and only that, once the owner has one (`tick`).
+ *   While nobody else is online the owner's bar plays for it on every change
+ *   (roomBridge.ts `liveWhenAlone`), so the first device to join meets the
+ *   laptop's picture, not a stale Main. A
  *   later snapshot (a gap resync or a reconnect) follows only a device that
  *   was on air, so a wifi blink never costs anyone their unplayed edits.
  *   The room sends a connection's snapshot before its roster, so a non-owner's

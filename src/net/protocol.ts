@@ -13,7 +13,16 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [29..30] bpm * 10, Uint16
  *   [31]     level, Uint8 (0..1 -> 0..255)
  *   [32..39] roomTimeMs, Float64
- * = 40 bytes. The DO relay never parses this — it's a client-only concern.
+ * = 40 bytes, then an optional tail:
+ *   [40]     wave min, Int8 (companded, see encodeWaveSample)
+ *   [41]     wave max, Int8
+ * = 42 bytes when the sender has a waveform: the min and max of its mic's
+ * raw samples since the frame before, which a following phone or iPad draws
+ * as the Dynamics card's Waveform row (src/ui/audioMeters.ts). A sender with
+ * no mic samples (the synthetic feed) leaves the tail off, and the follower
+ * hides that row as it would with no waveform at all. The tail sits after
+ * roomTimeMs so the 40 bytes before it are exactly the layout without it.
+ * The DO relay never parses this — it's a client-only concern.
  *
  * bit1 (pulseOnset) was added after bit0 shipped — decodeFeatureFrame ORs it
  * with `onset` on decode (`(flags & 2) !== 0 || onset`) so a sender that
@@ -27,6 +36,12 @@ import { NUM_BANDS } from "../audio/types.ts";
  * unchanged), and not worth a special case: retire this paragraph together
  * with the legacy-decode fallback below once mixed-version pairing is no
  * longer a concern.
+ *
+ * A page still on a decoder from before the wave tail takes only 39 or 40
+ * bytes, so it drops a 42-byte frame and shows its "waiting" state until it
+ * reloads. decodeFeatureFrame reads the known prefix of anything longer than
+ * FRAME_BYTES, so a tail added after this one only costs the waveform-era
+ * decoders that one reload, not a black screen.
  *
  * decodeFeatureFrame also accepts the legacy 39-byte layout (no `level`
  * byte, roomTimeMs at [31..38]) and defaults `level` to 0.5 — so a renderer
@@ -52,8 +67,29 @@ import { NUM_BANDS } from "../audio/types.ts";
  * wire or breaks a paired device running older code.
  */
 const MSG_FEATURE_FRAME = 1;
-const FRAME_BYTES = 1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8;
-const LEGACY_FRAME_BYTES = FRAME_BYTES - 1;
+const BASE_FRAME_BYTES = 1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8;
+const LEGACY_FRAME_BYTES = BASE_FRAME_BYTES - 1;
+const FRAME_BYTES = BASE_FRAME_BYTES + 2;
+
+/** The min and max of a stretch of raw mic samples, each in [-1,1]. */
+export interface WaveEnvelope {
+  min: number;
+  max: number;
+}
+
+// A square-root curve, not a linear one: the Waveform row zooms to the
+// loudest column on screen (down to its own WAVE_RANGE_FLOOR), so a quiet
+// room needs most of an Int8's steps near zero. Full scale still lands within
+// a step of the row's clip threshold, so a follower's CLIP matches the host's.
+function encodeWaveSample(x: number): number {
+  const c = Math.max(-1, Math.min(1, Number.isFinite(x) ? x : 0));
+  return Math.round(Math.sign(c) * Math.sqrt(Math.abs(c)) * 127);
+}
+
+function decodeWaveSample(q: number): number {
+  const a = q / 127;
+  return Math.sign(a) * a * a;
+}
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -69,8 +105,10 @@ export interface EncodableFrame {
   level: number;
 }
 
-export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number): ArrayBuffer {
-  const buf = new ArrayBuffer(FRAME_BYTES);
+/** `wave`, when given, becomes the frame's tail (see the header); null sends
+ *  the 40-byte frame. */
+export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number, wave: WaveEnvelope | null = null): ArrayBuffer {
+  const buf = new ArrayBuffer(wave ? FRAME_BYTES : BASE_FRAME_BYTES);
   const view = new DataView(buf);
   let o = 0;
   view.setUint8(o, MSG_FEATURE_FRAME);
@@ -89,6 +127,11 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number): A
   view.setUint8(o, Math.round(clamp01(frame.level) * 255));
   o += 1;
   view.setFloat64(o, roomTimeMs, true);
+  o += 8;
+  if (wave) {
+    view.setInt8(o, encodeWaveSample(wave.min));
+    view.setInt8(o + 1, encodeWaveSample(wave.max));
+  }
   return buf;
 }
 
@@ -101,11 +144,13 @@ export interface DecodedFrame {
   onsetPhase: number;
   level: number;
   roomTimeMs: number;
+  /** The sender's waveform since its previous frame; null when it sent none. */
+  wave: WaveEnvelope | null;
 }
 
 export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   const legacy = buf.byteLength === LEGACY_FRAME_BYTES;
-  if (!legacy && buf.byteLength !== FRAME_BYTES) return null;
+  if (!legacy && buf.byteLength !== BASE_FRAME_BYTES && buf.byteLength < FRAME_BYTES) return null;
   const view = new DataView(buf);
   let o = 0;
   if (view.getUint8(o) !== MSG_FEATURE_FRAME) return null;
@@ -137,6 +182,9 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   // false everywhere, so it is never pruned; Infinity prunes all history).
   // No honest sender writes one.
   if (!Number.isFinite(roomTimeMs)) return null;
+  o += 8;
+  const wave =
+    buf.byteLength >= FRAME_BYTES ? { min: decodeWaveSample(view.getInt8(o)), max: decodeWaveSample(view.getInt8(o + 1)) } : null;
 
-  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, roomTimeMs };
+  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, roomTimeMs, wave };
 }

@@ -4,13 +4,14 @@
 // header; this file only gathers the facts from git and GitHub.
 //
 //   node tools/release-notes.mjs [--tag vX.Y.Z] [--from <ref>] [--to <ref>]
-//        [--version-json dist/version.json] [--pr-body <file>] [--repo owner/name]
+//        [--version-json dist/version.json] [--pr-body <file>] [--repo owner/name] [--prs]
 //
 // --from defaults to the newest strict vX.Y.Z tag in --to's history, or, run
 // from main (whose history never holds the release tags — they sit on
 // production's merge commits), the newest one on origin/production.
-// --pr-body is a file holding the release pull request's body; its
-// "## Highlights" section opens the notes. --version-json adds the scene
+// --pr-body is a file holding the release pull request's body; its written
+// notes open the page. --prs prints only the release's pull request numbers,
+// one per line (release.yml comments on each). --version-json adds the scene
 // versions this release changed. Authors come from GitHub (`gh`), and a line
 // just goes without its "by @…" when that fails.
 //
@@ -25,8 +26,8 @@ import { parseRegistryImports, resolveImport } from "./sceneVersionLib.mjs";
 import {
   addedSceneUnits,
   categorize,
-  extractHighlights,
-  prNumberFromSubject,
+  changesFromLog,
+  extractReleaseNotes,
   renderNotes,
   sceneNameFromSource,
 } from "./releaseNotesLib.mjs";
@@ -45,6 +46,7 @@ const { values: opts } = parseArgs({
     "version-json": { type: "string" },
     "pr-body": { type: "string" },
     repo: { type: "string" },
+    prs: { type: "boolean" },
   },
 });
 
@@ -121,17 +123,28 @@ const repo = repoName();
 const names = sceneNames();
 const nameList = [...names.values()];
 
-const commits = lines(git("log", "--no-merges", "--format=%H%x1f%s", ...(from ? [`${from}..${to}`] : [to]))).map((l) => {
-  const [sha, subject] = l.split("\x1f");
-  return { sha, subject, pr: prNumberFromSubject(subject) };
-});
-const authors = prAuthors(repo, [...new Set(commits.map((c) => c.pr).filter(Boolean))]);
+const log = git("log", "--format=%x1e%H%x1f%P%x1f%s%x1f%b", ...(from ? [`${from}..${to}`] : [to]))
+  .split("\x1e")
+  .filter((rec) => rec.trim())
+  .map((rec) => {
+    const [sha, parents, subject, body = ""] = rec.trim().split("\x1f");
+    return { sha, parents: parents.split(" ").filter(Boolean), subject, body };
+  });
+const changes = changesFromLog(log, (sha) => lines(git("rev-list", `${sha}^1..${sha}^2`)));
+const prNumbers = [...new Set(changes.map((c) => c.pr).filter(Boolean))];
+if (opts.prs) {
+  process.stdout.write(prNumbers.sort((a, b) => a - b).map((n) => `${n}\n`).join(""));
+  process.exit(0);
+}
+const authors = prAuthors(repo, prNumbers);
 
-const entries = commits.map((c) => {
-  const files = lines(git("diff-tree", "--no-commit-id", "--name-only", "-r", c.sha));
-  const newScenes = files.includes(REGISTRY)
-    ? addedSceneUnits(git("show", "--format=", "--unified=0", c.sha, "--", REGISTRY)).filter((u) => names.has(u))
-    : [];
+const entries = changes.map((c) => {
+  // A merged pull request is everything since its first parent; a single
+  // commit is its own diff.
+  const files = lines(c.base ? git("diff", "--name-only", c.base, c.sha) : git("diff-tree", "--no-commit-id", "--name-only", "-r", c.sha));
+  const registryDiff = () =>
+    c.base ? git("diff", "--unified=0", c.base, c.sha, "--", REGISTRY) : git("show", "--format=", "--unified=0", c.sha, "--", REGISTRY);
+  const newScenes = files.includes(REGISTRY) ? addedSceneUnits(registryDiff()).filter((u) => names.has(u)) : [];
   return { ...c, author: authors.get(c.pr) ?? null, newScenes, category: categorize({ subject: c.subject, files, newScenes, sceneNames: nameList }) };
 });
 
@@ -141,8 +154,8 @@ if (opts["version-json"]) {
   sceneVersions = (info.scenesChanged ?? []).map((unit) => ({ unit, name: names.get(unit), version: info.scenes?.[unit] ?? "?" }));
 }
 
-const highlights = opts["pr-body"] && existsSync(opts["pr-body"]) ? extractHighlights(readFileSync(opts["pr-body"], "utf8")) : "";
+const notes = opts["pr-body"] && existsSync(opts["pr-body"]) ? extractReleaseNotes(readFileSync(opts["pr-body"], "utf8")) : "";
 
 process.stdout.write(
-  renderNotes({ highlights, entries, sceneVersions, repo, prevTag: from, tag: opts.tag ?? null, siteUrl: opts.tag ? STABLE_URL : null }),
+  renderNotes({ notes, entries, sceneVersions, repo, prevTag: from, tag: opts.tag ?? null, siteUrl: opts.tag ? STABLE_URL : null }),
 );

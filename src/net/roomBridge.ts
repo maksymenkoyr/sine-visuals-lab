@@ -34,7 +34,12 @@ import type { MainPlay } from "./mainPlay.ts";
  * device's look and works out whether it is on air.
  *
  * "Open" means another device of the room is online: with nobody else there,
- * Play has nobody to reach and the bar stays away.
+ * Play has nobody to reach and the bar stays away. So that the first device to
+ * join (a phone or iPad scanning the QR) opens on what the laptop shows rather
+ * than on whatever Main was last played, the room's owner is live while it is
+ * alone (`liveWhenAlone`): `update` plays its look to Main as soon as the two
+ * differ, with no bar and no Play. The first other device online ends that,
+ * and Main waits for Play again.
  *
  * `combineBridges` lets one bar drive the pop-out and the room together on the
  * laptop. Play goes to every open bridge (the pop-out and Main), a held Cue only to
@@ -51,6 +56,9 @@ export interface RoomBridgeOptions {
   mayPlay: () => boolean;
   /** Clicked "POP OUT" where there is nothing to open: show the room view. */
   showRoom: () => void;
+  /** This device may keep Main in step with its look while nobody else is
+   *  online (see the header): the room's owner, once the roster has listed it. */
+  liveWhenAlone?: () => boolean;
 }
 
 /** What the app holds: a plain output bridge. */
@@ -95,6 +103,9 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
     },
     update(nowMs) {
       play.tick(nowMs);
+      // tick re-reads the look on its own clock, so onAir is never staler than that.
+      const p = play.status();
+      if (p.known && !p.onAir && !opts.present() && opts.liveWhenAlone?.()) play.play();
       emitIfChanged();
     },
     take() {

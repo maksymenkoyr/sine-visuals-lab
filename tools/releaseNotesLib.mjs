@@ -1,16 +1,29 @@
 /**
  * The body of a Stable GitHub Release — the pure half (tests/releaseNotes.test.ts);
  * tools/release-notes.mjs reads git and GitHub and hands the facts in here.
- * Modelled on the GitHub CLI's own release pages: an optional hand-written
- * lead, then "What's Changed" with one line per pull request
- * (`title by @author in #N`) under a heading for the part of the app it
- * changed, then a Full Changelog compare link.
+ * Two parts: the written notes, then the generated list.
  *
- * **Highlights** — the hand-written lead — come from the release pull request
- * itself: `npm run release` (tools/release-pr.mjs) opens it with an empty
- * "## Highlights" section, and whatever is written there before merging
- * opens the Release (`extractHighlights`). Left empty, the Release is just
- * the generated list.
+ * **The written notes** come from the release pull request itself: everything
+ * in its body above the `NOTES_END` line (`extractReleaseNotes`), which
+ * `npm run release` (tools/release-pr.mjs) puts in. `/release`
+ * (.claude/commands/release.md) writes them for people who use the app, not
+ * its code — and the same text is where the release video's lines start
+ * (`/video-release-stable`). A body without that line falls back to its
+ * "## Highlights" section, the shape release pull requests had before.
+ *
+ * **The generated list** is modelled on the GitHub CLI's own release pages:
+ * one line per pull request (`title by @author in #N`) under a heading for
+ * the part of the app it changed, then a Full Changelog compare link. Under
+ * written notes it's folded (`<details>`), so the page reads as the notes;
+ * with none, it's the page.
+ *
+ * **Pull requests** are read off the log (`changesFromLog`). A merge commit
+ * `Merge pull request #N from owner/branch` is one, titled by the merge
+ * commit's body (GitHub writes the PR title there), and it covers its own
+ * commits — its second parent back to its first. A squash-merged commit ends
+ * `(#N)`. Any other commit is a direct push, a change of its own. A merge of
+ * `main` itself (a release pull request: main into production) and any other
+ * merge (a stack's plumbing) is no change of its own.
  *
  * **Categories** (`CATEGORIES`, in page order) are worked out per pull
  * request from its title and the files it touched — `categorize` — since PRs
@@ -44,10 +57,24 @@ export function stripPrSuffix(subject) {
   return subject.replace(/\s*\(#\d+\)\s*$/, "");
 }
 
-/** The hand-written lead from a release pull request's body: everything
- *  under a `## Highlights` heading up to the next `##` heading or a `---`
- *  rule, HTML comments removed. "" when there's no such section or it's
- *  empty. */
+/** How the line that ends a release pull request's written notes starts —
+ *  an HTML comment, so it never shows on the page. */
+export const NOTES_END = "<!-- release notes end";
+
+/** A release pull request's written notes: everything above its `NOTES_END`
+ *  line, HTML comments removed; a body without that line falls back to
+ *  `extractHighlights`. "" when nothing is written. */
+export function extractReleaseNotes(body) {
+  if (!body) return "";
+  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  const end = lines.findIndex((l) => l.trim().startsWith(NOTES_END));
+  if (end < 0) return extractHighlights(body);
+  return stripComments(lines.slice(0, end).join("\n"));
+}
+
+/** The older shape's hand-written lead: everything under a `## Highlights`
+ *  heading up to the next `##` heading or a `---` rule, HTML comments
+ *  removed. "" when there's no such section or it's empty. */
 export function extractHighlights(body) {
   if (!body) return "";
   const lines = body.replace(/\r\n/g, "\n").split("\n");
@@ -58,7 +85,50 @@ export function extractHighlights(body) {
     if (/^##\s/.test(line) || /^-{3,}\s*$/.test(line.trim())) break;
     out.push(line);
   }
-  return out.join("\n").replace(/<!--[\s\S]*?-->/g, "").trim();
+  return stripComments(out.join("\n"));
+}
+
+function stripComments(text) {
+  return text.replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** The pull request a GitHub merge commit landed — subject
+ *  `Merge pull request #N from owner/branch`, the PR's title on the body's
+ *  first line — or null for any other commit. */
+export function parsePrMerge(subject, body = "") {
+  const m = /^Merge pull request #(\d+) from [^/\s]+\/(\S+)/.exec(subject ?? "");
+  if (!m) return null;
+  const title = (body ?? "").split("\n").map((l) => l.trim()).find(Boolean) ?? null;
+  return { pr: Number(m[1]), branch: m[2], title };
+}
+
+/**
+ * The changes a release ships, newest first — see this file's header.
+ *  - `log`: `{ sha, parents, subject, body }` per commit in the release's
+ *    range, merges included, newest first (as `git log` gives them).
+ *  - `commitsOf(sha)`: a merge commit's own commits (`git rev-list
+ *    <first parent>..<second parent>`).
+ * Each change is `{ sha, base, pr, subject }`: `base` is a merged pull
+ * request's first parent (its files are the diff from there), null for a
+ * single commit.
+ */
+export function changesFromLog(log, commitsOf) {
+  const merges = new Map();
+  const covered = new Set();
+  for (const c of log) {
+    if (c.parents.length < 2) continue;
+    const merge = parsePrMerge(c.subject, c.body);
+    if (!merge || merge.branch === "main") continue;
+    merges.set(c.sha, merge);
+    for (const sha of commitsOf(c.sha)) covered.add(sha);
+  }
+  const changes = [];
+  for (const c of log) {
+    const merge = merges.get(c.sha);
+    if (merge) changes.push({ sha: c.sha, base: c.parents[0], pr: merge.pr, subject: merge.title ?? `Pull request #${merge.pr}` });
+    else if (c.parents.length < 2 && !covered.has(c.sha)) changes.push({ sha: c.sha, base: null, pr: prNumberFromSubject(c.subject), subject: c.subject });
+  }
+  return changes;
 }
 
 /** Scene units a commit registers: `+import { fooScene } from "./foo.ts"`
@@ -150,33 +220,38 @@ export function formatEntry({ subject, pr, author, sha }) {
 
 /**
  * The whole Release body.
+ *  - `notes`: the written notes (`extractReleaseNotes`), or "".
  *  - `entries`: `{ subject, pr, author, sha, category, newScenes }` per
- *    commit, newest first (as `git log` gives them).
+ *    change, newest first (`changesFromLog`).
  *  - `sceneVersions`: `{ unit, name, version }` for each scene this release
  *    changed, or [] (the build's version.json `scenesChanged`).
  *  - `prevTag` / `tag`: for the compare link; it's left out without both.
  */
-export function renderNotes({ highlights = "", entries, sceneVersions = [], repo, prevTag, tag, siteUrl }) {
+export function renderNotes({ notes = "", entries, sceneVersions = [], repo, prevTag, tag, siteUrl }) {
   const out = [];
-  if (highlights) out.push(highlights, "");
+  const fold = (summary, body) => (notes ? [`<details><summary>${summary}</summary>`, "", ...body, "</details>", ""] : body);
 
-  out.push("## What's Changed", "");
-  if (entries.length === 0) out.push("Nothing new since the last release — a redeploy.", "");
+  const list = [];
+  if (entries.length === 0) list.push("Nothing new since the last release — a redeploy.", "");
   for (const { key, title } of CATEGORIES) {
     const group = entries.filter((e) => e.category === key);
     if (group.length === 0) continue;
     // Scene lines sort by title so one scene's changes sit together; the
     // rest keep newest-first.
     const ordered = key === "scenes" ? [...group].sort((a, b) => stripPrSuffix(a.subject).localeCompare(stripPrSuffix(b.subject))) : group;
-    out.push(`### ${title}`, "", ...ordered.map(formatEntry), "");
+    list.push(`### ${title}`, "", ...ordered.map(formatEntry), "");
   }
+  if (notes) out.push(notes, "", "## Every change", "");
+  else out.push("## What's Changed", "");
+  out.push(...fold(`All ${entries.length} changes, by the part of the app they changed`, list));
 
   if (sceneVersions.length > 0) {
-    out.push("## Scene versions", "", "| Scene | Version |", "|---|---|");
+    const table = ["| Scene | Version |", "|---|---|"];
     for (const s of [...sceneVersions].sort((a, b) => (a.name ?? a.unit).localeCompare(b.name ?? b.unit))) {
-      out.push(`| ${s.name ?? s.unit} (\`${s.unit}\`) | ${s.version} |`);
+      table.push(`| ${s.name ?? s.unit} (\`${s.unit}\`) | ${s.version} |`);
     }
-    out.push("");
+    if (!notes) out.push("## Scene versions", "");
+    out.push(...fold(`Versions of the ${sceneVersions.length} scenes this release changed`, [...table, ""]));
   }
 
   if (siteUrl) out.push(`**Live at** ${siteUrl}`, "");

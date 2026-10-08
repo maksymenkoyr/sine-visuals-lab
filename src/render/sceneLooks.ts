@@ -1,6 +1,8 @@
+import { deflateSync, inflateSync, strFromU8, strToU8 } from "fflate";
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
+import { fitCustom, getCustomValue, setCustomValue } from "./customValues.ts";
 import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
 
@@ -30,7 +32,11 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  * converge on identical state.
  *
  * Share-code format is version-tagged JSON (`{v:1,n,s,m,d}`), base64url of
- * its UTF-8 bytes. `d` is optional — added for SceneSetting.drive
+ * its UTF-8 bytes — or, when that is shorter, the same bytes deflated and
+ * marked with a leading `Z` (a JSON code starts `ey`, so the two never
+ * collide). encodeLook picks the shorter; decodeLook reads both, so every
+ * link ever made still opens, while an app from before `Z` codes reads a
+ * short one as a code that didn't parse. `d` is optional — added for SceneSetting.drive
  * (src/render/drives.ts) without bumping `v`: an old code simply lacks it,
  * and an old app decoding a new code just ignores the unknown key, same as
  * any other schema-outlives-the-link case this format tolerates. decodeLook
@@ -167,7 +173,11 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
     // The variant (SceneSetting.variant) is always carried, auto or not:
     // every other key is stored per variant option, so a Look that left it
     // out would apply its keys into whatever option the receiver was on.
-    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) manual[spec.key] = getSceneSetting(sceneId, spec);
+    // A custom value (customValues.ts) is the number on screen, so it is the
+    // one carried; an app that predates custom values clamps it on apply.
+    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) {
+      manual[spec.key] = getCustomValue(sceneId, spec.key) ?? getSceneSetting(sceneId, spec);
+    }
     if (spec.drive) {
       const setting = getDriveSetting(sceneId, spec);
       if (!sameDriveSetting(setting, defaultDriveSetting(spec))) (drives ??= {})[spec.key] = setting;
@@ -189,7 +199,12 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
     const value = look.manual[spec.key];
     if (value !== undefined) {
       setAutoEnabled(look.sceneId, spec.key, false);
+      // The store takes the slider's nearest end (and drops any custom value
+      // already set); a value past it goes back on top as a custom value,
+      // bounded like a typed one, since a share link can carry any number.
       setSceneSetting(look.sceneId, spec, value);
+      const custom = fitCustom(spec, value);
+      if (custom !== null) setCustomValue(look.sceneId, spec.key, custom);
     } else {
       const base = settingDefault(look.sceneId, spec);
       setSceneSetting(look.sceneId, spec, base);
@@ -204,18 +219,31 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
   }
 }
 
-function toBase64Url(json: string): string {
-  const bytes = new TextEncoder().encode(json);
+const COMPRESSED_PREFIX = "Z";
+
+function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function fromBase64Url(code: string): string {
+function base64UrlToBytes(code: string): Uint8Array {
   const padded = code.replace(/-/g, "+").replace(/_/g, "/");
   const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/** Most a deflated code may unpack to. A link can carry anything, so inflating
+ *  into a fixed buffer cuts a decompression bomb off: the output ends short,
+ *  no longer parses as JSON, and decodeLook returns null. Far above any look. */
+const MAX_UNPACKED_BYTES = 1 << 16;
+
+function fromBase64Url(code: string): string {
+  if (code.startsWith(COMPRESSED_PREFIX)) {
+    const packed = base64UrlToBytes(code.slice(1));
+    return strFromU8(inflateSync(packed, { out: new Uint8Array(MAX_UNPACKED_BYTES) }));
+  }
+  return strFromU8(base64UrlToBytes(code));
 }
 
 export function encodeLook(look: SceneLook): string {
@@ -229,7 +257,10 @@ export function encodeLook(look: SceneLook): string {
     payload.d = {};
     for (const [key, setting] of Object.entries(look.drives)) payload.d[key] = encodeDriveSetting(setting);
   }
-  return toBase64Url(JSON.stringify(payload));
+  const bytes = strToU8(JSON.stringify(payload));
+  const plain = bytesToBase64Url(bytes);
+  const packed = COMPRESSED_PREFIX + bytesToBase64Url(deflateSync(bytes, { level: 9 }));
+  return packed.length < plain.length ? packed : plain;
 }
 
 export function decodeLook(code: string): SceneLook | null {

@@ -1197,7 +1197,7 @@ describe("the roster", () => {
       },
       {
         deviceId: "phone", role: "controller", scene: "phone-scene", palette: "ice", viewport: { x: 0, y: 0, w: 1, h: 1 },
-        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "off", quality: "auto", canPlay: false, autoQuality: null, online: true, owner: false,
+        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "main", quality: "auto", canPlay: false, autoQuality: null, online: true, owner: false,
       },
       {
         deviceId: "tv", role: "renderer", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 },
@@ -1323,7 +1323,7 @@ describe("device records", () => {
     await room.renderer("tv");
     expect(row(room, "laptop")).toMatchObject({ role: "host", kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main" });
     expect(row(room, "pad")).toMatchObject({ role: "controller", kind: "tablet", name: "Studio iPad", hasMic: true, ears: "follow", screen: "main" });
-    expect(row(room, "phone")).toMatchObject({ kind: "phone", name: "Phone", ears: "follow", screen: "off" });
+    expect(row(room, "phone")).toMatchObject({ kind: "phone", name: "Phone", ears: "follow", screen: "main" });
     expect(row(room, "tv")).toMatchObject({ role: "renderer", kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main" });
     expect(row(room, "pad")).toMatchObject({ added: room.host.time, seen: room.host.time });
   });

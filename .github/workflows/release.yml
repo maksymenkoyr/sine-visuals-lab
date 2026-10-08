@@ -23,10 +23,10 @@
 # title: that flag is what keeps Insiders builds (deploy.yml) off "Latest",
 # which is how the list tells the two channels apart. Its notes are written by
 # tools/release-notes.mjs (tools/releaseNotesLib.mjs
-# owns what it says): the release pull request's "## Highlights", then the
-# pull requests since the previous release grouped by the part of the app
-# they changed (each of which gets a "Released to Stable as X" comment back),
-# then the versions of whichever scenes this release actually changes
+# owns what it says): the release pull request's written notes (`/release`
+# writes them), then the pull requests since the previous release grouped by
+# the part of the app they changed (each of which gets a "Released to Stable
+# as X" comment back), then the versions of whichever scenes this release actually changes
 # (tools/sceneVersionLib.mjs owns how each scene's own version, alongside the
 # build's, is counted). A re-run of the same production commit keeps its
 # version and skips the Release.
@@ -159,8 +159,8 @@ jobs:
             gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes "First release on the stable channel."
           else
             # The release pull request this merge commit came from: its body's
-            # "## Highlights" opens the notes. None (a direct push) just
-            # means no highlights.
+            # written notes open the page. None (a direct push) just means
+            # no written notes.
             pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" -q '[.[] | select(.base.ref == "production")][0].number // empty' 2>/dev/null || true)
             if [ -n "$pr" ]; then
               gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/release-pr.md" || true
@@ -169,13 +169,11 @@ jobs:
             gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md"
             # The other direction of the release notes' PR list: tell each
             # shipped PR which release carried it (deploy.yml does the same
-            # for Insiders). PRs are the `(#N)` every squash-merged commit on
-            # main ends with, between the previous strict release tag and this
-            # commit. Best-effort: a failed comment never fails a release
-            # that is already live.
-            prev=$(git tag --merged HEAD | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | grep -vx "$TAG" | sort -V | tail -1 || true)
-            git log --no-merges --format=%s ${prev:+"$prev..HEAD"} \
-              | { grep -oE '\(#[0-9]+\)$' || true; } | tr -d '(#)' | sort -un | while read -r pr; do
+            # for Insiders). The PRs are the ones the notes list, since the
+            # previous release (release-notes.mjs --prs). Best-effort: a
+            # failed comment never fails a release that is already live.
+            { node tools/release-notes.mjs --tag "$TAG" --prs || echo "::warning::could not list the release's pull requests" >&2; } \
+              | while read -r pr; do
                 gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" \
                   --body "Released to Stable as **$TITLE** — [$TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG)" \
                   || echo "::warning::could not comment on #$pr"

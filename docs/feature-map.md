@@ -50,6 +50,7 @@ flowchart LR
 
   picture --> crossfade["Crossfades"]
   corner --> fs["Fullscreen"]
+  corner --> sceneList["Scene list"]
   corner --> fx["Held effects"]
   corner --> rec["Record a clip"]
 
@@ -72,7 +73,7 @@ flowchart LR
   classDef hood fill:#eef1f4,stroke:#b9c2cb,color:#3a4652
 
   class app,gallery,view,start,picture,featured,fs,analysis,auto core
-  class drafts,out,popout,room,crossfade,fx,rec,corner,show key
+  class drafts,out,popout,room,crossfade,fx,rec,corner,show,sceneList key
   class panel,soundIn,look,wires depth
   class engine,power,governor hood
 ```
@@ -85,10 +86,13 @@ Darker means more important.
 
 - ●●● **Gallery** — the first screen: a tile per scene, each playing a
   synthetic demo feed until live audio starts · `src/ui/gallery.ts`
-  - ●●● **Featured scenes** — the scenes not in `DRAFT_SCENE_IDS`, shown first
-    · `src/render/scenes/index.ts`
-  - ●●○ **Draft scenes** — rougher scenes behind the gallery's draft toggle.
-    Measured: more than half of all scene views land here · `DRAFT_SCENE_IDS`
+  - ●●● **Featured scenes** — the Released section, shown first: the scenes
+    `sceneStage` calls released · `src/render/scenes/index.ts`
+  - ●●○ **In development scenes** — scenes being worked on now, shown open
+    below Released as small tiles · `IN_DEVELOPMENT_SCENE_IDS`
+  - ●●○ **Draft scenes** — rougher scenes, greyed out behind the gallery's
+    draft toggle. Measured: more than half of all scene views land on drafts
+    or scenes in development · `DRAFT_SCENE_IDS`
   - ●○○ **Source picker** — Mic or Screen, chosen before a scene opens ·
     `src/audio/sourcePref.ts`
   - ○○○ **Version label and channel badge** — Stable or Insiders, links to the
@@ -102,8 +106,9 @@ Darker means more important.
     from a DJ mixer · `src/audio/inputDevice.ts`
 - ●●● **The picture** — the scene itself, drawn on live audio ·
   `src/render/sceneHost.ts`
-  - ●●○ **Crossfades** — a scene change blends old into new, starting on a beat
-    · `src/render/crossfade.ts`
+  - ●●○ **Crossfades** — a scene change blends old into new, or cuts, starting
+    on a beat; Cut or Fade and the Length are picked at the foot of the scene
+    list · `src/render/crossfade.ts`, `src/render/sceneTransition.ts`
   - ●○○ **Pro options** — scene options locked until a Pro subscription exists;
     playable only in a dev build · `src/render/pro.ts`
 - ●●○ **Corner controls**
@@ -115,12 +120,18 @@ Darker means more important.
   - ●●○ **Record a clip** — saves the picture with its sound, cropped for a
     phone or a square post. For DJs, and for our own promos ·
     `src/ui/recordControls.ts`, `src/ui/clipRecorder.ts`
+  - ●●○ **Scene list** — the scene's name in the top-left row opens every
+    scene, to switch without going back to the gallery. For DJs ·
+    `src/ui/scenePicker.ts`
   - ●○○ **Back to gallery, Stop, Room badge** — the top-left row ·
     `src/app.ts`
   - ○○○ **Wake lock** — keeps the screen on while a scene plays ·
     `src/ui/wakeLock.ts`
 - ●○○ **Controls panel** — the left column, opened with the gear or S ·
   `src/ui/deviceMenu.ts`
+  - ●○○ **Typed values** — click any slider's number and type one in place;
+    a scene setting can go past its slider, marked ⚠ · `src/ui/typedValue.ts`,
+    `src/render/customValues.ts`
   - ●○○ **Sound in**
     - ●○○ **Input card** — Source, device, Sensitivity, Expansion,
       Smoothing, the silence gate, and one Auto for the whole mic ·
@@ -182,8 +193,11 @@ Darker means more important.
     `src/ui/outputKeys.ts`
 - ●●○ **Room** — devices that share one look over the network ·
   `src/ui/roomView.ts`, `server/roomCore.ts`
-  - ●●○ **Phone as controller** — scan the laptop's QR, get the whole panel on
-    the phone. Measured: a few sessions a month · `src/net/room.ts`
+  - ●●○ **Phone as controller** — scan the laptop's QR: the phone or iPad
+    opens on the room's picture, full screen, and a tap brings up the whole
+    panel.
+    Measured: a few sessions a month · `src/net/room.ts`, `src/app.ts`
+    (`handheldScreen`)
   - ●●○ **TV** — a screen that draws the room's picture, paired by its own QR
     or a typed code. For hosts, as the bonus · `src/tv.ts`
   - ○○○ **Ears and screen per device** — whether a device listens itself or

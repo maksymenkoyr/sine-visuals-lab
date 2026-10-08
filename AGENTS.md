@@ -82,6 +82,9 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
   into the client gets an entry in `THIRD-PARTY-NOTICES.md`.
 - **Independent work.** Don't port third-party implementations into a
   scene; write the scene as independent work.
+- **Issue labels.** Every issue you file gets a difficulty label (`high dif`,
+  `mid dif`, `low dif`) and, when a person is needed at some point or likely
+  (over 30%), `human`. `docs/issue-labels.md` has the rules.
 - **Scene records.** Every free scene has a record, `docs/scenes/<id>.md`,
   started from `docs/scenes/_template.md`. Update it in the same PR as any
   change to the scene, and keep what the scene was built with as its

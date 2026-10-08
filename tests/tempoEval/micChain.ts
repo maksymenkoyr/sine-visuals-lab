@@ -9,6 +9,14 @@
  * algorithm, `sr` taken as a parameter instead of a module-level constant so
  * this can run against any track (tempoEval/synth.ts's tracks are all at
  * synth.ts's own SR, but nothing here should assume that).
+ *
+ * The `hpHz` and `gainDb` defaults are fitted to phone recordings of a real
+ * party (tests/tempoRecordings.test.ts's room table): a party PA keeps far
+ * more bass than a small speaker, and the phone heard the music louder than
+ * this chain first assumed. `wet` and `noiseDb` are not fitted: the party's
+ * hits do fade slower than here, but these combs can't slow the fade without
+ * filling the gaps between hits far above the party's, and how fast a hit
+ * fades depends as much on the music, whose clean original we don't have.
  */
 
 export interface MicChainOpts {
@@ -23,10 +31,10 @@ export interface MicChainOpts {
 }
 
 export function micChain(mono: Float32Array, sr: number, opts: MicChainOpts = {}): Float32Array {
-  const hp = opts.hpHz ?? 200;
+  const hp = opts.hpHz ?? 110;
   const wet = opts.wet ?? 0.35;
   const noiseDb = opts.noiseDb ?? -45;
-  const gainDb = opts.gainDb ?? -20;
+  const gainDb = opts.gainDb ?? -5;
 
   const y = Float32Array.from(mono);
   for (let pass = 0; pass < 2; pass++) {

@@ -1,5 +1,6 @@
 import type { OutputBridge, OutputStatus } from "../net/outputBridge.ts";
 import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts";
+import { setLiveText } from "./liveText.ts";
 
 /**
  * The on-screen half of the pop-out output (index.html's #outBtn in the
@@ -142,7 +143,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     // the room's other devices are there, and that is no window to bring up.
     // A pop-out that is open is the one output that can cue (`canCue`).
     const popOpen = s.canCue;
-    popBtn.textContent = popOpen ? "OUTPUT ●" : "POP OUT";
+    setLiveText(popBtn, popOpen ? "OUTPUT ●" : "POP OUT"); // in place: a glide re-renders every frame
     popBtn.setAttribute("aria-pressed", String(popOpen));
     popBtn.title = popOpen ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
     const show = visible && s.open;

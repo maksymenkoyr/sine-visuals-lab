@@ -213,7 +213,7 @@ export const surgeAtThreshold = clamp01((1 - SURGE_RATIO_FLOOR) / (SURGE_RATIO_C
  *  is ever "active" by construction. `get` reads a sibling setting's
  *  resolved value (auto-aware, the same number the shader sees) by key
  *  rather than by spec object, since the device menu already keys its
- *  settings that way for the pin/typed-entry path (src/tuning/pins.ts). */
+ *  settings that way for the typed-entry path (src/render/customValues.ts). */
 export type SignalLink =
   | SignalId
   | {
@@ -349,7 +349,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
     monitor: { card: "signal", row: "waveform" },

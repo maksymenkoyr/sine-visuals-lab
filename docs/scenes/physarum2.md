@@ -1322,6 +1322,15 @@ refractory (`SEED_RISE_REFRACTORY_SEC`, now exported). The pipette is
 untouched. Not yet judged on real music; the default line is
 `RING_THRESHOLD_DEFAULT`, the ripple's own.
 
+2026-10-06: the detector moved to the shared `src/render/standout.ts`, and
+Dose now holds a `StandoutTrigger` (`createStandoutTrigger` with
+`SEED_RISE_REFRACTORY_SEC` as its gap, stepped by `stepStandoutTrigger`)
+instead of its own state and refractory counter; `standoutThreshold` and
+`standoutLine` replace the inline reads. Same behaviour; Alien's Cut fires on
+the same trigger. How to wire another setting to it is in that file's header.
+The graph's key now calls Dose's dots "colony started"; it had said "ring
+sent", Beat ripple's word, for every scene.
+
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
@@ -1399,3 +1408,6 @@ panel rendering in system fonts headlessly (not needed for the scripts to pass).
 - #213 (draft, 2026-09-29): the Strain Console in the app — Lanes and Knobs,
   Sensor angle, Trail life, Switching (Headcount) and Synergy; the box
   selection and its rows went.
+- #405 (draft, 2026-10-06): Dose on the shared `StandoutTrigger`
+  (`src/render/standout.ts`), same behaviour; its graph's dots keyed
+  "colony started".

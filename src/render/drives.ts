@@ -8,7 +8,7 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import type { HitLane } from "../audio/hitStrength.ts";
-import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveThresholdState } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveSmoothness, getDriveThresholdState } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
 /**
@@ -183,8 +183,11 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * **Nothing plugged in.** Two rules a jack's `drive.default` and a scene's
  * own coupling formula both have to hold for (2026-09-28): (1) a jack's
  * default always reacts to the music — never a constant, and never a Scene
- * composite that turns out to be one in disguise; a setting nothing in the
- * catalogue genuinely fits simply declares no `drive` at all. (2) with
+ * composite that turns out to be one in disguise. A setting nothing in the
+ * catalogue genuinely fits either declares no `drive` at all or, when the
+ * scene wants it wireable anyway, starts on an empty patch — a jack with
+ * nothing plugged in, reading its slider until the user wires it (Sweep's
+ * knobs, 2026-10-05: the user asked for every knob to be wireable). (2) with
  * nothing plugged in — every source unplugged (an empty patch), muted, or
  * (in a `gate` mix) only a `when` condition left with no source actually
  * "playing", see `hasLiveSource` below — the music stops moving the
@@ -206,8 +209,8 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * threshold` marks a setting scene-handled: the scene owns the whole idea of
  * "how far does this have to stand out before it counts" and reads the
  * user's own slider back with `drives.threshold(key)`, applying whatever
- * gate shape actually fits its signal — Physarum 2's Dose reads
- * rippleEmitter.ts's salience floor/peak trackers, not the generic one
+ * gate shape actually fits its signal — Physarum 2's Dose and Alien's Cut
+ * read standout.ts's learned floor/peak trackers, not the generic one
  * below. (Caustics' Beat ripple takes both instead: the generic gate on its
  * drive, then its own Ring threshold as a plain setting.) Declaring
  * `drive.threshold` is what opts a setting *out* of the engine's own gate;
@@ -221,7 +224,10 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * 0 at the floor (everything through), 1 at the peak (only the standouts).
  * `value()`/`uniformPair()`/`valueOf()` fade a reading out smoothly below
  * that line (a soft knee, not a hard cut, so a hit riding right on the edge
- * doesn't flicker) and `fired()` blocks an edge whose own combined value
+ * doesn't flicker; the knee's width is the setting's Smoothness, see
+ * getDriveSmoothness in driveStore.ts, defaulting to
+ * GENERIC_SMOOTHNESS_DEFAULT, and at its far left it is a hard cut) and
+ * `fired()` blocks an edge whose own combined value
  * falls under it, on top of whatever that mix already required. A setting
  * still on its built-in reaction (`"scene"`) gets the same gate through
  * `value()` only — forScene()'s gateBuiltIn advances its tracker there, on
@@ -506,6 +512,12 @@ export const GATE_OPEN_HIGH = 0.55;
  *  every generic setting, since none of them shaped this gate on purpose the
  *  way a scene-handled setting shapes its own. */
 export const GENERIC_THRESHOLD_DEFAULT = 0.25;
+
+/** The generic engine gate's knee-width default (driveStore.ts's
+ *  getDriveSmoothness; the knee itself is applyGenericGate's) — the resting
+ *  position of the Smoothness slider, and the knee every generic setting has
+ *  always had. A scene-handled threshold never reads it. */
+export const GENERIC_SMOOTHNESS_DEFAULT = 0.1;
 // The generic gate tracker's own time constants (accumulate() below) — a
 // floor that chases a *lower* resting level quickly (so a quiet moment reads
 // as quiet almost at once) but a *higher* one slowly (so one loud passage
@@ -513,7 +525,7 @@ export const GENERIC_THRESHOLD_DEFAULT = 0.25;
 // to a new high immediately but eases back down toward the floor at the same
 // slow rate. Picked to feel like a noise floor, not measured against any
 // reference — nothing here plays back a released ring the way
-// SALIENCE_*_RELAX_SEC (rippleEmitter.ts) does for Beat ripple's own,
+// standout.ts's FLOOR_RELAX_SEC/PEAK_RELAX_SEC do for its own,
 // unrelated trackers.
 const GATE_FLOOR_DOWN_TAU_SEC = 0.3;
 const GATE_FLOOR_UP_TAU_SEC = 4;
@@ -521,8 +533,11 @@ const GATE_PEAK_DECAY_TAU_SEC = 4;
 // The soft knee around the gate's own line (value()/uniformPair()/valueOf()
 // below): a fraction of the tracker's own floor-to-peak spread, with a
 // minimum so a dead-flat signal (peak == floor) still has *some* knee rather
-// than a hard step.
-const GATE_KNEE_FRACTION = 0.04;
+// than a hard step. The fraction is the generic gate's Smoothness setting
+// (driveStore.ts getDriveSmoothness, 0..1) scaled by GATE_KNEE_MAX_FRACTION,
+// so the setting's default, GENERIC_SMOOTHNESS_DEFAULT, is the knee every
+// generic gate had before the slider existed.
+const GATE_KNEE_MAX_FRACTION = 0.4;
 const GATE_KNEE_SPREAD_MIN = 0.1;
 
 // Master Expansion (this file's header): `normal`'s fixed averaging time,
@@ -1339,7 +1354,10 @@ export function createDriveEngine(): DriveEngine {
       function applyGenericGate(key: string, v: number): number {
         const tr = genericGate(key);
         if (!tr) return v;
-        const k = GATE_KNEE_FRACTION * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
+        const spec = specByKey.get(key)!;
+        const s = getDriveSmoothness(sceneId, spec);
+        const k = GATE_KNEE_MAX_FRACTION * s * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
+        if (k <= 0) return v >= tr.line ? v : 0;
         return v * smoothstep(tr.line - k, tr.line + k, v);
       }
 

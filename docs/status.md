@@ -4,34 +4,33 @@ This file is expected to be rewritten wholesale each session — it's a snapshot
 not a history. Keep it short enough to read in one glance. Use `/wrap` to
 regenerate it at session close.
 
-_2026-10-04_
+_2026-10-06_
 
 ## In flight
 
-- **Release promo** — draft #313 (`worktree-promo-demo-first`). The v0.2.0
-  video: `~/Movies/sine-visuals-lab-v0.2.0-promo/`, 31.9 s. The PR makes
-  `tools/promo` produce it: scene takes hear the song through a fake mic,
-  demos first, pop-out/Cue/Play and the room drawn as a laptop with lit keys
-  over its second screen, the list card scrolling low in the frame, no fades.
-  `/release-promo` (`.claude/commands/release-promo.md`, its "Scenario")
-  records every call the user made, so the next run comes out the same.
-- **Other open PRs:** #317 CLAUDE.md review (draft); #307 Toon Rave "Energy"
-  label; #236 Output Cast mode (draft); #160 magnet slider; #74 architecture
-  doc (draft).
+- **Tempo + party mic** — draft #384, `plans/tempo-and-mic.md`. Research
+  only, no code yet. The simulated mic barely hurts the 6 real songs; what
+  hurts is a tempo detector that changes its answer with mic volume, room
+  echo that adds fake hits, and a detector that only hears kick and snare.
+  Six phases, starting with the user's party recordings as a test set.
+- **Other open PRs:** drafts #383 Room QR opens full screen, #379 Sweep,
+  #378 real-song tuning check, #377 Fractal Grid, #376 Echoes, #367 Long
+  Play views, #366 Chladni plates, #335 Physarum 2 agent sort, #236 Output
+  Cast mode, #74 architecture doc; #160 Magnet slider (ready).
 
 ## Open questions
 
-- Physarum 2's defaults barely pulse with real music (beat pulse 1.08 vs 1.48
-  for the user's look, whose drives are Speed boost/pump, Seed and Flash on
-  the beat and low onset) — make those drives the defaults? (Physarum 2
-  record, Known issues.)
-- The video was not posted; posting it needs the song's rights (a Primate
-  bootleg).
+- The true tempo of each party video: known songs or set BPM, or tapped by
+  ear? (`plans/tempo-and-mic.md`, blocks phase 1's scoring.)
+- In a loud room, should Auto do what the user does by hand (Expansion up,
+  Sensitivity near 1×, Smoothing low), at the cost of more twitch on crowd
+  noise? (Blocks phase 4.)
+- Carry a DJ set's tempo from one song into the next? (Blocks part of
+  phase 6.)
 
 ## Next up
 
-- Merge #313, then run `/release-promo` after the next Stable release — it
-  takes the release, reuses the last song and look unless given new ones,
-  and starts from the changelog.
-- Prune worktrees whose PRs merged (47 besides `main`; check each one's PR
+- Merge #384, then the user sends the party videos and starts a new session
+  with `/handoff tempo-and-mic` (phase 1).
+- Prune worktrees whose PRs merged (72 besides `main`; check each one's PR
   with `gh pr view`).

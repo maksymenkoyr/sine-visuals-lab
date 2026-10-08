@@ -39,9 +39,11 @@
  * Who decides. Any keyed member may change any device's name, ears, screen and
  * quality (the QR is the permission: only people in the room can scan it); only
  * the owner may grant or take back Play, or forget a device. The defaults for a
- * newcomer come from what it is: the owner is on its own input, shows Main and
- * may Play, everyone else follows the owner, only the owner may Play, and a
- * phone starts as a remote.
+ * newcomer come from what it is: the owner is on its own input, everyone else
+ * follows the owner, only the owner may Play, and every device shows Main.
+ * A phone or iPad that scans the laptop's QR opens as one more screen of the
+ * room, full screen with its controls hidden until a tap (src/app.ts
+ * `handheldScreen`); the Room view turns it into a remote with `off`.
  *
  * Plain TS with no DOM or Workers types (listed in the root tsconfig `files`
  * like server/roomRules.ts): the room, the client and the tests share it.
@@ -163,7 +165,7 @@ export function defaultSettings(role: RoomRole, traits: DeviceTraits, name?: str
     name: cleanName(name) ?? defaultName(traits.kind),
     ears: own ? "own" : "follow",
     follow: null,
-    screen: !own && traits.kind === "phone" ? "off" : "main",
+    screen: "main",
     quality: "auto",
     canPlay: own,
   };

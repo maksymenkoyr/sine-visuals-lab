@@ -2,7 +2,7 @@
 // controller it puts the in-memory look overlay over localStorage — see the
 // header of net/controllerStorageBoot.ts. A no-op for every other page.
 import "./net/controllerStorageBoot.ts";
-import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
+import { PAID_SCENE_IDS, sceneStage } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
 import {
   getInputDevicePref,
@@ -23,7 +23,7 @@ import {
 import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { peak, rms } from "./audio/waveform.ts";
+import { minMax, peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
 import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
@@ -76,7 +76,9 @@ import {
   getDriveLine,
   getDriveLineStrength,
   getDriveSetting,
+  getDriveSmoothness,
   getDriveThresholdState,
+  setDriveSmoothness,
   setDriveThreshold,
   setDriveThresholdOn,
   resetDriveLine,
@@ -97,6 +99,7 @@ import {
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import {
@@ -158,7 +161,7 @@ import {
 } from "./render/sceneSet.ts";
 import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
 import { funnyLookName } from "./render/lookNames.ts";
-import { getPin, setPin, clearPin } from "./tuning/pins.ts";
+import { clearCustomValue, getCustomValue, setCustomValue } from "./render/customValues.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import {
   getAutoGain,
@@ -253,9 +256,10 @@ import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { browserMidiEnv, createMidiController } from "./ui/midiInput.ts";
 import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
-import { createGallery, type Gallery } from "./ui/gallery.ts";
+import { createGallery, type Gallery, type GallerySceneEntry } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { createScenePicker, type ScenePickEntry, type ScenePicker } from "./ui/scenePicker.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
@@ -294,6 +298,7 @@ const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
+const sceneBtn = document.getElementById("sceneBtn") as HTMLButtonElement;
 const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const recBtn = document.getElementById("recBtn") as HTMLButtonElement;
 const recAspectBtn = document.getElementById("recAspectBtn") as HTMLButtonElement;
@@ -328,6 +333,14 @@ let soloFallbackTriggered = false;
  *  controller is gated on this flag alone, so a solo, host or legacy-renderer
  *  page never takes a controller branch. */
 let isController = false;
+/** A controller running on a phone or a tablet (an iPad): one more screen of
+ *  the room rather than a remote. It opens on the room's scene and look, not on
+ *  the gallery (boot()'s routing waits for Main, `mainShown`), draws at full
+ *  quality over the whole screen, and starts with every control hidden; a tap
+ *  asks for fullscreen and shows the controls for a while (ui/fullscreen.ts
+ *  `enterHidden`). The Room view's screen `off` makes it a remote again
+ *  (`fillsScreen`). A laptop that opens the QR link stays a remote. */
+let handheldScreen = false;
 let controllerConn: ControllerConnection | null = null;
 /** The scene and palette ids this device holds for its room's look, even when
  *  it cannot show them (net/controllerLook.ts: a phone can be handed a scene it
@@ -449,10 +462,24 @@ let outputPower: OutputPower = {
   resolution: getOutputResolution(),
 };
 /** True while an output window is open and a scene is showing: recomputed
- *  every tick (render loop, right after outputBridge.update). A phone
- *  controller is always previewing whatever it shows — the room's TV is the
- *  real picture — so for it this is just "a scene is showing". */
+ *  every tick (render loop, right after outputBridge.update). A controller
+ *  that is a remote previews whatever it shows — the room's screens are the
+ *  real picture — so for it this is just "a scene is showing"; a phone or iPad
+ *  that is one of those screens (`fillsScreen`) never previews. */
 let previewActive = false;
+/** A phone or iPad controller is a screen of the room (see `handheldScreen`)
+ *  unless the Room view has turned its screen off, which makes it a remote.
+ *  Before the roster lists it, it is what the room gives a newcomer: a screen. */
+function fillsScreen(): boolean {
+  return handheldScreen && controllerConn?.self?.screen !== "off";
+}
+/** A phone or iPad screen whose controls are hidden (index.html's `chrome-idle`)
+ *  shows the picture alone: no HUD line for the scene it opens on, or for a
+ *  Main it follows. Once a tap shows the controls, a scene picked in its own
+ *  panel says its name as anywhere else. */
+function quietScreen(): boolean {
+  return handheldScreen && document.body.classList.contains("chrome-idle");
+}
 /** The preset this window actually renders at. effectivePreset() is the
  *  DEVICE's preset and stays the one every scene-availability check uses, so
  *  the preview's lower quality never hides a scene from the gallery; this is
@@ -502,6 +529,7 @@ let lastPictureKickMs = -Infinity;
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
 let immersive: ImmersiveMode | null = null;
+let scenePicker: ScenePicker | null = null;
 let inViz = false;
 /** `?room=CODE` (no role) — a mic-less renderer joining someone else's
  *  room. The scene is dictated by the host, so there's nothing to browse:
@@ -522,6 +550,19 @@ let lastRawBands: Float32Array | null = null;
  *  solo/host-only availability as lastRawBands above, for the same reason
  *  (no local mic on a renderer device). Feeds the Dynamics card's Waveform row. */
 let lastMono: Float32Array | null = null;
+/** On a device following another one's input (a phone or iPad on the laptop):
+ *  the feed's waveform at this tick's sample as two samples, [min, max]
+ *  (src/net/protocol.ts's wave tail), written by sampleToVisual. Null
+ *  everywhere else, and when the feed sends none (a synthetic feed). It
+ *  stands in for lastMono wherever the Waveform row and AnimFrame.wavePeak
+ *  read samples — see waveSamples(). */
+let lastFeedWave: Float32Array | null = null;
+const feedWaveScratch = new Float32Array(2);
+/** The samples the Dynamics card's Waveform row and AnimFrame.wavePeak read
+ *  this tick: this device's own mic, else the feed's envelope. */
+function waveSamples(): Float32Array | null {
+  return lastMono ?? lastFeedWave;
+}
 /** This tick's deep waveform samples, straight off measureAnalyser — DEV
  *  only, see that variable's own comment. Same buffer identity every read;
  *  a consumer across a page.evaluate boundary must copy before it returns. */
@@ -852,12 +893,48 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
 
+/** Every scene as the gallery shows it: each with its section (released, in
+ *  development or draft), and the ones this device's preset can't run
+ *  disabled, with the reason. */
+function galleryEntries(): GallerySceneEntry[] {
+  return listScenes().map((s) => {
+    const enabled = presetAllows(s, effectivePreset());
+    return {
+      scene: s,
+      enabled,
+      stage: sceneStage(s.id),
+      reason: enabled ? undefined : "Needs a faster device",
+    };
+  });
+}
+
+/** The same scenes, in the same order, for the scene list (ui/scenePicker.ts). */
+function scenePickEntries(): ScenePickEntry[] {
+  return galleryEntries().map((e) => ({ id: e.scene.id, name: e.scene.name, stage: e.stage, enabled: e.enabled, reason: e.reason }));
+}
+
+/** A pick from the scene list: the same switch a Set pad makes (firePad
+ *  above), so the pop-out's Cue/Play, a room's Main and the crossfade all see
+ *  an ordinary scene change. */
+function pickSceneFromList(id: string): void {
+  const next = getScene(id);
+  if (!inViz || !next || next.id === scene.id) return;
+  if (!presetAllows(next, effectivePreset())) {
+    showHud("scene unavailable on this device", true);
+    return;
+  }
+  applyScene(next);
+  deviceMenu?.sceneChanged();
+}
+
 /** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
  *  index.html) for `next` — called from applyScene() and enterViz() below so
  *  it stays current across a scene switch, not just once at boot. Shows
  *  "<Scene name> <its version>" in brighter white (a `+dev` suffix in amber),
  *  a dim middle dot, then the build's own label (src/version.ts) in its
- *  usual place and colour — or, when the scene has no version of its own
+ *  usual place and colour; the name is left off where the scene list's
+ *  button already says it (every page but a `?room=` renderer, which has no
+ *  list: its scene is the room's) — or, when the scene has no version of its own
  *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
  *  for — src/render/sceneVersions.ts's header), just the build's own label,
  *  same as before per-scene versions existed. The hint is the scene's own
@@ -870,6 +947,7 @@ function updateSceneVersionLabel(next: Scene): void {
   const offStable = BUILD_INFO.channel !== "stable";
   const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
   const sceneVer = sceneVersionOf(next.id);
+  scenePicker?.setScene(next.name);
 
   sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
   sceneVersion.replaceChildren();
@@ -884,7 +962,7 @@ function updateSceneVersionLabel(next: Scene): void {
   const base = isDev ? sceneVer.slice(0, -"+dev".length) : sceneVer;
   const nameEl = document.createElement("span");
   nameEl.className = "svScene";
-  nameEl.textContent = `${next.name} ${base}`;
+  nameEl.textContent = bypassGallery ? `${next.name} ${base}` : base;
   if (isDev) {
     const dev = document.createElement("span");
     dev.className = "svDev";
@@ -913,13 +991,13 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   compositor?.cancel();
   // A different scene on screen already: it stays mounted, drawn under the new
   // one, until the compositor's blend is done (render/crossfade.ts has the
-  // timing). The floor preset cuts on the beat instead of blending: two
-  // scenes at once are too much for it.
+  // timing; render/sceneTransition.ts says Cut or Fade and how long). The
+  // floor preset always cuts on the beat: two scenes at once are too much for it.
   const fade = crossfade && prev !== next && host.isMounted(prev);
   if (!fade) host.unmountAll();
   try {
     host.mount(next);
-    if (fade) compositor?.begin(prev, { cut: quality.preset === "floor" });
+    if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
     return true;
   } catch (err) {
     console.error(`"${next.name}" failed to start:`, err);
@@ -950,7 +1028,7 @@ function applyScene(next: Scene): void {
   if (previewActive) applyRenderQuality();
   if (!mountOrBail(next, prev, inViz)) return;
   updateSceneVersionLabel(next);
-  showHud(`scene: ${scene.name}`);
+  if (!quietScreen()) showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
 }
@@ -1821,6 +1899,7 @@ function wireDeviceMenu(): void {
     decodeLook,
     buildShareLink: (look) =>
       `${location.origin}${location.pathname}?look=${encodeLook(look)}#/v/${encodeURIComponent(look.sceneId)}`,
+    buildShareCode: encodeLook,
     hasLookUndo,
     onUndoLook: (sceneId) => {
       const look = takeUndo(sceneId);
@@ -1882,6 +1961,8 @@ function wireDeviceMenu(): void {
     getDriveThresholdState: (sceneId, spec) => getDriveThresholdState(sceneId, spec),
     onSetDriveThreshold: (sceneId, spec, value) => setDriveThreshold(sceneId, spec, value),
     onSetDriveThresholdOn: (sceneId, spec, on) => setDriveThresholdOn(sceneId, spec, on),
+    getDriveSmoothness: (sceneId, spec) => getDriveSmoothness(sceneId, spec),
+    onSetDriveSmoothness: (sceneId, spec, value) => setDriveSmoothness(sceneId, spec, value),
     setDriveLineStrength: (sceneId, spec, value) => setDriveLineStrength(sceneId, spec, value),
     onLufsReset: () => lufsAnalyser?.reset(),
     onTap: (timeStamp) => tapTempo(timeStamp, false),
@@ -2013,12 +2094,7 @@ function wireDeviceMenu(): void {
       bufferHeight: canvas.height,
       ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
     }),
-    // Rollup replaces import.meta.env.DEV with a literal `false` in a
-    // production build, folding this to `undefined` and — since pins.ts
-    // carries no module-scope side effect (see its header) — letting the
-    // whole module tree-shake out, the same way autoTune.ts's own DEV-gated
-    // import of tuning/overrides.ts already does.
-    devPin: import.meta.env.DEV ? { get: getPin, set: setPin, clear: clearPin } : undefined,
+    customValues: { get: getCustomValue, set: setCustomValue, clear: clearCustomValue },
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
@@ -2181,6 +2257,7 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
     capture: look.io.read,
     apply(doc, glideMs) {
       look.io.write(doc);
+      markMainShown();
       // The pop-out is one more Main screen of the laptop: it follows too, and
       // walks the glide this window cannot.
       if (outputBridge?.status().open) outputBridge.go(glideMs);
@@ -2206,6 +2283,41 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
   conn.onRosterChange(() => play.onScreenKnown());
   mainPlay = play;
   return play;
+}
+
+/** This laptop claimed its keyed room and the roster has listed it, so it
+ *  knows whether anyone else is online (net/roomBridge.ts `liveWhenAlone`). */
+function ownsRoom(): boolean {
+  return !!hostConn && hostConn === activeConn() && hostConn.keyed && hostConn.self !== null;
+}
+
+/** What the pop-out shows goes to Main too while the laptop is alone in its
+ *  room, where the bar's Play doesn't reach Main (nobody is there to see it),
+ *  so the first phone or iPad to join opens on the projector's picture. */
+function playMainWhileAlone(): void {
+  if (ownsRoom() && roomBridge && !roomBridge.status().open) mainPlay?.play();
+}
+
+/** Settles the first time this device shows the room's Main (startMainPlay's
+ *  `apply`), which may come before boot() starts waiting for it. */
+let markMainShown: () => void = () => {};
+const mainShown = new Promise<void>((resolve) => {
+  markMainShown = resolve;
+});
+
+/** How long a phone or iPad screen waits for the room's Main before it opens
+ *  on the scene it has. A join's look and roster come back within a round trip or
+ *  two; this is for a slow network, or a room with no Main yet. */
+const MAIN_WAIT_MS = 5000;
+
+/** A phone or iPad screen that opened on the laptop's QR (a link with no scene
+ *  in it) goes straight to the room's scene: once it shows Main, or after
+ *  MAIN_WAIT_MS on the scene it has. Until then the page stays blank. Pushed
+ *  over the gallery's entry, so Back still finds the gallery. */
+async function openOnMain(): Promise<void> {
+  await Promise.race([mainShown, new Promise<void>((resolve) => window.setTimeout(resolve, MAIN_WAIT_MS))]);
+  if (inViz || currentRoute().kind !== "gallery") return;
+  navigate({ kind: "viz", sceneId: scene.id }, "push");
 }
 
 /** How long the phone waits for a TV it has just handed to the room to show up
@@ -2337,7 +2449,9 @@ function startController(
   roomCode = target.room;
   ownRoomKey = target.key;
   document.body.classList.add("controller"); // index.html: the badge's place and cursor
-  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device: thisDevice() });
+  const device = thisDevice();
+  handheldScreen = device.kind === "phone" || device.kind === "tablet";
+  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device });
   controllerConn = conn;
 
   if (target.keyFromUrl) {
@@ -2415,12 +2529,17 @@ async function enterViz(next: Scene): Promise<void> {
   if (!mountOrBail(next, prev, fromScene)) return;
   updateSceneVersionLabel(next);
 
-  showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+  if (!quietScreen()) {
+    showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+  }
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
-  if (!bypassGallery) backBtn.style.display = "block";
+  if (!bypassGallery) {
+    backBtn.style.display = "block";
+    sceneBtn.style.display = "block";
+  }
   sceneVersion.style.display = "inline";
   outputControls?.setVisible(true);
   effectControls?.setVisible(true);
@@ -2443,6 +2562,8 @@ function exitToGallery(): void {
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
+  sceneBtn.style.display = "none";
+  scenePicker?.close();
   sceneVersion.style.display = "none";
   outputControls?.setVisible(false);
   effectControls?.setVisible(false);
@@ -2634,7 +2755,8 @@ async function boot(): Promise<void> {
   let hostRoomKey: string | null = null;
   if (controllerTarget) {
     // The laptop's QR (or a TV's, with a controller session already saved) —
-    // a phone that edits the room's look and previews it from the host's frames.
+    // a phone or iPad that shows the room's look from the host's frames and
+    // can edit it (a screen first, see `handheldScreen`).
     startController(controllerTarget, adoptRequest, badAdoptLink);
   } else if (plan.kind === "renderer") {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
@@ -2734,8 +2856,8 @@ async function boot(): Promise<void> {
       conn,
       () => {
         if (!roomCode) return null;
-        // A controller page invites more devices with its own room key (an
-        // iPad can be the second remote); it has no key in a legacy room.
+        // A controller page invites more devices with its own room key (a
+        // second phone or iPad joins from it); it has no key in a legacy room.
         if (isController) return ownRoomKey ? { kind: "controller", code: roomCode, info: { key: ownRoomKey } } : null;
         return { kind: hostRoomKey ? "controller" : "renderer", code: roomCode, info: inviteKey ? { key: inviteKey } : undefined };
       },
@@ -2749,9 +2871,11 @@ async function boot(): Promise<void> {
 
   immersive = createImmersiveMode({
     button: fsBtn,
-    isMenuOpen: () => deviceMenu?.isOpen() ?? false,
+    isMenuOpen: () => (deviceMenu?.isOpen() ?? false) || (scenePicker?.isOpen() ?? false),
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
+  // A phone or iPad screen shows nothing but the picture until it is tapped.
+  if (handheldScreen) immersive.enterHidden();
 
   // The bar (CUE / PLAY / state line). A laptop has the pop-out window, which
   // has a Cue and a Play of its own; a keyed room's Main is one more output next
@@ -2773,6 +2897,10 @@ async function boot(): Promise<void> {
       present: () => joinedConn.currentRoster.some((d) => d.online && d.deviceId !== joinedConn.deviceId),
       mayPlay: () => joinedConn === hostConn || (joinedConn.self?.canPlay ?? false),
       showRoom: () => roomCodeEl.click(),
+      // Alone in its room, the laptop's program is Main without a Play: this
+      // window, or the pop-out while it is open (its Play and its opening
+      // reach Main through playMainWhileAlone instead).
+      liveWhenAlone: () => ownsRoom() && !(outputBridge?.status().open ?? false),
     });
   }
   // Record sits beside POP OUT; a controller has no canvas of its own to record.
@@ -2805,6 +2933,7 @@ async function boot(): Promise<void> {
     // The Set card's live marker: whatever pad was loaded when Play sent it.
     outputControls.onPlay(() => {
       setLivePadId = currentPadId();
+      playMainWhileAlone();
     });
   }
   // The held effects: on this window through the compositor, and on the
@@ -2946,20 +3075,17 @@ async function boot(): Promise<void> {
   audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));
 
   micPermission = await micPermissionReady;
+  scenePicker = createScenePicker({
+    button: sceneBtn,
+    scenes: scenePickEntries,
+    currentId: () => scene.id,
+    onPick: pickSceneFromList,
+  });
   if (bypassGallery) {
     void enterViz(scene);
   } else {
     gallery = createGallery({
-      scenes: () =>
-        listScenes().map((s) => {
-          const enabled = presetAllows(s, effectivePreset());
-          return {
-            scene: s,
-            enabled,
-            draft: DRAFT_SCENE_IDS.has(s.id),
-            reason: enabled ? undefined : "Needs a faster device",
-          };
-        }),
+      scenes: galleryEntries,
       quality: () => quality,
       liveFrame: () => lastVis,
       onPick: (id) => {
@@ -3021,7 +3147,8 @@ async function boot(): Promise<void> {
 
     seedHistory();
     onRouteChange(applyRoute);
-    applyRoute(currentRoute());
+    if (handheldScreen && currentRoute().kind === "gallery") void openOnMain();
+    else applyRoute(currentRoute());
   }
   // The mic permission is known and the page routed: a screen already in the
   // room (a laptop that reloaded with its TV paired) can be fed now.
@@ -3062,7 +3189,14 @@ async function boot(): Promise<void> {
       },
       setMaster: (v: number) => setSceneMaster(v),
       scenes: () =>
-        listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
+        listScenes().map((s) => ({
+          id: s.id,
+          name: s.name,
+          // master-sweep's "featured" means Released only, so a scene in
+          // development counts as a draft here.
+          draft: sceneStage(s.id) !== "released",
+          paid: PAID_SCENE_IDS.has(s.id),
+        })),
     });
     // For headless room tests (tools/ and the e2e runs): what this page is
     // doing about its ears right now, read live off the connection. Added to
@@ -3188,6 +3322,8 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // tempoSource) sets this back — see its own doc comment on the module
   // state above for why host/renderer/TV never do.
   lastTempoHits = undefined;
+  // Same reset: only sampleToVisual, on a page following a feed, sets it.
+  lastFeedWave = null;
   const conn = activeConn();
 
   if (mode === "solo" || !conn) {
@@ -3253,7 +3389,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       f.bpm = tempoSource.bpm;
       tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
     }
-    conn.sendFrame(f);
+    conn.sendFrame(f, lastMono ? minMax(lastMono) : null);
     return sampleToVisual(conn.sample());
   }
 
@@ -3291,6 +3427,11 @@ function currentVisual(rateScale: number): FeatureFrame | null {
 
 function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
   if (!s) return null;
+  if (s.wave) {
+    feedWaveScratch[0] = s.wave.min;
+    feedWaveScratch[1] = s.wave.max;
+    lastFeedWave = feedWaveScratch;
+  }
   return {
     time: s.timeSec,
     bands: s.bands,
@@ -3338,6 +3479,7 @@ function tick(): void {
   // so a paired TV/renderer keeps getting frames even while this device is
   // just sitting on the gallery with nothing on screen.
   lastVis = currentVisual(rateScale);
+  const wave = waveSamples();
 
   // The pop-out output (net/outputBridge.ts) keeps streaming even while this
   // window sits on the gallery, so a stray Esc never blanks the projector —
@@ -3345,20 +3487,24 @@ function tick(): void {
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   outputBridge?.update(nowRafMs);
   roomBridge?.update(nowRafMs);
-  // The preview transition sits outside the bridge check because a phone
-  // controller has no bridge yet still previews, whenever a scene is showing.
-  const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  // The preview transition sits outside the bridge check because a controller
+  // has no pop-out yet still previews whenever a scene is showing, unless it
+  // is a phone that is a screen of the room.
+  const nextActive = isController ? inViz && !fillsScreen() : inViz && !!outputBridge && outputBridge.status().open;
   // A pop-out that just opened starts on this window's preview (net/outputSync.ts's
   // outputOpened), so the pad loaded here is live on it.
   const popOutOpen = outputBridge?.status().open ?? false;
-  if (popOutOpen && !setPopOutWasOpen) setLivePadId = currentPadId();
+  if (popOutOpen && !setPopOutWasOpen) {
+    setLivePadId = currentPadId();
+    playMainWhileAlone();
+  }
   setPopOutWasOpen = popOutOpen;
   if (nextActive !== previewActive) {
     previewActive = nextActive;
     applyRenderQuality(true);
     applyPreviewBox();
   }
-  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: wave ? peak(wave) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
@@ -3389,9 +3535,10 @@ function tick(): void {
   // real broadband reading to give it. `lastTempoHits` is solo-mode-only
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
-  // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
-  // own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
-  // its drive jack); null on any device with no local mic. `nowRafMs` makes
+  // fixed-hop feed for this tick when a tempo source is live. `wave`'s
+  // (waveSamples()) own peak feeds AnimFrame.wavePeak (the Dynamics card's Waveform readout and
+  // its drive jack): the local mic, or a followed feed's envelope; null when
+  // there is neither. `nowRafMs` makes
   // this the one clock that follows a tap tempo (src/render/tapTempo.ts):
   // like the beat keys, a tap only ever reaches this window's own clock.
   const anim = gained
@@ -3404,7 +3551,7 @@ function tick(): void {
           shape: getHitShape(),
           beatRatio: lastFluxRatio,
           tempoHits: lastTempoHits,
-          wavePeak: lastMono ? peak(lastMono) : null,
+          wavePeak: wave ? peak(wave) : null,
         },
         nowRafMs,
       )
@@ -3456,7 +3603,7 @@ function tick(): void {
   // Only built while the panel is open: update() returns before it touches
   // `drives` when closed, and forScene() allocates a Map and a dozen closures.
   const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);

@@ -20,13 +20,16 @@ All commands are `node tools/promo/promo.mjs <step> --video release`.
 
 ## 1. The changes
 
-`notes` writes the release page to the work folder. Read every PR body in the release (a Sonnet
-subagent) and check each change against the release's final state. Then write `<work>/lines.json`,
-shaped like `tools/promo/shapes/release.example.json`:
+`notes` writes the release page to the work folder. Its written notes (above the folded list) were
+made for this video by `/release` (its Shape): start `<work>/lines.json` from them, shaped like
+`tools/promo/shapes/release.example.json`. Only a release without written notes needs every PR body
+read (a Sonnet subagent), each change checked against the release's final state.
 
-- `groups`: every change, in plain words, one per line, short enough to fit (`cards` warns). Group
-  order: Scenes, Controls, Output and rooms, Sound and beat, Release.
-- `demos`: clips that show a visible change happening, one caption each. The first stays the Physarum
+- `groups`: every change, in plain words, one per line, short enough to fit (`cards` warns): each
+  bold line of the notes, under the area it sits in. Group order: Scenes, Controls, Output and
+  rooms, Sound and beat, Release.
+- `demos`: clips that show a visible change happening, one caption each; the notes' pictured changes
+  are the candidates, their bold lines the captions. The first stays the Physarum
   2 re-roll (`song_p2r`): the song's drop lands on it. The available takes are in
   `tools/promo/takes.json`; a new kind of change may need a new panel take (copy a `ui_*` entry there
   and its script in `tools/promo/shots/take-ui.mjs`).
@@ -38,10 +41,19 @@ Show the lines as a plain list and let the user add and cut.
 `song` (when the work folder has none yet), then `plan` prints the time table from the lines. Show
 it; the user approves or changes it.
 
-## 3. Build and check
+## 3. Build section by section
 
-`all`, or step by step `song` → `record` → `cards` → `render` → `check`. `record <take>…` re-records
-only those takes.
+`song` → `record` → `cards`, then the video one section at a time, then `render` → `check`.
+`record <take>…` re-records only those takes. (`all` runs every step in one go, with no reviews.)
+
+- A section is a row of the plan table, numbered in its `#` column. In order, a section or a short run
+  of them at a time: `render --section N` (or `N-M`) writes `out/release-section-N.mp4` with the song
+  under it. Send it; the user approves it or asks for a change.
+- A change: edit `lines.json`, re-run `plan` and `cards` (or `record --section N` for its takes), then
+  `render --section N` again. Only the sections an edit touched are drawn again (the `compose.py`
+  header). A change in length or order moves every later section: their frames are drawn again, but
+  approved sections need no second review unless their picture changed.
+- When every section is approved, `render` reuses their frames and encodes the whole video.
 
 - `song`: the bpm must match what the user counts (a half or double reading: `--bpm`), and `dropTime`
   must be the real drop.
