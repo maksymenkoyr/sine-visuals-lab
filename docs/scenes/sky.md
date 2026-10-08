@@ -410,6 +410,18 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   sky by yellow, made a big olive propeller. Checked headless on the real
   GPU at 1600×1000 with Floaters and Light waves wired to the Metronome:
   defaults, Rainbow 1 with pinned floaters, sprites at 1.
+- 2026-10-08 — Legal audit: Sky's own `hash21` was the fract/dot hash
+  from a Shadertoy author (Art of Code) whose terms are unclear; the repo
+  had retired it everywhere with `FLOAT_HASH_GLSL` (#135) and Sky brought
+  it back under an "independently written" comment. Sky now pastes
+  `FLOAT_HASH_GLSL` for its one-shot draws (seeds, sprite ids, dither),
+  the bench page hashes its lattice with lowbias32, and
+  `tests/noiseHash.test.ts` fails if the old constants appear in `src/` or
+  `docs/` again. Seeds still wrap to `SHADER_SEED_PERIOD`: the shader
+  scales them into sin() phases and noise coordinates too. Headless on the
+  real GPU at 1280×800, before and after side by side: the clouds are
+  identical (they hash with `NOISE_HASH_GLSL`); only which spots the
+  floaters and sprites land on moved.
 
 ## Tuning notes
 

@@ -5,7 +5,7 @@ import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
-import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../../noiseHash.ts";
+import { FLOAT_HASH_GLSL, NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../../noiseHash.ts";
 import { createBeatListener, type HoldBeats } from "../../beatListener.ts";
 import {
   createFluidSim,
@@ -552,13 +552,12 @@ export interface WavePool {
 }
 
 /** Period of the seeds the shader hashes (a stamp's uBurstSeed, a sweep's
- *  uSweepSeed). The shader's fract-based hash21 multiplies the seed by about
- *  123 before taking fract(), and fp32 keeps only 23 bits of that product, so
- *  an ever-growing seed leaves it fewer and fewer fractional bits (one stamp
- *  per beat runs it dry within hours of a gig) and every streak or sweep
- *  ends up with nearly the same hash. Wrapping what reaches the GPU keeps
- *  256 * 123 ~ 3.2e4, which still leaves about 8 fractional bits; the JS
- *  counters themselves (stepBrush, pickSwarmCenter) never wrap. */
+ *  uSweepSeed). Besides hash21, the shader scales the seed into sin() phases
+ *  and noise coordinates, and fp32 keeps only 23 bits of each product, so
+ *  an ever-growing seed (one stamp per beat for a whole gig) leaves those
+ *  fewer and fewer fractional bits until every streak or sweep wobbles and
+ *  frays alike. Wrapping what reaches the GPU keeps every product small;
+ *  the JS counters themselves (stepBrush, pickSwarmCenter) never wrap. */
 export const SHADER_SEED_PERIOD = 256;
 
 /** x reduced into [0, SHADER_SEED_PERIOD), in float64 — safe for fractions
@@ -1182,18 +1181,9 @@ float skyLift(float amount, float drive) {
 
 ${NOISE_HASH_GLSL}
 
-// This scene's own small hash/noise family — independently written (the
-// same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
-// standing rule against porting), not shared with any other scene's.
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
-vec2 hash22(vec2 p) {
-  return vec2(hash21(p), hash21(p + 19.19));
-}
+// hash21/hash22 for the one-shot draws (seeds, sprite ids, dither) — the
+// repo's shared bit hash, see noiseHash.ts.
+${FLOAT_HASH_GLSL}
 
 // Value-noise fbm for the cloud's bump texture and the streaks' row fray —
 // this scene's own, independently written (not shared with ink.ts/moire.ts/
