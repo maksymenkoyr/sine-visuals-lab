@@ -260,9 +260,12 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * own `level`, which neither frame's gain or sensitivity ever shapes.
  *
  * **Reading.** `forScene(sceneId, settings, anim)` returns a `SceneDrives`
- * view — cheap to build (closes over three references, no new state) — for
- * whichever AnimFrame the caller has in hand. A scene's own render() gets
- * one built from the render-latched AnimFrame (renderLatch.ts's consume()
+ * view (each call builds a fresh view object and its closures; the key -> spec
+ * lookup is cached per settings array by specMapFor(), and combined readings
+ * go through one reused scratch array, so what a read still allocates is its
+ * small result objects) — for whichever AnimFrame the caller has in hand. A
+ * scene's own render() gets one built from the render-latched AnimFrame
+ * (renderLatch.ts's consume()
  * result, the same object passed to render() itself), so a plain-catalogue
  * edge choice (Beat, Bass hit, …) reads its per-source edge straight off
  * that already-latched boolean — no separate latch needed for those. Only a
@@ -1079,7 +1082,7 @@ function loudLevel(choice: DriveSourceChoice, anim: AnimFrame, driveEnergy: numb
 // already-weighted readings in), so both forScene() (a scene/panel's own
 // read) and accumulate() (the generic gate tracker's own input, this file's
 // header's threshold paragraph) share this one implementation.
-function combine(patch: DrivePatch, weighted: number[]): number {
+function combine(patch: DrivePatch, weighted: readonly number[]): number {
   if (patch.mix === "max") {
     let m = 0;
     for (let i = 0; i < weighted.length; i++) {
@@ -1122,6 +1125,27 @@ const driveFrameScratch: FeatureFrame = {
   onsetPhase: 0,
   level: 0,
 };
+
+// forScene()'s key -> spec lookup, built once per `settings` array rather
+// than once per call (app.ts, output.ts and tv.ts each call forScene() every
+// rendered frame, and a crossfade's drivesFor adds a second call). Keyed by
+// array identity, so it assumes a scene's `settings` array is never mutated in
+// place; a scene declares it once as a constant. `scene.settings ?? []`
+// hands in a fresh empty array each frame, so empty arrays share one map
+// instead of filling the WeakMap.
+const EMPTY_SPEC_MAP: ReadonlyMap<string, SceneSetting> = new Map();
+const specMaps = new WeakMap<readonly SceneSetting[], ReadonlyMap<string, SceneSetting>>();
+
+/** forScene()'s cached key -> spec lookup. Exported for tests. */
+export function specMapFor(settings: readonly SceneSetting[]): ReadonlyMap<string, SceneSetting> {
+  if (settings.length === 0) return EMPTY_SPEC_MAP;
+  let m = specMaps.get(settings);
+  if (!m) {
+    m = new Map(settings.map((s) => [s.key, s]));
+    specMaps.set(settings, m);
+  }
+  return m;
+}
 
 export interface DriveEngine {
   /** Call once per rAF tick, right after animClock.advance() — see this
@@ -1215,15 +1239,29 @@ export function createDriveEngine(): DriveEngine {
     return catalogue.read(driveFrameScratch, anim);
   }
 
-  // Plain float64 array, deliberately not a Float32Array — combine()'s
-  // sum/max has to match today's bit-for-bit reading exactly (this file's
-  // header's Identity paragraph), and rounding every weighted term through
-  // float32 on the way in would quietly break that at the last few bits.
-  // sourceValues() below, the panel's own inspection API, is the one place
-  // that precision loss is fine (and its own return type, Float32Array,
-  // says so).
-  function weightedValuesImpl(sceneId: string, key: string, patch: DrivePatch, anim: AnimFrame): number[] {
-    return patch.sources.map((src) => clampWeight(src.weight) * sourceRawImpl(sceneId, key, src, anim));
+  // Plain float64 array, deliberately not a Float32Array: combine()'s sum and
+  // max have to match the reading bit for bit (this file's header's Identity
+  // paragraph), and rounding each weighted term through float32 would break
+  // that in the last few bits. One array per engine, reused by every read:
+  // weightedInto() fills it completely (its length set to the patch's source
+  // count) and combine() reads it immediately, and nothing reads it after
+  // that. sourceRawImpl() never calls back into a combine, so no read can
+  // overwrite another read's terms halfway through.
+  const weightedScratch: number[] = [];
+
+  function weightedInto(sceneId: string, key: string, patch: DrivePatch, anim: AnimFrame, out: number[]): number[] {
+    const sources = patch.sources;
+    out.length = sources.length;
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i]!;
+      out[i] = clampWeight(src.weight) * sourceRawImpl(sceneId, key, src, anim);
+    }
+    return out;
+  }
+
+  // The combined (un-gained) reading, shared by accumulate() and forScene().
+  function combinedImpl(sceneId: string, key: string, patch: DrivePatch, anim: AnimFrame): number {
+    return combine(patch, weightedInto(sceneId, key, patch, anim, weightedScratch));
   }
 
   return {
@@ -1275,7 +1313,7 @@ export function createDriveEngine(): DriveEngine {
 
         if (!hasLiveSource(setting)) continue;
         const gain = spec.drive.gain ?? 1;
-        const raw = combine(setting, weightedValuesImpl(sceneId, spec.key, setting, anim)) * gain;
+        const raw = combinedImpl(sceneId, spec.key, setting, anim) * gain;
         const trKey = gateTrackerKey(sceneId, spec.key);
         let ex = expansionTrackers.get(trKey);
         if (!ex) {
@@ -1300,7 +1338,7 @@ export function createDriveEngine(): DriveEngine {
     },
 
     forScene(sceneId, settings, anim) {
-      const specByKey = new Map(settings.map((s) => [s.key, s]));
+      const specByKey = specMapFor(settings);
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();
 
@@ -1313,13 +1351,14 @@ export function createDriveEngine(): DriveEngine {
 
       // Thin, 2-arg wrappers around the shared impls above, closing over
       // this call's own (sceneId, anim) — every call site below reads
-      // exactly as it did before sourceRaw/weightedValues moved out to be
-      // shared with accumulate()'s own generic-gate tracker.
+      // exactly as it did before sourceRawImpl/combinedImpl moved out to be
+      // shared with accumulate()'s own generic-gate tracker. sourceRaw and
+      // combined are the two names the reads below use.
       function sourceRaw(key: string, src: DriveSource): number {
         return sourceRawImpl(sceneId, key, src, anim);
       }
-      function weightedValues(key: string, patch: DrivePatch): number[] {
-        return weightedValuesImpl(sceneId, key, patch, anim);
+      function combined(key: string, patch: DrivePatch): number {
+        return combinedImpl(sceneId, key, patch, anim);
       }
 
       // Whether `key` is gated by the *generic* engine gate right now (a
@@ -1341,7 +1380,7 @@ export function createDriveEngine(): DriveEngine {
       // generic gate, and what fired()'s gate check compares. A setting
       // accumulate() has never advanced a tracker for passes through.
       function reading(key: string, setting: DrivePatch, gain: number): number {
-        const v = combine(setting, weightedValues(key, setting)) * gain;
+        const v = combined(key, setting) * gain;
         if (expansion === SCENE_EXPANSION_DEFAULT && shape === "even") return v;
         const ex = expansionTrackers.get(gateTrackerKey(sceneId, key));
         return ex ? expandReading(v, ex, expansion, shape) : v;
@@ -1472,7 +1511,7 @@ export function createDriveEngine(): DriveEngine {
         sourceValues(key) {
           const { setting } = resolve(key);
           if (setting === "scene") return null;
-          const out = Float32Array.from(weightedValues(key, setting));
+          const out = Float32Array.from(weightedInto(sceneId, key, setting, anim, weightedScratch));
           // A muted source's own slot reads 0 (this file's header's Muting
           // paragraph) — combine()/fired() above check `.off` directly
           // instead of relying on this zeroing (a muted *condition* still
@@ -1497,7 +1536,7 @@ export function createDriveEngine(): DriveEngine {
           if (setting === "scene" || !hasLiveSource(setting)) return null;
           const ex = expansionTrackers.get(gateTrackerKey(sceneId, key));
           if (!ex) return null;
-          const before = combine(setting, weightedValues(key, setting)) * gain;
+          const before = combined(key, setting) * gain;
           return { before, after: expandReading(before, ex, expansion, shape) };
         },
 

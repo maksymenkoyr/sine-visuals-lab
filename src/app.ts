@@ -3598,7 +3598,7 @@ function tick(): void {
   }
 
   // Only built while the panel is open: update() returns before it touches
-  // `drives` when closed, and forScene() allocates a Map and a dozen closures.
+  // `drives` when closed, and forScene() allocates a view object and its closures.
   const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 

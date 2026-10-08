@@ -15,6 +15,7 @@ import {
   setSourceMuted,
   setSourceRole,
   smoothstep,
+  specMapFor,
   togglePatchSource,
   type DriveChoice,
   type DrivePatch,
@@ -1591,6 +1592,115 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
     const one = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 1 as const }] };
     const normOne = normalizeDriveSetting(one);
     if (normOne !== "scene") expect(normOne.sources[0]!.every).toBeUndefined();
+  });
+});
+
+describe("drives: per-frame allocation (#353)", () => {
+  // One settled AnimFrame with its anim.* readings, the same setup as the
+  // "a patch default reads exactly its weighted sum" test above.
+  function allocFixture() {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    clock.advance(DT, frame({ bands, onset: true }));
+    const f = frame({ bands, onset: true });
+    const anim = clock.advance(DT, f);
+    return {
+      anim,
+      low: SIGNALS["anim.low"].read(f, anim),
+      mid: SIGNALS["anim.mid"].read(f, anim),
+      high: SIGNALS["anim.high"].read(f, anim),
+    };
+  }
+
+  it("specMapFor() caches the key -> spec map per settings array, and empty arrays share one map", () => {
+    const a = settingWithDrive("a", "anim.low");
+    const b = settingWithDrive("b", "anim.mid");
+    const settings = [a, b];
+    const m1 = specMapFor(settings);
+    expect(m1.get("b")).toBe(b);
+    expect(m1.size).toBe(2);
+    expect(specMapFor(settings)).toBe(m1);
+    expect(specMapFor([a, b])).not.toBe(m1);
+    expect(specMapFor([])).toBe(specMapFor([]));
+  });
+
+  it("the combined reading stays bit-identical in float64 for add (muted terms skipped, sum order kept)", () => {
+    const { anim, low, mid, high } = allocFixture();
+    expect(low).toBeGreaterThan(0);
+    expect(mid).toBeGreaterThan(0);
+    expect(high).toBeGreaterThan(0);
+    const spec = patchSetting("alloc-add", "k", {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.3, off: true },
+      ],
+    });
+    let e = 0;
+    e += 0.3 * low;
+    e += 0.7 * mid;
+    const engine = createDriveEngine();
+    expect(engine.forScene("alloc-add", [spec], anim).valueOf("k")).toBe(e);
+    // A Float32Array scratch would round each term first and land on this instead.
+    expect(Math.fround(0.3 * low) + Math.fround(0.7 * mid)).not.toBe(e);
+  });
+
+  it("the combined reading stays bit-identical in float64 for max (a muted source never wins)", () => {
+    const { anim, low, mid, high } = allocFixture();
+    // The muted term must be the largest, so only skipping it can give the right answer.
+    expect(1.3 * high).toBeGreaterThan(Math.max(0.3 * low, 0.7 * mid));
+    const spec = patchSetting("alloc-max", "k", {
+      mix: "max",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.3, off: true },
+      ],
+    });
+    const engine = createDriveEngine();
+    expect(engine.forScene("alloc-max", [spec], anim).valueOf("k")).toBe(Math.max(0, 0.3 * low, 0.7 * mid));
+  });
+
+  it("the combined reading stays bit-identical in float64 for gate (the condition scales the plays)", () => {
+    const { anim, low, mid, high } = allocFixture();
+    const expected = (0 + 0.3 * low + 0.7 * mid) * (1 * smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, 1.3 * high));
+    expect(expected).toBeGreaterThan(0);
+    const spec = patchSetting("alloc-gate", "k", {
+      mix: "gate",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.3, when: true },
+      ],
+    });
+    const engine = createDriveEngine();
+    expect(engine.forScene("alloc-gate", [spec], anim).valueOf("k")).toBe(expected);
+  });
+
+  it("no stale scratch entries: a narrower read after a wider one reads only its own terms", () => {
+    const { anim, low, mid, high } = allocFixture();
+    const wide = patchSetting("alloc-width", "wide", {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.9 },
+      ],
+    });
+    const narrow = patchSetting("alloc-width", "narrow", {
+      mix: "max",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+      ],
+    });
+    const engine = createDriveEngine();
+    const drives = engine.forScene("alloc-width", [wide, narrow], anim);
+    drives.valueOf("wide");
+    // The wide read's third term must be larger than anything the narrow max could show.
+    expect(1.9 * high).toBeGreaterThan(Math.max(0.3 * low, 0.7 * mid));
+    expect(drives.valueOf("narrow")).toBe(Math.max(0, 0.3 * low, 0.7 * mid));
   });
 });
 
