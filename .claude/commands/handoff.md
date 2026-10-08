@@ -15,7 +15,9 @@ that still have an unticked phase, each with its next phase, and asks.
 
 Paid-scene work never goes in this repo: its plan lives at
 `src/render/scenes/private/plans/<topic>.md`, and committing and pushing it
-is the user's, and it gets no GitHub issue (issues are public).
+is the user's, and it gets no GitHub issue (issues are public). Every other
+plan always has a tracking issue: a plan without an `Issue:` line is
+incomplete, whichever end of the hand-off finds it.
 
 ## Write (end of a session)
 
@@ -31,7 +33,9 @@ is the user's, and it gets no GitHub issue (issues are public).
      leaves `main` working. Lead with what the user can see when it's done.
    - Every artifact URL on its own line, nothing after it.
 3. **Open or update the plan's tracking issue.** One issue per plan, found
-   by the plan's `Issue:` line. If the plan has none, `gh issue create`
+   by the plan's `Issue:` line. If the plan has none, first look for one
+   already open for it (`gh issue list --state all --search
+   "plans/<topic>.md in:body"`), then `gh issue create`
    with the plan's title, the opening paragraph, one `- [ ]` line per phase
    (its "what the user can see" line), and the plan's path; then put the
    number on the plan's `Issue: #<n>` line. If it has one, edit that issue
@@ -50,7 +54,9 @@ is the user's, and it gets no GitHub issue (issues are public).
    <N>`), so `gh pr list --search "plans/<topic>.md in:body"` shows which
    phases are in flight.
 3. **Read before building:** the plan's issue (`gh issue view`) for anything
-   added since, then the phase's "Read first", every artifact the
+   added since. If the plan has no `Issue:` line, open the issue now as
+   Write step 3 says and put the number on the plan's `Issue:` line in this
+   phase's PR. Then the phase's "Read first", every artifact the
    plan links (Artifact `read`), and "Learned while building". Then do
    CLAUDE.md's `origin/main` and open-PR check for the phase itself.
 4. **Say which phase you're building, in one line.** If an open question
