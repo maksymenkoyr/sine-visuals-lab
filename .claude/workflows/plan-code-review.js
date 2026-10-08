@@ -6,16 +6,19 @@ export const meta = {
     { title: 'Plan', detail: 'a detailed plan per issue, no edits' },
     { title: 'Code', detail: 'implements the plan on a fresh branch in a fresh worktree' },
     { title: 'Review', detail: 'typecheck, tests, graded review; the reviewer does not fix' },
-    { title: 'Correct', detail: 'plan findings go back to the planner, code findings to the coder, then review again' },
+    { title: 'Correct', detail: 'the coder fixes every finding, plan ones by the reviewer\'s amendment, then review again' },
     { title: 'Finish', detail: 'only if findings outlive the rounds: the reviewer fixes them itself' },
   ],
 }
 
 // One issue goes through plan → code → review in a pipeline, so issues don't
 // wait on each other. A review that leaves blocking or should-fix findings
-// starts a correction round: findings the plan caused go back to the planner
-// for a plan amendment, then the coder fixes everything in the same worktree,
-// then the reviewer looks again. After `maxRounds` rounds, any findings still
+// starts a correction round: the coder fixes every finding in the same
+// worktree, then the reviewer looks again. For findings the plan caused, the
+// reviewer writes the corrected instruction itself, as a plan amendment in the
+// same review. Until version 4 a separate planner agent wrote it, and that
+// agent cost about as much just to start up as the whole fix step (the
+// recorder's `tokens` view shows it). After `maxRounds` rounds, any findings still
 // open go to a finish step where the reviewer's model fixes them itself, so
 // every branch ends shippable and the stats show what the loop couldn't do.
 //
@@ -38,7 +41,7 @@ export const meta = {
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
-const WORKFLOW_VERSION = 4
+const WORKFLOW_VERSION = 5
 const DEFAULT_MAX_ROUNDS = 2
 
 const DEFAULT_MODELS = {
@@ -112,16 +115,9 @@ const REVIEW_SCHEMA = {
     tests_passed: { type: 'boolean' },
     ready_to_ship: { type: 'boolean' },
     notes: { type: 'string' },
+    plan_amendment: { type: 'string', description: "empty when no open finding has origin 'plan'; otherwise, for each one, the corrected instruction the coder should follow, with code shapes and test inputs where they help" },
   },
-  required: ['issue_resolved', 'plan_grade', 'plan_grade_reason', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes'],
-}
-
-const AMEND_SCHEMA = {
-  type: 'object',
-  properties: {
-    amendment: { type: 'string', description: 'the corrected instructions for each plan finding, written for the coder' },
-  },
-  required: ['amendment'],
+  required: ['issue_resolved', 'plan_grade', 'plan_grade_reason', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes', 'plan_amendment'],
 }
 
 // `blocked` lets an agent that couldn't reach the worktree say so and still
@@ -205,12 +201,13 @@ const results = await pipeline(
     for (let round = 1; ; round++) {
       review = await agent(
         `Review and test the implementation of GitHub issue #${issue.n} ("${plan.title}"). ${where}\n` +
-        `This is review round ${round}. The plan and the code came from different models in an experiment that gets compared across runs, so grade each one honestly and on its own. Do NOT fix anything yourself: your findings go back to the planner and the coder.\n` +
+        `This is review round ${round}. The plan and the code came from different models in an experiment that gets compared across runs, so grade each one honestly and on its own. Do NOT fix anything yourself: your findings go back to the coder.\n` +
         `1. Read the issue (\`gh issue view ${issue.n}\`) and the diff \`git diff origin/main...HEAD\`.\n` +
         `2. Run \`npm run typecheck\` and \`npm test\`.\n` +
         `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
         `4. Give each finding an origin: 'plan' when the coder faithfully followed a wrong or missing instruction, 'code' when the coder went wrong on its own. Write each summary so the coder can fix it without asking.\n` +
-        (history.length ? `5. Earlier rounds found these. Re-check each by id: list it with fixed: true if resolved, or again with fixed: false (and a sharper summary) if not. Add new findings with new ids.\n${listFindings(history)}\n` : '') +
+        `5. If any open finding has origin 'plan', write \`plan_amendment\`: for each one, the corrected instruction that overrides the plan, read against origin/main (\`git show origin/main:<path>\`) where it matters. Otherwise leave it empty.\n` +
+        (history.length ? `6. Earlier rounds found these. Re-check each by id: list it with fixed: true if resolved, or again with fixed: false (and a sharper summary) if not. Add new findings with new ids.\n${listFindings(history)}\n` : '') +
         `\n=== PLAN ===\n${plan.plan}${amendments ? `\n\n=== PLAN AMENDMENTS ===\n${amendments}` : ''}`,
         { label: `review #${issue.n} r${round}`, phase: 'Review', ...models.review, schema: REVIEW_SCHEMA },
       )
@@ -222,13 +219,8 @@ const results = await pipeline(
       log(`#${issue.n}: round ${round} left ${todo.length} finding(s); correcting`)
 
       const planFindings = todo.filter(f => f.origin === 'plan')
-      if (planFindings.length) {
-        const amend = await agent(
-          `You wrote the plan below for GitHub issue #${issue.n}. A reviewer found that the coder followed it faithfully but the plan itself was wrong or incomplete in these places:\n${listFindings(planFindings)}\n\n` +
-          `Do NOT edit files. Read origin/main (\`git show origin/main:<path>\`) as needed and write a plan amendment: for each finding, the corrected instruction the coder should follow, with code shapes and test inputs where they help.\n\n=== PLAN ===\n${plan.plan}`,
-          { label: `replan #${issue.n} r${round}`, phase: 'Correct', ...models.plan, schema: AMEND_SCHEMA },
-        )
-        if (amend) amendments += `${amendments ? '\n\n' : ''}Round ${round}:\n${amend.amendment}`
+      if (planFindings.length && review.plan_amendment) {
+        amendments += `${amendments ? '\n\n' : ''}Round ${round}:\n${review.plan_amendment}`
       }
 
       const fix = await agent(
