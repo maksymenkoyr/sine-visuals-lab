@@ -104,7 +104,7 @@ Each phase is one build session and one PR.
 - [ ] **5. Every setup is graded by the same blind grader, by fixed rules**
   - Touches: `.claude/workflows/plan-code-review.js` (a `grade` agent after the last review in every mode, as solo mode has), `tools/workflowStatsLib.mjs` (grades from that agent; its cost kept out of the setup's, as solo's is)
   - Read first: the workflow header's solo and `base` sections; `buildRows` and `gradeCost` in `tools/workflowStatsLib.mjs`
-  - Blind: the grader sees the issue's title and body and a diff with no branch name, tag, commit messages or trailers, and nothing about the setup. A pinned run's grader works in a clean clone with no remote; its prompt overrides CLAUDE.md's rule to read origin/main and open PRs.
+  - Blind: the grader sees the issue's title and body and a diff with no branch name, tag, commit messages or trailers, and nothing about the setup. The grader works in its own clone with the diff applied as one commit on a neutral branch, so the worktree path, the git log and the branch list name no setup either. A pinned run's clone has no remote; its prompt overrides CLAUDE.md's rule to read origin/main and open PRs.
   - Rules: the grader answers yes/no questions per part (correctness, tests, scope, docs) and lists findings by severity, with "blocking" and "should-fix" defined in its prompt. The workflow, not the grader, turns those into the grade: any blocking finding caps it, any should-fix caps it lower.
   - Done when: each issue gets one `grade` agent with the same model, effort and prompt whatever the setup; the report shows its part scores and findings beside the reviewer's grade
 
