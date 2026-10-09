@@ -95,6 +95,7 @@ import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading } from "./audioMeters.ts";
+import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
 import {
   PICTURE_MEASURES,
   displayLevel,
@@ -395,14 +396,18 @@ import {
  * row, matching the identical hover/focus styling below, so pointing at a
  * row is enough; no click needed first. The hint under a row (a setting's
  * `description`) stays collapsed until hover/focus, and while auto holds the
- * row a second line beneath it invites the user to take over. Each card's accent
- * names its system — the constants and their meanings live in
- * controlsTheme.ts.
+ * row a second line beneath it invites the user to take over. Each row's slider
+ * carries aria-valuetext from sliderValueText.ts (the readout's number and unit,
+ * or Off), not its native value, since a log row's native value is a hidden
+ * position. Each card's accent names its system — the constants and their
+ * meanings live in controlsTheme.ts.
  *
  * The panel itself is opened and closed from outside with S (wired in
  * app.ts, live only in a viz — see that handler), mirroring a click on
  * deps.toggleButton (the gear); H, below, is the reverse direction, only
- * live once the panel is already open.
+ * live once the panel is already open. Opening moves focus to the panel's
+ * first Tab-ring control, and closing hands focus back to deps.toggleButton,
+ * but only if focus was inside the panel when it closed.
  *
  * It's never closed by a tap outside it: that only lets go of focus (see
  * onDocPointerDown), so you can work the scene with the panel still up.
@@ -1773,6 +1778,8 @@ export function createControlRow(spec: ControlRowSpec) {
   slider.type = "range";
   slider.className = "vc-slider";
   slider.setAttribute("aria-label", spec.label);
+  // A log row's slider is a hidden position, so a screen reader is given the
+  // setting's own text instead: aria-valuetext, set in display() below.
   // The accent rides the row (not just the slider) so the hover/focus
   // highlight on the title and track share it — see controlsTheme.ts.
   el.style.setProperty("--vc-accent", spec.accent);
@@ -1876,7 +1883,7 @@ export function createControlRow(spec: ControlRowSpec) {
 
   function setReadout(value: number, muted: boolean): void {
     if (editing) return; // the digits are the typed field right now
-    if (muted || (spec.zeroAtMin && value <= 0)) {
+    if (isOffReadout(value, muted, spec.zeroAtMin)) {
       setDigitsText("Off");
       digits.style.cssText = `${digitsTextStyle} color: ${FADER_OFF};`;
       unit.style.display = "none";
@@ -1936,6 +1943,12 @@ export function createControlRow(spec: ControlRowSpec) {
     // was — on the value a second T brings back — and the row greys out
     // (.vc-row-off, controlsTheme.ts) instead of sliding to the left end.
     const muted = offStoredValue !== null && !auto;
+    // Set before setReadout, which returns early while typed entry is open:
+    // the value is still real then, so the voiced text must not wait for it.
+    slider.setAttribute(
+      "aria-valuetext",
+      sliderValueText(value, { format: spec.format, unit: spec.unit, muted, zeroAtMin: spec.zeroAtMin }),
+    );
     const shown = muted ? offStoredValue! : value;
     slider.value = String(valueToSlider(shown));
     slider.style.setProperty("--vc-fill", `${valueToPercent(shown)}%`);
@@ -3195,7 +3208,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const showValue = (v: number) => {
       rng.value = String(v);
       rng.style.setProperty("--vc-fill", `${v * 100}%`);
-      out.textContent = v.toFixed(2);
+      const text = v.toFixed(2);
+      out.textContent = text;
+      rng.setAttribute("aria-valuetext", text);
     };
     const showOnOff = (on: boolean) => {
       onBtn.setAttribute("aria-pressed", String(on));
@@ -3285,7 +3300,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const showValue = (v: number) => {
       rng.value = String(v);
       rng.style.setProperty("--vc-fill", `${v * 100}%`);
-      out.textContent = v.toFixed(2);
+      const text = v.toFixed(2);
+      out.textContent = text;
+      rng.setAttribute("aria-valuetext", text);
     };
     const showOnOff = (on: boolean) => {
       onBtn.setAttribute("aria-pressed", String(on));
@@ -3399,7 +3416,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
     const setFill = (w: number) => rng.style.setProperty("--vc-fill", `${(w / DRIVE_WEIGHT_MAX) * 100}%`);
-    const setOut = (w: number) => (out.textContent = `${w.toFixed(2)}×`);
+    // Also the slider's valuetext: the same text the output beside it shows.
+    const setOut = (w: number) => {
+      const text = `${w.toFixed(2)}×`;
+      out.textContent = text;
+      rng.setAttribute("aria-valuetext", text);
+    };
     setFill(src.weight);
     setOut(src.weight);
     // Live store write + readout on every drag frame, no rebuild — a full
@@ -5269,6 +5291,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       { color: SCENE_VIOLET, width: 2.5 },
     ],
     40,
+    { label: "History of the Overall picture reading" },
   );
   pictureSummaryStrip.canvas.style.marginTop = "0";
   const pictureSummaryReadout = document.createElement("span");
@@ -5305,7 +5328,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     caption.textContent = measure.label;
     caption.title = measure.description;
     caption.style.cssText = `${pictureCaptionStyle} color: ${PICTURE_COLORS[measure.key]};`;
-    const strip = createTraceStrip([{ color: PICTURE_COLORS[measure.key], width: 1.5 }], 18);
+    // The caption and the number beside the trace give the current reading;
+    // the trace adds its history.
+    const strip = createTraceStrip([{ color: PICTURE_COLORS[measure.key], width: 1.5 }], 18, {
+      label: `History of ${measure.label}`,
+    });
     strip.canvas.style.marginTop = "0";
     const readout = document.createElement("span");
     readout.style.cssText = pictureReadoutTextStyle;
@@ -7393,9 +7420,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // The Source row's idle signal-preview meters (inputPreview.ts) only run
     // while there's a row list open to show them on.
     deps.setInputPreviewActive(true);
+    // Keyboard users reach the panel with S: move into it (the first Tab-ring
+    // control, where Tab would land), without scrolling the column. Read after
+    // vc-open and syncToScene(), since ringElements() needs the laid-out rows.
+    ringElements()[0]?.focus({ preventScroll: true });
   }
 
   function close() {
+    // Captured before vc-open comes off: display:none makes the browser drop focus.
+    const hadFocus = root.contains(document.activeElement);
     root.classList.remove("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "false");
     deps.toggleButton.title = "Controls (S)";
@@ -7407,6 +7440,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     positionSoloEye();
     deps.setInputPreviewActive(false);
     sourceRow.endEdit();
+    // Only when focus was in the panel: a tap outside has already let go of it
+    // (onDocPointerDown), and that stays let go. Last, so a typed-source
+    // field's blur commit (endEdit) has run before focus moves.
+    if (hadFocus) deps.toggleButton.focus({ preventScroll: true });
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
