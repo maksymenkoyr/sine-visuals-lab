@@ -335,7 +335,7 @@ describe("custom values in a Look", () => {
   it("bounds a shared link's custom value like a typed one", () => {
     const sceneId = "look-custom-bound";
     applyLook({ name: "L", sceneId, manual: { focus: 1e9 } }, SPECS);
-    expect(getCustomValue(sceneId, FOCUS.key)).toBe(2);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBe(5);
   });
 
   it("drops a custom value the Look doesn't carry, whether listed in range or absent", () => {

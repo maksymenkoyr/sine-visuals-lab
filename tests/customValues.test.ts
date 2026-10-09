@@ -94,13 +94,15 @@ describe("custom values map", () => {
 });
 
 describe("customReach / fitCustom", () => {
-  it("reaches one more slider's width past either end", () => {
-    expect(customReach({ min: -1, max: 1, step: 0.01 })).toEqual({ lo: -3, hi: 3 });
-    expect(customReach({ min: 0.5, max: 3, step: 0.05 })).toEqual({ lo: 0, hi: 5.5 });
+  it("reaches several slider widths past either end", () => {
+    expect(customReach({ min: -1, max: 1, step: 0.01 })).toEqual({ lo: -9, hi: 9 });
+    expect(customReach({ min: 0.5, max: 3, step: 0.05 })).toEqual({ lo: 0, hi: 13 });
+    // A min above 0 whose reach would dip below 0 is floored at 0, not carried below it.
+    expect(customReach({ min: 2, max: 3, step: 0.01 })).toEqual({ lo: 0, hi: 7 });
   });
 
   it("never goes below 0 on a slider that starts at 0 or above", () => {
-    expect(customReach({ min: 0, max: 1, step: 0.05 })).toEqual({ lo: 0, hi: 2 });
+    expect(customReach({ min: 0, max: 1, step: 0.05 })).toEqual({ lo: 0, hi: 5 });
   });
 
   it("gives counts, toggles and options no custom value", () => {
@@ -119,9 +121,13 @@ describe("customReach / fitCustom", () => {
     expect(fitCustom(range, 0.5)).toBeNull();
     expect(fitCustom(range, 1)).toBeNull();
     expect(fitCustom(range, 1.5)).toBe(1.5);
-    expect(fitCustom(range, 40)).toBe(2);
+    expect(fitCustom(range, 3.7)).toBe(3.7);
+    expect(fitCustom(range, 40)).toBe(5);
     expect(fitCustom(range, -0.5)).toBe(0);
     expect(fitCustom(range, Number.NaN)).toBeNull();
+    // A fractional span, so a `max * CUSTOM_REACH_SPANS` mistake fails here: the
+    // reach is the span times CUSTOM_REACH_SPANS, added past max.
+    expect(fitCustom({ min: 0.2, max: 0.6, step: 0.01 }, 100)).toBeCloseTo(2.2, 10);
   });
 });
 
