@@ -1,7 +1,4 @@
 {
-  "modelSettings": {
-    "claude-haiku-5-5": { "autoCompactWindow": 120000 }
-  },
   "permissions": {
     "allow": ["Bash(tools/cheap.sh:*)"]
   },
