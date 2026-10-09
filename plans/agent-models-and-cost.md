@@ -69,7 +69,7 @@ Each phase is one build session and one PR.
   - Read first: the `tools/workflowStatsLib.mjs` header; the claude-api skill's Haiku 5.5 pricing (both rate cards)
   - Done when: `transcriptStats` splits tokens from requests over 100K and the cost prices them at the higher card; a test with a fixture over 100K fails without the split; re-recording the existing runs (`sweep`) shows r6's Haiku cost near $1.26 rather than $0.36; `npm run typecheck` and `npm run test` pass
 
-- [ ] **2. One doc says which model and effort each kind of agent work gets, and why**
+- [x] **2. One doc says which model and effort each kind of agent work gets, and why**
   - Touches: new `docs/agent-models.md`, `docs/index.md`
   - Read first: this plan's Evidence; `plans/multi-model-flow.md`; #429, #444, #447, #451; CLAUDE.md's delegation table; `docs/issue-labels.md`
   - Done when: the doc covers planning, coding, review and sweeps, Haiku's 100K line and why it isn't capped, the lean agent, and the cost-per-finished-task rule, each linking its source; numbers stay in dated notes, per CLAUDE.md
@@ -101,3 +101,4 @@ Each phase is one build session and one PR.
 
 ## Learned while building
 - 2026-10-09, phase 1, PR #459: rows record `longTokens` next to `tokens`; older rows have none and keep their short-card cost until re-recorded from transcripts. Re-recorded, Haiku's code stage at xhigh cost $0.39–0.57 per issue on r10–r12.
+- 2026-10-09, phase 2: `docs/agent-models.md` keeps every number in its dated notes, so phase 3 can align `CLAUDE.md` with the doc's sections without copying figures. Where they differ today: the doc records Haiku at xhigh coding inside `/plan-code-review`, while `CLAUDE.md` sends plan-following to Sonnet at medium outside it; `haiku-coder` is still draft PR #451, so phase 3 should name it only once that merges. The trials dashboard's cost-per-stage tooltip now shows each stage's model and effort.

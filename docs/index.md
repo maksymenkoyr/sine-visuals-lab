@@ -23,6 +23,8 @@ before adding a note here; this file doesn't restate them.
   hook, explainer) and the taste calls every one of them follows.
 - [Issue labels](issue-labels.md) — the difficulty labels (which model builds an
   issue), the `human` label (a person is needed), and the hook that enforces them.
+- [Agent models](agent-models.md) — which model and effort each kind of agent
+  work gets (planning, coding, review, sweeps), why, and the dated runs behind it.
 - [Status](status.md) — what's in flight right now. The one note here that's
   expected to be rewritten wholesale each session.
 - [Scene records](scenes/) — one note per scene, `scenes/<id>.md`: what it
