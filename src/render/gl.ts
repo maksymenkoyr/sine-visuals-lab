@@ -1,3 +1,22 @@
+// WebGL2 plumbing that every scene and surface shares. This file creates the
+// context and handles a context loss, compiles shader source into programs,
+// holds the one oversized triangle every fullscreen pass draws, sizes a
+// canvas's backing store to its display, and makes the off-screen render
+// targets that blur passes and bloom chains draw into.
+//
+// Render targets (the section at the end). A target is a texture plus a
+// framebuffer with that texture as its colour attachment. Scenes used to each
+// hand-write that pair, and the copies drifted: each worded its own
+// incomplete-framebuffer error, the ones that failed did not free what they
+// had already made, and a new target was easy to forget in a hand-written
+// delete list. createColorTarget is now the one place a target is made. It
+// throws one message, frees what it made when creation fails, and takes its
+// formats, filters and wrap mode from ColorTargetOptions, whose defaults are
+// the plain colour target most blur and bloom passes want. createTargetList
+// serves a scene that owns several targets: `add` remembers each one and
+// `freeAll` destroys them all in one call, so `dispose()` and the resize
+// paths never need a hand-written list of deletes.
+
 export function createGL(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   overrides: WebGLContextAttributes = {},
@@ -226,4 +245,95 @@ export function resizeCanvasToDisplaySize(
     return true;
   }
   return false;
+}
+
+/** One texture with one framebuffer that has the texture as COLOR_ATTACHMENT0. */
+export interface ColorTarget {
+  tex: WebGLTexture;
+  fbo: WebGLFramebuffer;
+  w: number;
+  h: number;
+}
+
+export interface ColorTargetOptions {
+  /** texImage2D internal format / format / type. Default RGBA8 / RGBA / UNSIGNED_BYTE. */
+  internalFormat?: number;
+  format?: number;
+  type?: number;
+  /** MIN and MAG filter. Default LINEAR. */
+  filter?: number;
+  /** Overrides `filter` for MIN only (e.g. LINEAR_MIPMAP_LINEAR). */
+  minFilter?: number;
+  /** WRAP_S and WRAP_T. Default CLAMP_TO_EDGE. */
+  wrap?: number;
+  /** generateMipmap right after allocation, so the chain is complete from the first frame. */
+  mipmap?: boolean;
+  /** Prefix of the error message, e.g. the scene id. */
+  label?: string;
+}
+
+export function createColorTarget(
+  gl: WebGL2RenderingContext, w: number, h: number, opts: ColorTargetOptions = {},
+): ColorTarget {
+  const label = opts.label ?? "render target";
+  const filter = opts.filter ?? gl.LINEAR;
+  const wrap = opts.wrap ?? gl.CLAMP_TO_EDGE;
+  const tex = gl.createTexture();
+  if (!tex) throw new Error(`${label}: createTexture failed`);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, opts.internalFormat ?? gl.RGBA8, w, h, 0,
+    opts.format ?? gl.RGBA, opts.type ?? gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, opts.minFilter ?? filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+  if (opts.mipmap) gl.generateMipmap(gl.TEXTURE_2D);
+  const fbo = gl.createFramebuffer();
+  if (!fbo) {
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.deleteTexture(tex);
+    throw new Error(`${label}: createFramebuffer failed`);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(tex);
+    throw new Error(`${label}: framebuffer incomplete (0x${status.toString(16)})`);
+  }
+  return { tex, fbo, w, h };
+}
+
+/** Frees a target's framebuffer and texture. Accepts null so callers can pass an unset slot. */
+export function destroyTarget(gl: WebGL2RenderingContext, t: ColorTarget | null | undefined): void {
+  if (!t) return;
+  gl.deleteFramebuffer(t.fbo);
+  gl.deleteTexture(t.tex);
+}
+
+/** The targets one scene owns. `add` creates and remembers one, and `freeAll` destroys every
+ *  remembered target and forgets them, so it is safe to call twice (e.g. resize then dispose).
+ *  `gl` is passed per call because a scene creates its list in its factory closure, before
+ *  `init` has a context. */
+export interface TargetList {
+  add(gl: WebGL2RenderingContext, w: number, h: number, opts?: ColorTargetOptions): ColorTarget;
+  freeAll(gl: WebGL2RenderingContext): void;
+}
+
+export function createTargetList(): TargetList {
+  let targets: ColorTarget[] = [];
+  return {
+    add(gl, w, h, opts) {
+      const t = createColorTarget(gl, w, h, opts);
+      targets.push(t);
+      return t;
+    },
+    freeAll(gl) {
+      for (const t of targets) destroyTarget(gl, t);
+      targets = [];
+    },
+  };
 }

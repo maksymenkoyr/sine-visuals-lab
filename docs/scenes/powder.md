@@ -159,3 +159,4 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
 - `#77` (`6cfdf04`, 2026-09-04) — Powder: GPU powder cloud, Chladni-derived
   MRT architecture, shove+spring v1 then a velocity-field v2/v3 rewrite,
   stateless chunk cubes, per-scene bloom. Merged as a draft scene.
+- #462 (draft, 2026-10-09): Rendering: the bloom/blur targets now come from gl.ts's shared render-target helper (`createTargetList`); no change to the look.

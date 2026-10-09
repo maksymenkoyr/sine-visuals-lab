@@ -267,3 +267,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   carrying the scene's full v1–v4 history (see "Decisions and pivots")
   plus the `tools/refburst.py` cut/fade fix. Still listed in
   `DRAFT_SCENE_IDS` on `main`.
+- #462 (draft, 2026-10-09): Rendering: the march and blur-pyramid targets now come from gl.ts's shared render-target helper (`createTargetList`); no change to the look.

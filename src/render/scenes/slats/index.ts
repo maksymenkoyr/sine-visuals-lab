@@ -70,7 +70,7 @@
  * straight to the default framebuffer.
  */
 import { NUM_BANDS } from "../../../audio/types.ts";
-import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../../gl.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { uploadCommonUniforms } from "../../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
@@ -190,6 +190,7 @@ export const slatsScene: Scene = (() => {
   let fullH = 0;
   let halfW = 0;
   let halfH = 0;
+  const glowTargets = createTargetList();
 
   const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   const bandsBuf = new Float32Array(NUM_BANDS);
@@ -232,35 +233,8 @@ export const slatsScene: Scene = (() => {
     uploadInstanceBuffer(gl, bufA!, packedA);
   }
 
-  function makeHalfColourTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-  }
-
-  function attachColour(gl: WebGL2RenderingContext, tex: WebGLTexture | null): WebGLFramebuffer | null {
-    const f = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`slats: framebuffer incomplete (0x${status.toString(16)})`);
-    }
-    return f;
-  }
-
   function freeGlowTargets(gl: WebGL2RenderingContext): void {
-    if (fullFbo) gl.deleteFramebuffer(fullFbo);
-    if (halfFboA) gl.deleteFramebuffer(halfFboA);
-    if (halfFboB) gl.deleteFramebuffer(halfFboB);
-    if (fullTex) gl.deleteTexture(fullTex);
-    if (halfTexA) gl.deleteTexture(halfTexA);
-    if (halfTexB) gl.deleteTexture(halfTexB);
+    glowTargets.freeAll(gl);
     fullFbo = halfFboA = halfFboB = null;
     fullTex = halfTexA = halfTexB = null;
     fullW = fullH = halfW = halfH = 0;
@@ -275,12 +249,9 @@ export const slatsScene: Scene = (() => {
     fullH = h;
     halfW = Math.max(1, w >> 1);
     halfH = Math.max(1, h >> 1);
-    fullTex = makeHalfColourTexture(gl, fullW, fullH);
-    halfTexA = makeHalfColourTexture(gl, halfW, halfH);
-    halfTexB = makeHalfColourTexture(gl, halfW, halfH);
-    fullFbo = attachColour(gl, fullTex);
-    halfFboA = attachColour(gl, halfTexA);
-    halfFboB = attachColour(gl, halfTexB);
+    ({ tex: fullTex, fbo: fullFbo } = glowTargets.add(gl, fullW, fullH, { label: "slats" }));
+    ({ tex: halfTexA, fbo: halfFboA } = glowTargets.add(gl, halfW, halfH, { label: "slats" }));
+    ({ tex: halfTexB, fbo: halfFboB } = glowTargets.add(gl, halfW, halfH, { label: "slats" }));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
