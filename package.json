@@ -26,6 +26,7 @@
     "usage": "node tools/usage.mjs",
     "workflow-stats": "node tools/workflow-stats.mjs",
     "doc-check": "node tools/doc-check.mjs",
+    "dupes": "node tools/dupes.mjs",
     "pr-shots": "node tools/pr-shots.mjs",
     "fix-conflicts": "bash tools/fix-conflicts.sh",
     "aliases": "cat tools/aliases.txt"
@@ -42,6 +43,7 @@
     "@cloudflare/workers-types": "^5.20260811.1",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-basic-ssl": "^1.2.0",
+    "jscpd": "5.4.0",
     "playwright": "^1.62.1",
     "typescript": "^5.9.0",
     "vite": "^6.3.0",
