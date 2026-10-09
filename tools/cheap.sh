@@ -5,8 +5,10 @@
 # hand (`tools/cheap.sh` for an interactive session, or with normal `claude`
 # arguments such as `-p "…"`).
 #
-# Why a script and not a shell function: a Bash tool call in a Claude session
-# doesn't load your ~/.zshrc, so a function would not exist there.
+# Why a script and not a shell function: a script lives in the repo, so it
+# works from any shell and on any machine, while a function exists only where
+# its author's ~/.zshrc is loaded. (A Bash tool call in a Claude session does
+# load ~/.zshrc, checked 2026-10-09.)
 #
 # Why its own CLAUDE_CONFIG_DIR: Claude Code prefers a saved Anthropic login
 # over ANTHROPIC_* env vars. A separate config dir has no login, so the env
