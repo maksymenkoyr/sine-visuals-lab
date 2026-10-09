@@ -65,9 +65,9 @@ describe("GLProgram.setI", () => {
   });
 
   it("keeps the location cache per program", () => {
-    // Breaks if the cache is hoisted to module scope. A shared cache would
-    // hand program b the location program a looked up, the cross-program
-    // mix-up that physarum2's depKeyPrefix comment warns about.
+    // Breaks if the cache is hoisted to module scope: program b would reuse
+    // the location program a looked up, and a location from one program is
+    // not valid on another.
     const { gl, lookups } = fakeGL();
     const a = createProgram(gl, "void main() {}");
     const b = createProgram(gl, "void main() {}");
