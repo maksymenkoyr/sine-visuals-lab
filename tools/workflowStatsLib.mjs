@@ -184,6 +184,15 @@ export function costOf(model, tokens, longTokens = NO_TOKENS) {
   return { ...cost, total: cost.input + cost.cacheWrite + cost.cacheRead + cost.output };
 }
 
+/**
+ * The store's rows with `added` in place of any rows for the same runs:
+ * recording a run twice replaces it, and a run never appears twice.
+ */
+export function mergeRows(stored, added) {
+  const runs = new Set(added.map((r) => r.runId));
+  return [...stored.filter((r) => !runs.has(r.runId)), ...added];
+}
+
 /** The setup a row ran under, as one readable key. */
 export function setupKey(row) {
   const st = (name) => {

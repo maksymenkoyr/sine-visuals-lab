@@ -181,6 +181,8 @@ export function forkIndex(entries: any[]): number;
 
 export function costOf(model: string | null, tokens: Tokens, longTokens?: Tokens): Cost | null;
 
+export function mergeRows(stored: Row[], added: Row[]): Row[];
+
 export function setupKey(row: Row): string;
 
 export function buildRows(run: {

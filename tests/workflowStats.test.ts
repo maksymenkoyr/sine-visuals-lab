@@ -3,6 +3,7 @@ import {
   buildRows,
   costOf,
   forkIndex,
+  mergeRows,
   parseGrade,
   parseLabel,
   PRICES,
@@ -70,6 +71,15 @@ describe("wasBlocked", () => {
   it("takes a reason as a block and the words for nothing as no block", () => {
     expect(wasBlocked("could not cd into the worktree")).toBe(true);
     for (const v of ["", " ", "none", "None.", "N/A", "-", null, undefined]) expect(wasBlocked(v)).toBe(false);
+  });
+});
+
+describe("mergeRows", () => {
+  it("replaces a run's rows and keeps every other run's", () => {
+    const row = (runId: string, issue: number) => ({ runId, issue }) as never;
+    const merged = mergeRows([row("a", 1), row("a", 2), row("b", 1)], [row("a", 3)]);
+    expect(merged).toEqual([row("b", 1), row("a", 3)]);
+    expect(mergeRows([], [row("c", 1)])).toEqual([row("c", 1)]);
   });
 });
 

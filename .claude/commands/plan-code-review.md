@@ -39,8 +39,12 @@ Its header says what each stage does, how a correction round works, and what
    wait for the completion notice.
 
 4. **Record the run** right after it completes, before anything else:
-   `npm run workflow-stats -- record <runId>`. The session's transcripts it
-   reads are cleaned up with old sessions. If a run was ever left unrecorded,
+   `npm run workflow-stats -- record <runId>`. With `WORKFLOW_STATS_REPO`
+   set, the row goes to the owner's private log repo and every session sees
+   it (the `tools/workflow-stats.mjs` header). In a cloud session without
+   it, attach that repo (add_repo), clone it and set the variable first.
+   The session's transcripts it reads are cleaned up with old sessions. If a
+   run was ever left unrecorded,
    `npm run workflow-stats -- sweep` records every finished one still on disk.
 
 5. **Report** for each issue:

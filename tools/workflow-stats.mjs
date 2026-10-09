@@ -10,6 +10,7 @@
 //   npm run workflow-stats -- report --issues         # plus one line per issue
 //   npm run workflow-stats -- report --json           # the raw rows
 //   npm run workflow-stats -- tokens [runId]           # per agent, latest run by default
+//   npm run workflow-stats -- import rows.jsonl        # add rows another machine recorded
 //
 // `record` finds the run under ~/.claude/projects/*/*/workflows/<runId>.json,
 // reads its journal and each agent's transcript next to it, and replaces any
@@ -19,9 +20,18 @@
 // completed run of the plan-code-review workflow that the store lacks, from
 // any session still on disk: the catch-up for runs nobody recorded.
 //
-// The store is one JSON row per issue, in WORKFLOW_STATS_FILE or
-// ~/.claude/workflow-stats/runs.jsonl. It sits outside the repo on purpose:
-// it's the owner's private log, and it outlives worktrees and branches.
+// The store is one JSON row per issue. It sits outside this repo on purpose:
+// it's the owner's private log, and it outlives worktrees and branches. Where
+// it lives, first match wins:
+// - WORKFLOW_STATS_REPO, a clone of the owner's private log repo: the store
+//   is its runs.jsonl, every command pulls before reading, and `record`,
+//   `sweep` and `import` commit and push what they add, so local and cloud
+//   sessions share one log. Two sessions recording at once can't lose rows:
+//   a push that is refused fetches, rebuilds the file from the remote's rows
+//   plus this session's (`mergeRows`, by run) and pushes again. Offline, the
+//   commit waits in the clone and the next write pushes it.
+// - WORKFLOW_STATS_FILE, a plain file, synced by nothing.
+// - ~/.claude/workflow-stats/runs.jsonl, the same.
 // `report` asks `gh` which branches have a merged PR, the slowest but most
 // honest signal of whether a run's work was any good. Pass --no-gh to skip it.
 //
@@ -31,9 +41,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { buildRows, forkIndex, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
+import { buildRows, forkIndex, mergeRows, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
 
-const STORE = process.env.WORKFLOW_STATS_FILE ?? join(homedir(), ".claude", "workflow-stats", "runs.jsonl");
+const REPO = process.env.WORKFLOW_STATS_REPO || null;
+const STORE = REPO ? join(REPO, "runs.jsonl") : (process.env.WORKFLOW_STATS_FILE ?? join(homedir(), ".claude", "workflow-stats", "runs.jsonl"));
+const PUSH_TRIES = 3;
 const PROJECTS = join(homedir(), ".claude", "projects");
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -44,6 +56,60 @@ function readJsonl(path) {
 
 function readStore() {
   return existsSync(STORE) ? readJsonl(STORE) : [];
+}
+
+function writeStore(rows) {
+  mkdirSync(dirname(STORE), { recursive: true });
+  writeFileSync(STORE, rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""));
+}
+
+/** git in the log repo; returns stdout, or null when the command fails. */
+function git(...args) {
+  try {
+    return execFileSync("git", ["-C", REPO, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bring the clone up to the remote, keeping rows only this clone has (a
+ * commit an offline write left behind). Returns false when the remote
+ * couldn't be reached, so the caller works on the local copy.
+ */
+function pullLog() {
+  if (!REPO) return true;
+  if (!existsSync(join(REPO, ".git"))) throw new Error(`WORKFLOW_STATS_REPO=${REPO} is not a git clone; clone the private log repo there first`);
+  if (git("fetch", "--quiet", "origin") === null) {
+    console.warn(`warning: couldn't reach the log repo's remote; using the local copy in ${REPO}`);
+    return false;
+  }
+  const upstream = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}") ?? (git("rev-parse", "--verify", "--quiet", "origin/main") !== null ? "origin/main" : null);
+  if (!upstream) return true; // an empty remote: the first push creates its branch
+  const ours = readStore();
+  if (git("reset", "--hard", "--quiet", upstream) === null) throw new Error(`couldn't reset ${REPO} to ${upstream}`);
+  const theirs = readStore();
+  const known = new Set(theirs.map((r) => r.runId));
+  const onlyOurs = ours.filter((r) => !known.has(r.runId));
+  if (onlyOurs.length) writeStore(mergeRows(theirs, onlyOurs));
+  return true;
+}
+
+/** Adds rows to the store, replacing any it has for the same runs, and shares them. */
+function saveRows(added, message) {
+  if (!REPO) {
+    writeStore(mergeRows(readStore(), added));
+    return;
+  }
+  for (let attempt = 1; attempt <= PUSH_TRIES; attempt++) {
+    const online = pullLog();
+    writeStore(mergeRows(readStore(), added));
+    git("add", "runs.jsonl");
+    if (git("diff", "--cached", "--quiet") === null) git("commit", "--quiet", "-m", message);
+    if (!online) break;
+    if (git("push", "--quiet", "-u", "origin", "HEAD") !== null) return;
+  }
+  console.warn(`warning: ${message} is committed in ${REPO} but not pushed; the next record, sweep or import pushes it`);
 }
 
 /** Every session's workflows/ directory under ~/.claude/projects. */
@@ -81,6 +147,7 @@ function record(runId) {
 }
 
 function sweep() {
+  pullLog();
   const stored = new Set(readStore().map((r) => r.runId));
   let found = 0;
   for (const dir of workflowDirs()) {
@@ -129,9 +196,7 @@ function recordFrom(runId, recordPath) {
     ];
   });
   const rows = buildRows({ record: runRecord, agents, recordedAt: new Date().toISOString() });
-  const kept = readStore().filter((r) => r.runId !== runId);
-  mkdirSync(dirname(STORE), { recursive: true });
-  writeFileSync(STORE, [...kept, ...rows].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  saveRows(rows, `record ${runId}`);
   console.log(`recorded ${rows.length} issue(s) from ${runId} into ${STORE}`);
   for (const r of rows) {
     console.log(`  #${r.issue} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"}→${r.finalCodeGrade ?? "-"} · ${r.reviewRounds} review(s) · $${r.cost.toFixed(2)}${r.alreadyDone ? " · already done" : ""}`);
@@ -141,6 +206,7 @@ function recordFrom(runId, recordPath) {
 // One line per agent of one recorded run (the latest when no ID is given):
 // where the tokens went and what they cost.
 function tokens(runId) {
+  pullLog();
   const all = readStore();
   const id = runId ?? all.at(-1)?.runId;
   const rows = all.filter((r) => r.runId === id);
@@ -182,6 +248,7 @@ function prStates() {
 }
 
 function report(flags) {
+  pullLog();
   const rows = readStore();
   if (flags.includes("--json")) {
     console.log(JSON.stringify(rows, null, 2));
@@ -195,11 +262,20 @@ function report(flags) {
   console.log(renderReport(summarize(rows, prState), rows, { listIssues: flags.includes("--issues"), prState }));
 }
 
+function importRows(path) {
+  if (!path) throw new Error("usage: workflow-stats import <rows.jsonl>");
+  const rows = readJsonl(path);
+  const runs = new Set(rows.map((r) => r.runId));
+  saveRows(rows, `import ${runs.size} run(s) from ${path.split("/").pop()}`);
+  console.log(`imported ${rows.length} row(s) from ${runs.size} run(s) into ${STORE}`);
+}
+
 if (cmd === "record") record(rest[0]);
+else if (cmd === "import") importRows(rest[0]);
 else if (cmd === "sweep") sweep();
 else if (cmd === "report") report(rest);
 else if (cmd === "tokens") tokens(rest[0]);
 else {
-  console.log("usage: workflow-stats record <runId> | sweep | report [--issues] [--json] [--no-gh] | tokens [runId]");
+  console.log("usage: workflow-stats record <runId> | sweep | import <rows.jsonl> | report [--issues] [--json] [--no-gh] | tokens [runId]");
   process.exit(cmd ? 1 : 0);
 }
