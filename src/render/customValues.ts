@@ -22,8 +22,7 @@ import type { SceneSetting } from "./sceneSettings.ts";
  *   pop-out output show it too, and sceneLooks.ts carries it in a Look.
  *
  * How far: `customReach` allows `CUSTOM_REACH_SPANS` slider widths past either
- * end. That is enough for a glow, size or speed that wants to go several times
- * past its tuned end. It never goes below 0 for a slider that starts at 0 or
+ * end. That leaves room for a glow, size or speed tuned well past its slider. It never goes below 0 for a slider that starts at 0 or
  * above (a negative glow or size is a shader's NaN, not a look). Only
  * continuous settings take one: a toggle, an option, or a step of 1 or more
  * (a count) takes none, because a count's max is usually a hard limit in the
