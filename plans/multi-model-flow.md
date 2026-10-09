@@ -41,7 +41,7 @@ None. The evidence is the recorded runs in `~/.claude/workflow-stats/runs.jsonl`
 
 ## Phases
 
-Each phase is one build session and one PR. PR #429 (the workflow, `/plan-code-review` with `bench` and `solo`, and `tools/workflow-stats.mjs` with `sweep`) must be merged before phase 1.
+Each phase is one build session and one PR. Since 2026-10-09 the workflow, the command and the recorder live in workflow-arena (`plans/agent-models-and-cost.md`, phase 8); paths below are from before. PR #429 (the workflow, `/plan-code-review` with `bench` and `solo`, and `tools/workflow-stats.mjs` with `sweep`) must be merged before phase 1.
 
 - [ ] **1. Every finished `/plan-code-review` run shows up in `npm run workflow-stats -- report` without anyone recording it**
   - Touches: `.claude/hooks/session-start.sh` (call `node tools/workflow-stats.mjs sweep` and print one line only when it recorded a run), `tools/workflow-stats.mjs` (a quiet mode for `sweep` that prints nothing when there's nothing new, and never fails the hook), `.claude/commands/plan-code-review.md` step 4 (the hook is the backstop; recording right after a run stays the first choice).

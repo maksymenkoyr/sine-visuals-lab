@@ -19,7 +19,7 @@ Researched 2026-10-09. Issue: #455
 - Every branch is graded twice, always, and a disagreement between the two points at the grading, not the code — the user's call on 2026-10-09, in place of grading twice only now and then.
 - Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
-- The new repo is `workflow-arena`, public, under AGPL-3.0-or-later, so any copy or hosted version stays open ("enforcing open source"); the run log stays private — the user's calls on 2026-10-09. The harness runs beside this repo and is never bundled into its client, so CLAUDE.md's no-GPL rule for dependencies doesn't touch it.
+- The new repo is `workflow-arena`, public, under AGPL-3.0-or-later, so any copy or hosted version stays open ("enforcing open source"); the run log stays private, in a Turso database the owner keeps (one store every machine and cloud session writes over HTTPS, instead of a git log repo to pull and push) — the user's calls on 2026-10-09. The harness runs beside this repo and is never bundled into its client, so CLAUDE.md's no-GPL rule for dependencies doesn't touch it.
 
 ## Prototypes
 
@@ -81,6 +81,8 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 
 Each phase is one build session and one PR.
 
+Phase 8 was built first, on 2026-10-09: from then on the workflow, `/plan-code-review` and the recorder live in workflow-arena, so the `.claude/workflows/`, `.claude/commands/` and `tools/` paths in phases 4–7 mean that repo's `workflows/`, `commands/` and `tools/`; this repo's bench is `.claude/arena-bench.json`.
+
 - [x] **1. `npm run workflow-stats -- report` shows Haiku's real cost, over-100K requests included** — PR #459
   - Touches: `tools/workflowStatsLib.mjs` (`PRICES`, `transcriptStats`, the cost sum), `tools/workflow-stats.mjs`, their tests
   - Read first: the `tools/workflowStatsLib.mjs` header; the claude-api skill's Haiku 5.5 pricing (both rate cards)
@@ -124,7 +126,7 @@ Each phase is one build session and one PR.
   - Same conditions: one workflow at a time (the command refuses to start beside another), each row records the machine's load, and the report marks rows taken under load.
   - Done when: the report shows ranges, the grader's measured spread and win/tie/loss counts, and says plainly when two setups can't be told apart
 
-- [ ] **8. The harness lives in its own repo**
+- [x] **8. The harness lives in its own repo** — this PR and workflow-arena's first commit
   - Touches: a new repo holding the workflow, `/plan-code-review`, the recorder, the grader, the script checks and the bench; here, what's left is a pointer and this repo's bench entry
   - Read first: this plan's Decisions on the new repo; `CONTRIBUTING.md` on licences
   - Done when: the new repo runs a bench against this repo at its pinned commit and records rows as before; this repo keeps no copy of the harness

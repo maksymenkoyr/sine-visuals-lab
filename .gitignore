@@ -10,6 +10,8 @@ docs/.obsidian/
 .claude/settings.local.json
 .claude/RESUME.md
 .claude/worktrees/
+# workflow-arena, cloned and kept current by .claude/hooks/session-start.sh
+.workflow-arena/
 tools/.cache/
 __pycache__/
 # Paid scenes: a local checkout of the private scenes repo, never committed
