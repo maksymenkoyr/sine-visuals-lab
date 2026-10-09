@@ -13,6 +13,11 @@ A browser-based, real-time WebGL2 audio visualizer.
   plans or artifacts unless I ask.
 - If a label, UX wording or the intended look could reasonably mean two
   things, ask one short question before building.
+- When a design ask leaves the look or the interaction open, first show two
+  or three rough sketches in one artifact that differ in idea, not styling,
+  and build (prototype or code) only the one I pick.
+- Never sign off how a scene reacts on synthetic audio alone: run
+  `tools/tune-real.mjs` (a real song, then silence) and report its table.
 - The repo is AGPL-3.0-or-later. New dependencies must be permissively
   licensed (MIT, BSD, Apache-2.0, ISC, OFL or similar), never GPL, LGPL or
   AGPL; `CONTRIBUTING.md` says why. Any third-party code bundled into the

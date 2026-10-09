@@ -72,6 +72,13 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
   and stop: no edits, plans or artifacts unless I ask.
 - **Ask about wording and look.** If a label, UX wording or the intended look
   could reasonably mean two things, ask one short question before building.
+- **Sketches before builds.** When a design ask leaves the look or the
+  interaction open, first show two or three rough sketches in one artifact
+  that differ in idea, not styling, and build (prototype or code) only the
+  one the user picks.
+- **Real audio signs off reactions.** Never sign off how a scene reacts on
+  synthetic audio alone: run `tools/tune-real.mjs` (a real song, then
+  silence) and report its table.
 - **Scene links.** When working on a visualization, run `npm run dev` and
   give the user the link to that scene that the dev server prints at startup,
   not the gallery root. Any query goes *before* the hash; one placed after the
