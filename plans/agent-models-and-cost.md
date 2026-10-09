@@ -19,7 +19,6 @@ Researched 2026-10-09. Issue: #455
 - Every branch is graded twice, always, and a disagreement between the two points at the grading, not the code — the user's call on 2026-10-09, in place of grading twice only now and then.
 - Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
-
 - The new repo is `workflow-arena`, public, under the MIT licence; the run log stays in the owner's private log repo — the user's calls on 2026-10-09. The harness files have no author but the owner, so they can move from this AGPL repo under MIT.
 
 ## Prototypes
