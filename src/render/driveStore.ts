@@ -91,6 +91,9 @@ interface DriveEntry {
   thresholdOn?: boolean;
   /** The generic engine gate's knee width, 0..1 — see getDriveSmoothness. */
   smoothness?: number;
+  /** Whether that knee is switched on, independent of the threshold — absent
+   *  means on. See getDriveSmoothnessOn. */
+  smoothnessOn?: boolean;
   /** A hit driver's Reaction row, Flat or Sized — see getDriveReadout. */
   readout?: HitReadout;
 }
@@ -423,6 +426,7 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   delete entry.threshold; // "Reset to scene default" covers the threshold row too
   delete entry.thresholdOn;
   delete entry.smoothness;
+  delete entry.smoothnessOn;
   delete entry.readout;
   persist();
 }
@@ -581,6 +585,19 @@ export function getDriveSmoothness(sceneId: string, spec: SceneSetting): number 
 export function setDriveSmoothness(sceneId: string, spec: SceneSetting, value: number): void {
   if (!Number.isFinite(value)) return;
   entryFor(settingScope(sceneId, spec.key), spec.key).smoothness = Math.min(1, Math.max(0, value));
+  persist();
+}
+
+/** Whether the knee is on, separately from the threshold itself: off is a
+ *  hard cut at the line whatever the Smoothness slider says (the slider keeps
+ *  its value). Starts on, so nothing changes until it is switched off. */
+export function getDriveSmoothnessOn(sceneId: string, spec: SceneSetting): boolean {
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.smoothnessOn;
+  return typeof stored === "boolean" ? stored : true;
+}
+
+export function setDriveSmoothnessOn(sceneId: string, spec: SceneSetting, on: boolean): void {
+  entryFor(settingScope(sceneId, spec.key), spec.key).smoothnessOn = on;
   persist();
 }
 

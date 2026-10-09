@@ -21,7 +21,7 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
+import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -1454,6 +1454,13 @@ describe("drives: the generic engine gate — every drive setting without its ow
     const hard = readBelowLine("gate-smoothness-hard", 0);
     expect(hard.line).toBeGreaterThan(0.099);
     expect(hard.drives.value("k", -1)).toBe(0);
+
+    // Switched off, the slider is ignored: the same hard cut as 0.
+    const offSpec = energySetting();
+    setDriveSmoothnessOn("gate-smoothness-off", offSpec, false);
+    setDriveSmoothness("gate-smoothness-off", offSpec, 1);
+    const off = readBelowLine("gate-smoothness-off");
+    expect(off.drives.value("k", -1)).toBe(0);
 
     const dflt = readBelowLine("gate-smoothness-default");
     const knee = 0.04 * 0.1;
