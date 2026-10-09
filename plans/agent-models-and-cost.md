@@ -10,6 +10,9 @@ Researched 2026-10-09. Issue: #455
 - "Set recommended auto compaction": auto-compaction is back on in the user settings at its default (`autoCompactEnabled`, it had been `false`).
 - "On haiku cap I think I shouldn't force it. It could affect work and it's still quite cheap too" — no Haiku compact window. Haiku may pass 100K; the stats should just price it honestly (phase 1).
 - A lean Haiku agent for plan-following code: `.claude/agents/haiku-coder.md` (#451), the user's "yeah" to trying it.
+- Rerun only the setups worth attention (r5's, r8's and b1's) on fresh issues, not the old benchmark again: "no don't rerun any" stopped a b3 benchmark run; the user then picked the three setups and three easy plus five mid issues (runs r10–r12, below). #199 was left out as needing people.
+- Skipping the Opus review on easy issues whose checks pass is its own issue, #457, not a phase here.
+- Comparisons need a fixed grader, steadier scores and the same conditions every time — the user's three additions after r10–r12 (phases 5–7), since one run per setup turned out to be mostly noise.
 
 ## Prototypes
 
@@ -25,6 +28,23 @@ None. Measurements are in "Evidence" below and in `~/.claude/workflow-stats/runs
 - `haiku-coder` (body replaces Claude Code's system prompt, `omitClaudeMd: true`, six tools) started at 5K tokens on a small task; a general-purpose Haiku agent with the same task started at 19K. Workflow agents also carry their prompt (the plan), which stays.
 - Anthropic's guidance (claude-api skill, cached 2026-10-06): Sonnet 5.5 at medium is the starting point for agentic coding; Opus 5.5 at its default medium matched Opus 5 at high on coding and catches more bugs in review with fewer false alarms; Haiku 5.5 is for sub-agent and high-volume work, "not long agentic loops"; sweep effort before switching to a cheaper model; a planner plus workers paid off only when there was bulk to hand out; judge cost per finished task; review prompts that say "only high-severity" hide real bugs.
 
+## Evidence (2026-10-09, runs r10–r12)
+
+Three setups ran in parallel on the same eight issues from `origin/main` `8a1fecb`: easy #349, #356, #431; mid #347, #357, #358, #411, #449. Grades are points out of 4 (A = 4, A- = 3.7, B+ = 3.3). Costs are with phase 1's Haiku repricing.
+
+| Run | Setup | Ready | Code grade, first → last review | $/issue | Easy: grade / $ | Mid: grade / $ |
+|---|---|---|---|---|---|---|
+| r10 | Opus/medium plans, Haiku/xhigh codes, Opus/high reviews, up to 2 correction rounds | 7/8 | 3.72 → 3.67 | 2.16 | 3.67 / 1.63 | 3.68 / 2.47 |
+| r11 | r10 plus the Opus-fix fork | 7/8 | 3.89 → 3.84 | 2.38 | 3.90 / 1.86 | 3.80 / 2.69 |
+| r12 | r10 with Sonnet/high planning | still running when this was written | | | | |
+
+- r10 and r11 are the same setup until after the first review (the fork only acts after it), yet their first-review code grades differ by 0.17: that is the noise of one run, as large as most gaps between setups recorded before. Rankings from single runs aren't evidence yet.
+- Repriced, the Haiku code stage cost $0.39–0.45 per issue, about four times what was recorded ($0.10–0.11). It is still the cheapest stage; the Opus review stays the largest.
+- Fork, mean over the issues whose first review had findings: the reviewer fixing them itself cost $0.19 plus a $0.58 check and left nothing open; the correction loop cost $0.23 and left 0.5 findings open.
+- Mid issues cost about 1.4× easy ones, with grades about the same.
+- Two of the three not-ready branches were the workflow's fault: a fix agent answered `blocked: "none"` and the loop stopped before the last review could fix what was left (r10 #349, r11 #347). A third review wrote ordinary notes about slow tests into `blocked`. Fixed with phase 1 (`wasBlocked`).
+- Running three workflows at once put the container at load ~21 on 4 cores; timing-only tests failed in every run and durations are not comparable with earlier runs.
+
 ## Rejected
 
 - A Haiku compact window (`modelSettings` `autoCompactWindow` 100000 or 120000) — the user's call above. It worked in tests, but compaction mid-task summarizes the plan Haiku is following, and the money saved is small.
@@ -33,6 +53,7 @@ None. Measurements are in "Evidence" below and in `~/.claude/workflow-stats/runs
 ## Open questions
 
 - Should the `/plan-code-review` code stage run as `agentType: 'haiku-coder'`, with the repo rules it needs written into the plan? — blocks phase 4
+- Which model and effort is the fixed grader: solo mode's (the reviewer model) or one never used as a reviewer, so no setup grades itself? — blocks phase 5
 
 ## Phases
 
@@ -57,5 +78,20 @@ Each phase is one build session and one PR.
   - Touches: `.claude/workflows/plan-code-review.js` (the code and fix stages), `.claude/commands/plan-code-review.md`
   - Read first: the workflow's header; `plans/multi-model-flow.md`; `.claude/agents/haiku-coder.md`
   - Done when: the open question is answered; `/plan-code-review bench` with the lean coder is recorded next to r8 in `npm run workflow-stats -- report`, with its grade and cost
+
+- [ ] **5. Every setup is graded by the same fixed grader**
+  - Touches: `.claude/workflows/plan-code-review.js` (a `grade` agent after the last review in every mode, as solo mode has), `tools/workflowStatsLib.mjs` (grades from that agent; its cost kept out of the setup's, as solo's is)
+  - Read first: the workflow header's solo section; `buildRows` and `gradeCost` in `tools/workflowStatsLib.mjs`
+  - Done when: each issue gets one `grade` agent with the same model, effort and prompt whatever the setup; the report shows its grade beside the reviewer's; grading one branch twice is recorded, so the report can say how much the grader alone moves
+
+- [ ] **6. The report shows checkable counts beside the letter grades**
+  - Touches: `tools/workflowStatsLib.mjs` (`summarize`, `renderReport`), `tools/workflow-stats.mjs` (the `gh` merge check)
+  - Read first: the `tools/workflow-stats.mjs` header on how `report` asks `gh` about merges
+  - Done when: per setup the report gives tests passing, blocking findings, correction rounds, and the share of PRs merged with no change after review; letter grades stay, but no longer stand alone
+
+- [ ] **7. Setups are compared under the same conditions**
+  - Touches: `.claude/commands/plan-code-review.md`, `tools/workflow-stats.mjs`
+  - Read first: `tools/plan-code-review-bench.json`; the workflow header on `base`
+  - Done when: a comparison pins its commit as the benchmark does and runs one setup at a time (the command refuses to start beside another running workflow); each row records the machine's load, and the report marks rows taken under load
 
 ## Learned while building
