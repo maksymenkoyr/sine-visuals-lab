@@ -28,3 +28,8 @@ Finish the change on this branch:
    pushes that nobody sees. If it's merged, move the commits to a new branch.
 
 6. **Push and open a draft PR**, or update the open one.
+
+7. **Record the difficulty** of each issue the PR closes, also when the label
+   held: `npm run difficulty -- record <issue> --actual … --human … --pr <pr>
+   --why "…"`. The correction loop in `docs/issue-labels.md` says how to
+   judge it. Skip this for a PR that closes no issue.

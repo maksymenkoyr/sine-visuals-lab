@@ -22,7 +22,8 @@ before adding a note here; this file doesn't restate them.
 - [Video house style](video-house-style.md) — the three promo videos (release,
   hook, explainer) and the taste calls every one of them follows.
 - [Issue labels](issue-labels.md) — the difficulty labels (which model builds an
-  issue), the `human` label (a person is needed), and the hook that enforces them.
+  issue), the `human` label (a person is needed), the hook that enforces them,
+  and the correction loop that records each issue's actual difficulty after the work.
 - [Status](status.md) — what's in flight right now. The one note here that's
   expected to be rewritten wholesale each session.
 - [Scene records](scenes/) — one note per scene, `scenes/<id>.md`: what it
