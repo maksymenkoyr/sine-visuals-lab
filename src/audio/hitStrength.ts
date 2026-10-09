@@ -83,7 +83,7 @@ export const HIT_LANES: readonly HitLane[] = ["beat", "low", "mid", "high"];
 /** setHitShape's argument: any subset of the fields, and of the lanes. */
 export type HitShapePatch = Partial<Omit<HitShape, "tail">> & { tail?: Partial<HitTails> };
 
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedNumber, registerSyncedStore } from "../net/syncedStores.ts";
 
 export const HIT_AMOUNT_MIN = 0;
 export const HIT_AMOUNT_MAX = 1;
@@ -160,13 +160,31 @@ function loadTails(): HitTails {
   return Object.freeze(out);
 }
 
-// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+// Strict, one field: an absent key is the fallback, but text that is not a
+// finite number keeps `current` (the value this field already has). So one bad
+// key in a snapshot leaves the good ones applying (net/syncedStores.ts's
+// parseSyncedNumber).
+function reloadField(key: string, lo: number, hi: number, fallback: number, current: number): number {
+  try {
+    const n = parseSyncedNumber(localStorage.getItem(key));
+    return n === null ? fallback : clampField(n, lo, hi, fallback);
+  } catch {
+    return current;
+  }
+}
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts),
+// field by field — see reloadField.
 function reload(): void {
-  amountCache = loadField(STORAGE_KEY_AMOUNT, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, HIT_AMOUNT_DEFAULT);
-  kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
-  loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
-  floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
-  tailCache = loadTails();
+  amountCache = reloadField(STORAGE_KEY_AMOUNT, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, HIT_AMOUNT_DEFAULT, amountCache);
+  kneeCache = reloadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT, kneeCache);
+  loudnessCache = reloadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT, loudnessCache);
+  floorCache = reloadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT, floorCache);
+  const tails: Record<HitLane, number> = { ...tailCache };
+  for (const lane of HIT_LANES) {
+    tails[lane] = reloadField(STORAGE_KEY_TAIL[lane], HIT_TAIL_MIN, HIT_TAIL_MAX, HIT_TAIL_DEFAULT, tailCache[lane]);
+  }
+  tailCache = Object.freeze(tails);
   snapshot = null;
 }
 for (const key of [STORAGE_KEY_AMOUNT, STORAGE_KEY_KNEE, STORAGE_KEY_LOUDNESS, STORAGE_KEY_FLOOR, ...Object.values(STORAGE_KEY_TAIL)]) {

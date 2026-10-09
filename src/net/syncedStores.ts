@@ -21,6 +21,13 @@
  * applied. A store that forgets still gets its text mirrored, and re-reads it
  * at the next output reload; the hook is what makes it live.
  *
+ * Text a hook cannot read must not reset its store. The hook reads and
+ * validates first, and swaps its cache only on success, using
+ * parseSyncedObject / parseSyncedNumber (they throw on unreadable text; a
+ * missing key still means the defaults). The unreadable text itself stays in
+ * storage until that store's next write, so a reload of that window falls
+ * back to the defaults.
+ *
  * Kept import-free on purpose: stores in render/ and audio/ both import it.
  */
 
@@ -103,6 +110,25 @@ const hooks: Array<() => void> = [];
  *  documents which store the hook belongs to. */
 export function registerSyncedStore(_key: string, reload: () => void): void {
   if (!hooks.includes(reload)) hooks.push(reload);
+}
+
+/** A mirrored key's JSON object. Null when the key is absent (or empty): the
+ *  store resets to its defaults. Throws on text that is not a plain object,
+ *  so a reload hook that calls it before touching its cache keeps what it
+ *  had (see applySyncedStorage). */
+export function parseSyncedObject(raw: string | null): Record<string, unknown> | null {
+  if (raw === null || raw === "") return null;
+  const parsed: unknown = JSON.parse(raw); // throws on bad JSON
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+  return parsed as Record<string, unknown>;
+}
+
+/** The same for a stored number: null when absent, throws when not finite. */
+export function parseSyncedNumber(raw: string | null): number | null {
+  if (raw === null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error("not a number");
+  return n;
 }
 
 type Keyed = Pick<Storage, "getItem" | "key" | "length">;
