@@ -32,5 +32,6 @@ _2026-10-06_
 
 - Merge #384, then the user sends the party videos and starts a new session
   with `/handoff tempo-and-mic` (phase 1).
-- Prune worktrees whose PRs merged (72 besides `main`; check each one's PR
-  with `gh pr view`).
+- Merge #399: the SessionStart hook then removes worktrees whose PRs merged,
+  in the background every session (`npm run prune-worktrees` is the dry run;
+  add `-- --yes` to remove). Its first run on 2026-10-08 removed 43.
