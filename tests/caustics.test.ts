@@ -9,6 +9,7 @@ import {
   createDensityFlowState,
   createLoudSwellState,
   createPumpState,
+  FRAG,
   DENSITY_GLIDE_SEC,
   densityTargetFor,
   driftFlows,
@@ -571,5 +572,10 @@ describe("caustics level glow (brightnessGain, #449)", () => {
 
   it("a negative loudness reading contributes nothing, matching FRAG's max(…, 0.0) before pow", () => {
     expect(brightnessGain(1, -0.5, 0, 0, 0)).toBeCloseTo(0.35, 10);
+  });
+
+  it("FRAG's brightness line is the one brightnessGain mirrors: level glow through its drive, no raw uEnergy", () => {
+    expect(FRAG).toContain("uLevelGlow * 1.40 * pow(max(levelGlowDrive(uEnergy), 0.0), 1.50)");
+    expect(FRAG).not.toContain("pow(uEnergy");
   });
 });

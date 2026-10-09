@@ -625,8 +625,8 @@ reference-measurement workflow used by later scenes.
 - 2026-10-09 — Level glow (#449): the whole pool's brightness used to rise
   with `uEnergy` through a fixed term in FRAG's `acc *=` line, with no setting
   to turn it off. It is now `levelGlow`, a wirable slider ("Level glow", Look
-  group) on All level by default. Its default reproduces the old term exactly
-  (the slider times `LEVEL_GLOW_GAIN` is the old 0.7 coefficient, same
+  group) on All level by default. Its default reproduces the old term to within float
+  rounding (the slider times `LEVEL_GLOW_GAIN` is the old 0.7 coefficient, same
   1.5 power curve), so existing looks are unchanged; at 0, loudness no longer
   moves the brightness at all, and the base, Beat flash and the ripple crest
   are what is left. It is a multiply, not a lift: that brightening exists only
@@ -753,7 +753,8 @@ reference-measurement workflow used by later scenes.
 
 - `npm run dev`, then open the scene directly:
   `/?audio=synthetic&bpm=120#/v/caustics` (any query goes before the hash).
-- `tests/caustics.test.ts` pins the drift-rate, Fog pulse and loudness
+- `tests/caustics.test.ts` pins the drift-rate, Fog pulse, brightness
+  multiplier (`brightnessGain`, and that FRAG uses it) and loudness
   calibration (`advanceLoudSwell`) invariants directly; Beat ripple's own
   profile invariants (`rippleEnvelope`, `createRippleEmitter`, `buildProfile`)
   are `tests/rippleEmitter.test.ts`'s job, and its emission

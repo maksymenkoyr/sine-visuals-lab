@@ -460,12 +460,12 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "levelGlow",
     label: "Level glow",
-    description: "The whole pool brightens with whatever is wired in, All level by default. 0 keeps the brightness steady.",
+    description: "The whole pool brightens with whatever is wired in, All level by default; 0 = loudness no longer brightens it",
     group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5, // the scene's old fixed level brightening, LEVEL_GLOW_GAIN
+    default: 0.5, // 0.5 on this dial was the scene's old fixed level brightening (LEVEL_GLOW_GAIN)
     // The brightness that used to ride uEnergy with no setting at all (#449).
     // A plain All level default reads exactly what uEnergy did (signals.ts
     // header), so existing looks are unchanged. A multiply, not a lift: this
@@ -1127,7 +1127,9 @@ export function driftRatePerSec(s: DriftInputs): number {
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
 
-const FRAG = `
+/** The assembled fragment shader, exported so tests/caustics.test.ts can pin the
+ *  brightness line to brightnessGain's constants. */
+export const FRAG = `
 // The integer lattice hash (hashCell / hash2Cell) — see the file header's
 // precision paragraph and noiseHash.ts for why nothing here uses fract() of
 // a large product.
