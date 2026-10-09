@@ -14,6 +14,13 @@ Researched 2026-10-09. Issue: #455
 - Skipping the Opus review on easy issues whose checks pass is its own issue, #457, not a phase here.
 - Comparisons need a fixed grader, steadier scores and the same conditions every time — the user's three additions after r10–r12 (phases 5–7), since one run per setup turned out to be mostly noise.
 
+- The grading design, the user's points of 2026-10-09: one `grade` agent per issue that only grades, never learns which setup or models built the branch, and whose cost stays out of the setup's; the grade follows from its findings by fixed rules (a blocking finding caps it, a should-fix caps it lower), with correctness, tests, scope and docs scored apart; a script, not an agent, runs typecheck and tests and records where the agents' own reports differ; the same branch is graded twice now and then, and a gap between setups smaller than that noise counts for nothing; pinned runs leak nothing (a clean clone with no remote, prompts that override CLAUDE.md's "read origin/main and open PRs"); comparing with the real fix is asked at launch, only the grader sees it, and its result has its own field.
+- From research the same day (sources in the Evidence below), the measurements the grade rests on: the real fix's tests run on the branch (SWE-bench's fail-to-pass and pass-to-pass), mutation testing for test strength instead of one revert, a blind side-by-side judgement between setups instead of a score per branch, and repeated runs with ranges instead of one run per setup.
+- Every branch is graded twice, always, and a disagreement between the two points at the grading, not the code — the user's call on 2026-10-09, in place of grading twice only now and then.
+- Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
+- "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
+- The new repo is `workflow-arena`, public, under AGPL-3.0-or-later, so any copy or hosted version stays open ("enforcing open source"); the run log stays private, in a local file: after a couple more cloud runs the owner runs it locally, so cloud rows come over by hand (`export`, then `import`), and a shared database waits until the project is published — the user's calls on 2026-10-09. The harness runs beside this repo and is never bundled into its client, so CLAUDE.md's no-GPL rule for dependencies doesn't touch it.
+
 ## Prototypes
 
 Plan-Code-Review Model Trials: every run so far, per issue, easy against mid, and cost per stage. Its data files are uploaded in the dashboard; add a run by uploading a new file and pointing the dataset at it.
@@ -50,19 +57,31 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 - Two of the three not-ready branches were the workflow's fault: a fix agent answered `blocked: "none"` and the loop stopped before the last review could fix what was left (r10 #349, r11 #347). A third review wrote ordinary notes about slow tests into `blocked`. Fixed with phase 1 (`wasBlocked`).
 - Running three workflows at once put the container at load ~21 on 4 cores; timing-only tests failed in every run and durations are not comparable with earlier runs.
 
+## Evidence (2026-10-09, grading research)
+
+- SWE-bench grades a patch by the real fix's tests: the ones that failed before the fix must pass, and the ones that passed must keep passing. It is objective but misses fixes that take another route, and about half of SWE-bench's annotations needed re-parsing ([UTBoost](https://arxiv.org/html/2506.09289v1), [explainer](https://qaskills.sh/blog/swe-bench-explained-guide-2026)).
+- Mutation testing (StrykerJS, Apache-2.0) counts how many small breaks in the changed code the tests catch; AI-written suites reach high coverage while catching few ([guide](https://www.augmentcode.com/guides/mutation-testing-ai-generated-code)).
+- A model judge is steadier choosing between two answers (shown in both orders, against position bias) than scoring one alone, and steadier on coarse yes/no questions than on fine scales ([survey](https://arxiv.org/pdf/2411.15594), [Wolfe](https://cameronrwolfe.substack.com/p/llm-as-a-judge), [LangChain](https://www.langchain.com/resources/llm-as-a-judge)).
+- Run-to-run spread of one agent setup can exceed the gap between setups; with three runs per setup, one study picked the weaker setup 28–44% of the time ([summary](https://github.com/jjakimoto/research-issues/issues/1854), [paper](https://arxiv.org/html/2609.33812v1)). Mostly preprints; none measured a setup like this one.
+
 ## Rejected
 
 - A Haiku compact window (`modelSettings` `autoCompactWindow` 100000 or 120000) — the user's call above. It worked in tests, but compaction mid-task summarizes the plan Haiku is following, and the money saved is small.
 - A hook that stops Haiku near 100K — hooks don't receive the model or token use, and stopping mid-change leaves work for a fix round.
 
+- A letter grade on the US school scale (A = 4) and a 100-point score built from fixed deductions — the user didn't like either; per-part yes/no checks and the measurements above replace them.
+
 ## Open questions
 
 - Should the `/plan-code-review` code stage run as `agentType: 'haiku-coder'`, with the repo rules it needs written into the plan? — blocks phase 4
 - Which model and effort is the fixed grader: solo mode's (the reviewer model) or one never used as a reviewer, so no setup grades itself? — blocks phase 5
+- How many runs per setup, and how many bench issues, before a comparison counts? The two graders' disagreement sets the floor. — blocks phase 7
 
 ## Phases
 
 Each phase is one build session and one PR.
+
+Phase 8 was built first, on 2026-10-09: from then on the workflow, `/plan-code-review` and the recorder live in workflow-arena, so the `.claude/workflows/`, `.claude/commands/` and `tools/` paths in phases 4–7 mean that repo's `workflows/`, `commands/` and `tools/`; this repo's bench is `.claude/arena-bench.json`.
 
 - [x] **1. `npm run workflow-stats -- report` shows Haiku's real cost, over-100K requests included** — PR #459
   - Touches: `tools/workflowStatsLib.mjs` (`PRICES`, `transcriptStats`, the cost sum), `tools/workflow-stats.mjs`, their tests
@@ -84,20 +103,33 @@ Each phase is one build session and one PR.
   - Read first: the workflow's header; `plans/multi-model-flow.md`; `.claude/agents/haiku-coder.md`
   - Done when: the open question is answered; `/plan-code-review bench` with the lean coder is recorded next to r8 in `npm run workflow-stats -- report`, with its grade and cost
 
-- [ ] **5. Every setup is graded by the same fixed grader**
+- [ ] **5. Every setup is graded by the same blind grader, by fixed rules**
   - Touches: `.claude/workflows/plan-code-review.js` (a `grade` agent after the last review in every mode, as solo mode has), `tools/workflowStatsLib.mjs` (grades from that agent; its cost kept out of the setup's, as solo's is)
-  - Read first: the workflow header's solo section; `buildRows` and `gradeCost` in `tools/workflowStatsLib.mjs`
-  - Done when: each issue gets one `grade` agent with the same model, effort and prompt whatever the setup; the report shows its grade beside the reviewer's; grading one branch twice is recorded, so the report can say how much the grader alone moves
+  - Read first: the workflow header's solo and `base` sections; `buildRows` and `gradeCost` in `tools/workflowStatsLib.mjs`
+  - Blind: the grader sees the issue's title and body and a diff with no branch name, tag, commit messages or trailers, and nothing about the setup. The grader works in its own clone with the diff applied as one commit on a neutral branch, so the worktree path, the git log and the branch list name no setup either. A pinned run's clone has no remote; its prompt overrides CLAUDE.md's rule to read origin/main and open PRs.
+  - Rules: the grader answers yes/no questions per part (correctness, tests, scope, docs) and lists findings by severity, with "blocking" and "should-fix" defined in its prompt. The workflow, not the grader, turns those into the grade: any blocking finding caps it, any should-fix caps it lower.
+  - Done when: each issue gets one `grade` agent with the same model, effort and prompt whatever the setup; the report shows its part scores and findings beside the reviewer's grade
 
-- [ ] **6. The report shows checkable counts beside the letter grades**
-  - Touches: `tools/workflowStatsLib.mjs` (`summarize`, `renderReport`), `tools/workflow-stats.mjs` (the `gh` merge check)
-  - Read first: the `tools/workflow-stats.mjs` header on how `report` asks `gh` about merges
-  - Done when: per setup the report gives tests passing, blocking findings, correction rounds, and the share of PRs merged with no change after review; letter grades stay, but no longer stand alone
+- [ ] **6. A script measures what can be checked, beside the grader**
+  - Touches: a new script under `tools/` the workflow runs after the last review, `tools/plan-code-review-bench.json` (the reference PR per issue), `.claude/commands/plan-code-review.md`
+  - Read first: the `tools/workflow-stats.mjs` header; StrykerJS's docs on running only changed files
+  - Checks: typecheck and tests on the base and on the branch, so a test that also fails on the base doesn't count; where the agents' own `typecheck_passed` and `tests_passed` differ from that; the reference fix's tests run on the branch (fail-to-pass and pass-to-pass) when the bench names a reference PR; a mutation score of the new tests on the changed files (StrykerJS as a dev dependency).
+  - Reference fix: asked at launch; only the grader and the script see it, and its result goes in its own field, apart from the grade.
+  - Bench issues: only ones whose real fix has tests; a look or shader issue stays out.
+  - Done when: a bench run records each check per issue; a test that passes with the fix reverted shows as a surviving mutant; the report gives these counts per setup next to the grades
 
-- [ ] **7. Setups are compared under the same conditions**
-  - Touches: `.claude/commands/plan-code-review.md`, `tools/workflow-stats.mjs`
-  - Read first: `tools/plan-code-review-bench.json`; the workflow header on `base`
-  - Done when: a comparison pins its commit as the benchmark does and runs one setup at a time (the command refuses to start beside another running workflow); each row records the machine's load, and the report marks rows taken under load
+- [ ] **7. Comparisons say how much is noise**
+  - Touches: `.claude/workflows/plan-code-review.js` (a side-by-side judge), `tools/workflowStatsLib.mjs` (`summarize`, `renderReport`), `.claude/commands/plan-code-review.md`, `tools/workflow-stats.mjs`
+  - Read first: this plan's grading research; the `/plan-code-review` rule on repeats
+  - Side by side: for the same issue under two setups, the grader is shown both diffs unlabelled, in both orders, and says which is better; the report counts wins, ties and losses per pair of setups.
+  - Noise: every branch is graded twice, by two grader agents that don't see each other. Where the two disagree, the report flags that issue's grading as the problem to look at, not the setup. Across runs, the report shows each setup as a range and marks any gap smaller than the graders' disagreement.
+  - Same conditions: one workflow at a time (the command refuses to start beside another), each row records the machine's load, and the report marks rows taken under load.
+  - Done when: the report shows ranges, the grader's measured spread and win/tie/loss counts, and says plainly when two setups can't be told apart
+
+- [x] **8. The harness lives in its own repo** — this PR and workflow-arena's first commit
+  - Touches: a new repo holding the workflow, `/plan-code-review`, the recorder, the grader, the script checks and the bench; here, what's left is a pointer and this repo's bench entry
+  - Read first: this plan's Decisions on the new repo; `CONTRIBUTING.md` on licences
+  - Done when: the new repo runs a bench against this repo at its pinned commit and records rows as before; this repo keeps no copy of the harness
 
 ## Learned while building
 - 2026-10-09, phase 1, PR #459: rows record `longTokens` next to `tokens`; older rows have none and keep their short-card cost until re-recorded from transcripts. Re-recorded, Haiku's code stage at xhigh cost $0.39–0.57 per issue on r10–r12.
