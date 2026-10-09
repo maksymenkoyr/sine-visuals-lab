@@ -19,7 +19,7 @@ Researched 2026-10-09. Issue: #455
 - Every branch is graded twice, always, and a disagreement between the two points at the grading, not the code — the user's call on 2026-10-09, in place of grading twice only now and then.
 - Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
-- The new repo is `workflow-arena`, public, under AGPL-3.0-or-later, so any copy or hosted version stays open ("enforcing open source"); the run log stays private, in a Turso database the owner keeps (one store every machine and cloud session writes over HTTPS, instead of a git log repo to pull and push) — the user's calls on 2026-10-09. The harness runs beside this repo and is never bundled into its client, so CLAUDE.md's no-GPL rule for dependencies doesn't touch it.
+- The new repo is `workflow-arena`, public, under AGPL-3.0-or-later, so any copy or hosted version stays open ("enforcing open source"); the run log stays private, in a local file: after a couple more cloud runs the owner runs it locally, so cloud rows come over by hand (`export`, then `import`), and a shared database waits until the project is published — the user's calls on 2026-10-09. The harness runs beside this repo and is never bundled into its client, so CLAUDE.md's no-GPL rule for dependencies doesn't touch it.
 
 ## Prototypes
 
