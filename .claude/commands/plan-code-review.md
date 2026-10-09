@@ -64,6 +64,12 @@ Its header says what each stage does, how a correction round works, and what
    this run next to earlier setups. For `bench`, compare against the other
    setups in the same "bench <sha>" series and show them as one table.
 
+   One run per setup is mostly noise: two runs of the same setup have differed
+   as much as two setups have. Don't call one setup better from a single run.
+   Suggest a rerun (a fresh `tag`) when a setup's choice would hang on it, and
+   only call a gap real when it holds across runs and is larger than the
+   grader's own spread.
+
 6. **Don't ship on your own.** Ask which branches to finish with `/ship`. Every
    branch stays local until then. Never offer to ship a `bench` branch: it
    starts from an old commit and exists only to be measured.
