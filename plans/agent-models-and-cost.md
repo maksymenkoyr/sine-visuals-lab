@@ -16,6 +16,7 @@ Researched 2026-10-09. Issue: #455
 
 - The grading design, the user's points of 2026-10-09: one `grade` agent per issue that only grades, never learns which setup or models built the branch, and whose cost stays out of the setup's; the grade follows from its findings by fixed rules (a blocking finding caps it, a should-fix caps it lower), with correctness, tests, scope and docs scored apart; a script, not an agent, runs typecheck and tests and records where the agents' own reports differ; the same branch is graded twice now and then, and a gap between setups smaller than that noise counts for nothing; pinned runs leak nothing (a clean clone with no remote, prompts that override CLAUDE.md's "read origin/main and open PRs"); comparing with the real fix is asked at launch, only the grader sees it, and its result has its own field.
 - From research the same day (sources in the Evidence below), the measurements the grade rests on: the real fix's tests run on the branch (SWE-bench's fail-to-pass and pass-to-pass), mutation testing for test strength instead of one revert, a blind side-by-side judgement between setups instead of a score per branch, and repeated runs with ranges instead of one run per setup.
+- Every branch is graded twice, always, and a disagreement between the two points at the grading, not the code — the user's call on 2026-10-09, in place of grading twice only now and then.
 - Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
 
@@ -73,7 +74,7 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 
 - Should the `/plan-code-review` code stage run as `agentType: 'haiku-coder'`, with the repo rules it needs written into the plan? — blocks phase 4
 - Which model and effort is the fixed grader: solo mode's (the reviewer model) or one never used as a reviewer, so no setup grades itself? — blocks phase 5
-- How many runs per setup, and how many bench issues, before a comparison counts? Phase 7's grader noise answers it. — blocks phase 7
+- How many runs per setup, and how many bench issues, before a comparison counts? The two graders' disagreement sets the floor. — blocks phase 7
 - The new repo's name, licence, and whether `runs.jsonl` joins it or stays in the private log repo. — blocks phase 8
 
 ## Phases
@@ -119,7 +120,7 @@ Each phase is one build session and one PR.
   - Touches: `.claude/workflows/plan-code-review.js` (a side-by-side judge), `tools/workflowStatsLib.mjs` (`summarize`, `renderReport`), `.claude/commands/plan-code-review.md`, `tools/workflow-stats.mjs`
   - Read first: this plan's grading research; the `/plan-code-review` rule on repeats
   - Side by side: for the same issue under two setups, the grader is shown both diffs unlabelled, in both orders, and says which is better; the report counts wins, ties and losses per pair of setups.
-  - Noise: now and then the same branch is graded twice and the same setup run twice; the report shows each setup as a range over its runs and marks any gap smaller than the grader's own spread.
+  - Noise: every branch is graded twice, by two grader agents that don't see each other. Where the two disagree, the report flags that issue's grading as the problem to look at, not the setup. Across runs, the report shows each setup as a range and marks any gap smaller than the graders' disagreement.
   - Same conditions: one workflow at a time (the command refuses to start beside another), each row records the machine's load, and the report marks rows taken under load.
   - Done when: the report shows ranges, the grader's measured spread and win/tie/loss counts, and says plainly when two setups can't be told apart
 
