@@ -7,9 +7,9 @@
  * The text is built from the setting's own value, never the native
  * slider.value: a log row's slider is a hidden position (posToValue and
  * valueToPos in createControlRow), so the native value would be read as that
- * position rather than the number on screen. The patch panel's weight and
- * smoothing sliders, and powerCard.ts's Resolution slider, are linear, so they
- * set their valuetext from the text their own output already shows instead.
+ * position rather than the number on screen. The patch panel's own linear
+ * sliders (deviceMenu.ts) and powerCard.ts's Resolution slider set their
+ * valuetext from the text their own output shows instead.
  *
  * isOffReadout is the one rule for "the readout says Off", shared by this
  * text and createControlRow's own setReadout, so the two cannot drift.
