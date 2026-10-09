@@ -3,7 +3,13 @@
 // Keep in sync with the JSDoc in workflowStatsLib.mjs by hand.
 
 export const GRADE_POINTS: Record<string, number>;
-export const PRICES: Record<string, { input: number; output: number; cacheRead: number }>;
+export interface PriceCard {
+  input: number;
+  output: number;
+  cacheRead: number;
+}
+
+export const PRICES: Record<string, PriceCard & { long?: PriceCard & { above: number } }>;
 export const CACHE_WRITE_MULT: number;
 export const STAGES: readonly string[];
 
@@ -29,6 +35,8 @@ export interface TranscriptStats {
   effort: string | null;
   requests: number;
   tokens: Tokens;
+  /** The part of `tokens` from requests billed at the model's `long` card. */
+  longTokens: Tokens;
   peakContext: number;
   minutes: number;
 }
@@ -44,6 +52,7 @@ export interface AgentStats {
   minutes: number;
   peakContext: number;
   tokens: Tokens;
+  longTokens: Tokens;
   cost: Cost | null;
 }
 
@@ -162,13 +171,15 @@ export interface Summary {
 
 export function parseGrade(text: unknown): string | null;
 
+export function wasBlocked(v: unknown): boolean;
+
 export function parseLabel(label: string | null | undefined): { stage: StageName; issue: number; round: number } | null;
 
 export function transcriptStats(entries: any[]): TranscriptStats;
 
 export function forkIndex(entries: any[]): number;
 
-export function costOf(model: string | null, tokens: Tokens): Cost | null;
+export function costOf(model: string | null, tokens: Tokens, longTokens?: Tokens): Cost | null;
 
 export function setupKey(row: Row): string;
 
