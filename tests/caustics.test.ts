@@ -3,10 +3,13 @@ import {
   advanceDensityFlow,
   advanceLoudSwell,
   advancePump,
+  brightnessGain,
   causticDensityScale,
+  causticsScene,
   createDensityFlowState,
   createLoudSwellState,
   createPumpState,
+  FRAG,
   DENSITY_GLIDE_SEC,
   densityTargetFor,
   driftFlows,
@@ -537,5 +540,42 @@ describe("caustic density glide (advanceDensityFlow)", () => {
     for (let i = 0; i < before.length; i++) {
       expect(after[i]).toBe(before[i]);
     }
+  });
+});
+
+describe("caustics level glow (brightnessGain, #449)", () => {
+  const levelGlowSpec = () => causticsScene.settings!.find((s) => s.key === "levelGlow")!;
+
+  it("with Level glow at 0 the loudness reading no longer moves the brightness", () => {
+    expect(brightnessGain(0, 0.64, 0, 0, 0)).toBeCloseTo(0.35, 10);
+    expect(brightnessGain(0, 1.0, 0, 0, 0)).toBeCloseTo(0.35, 10);
+  });
+
+  it("the default reproduces the old fixed loudness brightening, spelled out as the old literal formula", () => {
+    const spec = levelGlowSpec();
+    expect(brightnessGain(spec.default, 0.64, 0, 0, 0)).toBeCloseTo(0.35 + Math.pow(0.64, 1.5) * 0.7, 6);
+    expect(brightnessGain(spec.default, 0.3, 0.75, 0.5, 0.2)).toBeCloseTo(
+      0.35 + Math.pow(0.3, 1.5) * 0.7 + 0.75 * 0.5 * 1.5 + 0.2 * 0.8,
+      6,
+    );
+  });
+
+  it("the drive defaults to All level, the number uEnergy carries", () => {
+    expect(levelGlowSpec().drive?.default).toBe("anim.energy");
+  });
+
+  it("the glow scales with its slider as a multiply, not a lift", () => {
+    const full = brightnessGain(1, 0.64, 0, 0, 0) - 0.35;
+    const half = brightnessGain(0.5, 0.64, 0, 0, 0) - 0.35;
+    expect(full).toBeCloseTo(2 * half, 10);
+  });
+
+  it("a negative loudness reading contributes nothing, matching FRAG's max(…, 0.0) before pow", () => {
+    expect(brightnessGain(1, -0.5, 0, 0, 0)).toBeCloseTo(0.35, 10);
+  });
+
+  it("FRAG's brightness line is the one brightnessGain mirrors: level glow through its drive, no raw uEnergy", () => {
+    expect(FRAG).toContain("uLevelGlow * 1.40 * pow(max(levelGlowDrive(uEnergy), 0.0), 1.50)");
+    expect(FRAG).not.toContain("pow(uEnergy");
   });
 });

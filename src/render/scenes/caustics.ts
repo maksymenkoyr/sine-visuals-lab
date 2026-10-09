@@ -62,7 +62,9 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // flat plateau), or Merge (folds emissions that land close together into
 // one stronger ring instead of changing the shape at all) — see
 // rippleEmitter.ts's own `RingStyle` section; the emission and profile-building logic live in the `extraUniforms`
-// closure below. uFlash is a brightness punch,
+// closure below. uFlash is a brightness punch, and uLevelGlow is how far the
+// whole pool brightens with its source (All level by default). It used to be
+// a fixed brightening on uEnergy that no setting could turn off (#449).
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly).
 // driftLevel adds to that rate directly, right now: the louder the music is
@@ -96,7 +98,10 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // high settings — removed; see docs/scenes/caustics.md's decision entry).
 // uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
-// / crest glints).
+// / crest glints). Every music-driven term is a slider times its drive, so
+// with the sliders at 0 the picture only drifts on its own clock. The
+// exception is Caustic density, whose source still lifts the slider
+// (densityTargetFor, #453).
 //
 // Precision, or why nothing the shader hashes ever grows with session
 // length: the drift phase only ever accumulates (advanceDensityFlow's
@@ -453,6 +458,22 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "feature.onset" },
   },
   {
+    key: "levelGlow",
+    label: "Level glow",
+    description: "The whole pool brightens with whatever is wired in, All level by default; 0 = loudness no longer brightens it",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5, // 0.5 on this dial was the scene's old fixed level brightening (LEVEL_GLOW_GAIN)
+    // The brightness that used to ride uEnergy with no setting at all (#449).
+    // A plain All level default reads exactly what uEnergy did (signals.ts
+    // header), so existing looks are unchanged. A multiply, not a lift: this
+    // brightening exists only with music, so an unplugged jack reads 0 and
+    // the glow goes, like Beat flash. No auto table, because this is taste.
+    drive: { default: "anim.energy" },
+  },
+  {
     key: "centroidHue",
     label: "Spectral hue",
     description: "Palette drifts one way when the mix is brighter than usual for this track, the other way when it's darker",
@@ -707,6 +728,33 @@ export function focusSharp(fog: number, focus: number, beatPulse: number): numbe
  *  uDensityLive. */
 export function causticDensityScale(density: number): number {
   return Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
+}
+
+// Level glow (the "levelGlow" setting, #449): how far the whole pool's
+// brightness rises with its source, All level by default. The default
+// reproduces the coefficient this scene used to hard-code on uEnergy (with
+// LEVEL_GLOW_GAIN). LEVEL_GLOW_EXP keeps that old curve: quiet passages
+// barely lift, loud ones lift a lot.
+const LEVEL_GLOW_GAIN = 1.4;
+const LEVEL_GLOW_EXP = 1.5;
+// The brightness multiplier's floor with nothing driving it, and the gains on
+// Beat flash and the ripple crest. FRAG's `acc *=` line reads these same
+// constants (see brightnessGain).
+const BRIGHT_BASE = 0.35;
+const FLASH_GAIN = 1.5;
+const RING_BRIGHT_GAIN = 0.8;
+
+/** The multiplier FRAG applies to `acc` before the dark-water floor: BRIGHT_BASE
+ *  plus Level glow, Beat flash and the ripple crest. Each term is its slider
+ *  times what it reads (`ring` is already the crest scaled by Beat ripple's
+ *  own slider), so with those sliders at 0 the multiplier is BRIGHT_BASE and
+ *  nothing in it moves with the music. FRAG computes the same sum from the
+ *  same constants. Exported for tests/caustics.test.ts. */
+export function brightnessGain(levelGlow: number, levelDrive: number, flash: number, flashDrive: number, ring: number): number {
+  return BRIGHT_BASE
+    + levelGlow * LEVEL_GLOW_GAIN * Math.pow(Math.max(levelDrive, 0), LEVEL_GLOW_EXP)
+    + flash * flashDrive * FLASH_GAIN
+    + ring * RING_BRIGHT_GAIN;
 }
 
 // How hard the palette's cosine modulation damps where hue phase is
@@ -1079,7 +1127,9 @@ export function driftRatePerSec(s: DriftInputs): number {
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
 
-const FRAG = `
+/** The assembled fragment shader, exported so tests/caustics.test.ts can pin the
+ *  brightness line to brightnessGain's constants. */
+export const FRAG = `
 // The integer lattice hash (hashCell / hash2Cell) — see the file header's
 // precision paragraph and noiseHash.ts for why nothing here uses fract() of
 // a large product.
@@ -1361,7 +1411,13 @@ void main() {
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8;
+  // Level glow, Beat flash and the ripple crest: each is its slider times what
+  // it reads (brightnessGain above), so with those sliders at 0 brightness
+  // holds at the base.
+  acc *= ${BRIGHT_BASE.toFixed(2)}
+    + uLevelGlow * ${LEVEL_GLOW_GAIN.toFixed(2)} * pow(max(levelGlowDrive(uEnergy), 0.0), ${LEVEL_GLOW_EXP.toFixed(2)})
+    + uFlash * flashDrive(uBeatPulse) * ${FLASH_GAIN.toFixed(2)}
+    + ring * ${RING_BRIGHT_GAIN.toFixed(2)};
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
