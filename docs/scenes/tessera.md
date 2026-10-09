@@ -34,8 +34,8 @@ camera makes the regimes. Draft scene, merged to main.
   idioms: an empty VAO decoded entirely from `gl_InstanceID`/`gl_VertexID`
   (no per-instance upload, the same trick as `ambience.ts`'s `DOT_VERT`), a
   full-res sharp target with its own depth renderbuffer plus a half-res
-  two-pass blur for the halo, hand-cached sampler locations, and the
-  GL-state restore block at the end (the gallery shares one context across
+  two-pass blur for the halo, sampler units set with `GLProgram.setI`, and
+  the GL-state restore block at the end (the gallery shares one context across
   every scene's tile).
 - `tests/tessera.test.ts` — layout and instance decode, lobe/hue symmetry,
   the dolly cycle, the hue clock, the camera projection.
@@ -191,3 +191,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   measured short lZaThcqs-dk (a 3D lattice of hollow boxes on a sphere)".
   Single squashed commit covering the flat-tile rejection, the lattice
   rebuild, and the round 2/round 5 tuning passes.
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.

@@ -1417,3 +1417,4 @@ panel rendering in system fonts headlessly (not needed for the scripts to pass).
 - #405 (draft, 2026-10-06): Dose on the shared `StandoutTrigger`
   (`src/render/standout.ts`), same behaviour; its graph's dots keyed
   "colony started".
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.

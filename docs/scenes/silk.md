@@ -187,3 +187,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   from the measured short vKJu9mfeDS8 (video-feedback mirror kaleidoscope),
   including the Round 2 density fix and Round 3 threads/web/colour push
   folded into the same PR.
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.

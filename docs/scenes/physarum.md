@@ -98,3 +98,4 @@ verifying a settings change didn't perturb the Auto baseline.
 
 - `#108` / `478f4cf` — Add Physarum scene: agent-based slime-mould network
   (complete implementation, tests, featured registration).
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.

@@ -191,3 +191,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   the shared trigger+hold+refractory module; migrates Shards' cut onto it
   (`CUT_LISTENER`, `cutSource`), removing the free-run fallback so the scene
   stops cutting in silence; adds Cut-on signal pills.
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.
