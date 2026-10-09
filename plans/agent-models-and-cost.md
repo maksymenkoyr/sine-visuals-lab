@@ -20,6 +20,8 @@ Researched 2026-10-09. Issue: #455
 - Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
 
+- The new repo is `workflow-arena`, public, under the MIT licence; the run log stays in the owner's private log repo — the user's calls on 2026-10-09. The harness files have no author but the owner, so they can move from this AGPL repo under MIT.
+
 ## Prototypes
 
 Plan-Code-Review Model Trials: every run so far, per issue, easy against mid, and cost per stage. Its data files are uploaded in the dashboard; add a run by uploading a new file and pointing the dataset at it.
@@ -75,7 +77,6 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 - Should the `/plan-code-review` code stage run as `agentType: 'haiku-coder'`, with the repo rules it needs written into the plan? — blocks phase 4
 - Which model and effort is the fixed grader: solo mode's (the reviewer model) or one never used as a reviewer, so no setup grades itself? — blocks phase 5
 - How many runs per setup, and how many bench issues, before a comparison counts? The two graders' disagreement sets the floor. — blocks phase 7
-- The new repo's name, licence, and whether `runs.jsonl` joins it or stays in the private log repo. — blocks phase 8
 
 ## Phases
 
@@ -126,7 +127,7 @@ Each phase is one build session and one PR.
 
 - [ ] **8. The harness lives in its own repo**
   - Touches: a new repo holding the workflow, `/plan-code-review`, the recorder, the grader, the script checks and the bench; here, what's left is a pointer and this repo's bench entry
-  - Read first: the open question on the new repo; `CONTRIBUTING.md` on licences
+  - Read first: this plan's Decisions on the new repo; `CONTRIBUTING.md` on licences
   - Done when: the new repo runs a bench against this repo at its pinned commit and records rows as before; this repo keeps no copy of the harness
 
 ## Learned while building
