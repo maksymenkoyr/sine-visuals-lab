@@ -16,8 +16,9 @@ if [ "${behind:-0}" -gt 0 ]; then
   echo "This checkout is $behind commits behind origin/main."
 fi
 
-prs=$(gh pr list --state open --limit 100 --json number,title,headRefName \
-  --jq '.[] | "#\(.number) \(.title) [\(.headRefName)]"' 2>/dev/null)
+# REST, not `gh pr list`: cloud sessions refuse GraphQL.
+prs=$(gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' \
+  --jq '.[] | "#\(.number) \(.title) [\(.head.ref)]"' 2>/dev/null)
 if [ -n "$prs" ]; then
   echo "Open PRs:"
   echo "$prs"

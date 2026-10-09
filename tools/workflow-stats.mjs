@@ -239,10 +239,19 @@ function tokens(runId) {
 
 function prStates() {
   try {
-    const out = execFileSync("gh", ["pr", "list", "--state", "all", "--limit", "500", "--json", "headRefName,state"], { encoding: "utf8" });
-    return new Map(JSON.parse(out).map((p) => [p.headRefName, p.state]));
+    // REST, not `gh pr list`: cloud sessions refuse GraphQL. Pages are asked
+    // for by number, since --paginate follows GitHub's numeric-id links, which
+    // the cloud proxy refuses too.
+    const jq = '.[] | [.head.ref, (if .merged_at then "MERGED" else (.state | ascii_upcase) end)] | @tsv';
+    const states = new Map();
+    for (let page = 1; ; page++) {
+      const out = execFileSync("gh", ["api", `repos/{owner}/{repo}/pulls?state=all&per_page=100&page=${page}`, "--jq", jq], { encoding: "utf8" });
+      const lines = out.split("\n").filter(Boolean);
+      for (const line of lines) states.set(...line.split("\t"));
+      if (lines.length < 100) return states;
+    }
   } catch {
-    console.warn("warning: gh pr list failed; merged counts show 0");
+    console.warn("warning: listing PRs through gh api failed; merged counts show 0");
     return new Map();
   }
 }

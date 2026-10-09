@@ -58,6 +58,11 @@ export const meta = {
 // old runs a different setup. Agent labels ("review #346 r2") are what the
 // recorder parses, so keep their shape.
 //
+// Agents reach GitHub only through `gh api` (REST), never `gh issue view` or
+// `gh pr list`: those use GraphQL, which cloud sessions refuse with a 403, and
+// every agent would spend calls finding the REST route on its own. No
+// --paginate either: it follows numeric-id links the cloud proxy refuses.
+//
 // Launch it from a session that is NOT inside a worktree (EnterWorktree).
 // Only the code stage gets its own worktree; every later stage cds into that
 // one, and an agent spawned from a worktree-isolated session inherits the
@@ -213,9 +218,10 @@ const GRADE_SCHEMA = {
 const GIT_RULES = 'Never use git stash (refs/stash is shared with parallel agents), never push, never touch main. '
 const INDEPENDENT = `This is an independent attempt: do not look at other worktrees under .claude/worktrees, other local branches for this issue, or earlier attempts at it. Work only from ${BASE} and what you are given here. `
 const TRAILER = 'Co-Authored-By: Claude <noreply@anthropic.com>'
+const issueApi = (n) => `gh api 'repos/{owner}/{repo}/issues/${n}`
 const readIssue = (n) => pinned
-  ? `\`gh issue view ${n} --json title,body\`, title and body only, since this run is pinned to commit ${BASE} and later comments may describe a fix`
-  : `\`gh issue view ${n}\``
+  ? `\`${issueApi(n)}' --jq '.title, .body'\`, title and body only, since this run is pinned to commit ${BASE} and later comments may describe a fix`
+  : `\`${issueApi(n)}' --jq '.title, .body'\`, then its comments: \`${issueApi(n)}/comments?per_page=100' --jq '.[].body'\``
 const whereIs = (branch, path) => `The work is on branch ${branch} in the worktree ${path}: cd there and run every command there. If you cannot cd there or write there, stop at once and say why in \`blocked\`; never do the work anywhere else. ${GIT_RULES}`
 const open = (findings) => findings.filter(f => !f.fixed && f.severity !== 'nit')
 // Agents report short or full shas; a prefix only counts at abbreviation length.
@@ -262,7 +268,7 @@ const results = await pipeline(
     `1. Read the issue: ${readIssue(issue.n)}.\n` +
     (pinned
       ? `2. \`git fetch origin\`. This run is pinned to commit ${BASE}: skip the already-done check, set already_done false, and plan against that commit even where origin/main has moved on.\n`
-      : `2. \`git fetch origin\`, then grep origin/main (\`git grep <term> origin/main\`) to see whether it is already done, and skim \`gh pr list\` titles for overlap.\n`) +
+      : `2. \`git fetch origin\`, then grep origin/main (\`git grep <term> origin/main\`) to see whether it is already done, and skim the open PR titles (\`gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[].title'\`) for overlap.\n`) +
     `3. Read the code involved on ${BASE} (\`git show ${BASE}:<path>\`, since the checkout may be behind) and the file headers CLAUDE.md's table points to for this area.\n` +
     `4. Write a DETAILED plan a smaller model can follow mechanically: exact files, functions, the code shape of each change (snippets welcome), the header comments to update (CLAUDE.md: explain code at the top of its file; don't copy numbers from code into comments), and the verification commands. Call out pitfalls.\n` +
     `5. For every test you ask for, give inputs whose expected value is NOT trivial (not 0, not an empty result, not the test's own counters), and name the break in the code that must make that test fail. A test that still passes with the change reverted is worthless.\n` +

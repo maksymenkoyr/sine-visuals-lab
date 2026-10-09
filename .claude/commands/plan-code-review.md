@@ -25,9 +25,11 @@ Its header says what each stage does, how a correction round works, and what
      `r<N>` otherwise.
    - With neither issue numbers nor `bench`, ask which issues to run, and stop.
 
-2. **Check the issues are still open** with `gh issue view <n> --json state`, and
-   drop any closed ones. Skip this for `bench`: its issues may be closed by
-   now, and the run is pinned to a commit from before their fixes. Leave
+2. **Check the issues are still open** with
+   `gh api 'repos/{owner}/{repo}/issues/<n>' --jq .state` (REST: cloud sessions
+   refuse `gh issue view`), and drop any closed ones. Skip this for `bench`:
+   its issues may be closed by now, and the run is pinned to a commit from
+   before their fixes. Leave
    overlap with `origin/main` and open PRs to the plan stage, which checks for it.
 
 3. **Launch from outside a worktree.** If this session entered one
