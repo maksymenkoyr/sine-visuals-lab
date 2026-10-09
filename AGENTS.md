@@ -21,15 +21,17 @@ A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` â
 
 ## Done means
 
-- Any TS change: `npm run typecheck` (root and `server/`) and `npm run test`.
+- Any TS change: `npm run typecheck` (root and `server/`), `npm run test` and
+  `npm run dupes`.
 - Any visualization or UI change also needs headless Playwright screenshots
   from before and after, and their paths in your summary. Put a couple of
   them in the PR body: `npm run pr-shots -- before.png after.png` prints the
   markdown (never for a paid scene).
 - A bug isn't fixed until every other place the same behaviour shows up has
   been checked too.
-- CI runs the same two gates on every PR and before every deploy. The channels
-  and releasing are explained in the `src/version.ts` header.
+- CI runs the same gates on every PR and before every deploy: typecheck, test,
+  and `npm run dupes` (the copy-paste check; see the `tools/dupes.mjs` header).
+  The channels and releasing are explained in the `src/version.ts` header.
 
 ## Two rules for keeping documentation honest
 

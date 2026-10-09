@@ -52,15 +52,16 @@ npm run dev          # visualizer + controller (HTTPS, for mic access)
 npm run dev:worker   # Cloudflare Worker backend, for phone/TV pairing
 ```
 
-Before opening a pull request, run the two gates that CI enforces:
+Before opening a pull request, run the gates that CI enforces:
 
 ```
 npm run typecheck
 npm run test
+npm run dupes        # copy-paste check; see tools/dupes.mjs
 ```
 
-Both also run automatically on every pull request, and again on every deploy —
-see [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (PR checks
+All of them also run automatically on every pull request, and again on every
+deploy — see [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (PR checks
 and previews, plus the Insiders channel on every push to `main`) and
 [.github/workflows/release.yml](.github/workflows/release.yml) (the Stable
 channel, released deliberately rather than on every push).

@@ -81,12 +81,14 @@ jobs:
       - run: npm ci
 
       # The gates named in AGENTS.md. typecheck covers both tsconfigs, so the
-      # Worker source is checked before it ships. They gate every deploy this
-      # workflow makes (Insiders and every preview) — Stable's own gates are
-      # release.yml's own npm ci/typecheck/test steps, run again there against
-      # the production commit being released.
+      # Worker source is checked before it ships. dupes is a drift check on the
+      # same footing, so a copied scene fails the pull request. They gate every
+      # deploy this workflow makes (Insiders and every preview) — Stable's own
+      # gates are release.yml's own npm ci/typecheck/test steps, run again there
+      # against the production commit being released.
       - run: npm run typecheck
       - run: npm run test
+      - run: npm run dupes
 
       - name: Pick the Insiders version
         id: version
