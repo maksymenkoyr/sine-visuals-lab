@@ -8,7 +8,7 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import type { HitLane } from "../audio/hitStrength.ts";
-import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveThresholdState } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
@@ -228,7 +228,8 @@ import { publishSettingMarks } from "./settingMarks.ts";
  * that line (a soft knee, not a hard cut, so a hit riding right on the edge
  * doesn't flicker; the knee's width is the setting's Smoothness, see
  * getDriveSmoothness in driveStore.ts, defaulting to
- * GENERIC_SMOOTHNESS_DEFAULT, and at its far left it is a hard cut) and
+ * GENERIC_SMOOTHNESS_DEFAULT; at its far left, or switched off with
+ * getDriveSmoothnessOn, it is a hard cut) and
  * `fired()` blocks an edge whose own combined value
  * falls under it, on top of whatever that mix already required. A setting
  * still on its built-in reaction (`"scene"`) gets the same gate through
@@ -556,7 +557,7 @@ export const GENERIC_THRESHOLD_DEFAULT = 0.25;
  *  getDriveSmoothness; the knee itself is applyGenericGate's) — the resting
  *  position of the Smoothness slider, and the knee every generic setting has
  *  always had. A scene-handled threshold never reads it. */
-export const GENERIC_SMOOTHNESS_DEFAULT = 0.1;
+export const GENERIC_SMOOTHNESS_DEFAULT = 0.02;
 
 /** The longest step a hit driver's standout detector takes between two
  *  fired() calls — a stalled tab shouldn't read as one long decay. The same
@@ -595,7 +596,7 @@ const GATE_PEAK_DECAY_TAU_SEC = 4;
 // (driveStore.ts getDriveSmoothness, 0..1) scaled by GATE_KNEE_MAX_FRACTION,
 // so the setting's default, GENERIC_SMOOTHNESS_DEFAULT, is the knee every
 // generic gate had before the slider existed.
-const GATE_KNEE_MAX_FRACTION = 0.4;
+const GATE_KNEE_MAX_FRACTION = 2;
 const GATE_KNEE_SPREAD_MIN = 0.1;
 
 // Master Expansion (this file's header): `normal`'s fixed averaging time,
@@ -1432,7 +1433,7 @@ export function createDriveEngine(): DriveEngine {
         const tr = genericGate(key);
         if (!tr) return v;
         const spec = specByKey.get(key)!;
-        const s = getDriveSmoothness(sceneId, spec);
+        const s = getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
         const k = GATE_KNEE_MAX_FRACTION * s * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
         if (k <= 0) return v >= tr.line ? v : 0;
         return v * smoothstep(tr.line - k, tr.line + k, v);

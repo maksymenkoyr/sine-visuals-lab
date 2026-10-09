@@ -634,6 +634,10 @@ export interface DeviceMenuDeps {
    *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
   getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
   onSetDriveSmoothness: (sceneId: string, spec: SceneSetting, value: number) => void;
+  /** Whether that knee is on, independent of the threshold — driveStore.ts's
+   *  getDriveSmoothnessOn/setDriveSmoothnessOn. */
+  getDriveSmoothnessOn: (sceneId: string, spec: SceneSetting) => boolean;
+  onSetDriveSmoothnessOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
   /** A hit driver's Reaction row, Flat or Sized (SceneSetting.drive.hit) —
    *  driveStore.ts's getDriveReadout/setDriveReadout. Undefined for a
    *  setting that isn't a hit driver. */
@@ -3151,16 +3155,28 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const GENERIC_SMOOTHNESS_HINT =
-    "How gradually the gate opens around the dotted line. Left: a sharp edge. Right: a slow fade.";
+    "How gradually the gate opens around the dotted line. Left: a sharp edge. Right: a slow fade. Off: a sharp edge, whatever the slider says.";
 
   /** The generic gate's Smoothness row — a 0..1 slider for how wide the
    *  knee around the dotted line is (driveStore.ts's getDriveSmoothness).
-   *  Same live-write, no-rebuild rule as buildThresholdRow; that row dims
-   *  it with setEnabled while its threshold is Off. */
-  function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): { el: HTMLElement; setEnabled: (on: boolean) => void } {
+   *  Its own On/Off, independent of the threshold's. Same live-write,
+   *  no-rebuild rule as buildThresholdRow. */
+  function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const wrap = document.createElement("div");
-    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px;`;
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;`;
     setHint(wrap, GENERIC_SMOOTHNESS_HINT);
+
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Smoothness on/off");
+    const onBtn = document.createElement("button");
+    onBtn.type = "button";
+    onBtn.textContent = "On";
+    const offBtn = document.createElement("button");
+    offBtn.type = "button";
+    offBtn.textContent = "Off";
+    seg.append(onBtn, offBtn);
 
     const name = document.createElement("span");
     name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
@@ -3170,7 +3186,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     rng.className = "vc-slider";
     rng.min = "0";
     rng.max = "1";
-    rng.step = "0.05";
+    rng.step = "0.01";
     rng.setAttribute("aria-label", "Smoothness");
     rng.style.cssText = driveWeightRangeStyle;
     const out = document.createElement("output");
@@ -3181,7 +3197,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rng.style.setProperty("--vc-fill", `${v * 100}%`);
       out.textContent = v.toFixed(2);
     };
+    const showOnOff = (on: boolean) => {
+      onBtn.setAttribute("aria-pressed", String(on));
+      offBtn.setAttribute("aria-pressed", String(!on));
+      onBtn.style.cssText = on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      offBtn.style.cssText = !on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      rng.disabled = !on;
+      rng.style.opacity = on ? "1" : "0.4";
+      out.style.opacity = on ? "1" : "0.4";
+    };
     showValue(deps.getDriveSmoothness(sceneId, spec));
+    showOnOff(deps.getDriveSmoothnessOn(sceneId, spec));
 
     rng.addEventListener("input", () => {
       const v = Number(rng.value);
@@ -3189,16 +3215,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       deps.onSetDriveSmoothness(sceneId, spec, v);
       onLiveEdit();
     });
+    onBtn.addEventListener("click", () => {
+      if (onBtn.getAttribute("aria-pressed") === "true") return;
+      deps.onSetDriveSmoothnessOn(sceneId, spec, true);
+      showOnOff(true);
+      onLiveEdit();
+    });
+    offBtn.addEventListener("click", () => {
+      if (offBtn.getAttribute("aria-pressed") === "true") return;
+      deps.onSetDriveSmoothnessOn(sceneId, spec, false);
+      showOnOff(false);
+      onLiveEdit();
+    });
 
-    wrap.append(name, rng, out);
-    return {
-      el: wrap,
-      setEnabled: (on: boolean) => {
-        rng.disabled = !on;
-        rng.style.opacity = on ? "1" : "0.4";
-        out.style.opacity = on ? "1" : "0.4";
-      },
-    };
+    wrap.append(seg, name, rng, out);
+    return wrap;
   }
 
   /** Every drive setting's own threshold row — On/Off + a labelled 0..1
@@ -3210,7 +3241,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
    *  setDriveThreshold/setDriveThresholdOn either way. A generic gate also
    *  gets a Smoothness row under the threshold line (buildSmoothnessRow),
-   *  dimmed while the threshold is Off. Same live-write, no-rebuild rule
+   *  with its own On/Off. Same live-write, no-rebuild rule
    *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
    *  own mini-segment styling. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
@@ -3264,7 +3295,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rng.disabled = !on;
       rng.style.opacity = on ? "1" : "0.4";
       out.style.opacity = on ? "1" : "0.4";
-      smooth?.setEnabled(on);
     };
 
     const state = deps.getDriveThresholdState(sceneId, spec);
@@ -3294,7 +3324,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!smooth) return wrap;
     const column = document.createElement("div");
     column.style.cssText = `display: flex; flex-direction: column;`;
-    column.append(wrap, smooth.el);
+    column.append(wrap, smooth);
     return column;
   }
 
@@ -3903,7 +3933,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         !!thresholdState &&
         (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
       const smoothnessMoved =
-        !!spec.drive && declared === undefined && !isEngineHitDriver(spec) && deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT;
+        !!spec.drive && declared === undefined && !isEngineHitDriver(spec) && (deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT || !deps.getDriveSmoothnessOn(sceneId, spec));
       // And a hit driver's Reaction row, away from its declared read-out.
       const hit = spec.drive?.hit;
       const readoutMoved = !!hit && hit.flatOnly === undefined && deps.getDriveReadout(sceneId, spec) !== (hit.readout ?? "flat");

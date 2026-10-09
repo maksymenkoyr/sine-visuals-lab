@@ -7,7 +7,9 @@ import {
   setDriveThreshold,
   setDriveThresholdOn,
   getDriveSmoothness,
+  getDriveSmoothnessOn,
   setDriveSmoothness,
+  setDriveSmoothnessOn,
   sanitizeDriveSetting,
   encodeDriveSetting,
   togglePatchSource,
@@ -283,6 +285,18 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.3);
     resetDriveSetting(sceneId, SPARKLE);
     expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(GENERIC_SMOOTHNESS_DEFAULT);
+  });
+
+  it("a generic gate's smoothness on/off: on by default, independent of the threshold and the slider, cleared by Reset", () => {
+    const sceneId = "smoothness-on-1";
+    expect(getDriveSmoothnessOn(sceneId, SPARKLE)).toBe(true);
+    setDriveSmoothness(sceneId, SPARKLE, 0.7);
+    setDriveSmoothnessOn(sceneId, SPARKLE, false);
+    expect(getDriveSmoothnessOn(sceneId, SPARKLE)).toBe(false);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.7);
+    expect(getDriveThresholdState(sceneId, SPARKLE).on).toBe(false);
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveSmoothnessOn(sceneId, SPARKLE)).toBe(true);
   });
 
   it("an empty patch survives the storage round trip", () => {
