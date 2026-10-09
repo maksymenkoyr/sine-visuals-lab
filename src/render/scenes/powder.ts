@@ -1,4 +1,4 @@
-import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
@@ -1770,6 +1770,7 @@ function createPowderScene(): Scene {
   let glowFbo: WebGLFramebuffer | null = null;
   let blurFboA: WebGLFramebuffer | null = null;
   let blurFboB: WebGLFramebuffer | null = null;
+  const glowTargets = createTargetList();
   let glowW = 0;
   let glowH = 0;
   const samplerLocs = new Map<string, WebGLUniformLocation | null>();
@@ -1821,37 +1822,8 @@ function createPowderScene(): Scene {
     return tex;
   }
 
-  /** A half-res LINEAR/CLAMP colour target. LINEAR because the composite
-   *  upsamples it 2x and the blur taps between texels. */
-  function makeGlowTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-  }
-
-  function attachColour(gl: WebGL2RenderingContext, tex: WebGLTexture | null): WebGLFramebuffer | null {
-    const f = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`powder: bloom framebuffer incomplete (0x${status.toString(16)})`);
-    }
-    return f;
-  }
-
   function freeGlowTargets(gl: WebGL2RenderingContext): void {
-    if (glowFbo) gl.deleteFramebuffer(glowFbo);
-    if (blurFboA) gl.deleteFramebuffer(blurFboA);
-    if (blurFboB) gl.deleteFramebuffer(blurFboB);
-    if (glowTex) gl.deleteTexture(glowTex);
-    if (blurTexA) gl.deleteTexture(blurTexA);
-    if (blurTexB) gl.deleteTexture(blurTexB);
+    glowTargets.freeAll(gl);
     glowFbo = null;
     blurFboA = null;
     blurFboB = null;
@@ -1864,18 +1836,17 @@ function createPowderScene(): Scene {
 
   /** Rebuilds the bloom chain when the drawing buffer changes size. The
    *  quality governor moves renderScale at runtime, so the stored size is
-   *  compared every frame rather than trusted from init. */
+   *  compared every frame rather than trusted from init. The targets are
+   *  half-res and LINEAR because the composite upsamples them and the blur
+   *  taps between texels. */
   function ensureGlowTargets(gl: WebGL2RenderingContext): void {
     const w = Math.max(1, gl.drawingBufferWidth >> 1);
     const h = Math.max(1, gl.drawingBufferHeight >> 1);
     if (w === glowW && h === glowH && glowFbo) return;
     freeGlowTargets(gl);
-    glowTex = makeGlowTexture(gl, w, h);
-    blurTexA = makeGlowTexture(gl, w, h);
-    blurTexB = makeGlowTexture(gl, w, h);
-    glowFbo = attachColour(gl, glowTex);
-    blurFboA = attachColour(gl, blurTexA);
-    blurFboB = attachColour(gl, blurTexB);
+    ({ tex: glowTex, fbo: glowFbo } = glowTargets.add(gl, w, h, { label: "powder: bloom" }));
+    ({ tex: blurTexA, fbo: blurFboA } = glowTargets.add(gl, w, h, { label: "powder: bloom" }));
+    ({ tex: blurTexB, fbo: blurFboB } = glowTargets.add(gl, w, h, { label: "powder: bloom" }));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
     glowW = w;

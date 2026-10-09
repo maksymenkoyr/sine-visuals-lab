@@ -182,3 +182,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   entry), and in the same PR, graduated out of `DRAFT_SCENE_IDS`.
 - `#130` (open, not yet merged) — Drives: would move `slats`'s reactive
   settings onto the global per-setting drive-source system.
+- (this PR, open, not yet merged) — Rendering: bloom/blur targets (fluid: the bolt layer target) now come from gl.ts's shared render-target helper; no change to the look.

@@ -30,7 +30,7 @@
  * entering from outside the frame, which is the point.
  */
 import { BOLT_RIBBON_VERTS, BOLT_VERT_FLOATS, buildBoltTree, strikeEnvelope } from "../bolt.ts";
-import { createProgram } from "../gl.ts";
+import { createProgram, createColorTarget, destroyTarget, type ColorTarget } from "../gl.ts";
 import type { SimFormat } from "./fluidSim.ts";
 
 /** Bolt slots the layer can hold in flight at once — enough for a multi-bolt
@@ -178,59 +178,24 @@ export interface FluidBolts {
   readonly strengths: Float32Array;
 }
 
-interface BoltTarget {
-  tex: WebGLTexture;
-  fbo: WebGLFramebuffer;
-  w: number;
-  h: number;
-}
-
 /** Allocates the layer's render target: RG16F (.r core, .g glow) when the sim
  *  is running in half-float mode, RGBA8 otherwise — the same format/filter
- *  choice fluidSim.ts's own createTarget makes for its float-format targets,
- *  reimplemented locally since that helper isn't exported. Byte mode clamps
- *  to [0,1] on write, which is exactly the range core/glow live in. The
- *  mipmapped MIN_FILTER is what lets the display's textureLod read the
- *  blurred layer as light thrown on the dye (16F formats are filterable in
- *  WebGL2 core, so no extra extension is needed for it). */
-function createBoltTarget(gl: WebGL2RenderingContext, w: number, h: number, format: SimFormat): BoltTarget {
+ *  choice fluidSim.ts's own createTarget makes for its float-format targets.
+ *  gl.ts's createColorTarget builds it. Byte mode clamps to [0,1] on write,
+ *  which is exactly the range core/glow live in. The mipmapped MIN_FILTER is
+ *  what lets the display's textureLod read the blurred layer as light thrown
+ *  on the dye (16F formats are filterable in WebGL2 core, so no extra
+ *  extension is needed for it). */
+function createBoltTarget(gl: WebGL2RenderingContext, w: number, h: number, format: SimFormat): ColorTarget {
   const isHalf = format === "half";
-  const tex = gl.createTexture();
-  if (!tex) throw new Error("fluidBolts: createTexture failed");
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  const internalFormat = isHalf ? gl.RG16F : gl.RGBA8;
-  const glFormat = isHalf ? gl.RG : gl.RGBA;
-  const type = isHalf ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
-  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, glFormat, type, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  // A complete mip chain from the start, so the first display frame's
-  // textureLod reads zeros rather than an incomplete texture.
-  gl.generateMipmap(gl.TEXTURE_2D);
-
-  const fbo = gl.createFramebuffer();
-  if (!fbo) {
-    gl.deleteTexture(tex);
-    throw new Error("fluidBolts: createFramebuffer failed");
-  }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-  const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-  if (!complete) {
-    gl.deleteFramebuffer(fbo);
-    gl.deleteTexture(tex);
-    throw new Error(`fluidBolts: target incomplete (format=${format})`);
-  }
-  return { tex, fbo, w, h };
-}
-
-function deleteBoltTarget(gl: WebGL2RenderingContext, t: BoltTarget): void {
-  gl.deleteFramebuffer(t.fbo);
-  gl.deleteTexture(t.tex);
+  return createColorTarget(gl, w, h, {
+    internalFormat: isHalf ? gl.RG16F : gl.RGBA8,
+    format: isHalf ? gl.RG : gl.RGBA,
+    type: isHalf ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE,
+    minFilter: gl.LINEAR_MIPMAP_LINEAR,
+    mipmap: true, // complete chain from the start, so the first textureLod reads zeros
+    label: `fluidBolts (format=${format})`,
+  });
 }
 
 // Attributes match buildBoltTree's ribbon-vertex layout (see bolt.ts):
@@ -397,12 +362,12 @@ export function createFluidBolts(
     size: () => ({ w: target.w, h: target.h }),
     resize(nw: number, nh: number): void {
       if (nw === target.w && nh === target.h) return;
-      deleteBoltTarget(gl, target);
+      destroyTarget(gl, target);
       target = createBoltTarget(gl, nw, nh, format);
       layerEmpty = true;
     },
     dispose(): void {
-      deleteBoltTarget(gl, target);
+      destroyTarget(gl, target);
       gl.deleteBuffer(buf);
       gl.deleteVertexArray(vao);
       prog.dispose();
