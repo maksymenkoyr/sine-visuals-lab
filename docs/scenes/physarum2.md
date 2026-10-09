@@ -1088,6 +1088,11 @@ configs are used.
   (`SORT_EVERY_STEPS`) and grid (`SORT_GRID_BITS`) kept from the prototype;
   not tuned further, since the sort's own share is already small next to the
   saving (Measurements).
+- 2026-10-09 — the Pairs own-trail faders and the Strain Console lanes say
+  their value. Each is a `role="slider"`; its `aria-valuetext` is the text
+  its visible readout shows, so a screen reader no longer hears only the
+  bare number. Attribute only: no change to the sim, the stored values or the
+  look.
 
 ## Tuning notes
 
