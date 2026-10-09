@@ -16,7 +16,10 @@ Researched 2026-10-09. Issue: #455
 
 ## Prototypes
 
-None. Measurements are in "Evidence" below and in `~/.claude/workflow-stats/runs.jsonl` (`npm run workflow-stats -- report`).
+Plan-Code-Review Model Trials: every run so far, per issue, easy against mid, and cost per stage. Its data files are uploaded in the dashboard; add a run by uploading a new file and pointing the dataset at it.
+https://claude.ai/artifact/2zLK4nfv1JWGPWnEmpZaiN
+
+Raw rows are in the owner's `~/.claude/workflow-stats/runs.jsonl` (`npm run workflow-stats -- report`). r10–r12 ran in a cloud session; their rows were handed over as a file to append there.
 
 ## Evidence (2026-10-09, this session)
 
