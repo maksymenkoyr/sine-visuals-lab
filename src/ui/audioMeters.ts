@@ -5,6 +5,7 @@ import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, jackKey } from "./driveSources.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
+import { flashTo } from "./flashAnim.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
@@ -186,7 +187,10 @@ import { createColumnStore } from "./columnStore.ts";
  *
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
- * can't read faster anyway). Only the waveform is a canvas.
+ * can't read faster anyway). Only the waveform is a canvas. Flashes (a bar's
+ * flash(), the Tempo dot on each beat, revealRow's ring) run as Web Animations
+ * through flashAnim.ts rather than as style writes, so they never force a
+ * layout.
  *
  * Each card is independently collapsible (controlsKit.ts's createCard
  * foldId, remembered in panelFolds.ts) and update() skips a folded card's
@@ -415,7 +419,8 @@ const WAVE_HEIGHT_CSS_PX = 64;
 // to the loudest column on screen, floored at WAVE_RANGE_FLOOR so silence
 // and mic hiss aren't blown up to look like signal.
 const WAVE_RANGE_FLOOR = 0.05;
-const FADE = "background-color 0.3s ease-out";
+const FADE_MS = 300;
+const FADE = `background-color ${FADE_MS}ms ease-out`;
 
 // The meter sits where a row's slider would, at the slider's height, so meter
 // rows and slider rows line up card to card.
@@ -459,12 +464,14 @@ const tempoJackHostStyle = `
   display: flex; justify-content: space-between;
 `;
 const BEAT_COLOR = HOT_RED;
-const DOT_EASE =
-  "background-color 0.55s ease-out, box-shadow 0.55s ease-out, transform 0.55s ease-out";
+// The beat's lit look and its fade are a Web Animation (flashTo, flashAnim.ts);
+// this transition only eases a change of resting tint (the lock-step write in
+// createTempoBlock's update()).
+const DOT_FADE_MS = 550;
 const tempoDotStyle = `
   width: 6px; height: 6px; border-radius: 50%; margin: 5px auto 0;
   background-color: ${withAlpha(BEAT_COLOR, 0.25)}; box-shadow: 0 0 0 0 transparent;
-  transition: ${DOT_EASE};
+  transition: background-color ${DOT_FADE_MS}ms ease-out;
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
@@ -738,40 +745,28 @@ export function createTraceStrip(
   };
 }
 
-/** Jump an element to `color` with no fade, then re-arm the fade so the
- *  next color write eases back — a one-frame event made visible. */
-function blink(el: HTMLElement, color: string): void {
-  el.style.transition = "none";
-  el.style.backgroundColor = color;
-  void el.offsetWidth; // commit the jump before the fade is re-enabled
-  el.style.transition = FADE;
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-const ROW_FLASH_MS = 900;
-/** Same jump-then-fade shape as blink(), applied to a row's own ring
- *  (.vc-row's hover box-shadow, controlsTheme.ts) instead of a fill's
- *  background — AudioMeters.revealRow's "you're looking at the right row"
- *  cue, since a jumped-to row isn't necessarily under the pointer. */
+// How long a row's ring takes to fade back to nothing (flashTo).
+const ROW_FLASH_MS = 600;
+// The last flash on each row, so a new one cancels it (flashTo) instead of
+// stacking.
+const rowFlashes = new WeakMap<HTMLElement, Animation>();
+/** A jump-then-fade on a row's own ring (.vc-row's hover box-shadow,
+ *  controlsTheme.ts) — AudioMeters.revealRow's "you're looking at the right
+ *  row" cue, since a jumped-to row isn't necessarily under the pointer. The
+ *  fade runs as a Web Animation, so a click never forces a layout. */
 function flashRow(el: HTMLElement): void {
-  el.style.transition = "none";
-  el.style.boxShadow = "0 0 0 1px #fff, 0 0 16px 2px rgba(255,255,255,0.5)";
-  void el.offsetWidth; // commit the jump before the fade is re-enabled
-  el.style.transition = "box-shadow 0.6s ease-out";
-  // The fade-to-nothing has to start on a later paint than the jump above,
-  // or the browser coalesces both writes into one frame and nothing visibly
-  // eases — same reasoning as blink()'s reflow, one step further because
-  // this fades to a cleared style rather than to a value a later real update
-  // will overwrite on its own.
-  requestAnimationFrame(() => {
-    el.style.boxShadow = "";
-  });
-  setTimeout(() => {
-    el.style.transition = "";
-  }, ROW_FLASH_MS);
+  const anim = flashTo(
+    el,
+    rowFlashes.get(el) ?? null,
+    { boxShadow: "0 0 0 1px #fff, 0 0 16px 2px rgba(255,255,255,0.5)" },
+    { boxShadow: "0 0 0 1px transparent, 0 0 0 0 transparent" },
+    ROW_FLASH_MS,
+  );
+  if (anim) rowFlashes.set(el, anim);
 }
 
 export interface MeterRowSpec {
@@ -861,7 +856,7 @@ export function createMeterRow(spec: MeterRowSpec) {
   el.append(head, meter, hint);
 
   let peakFrac = 0;
-  let flashed = false;
+  let flashAnim: Animation | null = null;
   let lastReadoutKey = "";
   // What the fill settles back to after a flash — the accent unless
   // setFillColor has moved it (the Loudness bar going hot).
@@ -875,10 +870,6 @@ export function createMeterRow(spec: MeterRowSpec) {
     right,
     /** Fraction of the track (null empties it). `dtSec` drives the peak cap's fall. */
     setValue(value: number | null, dtSec: number): void {
-      if (flashed) {
-        fill.style.backgroundColor = restColor;
-        flashed = false;
-      }
       if (value === null) {
         fill.style.width = "0";
         cap.style.visibility = "hidden";
@@ -903,17 +894,16 @@ export function createMeterRow(spec: MeterRowSpec) {
       unit.style.display = u ? "" : "none";
     },
     /** A one-frame event (an onset, a drop): the fill jumps to `color` and
-     *  fades back to the resting colour on the next setValue(). */
+     *  fades straight back to the resting colour (flashTo). */
     flash(color = "#fff"): void {
-      blink(fill, color);
-      flashed = true;
+      flashAnim = flashTo(fill, flashAnim, { backgroundColor: color }, { backgroundColor: restColor }, FADE_MS);
     },
     /** A sustained state (the Loudness bar past its hot mark): the colour
      *  the fill rests at from now on. Keyed, so a per-frame call is free. */
     setFillColor(color: string): void {
       if (color === restColor) return;
       restColor = color;
-      if (!flashed) fill.style.backgroundColor = color;
+      fill.style.backgroundColor = color;
     },
   };
 }
@@ -935,17 +925,11 @@ function createTempoBlock(accent: string) {
   el.append(jackHost, inner);
 
   let restColor = withAlpha(BEAT_COLOR, 0.25);
-  let lit = false;
+  let dotAnim: Animation | null = null;
   let lastLockStep = -1;
   let shownBpm = 0;
   let shownCaption = caption.textContent;
   digits.textContent = "--";
-
-  function settle(): void {
-    dot.style.backgroundColor = restColor;
-    dot.style.boxShadow = "0 0 0 0 transparent";
-    dot.style.transform = "scale(1)";
-  }
 
   return {
     el,
@@ -954,9 +938,9 @@ function createTempoBlock(accent: string) {
      *  rather than a row. */
     jackHost,
     /** Per frame. `lock` (0..1) sets the resting tint; a lit dot eases back
-     *  to it on the frame after its beat. `beat` is anim.metronomeBeat, not
-     *  a raw hit — the dot now flashes with the metronome, same as this
-     *  card's own number ticks with it. */
+     *  to it straight away. `beat` is anim.metronomeBeat, not a raw hit — the
+     *  dot now flashes with the metronome, same as this card's own number
+     *  ticks with it. */
     update(lock: number, beat: boolean): void {
       // Quantised so the resting tint isn't rewritten every frame.
       const step = Math.round(lock * 20);
@@ -964,21 +948,19 @@ function createTempoBlock(accent: string) {
         lastLockStep = step;
         restColor = withAlpha(BEAT_COLOR, 0.25 + 0.6 * (step / 20));
         digits.style.color = `rgba(255,255,255,${(0.45 + 0.55 * (step / 20)).toFixed(3)})`;
-      }
-      if (lit) {
-        settle();
-        lit = false;
+        dot.style.backgroundColor = restColor;
       }
       if (beat) {
-        // Jump with no easing, then re-arm the easing so the next settle()
-        // fades — same shape as blink(), with glow and size along for the ride.
-        dot.style.transition = "none";
-        dot.style.backgroundColor = "#fff";
-        dot.style.boxShadow = `0 0 6px 1px ${BEAT_COLOR}`;
-        dot.style.transform = "scale(1.6)";
-        void dot.offsetWidth;
-        dot.style.transition = DOT_EASE;
-        lit = true;
+        // The flash is a Web Animation from the lit look to the current
+        // resting tint, cancelled by the next beat, so a beat never forces
+        // a style and layout pass.
+        dotAnim = flashTo(
+          dot,
+          dotAnim,
+          { backgroundColor: "#fff", boxShadow: `0 0 6px 1px ${BEAT_COLOR}`, transform: "scale(1.6)" },
+          { backgroundColor: restColor, boxShadow: "0 0 0 0 transparent", transform: "scale(1)" },
+          DOT_FADE_MS,
+        );
       }
     },
     /** At the text tick: `bpm` is already the number to show (0 = none) —
