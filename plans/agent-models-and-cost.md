@@ -7,7 +7,8 @@ Researched 2026-10-09. Issue: #455
 ## Decisions
 
 - "Gather all this stuff in one place", including loosely related research — one doc in `docs/`, linking each source rather than copying it.
-- "Set recommended auto compaction": auto-compaction is back on in the user settings (`autoCompactEnabled`, it had been `false`), and Haiku gets a 120000 auto-compact window under `modelSettings` in `.claude/settings.json` (#451). It beat the strict 100000 window, which compacts at ~67K: workflow Haiku coders start at 41–53K, so they would compact 2–5 times each and lose the plan text to summaries every time.
+- "Set recommended auto compaction": auto-compaction is back on in the user settings at its default (`autoCompactEnabled`, it had been `false`).
+- "On haiku cap I think I shouldn't force it. It could affect work and it's still quite cheap too" — no Haiku compact window. Haiku may pass 100K; the stats should just price it honestly (phase 1).
 - A lean Haiku agent for plan-following code: `.claude/agents/haiku-coder.md` (#451), the user's "yeah" to trying it.
 
 ## Prototypes
@@ -26,12 +27,11 @@ None. Measurements are in "Evidence" below and in `~/.claude/workflow-stats/runs
 
 ## Rejected
 
-- A hard 100000 Haiku window — see Decisions.
+- A Haiku compact window (`modelSettings` `autoCompactWindow` 100000 or 120000) — the user's call above. It worked in tests, but compaction mid-task summarizes the plan Haiku is following, and the money saved is small.
 - A hook that stops Haiku near 100K — hooks don't receive the model or token use, and stopping mid-change leaves work for a fix round.
 
 ## Open questions
 
-- Does compaction mid-task hurt how well Haiku follows the plan? Not measured on real coding yet. — doesn't block
 - Should the `/plan-code-review` code stage run as `agentType: 'haiku-coder'`, with the repo rules it needs written into the plan? — blocks phase 4
 
 ## Phases
@@ -46,7 +46,7 @@ Each phase is one build session and one PR.
 - [ ] **2. One doc says which model and effort each kind of agent work gets, and why**
   - Touches: new `docs/agent-models.md`, `docs/index.md`
   - Read first: this plan's Evidence; `plans/multi-model-flow.md`; #429, #444, #447, #451; CLAUDE.md's delegation table; `docs/issue-labels.md`
-  - Done when: the doc covers planning, coding, review and sweeps, Haiku's 100K line and the compaction window, the lean agent, and the cost-per-finished-task rule, each linking its source; numbers stay in dated notes, per CLAUDE.md
+  - Done when: the doc covers planning, coding, review and sweeps, Haiku's 100K line and why it isn't capped, the lean agent, and the cost-per-finished-task rule, each linking its source; numbers stay in dated notes, per CLAUDE.md
 
 - [ ] **3. CLAUDE.md's delegation table matches the doc**
   - Touches: `CLAUDE.md`, `AGENTS.md` (two separate copies; edit shared rules in both), `docs/issue-labels.md`
