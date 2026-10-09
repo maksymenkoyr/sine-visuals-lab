@@ -202,6 +202,10 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * through flashAnim.ts rather than as style writes, so they never force a
  * layout.
  *
+ * Every graph canvas here is role="img" with a name set by nameGraph, the
+ * same way leashGauge.ts names its gauge. The label is a required argument of
+ * createColumnRing and createTraceStrip, so a new trace can't ship unnamed.
+ *
  * Each card is independently collapsible (controlsKit.ts's createCard
  * foldId, remembered in panelFolds.ts) and update() skips a folded card's
  * drawing and DOM writes — folding buys back the per-frame cost, not just
@@ -516,6 +520,14 @@ interface TraceStripGuide {
   color: string;
 }
 
+/** A graph canvas is role="img" with a name, the way leashGauge.ts names its
+ *  gauge. Labelled rather than hidden: a readout beside a graph gives the
+ *  current value, while the graph draws its history. */
+function nameGraph(canvas: HTMLCanvasElement, label: string): void {
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", label);
+}
+
 /** The canvas side of every trace strip: a columnStore.ts store drawn as one
  *  column per CSS pixel over `spanSec()`, so createHitsHistory and the
  *  Waveform share its timing. push() records whether or not anything is on
@@ -525,10 +537,12 @@ interface TraceStripGuide {
 function createColumnRing(
   seriesCount: number,
   heightPx: number,
+  label: string,
   spanSec: () => number = () => HISTORY_SPAN_DEFAULT,
   maxSpanSec: number = HISTORY_SPAN_DEFAULT,
 ) {
   const canvas = document.createElement("canvas");
+  nameGraph(canvas, label);
   canvas.style.cssText = `display: block; width: 100%; height: ${heightPx}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
   const S = seriesCount;
@@ -580,15 +594,16 @@ function createColumnRing(
 /** A rolling line trace over createColumnRing. `guides` replaces the fixed
  *  mid-height line with dashed lines at each `at` (0..1, the series' y scale),
  *  read fresh every draw() since a mark can move. `span` is the card's span
- *  chip; without it the strip uses HISTORY_SPAN_DEFAULT. Exported for the
- *  Master card's Picture block. */
+ *  chip; without it the strip uses HISTORY_SPAN_DEFAULT. `label` names the
+ *  canvas (nameGraph) and has no default, so a strip can't ship unnamed.
+ *  Exported for the Master card's Picture block. */
 export function createTraceStrip(
   series: TraceStripSeries[],
   heightPx: number,
-  opts: { guides?: () => TraceStripGuide[]; span?: TraceSpan } = {},
+  opts: { label: string; guides?: () => TraceStripGuide[]; span?: TraceSpan },
 ) {
-  const { guides, span } = opts;
-  const ring = createColumnRing(series.length, heightPx, span?.sec, span?.max);
+  const { guides, span, label } = opts;
+  const ring = createColumnRing(series.length, heightPx, label, span?.sec, span?.max);
   const { canvas, ctx } = ring;
   const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (heightPx - 2);
 
@@ -975,7 +990,10 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
     unit: "s",
     description: `${hitsRuleHint(getSilenceGate)} A fired tick's height is its graded strength (Shape).`,
   });
-  const ring = createColumnRing(HITS_SERIES_COUNT, HITS_HEIGHT_PX, span.sec, span.max);
+  // The lane names come from HITS_LANES, so the label can't drift from the lanes.
+  const hitsNames = HITS_LANES.map((l) => l.label).join(", ");
+  const hitsLabel = `History of hits, one lane each for ${hitsNames}, with Surge under them`;
+  const ring = createColumnRing(HITS_SERIES_COUNT, HITS_HEIGHT_PX, hitsLabel, span.sec, span.max);
   const ctx = ring.ctx;
   // Lane jacks mount in this wrapper, not the row: the row's top edge is above
   // the head and shifts with font metrics, the wrapper's is exactly the
@@ -1357,7 +1375,9 @@ function createTimingStrip(mountJack: MountJack, span: TraceSpan) {
       "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above: faint on each beat, bright on the bar, and only the bar goes out its jack; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
-  const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX, span.sec, span.max);
+  // The lane names come from TIMING_LANES, so the label can't drift from the lanes.
+  const timingLabel = `Beat timing history: ${TIMING_LANES.map((l) => l.label).join(", ")}`;
+  const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX, timingLabel, span.sec, span.max);
   const ctx = ring.ctx;
   // Padded on the right like createHitsHistory's vizWrap, so jacks sit past the trace.
   const vizWrap = document.createElement("div");
@@ -1510,6 +1530,7 @@ const TAIL_ENVELOPE_FALLBACK_BPM = 120;
  *  move). */
 function createTailEnvelope() {
   const canvas = document.createElement("canvas");
+  nameGraph(canvas, "How each lane's pulse falls after a hit");
   canvas.style.cssText = `display: block; width: 100%; height: ${TAIL_ENVELOPE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
   const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: TAIL_ENVELOPE_HEIGHT_CSS_PX });
@@ -1586,6 +1607,7 @@ function createTailEnvelope() {
 
 function createHitCurve() {
   const canvas = document.createElement("canvas");
+  nameGraph(canvas, "Curve: how strongly a hit stands out against how far it cleared the firing line");
   canvas.style.cssText = `display: block; width: 100%; height: ${HIT_CURVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
 
@@ -1841,7 +1863,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   // Per column: the loudest positive and negative swing (both as heights
   // above zero, so one max-hold serves both) and whether anything clipped.
-  const waveRing = createColumnRing(3, WAVE_HEIGHT_CSS_PX, signalSpan.sec, signalSpan.max);
+  const waveRing = createColumnRing(
+    3,
+    WAVE_HEIGHT_CSS_PX,
+    "Waveform of the incoming sound, with clipping marked",
+    signalSpan.sec,
+    signalSpan.max,
+  );
   waveform.el.children[1].replaceWith(waveRing.canvas);
   const waveCtx = waveRing.ctx;
   mountJack("anim.wavePeak", waveform.right, waveform.el);
@@ -1909,7 +1937,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: HISTORY_LEVEL_COLOR, width: 1 },
     ],
     HISTORY_HEIGHT_CSS_PX,
-    { span: signalSpan },
+    { label: "History of Level and Energy", span: signalSpan },
   );
   history.el.children[1].replaceWith(historyStrip.canvas);
   history.setReadout(String(signalSpan.sec()));
@@ -1937,6 +1965,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ],
     GATE_HISTORY_HEIGHT_CSS_PX,
     {
+      label: "History of Level and the gate's Dimmer against the gate's two marks",
       guides: () => {
         const marks = deps.getSilenceGate();
         const top = gateLevelTop(marks);
@@ -2199,7 +2228,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: BEAT_GRID_COLOR, width: 1.5 },
     ],
     BEAT_TRACE_HEIGHT_CSS_PX,
-    { span: tempoSpan },
+    { label: "History of the beat wave and the bar wave", span: tempoSpan },
   );
   wave.el.children[1].replaceWith(waveTrace.canvas);
   wave.setReadout(String(tempoSpan.sec()));
@@ -2281,6 +2310,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // processed samples in this trace after a toggle until the span rolls them
   // out; harmless.
   const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX, {
+    label: "History of the live Centroid",
     span: characterSpan,
   });
   brightnessRow.el.insertBefore(centroidTrace.canvas, brightnessRow.el.children[2]);
