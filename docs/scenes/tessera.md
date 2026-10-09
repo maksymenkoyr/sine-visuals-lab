@@ -191,4 +191,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   measured short lZaThcqs-dk (a 3D lattice of hollow boxes on a sphere)".
   Single squashed commit covering the flat-tile rejection, the lattice
   rebuild, and the round 2/round 5 tuning passes.
-- `#349` — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.

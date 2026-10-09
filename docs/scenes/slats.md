@@ -182,4 +182,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   entry), and in the same PR, graduated out of `DRAFT_SCENE_IDS`.
 - `#130` (open, not yet merged) — Drives: would move `slats`'s reactive
   settings onto the global per-setting drive-source system.
-- `#349` — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.
+- `#463` (`0a99b44c`, 2026-10-09) — sampler units set with `GLProgram.setI` instead of a scene-local location map; no visual change.
