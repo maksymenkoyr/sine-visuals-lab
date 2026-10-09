@@ -43,4 +43,26 @@ describe("flashTo", () => {
     expect(out).toBeNull();
     expect(cancel).toHaveBeenCalledTimes(1);
   });
+
+  it("animates [lit] alone when rest is null, so it eases to the element's own style", () => {
+    const animate = vi.fn(() => ({ cancel: vi.fn() }) as unknown as Animation);
+    const el = { animate } as unknown as Flashable;
+
+    flashTo(el, null, LIT, null, 600);
+
+    expect(animate).toHaveBeenCalledWith([LIT], { duration: 600, easing: "ease-out" });
+  });
+
+  it("returns null instead of throwing when an old engine rejects the keyframes", () => {
+    const cancel = vi.fn();
+    const prev = { cancel } as unknown as Animation;
+    const animate = vi.fn(() => {
+      throw new DOMException("partial keyframes", "NotSupportedError");
+    });
+    const el = { animate } as unknown as Flashable;
+
+    expect(flashTo(el, prev, LIT, null, 600)).toBeNull();
+    expect(flashTo(el, null, LIT, REST, 600)).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });

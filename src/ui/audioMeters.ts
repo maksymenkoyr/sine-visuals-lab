@@ -763,7 +763,7 @@ function flashRow(el: HTMLElement): void {
     el,
     rowFlashes.get(el) ?? null,
     { boxShadow: "0 0 0 1px #fff, 0 0 16px 2px rgba(255,255,255,0.5)" },
-    { boxShadow: "0 0 0 1px transparent, 0 0 0 0 transparent" },
+    null, // ease to whatever the row shows then (hover ring, focus)
     ROW_FLASH_MS,
   );
   if (anim) rowFlashes.set(el, anim);
