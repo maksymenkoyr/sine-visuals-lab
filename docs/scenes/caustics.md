@@ -622,6 +622,18 @@ reference-measurement workflow used by later scenes.
   emission state, with Ring threshold), the one-ring-per-yes look of the
   first ring pool. The Threshold row under the graph stays the generic gate,
   as decided on 2026-10-03.
+- 2026-10-09 — Level glow (#449): the whole pool's brightness used to rise
+  with `uEnergy` through a fixed term in FRAG's `acc *=` line, with no setting
+  to turn it off. It is now `levelGlow`, a wirable slider ("Level glow", Look
+  group) on All level by default. Its default reproduces the old term exactly
+  (the slider times `LEVEL_GLOW_GAIN` is the old 0.7 coefficient, same
+  1.5 power curve), so existing looks are unchanged; at 0, loudness no longer
+  moves the brightness at all, and the base, Beat flash and the ripple crest
+  are what is left. It is a multiply, not a lift: that brightening exists only
+  with music, so an unplugged jack reads 0 and the glow goes, like Beat flash.
+  Caustic density is the one music term that is not zeroed by its slider: its
+  own source still lifts the slider (`densityTargetFor`). That is left to #453,
+  and `densityTargetFor` is untouched here.
 
 ## Tuning notes
 
@@ -798,3 +810,4 @@ reference-measurement workflow used by later scenes.
 - #154 (2026-09-27) — Beat ripple: rings always reach the edge, then a continuous ring emitter (`rippleEmitter.ts`) sized by salience, with its threshold drawn on the panel graph (`settingMarks.ts`); level/line drive sources fire through `valueTrigger.ts` (see Decisions)
 - #185 (2026-09-28) — Spray loop: 2x2 nozzle cells, far nozzles skipped, gated on its own brightness — the frame's GPU cost roughly halved, no pixel changed (see Decisions)
 - #405 (draft, 2026-10-06) — Beat ripple's detector moved to the shared `src/render/standout.ts`, renamed only (see Decisions)
+- #449 (2026-10-09) — Level glow: brightness-from-loudness gets its own setting (see Decisions)
