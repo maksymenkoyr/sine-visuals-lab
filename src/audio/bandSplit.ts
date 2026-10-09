@@ -1,5 +1,5 @@
 import { NUM_BANDS } from "./types.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * Persisted low/mid/high crossover for src/render/bandEnergy.ts, tunable from
@@ -27,16 +27,21 @@ const DEFAULT_SPLIT: BandSplit = { lowMid: LOW_MID_DEFAULT, midHigh: MID_HIGH_DE
 
 const STORAGE_KEY = "vibe.bandSplit";
 
+// Strict: throws on text that is not a JSON object, so the reload hook keeps
+// the split it has (net/syncedStores.ts's parseSyncedObject). An absent key is
+// the default split.
+function readSplit(): BandSplit {
+  const parsed = parseSyncedObject(localStorage.getItem(STORAGE_KEY));
+  if (parsed === null) return { ...DEFAULT_SPLIT };
+  return clampSplit({
+    lowMid: typeof parsed.lowMid === "number" ? parsed.lowMid : DEFAULT_SPLIT.lowMid,
+    midHigh: typeof parsed.midHigh === "number" ? parsed.midHigh : DEFAULT_SPLIT.midHigh,
+  });
+}
+
 function loadInitial(): BandSplit {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_SPLIT };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_SPLIT };
-    return clampSplit({
-      lowMid: typeof parsed.lowMid === "number" ? parsed.lowMid : DEFAULT_SPLIT.lowMid,
-      midHigh: typeof parsed.midHigh === "number" ? parsed.midHigh : DEFAULT_SPLIT.midHigh,
-    });
+    return readSplit();
   } catch {
     return { ...DEFAULT_SPLIT };
   }
@@ -59,8 +64,10 @@ let version = 0;
 // A snapshot applied from outside (the pop-out's Cue, a room look on a TV)
 // re-seeds the split. It bumps `version` like any change, so bandEnergy.ts
 // rebuilds its cached group edges instead of rendering the old crossover.
+// Unreadable text throws out of readSplit before either line runs, so neither
+// the split nor the version moves.
 registerSyncedStore(STORAGE_KEY, () => {
-  cache = loadInitial();
+  cache = readSplit();
   version++;
 });
 

@@ -1,6 +1,6 @@
 import type { SignalId, SignalLink } from "./signals.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedNumber, parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { proUnlocked } from "./pro.ts";
 import { clearCustomValue } from "./customValues.ts";
 
@@ -320,12 +320,15 @@ export function settingDefault(sceneId: string, spec: SceneSetting): number {
 
 type Store = Record<string, Record<string, number>>;
 
+// Strict: throws on text that is not a JSON object, so the reload hook can keep
+// the cache it has (net/syncedStores.ts's parseSyncedObject).
+function readStore(): Store {
+  return (parseSyncedObject(localStorage.getItem(STORAGE_KEY)) ?? {}) as Store;
+}
+
 function loadInitial(): Store {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return readStore();
   } catch {
     return {};
   }
@@ -334,10 +337,12 @@ function loadInitial(): Store {
 const cache: Store = loadInitial();
 
 // Re-seeds the cache from localStorage — how the pop-out output window picks
-// up a snapshot (net/syncedStores.ts).
+// up a snapshot (net/syncedStores.ts). It reads before it clears, so unreadable
+// text leaves the cache as it was.
 registerSyncedStore(STORAGE_KEY, () => {
+  const next = readStore();
   for (const k of Object.keys(cache)) delete cache[k];
-  Object.assign(cache, loadInitial());
+  Object.assign(cache, next);
 });
 
 function persist(): void {
@@ -423,13 +428,18 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
     return Math.min(max, Math.max(min, value));
   }
 
+  // Strict: throws on text that is not a finite number, so the reload hook
+  // keeps the value it has. An absent key is the default: parseSyncedNumber
+  // checks for null before converting, since Number(null) is 0, not NaN, and an
+  // absent key must mean the default (identity), not a master that blanks every param.
+  function reload(): number {
+    const n = parseSyncedNumber(localStorage.getItem(storageKey));
+    return n === null ? defaultValue : clamp(n);
+  }
+
   function load(): number {
     try {
-      const raw = localStorage.getItem(storageKey);
-      // Number(null) is 0, not NaN — an absent key must mean the default
-      // (identity), not a master that blanks every param.
-      if (raw === null) return defaultValue;
-      return clamp(Number(raw));
+      return reload();
     } catch {
       return defaultValue;
     }
@@ -437,7 +447,7 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
 
   let value = load();
   registerSyncedStore(storageKey, () => {
-    value = load();
+    value = reload();
   });
   return {
     get: (): number => value,

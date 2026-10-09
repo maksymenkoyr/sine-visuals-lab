@@ -1,5 +1,5 @@
 import type { SceneSetting } from "./sceneSettings.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import {
   getSceneMaster,
   getSceneSetting,
@@ -228,27 +228,34 @@ function pruneDefaultEntries(store: AutoStore): boolean {
   return changed;
 }
 
+// Strict: throws on text that is not a JSON object, so the reload hook keeps
+// what it had (net/syncedStores.ts's parseSyncedObject). Then the same tidy-up
+// the initial load has always run: drop bad scope entries, migrate, prune and
+// write back if anything changed.
+function readAutoStore(): AutoStore {
+  const parsed = parseSyncedObject(localStorage.getItem(STORAGE_KEY_AUTO_ON)) as AutoStore | null;
+  if (parsed === null) return {};
+  // A scope entry that isn't an object (hand-edited or corrupted storage)
+  // would make the migrate/prune passes below throw and the catch discard
+  // every scene's choice — drop just that entry instead.
+  let dropped = false;
+  for (const sceneId of Object.keys(parsed)) {
+    const entry = parsed[sceneId];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      delete parsed[sceneId];
+      dropped = true;
+    }
+  }
+  const migrated = migrateLegacyExpansionKeys(parsed);
+  const pruned = pruneDefaultEntries(parsed);
+  if (dropped || migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
+  return parsed;
+}
+
+// Initial load: unreadable text reads as empty, as it always has.
 function loadAutoStore(): AutoStore {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_AUTO_ON);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    // A scope entry that isn't an object (hand-edited or corrupted storage)
-    // would make the migrate/prune passes below throw and the catch discard
-    // every scene's choice — drop just that entry instead.
-    let dropped = false;
-    for (const sceneId of Object.keys(parsed)) {
-      const entry = parsed[sceneId];
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-        delete parsed[sceneId];
-        dropped = true;
-      }
-    }
-    const migrated = migrateLegacyExpansionKeys(parsed);
-    const pruned = pruneDefaultEntries(parsed);
-    if (dropped || migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
-    return parsed;
+    return readAutoStore();
   } catch {
     return {};
   }
@@ -257,9 +264,11 @@ function loadAutoStore(): AutoStore {
 const autoOn: AutoStore = loadAutoStore();
 
 // Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+// Reads before it clears, so unreadable text leaves the store as it was.
 registerSyncedStore(STORAGE_KEY_AUTO_ON, () => {
+  const next = readAutoStore();
   for (const k of Object.keys(autoOn)) delete autoOn[k];
-  Object.assign(autoOn, loadAutoStore());
+  Object.assign(autoOn, next);
 });
 
 function persistAutoStore(): void {
