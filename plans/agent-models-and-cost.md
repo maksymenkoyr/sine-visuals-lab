@@ -36,12 +36,14 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 |---|---|---|---|---|---|---|
 | r10 | Opus/medium plans, Haiku/xhigh codes, Opus/high reviews, up to 2 correction rounds | 7/8 | 3.72 → 3.67 | 2.16 | 3.67 / 1.63 | 3.68 / 2.47 |
 | r11 | r10 plus the Opus-fix fork | 7/8 | 3.89 → 3.84 | 2.38 | 3.90 / 1.86 | 3.80 / 2.69 |
-| r12 | r10 with Sonnet/high planning | still running when this was written | | | | |
+| r12 | r10 with Sonnet/high planning | 7/8 | 3.74 → 3.74 | 2.09 | 3.70 / 1.84 | 3.76 / 2.24 |
 
 - r10 and r11 are the same setup until after the first review (the fork only acts after it), yet their first-review code grades differ by 0.17: that is the noise of one run, as large as most gaps between setups recorded before. Rankings from single runs aren't evidence yet.
 - Repriced, the Haiku code stage cost $0.39–0.45 per issue, about four times what was recorded ($0.10–0.11). It is still the cheapest stage; the Opus review stays the largest.
 - Fork, mean over the issues whose first review had findings: the reviewer fixing them itself cost $0.19 plus a $0.58 check and left nothing open; the correction loop cost $0.23 and left 0.5 findings open.
 - Mid issues cost about 1.4× easy ones, with grades about the same.
+- A Sonnet planner (r12) graded about the same as Opus planners (r10, r11) and cost less to plan; its fix rounds cost more, since Haiku fixed more. Within the noise above, the planner model made no visible difference.
+- r12 #356 was the third branch stopped by `blocked: "none"`; its review also found a real bug (one-keyframe animations throw on the Chromium versions `vite.config.ts` targets).
 - Two of the three not-ready branches were the workflow's fault: a fix agent answered `blocked: "none"` and the loop stopped before the last review could fix what was left (r10 #349, r11 #347). A third review wrote ordinary notes about slow tests into `blocked`. Fixed with phase 1 (`wasBlocked`).
 - Running three workflows at once put the container at load ~21 on 4 cores; timing-only tests failed in every run and durations are not comparable with earlier runs.
 
