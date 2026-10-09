@@ -61,7 +61,7 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 
 Each phase is one build session and one PR.
 
-- [ ] **1. `npm run workflow-stats -- report` shows Haiku's real cost, over-100K requests included**
+- [x] **1. `npm run workflow-stats -- report` shows Haiku's real cost, over-100K requests included** — PR #459
   - Touches: `tools/workflowStatsLib.mjs` (`PRICES`, `transcriptStats`, the cost sum), `tools/workflow-stats.mjs`, their tests
   - Read first: the `tools/workflowStatsLib.mjs` header; the claude-api skill's Haiku 5.5 pricing (both rate cards)
   - Done when: `transcriptStats` splits tokens from requests over 100K and the cost prices them at the higher card; a test with a fixture over 100K fails without the split; re-recording the existing runs (`sweep`) shows r6's Haiku cost near $1.26 rather than $0.36; `npm run typecheck` and `npm run test` pass
@@ -97,3 +97,4 @@ Each phase is one build session and one PR.
   - Done when: a comparison pins its commit as the benchmark does and runs one setup at a time (the command refuses to start beside another running workflow); each row records the machine's load, and the report marks rows taken under load
 
 ## Learned while building
+- 2026-10-09, phase 1, PR #459: rows record `longTokens` next to `tokens`; older rows have none and keep their short-card cost until re-recorded from transcripts. Re-recorded, Haiku's code stage at xhigh cost $0.39–0.57 per issue on r10–r12.
