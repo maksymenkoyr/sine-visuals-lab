@@ -193,4 +193,4 @@ pivot above.
   v1-v7) — Neon Fluid added: a stable-fluids dye sim drawn as mirrored neon
   outlines, through the MacCormack/beat-puff, mirror-mode, Auto-symmetry,
   Currents/neon-tone-map, and screen-space-lightning pivots described above.
-- (this PR, open, not yet merged) — Rendering: bloom/blur targets (fluid: the bolt layer target) now come from gl.ts's shared render-target helper; no change to the look.
+- (this PR, open, not yet merged) — Rendering: the lightning bolt layer's render target (`fluidBolts.ts`) now comes from gl.ts's `createColorTarget`; no change to the look.
