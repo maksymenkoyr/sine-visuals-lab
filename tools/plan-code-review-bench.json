@@ -1,0 +1,5 @@
+{
+  "about": "The fixed benchmark for /plan-code-review bench: these issues, always from this commit, so setups compare across reruns after the issues are fixed on main. Runs r8 (pipeline) and r9 (Opus solo) used the same commit, before the bench existed. Change it only by starting a new bench: rows from another commit are a different series in the report.",
+  "base": "39cbc28bdd7fa0e9cbed8003c7f478c1dadfb602",
+  "issues": [346, 353, 355]
+}
