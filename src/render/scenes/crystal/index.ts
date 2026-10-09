@@ -260,7 +260,6 @@ function createCrystalSceneImpl(): Scene {
   let blurProg: GLProgram | null = null;
   let compositeProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   const bandsBuf = new Float32Array(NUM_BANDS);
   let state: CrystalState | null = null;
 
@@ -285,18 +284,6 @@ function createCrystalSceneImpl(): Scene {
   let l1BFbo: WebGLFramebuffer | null = null;
   let l1W = 0;
   let l1H = 0;
-
-  /** Cached sampler locations — GLProgram has no integer setter (samplers
-   *  are the one uniform kind that needs one), same pattern as powder.ts /
-   *  shards/index.ts. */
-  function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -371,7 +358,6 @@ function createCrystalSceneImpl(): Scene {
       marchProg = createProgram(gl, MARCH_FRAG);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       state = createCrystalState();
       dbW = 0;
@@ -441,7 +427,7 @@ function createCrystalSceneImpl(): Scene {
       if (useBloom) {
         blurProg.use();
         gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+        blurProg.setI("uTex", 0);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, l0AFbo);
         gl.viewport(0, 0, l0W, l0H);
@@ -484,9 +470,9 @@ function createCrystalSceneImpl(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, l0BTex);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, l1BTex);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uSharpTex", "uSharpTex"), 0);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uGlowATex", "uGlowATex"), 1);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uGlowBTex", "uGlowBTex"), 2);
+      compositeProg.setI("uSharpTex", 0);
+      compositeProg.setI("uGlowATex", 1);
+      compositeProg.setI("uGlowBTex", 2);
       drawFullscreenQuad(gl, quadVao);
 
       // 4. The gallery renders every scene into one shared context each
@@ -506,7 +492,6 @@ function createCrystalSceneImpl(): Scene {
       compositeProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       freeTargets(gl);
-      samplerLocs.clear();
       marchProg = null;
       blurProg = null;
       compositeProg = null;

@@ -1,3 +1,9 @@
+// gl.ts holds the context, program and fullscreen-triangle helpers.
+// createProgram caches each uniform location per program, in a map that dies
+// with the program, so a scene that rebuilds its programs gets fresh locations
+// for free. Set a sampler's unit with `setI`, never with a scene-local location
+// map.
+
 export function createGL(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   overrides: WebGLContextAttributes = {},
@@ -74,6 +80,8 @@ export interface GLProgram {
   program: WebGLProgram;
   use(): void;
   setF(name: string, v: number): void;
+  /** Integer uniform: a sampler's texture unit, or an `int`/`bool` uniform. */
+  setI(name: string, v: number): void;
   setV2(name: string, x: number, y: number): void;
   setV4(name: string, x: number, y: number, z: number, w: number): void;
   setFv(name: string, arr: Float32Array | number[]): void;
@@ -116,6 +124,7 @@ export function createProgram(
     program,
     use: () => gl.useProgram(program),
     setF: (name, v) => gl.uniform1f(loc(name), v),
+    setI: (name, v) => gl.uniform1i(loc(name), v),
     setV2: (name, x, y) => gl.uniform2f(loc(name), x, y),
     setV4: (name, x, y, z, w) => gl.uniform4f(loc(name), x, y, z, w),
     setFv: (name, arr) => gl.uniform1fv(loc(name), arr as Float32Array),
