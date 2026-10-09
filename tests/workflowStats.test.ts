@@ -3,12 +3,15 @@ import {
   buildRows,
   costOf,
   forkIndex,
+  mergeRows,
   parseGrade,
   parseLabel,
+  PRICES,
   renderReport,
   setupKey,
   summarize,
   transcriptStats,
+  wasBlocked,
 } from "../tools/workflowStatsLib.mjs";
 
 // The rows these build are what tools/workflow-stats.mjs stores and sums, so a
@@ -64,6 +67,22 @@ describe("parseGrade", () => {
   });
 });
 
+describe("wasBlocked", () => {
+  it("takes a reason as a block and the words for nothing as no block", () => {
+    expect(wasBlocked("could not cd into the worktree")).toBe(true);
+    for (const v of ["", " ", "none", "None.", "N/A", "-", null, undefined]) expect(wasBlocked(v)).toBe(false);
+  });
+});
+
+describe("mergeRows", () => {
+  it("replaces a run's rows and keeps every other run's", () => {
+    const row = (runId: string, issue: number) => ({ runId, issue }) as never;
+    const merged = mergeRows([row("a", 1), row("a", 2), row("b", 1)], [row("a", 3)]);
+    expect(merged).toEqual([row("b", 1), row("a", 3)]);
+    expect(mergeRows([], [row("c", 1)])).toEqual([row("c", 1)]);
+  });
+});
+
 describe("parseLabel", () => {
   it("splits a stage label into stage, issue and round", () => {
     expect(parseLabel("review #355")).toEqual({ stage: "review", issue: 355, round: 1 });
@@ -98,6 +117,31 @@ describe("costOf", () => {
     expect(c.cacheRead).toBeLessThan(c.input);
     expect(c.total).toBeCloseTo(c.input + c.cacheWrite + c.cacheRead + c.output);
     expect(costOf("claude-unknown", { input: 1, cacheWrite: 0, cacheRead: 0, outputSeen: 0 })).toBeNull();
+  });
+
+  it("bills a Haiku request whose prompt passes the long card's line at the long card", () => {
+    const { long, ...short } = PRICES["claude-haiku-5-5"];
+    const line = long!.above;
+    const at = (n: number) => `2026-10-08T00:00:0${n}.000Z`;
+    // One request just under the line, one just over it.
+    const s = transcriptStats([
+      assistant("claude-haiku-5-5", "xhigh", at(1), "under", { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: line, output_tokens: 1000 }),
+      assistant("claude-haiku-5-5", "xhigh", at(2), "over", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: line, output_tokens: 1000 }),
+    ]);
+    expect(s.longTokens).toEqual({ input: 1, cacheWrite: 0, cacheRead: line, outputSeen: 1000 });
+    const c = costOf(s.model, s.tokens, s.longTokens)!;
+    const expected = (line * short.cacheRead + 1000 * short.output + 1 * long!.input + line * long!.cacheRead + 1000 * long!.output) / 1e6;
+    expect(c.total).toBeCloseTo(expected, 9);
+    // Pricing it all at the short card is what the rows recorded before the split did.
+    expect(costOf(s.model, s.tokens)!.total).toBeLessThan(c.total);
+  });
+
+  it("ignores longTokens for a model with no long card", () => {
+    const t = { input: 1e6, cacheWrite: 0, cacheRead: 0, outputSeen: 0 };
+    expect(costOf("claude-opus-5-5", t, t)!.total).toBeCloseTo(costOf("claude-opus-5-5", t)!.total);
+    expect(transcriptStats([
+      assistant("claude-opus-5-5", "high", "2026-10-08T00:00:00.000Z", "r", { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 900_000, output_tokens: 1 }),
+    ]).longTokens).toEqual({ input: 0, cacheWrite: 0, cacheRead: 0, outputSeen: 0 });
   });
 });
 

@@ -142,8 +142,14 @@ const CODE_SCHEMA = {
 
 // `blocked` lets an agent that couldn't reach the worktree say so and still
 // return valid output; without it a blocked agent burns its retries on the
-// schema and kills the issue's whole pipeline.
-const BLOCKED = { type: 'string', description: 'empty, or why you could not work in the worktree at all' }
+// schema and kills the issue's whole pipeline. Agents have filled it with
+// "none" when nothing blocked them, and with ordinary notes (slow tests), and
+// each stopped the loop before the last review could fix what was left, so
+// `wasBlocked` ignores the "nothing" words and the description says where
+// notes go.
+const BLOCKED = { type: 'string', description: 'Leave empty unless you could not cd into or write to the worktree at all; then say why. Problems met while doing the work (failing or slow tests, findings left open) go in your other fields, never here.' }
+const wasBlocked = (v) => typeof v === 'string' && v.trim() !== '' && !/^(none|n\/?a|no|null|nothing|-)\.?$/i.test(v.trim())
+// Keep in step with `wasBlocked` in tools/workflowStatsLib.mjs.
 
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -320,7 +326,7 @@ const results = await pipeline(
         { label: `review #${issue.n} r${round}`, phase: 'Review', ...models.review, schema: REVIEW_SCHEMA },
       )
       if (!review) return null
-      if (review.blocked) { stalled = `review round ${round} was blocked: ${review.blocked}`; log(`#${issue.n}: STALLED, ${stalled}`); break }
+      if (wasBlocked(review.blocked)) { stalled = `review round ${round} was blocked: ${review.blocked}`; log(`#${issue.n}: STALLED, ${stalled}`); break }
       history = review.findings
       if (round === 1 && fork && review.fork_commit && !sameSha(review.fork_commit, head)) {
         forked = { branch: forkAt.branch, worktree: forkAt.path, commit: review.fork_commit, fixed: review.fork_fixed || [] }
@@ -350,7 +356,7 @@ const results = await pipeline(
       // A fix round that didn't move the branch hands the same commit to one
       // last review, which fixes it itself; a blocked one stops here, since the
       // reviewer would be blocked the same way.
-      if (fix?.blocked) { stalled = `fix round ${round} was blocked: ${fix.blocked}`; log(`#${issue.n}: STALLED, ${stalled}`); break }
+      if (wasBlocked(fix?.blocked)) { stalled = `fix round ${round} was blocked: ${fix.blocked}`; log(`#${issue.n}: STALLED, ${stalled}`); break }
       if (!fix) stalled = `fix round ${round} returned nothing`
       else if (sameSha(fix.commit, head)) stalled = `fix round ${round} made no commit`
       if (stalled) log(`#${issue.n}: STALLED, ${stalled}; the last review fixes it`)

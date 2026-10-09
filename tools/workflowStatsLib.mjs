@@ -23,7 +23,12 @@
 // Cost is an API-list-price estimate from `PRICES`, not a bill: a Claude Code
 // subscription doesn't charge per token, but the estimate still ranks stages
 // and setups fairly. Cache writes are priced at `CACHE_WRITE_MULT` × input,
-// the one-hour cache Claude Code uses.
+// the one-hour cache Claude Code uses. A model with a `long` card bills a
+// whole request at that card once its prompt (input plus cache write plus
+// cache read) passes `long.above`, so `transcriptStats` keeps those requests'
+// tokens apart as `longTokens` and `costOf` prices them on their own. Rows
+// recorded before that split priced every request at the short card, which
+// made a Haiku code stage look up to several times cheaper than it was.
 //
 // Agents are labelled "<stage> #<issue>", with " r<round>" on stages that run
 // once per correction round. Version 1 and 2 runs have one review that fixes
@@ -56,8 +61,12 @@ export const GRADE_POINTS = {
 export const PRICES = {
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
-  // The skill lists no Haiku cache-read price; this assumes the usual tenth of input.
-  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
+  // The skill lists no Haiku cache-read price; this assumes the usual tenth of
+  // input, on both cards.
+  "claude-haiku-5-5": {
+    input: 0.1, output: 0.5, cacheRead: 0.01,
+    long: { above: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05 },
+  },
 };
 export const CACHE_WRITE_MULT = 2;
 
@@ -69,6 +78,16 @@ export function parseGrade(text) {
   if (typeof text !== "string") return null;
   const m = /^\s*([A-DF][+-]?)(?![A-Za-z])/.exec(text);
   return m && m[1] in GRADE_POINTS ? m[1] : null;
+}
+
+/**
+ * Whether an agent's `blocked` field reports a real block. Agents have
+ * written "none" there when nothing blocked them; the workflow script makes
+ * the same check before it stops a loop.
+ * @param {unknown} v
+ */
+export function wasBlocked(v) {
+  return typeof v === "string" && v.trim() !== "" && !/^(none|n\/?a|no|null|nothing|-)\.?$/i.test(v.trim());
 }
 
 /** "review #346 r2" → { stage: "review", issue: 346, round: 2 } */
@@ -107,17 +126,18 @@ export function transcriptStats(entries) {
     r.outputSeen = Math.max(r.outputSeen, usage.output_tokens ?? 0);
     requests.set(key, r);
   }
-  const tokens = { input: 0, cacheWrite: 0, cacheRead: 0, outputSeen: 0 };
+  const above = PRICES[model ?? ""]?.long?.above ?? Infinity;
+  let tokens = NO_TOKENS;
+  let longTokens = NO_TOKENS;
   let peakContext = 0;
   for (const r of requests.values()) {
-    tokens.input += r.input;
-    tokens.cacheWrite += r.cacheWrite;
-    tokens.cacheRead += r.cacheRead;
-    tokens.outputSeen += r.outputSeen;
-    peakContext = Math.max(peakContext, r.input + r.cacheWrite + r.cacheRead);
+    const prompt = r.input + r.cacheWrite + r.cacheRead;
+    tokens = addTokens(tokens, r);
+    if (prompt > above) longTokens = addTokens(longTokens, r);
+    peakContext = Math.max(peakContext, prompt);
   }
   const minutes = first !== null && last !== null ? Math.round((last - first) / 600) / 100 : 0;
-  return { model, effort, requests: requests.size, tokens, peakContext, minutes };
+  return { model, effort, requests: requests.size, tokens, longTokens, peakContext, minutes };
 }
 
 /**
@@ -133,18 +153,44 @@ export function forkIndex(entries) {
   return id ? entries.findIndex((e) => e.requestId === id) : at;
 }
 
-/** API-list-price estimate in USD for one agent's tokens, split by kind. */
-export function costOf(model, tokens) {
+/**
+ * API-list-price estimate in USD for one agent's tokens, split by kind.
+ * `longTokens` is the part of `tokens` from requests billed at the model's
+ * `long` card.
+ */
+export function costOf(model, tokens, longTokens = NO_TOKENS) {
   const p = PRICES[model ?? ""];
   if (!p) return null;
-  const m = 1e6;
+  const card = (t, c) => ({
+    input: (t.input * c.input) / 1e6,
+    cacheWrite: (t.cacheWrite * c.input * CACHE_WRITE_MULT) / 1e6,
+    cacheRead: (t.cacheRead * c.cacheRead) / 1e6,
+    output: (t.outputSeen * c.output) / 1e6,
+  });
+  const long = p.long ? longTokens : NO_TOKENS;
+  const short = card({
+    input: tokens.input - long.input,
+    cacheWrite: tokens.cacheWrite - long.cacheWrite,
+    cacheRead: tokens.cacheRead - long.cacheRead,
+    outputSeen: tokens.outputSeen - long.outputSeen,
+  }, p);
+  const over = p.long ? card(long, p.long) : card(NO_TOKENS, p);
   const cost = {
-    input: (tokens.input * p.input) / m,
-    cacheWrite: (tokens.cacheWrite * p.input * CACHE_WRITE_MULT) / m,
-    cacheRead: (tokens.cacheRead * p.cacheRead) / m,
-    output: (tokens.outputSeen * p.output) / m,
+    input: short.input + over.input,
+    cacheWrite: short.cacheWrite + over.cacheWrite,
+    cacheRead: short.cacheRead + over.cacheRead,
+    output: short.output + over.output,
   };
   return { ...cost, total: cost.input + cost.cacheWrite + cost.cacheRead + cost.output };
+}
+
+/**
+ * The store's rows with `added` in place of any rows for the same runs:
+ * recording a run twice replaces it, and a run never appears twice.
+ */
+export function mergeRows(stored, added) {
+  const runs = new Set(added.map((r) => r.runId));
+  return [...stored.filter((r) => !runs.has(r.runId)), ...added];
 }
 
 /** The setup a row ran under, as one readable key. */
@@ -200,8 +246,8 @@ export function buildRows({ record, agents, recordedAt }) {
       model: t.model, effort: t.effort,
       requests: t.requests, toolCalls: a.progress?.toolCalls ?? null,
       minutes: a.progress?.durationMs ? Math.round(a.progress.durationMs / 600) / 100 : t.minutes,
-      peakContext: t.peakContext, tokens: t.tokens,
-      cost: costOf(t.model, t.tokens),
+      peakContext: t.peakContext, tokens: t.tokens, longTokens: t.longTokens ?? NO_TOKENS,
+      cost: costOf(t.model, t.tokens, t.longTokens),
       result: a.result,
     };
     if (!byIssue.has(at.issue)) byIssue.set(at.issue, []);
@@ -280,7 +326,7 @@ export function buildRows({ record, agents, recordedAt }) {
       finishFixes: finish ? findingsOf(finish).filter((f) => f.fixed).length : selfFixed,
       // A fix round that was blocked or fixed nothing; a run with these
       // measured the sandbox, not the models.
-      stalledFixes: list.filter((a) => a.stage === "fix" && (a.result?.blocked || !(a.result?.addressed ?? []).length)).length,
+      stalledFixes: list.filter((a) => a.stage === "fix" && (wasBlocked(a.result?.blocked) || !(a.result?.addressed ?? []).length)).length,
       // Both arms after the first review, when it forked. The loop's grade is
       // `finalCodeGrade`, taken before a last review's own fixes.
       fork: opusfix || check ? {
