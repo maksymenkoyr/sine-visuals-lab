@@ -16,6 +16,7 @@ Researched 2026-10-09. Issue: #455
 
 - The grading design, the user's points of 2026-10-09: one `grade` agent per issue that only grades, never learns which setup or models built the branch, and whose cost stays out of the setup's; the grade follows from its findings by fixed rules (a blocking finding caps it, a should-fix caps it lower), with correctness, tests, scope and docs scored apart; a script, not an agent, runs typecheck and tests and records where the agents' own reports differ; the same branch is graded twice now and then, and a gap between setups smaller than that noise counts for nothing; pinned runs leak nothing (a clean clone with no remote, prompts that override CLAUDE.md's "read origin/main and open PRs"); comparing with the real fix is asked at launch, only the grader sees it, and its result has its own field.
 - From research the same day (sources in the Evidence below), the measurements the grade rests on: the real fix's tests run on the branch (SWE-bench's fail-to-pass and pass-to-pass), mutation testing for test strength instead of one revert, a blind side-by-side judgement between setups instead of a score per branch, and repeated runs with ranges instead of one run per setup.
+- Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
 
 ## Prototypes
@@ -73,7 +74,6 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 - Should the `/plan-code-review` code stage run as `agentType: 'haiku-coder'`, with the repo rules it needs written into the plan? — blocks phase 4
 - Which model and effort is the fixed grader: solo mode's (the reviewer model) or one never used as a reviewer, so no setup grades itself? — blocks phase 5
 - How many runs per setup, and how many bench issues, before a comparison counts? Phase 7's grader noise answers it. — blocks phase 7
-- What grades an issue whose fix has no tests (a scene's look, a shader)? Only the side-by-side judgement, or screenshots beside it? — blocks phase 6
 - The new repo's name, licence, and whether `runs.jsonl` joins it or stays in the private log repo. — blocks phase 8
 
 ## Phases
@@ -112,6 +112,7 @@ Each phase is one build session and one PR.
   - Read first: the `tools/workflow-stats.mjs` header; StrykerJS's docs on running only changed files
   - Checks: typecheck and tests on the base and on the branch, so a test that also fails on the base doesn't count; where the agents' own `typecheck_passed` and `tests_passed` differ from that; the reference fix's tests run on the branch (fail-to-pass and pass-to-pass) when the bench names a reference PR; a mutation score of the new tests on the changed files (StrykerJS as a dev dependency).
   - Reference fix: asked at launch; only the grader and the script see it, and its result goes in its own field, apart from the grade.
+  - Bench issues: only ones whose real fix has tests; a look or shader issue stays out.
   - Done when: a bench run records each check per issue; a test that passes with the fix reverted shows as a surviving mutant; the report gives these counts per setup next to the grades
 
 - [ ] **7. Comparisons say how much is noise**
