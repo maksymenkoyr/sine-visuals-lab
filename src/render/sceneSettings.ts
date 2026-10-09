@@ -429,9 +429,9 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
   }
 
   // Strict: throws on text that is not a finite number, so the reload hook
-  // keeps the value it has. An absent key is the default — checked before the
-  // Number() below, since Number(null) is 0, not NaN, and an absent key must
-  // mean the default (identity), not a master that blanks every param.
+  // keeps the value it has. An absent key is the default: parseSyncedNumber
+  // checks for null before converting, since Number(null) is 0, not NaN, and an
+  // absent key must mean the default (identity), not a master that blanks every param.
   function reload(): number {
     const n = parseSyncedNumber(localStorage.getItem(storageKey));
     return n === null ? defaultValue : clamp(n);

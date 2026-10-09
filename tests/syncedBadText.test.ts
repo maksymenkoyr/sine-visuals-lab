@@ -61,7 +61,7 @@ describe("the two strict readers", () => {
 const FOCUS: SceneSetting = { key: "focus", label: "Focus", min: 0, max: 1, step: 0.05, default: 0.7 };
 
 describe("scene settings (vibe.sceneSettings)", () => {
-  // Break: restoring the old clear-then-loadInitial hook gives the default (0.7) on the first bad text.
+  // Break: restoring the old clear-then-loadInitial hook gives FOCUS.default on the first bad text.
   it("keeps every scene's values on unreadable text, then rereads a valid snapshot wholesale", async () => {
     const { fake, synced } = await fresh({
       [SCENE_SETTINGS_KEY]: JSON.stringify({ "scene-a": { focus: 0.4 }, "scene-b": { focus: 0.15 } }),
@@ -113,7 +113,7 @@ describe("auto-tune choices (vibe.sceneAuto)", () => {
 });
 
 describe("device dials (vibe.sceneMaster)", () => {
-  // Break: the old load() returns 1 on "abc" (Number("abc") is NaN, clamped to the default).
+  // Break: the old load() returns SCENE_MASTER_DEFAULT on "abc" (Number("abc") is NaN, clamped to the default).
   it("keeps the dial on unreadable text, still clamps a readable one, and resets when absent", async () => {
     const { fake, synced } = await fresh({ [SCENE_MASTER_KEY]: "1.5" });
     const { getSceneMaster, SCENE_MASTER_MAX, SCENE_MASTER_DEFAULT } = await import("../src/render/sceneSettings.ts");
@@ -196,7 +196,7 @@ describe("band split (vibe.bandSplit)", () => {
 
 describe("hit shape (vibe.hitKnee, vibe.hitTailLow, …)", () => {
   // Per field: the bad knee keeps 2.5 while the readable tail and floor apply.
-  // Break: the old reload sets knee to HIT_KNEE_DEFAULT (1); a version that skips
+  // Break: the old reload sets knee to HIT_KNEE_DEFAULT; a version that skips
   // the whole reload on any bad field leaves tail.low at 0.5.
   it("keeps only the field that cannot be read, and applies the rest of the snapshot", async () => {
     const { fake, synced } = await fresh({ "vibe.hitKnee": "2.5", "vibe.hitTailLow": "0.5" });
@@ -212,7 +212,7 @@ describe("hit shape (vibe.hitKnee, vibe.hitTailLow, …)", () => {
 });
 
 describe("silence gate marks (vibe.silenceGateClosed, vibe.silenceGateOpen)", () => {
-  // Break: the old reload gives closed = SILENCE_GATE_CLOSED_DEFAULT (0.05) on "nan?".
+  // Break: the old reload gives closed = SILENCE_GATE_CLOSED_DEFAULT on "nan?".
   it("keeps an unreadable mark and applies the other one", async () => {
     const { fake, synced } = await fresh({ "vibe.silenceGateClosed": "0.2", "vibe.silenceGateOpen": "0.4" });
     const { getSilenceGate } = await import("../src/audio/silenceGate.ts");
