@@ -35,6 +35,22 @@ export const meta = {
 // review's tokens where it made the copy, so the copy's fixing shows as its
 // own cost, the price of "the reviewer just fixes it".
 //
+// With `solo: true` the setup has no plan and no review: one agent
+// (`models.solo`) reads the issue, implements, tests and commits it alone.
+// One reviewer-model `grade` agent then grades the branch without fixing
+// anything. The grade is the measurement, not part of the setup, so the
+// recorder leaves its cost out of the issue's cost. This answers "would the
+// strong model alone be cheaper?" on the same terms as the reviewed runs.
+//
+// With `base` set to a commit, the run is pinned to it. Every stage branches
+// from that commit and diffs against it instead of origin/main, the planner
+// skips the "already done" check, and agents read only the issue's title and
+// body, since later comments may describe the fix. This keeps a benchmark
+// comparable after its issues are fixed on main; /plan-code-review's `bench`
+// reads the issues and the commit from tools/plan-code-review-bench.json.
+// The agents still load today's CLAUDE.md, so a big change there
+// shifts every setup at once: compare bench runs from about the same time.
+//
 // The stage models come from `args.models` and default to `DEFAULT_MODELS`.
 // Different models in different runs are the experiment that
 // tools/workflow-stats.mjs compares. The recorder reads `WORKFLOW_VERSION`
@@ -51,6 +67,7 @@ export const meta = {
 //
 // args: an array of issue numbers, or
 //   { issues: [346, 353], tag: 'r3', maxRounds: 2, fork: true, models: { code: { model: 'sonnet', effort: 'medium' } } }
+//   { issues: [346, 353, 355], base: '39cbc28b…', tag: 'b1', solo: true }
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
@@ -61,17 +78,24 @@ const DEFAULT_MODELS = {
   plan: { model: 'opus', effort: 'medium' },
   code: { model: 'haiku', effort: 'xhigh' },
   review: { model: 'opus', effort: 'high' },
+  solo: { model: 'opus', effort: 'medium' },
 }
 
 const input = Array.isArray(args) ? { issues: args } : (args || {})
 const pick = (stage) => ({ ...DEFAULT_MODELS[stage], ...((input.models || {})[stage] || {}) })
-const models = { plan: pick('plan'), code: pick('code'), review: pick('review') }
+const models = { plan: pick('plan'), code: pick('code'), review: pick('review'), solo: pick('solo') }
 const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS
 const tag = input.tag || `v${WORKFLOW_VERSION}`
-const fork = !!input.fork && maxRounds > 0
+const solo = !!input.solo
+const fork = !!input.fork && maxRounds > 0 && !solo
+const pinned = !!input.base
+const BASE = input.base || 'origin/main'
 const ISSUES = (input.issues || []).map(i => (typeof i === 'number' ? { n: i } : i))
 if (!ISSUES.length) throw new Error('plan-code-review: pass issue numbers in args')
-log(`v${WORKFLOW_VERSION} · plan ${models.plan.model}/${models.plan.effort} · code ${models.code.model}/${models.code.effort} · review ${models.review.model}/${models.review.effort} · up to ${maxRounds} correction round(s)${fork ? ' · Opus-fix fork' : ''} · tag ${tag}`)
+const ms = (m) => `${m.model}/${m.effort}`
+log(`v${WORKFLOW_VERSION} · ` +
+  (solo ? `solo ${ms(models.solo)} · graded by ${ms(models.review)}` : `plan ${ms(models.plan)} · code ${ms(models.code)} · review ${ms(models.review)} · up to ${maxRounds} correction round(s)${fork ? ' · Opus-fix fork' : ''}`) +
+  `${pinned ? ` · bench at ${BASE.slice(0, 8)}` : ''} · tag ${tag}`)
 
 const GRADE = { type: 'string', enum: ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'] }
 
@@ -107,7 +131,7 @@ const CODE_SCHEMA = {
   properties: {
     worktree_path: { type: 'string', description: 'absolute path of the worktree you worked in (output of pwd)' },
     branch: { type: 'string' },
-    base: { type: 'string', description: 'the origin/main sha the branch started from' },
+    base: { type: 'string', description: 'the sha the branch started from' },
     commit: { type: 'string', description: 'final commit sha' },
     typecheck_passed: { type: 'boolean' },
     tests_passed: { type: 'boolean' },
@@ -157,21 +181,83 @@ const FIX_SCHEMA = {
   required: ['commit', 'addressed', 'not_addressed', 'blocked'],
 }
 
+const SOLO_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: 'the issue title' },
+    already_done: { type: 'boolean', description: 'true if you stopped because origin/main already covers this issue' },
+    worktree_path: { type: 'string', description: 'absolute path of the worktree you worked in (output of pwd)' },
+    branch: { type: 'string' },
+    base: { type: 'string', description: 'the sha the branch started from' },
+    commit: { type: 'string', description: 'final commit sha' },
+    typecheck_passed: { type: 'boolean' },
+    tests_passed: { type: 'boolean' },
+    summary: { type: 'string', description: 'what you changed, and any open question for the maintainer' },
+  },
+  required: ['title', 'already_done', 'worktree_path', 'branch', 'base', 'commit', 'typecheck_passed', 'tests_passed', 'summary'],
+}
+
+const GRADE_SCHEMA = {
+  type: 'object',
+  properties: Object.fromEntries(['issue_resolved', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes', 'blocked']
+    .map(k => [k, REVIEW_SCHEMA.properties[k]])),
+  required: ['issue_resolved', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes'],
+}
+
 const GIT_RULES = 'Never use git stash (refs/stash is shared with parallel agents), never push, never touch main. '
-const INDEPENDENT = 'This is an independent attempt: do not look at other worktrees under .claude/worktrees, other local branches for this issue, or earlier attempts at it. Work only from origin/main and what you are given here. '
+const INDEPENDENT = `This is an independent attempt: do not look at other worktrees under .claude/worktrees, other local branches for this issue, or earlier attempts at it. Work only from ${BASE} and what you are given here. `
 const TRAILER = 'Co-Authored-By: Claude <noreply@anthropic.com>'
+const readIssue = (n) => pinned
+  ? `\`gh issue view ${n} --json title,body\`, title and body only, since this run is pinned to commit ${BASE} and later comments may describe a fix`
+  : `\`gh issue view ${n}\``
+const whereIs = (branch, path) => `The work is on branch ${branch} in the worktree ${path}: cd there and run every command there. If you cannot cd there or write there, stop at once and say why in \`blocked\`; never do the work anywhere else. ${GIT_RULES}`
 const open = (findings) => findings.filter(f => !f.fixed && f.severity !== 'nit')
 // Agents report short or full shas; a prefix only counts at abbreviation length.
 const sameSha = (a, b) => !!a && !!b && (a === b || (Math.min(a.length, b.length) >= 7 && (a.startsWith(b) || b.startsWith(a))))
 const listFindings = (fs) => fs.map(f => `- [${f.id}] ${f.severity}, ${f.origin}, ${f.kind}: ${f.file}${f.line ? `:${f.line}` : ''}: ${f.summary}`).join('\n')
 
+if (solo) {
+  const soloResults = await pipeline(
+    ISSUES,
+    (issue) => agent(
+      `Resolve GitHub issue #${issue.n} in this repo on your own: there is no plan before you and no review after you. You are in a fresh git worktree. ${GIT_RULES}${INDEPENDENT}\n` +
+      `1. \`pwd\`; remember it. \`git fetch origin\`. Read the issue: ${readIssue(issue.n)}.\n` +
+      (pinned
+        ? `2. Skip any check of whether the issue is already done; set already_done false.\n`
+        : `2. Grep origin/main (\`git grep <term> origin/main\`) to see whether it is already done. If it is, set already_done true, leave the other fields empty, and stop.\n`) +
+      `3. Pick a slug of two or three lowercase words joined by dashes, then \`git checkout -b worktree-issue-${issue.n}-${tag}-<slug> ${BASE}\`. \`git status --porcelain\` must print nothing and \`git rev-parse HEAD\` must equal \`git rev-parse ${BASE}\`; report that sha as base.\n` +
+      `4. If node_modules exists and is a symlink, remove the link. Run \`npm ci\`. The worktree must have its own install.\n` +
+      `5. Read the code involved and the file headers CLAUDE.md's table points to for this area, then implement the issue.\n` +
+      `6. Run \`npm run typecheck\` and \`npm test\` and fix failures you caused. For each new test, break the code it guards for a moment and check that the test fails, then restore.\n` +
+      `7. Commit with a plain-words message ending with a blank line and:\n${TRAILER}`,
+      { label: `solo #${issue.n}`, phase: 'Code', ...models.solo, isolation: 'worktree', schema: SOLO_SCHEMA },
+    ),
+    async (built, issue) => {
+      if (!built || built.already_done) { log(`#${issue.n}: skipped (${built ? 'already done' : 'no result'})`); return null }
+      const grade = await agent(
+        `Grade the implementation of GitHub issue #${issue.n} ("${built.title}"). ${whereIs(built.branch, built.worktree_path)}\n` +
+        `One agent resolved it alone, with no plan and no review, in an experiment that compares setups across runs. You are the measurement: grade it as honestly as a correction round's review would, and do NOT fix anything.\n` +
+        `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
+        `2. Run \`npm run typecheck\` and \`npm test\`.\n` +
+        `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
+        `4. Give every finding origin 'code' and write each summary so a coder could fix it without asking.`,
+        { label: `grade #${issue.n}`, phase: 'Review', ...models.review, schema: GRADE_SCHEMA },
+      )
+      return { issue: issue.n, title: built.title, branch: built.branch, worktree: built.worktree_path, base: built.base, summary: built.summary, review: grade }
+    },
+  )
+  return { version: WORKFLOW_VERSION, models: { solo: models.solo, review: models.review }, solo, base: pinned ? BASE : null, tag, results: soloResults.filter(Boolean) }
+}
+
 const results = await pipeline(
   ISSUES,
   (issue) => agent(
     `You are planning GitHub issue #${issue.n} in this repo. Do NOT edit any files. ${INDEPENDENT}\n` +
-    `1. Read the issue: \`gh issue view ${issue.n}\`.\n` +
-    `2. \`git fetch origin\`, then grep origin/main (\`git grep <term> origin/main\`) to see whether it is already done, and skim \`gh pr list\` titles for overlap.\n` +
-    `3. Read the code involved on origin/main (\`git show origin/main:<path>\`, since the checkout may be behind) and the file headers CLAUDE.md's table points to for this area.\n` +
+    `1. Read the issue: ${readIssue(issue.n)}.\n` +
+    (pinned
+      ? `2. \`git fetch origin\`. This run is pinned to commit ${BASE}: skip the already-done check, set already_done false, and plan against that commit even where origin/main has moved on.\n`
+      : `2. \`git fetch origin\`, then grep origin/main (\`git grep <term> origin/main\`) to see whether it is already done, and skim \`gh pr list\` titles for overlap.\n`) +
+    `3. Read the code involved on ${BASE} (\`git show ${BASE}:<path>\`, since the checkout may be behind) and the file headers CLAUDE.md's table points to for this area.\n` +
     `4. Write a DETAILED plan a smaller model can follow mechanically: exact files, functions, the code shape of each change (snippets welcome), the header comments to update (CLAUDE.md: explain code at the top of its file; don't copy numbers from code into comments), and the verification commands. Call out pitfalls.\n` +
     `5. For every test you ask for, give inputs whose expected value is NOT trivial (not 0, not an empty result, not the test's own counters), and name the break in the code that must make that test fail. A test that still passes with the change reverted is worthless.\n` +
     `6. Mark anything you state as fact about the code that you did not read yourself as UNVERIFIED. The coder will trust everything else.`,
@@ -185,7 +271,7 @@ const results = await pipeline(
       `Implement GitHub issue #${issue.n} ("${plan.title}") by following this plan. You are in a fresh git worktree. ${GIT_RULES}${INDEPENDENT}\n` +
       `Setup, and check each step before going on:\n` +
       `1. \`pwd\`; remember it. \`git fetch origin\`.\n` +
-      `2. \`git checkout -b ${branch} origin/main\`. Then \`git status --porcelain\` must print nothing and \`git rev-parse HEAD\` must equal \`git rev-parse origin/main\`; report that sha as base.\n` +
+      `2. \`git checkout -b ${branch} ${BASE}\`. Then \`git status --porcelain\` must print nothing and \`git rev-parse HEAD\` must equal \`git rev-parse ${BASE}\`; report that sha as base.\n` +
       `3. If node_modules exists and is a symlink, remove the link. Run \`npm ci\`. The worktree must have its own install.\n` +
       `Then implement, run \`npm run typecheck\` and \`npm test\` (fix failures you caused). For each new test, break the code it guards for a moment and check that the test fails, then restore. Commit with a plain-words message ending with a blank line and:\n${TRAILER}\n\n` +
       `=== PLAN ===\n${plan.plan}`,
@@ -196,7 +282,6 @@ const results = await pipeline(
   async (prev, issue) => {
     if (!prev) return null
     const { plan, code } = prev
-    const whereIs = (branch, path) => `The work is on branch ${branch} in the worktree ${path}: cd there and run every command there. If you cannot cd there or write there, stop at once and say why in \`blocked\`; never do the work anywhere else. ${GIT_RULES}`
     const where = whereIs(code.branch, code.worktree_path)
     const forkAt = { branch: `${code.branch}-opusfix`, path: `${code.worktree_path}-opusfix` }
     let check = null
@@ -209,12 +294,12 @@ const results = await pipeline(
         : mode === 'check'
           ? `The reviewer of round 1 fixed its own findings on this branch. Do NOT fix anything yourself: grade the branch as it stands, and grade the plan as the round-1 reviewer would have.\n`
           : `Do NOT fix anything yourself in this worktree: your findings go back to the coder.\n`) +
-      `1. Read the issue (\`gh issue view ${issue.n}\`) and the diff \`git diff origin/main...HEAD\`.\n` +
+      `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
       `2. Run \`npm run typecheck\` and \`npm test\`.\n` +
       `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
       `4. Give each finding an origin: 'plan' when the coder faithfully followed a wrong or missing instruction, 'code' when the coder went wrong on its own. Write each summary so the coder can fix it without asking.\n` +
       (mode === 'loop'
-        ? `5. If any open finding has origin 'plan', write \`plan_amendment\`: for each one, the corrected instruction that overrides the plan, read against origin/main (\`git show origin/main:<path>\`) where it matters. Otherwise leave it empty.\n`
+        ? `5. If any open finding has origin 'plan', write \`plan_amendment\`: for each one, the corrected instruction that overrides the plan, read against ${BASE} (\`git show ${BASE}:<path>\`) where it matters. Otherwise leave it empty.\n`
         : `5. Leave \`plan_amendment\` empty.\n`) +
       (history.length ? `6. Earlier rounds found these. Re-check each by id: list it with fixed: true if resolved, or again with fixed: false (and a sharper summary) if not. Add new findings with new ids.\n${listFindings(history)}\n` : '') +
       (mode === 'last'
@@ -277,4 +362,4 @@ const results = await pipeline(
   },
 )
 
-return { version: WORKFLOW_VERSION, models, maxRounds, fork, tag, results: results.filter(Boolean) }
+return { version: WORKFLOW_VERSION, models: { plan: models.plan, code: models.code, review: models.review }, maxRounds, fork, base: pinned ? BASE : null, tag, results: results.filter(Boolean) }

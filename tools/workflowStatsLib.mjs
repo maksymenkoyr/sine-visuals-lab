@@ -39,6 +39,13 @@
 // request that made the copy, and records the second half as its own
 // `opusfix` agent. A row's `fork` then holds each arm's cost and grade after
 // the first review, which is what the fork is for.
+//
+// A `solo` run has one `solo` agent per issue and one `grade` agent that
+// grades its branch in place of a review. The grade is the measurement, not
+// part of the setup, so it counts as both the first and the last review, the
+// row's `cost` leaves it out, and `gradeCost` keeps it apart. A run pinned to
+// a `base` commit (a benchmark) gets that commit in its setup key, so bench
+// rows form their own series apart from everyday runs on origin/main.
 
 /** Grade letters the review schema allows, best first, with their points. */
 export const GRADE_POINTS = {
@@ -55,7 +62,7 @@ export const PRICES = {
 export const CACHE_WRITE_MULT = 2;
 
 /** Every stage label the workflow uses, in run order. */
-export const STAGES = ["plan", "code", "review", "replan", "fix", "finish", "opusfix", "check"];
+export const STAGES = ["plan", "code", "solo", "review", "replan", "fix", "finish", "opusfix", "check", "grade"];
 
 /** @param {unknown} text @returns {string | null} the grade letter it starts with */
 export function parseGrade(text) {
@@ -66,7 +73,7 @@ export function parseGrade(text) {
 
 /** "review #346 r2" → { stage: "review", issue: 346, round: 2 } */
 export function parseLabel(label) {
-  const m = /^(plan|replan|code|fix|review|finish|opusfix|check)\s+#(\d+)(?:\s+r(\d+))?$/.exec(label ?? "");
+  const m = /^(plan|replan|code|solo|fix|review|finish|opusfix|check|grade)\s+#(\d+)(?:\s+r(\d+))?$/.exec(label ?? "");
   return m ? { stage: m[1], issue: Number(m[2]), round: m[3] ? Number(m[3]) : 1 } : null;
 }
 
@@ -146,8 +153,13 @@ export function setupKey(row) {
     const s = row.stages[name];
     return s ? `${name} ${shortModel(s.model)}/${s.effort ?? "?"}` : `${name} -`;
   };
+  const bench = row.base ? ` · bench ${row.base.slice(0, 8)}` : "";
+  if (row.solo) {
+    const g = row.stages.grade;
+    return `v${row.version} · ${st("solo")} · graded by ${g ? `${shortModel(g.model)}/${g.effort ?? "?"}` : "-"}${bench}`;
+  }
   const loops = row.maxRounds ? ` · up to ${row.maxRounds} correction round(s)` : "";
-  return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}${loops}${row.forkRun ? " · Opus-fix fork" : ""}`;
+  return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}${loops}${row.forkRun ? " · Opus-fix fork" : ""}${bench}`;
 }
 
 function shortModel(model) {
@@ -200,9 +212,12 @@ export function buildRows({ record, agents, recordedAt }) {
     const one = (stage, round = 1) => list.find((a) => a.stage === stage && a.round === round) ?? null;
     const plan = one("plan")?.result ?? null;
     const code = one("code")?.result ?? null;
+    const solo = one("solo")?.result ?? null;
+    const grade = one("grade");
     const reviews = list.filter((a) => a.stage === "review").sort((a, b) => a.round - b.round);
-    const firstReview = reviews[0]?.result ?? null;
-    const lastReview = reviews.at(-1)?.result ?? null;
+    const firstReview = reviews[0]?.result ?? grade?.result ?? null;
+    const lastReview = reviews.at(-1)?.result ?? grade?.result ?? null;
+    const soloRun = !!one("solo");
     const finish = one("finish")?.result ?? null;
     const stages = {};
     for (const name of STAGES) {
@@ -217,8 +232,9 @@ export function buildRows({ record, agents, recordedAt }) {
         tokens: ss.reduce((s, a) => addTokens(s, a.tokens), NO_TOKENS),
         cost: ss.reduce((s, a) => s + (a.cost?.total ?? 0), 0),
       };
-      if (name === "code" && code) {
-        Object.assign(stages.code, { typecheckPassed: code.typecheck_passed ?? null, testsPassed: code.tests_passed ?? null, deviations: code.deviations ?? "" });
+      const built = name === "code" ? code : name === "solo" ? solo : null;
+      if (built) {
+        Object.assign(stages[name], { typecheckPassed: built.typecheck_passed ?? null, testsPassed: built.tests_passed ?? null, deviations: built.deviations ?? "" });
       }
     }
     const findingsOf = (r) => (r?.findings ?? []).map((f) => ({
@@ -235,13 +251,15 @@ export function buildRows({ record, agents, recordedAt }) {
       workflow: record.workflowName ?? null,
       version,
       maxRounds,
-      forkRun: version >= 7 && argsObject(record.args).fork === true,
+      forkRun: version >= 7 && argsObject(record.args).fork === true && !soloRun,
+      solo: soloRun,
+      base: argsObject(record.args).base ?? null,
       runStartedAt: record.timestamp ?? null,
       recordedAt,
       issue,
-      title: plan?.title ?? titles.get(issue) ?? null,
-      branch: code?.branch ?? plan?.branch ?? null,
-      alreadyDone: plan?.already_done ?? null,
+      title: plan?.title ?? solo?.title ?? titles.get(issue) ?? null,
+      branch: code?.branch ?? solo?.branch ?? plan?.branch ?? null,
+      alreadyDone: plan?.already_done ?? solo?.already_done ?? null,
       stages,
       agents: list.map(({ result, ...a }) => a),
       reviewRounds: reviews.length,
@@ -249,7 +267,7 @@ export function buildRows({ record, agents, recordedAt }) {
       // last review left nothing above a nit open before the reviewer's model
       // fixed anything itself (a finish step, or from version 6 the last
       // review's own `self_fixed`).
-      converged: version >= 3 ? open(lastReview) === 0 && !selfFixed : null,
+      converged: version >= 3 && !soloRun ? open(lastReview) === 0 && !selfFixed : null,
       planGrade: parseGrade(firstReview?.plan_grade),
       codeGrade: parseGrade(firstReview?.code_grade ?? firstReview?.haiku_grade),
       finalCodeGrade: parseGrade(lastReview?.code_grade ?? lastReview?.haiku_grade),
@@ -275,7 +293,8 @@ export function buildRows({ record, agents, recordedAt }) {
         loopCost: costOfStages((a) => a.stage === "fix" || a.stage === "replan" || (a.stage === "review" && a.round > 1)),
         loopOpen: open(lastReview) + selfFixed,
       } : null,
-      cost: list.reduce((s, a) => s + (a.cost?.total ?? 0), 0),
+      cost: costOfStages((a) => a.stage !== "grade"),
+      gradeCost: grade?.cost?.total ?? null,
     });
   }
   return rows;
@@ -394,7 +413,8 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
       out.push(`    correction loop    ${usd(s.fork.loopCost)} fixes and re-reviews · code grade at last review ${n(loopGrade, 2)} · open at last review ${n(s.fork.loopOpen)}`);
     }
     for (const [name, st] of Object.entries(s.stages)) {
-      out.push(`  ${name.padEnd(7)} ${usd(st.cost)} · ${n(st.agents)} agent(s) · ${n(st.minutes)} min · ${n(st.requests, 0)} requests · ${mt(st.contextTokens)} context · ${n(st.outputSeen, 0)}+ output (mean per issue that ran it)`);
+      out.push(`  ${name.padEnd(7)} ${usd(st.cost)} · ${n(st.agents)} agent(s) · ${n(st.minutes)} min · ${n(st.requests, 0)} requests · ${mt(st.contextTokens)} context · ${n(st.outputSeen, 0)}+ output (mean per issue that ran it)` +
+        (name === "grade" ? " · the measurement, not in the cost" : ""));
     }
     out.push("");
   }

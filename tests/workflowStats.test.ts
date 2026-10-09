@@ -68,6 +68,7 @@ describe("parseLabel", () => {
   it("splits a stage label into stage, issue and round", () => {
     expect(parseLabel("review #355")).toEqual({ stage: "review", issue: 355, round: 1 });
     expect(parseLabel("fix #346 r2")).toEqual({ stage: "fix", issue: 346, round: 2 });
+    expect(parseLabel("grade #353")).toEqual({ stage: "grade", issue: 353, round: 1 });
     expect(parseLabel("verify #1")).toBeNull();
   });
 });
@@ -195,6 +196,28 @@ describe("buildRows fork", () => {
     expect(row.fork!.loopCost).toBeCloseTo(cost("fix #7 r1") + cost("review #7 r2"), 8);
     expect(setupKey(row)).toMatch(/Opus-fix fork$/);
     expect(renderReport(summarize([row]), [row])).toContain("code grade after 3.70 · open after 1.0");
+  });
+});
+
+describe("buildRows solo", () => {
+  it("grades a solo branch by its grade agent and leaves the grade out of the cost", () => {
+    const base = "39cbc28bdd7fa0e9cbed8003c7f478c1dadfb602";
+    const record = { runId: "wf_s", script: SCRIPT_V3.replace("= 3", "= 7"), args: { issues: [7], solo: true, fork: true, base } };
+    const [row] = buildRows({ record, recordedAt: "", agents: [
+      { label: "solo #7", result: { title: "Seven", already_done: false, branch: "s7", typecheck_passed: true, tests_passed: true, summary: "…" }, transcript: stage("claude-opus-5-5", "medium", 4) },
+      { label: "grade #7", result: { issue_resolved: true, ready_to_ship: false, code_grade: "B", findings: [finding("F1", "should-fix", false)] }, transcript: stage("claude-opus-5-5", "high", 9) },
+    ] });
+    const cost = (label: string) => row.agents.find((a) => a.label === label)!.cost!.total;
+    expect(row).toMatchObject({
+      solo: true, forkRun: false, base, title: "Seven", branch: "s7",
+      planGrade: null, codeGrade: "B", finalCodeGrade: "B", reviewRounds: 0, converged: null, readyToShip: false,
+    });
+    expect(row.stages.solo).toMatchObject({ testsPassed: true, minutes: 4 });
+    expect(row.findings).toHaveLength(1);
+    expect(row.cost).toBeCloseTo(cost("solo #7"), 8);
+    expect(row.gradeCost).toBeCloseTo(cost("grade #7"), 8);
+    expect(setupKey(row)).toBe("v7 · solo opus-5-5/medium · graded by opus-5-5/high · bench 39cbc28b");
+    expect(renderReport(summarize([row]), [row])).toContain("the measurement, not in the cost");
   });
 });
 

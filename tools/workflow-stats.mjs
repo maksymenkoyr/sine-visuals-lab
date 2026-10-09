@@ -5,6 +5,7 @@
 // minutes and tokens each stage used.
 //
 //   npm run workflow-stats -- record wf_d5233a2c-fd5   # add a finished run
+//   npm run workflow-stats -- sweep                   # add every finished run not stored yet
 //   npm run workflow-stats -- report                  # per setup
 //   npm run workflow-stats -- report --issues         # plus one line per issue
 //   npm run workflow-stats -- report --json           # the raw rows
@@ -13,8 +14,10 @@
 // `record` finds the run under ~/.claude/projects/*/*/workflows/<runId>.json,
 // reads its journal and each agent's transcript next to it, and replaces any
 // rows the store already has for that run, so recording twice is safe. Those
-// files belong to the Claude Code session and go away with it, so record a
-// run soon after it finishes.
+// files belong to the Claude Code session and are cleaned up with old
+// sessions, so record a run soon after it finishes. `sweep` records every
+// completed run of the plan-code-review workflow that the store lacks, from
+// any session still on disk: the catch-up for runs nobody recorded.
 //
 // The store is one JSON row per issue, in WORKFLOW_STATS_FILE or
 // ~/.claude/workflow-stats/runs.jsonl. It sits outside the repo on purpose:
@@ -43,7 +46,9 @@ function readStore() {
   return existsSync(STORE) ? readJsonl(STORE) : [];
 }
 
-function findRunRecord(runId) {
+/** Every session's workflows/ directory under ~/.claude/projects. */
+function workflowDirs() {
+  const dirs = [];
   for (const project of readdirSync(PROJECTS)) {
     const pdir = join(PROJECTS, project);
     let sessions;
@@ -53,9 +58,17 @@ function findRunRecord(runId) {
       continue;
     }
     for (const s of sessions) {
-      const path = join(pdir, s.name, "workflows", `${runId}.json`);
-      if (existsSync(path)) return path;
+      const dir = join(pdir, s.name, "workflows");
+      if (existsSync(dir)) dirs.push(dir);
     }
+  }
+  return dirs;
+}
+
+function findRunRecord(runId) {
+  for (const dir of workflowDirs()) {
+    const path = join(dir, `${runId}.json`);
+    if (existsSync(path)) return path;
   }
   return null;
 }
@@ -64,6 +77,31 @@ function record(runId) {
   if (!runId) throw new Error("usage: workflow-stats record <runId>");
   const recordPath = findRunRecord(runId);
   if (!recordPath) throw new Error(`no run record for ${runId} under ${PROJECTS}`);
+  recordFrom(runId, recordPath);
+}
+
+function sweep() {
+  const stored = new Set(readStore().map((r) => r.runId));
+  let found = 0;
+  for (const dir of workflowDirs()) {
+    for (const name of readdirSync(dir).filter((f) => /^wf_.*\.json$/.test(f))) {
+      const runId = name.replace(/\.json$/, "");
+      if (stored.has(runId)) continue;
+      let meta;
+      try {
+        meta = JSON.parse(readFileSync(join(dir, name), "utf8"));
+      } catch {
+        continue;
+      }
+      if (meta.workflowName !== "plan-code-review" || meta.status !== "completed") continue;
+      found++;
+      recordFrom(runId, join(dir, name));
+    }
+  }
+  if (!found) console.log(`every completed plan-code-review run on disk is already in ${STORE}`);
+}
+
+function recordFrom(runId, recordPath) {
   const runRecord = JSON.parse(readFileSync(recordPath, "utf8"));
   if (runRecord.status && runRecord.status !== "completed") {
     console.warn(`warning: run ${runId} is ${runRecord.status}; recording what finished`);
@@ -115,11 +153,13 @@ function tokens(runId) {
   console.log(`${id} · cost is an API-list-price estimate; output tokens are a floor`);
   console.log("agent               model/effort         req tools  min    fresh  c.write   c.read  out+   peak    cost  (fresh / write / read / out)");
   let total = 0;
+  let graded = 0;
   for (const r of rows) {
     for (const a of r.agents) {
       const t = a.tokens;
       const c = a.cost;
-      total += c?.total ?? 0;
+      if (a.stage === "grade") graded += c?.total ?? 0;
+      else total += c?.total ?? 0;
       console.log(
         `${a.label.padEnd(19)} ${`${(a.model ?? "?").replace(/^claude-/, "")}/${a.effort ?? "?"}`.padEnd(20)}` +
         ` ${String(a.requests).padStart(3)} ${String(a.toolCalls ?? "-").padStart(5)} ${a.minutes.toFixed(1).padStart(4)}` +
@@ -128,7 +168,7 @@ function tokens(runId) {
       );
     }
   }
-  console.log(`total ${usd(total)}`);
+  console.log(`total ${usd(total)}${graded ? ` (+ ${usd(graded)} of grade agents, the measurement, not counted)` : ""}`);
 }
 
 function prStates() {
@@ -156,9 +196,10 @@ function report(flags) {
 }
 
 if (cmd === "record") record(rest[0]);
+else if (cmd === "sweep") sweep();
 else if (cmd === "report") report(rest);
 else if (cmd === "tokens") tokens(rest[0]);
 else {
-  console.log("usage: workflow-stats record <runId> | report [--issues] [--json] [--no-gh] | tokens [runId]");
+  console.log("usage: workflow-stats record <runId> | sweep | report [--issues] [--json] [--no-gh] | tokens [runId]");
   process.exit(cmd ? 1 : 0);
 }

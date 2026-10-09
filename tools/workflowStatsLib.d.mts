@@ -7,7 +7,7 @@ export const PRICES: Record<string, { input: number; output: number; cacheRead: 
 export const CACHE_WRITE_MULT: number;
 export const STAGES: readonly string[];
 
-export type StageName = "plan" | "replan" | "code" | "fix" | "review" | "finish" | "opusfix" | "check";
+export type StageName = "plan" | "replan" | "code" | "solo" | "fix" | "review" | "finish" | "opusfix" | "check" | "grade";
 
 export interface Tokens {
   input: number;
@@ -77,6 +77,10 @@ export interface Row {
   version: number;
   maxRounds: number;
   forkRun: boolean;
+  /** One agent built it alone and a `grade` agent measured it. */
+  solo: boolean;
+  /** The commit a benchmark run was pinned to; null on origin/main. */
+  base: string | null;
   runStartedAt: string | null;
   recordedAt: string;
   issue: number;
@@ -99,7 +103,9 @@ export interface Row {
   finishFixes: number;
   stalledFixes: number;
   fork: ForkArms | null;
+  /** Every agent but `grade`. */
   cost: number;
+  gradeCost: number | null;
 }
 
 /** Both arms after a forked first review; costs in USD per issue. */
