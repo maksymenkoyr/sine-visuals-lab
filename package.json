@@ -24,7 +24,7 @@
     "eval:tempo": "vitest run tests/tempoEval.test.ts",
     "eval:tempo:real": "vitest run tests/tempoRecordings.test.ts",
     "usage": "node tools/usage.mjs",
-    "workflow-stats": "node .workflow-arena/tools/workflow-stats.mjs",
+    "workflow-stats": "node tools/workflow-stats.mjs",
     "doc-check": "node tools/doc-check.mjs",
     "pr-shots": "node tools/pr-shots.mjs",
     "fix-conflicts": "bash tools/fix-conflicts.sh",

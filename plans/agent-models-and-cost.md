@@ -19,6 +19,7 @@ Researched 2026-10-09. Issue: #455
 - Every branch is graded twice, always, and a disagreement between the two points at the grading, not the code — the user's call on 2026-10-09, in place of grading twice only now and then.
 - Issues whose fix has no tests to run (a scene's look, a shader) stay out of the bench for now — the user's call on 2026-10-09, so every bench issue can be graded by its real fix's tests.
 - "It would make sense to extract this in separate project" — the workflow, the recorder and the bench move to their own repo (phase 8); this repo becomes the first project it measures.
+- 2026-10-10, reversed: "whole system should exist within this project" — the harness came back into this repo at its old paths, from workflow-arena's latest commit, so a run needs no clone at session start and auto mode doesn't block it as outside code. Phase 8 is undone; split it out again only when a second project needs it.
 - The new repo is `workflow-arena`, public, under AGPL-3.0-or-later, so any copy or hosted version stays open ("enforcing open source"); the run log stays private, in a local file: after a couple more cloud runs the owner runs it locally, so cloud rows come over by hand (`export`, then `import`), and a shared database waits until the project is published — the user's calls on 2026-10-09. The harness runs beside this repo and is never bundled into its client, so CLAUDE.md's no-GPL rule for dependencies doesn't touch it.
 
 ## Prototypes
@@ -81,7 +82,7 @@ Three setups ran in parallel on the same eight issues from `origin/main` `8a1fec
 
 Each phase is one build session and one PR.
 
-Phase 8 was built first, on 2026-10-09: from then on the workflow, `/plan-code-review` and the recorder live in workflow-arena, so the `.claude/workflows/`, `.claude/commands/` and `tools/` paths in phases 4–7 mean that repo's `workflows/`, `commands/` and `tools/`; this repo's bench is `.claude/arena-bench.json`.
+Phase 8 was built first, on 2026-10-09, and undone on 2026-10-10 (see Decisions): the workflow, `/plan-code-review` and the recorder are back at the paths phases 4–7 name, and the bench is `tools/plan-code-review-bench.json` again.
 
 - [x] **1. `npm run workflow-stats -- report` shows Haiku's real cost, over-100K requests included** — PR #459
   - Touches: `tools/workflowStatsLib.mjs` (`PRICES`, `transcriptStats`, the cost sum), `tools/workflow-stats.mjs`, their tests
@@ -126,7 +127,7 @@ Phase 8 was built first, on 2026-10-09: from then on the workflow, `/plan-code-r
   - Same conditions: one workflow at a time (the command refuses to start beside another), each row records the machine's load, and the report marks rows taken under load.
   - Done when: the report shows ranges, the grader's measured spread and win/tie/loss counts, and says plainly when two setups can't be told apart
 
-- [x] **8. The harness lives in its own repo** — this PR and workflow-arena's first commit
+- [ ] **8. The harness lives in its own repo** — built 2026-10-09 (workflow-arena's first commit), undone 2026-10-10; redo only when a second project needs it
   - Touches: a new repo holding the workflow, `/plan-code-review`, the recorder, the grader, the script checks and the bench; here, what's left is a pointer and this repo's bench entry
   - Read first: this plan's Decisions on the new repo; `CONTRIBUTING.md` on licences
   - Done when: the new repo runs a bench against this repo at its pinned commit and records rows as before; this repo keeps no copy of the harness
