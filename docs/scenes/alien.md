@@ -190,6 +190,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - 2026-10-08 — Cut gets a Reaction row under its graph (`drive.hit`, with
   `ownDetector`), flat-only: a cut either happens or it doesn't, so Sized is
   greyed out with that hint. The reel is unchanged.
+- 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

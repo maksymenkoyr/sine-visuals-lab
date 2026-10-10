@@ -2106,14 +2106,14 @@ function makePrograms(gl: WebGL2RenderingContext, zoom: boolean): Programs {
   // on unit 3 in the point pass.
   for (const prog of [sim, bg, point]) {
     prog.use();
-    gl.uniform1i(gl.getUniformLocation(prog.program, "uPlateAtlas"), 1);
+    prog.setI("uPlateAtlas", 1);
   }
   for (const prog of [sim, point]) {
     prog.use();
-    gl.uniform1i(gl.getUniformLocation(prog.program, "uMemTex"), 2);
+    prog.setI("uMemTex", 2);
   }
   point.use();
-  gl.uniform1i(gl.getUniformLocation(point.program, "uSpecTex"), 3);
+  point.setI("uSpecTex", 3);
   return {
     sim,
     bg,

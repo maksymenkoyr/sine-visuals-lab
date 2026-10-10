@@ -651,6 +651,7 @@ hexagon and decagon.
   power passed to `advanceToss` by how far the hit stood out; Flat, the
   default, is unchanged. Beat waves is flat-only: a wave either runs or it
   doesn't.
+- 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

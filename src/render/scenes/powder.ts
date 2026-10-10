@@ -1772,7 +1772,6 @@ function createPowderScene(): Scene {
   let blurFboB: WebGLFramebuffer | null = null;
   let glowW = 0;
   let glowH = 0;
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let read = 0;
   let side = 1;
   let grainCount = 0;
@@ -1792,23 +1791,6 @@ function createPowderScene(): Scene {
   const attractorBuf = new Float32Array(MAX_ATTRACTORS * 3);
   const chunkOrigin: [number, number, number] = [0, 0, 0];
   const chunkAxis: [number, number, number] = [0, 1, 0];
-
-  /** Cached sampler locations. GLProgram has no integer setter — samplers are
-   *  the one uniform kind that needs one — so the unit is set with
-   *  gl.uniform1i against a location looked up once per (program, name). */
-  function samplerLoc(
-    gl: WebGL2RenderingContext,
-    prog: GLProgram,
-    key: string,
-    name: string,
-  ): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeStateTexture(gl: WebGL2RenderingContext, data: Uint8Array): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -1895,7 +1877,6 @@ function createPowderScene(): Scene {
       chunkProg = createProgram(gl, CHUNK_FRAG, CHUNK_VERT);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // Both point passes address their data by gl_VertexID and have no
       // vertex attributes at all, so they draw from an empty VAO rather than
@@ -2076,10 +2057,10 @@ function createPowderScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, texVXY[read]);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, texVZW[read]);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uPosXY", "uPosXY"), 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uPosZW", "uPosZW"), 1);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uVelXY", "uVelXY"), 2);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uVelZW", "uVelZW"), 3);
+      simProg.setI("uPosXY", 0);
+      simProg.setI("uPosZW", 1);
+      simProg.setI("uVelXY", 2);
+      simProg.setI("uVelZW", 3);
       drawFullscreenQuad(gl, quadVao);
       read = write;
 
@@ -2118,9 +2099,9 @@ function createPowderScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, texZW[read]);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, texVZW[read]);
-      gl.uniform1i(samplerLoc(gl, pointProg, "pt.uPosXY", "uPosXY"), 0);
-      gl.uniform1i(samplerLoc(gl, pointProg, "pt.uPosZW", "uPosZW"), 1);
-      gl.uniform1i(samplerLoc(gl, pointProg, "pt.uVelZW", "uVelZW"), 3);
+      pointProg.setI("uPosXY", 0);
+      pointProg.setI("uPosZW", 1);
+      pointProg.setI("uVelZW", 3);
       gl.bindVertexArray(pointVao);
       gl.drawArrays(gl.POINTS, 0, grainCount);
 
@@ -2140,7 +2121,7 @@ function createPowderScene(): Scene {
       // 5. Two separable blurs, half-res throughout.
       blurProg.use();
       gl.activeTexture(gl.TEXTURE0);
-      gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+      blurProg.setI("uTex", 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, blurFboA);
       gl.bindTexture(gl.TEXTURE_2D, glowTex);
       blurProg.setV2("uBlurStep", BLUR_STRIDE / glowW, 0);
@@ -2162,8 +2143,8 @@ function createPowderScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, glowTex);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, blurTexB);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uGlowTex", "uGlowTex"), 0);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uBlurTex", "uBlurTex"), 1);
+      compositeProg.setI("uGlowTex", 0);
+      compositeProg.setI("uBlurTex", 1);
       drawFullscreenQuad(gl, quadVao);
 
       // 7. The gallery renders every scene into one shared context each tick
@@ -2200,7 +2181,6 @@ function createPowderScene(): Scene {
         texVZW[i] = null;
       }
       freeGlowTargets(gl);
-      samplerLocs.clear();
       simProg = null;
       roomProg = null;
       pointProg = null;

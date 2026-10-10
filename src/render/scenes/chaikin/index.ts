@@ -479,7 +479,7 @@ function beforeDraw(ctx: SceneContext, prog: GLProgram, viewport: Viewport): voi
     filledAt = timeSec;
     filledRows = rows;
   }
-  gl.uniform1i(gl.getUniformLocation(prog.program, "uSeeds"), 0);
+  prog.setI("uSeeds", 0);
   gl.uniform1f(gl.getUniformLocation(prog.program, "uRows"), filledRows);
   gl.uniform1f(gl.getUniformLocation(prog.program, "uKidLo"), kidLo);
   gl.uniform1f(gl.getUniformLocation(prog.program, "uKidHi"), kidHi);
