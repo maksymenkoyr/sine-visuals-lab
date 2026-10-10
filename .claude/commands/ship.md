@@ -24,7 +24,8 @@ Finish the change on this branch:
    for divergence right before pushing.
 
 5. **Check the PR state.** If this branch already has a PR,
-   `gh pr view --json state`: a merged or closed branch still accepts
+   `gh api 'repos/{owner}/{repo}/pulls?head={owner}:<branch>&state=all' --jq '.[] | .state, .merged_at'`
+   (REST: cloud sessions refuse `gh pr view`): a merged or closed branch still accepts
    pushes that nobody sees. If it's merged, move the commits to a new branch.
 
 6. **Push and open a draft PR**, or update the open one.
