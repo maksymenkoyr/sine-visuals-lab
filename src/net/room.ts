@@ -202,6 +202,11 @@ abstract class RoomConnectionBase {
   // The roster as the records the room's own rules read (feedOf, followersOf,
   // pictureDelayMs); rebuilt whenever a roster arrives, not per frame.
   private rosterView: { records: Map<string, DeviceRecord>; online: Set<string> } | null = null;
+  // Whether the latest roster lists a renderer other than this device; null
+  // until a roster has arrived. The legacy room relays a host's frames to its
+  // renderers only, so with none listed a frame sent is a billed Durable Object
+  // request that reaches nobody.
+  private rosterHasRenderer: boolean | null = null;
   private rosterListeners: Array<(r: RosterEntry[]) => void> = [];
   private rejectListeners: Array<(m: DeviceReject) => void> = [];
   private _endedReason: "removed" | null = null;
@@ -399,7 +404,8 @@ abstract class RoomConnectionBase {
    *  shows a device that follows this one; a connection with no room key (the
    *  legacy room, whose roster only looks like records), or a roster that
    *  doesn't list this device yet, takes every frame and relays it as it
-   *  always did. Whether this device is *allowed* to be a feed
+   *  always did, unless its latest roster lists no renderer to relay to (the
+   *  room bills every message it receives, watched or not). Whether this device is *allowed* to be a feed
    *  is the room's call, by the same records. `wave` is this tick's mic
    *  envelope for a follower's Waveform row (protocol.ts's wave tail), null
    *  with no mic samples; this device's own buffer never keeps it, since its
@@ -415,6 +421,7 @@ abstract class RoomConnectionBase {
     // arrives.
     const view = this.rosterView;
     if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
+    if (!this.keyed && this.rosterHasRenderer === false) return;
     this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs, d.wave));
   }
 
@@ -449,6 +456,7 @@ abstract class RoomConnectionBase {
     } else if (msg.type === "roster") {
       this.roster = msg.devices;
       this.rosterView = recordsFromRoster(msg.devices);
+      this.rosterHasRenderer = msg.devices.some((e) => e.role === "renderer" && e.deviceId !== this.deviceId);
       for (const cb of this.rosterListeners) cb(this.roster);
     } else if (msg.type === "deviceReject") {
       for (const cb of this.rejectListeners) cb(msg);

@@ -965,9 +965,33 @@ describe("sendFrame", () => {
     const host = new HostConnection("ABCD");
     last().open();
     roster(last(), [
-      { deviceId: "first", role: "host", scene: "", palette: "" },
       { deviceId: host.deviceId, role: "host", scene: "", palette: "" },
+      { deviceId: "tv", role: "renderer", scene: "", palette: "" },
     ]);
+    vi.advanceTimersByTime(40);
+    host.sendFrame(FRAME);
+    expect(binaries(last())).toHaveLength(1);
+  });
+
+  it("puts nothing on the wire in a legacy room while its roster lists no renderer", async () => {
+    const { HostConnection } = await loadRoom();
+    const host = new HostConnection("ABCD");
+    last().open();
+    const me = { deviceId: host.deviceId, role: "host", scene: "", palette: "" };
+    roster(last(), [me, { deviceId: "other", role: "host", scene: "", palette: "" }]);
+    for (let i = 0; i < 5; i++) {
+      vi.advanceTimersByTime(40);
+      host.sendFrame(FRAME);
+    }
+    expect(binaries(last())).toHaveLength(0);
+    expect(host.msSinceLastFrame).toBeLessThan(1000);
+
+    roster(last(), [me, { deviceId: "tv", role: "renderer", scene: "", palette: "" }]);
+    vi.advanceTimersByTime(40);
+    host.sendFrame(FRAME);
+    expect(binaries(last())).toHaveLength(1);
+
+    roster(last(), [me]);
     vi.advanceTimersByTime(40);
     host.sendFrame(FRAME);
     expect(binaries(last())).toHaveLength(1);
