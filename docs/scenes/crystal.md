@@ -267,3 +267,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   carrying the scene's full v1–v4 history (see "Decisions and pivots")
   plus the `tools/refburst.py` cut/fade fix. Still listed in
   `DRAFT_SCENE_IDS` on `main`.
+- #349 cleanup — sampler units now set with GLProgram.setI; the scene's own sampler-location cache is gone. No change on screen.

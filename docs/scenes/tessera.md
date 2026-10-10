@@ -191,3 +191,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   measured short lZaThcqs-dk (a 3D lattice of hollow boxes on a sphere)".
   Single squashed commit covering the flat-tile rejection, the lattice
   rebuild, and the round 2/round 5 tuning passes.
+- #349 cleanup — sampler units now set with GLProgram.setI; the scene's own sampler-location cache is gone. No change on screen.
