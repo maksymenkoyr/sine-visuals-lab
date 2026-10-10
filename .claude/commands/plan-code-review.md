@@ -1,6 +1,6 @@
 ---
 description: Run GitHub issues through the plan → code → review workflow (a strong model plans, reviews once and fixes what it found, a cheaper one codes), or rerun the fixed benchmark, then grade every run of an issue side by side, and record the results for model comparison
-argument-hint: <issue numbers | bench | grade <issue numbers | bench>> [solo] [plan=model/effort] [code=model/effort] [review=model/effort] [solo=model/effort] [rounds=N] [fork] [tag=name]
+argument-hint: <issue numbers | bench | grade <issue numbers | bench>> [solo] [no-review] [plan=model/effort] [code=model/effort] [review=model/effort] [solo=model/effort] [rounds=N] [fork] [tag=name]
 ---
 
 Run `$ARGUMENTS` through the workflow,
@@ -22,6 +22,10 @@ Run `$ARGUMENTS` through the workflow,
      such as `code=sonnet/medium`.
    - `rounds=N` brings back up to N correction rounds; by default there are
      none, and the one review fixes what it found.
+   - `no-review` keeps the plan and code stages and drops the review: the
+     same `grade` agent and record-only `review` that `solo` gets read the
+     branch as the coder left it (the plan too), and neither counts in the
+     cost. Pass it as `"noReview": true`.
    - `fork` turns on the Opus-fix fork the workflow header describes. It needs
      `rounds=1` or more.
    - `grade` runs no build: it grades the runs already recorded, and skips to
