@@ -103,6 +103,7 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the
   plume strength and `chunkStrength` by how far the hit stood out; Flat, the
   default, is unchanged.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

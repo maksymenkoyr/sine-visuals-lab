@@ -112,6 +112,7 @@ layers never overlapped so nothing stacked toward white.
   popping the wall back to the old layout; `bakeMorph` now writes the mix
   that is on screen into A first, so the new fade starts from it.
 - 2026-10-08 — Beat kick became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the peak of the onset envelope (advanceOnsetEnvelope now takes true, false or a 0..1 size) by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

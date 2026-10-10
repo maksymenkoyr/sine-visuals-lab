@@ -52,6 +52,7 @@ hear run but ~106.7 on the ref-shoot run.
   top on every bass hit; share lowered and each head now enters from its own
   height above the top.
 - 2026-10-08 — Downpour and Turn became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the burst share and the camera swing by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Known issues and next steps
 

@@ -2326,7 +2326,6 @@ function createPhysarum2Scene(): Scene {
   let footprintFresh = false;
   const FOOT_CLEAR = new Float32Array(4);
 
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let agentRead = 0;
   let trailReadIdx = 0;
   let agentSide = 1;
@@ -2460,20 +2459,6 @@ function createPhysarum2Scene(): Scene {
   // the Strain Console grabs when a dragged stain starts from what's on screen.
   const shownStain = new Float32Array(SPECIES_COUNT);
   let harmonyIdx = 0;
-
-  function samplerLoc(
-    gl: WebGL2RenderingContext,
-    prog: GLProgram,
-    key: string,
-    name: string,
-  ): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeAgentTexture(gl: WebGL2RenderingContext, side: number, data: Uint8Array): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -2664,7 +2649,7 @@ function createPhysarum2Scene(): Scene {
         prog.setF("uBlock", block);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-        gl.uniform1i(samplerLoc(gl, prog, "terr.uTrail", "uTrail"), 0);
+        prog.setI("uTrail", 0);
         drawFullscreenQuad(gl, quad);
       };
     }
@@ -2679,7 +2664,7 @@ function createPhysarum2Scene(): Scene {
         prog.setF("uBlock", block);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
-        gl.uniform1i(samplerLoc(gl, prog, "pop.uAgentDir", "uAgentDir"), 0);
+        prog.setI("uAgentDir", 0);
         drawFullscreenQuad(gl, quad);
       };
     }
@@ -2693,7 +2678,7 @@ function createPhysarum2Scene(): Scene {
         prog.setF("uBlock", block);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-        gl.uniform1i(samplerLoc(gl, prog, "level.uTrail", "uTrail"), 0);
+        prog.setI("uTrail", 0);
         drawFullscreenQuad(gl, quad);
       };
     }
@@ -2801,7 +2786,6 @@ function createPhysarum2Scene(): Scene {
       territoryProg = createProgram(gl, TERRITORY_FRAG);
       popProg = createProgram(gl, POP_FRAG);
       levelProg = createProgram(gl, LEVEL_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all — every agent is addressed by
       // gl_VertexID — so this draws from an empty VAO rather than the
@@ -2951,8 +2935,8 @@ function createPhysarum2Scene(): Scene {
       diffuseProg.setF("uTrailSide", trailSideCur);
       diffuseProg.setV4v("uEatCol", eatCols);
       diffuseProg.setV4("uLifeMul", strainLifeMul[0]!, strainLifeMul[1]!, strainLifeMul[2]!, strainLifeMul[3]!);
-      gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uTrailIn", "uTrailIn"), 0);
-      gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uFootprint", "uFootprint"), 1);
+      diffuseProg.setI("uTrailIn", 0);
+      diffuseProg.setI("uFootprint", 1);
 
       simProg.use();
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
@@ -2975,21 +2959,17 @@ function createPhysarum2Scene(): Scene {
       simProg.setF("uInjectX", pendingInject ? pendingInject.fieldX : 0);
       simProg.setF("uInjectY", pendingInject ? pendingInject.fieldY : 0);
       simProg.setF("uInjectStrain", pendingInject ? pendingInject.strain : 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentPos", "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentDir", "uAgentDir"), 1);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uTrail", "uTrail"), 2);
+      simProg.setI("uAgentPos", 0);
+      simProg.setI("uAgentDir", 1);
+      simProg.setI("uTrail", 2);
 
       depositActive.use();
       uploadCommonUniforms(depositActive, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       depositActive.setF("uAgentSide", agentSide);
       depositActive.setV4("uStrainFeed", strainFeed[0]!, strainFeed[1]!, strainFeed[2]!, strainFeed[3]!);
       depositActive.setV4v("uTouchFeedRow", touchFeedRows);
-      // Keyed by which program is active (not a shared "dep." prefix): the
-      // two deposit programs are distinct WebGLProgram objects, and a
-      // uniform location cached from one is not valid on the other.
-      const depKeyPrefix = mrt ? "depMrt." : "dep.";
-      gl.uniform1i(samplerLoc(gl, depositActive, `${depKeyPrefix}uAgentPos`, "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, depositActive, `${depKeyPrefix}uAgentDir`, "uAgentDir"), 1);
+      depositActive.setI("uAgentPos", 0);
+      depositActive.setI("uAgentDir", 1);
 
       for (let step = 0; step < steps; step++) {
         const trailWrite = 1 - trailReadIdx;
@@ -3097,7 +3077,7 @@ function createPhysarum2Scene(): Scene {
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uTrail", "uTrail"), 0);
+      compositeProg.setI("uTrail", 0);
       drawFullscreenQuad(gl, quadVao);
 
       // 5. The gallery renders every scene into one shared context each
@@ -3204,7 +3184,6 @@ function createPhysarum2Scene(): Scene {
       }
       freeTrailTargets(gl);
       census.dispose(gl);
-      samplerLocs.clear();
       diffuseProg = null;
       simProg = null;
       depositProg = null;

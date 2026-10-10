@@ -385,7 +385,7 @@ export const alienScene: Scene = (() => {
       prog.setF("uHasFrame", hasFrame);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.uniform1i(gl.getUniformLocation(prog.program, "uVideo"), 0);
+      prog.setI("uVideo", 0);
       drawFullscreenQuad(gl, quadVao);
       // The gallery renders every scene into one shared context each tick.
       gl.bindTexture(gl.TEXTURE_2D, null);

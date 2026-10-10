@@ -136,6 +136,7 @@ bpm, 59 beats, 3539 probe samples / 185 reference onsets):
   glides the current regime onto the pinned fold within
   `REGIME_TRAVEL_SEC` instead of waiting for the next regime change,
   which in silence never came.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

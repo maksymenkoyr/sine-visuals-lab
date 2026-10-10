@@ -541,7 +541,7 @@ function createCodeRainScene(): Scene {
         prog.setV3v("uFwd", fwd);
         prog.setV4("uProj", 1 / (tanHalf * aspect), 1 / tanHalf, depthA, depthB);
         prog.setV4("uSlice", sliceX, sliceY, 1 / Math.max(viewport.w, 1e-4), 1 / Math.max(viewport.h, 1e-4));
-        gl.uniform1i(gl.getUniformLocation(prog.program, "uAtlas"), 0);
+        prog.setI("uAtlas", 0);
         prog.setF("uFall", fallClock);
         prog.setF("uTime", anim.timeSec);
         prog.setF("uFlicker", FLICKER_BASE * flicker);
