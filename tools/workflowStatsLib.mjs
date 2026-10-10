@@ -50,7 +50,21 @@
 // part of the setup, so it counts as both the first and the last review, the
 // row's `cost` leaves it out, and `gradeCost` keeps it apart. A run pinned to
 // a `base` commit (a benchmark) gets that commit in its setup key, so bench
-// rows form their own series apart from everyday runs on origin/main.
+// rows form their own series apart from everyday runs on origin/main. A
+// solo run with `soloReview` has the usual last review in place of the grade
+// agent; that review is part of the setup, so its cost counts.
+//
+// A run tagged `r<N>.<k>` is subrun k of run r<N>: the same setup run again
+// on the same issues, to see how far one setup's results wander. Rows keep
+// their subrun; everything a person reads merges them. `summarize` counts
+// each issue of each run once, as the median of its subruns, and sets the
+// spread between subruns beside it as the noise: a gap between setups
+// smaller than that is not evidence. An issue whose subruns disagree past
+// `UNSTEADY_GRADE_GAP`, or on ready-to-ship, is listed as unsteady, since
+// a setup that can't repeat itself there points at the system, not the
+// models. Rows without a subrun tag are each their own run, as before.
+// `setupName` is the short name a setup goes by (v8-cr, v8-solo opus
+// no-review), next to its full `setupKey`.
 //
 // The grade-runs workflow (.claude/workflows/grade-runs.js) is the outside
 // measurement: `materials` is what its grader reads, `buildGradeRows` turns
@@ -74,6 +88,9 @@ export const PRICES = {
   },
 };
 export const CACHE_WRITE_MULT = 2;
+
+/** Final-code-grade spread (in grade points) between subruns that marks an issue unsteady. */
+export const UNSTEADY_GRADE_GAP = 1;
 
 /** Every stage label the workflow uses, in run order. */
 export const STAGES = ["plan", "code", "solo", "review", "replan", "fix", "finish", "opusfix", "check", "grade"];
@@ -206,11 +223,31 @@ export function setupKey(row) {
   };
   const bench = row.base ? ` · bench ${row.base.slice(0, 8)}` : "";
   if (row.solo) {
-    const g = row.stages.grade;
-    return `v${row.version} · ${st("solo")} · graded by ${g ? `${shortModel(g.model)}/${g.effort ?? "?"}` : "-"}${bench}`;
+    const g = row.stages.review ?? row.stages.grade;
+    return `v${row.version} · ${st("solo")} · ${row.stages.review ? "reviewed" : "graded"} by ${g ? `${shortModel(g.model)}/${g.effort ?? "?"}` : "-"}${bench}`;
   }
   const loops = row.maxRounds ? ` · up to ${row.maxRounds} correction round(s)` : "";
   return `v${row.version} · ${st("plan")} · ${st("code")} · ${st("review")}${loops}${row.forkRun ? " · Opus-fix fork" : ""}${bench}`;
+}
+
+/** The short name a setup goes by: "v8", "v8-cr", "v8-solo opus no-review". */
+export function setupName(row) {
+  if (row.solo) {
+    const model = /(opus|sonnet|haiku)/.exec(row.stages.solo?.model ?? "")?.[1] ?? "?";
+    return `v${row.version}-solo ${model} ${row.stages.review ? "+review" : "no-review"}`;
+  }
+  return `v${row.version}${row.maxRounds ? "-cr" : ""}${row.forkRun ? "-fork" : ""}`;
+}
+
+/**
+ * Which run a row belongs to. A tag "r13.2" is subrun 2 of run r13; any other
+ * row is its own run, keyed by its run ID, since workflows launched without a
+ * tag all share the default one.
+ * @returns {{ run: string, name: string, subrun: number | null }}
+ */
+export function runOf(row) {
+  const m = /^(.+)\.(\d+)$/.exec(row.tag ?? "");
+  return m ? { run: m[1], name: m[1], subrun: Number(m[2]) } : { run: row.runId, name: row.tag ?? row.runId, subrun: null };
 }
 
 function shortModel(model) {
@@ -307,6 +344,7 @@ export function buildRows({ record, agents, recordedAt }) {
       forkRun: version >= 7 && argsObject(record.args).fork === true && !soloRun,
       solo: soloRun,
       base: argsObject(record.args).base ?? null,
+      tag: argsObject(record.args).tag ?? null,
       runStartedAt: record.timestamp ?? null,
       recordedAt,
       issue,
@@ -392,11 +430,12 @@ export function materials(rows, issue, bench = null) {
   for (const r of runs) {
     const c = r.commits;
     out.push(`=== run ${r.runId} ===`, `base ${c.base ?? "?"} · code ${c.code} · final ${c.final ?? c.code}`);
-    if (r.solo) {
+    if (r.solo && !r.stages.review) {
       out.push("One agent built this alone: no plan and no review. Grade only its code (code and final are the same commit).", "");
       continue;
     }
-    out.push("--- plan ---", r.planText ?? "(not recorded)", "--- first review's findings, on the code commit ---");
+    if (r.solo) out.push("One agent built this alone, with no plan; one review then fixed what it found.", "--- the review's findings, on the code commit ---");
+    else out.push("--- plan ---", r.planText ?? "(not recorded)", "--- first review's findings, on the code commit ---");
     out.push(...(r.findings.length
       ? r.findings.map((f) => `- [${f.id ?? "?"}] ${f.severity}, ${f.origin}, ${f.kind}: ${f.file}${f.line ? `:${f.line}` : ""}: ${f.summary}`)
       : ["(none)"]));
@@ -463,90 +502,142 @@ export function latestGrades(gradeRows) {
 }
 
 /**
- * Sums rows per setup. `prState` maps a branch to its PR state (OPEN,
- * MERGED, CLOSED) when the caller could ask GitHub.
+ * Sums rows per setup, each issue of each run once: the median over its
+ * subruns (`runOf`). `prState` maps a branch to its PR state (OPEN, MERGED,
+ * CLOSED) when the caller could ask GitHub.
  * @param {any[]} rows
  * @param {Map<string, string>} [prState]
  * @param {Map<string, any>} [grades] from `latestGrades`
  */
 export function summarize(rows, prState = new Map(), grades = new Map()) {
-  /** @type {Map<string, any[]>} */
+  /** @type {Map<string, Map<string, any[]>>} setup → "<run>#<issue>" → its subruns' rows */
   const groups = new Map();
   for (const r of rows) {
     if (r.alreadyDone) continue;
     const k = setupKey(r);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(r);
+    if (!groups.has(k)) groups.set(k, new Map());
+    const items = groups.get(k);
+    const ik = `${runOf(r).run}#${r.issue}`;
+    if (!items.has(ik)) items.set(ik, []);
+    items.get(ik).push(r);
   }
-  return [...groups].map(([setup, rs]) => {
+  return [...groups].map(([setup, byItem]) => {
+    const items = [...byItem.values()];
+    const rs = items.flat();
+    // One value per issue of a run: the median of what its subruns gave.
+    const per = (f) => items.map((sub) => median(sub.map(f).filter(isNum))).filter(isNum);
+    const avg = (f) => mean(per(f));
+    const total = (f) => per(f).reduce((a, b) => a + b, 0);
+    const flag = (f) => (r) => (f(r) ? 1 : 0);
+    const points = (key) => (r) => GRADE_POINTS[r[key]];
     const findings = rs.flatMap((r) => r.findings);
-    const count = (pred) => findings.filter(pred).length;
     const withOrigin = findings.filter((f) => f.origin);
+    const count = (r, pred) => r.findings.filter(pred).length;
     const stages = {};
     for (const name of STAGES) {
-      const ss = rs.map((r) => r.stages[name]).filter(Boolean);
-      if (!ss.length) continue;
+      const of = (f) => (r) => (r.stages[name] ? f(r.stages[name]) : undefined);
+      const used = per(of(() => 1)).length;
+      if (!used) continue;
       stages[name] = {
-        issuesUsing: ss.length,
-        agents: mean(ss.map((s) => s.agents)),
-        minutes: mean(ss.map((s) => s.minutes)),
-        requests: mean(ss.map((s) => s.requests)),
-        contextTokens: mean(ss.map((s) => s.tokens.input + s.tokens.cacheWrite + s.tokens.cacheRead)),
-        outputSeen: mean(ss.map((s) => s.tokens.outputSeen)),
-        cost: mean(ss.map((s) => s.cost)),
+        issuesUsing: used,
+        agents: avg(of((s) => s.agents)),
+        minutes: avg(of((s) => s.minutes)),
+        requests: avg(of((s) => s.requests)),
+        contextTokens: avg(of((s) => s.tokens.input + s.tokens.cacheWrite + s.tokens.cacheRead)),
+        outputSeen: avg(of((s) => s.tokens.outputSeen)),
+        cost: avg(of((s) => s.cost)),
       };
     }
-    const v3 = rs.filter((r) => r.converged !== null);
+    const converged = per((r) => (r.converged === null ? undefined : r.converged ? 1 : 0));
     return {
       setup,
-      issues: rs.length,
-      runs: new Set(rs.map((r) => r.runId)).size,
-      resolved: rs.filter((r) => r.issueResolved).length,
-      readyToShip: rs.filter((r) => r.readyToShip).length,
-      merged: rs.filter((r) => prState.get(r.branch) === "MERGED").length,
-      converged: v3.length ? v3.filter((r) => r.converged).length : null,
-      stalledFixes: rs.reduce((s, r) => s + (r.stalledFixes ?? 0), 0),
-      reviewRounds: mean(rs.map((r) => r.reviewRounds)),
-      planGrade: mean(rs.map((r) => GRADE_POINTS[r.planGrade]).filter((x) => x !== undefined)),
-      codeGrade: mean(rs.map((r) => GRADE_POINTS[r.codeGrade]).filter((x) => x !== undefined)),
-      finalCodeGrade: mean(rs.map((r) => GRADE_POINTS[r.finalCodeGrade]).filter((x) => x !== undefined)),
+      name: setupName(rs[0]),
+      issues: items.length,
+      subruns: rs.length,
+      runs: new Set(rs.map((r) => runOf(r).run)).size,
+      resolved: total(flag((r) => r.issueResolved)),
+      readyToShip: total(flag((r) => r.readyToShip)),
+      merged: total(flag((r) => prState.get(r.branch) === "MERGED")),
+      converged: converged.length ? converged.reduce((a, b) => a + b, 0) : null,
+      stalledFixes: total((r) => r.stalledFixes ?? 0),
+      reviewRounds: avg((r) => r.reviewRounds),
+      planGrade: avg(points("planGrade")),
+      codeGrade: avg(points("codeGrade")),
+      finalCodeGrade: avg(points("finalCodeGrade")),
       findingsPerIssue: {
-        blocking: count((f) => f.severity === "blocking") / rs.length,
-        shouldFix: count((f) => f.severity === "should-fix") / rs.length,
-        nit: count((f) => f.severity === "nit") / rs.length,
+        blocking: avg((r) => count(r, (f) => f.severity === "blocking")) ?? 0,
+        shouldFix: avg((r) => count(r, (f) => f.severity === "should-fix")) ?? 0,
+        nit: avg((r) => count(r, (f) => f.severity === "nit")) ?? 0,
       },
       fromPlanShare: withOrigin.length ? withOrigin.filter((f) => f.origin === "plan").length / withOrigin.length : null,
-      weakTests: count((f) => f.kind === "weak-test"),
-      bugs: count((f) => f.kind === "bug"),
-      costPerIssue: mean(rs.map((r) => r.cost)),
+      weakTests: total((r) => count(r, (f) => f.kind === "weak-test")),
+      bugs: total((r) => count(r, (f) => f.kind === "bug")),
+      costPerIssue: avg((r) => r.cost),
       fork: forkSummary(rs.map((r) => r.fork).filter(Boolean)),
-      grader: graderSummary(rs, grades),
+      grader: graderSummary(items, grades),
+      noise: noiseSummary(items, grades),
       stages,
     };
   });
 }
 
-function graderSummary(rs, grades) {
-  const pairs = rs.map((r) => [r, grades.get(`${r.runId}#${r.issue}`)]).filter(([, g]) => g);
-  if (!pairs.length) return null;
-  const gs = pairs.map(([, g]) => g);
-  const points = (xs) => mean(xs.map((x) => GRADE_POINTS[x]).filter((x) => x !== undefined));
-  const reviewed = gs.filter((g) => g.reviewGrade);
-  const per = (f) => (reviewed.length ? mean(reviewed.map(f)) : null);
-  // Positive: the reviewer graded the code higher than the grader did.
-  const gaps = pairs.map(([r, g]) => GRADE_POINTS[r.codeGrade] - GRADE_POINTS[g.codeGrade]).filter((x) => !Number.isNaN(x));
+/**
+ * How far the subruns of one issue of one run wandered, over the issues run
+ * more than once: the mean of each one's max minus min, and the unsteady
+ * ones by name.
+ * @param {any[][]} items
+ * @param {Map<string, any>} grades
+ */
+function noiseSummary(items, grades) {
+  const multi = items.filter((sub) => sub.length > 1);
+  if (!multi.length) return null;
+  const spreadOf = (sub, f) => {
+    const xs = sub.map(f).filter(isNum);
+    return xs.length > 1 ? Math.max(...xs) - Math.min(...xs) : undefined;
+  };
+  const spread = (f) => mean(multi.map((sub) => spreadOf(sub, f)).filter(isNum));
+  const graded = (r) => GRADE_POINTS[grades.get(`${r.runId}#${r.issue}`)?.codeGrade];
+  const unsteady = multi.filter((sub) =>
+    new Set(sub.map((r) => !!r.readyToShip)).size > 1 ||
+    (spreadOf(sub, (r) => GRADE_POINTS[r.finalCodeGrade]) ?? 0) >= UNSTEADY_GRADE_GAP);
   return {
-    issues: gs.length,
-    planGrade: points(gs.map((g) => g.planGrade)),
-    codeGrade: points(gs.map((g) => g.codeGrade)),
-    reviewGrade: points(gs.map((g) => g.reviewGrade)),
-    finalCodeGrade: points(gs.map((g) => g.finalCodeGrade)),
-    findingsReal: per((g) => g.findingsReal),
-    findingsWrong: per((g) => g.findingsWrong),
-    missed: per((g) => g.missed.length),
-    missedBlocking: per((g) => g.missed.filter((x) => x.severity === "blocking").length),
-    finalOpen: mean(gs.map((g) => g.finalOpen.filter((x) => x.severity !== "nit").length)),
-    reviewerGap: mean(gaps),
+    issues: multi.length,
+    codeGrade: spread((r) => GRADE_POINTS[r.codeGrade]),
+    finalCodeGrade: spread((r) => GRADE_POINTS[r.finalCodeGrade]),
+    graderCodeGrade: spread(graded),
+    cost: spread((r) => r.cost),
+    readyDiffered: multi.filter((sub) => new Set(sub.map((r) => !!r.readyToShip)).size > 1).length,
+    unsteady: unsteady.map((sub) => ({
+      run: runOf(sub[0]).name,
+      issue: sub[0].issue,
+      finalCodeGrades: sub.map((r) => r.finalCodeGrade ?? "-"),
+      readyToShip: sub.map((r) => !!r.readyToShip),
+    })),
+  };
+}
+
+function graderSummary(items, grades) {
+  const gradeOf = (r) => grades.get(`${r.runId}#${r.issue}`);
+  const gradedItems = items.filter((sub) => sub.some(gradeOf));
+  if (!gradedItems.length) return null;
+  // Per issue of a run, the median over the subruns the grader saw.
+  const per = (f) => gradedItems.map((sub) => median(sub.filter(gradeOf).map((r) => f(gradeOf(r), r)).filter(isNum))).filter(isNum);
+  const avg = (f) => mean(per(f));
+  const points = (key) => (g) => GRADE_POINTS[g[key]];
+  const reviewed = (f) => (g, r) => (g.reviewGrade ? f(g, r) : undefined);
+  return {
+    issues: gradedItems.length,
+    planGrade: avg(points("planGrade")),
+    codeGrade: avg(points("codeGrade")),
+    reviewGrade: avg(points("reviewGrade")),
+    finalCodeGrade: avg(points("finalCodeGrade")),
+    findingsReal: avg(reviewed((g) => g.findingsReal)),
+    findingsWrong: avg(reviewed((g) => g.findingsWrong)),
+    missed: avg(reviewed((g) => g.missed.length)),
+    missedBlocking: avg(reviewed((g) => g.missed.filter((x) => x.severity === "blocking").length)),
+    finalOpen: avg((g) => g.finalOpen.filter((x) => x.severity !== "nit").length),
+    // Positive: the reviewer graded the code higher than the grader did.
+    reviewerGap: avg((g, r) => GRADE_POINTS[r.codeGrade] - GRADE_POINTS[g.codeGrade]),
   };
 }
 
@@ -568,21 +659,44 @@ function mean(xs) {
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
 }
 
+function median(xs) {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function isNum(x) {
+  return typeof x === "number" && !Number.isNaN(x);
+}
+
 /** The plain-text report the CLI prints. */
 export function renderReport(summaries, rows, { listIssues = false, prState = new Map() } = {}) {
   const out = [];
   const n = (x, d = 1) => (x === null || x === undefined ? "-" : x.toFixed(d));
   const mt = (x) => (x === null ? "-" : `${(x / 1e6).toFixed(2)}M`);
   const usd = (x) => (x === null ? "-" : `$${x.toFixed(2)}`);
+  // A count over issues can be a half when two subruns split.
+  const c = (x) => (x === null || x === undefined ? "-" : Number.isInteger(x) ? String(x) : x.toFixed(1));
   for (const s of summaries) {
-    out.push(s.setup);
-    out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} · merged ${s.merged}` +
-      (s.converged === null ? "" : ` · converged without the reviewer fixing ${s.converged}`) +
+    out.push(`${s.name}: ${s.setup}`);
+    out.push(`  ${s.issues} issue(s) over ${s.runs} run(s)${s.subruns > s.issues ? ` (${s.subruns} subruns; each issue is their median)` : ""}` +
+      ` · resolved ${c(s.resolved)} · ready to ship ${c(s.readyToShip)} · merged ${c(s.merged)}` +
+      (s.converged === null ? "" : ` · converged without the reviewer fixing ${c(s.converged)}`) +
       (s.stalledFixes ? ` · STALLED fix rounds ${s.stalledFixes}` : ""));
     out.push(`  grades (A = 4): plan ${n(s.planGrade, 2)} · code at first review ${n(s.codeGrade, 2)} · code at last review ${n(s.finalCodeGrade, 2)} · review rounds ${n(s.reviewRounds)}`);
     out.push(`  first-review findings per issue: blocking ${n(s.findingsPerIssue.blocking)} · should-fix ${n(s.findingsPerIssue.shouldFix)} · nit ${n(s.findingsPerIssue.nit)}` +
-      ` · from the plan ${s.fromPlanShare === null ? "-" : `${Math.round(s.fromPlanShare * 100)}%`} · weak tests ${s.weakTests} · bugs ${s.bugs}`);
+      ` · from the plan ${s.fromPlanShare === null ? "-" : `${Math.round(s.fromPlanShare * 100)}%`} · weak tests ${c(s.weakTests)} · bugs ${c(s.bugs)}`);
     out.push(`  est. cost per issue ${usd(s.costPerIssue)} (API list price; output tokens are a floor)`);
+    if (s.noise) {
+      const z = s.noise;
+      out.push(`  noise, max minus min between subruns (${z.issues} issue(s) run more than once): code grade at first review ${n(z.codeGrade, 2)} · at last review ${n(z.finalCodeGrade, 2)}` +
+        (z.graderCodeGrade === null ? "" : ` · grader's code grade ${n(z.graderCodeGrade, 2)}`) +
+        ` · cost ${usd(z.cost)} · ready to ship differed on ${z.readyDiffered}`);
+      for (const u of z.unsteady) {
+        out.push(`    unsteady: #${u.issue} ${u.run} · final code ${u.finalCodeGrades.join(" / ")} · ready ${u.readyToShip.map((x) => (x ? "yes" : "no")).join(" / ")}`);
+      }
+    }
     if (s.fork) {
       const loopGrade = mean(rows.filter((r) => r.fork && setupKey(r) === s.setup).map((r) => GRADE_POINTS[r.finalCodeGrade]).filter((x) => x !== undefined));
       out.push(`  after a first review with findings (${s.fork.issues} issue(s)), mean per issue:`);
@@ -602,9 +716,18 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
     out.push("");
   }
   if (listIssues) {
+    // One line per issue of a run; subruns' letters side by side, their median cost.
+    const items = new Map();
     for (const r of rows) {
-      const pr = prState.get(r.branch) ?? "no PR";
-      out.push(`#${r.issue} ${r.runId} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"}→${r.finalCodeGrade ?? "-"} · ${r.reviewRounds} review(s) · ${r.findings.length} first finding(s) · ${usd(r.cost)} · ${pr} · ${r.branch ?? ""}${r.alreadyDone ? " · already done" : ""}`);
+      const k = `${runOf(r).run}#${r.issue}`;
+      if (!items.has(k)) items.set(k, []);
+      items.get(k).push(r);
+    }
+    for (const sub of items.values()) {
+      const r = sub[0];
+      const all = (f) => sub.map((x) => f(x) ?? "-").join("/");
+      const subs = sub.length > 1 ? ` (${sub.length} subruns)` : "";
+      out.push(`#${r.issue} ${runOf(r).name}${subs} plan ${all((x) => x.planGrade)} code ${all((x) => x.codeGrade)}→${all((x) => x.finalCodeGrade)} · ${all((x) => x.reviewRounds)} review(s) · ${all((x) => x.findings.length)} first finding(s) · ${usd(median(sub.map((x) => x.cost).filter(isNum)))} · ${all((x) => prState.get(x.branch) ?? "no PR")} · ${sub.map((x) => x.branch ?? "").join(", ")}${r.alreadyDone ? " · already done" : ""}`);
     }
   }
   return out.join("\n");

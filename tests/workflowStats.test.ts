@@ -11,7 +11,9 @@ import {
   parseLabel,
   PRICES,
   renderReport,
+  runOf,
   setupKey,
+  setupName,
   summarize,
   transcriptStats,
   wasBlocked,
@@ -266,6 +268,18 @@ describe("buildRows solo", () => {
     expect(setupKey(row)).toBe("v7 · solo opus-5-5/medium · graded by opus-5-5/high · bench 39cbc28b");
     expect(renderReport(summarize([row]), [row])).toContain("the measurement, not in the cost");
   });
+  it("counts a solo branch's review in the cost and names the setup by it", () => {
+    const record = { runId: "wf_sr", script: SCRIPT_V3.replace("= 3", "= 8"), args: { issues: [7], solo: true, soloReview: true, tag: "r15.1" } };
+    const [row] = buildRows({ record, recordedAt: "", agents: [
+      { label: "solo #7", result: { title: "Seven", already_done: false, branch: "s7", commit: "c1", typecheck_passed: true, tests_passed: true, summary: "…" }, transcript: stage("claude-sonnet-5-5", "high", 4) },
+      { label: "review #7 r1", result: { issue_resolved: true, ready_to_ship: true, code_grade: "B+", findings: [finding("F1", "should-fix", true)], self_fixed: ["F1"], final_commit: "c2" }, transcript: stage("claude-opus-5-5", "high", 6) },
+    ] });
+    expect(row).toMatchObject({ solo: true, tag: "r15.1", codeGrade: "B+", reviewRounds: 1, gradeCost: null, commits: { code: "c1", final: "c2" } });
+    expect(row.cost).toBeCloseTo(row.agents.reduce((s, a) => s + a.cost!.total, 0), 8);
+    expect(setupKey(row)).toBe("v8 · solo sonnet-5-5/high · reviewed by opus-5-5/high");
+    expect(setupName(row)).toBe("v8-solo sonnet +review");
+    expect(materials([row], 7).text).toContain("one review then fixed what it found");
+  });
 });
 
 describe("forkIndex", () => {
@@ -371,5 +385,61 @@ describe("grading runs side by side", () => {
     // Reviewer A and B against grader B and C: one point high on average.
     expect(s.grader).toMatchObject({ issues: 2, codeGrade: 2.5, reviewGrade: 2, missed: 0.5, missedBlocking: 0.5, finalOpen: 0, reviewerGap: 1 });
     expect(renderReport([s], rows)).toContain("reviewer's code grade minus the grader's +1.00");
+  });
+});
+
+describe("subruns", () => {
+  const SCRIPT_V8 = SCRIPT_V3.replace("= 3", "= 8").replace("= 2", "= 0");
+  const sub = (runId: string, tag: string | undefined, issue: number, code: string, ready: boolean) => buildRows({
+    record: { runId, workflowName: "plan-code-review", script: SCRIPT_V8, args: { issues: [issue], tag } },
+    recordedAt: "",
+    agents: [
+      { label: `plan #${issue}`, result: PLAN, transcript: stage("claude-sonnet-5-5", "high", 2) },
+      { label: `code #${issue}`, result: CODE, transcript: stage("claude-haiku-5-5", "xhigh", 4) },
+      { label: `review #${issue} r1`, result: {
+        issue_resolved: true, ready_to_ship: ready, plan_grade: "A", code_grade: code,
+        findings: [finding("F1", "blocking", false)], self_fixed: [],
+      }, transcript: stage("claude-opus-5-5", "high", 6) },
+    ],
+  })[0];
+
+  it("reads the run and subrun from the tag, and keeps untagged runs apart", () => {
+    expect(runOf({ tag: "r13.2", runId: "wf_1" })).toEqual({ run: "r13", name: "r13", subrun: 2 });
+    expect(runOf({ tag: "v8", runId: "wf_1" })).toEqual({ run: "wf_1", name: "v8", subrun: null });
+    expect(runOf({ runId: "wf_1" })).toEqual({ run: "wf_1", name: "wf_1", subrun: null });
+  });
+
+  it("counts each issue of a run once, as the median of its subruns, and reports their spread", () => {
+    const rows = [
+      sub("wf_1", "r13.1", 7, "A", true),
+      sub("wf_2", "r13.2", 7, "C", false),
+      sub("wf_3", "r13.3", 7, "B+", true),
+      sub("wf_1", "r13.1", 8, "A", true),
+      sub("wf_2", "r13.2", 8, "A-", true),
+    ];
+    expect(setupName(rows[0])).toBe("v8");
+    const [s] = summarize(rows);
+    expect(s).toMatchObject({ name: "v8", issues: 2, subruns: 5, runs: 1, readyToShip: 2 });
+    // #7: median of A, C, B+ is B+ (3.3); #8: median of A and A- is 3.85.
+    expect(s.codeGrade).toBeCloseTo((3.3 + 3.85) / 2, 8);
+    // #7's code grades spread 2.0 (A to C), #8's 0.3.
+    expect(s.noise!.codeGrade).toBeCloseTo(1.15, 8);
+    expect(s.noise!.readyDiffered).toBe(1);
+    expect(s.noise!.unsteady).toEqual([{ run: "r13", issue: 7, finalCodeGrades: ["A", "C", "B+"], readyToShip: [true, false, true] }]);
+    const text = renderReport([s], rows, { listIssues: true });
+    expect(text).toContain("2 issue(s) over 1 run(s) (5 subruns; each issue is their median)");
+    expect(text).toContain("unsteady: #7 r13 · final code A / C / B+ · ready yes / no / yes");
+    expect(text).toContain("#7 r13 (3 subruns) plan A/A/A code A/C/B+→A/C/B+");
+  });
+
+  it("splits a count when two subruns disagree, and leaves rows without subruns as they were", () => {
+    const [split] = summarize([sub("wf_1", "r13.1", 7, "A", true), sub("wf_2", "r13.2", 7, "A", false)]);
+    expect(split.readyToShip).toBe(0.5);
+    expect(renderReport([split], [])).toContain("ready to ship 0.5");
+    // Both ready, but a whole letter apart: unsteady on the grade alone.
+    const [apart] = summarize([sub("wf_1", "r14.1", 7, "A", true), sub("wf_2", "r14.2", 7, "B", true)]);
+    expect(apart.noise!.unsteady).toHaveLength(1);
+    const [plain] = summarize([sub("wf_1", undefined, 7, "A", true), sub("wf_2", undefined, 7, "B", true)]);
+    expect(plain).toMatchObject({ issues: 2, subruns: 2, runs: 2, noise: null, codeGrade: 3.5 });
   });
 });

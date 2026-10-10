@@ -47,6 +47,10 @@ export const meta = {
 // anything. The grade is the measurement, not part of the setup, so the
 // recorder leaves its cost out of the issue's cost. This answers "would the
 // strong model alone be cheaper?" on the same terms as the reviewed runs.
+// With `soloReview: true` as well, the `grade` agent gives way to the usual
+// last review (`models.review`): it grades the solo agent's branch, then
+// fixes what it found, as the review of a run without correction rounds
+// does. That review is part of the setup, so its cost counts.
 //
 // With `base` set to a commit, the run is pinned to it. Every stage branches
 // from that commit and diffs against it instead of origin/main, the planner
@@ -79,8 +83,11 @@ export const meta = {
 // args: an array of issue numbers, or
 //   { issues: [346, 353], tag: 'r3', maxRounds: 2, fork: true, models: { code: { model: 'sonnet', effort: 'medium' } } }
 //   { issues: [346, 353, 355], base: '39cbc28b…', tag: 'b1', solo: true }
+//   { issues: [347], tag: 'r15.1', solo: true, soloReview: true, models: { solo: { model: 'sonnet', effort: 'high' } } }
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
-// branch instead of colliding with an earlier attempt.
+// branch instead of colliding with an earlier attempt. A tag `r<N>.<k>` is
+// subrun k of run r<N>: the same setup run again, which the report merges
+// into one run (tools/workflowStatsLib.mjs header).
 
 const WORKFLOW_VERSION = 8
 const DEFAULT_MAX_ROUNDS = 0
@@ -98,6 +105,7 @@ const models = { plan: pick('plan'), code: pick('code'), review: pick('review'),
 const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS
 const tag = input.tag || `v${WORKFLOW_VERSION}`
 const solo = !!input.solo
+const soloReview = solo && !!input.soloReview
 const fork = !!input.fork && maxRounds > 0 && !solo
 const pinned = !!input.base
 const BASE = input.base || 'origin/main'
@@ -105,7 +113,7 @@ const ISSUES = (input.issues || []).map(i => (typeof i === 'number' ? { n: i } :
 if (!ISSUES.length) throw new Error('plan-code-review: pass issue numbers in args')
 const ms = (m) => `${m.model}/${m.effort}`
 log(`v${WORKFLOW_VERSION} · ` +
-  (solo ? `solo ${ms(models.solo)} · graded by ${ms(models.review)}` : `plan ${ms(models.plan)} · code ${ms(models.code)} · review ${ms(models.review)} · up to ${maxRounds} correction round(s)${fork ? ' · Opus-fix fork' : ''}`) +
+  (solo ? `solo ${ms(models.solo)} · ${soloReview ? 'reviewed' : 'graded'} by ${ms(models.review)}` : `plan ${ms(models.plan)} · code ${ms(models.code)} · review ${ms(models.review)} · up to ${maxRounds} correction round(s)${fork ? ' · Opus-fix fork' : ''}`) +
   `${pinned ? ` · bench at ${BASE.slice(0, 8)}` : ''} · tag ${tag}`)
 
 const GRADE = { type: 'string', enum: ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'] }
@@ -221,6 +229,14 @@ const GRADE_SCHEMA = {
   required: ['issue_resolved', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'notes'],
 }
 
+// The last review of a solo branch: no plan to grade or amend, no fork.
+const SOLO_REVIEW_SCHEMA = {
+  type: 'object',
+  properties: Object.fromEntries(Object.entries(REVIEW_SCHEMA.properties)
+    .filter(([k]) => !/^plan_|^fork_/.test(k))),
+  required: REVIEW_SCHEMA.required.filter(k => !k.startsWith('plan_')),
+}
+
 const GIT_RULES = 'Never use git stash (refs/stash is shared with parallel agents), never push, never touch main. '
 const INDEPENDENT = `This is an independent attempt: do not look at other worktrees under .claude/worktrees, other local branches for this issue, or earlier attempts at it. Work only from ${BASE} and what you are given here. `
 const TRAILER = 'Co-Authored-By: Claude <noreply@anthropic.com>'
@@ -252,6 +268,19 @@ if (solo) {
     ),
     async (built, issue) => {
       if (!built || built.already_done) { log(`#${issue.n}: skipped (${built ? 'already done' : 'no result'})`); return null }
+      if (soloReview) {
+        const review = await agent(
+          `Review and test the implementation of GitHub issue #${issue.n} ("${built.title}"). ${whereIs(built.branch, built.worktree_path)}\n` +
+          `One agent resolved it alone, with no plan, in an experiment that compares setups across runs. This is the LAST round: no coder comes after you. Grade the code honestly as you found it, before any fix of yours, then do step 5.\n` +
+          `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
+          `2. Run \`npm run typecheck\` and \`npm test\`.\n` +
+          `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
+          `4. Give every finding origin 'code' and write each summary so a coder could fix it without asking.\n` +
+          `5. Fix every open finding that isn't a nit yourself (a nit too when it takes a line). Run \`npm run typecheck\` and \`npm test\`, break each test you touched for a moment to check it fails, and commit with a plain-words message ending with a blank line and:\n${TRAILER}\nReport those findings with fixed: true, their ids in \`self_fixed\`, your commit in \`final_commit\`, and \`ready_to_ship\`, typecheck and tests as they stand after your fixes.`,
+          { label: `review #${issue.n} r1`, phase: 'Review', ...models.review, schema: SOLO_REVIEW_SCHEMA },
+        )
+        return { issue: issue.n, title: built.title, branch: built.branch, worktree: built.worktree_path, base: built.base, summary: built.summary, review }
+      }
       const grade = await agent(
         `Grade the implementation of GitHub issue #${issue.n} ("${built.title}"). ${whereIs(built.branch, built.worktree_path)}\n` +
         `One agent resolved it alone, with no plan and no review, in an experiment that compares setups across runs. You are the measurement: grade it as honestly as a correction round's review would, and do NOT fix anything.\n` +
@@ -264,7 +293,7 @@ if (solo) {
       return { issue: issue.n, title: built.title, branch: built.branch, worktree: built.worktree_path, base: built.base, summary: built.summary, review: grade }
     },
   )
-  return { version: WORKFLOW_VERSION, models: { solo: models.solo, review: models.review }, solo, base: pinned ? BASE : null, tag, results: soloResults.filter(Boolean) }
+  return { version: WORKFLOW_VERSION, models: { solo: models.solo, review: models.review }, solo, soloReview, base: pinned ? BASE : null, tag, results: soloResults.filter(Boolean) }
 }
 
 const results = await pipeline(

@@ -1,6 +1,6 @@
 ---
 description: Run GitHub issues through the plan → code → review workflow (a strong model plans, reviews once and fixes what it found, a cheaper one codes), or rerun the fixed benchmark, then grade every run of an issue side by side, and record the results for model comparison
-argument-hint: <issue numbers | bench | grade <issue numbers | bench>> [solo] [plan=model/effort] [code=model/effort] [review=model/effort] [solo=model/effort] [rounds=N] [fork] [tag=name]
+argument-hint: <issue numbers | bench | grade <issue numbers | bench>> [solo [+review]] [subruns=N] [plan=model/effort] [code=model/effort] [review=model/effort] [solo=model/effort] [rounds=N] [fork] [tag=name]
 ---
 
 Run `$ARGUMENTS` through the workflow,
@@ -14,7 +14,14 @@ Run `$ARGUMENTS` through the workflow,
      `tools/plan-code-review-bench.json` and pass both. Its rows form their
      own series in the report, so setups compare across reruns.
    - `solo` runs one agent per issue with no plan and no review, then a
-     `grade` agent whose cost stays out of the total.
+     `grade` agent whose cost stays out of the total. `solo +review` puts the
+     usual last review (`soloReview: true`) in the grade agent's place: it
+     grades, then fixes what it found, and its cost counts.
+   - `subruns=N` runs the same setup N times as one run, to measure the
+     noise: tags `r<N>.1` … `r<N>.N`, launched one after another, never at
+     once (parallel runs load the container and skew the timings). The report
+     shows the run merged, each issue as the median of its subruns, with the
+     spread between them; the `tools/workflowStatsLib.mjs` header says how.
    - A `plan=`, `code=`, `review=` or `solo=` override takes `model/effort`,
      such as `code=sonnet/medium`.
    - `rounds=N` brings back up to N correction rounds; by default there are
@@ -26,7 +33,8 @@ Run `$ARGUMENTS` through the workflow,
    - `tag=name` goes into the branch names, so a rerun of an issue gets fresh
      branches. Default it to a short tag that isn't in
      `git branch --list 'worktree-issue-*'` yet: `b<N>` for a bench run,
-     `r<N>` otherwise.
+     `r<N>` otherwise. A tag names a run only; the setup goes by its name in
+     the report (`v8-cr`, `v8-solo opus no-review`).
    - With neither issue numbers nor `bench`, ask which issues to run, and stop.
 
 2. **Check the issues are still open** with
@@ -41,8 +49,9 @@ Run `$ARGUMENTS` through the workflow,
    header says why. Then launch with the Workflow tool, `scriptPath:
    ".claude/workflows/plan-code-review.js"`, and `args` as real JSON: `{ "issues": [346, 353], "tag": "r3", "maxRounds": 2, "fork": true, "models": { "code": { "model": "sonnet", "effort": "medium" } } }`,
    or for `bench solo`: `{ "issues": [346, 353, 355], "base": "<sha from the bench file>", "tag": "b2", "solo": true }`.
-   Leave out what wasn't given. Tell the user the run ID and the setup, then
-   wait for the completion notice.
+   Leave out what wasn't given. With `subruns=N`, launch subrun 1 and start
+   each next one only after the last is recorded. Tell the user the run ID and
+   the setup, then wait for the completion notice.
 
 4. **Record the run** right after it completes, before anything else:
    `node tools/workflow-stats.mjs record <runId>`. The rows

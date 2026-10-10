@@ -12,6 +12,7 @@ export interface PriceCard {
 export const PRICES: Record<string, PriceCard & { long?: PriceCard & { above: number } }>;
 export const CACHE_WRITE_MULT: number;
 export const STAGES: readonly string[];
+export const UNSTEADY_GRADE_GAP: number;
 
 export type StageName = "plan" | "replan" | "code" | "solo" | "fix" | "review" | "finish" | "opusfix" | "check" | "grade";
 
@@ -88,10 +89,12 @@ export interface Row {
   version: number;
   maxRounds: number;
   forkRun: boolean;
-  /** One agent built it alone and a `grade` agent measured it. */
+  /** One agent built it alone; a `grade` agent measured it, or with `soloReview` the usual last review fixed it. */
   solo: boolean;
   /** The commit a benchmark run was pinned to; null on origin/main. */
   base: string | null;
+  /** The run's tag; "r13.2" is subrun 2 of run r13. Absent on rows recorded before tags were kept. */
+  tag?: string | null;
   runStartedAt: string | null;
   recordedAt: string;
   issue: number;
@@ -180,7 +183,12 @@ export interface StageSummary {
 
 export interface Summary {
   setup: string;
+  /** The setup's short name, from `setupName`. */
+  name: string;
+  /** Issues of runs, each counted once however many subruns it had. */
   issues: number;
+  /** Rows: every subrun of every issue. */
+  subruns: number;
   runs: number;
   resolved: number;
   readyToShip: number;
@@ -219,6 +227,16 @@ export interface Summary {
     /** The reviewer's code grade minus the grader's, in grade points. */
     reviewerGap: number | null;
   } | null;
+  /** Max minus min between the subruns of an issue, averaged over the issues run more than once; null with none. */
+  noise: {
+    issues: number;
+    codeGrade: number | null;
+    finalCodeGrade: number | null;
+    graderCodeGrade: number | null;
+    cost: number | null;
+    readyDiffered: number;
+    unsteady: { run: string; issue: number; finalCodeGrades: string[]; readyToShip: boolean[] }[];
+  } | null;
   stages: Partial<Record<StageName, StageSummary>>;
 }
 
@@ -237,6 +255,10 @@ export function costOf(model: string | null, tokens: Tokens, longTokens?: Tokens
 export function mergeRows(stored: Row[], added: Row[]): Row[];
 
 export function setupKey(row: Row): string;
+
+export function setupName(row: Row): string;
+
+export function runOf(row: Pick<Row, "runId" | "tag">): { run: string; name: string; subrun: number | null };
 
 export function buildRows(run: {
   record: { runId: string; workflowName?: string; timestamp?: string; script?: string; args?: unknown };
