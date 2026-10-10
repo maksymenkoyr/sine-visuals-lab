@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildGradeRows,
   buildRows,
   costOf,
   forkIndex,
+  latestGrades,
+  materials,
   mergeRows,
   parseGrade,
   parseLabel,
@@ -307,5 +310,66 @@ describe("summarize", () => {
   it("leaves issues the planner found already done out of the sums", () => {
     const [row] = run("wf_x", SCRIPT_V2, { plan_grade: "A", code_grade: "A", findings: [] });
     expect(summarize([{ ...row, alreadyDone: true }])).toEqual([]);
+  });
+});
+
+describe("grading runs side by side", () => {
+  const SCRIPT_V8 = SCRIPT_V3.replace("= 3", "= 8").replace("= 2", "= 0");
+  const t = (m: string) => stage(m, "high", 1);
+  const v8 = (runId: string, startedAt: string, codeGrade: string) => buildRows({
+    record: { runId, workflowName: "plan-code-review", timestamp: startedAt, script: SCRIPT_V8, args: { issues: [7] } },
+    recordedAt: "",
+    agents: [
+      { label: "plan #7", result: { ...PLAN, plan: `plan of ${runId}` }, transcript: t("claude-opus-5-5") },
+      { label: "code #7", result: { ...CODE, base: "b0", commit: `c-${runId}` }, transcript: t("claude-haiku-5-5") },
+      { label: "review #7 r1", result: {
+        issue_resolved: true, ready_to_ship: true, plan_grade: "A", code_grade: codeGrade,
+        findings: [{ ...finding("F1", "blocking", true), line: 12 }], self_fixed: ["F1"], final_commit: `f-${runId}`,
+      }, transcript: t("claude-opus-5-5") },
+    ],
+  })[0];
+
+  it("hands the grader each run's commits, plan and findings, but no models or reviewer grades", () => {
+    const later = v8("wf_b", "2026-10-10T02:00:00Z", "B");
+    const earlier = v8("wf_a", "2026-10-10T01:00:00Z", "A-");
+    expect(later).toMatchObject({ maxRounds: 0, commits: { base: "b0", code: "c-wf_b", final: "f-wf_b" }, selfFixedIds: ["F1"] });
+    const old = { ...earlier, runId: "wf_old", commits: undefined };
+    const bench = { ...earlier, runId: "wf_bench", base: "39cbc28b" };
+    const { runs, text } = materials([later, old, bench, earlier], 7);
+    expect(runs).toEqual(["wf_a", "wf_b"]);
+    expect(text).toContain("plan of wf_a");
+    expect(text).toContain("- [F1] blocking, code, bug: f.ts:12: F1");
+    expect(text).toContain("fixed these itself, up to the final commit: F1");
+    expect(text).not.toMatch(/opus|haiku|A-/);
+    expect(materials([later, bench], 7, "39cbc28b").runs).toEqual(["wf_bench"]);
+  });
+
+  it("records the grader's grades and sets the reviewer's code grade against them", () => {
+    const rows = [v8("wf_a", "2026-10-10T01:00:00Z", "A"), v8("wf_b", "2026-10-10T02:00:00Z", "B")];
+    const grade = (runId: string, code: string, missed: unknown[]) => ({
+      run_id: runId, plan_grade: "B", code_grade: code, review_grade: "C", final_code_grade: "B+",
+      findings_real: ["F1"], findings_wrong: [], missed, final_open: [{ severity: "nit", summary: "n" }],
+    });
+    const gradeRun = (runId: string, recordedAt: string, codeA: string) => buildGradeRows({
+      record: { runId, workflowName: "grade-runs", args: { issues: [7] } },
+      recordedAt,
+      agents: [{ label: "rungrade #7", transcript: t("claude-opus-5-5"), result: {
+        runs: [grade("wf_a", codeA, [{ severity: "blocking", summary: "x" }]), grade("wf_b", "C", [])],
+        ranking: ["wf_a", "wf_b"], notes: "",
+      } }],
+    });
+    const [first] = gradeRun("wf_g1", "2026-10-10T03:00:00Z", "D");
+    const [second] = gradeRun("wf_g2", "2026-10-10T04:00:00Z", "B");
+    expect(first).toMatchObject({ issue: 7, ranking: ["wf_a", "wf_b"] });
+    expect(first.cost).toBeGreaterThan(0);
+    expect(first.runs[0]).toMatchObject({ codeGrade: "D", reviewGrade: "C", findingsReal: 1, findingsWrong: 0 });
+
+    // The newer grading of wf_a wins.
+    const grades = latestGrades([second, first]);
+    expect(grades.get("wf_a#7")?.codeGrade).toBe("B");
+    const [s] = summarize(rows, new Map(), grades);
+    // Reviewer A and B against grader B and C: one point high on average.
+    expect(s.grader).toMatchObject({ issues: 2, codeGrade: 2.5, reviewGrade: 2, missed: 0.5, missedBlocking: 0.5, finalOpen: 0, reviewerGap: 1 });
+    expect(renderReport([s], rows)).toContain("reviewer's code grade minus the grader's +1.00");
   });
 });

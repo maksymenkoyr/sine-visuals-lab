@@ -10,6 +10,7 @@
 //   node tools/workflow-stats.mjs report --issues         # plus one line per issue
 //   node tools/workflow-stats.mjs report --json           # the raw rows
 //   node tools/workflow-stats.mjs tokens [runId]           # per agent, latest run by default
+//   node tools/workflow-stats.mjs materials 346 [--bench <sha>]  # what the side-by-side grader reads
 //   node tools/workflow-stats.mjs export wf_d5233a2c-fd5   # one run's rows, to carry to another machine
 //   node tools/workflow-stats.mjs import rows.jsonl        # add rows another machine exported
 //
@@ -27,6 +28,11 @@
 // branches. Nothing syncs it. A run recorded on another machine or in a cloud
 // session comes over by hand: `export <runId>` there, `import` here. A shared
 // database can come later, if the project is ever published.
+// A run of the grade-runs workflow (.claude/workflows/grade-runs.js) records
+// the same way, into GRADES next to the store: one row per issue holding the
+// grader's grades of every run it compared, kept apart so recording a run
+// again never drops its grades. `materials` prints what that grader reads.
+//
 // `report` asks `gh` which branches have a merged PR, the slowest but most
 // honest signal of whether a run's work was any good. Pass --no-gh to skip it.
 //
@@ -36,9 +42,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { buildRows, forkIndex, mergeRows, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
+import { buildGradeRows, buildRows, forkIndex, latestGrades, materials, mergeRows, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
 
 const STORE = process.env.WORKFLOW_STATS_FILE ?? join(homedir(), ".claude", "workflow-stats", "runs.jsonl");
+const GRADES = join(dirname(STORE), "grades.jsonl");
 const PROJECTS = join(homedir(), ".claude", "projects");
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -93,7 +100,7 @@ async function record(runId) {
 }
 
 async function sweep() {
-  const stored = new Set(readStore().map((r) => r.runId));
+  const stored = new Set([...readStore(), ...readStore(GRADES)].map((r) => r.runId));
   let found = 0;
   for (const dir of workflowDirs()) {
     for (const name of readdirSync(dir).filter((f) => /^wf_.*\.json$/.test(f))) {
@@ -105,12 +112,12 @@ async function sweep() {
       } catch {
         continue;
       }
-      if (meta.workflowName !== "plan-code-review" || meta.status !== "completed") continue;
+      if (!["plan-code-review", "grade-runs"].includes(meta.workflowName) || meta.status !== "completed") continue;
       found++;
       await recordFrom(runId, join(dir, name));
     }
   }
-  if (!found) console.log(`every completed plan-code-review run on disk is already in ${STORE}`);
+  if (!found) console.log(`every completed plan-code-review and grade-runs run on disk is already recorded`);
 }
 
 async function recordFrom(runId, recordPath) {
@@ -140,6 +147,16 @@ async function recordFrom(runId, recordPath) {
       { label: label.replace(/^review (#\d+) r1$/, "opusfix $1"), result: { fixed: result.fork_fixed ?? [], commit: result.fork_commit }, transcript: transcriptStats(entries.slice(cut)) },
     ];
   });
+  if (runRecord.workflowName === "grade-runs") {
+    const grades = buildGradeRows({ record: runRecord, agents, recordedAt: new Date().toISOString() });
+    saveRows(grades, GRADES);
+    console.log(`recorded the grades of ${grades.length} issue(s) from ${runId} into ${GRADES}`);
+    for (const g of grades) {
+      console.log(`  #${g.issue} · ${g.runs.length} run(s) · $${(g.cost ?? 0).toFixed(2)} · best first: ${g.ranking.join(", ")}`);
+      for (const r of g.runs) console.log(`    ${r.runId} plan ${r.planGrade ?? "-"} code ${r.codeGrade ?? "-"} review ${r.reviewGrade ?? "-"} final ${r.finalCodeGrade ?? "-"} · missed ${r.missed.length} · wrong ${r.findingsWrong}`);
+    }
+    return;
+  }
   const rows = buildRows({ record: runRecord, agents, recordedAt: new Date().toISOString() });
   saveRows(rows);
   console.log(`recorded ${rows.length} issue(s) from ${runId} into ${STORE}`);
@@ -151,8 +168,8 @@ async function recordFrom(runId, recordPath) {
 // One line per agent of one recorded run (the latest when no ID is given):
 // where the tokens went and what they cost.
 async function tokens(runId) {
-  const all = readStore();
-  const id = runId ?? all.at(-1)?.runId;
+  const all = [...readStore(), ...readStore(GRADES)];
+  const id = runId ?? readStore().at(-1)?.runId;
   const rows = all.filter((r) => r.runId === id);
   if (!rows.length) {
     console.log(runId ? `no recorded run ${runId}` : "no runs recorded yet");
@@ -168,7 +185,7 @@ async function tokens(runId) {
     for (const a of r.agents) {
       const t = a.tokens;
       const c = a.cost;
-      if (a.stage === "grade") graded += c?.total ?? 0;
+      if (a.stage === "grade" || a.stage === "rungrade") graded += c?.total ?? 0;
       else total += c?.total ?? 0;
       console.log(
         `${a.label.padEnd(19)} ${`${(a.model ?? "?").replace(/^claude-/, "")}/${a.effort ?? "?"}`.padEnd(20)}` +
@@ -211,22 +228,38 @@ async function report(flags) {
     return;
   }
   const prState = flags.includes("--no-gh") ? new Map() : prStates();
-  console.log(renderReport(summarize(rows, prState), rows, { listIssues: flags.includes("--issues"), prState }));
+  console.log(renderReport(summarize(rows, prState, latestGrades(readStore(GRADES))), rows, { listIssues: flags.includes("--issues"), prState }));
 }
 
 async function importRows(path) {
   if (!path) throw new Error("usage: workflow-stats import <rows.jsonl>");
-  const rows = readJsonl(path);
-  const runs = new Set(rows.map((r) => r.runId));
-  saveRows(rows);
-  console.log(`imported ${rows.length} row(s) from ${runs.size} run(s) into ${STORE}`);
+  const all = readJsonl(path);
+  // Grade rows hold a `runs` list; run rows never do.
+  const grades = all.filter((r) => Array.isArray(r.runs));
+  const rows = all.filter((r) => !Array.isArray(r.runs));
+  if (rows.length) saveRows(rows);
+  if (grades.length) saveRows(grades, GRADES);
+  const runs = new Set(all.map((r) => r.runId));
+  console.log(`imported ${rows.length} run row(s) and ${grades.length} grade row(s) from ${runs.size} run(s)`);
 }
 
 function exportRows(runId) {
   if (!runId) throw new Error("usage: workflow-stats export <runId>");
-  const rows = readStore().filter((r) => r.runId === runId);
-  if (!rows.length) throw new Error(`no recorded run ${runId} in ${STORE}`);
+  const rows = [...readStore(), ...readStore(GRADES)].filter((r) => r.runId === runId);
+  if (!rows.length) throw new Error(`no recorded run ${runId} in ${STORE} or ${GRADES}`);
   process.stdout.write(rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+}
+
+function printMaterials(args) {
+  const issue = Number(args[0]);
+  if (!issue) throw new Error("usage: workflow-stats materials <issue> [--bench <sha>]");
+  const at = args.indexOf("--bench");
+  const { runs, text } = materials(readStore(), issue, at >= 0 ? args[at + 1] ?? null : null);
+  if (!runs.length) {
+    console.log(`no recorded run of #${issue} with commits on that base in ${STORE}`);
+    return;
+  }
+  console.log(`${runs.length} run(s) of #${issue}\n\n${text}`);
 }
 
 if (cmd === "record") await record(rest[0]);
@@ -235,7 +268,8 @@ else if (cmd === "import") await importRows(rest[0]);
 else if (cmd === "sweep") await sweep();
 else if (cmd === "report") await report(rest);
 else if (cmd === "tokens") await tokens(rest[0]);
+else if (cmd === "materials") printMaterials(rest);
 else {
-  console.log("usage: workflow-stats record <runId> | sweep | export <runId> | import <rows.jsonl> | report [--issues] [--json] [--no-gh] | tokens [runId]");
+  console.log("usage: workflow-stats record <runId> | sweep | export <runId> | import <rows.jsonl> | report [--issues] [--json] [--no-gh] | tokens [runId] | materials <issue> [--bench <sha>]");
   process.exit(cmd ? 1 : 0);
 }
