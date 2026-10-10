@@ -51,10 +51,11 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    (`src/ui/typedValue.ts`), and one inside the slider's range is just the
    setting, saved like a drag. On a Scene-card row, one typed past the slider
    becomes a custom value instead of clamping (`src/render/customValues.ts`),
-   marked with ⚠, persisted, and cleared by emptying the field, dragging the
-   slider, pressing its ↺, or handing the row to auto. The public build bounds
-   it (that file's header says how far, and which settings take none); a dev
-   build lifts the bound, and lets the Input card's rows take one too.
+   marked with ⚠ and its slider stretched to it, persisted. Dragging back inside
+   the slider's own range drops it but keeps the stretch; ↺, emptying the field
+   or handing the row to auto drops both. The public build bounds it (that
+   file's header says how far, and which settings take none); a dev build
+   lifts the bound, and lets the Input card's rows take one too.
 2. **Mark.** Alt+M (wired in `src/tuning/debug.ts`) captures one frame plus a
    probe snapshot and POSTs it to `/__tuning/mark`; the plugin writes
    `tuning/marks/<timestamp>.png` and `<timestamp>.json` (both gitignored — marks
