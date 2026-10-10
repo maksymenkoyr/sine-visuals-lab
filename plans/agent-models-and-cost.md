@@ -98,19 +98,19 @@ Phase 8 was built first, on 2026-10-09: from then on the workflow, `/plan-code-r
   - Read first: `docs/agent-models.md` from phase 2
   - Done when: the table names `haiku-coder` for spelled-out edits, every row agrees with the doc, and both files say the same thing
 
-- [ ] **4. `/plan-code-review` codes with the lean Haiku agent, and a bench run shows whether it holds up**
+- [ ] **4. `/plan-code-review` codes with the lean Haiku agent, and a bench run shows whether it holds up** — workflow-arena#4
   - Touches: `.claude/workflows/plan-code-review.js` (the code and fix stages), `.claude/commands/plan-code-review.md`
   - Read first: the workflow's header; `plans/multi-model-flow.md`; `.claude/agents/haiku-coder.md`
   - Done when: the open question is answered; `/plan-code-review bench` with the lean coder is recorded next to r8 in `npm run workflow-stats -- report`, with its grade and cost
 
-- [ ] **5. Every setup is graded by the same blind grader, by fixed rules**
+- [ ] **5. Every setup is graded by the same blind grader, by fixed rules** — workflow-arena#1
   - Touches: `.claude/workflows/plan-code-review.js` (a `grade` agent after the last review in every mode, as solo mode has), `tools/workflowStatsLib.mjs` (grades from that agent; its cost kept out of the setup's, as solo's is)
   - Read first: the workflow header's solo and `base` sections; `buildRows` and `gradeCost` in `tools/workflowStatsLib.mjs`
   - Blind: the grader sees the issue's title and body and a diff with no branch name, tag, commit messages or trailers, and nothing about the setup. The grader works in its own clone with the diff applied as one commit on a neutral branch, so the worktree path, the git log and the branch list name no setup either. A pinned run's clone has no remote; its prompt overrides CLAUDE.md's rule to read origin/main and open PRs.
   - Rules: the grader answers yes/no questions per part (correctness, tests, scope, docs) and lists findings by severity, with "blocking" and "should-fix" defined in its prompt. The workflow, not the grader, turns those into the grade: any blocking finding caps it, any should-fix caps it lower.
   - Done when: each issue gets one `grade` agent with the same model, effort and prompt whatever the setup; the report shows its part scores and findings beside the reviewer's grade
 
-- [ ] **6. A script measures what can be checked, beside the grader**
+- [ ] **6. A script measures what can be checked, beside the grader** — workflow-arena#2
   - Touches: a new script under `tools/` the workflow runs after the last review, `tools/plan-code-review-bench.json` (the reference PR per issue), `.claude/commands/plan-code-review.md`
   - Read first: the `tools/workflow-stats.mjs` header; StrykerJS's docs on running only changed files
   - Checks: typecheck and tests on the base and on the branch, so a test that also fails on the base doesn't count; where the agents' own `typecheck_passed` and `tests_passed` differ from that; the reference fix's tests run on the branch (fail-to-pass and pass-to-pass) when the bench names a reference PR; a mutation score of the new tests on the changed files (StrykerJS as a dev dependency).
@@ -118,7 +118,7 @@ Phase 8 was built first, on 2026-10-09: from then on the workflow, `/plan-code-r
   - Bench issues: only ones whose real fix has tests; a look or shader issue stays out.
   - Done when: a bench run records each check per issue; a test that passes with the fix reverted shows as a surviving mutant; the report gives these counts per setup next to the grades
 
-- [ ] **7. Comparisons say how much is noise**
+- [ ] **7. Comparisons say how much is noise** — workflow-arena#3
   - Touches: `.claude/workflows/plan-code-review.js` (a side-by-side judge), `tools/workflowStatsLib.mjs` (`summarize`, `renderReport`), `.claude/commands/plan-code-review.md`, `tools/workflow-stats.mjs`
   - Read first: this plan's grading research; the `/plan-code-review` rule on repeats
   - Side by side: for the same issue under two setups, the grader is shown both diffs unlabelled, in both orders, and says which is better; the report counts wins, ties and losses per pair of setups.
