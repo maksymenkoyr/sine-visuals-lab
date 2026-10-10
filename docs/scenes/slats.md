@@ -184,3 +184,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
 - `#130` (open, not yet merged) — Drives: would move `slats`'s reactive
   settings onto the global per-setting drive-source system.
 - #462 (draft, 2026-10-09): Rendering: the glow targets (full-res plus the half-res blur pair) now come from gl.ts's shared render-target helper (`createTargetList`); no change to the look.
+- #349 cleanup — sampler units now set with GLProgram.setI; the scene's own sampler-location cache is gone. No change on screen.
