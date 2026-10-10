@@ -51,6 +51,11 @@
 // row's `cost` leaves it out, and `gradeCost` keeps it apart. A run pinned to
 // a `base` commit (a benchmark) gets that commit in its setup key, so bench
 // rows form their own series apart from everyday runs on origin/main.
+//
+// The grade-runs workflow (.claude/workflows/grade-runs.js) is the outside
+// measurement: `materials` is what its grader reads, `buildGradeRows` turns
+// its run into grade rows, and `summarize` sets those grades beside each
+// setup's own review.
 
 /** Grade letters the review schema allows, best first, with their points. */
 export const GRADE_POINTS = {
@@ -284,13 +289,15 @@ export function buildRows({ record, agents, recordedAt }) {
       }
     }
     const findingsOf = (r) => (r?.findings ?? []).map((f) => ({
-      severity: f.severity ?? null, origin: f.origin ?? null, kind: f.kind ?? null,
+      id: f.id ?? null, line: f.line ?? null, severity: f.severity ?? null, origin: f.origin ?? null, kind: f.kind ?? null,
       fixed: f.fixed ?? null, file: f.file ?? null, summary: f.summary ?? "",
     }));
     const open = (r) => findingsOf(r).filter((f) => f.severity !== "nit" && !f.fixed).length;
     const selfFixed = (lastReview?.self_fixed ?? []).length;
     const opusfix = one("opusfix");
     const check = one("check");
+    const fixes = list.filter((a) => a.stage === "fix").sort((a, b) => a.round - b.round);
+    const codeCommit = code?.commit ?? solo?.commit ?? null;
     const costOfStages = (pred) => list.filter(pred).reduce((s, a) => s + (a.cost?.total ?? 0), 0);
     rows.push({
       runId: record.runId,
@@ -341,6 +348,15 @@ export function buildRows({ record, agents, recordedAt }) {
       } : null,
       cost: costOfStages((a) => a.stage !== "grade"),
       gradeCost: grade?.cost?.total ?? null,
+      // What a side-by-side grader (`materials`, `buildGradeRows`) reads: the
+      // plan, the commit the coder handed over, and the branch's last commit.
+      planText: plan?.plan ?? null,
+      commits: {
+        base: code?.base ?? solo?.base ?? argsObject(record.args).base ?? null,
+        code: codeCommit,
+        final: lastReview?.final_commit || fixes.map((f) => f.result?.commit).filter(Boolean).at(-1) || codeCommit,
+      },
+      selfFixedIds: lastReview?.self_fixed ?? [],
     });
   }
   return rows;
@@ -358,12 +374,102 @@ function issueTitles(args) {
 }
 
 /**
+ * What the side-by-side grader (.claude/workflows/grade-runs.js) reads for
+ * one issue: every recorded run of it from the same base (`bench`, or null
+ * for runs on origin/main), named by run ID only, so the grader can't tell
+ * which setup made which. The reviewer's own grades stay out too: the report
+ * sets them against the grader's instead. Rows recorded before `commits`
+ * existed are left out, since the grader can't find their code.
+ * @param {any[]} rows
+ * @param {number} issue
+ * @param {string | null} [bench]
+ */
+export function materials(rows, issue, bench = null) {
+  const runs = rows
+    .filter((r) => r.issue === issue && !r.alreadyDone && r.commits?.code && (r.base ?? null) === bench)
+    .sort((a, b) => String(a.runStartedAt ?? "").localeCompare(String(b.runStartedAt ?? "")) || a.runId.localeCompare(b.runId));
+  const out = [];
+  for (const r of runs) {
+    const c = r.commits;
+    out.push(`=== run ${r.runId} ===`, `base ${c.base ?? "?"} · code ${c.code} · final ${c.final ?? c.code}`);
+    if (r.solo) {
+      out.push("One agent built this alone: no plan and no review. Grade only its code (code and final are the same commit).", "");
+      continue;
+    }
+    out.push("--- plan ---", r.planText ?? "(not recorded)", "--- first review's findings, on the code commit ---");
+    out.push(...(r.findings.length
+      ? r.findings.map((f) => `- [${f.id ?? "?"}] ${f.severity}, ${f.origin}, ${f.kind}: ${f.file}${f.line ? `:${f.line}` : ""}: ${f.summary}`)
+      : ["(none)"]));
+    if (r.reviewRounds > 1) out.push(`The coder then had ${r.reviewRounds - 1} correction round(s) before the last review.`);
+    out.push(`--- the reviewer then fixed these itself, up to the final commit: ${r.selfFixedIds?.length ? r.selfFixedIds.join(", ") : "none"}`, "");
+  }
+  return { runs: runs.map((r) => r.runId), text: out.join("\n") };
+}
+
+/**
+ * One row per issue for a finished grade-runs run: the grader's grades of
+ * every run it compared. Stored apart from the run rows, so recording a run
+ * again doesn't drop its grades.
+ * @param {Parameters<typeof buildRows>[0]} run
+ */
+export function buildGradeRows({ record, agents, recordedAt }) {
+  const rows = [];
+  for (const a of agents) {
+    const m = /^rungrade\s+#(\d+)$/.exec(a.label ?? "");
+    if (!m || !a.result) continue;
+    const t = a.transcript;
+    const cost = costOf(t.model, t.tokens, t.longTokens);
+    rows.push({
+      runId: record.runId,
+      workflow: record.workflowName ?? null,
+      recordedAt,
+      issue: Number(m[1]),
+      bench: argsObject(record.args).base ?? null,
+      agents: [{
+        label: a.label, stage: "rungrade", round: 1, model: t.model, effort: t.effort,
+        requests: t.requests, toolCalls: a.progress?.toolCalls ?? null, minutes: t.minutes,
+        peakContext: t.peakContext, tokens: t.tokens, longTokens: t.longTokens ?? NO_TOKENS, cost,
+      }],
+      cost: cost?.total ?? null,
+      runs: (a.result.runs ?? []).map((g) => ({
+        runId: g.run_id,
+        planGrade: parseGrade(g.plan_grade),
+        codeGrade: parseGrade(g.code_grade),
+        reviewGrade: parseGrade(g.review_grade),
+        finalCodeGrade: parseGrade(g.final_code_grade),
+        findingsReal: (g.findings_real ?? []).length,
+        findingsWrong: (g.findings_wrong ?? []).length,
+        missed: g.missed ?? [],
+        finalOpen: g.final_open ?? [],
+        reasons: { plan: g.plan_reason ?? "", code: g.code_reason ?? "", review: g.review_reason ?? "", finalCode: g.final_code_reason ?? "" },
+      })),
+      ranking: a.result.ranking ?? [],
+      notes: a.result.notes ?? "",
+    });
+  }
+  return rows;
+}
+
+/**
+ * The newest grade of each run of each issue, keyed "<runId>#<issue>".
+ * @param {any[]} gradeRows
+ */
+export function latestGrades(gradeRows) {
+  const m = new Map();
+  for (const row of [...gradeRows].sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))) {
+    for (const g of row.runs) m.set(`${g.runId}#${row.issue}`, g);
+  }
+  return m;
+}
+
+/**
  * Sums rows per setup. `prState` maps a branch to its PR state (OPEN,
  * MERGED, CLOSED) when the caller could ask GitHub.
  * @param {any[]} rows
  * @param {Map<string, string>} [prState]
+ * @param {Map<string, any>} [grades] from `latestGrades`
  */
-export function summarize(rows, prState = new Map()) {
+export function summarize(rows, prState = new Map(), grades = new Map()) {
   /** @type {Map<string, any[]>} */
   const groups = new Map();
   for (const r of rows) {
@@ -414,9 +520,34 @@ export function summarize(rows, prState = new Map()) {
       bugs: count((f) => f.kind === "bug"),
       costPerIssue: mean(rs.map((r) => r.cost)),
       fork: forkSummary(rs.map((r) => r.fork).filter(Boolean)),
+      grader: graderSummary(rs, grades),
       stages,
     };
   });
+}
+
+function graderSummary(rs, grades) {
+  const pairs = rs.map((r) => [r, grades.get(`${r.runId}#${r.issue}`)]).filter(([, g]) => g);
+  if (!pairs.length) return null;
+  const gs = pairs.map(([, g]) => g);
+  const points = (xs) => mean(xs.map((x) => GRADE_POINTS[x]).filter((x) => x !== undefined));
+  const reviewed = gs.filter((g) => g.reviewGrade);
+  const per = (f) => (reviewed.length ? mean(reviewed.map(f)) : null);
+  // Positive: the reviewer graded the code higher than the grader did.
+  const gaps = pairs.map(([r, g]) => GRADE_POINTS[r.codeGrade] - GRADE_POINTS[g.codeGrade]).filter((x) => !Number.isNaN(x));
+  return {
+    issues: gs.length,
+    planGrade: points(gs.map((g) => g.planGrade)),
+    codeGrade: points(gs.map((g) => g.codeGrade)),
+    reviewGrade: points(gs.map((g) => g.reviewGrade)),
+    finalCodeGrade: points(gs.map((g) => g.finalCodeGrade)),
+    findingsReal: per((g) => g.findingsReal),
+    findingsWrong: per((g) => g.findingsWrong),
+    missed: per((g) => g.missed.length),
+    missedBlocking: per((g) => g.missed.filter((x) => x.severity === "blocking").length),
+    finalOpen: mean(gs.map((g) => g.finalOpen.filter((x) => x.severity !== "nit").length)),
+    reviewerGap: mean(gaps),
+  };
 }
 
 function forkSummary(fs) {
@@ -457,6 +588,12 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
       out.push(`  after a first review with findings (${s.fork.issues} issue(s)), mean per issue:`);
       out.push(`    reviewer fixes it  ${usd(s.fork.fixCost)} fixing (+ ${usd(s.fork.checkCost)} check) · code grade after ${n(s.fork.codeGrade, 2)} · open after ${n(s.fork.open)}`);
       out.push(`    correction loop    ${usd(s.fork.loopCost)} fixes and re-reviews · code grade at last review ${n(loopGrade, 2)} · open at last review ${n(s.fork.loopOpen)}`);
+    }
+    if (s.grader) {
+      const g = s.grader;
+      const sign = (x) => (x === null ? "-" : `${x > 0 ? "+" : ""}${x.toFixed(2)}`);
+      out.push(`  grader, side by side (${g.issues} issue(s)): plan ${n(g.planGrade, 2)} · code ${n(g.codeGrade, 2)} · review ${n(g.reviewGrade, 2)} · final code ${n(g.finalCodeGrade, 2)} · open at the end ${n(g.finalOpen)}`);
+      out.push(`  review per issue, by the grader: real findings ${n(g.findingsReal)} · wrong ${n(g.findingsWrong)} · missed ${n(g.missed)} (blocking ${n(g.missedBlocking)}) · reviewer's code grade minus the grader's ${sign(g.reviewerGap)}`);
     }
     for (const [name, st] of Object.entries(s.stages)) {
       out.push(`  ${name.padEnd(7)} ${usd(st.cost)} · ${n(st.agents)} agent(s) · ${n(st.minutes)} min · ${n(st.requests, 0)} requests · ${mt(st.contextTokens)} context · ${n(st.outputSeen, 0)}+ output (mean per issue that ran it)` +

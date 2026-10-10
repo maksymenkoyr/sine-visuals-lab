@@ -23,8 +23,14 @@ export const meta = {
 // the branch as it found it, then fixes what is still open itself and lists
 // those ids in `self_fixed`, so every branch ends shippable and the stats show
 // what the loop couldn't do. Until version 6 a separate finish agent did that
-// fixing, at the price of starting one more reviewer-model agent; with
-// `maxRounds: 0` the first review is the last, as in the first trial run.
+// fixing, at the price of starting one more reviewer-model agent. From
+// version 8 `DEFAULT_MAX_ROUNDS` runs no correction round: the first review
+// is the last, so Opus reviews once, fixes once, and the run ends. Pass
+// `maxRounds` to bring the loop back.
+//
+// What the review was worth is measured outside this workflow:
+// .claude/workflows/grade-runs.js grades every recorded run of an issue side
+// by side, the review included.
 //
 // With `fork: true` the run compares two ways to act on the first review's
 // findings, from the same findings. The first review also fixes them itself,
@@ -76,8 +82,8 @@ export const meta = {
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
-const WORKFLOW_VERSION = 7
-const DEFAULT_MAX_ROUNDS = 2
+const WORKFLOW_VERSION = 8
+const DEFAULT_MAX_ROUNDS = 0
 
 const DEFAULT_MODELS = {
   plan: { model: 'opus', effort: 'medium' },
