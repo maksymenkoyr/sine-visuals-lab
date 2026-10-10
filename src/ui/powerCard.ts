@@ -374,6 +374,8 @@ function createResolutionRow(deps: PowerCardDeps, accent: string) {
     const lo = Number(slider.min);
     slider.style.setProperty("--vc-fill", `${((pct - lo) / (Number(slider.max) - lo)) * 100}%`);
     outDigits.textContent = String(pct);
+    // The same text the readout shows, so a screen reader says "85%", not "85".
+    slider.setAttribute("aria-valuetext", `${pct}%`);
   };
   slider.addEventListener("input", () => {
     const fraction = Number(slider.value) / 100;

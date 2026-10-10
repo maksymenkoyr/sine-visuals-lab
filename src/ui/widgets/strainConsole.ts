@@ -71,6 +71,10 @@ import {
  * Every word a person reads here is a spec label/description, a value or a
  * preset's own name and hint; the few fixed strings (Link, Random, Back,
  * Shuffle, New palette) are the layout's own vocabulary.
+ *
+ * **Slider values are voiced.** Each lane is a `role="slider"` whose
+ * `aria-valuetext` is the text its visible readout shows, so a screen reader
+ * says the same value the person sees.
  */
 
 export interface ConsoleOptions {
@@ -391,6 +395,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
           code.style.color = colour;
           val.textContent = formatValue(value, fmtOf(p), spec);
           track.setAttribute("aria-valuenow", value.toFixed(3));
+          track.setAttribute("aria-valuetext", val.textContent ?? "");
         },
       });
     }
