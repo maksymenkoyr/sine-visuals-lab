@@ -7,6 +7,8 @@ interface Recorder {
   lookups: [unknown, string][];
   uniform1i: [unknown, number][];
   uniform1f: [unknown, number][];
+  uniform3f: [unknown, number, number, number][];
+  matrix3: [unknown, boolean, unknown][];
 }
 
 function fakeGL(): Recorder {
@@ -14,6 +16,8 @@ function fakeGL(): Recorder {
   const lookups: [unknown, string][] = [];
   const uniform1i: [unknown, number][] = [];
   const uniform1f: [unknown, number][] = [];
+  const uniform3f: [unknown, number, number, number][] = [];
+  const matrix3: [unknown, boolean, unknown][] = [];
   const gl = {
     VERTEX_SHADER: 1,
     FRAGMENT_SHADER: 2,
@@ -40,8 +44,14 @@ function fakeGL(): Recorder {
     uniform1f: (l: unknown, v: number) => {
       uniform1f.push([l, v]);
     },
+    uniform3f: (l: unknown, x: number, y: number, z: number) => {
+      uniform3f.push([l, x, y, z]);
+    },
+    uniformMatrix3fv: (l: unknown, transpose: boolean, arr: unknown) => {
+      matrix3.push([l, transpose, arr]);
+    },
   };
-  return { gl: gl as unknown as WebGL2RenderingContext, lookups, uniform1i, uniform1f };
+  return { gl: gl as unknown as WebGL2RenderingContext, lookups, uniform1i, uniform1f, uniform3f, matrix3 };
 }
 
 describe("GLProgram.setI", () => {
@@ -73,5 +83,25 @@ describe("GLProgram.setI", () => {
     expect(uniform1i[0]![1]).toBe(1);
     expect((uniform1i[1]![0] as { prog: unknown }).prog).toBe(b.program);
     expect(uniform1i[1]![1]).toBe(4);
+  });
+});
+
+describe("GLProgram.setV3 and setM3", () => {
+  it("sets a vec3 through its own location", () => {
+    const { gl, uniform3f } = fakeGL();
+    const p = createProgram(gl, "frag");
+    p.setV3("uGround", 0.1, 0.2, 0.3);
+    expect(uniform3f).toEqual([[{ prog: p.program, name: "uGround" }, 0.1, 0.2, 0.3]]);
+  });
+
+  it("sets a mat3 untransposed, from the array it is given", () => {
+    const { gl, matrix3 } = fakeGL();
+    const p = createProgram(gl, "frag");
+    const rot = new Float32Array(9);
+    p.setM3("uRot", rot);
+    expect(matrix3).toHaveLength(1);
+    expect(matrix3[0]![0]).toEqual({ prog: p.program, name: "uRot" });
+    expect(matrix3[0]![1]).toBe(false);
+    expect(matrix3[0]![2]).toBe(rot);
   });
 });

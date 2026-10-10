@@ -188,3 +188,5 @@ the reference's sparse still state while the music plays, by design.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI` instead of the
   file's own location cache; that cache stays only for `uRot` and `uGround`.
   Nothing on screen changes. (#349)
+- #349 cleanup — uniforms set through GLProgram's own setters (setI for samplers) instead of
+  looking up locations by hand. No change on screen.

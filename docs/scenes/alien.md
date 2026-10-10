@@ -263,3 +263,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #389 (merged 2026-10-06): Bounce smoothness.
 - #407 (draft, 2026-10-06): Move on iPhone and iPad (videos in the page, unlock on the
   first tap, a playhead scrub where play() is refused).
+- #349 cleanup — uniforms set through GLProgram's own setters (setI for samplers) instead of
+  looking up locations by hand. No change on screen.
