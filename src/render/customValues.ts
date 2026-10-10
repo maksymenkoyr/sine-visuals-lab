@@ -21,11 +21,12 @@ import type { SceneSetting } from "./sceneSettings.ts";
  * - It is part of the room look (net/syncedStores.ts), so a room's TV and the
  *   pop-out output show it too, and sceneLooks.ts carries it in a Look.
  *
- * How far: `customReach` allows one more slider's width past either end, and
- * never below 0 for a slider that starts at 0 or above (a negative glow or
- * size is a shader's NaN, not a look). Only continuous settings: a toggle,
- * an option, or a step of 1 or more (a count) takes none, whose max is usually a hard limit in the
- * scene's code. The bound matters because the value persists — a typo that
+ * How far: `customReach` allows `CUSTOM_REACH_SPANS` slider widths past either
+ * end. That leaves room for a glow, size or speed tuned well past its slider. It never goes below 0 for a slider that starts at 0 or
+ * above (a negative glow or size is a shader's NaN, not a look). Only
+ * continuous settings take one: a toggle, an option, or a step of 1 or more
+ * (a count) takes none, because a count's max is usually a hard limit in the
+ * scene's code. The bound stays finite because the value persists: a typo that
  * stalls the GPU would stall it again on every load. Dev builds lift it for
  * tuning (`unbounded`), as the old dev-only pins did.
  */
@@ -109,6 +110,10 @@ export function customValueSnapshot(): Record<string, number> {
 
 type Range = Pick<SceneSetting, "min" | "max" | "step" | "type">;
 
+/** How many slider widths a custom value may reach past either end — see the
+ *  header's "How far". */
+export const CUSTOM_REACH_SPANS = 4;
+
 /** The span a custom value may take for this setting, or null when it takes
  *  none (a toggle, an option, or — outside a dev build — a count). See the
  *  header. */
@@ -116,8 +121,8 @@ export function customReach(range: Range, unbounded = false): { lo: number; hi: 
   if (range.type !== undefined) return null;
   if (unbounded) return { lo: -Infinity, hi: Infinity };
   if (range.step !== undefined && range.step >= 1) return null;
-  const span = range.max - range.min;
-  return { lo: range.min >= 0 ? Math.max(0, range.min - span) : range.min - span, hi: range.max + span };
+  const reach = (range.max - range.min) * CUSTOM_REACH_SPANS;
+  return { lo: range.min >= 0 ? Math.max(0, range.min - reach) : range.min - reach, hi: range.max + reach };
 }
 
 /** `value` as a custom value for this setting: inside the slider's own range
