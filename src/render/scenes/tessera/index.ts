@@ -27,8 +27,8 @@
 // empty VAO with gl_InstanceID/gl_VertexID doing all the work (no per-
 // instance upload -- ambience.ts's DOT_VERT is the other precedent for that
 // trick), a full-res sharp target with its own depth renderbuffer plus a
-// half-res two-pass blur for the halo, hand-cached sampler locations
-// (GLProgram has no integer setter), and the GL-state restore block at the
+// half-res two-pass blur for the halo, sampler units set with GLProgram.setI,
+// and the GL-state restore block at the
 // end of render() (the gallery renders every scene into one shared context
 // each tick).
 //
@@ -331,7 +331,6 @@ export const tesseraScene: Scene = (() => {
   let blurFboB: WebGLFramebuffer | null = null;
   let sharpW = 0;
   let sharpH = 0;
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let rollRad = 0;
   let hueClock: HueClockState = createHueClockState();
   const bandsBuf = new Float32Array(NUM_BANDS);
@@ -352,16 +351,6 @@ export const tesseraScene: Scene = (() => {
   // change never allocates mid-render.
   const ringStartBuf = new Float32Array(MAX_RINGS + 1);
   const ringSlotsBuf = new Float32Array(MAX_RINGS);
-
-  /** GLProgram has no integer setter; samplers need one (shards/index.ts/powder.ts idiom). */
-  function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string) {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -441,7 +430,6 @@ export const tesseraScene: Scene = (() => {
       // from gl_InstanceID -- so the boxes draw from an empty VAO
       // (ambience.ts's DOT_VERT, shards/glsl.ts's prisms).
       emptyVao = gl.createVertexArray();
-      samplerLocs.clear();
       rollRad = 0;
       hueClock = createHueClockState();
       smoothBands.fill(0);
@@ -555,7 +543,7 @@ export const tesseraScene: Scene = (() => {
         const hh = Math.max(1, sharpH >> 1);
         blurProg.use();
         gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+        blurProg.setI("uTex", 0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, blurFboA);
         gl.viewport(0, 0, hw, hh);
         gl.bindTexture(gl.TEXTURE_2D, sharpTex);
@@ -577,8 +565,8 @@ export const tesseraScene: Scene = (() => {
         gl.bindTexture(gl.TEXTURE_2D, sharpTex);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, blurTexB);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uSharpTex", "uSharpTex"), 0);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uBlurTex", "uBlurTex"), 1);
+        compositeProg.setI("uSharpTex", 0);
+        compositeProg.setI("uBlurTex", 1);
         drawFullscreenQuad(gl, quadVao);
         gl.activeTexture(gl.TEXTURE0);
       }
@@ -603,7 +591,6 @@ export const tesseraScene: Scene = (() => {
       freeTargets(gl);
       bgProg = boxProg = blurProg = compositeProg = null;
       quadVao = emptyVao = null;
-      samplerLocs.clear();
     },
   };
 })();

@@ -1,3 +1,17 @@
+// The WebGL2 plumbing every scene stands on: creating the context and keeping
+// it alive through a loss (createGL, watchContextLoss), compiling shaders and
+// linking programs (createProgram and the GLProgram setters), the one
+// fullscreen triangle every pass draws (createFullscreenQuad,
+// drawFullscreenQuad), and sizing a canvas's backing store to its CSS box
+// (resizeCanvasToDisplaySize, refreshCssSize).
+//
+// GLProgram's setters look a uniform up by name once per program and cache
+// the answer, a missing uniform included, so a draw never asks the driver for
+// the same location twice. setI is the setter for sampler units and any other
+// integer uniform; the rest take floats and vectors. The cache belongs to the
+// program object, so it lives and dies with that program: a scene never keeps
+// location maps of its own and never clears them when it rebuilds a program.
+
 export function createGL(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   overrides: WebGLContextAttributes = {},
@@ -74,6 +88,10 @@ export interface GLProgram {
   program: WebGLProgram;
   use(): void;
   setF(name: string, v: number): void;
+  /** Sets an integer uniform: a sampler's texture unit, or any int. Use it
+   *  for samplers, not setF (a float call on a sampler is a GL error). Like
+   *  the other setters, call it after use(). */
+  setI(name: string, v: number): void;
   setV2(name: string, x: number, y: number): void;
   setV4(name: string, x: number, y: number, z: number, w: number): void;
   setFv(name: string, arr: Float32Array | number[]): void;
@@ -116,6 +134,7 @@ export function createProgram(
     program,
     use: () => gl.useProgram(program),
     setF: (name, v) => gl.uniform1f(loc(name), v),
+    setI: (name, v) => gl.uniform1i(loc(name), v),
     setV2: (name, x, y) => gl.uniform2f(loc(name), x, y),
     setV4: (name, x, y, z, w) => gl.uniform4f(loc(name), x, y, z, w),
     setFv: (name, arr) => gl.uniform1fv(loc(name), arr as Float32Array),

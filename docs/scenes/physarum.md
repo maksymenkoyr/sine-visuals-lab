@@ -62,6 +62,7 @@ follows). No video or visual reference was studied for this scene.
   Sized; drives.ts's header, "Hit drivers"). Sized scales the share of agents
   relocated (`uSeedFresh` multiplies `uSeed` in the sim shader) by how far the
   hit stood out; Flat, the default, is unchanged.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

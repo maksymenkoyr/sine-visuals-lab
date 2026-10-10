@@ -177,8 +177,8 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
     if (program) return;
     program = createProgram(gl, PASS_FRAG);
     program.use();
-    gl.uniform1i(gl.getUniformLocation(program.program, "uB"), 0);
-    gl.uniform1i(gl.getUniformLocation(program.program, "uA"), 1);
+    program.setI("uB", 0);
+    program.setI("uA", 1);
     gl.useProgram(null);
     vao = createFullscreenQuad(gl);
   }

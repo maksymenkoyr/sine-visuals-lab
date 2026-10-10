@@ -191,7 +191,6 @@ export const slatsScene: Scene = (() => {
   let halfW = 0;
   let halfH = 0;
 
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   let rng: Rng = createRng(RNG_SEED);
@@ -204,15 +203,6 @@ export const slatsScene: Scene = (() => {
   let lastTime: number | null = null;
   let prevBarPhase = 0;
   const onsetEnv = createOnsetEnvelope();
-
-  function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function uploadInstanceBuffer(gl: WebGL2RenderingContext, buf: WebGLBuffer, data: Float32Array): void {
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -295,7 +285,6 @@ export const slatsScene: Scene = (() => {
       slatProg = createProgram(gl, SLAT_FRAG, SLAT_VERT);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
 
       slatCount = slatCountForQuality(ctx.quality.detail);
@@ -399,7 +388,7 @@ export const slatsScene: Scene = (() => {
 
         blurProg.use();
         gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+        blurProg.setI("uTex", 0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, halfFboA);
         gl.viewport(0, 0, halfW, halfH);
         gl.bindTexture(gl.TEXTURE_2D, fullTex);
@@ -420,8 +409,8 @@ export const slatsScene: Scene = (() => {
         gl.bindTexture(gl.TEXTURE_2D, fullTex);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, halfTexB);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uSharpTex", "uSharpTex"), 0);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uBlurTex", "uBlurTex"), 1);
+        compositeProg.setI("uSharpTex", 0);
+        compositeProg.setI("uBlurTex", 1);
         drawFullscreenQuad(gl, quadVao);
 
         // The gallery renders every scene into one shared context each tick
@@ -453,7 +442,6 @@ export const slatsScene: Scene = (() => {
       if (bufA) gl.deleteBuffer(bufA);
       if (bufB) gl.deleteBuffer(bufB);
       freeGlowTargets(gl);
-      samplerLocs.clear();
       slatProg = null;
       blurProg = null;
       compositeProg = null;

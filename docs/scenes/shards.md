@@ -116,6 +116,7 @@ bpm, 13 beats):
   never reaches them; the drift eases to a hold. (3) The bloom path's
   depth renderbuffer is 24-bit (it was 16-bit with a far plane of 80 —
   the same near-coplanar z-fight Tessera hit).
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

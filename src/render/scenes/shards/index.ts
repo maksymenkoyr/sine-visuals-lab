@@ -234,7 +234,6 @@ export const shardsScene: Scene = (() => {
   let blurFboB: WebGLFramebuffer | null = null;
   let sharpW = 0;
   let sharpH = 0;
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let state: ShardState | null = null;
   let listener: BeatListener | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
@@ -242,16 +241,6 @@ export const shardsScene: Scene = (() => {
   const shardB = new Float32Array(MAX_SHARDS * 4);
   const shardC = new Float32Array(MAX_SHARDS * 4);
   const shardD = new Float32Array(MAX_SHARDS * 4);
-
-  /** GLProgram has no integer setter; samplers need one (powder.ts idiom). */
-  function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string) {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -342,7 +331,6 @@ export const shardsScene: Scene = (() => {
       // No vertex attributes at all — corner from gl_VertexID, shard from
       // gl_InstanceID — so the prisms draw from an empty VAO (ambience.ts).
       emptyVao = gl.createVertexArray();
-      samplerLocs.clear();
       state = createShardState(SEED, options(ctx.quality.detail));
       listener = createBeatListener(CUT_LISTENER);
     },
@@ -407,7 +395,7 @@ export const shardsScene: Scene = (() => {
         const hh = Math.max(1, sharpH >> 1);
         blurProg.use();
         gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+        blurProg.setI("uTex", 0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, blurFboA);
         gl.viewport(0, 0, hw, hh);
         gl.bindTexture(gl.TEXTURE_2D, sharpTex);
@@ -429,8 +417,8 @@ export const shardsScene: Scene = (() => {
         gl.bindTexture(gl.TEXTURE_2D, sharpTex);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, blurTexB);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uSharpTex", "uSharpTex"), 0);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uBlurTex", "uBlurTex"), 1);
+        compositeProg.setI("uSharpTex", 0);
+        compositeProg.setI("uBlurTex", 1);
         drawFullscreenQuad(gl, quadVao);
         gl.activeTexture(gl.TEXTURE0);
       }
@@ -455,7 +443,6 @@ export const shardsScene: Scene = (() => {
       freeTargets(gl);
       bgProg = prismProg = blurProg = compositeProg = null;
       quadVao = emptyVao = null;
-      samplerLocs.clear();
       state = null;
       listener = null;
     },
