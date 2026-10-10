@@ -268,6 +268,38 @@ describe("buildRows solo", () => {
   });
 });
 
+describe("buildRows solo with a record-only review", () => {
+  const base = "39cbc28bdd7fa0e9cbed8003c7f478c1dadfb602";
+  const record = { runId: "wf_m", script: SCRIPT_V3.replace("= 3", "= 10"), args: { issues: [8], solo: true, base } };
+  const agents = (gradeResult: object) => [
+    { label: "solo #8", result: { title: "Eight", already_done: false, branch: "s8", commit: "aaa1111", typecheck_passed: true, tests_passed: true, summary: "…" }, transcript: stage("claude-opus-5-5", "high", 4) },
+    { label: "grade #8", result: gradeResult, transcript: stage("claude-opus-5-5", "high", 3) },
+    { label: "review #8 r1", result: { issue_resolved: true, ready_to_ship: true, ship_state: "ready-with-fixes", code_grade: "B+", findings: [finding("F1", "should-fix", true)], self_fixed: ["F1"], final_commit: "bbb2222" }, transcript: stage("claude-opus-5-5", "high", 6) },
+  ];
+
+  it("keeps the review's cost, grade and findings out of the setup, and records them as metaReview", () => {
+    const [row] = buildRows({ record, recordedAt: "", agents: agents({ issue_resolved: true, ready_to_ship: true, ship_state: "ready-with-fixes", code_grade: "A-", findings: [finding("F1", "should-fix", false)] }) });
+    const cost = (label: string) => row.agents.find((a) => a.label === label)!.cost!.total;
+    expect(row).toMatchObject({ solo: true, reviewRounds: 0, codeGrade: "A-", finalCodeGrade: "A-", readyToShip: true, shipState: "ready-with-fixes" });
+    expect(row.findings).toHaveLength(1);
+    expect(row.cost).toBeCloseTo(cost("solo #8"), 8);
+    expect(row.metaReview).toMatchObject({ codeGrade: "B+", shipState: "ready-with-fixes", selfFixed: ["F1"], finalCommit: "bbb2222" });
+    expect(row.metaReview!.cost).toBeCloseTo(cost("review #8 r1"), 8);
+    const report = renderReport(summarize([row]), [row]);
+    expect(report).toContain("(with fixes still open 1)");
+    expect(report).toMatch(/review\s+\$[\d.]+ .*the measurement, not in the cost/);
+  });
+
+  it("names the three states, and reads a row from before ship_state off the boolean and its open findings", () => {
+    const state = (gradeResult: object) => buildRows({ record, recordedAt: "", agents: agents(gradeResult) })[0].shipState;
+    expect(state({ issue_resolved: true, ready_to_ship: true, ship_state: "ready", code_grade: "A", findings: [] })).toBe("ready");
+    expect(state({ issue_resolved: true, ready_to_ship: false, ship_state: "not-ready", code_grade: "C", findings: [] })).toBe("not-ready");
+    expect(state({ issue_resolved: true, ready_to_ship: true, code_grade: "A-", findings: [finding("F1", "should-fix", false)] })).toBe("ready-with-fixes");
+    expect(state({ issue_resolved: true, ready_to_ship: true, code_grade: "A-", findings: [finding("F1", "nit", false)] })).toBe("ready");
+    expect(state({ issue_resolved: true, ready_to_ship: false, code_grade: "B", findings: [] })).toBe("not-ready");
+  });
+});
+
 describe("forkIndex", () => {
   it("cuts at the first entry of the request that made the copy", () => {
     const bash = (requestId: string, command: string) =>
