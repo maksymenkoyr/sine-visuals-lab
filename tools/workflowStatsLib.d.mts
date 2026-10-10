@@ -107,6 +107,8 @@ export interface Row {
   finalCodeGrade: string | null;
   issueResolved: boolean | null;
   readyToShip: boolean | null;
+  /** ready, ready-with-fixes (could ship, a should-fix is open) or not-ready. */
+  shipState: "ready" | "ready-with-fixes" | "not-ready" | null;
   finalTypecheck: boolean | null;
   finalTests: boolean | null;
   findings: Finding[];
@@ -114,9 +116,19 @@ export interface Row {
   finishFixes: number;
   stalledFixes: number;
   fork: ForkArms | null;
-  /** Every agent but `grade`. */
+  /** Every agent but `grade`, and in a solo run the record-only review. */
   cost: number;
   gradeCost: number | null;
+  /** Solo only: the full review run for the record, kept out of `cost`. */
+  metaReview?: {
+    cost: number | null;
+    minutes: number;
+    codeGrade: string | null;
+    shipState: "ready" | "ready-with-fixes" | "not-ready" | null;
+    findings: Finding[];
+    selfFixed: string[];
+    finalCommit: string | null;
+  } | null;
   /** What a side-by-side grader reads; absent on rows recorded before it. */
   planText?: string | null;
   commits?: { base: string | null; code: string | null; final: string | null };
@@ -184,6 +196,8 @@ export interface Summary {
   runs: number;
   resolved: number;
   readyToShip: number;
+  readyWithFixes: number;
+  solo: boolean;
   merged: number;
   converged: number | null;
   stalledFixes: number;

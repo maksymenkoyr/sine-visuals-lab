@@ -48,7 +48,10 @@
 // A `solo` run has one `solo` agent per issue and one `grade` agent that
 // grades its branch in place of a review. The grade is the measurement, not
 // part of the setup, so it counts as both the first and the last review, the
-// row's `cost` leaves it out, and `gradeCost` keeps it apart. A run pinned to
+// row's `cost` leaves it out, and `gradeCost` keeps it apart. From version 10
+// a solo issue also has a full `review` agent after the grade, run for the
+// record: its cost is left out too (`metaReview.cost`), and what it found and
+// fixed sits in `metaReview`, never in the row's own findings or grades. A run pinned to
 // a `base` commit (a benchmark) gets that commit in its setup key, so bench
 // rows form their own series apart from everyday runs on origin/main.
 //
@@ -265,10 +268,13 @@ export function buildRows({ record, agents, recordedAt }) {
     const code = one("code")?.result ?? null;
     const solo = one("solo")?.result ?? null;
     const grade = one("grade");
-    const reviews = list.filter((a) => a.stage === "review").sort((a, b) => a.round - b.round);
+    const soloRun = !!one("solo");
+    const allReviews = list.filter((a) => a.stage === "review").sort((a, b) => a.round - b.round);
+    // In a solo run the review is the record-only one, kept out of the setup.
+    const reviews = soloRun ? [] : allReviews;
+    const metaReview = soloRun ? allReviews[0] ?? null : null;
     const firstReview = reviews[0]?.result ?? grade?.result ?? null;
     const lastReview = reviews.at(-1)?.result ?? grade?.result ?? null;
-    const soloRun = !!one("solo");
     const finish = one("finish")?.result ?? null;
     const stages = {};
     for (const name of STAGES) {
@@ -293,6 +299,16 @@ export function buildRows({ record, agents, recordedAt }) {
       fixed: f.fixed ?? null, file: f.file ?? null, summary: f.summary ?? "",
     }));
     const open = (r) => findingsOf(r).filter((f) => f.severity !== "nit" && !f.fixed).length;
+    // Three states: ready, ready-with-fixes (could ship, a should-fix is still
+    // open) and not-ready. Rows from before `ship_state` get it from the
+    // boolean and the open should-fix findings.
+    const shipStateOf = (r) => {
+      if (!r) return null;
+      if (r.ship_state) return r.ship_state;
+      if (r.ready_to_ship === undefined || r.ready_to_ship === null) return null;
+      if (!r.ready_to_ship) return "not-ready";
+      return findingsOf(r).some((f) => f.severity === "should-fix" && !f.fixed) ? "ready-with-fixes" : "ready";
+    };
     const selfFixed = (lastReview?.self_fixed ?? []).length;
     const opusfix = one("opusfix");
     const check = one("check");
@@ -326,6 +342,7 @@ export function buildRows({ record, agents, recordedAt }) {
       finalCodeGrade: parseGrade(lastReview?.code_grade ?? lastReview?.haiku_grade),
       issueResolved: (finish ?? lastReview)?.issue_resolved ?? null,
       readyToShip: (finish ?? lastReview)?.ready_to_ship ?? null,
+      shipState: shipStateOf(finish ?? lastReview),
       finalTypecheck: (finish ?? lastReview)?.typecheck_passed ?? null,
       finalTests: (finish ?? lastReview)?.tests_passed ?? null,
       findings: findingsOf(firstReview),
@@ -346,8 +363,19 @@ export function buildRows({ record, agents, recordedAt }) {
         loopCost: costOfStages((a) => a.stage === "fix" || a.stage === "replan" || (a.stage === "review" && a.round > 1)),
         loopOpen: open(lastReview) + selfFixed,
       } : null,
-      cost: costOfStages((a) => a.stage !== "grade"),
+      cost: costOfStages((a) => a.stage !== "grade" && !(soloRun && a.stage === "review")),
       gradeCost: grade?.cost?.total ?? null,
+      // Solo only: the full review run for the record, on the branch after the
+      // grade read it. Its grade and findings are of the branch as built.
+      metaReview: metaReview ? {
+        cost: metaReview.cost?.total ?? null,
+        minutes: metaReview.minutes,
+        codeGrade: parseGrade(metaReview.result?.code_grade),
+        shipState: shipStateOf(metaReview.result),
+        findings: findingsOf(metaReview.result),
+        selfFixed: metaReview.result?.self_fixed ?? [],
+        finalCommit: metaReview.result?.final_commit || null,
+      } : null,
       // What a side-by-side grader (`materials`, `buildGradeRows`) reads: the
       // plan, the commit the coder handed over, and the branch's last commit.
       planText: plan?.plan ?? null,
@@ -502,7 +530,9 @@ export function summarize(rows, prState = new Map(), grades = new Map()) {
       issues: rs.length,
       runs: new Set(rs.map((r) => r.runId)).size,
       resolved: rs.filter((r) => r.issueResolved).length,
+      solo: rs.some((r) => r.solo),
       readyToShip: rs.filter((r) => r.readyToShip).length,
+      readyWithFixes: rs.filter((r) => r.shipState === "ready-with-fixes").length,
       merged: rs.filter((r) => prState.get(r.branch) === "MERGED").length,
       converged: v3.length ? v3.filter((r) => r.converged).length : null,
       stalledFixes: rs.reduce((s, r) => s + (r.stalledFixes ?? 0), 0),
@@ -576,7 +606,7 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
   const usd = (x) => (x === null ? "-" : `$${x.toFixed(2)}`);
   for (const s of summaries) {
     out.push(s.setup);
-    out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} · merged ${s.merged}` +
+    out.push(`  ${s.issues} issue(s) over ${s.runs} run(s) · resolved ${s.resolved} · ready to ship ${s.readyToShip} (with fixes still open ${s.readyWithFixes}) · merged ${s.merged}` +
       (s.converged === null ? "" : ` · converged without the reviewer fixing ${s.converged}`) +
       (s.stalledFixes ? ` · STALLED fix rounds ${s.stalledFixes}` : ""));
     out.push(`  grades (A = 4): plan ${n(s.planGrade, 2)} · code at first review ${n(s.codeGrade, 2)} · code at last review ${n(s.finalCodeGrade, 2)} · review rounds ${n(s.reviewRounds)}`);
@@ -597,7 +627,7 @@ export function renderReport(summaries, rows, { listIssues = false, prState = ne
     }
     for (const [name, st] of Object.entries(s.stages)) {
       out.push(`  ${name.padEnd(7)} ${usd(st.cost)} · ${n(st.agents)} agent(s) · ${n(st.minutes)} min · ${n(st.requests, 0)} requests · ${mt(st.contextTokens)} context · ${n(st.outputSeen, 0)}+ output (mean per issue that ran it)` +
-        (name === "grade" ? " · the measurement, not in the cost" : ""));
+        (name === "grade" || (name === "review" && s.solo) ? " · the measurement, not in the cost" : ""));
     }
     out.push("");
   }

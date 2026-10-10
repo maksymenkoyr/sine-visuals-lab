@@ -14,7 +14,10 @@ Run `$ARGUMENTS` through the workflow,
      `tools/plan-code-review-bench.json` and pass both. Its rows form their
      own series in the report, so setups compare across reruns.
    - `solo` runs one agent per issue with no plan and no review, then a
-     `grade` agent whose cost stays out of the total.
+     `grade` agent that reads the branch as built and sets `ship_state`
+     (ready, ready-with-fixes or not-ready), then a full `review` agent that
+     fixes what it finds. Neither one's cost counts in the total, and the
+     review's result is kept apart as `metaReview`.
    - A `plan=`, `code=`, `review=` or `solo=` override takes `model/effort`,
      such as `code=sonnet/medium`.
    - `rounds=N` brings back up to N correction rounds; by default there are
@@ -58,7 +61,8 @@ Run `$ARGUMENTS` through the workflow,
 5. **Report** for each issue:
    - its branch and worktree
    - the plan grade, and the code grade at the first and the last review (for
-     `solo`: the grade agent's code grade and findings)
+     `solo`: the grade agent's code grade, findings and ship state, and what
+     the record-only review found and fixed)
    - how many review rounds ran, and whether the loop converged or the last
      review had to fix findings itself (`self_fixed`)
    - each first-round finding with its severity, origin (plan or code) and
