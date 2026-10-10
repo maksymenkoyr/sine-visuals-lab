@@ -172,3 +172,4 @@ From the bundle's `report.md` and PR #90's verification (2026-09-05/06 and
 - #137 (39c5086, 2026-09-25) — keeps the scene's materials under
   `docs/scenes/gates/`.
 - #231 (4e39e9c, 2026-09-30) — Gate density opts out of the output glide.
+- #349 cleanup — sampler units now set with GLProgram.setI; the scene's own sampler-location cache is gone. No change on screen.

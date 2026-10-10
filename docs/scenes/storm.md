@@ -253,3 +253,4 @@ Studied, not copied, across two look references:
   merge.
 - `#69` / `88aab06` (2026-09-03) — setting groups joined the shared
   cross-scene vocabulary.
+- #349 cleanup — sampler units now set with GLProgram.setI; the scene's own sampler-location cache is gone. No change on screen.

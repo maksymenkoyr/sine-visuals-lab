@@ -187,3 +187,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   from the measured short vKJu9mfeDS8 (video-feedback mirror kaleidoscope),
   including the Round 2 density fix and Round 3 threads/web/colour push
   folded into the same PR.
+- #349 cleanup — sampler units now set with GLProgram.setI; the scene's own sampler-location cache is gone. No change on screen.

@@ -3251,8 +3251,8 @@ export const stormScene: Scene = (() => {
 
       // Sampler bindings are program state, so they only have to be set once.
       prog.use();
-      gl.uniform1i(gl.getUniformLocation(prog.program, "uNoise"), 0);
-      gl.uniform1i(gl.getUniformLocation(prog.program, "uShape"), 1);
+      prog.setI("uNoise", 0);
+      prog.setI("uShape", 1);
 
       // The point cloud, sampled from the same lobes variant 0 of the shape
       // volume was baked from (buildCloud seeds buildLobes exactly as
@@ -3305,8 +3305,8 @@ export const stormScene: Scene = (() => {
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, buildFilamentIndices(strandCount), gl.STATIC_DRAW);
       gl.bindVertexArray(null);
       filProg.use();
-      gl.uniform1i(gl.getUniformLocation(filProg.program, "uShape"), 1);
-      gl.uniform1i(gl.getUniformLocation(filProg.program, "uFlowTex"), 2);
+      filProg.setI("uShape", 1);
+      filProg.setI("uFlowTex", 2);
 
       // The lattice. Its contents change as the cloud morphs, so both buffers
       // are DYNAMIC_DRAW at a fixed capacity and a re-mesh is a bufferSubData

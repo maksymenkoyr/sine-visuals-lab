@@ -1,3 +1,10 @@
+// WebGL2 plumbing shared by every scene: context creation (createGL), the
+// context-loss watch (watchContextLoss), shader compile and link, the
+// GLProgram wrapper with its per-program cached uniform setters
+// (createProgram), the one-triangle fullscreen draw (createFullscreenQuad,
+// drawFullscreenQuad), and canvas sizing (refreshCssSize,
+// resizeCanvasToDisplaySize).
+
 export function createGL(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   overrides: WebGLContextAttributes = {},
@@ -70,10 +77,18 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
+/**
+ * A linked shader program plus its uniform setters. Each program caches its
+ * uniform locations by name for its own lifetime, so scenes call the setters
+ * (`setI` for samplers and ints, `setF` and the rest for floats) and never
+ * keep their own location maps or clear them on a rebuild.
+ */
 export interface GLProgram {
   program: WebGLProgram;
   use(): void;
   setF(name: string, v: number): void;
+  /** An int uniform. A sampler takes its texture unit through this (`setI("uTex", 0)`). */
+  setI(name: string, v: number): void;
   setV2(name: string, x: number, y: number): void;
   setV4(name: string, x: number, y: number, z: number, w: number): void;
   setFv(name: string, arr: Float32Array | number[]): void;
@@ -116,6 +131,7 @@ export function createProgram(
     program,
     use: () => gl.useProgram(program),
     setF: (name, v) => gl.uniform1f(loc(name), v),
+    setI: (name, v) => gl.uniform1i(loc(name), v),
     setV2: (name, x, y) => gl.uniform2f(loc(name), x, y),
     setV4: (name, x, y, z, w) => gl.uniform4f(loc(name), x, y, z, w),
     setFv: (name, arr) => gl.uniform1fv(loc(name), arr as Float32Array),
