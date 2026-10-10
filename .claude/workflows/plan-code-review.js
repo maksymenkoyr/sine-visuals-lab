@@ -47,6 +47,11 @@ export const meta = {
 // anything. The grade is the measurement, not part of the setup, so the
 // recorder leaves its cost out of the issue's cost. This answers "would the
 // strong model alone be cheaper?" on the same terms as the reviewed runs.
+// Until version 9 the grader judged `ready_to_ship` on its own, and with no
+// review after it a tool hiccup or a mood flipped the answer between subruns of
+// the same setup. Now the prompt fixes the rule (resolved, typecheck and tests
+// pass after a rerun, no open blocking finding) and tells it to rerun a failing
+// command before counting it.
 //
 // With `base` set to a commit, the run is pinned to it. Every stage branches
 // from that commit and diffs against it instead of origin/main, the planner
@@ -82,7 +87,7 @@ export const meta = {
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
-const WORKFLOW_VERSION = 8
+const WORKFLOW_VERSION = 9
 const DEFAULT_MAX_ROUNDS = 0
 
 const DEFAULT_MODELS = {
@@ -256,9 +261,10 @@ if (solo) {
         `Grade the implementation of GitHub issue #${issue.n} ("${built.title}"). ${whereIs(built.branch, built.worktree_path)}\n` +
         `One agent resolved it alone, with no plan and no review, in an experiment that compares setups across runs. You are the measurement: grade it as honestly as a correction round's review would, and do NOT fix anything.\n` +
         `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
-        `2. Run \`npm run typecheck\` and \`npm test\`.\n` +
+        `2. Run \`npm run typecheck\` and \`npm test\`. A failure may be the tool, not the branch (a missing or half-installed node_modules, a network or timeout error, a flaky test): rerun the failing command once, run \`npm ci\` first if the install looks broken, and re-run the failing test file alone. Count a failure only if it repeats and traces to the branch's diff. One that doesn't is a finding with origin 'environment' and severity 'nit', and it does not set typecheck_passed or tests_passed to false.\n` +
         `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
-        `4. Give every finding origin 'code' and write each summary so a coder could fix it without asking.`,
+        `4. Give every other finding origin 'code' and write each summary so a coder could fix it without asking.\n` +
+        `5. Set \`ready_to_ship\` by this rule, not by feel: true exactly when issue_resolved is true, typecheck_passed and tests_passed are true, and no open finding has severity 'blocking'. Should-fix findings and nits do not change it; they are in \`findings\` for the comparison.`,
         { label: `grade #${issue.n}`, phase: 'Review', ...models.review, schema: GRADE_SCHEMA },
       )
       return { issue: issue.n, title: built.title, branch: built.branch, worktree: built.worktree_path, base: built.base, summary: built.summary, review: grade }
