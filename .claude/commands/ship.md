@@ -20,12 +20,17 @@ Finish the change on this branch:
    For a visualization change, also run `npm run dev` and give the user the
    scene link it prints at startup, not the gallery root.
 
-4. **Rebase.** Fetch, rebase (never merge) on `origin/main`, and check again
+4. **Handoffs.** If a coder agent made part of this change, run
+   `node tools/workflow-stats.mjs handoff-ship` before rebasing: it records
+   what you changed after each coder for the handoff stats, and a rebase
+   first would count main's changes as yours.
+
+5. **Rebase.** Fetch, rebase (never merge) on `origin/main`, and check again
    for divergence right before pushing.
 
-5. **Check the PR state.** If this branch already has a PR,
+6. **Check the PR state.** If this branch already has a PR,
    `gh api 'repos/{owner}/{repo}/pulls?head={owner}:<branch>&state=all' --jq '.[] | .state, .merged_at'`
    (REST: cloud sessions refuse `gh pr view`): a merged or closed branch still accepts
    pushes that nobody sees. If it's merged, move the commits to a new branch.
 
-6. **Push and open a draft PR**, or update the open one.
+7. **Push and open a draft PR**, or update the open one.
