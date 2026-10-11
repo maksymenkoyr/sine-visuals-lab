@@ -44,9 +44,9 @@ Draft scene (in `DRAFT_SCENE_IDS`, `src/render/scenes/index.ts`), shipped on
   `anim.onset`/`anim.dropOnset` rather than `frame.*` for triggers, because
   the render cap can skip the tick a feature fired on (see `renderLatch.ts`).
   The bloom chain itself (two-level separable Gaussian, ping-pong FBOs,
-  sampler units set with `GLProgram.setI`) is copied from `powder.ts`'s pattern — there is no
-  shared bloom helper between the two scenes, by design (each scene owns its
-  own GL code).
+  sampler units set with `GLProgram.setI`) is copied from `powder.ts`'s
+  pattern — there is no shared bloom helper between the two scenes, by design
+  (each scene owns its own GL code).
 
 ## References
 
