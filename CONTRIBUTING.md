@@ -41,8 +41,8 @@ can implement it independently.
   carries its author's copyright and license whether or not you copy it
   verbatim.
 - The working rules for the codebase itself — documentation conventions,
-  what to read before touching what — live in [AGENTS.md](AGENTS.md)
-  ([CLAUDE.md](CLAUDE.md) imports them for Claude Code).
+  what to read before touching what — live in [CLAUDE.md](CLAUDE.md). They
+  are written to Claude Code, but hold for any contributor.
 
 ## Practical setup
 

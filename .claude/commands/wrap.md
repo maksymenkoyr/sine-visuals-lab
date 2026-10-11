@@ -46,7 +46,7 @@ Close out this working session:
    made wrong; read and fix only the flagged paragraphs. Without a key it
    lists the same candidate paragraphs unjudged — read those instead. Then,
    for any symbol, file, or param name this session renamed, removed, or
-   changed the meaning of, grep `AGENTS.md`, `CLAUDE.md` and `docs/*.md` for
+   changed the meaning of, grep `CLAUDE.md` and `docs/*.md` for
    the old name as a fallback — this catches a rename the tool's diff-based
    search can miss, like a name only mentioned in prose rather than declared
    in code. Fix any reference you find — this is the enforcement mechanism

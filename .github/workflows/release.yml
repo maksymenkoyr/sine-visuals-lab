@@ -106,7 +106,7 @@ jobs:
 
       - run: npm ci
 
-      # Same gates as every other deploy (AGENTS.md, deploy.yml), run again on
+      # Same gates as every other deploy (CONTRIBUTING.md, deploy.yml), run again on
       # the exact commit being released.
       - run: npm run typecheck
       - run: npm run test

@@ -4,10 +4,14 @@
 # costs more per token once a request's prompt passes 100K tokens, and a
 # general-purpose Haiku agent starts at 40-50K, so the saved room keeps it
 # under that line. The caller's prompt carries the plan and every repo rule
-# the change needs, since the agent knows none of them.
+# the change needs, since the agent knows none of them. CLAUDE.md's handoff
+# rule sends every session's settled change here when its plan is shorter
+# than the change; the hooks in .claude/settings.json record each handoff
+# (the tools/workflow-stats.mjs header).
 name: haiku-coder
 description: Writes code by following an exact plan given in the prompt. Use for spelled-out edits; it knows nothing about the repo beyond what the prompt says.
 model: haiku
+effort: high
 tools: Read, Edit, Write, Bash, Grep, Glob
 omitClaudeMd: true
 ---
