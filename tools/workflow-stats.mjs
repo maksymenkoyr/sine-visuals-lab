@@ -54,15 +54,15 @@ function readJsonl(path) {
   return readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
-function readStore() {
-  return existsSync(STORE) ? readJsonl(STORE) : [];
+function readStore(file = STORE) {
+  return existsSync(file) ? readJsonl(file) : [];
 }
 
-/** Adds rows to the store, replacing any it has for the same runs. */
-function saveRows(added) {
-  mkdirSync(dirname(STORE), { recursive: true });
-  const rows = mergeRows(readStore(), added);
-  writeFileSync(STORE, rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""));
+/** Adds rows to the store (or GRADES), replacing any it has for the same runs. */
+function saveRows(added, file = STORE) {
+  mkdirSync(dirname(file), { recursive: true });
+  const rows = mergeRows(readStore(file), added);
+  writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""));
 }
 
 /** Every session's workflows/ directory under ~/.claude/projects. */

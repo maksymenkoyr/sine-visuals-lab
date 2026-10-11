@@ -300,6 +300,27 @@ describe("buildRows solo with a record-only review", () => {
   });
 });
 
+describe("buildRows noReview", () => {
+  it("grades plan and code by the grade agent, and keeps grade and review out of the cost and the setup", () => {
+    const base = "8a1fecbef266f5f9b94ac11763c53a96f20613b7";
+    const record = { runId: "wf_n", script: SCRIPT_V3.replace("= 3", "= 11"), args: { issues: [9], noReview: true, base } };
+    const [row] = buildRows({ record, recordedAt: "", agents: [
+      { label: "plan #9", result: { title: "Nine", already_done: false, slug: "nine", plan: "do it", overlap_note: "" }, transcript: stage("claude-sonnet-5-5", "high", 2) },
+      { label: "code #9", result: { branch: "n9", base, commit: "ccc3333", typecheck_passed: true, tests_passed: true, deviations: "" }, transcript: stage("claude-haiku-5-5", "xhigh", 5) },
+      { label: "grade #9", result: { issue_resolved: true, ready_to_ship: false, ship_state: "not-ready", plan_grade: "B", code_grade: "C+", findings: [finding("F1", "blocking", false)] }, transcript: stage("claude-opus-5-5", "high", 3) },
+      { label: "review #9 r1", result: { issue_resolved: true, ready_to_ship: false, ship_state: "not-ready", code_grade: "C", findings: [finding("F1", "blocking", true)], self_fixed: ["F1"], final_commit: "ddd4444" }, transcript: stage("claude-opus-5-5", "high", 6) },
+    ] });
+    const cost = (label: string) => row.agents.find((a) => a.label === label)!.cost!.total;
+    expect(row).toMatchObject({ solo: false, noReview: true, forkRun: false, reviewRounds: 0, converged: null, planGrade: "B", codeGrade: "C+", finalCodeGrade: "C+", shipState: "not-ready" });
+    expect(row.cost).toBeCloseTo(cost("plan #9") + cost("code #9"), 8);
+    expect(row.commits!.final).toBe("ccc3333");
+    expect(row.metaReview).toMatchObject({ codeGrade: "C", selfFixed: ["F1"], finalCommit: "ddd4444" });
+    expect(setupKey(row)).toBe("v11 · plan sonnet-5-5/high · code haiku-5-5/xhigh · no review · graded by opus-5-5/high · bench 8a1fecbe");
+    expect(renderReport(summarize([row]), [row])).toMatch(/review\s+\$[\d.]+ .*the measurement, not in the cost/);
+    expect(materials([row], 9, base).text).toContain("No review followed the code");
+  });
+});
+
 describe("forkIndex", () => {
   it("cuts at the first entry of the request that made the copy", () => {
     const bash = (requestId: string, command: string) =>

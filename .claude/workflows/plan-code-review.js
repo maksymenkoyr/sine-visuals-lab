@@ -59,6 +59,12 @@ export const meta = {
 // branch nobody reviewed. Its cost and result are kept apart from the setup's
 // (`metaReview` in the recorder's row), like the grade agent's.
 //
+// With `noReview: true` (from version 11) the plan and code stages run as
+// usual and no review follows: the solo run's `grade` agent grades the branch
+// as built, the plan too, then its record-only full review runs (`measure`).
+// This asks what the review stage is worth on top of plan and code, on the
+// same terms as `solo` asks it of the whole pipeline.
+//
 // With `base` set to a commit, the run is pinned to it. Every stage branches
 // from that commit and diffs against it instead of origin/main, the planner
 // skips the "already done" check, and agents read only the issue's title and
@@ -90,10 +96,11 @@ export const meta = {
 // args: an array of issue numbers, or
 //   { issues: [346, 353], tag: 'r3', maxRounds: 2, fork: true, models: { code: { model: 'sonnet', effort: 'medium' } } }
 //   { issues: [346, 353, 355], base: '39cbc28b…', tag: 'b1', solo: true }
+//   { issues: [347, 349, 356], base: '8a1fecbe…', tag: 'r19', noReview: true, models: { plan: { model: 'sonnet', effort: 'high' } } }
 // `tag` goes into branch names, so a rerun of the same issue gets a fresh
 // branch instead of colliding with an earlier attempt.
 
-const WORKFLOW_VERSION = 10
+const WORKFLOW_VERSION = 11
 const DEFAULT_MAX_ROUNDS = 0
 
 const DEFAULT_MODELS = {
@@ -109,14 +116,15 @@ const models = { plan: pick('plan'), code: pick('code'), review: pick('review'),
 const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS
 const tag = input.tag || `v${WORKFLOW_VERSION}`
 const solo = !!input.solo
-const fork = !!input.fork && maxRounds > 0 && !solo
+const noReview = !!input.noReview && !solo
+const fork = !!input.fork && maxRounds > 0 && !solo && !noReview
 const pinned = !!input.base
 const BASE = input.base || 'origin/main'
 const ISSUES = (input.issues || []).map(i => (typeof i === 'number' ? { n: i } : i))
 if (!ISSUES.length) throw new Error('plan-code-review: pass issue numbers in args')
 const ms = (m) => `${m.model}/${m.effort}`
 log(`v${WORKFLOW_VERSION} · ` +
-  (solo ? `solo ${ms(models.solo)} · graded by ${ms(models.review)}` : `plan ${ms(models.plan)} · code ${ms(models.code)} · review ${ms(models.review)} · up to ${maxRounds} correction round(s)${fork ? ' · Opus-fix fork' : ''}`) +
+  (solo ? `solo ${ms(models.solo)} · graded by ${ms(models.review)}` : noReview ? `plan ${ms(models.plan)} · code ${ms(models.code)} · no review · graded by ${ms(models.review)}` : `plan ${ms(models.plan)} · code ${ms(models.code)} · review ${ms(models.review)} · up to ${maxRounds} correction round(s)${fork ? ' · Opus-fix fork' : ''}`) +
   `${pinned ? ` · bench at ${BASE.slice(0, 8)}` : ''} · tag ${tag}`)
 
 const GRADE = { type: 'string', enum: ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'] }
@@ -239,6 +247,13 @@ const GRADE_SCHEMA = {
   required: ['issue_resolved', 'code_grade', 'code_grade_reason', 'findings', 'typecheck_passed', 'tests_passed', 'ready_to_ship', 'ship_state', 'notes'],
 }
 
+// With `noReview` the grade agent grades the plan as well.
+const PLAN_GRADE_SCHEMA = {
+  type: 'object',
+  properties: { ...GRADE_SCHEMA.properties, plan_grade: GRADE, plan_grade_reason: REVIEW_SCHEMA.properties.plan_grade_reason },
+  required: [...GRADE_SCHEMA.required, 'plan_grade', 'plan_grade_reason'],
+}
+
 // The full review of a solo branch has no plan to grade or amend.
 const SOLO_REVIEW_SCHEMA = {
   type: 'object',
@@ -260,6 +275,39 @@ const open = (findings) => findings.filter(f => !f.fixed && f.severity !== 'nit'
 const sameSha = (a, b) => !!a && !!b && (a === b || (Math.min(a.length, b.length) >= 7 && (a.startsWith(b) || b.startsWith(a))))
 const listFindings = (fs) => fs.map(f => `- [${f.id}] ${f.severity}, ${f.origin}, ${f.kind}: ${f.file}${f.line ? `:${f.line}` : ''}: ${f.summary}`).join('\n')
 
+// The measurement of a branch no review touched (solo, or plan and code with
+// `noReview`): a grade agent reads it as built, then a full review runs for
+// the record. The recorder keeps both out of the setup's cost.
+const measure = async (issue, { title, branch, worktree, plan = '' }) => {
+  const made = plan ? 'A planner wrote a plan and a coder implemented it, with no review after' : 'One agent resolved it alone, with no plan and no review'
+  const grade = await agent(
+    `Grade the implementation of GitHub issue #${issue.n} ("${title}"). ${whereIs(branch, worktree)}\n` +
+    `${made}, in an experiment that compares setups across runs. You are the measurement: grade it as honestly as a correction round's review would, and do NOT fix anything.\n` +
+    `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
+    `2. Run \`npm run typecheck\` and \`npm test\`. A failure may be the tool, not the branch (a missing or half-installed node_modules, a network or timeout error, a flaky test): rerun the failing command once, run \`npm ci\` first if the install looks broken, and re-run the failing test file alone. Count a failure only if it repeats and traces to the branch's diff. One that doesn't is a finding with origin 'environment' and severity 'nit', and it does not set typecheck_passed or tests_passed to false.\n` +
+    `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
+    (plan
+      ? `4. Give every other finding an origin: 'plan' when the coder faithfully followed a wrong or missing instruction, 'code' when the coder went wrong on its own. Grade the plan too, in plan_grade. Write each summary so a coder could fix it without asking.\n`
+      : `4. Give every other finding origin 'code' and write each summary so a coder could fix it without asking.\n`) +
+    `5. Set \`ship_state\` by this rule, not by feel: 'not-ready' when issue_resolved is false, typecheck_passed or tests_passed is false, or an open finding has severity 'blocking'. Otherwise 'ready-with-fixes' when an open finding has severity 'should-fix', and 'ready' when only nits are open. Set \`ready_to_ship\` true for 'ready' and 'ready-with-fixes', false for 'not-ready'.` +
+    (plan ? `\n\n=== PLAN ===\n${plan}` : ''),
+    { label: `grade #${issue.n}`, phase: 'Review', ...models.review, schema: plan ? PLAN_GRADE_SCHEMA : GRADE_SCHEMA },
+  )
+  // The full review comes after the grade, so the grade reads the branch as built.
+  const metaReview = await agent(
+    `Review and test the implementation of GitHub issue #${issue.n} ("${title}"). ${whereIs(branch, worktree)}\n` +
+    `${made}, and a grade agent has already graded it as built. You are the full review that setup did not have, run for the record: your result is kept apart from the setup's score and cost, so review as you would in any pipeline. Grade the code as you found it, before any fix of yours, then do step 6.\n` +
+    `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
+    `2. Run \`npm run typecheck\` and \`npm test\`. A failure may be the tool, not the branch (a half-installed node_modules, a network or timeout error, a flaky test): rerun it once, alone if it is one test file, and count it only if it repeats and traces to the diff; one that doesn't is a finding with origin 'environment' and severity 'nit'.\n` +
+    `3. Review for correctness (does it resolve the issue, edge cases, regressions, sibling places that need the same change), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
+    `4. Give every other finding origin 'code' and write each summary so a coder could fix it without asking.\n` +
+    `5. Set \`ship_state\` and \`ready_to_ship\` for the branch as you found it, by the same rule as the grade agent: 'not-ready' when the issue is unresolved, typecheck or tests fail for real, or a blocking finding is open; else 'ready-with-fixes' when a should-fix is open; else 'ready'. ready_to_ship is true for the first two.\n` +
+    `6. Fix every open finding that isn't a nit (a nit too when it takes a line). Run \`npm run typecheck\` and \`npm test\`, break each test you touched for a moment to check it fails, and commit with a plain-words message ending with a blank line and:\n${TRAILER}\nList the fixed ids in \`self_fixed\` and your commit in \`final_commit\`. Steps 1-5 describe the branch before your fixes.`,
+    { label: `review #${issue.n} r1`, phase: 'Review', ...models.review, schema: SOLO_REVIEW_SCHEMA },
+  )
+  return { grade, metaReview }
+}
+
 if (solo) {
   const soloResults = await pipeline(
     ISSUES,
@@ -278,28 +326,7 @@ if (solo) {
     ),
     async (built, issue) => {
       if (!built || built.already_done) { log(`#${issue.n}: skipped (${built ? 'already done' : 'no result'})`); return null }
-      const grade = await agent(
-        `Grade the implementation of GitHub issue #${issue.n} ("${built.title}"). ${whereIs(built.branch, built.worktree_path)}\n` +
-        `One agent resolved it alone, with no plan and no review, in an experiment that compares setups across runs. You are the measurement: grade it as honestly as a correction round's review would, and do NOT fix anything.\n` +
-        `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
-        `2. Run \`npm run typecheck\` and \`npm test\`. A failure may be the tool, not the branch (a missing or half-installed node_modules, a network or timeout error, a flaky test): rerun the failing command once, run \`npm ci\` first if the install looks broken, and re-run the failing test file alone. Count a failure only if it repeats and traces to the branch's diff. One that doesn't is a finding with origin 'environment' and severity 'nit', and it does not set typecheck_passed or tests_passed to false.\n` +
-        `3. Review for correctness (does it resolve the issue, edge cases, regressions), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
-        `4. Give every other finding origin 'code' and write each summary so a coder could fix it without asking.\n` +
-        `5. Set \`ship_state\` by this rule, not by feel: 'not-ready' when issue_resolved is false, typecheck_passed or tests_passed is false, or an open finding has severity 'blocking'. Otherwise 'ready-with-fixes' when an open finding has severity 'should-fix', and 'ready' when only nits are open. Set \`ready_to_ship\` true for 'ready' and 'ready-with-fixes', false for 'not-ready'.`,
-        { label: `grade #${issue.n}`, phase: 'Review', ...models.review, schema: GRADE_SCHEMA },
-      )
-      // The full review comes after the grade, so the grade reads the branch as built.
-      const metaReview = await agent(
-        `Review and test the implementation of GitHub issue #${issue.n} ("${built.title}"). ${whereIs(built.branch, built.worktree_path)}\n` +
-        `One agent resolved it alone, with no plan and no review, and a grade agent has already graded it as built. You are the full review that setup did not have, run for the record: your result is kept apart from the setup's score and cost, so review as you would in any pipeline. Grade the code as you found it, before any fix of yours, then do step 6.\n` +
-        `1. Read the issue (${readIssue(issue.n)}) and the diff \`git diff ${BASE}...HEAD\`.\n` +
-        `2. Run \`npm run typecheck\` and \`npm test\`. A failure may be the tool, not the branch (a half-installed node_modules, a network or timeout error, a flaky test): rerun it once, alone if it is one test file, and count it only if it repeats and traces to the diff; one that doesn't is a finding with origin 'environment' and severity 'nit'.\n` +
-        `3. Review for correctness (does it resolve the issue, edge cases, regressions, sibling places that need the same change), test strength (break the guarded code: does each new test fail?), code quality (matches the surrounding idiom and comment density, no dead code) and the CLAUDE.md rules for comments.\n` +
-        `4. Give every other finding origin 'code' and write each summary so a coder could fix it without asking.\n` +
-        `5. Set \`ship_state\` and \`ready_to_ship\` for the branch as you found it, by the same rule as the grade agent: 'not-ready' when the issue is unresolved, typecheck or tests fail for real, or a blocking finding is open; else 'ready-with-fixes' when a should-fix is open; else 'ready'. ready_to_ship is true for the first two.\n` +
-        `6. Fix every open finding that isn't a nit (a nit too when it takes a line). Run \`npm run typecheck\` and \`npm test\`, break each test you touched for a moment to check it fails, and commit with a plain-words message ending with a blank line and:\n${TRAILER}\nList the fixed ids in \`self_fixed\` and your commit in \`final_commit\`. Steps 1-5 describe the branch before your fixes.`,
-        { label: `review #${issue.n} r1`, phase: 'Review', ...models.review, schema: SOLO_REVIEW_SCHEMA },
-      )
+      const { grade, metaReview } = await measure(issue, { title: built.title, branch: built.branch, worktree: built.worktree_path })
       return { issue: issue.n, title: built.title, branch: built.branch, worktree: built.worktree_path, base: built.base, summary: built.summary, review: grade, metaReview }
     },
   )
@@ -339,6 +366,10 @@ const results = await pipeline(
   async (prev, issue) => {
     if (!prev) return null
     const { plan, code } = prev
+    if (noReview) {
+      const { grade, metaReview } = await measure(issue, { title: plan.title, branch: code.branch, worktree: code.worktree_path, plan: plan.plan })
+      return { issue: issue.n, title: plan.title, branch: code.branch, worktree: code.worktree_path, base: code.base, review: grade, metaReview }
+    }
     const where = whereIs(code.branch, code.worktree_path)
     const forkAt = { branch: `${code.branch}-opusfix`, path: `${code.worktree_path}-opusfix` }
     let check = null
@@ -419,4 +450,4 @@ const results = await pipeline(
   },
 )
 
-return { version: WORKFLOW_VERSION, models: { plan: models.plan, code: models.code, review: models.review }, maxRounds, fork, base: pinned ? BASE : null, tag, results: results.filter(Boolean) }
+return { version: WORKFLOW_VERSION, models: { plan: models.plan, code: models.code, review: models.review }, maxRounds, fork, noReview, base: pinned ? BASE : null, tag, results: results.filter(Boolean) }
