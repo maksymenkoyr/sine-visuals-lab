@@ -38,11 +38,10 @@ A browser-based, real-time WebGL2 audio visualizer.
   don't write the change: put the plan in a `haiku-coder` agent's prompt and
   let it write it. Clear cases: new files or modules with their tests, one
   edit repeated across many places. This holds for anything written to
-  files: code, tests, docs, bulk edits. The agent skips this file, so the
-  plan names each file and edit, the checks to run, and the rules here that
-  the change touches. Read its diff against the plan before `/ship`. If
-  you're unsure, or the result has to be judged as you go (tuning by eye),
-  write it yourself.
+  files: code, tests, docs, bulk edits. The agent reads this file, so the
+  plan names each file and edit and the checks to run. Read its diff against
+  the plan before `/ship`. If you're unsure, or the result has to be judged
+  as you go (tuning by eye), write it yourself.
 - Finish every change with `/ship`, and close a session with `/wrap`.
 
 Before touching one of these, read what is listed:
