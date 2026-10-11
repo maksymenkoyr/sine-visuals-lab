@@ -65,3 +65,4 @@ Before touching one of these, read what is listed:
 - The version label, the Stable/Insiders channels, or releasing → `src/version.ts` header
 - A scene's own version → `tools/sceneVersionLib.mjs` header
 - A `?url` import, or any file the page fetches from its own origin after load → `src/pinnedAssets.ts` header
+- `npm run check`, a code rule in `rules/`, `biome.json`, `knip.jsonc` or `check-baseline.json` → `tools/check.mjs` header

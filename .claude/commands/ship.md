@@ -8,9 +8,10 @@ Finish the change on this branch:
    behaviour shows up and check or fix those too. It isn't fixed until they
    are.
 
-2. **Gates.** Any TS change: `npm run typecheck` (root and `server/`) and
-   `npm run test`. CI runs the same two on every PR and before every deploy
-   (channels and releasing: the `src/version.ts` header).
+2. **Gates.** `npm run check` passes (the `tools/check.mjs` header lists its
+   steps and how to fix each kind of finding). CI runs the same command on
+   every PR and before every deploy (channels and releasing: the
+   `src/version.ts` header), and the pre-push hook runs it before the push.
 
 3. **Screenshots.** Any visualization or UI change: headless Playwright
    screenshots from before and after, with their paths in your summary. Put

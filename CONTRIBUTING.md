@@ -52,14 +52,16 @@ npm run dev          # visualizer + controller (HTTPS, for mic access)
 npm run dev:worker   # Cloudflare Worker backend, for phone/TV pairing
 ```
 
-Before opening a pull request, run the two gates that CI enforces:
+Before opening a pull request, run the check that CI enforces (typecheck,
+code rules, lint, unused code, licenses, secrets and tests; the
+`tools/check.mjs` header explains each):
 
 ```
-npm run typecheck
-npm run test
+npm run check
 ```
 
-Both also run automatically on every pull request, and again on every deploy —
+`npm install` also sets up a git hook that runs it before every push. It
+runs automatically on every pull request too, and again on every deploy —
 see [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (PR checks
 and previews, plus the Insiders channel on every push to `main`) and
 [.github/workflows/release.yml](.github/workflows/release.yml) (the Stable
