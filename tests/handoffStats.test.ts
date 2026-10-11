@@ -8,6 +8,7 @@ import {
   plannerRequest,
   renderReport,
   replaceRow,
+  reviewStage,
   setupTag,
   summarize,
 } from "../tools/handoffStatsLib.mjs";
@@ -115,7 +116,36 @@ describe("buildRow", () => {
     expect(row.report).toBe("done: 2 files");
     expect(row.coderStats.requests).toBe(2);
     expect(row.plannerRequest?.model).toBe("claude-opus-5-5");
-    expect(row.fixup).toBeNull();
+    expect(row.transcript).toBe("/t.jsonl");
+    expect(row.review).toBeNull();
+  });
+});
+
+describe("reviewStage", () => {
+  const at = (timestamp: string, requestId: string, output: number) =>
+    ({ ...assistant("claude-opus-5-5", "xhigh", requestId, [{ type: "text", text: "review" }], usage(output)), timestamp });
+  const fixes = { files: 1, added: 3, removed: 1, paths: ["a.ts"] };
+
+  it("counts only the planner's requests after the coder's finish and up to the end of the span", () => {
+    const sessionEntries = [
+      at("2026-10-08T11:00:00.000Z", "before", 900),
+      at("2026-10-08T11:05:00.000Z", "r1", 40),
+      at("2026-10-08T11:10:00.000Z", "r2", 60),
+      at("2026-10-08T11:20:00.000Z", "after", 900),
+    ];
+    const r = reviewStage({ sessionEntries, from: "2026-10-08T11:00:00.000Z", to: "2026-10-08T11:10:00.000Z", fixes });
+    expect(r.by).toBe("planner");
+    expect(r.requests).toBe(2);
+    expect(r.tokens.outputSeen).toBe(100);
+    expect(r.model).toBe("claude-opus-5-5");
+    expect(r.cost ?? 0).toBeGreaterThan(0);
+    expect(r.fixes).toBe(fixes);
+  });
+
+  it("has no cost when the session made no request in the span", () => {
+    const r = reviewStage({ sessionEntries: [], from: "2026-10-08T11:00:00.000Z", to: "2026-10-08T11:10:00.000Z", fixes });
+    expect(r.requests).toBe(0);
+    expect(r.cost).toBeNull();
   });
 });
 
@@ -133,9 +163,9 @@ describe("summarize", () => {
   const A = "opus-5-5/xhigh → haiku-5-5/high";
   const B = "sonnet-5-5/high → haiku-5-5/medium";
   const rows: any[] = [
-    { id: "1", setup: A, planChars: 100, branch: "b1", change: { addedChars: 400, added: 10, removed: 0 }, fixup: null, coderStats: { cost: 0.2 }, plannerRequest: { cost: 0.5 } },
-    { id: "2", setup: A, planChars: 300, branch: "b2", change: { addedChars: 300, added: 5, removed: 5 }, fixup: { added: 2, removed: 1 }, coderStats: { cost: 0.4 }, plannerRequest: { cost: 0.7 } },
-    { id: "3", setup: B, planChars: 80, branch: "b3", change: null, fixup: null, coderStats: { cost: 0.1 }, plannerRequest: null },
+    { id: "1", setup: A, planChars: 100, branch: "b1", change: { addedChars: 400, added: 10, removed: 0 }, review: null, coderStats: { cost: 0.2 }, plannerRequest: { cost: 0.5 } },
+    { id: "2", setup: A, planChars: 300, branch: "b2", change: { addedChars: 300, added: 5, removed: 5 }, review: { cost: 0.3, fixes: { added: 2, removed: 1 } }, coderStats: { cost: 0.4 }, plannerRequest: { cost: 0.7 } },
+    { id: "3", setup: B, planChars: 80, branch: "b3", change: null, review: null, coderStats: { cost: 0.1 }, plannerRequest: null },
   ];
   const prStates = new Map([["b1", "MERGED"], ["b2", "OPEN"]]);
 
@@ -144,8 +174,10 @@ describe("summarize", () => {
     expect(a.setup).toBe(A);
     expect(a.n).toBe(2);
     expect(a.medianRatio).toBeCloseTo(0.625);
-    expect(a.withFixup).toBe(1);
-    expect(a.meanFixupLines).toBe(3);
+    expect(a.reviewed).toBe(1);
+    expect(a.withReviewFixes).toBe(1);
+    expect(a.meanReviewFixLines).toBe(3);
+    expect(a.meanReviewCost).toBeCloseTo(0.3);
     expect(a.merged).toBe(1);
     expect(b.setup).toBe(B);
     expect(b.medianRatio).toBeNull();
@@ -162,13 +194,15 @@ describe("renderReport", () => {
     const A = "opus-5-5/xhigh → haiku-5-5/high";
     const B = "sonnet-5-5/high → haiku-5-5/medium";
     const rows: any[] = [
-      { id: "1234567890abcdef", startedAt: "2026-10-08T10:00:00.000Z", setup: A, title: "Add the caustics level", planChars: 100, branch: "b1", change: { added: 10, removed: 0, addedChars: 400 }, fixup: null, coderStats: { cost: 0.2 } },
-      { id: "fedcba0987654321", startedAt: "2026-10-09T10:00:00.000Z", setup: B, title: "Fix the room join", planChars: 80, branch: "b3", change: null, fixup: null, coderStats: { cost: 0.1 } },
+      { id: "1234567890abcdef", startedAt: "2026-10-08T10:00:00.000Z", setup: A, title: "Add the caustics level", planChars: 100, branch: "b1", change: { added: 10, removed: 0, addedChars: 400 }, review: { cost: 0.05, fixes: { added: 4, removed: 1 } }, coderStats: { cost: 0.2 } },
+      { id: "fedcba0987654321", startedAt: "2026-10-09T10:00:00.000Z", setup: B, title: "Fix the room join", planChars: 80, branch: "b3", change: null, review: null, coderStats: { cost: 0.1 } },
     ];
     const text = renderReport(summarize(rows, new Map()), rows);
     expect(text).toContain(A);
     expect(text).toContain(B);
     expect(text).toContain("Add the caustics level");
     expect(text).toContain("Fix the room join");
+    expect(text).toContain("review $0.050 fixed 5");
+    expect(text).toContain("not reviewed");
   });
 });
