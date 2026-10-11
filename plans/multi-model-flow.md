@@ -9,6 +9,8 @@ Researched 2026-10-08. Issue: #447
 - "For mid diff issues Opus medium + Haiku xhigh would be the best combination" — the user's conclusion from all the runs below. The measured setup includes the Opus high review and its correction rounds; it is `/plan-code-review`'s default (`DEFAULT_MODELS` in `.claude/workflows/plan-code-review.js`).
 - "It makes no sense to have a different model for review and plan" — so Opus plans as well as reviews, instead of Sonnet planning. It beat Sonnet plans on grade (3.80 vs 3.57–3.70) for about $0.10 more per issue.
 - Haiku codes and fixes at xhigh effort — the user's call. On the runs, xhigh gave better first code than medium (3.70 vs 3.43) and still cost about $0.06–0.12 per issue.
+- "We don't do fixing loops. Opus reviews once and fixes once and it's done" (2026-10-10) — workflow version 8 runs no correction round by default; `rounds=N` brings the loop back.
+- A grading agent rates every run of the same issue side by side: plan, code, review and final code (2026-10-10). Opus at high effort, since grading the review means verifying its findings; it sees run IDs, never the models. `/plan-code-review grade`, `.claude/workflows/grade-runs.js`.
 - "It should save stats when I'm just using it in the normal flow" — every everyday run gets recorded without anyone typing `record`, not only the experiments.
 - "I'll adopt this model eventually" — the user picks when. A build session starts only when the user types `/handoff multi-model-flow`.
 
@@ -36,7 +38,6 @@ None. The evidence is the recorded runs in `~/.claude/workflow-stats/runs.jsonl`
 
 - When the user asks to build an issue in plain words ("fix #412"), should the session route it through `/plan-code-review` on its own, or only when the user types the command? — blocks phase 2
 - Which issues count as medium difficulty, and do easy ones go to Opus alone (`/plan-code-review <n> solo`, about $0.85 per issue)? — blocks phase 2
-- Should the first review fix its own findings by default instead of a correction round? In the fork runs (r7, r8) it cost about half as much for the same grade, but left nits open that the loop fixed. — doesn't block
 - Should nits go to a fix round when one runs anyway, and should a user-visible bug always count as should-fix? Raised after r6, where a real crossfade bug was filed as a nit and left unfixed. — doesn't block
 
 ## Phases

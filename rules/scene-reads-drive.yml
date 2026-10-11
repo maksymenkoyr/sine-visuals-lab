@@ -1,0 +1,24 @@
+# A scene reacts to the music through its settings' drives, not by reading
+# the raw music values off the feature frame (src/render/drives.ts header;
+# CLAUDE.md's "Making a setting audio-reactive" row). A raw value passed into
+# drives.value(…) / drives.fired(…) as the setting's scene default is fine:
+# the drive decides whether it is used. A read that is right on purpose (a
+# waveform drawn as-is, say) carries `// ast-grep-ignore: scene-reads-drive`
+# with the reason on the line above.
+id: scene-reads-drive
+language: TypeScript
+severity: error
+message: A scene reads the music through its setting's drive (drives.value / drives.fired), not straight off frame. See the src/render/drives.ts header.
+files:
+  - src/render/scenes/**/*.ts
+rule:
+  pattern: frame.$SIGNAL
+  not:
+    inside:
+      stopBy: end
+      any:
+        - pattern: $DRIVES.value($$$)
+        - pattern: $DRIVES.fired($$$)
+constraints:
+  SIGNAL:
+    regex: ^(bands|energy|level|onset|pulseOnset|onsetPhase)$

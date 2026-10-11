@@ -1,0 +1,38 @@
+id: no-per-frame-alloc
+valid:
+  - |
+    const scene = {
+      init(ctx) { buf = new Float32Array(64); },
+      render(ctx, frame) { for (let i = 0; i < 64; i++) buf[i] = frame.bands[i]; },
+    };
+  - |
+    function build(settings) {
+      return new Map(settings.map((s) => [s.key, s]));
+    }
+  - |
+    // Runs on resize only.
+    function resize() { return new Float32Array(1024); }
+invalid:
+  - |
+    const scene = {
+      render(ctx, frame) { const copy = new Float32Array(frame.bands); },
+    };
+  - |
+    const scene = {
+      render(ctx, frame, viewport, palette, anim) { const tint = [0, 1, 2].map((i) => palette.accent[i]); },
+    };
+  - |
+    // @per-frame
+    function forScene(settings) {
+      const specByKey = new Map();
+    }
+  - |
+    // @per-frame
+    export function combine(patch) {
+      return patch.sources.map((s) => s.weight);
+    }
+  - |
+    const engine = {
+      // @per-frame
+      forScene(settings) { return Object.entries(settings); },
+    };

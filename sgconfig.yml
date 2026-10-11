@@ -1,0 +1,6 @@
+# ast-grep config for the rules step of `npm run check` (tools/check.mjs
+# header). Each rule in rules/ has its examples in rule-tests/.
+ruleDirs:
+  - rules
+testConfigs:
+  - testDir: rule-tests

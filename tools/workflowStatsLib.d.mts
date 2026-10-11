@@ -3,7 +3,13 @@
 // Keep in sync with the JSDoc in workflowStatsLib.mjs by hand.
 
 export const GRADE_POINTS: Record<string, number>;
-export const PRICES: Record<string, { input: number; output: number; cacheRead: number }>;
+export interface PriceCard {
+  input: number;
+  output: number;
+  cacheRead: number;
+}
+
+export const PRICES: Record<string, PriceCard & { long?: PriceCard & { above: number } }>;
 export const CACHE_WRITE_MULT: number;
 export const STAGES: readonly string[];
 
@@ -29,6 +35,8 @@ export interface TranscriptStats {
   effort: string | null;
   requests: number;
   tokens: Tokens;
+  /** The part of `tokens` from requests billed at the model's `long` card. */
+  longTokens: Tokens;
   peakContext: number;
   minutes: number;
 }
@@ -44,6 +52,7 @@ export interface AgentStats {
   minutes: number;
   peakContext: number;
   tokens: Tokens;
+  longTokens: Tokens;
   cost: Cost | null;
 }
 
@@ -63,6 +72,8 @@ export interface StageTotals {
 }
 
 export interface Finding {
+  id: string | null;
+  line: number | null;
   severity: string | null;
   origin: string | null;
   kind: string | null;
@@ -96,6 +107,8 @@ export interface Row {
   finalCodeGrade: string | null;
   issueResolved: boolean | null;
   readyToShip: boolean | null;
+  /** ready, ready-with-fixes (could ship, a should-fix is open) or not-ready. */
+  shipState: "ready" | "ready-with-fixes" | "not-ready" | null;
   finalTypecheck: boolean | null;
   finalTests: boolean | null;
   findings: Finding[];
@@ -103,9 +116,56 @@ export interface Row {
   finishFixes: number;
   stalledFixes: number;
   fork: ForkArms | null;
-  /** Every agent but `grade`. */
+  /** Every agent but `grade`, and in a solo run the record-only review. */
   cost: number;
   gradeCost: number | null;
+  /** Solo only: the full review run for the record, kept out of `cost`. */
+  metaReview?: {
+    cost: number | null;
+    minutes: number;
+    codeGrade: string | null;
+    shipState: "ready" | "ready-with-fixes" | "not-ready" | null;
+    findings: Finding[];
+    selfFixed: string[];
+    finalCommit: string | null;
+  } | null;
+  /** What a side-by-side grader reads; absent on rows recorded before it. */
+  planText?: string | null;
+  commits?: { base: string | null; code: string | null; final: string | null };
+  selfFixedIds?: string[];
+}
+
+export interface Problem {
+  severity: string;
+  summary: string;
+}
+
+/** The grade-runs grader's grades of one run. */
+export interface RunGrade {
+  runId: string;
+  planGrade: string | null;
+  codeGrade: string | null;
+  reviewGrade: string | null;
+  finalCodeGrade: string | null;
+  findingsReal: number;
+  findingsWrong: number;
+  missed: Problem[];
+  finalOpen: Problem[];
+  reasons: { plan: string; code: string; review: string; finalCode: string };
+}
+
+/** One issue of a grade-runs run. */
+export interface GradeRow {
+  runId: string;
+  workflow: string | null;
+  recordedAt: string;
+  issue: number;
+  bench: string | null;
+  agents: (Omit<AgentStats, "stage"> & { stage: "rungrade" })[];
+  cost: number | null;
+  runs: RunGrade[];
+  ranking: string[];
+  notes: string;
 }
 
 /** Both arms after a forked first review; costs in USD per issue. */
@@ -136,6 +196,8 @@ export interface Summary {
   runs: number;
   resolved: number;
   readyToShip: number;
+  readyWithFixes: number;
+  solo: boolean;
   merged: number;
   converged: number | null;
   stalledFixes: number;
@@ -157,10 +219,26 @@ export interface Summary {
     loopCost: number | null;
     loopOpen: number | null;
   } | null;
+  grader: {
+    issues: number;
+    planGrade: number | null;
+    codeGrade: number | null;
+    reviewGrade: number | null;
+    finalCodeGrade: number | null;
+    findingsReal: number | null;
+    findingsWrong: number | null;
+    missed: number | null;
+    missedBlocking: number | null;
+    finalOpen: number | null;
+    /** The reviewer's code grade minus the grader's, in grade points. */
+    reviewerGap: number | null;
+  } | null;
   stages: Partial<Record<StageName, StageSummary>>;
 }
 
 export function parseGrade(text: unknown): string | null;
+
+export function wasBlocked(v: unknown): boolean;
 
 export function parseLabel(label: string | null | undefined): { stage: StageName; issue: number; round: number } | null;
 
@@ -168,7 +246,9 @@ export function transcriptStats(entries: any[]): TranscriptStats;
 
 export function forkIndex(entries: any[]): number;
 
-export function costOf(model: string | null, tokens: Tokens): Cost | null;
+export function costOf(model: string | null, tokens: Tokens, longTokens?: Tokens): Cost | null;
+
+export function mergeRows(stored: Row[], added: Row[]): Row[];
 
 export function setupKey(row: Row): string;
 
@@ -178,7 +258,13 @@ export function buildRows(run: {
   recordedAt: string;
 }): Row[];
 
-export function summarize(rows: Row[], prState?: Map<string, string>): Summary[];
+export function materials(rows: Row[], issue: number, bench?: string | null): { runs: string[]; text: string };
+
+export function buildGradeRows(run: Parameters<typeof buildRows>[0]): GradeRow[];
+
+export function latestGrades(gradeRows: GradeRow[]): Map<string, RunGrade>;
+
+export function summarize(rows: Row[], prState?: Map<string, string>, grades?: Map<string, RunGrade>): Summary[];
 
 export function renderReport(
   summaries: Summary[],

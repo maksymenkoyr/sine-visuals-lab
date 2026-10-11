@@ -1,14 +1,20 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildGradeRows,
   buildRows,
   costOf,
   forkIndex,
+  latestGrades,
+  materials,
+  mergeRows,
   parseGrade,
   parseLabel,
+  PRICES,
   renderReport,
   setupKey,
   summarize,
   transcriptStats,
+  wasBlocked,
 } from "../tools/workflowStatsLib.mjs";
 
 // The rows these build are what tools/workflow-stats.mjs stores and sums, so a
@@ -64,6 +70,22 @@ describe("parseGrade", () => {
   });
 });
 
+describe("wasBlocked", () => {
+  it("takes a reason as a block and the words for nothing as no block", () => {
+    expect(wasBlocked("could not cd into the worktree")).toBe(true);
+    for (const v of ["", " ", "none", "None.", "N/A", "-", null, undefined]) expect(wasBlocked(v)).toBe(false);
+  });
+});
+
+describe("mergeRows", () => {
+  it("replaces a run's rows and keeps every other run's", () => {
+    const row = (runId: string, issue: number) => ({ runId, issue }) as never;
+    const merged = mergeRows([row("a", 1), row("a", 2), row("b", 1)], [row("a", 3)]);
+    expect(merged).toEqual([row("b", 1), row("a", 3)]);
+    expect(mergeRows([], [row("c", 1)])).toEqual([row("c", 1)]);
+  });
+});
+
 describe("parseLabel", () => {
   it("splits a stage label into stage, issue and round", () => {
     expect(parseLabel("review #355")).toEqual({ stage: "review", issue: 355, round: 1 });
@@ -98,6 +120,31 @@ describe("costOf", () => {
     expect(c.cacheRead).toBeLessThan(c.input);
     expect(c.total).toBeCloseTo(c.input + c.cacheWrite + c.cacheRead + c.output);
     expect(costOf("claude-unknown", { input: 1, cacheWrite: 0, cacheRead: 0, outputSeen: 0 })).toBeNull();
+  });
+
+  it("bills a Haiku request whose prompt passes the long card's line at the long card", () => {
+    const { long, ...short } = PRICES["claude-haiku-5-5"];
+    const line = long!.above;
+    const at = (n: number) => `2026-10-08T00:00:0${n}.000Z`;
+    // One request just under the line, one just over it.
+    const s = transcriptStats([
+      assistant("claude-haiku-5-5", "xhigh", at(1), "under", { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: line, output_tokens: 1000 }),
+      assistant("claude-haiku-5-5", "xhigh", at(2), "over", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: line, output_tokens: 1000 }),
+    ]);
+    expect(s.longTokens).toEqual({ input: 1, cacheWrite: 0, cacheRead: line, outputSeen: 1000 });
+    const c = costOf(s.model, s.tokens, s.longTokens)!;
+    const expected = (line * short.cacheRead + 1000 * short.output + 1 * long!.input + line * long!.cacheRead + 1000 * long!.output) / 1e6;
+    expect(c.total).toBeCloseTo(expected, 9);
+    // Pricing it all at the short card is what the rows recorded before the split did.
+    expect(costOf(s.model, s.tokens)!.total).toBeLessThan(c.total);
+  });
+
+  it("ignores longTokens for a model with no long card", () => {
+    const t = { input: 1e6, cacheWrite: 0, cacheRead: 0, outputSeen: 0 };
+    expect(costOf("claude-opus-5-5", t, t)!.total).toBeCloseTo(costOf("claude-opus-5-5", t)!.total);
+    expect(transcriptStats([
+      assistant("claude-opus-5-5", "high", "2026-10-08T00:00:00.000Z", "r", { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 900_000, output_tokens: 1 }),
+    ]).longTokens).toEqual({ input: 0, cacheWrite: 0, cacheRead: 0, outputSeen: 0 });
   });
 });
 
@@ -221,6 +268,59 @@ describe("buildRows solo", () => {
   });
 });
 
+describe("buildRows solo with a record-only review", () => {
+  const base = "39cbc28bdd7fa0e9cbed8003c7f478c1dadfb602";
+  const record = { runId: "wf_m", script: SCRIPT_V3.replace("= 3", "= 10"), args: { issues: [8], solo: true, base } };
+  const agents = (gradeResult: object) => [
+    { label: "solo #8", result: { title: "Eight", already_done: false, branch: "s8", commit: "aaa1111", typecheck_passed: true, tests_passed: true, summary: "…" }, transcript: stage("claude-opus-5-5", "high", 4) },
+    { label: "grade #8", result: gradeResult, transcript: stage("claude-opus-5-5", "high", 3) },
+    { label: "review #8 r1", result: { issue_resolved: true, ready_to_ship: true, ship_state: "ready-with-fixes", code_grade: "B+", findings: [finding("F1", "should-fix", true)], self_fixed: ["F1"], final_commit: "bbb2222" }, transcript: stage("claude-opus-5-5", "high", 6) },
+  ];
+
+  it("keeps the review's cost, grade and findings out of the setup, and records them as metaReview", () => {
+    const [row] = buildRows({ record, recordedAt: "", agents: agents({ issue_resolved: true, ready_to_ship: true, ship_state: "ready-with-fixes", code_grade: "A-", findings: [finding("F1", "should-fix", false)] }) });
+    const cost = (label: string) => row.agents.find((a) => a.label === label)!.cost!.total;
+    expect(row).toMatchObject({ solo: true, reviewRounds: 0, codeGrade: "A-", finalCodeGrade: "A-", readyToShip: true, shipState: "ready-with-fixes" });
+    expect(row.findings).toHaveLength(1);
+    expect(row.cost).toBeCloseTo(cost("solo #8"), 8);
+    expect(row.metaReview).toMatchObject({ codeGrade: "B+", shipState: "ready-with-fixes", selfFixed: ["F1"], finalCommit: "bbb2222" });
+    expect(row.metaReview!.cost).toBeCloseTo(cost("review #8 r1"), 8);
+    const report = renderReport(summarize([row]), [row]);
+    expect(report).toContain("(with fixes still open 1)");
+    expect(report).toMatch(/review\s+\$[\d.]+ .*the measurement, not in the cost/);
+  });
+
+  it("names the three states, and reads a row from before ship_state off the boolean and its open findings", () => {
+    const state = (gradeResult: object) => buildRows({ record, recordedAt: "", agents: agents(gradeResult) })[0].shipState;
+    expect(state({ issue_resolved: true, ready_to_ship: true, ship_state: "ready", code_grade: "A", findings: [] })).toBe("ready");
+    expect(state({ issue_resolved: true, ready_to_ship: false, ship_state: "not-ready", code_grade: "C", findings: [] })).toBe("not-ready");
+    expect(state({ issue_resolved: true, ready_to_ship: true, code_grade: "A-", findings: [finding("F1", "should-fix", false)] })).toBe("ready-with-fixes");
+    expect(state({ issue_resolved: true, ready_to_ship: true, code_grade: "A-", findings: [finding("F1", "nit", false)] })).toBe("ready");
+    expect(state({ issue_resolved: true, ready_to_ship: false, code_grade: "B", findings: [] })).toBe("not-ready");
+  });
+});
+
+describe("buildRows noReview", () => {
+  it("grades plan and code by the grade agent, and keeps grade and review out of the cost and the setup", () => {
+    const base = "8a1fecbef266f5f9b94ac11763c53a96f20613b7";
+    const record = { runId: "wf_n", script: SCRIPT_V3.replace("= 3", "= 11"), args: { issues: [9], noReview: true, base } };
+    const [row] = buildRows({ record, recordedAt: "", agents: [
+      { label: "plan #9", result: { title: "Nine", already_done: false, slug: "nine", plan: "do it", overlap_note: "" }, transcript: stage("claude-sonnet-5-5", "high", 2) },
+      { label: "code #9", result: { branch: "n9", base, commit: "ccc3333", typecheck_passed: true, tests_passed: true, deviations: "" }, transcript: stage("claude-haiku-5-5", "xhigh", 5) },
+      { label: "grade #9", result: { issue_resolved: true, ready_to_ship: false, ship_state: "not-ready", plan_grade: "B", code_grade: "C+", findings: [finding("F1", "blocking", false)] }, transcript: stage("claude-opus-5-5", "high", 3) },
+      { label: "review #9 r1", result: { issue_resolved: true, ready_to_ship: false, ship_state: "not-ready", code_grade: "C", findings: [finding("F1", "blocking", true)], self_fixed: ["F1"], final_commit: "ddd4444" }, transcript: stage("claude-opus-5-5", "high", 6) },
+    ] });
+    const cost = (label: string) => row.agents.find((a) => a.label === label)!.cost!.total;
+    expect(row).toMatchObject({ solo: false, noReview: true, forkRun: false, reviewRounds: 0, converged: null, planGrade: "B", codeGrade: "C+", finalCodeGrade: "C+", shipState: "not-ready" });
+    expect(row.cost).toBeCloseTo(cost("plan #9") + cost("code #9"), 8);
+    expect(row.commits!.final).toBe("ccc3333");
+    expect(row.metaReview).toMatchObject({ codeGrade: "C", selfFixed: ["F1"], finalCommit: "ddd4444" });
+    expect(setupKey(row)).toBe("v11 · plan sonnet-5-5/high · code haiku-5-5/xhigh · no review · graded by opus-5-5/high · bench 8a1fecbe");
+    expect(renderReport(summarize([row]), [row])).toMatch(/review\s+\$[\d.]+ .*the measurement, not in the cost/);
+    expect(materials([row], 9, base).text).toContain("No review followed the code");
+  });
+});
+
 describe("forkIndex", () => {
   it("cuts at the first entry of the request that made the copy", () => {
     const bash = (requestId: string, command: string) =>
@@ -263,5 +363,66 @@ describe("summarize", () => {
   it("leaves issues the planner found already done out of the sums", () => {
     const [row] = run("wf_x", SCRIPT_V2, { plan_grade: "A", code_grade: "A", findings: [] });
     expect(summarize([{ ...row, alreadyDone: true }])).toEqual([]);
+  });
+});
+
+describe("grading runs side by side", () => {
+  const SCRIPT_V8 = SCRIPT_V3.replace("= 3", "= 8").replace("= 2", "= 0");
+  const t = (m: string) => stage(m, "high", 1);
+  const v8 = (runId: string, startedAt: string, codeGrade: string) => buildRows({
+    record: { runId, workflowName: "plan-code-review", timestamp: startedAt, script: SCRIPT_V8, args: { issues: [7] } },
+    recordedAt: "",
+    agents: [
+      { label: "plan #7", result: { ...PLAN, plan: `plan of ${runId}` }, transcript: t("claude-opus-5-5") },
+      { label: "code #7", result: { ...CODE, base: "b0", commit: `c-${runId}` }, transcript: t("claude-haiku-5-5") },
+      { label: "review #7 r1", result: {
+        issue_resolved: true, ready_to_ship: true, plan_grade: "A", code_grade: codeGrade,
+        findings: [{ ...finding("F1", "blocking", true), line: 12 }], self_fixed: ["F1"], final_commit: `f-${runId}`,
+      }, transcript: t("claude-opus-5-5") },
+    ],
+  })[0];
+
+  it("hands the grader each run's commits, plan and findings, but no models or reviewer grades", () => {
+    const later = v8("wf_b", "2026-10-10T02:00:00Z", "B");
+    const earlier = v8("wf_a", "2026-10-10T01:00:00Z", "A-");
+    expect(later).toMatchObject({ maxRounds: 0, commits: { base: "b0", code: "c-wf_b", final: "f-wf_b" }, selfFixedIds: ["F1"] });
+    const old = { ...earlier, runId: "wf_old", commits: undefined };
+    const bench = { ...earlier, runId: "wf_bench", base: "39cbc28b" };
+    const { runs, text } = materials([later, old, bench, earlier], 7);
+    expect(runs).toEqual(["wf_a", "wf_b"]);
+    expect(text).toContain("plan of wf_a");
+    expect(text).toContain("- [F1] blocking, code, bug: f.ts:12: F1");
+    expect(text).toContain("fixed these itself, up to the final commit: F1");
+    expect(text).not.toMatch(/opus|haiku|A-/);
+    expect(materials([later, bench], 7, "39cbc28b").runs).toEqual(["wf_bench"]);
+  });
+
+  it("records the grader's grades and sets the reviewer's code grade against them", () => {
+    const rows = [v8("wf_a", "2026-10-10T01:00:00Z", "A"), v8("wf_b", "2026-10-10T02:00:00Z", "B")];
+    const grade = (runId: string, code: string, missed: unknown[]) => ({
+      run_id: runId, plan_grade: "B", code_grade: code, review_grade: "C", final_code_grade: "B+",
+      findings_real: ["F1"], findings_wrong: [], missed, final_open: [{ severity: "nit", summary: "n" }],
+    });
+    const gradeRun = (runId: string, recordedAt: string, codeA: string) => buildGradeRows({
+      record: { runId, workflowName: "grade-runs", args: { issues: [7] } },
+      recordedAt,
+      agents: [{ label: "rungrade #7", transcript: t("claude-opus-5-5"), result: {
+        runs: [grade("wf_a", codeA, [{ severity: "blocking", summary: "x" }]), grade("wf_b", "C", [])],
+        ranking: ["wf_a", "wf_b"], notes: "",
+      } }],
+    });
+    const [first] = gradeRun("wf_g1", "2026-10-10T03:00:00Z", "D");
+    const [second] = gradeRun("wf_g2", "2026-10-10T04:00:00Z", "B");
+    expect(first).toMatchObject({ issue: 7, ranking: ["wf_a", "wf_b"] });
+    expect(first.cost).toBeGreaterThan(0);
+    expect(first.runs[0]).toMatchObject({ codeGrade: "D", reviewGrade: "C", findingsReal: 1, findingsWrong: 0 });
+
+    // The newer grading of wf_a wins.
+    const grades = latestGrades([second, first]);
+    expect(grades.get("wf_a#7")?.codeGrade).toBe("B");
+    const [s] = summarize(rows, new Map(), grades);
+    // Reviewer A and B against grader B and C: one point high on average.
+    expect(s.grader).toMatchObject({ issues: 2, codeGrade: 2.5, reviewGrade: 2, missed: 0.5, missedBlocking: 0.5, finalOpen: 0, reviewerGap: 1 });
+    expect(renderReport([s], rows)).toContain("reviewer's code grade minus the grader's +1.00");
   });
 });

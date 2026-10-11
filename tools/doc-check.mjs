@@ -180,7 +180,7 @@ function diffFor(path, base, untracked) {
 }
 
 function docFiles() {
-  const candidates = ["AGENTS.md", "CLAUDE.md", "README.md", "CONTRIBUTING.md"];
+  const candidates = ["CLAUDE.md", "README.md", "CONTRIBUTING.md"];
   const paths = candidates.filter((p) => existsSync(p));
   const docsGlob = globSync("docs/**/*.md").filter((p) => p !== "docs/status.md");
   const commandsGlob = globSync(".claude/commands/*.md");

@@ -36,8 +36,8 @@ on the subscription model; only the cheap process talks to OpenRouter.
    Anything outside that allowlist fails in headless mode instead of prompting;
    if the plan needs another command, add it to the plan and the allowlist
    deliberately, don't widen it on the fly.
-4. **Don't trust its "done".** Independently: run `npm run typecheck` and
-   `npm run test` here; read `git log` and `git diff origin/main...HEAD` against
+4. **Don't trust its "done".** Independently: run `npm run check`
+   here; read `git log` and `git diff origin/main...HEAD` against
    the plan step by step; for a visualization/UI change take the before/after
    headless Playwright screenshots CLAUDE.md requires.
 5. Report to the user: steps completed vs the plan, anything the cheap model

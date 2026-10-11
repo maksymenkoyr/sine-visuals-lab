@@ -5,8 +5,8 @@ first (`docs/tuning.md`, "Tuning against a reference video") — a contact
 sheet shows the look, not the motion, and the motion is the sync.
 
 Every scene ships with its record, `docs/scenes/<id>.md`, started from
-[the template](scenes/_template.md) — the standing rule in `AGENTS.md` says
-what goes in it and what never does.
+[the template](scenes/_template.md) — the scene-record rule in `CLAUDE.md`
+says what goes in it and what never does.
 
 A **paid** scene is built the same way but lives elsewhere: in its own folder
 of the private scenes repo, checked out at `src/render/scenes/private/<id>/`,
@@ -81,8 +81,8 @@ missing a required method; nothing here needs a special build step.
 Once it renders, keep `npm run dev` running and give whoever is reviewing a
 direct link to the scene rather than the gallery root — the dev server prints
 one per scene at startup, and a scene registered first among the drafts is the
-first draft link in that list. The standing rule in `AGENTS.md` spells out the
-URL form (query before the hash).
+first draft link in that list. Any query goes before the hash: one placed
+after it lands on the gallery.
 
 ## The invariant you can't get from typecheck
 

@@ -1,0 +1,19 @@
+id: no-private-import
+valid:
+  - |
+    import { scene } from "./storm.ts";
+  - |
+    const found = import.meta.glob("./private/*/index.ts", { eager: true });
+  - |
+    import { collectPrivateScenes } from "./privateScenes.ts";
+  - |
+    const note = "see scenes/private/README";
+invalid:
+  - |
+    import { scene } from "./private/aurora/index.ts";
+  - |
+    import { scene } from "../render/scenes/private/aurora/index.ts";
+  - |
+    export { scene } from "./private/aurora/index.ts";
+  - |
+    const m = await import("../scenes/private/aurora/index.ts");
