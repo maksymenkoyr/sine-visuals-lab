@@ -25,12 +25,12 @@ Each step is one commit. Keep each small enough for one short session.
 
 - File: `<path>`; symbol: `<function/const>`
 - Edit: <the change, close to a diff — old behaviour → new behaviour>
-- Check: `npm run typecheck` and `npm run test` pass; <any step-specific check>
+- Check: `npm run check` passes; <any step-specific check>
 
 ### 2. <…>
 
 ## Done when
 
-- `npm run typecheck` and `npm run test` pass.
+- `npm run check` passes.
 - <observable result; for a visualization change, the before/after screenshots
   AGENTS.md requires — say which scene, which query, where to save them>

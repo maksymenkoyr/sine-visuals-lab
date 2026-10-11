@@ -1,0 +1,24 @@
+# Paid scenes live in the gitignored src/render/scenes/private/ checkout
+# (src/render/scenes/privateScenes.ts header). Only scenes/index.ts reaches
+# them, through import.meta.glob, which matches nothing where the folder is
+# missing. A plain import builds on a machine that has the checkout, then
+# breaks everywhere else or carries paid code into a public bundle.
+id: no-private-import
+language: TypeScript
+severity: error
+message: Public code must not import from scenes/private/. Paid scenes reach the app only through the import.meta.glob in src/render/scenes/index.ts.
+files:
+  - src/**/*.ts
+  - server/**/*.ts
+  - tools/**/*.ts
+ignores:
+  - src/render/scenes/private/**
+rule:
+  kind: string_fragment
+  regex: (^|/)scenes/private(/|$)|^\.{1,2}/private(/|$)
+  inside:
+    stopBy: end
+    any:
+      - kind: import_statement
+      - kind: export_statement
+      - pattern: import($$$)

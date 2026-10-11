@@ -80,13 +80,18 @@ jobs:
 
       - run: npm ci
 
-      # The gates CONTRIBUTING.md names. typecheck covers both tsconfigs, so the
-      # Worker source is checked before it ships. They gate every deploy this
-      # workflow makes (Insiders and every preview) — Stable's own gates are
-      # release.yml's own npm ci/typecheck/test steps, run again there against
-      # the production commit being released.
-      - run: npm run typecheck
-      - run: npm run test
+      # Every gate CONTRIBUTING.md names, in one command, the same one the Stop hook and the
+      # pre-push hook run (tools/check.mjs header): typecheck (both
+      # tsconfigs, so the Worker source is checked before it ships), the
+      # repo's code rules, lint, unused code, licenses, secrets and the whole
+      # test suite. It gates every deploy this workflow makes (Insiders and
+      # every preview) — Stable's own gates are release.yml's own
+      # npm ci/typecheck/test steps, run again there against the production
+      # commit being released. CHECK_BASE is what the secrets step diffs
+      # against: the PR's base, or main before this push.
+      - run: npm run check
+        env:
+          CHECK_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
 
       - name: Pick the Insiders version
         id: version

@@ -1,0 +1,22 @@
+// knip finds unused files, exports and dependencies for the knip step of
+// `npm run check` (tools/check.mjs header). What it finds today is in
+// check-baseline.json; only new findings fail.
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "index.html",
+    "tv.html",
+    "output.html",
+    // Loaded by tools/alien-bake/index.html from the site root, which knip can't resolve.
+    "src/render/scenes/alien/bakePage.ts",
+    "tools/**/*.{mjs,js,ts}",
+    "tests/**/*.ts"
+  ],
+  "project": ["src/**/*.ts", "server/**/*.ts", "tools/**/*.{mjs,js,ts}", "tests/**/*.ts"],
+  // Run by tools/check.mjs through npx, which knip can't see.
+  "ignoreDependencies": ["@ast-grep/cli", "@biomejs/biome", "cloudflare"],
+  // uv is a system tool the promo scripts call, not an npm package.
+  "ignoreBinaries": ["uv"],
+  // make-icons.mjs imports this inside a page served by Vite, from the site root.
+  "ignoreUnresolved": ["/src/ui/brandMark.ts"]
+}
