@@ -6,9 +6,13 @@ import {
   customValueSnapshot,
   fitCustom,
   getCustomValue,
+  getSliderStretch,
+  resetCustomValue,
   setCustomValue,
+  sliderSpan,
+  stretchSlider,
 } from "../src/render/customValues.ts";
-import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
+import { resetSceneSettings, setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 
 afterEach(() => {
   clearAllCustomValues();
@@ -133,5 +137,45 @@ describe("a write to the setting itself", () => {
     setSceneSetting("scene-custom-write", spec, 0.3);
     expect(getCustomValue("scene-custom-write", "glow")).toBeUndefined();
     expect(getCustomValue("scene-custom-write", "other")).toBe(1.2);
+  });
+});
+
+describe("the slider's stretch", () => {
+  const spec: SceneSetting = { key: "glow", label: "Glow", min: 0, max: 1, step: 0.01, default: 0.5 };
+
+  it("outlives the custom value: a write inside the slider keeps it", () => {
+    setCustomValue("scene-stretch-1", "glow", 1.5);
+    stretchSlider("scene-stretch-1", "glow", 1.5);
+    setSceneSetting("scene-stretch-1", spec, 0.8);
+    expect(getCustomValue("scene-stretch-1", "glow")).toBeUndefined();
+    expect(getSliderStretch("scene-stretch-1", "glow")).toBe(1.5);
+    expect(customValueSnapshot()["scene-stretch-1:glow"]).toBeUndefined();
+  });
+
+  it("is left alone by a new custom value, and moved only by stretchSlider", () => {
+    stretchSlider("scene-stretch-2", "glow", 1.5);
+    setCustomValue("scene-stretch-2", "glow", 1.2);
+    expect(getSliderStretch("scene-stretch-2", "glow")).toBe(1.5);
+    stretchSlider("scene-stretch-2", "glow", 1.8);
+    expect(getSliderStretch("scene-stretch-2", "glow")).toBe(1.8);
+  });
+
+  it("goes with the value on a reset, and on the Scene card's Reset", () => {
+    setCustomValue("scene-stretch-3", "glow", 1.5);
+    stretchSlider("scene-stretch-3", "glow", 1.5);
+    resetCustomValue("scene-stretch-3", "glow");
+    expect(getCustomValue("scene-stretch-3", "glow")).toBeUndefined();
+    expect(getSliderStretch("scene-stretch-3", "glow")).toBeUndefined();
+
+    stretchSlider("scene-stretch-4", "glow", 1.5);
+    resetSceneSettings("scene-stretch-4", [spec]);
+    expect(getSliderStretch("scene-stretch-4", "glow")).toBeUndefined();
+  });
+
+  it("widens the slider's span to the stretch and the value, whichever end", () => {
+    expect(sliderSpan({ min: 0, max: 1 }, 1.5, undefined)).toEqual({ lo: 0, hi: 1.5 });
+    expect(sliderSpan({ min: -1, max: 1 }, undefined, -2)).toEqual({ lo: -2, hi: 1 });
+    expect(sliderSpan({ min: 0, max: 1 }, 1.5, 1.2)).toEqual({ lo: 0, hi: 1.5 });
+    expect(sliderSpan({ min: 0, max: 1 })).toEqual({ lo: 0, hi: 1 });
   });
 });
