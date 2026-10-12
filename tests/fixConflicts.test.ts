@@ -56,8 +56,10 @@ describe("resolveSegments", () => {
 describe("fix-conflicts-auto.mjs in a stopped rebase", () => {
   it("settles list additions without a model and leaves a real disagreement", () => {
     const dir = mkdtempSync(join(tmpdir(), "fc-test-"));
+    // Run from a git hook (pre-push), GIT_DIR and friends point at this repo; the temp repo must not inherit them.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
     const git = (...args: string[]) =>
-      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     try {
       git("init", "-q", "-b", "main");
       writeFileSync(join(dir, "list.md"), "# list\n- a\n");
@@ -78,7 +80,7 @@ describe("fix-conflicts-auto.mjs in a stopped rebase", () => {
       git("checkout", "-q", "feature");
       expect(() => git("rebase", "main")).toThrow();
 
-      const out = execFileSync("node", [join(process.cwd(), "tools/fix-conflicts-auto.mjs")], { cwd: dir, encoding: "utf8" });
+      const out = execFileSync("node", [join(process.cwd(), "tools/fix-conflicts-auto.mjs")], { cwd: dir, env, encoding: "utf8" });
       expect(out).toContain("auto-resolved list.md");
       expect(readFileSync(join(dir, "list.md"), "utf8")).toBe("# list\n- a\n- from main\n- from feature\n");
       // A real disagreement and the lockfile stay for the model, still conflicted.
