@@ -161,15 +161,16 @@ export function serializeSet(doc: SetDoc): string {
   });
 }
 
-/** Never throws: unreadable text, a future version or a pad whose Look no
- *  longer decodes comes back as the Set without it (a Set outlives the build
- *  that wrote it). A key a room or an old build planted is clamped to what
- *  this build allows. */
-export function parseSet(raw: string | null): SetDoc {
+/** Never throws: absent or empty text is the empty Set; unreadable text (not
+ *  JSON, the wrong shape, or a future version) is null, so a synced re-seed
+ *  can keep what it has (net/syncedStores.ts's header). A pad whose Look no
+ *  longer decodes is dropped (a Set outlives the build that wrote it). A key a
+ *  room or an old build planted is clamped to what this build allows. */
+function readSet(raw: string | null): SetDoc | null {
   if (!raw) return emptySet();
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || parsed.v !== STORE_VERSION || !Array.isArray(parsed.pads)) return emptySet();
+    if (!parsed || typeof parsed !== "object" || parsed.v !== STORE_VERSION || !Array.isArray(parsed.pads)) return null;
     const pads: SetPad[] = [];
     const seen = new Set<string>();
     let next = typeof parsed.next === "number" && Number.isFinite(parsed.next) ? Math.max(1, Math.floor(parsed.next)) : 1;
@@ -192,28 +193,35 @@ export function parseSet(raw: string | null): SetDoc {
     }
     return { pads, next, autopilot: sanitizeAutopilot(parsed.autopilot) };
   } catch {
-    return emptySet();
+    return null;
   }
+}
+
+/** readSet, with unreadable text as the empty Set. */
+export function parseSet(raw: string | null): SetDoc {
+  return readSet(raw) ?? emptySet();
 }
 
 // ---- the store: a cache over localStorage, same pattern as sceneLooks.ts ----
 
 const STORAGE_KEY = "vibe.set";
 
-function loadInitial(): SetDoc {
+function readStored(): SetDoc | null {
   try {
-    return parseSet(localStorage.getItem(STORAGE_KEY));
+    return readSet(localStorage.getItem(STORAGE_KEY));
   } catch {
-    return emptySet();
+    return null;
   }
 }
 
-let cache: SetDoc = loadInitial();
+let cache: SetDoc = readStored() ?? emptySet();
 
 // Re-seeds from localStorage for the pop-out and a room's applied look
-// (net/syncedStores.ts).
+// (net/syncedStores.ts); text it cannot read keeps the current Set.
 registerSyncedStore(STORAGE_KEY, () => {
-  cache = loadInitial();
+  const doc = readStored();
+  if (doc === null) return;
+  cache = doc;
 });
 
 function commit(doc: SetDoc): void {

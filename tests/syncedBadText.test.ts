@@ -222,3 +222,78 @@ describe("silence gate marks (vibe.silenceGateClosed, vibe.silenceGateOpen)", ()
     expect(getSilenceGate()).toEqual({ closed: 0.2, open: 0.5 });
   });
 });
+
+describe("scene transition (vibe.transition)", () => {
+  // Break: the old hook does `current = load()`, and parseTransition reads all
+  // four junk texts as TRANSITION_DEFAULT.
+  it("keeps the transition on unreadable text, and resets to the default when absent", async () => {
+    const { fake, synced } = await fresh({ "vibe.transition": JSON.stringify({ style: "cut", bars: 4 }) });
+    const { getSceneTransition, TRANSITION_DEFAULT } = await import("../src/render/sceneTransition.ts");
+    expect(getSceneTransition()).toEqual({ style: "cut", bars: 4 });
+
+    for (const junk of ["{x", "null", "[1]", "7"]) {
+      synced.applySyncedStorage({ "vibe.transition": junk }, fake);
+      expect(getSceneTransition(), junk).toEqual({ style: "cut", bars: 4 });
+    }
+
+    synced.applySyncedStorage({ "vibe.transition": JSON.stringify({ style: "fade", bars: 2 }) }, fake);
+    expect(getSceneTransition()).toEqual({ style: "fade", bars: 2 });
+
+    synced.applySyncedStorage({}, fake);
+    expect(getSceneTransition()).toEqual(TRANSITION_DEFAULT);
+  });
+});
+
+describe("Set pads (vibe.set)", () => {
+  // Break: the old hook does `cache = loadInitial()`, and parseSet reads every
+  // junk text (a future version included) as emptySet().
+  it("keeps the pads on unreadable text, and empties the Set when absent", async () => {
+    const set0 = await import("../src/render/sceneSet.ts");
+    const pad = (sceneId: string) => {
+      const r = set0.addPad(set0.emptySet(), { name: "x", sceneId, manual: { focus: 0.3 } }, "neon");
+      if (!r.ok) throw new Error(r.reason);
+      return set0.serializeSet(r.doc);
+    };
+    const { fake, synced } = await fresh({ "vibe.set": pad("scene-a") });
+    const { listPads } = await import("../src/render/sceneSet.ts");
+    expect(listPads().map((p) => p.look.sceneId)).toEqual(["scene-a"]);
+
+    for (const junk of ["{x", "null", "[]", '{"v":1}', '{"v":99,"pads":[]}']) {
+      synced.applySyncedStorage({ "vibe.set": junk }, fake);
+      expect(listPads().map((p) => p.look.sceneId), junk).toEqual(["scene-a"]);
+    }
+
+    synced.applySyncedStorage({ "vibe.set": pad("scene-b") }, fake);
+    expect(listPads().map((p) => p.look.sceneId)).toEqual(["scene-b"]);
+
+    synced.applySyncedStorage({}, fake);
+    expect(listPads()).toEqual([]);
+  });
+});
+
+describe("overlay (vibe.overlay, vibe.overlayLogo)", () => {
+  const OVERLAY_SIZE = 2; // inside OVERLAY_SIZE_MIN..OVERLAY_SIZE_MAX, not the default
+  const LOGO = "data:image/png;base64,iVBORw0KGgo=";
+  // Break: the old hook does `state = load()`, so junk settings give
+  // OVERLAY_DEFAULTS and a junk logo gives "".
+  it("keeps an unreadable key and applies the other one, and resets when absent", async () => {
+    const { fake, synced } = await fresh({
+      "vibe.overlay": JSON.stringify({ text: "Club", size: OVERLAY_SIZE }),
+      "vibe.overlayLogo": LOGO,
+    });
+    const { getOverlay } = await import("../src/render/overlayStore.ts");
+    const { OVERLAY_DEFAULTS } = await import("../src/render/overlayLayout.ts");
+    expect(getOverlay()).toMatchObject({ text: "Club", size: OVERLAY_SIZE, logo: LOGO });
+
+    for (const junk of ["{x", "null", "[1]", "7"]) {
+      synced.applySyncedStorage({ "vibe.overlay": junk, "vibe.overlayLogo": LOGO }, fake);
+      expect(getOverlay(), junk).toMatchObject({ text: "Club", size: OVERLAY_SIZE, logo: LOGO });
+    }
+    // A logo that is not a PNG data URL is kept out; the readable settings still apply.
+    synced.applySyncedStorage({ "vibe.overlay": JSON.stringify({ text: "Late" }), "vibe.overlayLogo": "nope" }, fake);
+    expect(getOverlay()).toMatchObject({ text: "Late", size: OVERLAY_DEFAULTS.size, logo: LOGO });
+
+    synced.applySyncedStorage({}, fake);
+    expect(getOverlay()).toEqual(OVERLAY_DEFAULTS);
+  });
+});
