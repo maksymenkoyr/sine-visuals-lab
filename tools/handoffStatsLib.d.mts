@@ -37,6 +37,7 @@ export interface HandoffRow {
   recordedAt: string;
   startedAt: string;
   session: string;
+  transcript: string | null;
   cwd: string;
   branch: string;
   headBefore: string;
@@ -60,10 +61,24 @@ export interface HandoffRow {
   };
   /** The diff the coder made, from the CLI; null when it could not be taken. */
   change: (NumstatSummary & { addedChars: number; preTree: string; postTree: string }) | null;
-  /** What the session changed after the coder, set by `handoff-ship`. */
-  fixup: NumstatSummary | null;
+  /** The planner's review of the coder's diff, set by `handoff-ship`. */
+  review: ReviewStage | null;
   shippedAt: string | null;
 }
+
+export interface ReviewStage {
+  by: "planner";
+  model: string | null;
+  effort: string | null;
+  requests: number;
+  tokens: Tokens;
+  minutes: number;
+  cost: number | null;
+  /** What the session changed after the coder. */
+  fixes: NumstatSummary;
+}
+
+export function reviewStage(span: { sessionEntries: any[]; from: string; to: string; fixes: NumstatSummary }): ReviewStage;
 
 export function buildRow(run: {
   pending: any;
@@ -85,8 +100,10 @@ export interface HandoffSummary {
   medianRatio: number | null;
   meanCoderCost: number | null;
   meanPlannerCost: number | null;
-  withFixup: number;
-  meanFixupLines: number | null;
+  reviewed: number;
+  withReviewFixes: number;
+  meanReviewFixLines: number | null;
+  meanReviewCost: number | null;
   merged: number;
 }
 

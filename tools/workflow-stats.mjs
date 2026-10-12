@@ -51,8 +51,10 @@
 // is completed by SubagentStop, not by its PostToolUse. A pending file stays
 // until it is PENDING_DAYS old, since PostToolUse and SubagentStop may both
 // finish the same handoff and the later one replaces the row. `handoff-ship` runs
-// before /ship's rebase, so the fix-up diff holds only the session's own edits;
-// a rebase first would count main's changes as the session's. The paid-scene
+// before /ship's rebase and records each handoff's review stage (the planner
+// reading the coder's diff and fixing it; handoffStatsLib.mjs says what it
+// counts), so its fixes hold only the session's own edits; a rebase first
+// would count main's changes as the session's. The paid-scene
 // checkout is gitignored, so edits made there don't show in the diff. The hook
 // never blocks a tool call: any error is swallowed and it exits 0 printing
 // nothing.
@@ -69,7 +71,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { buildGradeRows, buildRows, forkIndex, latestGrades, materials, mergeRows, renderReport, summarize, transcriptStats } from "./workflowStatsLib.mjs";
-import { addedChars, buildRow, parseNumstat, replaceRow, renderReport as renderHandoffReport, summarize as summarizeHandoffs } from "./handoffStatsLib.mjs";
+import { addedChars, buildRow, parseNumstat, replaceRow, renderReport as renderHandoffReport, reviewStage, summarize as summarizeHandoffs } from "./handoffStatsLib.mjs";
 
 const STORE = process.env.WORKFLOW_STATS_FILE ?? join(homedir(), ".claude", "workflow-stats", "runs.jsonl");
 const GRADES = join(dirname(STORE), "grades.jsonl");
@@ -380,7 +382,7 @@ function finishHandoff(pending, { subagents, status, toolUses }) {
   const stored = readStore(HANDOFFS);
   const old = stored.find((r) => r.id === row.id);
   if (old) {
-    row.fixup = old.fixup ?? null;
+    row.review = old.review ?? null;
     row.shippedAt = old.shippedAt ?? null;
   }
   writeHandoffs(replaceRow(stored, row));
@@ -488,10 +490,22 @@ function handoff(prefix) {
   console.log(plan);
 }
 
+/** The session's transcript: the path the row kept, or the session's file under PROJECTS. */
+function sessionTranscript(row) {
+  if (row.transcript && existsSync(row.transcript)) return row.transcript;
+  for (const dir of existsSync(PROJECTS) ? readdirSync(PROJECTS) : []) {
+    const path = join(PROJECTS, dir, `${row.session}.jsonl`);
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
 /**
- * `handoff-ship`, run by /ship before its rebase: the diff from each coder's
- * end to the next coder's start (or to now) is what the session changed
- * after that coder. Rows are updated in place, so the store keeps its order.
+ * `handoff-ship`, run by /ship before its rebase: records each handoff's
+ * review stage. The span runs from the coder's end to the next coder's start
+ * (or to now): the diff over it is what the session fixed, and the session's
+ * requests in it are what the review cost. Rows are updated in place, so the
+ * store keeps its order.
  */
 function handoffShip() {
   const cwd = process.cwd();
@@ -502,14 +516,22 @@ function handoffShip() {
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   if (!rows.length) return;
   const now = snapshotTree(cwd);
+  const shippedAt = new Date().toISOString();
   for (let i = 0; i < rows.length; i++) {
-    const next = rows[i + 1]?.change.preTree ?? now;
-    rows[i].fixup = parseNumstat(git(cwd, ["diff", "--numstat", rows[i].change.postTree, next]));
-    rows[i].shippedAt = new Date().toISOString();
+    const next = rows[i + 1];
+    const transcript = sessionTranscript(rows[i]);
+    rows[i].review = reviewStage({
+      sessionEntries: transcript ? readJsonlSafe(transcript) : [],
+      from: rows[i].recordedAt,
+      to: next?.startedAt ?? shippedAt,
+      fixes: parseNumstat(git(cwd, ["diff", "--numstat", rows[i].change.postTree, next?.change.preTree ?? now])),
+    });
+    rows[i].shippedAt = shippedAt;
   }
   writeHandoffs(stored);
-  const fixup = rows.reduce((t, r) => ({ added: t.added + r.fixup.added, removed: t.removed + r.fixup.removed }), { added: 0, removed: 0 });
-  console.log(`handoffs: ${rows.length} recorded for ${branch}, fix-ups +${fixup.added}/-${fixup.removed} lines`);
+  const lines = rows.reduce((t, r) => ({ added: t.added + r.review.fixes.added, removed: t.removed + r.review.fixes.removed }), { added: 0, removed: 0 });
+  const cost = rows.reduce((t, r) => t + (r.review.cost ?? 0), 0);
+  console.log(`handoffs: ${rows.length} recorded for ${branch}, review fixed +${lines.added}/-${lines.removed} lines for $${cost.toFixed(3)}`);
 }
 
 if (cmd === "record") await record(rest[0]);

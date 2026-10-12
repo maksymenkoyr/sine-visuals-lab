@@ -7,8 +7,15 @@
 //
 // A setup is the model and effort of the planner (the session that wrote the
 // plan) and of the coder (the subagent), so setups can be compared: how much
-// plan went into how much code, what each side cost, and how much the session
-// had to fix in the coder's diff afterwards.
+// plan went into how much code and what each side cost.
+//
+// After the coder, the planner reads its diff against the plan and fixes what
+// it finds: the handoff's review stage, the same stage the reviewer agent runs
+// in the plan-code-review workflow, done here by the planner itself. Its cost
+// is the session's requests from the coder's finish to the next coder's start
+// or to `handoff-ship`, so it includes /ship's own steps before that call and
+// any other work the session did meanwhile. Its fixes are the lines the
+// session changed in that span.
 //
 // The planner's request is found in the session transcript by the tool_use id
 // of the Agent call. The coder's usage comes from its own transcript, read with
@@ -124,7 +131,8 @@ export function buildRow({ pending, sessionEntries, agentEntries, change, status
   const coder = { agent: pending.agent, model: stats.model, effort: stats.effort };
   return {
     id: pending.id, recordedAt, startedAt: pending.startedAt,
-    session: pending.session, cwd: pending.cwd, branch: pending.branch, headBefore: pending.headBefore,
+    session: pending.session, transcript: pending.transcript ?? null,
+    cwd: pending.cwd, branch: pending.branch, headBefore: pending.headBefore,
     title: pending.title,
     planner,
     coder,
@@ -142,7 +150,32 @@ export function buildRow({ pending, sessionEntries, agentEntries, change, status
       toolUses,
     },
     change,
-    fixup: null, shippedAt: null,
+    review: null, shippedAt: null,
+  };
+}
+
+/**
+ * The review stage of one handoff: the planner session's requests after
+ * `from` and up to `to`, and the lines it changed in that span.
+ * @param {{ sessionEntries: any[], from: string, to: string, fixes: { files: number, added: number, removed: number, paths: string[] } }} span
+ */
+export function reviewStage({ sessionEntries, from, to, fixes }) {
+  const start = Date.parse(from);
+  const end = Date.parse(to);
+  const inSpan = sessionEntries.filter((e) => {
+    const t = e.timestamp ? Date.parse(e.timestamp) : NaN;
+    return t > start && t <= end;
+  });
+  const stats = transcriptStats(inSpan);
+  return {
+    by: "planner",
+    model: stats.model,
+    effort: stats.effort,
+    requests: stats.requests,
+    tokens: stats.tokens,
+    minutes: stats.minutes,
+    cost: stats.requests ? costOf(stats.model, stats.tokens, stats.longTokens)?.total ?? null : null,
+    fixes,
   };
 }
 
@@ -186,7 +219,8 @@ export function summarize(rows, prStates = new Map()) {
   const summaries = [...groups].map(([setup, rs]) => {
     const withChange = rs.filter((r) => r.change);
     const sized = rs.filter((r) => r.change && r.change.addedChars > 0);
-    const fixed = rs.filter((r) => r.fixup);
+    const reviewed = rs.filter((r) => r.review);
+    const fixLines = (r) => r.review.fixes.added + r.review.fixes.removed;
     return {
       setup,
       n: rs.length,
@@ -195,8 +229,10 @@ export function summarize(rows, prStates = new Map()) {
       medianRatio: median(sized.map((r) => r.planChars / r.change.addedChars)),
       meanCoderCost: mean(rs.map((r) => r.coderStats?.cost ?? null)),
       meanPlannerCost: mean(rs.map((r) => r.plannerRequest?.cost ?? null)),
-      withFixup: rs.filter((r) => r.fixup && r.fixup.added + r.fixup.removed > 0).length,
-      meanFixupLines: mean(fixed.map((r) => r.fixup.added + r.fixup.removed)),
+      reviewed: reviewed.length,
+      withReviewFixes: reviewed.filter((r) => fixLines(r) > 0).length,
+      meanReviewFixLines: mean(reviewed.map(fixLines)),
+      meanReviewCost: mean(reviewed.map((r) => r.review.cost)),
       merged: rs.filter((r) => prStates.get(r.branch) === "MERGED").length,
     };
   });
@@ -222,8 +258,9 @@ export function renderReport(summaries, rows) {
       `plan/change ${num(s.medianRatio, 2)}`,
       `coder ${usd(s.meanCoderCost)}`,
       `planner ${usd(s.meanPlannerCost)}`,
-      `fix-ups ${s.withFixup}/${s.n}`,
-      `fix-up lines ${num(s.meanFixupLines, 1)}`,
+      `review ${usd(s.meanReviewCost)}`,
+      `review fixed ${s.withReviewFixes}/${s.reviewed}`,
+      `fix lines ${num(s.meanReviewFixLines, 1)}`,
       `merged ${s.merged}/${s.n}`,
     ].join("  "));
   }
@@ -237,7 +274,7 @@ export function renderReport(summaries, rows) {
       `${r.planChars} chars`,
       r.change ? `+${r.change.added}/-${r.change.removed}` : "no diff",
       usd(r.coderStats?.cost ?? null),
-      r.fixup ? String(r.fixup.added + r.fixup.removed) : dash,
+      r.review ? `review ${usd(r.review.cost)} fixed ${r.review.fixes.added + r.review.fixes.removed}` : "not reviewed",
     ].join("  "));
   }
   return out.join("\n");
