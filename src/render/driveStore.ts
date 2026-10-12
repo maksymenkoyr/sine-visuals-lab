@@ -1,5 +1,5 @@
 import { NUM_BANDS } from "../audio/types.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
@@ -102,12 +102,15 @@ type Store = Record<string, Record<string, DriveEntry>>;
 
 const STORAGE_KEY = "vibe.drives";
 
+// Strict: throws on text that is not a JSON object, so the reload hook keeps
+// the cache it has (net/syncedStores.ts's parseSyncedObject).
+function readStore(): Store {
+  return (parseSyncedObject(localStorage.getItem(STORAGE_KEY)) ?? {}) as Store;
+}
+
 function loadInitial(): Store {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return readStore();
   } catch {
     return {};
   }
@@ -116,9 +119,11 @@ function loadInitial(): Store {
 const cache: Store = loadInitial();
 
 // Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+// Reads before it clears, so unreadable text leaves the cache as it was.
 registerSyncedStore(STORAGE_KEY, () => {
+  const next = readStore();
   for (const k of Object.keys(cache)) delete cache[k];
-  Object.assign(cache, loadInitial());
+  Object.assign(cache, next);
 });
 
 function persist(): void {

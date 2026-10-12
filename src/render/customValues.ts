@@ -1,4 +1,4 @@
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 
 /**
@@ -36,12 +36,15 @@ type Store = Record<string, Record<string, number>>;
 
 let cache: Store | null = null;
 
+// Strict: throws on text that is not a JSON object, so the reload hook can keep
+// the values it has (net/syncedStores.ts's parseSyncedObject).
+function readStore(): Store {
+  return (parseSyncedObject(localStorage.getItem(STORAGE_KEY)) ?? {}) as Store;
+}
+
 function loadInitial(): Store {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return readStore();
   } catch {
     // Matches sceneSettings.ts: no localStorage global at all (Vitest's node
     // env), storage disabled, or a corrupt blob — start empty either way.
@@ -54,10 +57,11 @@ function store(): Store {
   return cache;
 }
 
-// Re-seeds from localStorage once a snapshot lands — how the pop-out output
-// and a room's TV pick up a custom value (net/syncedStores.ts).
+// Re-seeds once a snapshot lands — how the pop-out output and a room's TV pick
+// up a custom value (net/syncedStores.ts). Eager rather than lazy, so unreadable
+// text throws here and the values already in `cache` are kept.
 registerSyncedStore(STORAGE_KEY, () => {
-  cache = null;
+  cache = readStore();
 });
 
 function persist(): void {

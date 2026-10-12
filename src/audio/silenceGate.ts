@@ -104,7 +104,7 @@
  * there — this is what keeps every headless screenshot undimmed by default.
  */
 
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedNumber, registerSyncedStore } from "../net/syncedStores.ts";
 
 const STORAGE_KEY_CLOSED = "vibe.silenceGateClosed";
 const STORAGE_KEY_OPEN = "vibe.silenceGateOpen";
@@ -166,10 +166,24 @@ if (openCache < closedCache + SILENCE_GATE_MIN_WIDTH) {
   closedCache = Math.max(SILENCE_GATE_MIN, openCache - SILENCE_GATE_MIN_WIDTH);
 }
 
-// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+// Strict, one mark, for the reload hook: an absent key is the fallback, but
+// text that is not a finite number keeps `current` (the mark this device
+// already has), so the other mark can still apply (net/syncedStores.ts's
+// parseSyncedNumber).
+function reloadMark(key: string, fallback: number, current: number): number {
+  try {
+    const n = parseSyncedNumber(localStorage.getItem(key));
+    return n === null ? fallback : clampMark(n, fallback);
+  } catch {
+    return current;
+  }
+}
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts),
+// one mark at a time — see reloadMark.
 registerSyncedStore(STORAGE_KEY_CLOSED, () => {
-  closedCache = loadMark(STORAGE_KEY_CLOSED, SILENCE_GATE_CLOSED_DEFAULT);
-  openCache = loadMark(STORAGE_KEY_OPEN, SILENCE_GATE_OPEN_DEFAULT);
+  closedCache = reloadMark(STORAGE_KEY_CLOSED, SILENCE_GATE_CLOSED_DEFAULT, closedCache);
+  openCache = reloadMark(STORAGE_KEY_OPEN, SILENCE_GATE_OPEN_DEFAULT, openCache);
   if (openCache < closedCache + SILENCE_GATE_MIN_WIDTH) {
     closedCache = Math.max(SILENCE_GATE_MIN, openCache - SILENCE_GATE_MIN_WIDTH);
   }
