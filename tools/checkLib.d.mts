@@ -37,6 +37,7 @@ export function licenseProblems(
   exceptions?: LicenseException[],
 ): LicenseProblem[];
 export function missingNotices(pkg: { dependencies?: Record<string, string> }, noticesText: string): string[];
+export function testFilesDone(output: string): number;
 
 export function finding(tool: string, rule: string, file: string, line: number, text: unknown, message: string): Finding;
 export function fingerprint(f: Finding): string;
