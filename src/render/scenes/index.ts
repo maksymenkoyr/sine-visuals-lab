@@ -38,6 +38,7 @@ import { sweepScene } from "./sweep/index.ts";
 import { tangleScene } from "./tangle/index.ts";
 import { chaikinScene } from "./chaikin/index.ts";
 import { alienScene } from "./alien/index.ts";
+import { portalScene } from "./portal/index.ts";
 
 // Registration order is display order within each gallery section
 // (listScenes() preserves Map insertion order; sceneStage(), below, picks the
@@ -48,6 +49,7 @@ import { alienScene } from "./alien/index.ts";
 // link when you start `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
 registerScene(skyScene);
+registerScene(portalScene);
 registerScene(fractalGridScene);
 registerScene(codeRainScene);
 registerScene(sweepScene);
@@ -104,6 +106,7 @@ const inDevelopmentIds = new Set([
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "portal",
   "fractalgrid",
   "coderain",
   "sweep",
