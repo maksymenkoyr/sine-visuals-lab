@@ -230,7 +230,9 @@ hexagon and decagon.
   (Tarantula through the fake mic). Embers' halo at one carrier in three and
   full strength flooded the screen with colour when Tarantula's drop tossed
   the bed; one in `EMBER_HALO_ONE_IN` at `EMBER_HALO_MAX` doesn't.
-- 2026-10-12 (bake test): the bake-time test failed CI on PR #487 at 629 ms
+- 2026-10-12 (bake test, #488, measured with
+  `docs/scenes/chladni/scripts/bake-units-measure.test.ts`): the bake-time
+  test failed CI on PR #487 at 629 ms
   against its fixed 600 ms limit (decagon, a slower runner) and passed on a
   rerun. It now times a fixed float-math job next to each bake and limits the
   ratio (`BAKE_UNITS_MAX` in `tests/chladniPlates.test.ts`). On an M1 Pro
@@ -831,7 +833,9 @@ hexagon and decagon.
   `weight-split.mjs` (where a grain of each weight ends up, lines or heaps;
   `POWDER_SPLIT` comes from it) and `colour-ab-shots.mjs` (each sand colour
   setting switched on 120 ms after a shot of the plate without it, so both
-  see the same sand, on a song through the fake mic or the synthetic feed).
+  see the same sand, on a song through the fake mic or the synthetic feed)
+  and `bake-units-measure.test.ts` (each plate's bake in yardstick units,
+  where `BAKE_UNITS_MAX` comes from; copy into `tests/` to run).
   For pixel checks, `tools/gpu-bench.mjs --seed N` seeds `Math.random`,
   without which this scene's dumps never repeat. The toss's share-on-lines
   readback relied on temporary in-scene hooks and wasn't kept. Captured

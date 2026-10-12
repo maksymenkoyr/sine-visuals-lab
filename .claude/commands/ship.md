@@ -23,8 +23,9 @@ Finish the change on this branch:
 
 4. **Handoffs.** If a coder agent made part of this change, run
    `node tools/workflow-stats.mjs handoff-ship` before rebasing: it records
-   what you changed after each coder for the handoff stats, and a rebase
-   first would count main's changes as yours.
+   your review of each coder's diff (its cost and what you changed after it)
+   for the handoff stats, and a rebase first would count main's changes as
+   yours.
 
 5. **Rebase.** Fetch, rebase (never merge) on `origin/main`, and check again
    for divergence right before pushing.
