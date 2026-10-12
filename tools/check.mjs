@@ -11,6 +11,11 @@
 //   npm run check -- --accept-baseline  # record every current finding as known (a person's call, never an agent's)
 //
 // The steps, in order. Each prints ✓ or ✗; any ✗ makes the exit code 1.
+// On a terminal (stderr is a TTY, as in a push) the running step shows a
+// spinner, its place in the list, its seconds so far and, for tests, the files
+// done; it then settles into its ✓ or ✗ line, and the end prints only the
+// failures' details. Anywhere else (the Stop hook, CI, a pipe) nothing prints
+// until the end, and that is the whole report.
 //   typecheck  `npm run typecheck` (strict tsc, root and server/).
 //   rules      ast-grep with the repo's own rules: one YAML file per rule in
 //              rules/, each with examples in rule-tests/ that run first. A
@@ -45,7 +50,7 @@
 // The base the secrets step diffs against: $CHECK_BASE when set (CI passes the
 // PR's base commit), otherwise the merge-base with origin/main.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -60,6 +65,7 @@ import {
   knipFindings,
   licenseProblems,
   missingNotices,
+  testFilesDone,
 } from "./checkLib.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -94,14 +100,33 @@ for (const name of only ?? []) {
   }
 }
 
-function run(cmd, cmdArgs, opts = {}) {
-  const r = spawnSync(cmd, cmdArgs, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, ...opts });
-  return { code: r.status ?? 1, out: (r.stdout ?? "") + (r.stderr ?? ""), stdout: r.stdout ?? "", error: r.error };
+/** Runs a tool without blocking the progress line. `input` goes to its stdin;
+ *  `onOut(stdoutSoFar)` fires as output arrives. */
+function run(cmd, cmdArgs, { input = "", onOut, ...opts } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, cmdArgs, { cwd: ROOT, ...opts });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (d) => {
+      stdout += d;
+      onOut?.(stdout);
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d;
+    });
+    child.stdin.on("error", () => {});
+    child.on("error", (error) => resolve({ code: 1, out: String(error.message), stdout: "", error }));
+    child.on("close", (code) => resolve({ code: code ?? 1, out: stdout + stderr, stdout, error: undefined }));
+    child.stdin.end(input);
+  });
 }
 
+/** Git answers in milliseconds, so it stays synchronous: its trimmed stdout, or null on failure. */
 function git(...gitArgs) {
-  const r = run("git", gitArgs);
-  return r.code === 0 ? r.stdout.trim() : null;
+  const r = spawnSync("git", gitArgs, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout.trim() : null;
 }
 
 function tail(text, lines = 40) {
@@ -159,15 +184,15 @@ function listFindings(findings, hint) {
 // ---- The steps -------------------------------------------------------------
 
 const steps = {
-  typecheck() {
-    const r = run("npm", ["run", "-s", "typecheck"]);
+  async typecheck() {
+    const r = await run("npm", ["run", "-s", "typecheck"]);
     return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out) };
   },
 
-  rules() {
-    const t = run(BIN("ast-grep"), ["test", "--skip-snapshot-tests"]);
+  async rules() {
+    const t = await run(BIN("ast-grep"), ["test", "--skip-snapshot-tests"]);
     if (t.code !== 0) return { ok: false, detail: "A rule no longer matches its own examples in rule-tests/:\n" + tail(t.out) };
-    const r = run(BIN("ast-grep"), ["scan", "--json=compact"]);
+    const r = await run(BIN("ast-grep"), ["scan", "--json=compact"]);
     let matches;
     try {
       matches = JSON.parse(r.stdout);
@@ -180,8 +205,8 @@ const steps = {
     };
   },
 
-  lint() {
-    const r = run(BIN("biome"), ["lint", "--reporter=json", "--max-diagnostics=none"]);
+  async lint() {
+    const r = await run(BIN("biome"), ["lint", "--reporter=json", "--max-diagnostics=none"]);
     let report;
     try {
       report = JSON.parse(r.stdout);
@@ -194,8 +219,8 @@ const steps = {
     };
   },
 
-  knip() {
-    const r = run(BIN("knip"), ["--no-progress", "--reporter", "json", "--no-exit-code"]);
+  async knip() {
+    const r = await run(BIN("knip"), ["--no-progress", "--reporter", "json", "--no-exit-code"]);
     let report;
     try {
       report = JSON.parse(r.stdout);
@@ -208,14 +233,14 @@ const steps = {
     };
   },
 
-  dupes() {
+  async dupes() {
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
     if (!pkg.scripts?.dupes) return { skipped: "no `dupes` script yet" };
-    const r = run("npm", ["run", "-s", "dupes"]);
+    const r = await run("npm", ["run", "-s", "dupes"]);
     return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out) };
   },
 
-  licenses() {
+  async licenses() {
     const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
     const notices = readFileSync(join(ROOT, "THIRD-PARTY-NOTICES.md"), "utf8");
@@ -236,7 +261,7 @@ const steps = {
     if (!baseRef) return { skipped: "no base to diff against (no origin/main and no CHECK_BASE)" };
     const bin = await gitleaksBinary();
     if (typeof bin !== "string") return bin;
-    const diff = run("git", ["diff", "-U0", "--no-color", "--no-ext-diff", baseRef, "--", ".", ":(exclude)package-lock.json"]).stdout;
+    const diff = (await run("git", ["diff", "-U0", "--no-color", "--no-ext-diff", baseRef, "--", ".", ":(exclude)package-lock.json"])).stdout;
     const added = addedLines(diff);
     for (const file of (git("ls-files", "--others", "--exclude-standard") ?? "").split("\n").filter(Boolean)) {
       if (file === "package-lock.json") continue;
@@ -252,7 +277,7 @@ const steps = {
     }
     if (!added.length) return { ok: true };
     const report = join(tmpdir(), `check-gitleaks-${process.pid}.json`);
-    const r = run(bin, ["stdin", "--no-banner", "--redact", "--exit-code", "0", "--report-format", "json", "--report-path", report], {
+    const r = await run(bin, ["stdin", "--no-banner", "--redact", "--exit-code", "0", "--report-format", "json", "--report-path", report], {
       input: added.map((a) => a.text).join("\n"),
     });
     let leaks;
@@ -272,14 +297,19 @@ const steps = {
     return { ok: false, detail: lines.join("\n") };
   },
 
-  tests() {
+  async tests(note) {
     if (changedMode) {
       const files = changedFiles(base()).filter((f) => /\.(ts|mts|mjs|js)$/.test(f) && existsSync(join(ROOT, f)));
       if (!files.length) return { skipped: "no code changed" };
-      const r = run(BIN("vitest"), ["related", "--run", "--passWithNoTests", ...files]);
+      const r = await run(BIN("vitest"), ["related", "--run", "--passWithNoTests", ...files], {
+        onOut: (out) => note(`${testFilesDone(out)} test files`),
+      });
       return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out, 60) };
     }
-    const r = run(BIN("vitest"), ["run"]);
+    // The files vitest has finished so far, out of the files it will run.
+    const listed = await run(BIN("vitest"), ["list", "--filesOnly"]);
+    const total = listed.code === 0 ? listed.stdout.split("\n").filter((l) => l.trim()).length : 0;
+    const r = await run(BIN("vitest"), ["run"], { onOut: (out) => note(`${testFilesDone(out)}${total ? `/${total}` : ""} test files`) });
     return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out, 60) };
   },
 };
@@ -308,7 +338,7 @@ async function gitleaksBinary() {
   mkdirSync(dir, { recursive: true });
   const tgz = join(dir, "gitleaks.tar.gz");
   writeFileSync(tgz, buf);
-  const r = run("tar", ["-xzf", tgz, "-C", dir, "gitleaks"]);
+  const r = await run("tar", ["-xzf", tgz, "-C", dir, "gitleaks"]);
   rmSync(tgz, { force: true });
   if (r.code !== 0) return fail(`couldn't unpack gitleaks: ${tail(r.out, 5)}`);
   chmodSync(bin, 0o755);
@@ -324,12 +354,41 @@ const ranBaselined = new Set();
 let failed = false;
 const report = [];
 
-for (const name of wanted) {
+// The live line (the header says when it shows): one line for the running step,
+// redrawn every tick, then replaced by that step's result.
+const live = Boolean(process.stderr.isTTY) && !process.env.CI;
+const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+let ticker = null;
+/** Starts a step's live line; returns the function a step calls to add a note to it. */
+function beginStep(place, name) {
+  if (!live) return () => {};
   const t0 = Date.now();
-  const res = await steps[name]();
+  let note = "";
+  const draw = () => {
+    const frame = FRAMES[Math.floor((Date.now() - t0) / 100) % FRAMES.length];
+    process.stderr.write(`\r\x1b[K${frame} [${place}/${wanted.length}] ${name} ${Math.floor((Date.now() - t0) / 1000)}s${note ? ` · ${note}` : ""}`);
+  };
+  draw();
+  ticker = setInterval(draw, 100);
+  return (text) => {
+    note = text;
+  };
+}
+/** A step's result: on a terminal the line replaces the live one at once and only a failure's detail waits for the end; elsewhere the whole of it waits. */
+function settle(head, body) {
+  if (live) {
+    clearInterval(ticker);
+    process.stderr.write(`\r\x1b[K${head}\n`);
+    if (body) report.push(`${head}\n${body}`);
+  } else report.push(body ? `${head}\n${body}` : head);
+}
+
+for (const [i, name] of wanted.entries()) {
+  const t0 = Date.now();
+  const res = await steps[name](beginStep(i + 1, name));
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   if (res.skipped) {
-    report.push(`- ${name}: skipped, ${res.skipped}`);
+    settle(`- ${name}: skipped, ${res.skipped}`);
     continue;
   }
   if (res.findings) {
@@ -339,14 +398,14 @@ for (const name of wanted) {
     const { fresh } = accept ? { fresh: [] } : compareToBaseline(res.findings, baseline.filter((k) => k.startsWith(`${name} | `)));
     if (fresh.length) {
       failed = true;
-      report.push(`✗ ${name} (${secs}s): ${fresh.length} new finding${fresh.length === 1 ? "" : "s"}\n${listFindings(fresh, res.hint)}`);
-    } else report.push(`✓ ${name} (${secs}s)`);
+      settle(`✗ ${name} (${secs}s): ${fresh.length} new finding${fresh.length === 1 ? "" : "s"}`, listFindings(fresh, res.hint));
+    } else settle(`✓ ${name} (${secs}s)`);
     continue;
   }
-  if (res.ok) report.push(`✓ ${name} (${secs}s)`);
+  if (res.ok) settle(`✓ ${name} (${secs}s)`);
   else {
     failed = true;
-    report.push(`✗ ${name} (${secs}s)\n${res.detail}`);
+    settle(`✗ ${name} (${secs}s)`, res.detail);
   }
 }
 

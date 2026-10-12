@@ -183,6 +183,15 @@ export function knipFindings(report) {
   return out;
 }
 
+// ---- Tests: progress ------------------------------------------------------
+
+/** How many test files vitest's piped output says it has finished: one
+ *  `✓ tests/x.test.ts (12 tests) 30ms` style line each, passed or failed. */
+export function testFilesDone(output) {
+  const plain = output.replace(/\x1b\[[0-9;]*m/g, "");
+  return (plain.match(/^\s*[✓❯×↓]\s+\S+\.test\.\w+/gm) ?? []).length;
+}
+
 // ---- Secrets: the lines a change adds ------------------------------------
 
 /** The lines a `git diff -U0` adds, with the file and new line number of

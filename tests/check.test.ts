@@ -10,6 +10,7 @@ import {
   knipFindings,
   licenseProblems,
   missingNotices,
+  testFilesDone,
 } from "../tools/checkLib.mjs";
 
 // The pure half of `npm run check` (tools/check.mjs header). The tools
@@ -155,5 +156,20 @@ describe("addedLines", () => {
       { file: "src/a.ts", line: 5, text: "const b = 2;" },
       { file: "src/a.ts", line: 12, text: "new" },
     ]);
+  });
+});
+
+describe("testFilesDone", () => {
+  it("counts finished test files in vitest's piped output, passed or failed, colour or not", () => {
+    const out = [
+      " RUN  v3",
+      "",
+      " ✓ tests/a.test.ts (3 tests) 4ms",
+      " ❯ tests/b.test.ts (2 tests | 1 failed) 9ms",
+      "\u001b[32m ✓\u001b[39m tests/c.test.ts (1 test) 2ms",
+      " Test Files  3",
+    ].join("\n");
+    expect(testFilesDone(out)).toBe(3);
+    expect(testFilesDone(" RUN  v3\n")).toBe(0);
   });
 });
