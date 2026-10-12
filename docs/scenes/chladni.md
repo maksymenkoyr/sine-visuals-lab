@@ -230,6 +230,14 @@ hexagon and decagon.
   (Tarantula through the fake mic). Embers' halo at one carrier in three and
   full strength flooded the screen with colour when Tarantula's drop tossed
   the bed; one in `EMBER_HALO_ONE_IN` at `EMBER_HALO_MAX` doesn't.
+- 2026-10-12 (bake test): the bake-time test failed CI on PR #487 at 629 ms
+  against its fixed 600 ms limit (decagon, a slower runner) and passed on a
+  rerun. It now times a fixed float-math job next to each bake and limits the
+  ratio (`BAKE_UNITS_MAX` in `tests/chladniPlates.test.ts`). On an M1 Pro
+  after warm-up, idle and with four cores busy alike: decagon 10–11 units,
+  hexagon 8–9.5, round, triangle and clamped 1.5–4; the first bake of a run
+  reads higher while V8 warms up. The limit keeps the old one's margin over
+  the decagon, about 2.5×.
 
 ## Decisions and pivots
 

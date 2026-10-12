@@ -36,6 +36,25 @@ import { modeFrequencyHz, FUNDAMENTAL_HZ_SMALL } from "../src/render/scenes/chla
 const BAKED = [ROUND, HEXAGON, TRIANGLE, DECAGON, CLAMPED];
 const MEMBRANES = [HEXAGON, TRIANGLE, DECAGON];
 
+/** The most a bake may take, in yardstickMs() units. */
+const BAKE_UNITS_MAX = 25;
+/** Timings per shape before a bake over BAKE_UNITS_MAX fails. */
+const BAKE_TRIES = 3;
+
+/**
+ * Milliseconds for a fixed job of the bake's kind, transcendental math
+ * written into a float array, on this machine right now.
+ */
+function yardstickMs(): number {
+  const out = new Float32Array(1 << 20);
+  const t0 = performance.now();
+  for (let i = 0; i < out.length; i++) {
+    const x = i * 1e-4;
+    out[i] = Math.sin(x) * Math.exp(-x * 1e-3) + Math.cos(3 * x);
+  }
+  return performance.now() - t0;
+}
+
 /** A seeded uniform stream, so a failure reproduces. */
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -277,13 +296,24 @@ describe("baked atlases", () => {
     expect(shifts[Math.floor(0.99 * (shifts.length - 1))]).toBeLessThan(0.35);
   });
 
-  it("baking a shape stays short", () => {
+  it("baking a shape stays short next to a fixed job on the same machine", () => {
+    // A bake is measured in units of yardstickMs(), timed just before it, so
+    // a slow CI box slows both and the limit holds on any machine. A busy
+    // moment can still hit one timing alone, so a shape over the limit gets
+    // up to BAKE_TRIES tries and keeps its best. The scene's own numbers are
+    // in the record.
     for (const shape of BAKED) {
-      const t0 = performance.now();
-      bakePlate(shape);
-      const ms = performance.now() - t0;
-      // Generous for a loaded CI box; the scene's own number is in the record.
-      expect(ms).toBeLessThan(600);
+      let best = Infinity;
+      let seen = "";
+      for (let tries = 0; tries < BAKE_TRIES && best >= BAKE_UNITS_MAX; tries++) {
+        const unit = yardstickMs();
+        const t0 = performance.now();
+        bakePlate(shape);
+        const ms = performance.now() - t0;
+        best = Math.min(best, ms / unit);
+        seen += ` ${ms.toFixed(0)} ms / ${unit.toFixed(1)} ms;`;
+      }
+      expect(best, `${PLATE_SHAPES[shape]}:${seen}`).toBeLessThan(BAKE_UNITS_MAX);
     }
   });
 
