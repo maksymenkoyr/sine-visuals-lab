@@ -33,15 +33,11 @@ A browser-based, real-time WebGL2 audio visualizer.
   `low dif`) and, when a person is needed at some
   point or likely (over 30%), `human`. `docs/issue-labels.md` has the rules;
   a hook refuses `gh issue create` without a difficulty label.
-- When a change is settled (I asked for it, straight away or after we
-  discussed it) and you're sure its plan would be half the change or less,
-  don't write the change: put the plan in a `haiku-coder` agent's prompt and
-  let it write it. Clear cases: new files or modules with their tests, one
-  edit repeated across many places. This holds for anything written to
-  files: code, tests, docs, bulk edits. The agent reads this file, so the
-  plan names each file and edit and the checks to run. Read its diff against
-  the plan before `/ship`. If you're unsure, or the result has to be judged
-  as you go (tuning by eye), write it yourself.
+- Hand a change to a `haiku-coder` agent when I ask, or unasked when it's
+  plainly large and mechanical (new modules with tests, one edit across many
+  files). If it might fit but isn't obvious, suggest it; don't weigh it.
+  Its prompt holds the plan: each file, edit and check. Read its diff before
+  `/ship`.
 - Finish every change with `/ship`, and close a session with `/wrap`.
 
 Before touching one of these, read what is listed:
