@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Resolve the merge conflicts of a rebase or merge that stopped, spending as
 # few tokens as possible. Run it by hand (`! npm run fix-conflicts` inside a
-# session, or `fix-conflicts <PR number>` in a terminal, the function in
-# ~/.zshrc that also continues the rebase and pushes) after
+# session, or `fix-conflicts <PR number>` in a terminal, which runs
+# tools/fix-conflicts-pr.sh to also continue the rebase and push) after
 # `git rebase origin/main` reports a conflict.
 #
 # Two passes:
@@ -17,8 +17,8 @@
 #      line range of each remaining conflict so it reads those and no more.
 #
 # What it does and does not do: it edits the conflicted files and `git add`s
-# them. It never runs `git rebase --continue`, commits or pushes (the
-# `fix-conflicts <PR number>` function does, after this script says nothing
+# them. It never runs `git rebase --continue`, commits or pushes
+# (tools/fix-conflicts-pr.sh does, after this script says nothing
 # is left), and it does not run the typecheck: the pre-push hook runs
 # `npm run check`. When both sides changed the same logic in different ways it
 # stops and says so, leaving the file untouched, so you pick a stronger model
