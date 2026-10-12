@@ -14,11 +14,11 @@ import { createLookIcon } from "./lookIcon.ts";
  * app.ts is the one place that wires these callbacks to sceneLooks.ts.
  *
  * "Save look" saves in one click: app.ts names the look (lookNames.ts makes
- * up a silly one) and the card says what it was called. A double-click on a
- * look's name renames it in place; the click handler skips the double-click's
- * second click, which would otherwise apply the look again and overwrite its
- * Undo snapshot with the look itself. Each row starts with the look's
- * icon, tinted from its name (lookIcon.ts).
+ * up a silly one) and the new row opens straight in rename, the made-up name
+ * filled in and selected — type over it, or press Enter or leave the field
+ * (or clear it) to keep the made-up name. Pressing any look's name renames it
+ * the same way; pressing the look's icon (tinted from its name, lookIcon.ts)
+ * applies it.
  *
  * Renaming and "Paste a look code" use an inline <input> rather than
  * prompt(): this panel runs over a fullscreen canvas on a phone or TV, and a
@@ -57,6 +57,7 @@ const nameBtnStyle = `
   font: 300 13.5px/1.3 ${FONT_LABEL}; color: rgba(255,255,255,0.85); padding: 3px 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 `;
+const applyBtnStyle = `display: flex; background: none; border: none; padding: 2px; cursor: pointer; flex-shrink: 0;`;
 const iconBtnStyle = `
   font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.5); background: none; border: none;
   padding: 3px 5px; cursor: pointer; flex-shrink: 0;
@@ -138,8 +139,9 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
   saveRow.style.cssText = actionRowStyle;
   const saveChip = createChipButton("Save look", "Save this scene's current tuning as a new look", () => {
     const name = deps.onSaveLook(deps.currentSceneId());
-    refresh();
-    showFeedback(`Saved as "${name}". Double-click a name to rename it.`);
+    feedback.style.display = "none";
+    renderList(name);
+    refreshUndo();
   });
   saveChip.style.cssText = `${chipBtnStyle} flex: 1; text-align: center;`;
   saveRow.appendChild(saveChip);
@@ -161,8 +163,9 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
 
   card.body.append(list, spacer(), saveRow, ...pasteAction.el, feedback);
 
-  /** Swaps a look's name button for an input holding its name. Enter or
-   *  leaving the field keeps the new name, Escape keeps the old one. */
+  /** Swaps a look's name button for an input holding its name, selected.
+   *  Enter or leaving the field keeps the new name; Escape, or a blank
+   *  field, keeps the old one. */
   function startRename(sceneId: string, look: SceneLook, nameBtn: HTMLButtonElement): void {
     const input = document.createElement("input");
     input.type = "text";
@@ -193,7 +196,8 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
     input.select();
   }
 
-  function renderList(): void {
+  /** `renameName` is a look to open in rename as soon as it's drawn. */
+  function renderList(renameName?: string): void {
     const sceneId = deps.currentSceneId();
     const looks = deps.listLooks(sceneId);
     list.innerHTML = "";
@@ -208,16 +212,20 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
       const row = document.createElement("div");
       row.style.cssText = rowStyle;
 
-      const nameBtn = document.createElement("button");
-      nameBtn.textContent = look.name;
-      nameBtn.title = `Apply "${look.name}" (double-click to rename)`;
-      nameBtn.style.cssText = nameBtnStyle;
-      nameBtn.addEventListener("click", (e) => {
-        if (e.detail > 1) return;
+      const iconBtn = document.createElement("button");
+      iconBtn.title = `Apply "${look.name}"`;
+      iconBtn.style.cssText = applyBtnStyle;
+      iconBtn.appendChild(createLookIcon(look.name));
+      iconBtn.addEventListener("click", () => {
         deps.onApplyLook(look);
         refresh();
       });
-      nameBtn.addEventListener("dblclick", () => startRename(sceneId, look, nameBtn));
+
+      const nameBtn = document.createElement("button");
+      nameBtn.textContent = look.name;
+      nameBtn.title = `Rename "${look.name}"`;
+      nameBtn.style.cssText = nameBtnStyle;
+      nameBtn.addEventListener("click", () => startRename(sceneId, look, nameBtn));
 
       const copyBtn = copyButton("⧉", "Copy a share link for this look", "a link", look, deps.buildShareLink);
       const codeBtn = copyButton("{}", "Copy only the code for this look", "the code", look, deps.buildShareCode);
@@ -231,8 +239,9 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
         refresh();
       });
 
-      row.append(createLookIcon(look.name), nameBtn, copyBtn, codeBtn, deleteBtn);
+      row.append(iconBtn, nameBtn, copyBtn, codeBtn, deleteBtn);
       list.appendChild(row);
+      if (look.name === renameName) startRename(sceneId, look, nameBtn);
     }
   }
 
@@ -267,10 +276,13 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
     return btn;
   }
 
-  function refresh(): void {
-    renderList();
+  function refreshUndo(): void {
     const canUndo = deps.hasUndo(deps.currentSceneId());
     undoChip.style.visibility = canUndo ? "visible" : "hidden";
+  }
+  function refresh(): void {
+    renderList();
+    refreshUndo();
   }
   refresh();
 

@@ -17,8 +17,8 @@
  *
  * No meme is quoted whole: the forms are internet grammar, not anyone's
  * joke. A daft name is easier to tell apart in a list than a number, and the
- * visitor can rename it with a double-click whenever a real name comes to
- * mind.
+ * visitor can rename it by pressing the name whenever a real name comes to
+ * mind (a new look opens straight in rename, with this name selected).
  *
  * Pure — no store, no DOM. The caller passes the names this scene already
  * has, and funnyLookName returns one that isn't among them: it tries random
