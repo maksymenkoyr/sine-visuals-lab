@@ -159,7 +159,7 @@ describe("custom values (vibe.customValues)", () => {
   // Break: the old hook sets the cache to null, so the next read reloads lazily,
   // parses "nope", gets {} and returns undefined.
   it("keeps the values on unreadable text, and drops them when the snapshot lacks the key", async () => {
-    const { fake, synced } = await fresh({ "vibe.customValues": JSON.stringify({ "scene-a": { amp: 1.5 } }) });
+    const { fake, synced } = await fresh({ "vibe.customValues": JSON.stringify({ "scene-a": { amp: { v: 1.5 } } }) });
     const { getCustomValue } = await import("../src/render/customValues.ts");
     expect(getCustomValue("scene-a", "amp")).toBe(1.5);
 
