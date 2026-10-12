@@ -223,7 +223,7 @@ export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
       gl.activeTexture(gl.TEXTURE0);
       if (bloomPasses >= 1) {
         blurProg.use();
-        gl.uniform1i(gl.getUniformLocation(blurProg.program, "uTex"), 0);
+        blurProg.setI("uTex", 0);
         blurLevel(0, sharpTex);
         if (bloomPasses >= 2) blurLevel(1, levelTex[1]);
       }
@@ -238,9 +238,9 @@ export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
       gl.bindTexture(gl.TEXTURE_2D, levelTex[1]);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, levelTex[3]);
-      gl.uniform1i(gl.getUniformLocation(compProg.program, "uSharpTex"), 0);
-      gl.uniform1i(gl.getUniformLocation(compProg.program, "uGlowATex"), 1);
-      gl.uniform1i(gl.getUniformLocation(compProg.program, "uGlowBTex"), 2);
+      compProg.setI("uSharpTex", 0);
+      compProg.setI("uGlowATex", 1);
+      compProg.setI("uGlowBTex", 2);
       compProg.setF("uGlowAGain", bloomPasses >= 1 ? GLOW_A_GAIN : 0);
       compProg.setF("uGlowBGain", bloomPasses >= 2 ? GLOW_B_GAIN : 0);
       drawFullscreenQuad(gl, quadVao);

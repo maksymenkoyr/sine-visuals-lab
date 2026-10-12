@@ -310,6 +310,8 @@ function createTangleScene(): Scene {
   /** The fine octave's envelope, 0..1 -- see CRINKLE_TAU. */
   let crinkle = 1;
 
+  /** Locations for the uniform calls GLProgram has no setter for (uRot's
+   *  matrix, uGround's vec3 from a const tuple). Samplers go through setI. */
   function loc(gl: WebGL2RenderingContext, prog: GLProgram, name: string): WebGLUniformLocation | null {
     let byName = locs.get(prog);
     if (!byName) {
@@ -327,8 +329,7 @@ function createTangleScene(): Scene {
   function sampler(gl: WebGL2RenderingContext, prog: GLProgram, name: string, unit: number, tex: WebGLTexture | null): void {
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    const l = loc(gl, prog, name);
-    if (l) gl.uniform1i(l, unit);
+    prog.setI(name, unit);
   }
 
   function makeTexture(

@@ -194,6 +194,7 @@ and `ours-chaikin/cells-ours.json`):
   numbers and kept off the Master Scale (`masterScale: false`), or the
   waves would tear at the angle's seam and stop repeating on the bar.
 - 2026-10-08 — Births, Relaunch and Drop sync became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the birth kick, the relaunch amount and the snap amount by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

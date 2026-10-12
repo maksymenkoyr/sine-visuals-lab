@@ -936,7 +936,6 @@ function createPhysarumScene(): Scene {
   const trailTex: (WebGLTexture | null)[] = [null, null];
   const trailFbo: (WebGLFramebuffer | null)[] = [null, null];
 
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let agentRead = 0;
   let trailReadIdx = 0;
   let agentSide = 1;
@@ -952,20 +951,6 @@ function createPhysarumScene(): Scene {
   let seedEpoch = 0;
   const bandsBuf = new Float32Array(NUM_BANDS);
   const attractorBuf = new Float32Array(GROUP_COUNT * 2);
-
-  function samplerLoc(
-    gl: WebGL2RenderingContext,
-    prog: GLProgram,
-    key: string,
-    name: string,
-  ): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeAgentTexture(gl: WebGL2RenderingContext, side: number, data: Uint8Array): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -1036,7 +1021,6 @@ function createPhysarumScene(): Scene {
       simProg = createProgram(gl, SIM_FRAG);
       depositProg = createProgram(gl, DEPOSIT_FRAG, DEPOSIT_VERT);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all — every agent is addressed by
       // gl_VertexID — so this draws from an empty VAO rather than the
@@ -1110,7 +1094,7 @@ function createPhysarumScene(): Scene {
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-      gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uTrailIn", "uTrailIn"), 0);
+      diffuseProg.setI("uTrailIn", 0);
       drawFullscreenQuad(gl, quadVao);
 
       // 2. Agent sim: agentRead -> agentWrite, sensing the trail diffuse
@@ -1130,9 +1114,9 @@ function createPhysarumScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailWrite]);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentPos", "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentDir", "uAgentDir"), 1);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uTrail", "uTrail"), 2);
+      simProg.setI("uAgentPos", 0);
+      simProg.setI("uAgentDir", 1);
+      simProg.setI("uTrail", 2);
       drawFullscreenQuad(gl, quadVao);
       agentRead = agentWrite;
 
@@ -1151,8 +1135,8 @@ function createPhysarumScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, agentPosTex[agentRead]);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
-      gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentPos", "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentDir", "uAgentDir"), 1);
+      depositProg.setI("uAgentPos", 0);
+      depositProg.setI("uAgentDir", 1);
       gl.bindVertexArray(depositVao);
       gl.drawArrays(gl.POINTS, 0, agentCount);
       gl.bindVertexArray(null);
@@ -1167,7 +1151,7 @@ function createPhysarumScene(): Scene {
       compositeProg.setF("uTrailTexel", 1 / trailSideCur);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uTrail", "uTrail"), 0);
+      compositeProg.setI("uTrail", 0);
       drawFullscreenQuad(gl, quadVao);
 
       // 5. The gallery renders every scene into one shared context each
@@ -1200,7 +1184,6 @@ function createPhysarumScene(): Scene {
         agentDirTex[i] = null;
       }
       freeTrailTargets(gl);
-      samplerLocs.clear();
       diffuseProg = null;
       simProg = null;
       depositProg = null;

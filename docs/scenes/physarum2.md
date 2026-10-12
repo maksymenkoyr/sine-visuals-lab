@@ -1016,6 +1016,7 @@ configs are used.
   stepped with `stepStandoutHit`, `pendingSeed` holds the firing's size, and
   the sim's reseed draw tests `uSeed * uSeedFresh` with `uSeedFresh` set to
   that size. The user, on why Dose isn't flat-only: it can take loudness.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

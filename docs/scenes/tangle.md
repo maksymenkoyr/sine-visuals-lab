@@ -185,3 +185,6 @@ the reference's sparse still state while the music plays, by design.
 - `5ba77502` — first version (WIP).
 - #371 — draft PR: two-scale knot flares, the crinkle envelope, tests and
   this record.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI` instead of the
+  file's own location cache; that cache stays only for `uRot` and `uGround`.
+  Nothing on screen changes. (#349)
