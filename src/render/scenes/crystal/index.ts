@@ -1,4 +1,4 @@
-import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../../gl.ts";
 import { PALETTE_GLSL } from "../../palette.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
@@ -285,6 +285,7 @@ function createCrystalSceneImpl(): Scene {
   let l1BFbo: WebGLFramebuffer | null = null;
   let l1W = 0;
   let l1H = 0;
+  const targets = createTargetList();
 
   /** Cached sampler locations — GLProgram has no integer setter (samplers
    *  are the one uniform kind that needs one), same pattern as powder.ts /
@@ -298,31 +299,8 @@ function createCrystalSceneImpl(): Scene {
     return l;
   }
 
-  function makeTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-  }
-
-  function attachColour(gl: WebGL2RenderingContext, tex: WebGLTexture | null): WebGLFramebuffer | null {
-    const f = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`crystal: framebuffer incomplete (0x${status.toString(16)})`);
-    }
-    return f;
-  }
-
   function freeTargets(gl: WebGL2RenderingContext): void {
-    for (const fbo of [sharpFbo, l0AFbo, l0BFbo, l1AFbo, l1BFbo]) if (fbo) gl.deleteFramebuffer(fbo);
-    for (const tex of [sharpTex, l0ATex, l0BTex, l1ATex, l1BTex]) if (tex) gl.deleteTexture(tex);
+    targets.freeAll(gl);
     sharpFbo = l0AFbo = l0BFbo = l1AFbo = l1BFbo = null;
     sharpTex = l0ATex = l0BTex = l1ATex = l1BTex = null;
     sharpW = sharpH = l0W = l0H = l1W = l1H = 0;
@@ -342,20 +320,15 @@ function createCrystalSceneImpl(): Scene {
     dbH = h;
     sharpW = Math.max(1, Math.round(w * MARCH_SCALE));
     sharpH = Math.max(1, Math.round(h * MARCH_SCALE));
-    sharpTex = makeTexture(gl, sharpW, sharpH);
-    sharpFbo = attachColour(gl, sharpTex);
+    ({ tex: sharpTex, fbo: sharpFbo } = targets.add(gl, sharpW, sharpH, { label: "crystal" }));
     l0W = Math.max(1, w >> 2);
     l0H = Math.max(1, h >> 2);
-    l0ATex = makeTexture(gl, l0W, l0H);
-    l0BTex = makeTexture(gl, l0W, l0H);
-    l0AFbo = attachColour(gl, l0ATex);
-    l0BFbo = attachColour(gl, l0BTex);
+    ({ tex: l0ATex, fbo: l0AFbo } = targets.add(gl, l0W, l0H, { label: "crystal" }));
+    ({ tex: l0BTex, fbo: l0BFbo } = targets.add(gl, l0W, l0H, { label: "crystal" }));
     l1W = Math.max(1, w >> 3);
     l1H = Math.max(1, h >> 3);
-    l1ATex = makeTexture(gl, l1W, l1H);
-    l1BTex = makeTexture(gl, l1W, l1H);
-    l1AFbo = attachColour(gl, l1ATex);
-    l1BFbo = attachColour(gl, l1BTex);
+    ({ tex: l1ATex, fbo: l1AFbo } = targets.add(gl, l1W, l1H, { label: "crystal" }));
+    ({ tex: l1BTex, fbo: l1BFbo } = targets.add(gl, l1W, l1H, { label: "crystal" }));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
