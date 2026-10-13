@@ -100,7 +100,7 @@ const SETTINGS: SceneSetting[] = [
     key: "dance",
     label: "Dance",
     description:
-      "The cast dances a move learned from this signal: it finds the beat, folds one bar of the signal over itself and " +
+      "The cast dances a move learned from this input node: it finds the beat, folds one bar of it over itself and " +
       "dances that loop. Off: the groove's own choreography on the BPM",
     group: "Motion",
     type: "boolean",
@@ -116,7 +116,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "energy",
     label: "Energy",
-    description: "Where energy settles with no signal. Energy is how fast they go through the move; 0 = they end up standing still",
+    description: "Where energy settles when the input node is quiet. Energy is how fast they go through the move; 0 = they end up standing still",
     group: "Motion",
     family: "Energy",
     min: 0,
@@ -127,7 +127,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "energyBoost",
     label: "Energy boost",
-    description: "Lifts energy while the signal is high",
+    description: "Lifts energy while the input node is high",
     group: "Motion",
     family: "Energy",
     min: 0,
@@ -188,9 +188,9 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "clock",
-    label: "Clock on signal",
+    label: "Clock on input node",
     description:
-      "On: the scene's clock (drops, cuts, lights, the cast's script) runs only while the wired signal is above the line " +
+      "On: the scene's clock (drops, cuts, lights, the cast's script) runs only while the wired input node is above the line " +
       "under its graph, and stops in silence. Off: it always runs on the BPM",
     group: "Motion",
     type: "boolean",
@@ -203,7 +203,7 @@ const SETTINGS: SceneSetting[] = [
       threshold: {
         default: CLOCK_RUN_MARK,
         label: "Runs above",
-        hint: "The clock runs while the signal is above this line and stops below it",
+        hint: "The clock runs while the input node is above this line and stops below it",
       },
     },
   },
@@ -339,7 +339,7 @@ function createToonRaveScene(): Scene {
   const dance = createDance();
   const energy = createEnergy();
   const playhead = createPlayhead();
-  let clockRunning = true; // Clock on signal's state, with its hysteresis
+  let clockRunning = true; // Clock on input node's state, with its hysteresis
   let lastTime: number | null = null;
   let lastC = 0;
   let lastBars = 0; // dev peek only

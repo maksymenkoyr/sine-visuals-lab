@@ -156,7 +156,7 @@ Darker means more important.
       someone else made · `src/ui/looksCard.ts`, `src/render/sceneLooks.ts`
     - ●●○ **Palette card** — the colour scheme, from `PALETTES`. The
       cheapest change that makes a scene feel new · `src/render/palette.ts`
-  - ●○○ **Wires** — a signal's jack wired to a reactive setting's port, so
+  - ●○○ **Wires** — an input node's jack wired to an animation node's port, so
     the setting follows the sound. Words in [Vocabulary](vocabulary.md) ·
     `src/render/drives.ts`, `src/ui/cableLayer.ts`,
     `src/ui/driveSources.ts`

@@ -727,7 +727,7 @@ const SETTINGS: SceneSetting[] = [
     key: "floaterDensity",
     label: "Floaters",
     description:
-      "How many floaters each stamp lays down — a light touch at the low end, a dense cloud of them at the high end. The signal scales it beat by beat, and 0 stops the brush stamping entirely",
+      "How many floaters each stamp lays down — a light touch at the low end, a dense cloud of them at the high end. The input node scales it beat by beat, and 0 stops the brush stamping entirely",
     group: "Motion",
     min: 0,
     max: 1,
@@ -882,7 +882,7 @@ const SETTINGS: SceneSetting[] = [
     key: "sprites",
     label: "Blue-field sprites",
     description:
-      "Tiny bright specks darting along short curved paths all over the sky, the way they do when you stare at a bright blue sky — none at 0, a busy field at 1. They thin out right at the centre of view, and the signal makes them surge forward",
+      "Tiny bright specks darting along short curved paths all over the sky, the way they do when you stare at a bright blue sky — none at 0, a busy field at 1. They thin out right at the centre of view, and the input node makes them surge forward",
     group: "Look",
     min: 0,
     max: 1,

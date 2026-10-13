@@ -945,7 +945,7 @@ const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em;
 // under a control someone has to find).
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
-  "Drag a knob up to boost a band, down to cut it. Pin a reactive setting to plug signals into it.";
+  "Drag a knob up to boost a band, down to cut it. Pin an animation node to plug input nodes into it.";
 
 // The Bands card's Levels row: a small caption, then a 3-column grid of
 // BAND_LEVEL_CHOICES's own compact meters (below) — one row rather than
@@ -971,7 +971,7 @@ const RAW_CHIP_TITLE =
   "Raw: the spectrum before the adaptive envelope and Bands gain, and every meter reading below its pre-smoothing value. Drag Smoothing (Input card) to Off instead to close that second gap for good — at Off, every eased reading already lands on exactly what this shows.";
 // The column head's HEAT chip (heat.ts's lens) — see its build site below.
 const HEAT_CHIP_TITLE =
-  "Heat lens: every wired setting and signal glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
+  "Heat lens: every wired animation node and input node glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
 
 // ---- The patch bay (a drive row's port/summary/sparkline, and its pinned
 // patch panel) — see this file's own header doc-comment paragraph. Every
@@ -3159,7 +3159,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = opt.label;
       btn.disabled = disabled;
-      setHint(btn, disabled ? "Plug in a second signal to gate one against the other." : opt.hint);
+      setHint(btn, disabled ? "Plug in a second input node to gate one against the other." : opt.hint);
       btn.setAttribute("aria-pressed", String(patch.mix === opt.mix));
       btn.style.cssText = disabled ? driveSegBtnDisabledStyle : patch.mix === opt.mix ? driveSegBtnLitStyle : driveSegBtnStyle;
       if (!disabled) {
@@ -4126,8 +4126,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       empty.style.cssText = driveEmptySrcStyle;
       const builtIn = builtInText(spec);
       empty.textContent = builtIn
-        ? `Built-in: ${builtIn}. Plug in a signal to replace it.`
-        : "Built-in reaction. Plug in a signal to replace it.";
+        ? `Built-in: ${builtIn}. Plug in an input node to replace it.`
+        : "Built-in reaction. Plug in an input node to replace it.";
       const unplug = document.createElement("button");
       unplug.type = "button";
       unplug.style.cssText = driveResetLinkStyle;
@@ -4143,7 +4143,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // in, so the setting holds still.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a signal, or reset to the scene default.";
+      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in an input node, or reset to the scene default.";
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
@@ -4177,7 +4177,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // layout jacks are far away, so the rest state points at the add-by-
     // name chips instead of a signal's jack.
     const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
-    const restHint = stacked ? "Add a signal by name below." : "Click a signal's jack to plug it in or out.";
+    const restHint = stacked ? "Add an input node by name below." : "Click an input node's jack to plug it in or out.";
     const hintBar = document.createElement("div");
     hintBar.className = "vc-drive-bottom-hint";
     setHintText(hintBar, restHint);
