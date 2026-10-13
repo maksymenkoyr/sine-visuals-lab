@@ -123,6 +123,7 @@ import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import type { PreviewSize } from "../render/outputPower.ts";
 import type { OutputRenderStatus } from "../net/outputSync.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
+import { isUiV2, setUiV2 } from "./uiVersion.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
@@ -972,6 +973,9 @@ const RAW_CHIP_TITLE =
 // The column head's HEAT chip (heat.ts's lens) — see its build site below.
 const HEAT_CHIP_TITLE =
   "Heat lens: every wired setting and signal glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
+// The column head's V2 chip (uiVersion.ts) — see its build site below.
+const UI_V2_CHIP_TITLE =
+  "Try the three-column layout: a pinned setting's wires open in a column of their own instead of under the setting. Also ?ui=v2 (and ?ui=v1 to go back).";
 
 // ---- The patch bay (a drive row's port/summary/sparkline, and its pinned
 // patch panel) — see this file's own header doc-comment paragraph. Every
@@ -2290,6 +2294,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
+  // ui-v2 (uiVersion.ts): the pinned setting's wire panel opens in this
+  // column instead of under its row. Always mounted, shown by CSS only while
+  // v2 is on and something is pinned (controlsTheme.ts's .vc-shape-col).
+  const shapeCard = createCard({ title: "Wires", accent: SCENE_VIOLET });
+  const shapeCol = document.createElement("div");
+  shapeCol.className = "vc-shape-col";
+  shapeCol.append(shapeCard.el);
+  const shapeHost = shapeCard.body;
+
   // ---- power column: energy saving mode ----
   // Leftmost — a compact card, not a scrolling stack, so it isn't wired into
   // the digit-block keyboard jump (renumberBlocks/markBlock): its controls
@@ -2444,7 +2457,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   heatChip.dataset.key = "heat";
   const headChips = document.createElement("div");
   headChips.style.cssText = "display: flex; gap: 6px; align-items: center;";
-  headChips.append(heatChip, rawChip);
+  // The ui-v2 switch (uiVersion.ts). Unpins first so a panel open in the old
+  // spot is torn down before the layout changes under it.
+  const uiChip = createChipButton("V2", UI_V2_CHIP_TITLE, () => {
+    if (pinned) togglePin(pinned.sceneId, pinned.spec);
+    setUiV2(!isUiV2());
+    applyUiVersion();
+  });
+  function applyUiVersion(): void {
+    root.classList.toggle("vc-ui-v2", isUiV2());
+    uiChip.style.cssText = isUiV2() ? chipBtnLitStyle : chipBtnStyle;
+    scheduleCableRecompute();
+  }
+  headChips.append(uiChip, heatChip, rawChip);
   columnHead.append(spectrumStatus, headChips);
 
   // The fader bank sits in a .vc-row so it wakes (glow) on hover and on
@@ -4352,11 +4377,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       refreshMeta();
     }
 
+    // Whether this row's panel currently sits in the v2 column (uiVersion.ts)
+    // rather than in patchContainer, so unpinning clears the right one and
+    // never another row's.
+    let inShapeCol = false;
+
     function rebuildIfPinned(): void {
       if (!isPinned()) return;
       untrackDriveCanvas(outputCanvas);
       const built = buildPatchPanel(sceneId, spec);
-      patchContainer.replaceChildren(built.el);
+      inShapeCol = isUiV2();
+      if (inShapeCol) {
+        built.el.style.marginTop = "0";
+        shapeCard.title.textContent = spec.label;
+        shapeHost.replaceChildren(built.el);
+      } else {
+        patchContainer.replaceChildren(built.el);
+      }
       outputCanvas = built.outputCanvas;
       activeOutputTick = built.tick;
       lastPinnedSetting = deps.getDriveSetting(sceneId, spec);
@@ -4365,13 +4402,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function refreshPin(): void {
       const on = isPinned();
       boundRowEl?.classList.toggle("vc-drive-pinned", on);
-      patchContainer.style.display = on ? "" : "none";
+      patchContainer.style.display = on && !isUiV2() ? "" : "none";
       if (on) {
         rebuildIfPinned();
       } else {
         untrackDriveCanvas(outputCanvas);
         outputCanvas = null;
         patchContainer.replaceChildren();
+        if (inShapeCol) {
+          shapeHost.replaceChildren();
+          inShapeCol = false;
+        }
       }
       refreshMeta();
     }
@@ -4572,6 +4613,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
     for (const h of pinRowHandles) h.refreshPin();
+    root.classList.toggle("vc-has-pin", pinned !== null);
     // preview just went to null above — resyncs every row's own
     // .vc-drive-preview against that, since refreshPin() (above) never
     // touches it and a row other than the one just clicked could otherwise
@@ -7095,8 +7137,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         // The old output graph is detached with its patch panel — stop
         // update() redrawing it (togglePin clears this the same way).
         activeOutputTick = null;
+        shapeHost.replaceChildren();
       }
     }
+    root.classList.toggle("vc-has-pin", pinned !== null);
     // A jack click with nothing pinned reaches for lastPreview — drop it on
     // a genuine scene switch, same reasoning as the pinned check above,
     // rather than let a jack click quietly pin a setting on the scene that
@@ -7432,7 +7476,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     : null;
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
-  root.append(columnsWrap, controlsCol);
+  root.append(columnsWrap, shapeCol, controlsCol);
+  applyUiVersion();
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);

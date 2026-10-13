@@ -242,6 +242,15 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
+/* ui-v2 (uiVersion.ts): the pinned setting's wire panel in a column of its
+ * own, between Power and the settings. Shown only while v2 is on and a
+ * setting is pinned; deviceMenu.ts toggles both classes on .vc-root. */
+.vc-shape-col {
+  display: none; width: 340px; flex: none; flex-direction: column; gap: 4px;
+  max-height: calc(var(--vc-vh) - 74px); overflow-y: auto;
+}
+.vc-shape-col > * { flex-shrink: 0; }
+.vc-root.vc-ui-v2.vc-has-pin .vc-shape-col { display: flex; }
 /* Power folds to a small square (POWER_SQUARE_PX) instead of a full-width
  * title bar, in the wide layout only (see powerCard.ts's own header for why:
  * it sits against the settings column, so growing leftward on unfold keeps
@@ -336,7 +345,7 @@ const stylesheet = `
    * last — a phone shouldn't have to scroll past a screen of readouts to
    * reach a slider. */
   .vc-spectrum-col { display: contents; }
-  .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
+  .vc-power-col, .vc-spectrum-card, .vc-controls-col, .vc-shape-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
   /* The horizontal triangle-collapse only makes sense beside other columns;
    * a single stacked mobile column has nothing to shrink next to, so

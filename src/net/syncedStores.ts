@@ -40,6 +40,7 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.deviceId",
   "vibe.keyTips",
   "vibe.panelFolds",
+  "vibe.uiVersion",
   "vibe.historySpans",
   "vibe.hitTailLinked",
   "vibe.hiddenInputs",
