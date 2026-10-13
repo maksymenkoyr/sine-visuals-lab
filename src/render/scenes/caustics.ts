@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import type { PanelSection } from "../scene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
 import {
@@ -16,6 +17,15 @@ import {
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
 import { advanceStandout, advanceStandoutAmount, createStandoutState, STANDOUT_THRESHOLD_DEFAULT, standoutLine } from "../standout.ts";
+import {
+  advanceSparkleHit,
+  BELL_CELLS_PER_GRAIN,
+  BELL_GLSL,
+  BELL_JITTER,
+  BELL_LIFE_SEC,
+  BELL_STAGGER_SEC,
+  createSparkleHitClock,
+} from "./causticsBell.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
@@ -149,6 +159,16 @@ const SPARKLE: SceneSetting = {
   // line; that's now Frequencies, a discrete alternative source on this
   // same picker.
   drive: { default: "scene", sceneLabel: "Scene: treble hits + sustain wash", sceneSources: ["anim.highOnset", "anim.high"] },
+};
+
+// The Scene card's "Sparkle shape" section: a live preview of the chosen
+// shape (src/ui/widgets/sparkleShape.ts) with the shape pick and Bell ring-out
+// mounted under it, so the flat Look list skips those two.
+const SPARKLE_PANEL: PanelSection = {
+  widget: "sparkleShape",
+  title: "Sparkle",
+  hint: "One glint, replayed on every treble hit. The graph shows its flash (solid) and ring (dashed) over time.",
+  settings: ["sparkleShape", "sparkleRing"],
 };
 
 const SETTINGS: SceneSetting[] = [
@@ -487,6 +507,35 @@ const SETTINGS: SceneSetting[] = [
     reads: ["anim.centroid"],
   },
   SPARKLE,
+  // What one glint is. Glint keeps the original flash-and-fade field; the two
+  // bell shapes (causticsBell.ts) ring out from a point after each treble hit.
+  // Both live in the "Sparkle shape" panel section (SPARKLE_PANEL) next to a
+  // preview of the shape, so the flat Look list skips them.
+  {
+    key: "sparkleShape",
+    label: "Sparkle shape",
+    description:
+      "Glint: a point that flashes and fades. Bell strike: a flash that dies away while rings leave it, like a struck bell. Bell bloom: the point swells, hollows out and ends as a ring.",
+    group: "Look",
+    min: 0,
+    max: 2,
+    step: 1,
+    default: 0,
+    type: "enum",
+    options: ["Glint", "Bell strike", "Bell bloom"],
+    // A shape pick, not an amount or a reactive coupling: no `auto`, no `drive`.
+  },
+  {
+    key: "sparkleRing",
+    label: "Bell ring-out",
+    description: "How long a bell keeps ringing after the hit (bell shapes only)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    // Response shape, like Wave fade: not something the music profile should redecide.
+  },
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
@@ -884,6 +933,19 @@ if (!Number.isInteger(Math.log2(INJECTION_MASK + 1))) {
   throw new Error("caustics: NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN must be a power of two");
 }
 
+// The bell shapes' lattice (causticsBell.ts) wraps like the spray's, at
+// NOISE_PERIOD * BELL_CELLS_PER_GRAIN cells.
+const BELL_MASK = NOISE_PERIOD * BELL_CELLS_PER_GRAIN - 1;
+if (!Number.isInteger(Math.log2(BELL_MASK + 1))) {
+  throw new Error("caustics: NOISE_PERIOD * BELL_CELLS_PER_GRAIN must be a power of two");
+}
+// How much of a bell shows over dark water (the rest follows the crest gate),
+// so a ring reads whole instead of only where a filament happens to be.
+const BELL_DARK_WATER = 0.3;
+// Sparkle density's range as the share of bell cells that ring on a hit.
+const BELL_ACTIVE_LO = 0.04;
+const BELL_ACTIVE_HI = 0.5;
+
 // The ridge loop's octave count, and the flow multipliers FRAG applies per
 // use of the drift phase — named here because driftFlows has to reproduce
 // exactly the offsets the shader adds, one wrapped entry each. FLOW_X/FLOW_Y
@@ -1134,6 +1196,7 @@ export const FRAG = `
 // precision paragraph and noiseHash.ts for why nothing here uses fract() of
 // a large product.
 ${NOISE_HASH_GLSL}
+${BELL_GLSL}
 #define TWO_PI 6.28318530718
 
 float noise(vec2 p) {
@@ -1229,6 +1292,9 @@ void main() {
   // the frequency change from this one multiply rather than re-scaling p at
   // each octave separately.
   vec2 q = (p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)}) * densScale;
+  // The same point before the ridge loop warps q: the bell shapes need round
+  // cells, and q after the loop is stretched along the filaments.
+  vec2 q0 = q;
 
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
@@ -1336,7 +1402,38 @@ void main() {
   float sparkleNoise = noise(sparkleQ * sparkleFreq + sparkleFlow);
   float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
   float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
-  acc += uSparkle * sparkleGlintDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
+  if (uSparkleShape < 0.5) {
+    acc += uSparkle * sparkleGlintDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
+  } else {
+    // The bell shapes (causticsBell.ts): the pool is tiled into bell cells,
+    // each hit reseeds which cells ring and where, and every bell plays out
+    // from uSparkleAge, the time since the Sparkle driver's last climb
+    // (advanceSparkleHit), so the flash, the rings and the fade all belong to
+    // the hit rather than to the driver's own decay. The 2x2 cells whose
+    // centres straddle the pixel are enough because a ring never travels
+    // past BELL_REACH. Sparkle sustain doesn't apply: there is no wash.
+    vec2 bellQ = q0 + (sparkleQ - q);
+    int bellShape = int(uSparkleShape + 0.5);
+    float bellK = 0.5 + 1.5 * uSparkleRing;
+    float bellGain = uSparkle * (${BELL_DARK_WATER.toFixed(2)} + (1.0 - ${BELL_DARK_WATER.toFixed(2)}) * crestGate) * sparkleGain * uSparkleHitAmp;
+    float bellSum = 0.0;
+    if (bellGain > 0.0 && uSparkleAge < ${BELL_LIFE_SEC.toFixed(1)} * bellK) {
+      vec2 bp = (bellQ * sparkleFreq + sparkleFlow) * ${BELL_CELLS_PER_GRAIN.toFixed(4)};
+      vec2 bNear = floor(bp - 0.5);
+      uint bSeed = 3u + uint(uSparkleHit);
+      float bActive = mix(${BELL_ACTIVE_LO.toFixed(2)}, ${BELL_ACTIVE_HI.toFixed(2)}, uSparkleDensity);
+      for (int bx = 0; bx <= 1; bx++) {
+        for (int by = 0; by <= 1; by++) {
+          vec2 bCell = bNear + vec2(float(bx), float(by));
+          if (hashCell(bCell, ${BELL_MASK}, bSeed + 2048u) > bActive) continue;
+          vec2 bCenter = bCell + 0.5 + (hash2Cell(bCell, ${BELL_MASK}, bSeed) - 0.5) * ${BELL_JITTER.toFixed(2)};
+          float bAge = uSparkleAge - hashCell(bCell, ${BELL_MASK}, bSeed + 4096u) * ${BELL_STAGGER_SEC.toFixed(2)};
+          bellSum += bellGlint(bellShape, bAge, length(bp - bCenter), bellK);
+        }
+      }
+    }
+    acc += bellGain * bellSum;
+  }
 
   // Spray injection, added on top of the glints rather than in place of
   // them. The glint field is tiled into nozzle cells — in sparkleQ *
@@ -1479,14 +1576,24 @@ export const causticsScene = createFullscreenScene(
     const crestBuf = new Float32Array(PROFILE_SAMPLES);
     const slopeBuf = new Float32Array(PROFILE_SAMPLES);
     let prevDropOnset = false;
+    // The bell shapes' hit clock and its own climb detector (causticsBell.ts).
+    const sparkleClock = createSparkleHitClock();
+    const sparkleHits = createStandoutState();
 
     return {
       settings: SETTINGS,
+      panel: [SPARKLE_PANEL],
+      probe: () => ({ sparkleHit: sparkleClock.count, sparkleAge: sparkleClock.ageSec, sparkleAmp: sparkleClock.amp }),
       extraUniformDecls: `
 uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 // The glided, drive-scaled Caustic density (advanceDensityFlow) — see
 // densScale in FRAG.
 uniform float uDensityLive;
+// The bell shapes' clock (advanceSparkleHit): seconds since the last hit,
+// which hit it was (it reseeds the cells), and how big.
+uniform float uSparkleAge;
+uniform float uSparkleHit;
+uniform float uSparkleHitAmp;
 uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
 // Linear interpolation into a profile array built by rippleEmitter.ts's
@@ -1602,7 +1709,20 @@ float softCeil(float x, float knee, float ceil) {
             : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
         buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
 
+        // Sparkle's bell shapes: step the hit clock every frame (so its
+        // detector keeps learning) on the same reading the glint's drive
+        // gets, at its Scene default the treble pulse or the sustain wash.
+        advanceSparkleHit(
+          sparkleClock,
+          sparkleHits,
+          anim.dtSec,
+          drives.value("sparkle", Math.max(anim.highPulse, getSetting("sparkleSustain") * anim.high)),
+        );
+
         return {
+          uSparkleAge: sparkleClock.ageSec,
+          uSparkleHit: sparkleClock.count,
+          uSparkleHitAmp: sparkleClock.amp,
           uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
           uRippleCrest: crestBuf,

@@ -32,6 +32,10 @@ export function createFullscreenScene(
   opts: {
     minQuality?: Scene["minQuality"];
     settings?: SceneSetting[];
+    /** Custom Scene-card sections, passed to Scene.panel (scene.ts). */
+    panel?: Scene["panel"];
+    /** Scene.probe (scene.ts): live internal state for a panel widget. */
+    probe?: Scene["probe"];
     /** Extra GLSL uniform declarations this scene needs beyond
      *  COMMON_UNIFORMS_GLSL — for small per-scene arrays/values driven by
      *  JS-side state (a ripple pool, a scene-owned drift accumulator) that
@@ -104,6 +108,8 @@ ${fragBody}
     name,
     minQuality: opts.minQuality,
     settings: opts.settings,
+    panel: opts.panel,
+    probe: opts.probe,
 
     init(ctx: SceneContext) {
       prog = createProgram(ctx.gl, fragSrc);

@@ -21,6 +21,12 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
   launched ring amount, sized by how far it stands out from the everyday
   climbs (Physarum 2's Dose and Alien's Cut fire on the same detector).
   `tests/standout.test.ts` pins it.
+- `src/render/scenes/causticsBell.ts` — Sparkle shape's two bell shapes: the
+  maths written once in TypeScript (`bellBrightness`, drawn by the preview and
+  pinned by `tests/causticsBell.test.ts`) and mirrored in GLSL (`BELL_GLSL`),
+  plus the hit clock (`advanceSparkleHit`) that turns the Sparkle driver's climbs
+  into hits. `src/ui/widgets/sparkleShape.ts` is the Scene-card section with the
+  looping preview and the shape/ring-out rows.
 - `src/render/scenes/rippleEmitter.ts` — Beat ripple's own continuous ring
   emitter: `createRippleEmitter` keeps every ring in flight as
   a plain `{ageSec, amp}` ring-buffer entry, and `buildProfile` sums them into
@@ -634,6 +640,25 @@ reference-measurement workflow used by later scenes.
   Caustic density is the one music term that is not zeroed by its slider: its
   own source still lifts the slider (`densityTargetFor`). That is left to #453,
   and `densityTargetFor` is untouched here.
+- 2026-10-13 — Sparkle shape: Glint (the original field, untouched) plus two
+  bell shapes, with a small looping preview and a fixed-scale graph of the
+  glint's life in the Scene card. Asked for as "hitting the bell": a flash that
+  decays exponentially with a ring on the end. Both readings of that were kept,
+  chosen from the prototype under Materials: **Bell strike** (flash plus a
+  ring leaving the point and a fainter echo ring) and **Bell bloom** (the point
+  swells, hollows out and ends as a ring). The other two shapes in the prototype
+  (a cross flare, a ring pop) were left out. The glint field has no per-glint
+  age (every glint follows the treble drive's own decay), so the bells run on a
+  clock of their own: each climb of the Sparkle driver that the shared
+  standout detector counts restarts every bell, reseeds which cells ring and
+  where, and sizes the hit by the climb. Decisions that came out of the first
+  screenshots: the bell cells are laid on the coordinate *before* the ridge
+  loop warps it (after it they stretch along the filaments and stop being
+  round), and a bell shows at a fraction of its brightness over dark water
+  (`BELL_DARK_WATER`) so a ring reads whole rather than only where a crest
+  happens to be. Sparkle sustain, the glint wash, does nothing for the bell
+  shapes; Spray injection is unchanged. Only the synthetic feed and the
+  headless render have been used; nobody has judged the bells with real music.
 
 ## Tuning notes
 
@@ -746,6 +771,7 @@ reference-measurement workflow used by later scenes.
 - Both artifacts are clickable prototypes for choosing what each reactive setting listens to — the UI behind the drives work (PR #130).
 - Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceStandoutAmount` (`src/render/standout.ts`; `advanceEmission` in `rippleEmitter.ts` until 2026-10-06) or its tracker constants (the old `SALIENCE_*`) change, the copy in that page has to change with them.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
+- Artifact: [Caustics Sparkle Shapes](https://claude.ai/artifact/8a4Gb8UQEn89BNyFwsvzNS). Source saved as `caustics/artifacts/sparkle-shapes.html`. Five animated candidate glint shapes with Size and Decay dials, each beside a graph of its brightness over time; the Sparkle shape feature was chosen from it. Its shape maths is a sketch, the shipped maths is `causticsBell.ts`.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 - `caustics/scripts/shader-bisect.py` — the 2026-09-28 performance work: times FRAG with one part switched off at a time, and pixel-diffs the scene against any git ref. Runs on `tools/gpu-bench.mjs` (general: any scene, bench or in-app timing), whose header explains why each benchmark frame has to end its render pass on an Apple GPU.
 
