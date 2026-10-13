@@ -436,17 +436,28 @@ body.vc-keys-reveal [data-keycap]::after {
   color: var(--vc-accent);
   text-shadow: 0 0 10px color-mix(in srgb, var(--vc-accent) 35%, transparent);
 }
+/* A row's own hint never unfolds in the row: src/ui/rowHints.ts shows a copy
+ * of it beside the panel (.vc-row-hint, below), so nothing in the column
+ * moves on hover. Kept in the row, visually hidden, so a screen reader still
+ * reads it with the row, and so the code that writes into it keeps working.
+ * On a touch screen (iPad Safari) a tap that makes something appear through
+ * :hover counts as a hover, and the tap's click is dropped, so a jack inside
+ * the row didn't plug in until a second tap: rowHints.ts shows a finger the
+ * hint through focus only. */
 .vc-hint {
-  max-height: 0; opacity: 0; overflow: hidden; margin-top: 0;
-  transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
-  font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.65);
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
-/* Hover unfolds it only where hover is real: on iPad Safari a tap that reveals
- * something via :hover counts as the hover and its click is dropped, so a jack in
- * the row needed a second tap. A tap still unfolds it through focus. */
-.vc-row:focus-within .vc-hint { max-height: 120px; opacity: 1; margin-top: 5px; }
-@media (hover: hover) {
-  .vc-row:hover .vc-hint { max-height: 120px; opacity: 1; margin-top: 5px; }
+/* The floating copy (src/ui/rowHints.ts): beside the row's column, level
+ * with the row, over the picture; or over the rows below it where there's no
+ * room beside (.vc-row-hint-over). Dark glass and a left rule in the row's
+ * own accent (--c, set by rowHints.ts), like the jack tooltip (.vc-tooltip,
+ * below); above the cable layer, which it can sit over. */
+.vc-row-hint {
+  position: fixed; z-index: 40; pointer-events: none; box-sizing: border-box;
+  background: rgba(8, 11, 10, 0.94); border-left: 2px solid var(--c, #fff); border-radius: 3px;
+  padding: 6px 9px 7px; font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 /* Auto takeover line (AUTO_HOLDING_HINT): a second line in auto's colour while auto
  * holds the row, so the description above stays readable. */
@@ -464,17 +475,16 @@ body.vc-keys-reveal [data-keycap]::after {
 
 /* A row's "reacts to" strip (createSignalStrip): a sibling of .vc-hint, not inside
  * it, so they reveal independently (auto's takeover line goes in the hint, never
- * here). Reveals like the hint, or pinned open by its head chip (.vc-reads-open). */
+ * here). Its pills are buttons, so it can't float beside the panel like the hint
+ * (that layer ignores the pointer); it unfolds in the row instead, on focus or
+ * pinned open by its head chip (.vc-reads-open), but not on hover, which would
+ * slide the rows below under the cursor. */
 .vc-reads {
   max-height: 0; opacity: 0; overflow: hidden; margin-top: 0;
   transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
 }
 .vc-row:focus-within .vc-reads, .vc-reads.vc-reads-open {
   max-height: 60px; opacity: 1; margin-top: 6px;
-}
-/* Hover only where hover is real, for the same dropped-tap reason as .vc-hint. */
-@media (hover: hover) {
-  .vc-row:hover .vc-reads { max-height: 60px; opacity: 1; margin-top: 6px; }
 }
 
 /* The whole input is the touch target, taller than the track it draws. The accent

@@ -1122,7 +1122,9 @@ applies there too. Tuned so far only against the synthetic feed at
 - Pressing a pad right after switching the layer moves the pads 55 px under
   the pointer: focus leaves the Smell/Touch switch, whose row's `.vc-hint`
   (the layer's `how`) folds up. The panel's rows-unfold-on-focus grammar, not
-  the pads; seen with `padshot.mjs --layer touch` (2026-10-02).
+  the pads; seen with `padshot.mjs --layer touch` (2026-10-02). Fixed
+  2026-10-13: row hints show beside the panel (`src/ui/rowHints.ts`), so no
+  row folds under the pads.
 - "Flee" doesn't exist: no Smell value makes a strain run from another (see
   Decisions 2026-10-02). Would need a new steering behaviour.
 
