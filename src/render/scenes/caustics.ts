@@ -678,10 +678,11 @@ const BREATHE_ZOOM = 0.10;
 const FOCUS_SNAP_RATIO = 1.3;
 
 // Caustic density's reach (causticDensityScale below): 0.5 is exactly today's old fixed
-// noise-sampling frequency (densScale = 1); the endpoints are ±1.2 octaves
-// off that, mild enough that both ends still read as this scene's own
-// pool-caustics look rather than a different pattern entirely.
-const DENSITY_SPAN_OCTAVES = 2.4;
+// noise-sampling frequency (densScale = 1); the endpoints sit half the span
+// either side of that in octaves. Widened once (#454) when density stopped
+// zooming: with the filament width held, a wide range reads as a sparse web
+// at one end and a dense mesh at the other, still this scene's own look.
+const DENSITY_SPAN_OCTAVES = 3.2;
 // How far Caustic density's own source lifts the slider toward the finest
 // mesh at a full reading. A lift, identity at drive 0 (drives.ts's header's
 // "Nothing plugged in" paragraph), so an unplugged jack leaves the slider's

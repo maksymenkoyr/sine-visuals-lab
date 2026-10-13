@@ -380,9 +380,9 @@ describe("caustics caustic density", () => {
     expect(causticDensityScale(0.5)).toBeCloseTo(1, 10);
   });
 
-  it("the endpoints span roughly a moderate 0.43x..2.3x range, monotone across it", () => {
-    expect(causticDensityScale(0)).toBeCloseTo(0.435, 2);
-    expect(causticDensityScale(1)).toBeCloseTo(2.297, 2);
+  it("the endpoints span roughly a 0.33x..3x range, monotone across it", () => {
+    expect(causticDensityScale(0)).toBeCloseTo(0.330, 2);
+    expect(causticDensityScale(1)).toBeCloseTo(3.031, 2);
     let prev = causticDensityScale(0);
     for (let d = 0.1; d <= 1; d += 0.1) {
       const s = causticDensityScale(d);

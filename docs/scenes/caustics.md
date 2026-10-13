@@ -647,7 +647,8 @@ reference-measurement workflow used by later scenes.
   default is lower, so its pool now has fewer filaments at normal width rather
   than a zoomed-in one. Checked headless on a frozen pool (`drift` 0 and the
   motion drives off) at 0, 35, 50, 75 and 100%, before against after. Not yet
-  judged by eye on the real default or with music.
+  judged by eye on the real default or with music. Same day the dial's span
+  was widened from 2.4 to 3.2 octaves (0.33x..3x the default's filament count).
 
 ## Tuning notes
 
