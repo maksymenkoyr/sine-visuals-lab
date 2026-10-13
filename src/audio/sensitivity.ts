@@ -35,7 +35,11 @@ export const EXPANSION_MAX = 4;
 export const EXPANSION_DEFAULT = 1;
 
 export const SMOOTHING_MIN = 0.25;
-export const SMOOTHING_MAX = 4;
+export const SMOOTHING_MAX = 20;
+// Auto's own ceiling for Smoothing: autoTune.ts's SMOOTHING_SPEC.max.
+// computeAutoTarget scales Auto's swing by the spec's span, so it keeps
+// the span it was tuned on; only a manual drag reaches SMOOTHING_MAX.
+export const SMOOTHING_AUTO_MAX = 4;
 export const SMOOTHING_DEFAULT = 1;
 
 // In-memory cache is the source of truth for get/set within a session, seeded
