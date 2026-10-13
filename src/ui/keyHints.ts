@@ -82,6 +82,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "H", id: "hide", label: "Hide UI", hint: "Hide the interface" },
   { key: "M", id: "left", label: "Hide left", hint: "Hide / show the left panel" },
   { key: "O", id: "solo", label: "Solo", hint: "Show only the pinned setting (or the Scene card)" },
+  { key: "L", id: "heat", label: "Heat lens", hint: "Every wired setting and signal glows in its heat colour, brighter as it moves" },
   { key: "F", id: "fullscreen", label: "Fullscreen", hint: "Fullscreen" },
   { key: "Tab", id: "tab", label: "Next control", hint: "Next control (⇧ previous)" },
   { key: "⇧ 1–9", id: "block", label: "Jump to block", hint: "Jump to a numbered block (Shift + a digit)" },
