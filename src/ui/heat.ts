@@ -4,7 +4,8 @@
  * music and colder by quiet music (docs/vocabulary.md's **heat**).
  * Heat shows in the panel four ways, all fed by the same tracks (deviceMenu.ts
  * and audioMeters.ts own the elements, this file only measures and colours):
- *   1. a thin history strip under every wired setting's graph, always on;
+ *   1. a thin history strip under every wired setting's graph and under every
+ *      signal's monitor row, always on;
  *   2. the Heat history card in the meters column, folded by default, with one
  *      strip per wired setting and per signal jack;
  *   3. the heat lens (L, or the column head's HEAT chip): every wired
