@@ -707,6 +707,10 @@ reference-measurement workflow used by later scenes.
     the synthetic feed only. On the real pool, Rings and Bloom needed a
     finer bend noise and more gain than in the prototype, because the
     scene's coordinates and its brightness multiplier differ.
+  - Same day: the user asked for "the ones we had to adjust the curve". The
+    shape's rows were there, but they mounted after Treble sparkle and the
+    effect's rows, below the panel's fold. They now sit right under the
+    curve.
 
 ## Tuning notes
 

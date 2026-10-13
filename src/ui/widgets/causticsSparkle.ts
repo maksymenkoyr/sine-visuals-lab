@@ -29,9 +29,9 @@ import {
 /**
  * Caustics' Sparkle section (src/render/scenes/caustics.ts's PANEL): the
  * Sparkle effect and Sparkle shape picks as the device menu's own rows, a
- * preview, one line saying what the pair does, then Treble sparkle and only
- * the rows the picked effect and shape use (causticsSparkle.ts's
- * SPARKLE_EFFECT_ROWS / SPARKLE_SHAPE_ROWS) — swapped in place through
+ * preview, the picked shape's own rows (SPARKLE_SHAPE_ROWS) right under its
+ * curve, one line saying what the pair does, then Treble sparkle and the
+ * picked effect's rows (SPARKLE_EFFECT_ROWS) — swapped in place through
  * `ctx.mountRows` when a pick changes, so the preview keeps running.
  *
  * The preview plays one hit on loop: on the right, the shape's curve
@@ -91,22 +91,26 @@ function buildCausticsSparkle(container: HTMLElement, _section: PanelSection, ct
   box.append(patch, side);
   const hint = document.createElement("div");
   hint.style.cssText = "font-size:11px;line-height:1.35;color:rgba(255,255,255,0.6);padding:0 0 6px;";
-  const rowsHost = document.createElement("div");
-  container.append(box, hint, rowsHost);
+  // The shape's own rows sit right under its curve, so what they change is
+  // in view; Treble sparkle and the effect's rows follow the hint.
+  const curveRowsHost = document.createElement("div");
+  const effectRowsHost = document.createElement("div");
+  container.append(box, curveRowsHost, hint, effectRowsHost);
 
-  let mounted: { dispose(): void } | null = null;
+  const mounted: { dispose(): void }[] = [];
   let mountedFor = "";
   const pick = (s: SceneSetting, count: number): number => Math.min(count - 1, Math.max(0, Math.round(ctx.get(s))));
+  const specsFor = (keys: readonly string[]): { spec: SceneSetting }[] =>
+    keys.map(spec).filter((s): s is SceneSetting => !!s).map((s) => ({ spec: s }));
   const mountPicked = (): void => {
     const fx = pick(effectSpec, SPARKLE_EFFECTS.length);
     const sh = pick(shapeSpec, SPARKLE_SHAPES.length);
     const id = `${fx}:${sh}`;
     if (id === mountedFor) return;
     mountedFor = id;
-    mounted?.dispose();
-    const keys = [...new Set([SPARKLE_AMOUNT_KEY, ...SPARKLE_EFFECT_ROWS[fx], ...SPARKLE_SHAPE_ROWS[sh]])];
-    const rows = keys.map(spec).filter((s): s is SceneSetting => !!s);
-    mounted = ctx.mountRows(rowsHost, rows.map((s) => ({ spec: s })));
+    for (const m of mounted.splice(0)) m.dispose();
+    mounted.push(ctx.mountRows(curveRowsHost, specsFor(SPARKLE_SHAPE_ROWS[sh])));
+    mounted.push(ctx.mountRows(effectRowsHost, specsFor([SPARKLE_AMOUNT_KEY, ...SPARKLE_EFFECT_ROWS[fx]])));
     hint.textContent = `${SPARKLE_EFFECTS[fx]}: ${SPARKLE_EFFECT_HINTS[fx]} ${SPARKLE_SHAPES[sh]}: ${SPARKLE_SHAPE_HINTS[sh]}`;
   };
   mountPicked();
