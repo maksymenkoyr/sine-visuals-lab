@@ -6,6 +6,7 @@ import { sceneLinksPlugin } from "./vite-scene-links-plugin.ts";
 import { legalNoticesPlugin } from "./vite-legal-notices-plugin.ts";
 import { buildInfoPlugin } from "./vite-build-info-plugin.ts";
 import { sceneVersionsPlugin } from "./vite-scene-versions-plugin.ts";
+import { appManifestPlugin } from "./vite-app-manifest-plugin.ts";
 
 const root = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -25,10 +26,12 @@ export default defineConfig(({ command }) => ({
   // "very visible... in the dev flow" means dev gets it too, not just a
   // deploy — and only adds a file watcher (its own dev-only cache
   // invalidation) under the `serve` branch.
+  // appManifestPlugin is the one build-only plugin: a dev server has
+  // nothing to install (see its header).
   plugins:
     command === "serve"
       ? [basicSsl(), tuningPlugin(), sceneLinksPlugin(), legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin()]
-      : [legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin()],
+      : [legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin(), appManifestPlugin()],
   build: {
     // Global, not per-entry: webOS 5.x/6.x and Tizen 2018-2020 predate
     // optional chaining / nullish coalescing (Chrome 80). There's no

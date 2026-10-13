@@ -16,7 +16,9 @@
      * canonical and the one every absolute URL below and in sitemap.xml uses. -->
     <link rel="canonical" href="https://www.sinevisualslab.com/" />
     <!-- Real files under public/ — Google's favicon rules accept neither the
-     * data: URI this used to be nor SVG, only raster URLs (see tools/make-icons.mjs). -->
+     * data: URI this used to be nor SVG, only raster URLs (see tools/make-icons.mjs).
+     * The install manifest's <link> isn't here: vite-app-manifest-plugin.ts adds it
+     * to a build. -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
