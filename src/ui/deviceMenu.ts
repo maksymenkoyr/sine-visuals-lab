@@ -892,6 +892,20 @@ const autoChipManualStyle = (accent: string) =>
 // accent, so a muted row never reads as a lit A chip at a glance.
 const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
+/** Paints a row's O chip (createControlRow's `onlyThis`) from the current
+ *  solo: filled with the row's accent while this setting is the solo, outlined
+ *  otherwise. Also the title and aria-pressed. */
+function paintOnlyChip(chip: HTMLElement): void {
+  const solo = getDriveSolo();
+  const on = !!solo && `${solo.sceneId}:${solo.key}` === chip.dataset.soloKey;
+  const accent = chip.dataset.soloAccent ?? SCENE_VIOLET;
+  chip.style.cssText = on ? autoChipLitStyle(accent) : autoChipManualStyle(accent);
+  chip.setAttribute("aria-pressed", String(on));
+  chip.title = on
+    ? "All back: switch every setting's reaction back on"
+    : "Only this: switch off every other setting's reaction, so only this one moves";
+}
+
 /** The Master card's Expansion shape chips by name, in sceneSettings.ts's
  *  EXPANSION_SHAPES order — the chips' own labels and the output graph's
  *  Expansion tag both read these. */
@@ -1312,6 +1326,10 @@ export interface ControlRowSpec {
     below: HTMLElement;
     onPin: () => void;
   };
+  /** The O chip beside A and T: "Only this" (driveSolo.ts) for this setting.
+   *  Omit for a setting with no `drive`. The chip carries `data-solo-key`
+   *  so the menu's one onDriveSoloChange listener can relight every row. */
+  onlyThis?: { sceneId: string; key: string };
   /** Fires on a click anywhere on the card, the slider included, that isn't
    *  one of its side controls (isCardPress) — pin-only, so a stray click on
    *  a pinned card can't close it. Every Scene-card row passes it, drive or
@@ -1765,6 +1783,24 @@ export function createControlRow(spec: ControlRowSpec) {
   offChip.dataset.key = "mute";
   offChip.dataset.keycap = "T";
 
+  // "Only this" (driveSolo.ts), same chip geometry as A and T. No hotkey: O
+  // stays the panel's Solo view toggle. Lit while this setting is the solo.
+  let onlyChip: HTMLButtonElement | null = null;
+  if (spec.onlyThis) {
+    const { sceneId, key } = spec.onlyThis;
+    onlyChip = document.createElement("button");
+    onlyChip.type = "button";
+    onlyChip.textContent = "O";
+    onlyChip.dataset.soloKey = `${sceneId}:${key}`;
+    onlyChip.dataset.soloAccent = spec.accent;
+    onlyChip.addEventListener("click", () => {
+      const now = getDriveSolo();
+      if (now && now.sceneId === sceneId && now.key === key) clearDriveSolo();
+      else setDriveSolo(sceneId, key);
+    });
+    paintOnlyChip(onlyChip);
+  }
+
   // visibility (not display) keeps the row from reflowing while dragging.
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "↺";
@@ -1794,7 +1830,9 @@ export function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) right.appendChild(signalIndicator.chip);
 
   right.appendChild(readout);
-  right.append(chip, offChip, resetBtn);
+  right.append(chip, offChip);
+  if (onlyChip) right.appendChild(onlyChip);
+  right.appendChild(resetBtn);
   if (spec.drivePanel) {
     const left = document.createElement("div");
     left.style.cssText = driveRowLeftStyle;
@@ -2790,6 +2828,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // is current. rebuildIfPinned() is a no-op on every row but the pinned one.
   onDriveSoloChange(() => {
     for (const h of driveRowHandles) h.rebuildIfPinned();
+    for (const chip of document.querySelectorAll<HTMLElement>("[data-solo-key]")) paintOnlyChip(chip);
   });
 
   // Heat (heat.ts) for the current scene's wired settings and each of their
@@ -6901,6 +6940,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       drivePanel: driveBuild
         ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
         : undefined,
+      onlyThis: spec.drive ? { sceneId, key: spec.key } : undefined,
       onCardPin: () => pinSetting(sceneId, spec),
       linkedTicks: linked.length
         ? linked.map((l) => ({ value: deps.getSceneSettingValue(sceneId, l.spec), colour: l.colour }))
