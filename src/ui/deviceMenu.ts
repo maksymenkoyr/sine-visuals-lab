@@ -95,7 +95,20 @@ import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading } from "./audioMeters.ts";
-import { createHeatPip, createHeatTrack, HEAT_REFRESH_MS, type HeatPip, type HeatTrack } from "./heat.ts";
+import {
+  createHeatPip,
+  createHeatTrack,
+  heatColor,
+  heatGlowLevel,
+  heatHistory,
+  heatStep,
+  heatStripBackground,
+  heatText,
+  HEAT_HISTORY_CELLS,
+  HEAT_REFRESH_MS,
+  type HeatPip,
+  type HeatTrack,
+} from "./heat.ts";
 import { getHistorySpan } from "./historySpan.ts";
 import {
   PICTURE_MEASURES,
@@ -188,10 +201,11 @@ import {
  * sparkline under the slider (drawn from `drives.valueOf(key)` at ~30 Hz in
  * update(), skipped while the panel is closed). None of the three is a fork
  * of createControlRow — they're its `port`/`summary`/`below` slots, filled
- * in by appendSettingRow only for a setting with `spec.drive`. The port and
- * each wire in the wire panel also carry a heat pip (heat.ts), recorded
- * every tick panel open or closed and recoloured at most every
- * HEAT_REFRESH_MS; a built-in setting gets none.
+ * in by appendSettingRow only for a setting with `spec.drive`. Heat (heat.ts)
+ * puts a thin history strip under each wired setting's graph, and the heat
+ * lens (L or the column head's HEAT chip) makes its row glow in its heat
+ * colour; each wire in the wire panel carries a heat dot. Tracks record every
+ * tick, panel open or closed; a built-in setting gets none.
  *
  * Two levels of attention, not one: hovering a row for
  * HOVER_SELECT_DELAY_MS, or giving its slider keyboard focus, *previews* it
@@ -955,6 +969,9 @@ const levelsCellLabelStyle = `font-size: 11.5px;`;
 // RAW_CHIP_TITLE (that file no longer owns a chip to title).
 const RAW_CHIP_TITLE =
   "Raw: the spectrum before the adaptive envelope and Bands gain, and every meter reading below its pre-smoothing value. Drag Smoothing (Input card) to Off instead to close that second gap for good — at Off, every eased reading already lands on exactly what this shows.";
+// The column head's HEAT chip (heat.ts's lens) — see its build site below.
+const HEAT_CHIP_TITLE =
+  "Heat lens: every wired setting and signal glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
 
 // ---- The patch bay (a drive row's port/summary/sparkline, and its pinned
 // patch panel) — see this file's own header doc-comment paragraph. Every
@@ -2345,6 +2362,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const spectrumStrip = bandFaders.strip;
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
+    heatSettings: heatSettingRows,
     onLufsReset: deps.onLufsReset,
     onTap: deps.onTap,
     getSilenceGate: () => deps.getSilenceGate(),
@@ -2420,7 +2438,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     audioMeters.setRaw(on);
     rawChip.style.cssText = on ? chipBtnLitStyle : chipBtnStyle;
   });
-  columnHead.append(spectrumStatus, rawChip);
+  // The heat lens (heat.ts): every wired setting's row and every signal jack
+  // glows in its heat colour, brighter as it moves. Also L. Off on every load.
+  const heatChip = createChipButton("HEAT", HEAT_CHIP_TITLE, () => setHeatLens(!heatLensOn));
+  heatChip.dataset.key = "heat";
+  const headChips = document.createElement("div");
+  headChips.style.cssText = "display: flex; gap: 6px; align-items: center;";
+  headChips.append(heatChip, rawChip);
+  columnHead.append(spectrumStatus, headChips);
 
   // The fader bank sits in a .vc-row so it wakes (glow) on hover and on
   // focus-within exactly like a slider row.
@@ -2724,22 +2749,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPreviewLit(): void;
     rebuildIfPinned(): void;
     tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void;
-    /** Recolours the port's heat pip from settingHeat; hides it for a built-in
-     *  setting, which has no real value. */
+    /** Recolours the row's heat from settingHeat: its strip under the graph
+     *  and its heat colour. */
     refreshHeat(nowSec: number): void;
+    /** Writes the lens glow from heatLive when its level changes. */
+    tickHeatGlow(): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
 
   // Heat (heat.ts) for the current scene's wired settings and each of their
   // wires (keyed by the wire's jackKey), recorded every tick by recordHeat,
-  // panel open or closed, and cleared on a scene change. The pips — a
-  // setting's port and, in the pinned wire panel, each wire's name — read the
-  // Dynamics card's span chip: the Scene card has none of its own.
+  // panel open or closed, and cleared on a scene change. The strip under each
+  // setting's graph and the Heat history card read settingHeat; the pinned
+  // wire panel's dot per wire reads wireHeat; the heat lens's glow reads
+  // heatLive. All of them read the Dynamics card's span chip: the Scene card
+  // has none of its own.
   const HEAT_SPAN_CARD = "signal";
   let heatSceneId: string | null = null;
   const settingHeat = new Map<string, HeatTrack>();
   const wireHeat = new Map<string, Map<string, HeatTrack>>();
   let wireHeatPips: { key: string; wireKey: string; pip: HeatPip }[] = [];
+  // Each wired setting's live reading this tick for the lens glow, relative
+  // to its weight-1 line (the graph's dotted line), so one full-weight wire
+  // can light it fully.
+  const heatLive = new Map<string, number>();
+  let heatLensOn = false;
   let lastHeatMs = -Infinity;
 
   /** The output graph's corner tag while Expansion moves a reading: the
@@ -2843,6 +2877,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       heatSceneId = sceneId;
       settingHeat.clear();
       wireHeat.clear();
+      heatLive.clear();
     }
     if (!drives || !frame) return;
     const nowSec = performance.now() / 1000;
@@ -2856,7 +2891,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         track = createHeatTrack();
         settingHeat.set(spec.key, track);
       }
-      track.push(drives.valueOf(spec.key) / top, frame.level, nowSec);
+      const value = drives.valueOf(spec.key);
+      track.push(value / top, frame.level, nowSec);
+      heatLive.set(spec.key, value / (top / DRIVE_WEIGHT_MAX));
       if (!setting.sources.length) continue;
       const vals = drives.sourceValues(spec.key);
       if (!vals) continue;
@@ -2877,8 +2914,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  /** Recolours every port and wire heat pip — at most every HEAT_REFRESH_MS,
-   *  from update(), while the Scene card is on screen and unfolded. */
+  /** Recolours every row's heat and every wire's heat dot — at most every
+   *  HEAT_REFRESH_MS, from update(), while the Scene card is on screen and
+   *  unfolded. */
   function refreshHeatPips(nowSec: number): void {
     const span = getHistorySpan(HEAT_SPAN_CARD);
     for (const h of driveRowHandles) h.refreshHeat(nowSec);
@@ -2886,6 +2924,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (!w.pip.el.isConnected) continue;
       w.pip.set(wireHeat.get(w.key)?.get(w.wireKey)?.read(span, nowSec) ?? null, span);
     }
+  }
+
+  /** The Heat history card's Settings group (audioMeters.ts's deps.heatSettings):
+   *  the current scene's wired settings that have a track yet. */
+  function heatSettingRows(): { label: string; track: HeatTrack }[] {
+    const sceneId = deps.currentSceneId();
+    const rows: { label: string; track: HeatTrack }[] = [];
+    for (const spec of deps.getSceneSettings(sceneId)) {
+      if (!spec.drive || deps.getDriveSetting(sceneId, spec) === "scene") continue;
+      const track = settingHeat.get(spec.key);
+      if (track) rows.push({ label: spec.label, track });
+    }
+    return rows;
   }
 
   /** The drive graphs' frame, drawn under their traces: a faint band over
@@ -3586,10 +3637,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const name = document.createElement("div");
     name.style.cssText = driveSrcNameStyle;
     name.textContent = driveSourceLabel(src.choice);
-    // The wire's heat pip (heat.ts); its line shows in the panel's bottom
+    // The wire's heat dot (heat.ts); its line shows in the panel's bottom
     // hint bar while the name is hovered.
     const wireKey = jackKey(src.choice);
-    const wirePip = createHeatPip("wire", name);
+    const wirePip = createHeatPip(name);
     name.appendChild(wirePip.el);
     wireHeatPips.push({ key: spec.key, wireKey, pip: wirePip });
     const heatSpan = getHistorySpan(HEAT_SPAN_CARD);
@@ -4170,12 +4221,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const port = document.createElement("button");
     port.type = "button";
     port.className = "vc-drive-port";
-    // The port's heat pip (heat.ts), and its line under the port's tooltip.
-    const portPip = createHeatPip("port");
-    port.appendChild(portPip.el);
+    // The port's tooltip gets a heat line under its own (heat.ts).
     const portTooltip = (): string[] => {
-      const heat = portPip.text();
-      return heat ? [port.title, heat] : [port.title];
+      if (deps.getDriveSetting(sceneId, spec) === "scene") return [port.title];
+      const span = getHistorySpan(HEAT_SPAN_CARD);
+      return [port.title, heatText(settingHeat.get(spec.key)?.read(span, performance.now() / 1000) ?? null, span)];
     };
     // The row port's own instant tooltip (outside the pinned panel, so it
     // gets the floating tooltip rather than the panel's bottom hint line —
@@ -4209,10 +4259,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sparkCtx = sparkCanvas.getContext("2d")!;
     const sparkSize = trackDriveCanvas(sparkCanvas);
     driveSparkCanvases.push(sparkCanvas);
+    // The thin heat history strip under the graph (heat.ts), hidden for a
+    // setting that follows the scene.
+    const heatStrip = document.createElement("div");
+    heatStrip.className = "vc-heat-strip";
+    let heatStripBg = "";
+    let heatStepNow = -1;
+    let heatGlowNow = -1;
     const patchContainer = document.createElement("div");
     patchContainer.className = "vc-drive-patch";
     patchContainer.style.display = "none";
-    below.append(sparkWrap, patchContainer);
+    below.append(sparkWrap, heatStrip, patchContainer);
 
     const SPARK_LEN = 90; // ~3 s at 30 Hz
     const sparkVals = new Float32Array(SPARK_LEN);
@@ -4257,12 +4314,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
 
     function refreshHeat(nowSec: number): void {
-      if (deps.getDriveSetting(sceneId, spec) === "scene") {
-        portPip.hide();
-        return;
-      }
+      const wired = deps.getDriveSetting(sceneId, spec) !== "scene";
+      heatStrip.hidden = !wired;
+      boundRowEl?.classList.toggle("vc-heat-row", wired);
+      if (!wired) return;
+      const track = settingHeat.get(spec.key);
       const span = getHistorySpan(HEAT_SPAN_CARD);
-      portPip.set(settingHeat.get(spec.key)?.read(span, nowSec) ?? null, span);
+      const bg = track ? heatStripBackground(heatHistory(track, span, nowSec, HEAT_HISTORY_CELLS)) : "";
+      if (bg !== heatStripBg) {
+        heatStripBg = bg;
+        heatStrip.style.background = bg;
+      }
+      const r = track?.read(span, nowSec) ?? null;
+      const step = heatStep(r ? r.heat : 0);
+      if (step !== heatStepNow) {
+        heatStepNow = step;
+        boundRowEl?.style.setProperty("--vc-heat", heatColor(step));
+      }
+    }
+
+    /** Writes the lens glow from heatLive when this row's level changes. */
+    function tickHeatGlow(): void {
+      const glow = heatGlowLevel(heatLive.get(spec.key) ?? 0);
+      if (glow === heatGlowNow) return;
+      heatGlowNow = glow;
+      boundRowEl?.style.setProperty("--vc-heat-glow", String(glow));
     }
 
     /** Always resyncs .vc-drive-preview from the current global `preview`
@@ -4433,7 +4509,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         boundRowEl = rowEl;
         refreshMeta();
         refreshHeat(performance.now() / 1000);
-        return { sceneId, spec, portEl: port, rowEl, refreshMeta, refreshPin, refreshPreviewLit, rebuildIfPinned, tickSparkline, refreshHeat };
+        return { sceneId, spec, portEl: port, rowEl, refreshMeta, refreshPin, refreshPreviewLit, rebuildIfPinned, tickSparkline, refreshHeat, tickHeatGlow };
       },
     };
   }
@@ -7197,6 +7273,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   setMetersHidden(isFolded(METERS_COLUMN));
 
   // ---- solo ----
+  /** The heat lens on or off — the HEAT chip and L. View state for this
+   *  session only, like Solo below. */
+  function setHeatLens(on: boolean): void {
+    heatLensOn = on;
+    root.classList.toggle("vc-heat-lens", on);
+    heatChip.style.cssText = on ? chipBtnLitStyle : chipBtnStyle;
+    audioMeters.setHeatLens(on);
+  }
+
   // Everything but the pinned setting (or, unpinned, the Scene card)
   // hidden, until O again — hidden by walking up from it and the dock
   // (which always stays) to the root, and marking every sibling off those
@@ -7476,6 +7561,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       setSolo(!soloOn);
       return;
     }
+    if (e.key === "l" || e.key === "L") {
+      noteKeyUse("heat");
+      setHeatLens(!heatLensOn);
+      return;
+    }
     if (e.key === "?") {
       noteKeyUse("keys");
       setKeysShown(!keysCard.classList.contains("vc-keys-show"));
@@ -7720,10 +7810,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         }
       }
 
-      // Heat pips: at most every HEAT_REFRESH_MS, while the Scene card is unfolded.
+      // Heat: the strips under the graphs and each row's heat colour, at most
+      // every HEAT_REFRESH_MS, while the Scene card is unfolded.
       if (nowMs - lastHeatMs >= HEAT_REFRESH_MS && !sceneCard.fold?.isFolded()) {
         lastHeatMs = nowMs;
         refreshHeatPips(nowMs / 1000);
+      }
+      // The lens glow, every tick while it's on (a write only when a row's level changes).
+      if (heatLensOn && !sceneCard.fold?.isFolded()) {
+        for (const h of driveRowHandles) h.tickHeatGlow();
       }
 
       // Picture: the Overall trace plus one compact trace per measure of the

@@ -3,9 +3,20 @@ import { getTapRun } from "../render/tapTempo.ts";
 import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId, type SignalId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
-import { driveSourceColor, jackKey } from "./driveSources.ts";
+import { driveSourceColor, driveSourceLabel, jackKey } from "./driveSources.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
-import { createHeatPip, createHeatTrack, heatText, HEAT_REFRESH_MS, type HeatPip, type HeatTrack } from "./heat.ts";
+import {
+  createHeatTrack,
+  heatColor,
+  heatGlowLevel,
+  heatHistory,
+  heatStep,
+  heatStripBackground,
+  heatText,
+  HEAT_HISTORY_CELLS,
+  HEAT_REFRESH_MS,
+  type HeatTrack,
+} from "./heat.ts";
 import { flashTo } from "./flashAnim.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
@@ -244,12 +255,15 @@ import { createColumnStore } from "./columnStore.ts";
  * the cable layer's (src/ui/cableLayer.ts, owned by deviceMenu.ts) own
  * source-endpoint lookup.
  *
- * Each signal jack also carries a heat pip (heat.ts). Every signal's track
- * records on every tick, folded card or closed panel alike; the pips
- * recolour at most every HEAT_REFRESH_MS, and only on an unfolded card with
- * the panel open. A pip reads its signal's own card's span chip
- * (`monitor.card`), or the card it's mounted on when the signal has no
- * monitor.
+ * Signal jacks take part in the heat lens (heat.ts): a signal jack has no dot
+ * of its own. Every signal's track records on every tick, folded card or
+ * closed panel alike. Each jack's heat colour refreshes at most every
+ * HEAT_REFRESH_MS, and only on an unfolded card; while the heat lens is on,
+ * the jack glows, brighter as its reading moves. A jack reads its signal's
+ * own card's span chip (`monitor.card`), or the card it's mounted on when the
+ * signal has no monitor. The Heat history card (its own span chip, folded by
+ * default) draws one strip per wired setting, from deps.heatSettings, and one
+ * per signal jack.
  *
  * Every one of those "un-eased" values is what its smoothed sibling is
  * eternally chasing — none of it is a param a Reset chip can zero out.
@@ -313,6 +327,9 @@ export interface AudioMeters {
    *  always keeps the two in sync rather than this file owning a chip of
    *  its own. */
   setRaw(on: boolean): void;
+  /** Turns the heat lens on or off (deviceMenu.ts's HEAT chip and L key):
+   *  while on, update() writes every signal jack's glow (heat.ts). */
+  setHeatLens(on: boolean): void;
   /** Unfolds `card` if needed (the same click-the-chevron move
    *  deviceMenu.ts's jumpToBlock makes for a folded settings card), scrolls
    *  `row` into view and flashes it — the "reacts to" strip's jump target
@@ -332,11 +349,14 @@ export interface AudioMeters {
   jackElements(): ReadonlyMap<string, HTMLElement>;
   /** The heat line (heat.ts) for a meter jack's tooltip — deviceMenu.ts's
    *  jackTooltipLines adds it under its own lines. Null for a jack with no
-   *  heat pip: one not on a meter card, or one whose source isn't a signal. */
+   *  heat: one not on a meter card, or one whose source isn't a signal. */
   jackHeatText(choice: DriveSourceChoice): string | null;
 }
 
 export interface AudioMetersDeps {
+  /** The current scene's wired settings and their heat tracks, for the Heat
+   *  history card's Settings group — deviceMenu.ts owns them (heat.ts). */
+  heatSettings(): readonly { label: string; track: HeatTrack }[];
   /** The Dynamics card's Reset chip (its header, beside Loudness): start the
    *  integrated reading over. */
   onLufsReset: () => void;
@@ -1976,15 +1996,22 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const jackRegistry: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
   const jackElementsMap = new Map<string, HTMLElement>();
   // Heat (heat.ts): one track per signal, for the whole session and never
-  // cleared, recorded every tick in update() panel open or closed; a pip on
-  // each signal jack, recoloured at most every HEAT_REFRESH_MS while its card
-  // is on screen and unfolded. Parallel arrays so the per-tick record loop
-  // allocates nothing.
+  // cleared, recorded every tick in update() panel open or closed. Each signal
+  // jack's heat colour refreshes at most every HEAT_REFRESH_MS while its card
+  // is on screen and unfolded; while the heat lens is on, each jack glows,
+  // brighter as its reading moves, written only when the level changes.
+  // Parallel arrays so the per-tick record loop allocates nothing.
   const heatIds = Object.keys(SIGNALS) as SignalId[];
   const heatTracks: HeatTrack[] = heatIds.map(() => createHeatTrack());
   const heatById = new Map<SignalId, HeatTrack>(heatIds.map((id, i) => [id, heatTracks[i]!]));
-  const heatPips: { id: SignalId; card: MeterCardId; pip: HeatPip }[] = [];
-  // jackKey → the card whose span chip its pip reads (jackHeatText below).
+  // Each signal jack, for its lens glow and the Heat history card: the jack's
+  // element, the card whose span chip it reads, and its index into heatIds.
+  const heatJacks: { id: SignalId; card: MeterCardId; el: HTMLElement; idx: number; step: number; glow: number }[] = [];
+  // This tick's reading of every signal, by heatIds index, for the lens glow.
+  const heatLive = new Float32Array(heatIds.length);
+  const heatIdx = new Map<SignalId, number>(heatIds.map((id, i) => [id, i]));
+  let heatLensOn = false;
+  // jackKey → the card whose span chip its heat line reads (jackHeatText below).
   const heatCardByKey = new Map<string, MeterCardId>();
   let lastHeatMs = -Infinity;
 
@@ -1996,7 +2023,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
    *  different only where the jack itself is absolutely positioned inside
    *  a sub-wrapper (createHitsHistory's own vizWrap) but the glow/dim
    *  belongs to the row as a whole. `heatCard` is the card whose span chip a
-   *  signal jack's heat pip reads (see the heat block above); it defaults to
+   *  signal jack's heat reads (see the heat block above); it defaults to
    *  the signal's own `monitor` card, then the Dynamics card. */
   function mountJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement, heatCard?: MeterCardId): JackHandle {
     const jack = createJack(
@@ -2007,13 +2034,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     host.appendChild(jack.el);
     jackRegistry.push({ choice, jack, feedEl });
     jackElementsMap.set(jackKey(choice), jack.el);
-    // A signal jack gets a heat pip; a beat-grid or line jack has no signal
-    // reading to measure.
+    // A signal jack takes part in the heat lens and the Heat history card; a
+    // beat-grid or line jack has no signal reading to measure.
     if (typeof choice === "string") {
       const card = heatCard ?? SIGNALS[choice].monitor?.card ?? "signal";
-      const pip = createHeatPip("jack");
-      jack.el.appendChild(pip.el);
-      heatPips.push({ id: choice, card, pip });
+      jack.el.classList.add("vc-heat-jack");
+      heatJacks.push({ id: choice, card, el: jack.el, idx: heatIdx.get(choice)!, step: -1, glow: -1 });
       heatCardByKey.set(jackKey(choice), card);
     }
     return jack;
@@ -2542,6 +2568,112 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   characterCard.body.append(section.el, spacer(), dialGrid, spacer(), brightnessRow.el);
 
+  // The Heat history card (heat.ts): one strip per wired setting and per
+  // signal jack, one cell per second across this card's own span. Folded by
+  // default; refreshed at most every HEAT_REFRESH_MS while it's open.
+  const heatHistoryCard = createCard({
+    title: "Heat history",
+    accent: NEUTRAL_ACCENT,
+    foldId: "heat",
+    defaultFolded: true,
+    right: createSpanChip("heat", () => refreshHeatHistory(performance.now() / 1000)),
+  });
+  const heatNote = document.createElement("div");
+  heatNote.className = "vc-heat-hist-note";
+  heatNote.textContent = "How much each one moved, second by second. Colder = barely moves, hotter = big moves on loud music.";
+  const heatSettingsGrid = document.createElement("div");
+  heatSettingsGrid.className = "vc-heat-hist";
+  const heatSignalsGrid = document.createElement("div");
+  heatSignalsGrid.className = "vc-heat-hist";
+  const heatAxis = document.createElement("div");
+  heatAxis.className = "vc-heat-hist-axis";
+  const heatAxisLeft = document.createElement("span");
+  const heatAxisNow = document.createElement("span");
+  heatAxisNow.textContent = "now";
+  heatAxis.append(heatAxisLeft, heatAxisNow);
+  heatHistoryCard.body.append(heatNote, heatSettingsGrid, heatSignalsGrid, heatAxis);
+
+  function heatHistGroup(grid: HTMLElement, text: string): void {
+    const group = document.createElement("div");
+    group.className = "vc-heat-hist-group";
+    group.textContent = text;
+    grid.append(group);
+  }
+  function heatHistRow(grid: HTMLElement, label: string): HTMLElement {
+    const name = document.createElement("span");
+    name.className = "vc-heat-hist-label";
+    name.textContent = label;
+    name.title = label;
+    const strip = document.createElement("div");
+    strip.className = "vc-heat-hist-strip";
+    grid.append(name, strip);
+    return strip;
+  }
+
+  // The Signals group: built once, as every jack is mounted by now. Each
+  // card's signal jacks in mount order, one row per signal.
+  const heatSignalStrips: { idx: number; el: HTMLElement; bg: string }[] = [];
+  const heatCardTitles: Record<MeterCardId, string> = {
+    signal: signalCard.title.textContent ?? "",
+    hits: hitsCard.title.textContent ?? "",
+    tempo: tempoCard.title.textContent ?? "",
+    character: characterCard.title.textContent ?? "",
+  };
+  for (const cardId of ["signal", "hits", "tempo", "character"] as const) {
+    const seen = new Set<SignalId>();
+    const jacks = heatJacks.filter((j) => {
+      if (j.card !== cardId || seen.has(j.id)) return false;
+      seen.add(j.id);
+      return true;
+    });
+    if (!jacks.length) continue;
+    heatHistGroup(heatSignalsGrid, heatCardTitles[cardId]);
+    for (const j of jacks) {
+      heatSignalStrips.push({ idx: j.idx, el: heatHistRow(heatSignalsGrid, driveSourceLabel(j.id)), bg: "" });
+    }
+  }
+
+  // The Settings group, rebuilt only when the wired settings' labels change;
+  // their tracks are re-read every refresh.
+  let heatSettingsKey: string | null = null;
+  let heatSettingStrips: { track: HeatTrack; el: HTMLElement; bg: string }[] = [];
+  function refreshHeatSettings(): void {
+    const rows = deps.heatSettings();
+    const key = rows.map((r) => r.label).join("\n");
+    if (key !== heatSettingsKey) {
+      heatSettingsKey = key;
+      heatSettingsGrid.replaceChildren();
+      heatSettingStrips = [];
+      heatHistGroup(heatSettingsGrid, "Settings");
+      if (!rows.length) {
+        const none = document.createElement("div");
+        none.className = "vc-heat-hist-note";
+        none.textContent = "No wired settings in this scene.";
+        heatSettingsGrid.append(none);
+      }
+      for (const r of rows) heatSettingStrips.push({ track: r.track, el: heatHistRow(heatSettingsGrid, r.label), bg: "" });
+    }
+    rows.forEach((r, i) => {
+      heatSettingStrips[i]!.track = r.track;
+    });
+  }
+
+  /** Paints the Heat history card: its span's axis label, then every strip. */
+  function refreshHeatHistory(nowSec: number): void {
+    const span = getHistorySpan("heat");
+    heatAxisLeft.textContent = "−" + formatHistorySpan(span);
+    refreshHeatSettings();
+    const paint = (s: { el: HTMLElement; bg: string }, track: HeatTrack): void => {
+      const bg = heatStripBackground(heatHistory(track, span, nowSec, HEAT_HISTORY_CELLS));
+      if (bg !== s.bg) {
+        s.bg = bg;
+        s.el.style.background = bg;
+      }
+    };
+    for (const s of heatSettingStrips) paint(s, s.track);
+    for (const s of heatSignalStrips) paint(s, heatTracks[s.idx]!);
+  }
+
   // Sound/Beat/Song, per the file header. Signal leads Sound: it's the raw
   // picture of the sound itself, and the first thing to check when the
   // visuals seem off.
@@ -2552,6 +2684,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     tempoCard.el,
     meterGroupHeading("Song"),
     characterCard.el,
+    meterGroupHeading("Heat"),
+    heatHistoryCard.el,
   );
 
   /** Folds this frame's buffer into the Waveform's current column (see
@@ -2627,7 +2761,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["waveform", waveform.el],
   ]);
 
-  // Each card's fold, by id, for the heat pips (update()'s heat block below).
+  // Each card's fold, by id, for the heat block (update()'s heat block below).
   const meterCards: Record<MeterCardId, { fold?: { isFolded(): boolean } }> = {
     signal: signalCard,
     hits: hitsCard,
@@ -2701,21 +2835,40 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       centroidTrace.push([anim ? (raw ? anim.centroidRaw : anim.centroid) : null], nowMs);
       // Heat: every signal's track, panel open or closed (heat.ts).
       if (frame && anim) {
-        const heatSec = nowMs / 1000;
+        const recordSec = nowMs / 1000;
         for (let i = 0; i < heatIds.length; i++) {
-          heatTracks[i]!.push(SIGNALS[heatIds[i]!].read(frame, anim), frame.level, heatSec);
+          const x = SIGNALS[heatIds[i]!].read(frame, anim);
+          heatLive[i] = x;
+          heatTracks[i]!.push(x, frame.level, recordSec);
         }
       }
       if (!onScreen) return;
 
-      // Heat pips: at most every HEAT_REFRESH_MS, only on an unfolded card.
+      // Heat: each jack's colour and the Heat history card at most every
+      // HEAT_REFRESH_MS; the lens glow every tick it's on (a write only when
+      // a jack's level changes). Only on unfolded cards.
+      const heatSec = nowMs / 1000;
       if (nowMs - lastHeatMs >= HEAT_REFRESH_MS) {
         lastHeatMs = nowMs;
-        const heatSec = nowMs / 1000;
-        for (const { id, card, pip } of heatPips) {
-          if (meterCards[card].fold?.isFolded()) continue;
-          const span = getHistorySpan(card);
-          pip.set(heatById.get(id)!.read(span, heatSec), span);
+        for (const j of heatJacks) {
+          if (meterCards[j.card].fold?.isFolded()) continue;
+          const r = heatTracks[j.idx]!.read(getHistorySpan(j.card), heatSec);
+          const step = heatStep(r ? r.heat : 0);
+          if (step !== j.step) {
+            j.step = step;
+            j.el.style.setProperty("--vc-heat", heatColor(step));
+          }
+        }
+        if (!heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);
+      }
+      if (heatLensOn) {
+        for (const j of heatJacks) {
+          if (meterCards[j.card].fold?.isFolded()) continue;
+          const glow = heatGlowLevel(heatLive[j.idx]!);
+          if (glow !== j.glow) {
+            j.glow = glow;
+            j.el.style.setProperty("--vc-heat-glow", String(glow));
+          }
         }
       }
 
@@ -2981,6 +3134,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         glowEl.classList.toggle("on", kind !== "none");
         glowEl.style.opacity = kind === "faint" ? "0.45" : kind === "soft" ? "0.75" : "";
       }
+    },
+    setHeatLens(on) {
+      heatLensOn = on;
+      for (const j of heatJacks) j.glow = -1;
     },
     jackElements(): ReadonlyMap<string, HTMLElement> {
       return jackElementsMap;

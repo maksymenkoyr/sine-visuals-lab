@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   createHeatTrack,
   HEAT_COLORS,
+  HEAT_HISTORY_CELLS,
   HEAT_LEVEL_LOUD,
   HEAT_LEVEL_QUIET,
   HEAT_STEPS,
   type HeatTrack,
   heatColor,
+  heatGlowLevel,
+  heatHistory,
   heatStep,
+  heatStripBackground,
   heatText,
 } from "../src/ui/heat.ts";
 import { HISTORY_SPAN_MAX } from "../src/ui/historySpan.ts";
@@ -109,5 +113,42 @@ describe("heat", () => {
     expect(text).toContain("Moved a lot");
     expect(text).toContain("30s");
     expect(text).toContain("loud music");
+  });
+
+  it("gives a history of nulls for an empty track, one cell per second up to the cell count", () => {
+    const steps = heatHistory(createHeatTrack(), 30, 100, HEAT_HISTORY_CELLS);
+    expect(steps).toHaveLength(30);
+    expect(steps.every((s) => s === null)).toBe(true);
+  });
+
+  it("shows a loud swing in the early cells and a flat stretch in the last", () => {
+    const t = createHeatTrack();
+    feed(t, 0, 19, square, 0.9);
+    feed(t, 20, 39, flat, 0.9);
+    // Cell j ends at second j + 0.5, so cells 5..15 read only the square part.
+    const steps = heatHistory(t, 40, 39.5, 40);
+    expect(steps).toHaveLength(40);
+    for (let j = 5; j <= 15; j++) expect(steps[j]!).toBeGreaterThanOrEqual(HEAT_STEPS - 2);
+    for (let j = 30; j < 40; j++) expect(steps[j]).toBe(0);
+  });
+
+  it("gives HEAT_HISTORY_CELLS cells for a long span", () => {
+    expect(heatHistory(createHeatTrack(), HISTORY_SPAN_MAX, 500, HEAT_HISTORY_CELLS)).toHaveLength(HEAT_HISTORY_CELLS);
+  });
+
+  it("paints a history as hard-edged runs, empty cells included", () => {
+    const bg = heatStripBackground([0, 0, null, 5]);
+    expect(bg.startsWith("linear-gradient(to right, ")).toBe(true);
+    expect(bg.split(heatColor(0)).length - 1).toBe(1);
+    expect(bg).toContain(`${heatColor(0)} 0.00% 50.00%`);
+    expect(bg).toContain("rgba(255,255,255,0.06) 50.00% 75.00%");
+    expect(bg).toContain(heatColor(5));
+  });
+
+  it("quantises the lens glow to a 0..1 level", () => {
+    expect(heatGlowLevel(0)).toBe(0);
+    expect(heatGlowLevel(1)).toBe(1);
+    expect(heatGlowLevel(2)).toBe(1);
+    expect(heatGlowLevel(NaN)).toBe(0);
   });
 });
