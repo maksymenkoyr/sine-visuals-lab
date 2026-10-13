@@ -541,11 +541,11 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     }
   });
 
-  // None was ever a real composite — breathe read a bare 0 (no reaction at
-  // all), injection and causticDensity a bare 1 (an unfiltered
-  // pass-through) — so per drives.ts's header's "Nothing plugged in"
-  // paragraph they now each carry a real catalogue default instead of "scene".
-  it("breathe defaults to Bar wave, injection to Treble hit and causticDensity to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
+  // Neither was ever a real composite — breathe read a bare 0 (no reaction at
+  // all), causticDensity a bare 1 (an unfiltered pass-through) — so per
+  // drives.ts's header's "Nothing plugged in" paragraph they now each carry a
+  // real catalogue default instead of "scene".
+  it("breathe defaults to Bar wave and causticDensity to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.8), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
@@ -553,8 +553,6 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.value("causticDensity", -1)).toBe(anim.sectionIntensity);
     expect(byKey("breathe").drive!.default).toBe("anim.barWave");
     expect(drives.uniformPair("breathe")).toEqual({ drive: SIGNALS["anim.barWave"].read(frame(), anim), custom: 1 });
-    expect(byKey("injection").drive!.default).toBe("anim.highOnset");
-    expect(drives.uniformPair("injection")).toEqual({ drive: anim.highPulse, custom: 1 });
   });
 
   it("ripple's Scene default reproduces today's exact trigger (bass hit OR beat hit, unconditionally)", () => {

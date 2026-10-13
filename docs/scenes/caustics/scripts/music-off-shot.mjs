@@ -19,7 +19,7 @@ page.on("pageerror", (e) => console.log("pageerror", e.message.slice(0, 200)));
 page.on("console", (m) => { if (m.type() === "error") console.log("console:", m.text().slice(0, 200)); });
 await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=120#/v/caustics`);
 await page.waitForFunction(() => !!window.__viz, null, { timeout: 30000 });
-const settings = { ripple: 0, drift: 0, driftLevel: 0, driftPump: 0, bass: 0, turbulence: 0, flash: 0, breathe: 0, sparkleBright: 0, injection: 0, ...(extra ? JSON.parse(extra) : {}) };
+const settings = { ripple: 0, drift: 0, driftLevel: 0, driftPump: 0, bass: 0, turbulence: 0, flash: 0, breathe: 0, sparkleBright: 0, ...(extra ? JSON.parse(extra) : {}) };
 await page.evaluate((s) => window.__viz.setParams({ scene: "caustics", autoPin: true, settings: s }), settings);
 await page.waitForTimeout(6000); // settings glide to their new values
 for (let i = 0; i < 3; i++) {

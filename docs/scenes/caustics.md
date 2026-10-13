@@ -1,8 +1,8 @@
 # Caustics (`caustics`)
 
 The bright wandering filaments you see on the floor of a sunlit pool — domain-warped
-value noise sharpened into thin ridges, with a beat ripple, treble sparkle and a
-spray-injection layer riding on top. Ships from the initial commit and is on main
+value noise sharpened into thin ridges, with a beat ripple and treble sparkle
+riding on top. Ships from the initial commit and is on main
 (not a draft).
 
 ## Where the code is
@@ -649,6 +649,18 @@ reference-measurement workflow used by later scenes.
   motion drives off) at 0, 35, 50, 75 and 100%, before against after. Not yet
   judged by eye on the real default or with music. Same day the dial's span
   was widened from 2.4 to 3.2 octaves (0.33x..3x the default's filament count).
+- 2026-10-13 — Spray injection removed: the "injection" and "injectionReverse"
+  settings, the droplet loop in FRAG and every `INJECTION_*` constant (with the
+  lattice-period check that existed only for the spray field). The user asked to
+  remove the functionality after a demo of it. Sparkle's glints are untouched; the
+  spray had only ever added to them, at 0 it changed nothing, and nothing else
+  read its drive. A saved Look or share link that lists either key still opens:
+  `applyLook` walks the scene's own settings, so the unknown keys are dropped. A
+  scene left at the old default (0.67) loses the spray's brightness on lit
+  glints and gets that block's GPU time back (the 2026-09-28 entry above
+  measured it at about 3.6 of 11.1 ms per Retina frame after its own fix). `tests/drives.test.ts` no longer pins the injection drive.
+  The shared `hash2Cell` stays in `noiseHash.ts` (Tangle uses it). Not judged by
+  eye on the live pool or with music.
 
 ## Tuning notes
 
@@ -827,3 +839,4 @@ reference-measurement workflow used by later scenes.
 - #185 (2026-09-28) — Spray loop: 2x2 nozzle cells, far nozzles skipped, gated on its own brightness — the frame's GPU cost roughly halved, no pixel changed (see Decisions)
 - #405 (draft, 2026-10-06) — Beat ripple's detector moved to the shared `src/render/standout.ts`, renamed only (see Decisions)
 - #449 (2026-10-09) — Level glow: brightness-from-loudness gets its own setting (see Decisions)
+- 2026-10-13 — Spray injection removed (see Decisions)
