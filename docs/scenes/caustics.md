@@ -894,3 +894,4 @@ reference-measurement workflow used by later scenes.
 - #405 (draft, 2026-10-06) — Beat ripple's detector moved to the shared `src/render/standout.ts`, renamed only (see Decisions)
 - #449 (2026-10-09) — Level glow: brightness-from-loudness gets its own setting (see Decisions)
 - 2026-10-13 — Spray injection removed (see Decisions)
+- #508 (draft, 2026-10-13) — Treble sparkle as an Effect and a Shape, with a preview in the Scene card (see Decisions)
