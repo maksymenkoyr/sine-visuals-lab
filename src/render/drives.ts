@@ -12,6 +12,7 @@ import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, g
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
+import { getDriveSolo } from "./driveSolo.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -315,6 +316,14 @@ import { publishSettingMarks } from "./settingMarks.ts";
  * never `.fired()`, so it can't accidentally steal a grid edge a scene
  * hasn't rendered yet.
  *
+ * **"Only this".** A local, in-memory preview (driveSolo.ts): while one
+ * setting of a scene is soloed, `forScene()` reads every other setting of
+ * that scene as if all its wires were switched off, so it falls under the
+ * "Nothing plugged in" rules above, and a built-in reaction reads its rest.
+ * The soloed setting itself reads normally. The stored wires are never
+ * touched, so ending the solo restores them exactly. `accumulate()` ignores
+ * the solo, so every tracker keeps learning and ending it is warm.
+ *
  * **What's deliberately not a drive** (so the boundary is written down, not
  * just implied by what SETTINGS arrays happen to declare): response-shape
  * params (time constants, hold, curve shapes — they're not amounts);
@@ -524,6 +533,12 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   gateTop: () => undefined,
   masterExcursion: () => null,
 };
+
+// What a setting silenced by "Only this" (driveSolo.ts) reads as: a patch
+// whose one source is switched off, so it has no live source and reads its
+// rest, with no edge and no drive. Never stored; resolve() below is the only
+// place it is handed out.
+const SOLO_SILENCED: DrivePatch = { mix: "add", sources: [{ choice: "feature.level", weight: 1, off: true }] };
 
 // matches animClock.ts's own BEAT_PULSE_DECAY_PER_SEC exactly (imported, not
 // hand-duplicated) — grid pulses and Any-hit/beat-grid Fixed/Loud heights
@@ -1440,6 +1455,8 @@ export function createDriveEngine(): DriveEngine {
         const spec = specByKey.get(key);
         const drive = spec?.drive;
         if (!spec || !drive) return { setting: "scene", gain: 1 };
+        const solo = getDriveSolo();
+        if (solo && solo.sceneId === sceneId && solo.key !== key) return { setting: SOLO_SILENCED, gain: drive.gain ?? 1 };
         return { setting: getDriveSetting(sceneId, spec), gain: drive.gain ?? 1 };
       }
 
@@ -1674,6 +1691,7 @@ export function createDriveEngine(): DriveEngine {
         uniformPair(key) {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return { drive: 0, custom: 0 };
+          if (setting === SOLO_SILENCED) return { drive: 0, custom: 1 };
           return { drive: applyGenericGate(key, reading(key, setting, gain)), custom: 1 };
         },
 
@@ -1729,7 +1747,7 @@ export function createDriveEngine(): DriveEngine {
           let count = 0;
           for (const spec of settings) {
             if (!spec.drive) continue;
-            const setting = getDriveSetting(sceneId, spec);
+            const { setting } = resolve(spec.key);
             if (setting === "scene" || !hasLiveSource(setting)) continue;
             const ex = expansionTrackers.get(gateTrackerKey(sceneId, spec.key));
             if (!ex) continue;

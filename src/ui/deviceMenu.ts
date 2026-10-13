@@ -76,6 +76,7 @@ import {
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
+import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
@@ -2784,6 +2785,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     tickHeatGlow(): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
+  // "Only this" (driveSolo.ts) changes from any row's button or the scene
+  // change in update(): the pinned row's own panel shows whichever label
+  // is current. rebuildIfPinned() is a no-op on every row but the pinned one.
+  onDriveSoloChange(() => {
+    for (const h of driveRowHandles) h.rebuildIfPinned();
+  });
 
   // Heat (heat.ts) for the current scene's wired settings and each of their
   // wires (keyed by the wire's jackKey), recorded every tick by recordHeat,
@@ -4204,7 +4211,28 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
     eyebrow.textContent = "Wires";
-    head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
+    // "Only this" (driveSolo.ts): a local preview, not a wire edit, so it
+    // deliberately does not go through patchChanged() (which copies the
+    // setting to linked rows). onDriveSoloChange's own rebuild refreshes it.
+    const soloNow = getDriveSolo();
+    const isSolo = !!soloNow && soloNow.sceneId === sceneId && soloNow.key === spec.key;
+    const soloBtn = document.createElement("button");
+    soloBtn.type = "button";
+    soloBtn.style.cssText = driveResetLinkStyle;
+    soloBtn.textContent = isSolo ? "All back" : "Only this";
+    soloBtn.setAttribute("aria-pressed", String(isSolo));
+    setHint(
+      soloBtn,
+      isSolo
+        ? "Switch every setting's reaction back on."
+        : "Switch off every other setting's reaction, so only this one moves. Wires are kept; this screen only.",
+    );
+    soloBtn.addEventListener("click", () => {
+      const now = getDriveSolo();
+      if (now && now.sceneId === sceneId && now.key === spec.key) clearDriveSolo();
+      else setDriveSolo(sceneId, spec.key);
+    });
+    head.append(eyebrow, soloBtn, buildMixSeg(sceneId, spec, patch));
     panel.appendChild(head);
 
     const list = document.createElement("div");
@@ -7786,6 +7814,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     ) {
       // Heat records panel open or closed, like the meters' traces (heat.ts).
       recordHeat(drives, frame);
+      // "Only this" (driveSolo.ts) is dropped on a scene switch too. Checked
+      // before the closed return below, so it still clears with the panel shut.
+      const solo = getDriveSolo();
+      if (solo && solo.sceneId !== deps.currentSceneId()) clearDriveSolo();
       // Closed, only the meters' traces (audioMeters.ts's update(), onScreen
       // false) and heat record, so they open on what they missed; every DOM write
       // here is skipped — this runs every rAF tick while in a viz.
