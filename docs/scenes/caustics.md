@@ -634,6 +634,21 @@ reference-measurement workflow used by later scenes.
   Caustic density is the one music term that is not zeroed by its slider: its
   own source still lifts the slider (`densityTargetFor`). That is left to #453,
   and `densityTargetFor` is untouched here.
+- 2026-10-13 — Caustic density adds filaments instead of zooming (#454).
+  The dial used to scale `q` before the whole ridge loop, so the warp, every
+  filament's width and the glints zoomed with it. Now only the ridge noise
+  (`noise(q * 2.3 * densScale + ridgeFlow)`) is sampled finer or coarser, over
+  the same warp, and `sharp / densScale` feeds the ridge exponent so each
+  filament keeps its width while there are more or fewer of them. `driftFlows`
+  takes two phases: `scaledPhase` (density-scaled, from `advanceDensityFlow`)
+  for the ridge samples so drift stays the same speed on screen, and the plain
+  `phase` for the warp and glints, which no longer scale. At the dial's middle
+  `causticDensityScale` is 1, so that setting renders as before; the shipped
+  default is lower, so its pool now has fewer filaments at normal width rather
+  than a zoomed-in one. Checked headless on a frozen pool (`drift` 0 and the
+  motion drives off) at 0, 35, 50, 75 and 100%, before against after. Not yet
+  judged by eye on the real default or with music. Same day the dial's span
+  was widened from 2.4 to 3.2 octaves (0.33x..3x the default's filament count).
 
 ## Tuning notes
 

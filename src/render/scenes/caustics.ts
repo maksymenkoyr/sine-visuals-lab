@@ -38,8 +38,9 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // only ever get one of "peak reachable at any setting", "resting look stays
 // put", "doesn't collapse to fog between beats" right at a time — see this
 // file's git history),
-// Caustic density scales the noise field's spatial frequency (more/fewer,
-// finer/fatter filaments; 0.5 is exactly the old fixed frequency) — wirable
+// Caustic density scales how many filaments the ridge noise resolves into,
+// at the same filament width and over the same warp (it is not a zoom; 0.5 is
+// exactly the old fixed frequency) — wirable
 // (its source lifts the slider toward a finer mesh, Section by default), and
 // eased in by advanceDensityFlow rather than applied on the frame it changes,
 // uBreathe is the depth of a zoom its own source moves — Bar wave by
@@ -156,7 +157,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description:
-      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
+      "How many filaments the pattern resolves into — fewer at low values, more at high, each keeping its width. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -677,10 +678,11 @@ const BREATHE_ZOOM = 0.10;
 const FOCUS_SNAP_RATIO = 1.3;
 
 // Caustic density's reach (causticDensityScale below): 0.5 is exactly today's old fixed
-// noise-sampling frequency (densScale = 1); the endpoints are ±1.2 octaves
-// off that, mild enough that both ends still read as this scene's own
-// pool-caustics look rather than a different pattern entirely.
-const DENSITY_SPAN_OCTAVES = 2.4;
+// noise-sampling frequency (densScale = 1); the endpoints sit half the span
+// either side of that in octaves. Widened once (#454) when density stopped
+// zooming: with the filament width held, a wide range reads as a sparse web
+// at one end and a dense mesh at the other, still this scene's own look.
+const DENSITY_SPAN_OCTAVES = 3.2;
 // How far Caustic density's own source lifts the slider toward the finest
 // mesh at a full reading. A lift, identity at drive 0 (drives.ts's header's
 // "Nothing plugged in" paragraph), so an unplugged jack leaves the slider's
@@ -723,8 +725,9 @@ export function focusSharp(fog: number, focus: number, beatPulse: number): numbe
   return rest / (1 + focus * beatPulse * FOCUS_SNAP_RATIO);
 }
 
-/** Caustic density (0..1) -> the noise-sampling frequency multiplier. 0.5 ->
- *  1.0, the old fixed frequency exactly. FRAG computes the same curve from
+/** Caustic density (0..1) -> the ridge noise's sampling frequency multiplier,
+ *  i.e. how many filaments there are relative to the default. 0.5 -> 1.0, the
+ *  old fixed frequency exactly. FRAG computes the same curve from
  *  uDensityLive. */
 export function causticDensityScale(density: number): number {
   return Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
@@ -909,21 +912,25 @@ const DRIFT_FLOW_LEN = FLOW_SPARKLE + 1;
 /** Fills `out` with every drift offset FRAG adds to a noise coordinate, each
  *  already wrapped by wrapFlow: the field is periodic in NOISE_PERIOD
  *  (hashCell in FRAG), so each entry is equivalent to its unwrapped value
- *  and the GPU never sees the raw, ever-growing phase. `phase` is
- *  advanceDensityFlow's `scaledPhase`, which already carries the density
- *  factor the shader applies to q (see that function for why it's folded
- *  in per tick rather than here). */
-export function driftFlows(phase: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
+ *  and the GPU never sees the raw, ever-growing phase. `phase` drives the
+ *  warp and glint samples, whose frequency Caustic density leaves alone;
+ *  `ridgePhase` drives the six ridge samples, whose frequency it scales, so
+ *  it is advanceDensityFlow's `scaledPhase`, which already carries that
+ *  factor (see that function for why it's folded in per tick rather than
+ *  here). */
+export function driftFlows(phase: number, ridgePhase: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
   const fx = phase * FLOW_X;
   const fy = phase * FLOW_Y;
   out[FLOW_FWD] = wrapFlow(fx);
   out[FLOW_FWD + 1] = wrapFlow(fy);
   out[FLOW_BACK] = wrapFlow(-fx);
   out[FLOW_BACK + 1] = wrapFlow(-fy);
+  const rx = ridgePhase * FLOW_X;
+  const ry = ridgePhase * FLOW_Y;
   for (let i = 0; i < RIDGE_OCTAVES; i++) {
     const k = 1 + i * FLOW_OCTAVE_STEP;
-    out[FLOW_RIDGE + 2 * i] = wrapFlow(fx * k);
-    out[FLOW_RIDGE + 2 * i + 1] = wrapFlow(fy * k);
+    out[FLOW_RIDGE + 2 * i] = wrapFlow(rx * k);
+    out[FLOW_RIDGE + 2 * i + 1] = wrapFlow(ry * k);
   }
   out[FLOW_SPARKLE] = wrapFlow(phase * SPARKLE_FLOW);
   return out;
@@ -937,15 +944,16 @@ export function driftFlows(phase: number, out: Float32Array = new Float32Array(D
 export const DENSITY_GLIDE_SEC = 0.6;
 
 /** advanceDensityFlow's state: `live` is the glided density (null until the
- *  first tick), `scaledPhase` the density-scaled drift phase driftFlows
- *  reads. */
+ *  first tick), `phase` the plain drift phase (warp and glints), and
+ *  `scaledPhase` the density-scaled one (the ridges) — both for driftFlows. */
 export interface DensityFlowState {
   live: number | null;
+  phase: number;
   scaledPhase: number;
 }
 
 export function createDensityFlowState(): DensityFlowState {
-  return { live: null, scaledPhase: 0 };
+  return { live: null, phase: 0, scaledPhase: 0 };
 }
 
 /** One tick: `live` glides toward `targetDensity` over DENSITY_GLIDE_SEC
@@ -959,9 +967,11 @@ export function createDensityFlowState(): DensityFlowState {
  *  longer the scene had run. Now a change only bends the drift rate from
  *  here on. At a constant density the sum is exactly the old product, so
  *  screen-space drift speed is still independent of density (rate ×
- *  densScale in noise space, sampled at densScale × the frequency). */
+ *  densScale in noise space, sampled at densScale × the frequency). Only the
+ *  ridges sample at that scaled frequency; the warp and glints keep `phase`. */
 export function advanceDensityFlow(state: DensityFlowState, dtSec: number, targetDensity: number, phaseStep: number): void {
   state.live = state.live === null ? targetDensity : state.live + (targetDensity - state.live) * (1 - Math.exp(-dtSec / DENSITY_GLIDE_SEC));
+  state.phase += phaseStep;
   state.scaledPhase += phaseStep * causticDensityScale(state.live);
 }
 
@@ -1173,17 +1183,17 @@ void main() {
   // point — every filament near the middle gets dragged into a pinch.
   p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
-  // uDensityLive scales the noise field's own sampling frequency — more,
-  // finer filaments at higher values. It's the glided, drive-scaled density
-  // advanceDensityFlow keeps (the raw uCausticDensity setting uniform isn't
-  // read, so a change eases in instead of landing in one frame). Applied
-  // once, here, to q's starting point; every later use of q inherits it
-  // because q is built by accumulating onto that scaled start (see q's
-  // definition below), not by re-scaling p at each octave separately. The
-  // drift offsets in uDriftFlow carry the same factor, folded in per tick
-  // JS-side (advanceDensityFlow), so a finer/coarser pattern doesn't also
-  // drift visibly faster/slower on screen — screen-space drift speed is
-  // flowRate / (samplingFreq), and densScale cancels between the two.
+  // uDensityLive scales only the ridge noise's sampling frequency — more
+  // filaments at higher values, laid over the same warp field. It is the
+  // glided, drive-scaled density advanceDensityFlow keeps (the raw
+  // uCausticDensity setting uniform isn't read, so a change eases in instead
+  // of landing in one frame). Scaling q itself, as this used to, zoomed the
+  // whole pattern (warp, filament width and glints with it); here the warp
+  // and the glints stay put and the ridge loop below divides sharp by the
+  // same factor, so a filament keeps its width while there are more or fewer
+  // of them. The ridge drift offsets in uDriftFlow carry the factor, folded
+  // in per tick JS-side (advanceDensityFlow), so a denser pattern doesn't
+  // also drift faster on screen.
   float densScale = pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
 
   // This scene's own drift (uDriftFlow, uploaded by extraUniforms below)
@@ -1224,11 +1234,7 @@ void main() {
   // the picture below its own resting look — only a crest brightens it. The
   // refraction term below reads ringSlope directly, signed, unaffected.
   float ring = uRipple * max(ringCrest, 0.0);
-  // Scaled by densScale here, once — every later octave builds on q by
-  // accumulating onto it (see the loop below), so the whole pattern inherits
-  // the frequency change from this one multiply rather than re-scaling p at
-  // each octave separately.
-  vec2 q = (p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)}) * densScale;
+  vec2 q = p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)};
 
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
@@ -1281,7 +1287,7 @@ void main() {
       noise(q * 1.7 + flowBack + fi * 1.3)
     ) * warpAmt;
     vec2 ridgeFlow = vec2(uDriftFlow[${FLOW_RIDGE} + 2 * i], uDriftFlow[${FLOW_RIDGE + 1} + 2 * i]);
-    float v = noise(q * 2.3 + ridgeFlow);
+    float v = noise(q * 2.3 * densScale + ridgeFlow);
     float ridge = 1.0 - abs(v * 2.0 - 1.0);
     // Anti-alias the ridge against its own screen-space footprint. pow()
     // has no concept of pixel size, so whenever the true line width (which
@@ -1294,7 +1300,9 @@ void main() {
     // the exponent used here (never the uniform "sharp" itself, so
     // ridgeGain's brightness still tracks the real value) keeps the
     // rendered line at least ~1px wide regardless of how sharp moves.
-    float aaSharp = min(sharp, 0.3 / max(fwidth(v), 1e-4));
+    // sharp / densScale: v changes densScale times faster across the screen,
+    // so the same exponent would thin every filament by that factor.
+    float aaSharp = min(sharp / densScale, 0.3 / max(fwidth(v), 1e-4));
     acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
     amp *= 0.6;
   }
@@ -1603,7 +1611,7 @@ float softCeil(float x, float knee, float ceil) {
         buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
 
         return {
-          uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
+          uDriftFlow: driftFlows(densityFlow.phase, densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,
