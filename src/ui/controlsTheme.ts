@@ -827,6 +827,16 @@ body.vc-keys-reveal [data-keycap]::after {
   width: var(--s); height: var(--s); border-radius: 50%; background: var(--c); opacity: 0.75;
   transform: rotate(var(--a)) translateY(calc(-1 * var(--r)));
 }
+/* Heat pips (heat.ts): a small dot beside a signal's jack, a setting's port
+ * and a wire's name, coloured cold → hot through --heat. Never on top of the
+ * jack or port, whose own fill, pressed and pin looks stay untouched: the
+ * jack's sits at its lower left, just outside the usage-dot ring; the port's
+ * just under it. */
+.vc-heat-pip { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--heat); pointer-events: none; }
+.vc-heat-pip[hidden] { display: none; }
+.vc-heat-pip-jack { left: 50%; top: 50%; transform: translate(calc(-50% - 9px), calc(-50% + 9px)); }
+.vc-heat-pip-port { left: 50%; top: calc(100% + 5px); transform: translateX(-50%); }
+.vc-heat-pip-wire { position: relative; display: inline-block; margin-left: 7px; vertical-align: 1px; }
 
 /* Highlighting while a setting is previewed/pinned (deviceMenu.ts's own
  * refreshPatchHighlight/refreshBandsJacks, audioMeters.ts's
@@ -1162,7 +1172,9 @@ body.vc-keys-reveal [data-keycap]::after {
 /* A lane's port and a row's group port: a stand-in with the real port's look
  * until the row is mounted, then the row's own port, moved in. */
 .vc-sc-port-slot { display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; }
-.vc-sc-port-slot .vc-drive-port { position: static; flex: none; }
+/* relative, laid out exactly like static: the port's heat pip (heat.ts)
+ * needs something to sit against. */
+.vc-sc-port-slot .vc-drive-port { position: relative; left: auto; top: auto; flex: none; }
 .vc-sc-port-slot .vc-drive-port[hidden] { display: none; }
 .vc-row.vc-port-moved .vc-drive-row-left { padding-left: 0; }
 .vc-sc-row-title { font: 400 14px/1.2 ${FONT_LABEL}; color: #fff; }

@@ -1,10 +1,11 @@
 import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts";
 import { getTapRun } from "../render/tapTempo.ts";
-import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId } from "../render/signals.ts";
+import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId, type SignalId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, jackKey } from "./driveSources.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
+import { createHeatPip, createHeatTrack, heatText, HEAT_REFRESH_MS, type HeatPip, type HeatTrack } from "./heat.ts";
 import { flashTo } from "./flashAnim.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
@@ -243,6 +244,13 @@ import { createColumnStore } from "./columnStore.ts";
  * the cable layer's (src/ui/cableLayer.ts, owned by deviceMenu.ts) own
  * source-endpoint lookup.
  *
+ * Each signal jack also carries a heat pip (heat.ts). Every signal's track
+ * records on every tick, folded card or closed panel alike; the pips
+ * recolour at most every HEAT_REFRESH_MS, and only on an unfolded card with
+ * the panel open. A pip reads its signal's own card's span chip
+ * (`monitor.card`), or the card it's mounted on when the signal has no
+ * monitor.
+ *
  * Every one of those "un-eased" values is what its smoothed sibling is
  * eternally chasing — none of it is a param a Reset chip can zero out.
  * `rateScale` (this file's update(), threaded from app.ts's
@@ -322,6 +330,10 @@ export interface AudioMeters {
    *  layer's (src/ui/cableLayer.ts) source endpoints. Never mutated after
    *  a jack is built. */
   jackElements(): ReadonlyMap<string, HTMLElement>;
+  /** The heat line (heat.ts) for a meter jack's tooltip — deviceMenu.ts's
+   *  jackTooltipLines adds it under its own lines. Null for a jack with no
+   *  heat pip: one not on a meter card, or one whose source isn't a signal. */
+  jackHeatText(choice: DriveSourceChoice): string | null;
 }
 
 export interface AudioMetersDeps {
@@ -1963,6 +1975,18 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // refreshPatchView below only ever writes that row's fed state once.
   const jackRegistry: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
   const jackElementsMap = new Map<string, HTMLElement>();
+  // Heat (heat.ts): one track per signal, for the whole session and never
+  // cleared, recorded every tick in update() panel open or closed; a pip on
+  // each signal jack, recoloured at most every HEAT_REFRESH_MS while its card
+  // is on screen and unfolded. Parallel arrays so the per-tick record loop
+  // allocates nothing.
+  const heatIds = Object.keys(SIGNALS) as SignalId[];
+  const heatTracks: HeatTrack[] = heatIds.map(() => createHeatTrack());
+  const heatById = new Map<SignalId, HeatTrack>(heatIds.map((id, i) => [id, heatTracks[i]!]));
+  const heatPips: { id: SignalId; card: MeterCardId; pip: HeatPip }[] = [];
+  // jackKey → the card whose span chip its pip reads (jackHeatText below).
+  const heatCardByKey = new Map<string, MeterCardId>();
+  let lastHeatMs = -Infinity;
 
   /** Builds one jack, wires it straight to `deps.patch`, and registers it
    *  for refreshPatchView's own row-level glow/dim pass below. `host` is
@@ -1971,8 +1995,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
    *  glows when this jack lights — usually the same element as `host`,
    *  different only where the jack itself is absolutely positioned inside
    *  a sub-wrapper (createHitsHistory's own vizWrap) but the glow/dim
-   *  belongs to the row as a whole. */
-  function mountJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
+   *  belongs to the row as a whole. `heatCard` is the card whose span chip a
+   *  signal jack's heat pip reads (see the heat block above); it defaults to
+   *  the signal's own `monitor` card, then the Dynamics card. */
+  function mountJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement, heatCard?: MeterCardId): JackHandle {
     const jack = createJack(
       driveSourceColor(choice),
       () => deps.patch.onJackClick(choice),
@@ -1981,6 +2007,15 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     host.appendChild(jack.el);
     jackRegistry.push({ choice, jack, feedEl });
     jackElementsMap.set(jackKey(choice), jack.el);
+    // A signal jack gets a heat pip; a beat-grid or line jack has no signal
+    // reading to measure.
+    if (typeof choice === "string") {
+      const card = heatCard ?? SIGNALS[choice].monitor?.card ?? "signal";
+      const pip = createHeatPip("jack");
+      jack.el.appendChild(pip.el);
+      heatPips.push({ id: choice, card, pip });
+      heatCardByKey.set(jackKey(choice), card);
+    }
     return jack;
   }
 
@@ -2447,7 +2482,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description:
       "How intense this part of the track is against the last while. Flashes red on a drop.",
   });
-  mountJack("anim.sectionIntensity", section.right, section.el);
+  mountJack("anim.sectionIntensity", section.right, section.el, "character");
   mountJack("anim.dropOnset", section.right, section.el);
   // Every MUSIC_DIALS entry except brightness, which gets its own full-width
   // row below (with the live Centroid trace under its bar) instead of a grid
@@ -2592,6 +2627,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["waveform", waveform.el],
   ]);
 
+  // Each card's fold, by id, for the heat pips (update()'s heat block below).
+  const meterCards: Record<MeterCardId, { fold?: { isFolded(): boolean } }> = {
+    signal: signalCard,
+    hits: hitsCard,
+    tempo: tempoCard,
+    character: characterCard,
+  };
+
   return {
     el: root,
     update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, onScreen): void {
@@ -2656,7 +2699,25 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         nowMs,
       );
       centroidTrace.push([anim ? (raw ? anim.centroidRaw : anim.centroid) : null], nowMs);
+      // Heat: every signal's track, panel open or closed (heat.ts).
+      if (frame && anim) {
+        const heatSec = nowMs / 1000;
+        for (let i = 0; i < heatIds.length; i++) {
+          heatTracks[i]!.push(SIGNALS[heatIds[i]!].read(frame, anim), frame.level, heatSec);
+        }
+      }
       if (!onScreen) return;
+
+      // Heat pips: at most every HEAT_REFRESH_MS, only on an unfolded card.
+      if (nowMs - lastHeatMs >= HEAT_REFRESH_MS) {
+        lastHeatMs = nowMs;
+        const heatSec = nowMs / 1000;
+        for (const { id, card, pip } of heatPips) {
+          if (meterCards[card].fold?.isFolded()) continue;
+          const span = getHistorySpan(card);
+          pip.set(heatById.get(id)!.read(span, heatSec), span);
+        }
+      }
 
       // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
       // Level is already raw and doesn't change; Energy's raw counterpart
@@ -2923,6 +2984,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     },
     jackElements(): ReadonlyMap<string, HTMLElement> {
       return jackElementsMap;
+    },
+    jackHeatText(choice) {
+      if (typeof choice !== "string") return null;
+      const card = heatCardByKey.get(jackKey(choice));
+      if (!card) return null;
+      const span = getHistorySpan(card);
+      return heatText(heatById.get(choice)!.read(span, performance.now() / 1000), span);
     },
   };
 }
