@@ -836,10 +836,17 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-heat-pip[hidden] { display: none; }
 .vc-heat-pip-wire { position: relative; display: inline-block; margin-left: 7px; vertical-align: 1px; }
-/* Heat (heat.ts). The strip under a wired setting's graph, and the Heat
- * history card's strips: cells blended into one gradient background. */
+/* Heat (heat.ts). The strip under a wired setting's graph or a signal's
+ * monitor, and the Heat history card's strips: cells blended into one
+ * gradient background. */
 .vc-heat-strip { height: 2px; margin-top: 3px; border-radius: 1px; background: rgba(255,255,255,0.06); }
 .vc-heat-strip[hidden] { display: none; }
+/* A signal monitor's own strips (audioMeters.ts): one line per signal on the
+ * row, led by a dot in the signal's colour (--c). */
+.vc-heat-monitor { display: grid; gap: 3px; margin-top: 5px; }
+.vc-heat-monitor-line { display: flex; align-items: center; gap: 5px; }
+.vc-heat-monitor-line::before { content: ""; flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--c); }
+.vc-heat-monitor-line .vc-heat-strip { flex: 1; margin-top: 0; }
 .vc-heat-hist { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 8px; align-items: center; }
 .vc-heat-hist-label { font: 400 11px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-heat-hist-strip { height: 5px; border-radius: 1px; background: rgba(255,255,255,0.06); }

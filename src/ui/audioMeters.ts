@@ -260,9 +260,12 @@ import { createColumnStore } from "./columnStore.ts";
  * HEAT_REFRESH_MS, and only on an unfolded card; while the heat lens is on,
  * the jack glows, brighter as its reading moves. A jack reads its signal's
  * own card's span chip (`monitor.card`), or the card it's mounted on when the
- * signal has no monitor. The Heat history card (its own span chip, folded by
- * default) draws one strip per wired setting, from deps.heatSettings, and one
- * per signal jack.
+ * signal has no monitor. Each monitor row also carries its own heat strips,
+ * one per signal jack on it, led by a dot in the signal's colour, on the same
+ * span and refresh as the jack. The Heat history card (its own span chip,
+ * folded by default) draws one strip per wired setting, from
+ * deps.heatSettings, and one per signal jack. The Bands card's level jacks
+ * (deviceMenu.ts) join all of this through addHeatJack.
  *
  * Every one of those "un-eased" values is what its smoothed sibling is
  * eternally chasing — none of it is a param a Reset chip can zero out.
@@ -348,8 +351,16 @@ export interface AudioMeters {
   jackElements(): ReadonlyMap<string, HTMLElement>;
   /** The heat line (heat.ts) for a meter jack's tooltip — deviceMenu.ts's
    *  jackTooltipLines adds it under its own lines. Null for a jack with no
-   *  heat: one not on a meter card, or one whose source isn't a signal. */
+   *  heat: one not on a meter card or added through addHeatJack, or one
+   *  whose source isn't a signal. */
   jackHeatText(choice: DriveSourceChoice): string | null;
+  /** A signal jack mounted outside the meter cards (deviceMenu.ts's Bands
+   *  card) joins heat like a meter jack: the lens glow, its own strip in
+   *  `rowEl` (a createMeterRow row), a line under `group` in the Heat history
+   *  card and its tooltip line. It reads the Dynamics card's span chip, and
+   *  refreshes only while `folded()` is false. Call it while building the
+   *  panel. */
+  addHeatJack(id: SignalId, jackEl: HTMLElement, rowEl: HTMLElement, group: string, folded: () => boolean): void;
 }
 
 export interface AudioMetersDeps {
@@ -2010,10 +2021,34 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // hottest heat and brightest glow among its jacks.
   type HeatRow = { el: HTMLElement; color: string; glow: number; hottest: number; brightest: number };
   const heatRows: HeatRow[] = [];
-  // Each signal jack, for its lens glow and the Heat history card: the jack's
-  // element, its monitor row, the card whose span chip it reads, and its
-  // index into heatIds.
-  const heatJacks: { id: SignalId; card: MeterCardId; el: HTMLElement; row: HeatRow; idx: number; color: string; glow: number }[] = [];
+  /** The lens record for monitor row `el`, made (and the row marked for the
+   *  lens) when its first jack registers. */
+  function heatRowFor(el: HTMLElement): HeatRow {
+    let row = heatRows.find((r) => r.el === el);
+    if (!row) {
+      row = { el, color: "", glow: -1, hottest: -1, brightest: -1 };
+      heatRows.push(row);
+      el.classList.add("vc-heat-row");
+    }
+    return row;
+  }
+  // Each signal jack, for its lens glow, its monitor's strip and the Heat
+  // history card: the jack's element, the row it feeds and that row's lens
+  // record, the card whose span chip it reads, whether the card it sits on is
+  // folded, and its index into heatIds. The Bands card's jacks join through
+  // addHeatJack.
+  interface HeatJack {
+    id: SignalId;
+    card: MeterCardId;
+    el: HTMLElement;
+    feedEl: HTMLElement;
+    row: HeatRow;
+    folded: () => boolean;
+    idx: number;
+    color: string;
+    glow: number;
+  }
+  const heatJacks: HeatJack[] = [];
   // This tick's reading of every signal, by heatIds index, for the lens glow.
   const heatLive = new Float32Array(heatIds.length);
   const heatIdx = new Map<SignalId, number>(heatIds.map((id, i) => [id, i]));
@@ -2041,18 +2076,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     host.appendChild(jack.el);
     jackRegistry.push({ choice, jack, feedEl });
     jackElementsMap.set(jackKey(choice), jack.el);
-    // A signal jack takes part in the heat lens and the Heat history card; a
-    // beat-grid or line jack has no signal reading to measure.
+    // A signal jack takes part in the heat lens, its monitor's heat strip and
+    // the Heat history card; a beat-grid or line jack has no signal reading
+    // to measure.
     if (typeof choice === "string") {
       const card = heatCard ?? SIGNALS[choice].monitor?.card ?? "signal";
       jack.el.classList.add("vc-heat-jack");
-      let row = heatRows.find((r) => r.el === feedEl);
-      if (!row) {
-        row = { el: feedEl, color: "", glow: -1, hottest: -1, brightest: -1 };
-        heatRows.push(row);
-        feedEl.classList.add("vc-heat-row");
-      }
-      heatJacks.push({ id: choice, card, el: jack.el, row, idx: heatIdx.get(choice)!, color: "", glow: -1 });
+      const folded = (): boolean => meterCards[card].fold?.isFolded() ?? false;
+      heatJacks.push({
+        id: choice, card, el: jack.el, feedEl, row: heatRowFor(feedEl), folded, idx: heatIdx.get(choice)!, color: "", glow: -1,
+      });
       heatCardByKey.set(jackKey(choice), card);
     }
     return jack;
@@ -2596,6 +2629,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   heatNote.textContent = "How much each one moved, second by second. Colder = barely moves, hotter = big moves on loud music.";
   const heatSettingsGrid = document.createElement("div");
   heatSettingsGrid.className = "vc-heat-hist";
+  // Signal jacks outside the meter cards (addHeatJack: the Bands card's)
+  // get their own grid above the meter cards' groups, as their card sits
+  // above them in the column.
+  const heatOuterGrid = document.createElement("div");
+  heatOuterGrid.className = "vc-heat-hist";
   const heatSignalsGrid = document.createElement("div");
   heatSignalsGrid.className = "vc-heat-hist";
   const heatAxis = document.createElement("div");
@@ -2604,7 +2642,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const heatAxisNow = document.createElement("span");
   heatAxisNow.textContent = "now";
   heatAxis.append(heatAxisLeft, heatAxisNow);
-  heatHistoryCard.body.append(heatNote, heatSettingsGrid, heatSignalsGrid, heatAxis);
+  heatHistoryCard.body.append(heatNote, heatSettingsGrid, heatOuterGrid, heatSignalsGrid, heatAxis);
+  let heatOuterGroup: string | null = null;
 
   function heatHistGroup(grid: HTMLElement, text: string): void {
     const group = document.createElement("div");
@@ -2646,6 +2685,46 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     }
   }
 
+  // Each monitor's own heat strips: under the row a signal jack feeds, one
+  // strip per signal on it in mount order, led by a dot in the signal's
+  // colour so a row carrying several (Hits, Wave) reads which is which. They
+  // go above the row's hint, so they stay under its trace and legend. The
+  // Tempo block is a narrow box welded beside Lock, so its jacks' strips
+  // join Lock's.
+  const heatMonitorStrips: { idx: number; card: MeterCardId; folded: () => boolean; el: HTMLElement; bg: string }[] = [];
+  const heatMonitorHosts = new Map<HTMLElement, { host: HTMLElement; ids: Set<SignalId> }>();
+  function addHeatMonitorStrip(j: HeatJack, rowEl: HTMLElement): void {
+    let m = heatMonitorHosts.get(rowEl);
+    if (!m) {
+      const host = document.createElement("div");
+      host.className = "vc-heat-monitor";
+      rowEl.insertBefore(host, rowEl.querySelector(":scope > .vc-hint"));
+      m = { host, ids: new Set() };
+      heatMonitorHosts.set(rowEl, m);
+    }
+    if (m.ids.has(j.id)) return;
+    m.ids.add(j.id);
+    const line = document.createElement("div");
+    line.className = "vc-heat-monitor-line";
+    line.style.setProperty("--c", driveSourceColor(j.id));
+    const strip = document.createElement("div");
+    strip.className = "vc-heat-strip";
+    line.append(strip);
+    m.host.append(line);
+    heatMonitorStrips.push({ idx: j.idx, card: j.card, folded: j.folded, el: strip, bg: "" });
+  }
+  for (const j of heatJacks) addHeatMonitorStrip(j, j.feedEl === tempo.el ? lock.el : j.feedEl);
+
+  /** Repaints one heat strip from `track` over the last `span` seconds,
+   *  writing its style only when its cells change. */
+  function paintHeatStrip(s: { el: HTMLElement; bg: string }, track: HeatTrack, span: number, nowSec: number): void {
+    const bg = heatStripBackground(heatHistory(track, span, nowSec, HEAT_HISTORY_CELLS));
+    if (bg !== s.bg) {
+      s.bg = bg;
+      s.el.style.background = bg;
+    }
+  }
+
   // The Settings group, rebuilt only when the wired settings' labels change;
   // their tracks are re-read every refresh.
   let heatSettingsKey: string | null = null;
@@ -2676,15 +2755,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     const span = getHistorySpan("heat");
     heatAxisLeft.textContent = "−" + formatHistorySpan(span);
     refreshHeatSettings();
-    const paint = (s: { el: HTMLElement; bg: string }, track: HeatTrack): void => {
-      const bg = heatStripBackground(heatHistory(track, span, nowSec, HEAT_HISTORY_CELLS));
-      if (bg !== s.bg) {
-        s.bg = bg;
-        s.el.style.background = bg;
-      }
-    };
-    for (const s of heatSettingStrips) paint(s, s.track);
-    for (const s of heatSignalStrips) paint(s, heatTracks[s.idx]!);
+    for (const s of heatSettingStrips) paintHeatStrip(s, s.track, span, nowSec);
+    for (const s of heatSignalStrips) paintHeatStrip(s, heatTracks[s.idx]!, span, nowSec);
   }
 
   // Sound/Beat/Song, per the file header. Signal leads Sound: it's the raw
@@ -2857,15 +2929,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
       if (!onScreen) return;
 
-      // Heat: each jack's and monitor row's colour and the Heat history card
-      // at most every HEAT_REFRESH_MS; the lens glow every tick it's on (a
-      // write only when a level changes). Only on unfolded cards.
+      // Heat: each jack's and monitor row's colour, each monitor's strips and
+      // the Heat history card at most every HEAT_REFRESH_MS; the lens glow
+      // every tick it's on (a write only when a level changes). Only on
+      // unfolded cards.
       const heatSec = nowMs / 1000;
       if (nowMs - lastHeatMs >= HEAT_REFRESH_MS) {
         lastHeatMs = nowMs;
         for (const row of heatRows) row.hottest = -1;
         for (const j of heatJacks) {
-          if (meterCards[j.card].fold?.isFolded()) continue;
+          if (j.folded()) continue;
           const r = heatTracks[j.idx]!.read(getHistorySpan(j.card), heatSec);
           const heat = r ? r.heat : 0;
           const color = heatToColor(heat);
@@ -2883,12 +2956,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             row.el.style.setProperty("--vc-heat", color);
           }
         }
+        for (const s of heatMonitorStrips) {
+          if (s.folded()) continue;
+          paintHeatStrip(s, heatTracks[s.idx]!, getHistorySpan(s.card), heatSec);
+        }
         if (!heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);
       }
       if (heatLensOn) {
         for (const row of heatRows) row.brightest = -1;
         for (const j of heatJacks) {
-          if (meterCards[j.card].fold?.isFolded()) continue;
+          if (j.folded()) continue;
           const glow = heatGlowLevel(heatLive[j.idx]!);
           if (glow !== j.glow) {
             j.glow = glow;
@@ -3180,6 +3257,20 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       if (!card) return null;
       const span = getHistorySpan(card);
       return heatText(heatById.get(choice)!.read(span, performance.now() / 1000), span);
+    },
+    addHeatJack(id, jackEl, rowEl, group, folded) {
+      const j: HeatJack = {
+        id, card: "signal", el: jackEl, feedEl: rowEl, row: heatRowFor(rowEl), folded, idx: heatIdx.get(id)!, color: "", glow: -1,
+      };
+      jackEl.classList.add("vc-heat-jack");
+      heatJacks.push(j);
+      heatCardByKey.set(jackKey(id), j.card);
+      addHeatMonitorStrip(j, rowEl);
+      if (group !== heatOuterGroup) {
+        heatOuterGroup = group;
+        heatHistGroup(heatOuterGrid, group);
+      }
+      heatSignalStrips.push({ idx: j.idx, el: heatHistRow(heatOuterGrid, driveSourceLabel(id)), bg: "" });
     },
   };
 }

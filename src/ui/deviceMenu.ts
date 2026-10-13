@@ -2700,7 +2700,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const lineJack = mountBandsJack({ source: "line" }, fadersRow, fadersRow);
   lineJack.el.style.cssText += "position: absolute; top: 4px; right: 4px; z-index: 2;";
 
-  const BAND_LEVEL_CHOICES: readonly DriveSourceChoice[] = ["anim.low", "anim.mid", "anim.high"];
+  const BAND_LEVEL_CHOICES: readonly SignalId[] = ["anim.low", "anim.mid", "anim.high"];
   const levelsLabel = document.createElement("div");
   levelsLabel.textContent = "Levels";
   levelsLabel.style.cssText = levelsLabelStyle;
@@ -2717,7 +2717,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
     row.el.style.cssText += levelsCellStyle;
     row.el.querySelector<HTMLElement>(".vc-label")!.style.cssText += levelsCellLabelStyle;
-    mountBandsJack(choice, row.right, row.el);
+    const jack = mountBandsJack(choice, row.right, row.el);
+    // Heat (heat.ts): the lens glow, the row's own strip, a Heat history
+    // line and the tooltip line, like a meter card's signal jack.
+    audioMeters.addHeatJack(choice, jack.el, row.el, bandsCard.title.textContent ?? "", () => bandsCard.fold?.isFolded() ?? false);
     levelsGrid.appendChild(row.el);
     return { choice, row };
   });
