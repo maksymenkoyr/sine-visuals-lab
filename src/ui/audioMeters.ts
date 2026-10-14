@@ -88,6 +88,7 @@ import {
 import { createControlRow } from "./deviceMenu.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
+import { watchOnScreen } from "./onScreen.ts";
 import {
   cycleHistorySpan,
   formatHistorySpan,
@@ -2861,6 +2862,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     tempo: tempoCard,
     character: characterCard,
   };
+  // Whether each card is in view (onScreen.ts): one scrolled out of its
+  // column, or under a closed panel, skips its draws and DOM writes like a
+  // folded one, while its traces keep recording all the same.
+  const signalOnScreen = watchOnScreen(signalCard.el);
+  const hitsOnScreen = watchOnScreen(hitsCard.el);
+  const tempoOnScreen = watchOnScreen(tempoCard.el);
+  const characterOnScreen = watchOnScreen(characterCard.el);
 
   return {
     el: root,
@@ -3005,7 +3013,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // is rawBands (see file header), local-only like mono. Gate has no RAW
       // branch: it's already an instant, local reading with no pre-smoothing
       // counterpart threaded through AnimFrame to switch to.
-      if (!signalCard.fold?.isFolded()) {
+      if (!signalCard.fold?.isFolded() && signalOnScreen()) {
         // Waveform — hidden (with its own trailing spacer) with no samples
         // to draw; see AudioMeters.update's own doc comment.
         const showWaveform = mono !== null;
@@ -3079,7 +3087,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
 
       // ---- Hits ----
-      if (!hitsCard.fold?.isFolded()) {
+      if (!hitsCard.fold?.isFolded() && hitsOnScreen()) {
         const shapeOpen = hitsShape.isOpen();
         // Read fresh every draw(), like the Gate row's own marks — a slider
         // drag should move the hits history's dashed Floor line, and the
@@ -3115,7 +3123,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           tapStatus.textContent = status;
         }
       }
-      if (!tempoCard.fold?.isFolded()) {
+      if (!tempoCard.fold?.isFolded() && tempoOnScreen()) {
         // The dot flashes on the metronome's own tick, not a raw hit — the
         // dot and digits both come from the same tempoSettle.ts reading
         // (metronome.ts's own header).
@@ -3142,7 +3150,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
 
       // ---- Character ----
-      if (!characterCard.fold?.isFolded()) {
+      if (!characterCard.fold?.isFolded() && characterOnScreen()) {
         const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
         section.setValue(sectionVal, dtSec);
         if (drop) section.flash(HOT_RED);
