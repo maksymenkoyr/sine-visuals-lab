@@ -720,6 +720,11 @@ reference-measurement workflow used by later scenes.
     brightness moved into Grain's rows. New curve dials: Hit decay (Pluck,
     Bell's hit, Bounce), and Rise and Release (Swell). Every dial's middle,
     and Attack 0, draws the curve exactly as before.
+  - 2026-10-15: the preview draws only while it is on screen. The Scene
+    card is taller than its column, so at the panel's opening scroll the
+    preview sat out of view yet redrew its curve, caption and WebGL patch
+    on every panel tick. The rows under it still follow the picks on every
+    tick.
 
 ## Tuning notes
 
@@ -908,3 +913,4 @@ reference-measurement workflow used by later scenes.
 - #449 (2026-10-09) — Level glow: brightness-from-loudness gets its own setting (see Decisions)
 - 2026-10-13 — Spray injection removed (see Decisions)
 - #508 (draft, 2026-10-13) — Treble sparkle as an Effect and a Shape, with a preview in the Scene card (see Decisions)
+- 2026-10-15 — Sparkle preview draws only while on screen (see Decisions)

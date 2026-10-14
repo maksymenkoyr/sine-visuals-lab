@@ -1,5 +1,5 @@
 import { AUTO_SKY, FONT_MONO, SCENE_VIOLET, withAlpha } from "../controlsTheme.ts";
-import { watchSize } from "../onScreen.ts";
+import { watchOnScreen, watchSize } from "../onScreen.ts";
 import { registerWidget, type WidgetCtx } from "./registry.ts";
 import type { PanelSection } from "../../render/scene.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
@@ -43,6 +43,10 @@ import {
  * not exactly how the pool will look. Without WebGL2 the patch is left out
  * and the curve stays. It reads the stored settings (`ctx.get`), not what
  * Auto or the Master card make of them.
+ *
+ * The preview draws only while it is on screen (onScreen.ts): the Scene
+ * card is taller than its column, and the patch is a WebGL context of its
+ * own. The rows under it follow the picks on every tick regardless.
  */
 
 /** Seconds of stillness after each loop of the shape before it plays again. */
@@ -122,18 +126,29 @@ function buildCausticsSparkle(container: HTMLElement, _section: PanelSection, ct
   const patchView = createPatchView(patch);
   if (!patchView) patch.style.display = "none";
   const curveSize = watchSize(curve);
+  const boxOnScreen = watchOnScreen(box);
   ctx.onDispose(() => {
     curveSize.disconnect();
+    boxOnScreen.disconnect();
     patchView?.dispose();
   });
 
+  const captionFor = (length: number): string => `strength after one hit · ${length.toFixed(2)} s`;
+  // Written at once, so the box has its full height before it first draws.
+  let captionText = captionFor(shapeParams(ctx, spec).length);
+  caption.textContent = captionText;
   const start = performance.now();
   ctx.onTick(() => {
     mountPicked();
+    if (!boxOnScreen()) return;
     const params = shapeParams(ctx, spec);
     const span = params.length + LOOP_GAP_SEC;
     const t = ((performance.now() - start) / 1000) % span;
-    caption.textContent = `strength after one hit · ${params.length.toFixed(2)} s`;
+    const text = captionFor(params.length);
+    if (text !== captionText) {
+      captionText = text;
+      caption.textContent = text;
+    }
     drawCurve(curve, curveSize, params, t, span);
     if (!patchView) return;
     const get = (key: string): number => {

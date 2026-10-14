@@ -19,6 +19,8 @@
  *   which asks app.ts for a GPU readback of the finished frame, a synchronous
  *   round trip in Chrome that waits behind whatever the GPU is still doing
  *   (the Panel blur's re-filtering included).
+ *   `disconnect()` stops watching, for an element a rebuild throws away (a
+ *   Scene-card widget calls it from its dispose).
  * - `watchSize`: the element's CSS content size, rounded to whole pixels like
  *   `clientWidth` (a ResizeObserver). Until the first observation lands it
  *   falls back to a direct read, so a first draw still has a size.
@@ -27,14 +29,20 @@
  * caller's own gating, the panel being open, is all that applies) and
  * `watchSize` reads the element directly, as the widgets used to.
  */
-export function watchOnScreen(el: Element): () => boolean {
-  if (typeof IntersectionObserver === "undefined") return () => true;
+export interface OnScreen {
+  (): boolean;
+  disconnect(): void;
+}
+
+export function watchOnScreen(el: Element): OnScreen {
+  if (typeof IntersectionObserver === "undefined") return Object.assign(() => true, { disconnect: () => {} });
   let onScreen = false;
-  new IntersectionObserver((entries) => {
+  const io = new IntersectionObserver((entries) => {
     const last = entries[entries.length - 1];
     if (last) onScreen = last.isIntersecting;
-  }).observe(el);
-  return () => onScreen;
+  });
+  io.observe(el);
+  return Object.assign(() => onScreen, { disconnect: () => io.disconnect() });
 }
 
 export interface WatchedSize {
