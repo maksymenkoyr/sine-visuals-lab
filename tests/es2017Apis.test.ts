@@ -44,6 +44,8 @@ const FILES = [
   "src/render/overlayLayout.ts",
   "src/render/overlayStore.ts",
   "src/render/overlayLayer.ts",
+  // The shader-program pool: a TV's scenes get their programs from it through gl.ts.
+  "src/render/programCache.ts",
 ];
 
 /** Methods newer than the target, banned on any receiver (the receiver's type

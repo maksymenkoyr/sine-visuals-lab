@@ -844,24 +844,17 @@ function deleteTarget(gl: WebGL2RenderingContext, t: SimTarget): void {
 
 interface PassProgram {
   prog: GLProgram;
-  velLoc: WebGLUniformLocation | null;
-  auxLoc: WebGLUniformLocation | null;
-  aux2Loc: WebGLUniformLocation | null;
   /** Whether the shader reads the splat arrays. The compiler strips unused
    *  uniforms, so this is true for exactly the force and dye-advection
-   *  programs — the only passes that need the per-step splat upload. */
-  usesSplats: boolean;
+   *  programs — the only passes that need the per-step splat upload. Null
+   *  until the pass first draws: a lookup waits for the program's link, so
+   *  makePass only submits it and every pass compiles at once
+   *  (src/render/programCache.ts). */
+  usesSplats: boolean | null;
 }
 
 function makePass(gl: WebGL2RenderingContext, format: SimFormat, slots: number, body: string): PassProgram {
-  const prog = createProgram(gl, simPrefix(format, slots) + body);
-  return {
-    prog,
-    velLoc: gl.getUniformLocation(prog.program, "uVel"),
-    auxLoc: gl.getUniformLocation(prog.program, "uAux"),
-    aux2Loc: gl.getUniformLocation(prog.program, "uAux2"),
-    usesSplats: gl.getUniformLocation(prog.program, "uSplatPos[0]") !== null,
-  };
+  return { prog: createProgram(gl, simPrefix(format, slots) + body), usesSplats: null };
 }
 
 function clamp01(x: number): number {
@@ -975,13 +968,13 @@ export function createFluidSim(
     pp.prog.setF("uSeed", Math.random());
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, velTex);
-    gl.uniform1i(pp.velLoc, 0);
+    pp.prog.setI("uVel", 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, auxTex);
-    gl.uniform1i(pp.auxLoc, 1);
+    pp.prog.setI("uAux", 1);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, aux2Tex);
-    gl.uniform1i(pp.aux2Loc, 2);
+    pp.prog.setI("uAux2", 2);
 
     pp.prog.setF("uDt", dt);
     pp.prog.setV2("uVelTexel", velTexel[0], velTexel[1]);
@@ -991,6 +984,8 @@ export function createFluidSim(
     pp.prog.setF("uCurl", curl);
     pp.prog.setF("uEnergy", energy);
     pp.prog.setF("uFade", fade);
+    // First draw of this pass: its program was checked right after init().
+    if (pp.usesSplats === null) pp.usesSplats = gl.getUniformLocation(pp.prog.program, "uSplatPos[0]") !== null;
     if (pp.usesSplats) {
       pp.prog.setV4v("uSplatPos", splatPosBuf);
       pp.prog.setV4v("uSplatVel", splatVelBuf);

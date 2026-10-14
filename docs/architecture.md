@@ -50,6 +50,11 @@ autoTune.ts` sits between a scene's declared `settings` and what actually reache
 the shader, resolving each one against `src/render/musicProfile.ts`'s dials unless
 the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 
+A scene's shader programs come from `src/render/programCache.ts` (through
+`gl.ts`'s `createProgram`): the programs one mount creates compile together
+and are checked once its `init()` returns, and a disposed program waits in
+its GL context's pool for the next mount that asks for the same shaders.
+
 `src/router.ts` decides which scene mounts (`#/` → gallery, `#/v/<sceneId>` → one
 scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 (`index.html`).

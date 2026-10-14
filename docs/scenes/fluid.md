@@ -194,3 +194,4 @@ pivot above.
   outlines, through the MacCormack/beat-puff, mirror-mode, Auto-symmetry,
   Currents/neon-tone-map, and screen-space-lightning pivots described above.
 - #462 (draft, 2026-10-09): Rendering: the lightning bolt layer's render target (`fluidBolts.ts`) now comes from gl.ts's `createColorTarget`; no change to the look.
+- 2026-10-15 (shader program cache): the sim's passes (fluidSim.ts) look their uniforms up on first draw, and init() looks the display program's samplers up after every program is created, so a mount compiles all of the scene's programs at once. No change on screen.
