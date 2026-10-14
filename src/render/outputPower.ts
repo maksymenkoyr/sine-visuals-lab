@@ -56,7 +56,6 @@ import { isQualityChoice, type QualityChoice } from "./qualityPref.ts";
 /** How the output is drawn for a Chrome Cast: not at all different, a
  *  Cast-sized buffer, or that plus a soft blur. */
 export type CastMode = "off" | "on" | "soft";
-const CAST_MODES: readonly CastMode[] = ["off", "on", "soft"];
 /** The drawing buffer's height under Cast (width follows the window's aspect). */
 export const CAST_BUFFER_HEIGHT = 720;
 /** The render rate under Cast: what Chrome's mirroring streams. */
