@@ -602,6 +602,60 @@ const SETTINGS: SceneSetting[] = [
     masterScale: false,
   },
   {
+    key: "sparkleAttack",
+    label: "Attack",
+    description: "How a Pluck, Bell or Bounce hit lands: left at once, right swelling up first, then playing out from its peak",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0, // at once, as the shapes were first built
+    masterScale: false,
+  },
+  {
+    key: "sparkleDecay",
+    label: "Hit decay",
+    description: "How long the hit itself takes to fade in Pluck, Bell and Bounce: left fast, right slow",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.5, // each shape's own fade (causticsSparkle.ts's SparkleShapeParams.decay)
+    masterScale: false,
+  },
+  {
+    key: "sparkleRise",
+    label: "Rise",
+    description: "How much of the length a Swell hit spends growing before it lets go",
+    group: "Look",
+    min: 0.1,
+    max: 0.95,
+    step: 0.01,
+    default: 0.75,
+    masterScale: false,
+  },
+  {
+    key: "sparkleRelease",
+    label: "Release",
+    description: "How a Swell hit lets go at its peak: left a hard cut, right a soft fade",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.5, // the cut Swell was first built with
+    masterScale: false,
+  },
+  {
+    key: "sparkleRingWidth",
+    label: "Sparkle ring width",
+    description: "How thick each ring Rings strikes is, against Spot size",
+    group: "Look",
+    min: 0.04,
+    max: 0.4,
+    step: 0.01,
+    default: 0.12,
+  },
+  {
     key: "sparkleSize",
     label: "Spot size",
     description: "How far each spot Rings or Bloom strikes spreads",
@@ -959,9 +1013,6 @@ const SPOT_BEND_FREQ = 3.0;
 const SPOT_BEND = 1.6;
 const SPOT_KNEE = 2.0;
 const SPOT_GROW_TAU = 0.3;
-const RING_WIDTH = 0.12;
-// How far from its spot, in Spot sizes, a ring or bloom can light a pixel.
-const SPOT_REACH = 1 + 3 * RING_WIDTH;
 const RING_GAIN = 3.0;
 const BLOOM_GAIN = 1.2;
 
@@ -1457,14 +1508,14 @@ void main() {
         float dist = length(p - spot + bend);
         // Past a grown ring plus three of its widths, nothing of this spot
         // shows here, whichever hit struck it.
-        if (dist > uSparkleSize * ${SPOT_REACH.toFixed(2)} + 0.009) continue;
+        if (dist > uSparkleSize * (1.0 + 3.0 * uSparkleRingWidth) + 0.009) continue;
         for (int k = 0; k < ${SPARKLE_HITS}; k++) {
           float age = uSparkleHitAge[k];
           if (age < 0.0) continue;
           if (hashCell(cellId, ${NOISE_MASK}, 100u + uint(uSparkleHitSeed[k])) > chance) continue;
           float grow = 1.0 - exp(-age / (${SPOT_GROW_TAU.toFixed(2)} * uSparkleLength));
           if (sparkleFx == ${EFFECT_RINGS}) {
-            float dr = (dist - uSparkleSize * grow) / (${RING_WIDTH.toFixed(2)} * uSparkleSize + 0.003);
+            float dr = (dist - uSparkleSize * grow) / (uSparkleRingWidth * uSparkleSize + 0.003);
             spots += abs(uSparkleHitEnv[k]) * exp(-dr * dr) * (0.25 + 0.75 * lit) * ${RING_GAIN.toFixed(2)};
           } else {
             float rad = uSparkleSize * (0.35 + 0.65 * grow);
@@ -1754,6 +1805,10 @@ float softCeil(float x, float knee, float ceil) {
           speedHz: getSetting("sparkleSpeed"),
           vibDecay: getSetting("sparkleVibDecay"),
           bounces: getSetting("sparkleBounces"),
+          attack: getSetting("sparkleAttack"),
+          decay: getSetting("sparkleDecay"),
+          rise: getSetting("sparkleRise"),
+          release: getSetting("sparkleRelease"),
         });
         const wash = getSetting("sparkleSustain") * drives.value("sparkle", anim.high);
         const sparkleEnv = shapeEnv >= 0 ? Math.max(shapeEnv, wash) : shapeEnv + wash;

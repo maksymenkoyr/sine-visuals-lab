@@ -22,8 +22,66 @@ import {
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
 
-const BASE: SparkleShapeParams = { shape: SHAPE_PLUCK, length: 0.6, vibration: 0.5, speedHz: 39, vibDecay: 0.5, bounces: 4 };
+const BASE: SparkleShapeParams = {
+  shape: SHAPE_PLUCK,
+  length: 0.6,
+  vibration: 0.5,
+  speedHz: 39,
+  vibDecay: 0.5,
+  bounces: 4,
+  attack: 0,
+  decay: 0.5,
+  rise: 0.75,
+  release: 0.5,
+};
 const ALL_SHAPES = [SHAPE_PLUCK, SHAPE_BELL, SHAPE_SWELL, SHAPE_BOUNCE];
+
+/** When in [0, length] a shape is strongest. */
+function peakAt(p: SparkleShapeParams): number {
+  let best = -Infinity;
+  let bestT = 0;
+  for (let t = 0; t <= p.length; t += 0.001) {
+    const v = sparkleEnvelope(t, p);
+    if (v > best) {
+      best = v;
+      bestT = t;
+    }
+  }
+  return bestT;
+}
+
+describe("the curve dials", () => {
+  it("at their middles (Attack 0) draw each shape as first built", () => {
+    // The first-built formulas, written out: an exponential fade at each
+    // shape's own time constant, and Swell's rise then cut.
+    const L = BASE.length;
+    const atk = (t: number): number => 1 - Math.exp(-t / 0.008);
+    expect(sparkleEnvelope(0.1, BASE)).toBeCloseTo(atk(0.1) * Math.exp(-0.1 / (PLUCK_TAU * L)), 10);
+    const swell = { ...BASE, shape: SHAPE_SWELL };
+    expect(sparkleEnvelope(0.75 * L + 0.01, swell)).toBeCloseTo(Math.exp(-0.01 / (0.04 * L)), 10);
+  });
+
+  it("Attack swells up first, so the peak comes later", () => {
+    for (const shape of [SHAPE_PLUCK, SHAPE_BELL, SHAPE_BOUNCE]) {
+      expect(peakAt({ ...BASE, shape, attack: 0 })).toBeLessThan(0.05);
+      expect(peakAt({ ...BASE, shape, attack: 1 })).toBeGreaterThan(0.3 * BASE.length);
+    }
+  });
+
+  it("Hit decay stretches the fade", () => {
+    const at = (decay: number): number => sparkleEnvelope(0.2, { ...BASE, decay });
+    expect(at(1)).toBeGreaterThan(at(0.5));
+    expect(at(0.5)).toBeGreaterThan(at(0));
+  });
+
+  it("Rise moves Swell's peak, and Release softens its cut", () => {
+    const swell = { ...BASE, shape: SHAPE_SWELL, length: 1 };
+    expect(peakAt({ ...swell, rise: 0.3 })).toBeCloseTo(0.3, 2);
+    expect(peakAt({ ...swell, rise: 0.8 })).toBeCloseTo(0.8, 2);
+    const after = (release: number): number => sparkleEnvelope(0.8, { ...swell, rise: 0.7, release });
+    expect(after(1)).toBeGreaterThan(5 * after(0));
+  });
+});
 
 describe("sparkleEnvelope", () => {
   it("is 0 before the hit and after its length, for every shape", () => {
@@ -76,22 +134,10 @@ describe("sparkleEnvelope", () => {
   });
 
   it("Swell peaks late, the others at the hit", () => {
-    const peakAt = (shape: number): number => {
-      const p = { ...BASE, shape, length: 1 };
-      let best = 0;
-      let bestT = 0;
-      for (let t = 0; t <= 1; t += 0.001) {
-        const v = sparkleEnvelope(t, p);
-        if (v > best) {
-          best = v;
-          bestT = t;
-        }
-      }
-      return bestT;
-    };
-    expect(peakAt(SHAPE_SWELL)).toBeGreaterThan(0.6);
-    expect(peakAt(SHAPE_PLUCK)).toBeLessThan(0.1);
-    expect(peakAt(SHAPE_BELL)).toBeLessThan(0.1);
+    const at = (shape: number): number => peakAt({ ...BASE, shape, length: 1 });
+    expect(at(SHAPE_SWELL)).toBeGreaterThan(0.6);
+    expect(at(SHAPE_PLUCK)).toBeLessThan(0.1);
+    expect(at(SHAPE_BELL)).toBeLessThan(0.1);
   });
 });
 

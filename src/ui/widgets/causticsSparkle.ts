@@ -65,6 +65,10 @@ function shapeParams(ctx: WidgetCtx, spec: (key: string) => SceneSetting | undef
     speedHz: get("sparkleSpeed", 1),
     vibDecay: get("sparkleVibDecay", 0.5),
     bounces: get("sparkleBounces", 1),
+    attack: get("sparkleAttack", 0),
+    decay: get("sparkleDecay", 0.5),
+    rise: get("sparkleRise", 0.75),
+    release: get("sparkleRelease", 0.5),
   };
 }
 
@@ -145,6 +149,7 @@ function buildCausticsSparkle(container: HTMLElement, _section: PanelSection, ct
       density: get("sparkleDensity"),
       grain: get("sparkleGrain"),
       size: get("sparkleSize"),
+      ringWidth: get("sparkleRingWidth"),
       time: (performance.now() - start) / 1000,
     });
   });
@@ -222,6 +227,7 @@ interface PatchFrame {
   density: number;
   grain: number;
   size: number;
+  ringWidth: number;
   time: number;
 }
 
@@ -236,7 +242,7 @@ precision highp float;
 precision highp int;
 out vec4 outColor;
 uniform vec2 uRes;
-uniform float uTime, uE, uEnv, uAmount, uAge, uLength, uDensity, uGrain, uSize;
+uniform float uTime, uE, uEnv, uAmount, uAge, uLength, uDensity, uGrain, uSize, uRingWidth;
 uniform int uEffect;
 
 uint pcg(uvec3 v) {
@@ -311,7 +317,7 @@ void main() {
     float grow = 1.0 - exp(-uAge / (0.3 * uLength));
     float spot;
     if (uEffect == ${EFFECT_RINGS}) {
-      float dr = (dist - s * grow) / (0.12 * s + 0.002);
+      float dr = (dist - s * grow) / (uRingWidth * s + 0.002);
       spot = abs(uEnv) * exp(-dr * dr) * (0.25 + 0.75 * lit) * 2.0;
     } else {
       float rad = s * (0.35 + 0.65 * grow);
@@ -368,6 +374,7 @@ function createPatchView(canvas: HTMLCanvasElement): PatchView | null {
     density: u("uDensity"),
     grain: u("uGrain"),
     size: u("uSize"),
+    ringWidth: u("uRingWidth"),
     effect: u("uEffect"),
   };
   return {
@@ -386,6 +393,7 @@ function createPatchView(canvas: HTMLCanvasElement): PatchView | null {
       gl.uniform1f(uni.density, f.density);
       gl.uniform1f(uni.grain, f.grain);
       gl.uniform1f(uni.size, f.size);
+      gl.uniform1f(uni.ringWidth, f.ringWidth);
       gl.uniform1i(uni.effect, f.effect);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },

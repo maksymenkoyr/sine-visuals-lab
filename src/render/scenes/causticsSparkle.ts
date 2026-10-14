@@ -20,10 +20,11 @@
  * Prism swaps its fringes) reads the sign. Every shape lasts exactly
  * `length` seconds and fades to 0 over its last stretch, so a hit older
  * than that can be dropped. `SPARKLE_SHAPE_HINTS` says what each shape
- * looks like; Bell is the one with parameters of its own — a hit that fades
- * faster than Pluck's, plus a vibration at `speedHz` that starts with it
- * and fades on its own time constant (`vibDecay`, a fraction of `length`),
- * which is the trembling that rings on after the hit.
+ * looks like and `SparkleShapeParams` what each dial bends; every dial's
+ * middle (or Attack 0) draws the shape as first built. Bell is a hit that
+ * fades faster than Pluck's, plus a vibration at `speedHz` that starts with
+ * it and fades on its own time constant (`vibDecay`, a fraction of
+ * `length`), which is the trembling that rings on after the hit.
  *
  * **Hits.** `advanceSparkleHits` keeps the last `SPARKLE_HITS` hits in a
  * ring buffer (age, size, a per-hit seed) and sums their envelopes into one
@@ -73,8 +74,8 @@ export const SPARKLE_SHAPE_HINTS: readonly string[] = [
  *  under the always-shown ones. Every key here must be a caustics setting
  *  (tests/causticsSparkle.test.ts checks). */
 export const SPARKLE_EFFECT_ROWS: readonly (readonly string[])[] = [
-  ["sparkleDensity", "sparkleGrain"],
-  ["sparkleDensity", "sparkleSize"],
+  ["sparkleDensity", "sparkleGrain", "sparkleBright"],
+  ["sparkleDensity", "sparkleSize", "sparkleRingWidth"],
   ["sparkleDensity", "sparkleSize"],
   [],
   [],
@@ -83,10 +84,10 @@ export const SPARKLE_EFFECT_ROWS: readonly (readonly string[])[] = [
   [],
 ];
 export const SPARKLE_SHAPE_ROWS: readonly (readonly string[])[] = [
-  ["sparkleLength"],
-  ["sparkleLength", "sparkleVibration", "sparkleSpeed", "sparkleVibDecay"],
-  ["sparkleLength"],
-  ["sparkleLength", "sparkleBounces"],
+  ["sparkleLength", "sparkleAttack", "sparkleDecay"],
+  ["sparkleLength", "sparkleAttack", "sparkleDecay", "sparkleVibration", "sparkleSpeed", "sparkleVibDecay"],
+  ["sparkleLength", "sparkleRise", "sparkleRelease"],
+  ["sparkleLength", "sparkleAttack", "sparkleDecay", "sparkleBounces"],
 ];
 
 /** The two picks and the amount, shown above the preview and the picked
@@ -104,8 +105,16 @@ export const SPARKLE_PANEL_KEYS: readonly string[] = [
 export interface SparkleShapeParams {
   /** SHAPE_* index. */
   shape: number;
-  /** Seconds a hit lasts. */
+  /** Seconds a hit lasts, swell-in included. */
   length: number;
+  /** 0..1: 0 lands the hit at once; above 0 the effect first swells up
+   *  exponentially over up to ATTACK_SWELL_MAX of `length`, then plays the
+   *  shape from its peak (Pluck, Bell, Bounce). */
+  attack: number;
+  /** 0..1: how long the hit itself takes to fade (Pluck, Bell's hit,
+   *  Bounce). 0.5 is each shape's own fade; the ends are
+   *  DECAY_SPAN_OCTAVES apart. */
+  decay: number;
   /** Bell: the vibration's height against the hit's (0..1). */
   vibration: number;
   /** Bell: vibrations per second. */
@@ -114,10 +123,19 @@ export interface SparkleShapeParams {
   vibDecay: number;
   /** Bounce: how many bumps fit in `length`. */
   bounces: number;
+  /** Swell: the fraction of `length` it spends growing. */
+  rise: number;
+  /** Swell, 0..1: how softly it lets go after the peak. 0.5 is
+   *  SWELL_CUT_TAU; the ends are RELEASE_SPAN_OCTAVES apart. */
+  release: number;
 }
 
 /** The time constant of every shape's near-instant attack, in seconds. */
 const ATTACK_SEC = 0.008;
+/** At Attack 1, the swell-in takes this fraction of `length`. */
+const ATTACK_SWELL_MAX = 0.6;
+/** How steep every exponential swell is (Attack's and Swell's rise). */
+const SWELL_CURVE = 4;
 /** Pluck's fade time constant as a fraction of `length`. At the default
  *  length this is the treble pulse's own decay (animClock.ts's
  *  BEAT_PULSE_DECAY_PER_SEC), so Grain + Pluck reads as the sparkle did
@@ -128,11 +146,12 @@ const BELL_HIT_TAU = 0.18;
 /** How fast Bell's vibration grows in from the hit, in seconds — fast
  *  enough to tremble from the first moment without a click at t = 0. */
 const BELL_VIB_IN_SEC = 0.015;
-/** Swell rises over this fraction of `length`, then cuts off. */
-const SWELL_RISE = 0.75;
-const SWELL_CURVE = 4;
 const SWELL_CUT_TAU = 0.04;
 const BOUNCE_TAU = 0.35;
+/** Decay's full travel, in octaves of the fade time (half each side of
+ *  0.5); Release's, of the cut-off's. */
+const DECAY_SPAN_OCTAVES = 3;
+const RELEASE_SPAN_OCTAVES = 4;
 /** Every shape fades to exactly 0 between this fraction of `length` and
  *  `length` itself. */
 const END_FADE_FROM = 0.85;
@@ -142,34 +161,45 @@ function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+function swellUp(x: number): number {
+  return (Math.exp(SWELL_CURVE * x) - 1) / (Math.exp(SWELL_CURVE) - 1);
+}
+
 /** One hit's signed strength `t` seconds after it (0 outside [0, length]). */
 export function sparkleEnvelope(t: number, p: SparkleShapeParams): number {
   const L = p.length;
   if (!(t >= 0) || t > L || L <= 0) return 0;
   const endFade = 1 - smoothstep(END_FADE_FROM * L, L, t);
-  const attack = 1 - Math.exp(-t / ATTACK_SEC);
+  if (p.shape === SHAPE_SWELL) {
+    const rise = Math.min(Math.max(p.rise, 0.05), 0.98) * L;
+    const cutTau = SWELL_CUT_TAU * 2 ** ((p.release - 0.5) * RELEASE_SPAN_OCTAVES) * L;
+    return (t < rise ? swellUp(t / rise) : Math.exp(-(t - rise) / cutTau)) * endFade;
+  }
+  // Attack: swell up first, then play the shape from its peak over what is
+  // left of the length (`u`, `Lr`).
+  const swellIn = Math.min(Math.max(p.attack, 0), 1) * ATTACK_SWELL_MAX * L;
+  if (t < swellIn) return swellUp(t / swellIn) * endFade;
+  const u = t - swellIn;
+  const Lr = L - swellIn;
+  const hitIn = swellIn > 0 ? 1 : 1 - Math.exp(-u / ATTACK_SEC);
+  const fade = 2 ** ((p.decay - 0.5) * DECAY_SPAN_OCTAVES) * Lr;
   let e: number;
   switch (p.shape) {
     case SHAPE_BELL: {
-      const hit = attack * Math.exp(-t / (BELL_HIT_TAU * L));
+      const hit = hitIn * Math.exp(-u / (BELL_HIT_TAU * fade));
       const vib =
         p.vibration *
-        Math.sin(2 * Math.PI * p.speedHz * t) *
-        (1 - Math.exp(-t / BELL_VIB_IN_SEC)) *
-        Math.exp(-t / (Math.max(p.vibDecay, 0.01) * L));
+        Math.sin(2 * Math.PI * p.speedHz * u) *
+        (1 - Math.exp(-u / BELL_VIB_IN_SEC)) *
+        Math.exp(-u / (Math.max(p.vibDecay, 0.01) * Lr));
       e = hit + vib;
       break;
     }
-    case SHAPE_SWELL: {
-      const rise = SWELL_RISE * L;
-      e = t < rise ? (Math.exp((SWELL_CURVE * t) / rise) - 1) / (Math.exp(SWELL_CURVE) - 1) : Math.exp(-(t - rise) / (SWELL_CUT_TAU * L));
-      break;
-    }
     case SHAPE_BOUNCE:
-      e = attack * Math.exp(-t / (BOUNCE_TAU * L)) * Math.abs(Math.cos((Math.PI * p.bounces * t) / L));
+      e = hitIn * Math.exp(-u / (BOUNCE_TAU * fade)) * Math.abs(Math.cos((Math.PI * p.bounces * u) / Lr));
       break;
     default:
-      e = attack * Math.exp(-t / (PLUCK_TAU * L));
+      e = hitIn * Math.exp(-u / (PLUCK_TAU * fade));
   }
   return e * endFade;
 }

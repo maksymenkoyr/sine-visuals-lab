@@ -711,6 +711,15 @@ reference-measurement workflow used by later scenes.
     shape's rows were there, but they mounted after Treble sparkle and the
     effect's rows, below the panel's fold. They now sit right under the
     curve.
+  - 2026-10-14: the user wanted more curve sliders per shape, plus "a
+    couple more" from the prototype, "copied exactly". Version 1 of the
+    prototype had Attack (instant to swells), Ring width and Brightness.
+    Attack now applies to Pluck, Bell and Bounce: the hit first swells up
+    exponentially, then plays the shape from its peak. Sparkle ring width
+    is for Rings; "Ring width" was already Beat ripple's label. Sparkle
+    brightness moved into Grain's rows. New curve dials: Hit decay (Pluck,
+    Bell's hit, Bounce), and Rise and Release (Swell). Every dial's middle,
+    and Attack 0, draws the curve exactly as before.
 
 ## Tuning notes
 
