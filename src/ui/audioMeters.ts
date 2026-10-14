@@ -96,7 +96,7 @@ import {
   HISTORY_SPAN_MAX,
   HISTORY_SPANS,
 } from "./historySpan.ts";
-import { createColumnStore } from "./columnStore.ts";
+import { CARRY_MS, createColumnStore } from "./columnStore.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -282,8 +282,11 @@ import { createColumnStore } from "./columnStore.ts";
 export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame, panel open or closed: `onScreen` false (the panel
-   *  closed) only records the traces — see this function's own recording
-   *  block — and skips every draw and DOM write. `frame`/`anim` null before
+   *  closed, or a tick the panel doesn't draw — deviceMenu.ts's update())
+   *  only records the traces — see this function's own recording block —
+   *  and skips every draw and DOM write; the bars' peak fall, the readouts'
+   *  text cadence and the beat and drop flashes count from the last drawn
+   *  tick. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono` is the local mic's samples, or on a
    *  following device the feed's [min, max] (app.ts's waveSamples), null with
    *  neither (the Dynamics card's Waveform row hidden); `rawBands` null on any
@@ -2818,8 +2821,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     waveCtx.fillRect(0, mid - 0.5, w, 1);
   }
 
+  // The last drawn tick (update() with onScreen true).
   let lastMs: number | null = null;
   let lastTextMs = 0;
+  // When anim.metronomeBeat and anim.dropOnset last fired: recorded on every
+  // tick, flashed on the next drawn one (update()).
+  let beatAtMs = -Infinity;
+  let dropAtMs = -Infinity;
 
   // src/render/signals.ts's monitor anchors — populated on demand as a
   // SignalSpec starts pointing at a card/row, never exhaustively (see
@@ -2858,11 +2866,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     el: root,
     update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, onScreen): void {
       const nowMs = performance.now();
-      const dtSec =
-        lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
-      lastMs = nowMs;
-      const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
-      if (text) lastTextMs = nowMs;
       const raw = showRaw;
       // Smoothing's Off stop (sensitivity.ts's smoothingRateScale returns
       // Infinity there) — bypasses this file's own BPM settle the same way
@@ -2927,7 +2930,24 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           heatTracks[i]!.push(x, frame.level, recordSec);
         }
       }
+      if (anim?.metronomeBeat) beatAtMs = nowMs;
+      if (anim?.dropOnset) dropAtMs = nowMs;
       if (!onScreen) return;
+
+      // ---- Drawn ticks only from here ----
+      // deviceMenu.ts passes onScreen false on the ticks the panel doesn't
+      // draw, so the bars' peak fall and the text cadence count from the
+      // last drawn tick, and a beat or drop on a tick in between still
+      // flashes now. An edge older than CARRY_MS (the panel was closed, or
+      // rAF paused) is stale and doesn't.
+      const sinceDrawMs = lastMs === null ? 1000 / 60 : nowMs - lastMs;
+      lastMs = nowMs;
+      const dtSec = Math.max(1e-4, sinceDrawMs / 1000);
+      const edgeWindowMs = Math.min(sinceDrawMs, CARRY_MS);
+      const beat = nowMs - beatAtMs < edgeWindowMs;
+      const drop = nowMs - dropAtMs < edgeWindowMs;
+      const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
+      if (text) lastTextMs = nowMs;
 
       // Heat: each jack's and monitor row's colour, each monitor's strips and
       // the Heat history card at most every HEAT_REFRESH_MS; the lens glow
@@ -3099,7 +3119,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // The dot flashes on the metronome's own tick, not a raw hit — the
         // dot and digits both come from the same tempoSettle.ts reading
         // (metronome.ts's own header).
-        tempo.update(anim?.tempoLock ?? 0, !!anim?.metronomeBeat);
+        tempo.update(anim?.tempoLock ?? 0, beat);
         if (text) {
           // RAW / Smoothing Off show the unsettled raw estimate, exactly as
           // before this block's own settle pass moved into tempoSettle.ts.
@@ -3125,7 +3145,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       if (!characterCard.fold?.isFolded()) {
         const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
         section.setValue(sectionVal, dtSec);
-        if (anim?.dropOnset) section.flash(HOT_RED);
+        if (drop) section.flash(HOT_RED);
         if (text) {
           section.setReadout(
             sectionVal === null ? "--" : pct(sectionVal),

@@ -839,7 +839,12 @@ export interface DeviceMenu {
    *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
    *  its excess(); neither ever calls fired(), so polling it here every
    *  tick can't steal a grid setting's pending edge out from under the
-   *  scene that's about to render it. */
+   *  scene that's about to render it. `draw` is whether the panel draws this
+   *  tick (app.ts: every tick the scene renders, and at least the full
+   *  render cap's rate): false records only what must see every tick — the
+   *  meters' traces, the heat, the drive graphs' peaks — and skips every draw
+   *  and DOM write, so a display faster than the render cap doesn't redraw
+   *  the panel on every tick. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -853,6 +858,7 @@ export interface DeviceMenu {
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
     drives: SceneDrives | null,
+    draw: boolean,
   ): void;
   /** Moves the slider a MIDI mapping aims at (ui/midiCard.ts's applyCc), by
    *  target id and controller value 0..127. Works with the panel shut. */
@@ -2166,11 +2172,11 @@ export function createControlRow(spec: ControlRowSpec) {
         display(spec.auto.resolveLive(), true);
       } else display(spec.custom?.get() ?? manualValue(), false);
     },
-    /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
-     *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
-     *  each linked SignalSpec's live read() (0 while frame/anim aren't up
-     *  yet) and activeWhen predicate into the strip. Unthrottled to match
-     *  the meters' own "fills move every frame" rule (audioMeters.ts) — a
+    /** Called on every tick DeviceMenu.update() draws, unconditionally — a
+     *  no-op when this row has no `reads`, otherwise pushes each linked
+     *  SignalSpec's live read() (0 while frame/anim aren't up yet) and
+     *  activeWhen predicate into the strip. Every drawn tick, to match the
+     *  meters' own "fills move every frame" rule (audioMeters.ts) — a
      *  beat-driven pill should feel as live as the meter it points at. */
     updateSignalPills(frame: FeatureFrame | null, anim: AnimFrame | null): void {
       if (!signalIndicator || !spec.reads) return;
@@ -5894,7 +5900,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // 12-segment level meter, reused for the live row (green, taller) and an
   // idle row's signal preview (grey, shorter — see inputPreview.ts). Segment
   // nodes are fixed once built; only their own style is ever touched, on
-  // every rAF tick while the panel's open (this file's own update(), not
+  // every tick the open panel draws (this file's own update(), not
   // this row's slower structural refresh() — see the CRITICAL note above).
   const SOURCE_METER_SEGMENTS = 12;
   const sourceMeterStyle = (tall: boolean) =>
@@ -6327,8 +6333,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       endEdit(): void {
         editing = false;
       },
-      // Meter segments only — called every rAF tick while the panel's open
-      // (this file's own update(), unthrottled like the Bands strip), so the
+      // Meter segments only — called on every tick the open panel draws
+      // (this file's own update(), like the Bands strip), so the
       // live meter tracks frame.level as closely as the rest of the panel's
       // live meters. `liveLevel` is this tick's FeatureFrame.level; idle rows
       // read deps.getInputLevel(id) instead (src/audio/inputPreview.ts),
@@ -7800,8 +7806,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sourceRow.endEdit();
   }
 
-  // Cache of the last --wash value written, so update() (called every rAF
-  // tick while open) only touches the DOM when the fill color actually moves.
+  // Cache of the last --wash value written, so update() (drawing on every
+  // drawn tick while open) only touches the DOM when the fill color moves.
   let lastWash = "";
   // ~10Hz — auto-driven values move on a multi-second timescale, so per-frame
   // DOM writes here would be pure cost. The spectrum header rides the same
@@ -7855,6 +7861,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       beatDiag: OnsetDiag | null,
       gate: SilenceGateReading | null,
       drives: SceneDrives | null,
+      draw: boolean,
     ) {
       // Heat records panel open or closed, like the meters' traces (heat.ts).
       recordHeat(drives, frame);
@@ -7864,9 +7871,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (solo && solo.sceneId !== deps.currentSceneId()) clearDriveSolo();
       // Closed, only the meters' traces (audioMeters.ts's update(), onScreen
       // false) and heat record, so they open on what they missed; every DOM write
-      // here is skipped — this runs every rAF tick while in a viz.
-      if (!isOpen) {
+      // here is skipped — this runs every rAF tick while in a viz. Open, a
+      // tick the panel doesn't draw (`draw` false) records the same plus
+      // the drive graphs' peak-hold (notePeaks), so a one-tick hit still
+      // reaches the next drawn sparkline; all drawing waits for that tick.
+      if (!isOpen || !draw) {
         audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
+        if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
         return;
       }
       // A scene switch (or a renderer with nothing playing) leaves `pinned`
