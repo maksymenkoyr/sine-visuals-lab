@@ -140,7 +140,7 @@ const stylesheet = `
  * follows the toolbar; browsers without dvh keep 100vh. */
 :root {
   --vc-vh: 100vh;
-  --vc-glass-bg: rgba(8, 11, 10, 0.82);
+  --vc-glass-bg: rgba(8, 11, 10, 0.77);
   --vc-glass-filter: none;
 }
 @supports (height: 100dvh) {
