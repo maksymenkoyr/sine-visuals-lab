@@ -35,4 +35,9 @@ Finish the change on this branch:
    (REST: cloud sessions refuse `gh pr view`): a merged or closed branch still accepts
    pushes that nobody sees. If it's merged, move the commits to a new branch.
 
-7. **Push and open a draft PR**, or update the open one.
+7. **Push and open a draft PR**, or update the open one: push, then rewrite
+   its body so it describes the whole branch as it now stands, not just what
+   the first push carried — `/release` writes the release notes from PR
+   bodies. Keep the screenshots that still hold.
+   `gh api -X PATCH 'repos/{owner}/{repo}/pulls/<n>' -F body=@<file>` (REST,
+   as in step 6).
