@@ -56,9 +56,9 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 export const SORT_GRID_BITS = 7;
 /** Sim steps between re-sorts (the CPU prototype measured the gain holding
  *  across a range of intervals; see the record). */
-export const SORT_EVERY_STEPS = 150;
+const SORT_EVERY_STEPS = 150;
 /** Sort-network stages run per frame while a sort is in flight. */
-export const SORT_PASSES_PER_FRAME = 12;
+const SORT_PASSES_PER_FRAME = 12;
 
 export interface SortLayout {
   /** Slots sorted: the next power of two at or above the agent texture's. */
@@ -210,7 +210,7 @@ void main() {
 `;
 
 /** What one frame's advance needs from the scene. */
-export interface SortTarget {
+interface SortTarget {
   /** The agents' live textures (the half of the ping-pong the next step reads). */
   posTex: WebGLTexture;
   dirTex: WebGLTexture;
