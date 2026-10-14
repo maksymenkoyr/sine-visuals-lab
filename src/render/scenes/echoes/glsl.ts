@@ -34,7 +34,7 @@ import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
 /** The line colour measured on the reference's wall projection (bright
  *  pixels minus the local wall, normalised — docs/scenes/echoes.md's
  *  Measurements), used at Colours = 0. */
-export const LINE_RGB: readonly [number, number, number] = [1.0, 0.94, 0.84];
+const LINE_RGB: readonly [number, number, number] = [1.0, 0.94, 0.84];
 
 function settingUniformsGlsl(settings: readonly SceneSetting[]): string {
   return settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
