@@ -98,12 +98,11 @@ import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading 
 import {
   createHeatPip,
   createHeatTrack,
-  heatColor,
   heatGlowLevel,
   heatHistory,
-  heatStep,
   heatStripBackground,
   heatText,
+  heatToColor,
   HEAT_HISTORY_CELLS,
   HEAT_REFRESH_MS,
   type HeatPip,
@@ -4329,7 +4328,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const heatStrip = document.createElement("div");
     heatStrip.className = "vc-heat-strip";
     let heatStripBg = "";
-    let heatStepNow = -1;
+    let heatColorNow = "";
     let heatGlowNow = -1;
     const patchContainer = document.createElement("div");
     patchContainer.className = "vc-drive-patch";
@@ -4391,10 +4390,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         heatStrip.style.background = bg;
       }
       const r = track?.read(span, nowSec) ?? null;
-      const step = heatStep(r ? r.heat : 0);
-      if (step !== heatStepNow) {
-        heatStepNow = step;
-        boundRowEl?.style.setProperty("--vc-heat", heatColor(step));
+      const color = heatToColor(r ? r.heat : 0);
+      if (color !== heatColorNow) {
+        heatColorNow = color;
+        boundRowEl?.style.setProperty("--vc-heat", color);
       }
     }
 

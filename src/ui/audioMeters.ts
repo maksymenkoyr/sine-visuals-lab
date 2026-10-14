@@ -7,12 +7,11 @@ import { driveSourceColor, driveSourceLabel, jackKey } from "./driveSources.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import {
   createHeatTrack,
-  heatColor,
   heatGlowLevel,
   heatHistory,
-  heatStep,
   heatStripBackground,
   heatText,
+  heatToColor,
   HEAT_HISTORY_CELLS,
   HEAT_REFRESH_MS,
   type HeatTrack,
@@ -2006,7 +2005,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const heatById = new Map<SignalId, HeatTrack>(heatIds.map((id, i) => [id, heatTracks[i]!]));
   // Each signal jack, for its lens glow and the Heat history card: the jack's
   // element, the card whose span chip it reads, and its index into heatIds.
-  const heatJacks: { id: SignalId; card: MeterCardId; el: HTMLElement; idx: number; step: number; glow: number }[] = [];
+  const heatJacks: { id: SignalId; card: MeterCardId; el: HTMLElement; idx: number; color: string; glow: number }[] = [];
   // This tick's reading of every signal, by heatIds index, for the lens glow.
   const heatLive = new Float32Array(heatIds.length);
   const heatIdx = new Map<SignalId, number>(heatIds.map((id, i) => [id, i]));
@@ -2039,7 +2038,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     if (typeof choice === "string") {
       const card = heatCard ?? SIGNALS[choice].monitor?.card ?? "signal";
       jack.el.classList.add("vc-heat-jack");
-      heatJacks.push({ id: choice, card, el: jack.el, idx: heatIdx.get(choice)!, step: -1, glow: -1 });
+      heatJacks.push({ id: choice, card, el: jack.el, idx: heatIdx.get(choice)!, color: "", glow: -1 });
       heatCardByKey.set(jackKey(choice), card);
     }
     return jack;
@@ -2853,10 +2852,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         for (const j of heatJacks) {
           if (meterCards[j.card].fold?.isFolded()) continue;
           const r = heatTracks[j.idx]!.read(getHistorySpan(j.card), heatSec);
-          const step = heatStep(r ? r.heat : 0);
-          if (step !== j.step) {
-            j.step = step;
-            j.el.style.setProperty("--vc-heat", heatColor(step));
+          const color = heatToColor(r ? r.heat : 0);
+          if (color !== j.color) {
+            j.color = color;
+            j.el.style.setProperty("--vc-heat", color);
           }
         }
         if (!heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);

@@ -30,9 +30,12 @@
  *   heat  = swing · (HEAT_LOUD_FLOOR + (1 − HEAT_LOUD_FLOOR) · loud), and 0
  *     while mean(level) is under HEAT_LEVEL_QUIET, so silence reads cold.
  *
- * Heat quantises to HEAT_STEPS colours between HEAT_COLORS' anchors. The
- * owners refresh colours at most every HEAT_REFRESH_MS, and write a style only
- * when its step changes. Nothing here is persisted or synced: the panel is the
+ * A heat's colour blends smoothly across HEAT_COLORS' anchors (heatToColor),
+ * with no steps. The owners recolour at most every HEAT_REFRESH_MS, writing a
+ * style only when the colour changes, and controlsTheme.ts glides each change
+ * over that same time, so a colour never jumps. A history strip blends from
+ * cell to cell. Only the tooltip's words come in bands (HEAT_WORDS, split
+ * evenly across heat). Nothing here is persisted or synced: the panel is the
  * only place heat shows, so none of it reaches the output window or a TV.
  */
 import { HISTORY_SPAN_MAX, formatHistorySpan } from "./historySpan.ts";
@@ -47,9 +50,8 @@ const HEAT_LOUD_FLOOR = 0.3;
 /** Cold → hot anchors, readable on the dark glass panel: a dim desaturated
  *  blue, amber, red-orange. */
 export const HEAT_COLORS: readonly string[] = ["#4d5b78", "#f0a830", "#ff5a26"];
-/** How many colours heat steps through between HEAT_COLORS' anchors. */
-export const HEAT_STEPS = 6;
-/** How often a heat colour's owner refreshes it, at most. */
+/** How often a heat colour's owner refreshes it, at most; controlsTheme.ts
+ *  glides each change over the same time. */
 export const HEAT_REFRESH_MS = 1000;
 
 export interface HeatReading {
@@ -141,27 +143,20 @@ function heatOf(swing: number, level: number): number {
   return swing * (HEAT_LOUD_FLOOR + (1 - HEAT_LOUD_FLOOR) * heatLoudness(level));
 }
 
-/** 0 (coldest) .. HEAT_STEPS − 1 (hottest). */
-export function heatStep(heat: number): number {
-  return Math.min(HEAT_STEPS - 1, Math.max(0, Math.floor(clamp01(heat) * HEAT_STEPS)));
-}
-
-// HEAT_STEPS colours spread evenly across HEAT_COLORS' anchors, mixed in RGB.
-const STEP_COLORS: readonly string[] = Array.from({ length: HEAT_STEPS }, (_, step) => {
-  const t = (step / (HEAT_STEPS - 1)) * (HEAT_COLORS.length - 1);
-  const i = Math.min(HEAT_COLORS.length - 2, Math.floor(t));
-  const f = t - i;
-  const a = hexRgb(HEAT_COLORS[i]!);
-  const b = hexRgb(HEAT_COLORS[i + 1]!);
-  return "#" + a.map((c, k) => Math.round(c + (b[k]! - c) * f).toString(16).padStart(2, "0")).join("");
-});
-
 function hexRgb(hex: string): number[] {
   return [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
 }
 
-export function heatColor(step: number): string {
-  return STEP_COLORS[Math.min(HEAT_STEPS - 1, Math.max(0, step))]!;
+const ANCHOR_RGB: readonly number[][] = HEAT_COLORS.map(hexRgb);
+
+/** A heat's colour: 0..1 blended in RGB across HEAT_COLORS' anchors, with no steps. */
+export function heatToColor(heat: number): string {
+  const t = clamp01(heat) * (ANCHOR_RGB.length - 1);
+  const i = Math.min(ANCHOR_RGB.length - 2, Math.floor(t));
+  const f = t - i;
+  const a = ANCHOR_RGB[i]!;
+  const b = ANCHOR_RGB[i + 1]!;
+  return "#" + a.map((c, k) => Math.round(c + (b[k]! - c) * f).toString(16).padStart(2, "0")).join("");
 }
 
 /** How many cells a heat history strip has at most (a longer span makes each cell cover more seconds). */
@@ -173,7 +168,7 @@ const HEAT_HISTORY_EMPTY = "rgba(255,255,255,0.06)";
 /** How many brightness levels the lens glow has; it's written only when the level changes. */
 const HEAT_GLOW_LEVELS = 12;
 
-/** The heat steps of a history strip: up to `cells` cells across the last
+/** The heats (0..1) of a history strip: up to `cells` cells across the last
  *  `spanSec` seconds, oldest first, each the heat over the
  *  HEAT_HISTORY_WINDOW_SEC (or one cell, if longer) ending at that cell's
  *  second; null where nothing was recorded. */
@@ -184,27 +179,33 @@ export function heatHistory(track: HeatTrack, spanSec: number, nowSec: number, c
   const out: (number | null)[] = [];
   for (let j = 0; j < n; j++) {
     const r = track.read(win, nowSec - (n - 1 - j) * cellSec);
-    out.push(r ? heatStep(r.heat) : null);
+    out.push(r ? r.heat : null);
   }
   return out;
 }
 
-/** A CSS background drawing `steps` as hard-edged cells, left to right; runs
- *  of the same colour merge into one stop pair. */
-export function heatStripBackground(steps: readonly (number | null)[]): string {
-  if (!steps.length) return HEAT_HISTORY_EMPTY;
+/** A CSS background blending `heats` (heatHistory's cells) left to right.
+ *  Each cell's colour sits at the cell's centre, so neighbours blend with no
+ *  hard edge; a run of one colour stays flat across the run. */
+export function heatStripBackground(heats: readonly (number | null)[]): string {
+  const n = heats.length;
+  if (!n) return HEAT_HISTORY_EMPTY;
+  const colorOf = (h: number | null | undefined): string =>
+    h === null || h === undefined ? HEAT_HISTORY_EMPTY : heatToColor(h);
+  const at = (j: number): string => (((j + 0.5) / n) * 100).toFixed(2);
   const stops: string[] = [];
   let runStart = 0;
-  for (let j = 1; j <= steps.length; j++) {
-    if (j < steps.length && steps[j] === steps[runStart]) continue;
-    const s = steps[runStart];
-    const color = s === null || s === undefined ? HEAT_HISTORY_EMPTY : heatColor(s);
-    const a = ((runStart / steps.length) * 100).toFixed(2);
-    const b = ((j / steps.length) * 100).toFixed(2);
-    stops.push(`${color} ${a}% ${b}%`);
+  let runColor = colorOf(heats[0]);
+  for (let j = 1; j <= n; j++) {
+    const color = j < n ? colorOf(heats[j]) : "";
+    if (color === runColor) continue;
+    stops.push(`${runColor} ${at(runStart)}%`);
+    if (j - 1 > runStart) stops.push(`${runColor} ${at(j - 1)}%`);
     runStart = j;
+    runColor = color;
   }
-  return `linear-gradient(to right, ${stops.join(", ")})`;
+  // A single cell has one stop, too few for a gradient: its colour alone.
+  return stops.length < 2 ? colorOf(heats[0]) : `linear-gradient(to right, ${stops.join(", ")})`;
 }
 
 /** The lens glow's strength for a live reading `x` (0..1), quantised to HEAT_GLOW_LEVELS. */
@@ -212,10 +213,10 @@ export function heatGlowLevel(x: number): number {
   return Math.round(clamp01(x) * HEAT_GLOW_LEVELS) / HEAT_GLOW_LEVELS;
 }
 
-/** The plain word for a heat, in step with its colour. */
+/** The plain words for heat, coldest first, each owning an even band of 0..1. */
 const HEAT_WORDS = ["cold", "cool", "warm", "hot"] as const;
 function heatWord(heat: number): string {
-  return HEAT_WORDS[Math.min(HEAT_WORDS.length - 1, Math.floor((heatStep(heat) * HEAT_WORDS.length) / HEAT_STEPS))]!;
+  return HEAT_WORDS[Math.min(HEAT_WORDS.length - 1, Math.floor(clamp01(heat) * HEAT_WORDS.length))]!;
 }
 
 const HEAT_SCALE_TEXT = "Colder = barely moves, hotter = big moves on loud music.";
@@ -235,7 +236,7 @@ export function heatText(reading: HeatReading | null, spanSec: number): string {
  *  .vc-heat-pip rules place it). */
 export interface HeatPip {
   el: HTMLSpanElement;
-  /** Recolours only when the step changes; keeps `hintEl`'s data-hint current
+  /** Recolours only when the colour changes; keeps `hintEl`'s data-hint current
    *  when given. */
   set(reading: HeatReading | null, spanSec: number): void;
 }
@@ -244,18 +245,18 @@ export function createHeatPip(hintEl?: HTMLElement): HeatPip {
   const el = document.createElement("span");
   el.className = "vc-heat-pip vc-heat-pip-wire";
   el.setAttribute("aria-hidden", "true");
-  let step = -1;
+  let color = "";
   let text: string | null = null;
-  const setStep = (next: number): void => {
-    if (next === step) return;
-    step = next;
-    el.style.setProperty("--heat", heatColor(next));
+  const setColor = (next: string): void => {
+    if (next === color) return;
+    color = next;
+    el.style.setProperty("--heat", next);
   };
-  setStep(0);
+  setColor(heatToColor(0));
   return {
     el,
     set(reading, spanSec) {
-      setStep(heatStep(reading?.heat ?? 0));
+      setColor(heatToColor(reading?.heat ?? 0));
       const next = heatText(reading, spanSec);
       if (next !== text) {
         text = next;

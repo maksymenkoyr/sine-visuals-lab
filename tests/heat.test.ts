@@ -5,14 +5,12 @@ import {
   HEAT_HISTORY_CELLS,
   HEAT_LEVEL_LOUD,
   HEAT_LEVEL_QUIET,
-  HEAT_STEPS,
   type HeatTrack,
-  heatColor,
   heatGlowLevel,
   heatHistory,
-  heatStep,
   heatStripBackground,
   heatText,
+  heatToColor,
 } from "../src/ui/heat.ts";
 import { HISTORY_SPAN_MAX } from "../src/ui/historySpan.ts";
 
@@ -100,11 +98,18 @@ describe("heat", () => {
     expect(heatText(null, 30)).toContain("not measured");
   });
 
-  it("maps heat to the first and last step and colour", () => {
-    expect(heatStep(0)).toBe(0);
-    expect(heatStep(1)).toBe(HEAT_STEPS - 1);
-    expect(heatColor(0)).toBe(HEAT_COLORS[0]);
-    expect(heatColor(HEAT_STEPS - 1)).toBe(HEAT_COLORS[HEAT_COLORS.length - 1]);
+  it("colours heat with no steps: each anchor at its own heat, a blend between", () => {
+    const last = HEAT_COLORS.length - 1;
+    HEAT_COLORS.forEach((c, k) => expect(heatToColor(k / last)).toBe(c));
+    // Nearby heats get nearby but different colours: no plateaus.
+    expect(new Set([0.2, 0.21, 0.22].map(heatToColor)).size).toBe(3);
+    expect(heatToColor(-1)).toBe(HEAT_COLORS[0]);
+    expect(heatToColor(2)).toBe(HEAT_COLORS[last]);
+  });
+
+  it("splits heat evenly into its words", () => {
+    const word = (heat: number): string => heatText({ heat, swing: heat, level: 0.9, samples: 600 }, 10).split(".")[0]!;
+    expect([0.1, 0.3, 0.6, 0.9].map(word)).toEqual(["Heat: cold", "Heat: cool", "Heat: warm", "Heat: hot"]);
   });
 
   it("describes a loud full swing in plain words", () => {
@@ -126,23 +131,24 @@ describe("heat", () => {
     feed(t, 0, 19, square, 0.9);
     feed(t, 20, 39, flat, 0.9);
     // Cell j ends at second j + 0.5, so cells 5..15 read only the square part.
-    const steps = heatHistory(t, 40, 39.5, 40);
-    expect(steps).toHaveLength(40);
-    for (let j = 5; j <= 15; j++) expect(steps[j]!).toBeGreaterThanOrEqual(HEAT_STEPS - 2);
-    for (let j = 30; j < 40; j++) expect(steps[j]).toBe(0);
+    const heats = heatHistory(t, 40, 39.5, 40);
+    expect(heats).toHaveLength(40);
+    for (let j = 5; j <= 15; j++) expect(heats[j]!).toBeGreaterThanOrEqual(2 / 3);
+    for (let j = 30; j < 40; j++) expect(heats[j]!).toBeLessThan(0.01);
   });
 
   it("gives HEAT_HISTORY_CELLS cells for a long span", () => {
     expect(heatHistory(createHeatTrack(), HISTORY_SPAN_MAX, 500, HEAT_HISTORY_CELLS)).toHaveLength(HEAT_HISTORY_CELLS);
   });
 
-  it("paints a history as hard-edged runs, empty cells included", () => {
-    const bg = heatStripBackground([0, 0, null, 5]);
-    expect(bg.startsWith("linear-gradient(to right, ")).toBe(true);
-    expect(bg.split(heatColor(0)).length - 1).toBe(1);
-    expect(bg).toContain(`${heatColor(0)} 0.00% 50.00%`);
-    expect(bg).toContain("rgba(255,255,255,0.06) 50.00% 75.00%");
-    expect(bg).toContain(heatColor(5));
+  it("paints a history as a blend through cell centres, a run of one colour kept flat, empty cells included", () => {
+    expect(heatStripBackground([0, 0, null, 1])).toBe(
+      `linear-gradient(to right, ${heatToColor(0)} 12.50%, ${heatToColor(0)} 37.50%, rgba(255,255,255,0.06) 62.50%, ${heatToColor(1)} 87.50%)`,
+    );
+  });
+
+  it("paints a one-cell history as its plain colour", () => {
+    expect(heatStripBackground([0.5])).toBe(heatToColor(0.5));
   });
 
   it("quantises the lens glow to a 0..1 level", () => {
