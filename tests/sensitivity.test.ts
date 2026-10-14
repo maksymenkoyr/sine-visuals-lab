@@ -100,8 +100,9 @@ describe("smoothingRateScale", () => {
     expect(smoothingRateScale(SMOOTHING_DEFAULT)).toBeCloseTo(1);
   });
 
-  it("is linear on the slow half: 4x smoothing gives quarter rate", () => {
-    expect(smoothingRateScale(SMOOTHING_MAX)).toBeCloseTo(0.25);
+  it("is linear on the slow half: the top of the slider gives 1 / SMOOTHING_MAX rate", () => {
+    expect(smoothingRateScale(SMOOTHING_MAX)).toBeCloseTo(1 / SMOOTHING_MAX);
+    expect(smoothingRateScale(4)).toBeCloseTo(0.25);
   });
 
   it("is square-rooted on the fast half: 0.25x smoothing gives 2x rate, not 4x", () => {

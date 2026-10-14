@@ -5766,8 +5766,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       onAutoToggled: refreshMicAutoAndMaster,
       // Dev only: these rows keep their own store (audio/sensitivity.ts),
       // which doesn't drop a custom value on a write the way
-      // setSceneSetting does, so the public build clamps them.
-      custom: import.meta.env.DEV ? customConfig(() => deps.currentSceneId(), spec, resolveLive) : undefined,
+      // setSceneSetting does, so the public build clamps them. A custom value
+      // is one past the slider's own range, not the Auto spec's: Smoothing's
+      // slider reaches past SMOOTHING_SPEC.max (see SMOOTHING_AUTO_MAX).
+      custom: import.meta.env.DEV
+        ? customConfig(() => deps.currentSceneId(), () => ({ ...spec(), min: range.min, max: range.max }), resolveLive)
+        : undefined,
     });
     row.onChange(onChange);
     return { row, getManual, defaultValue: range.defaultValue, onChange };

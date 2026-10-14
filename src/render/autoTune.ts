@@ -19,8 +19,8 @@ import {
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
   shapeExpansion,
+  SMOOTHING_AUTO_MAX,
   SMOOTHING_DEFAULT,
-  SMOOTHING_MAX,
   SMOOTHING_MIN,
 } from "../audio/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
@@ -162,7 +162,8 @@ const SMOOTHING_SPEC: SceneSetting = {
   key: SMOOTHING_AUTO_KEY,
   label: "Smoothing",
   min: SMOOTHING_MIN,
-  max: SMOOTHING_MAX,
+  // Auto's span, not the slider's: see SMOOTHING_AUTO_MAX in sensitivity.ts.
+  max: SMOOTHING_AUTO_MAX,
   step: 0.05,
   default: SMOOTHING_DEFAULT,
   // Smoothing scales how fast the visuals chase the audio (bandEnergy.ts's
