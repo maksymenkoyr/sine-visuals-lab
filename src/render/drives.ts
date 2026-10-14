@@ -8,7 +8,7 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import type { HitLane } from "../audio/hitStrength.ts";
-import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
@@ -222,20 +222,24 @@ import { publishSettingMarks } from "./settingMarks.ts";
  * floor that follows the signal's resting level (down fast, up slowly — a
  * brief loud passage shouldn't instantly convince it the room got louder)
  * and a peak that jumps straight to a new high and eases back toward the
- * floor, with the threshold slider (0..1) picking a line between the two —
- * 0 at the floor (everything through), 1 at the peak (only the standouts).
- * `value()`/`uniformPair()`/`valueOf()` fade a reading out smoothly below
- * that line (a soft knee, not a hard cut, so a hit riding right on the edge
- * doesn't flicker; the knee's width is the setting's Smoothness, see
- * getDriveSmoothness in driveStore.ts, defaulting to
- * GENERIC_SMOOTHNESS_DEFAULT; at its far left, or switched off with
- * getDriveSmoothnessOn, it is a hard cut) and
- * `fired()` blocks an edge whose own combined value
- * falls under it, on top of whatever that mix already required. A setting
+ * floor. The setting's window — two 0..1 sliders, Min (the stored
+ * threshold) and Max (getDriveWindowMax), each 0 at the floor and 1 at the
+ * peak — picks two lines between them. `value()`/`uniformPair()`/`valueOf()`
+ * read 0 at or under the Min line, the tracked peak at or over the Max line,
+ * and a straight rise in between: the stretch a hand-set "normalize"
+ * min/max gives, except its ends ride this signal's own floor and peak, so
+ * it holds from one song to the next. The setting's Smoothness
+ * (getDriveSmoothness in driveStore.ts, defaulting to
+ * GENERIC_SMOOTHNESS_DEFAULT) widens the window at both ends so a reading
+ * riding the Min line doesn't flicker; at its far left, or switched off
+ * with getDriveSmoothnessOn, the window is exact. `fired()` blocks an edge
+ * whose own combined value falls under the Min line, on top of whatever
+ * that mix already required. A setting
  * still on its built-in reaction (`"scene"`) gets the same gate through
  * `value()` only — forScene()'s gateBuiltIn advances its tracker there, on
  * the scene's own value, since accumulate() never sees it. The panel's
- * own graph draws the line with `SceneDrives.gateLine(key)` — `undefined`
+ * own graph draws the Min line with `SceneDrives.gateLine(key)` and the Max
+ * line with `SceneDrives.gateTop(key)` — `undefined`
  * whenever there's nothing to draw: no `drive` at all, a scene-handled
  * threshold (the scene draws its own line through settingMarks.ts instead),
  * or the generic gate simply off. Because a scene-handled setting is
@@ -489,6 +493,8 @@ export interface SceneDrives {
    *  scene-handled threshold (the scene draws its own line instead), or the
    *  generic gate simply off. */
   gateLine(key: string): number | undefined;
+  /** The generic gate window's Max line (GateTrackerState.top) — undefined whenever gateLine is. */
+  gateTop(key: string): number | undefined;
   /** The Master card gauge's needle: how far this scene's picture sits from
    *  its normal right now — the mean, over every patched setting with a live
    *  source, of its Master-Expansion reading minus its own `normal`, in
@@ -515,6 +521,7 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   expansionPair: () => null,
   threshold: () => undefined,
   gateLine: () => undefined,
+  gateTop: () => undefined,
   masterExcursion: () => null,
 };
 
@@ -556,6 +563,9 @@ export const GATE_OPEN_HIGH = 0.55;
  *  way a scene-handled setting shapes its own. */
 export const GENERIC_THRESHOLD_DEFAULT = 0.25;
 
+/** The generic gate window's Max default (driveStore.ts's getDriveWindowMax) — 1 puts the Max line on the tracked peak, so only a new high reads full. */
+export const GENERIC_WINDOW_MAX_DEFAULT = 1;
+
 /** The generic engine gate's knee-width default (driveStore.ts's
  *  getDriveSmoothness; the knee itself is applyGenericGate's) — the resting
  *  position of the Smoothness slider, and the knee every generic setting has
@@ -592,8 +602,8 @@ function usesGenericGate(spec: SceneSetting): boolean {
 const GATE_FLOOR_DOWN_TAU_SEC = 0.3;
 const GATE_FLOOR_UP_TAU_SEC = 4;
 const GATE_PEAK_DECAY_TAU_SEC = 4;
-// The soft knee around the gate's own line (value()/uniformPair()/valueOf()
-// below): a fraction of the tracker's own floor-to-peak spread, with a
+// How far Smoothness widens the window at each end (value()/uniformPair()/
+// valueOf() below): a fraction of the tracker's own floor-to-peak spread, with a
 // minimum so a dead-flat signal (peak == floor) still has *some* knee rather
 // than a hard step. The fraction is the generic gate's Smoothness setting
 // (driveStore.ts getDriveSmoothness, 0..1) scaled by GATE_KNEE_MAX_FRACTION,
@@ -1056,18 +1066,21 @@ interface GateTrackerState {
    *  fired() gate against. Recomputed every advance, so it's always current
    *  the instant floor/peak move even if the threshold slider itself didn't. */
   line: number;
+  /** floor + max(t, tMax)·(peak−floor) — the window's Max line (SceneDrives.gateTop). Never below `line`. */
+  top: number;
 }
 
 function createGateTracker(): GateTrackerState {
-  return { init: false, floor: 0, peak: 0, line: 0 };
+  return { init: false, floor: 0, peak: 0, line: 0, top: 0 };
 }
 
 /** Advances one setting's gate tracker by `dtSec`, given `v` (that setting's
  *  own combined, gained reading this tick — the same number value() would
- *  give with the gate itself switched off) and `t` (the threshold slider,
- *  0..1). The first call seeds floor/peak from `v` rather than from 0, so
- *  startup never reads as a signal that's fallen far below a floor of 0. */
-function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: number): void {
+ *  give with the gate itself switched off), `t` (the window's Min slider,
+ *  0..1) and `tMax` (the window's Max slider, 0..1). The first call seeds
+ *  floor/peak from `v` rather than from 0, so startup never reads as a
+ *  signal that's fallen far below a floor of 0. */
+function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: number, tMax: number): void {
   if (!tr.init) {
     tr.floor = v;
     tr.peak = v;
@@ -1078,6 +1091,7 @@ function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: n
     tr.peak = v > tr.peak ? v : tr.floor + (tr.peak - tr.floor) * Math.exp(-dtSec / GATE_PEAK_DECAY_TAU_SEC);
   }
   tr.line = tr.floor + clamp01(t) * (tr.peak - tr.floor);
+  tr.top = tr.floor + Math.max(clamp01(t), clamp01(tMax)) * (tr.peak - tr.floor);
 }
 
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
@@ -1409,7 +1423,7 @@ export function createDriveEngine(): DriveEngine {
           const thresholdState = getDriveThresholdState(sceneId, spec);
           if (thresholdState.on) {
             const v = expandReading(raw, ex, expansion, shape);
-            advanceGateTracker(gateTrackerFor(sceneId, spec.key), dtSec, v, thresholdState.value);
+            advanceGateTracker(gateTrackerFor(sceneId, spec.key), dtSec, v, thresholdState.value, getDriveWindowMax(sceneId, spec));
           }
         }
       }
@@ -1464,18 +1478,22 @@ export function createDriveEngine(): DriveEngine {
         return ex ? expandReading(v, ex, expansion, shape) : v;
       }
 
-      // value()/uniformPair()/valueOf()'s own soft knee around the generic
-      // gate's line (this file's header's threshold paragraph) — a hard cut
-      // would make a hit riding right on the line flicker. No-op (returns
-      // `v` unchanged) whenever genericGate(key) has nothing to gate on.
+      // value()/uniformPair()/valueOf()'s window (this file's header's
+      // threshold paragraph): 0 at or under the Min line, the tracked peak at
+      // or over the Max line, a straight rise between; Smoothness widens both
+      // ends by the knee so a reading riding the Min line doesn't flicker.
+      // No-op (returns `v` unchanged) whenever genericGate(key) has nothing
+      // to gate on.
       function applyGenericGate(key: string, v: number): number {
         const tr = genericGate(key);
         if (!tr) return v;
         const spec = specByKey.get(key)!;
         const s = getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
         const k = GATE_KNEE_MAX_FRACTION * s * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
-        if (k <= 0) return v >= tr.line ? v : 0;
-        return v * smoothstep(tr.line - k, tr.line + k, v);
+        const lo = tr.line - k;
+        const hi = tr.top + k;
+        if (hi - lo <= 1e-6) return v >= tr.line ? tr.peak : 0;
+        return tr.peak * clamp01((v - lo) / (hi - lo));
       }
 
       // fired()'s own hard cut: an edge whose combined value falls under the
@@ -1524,7 +1542,7 @@ export function createDriveEngine(): DriveEngine {
         const k = gateTrackerKey(sceneId, key);
         if (builtInGateFrames.get(k) !== anim) {
           builtInGateFrames.set(k, anim);
-          advanceGateTracker(gateTrackerFor(sceneId, key), anim.dtSec, v, thresholdState.value);
+          advanceGateTracker(gateTrackerFor(sceneId, key), anim.dtSec, v, thresholdState.value, getDriveWindowMax(sceneId, spec));
         }
         return applyGenericGate(key, v);
       }
@@ -1698,6 +1716,10 @@ export function createDriveEngine(): DriveEngine {
 
         gateLine(key) {
           return genericGate(key)?.line;
+        },
+
+        gateTop(key) {
+          return genericGate(key)?.top;
         },
 
         masterExcursion() {
