@@ -166,6 +166,44 @@ describe("fix-conflicts-pr.sh", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // A pre-push hook, standing in for npm run check, that refuses the first `refusals` pushes.
+  const refusePushes = (root: string, work: string, git: (cwd: string, ...args: string[]) => string, refusals: number) => {
+    const hooks = join(root, "hooks");
+    mkdirSync(hooks);
+    writeFileSync(join(hooks, "pre-push"), `#!/bin/sh\nn=$(cat "$0.n" 2>/dev/null || echo 0)\necho $((n + 1)) >"$0.n"\n[ "$n" -ge ${refusals} ]\n`);
+    chmodSync(join(hooks, "pre-push"), 0o755);
+    git(work, "config", "core.hooksPath", hooks);
+  };
+
+  it("tries a refused push once more, as a slow test on a busy machine can pass the second time", () => {
+    const { root, work, git, run, pushed } = setup();
+    try {
+      refusePushes(root, work, git, 1);
+      run();
+      expect(pushed()).toEqual(rebased);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the rebase and names the command that pushes it when the push is refused twice", () => {
+    const { root, work, git, run, pushed } = setup();
+    try {
+      refusePushes(root, work, git, 2);
+      let stderr = "";
+      try {
+        run();
+      } catch (e) {
+        stderr = String((e as { stderr?: string }).stderr);
+      }
+      expect(stderr).toContain("then run: fix-conflicts 7");
+      expect(pushed().log).toEqual(["feature", "base"]);
+      expect(git(join(work, ".claude/worktrees/feature"), "log", "--format=%s").trim().split("\n")).toEqual(rebased.log);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("autoResolvable", () => {

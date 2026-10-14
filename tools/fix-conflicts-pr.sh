@@ -6,6 +6,12 @@
 # the rebase and pushes with --force-with-lease. It stops before the push when
 # a file needs judgment. Arguments after the PR number go to fix-conflicts.sh.
 #
+# The push runs the pre-push hook (npm run check). On a machine busy with
+# parallel agents a slow test can run past its time limit, so a refused push
+# is tried once more. If that fails too, the finished rebase stays: the branch
+# shows as diverged from origin until it lands, and running this again only
+# pushes.
+#
 # The ~/.zshrc function `fix-conflicts` only runs this script from the main
 # checkout and then cd's into the worktree it names (a script can't move its
 # parent shell): it writes the worktree path to $FIX_CONFLICTS_CD_FILE when
@@ -74,4 +80,9 @@ fi
 if [ -f package.json ]; then
   npm ls --depth=0 >/dev/null 2>&1 || npm ci || exit 1
 fi
-git push --force-with-lease origin "$branch"
+for try in 1 2; do
+  git push --force-with-lease origin "$branch" && exit 0
+  [ "$try" = 1 ] && echo "Push refused (see above). Trying once more, in case a test only ran slow." >&2
+done
+echo "The rebase is done and kept; only the push failed (see above). Fix what failed, then run: fix-conflicts $pr" >&2
+exit 1
