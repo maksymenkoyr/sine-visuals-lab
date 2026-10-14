@@ -1017,6 +1017,11 @@ configs are used.
   the sim's reseed draw tests `uSeed * uSeedFresh` with `uSeedFresh` set to
   that size. The user, on why Dose isn't flat-only: it can take loudness.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-09 — the Pairs own-trail faders and the Strain Console lanes say
+  their value. Each is a `role="slider"`; its `aria-valuetext` is the text
+  its visible readout shows, so a screen reader no longer hears only the
+  bare number. Attribute only: no change to the sim, the stored values or the
+  look.
 
 ## Tuning notes
 
