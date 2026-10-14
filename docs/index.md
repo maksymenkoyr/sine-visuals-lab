@@ -15,6 +15,9 @@ rules before adding a note here; this file doesn't restate them.
   auto-tune invariant that isn't owned by any single scene file.
 - [Tuning](tuning.md) — the live-tuning loop: param bus, mark, numeric probe,
   contact sheet, A/B.
+- [Performance](performance.md) — `npm run perf`: the dated snapshots of what
+  the app costs (download, GPU per scene, frame pacing and main thread), how
+  far to trust each number, and what was found.
 - [Vocabulary](vocabulary.md) — the words the panel uses for wiring the sound
   into a scene (input node, jack, wire, port, animation node), mapped to the
   code's own names.
