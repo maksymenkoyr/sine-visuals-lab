@@ -572,4 +572,4 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   cumulus round from a photo, reverted; bench cut to six controls.
 - Rainbow, Blue-field sprites, Floater glide, Gradient dither; light-wave
   halo and Haidinger's brush beat swell (2026-10-04).
-- 2026-10-15 (shader program cache): fluidSim.ts's passes look their uniforms up on first draw, so a mount compiles all of the sim's programs at once. No change on screen.
+- #533 (2026-10-15): fluidSim.ts's passes look their uniforms up on first draw, so a mount compiles all of the sim's programs at once. No change on screen.
