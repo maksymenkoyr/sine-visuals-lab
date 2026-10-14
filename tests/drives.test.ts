@@ -1,5 +1,5 @@
 import { UNIT_TAILS } from "../src/audio/hitStrength.ts";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   createDriveEngine,
   gateConditionIndices,
@@ -22,7 +22,8 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
+import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
+import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -1819,6 +1820,122 @@ describe("drives: per-frame allocation (#353)", () => {
     // The wide read's third term must be larger than anything the narrow max could show.
     expect(1.9 * high).toBeGreaterThan(Math.max(0.3 * low, 0.7 * mid));
     expect(drives.valueOf("narrow")).toBe(Math.max(0, 0.3 * low, 0.7 * mid));
+  });
+});
+
+// "Only this" (driveSolo.ts): one setting keeps following the sound while
+// every other setting of its scene reads as if its wires were all switched
+// off. The stored wires are never touched, so ending the solo restores them.
+describe("Only this (driveSolo)", () => {
+  afterEach(() => {
+    clearDriveSolo();
+  });
+
+  it("a soloed setting reads its normal value; a patch-driven sibling reads rest", () => {
+    const sceneId = "solo-patch-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const aBefore = engine.forScene(sceneId, [a, b], anim).value("A", 0, -1);
+    expect(aBefore).toBeGreaterThan(0);
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBeGreaterThan(0);
+
+    setDriveSolo(sceneId, "A");
+    const drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.value("B", 0, -1)).toBe(-1);
+    expect(drives.value("A", 0, -1)).toBe(aBefore);
+  });
+
+  it("a built-in reaction on a sibling reads its rest, not the scene's own value", () => {
+    const sceneId = "solo-builtin-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = settingWithDrive("B", "scene");
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0.6, 0.1)).toBe(0.6);
+
+    setDriveSolo(sceneId, "A");
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0.6, 0.1)).toBe(0.1);
+  });
+
+  it("clearing the solo restores every sibling exactly, and the stored wires are untouched", () => {
+    const sceneId = "solo-restore-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const bBefore = engine.forScene(sceneId, [a, b], anim).value("B", 0, -1);
+    const storedBefore = JSON.parse(JSON.stringify(getDriveSetting(sceneId, b)));
+
+    setDriveSolo(sceneId, "A");
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBe(-1);
+
+    clearDriveSolo();
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBe(bBefore);
+    expect(getDriveSetting(sceneId, b)).toEqual(storedBefore);
+    expect((getDriveSetting(sceneId, b) as DrivePatch).sources[0]!.off).toBeUndefined();
+  });
+
+  it("a solo set for a different scene changes nothing in this one", () => {
+    const sceneId = "solo-elsewhere-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const bBefore = engine.forScene(sceneId, [a, b], anim).value("B", 0, -1);
+
+    setDriveSolo("some-other-scene", "A");
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBe(bBefore);
+  });
+
+  it("soloing a second key moves the solo: the first is silenced, the second stays live", () => {
+    const sceneId = "solo-move-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const aBefore = engine.forScene(sceneId, [a, b], anim).value("A", 0, -1);
+    const bBefore = engine.forScene(sceneId, [a, b], anim).value("B", 0, -1);
+
+    setDriveSolo(sceneId, "A");
+    let drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.value("B", 0, -1)).toBe(-1);
+    expect(drives.value("A", 0, -1)).toBe(aBefore);
+
+    setDriveSolo(sceneId, "B");
+    drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.value("A", 0, -1)).toBe(-1);
+    expect(drives.value("B", 0, -1)).toBe(bBefore);
+  });
+
+  it("a silenced setting's uniform is exactly 0 and it leaves the Master excursion", () => {
+    const sceneId = "solo-uniform-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame(), 0, anim, sceneId, [a, b]);
+    expect(engine.forScene(sceneId, [a, b], anim).uniformPair("B").drive).toBeGreaterThan(0);
+
+    setDriveSolo(sceneId, "A");
+    const drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.uniformPair("B")).toEqual({ drive: 0, custom: 1 });
+    expect(drives.sourceValues("B")![0]).toBe(0);
+    // Only A is live now, so the excursion is A's alone.
+    expect(drives.masterExcursion()).toBe(engine.forScene(sceneId, [a], anim).masterExcursion());
+  });
+
+  it("fired() on a silenced edge setting is false", () => {
+    const sceneId = "solo-fired-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const e = settingWithDrive("E", "feature.onset");
+    const anim = { ...createAnimClock().advance(DT, frame()), onset: true, mid: 0.8 };
+    const engine = createDriveEngine();
+    expect(engine.forScene(sceneId, [a, e], anim).fired("E", false)).toBe(true);
+
+    setDriveSolo(sceneId, "A");
+    expect(engine.forScene(sceneId, [a, e], anim).fired("E", false)).toBe(false);
   });
 });
 

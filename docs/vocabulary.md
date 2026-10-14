@@ -38,6 +38,7 @@ reshapes an input node's value on its way to an animation node.
 | **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). |
 | **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, a "+ Add by name" chip, or Unplug. |
 | **switch off** / **switch on** | Muting a wire without unplugging it; its weight, height and role are kept. |
+| **only this** / **all back** | The **O** chip on a reactive setting's row (beside A and T), and a button in its wire panel, that switch off every other setting's reaction so only this one moves, then bring them back; a preview on this screen, the wires are kept. |
 | **receive** | What a setting does with its wires: "what this setting receives". |
 | **reset to scene default** | Throwing away the wires and going back to the scene's own starting state, built-in or wired. |
 

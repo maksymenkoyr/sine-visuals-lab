@@ -76,6 +76,7 @@ import {
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
+import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
@@ -891,6 +892,20 @@ const autoChipManualStyle = (accent: string) =>
 // accent, so a muted row never reads as a lit A chip at a glance.
 const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
+/** Paints a row's O chip (createControlRow's `onlyThis`) from the current
+ *  solo: filled with the row's accent while this setting is the solo, outlined
+ *  otherwise. Also the title and aria-pressed. */
+function paintOnlyChip(chip: HTMLElement): void {
+  const solo = getDriveSolo();
+  const on = !!solo && `${solo.sceneId}:${solo.key}` === chip.dataset.soloKey;
+  const accent = chip.dataset.soloAccent ?? SCENE_VIOLET;
+  chip.style.cssText = on ? autoChipLitStyle(accent) : autoChipManualStyle(accent);
+  chip.setAttribute("aria-pressed", String(on));
+  chip.title = on
+    ? "All back: switch every setting's reaction back on"
+    : "Only this: switch off every other setting's reaction, so only this one moves";
+}
+
 /** The Master card's Expansion shape chips by name, in sceneSettings.ts's
  *  EXPANSION_SHAPES order — the chips' own labels and the output graph's
  *  Expansion tag both read these. */
@@ -1311,6 +1326,10 @@ export interface ControlRowSpec {
     below: HTMLElement;
     onPin: () => void;
   };
+  /** The O chip beside A and T: "Only this" (driveSolo.ts) for this setting.
+   *  Omit for a setting with no `drive`. The chip carries `data-solo-key`
+   *  so the menu's one onDriveSoloChange listener can relight every row. */
+  onlyThis?: { sceneId: string; key: string };
   /** Fires on a click anywhere on the card, the slider included, that isn't
    *  one of its side controls (isCardPress) — pin-only, so a stray click on
    *  a pinned card can't close it. Every Scene-card row passes it, drive or
@@ -1764,6 +1783,24 @@ export function createControlRow(spec: ControlRowSpec) {
   offChip.dataset.key = "mute";
   offChip.dataset.keycap = "T";
 
+  // "Only this" (driveSolo.ts), same chip geometry as A and T. No hotkey: O
+  // stays the panel's Solo view toggle. Lit while this setting is the solo.
+  let onlyChip: HTMLButtonElement | null = null;
+  if (spec.onlyThis) {
+    const { sceneId, key } = spec.onlyThis;
+    onlyChip = document.createElement("button");
+    onlyChip.type = "button";
+    onlyChip.textContent = "O";
+    onlyChip.dataset.soloKey = `${sceneId}:${key}`;
+    onlyChip.dataset.soloAccent = spec.accent;
+    onlyChip.addEventListener("click", () => {
+      const now = getDriveSolo();
+      if (now && now.sceneId === sceneId && now.key === key) clearDriveSolo();
+      else setDriveSolo(sceneId, key);
+    });
+    paintOnlyChip(onlyChip);
+  }
+
   // visibility (not display) keeps the row from reflowing while dragging.
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "↺";
@@ -1793,7 +1830,9 @@ export function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) right.appendChild(signalIndicator.chip);
 
   right.appendChild(readout);
-  right.append(chip, offChip, resetBtn);
+  right.append(chip, offChip);
+  if (onlyChip) right.appendChild(onlyChip);
+  right.appendChild(resetBtn);
   if (spec.drivePanel) {
     const left = document.createElement("div");
     left.style.cssText = driveRowLeftStyle;
@@ -2784,6 +2823,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     tickHeatGlow(): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
+  // "Only this" (driveSolo.ts) changes from any row's button or the scene
+  // change in update(): the pinned row's own panel shows whichever label
+  // is current. rebuildIfPinned() is a no-op on every row but the pinned one.
+  onDriveSoloChange(() => {
+    for (const h of driveRowHandles) h.rebuildIfPinned();
+    for (const chip of document.querySelectorAll<HTMLElement>("[data-solo-key]")) paintOnlyChip(chip);
+  });
 
   // Heat (heat.ts) for the current scene's wired settings and each of their
   // wires (keyed by the wire's jackKey), recorded every tick by recordHeat,
@@ -4204,7 +4250,28 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
     eyebrow.textContent = "Wires";
-    head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
+    // "Only this" (driveSolo.ts): a local preview, not a wire edit, so it
+    // deliberately does not go through patchChanged() (which copies the
+    // setting to linked rows). onDriveSoloChange's own rebuild refreshes it.
+    const soloNow = getDriveSolo();
+    const isSolo = !!soloNow && soloNow.sceneId === sceneId && soloNow.key === spec.key;
+    const soloBtn = document.createElement("button");
+    soloBtn.type = "button";
+    soloBtn.style.cssText = driveResetLinkStyle;
+    soloBtn.textContent = isSolo ? "All back" : "Only this";
+    soloBtn.setAttribute("aria-pressed", String(isSolo));
+    setHint(
+      soloBtn,
+      isSolo
+        ? "Switch every setting's reaction back on."
+        : "Switch off every other setting's reaction, so only this one moves. Wires are kept; this screen only.",
+    );
+    soloBtn.addEventListener("click", () => {
+      const now = getDriveSolo();
+      if (now && now.sceneId === sceneId && now.key === spec.key) clearDriveSolo();
+      else setDriveSolo(sceneId, spec.key);
+    });
+    head.append(eyebrow, soloBtn, buildMixSeg(sceneId, spec, patch));
     panel.appendChild(head);
 
     const list = document.createElement("div");
@@ -6873,6 +6940,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       drivePanel: driveBuild
         ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
         : undefined,
+      onlyThis: spec.drive ? { sceneId, key: spec.key } : undefined,
       onCardPin: () => pinSetting(sceneId, spec),
       linkedTicks: linked.length
         ? linked.map((l) => ({ value: deps.getSceneSettingValue(sceneId, l.spec), colour: l.colour }))
@@ -7786,6 +7854,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     ) {
       // Heat records panel open or closed, like the meters' traces (heat.ts).
       recordHeat(drives, frame);
+      // "Only this" (driveSolo.ts) is dropped on a scene switch too. Checked
+      // before the closed return below, so it still clears with the panel shut.
+      const solo = getDriveSolo();
+      if (solo && solo.sceneId !== deps.currentSceneId()) clearDriveSolo();
       // Closed, only the meters' traces (audioMeters.ts's update(), onScreen
       // false) and heat record, so they open on what they missed; every DOM write
       // here is skipped — this runs every rAF tick while in a viz.
