@@ -25,6 +25,7 @@ import "@fontsource/chakra-petch/latin-300.css";
 import "@fontsource/chakra-petch/latin-500.css";
 import "@fontsource/share-tech-mono/latin-400.css";
 import dseg7Url from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Regular.woff2?url";
+import { HEAT_COLORS, HEAT_REFRESH_MS } from "./heat.ts";
 
 /** Mic input gain — Sensitivity/Expansion/Smoothing and the live level wash. */
 export const INPUT_GREEN = "#8ce6a0";
@@ -828,36 +829,52 @@ body.vc-keys-reveal [data-keycap]::after {
   transform: rotate(var(--a)) translateY(calc(-1 * var(--r)));
 }
 /* Heat pip (heat.ts): a small dot after a wire's name in the wire panel,
- * coloured cold → hot through --heat. */
-.vc-heat-pip { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--heat); pointer-events: none; }
+ * coloured cold → hot through --heat, gliding from one recolour to the next. */
+.vc-heat-pip {
+  position: absolute; width: 4px; height: 4px; border-radius: 50%; background-color: var(--heat); pointer-events: none;
+  transition: background-color ${HEAT_REFRESH_MS}ms linear;
+}
 .vc-heat-pip[hidden] { display: none; }
 .vc-heat-pip-wire { position: relative; display: inline-block; margin-left: 7px; vertical-align: 1px; }
-/* Heat (heat.ts). The strip under a wired setting's graph, and the Heat
- * history card's strips: hard-edged cells painted as a background. */
+/* Heat (heat.ts). The strip under a wired setting's graph or a signal's
+ * monitor, and the Heat history card's strips: cells blended into one
+ * gradient background. */
 .vc-heat-strip { height: 2px; margin-top: 3px; border-radius: 1px; background: rgba(255,255,255,0.06); }
 .vc-heat-strip[hidden] { display: none; }
+/* A signal monitor's own strips (audioMeters.ts): one line per signal on the
+ * row, led by a dot in the signal's colour (--c). */
+.vc-heat-monitor { display: grid; gap: 3px; margin-top: 5px; }
+.vc-heat-monitor-line { display: flex; align-items: center; gap: 5px; }
+.vc-heat-monitor-line::before { content: ""; flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--c); }
+.vc-heat-monitor-line .vc-heat-strip { flex: 1; margin-top: 0; }
 .vc-heat-hist { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 8px; align-items: center; }
 .vc-heat-hist-label { font: 400 11px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-heat-hist-strip { height: 5px; border-radius: 1px; background: rgba(255,255,255,0.06); }
 .vc-heat-hist-group { grid-column: 1 / -1; font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-top: 6px; }
 .vc-heat-hist-axis { display: flex; justify-content: space-between; font: 400 9.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); margin: 6px 0 0 104px; }
 .vc-heat-hist-note { font: 400 11px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,0.55); margin-bottom: 4px; }
-/* The heat lens (L, or the column head's HEAT chip): a wired setting's row
- * and every signal jack on the meter cards (.vc-heat-jack, audioMeters.ts's
- * mountJack) glow in their heat colour (--vc-heat, recoloured once a
- * second), brighter the more they move right now (--vc-heat-glow, 0..1,
- * written as it changes). On a pseudo-element, so the row's own hover,
- * pinned and fed rings and the jack's fill are untouched. */
+/* The heat lens (L, or the column head's HEAT chip): a wired setting's row,
+ * every signal's monitor row on the meter cards and every signal jack there
+ * (.vc-heat-row and .vc-heat-jack, audioMeters.ts's mountJack) glow in their
+ * heat colour (--vc-heat, recoloured at most every
+ * HEAT_REFRESH_MS), brighter the more they move right now (--vc-heat-glow,
+ * 0..1, written as it changes). On a pseudo-element, so the row's own hover,
+ * pinned and fed rings and the jack's fill are untouched. --vc-heat is a
+ * registered colour, so the pseudo-element glides from one recolour to the
+ * next; the glow stays immediate. */
+@property --vc-heat { syntax: "<color>"; inherits: true; initial-value: ${HEAT_COLORS[0]}; }
 .vc-heat-lens .vc-heat-row::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   background: color-mix(in srgb, var(--vc-heat, #4d5b78) calc(6% + 14% * var(--vc-heat-glow, 0)), transparent);
   box-shadow: inset 3px 0 0 var(--vc-heat, #4d5b78),
     0 0 calc(2px + 16px * var(--vc-heat-glow, 0)) color-mix(in srgb, var(--vc-heat, #4d5b78) calc(20% + 60% * var(--vc-heat-glow, 0)), transparent);
+  transition: --vc-heat ${HEAT_REFRESH_MS}ms linear;
 }
 .vc-heat-lens .vc-heat-jack::after {
   content: ""; position: absolute; inset: -2px; border-radius: 50%; pointer-events: none;
   box-shadow: 0 0 calc(2px + 12px * var(--vc-heat-glow, 0)) calc(1px + 2px * var(--vc-heat-glow, 0))
     color-mix(in srgb, var(--vc-heat, #4d5b78) calc(35% + 60% * var(--vc-heat-glow, 0)), transparent);
+  transition: --vc-heat ${HEAT_REFRESH_MS}ms linear;
 }
 
 /* Highlighting while a setting is previewed/pinned (deviceMenu.ts's own
