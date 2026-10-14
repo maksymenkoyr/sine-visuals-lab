@@ -66,8 +66,8 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *  - `hello`/`bye` from the output: a once-a-second heartbeat (so the main
  *    window's button reflects a closed window) and a goodbye on unload.
  *  - `status` from the output: its live render readouts (preset, fps,
- *    governor), twice a second, for the Output Power card in the main
- *    window's panel. Also counts as a sign of life, but unlike `hello` it
+ *    missed frames, governor), twice a second, for the Output Power card in
+ *    the main window's panel. Also counts as a sign of life, but unlike `hello` it
  *    never makes the main window re-send state.
  */
 
@@ -126,6 +126,11 @@ export interface OutputRenderStatus {
   standingDown: boolean;
   bufferWidth: number;
   bufferHeight: number;
+  /** The output's own missed frames and longest frame gap
+   *  (render/frameMisses.ts), null while it has measured nothing. Optional:
+   *  an output window older than these doesn't send them, and reads "--". */
+  missedFrames?: number | null;
+  longestGapMs?: number | null;
 }
 
 /** `glideMs` (state only): the output arrives at this look over that long
