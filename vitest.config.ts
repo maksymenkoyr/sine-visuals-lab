@@ -15,5 +15,10 @@ export default defineConfig({
     // Paid scenes keep their tests next to them in the private checkout
     // (src/render/scenes/privateScenes.ts); nothing matches in the public repo.
     include: ["tests/**/*.test.ts", "src/render/scenes/private/**/*.test.ts"],
+    // Well past vitest's default: the pre-push check often runs while parallel
+    // agents load the machine, and CPU-heavy tests then ran past the default
+    // and refused a push that had nothing wrong with it.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });

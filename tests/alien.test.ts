@@ -29,14 +29,18 @@ describe("alien mesh", () => {
   it("is a few tens of thousands of triangles, skinned to real bones with weights summing to one", () => {
     expect(mesh.triCount).toBeGreaterThan(10_000);
     expect(mesh.triCount).toBeLessThan(60_000);
+    // Counted, then checked once: an expect() per vertex took seconds and ran past the time limit on a busy machine.
+    let badBones = 0, badSums = 0;
     for (let v = 0; v < mesh.triCount * 3; v++) {
       let sum = 0;
       for (let k = 0; k < MAX_INFLUENCES; k++) {
         sum += mesh.weights[v * MAX_INFLUENCES + k];
-        expect(mesh.bones[v * MAX_INFLUENCES + k]).toBeLessThan(BONE_COUNT);
+        if (!(mesh.bones[v * MAX_INFLUENCES + k] < BONE_COUNT)) badBones++;
       }
-      expect(sum).toBe(255);
+      if (sum !== 255) badSums++;
     }
+    expect(badBones).toBe(0);
+    expect(badSums).toBe(0);
   });
 
   it("winds nearly every triangle outward, along its vertex normals", () => {
