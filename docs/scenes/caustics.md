@@ -16,6 +16,15 @@ riding on top. Ships from the initial commit and is on main
   `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
   `advancePump`, `driftFlows`, `advanceDensityFlow` (Caustic
   density's own glide — see Decisions), and the `sparkle*` helpers.
+- `src/render/scenes/causticsSparkle.ts` — Treble sparkle's two picks: the
+  effect list, the shape curves (`sparkleEnvelope`), the hit ring buffer
+  (`advanceSparkleHits`) and which rows each pick shows. Pure;
+  `tests/causticsSparkle.test.ts` pins it. FRAG draws the effects.
+- `src/ui/widgets/causticsSparkle.ts` — the Scene card's Sparkle section
+  (`PANEL` in caustics.ts): the two picks, a preview (the shape's curve plus a
+  small WebGL2 sketch of the effect, not the scene's own shader), then
+  Treble sparkle and the picked rows. `createFullscreenScene` passes `panel`
+  through for it.
 - `src/render/standout.ts` — the shared standout detector:
   `advanceStandoutAmount` conditions the driver's own rise each frame into a
   launched ring amount, sized by how far it stands out from the everyday
@@ -661,6 +670,56 @@ reference-measurement workflow used by later scenes.
   measured it at about 3.6 of 11.1 ms per Retina frame after its own fix). `tests/drives.test.ts` no longer pins the injection drive.
   The shared `hash2Cell` stays in `noiseHash.ts` (Tangle uses it). Not judged by
   eye on the live pool or with music.
+- 2026-10-13 — Treble sparkle rebuilt as two picks: an Effect and a Shape.
+  The user asked for "a couple of variations" of sparkle, one "like hitting
+  the bell … an exponent animation with a ring on the end", plus "a small
+  preview window of the shape". It was worked out in a prototype (Materials:
+  Caustics Sparkle Shapes) before any code:
+  - v1 drew glints on top of the pool (Grain = today's, Bell = flash + an
+    expanding ring, Star, Bloom). The user: "bloom and bell are bad … more
+    like adding or transforming effect on main animation instead of adding
+    some new ones on top", and the bell "was rather the shape to this
+    effect".
+  - So v2 split it in two. Effect: what a hit does. Grain, plus Rings and
+    Bloom now bent by the water and shown only on lit filaments, plus five
+    that change the pool itself (Flare, Tighten, Shimmer, Prism, Run).
+    Shape: the effect's strength over time after the hit (Pluck, Bell,
+    Swell, Bounce), drawn in the preview.
+  - v3 tried echo-style Bell curves. Rejected ("it was better before");
+    the user wanted the bell hit to have "vibration fluctuations … more
+    often". So v4's Bell is a fast hit plus a fast vibration that starts
+    with it and fades on its own time. v5 added a Vibration decay slider,
+    and v6 tripled the speed (Speed 12–60 Hz, default 39).
+  - "Add this panel as it is" → built. The default stays Grain + Pluck, with
+    Length 0.6 s so Pluck fades as fast as the treble pulse the glints rode
+    (`PLUCK_TAU`), so an untouched pool looks as before.
+  - Sparkle became a hit driver (`drive.hit`, Sized by default): each hit
+    starts the shape at its own size.
+  - Hits stack, soft-capped, where the old pulse took the max, so very fast
+    hats glint a little brighter than before.
+  - Spray injection now only sprays with Grain, since the other effects
+    have no glints to spray from.
+  - Prism samples the ridges three times. Measured headless at 1920×1080
+    on an M1 Pro: Grain 4.2 ms, Prism 8.7 ms, Rings 9.5 ms. Rings then got
+    a reach check per spot and measured 7.2 ms against Grain's 6.8 ms in
+    the same run (GPU clocks drift between runs).
+  - The effects were tuned against the prototype and checked headless on
+    the synthetic feed only. On the real pool, Rings and Bloom needed a
+    finer bend noise and more gain than in the prototype, because the
+    scene's coordinates and its brightness multiplier differ.
+  - Same day: the user asked for "the ones we had to adjust the curve". The
+    shape's rows were there, but they mounted after Treble sparkle and the
+    effect's rows, below the panel's fold. They now sit right under the
+    curve.
+  - 2026-10-14: the user wanted more curve sliders per shape, plus "a
+    couple more" from the prototype, "copied exactly". Version 1 of the
+    prototype had Attack (instant to swells), Ring width and Brightness.
+    Attack now applies to Pluck, Bell and Bounce: the hit first swells up
+    exponentially, then plays the shape from its peak. Sparkle ring width
+    is for Rings; "Ring width" was already Beat ripple's label. Sparkle
+    brightness moved into Grain's rows. New curve dials: Hit decay (Pluck,
+    Bell's hit, Bounce), and Rise and Release (Swell). Every dial's middle,
+    and Attack 0, draws the curve exactly as before.
 
 ## Tuning notes
 
@@ -724,6 +783,13 @@ reference-measurement workflow used by later scenes.
 
 ## Known issues and next steps
 
+- The sparkle effects and shapes (2026-10-13) have only been seen on the
+  synthetic feed and in the prototype; judge them live with real music.
+  Bell's Speed above 30 Hz can't be shown as such on a 60 Hz screen and
+  reads as a slower strobe. Prism roughly doubles the frame's GPU cost
+  while it is picked. The panel's preview patch is a sketch, so a pool on
+  another palette or Fog won't match it exactly.
+
 - Nothing in this file hand-rolls trigger/hold/decay logic any more: Kick
   surge and Beat churn were removed on main (Speed pump replaced them), and
   Beat ripple is a continuous emitter (`rippleEmitter.ts`), not a trigger
@@ -773,6 +839,7 @@ reference-measurement workflow used by later scenes.
 - Both artifacts are clickable prototypes for choosing what each reactive setting listens to — the UI behind the drives work (PR #130).
 - Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceStandoutAmount` (`src/render/standout.ts`; `advanceEmission` in `rippleEmitter.ts` until 2026-10-06) or its tracker constants (the old `SALIENCE_*`) change, the copy in that page has to change with them.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
+- Artifact: [Caustics Sparkle Shapes](https://claude.ai/artifact/FqAHd9xEBS8cYJzhwoXqUR). Source saved as `caustics/artifacts/caustics-sparkle-shapes.html` (its last version, v6). The prototype the 2026-10-13 sparkle rebuild was chosen in: a live pool with fake hats, the Effect and Shape picks, and the preview window. Its effects are a sketch in its own shader; the scene's are in FRAG.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 - `caustics/scripts/shader-bisect.py` — the 2026-09-28 performance work: times FRAG with one part switched off at a time, and pixel-diffs the scene against any git ref. Runs on `tools/gpu-bench.mjs` (general: any scene, bench or in-app timing), whose header explains why each benchmark frame has to end its render pass on an Apple GPU.
 
@@ -840,3 +907,4 @@ reference-measurement workflow used by later scenes.
 - #405 (draft, 2026-10-06) — Beat ripple's detector moved to the shared `src/render/standout.ts`, renamed only (see Decisions)
 - #449 (2026-10-09) — Level glow: brightness-from-loudness gets its own setting (see Decisions)
 - 2026-10-13 — Spray injection removed (see Decisions)
+- #508 (draft, 2026-10-13) — Treble sparkle as an Effect and a Shape, with a preview in the Scene card (see Decisions)

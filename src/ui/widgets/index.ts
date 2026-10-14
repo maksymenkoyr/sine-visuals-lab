@@ -8,5 +8,6 @@ import "./danceMove.ts";
 import "./alienPlay.ts";
 import "./sweepPath.ts";
 import "./presetPills.ts";
+import "./causticsSparkle.ts";
 
 export * from "./registry.ts";
