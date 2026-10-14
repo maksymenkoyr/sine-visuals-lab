@@ -199,7 +199,8 @@ import {
  * src/ui/driveSources.ts owns every source's colour and label), a source
  * summary under the label ("Treble hits + Treble level"), and a live
  * sparkline under the slider (drawn from `drives.valueOf(key)` at ~30 Hz in
- * update(), skipped while the panel is closed). None of the three is a fork
+ * update(), skipped while the panel is closed or the row is out of
+ * view). None of the three is a fork
  * of createControlRow — they're its `port`/`summary`/`below` slots, filled
  * in by appendSettingRow only for a setting with `spec.drive`. Heat (heat.ts)
  * puts a thin history strip under each wired setting's graph, and the heat
@@ -2922,6 +2923,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   interface CanvasSize {
     w: number;
     h: number;
+    /** In view (driveCanvasIO below). */
+    onScreen: boolean;
   }
   const driveCanvasSizes = new WeakMap<HTMLCanvasElement, CanvasSize>();
   const driveCanvasRO = new ResizeObserver((entries) => {
@@ -2937,6 +2940,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   });
+  // Which of them are in view. A Scene card is often taller than its column,
+  // so most of its rows can sit scrolled out of sight (or under a closed
+  // panel): their sparklines keep recording (tickSparkline) and skip only
+  // the draw, like the meters' cards (audioMeters.ts). One observer for all
+  // of them, unobserved with driveCanvasRO in untrackDriveCanvas, since
+  // onScreen.ts's watchOnScreen can't stop watching a row a rebuild drops.
+  const driveCanvasIO =
+    typeof IntersectionObserver === "undefined"
+      ? null
+      : new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            const size = driveCanvasSizes.get(entry.target as HTMLCanvasElement);
+            if (size) size.onScreen = entry.isIntersecting;
+          }
+        });
   /** The drive graphs' one fixed top — the row sparkline and the "What it
    *  receives" graph alike: one source at the most weight it can have
    *  (DRIVE_WEIGHT_MAX) reading full scale, times the setting's own gain.
@@ -3041,14 +3059,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   function trackDriveCanvas(canvas: HTMLCanvasElement): CanvasSize {
-    const size: CanvasSize = { w: 0, h: 0 };
+    // Without the observer every canvas counts as in view, as before.
+    const size: CanvasSize = { w: 0, h: 0, onScreen: driveCanvasIO === null };
     driveCanvasSizes.set(canvas, size);
     driveCanvasRO.observe(canvas);
+    driveCanvasIO?.observe(canvas);
     return size;
   }
   function untrackDriveCanvas(canvas: HTMLCanvasElement | null): void {
     if (!canvas) return;
     driveCanvasRO.unobserve(canvas);
+    driveCanvasIO?.unobserve(canvas);
     driveCanvasSizes.delete(canvas);
   }
 
@@ -4540,8 +4561,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
 
     function drawSparkline(): void {
-      const { w, h } = sparkSize;
-      if (w <= 1 || h <= 1) return;
+      const { w, h, onScreen } = sparkSize;
+      if (w <= 1 || h <= 1 || !onScreen) return;
       sparkCtx.clearRect(0, 0, w, h);
       const n = Math.min(sparkFilled, SPARK_LEN);
       if (n < 2) return;
