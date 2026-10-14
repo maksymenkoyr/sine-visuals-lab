@@ -12,7 +12,7 @@
  *     and returns the frame as a PNG data URL.
  * `?w=&h=` sets the frame size.
  */
-import { decodeClipLibrary, sampleClip, type ClipLibrary } from "../dancers/clipFormat.ts";
+import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { B, CH_LIFT, createPose, createRigWorld, forwardKinematics, groundToFloor } from "../dancers/rig.ts";
 import { createAlienRenderer, projectToFrame } from "./renderer.ts";
 import { clipSeconds, LOOPS } from "./reel.ts";
@@ -55,7 +55,7 @@ function pivotFor(loop: number): [number, number] {
   return projectToFrame(LOOPS[loop].camera, width / height, [x / PIVOT_SAMPLES, 0, z / PIVOT_SAMPLES]);
 }
 
-const ready = fetch("/src/render/scenes/dancers/clips.bin")
+const ready = fetch(CLIP_LIBRARY_URL)
   .then((res) => res.arrayBuffer())
   .then((buf) => {
     library = decodeClipLibrary(buf);

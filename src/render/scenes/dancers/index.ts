@@ -38,22 +38,22 @@ import {
 import { SDF_GLSL } from "./sdf.ts";
 import { createChoreographer } from "./choreo.ts";
 import type { MoveClocks } from "./moves.ts";
-import { decodeClipLibrary, sampleClip, type ClipLibrary } from "./clipFormat.ts";
+import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type ClipLibrary } from "./clipFormat.ts";
 import { clipPhaseAt, createBarCounter, type BlendMode } from "./player.ts";
-import clipsUrl from "./clips.bin?url";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
 import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
 import { FAST_RENDERERS_GLSL } from "./fastRenderers.ts";
-import { pinAsset } from "../../../pinnedAssets.ts";
+import { sceneMedia } from "../../../pinnedAssets.ts";
 
-// Pinned (src/pinnedAssets.ts): this module's own fetch below fires as soon
-// as it's imported (scenes/index.ts registers every scene eagerly, so that's
-// effectively page load, not "whenever Dancers is picked"), but pinAsset's
-// retry-on-failure means a fetch that loses a race with the rest of page
-// load still gets a second try — from pinEverything()'s later sweep — rather
-// than leaving this scene without its clip library for the rest of the tab's
-// session.
-const clips = pinAsset(clipsUrl);
+// Scene media (src/pinnedAssets.ts's header): a stable file under
+// public/media/, fetched the first time a host mounts this scene (onInit,
+// below), not at import, and kept for the session; a show pins it up front.
+// Code Rain names the same path, so the two share one copy.
+const clips = sceneMedia(CLIP_LIBRARY_URL);
+
+/** Starts the clip library's fetch. The extraUniforms closure below sets it
+ *  (the library and the choreographer live there); onInit calls it. */
+let loadLibrary = (): void => {};
 
 export const DANCERS_ID = "dancers";
 
@@ -375,6 +375,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
   // below Mid (RAYMARCH_MIN_DETAIL), so no preset is out of reach.
   minQuality: "floor",
   settings: SETTINGS,
+  onInit: () => loadLibrary(),
   extraUniforms: (() => {
     const choreographer = createChoreographer();
     const world = createRigWorld();
@@ -384,18 +385,25 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
       sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0, pulse: 0.5,
     };
 
-    // The clip library arrives asynchronously; until it does (or if it
-    // can't — tests import this module under node) the dancer sways.
+    // The clip library arrives asynchronously after the first mount; until
+    // it does (or if it can't — tests import this module under node) the
+    // dancer sways. A failed fetch is asked for again on the next mount.
     let library: ClipLibrary | null = null;
-    if (typeof window !== "undefined" && typeof fetch === "function") {
+    let libraryRequested = false;
+    loadLibrary = () => {
+      if (library || libraryRequested || typeof window === "undefined" || typeof fetch !== "function") return;
+      libraryRequested = true;
       clips
         .bytes()
         .then((buf) => {
           library = decodeClipLibrary(buf);
           choreographer.setLibrary(library);
         })
-        .catch((err: unknown) => console.warn("dancers: clip library unavailable", err));
-    }
+        .catch((err: unknown) => {
+          libraryRequested = false;
+          console.warn("dancers: clip library unavailable", err);
+        });
+    };
     // DEV: `?clip=<name>` loops one clip on the beat, for checking a conversion.
     const forcedClipName = import.meta.env.DEV && typeof location !== "undefined" ? new URLSearchParams(location.search).get("clip") : null;
     const bars = createBarCounter();

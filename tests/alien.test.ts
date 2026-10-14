@@ -20,7 +20,7 @@ import {
 import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
-import { decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
+import { CLIP_LIBRARY_URL, decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
 import { BONE_COUNT } from "../src/render/scenes/dancers/rig.ts";
 
 describe("alien mesh", () => {
@@ -250,7 +250,7 @@ describe("alien reel", () => {
 
 describe("alien bake", () => {
   it("has a baked video for every loop, of that loop's clip, at its captured length", () => {
-    const bin = readFileSync(new URL("../src/render/scenes/dancers/clips.bin", import.meta.url));
+    const bin = readFileSync(new URL(`../public${CLIP_LIBRARY_URL}`, import.meta.url));
     const library = decodeClipLibrary(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
     expect(BAKED.loops.length).toBe(LOOPS.length);
     LOOPS.forEach((loop, i) => {
@@ -259,7 +259,7 @@ describe("alien bake", () => {
       expect(clip, loop.clip).toBeDefined();
       expect(baked.clip).toBe(loop.clip);
       expect(baked.frames).toBe(Math.round(clipSeconds(clip!) * BAKED.fps));
-      expect(statSync(new URL(`../src/render/scenes/alien/loops/${baked.file}`, import.meta.url)).size).toBeGreaterThan(10_000);
+      expect(statSync(new URL(`../public${baked.file}`, import.meta.url)).size).toBeGreaterThan(10_000);
     });
   });
 

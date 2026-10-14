@@ -1,0 +1,6 @@
+# Response headers for the deployed site. Cloudflare's static assets read this
+# file from dist/ (wrangler.toml [assets]) and never serve it. Nothing under
+# /media/ changes once committed (src/pinnedAssets.ts's header, "Scene media";
+# tests/sceneMedia.test.ts), so browsers may keep those files for good.
+/media/*
+  Cache-Control: public, max-age=31536000, immutable

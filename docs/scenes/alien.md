@@ -13,7 +13,7 @@ ones (the dotted line on its graph). In development, on main since #374.
 
 - `src/render/scenes/alien/index.ts`: the scene, a video player. It holds the
   settings in `SETTINGS`, the Motion section in `PANEL`, one `<video>`
-  per loop (pinned bytes), the frame upload, the `?loop=<n>` DEV pin and the
+  per loop (its bytes from `sceneMedia`, fetched on the first mount), the frame upload, the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, videos).
 - `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
   `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
@@ -22,9 +22,10 @@ ones (the dotted line on its graph). In development, on main since #374.
   the room, squashed about the loop's pivot. The rest of it is the live look,
   used only by the bake: GPU skinning, the barycentric wireframe, the fresnel
   rim and outline, the blur and composite.
-- `loops/`: the baked videos and `manifest.ts` (frame rate, size, and per
-  loop its clip, frame count and Bounce pivot), both made by
-  `tools/alien-bake.mjs`.
+- `loops/manifest.ts` (`BAKED`): frame rate, size, and per loop its clip,
+  its video under `public/media/alien/`, frame count and Bounce pivot. Both
+  are made by `tools/alien-bake.mjs`, which writes a new `-v<n>` name rather
+  than replace a video (`src/pinnedAssets.ts`'s header, "Scene media").
 - The bake: `renderer.ts` draws the alien live (mesh pass, bloom,
   composite); `bakePage.ts` (served by `tools/alien-bake/index.html` on the
   dev server) draws any frame of any loop; `tools/alien-bake.mjs` saves every
@@ -38,8 +39,8 @@ ones (the dotted line on its graph). In development, on main since #374.
 - `src/ui/widgets/alienPlay.ts`: the Move readout under the Move row: speed,
   frames bought per second, the loop on screen, and the loop as a strip of
   its frames with the playhead. Fed by the scene's `probe()`.
-- Reused, not copied: the dancers' rig, clip format and `clips.bin`
-  (`../dancers/`); the drive system (`drives.value`, `drives.threshold`);
+- Reused, not copied: the dancers' rig, clip format and clip library
+  (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
   the Level signal (`feature.level`, #368); the standout detector
   (`src/render/standout.ts`, a `StandoutTrigger` held in the reel as `cut`),
   shared with Caustics' Beat ripple and Physarum 2's Dose.
@@ -209,9 +210,11 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 ## Known issues and next steps
 
-- Size: the three videos are pinned, so every visitor's page fetches them
-  after load (about 4 MB), Alien or not. A lazy fetch or a separate host
-  would need the deploy-skew rule in `src/pinnedAssets.ts` solved another way.
+- Size: the three videos (about 4.3 MB) download the first time the scene
+  or its gallery tile mounts. On 2026-10-15 the In development row started
+  961 CSS px down the gallery at desktop widths, so a window taller than
+  that mounts the tile, and downloads them, on a plain gallery visit. A
+  poster frame for the tile would avoid that.
 - Video playback rate can't go below about 0.07×; slower than that the loop
   pauses.
 - On an iPhone or iPad that no one has tapped, or one in Low Power Mode, the
@@ -244,7 +247,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   to pin one loop.
 - Changed the alien, a loop or the look? Rebake with the dev server
   running: `FFMPEG=<ffmpeg> node tools/alien-bake.mjs --port <p>`, then
-  look at a decoded frame before committing the videos.
+  look at a decoded frame before committing the videos. Keep the old videos
+  (a tab on an older build may still fetch them) and add the new ones to
+  `tests/mediaManifest.ts`; `tests/sceneMedia.test.ts` prints their lines.
 - Real music: `node docs/scenes/alien/scripts/realmusic.mjs <wav> out.json
   --port <p>` (add `--cut anim.lowOnset` to wire Cut to Bass hit). Synthetic
   audio always reads loud, so it can't test silence.
@@ -263,3 +268,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #389 (merged 2026-10-06): Bounce smoothness.
 - #407 (draft, 2026-10-06): Move on iPhone and iPad (videos in the page, unlock on the
   first tap, a playhead scrub where play() is refused).
+- #TBD (2026-10-15): the loops moved to `public/media/alien/` and download
+  the first time the scene or its tile mounts, not on every page load; a
+  show (the pop-out, a room with another device) still fetches them up front.

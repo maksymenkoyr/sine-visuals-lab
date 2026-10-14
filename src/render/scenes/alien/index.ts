@@ -1,8 +1,9 @@
 /**
  * Alien — one grey alien dancing as a glowing green wireframe on black, in
  * three short loops, each a captured dance seen from its own angle. The loops
- * are baked videos (loops/, made by tools/alien-bake.mjs from the live
- * renderer in renderer.ts); this scene plays them, and the music decides how:
+ * are baked videos (in public/media/alien/, listed by loops/manifest.ts, made
+ * by tools/alien-bake.mjs from the live renderer in renderer.ts); this scene
+ * plays them, and the music decides how:
  *   - Move: its wire (Level by default) times the slider is the playback
  *     speed, eased so it glides; silence buys no frames and the loop holds;
  *   - Cut: a loop repeats until its wire (Drop by default) makes a climb
@@ -47,18 +48,17 @@ import { publishSettingMarks } from "../../settingMarks.ts";
 import { STANDOUT_THRESHOLD_DEFAULT, standoutLine, standoutMarks, standoutThreshold } from "../../standout.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
-import { pinAsset } from "../../../pinnedAssets.ts";
-import loop0Url from "./loops/loop0.mp4?url";
-import loop1Url from "./loops/loop1.mp4?url";
-import loop2Url from "./loops/loop2.mp4?url";
+import { sceneMedia } from "../../../pinnedAssets.ts";
 import { BAKED } from "./loops/manifest.ts";
 import { BOUNCE_MAX, BOUNCE_WIDEN, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
 import { PLAYER_FRAG } from "./glsl.ts";
 
-// Pinned (src/pinnedAssets.ts): every visitor's page fetches these after
-// load, so a deploy mid-visit can't strand the scene without its loops. The
-// scene record has their size; keep the bake's quality no higher than needed.
-const VIDEOS = [pinAsset(loop0Url), pinAsset(loop1Url), pinAsset(loop2Url)];
+// Scene media (src/pinnedAssets.ts's header): stable files under
+// public/media/, named in BAKED, fetched the first time a host mounts the
+// scene (init → ensureVideos) and kept for the session; a show pins them up
+// front. The scene record has their size; keep the bake's quality no higher
+// than needed.
+const VIDEOS = BAKED.loops.map((loop) => sceneMedia(loop.file));
 
 export const ALIEN_ID = "alien";
 
@@ -182,7 +182,7 @@ export const alienScene: Scene = (() => {
   // What the last render read off the wires, for probe() and the DEV hook.
   const last = { target: 0, speed: 0, rate: 0, cutSignal: 0, cutLine: 0, squash: 0 };
 
-  /** One muted, looping <video> per loop, its source the pinned bytes. */
+  /** One muted, looping <video> per loop, its source the loop's bytes (sceneMedia). */
   function ensureVideos(): HTMLVideoElement[] {
     if (videos) return videos;
     videos = VIDEOS.map((asset) => {

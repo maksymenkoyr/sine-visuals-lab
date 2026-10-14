@@ -21,7 +21,7 @@ featured, registered at `minQuality: "floor"` so it also runs on TV presets.
 - `moves.ts` — the procedural fallback (`sway`, `dropPose`, `resetPose`) and
   the intent helpers (`armSwing`, `kneeFlex`, …) moves are authored with;
   `effectiveIntensity` is what the clip picker climbs on.
-- `clipFormat.ts` / `clips.bin` / `player.ts` — the captured-motion pipeline:
+- `clipFormat.ts` / the clip library (`CLIP_LIBRARY_URL`, a file under `public/media/dancers/`) / `player.ts` — the captured-motion pipeline:
   `decodeClipLibrary` reads the binary clip library (mirrors derived on
   load), `createClipPlayer` turns bar-relative phase into a sampled pose
   with a bar-boundary picker and the handover modes (`BlendMode`:
@@ -53,7 +53,7 @@ featured, registered at `minQuality: "floor"` so it also runs on TV presets.
 
 ## Data credit
 
-The dance clips in `clips.bin` are retargeted from the CMU Graphics Lab
+The dance clips in the clip library (`public/media/dancers/`) are retargeted from the CMU Graphics Lab
 Motion Capture Database (mocap.cs.cmu.edu, funded by NSF EIA-0196217) via
 Bruce Hahne's cgspeed BVH conversion, mirrored at
 github.com/una-dinosauria/cmu-mocap. Full license terms and the source
@@ -148,7 +148,7 @@ original work built around that data.
 
 - Artifact: [Dancing Figures Decision Guide](https://claude.ai/artifact/82iRWoHJybg3nfxMp8M7H8). Source saved as `dancers/artifacts/dancing-figures-decision-guide.html`.
 - Artifact: [Dancer Lab](https://claude.ai/artifact/BZwSRAM3ABZazqVQkXMYS3). Source saved as `dancers/artifacts/dancer-lab.html`.
-- The motion-capture clips are in the code itself (`clips.bin`), credited in `THIRD-PARTY-NOTICES.md`.
+- The motion-capture clips are in the repo (`public/media/dancers/`, named by `CLIP_LIBRARY_URL`), credited in `THIRD-PARTY-NOTICES.md`.
 
 ## Resume here
 
@@ -156,7 +156,7 @@ original work built around that data.
   `/?audio=synthetic&bpm=120#/v/dancers` (query before the hash).
 - To add a move: add a `tools/clip-cuts.json` entry, run
   `node tools/clip-convert.mjs --estimate <trial>` to get the joint-speed
-  and heading trace, then run the converter to rebuild `clips.bin`, and
+  and heading trace, then run the converter (it writes the next `clips-v<n>.bin`; point `CLIP_LIBRARY_URL` at it and add it to `tests/mediaManifest.ts`), and
   check the result with `?clip=<name>`.
 - A rig change invalidates every clip (`clipFormat.ts`'s binary layout
   checks the bone count against `BONE_COUNT`) — rebuild the clip library
@@ -171,3 +171,6 @@ original work built around that data.
   mocap clip pipeline, choreographer, three renderers, two skins. Draft.
 - `#69` (`88aab06`, 2026-09-03) — regrouped onto the shared `SettingGroup`
   vocabulary alongside caustics, chladni and meshGrid.
+- `#TBD` (2026-10-15) — the clip library moved to `public/media/dancers/`
+  and downloads the first time the scene mounts, not on every page load; a
+  show (the pop-out, a room with another device) still fetches it up front.

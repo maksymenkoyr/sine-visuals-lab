@@ -76,3 +76,6 @@ hear run but ~106.7 on the ref-shoot run.
 
 - Branch `worktree-coderain-scene`: first version, never opened as a PR.
 - Draft PR #398 (`worktree-coderain-scene-v2`): the same version, rebased onto main.
+- #TBD (2026-10-15): the dancers' clip library downloads the first time the
+  scene mounts, not on every page load; a later mount (the gallery tile, then
+  the full view) now gets it too, where that figure only swayed before.
