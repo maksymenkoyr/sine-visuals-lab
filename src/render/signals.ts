@@ -130,6 +130,7 @@ export type SignalId =
   | "feature.flux"
   | "feature.level"
   | "anim.lowOnset"
+  | "anim.kickBand"
   | "anim.midOnset"
   | "anim.highOnset"
   | "anim.dropOnset"
@@ -252,6 +253,15 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     read: (_frame, anim) => anim.lowPulse,
     edge: (anim) => anim.lowOnset,
     monitor: { card: "hits", row: "hits" },
+    bandRange: "low",
+  }),
+  "anim.kickBand": signal({
+    id: "anim.kickBand",
+    label: "Kick band",
+    description:
+      "The level of the single low band (below the Bands split) that has gone up and down the most over the last few seconds (AnimFrame.kickBand, bandPick.ts) — one narrow band, re-picked by itself when the music changes, unlike Bass level's average over the whole low group.",
+    kind: "level",
+    read: (_frame, anim) => anim.kickBand,
     bandRange: "low",
   }),
   "anim.midOnset": signal({

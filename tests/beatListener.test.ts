@@ -40,6 +40,8 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     lowOnset: false,
     midOnset: false,
     highOnset: false,
+    kickBand: 0,
+    kickBandIndex: 0,
     sectionIntensity: 0,
     dropPulse: 0,
     dropOnset: false,
