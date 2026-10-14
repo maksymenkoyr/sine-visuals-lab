@@ -43,7 +43,10 @@ export interface CollectedPrivateScenes {
   errors: string[];
 }
 
-function isScene(value: unknown): value is Scene {
+/** Whether `value` has what the app calls on a scene. Shared with
+ *  sceneModules.ts, which picks a free scene module's scene out of its
+ *  exports the same way. */
+export function isScene(value: unknown): value is Scene {
   const s = value as Partial<Scene> | null;
   return (
     typeof s === "object" &&

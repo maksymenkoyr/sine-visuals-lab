@@ -27,14 +27,13 @@
  *
  * **Categories** (`CATEGORIES`, in page order) are worked out per pull
  * request from its title and the files it touched — `categorize` — since PRs
- * here carry no labels. A pull request that registers a scene in
- * `src/render/scenes/index.ts` is a new scene; a title whose `Area:` prefix
- * names a scene is that scene's change, and one that names a product area
- * (`PREFIX_AREAS`) goes there; otherwise the product area with the most
- * touched files wins, and docs/tooling only when no product file moved.
+ * here carry no labels. A pull request that adds a scene module (a file or
+ * folder new under `src/render/scenes/` that is a scene today) is a new
+ * scene; a title whose `Area:` prefix names a scene is that scene's change,
+ * and one that names a product area (`PREFIX_AREAS`) goes there; otherwise
+ * the product area with the most touched files wins, and docs/tooling only
+ * when no product file moved.
  */
-
-import { unitNameFromImportPath } from "./sceneVersionLib.mjs";
 
 /** Page order. `key` is what `categorize` returns. */
 export const CATEGORIES = [
@@ -131,17 +130,15 @@ export function changesFromLog(log, commitsOf) {
   return changes;
 }
 
-/** Scene units a commit registers: `+import { fooScene } from "./foo.ts"`
- *  lines of its diff to `src/render/scenes/index.ts`. */
-export function addedSceneUnits(registryDiff) {
-  const units = [];
-  const re = /^\+[ \t]*import\s*\{\s*([^}]+?)\s*\}\s*from\s*["'](\.\/[^"']+)["']/gm;
-  let m;
-  while ((m = re.exec(registryDiff ?? ""))) {
-    if (!/Scene\b/.test(m[1]) || /privateScenes/.test(m[2])) continue;
-    units.push(unitNameFromImportPath(m[2]));
-  }
-  return units;
+/** Units a change adds: the top-level names of `src/render/scenes/` (its
+ *  files and folders, as `git ls-tree --name-only` lists them) after the
+ *  change and not before, `.ts` dropped (`ink.ts` → `ink`, `coil` →
+ *  `coil`). Helper files come out too; the caller keeps the units that are
+ *  scenes today. */
+export function newSceneUnits(before, after) {
+  const unit = (name) => name.replace(/\.ts$/, "");
+  const had = new Set(before.map(unit));
+  return [...new Set(after.map(unit))].filter((u) => !had.has(u));
 }
 
 /** A scene's display name from its entry module's source: the `name: "…"`

@@ -6,8 +6,8 @@ import { NUM_BANDS, type FeatureFrame } from "../../src/audio/types.ts";
 import { createAnimClock } from "../../src/render/animClock.ts";
 import { qualitySettings } from "../../src/render/quality.ts";
 import { PALETTES } from "../../src/render/palette.ts";
-import { FULL_VIEWPORT, listScenes, type Scene } from "../../src/render/scene.ts";
-import * as sceneModules from "../../src/render/scenes/index.ts";
+import { FULL_VIEWPORT, listScenes } from "../../src/render/scene.ts";
+import "../../src/render/scenes/index.ts"; // side effect: registers every scene
 
 const params = new URLSearchParams(location.search);
 const ids = (params.get("scenes") ?? "caustics").split(",");
@@ -25,14 +25,7 @@ const ctx = { gl, quality: qualitySettings("high") };
 const px = new Uint8Array(4);
 const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2") as { TIME_ELAPSED_EXT: number } | null;
 
-// The named exports plus the registry: importing the module registers every
-// scene, and not every scene is exported by name.
-const scenes = [
-  ...new Set([
-    ...Object.values(sceneModules).filter((s): s is Scene => typeof s === "object" && s !== null && "id" in s && "render" in s),
-    ...listScenes(),
-  ]),
-];
+const scenes = listScenes();
 
 // Ends the render pass. Without it a tile-based GPU (every Apple GPU) hidden-
 // surface-removes a frame's opaque fragments under the next frame's full-

@@ -3104,6 +3104,9 @@ function uploadGasRecipe(p: GLProgram, r: GasRecipe): void {
   p.setV3v("uGasTint", r.tint);
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-02" } as const;
+
 export const stormScene: Scene = (() => {
   let prog: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;

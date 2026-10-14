@@ -11,10 +11,10 @@ import type { Scene } from "./scene.ts";
  *
  * `setSceneVersions()` is called once per page load by a line
  * vite-scene-versions-plugin.ts appends to `src/render/scenes/index.ts`
- * after transforming it: every registered scene's own binding paired with
- * the version string tools/sceneVersions.mjs computed for its unit (from git
- * history, plus — in a `dev` build — a `+dev` suffix if the scene's own
- * files are dirty). A test that imports a scene module directly, never
+ * after transforming it: that file's `SCENE_UNITS` (each free scene by its
+ * unit) and the version string tools/sceneVersions.mjs computed for each
+ * unit (from git history, plus — in a `dev` build — a `+dev` suffix if the
+ * scene's own files are dirty). A test that imports a scene module directly, never
  * through that transform (every scene test does), sees an empty map, so
  * `sceneVersionOf` returns null for every id — the same fallback shape
  * src/version.ts's `BUILD_INFO` has under Vitest, and the same one a real
@@ -31,11 +31,18 @@ import type { Scene } from "./scene.ts";
 
 const versions = new Map<string, string>();
 
-/** Replaces the whole map with `[scene, version]` pairs, keyed by
- *  `scene.id` — see this file's header for who calls this and when. */
-export function setSceneVersions(pairs: readonly (readonly [Scene, string])[]): void {
+/** Replaces the whole map: each unit's version, keyed by its scene's `id`
+ *  — see this file's header for who calls this and when. A unit with no
+ *  version is left out. */
+export function setSceneVersions(
+  units: ReadonlyMap<string, Scene>,
+  byUnit: Readonly<Record<string, string>>,
+): void {
   versions.clear();
-  for (const [scene, version] of pairs) versions.set(scene.id, version);
+  for (const [unit, scene] of units) {
+    const version = byUnit[unit];
+    if (version !== undefined) versions.set(scene.id, version);
+  }
 }
 
 /** A scene's own version, or null if none was computed for it. */

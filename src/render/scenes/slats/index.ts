@@ -168,6 +168,9 @@ function smoothstep01(x: number): number {
   return x * x * (3 - 2 * x);
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-18" } as const;
+
 export const slatsScene: Scene = (() => {
   let slatProg: GLProgram | null = null;
   let blurProg: GLProgram | null = null;

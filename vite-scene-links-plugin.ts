@@ -19,8 +19,8 @@ import type { Plugin, ViteDevServer } from "vite";
  * is what this replaced.
  *
  * Files are mapped to scenes through Vite's SSR module graph, not by filename:
- * `src/render/scenes/index.ts` is loaded, each scene module it imports is
- * matched to the scene object it exports (by the registered `id`), and every
+ * `src/render/scenes/index.ts` is loaded, each module it imports is matched to
+ * the registered scene object it exports (a helper exports none), and every
  * module reachable from that entry is that scene's territory. A file two scenes
  * share belongs to neither, so editing a helper doesn't nominate every scene
  * that uses it. This can't drift from the registry — a scene that isn't
@@ -111,8 +111,8 @@ async function printSceneLinks(server: ViteDevServer): Promise<void> {
 }
 
 /** Scene id → absolute paths of every module reachable from that scene's
- *  entry (the module `src/render/scenes/index.ts` imports it from), in
- *  registry order. */
+ *  entry (its scene module, src/render/scenes/sceneModules.ts), in registry
+ *  order. */
 async function sceneClosures(server: ViteDevServer): Promise<Map<string, Set<string>>> {
   const { listScenes } = (await server.ssrLoadModule("/src/render/scene.ts")) as {
     listScenes: () => { id: string }[];
@@ -123,12 +123,15 @@ async function sceneClosures(server: ViteDevServer): Promise<Map<string, Set<str
   const registry = [...(graph.getModulesByFile(registryFile) ?? [])][0];
   if (!registry) throw new Error(`${REGISTRY} is not in the SSR module graph`);
 
-  // Entry module → the scene it exports, matched by registered id.
+  // Entry module → the registered scene object it exports. Matched by the
+  // object itself, so a helper that happens to export something with an
+  // `id` can't claim a scene.
+  const idOf = new Map<unknown, string>(listScenes().map((s) => [s, s.id]));
   const entryOf = new Map<string, (typeof registry)>();
   for (const mod of registry.importedModules) {
     for (const value of Object.values(mod.ssrModule ?? {})) {
-      const id = (value as { id?: unknown } | null)?.id;
-      if (typeof id === "string" && !entryOf.has(id)) entryOf.set(id, mod);
+      const id = idOf.get(value);
+      if (id !== undefined && !entryOf.has(id)) entryOf.set(id, mod);
     }
   }
 

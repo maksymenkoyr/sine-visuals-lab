@@ -1198,4 +1198,7 @@ function createPhysarumScene(): Scene {
   };
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-16" } as const;
+
 export const physarumScene = createPhysarumScene();

@@ -17,9 +17,11 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    or, when it sums several, to an `add` patch with one weighted source per
    signal, so it starts on real wires. Keep `"scene"` with a `sceneLabel`
    for a mix no patch can write; the panel shows it as dimmed ghost wires.
-3. Register it: add to `src/render/scenes/index.ts` (`registerScene(...)`) —
-   first among the drafts, per that file's header comment — and export it
-   alongside its neighbours.
+3. Register it by making it a scene module: `src/render/scenes/<unit>.ts` or
+   `src/render/scenes/<unit>/index.ts`, exporting the scene and
+   `export const gallery = { stage: "draft", added: "<today, YYYY-MM-DD>" } as const;`
+   (`src/render/scenes/sceneModules.ts` has the contract). Don't edit
+   `src/render/scenes/index.ts`: it finds the scene on its own.
 4. Set `minQuality` if the scene should degrade or disable below some hardware
    quality preset (`src/render/quality.ts`).
 5. **Check the invariant before calling it done** — see `docs/adding-a-scene.md`

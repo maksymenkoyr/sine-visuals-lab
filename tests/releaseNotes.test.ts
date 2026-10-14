@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
-  addedSceneUnits,
   areaOfFile,
   categorize,
   changesFromLog,
   extractHighlights,
   extractReleaseNotes,
   formatEntry,
+  newSceneUnits,
   NOTES_END,
   parsePrMerge,
   prNumberFromSubject,
@@ -39,16 +39,15 @@ describe("extractHighlights", () => {
   });
 });
 
-describe("addedSceneUnits", () => {
-  it("reads registered scene imports added by a diff", () => {
-    const diff = [
-      "@@ -1,3 +1,4 @@",
-      '+import { coilScene } from "./coil/index.ts";',
-      '-import { oldScene } from "./old.ts";',
-      '+import { collectPrivateScenes } from "./privateScenes.ts";',
-      "+registerScene(coilScene);",
-    ].join("\n");
-    expect(addedSceneUnits(diff)).toEqual(["coil"]);
+describe("newSceneUnits", () => {
+  it("is the top-level names the change created, as units", () => {
+    const before = ["caustics.ts", "index.ts", "sky"];
+    const after = ["caustics.ts", "coil", "index.ts", "ink.ts", "sky"];
+    expect(newSceneUnits(before, after)).toEqual(["coil", "ink"]);
+  });
+
+  it("doesn't count a scene that moved into its own folder", () => {
+    expect(newSceneUnits(["kaleido.ts"], ["kaleido"])).toEqual([]);
   });
 });
 

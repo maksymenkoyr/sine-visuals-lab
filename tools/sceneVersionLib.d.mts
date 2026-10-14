@@ -15,20 +15,24 @@ export interface SceneReleaseEntry {
   major: number;
 }
 
-/** One `import { binding } from "path"` line of the scene registry. */
-export interface RegistryImportEntry {
-  binding: string;
+/** One scene module: its unit and its repo-relative entry file. */
+export interface SceneEntry {
   unit: string;
-  path: string;
+  file: string;
 }
 
 export interface FileClosureOptions {
   stopAt?: ReadonlySet<string>;
 }
 
+export const SCENES_DIR: string;
+
 export function parseImportSpecifiers(source: string): string[];
-export function parseRegistryImports(source: string): RegistryImportEntry[];
-export function unitNameFromImportPath(specifier: string): string;
+export function sceneEntries(
+  names: Iterable<string>,
+  readFile: (path: string) => string | null,
+  exists: (path: string) => boolean,
+): SceneEntry[];
 
 export function resolveImport(
   fromFile: string,

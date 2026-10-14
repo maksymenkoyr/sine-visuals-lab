@@ -370,6 +370,9 @@ void main() {
 }
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-08-30" } as const;
+
 export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
   // The cheap renderers run anywhere; the raymarcher hands over to them
   // below Mid (RAYMARCH_MIN_DETAIL), so no preset is out of reach.

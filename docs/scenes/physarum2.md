@@ -17,9 +17,8 @@ for the whole simulation design (strain/attraction-table packing, the
 per-step fixed-rate stepper, the RGBA=strain trail, evaporation precision,
 the composite's exposure/gamma, and — since 2026-09-27 — the per-strain
 settings and the "Uniform budget" note on how they reach the shader without
-their own uniforms). Registered as `physarum2Scene` via `registerScene` in
-`src/render/scenes/index.ts` (first line of registration, newest first within
-its gallery group), and absent from that file's `draftIds`, so featured.
+their own uniforms). Exported as `physarum2Scene`, with
+`stage: "released"` in its `gallery` record, so featured.
 
 The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (the
 lanes, the mix row with Random/Back/the motion presets, and the Synergy row

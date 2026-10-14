@@ -672,6 +672,9 @@ ${CAMERA_GLSL}
 ${COMPOSITE_BODY}
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-25" } as const;
+
 export const gatesScene: Scene = (() => {
   let gateProg: GLProgram | null = null;
   let blurProg: GLProgram | null = null;

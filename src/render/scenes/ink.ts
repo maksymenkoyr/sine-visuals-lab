@@ -623,6 +623,9 @@ void main() {
 }
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-18" } as const;
+
 export const inkScene = createFullscreenScene("ink", "Ink Synth", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: `uniform float uParams[${PARAM_COUNT}];\nuniform float uStretchEnv;\nuniform float uNoiseFlow[${NOISE_FLOW_LEN}];\nuniform float uSinPhase[${SIN_FLOW_RATES.length}];`,

@@ -100,6 +100,19 @@ export interface Scene {
   dispose(ctx: SceneContext): void;
 }
 
+/** Which gallery section a scene sits in: released (featured), in
+ *  development, or draft. */
+export type SceneStage = "released" | "development" | "draft";
+
+/** What a free scene's module says about its own place in the gallery,
+ *  exported next to its scene as `gallery` — src/render/scenes/sceneModules.ts
+ *  has the contract. `added` is the day the scene (its current picture) first
+ *  landed, `YYYY-MM-DD`; each section lists the newest first. */
+export interface SceneGallery {
+  stage: SceneStage;
+  added: string;
+}
+
 const registry = new Map<string, Scene>();
 
 export function registerScene(scene: Scene): void {
