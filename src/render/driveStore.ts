@@ -11,6 +11,7 @@ import {
   DRIVE_EVERY_VALUES,
   GENERIC_SMOOTHNESS_DEFAULT,
   GENERIC_THRESHOLD_DEFAULT,
+  GENERIC_WINDOW_MAX_DEFAULT,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
   setSourceEvery as pureSetSourceEvery,
@@ -81,14 +82,16 @@ interface DriveEntry {
   line?: number[];
   lineStrength?: number;
   /** The setting's own threshold value, 0..1 — scene-handled
-   *  (SceneSetting.drive.threshold) or the generic engine gate every other
-   *  drive setting gets (drives.ts's header's threshold paragraph); see
-   *  getDriveThresholdState. */
+   *  (SceneSetting.drive.threshold) or, for the generic engine gate every
+   *  other drive setting gets, its window's Min (drives.ts's header's
+   *  threshold paragraph); see getDriveThresholdState. */
   threshold?: number;
   /** Whether that threshold is switched on. Absent means "use this setting's
    *  own default" (on for scene-handled, off for generic) — see
    *  getDriveThresholdState. */
   thresholdOn?: boolean;
+  /** The generic gate window's Max, 0..1 on the same floor→peak scale as `threshold` (its Min) — see getDriveWindowMax. */
+  windowMax?: number;
   /** The generic engine gate's knee width, 0..1 — see getDriveSmoothness. */
   smoothness?: number;
   /** Whether that knee is switched on, independent of the threshold — absent
@@ -430,6 +433,7 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   }
   delete entry.threshold; // "Reset to scene default" covers the threshold row too
   delete entry.thresholdOn;
+  delete entry.windowMax;
   delete entry.smoothness;
   delete entry.smoothnessOn;
   delete entry.readout;
@@ -574,6 +578,18 @@ export function setDriveThreshold(sceneId: string, spec: SceneSetting, value: nu
 
 export function setDriveThresholdOn(sceneId: string, spec: SceneSetting, on: boolean): void {
   entryFor(settingScope(sceneId, spec.key), spec.key).thresholdOn = on;
+  persist();
+}
+
+/** The generic gate window's Max (drives.ts's header's threshold paragraph), 0..1 — GENERIC_WINDOW_MAX_DEFAULT until moved. Generic gates only. */
+export function getDriveWindowMax(sceneId: string, spec: SceneSetting): number {
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.windowMax;
+  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : GENERIC_WINDOW_MAX_DEFAULT;
+}
+
+export function setDriveWindowMax(sceneId: string, spec: SceneSetting, value: number): void {
+  if (!Number.isFinite(value)) return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).windowMax = Math.min(1, Math.max(0, value));
   persist();
 }
 

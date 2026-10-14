@@ -650,6 +650,9 @@ export interface DeviceMenuDeps {
   getDriveThresholdState: (sceneId: string, spec: SceneSetting) => DriveThresholdState;
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
+  /** The generic gate window's Max — driveStore.ts's getDriveWindowMax/setDriveWindowMax. Generic gates only; its Min is the threshold above. */
+  getDriveWindowMax: (sceneId: string, spec: SceneSetting) => number;
+  onSetDriveWindowMax: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The generic gate's Smoothness (its knee width, 0..1) — driveStore.ts's
    *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
   getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
@@ -3299,7 +3302,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const WEIGHT_HINT = "This wire's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
   const GENERIC_THRESHOLD_HINT =
-    "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
+    "A window on this wire. The low dotted line (Min) sits on its resting level at 0, the high one (Max) on its recent peak at 1. Under Min counts as nothing, over Max counts as full, and in between rises in a straight line. Off: everything passes as it is.";
 
   const HIT_THRESHOLD_HINT =
     "Moves the dotted line: how far a hit has to stand out from the everyday ones to count. Left: more reactions, even from quiet sounds. Right: only clear standouts. Off: every hit counts.";
@@ -3314,10 +3317,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const GENERIC_SMOOTHNESS_HINT =
-    "How gradually the gate opens around the dotted line. Left: a sharp edge. Right: a slow fade. Off: a sharp edge, whatever the slider says.";
+    "How gently the window starts and ends. Left: exactly at the two lines. Right: a wider, softer rise. Off: exactly at the two lines, whatever the slider says.";
 
-  /** The generic gate's Smoothness row — a 0..1 slider for how wide the
-   *  knee around the dotted line is (driveStore.ts's getDriveSmoothness).
+  /** The generic gate's Smoothness row — a 0..1 slider for how far the
+   *  window widens at both ends (driveStore.ts's getDriveSmoothness).
    *  Its own On/Off, independent of the threshold's. Same live-write,
    *  no-rebuild rule as buildThresholdRow. */
   function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
@@ -3398,15 +3401,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  and starts on; every other drive setting uses the generic label/hint
    *  and starts off, gated by drives.ts's own engine (that file's header's
    *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
-   *  setDriveThreshold/setDriveThresholdOn either way. A generic gate also
-   *  gets a Smoothness row under the threshold line (buildSmoothnessRow),
-   *  with its own On/Off. Same live-write, no-rebuild rule
+   *  setDriveThreshold/setDriveThresholdOn either way. A generic gate's row
+   *  is a window rather than one threshold slider: a Min slider (the stored
+   *  threshold) and a Max slider (getDriveWindowMax), side by side. It also
+   *  gets a Smoothness row under the window (buildSmoothnessRow), with its
+   *  own On/Off. Same live-write, no-rebuild rule
    *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
    *  own mini-segment styling. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
     const engineHit = isEngineHitDriver(spec);
-    const label = declared?.label ?? "Threshold";
+    const generic = declared === undefined && !engineHit;
+    const label = declared?.label ?? (generic ? "Window" : "Threshold");
     const hint = declared?.hint ?? (engineHit ? HIT_THRESHOLD_HINT : GENERIC_THRESHOLD_HINT);
 
     const wrap = document.createElement("div");
@@ -3425,47 +3431,82 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     offBtn.textContent = "Off";
     seg.append(onBtn, offBtn);
 
-    const name = document.createElement("span");
-    name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
-    name.textContent = label;
-    const rng = document.createElement("input");
-    rng.type = "range";
-    rng.className = "vc-slider";
-    rng.min = "0";
-    rng.max = "1";
-    rng.step = "0.05";
-    rng.setAttribute("aria-label", label);
-    rng.style.cssText = driveWeightRangeStyle;
-    const out = document.createElement("output");
-    out.style.cssText = driveWeightOutStyle;
-
-    const smooth = declared === undefined && !engineHit ? buildSmoothnessRow(sceneId, spec, onLiveEdit) : undefined;
-
-    const showValue = (v: number) => {
-      rng.value = String(v);
-      rng.style.setProperty("--vc-fill", `${v * 100}%`);
-      out.textContent = v.toFixed(2);
+    // One labelled slider: its name span, range and output, with its own show().
+    const slider = (text: string, ariaLabel: string) => {
+      const name = document.createElement("span");
+      name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+      name.textContent = text;
+      const rng = document.createElement("input");
+      rng.type = "range";
+      rng.className = "vc-slider";
+      rng.min = "0";
+      rng.max = "1";
+      rng.step = "0.05";
+      rng.setAttribute("aria-label", ariaLabel);
+      rng.style.cssText = driveWeightRangeStyle;
+      const out = document.createElement("output");
+      out.style.cssText = driveWeightOutStyle;
+      const show = (v: number) => {
+        rng.value = String(v);
+        rng.style.setProperty("--vc-fill", `${v * 100}%`);
+        out.textContent = v.toFixed(2);
+      };
+      return { name, rng, out, show };
     };
+
+    // A generic gate's window: Min (the threshold) and Max. Anything else has one slider.
+    const main = generic ? slider("Min", "Window Min") : slider(label, label);
+    const top = generic ? slider("Max", "Window Max") : undefined;
+    const sliders = top ? [main, top] : [main];
+    const smooth = generic ? buildSmoothnessRow(sceneId, spec, onLiveEdit) : undefined;
+
     const showOnOff = (on: boolean) => {
       onBtn.setAttribute("aria-pressed", String(on));
       offBtn.setAttribute("aria-pressed", String(!on));
       onBtn.style.cssText = on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       offBtn.style.cssText = !on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
-      rng.disabled = !on;
-      rng.style.opacity = on ? "1" : "0.4";
-      out.style.opacity = on ? "1" : "0.4";
+      for (const s of sliders) {
+        s.rng.disabled = !on;
+        s.rng.style.opacity = on ? "1" : "0.4";
+        s.out.style.opacity = on ? "1" : "0.4";
+      }
     };
 
     const state = deps.getDriveThresholdState(sceneId, spec);
-    showValue(state.value);
+    main.show(state.value);
+    if (top) top.show(deps.getDriveWindowMax(sceneId, spec));
     showOnOff(state.on);
 
-    rng.addEventListener("input", () => {
-      const v = Number(rng.value);
-      showValue(v);
-      deps.onSetDriveThreshold(sceneId, spec, v);
-      onLiveEdit();
-    });
+    if (top) {
+      // Keep Min ≤ Max: dragging one past the other drags the other along.
+      main.rng.addEventListener("input", () => {
+        const v = Number(main.rng.value);
+        main.show(v);
+        deps.onSetDriveThreshold(sceneId, spec, v);
+        if (v > Number(top.rng.value)) {
+          top.show(v);
+          deps.onSetDriveWindowMax(sceneId, spec, v);
+        }
+        onLiveEdit();
+      });
+      top.rng.addEventListener("input", () => {
+        const v = Number(top.rng.value);
+        top.show(v);
+        deps.onSetDriveWindowMax(sceneId, spec, v);
+        if (v < Number(main.rng.value)) {
+          main.show(v);
+          deps.onSetDriveThreshold(sceneId, spec, v);
+        }
+        onLiveEdit();
+      });
+    } else {
+      main.rng.addEventListener("input", () => {
+        const v = Number(main.rng.value);
+        main.show(v);
+        deps.onSetDriveThreshold(sceneId, spec, v);
+        onLiveEdit();
+      });
+    }
     onBtn.addEventListener("click", () => {
       if (onBtn.getAttribute("aria-pressed") === "true") return;
       deps.onSetDriveThresholdOn(sceneId, spec, true);
@@ -3479,7 +3520,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       onLiveEdit();
     });
 
-    wrap.append(seg, name, rng, out);
+    if (top) {
+      // Min and Max each get a full line under "On/Off Window": two sliders
+      // side by side in the panel's column squeeze each down to its thumb.
+      const title = document.createElement("span");
+      title.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+      title.textContent = label;
+      wrap.append(seg, title);
+      for (const s of sliders) {
+        const line = document.createElement("div");
+        line.style.cssText = `display: flex; align-items: center; gap: 8px; flex: 1 1 100%; padding-left: 12px;`;
+        s.name.style.minWidth = "26px";
+        line.append(s.name, s.rng, s.out);
+        wrap.append(line);
+      }
+    } else {
+      wrap.append(seg, main.name, main.rng, main.out);
+    }
     if (!smooth) return wrap;
     const column = document.createElement("div");
     column.style.cssText = `display: flex; flex-direction: column;`;
@@ -3833,10 +3890,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const EXP_UP = withAlpha(SCENE_VIOLET, 0.45);
     const EXP_DOWN = withAlpha(SCENE_VIOLET, 0.14);
     const EXP_HATCH = withAlpha(SCENE_VIOLET, 0.6);
-    // The generic engine gate's own line has no scene of its own to name it
-    // (unlike Beat ripple's "reach to ring") — one fixed label, used as both
-    // this trace's key in `markTraces` and the text the key row shows for it.
+    // The generic engine gate's own lines have no scene of their own to name
+    // them (unlike Beat ripple's "reach to ring") — one fixed label each, used
+    // as both a trace's key in `markTraces` and the text the key row shows for
+    // it: the Min line (gateLine) and the Max line (gateTop).
     const GENERIC_GATE_LINE_LABEL = "below this counts as nothing";
+    const GENERIC_GATE_TOP_LABEL = "above this counts as full";
 
     function draw(): void {
       const { w, h } = size;
@@ -4011,17 +4070,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const pairHeld = pairNow && heldExpansion(spec.key, pairNow);
       expansionTag = pairNow ? expansionTagText(deps.getSceneExpansion(), deps.getSceneExpansionShape()) : "";
       const marks = takeSettingMarks(sceneId, spec.key, "graph");
-      // The generic engine gate's own line (drives.ts's header's threshold
-      // paragraph) — undefined for a scene-handled setting (it draws its own
-      // line above instead, through settingMarks.ts) or while the gate is
-      // off. Drawn the same dotted way as a scene's own mark lines, under
-      // one fixed label so it gets its own key entry.
+      // The generic engine gate's own window (drives.ts's header's threshold
+      // paragraph): its Min line (gateLine) and Max line (gateTop) — both
+      // undefined for a scene-handled setting (it draws its own line above
+      // instead, through settingMarks.ts) or while the gate is off. Drawn the
+      // same dotted way as a scene's own mark lines, under one fixed label
+      // each so they get their own key entries.
       const gateLine = drives.gateLine(spec.key);
+      const gateTop = drives.gateTop(spec.key);
       for (const line of marks?.lines ?? []) {
         if (!markTraces.has(line.label)) markTraces.set(line.label, new Float32Array(RING).fill(NaN));
       }
       if (gateLine !== undefined && !markTraces.has(GENERIC_GATE_LINE_LABEL)) {
         markTraces.set(GENERIC_GATE_LINE_LABEL, new Float32Array(RING).fill(NaN));
+      }
+      if (gateTop !== undefined && !markTraces.has(GENERIC_GATE_TOP_LABEL)) {
+        markTraces.set(GENERIC_GATE_TOP_LABEL, new Float32Array(RING).fill(NaN));
       }
       let open = 1;
       if (isGate) {
@@ -4047,6 +4111,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const trace of markTraces.values()) trace[ringHead] = NaN;
         for (const line of marks?.lines ?? []) markTraces.get(line.label)![ringHead] = line.value;
         if (gateLine !== undefined) markTraces.get(GENERIC_GATE_LINE_LABEL)![ringHead] = gateLine * (spec.drive?.gain ?? 1);
+        if (gateTop !== undefined) markTraces.get(GENERIC_GATE_TOP_LABEL)![ringHead] = gateTop * (spec.drive?.gain ?? 1);
         reactions[ringHead] = first ? (marks?.reaction ?? 0) : 0;
         if (isGate) gateOpen[ringHead] = open > 0.5 ? 1 : 0;
       }
@@ -4055,7 +4120,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
         keyReaction.innerHTML = marks ? keyReactionSwatch : "";
         keyReaction.append(marks?.reactionLabel ?? "");
-        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
+        const lineLabel = marks ? marks.lines[0]?.label : `${GENERIC_GATE_LINE_LABEL} · ${GENERIC_GATE_TOP_LABEL}`;
         keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
       }
       filled = Math.min(RING, filled + slots);

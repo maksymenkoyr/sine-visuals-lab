@@ -22,7 +22,7 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
+import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -1384,10 +1384,11 @@ describe("drives: the generic engine gate — every drive setting without its ow
     }
   });
 
-  it("on: a signal hovering below the line reads ~0 through value(), a bump above passes ≈ its own value", () => {
+  it("on, Smoothness off: a signal hovering below the Min line reads ~0 through value(), a bump to the peak reads ≈ the peak", () => {
     const sceneId = "gate-on-value";
     const spec = energySetting();
     setDriveThresholdOn(sceneId, spec, true);
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: a bump at the peak reads the peak itself
     const clock = createAnimClock();
     const engine = createDriveEngine();
 
@@ -1431,7 +1432,7 @@ describe("drives: the generic engine gate — every drive setting without its ow
     expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
   });
 
-  it("smoothness: a reading just under the line — 0 is a hard cut, the default is the old knee, high is a wider fade", () => {
+  it("smoothness: a reading just under the Min line — 0 is a hard cut, the default widens the window a little, high widens it more", () => {
     // Settle on a flat reading (floor and peak equal, so the spread is nothing),
     // then read just under it. The spread stays under GATE_KNEE_SPREAD_MIN's
     // floor, so the knee is applyGenericGate's minimum width, read from the same
@@ -1465,7 +1466,12 @@ describe("drives: the generic engine gate — every drive setting without its ow
 
     const dflt = readBelowLine("gate-smoothness-default");
     const knee = 0.04 * 0.1;
-    expect(dflt.drives.value("k", -1)).toBeCloseTo(0.099 * smoothstep(dflt.line - knee, dflt.line + knee, 0.099), 6);
+    // The window runs from the Min line less the knee to the Max line plus it,
+    // a straight rise (applyGenericGate). Max defaults to 1, so the Max line is the peak.
+    const peak = dflt.drives.gateTop("k")!;
+    const lo = dflt.line - knee;
+    const frac = (0.099 - lo) / (peak + knee - lo);
+    expect(dflt.drives.value("k", -1)).toBeCloseTo(peak * Math.min(1, Math.max(0, frac)), 6);
     expect(dflt.drives.value("k", -1)).toBeGreaterThan(0);
 
     const wide = readBelowLine("gate-smoothness-wide", 1);
@@ -1478,6 +1484,7 @@ describe("drives: the generic engine gate — every drive setting without its ow
     const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
     setDriveThresholdOn(sceneId, spec, true);
     setDriveThreshold(sceneId, spec, 0.5);
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: the loud hit reads the peak itself
     const clock = createAnimClock();
     const engine = createDriveEngine();
 
@@ -1510,12 +1517,13 @@ describe("drives: the generic engine gate — every drive setting without its ow
       }
     }
     expect(lastLoudFired).toBe(true); // the loud hit still fires
-    expect(lastLoudValue).toBe(1);
+    expect(lastLoudValue).toBeCloseTo(1, 6);
   });
 
   it("a built-in (\"scene\") reaction read through value() is gated too, once switched on — off, it passes straight through", () => {
     const sceneId = "gate-built-in";
     const spec = settingWithDrive("k", "scene");
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: read(1) lands on the peak itself
     const clock = createAnimClock();
     const engine = createDriveEngine();
     function read(v: number) {
@@ -1536,6 +1544,109 @@ describe("drives: the generic engine gate — every drive setting without its ow
     expect(last.out).toBe(0);
     expect(last.drives.gateLine("k")).toBeGreaterThan(0.1);
     expect(read(1).out).toBeCloseTo(1, 5);
+  });
+
+  it("window, Smoothness off: at the Min line reads ~0, at the tracked peak reads the peak, halfway between reads about half the peak", () => {
+    const sceneId = "gate-window-exact";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1); // a loud burst teaches the peak
+    for (let i = 0; i < 120; i++) tick(0.1); // the floor settles low, the peak eases down from the burst
+
+    // Each reading is placed on the lines the tick before read; floor and peak move only a little in one tick.
+    let d = tick(0.1);
+    d = tick(d.gateLine("k")!);
+    expect(d.value("k", -1)).toBeCloseTo(0, 2);
+    d = tick(d.gateTop("k")!);
+    expect(d.value("k", -1)).toBeCloseTo(d.gateTop("k")!, 2);
+    d = tick((d.gateLine("k")! + d.gateTop("k")!) / 2);
+    expect(d.value("k", -1)).toBeCloseTo(d.gateTop("k")! / 2, 2);
+  });
+
+  it("Max below 1: a reading at or over the Max line reads the full peak", () => {
+    const sceneId = "gate-window-max-half";
+    const full = energySetting("full");
+    const half = energySetting("half");
+    for (const s of [full, half]) {
+      setDriveThresholdOn(sceneId, s, true);
+      setDriveSmoothnessOn(sceneId, s, false);
+    }
+    setDriveWindowMax(sceneId, half, 0.5);
+    const specs = [full, half];
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, specs);
+      return engine.forScene(sceneId, specs, anim);
+    }
+
+    // Both settings see the same signal, so their floor and peak match; only half's Max line sits lower.
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    let d = tick(0.1);
+    d = tick(d.gateTop("half")!); // a reading exactly on half's Max line
+    expect(d.value("half", -1)).toBeCloseTo(d.gateTop("full")!, 6); // full's Max line is the peak
+    d = tick(1); // over it
+    expect(d.value("half", -1)).toBeCloseTo(1, 6);
+  });
+
+  it("Min == Max with Smoothness off is a step: under → 0, at/over → the peak", () => {
+    const sceneId = "gate-window-step";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0.5);
+    setDriveWindowMax(sceneId, spec, 0.5);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    const under = tick(0.1);
+    expect(under.gateTop("k")).toBe(under.gateLine("k"));
+    expect(under.value("k", -1)).toBe(0);
+    const over = tick(1);
+    expect(over.value("k", -1)).toBe(1);
+  });
+
+  it("gateTop: undefined while the gate is off; on, never below gateLine, and on the peak at the default Max", () => {
+    const sceneId = "gate-window-top";
+    const spec = energySetting();
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    expect(tick(0.1).gateTop("k")).toBeUndefined(); // off
+    setDriveThresholdOn(sceneId, spec, true);
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    let d = tick(0.1);
+    expect(d.gateTop("k")!).toBeGreaterThan(d.gateLine("k")!);
+    d = tick(1); // a new high: the default Max line sits on the peak
+    expect(d.gateTop("k")).toBeCloseTo(1, 6);
+    setDriveThreshold(sceneId, spec, 0.8);
+    setDriveWindowMax(sceneId, spec, 0.2); // Max under Min: the Max line still never drops below the Min line
+    d = tick(0.1);
+    expect(d.gateTop("k")).toBe(d.gateLine("k"));
   });
 });
 
