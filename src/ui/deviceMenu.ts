@@ -953,6 +953,8 @@ const FADER_HINT_TEXT =
 // The Bands card's Levels row: a small caption, then a 3-column grid of
 // BAND_LEVEL_CHOICES's own compact meters (below) — one row rather than
 // three full-width ones, since Low/Mid/High only ever need a bar and a jack.
+// Kick band's row sits under the grid at full width, since it also shows
+// which band it picked.
 const levelsRowStyle = `display: flex; flex-direction: column; gap: 4px; margin-top: 10px;`;
 const levelsLabelStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.45);`;
 const levelsGridStyle = `display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;`;
@@ -2724,7 +2726,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   const levelsRow = document.createElement("div");
   levelsRow.style.cssText = levelsRowStyle;
-  levelsRow.append(levelsLabel, levelsGrid);
+  // Kick band (bandPick.ts) gets its own full-width row under the three
+  // levels: its bar, its jack, and the frequency of the band it picked right
+  // now as the readout, so the pick itself can be watched.
+  const kickBandRow = createMeterRow({
+    label: driveSourceLabel("anim.kickBand"),
+    accent: driveSourceColor("anim.kickBand"),
+    description: `The level of ${driveSourceDescription("anim.kickBand")} The number is that band's frequency.`,
+  });
+  mountBandsJack("anim.kickBand", kickBandRow.right, kickBandRow.el);
+  levelsRow.append(levelsLabel, levelsGrid, kickBandRow.el);
 
   bandsCard.body.append(fadersRow, eqLayer, levelsRow);
 
@@ -7795,6 +7806,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const r of bandLevelRows) {
           const v = anim ? (r.choice === "anim.low" ? anim.low : r.choice === "anim.mid" ? anim.mid : anim.high) : null;
           r.row.setValue(v, cableDtSec);
+        }
+        kickBandRow.setValue(anim ? anim.kickBand : null, cableDtSec);
+        if (anim) {
+          const edges = deps.getBandEdgesHz();
+          const i = anim.kickBandIndex;
+          const hz = Math.sqrt(edges[i]! * edges[i + 1]!);
+          if (hz >= 1000) kickBandRow.setReadout((hz / 1000).toFixed(1), { unit: "kHz" });
+          else kickBandRow.setReadout(String(Math.round(hz)), { unit: "Hz" });
         }
       }
       if (!narrowMQ.matches) cableLayer.tick(cableDtSec);

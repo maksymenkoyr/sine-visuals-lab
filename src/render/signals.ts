@@ -49,6 +49,12 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * raw hits whenever it isn't sure — see metronome.ts's own header for why
  * these are two different things rather than one setting.
  *
+ * Every signal has a monitor: a meter row in the panel's left column with
+ * its own jack (audioMeters.ts's mountJack, or deviceMenu.ts's Bands card
+ * for the band levels and Kick band), so it can be watched and plugged in
+ * like any other. A new signal isn't done until it has one; the "+ Add by
+ * name" chips alone are folded away and don't count.
+ *
  * Populate SIGNALS on demand, not exhaustively: an entry no setting cites is
  * an unverifiable claim about where something is visible in the panel — this
  * relaxes once a drive's picker offers the *whole* catalogue on every row
