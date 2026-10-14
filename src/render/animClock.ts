@@ -9,6 +9,8 @@ import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
+import { createBandPick, type BandPick } from "./bandPick.ts";
+import { getBandSplit } from "../audio/bandSplit.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
 import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../audio/hitStrength.ts";
@@ -107,6 +109,9 @@ export interface AnimFrame {
   lowOnset: boolean;
   midOnset: boolean;
   highOnset: boolean;
+  /** The one low band that pulses most clearly right now, its level (silence-gate dimmed like low/mid/high) and its index — see bandPick.ts. src/render/signals.ts's "Kick band" reads kickBand. */
+  kickBand: number;
+  kickBandIndex: number;
   /** Section-level loudness trend and drop flash — see sectionIntensity.ts. */
   sectionIntensity: number;
   dropPulse: number;
@@ -316,6 +321,7 @@ export function createAnimClock(): AnimClock {
   // tracker here: a seed into beatClock/metronome and a fold of the raw bpm.
   const tapGuide: TapGuide = createTapGuide();
   const bandEnergy: BandEnergy = createBandEnergy();
+  const kickBand: BandPick = createBandPick();
   // AnimFrame.hitTail, cached against the HitShape it was built from.
   let tailShape: HitShape | undefined;
   let tailScales: HitTails = UNIT_TAILS;
@@ -368,6 +374,7 @@ export function createAnimClock(): AnimClock {
       // above: beat.advance() below needs *this* tick's lowDiag.ratio to
       // weigh this tick's own beat vote.
       bandEnergy.advance(dtSec, frame.bands, rateScale, dimmer, hit?.shape);
+      kickBand.advance(dtSec, frame.bands, getBandSplit().lowMid);
       const lowRatioNow = bandEnergy.lowDiag.ratio;
       const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
       const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
@@ -462,6 +469,8 @@ export function createAnimClock(): AnimClock {
         lowOnset: bandEnergy.lowOnset,
         midOnset: bandEnergy.midOnset,
         highOnset: bandEnergy.highOnset,
+        kickBand: kickBand.value * dimmer,
+        kickBandIndex: kickBand.band,
         sectionIntensity: section.intensity,
         dropPulse: section.dropPulse,
         dropOnset: section.dropOnset,

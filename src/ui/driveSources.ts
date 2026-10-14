@@ -39,6 +39,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "feature.flux": "Onset surge",
   "feature.level": "Level",
   "anim.lowOnset": "Bass hits",
+  "anim.kickBand": "Kick band",
   "anim.midOnset": "Mid hits",
   "anim.highOnset": "Treble hits",
   "anim.dropOnset": "Drop",
@@ -72,6 +73,7 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "feature.flux": "how sharply the sound is changing right now, compared with the hit threshold.",
   "feature.level": "how loud the room is on a fixed scale, before auto-gain: silence reads 0 — the Dynamics card's Level.",
   "anim.lowOnset": "kicks and bass notes landing.",
+  "anim.kickBand": "the one bass band that pulses most clearly right now, picked by itself and re-picked when the song changes.",
   "anim.midOnset": "snares, claps and vocal attacks.",
   "anim.highOnset": "hi-hats, cymbals and sharp highs.",
   "anim.dropOnset": "fires once when a drop lands.",
@@ -109,6 +111,7 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "feature.flux": DRIVE_WHITE,
   "feature.level": INPUT_GREEN,
   "anim.lowOnset": STRIP_LOW,
+  "anim.kickBand": STRIP_LOW,
   "anim.midOnset": STRIP_MID,
   "anim.highOnset": STRIP_HIGH,
   "anim.dropOnset": HOT_YELLOW,
@@ -213,7 +216,7 @@ export interface DriveAddGroup {
 }
 
 export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
-  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
+  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.kickBand", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
     choices: ["anim.energy", "feature.level", "dial.loudness", "anim.wavePeak", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.centroid"],
