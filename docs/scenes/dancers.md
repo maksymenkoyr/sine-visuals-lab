@@ -171,6 +171,6 @@ original work built around that data.
   mocap clip pipeline, choreographer, three renderers, two skins. Draft.
 - `#69` (`88aab06`, 2026-09-03) — regrouped onto the shared `SettingGroup`
   vocabulary alongside caustics, chladni and meshGrid.
-- `#TBD` (2026-10-15) — the clip library moved to `public/media/dancers/`
+- #532 (2026-10-15) — the clip library moved to `public/media/dancers/`
   and downloads the first time the scene mounts, not on every page load; a
   show (the pop-out, a room with another device) still fetches it up front.

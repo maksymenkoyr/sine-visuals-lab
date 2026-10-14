@@ -268,6 +268,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #389 (merged 2026-10-06): Bounce smoothness.
 - #407 (draft, 2026-10-06): Move on iPhone and iPad (videos in the page, unlock on the
   first tap, a playhead scrub where play() is refused).
-- #TBD (2026-10-15): the loops moved to `public/media/alien/` and download
+- #532 (2026-10-15): the loops moved to `public/media/alien/` and download
   the first time the scene or its tile mounts, not on every page load; a
   show (the pop-out, a room with another device) still fetches them up front.
