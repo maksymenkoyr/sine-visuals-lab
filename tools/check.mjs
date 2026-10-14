@@ -36,7 +36,12 @@
 //              and checks by hash (GITLEAKS below). A false alarm gets
 //              `gitleaks:allow` in a comment on that line.
 //   tests      vitest: the whole suite, or with --changed only the tests
-//              related to the changed files.
+//              related to the changed files. Off CI each test and hook gets
+//              LOCAL_TEST_LIMIT_MS instead of vitest's default: a push or a
+//              Stop often runs while parallel agents load the machine, and
+//              CPU-heavy tests then ran out of time with nothing wrong. CI
+//              and a plain `npm test` keep the default, so a test that hangs
+//              fails fast there.
 //
 // The baseline. rules, lint and knip were added to a codebase that already
 // broke some of them, so check-baseline.json lists the findings that existed
@@ -49,6 +54,11 @@
 //
 // The base the secrets step diffs against: $CHECK_BASE when set (CI passes the
 // PR's base commit), otherwise the merge-base with origin/main.
+//
+// $CHECK_REPORT_FILE, when set, names a file that also gets the end report.
+// tools/fix-conflicts-pr.sh sets it around its push to tell a test that ran
+// out of time from a real failure: piping the push's output instead would
+// take the terminal away and hide the live line.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -72,6 +82,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_PATH = join(ROOT, "check-baseline.json");
 const BIN = (name) => join(ROOT, "node_modules", ".bin", name);
 const SHOW = 30;
+const LOCAL_TEST_LIMIT_MS = 30_000;
 
 const GITLEAKS = {
   version: "8.30.1",
@@ -298,10 +309,11 @@ const steps = {
   },
 
   async tests(note) {
+    const limits = process.env.CI ? [] : [`--testTimeout=${LOCAL_TEST_LIMIT_MS}`, `--hookTimeout=${LOCAL_TEST_LIMIT_MS}`];
     if (changedMode) {
       const files = changedFiles(base()).filter((f) => /\.(ts|mts|mjs|js)$/.test(f) && existsSync(join(ROOT, f)));
       if (!files.length) return { skipped: "no code changed" };
-      const r = await run(BIN("vitest"), ["related", "--run", "--passWithNoTests", ...files], {
+      const r = await run(BIN("vitest"), ["related", "--run", "--passWithNoTests", ...limits, ...files], {
         onOut: (out) => note(`${testFilesDone(out)} test files`),
       });
       return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out, 60) };
@@ -309,7 +321,7 @@ const steps = {
     // The files vitest has finished so far, out of the files it will run.
     const listed = await run(BIN("vitest"), ["list", "--filesOnly"]);
     const total = listed.code === 0 ? listed.stdout.split("\n").filter((l) => l.trim()).length : 0;
-    const r = await run(BIN("vitest"), ["run"], { onOut: (out) => note(`${testFilesDone(out)}${total ? `/${total}` : ""} test files`) });
+    const r = await run(BIN("vitest"), ["run", ...limits], { onOut: (out) => note(`${testFilesDone(out)}${total ? `/${total}` : ""} test files`) });
     return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out, 60) };
   },
 };
@@ -435,5 +447,6 @@ if (prune || accept) {
 }
 
 console.log(report.join("\n"));
+if (process.env.CHECK_REPORT_FILE) writeFileSync(process.env.CHECK_REPORT_FILE, `${report.join("\n")}\n`);
 if (failed) console.log("\nnpm run check failed. The tools/check.mjs header explains each step.");
 process.exit(failed ? 1 : 0);

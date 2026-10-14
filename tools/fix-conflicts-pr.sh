@@ -6,11 +6,23 @@
 # the rebase and pushes with --force-with-lease. It stops before the push when
 # a file needs judgment. Arguments after the PR number go to fix-conflicts.sh.
 #
-# The push runs the pre-push hook (npm run check). On a machine busy with
-# parallel agents a slow test can run past its time limit, so a refused push
-# is tried once more. If that fails too, the finished rebase stays: the branch
-# shows as diverged from origin until it lands, and running this again only
-# pushes.
+# The push runs the pre-push hook (npm run check), which takes minutes. Two
+# things can refuse it besides a real failure:
+# - Someone else's push to the PR. --force-with-lease refuses when origin's
+#   copy of the branch moved past this repo's origin/<branch>, and fetching it
+#   would let the push drop their commits. So before the push, and after a
+#   refusal, the script asks origin for the tip; when it moved, it stops and
+#   lists the new commits (fetched into FETCH_HEAD only, so the lease still
+#   guards them) with the commands that keep them.
+# - A test that ran out of time on a machine busy with parallel agents. A
+#   push the check refused only for that (its report in $CHECK_REPORT_FILE,
+#   tools/check.mjs header) is tried again, up to push_tries pushes in all.
+#   Any other refusal stops at once, so a test that fails now and then can't
+#   get through on a second roll.
+# When the push fails, the finished rebase stays: the branch shows as diverged
+# from origin until it lands. Running this again rebases onto a fresh
+# origin/<base> (nothing to do unless the base moved, and then it can stop on
+# new conflicts) and pushes.
 #
 # The ~/.zshrc function `fix-conflicts` only runs this script from the main
 # checkout and then cd's into the worktree it names (a script can't move its
@@ -76,13 +88,44 @@ if rebasing; then
   exit 1
 fi
 
+# Pushes in all when the check refuses only because a test ran out of time.
+push_tries=2
+
+# True, after listing their commits, when someone pushed to the PR's branch
+# since this repo last fetched it.
+remote_moved() {
+  local known remote range
+  known=$(git rev-parse -q --verify "refs/remotes/origin/$branch")
+  remote=$(git ls-remote origin "refs/heads/$branch" | cut -f1) || { echo "Could not ask origin for $branch (see above)." >&2; exit 1; }
+  [ "$remote" != "$known" ] || return 1
+  if [ -z "$remote" ]; then
+    echo "origin has no branch $branch any more: look at PR $pr before pushing." >&2
+    return 0
+  fi
+  # An empty --refmap fetches into FETCH_HEAD only, leaving origin/$branch as the lease.
+  git fetch -q --refmap= origin "refs/heads/$branch" || exit 1
+  range="${known:-HEAD}..$remote"
+  echo "Someone pushed to $branch since this repo last fetched it:" >&2
+  git log --oneline "$range" >&2
+  echo "Put what you keep of it on this branch (git cherry-pick $range), then run: git fetch origin $branch && fix-conflicts $pr" >&2
+  echo "Fetching without that makes the next push drop their commits." >&2
+}
+
+remote_moved && exit 1
+
 # The pre-push hook runs npm run check, which needs a complete install.
 if [ -f package.json ]; then
   npm ls --depth=0 >/dev/null 2>&1 || npm ci || exit 1
 fi
-for try in 1 2; do
+CHECK_REPORT_FILE=$(mktemp) || exit 1
+export CHECK_REPORT_FILE
+trap 'rm -f "$CHECK_REPORT_FILE"' EXIT
+for ((try = 1; ; try++)); do
+  : >"$CHECK_REPORT_FILE"
   git push --force-with-lease origin "$branch" && exit 0
-  [ "$try" = 1 ] && echo "Push refused (see above). Trying once more, in case a test only ran slow." >&2
+  remote_moved && exit 1
+  if [ "$try" -ge "$push_tries" ] || ! grep -Eq '(Test|Hook) timed out in [0-9]+ms' "$CHECK_REPORT_FILE"; then break; fi
+  echo "The check refused the push because a test ran out of time (see above), which a busy machine can cause: pushing again." >&2
 done
 echo "The rebase is done and kept; only the push failed (see above). Fix what failed, then run: fix-conflicts $pr" >&2
 exit 1

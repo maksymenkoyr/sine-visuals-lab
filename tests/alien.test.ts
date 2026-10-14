@@ -30,17 +30,25 @@ describe("alien mesh", () => {
     expect(mesh.triCount).toBeGreaterThan(10_000);
     expect(mesh.triCount).toBeLessThan(60_000);
     // Counted, then checked once: an expect() per vertex took seconds and ran past the time limit on a busy machine.
-    let badBones = 0, badSums = 0;
+    // The first bad vertex goes in the failure message, so a count still says where to look.
+    let badBones = 0, badSums = 0, firstBadBone = "", firstBadSum = "";
     for (let v = 0; v < mesh.triCount * 3; v++) {
       let sum = 0;
       for (let k = 0; k < MAX_INFLUENCES; k++) {
+        const bone = mesh.bones[v * MAX_INFLUENCES + k];
         sum += mesh.weights[v * MAX_INFLUENCES + k];
-        if (!(mesh.bones[v * MAX_INFLUENCES + k] < BONE_COUNT)) badBones++;
+        if (!(bone < BONE_COUNT)) {
+          badBones++;
+          firstBadBone ||= `first at vertex ${v}, influence ${k}: bone ${bone}`;
+        }
       }
-      if (sum !== 255) badSums++;
+      if (sum !== 255) {
+        badSums++;
+        firstBadSum ||= `first at vertex ${v}: weights sum to ${sum}`;
+      }
     }
-    expect(badBones).toBe(0);
-    expect(badSums).toBe(0);
+    expect(badBones, `bones out of range, ${firstBadBone}`).toBe(0);
+    expect(badSums, `weights not summing to 255, ${firstBadSum}`).toBe(0);
   });
 
   it("winds nearly every triangle outward, along its vertex normals", () => {
