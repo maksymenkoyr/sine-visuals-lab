@@ -87,6 +87,20 @@ const CHROME_FLAGS = [
   "--autoplay-policy=no-user-gesture-required",
 ];
 
+/** Metric rules for compare: which way is worse, and the smallest change
+ *  (absolute and relative) worth reporting given run-to-run noise. Declared
+ *  above the dispatch below, which runs compare before the rest of the
+ *  module is evaluated. */
+const RULES = {
+  gz: { worse: "up", abs: 2048, rel: 0.02, fmt: kb },
+  ms: { worse: "up", abs: 1, rel: 0.15, fmt: (v) => `${v} ms` },
+  freeze: { worse: "up", abs: 50, rel: 0.3, fmt: (v) => `${v} ms` },
+  share: { worse: "up", abs: 0.05, rel: 0.2, fmt: (v) => `${Math.round(v * 100)}%` },
+  fps: { worse: "down", abs: 3, rel: 0.05, fmt: (v) => `${v} fps` },
+  hitch: { worse: "up", abs: 10, rel: 0.5, fmt: (v) => `${v}/min` },
+  heap: { worse: "up", abs: 5, rel: 0.2, fmt: (v) => `${v} MB` },
+};
+
 const args = process.argv.slice(2);
 const get = (k, d) => (args.includes(`--${k}`) ? args[args.indexOf(`--${k}`) + 1] : d);
 const has = (k) => args.includes(`--${k}`);
@@ -520,18 +534,6 @@ function compareCommand(files) {
   if (!a || !b) throw new Error("need two snapshots in docs/perf/ (or pass two files)");
   compare(JSON.parse(readFileSync(a, "utf8")), JSON.parse(readFileSync(b, "utf8")), relative(ROOT, a), relative(ROOT, b));
 }
-
-/** Metric rules for compare: which way is worse, and the smallest change
- *  (absolute and relative) worth reporting given run-to-run noise. */
-const RULES = {
-  gz: { worse: "up", abs: 2048, rel: 0.02, fmt: kb },
-  ms: { worse: "up", abs: 1, rel: 0.15, fmt: (v) => `${v} ms` },
-  freeze: { worse: "up", abs: 50, rel: 0.3, fmt: (v) => `${v} ms` },
-  share: { worse: "up", abs: 0.05, rel: 0.2, fmt: (v) => `${Math.round(v * 100)}%` },
-  fps: { worse: "down", abs: 3, rel: 0.05, fmt: (v) => `${v} fps` },
-  hitch: { worse: "up", abs: 10, rel: 0.5, fmt: (v) => `${v}/min` },
-  heap: { worse: "up", abs: 5, rel: 0.2, fmt: (v) => `${v} MB` },
-};
 
 function flatten(s) {
   const out = [];
