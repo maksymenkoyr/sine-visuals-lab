@@ -5,7 +5,7 @@ import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./be
 import { createMetronome, type Metronome } from "./metronome.ts";
 import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
 import { createTapGuide, type TapGuide } from "./tapTempo.ts";
-import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
+import { createBandEnergy, slewLevel, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
@@ -102,6 +102,12 @@ export interface AnimFrame {
   lowPulse: number;
   midPulse: number;
   highPulse: number;
+  /** FeatureFrame.hats/lead (src/audio/stemSplit.ts), eased with the same
+   *  slew as `low`/`mid`/`high` and multiplied by the silence gate's dimmer
+   *  (`gateDimmer`), so a quiet room's hiss never reads as hats or a melody:
+   *  the split's own scale is relative and has no idea what silence is. */
+  hats: number;
+  lead: number;
   /** One-shot edges, true only on the tick each group's onset fired. JS-side
    *  only (not uploaded as uniforms) — for scenes that want to trigger a
    *  discrete JS-side effect (e.g. a ripple) rather than read a continuous
@@ -329,6 +335,8 @@ export function createAnimClock(): AnimClock {
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
   let beatPulse = 0;
+  let hats = 0;
+  let lead = 0;
   let metronomePulse = 0;
   let metronomeBarPulse = 0;
   // AnimFrame.wavePeak's own held state — see that field's own doc comment.
@@ -375,6 +383,8 @@ export function createAnimClock(): AnimClock {
       // weigh this tick's own beat vote.
       bandEnergy.advance(dtSec, frame.bands, rateScale, dimmer, hit?.shape);
       kickBand.advance(dtSec, frame.bands, getBandSplit().lowMid);
+      hats = slewLevel(hats, frame.hats * dimmer, dtSec, rateScale);
+      lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);
       const lowRatioNow = bandEnergy.lowDiag.ratio;
       const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
       const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
@@ -466,6 +476,8 @@ export function createAnimClock(): AnimClock {
         lowPulse: bandEnergy.lowPulse,
         midPulse: bandEnergy.midPulse,
         highPulse: bandEnergy.highPulse,
+        hats,
+        lead,
         lowOnset: bandEnergy.lowOnset,
         midOnset: bandEnergy.midOnset,
         highOnset: bandEnergy.highOnset,

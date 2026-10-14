@@ -163,7 +163,7 @@ export function pinnedBands(): Uint8Array {
  * re-clamped to [0,1] since features.ts's contract is that bands stay
  * normalized (see clamp01 there) and a >1x gain can otherwise punch
  * through that; the bands that hit the clamp are recorded in pinnedBands.
- * energy/level/onset/pulseOnset/bpm/onsetPhase pass through untouched —
+ * energy/level/hats/lead/onset/pulseOnset/bpm/onsetPhase pass through untouched —
  * this is a per-band control, not a broadband one (that's
  * Sensitivity/Contrast's job), and level in particular must stay the raw,
  * un-gained reading: it's auto mode's input signal (see types.ts), so
@@ -192,5 +192,7 @@ export function applyBandGains(frame: FeatureFrame, gains: ArrayLike<number>): F
     bpm: frame.bpm,
     onsetPhase: frame.onsetPhase,
     level: frame.level,
+    hats: frame.hats,
+    lead: frame.lead,
   };
 }

@@ -25,7 +25,7 @@ import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 function frame(bands: number[], energy: number): FeatureFrame {
   const arr = new Float32Array(NUM_BANDS);
   bands.forEach((v, i) => (arr[i] = v));
-  return { time: 1.5, bands: arr, energy, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6 };
+  return { time: 1.5, bands: arr, energy, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6, hats: 0, lead: 0 };
 }
 
 describe("sensitivity persistence", () => {

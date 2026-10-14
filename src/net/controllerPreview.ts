@@ -29,6 +29,8 @@ export function silentSample(s: VisualSample): VisualSample {
     pulseFired: false,
     timeSec: s.timeSec,
     level: 0,
+    hats: 0,
+    lead: 0,
     wave: null,
   };
 }

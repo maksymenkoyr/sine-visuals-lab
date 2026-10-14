@@ -105,13 +105,15 @@ function binEdgesFor(sr: number): { binCount: number; binEdges: Int32Array } {
   return { binCount, binEdges };
 }
 
-/** Per-band FFT magnitude in dB (unnormalized, like analyser.ts's own
- *  readBandsDb) at frame time `tSec`, over the most recent FFT_SIZE samples
- *  of `mono` ending at round(tSec*sr) — samples before index 0 read as zero.
- *  -Infinity (true silence in a band) is left as-is; FeatureExtractor
- *  sanitizes it, same as a live analyser's output. */
-export function readBandsDb(mono: Float32Array, tSec: number, sr: number): Float32Array {
-  const { binEdges } = binEdgesFor(sr);
+// Float64, not the analyser's Float32, so readBandsDb() below sums exactly
+// the values it summed before this buffer existed.
+const binsDb = new Float64Array(FFT_SIZE / 2);
+
+/** Per-bin FFT magnitude in dB — what analyser.ts's `binsDb` holds after a
+ *  read — over the most recent FFT_SIZE samples of `mono` ending at
+ *  round(tSec*sr); samples before index 0 read as zero. Returns one shared
+ *  buffer, overwritten by the next call (readBandsDb's included). */
+export function readBinsDb(mono: Float32Array, tSec: number, sr: number): Float64Array {
   const end = Math.round(tSec * sr);
   const start = end - FFT_SIZE + 1;
   for (let i = 0; i < FFT_SIZE; i++) {
@@ -121,16 +123,25 @@ export function readBandsDb(mono: Float32Array, tSec: number, sr: number): Float
     imBuf[i] = 0;
   }
   fft(reBuf, imBuf);
+  for (let k = 0; k < FFT_SIZE / 2; k++) {
+    binsDb[k] = 20 * Math.log10(Math.hypot(reBuf[k]!, imBuf[k]!) / FFT_SIZE);
+  }
+  return binsDb;
+}
 
+/** Per-band FFT magnitude in dB (unnormalized, like analyser.ts's own
+ *  readBandsDb) at frame time `tSec`, over the same window as readBinsDb().
+ *  -Infinity (true silence in a band) is left as-is; FeatureExtractor
+ *  sanitizes it, same as a live analyser's output. */
+export function readBandsDb(mono: Float32Array, tSec: number, sr: number): Float32Array {
+  const { binEdges } = binEdgesFor(sr);
+  const bins = readBinsDb(mono, tSec, sr);
   const bands = new Float32Array(NUM_BANDS);
   for (let b = 0; b < NUM_BANDS; b++) {
     const lo = binEdges[b]!;
     const hi = Math.max(lo + 1, binEdges[b + 1]!);
     let sum = 0;
-    for (let k = lo; k < hi; k++) {
-      const mag = Math.hypot(reBuf[k]!, imBuf[k]!) / FFT_SIZE;
-      sum += 20 * Math.log10(mag);
-    }
+    for (let k = lo; k < hi; k++) sum += bins[k]!;
     bands[b] = sum / (hi - lo);
   }
   return bands;

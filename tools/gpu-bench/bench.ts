@@ -48,7 +48,7 @@ async function bench(id: string) {
     t += dt;
     const beat = t % 0.5 < dt;
     for (let i = 0; i < NUM_BANDS; i++) bands[i] = 0.4 + 0.3 * Math.sin(t * 3 + i) + (beat ? 0.3 : 0);
-    const frame: FeatureFrame = { time: t, bands, energy: 0.6, level: 0.6, onset: beat, pulseOnset: beat, bpm: 120, onsetPhase: 0 };
+    const frame: FeatureFrame = { time: t, bands, energy: 0.6, level: 0.6, onset: beat, pulseOnset: beat, bpm: 120, onsetPhase: 0, hats: 0, lead: 0 };
     const anim = clock.advance(dt, frame);
     gl.viewport(0, 0, w, h);
     scene.render(ctx, frame, FULL_VIEWPORT, PALETTES[0], anim);

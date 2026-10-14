@@ -732,6 +732,8 @@ describe("messages", () => {
       bpm: 120,
       onsetPhase: 0,
       level: 0.3,
+      hats: 0,
+      lead: 0,
     };
     last().receive(encodeFeatureFrame(frame, Date.now()));
     expect(conn.msSinceLastFrame).toBeLessThan(1000);
@@ -746,6 +748,8 @@ const FRAME = {
   bpm: 0,
   onsetPhase: 0,
   level: 0,
+  hats: 0,
+  lead: 0,
 };
 
 function binaries(sock: FakeSocket): ArrayBuffer[] {

@@ -103,11 +103,17 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       // firing on a given tick.
       const level = clamp01(0.15 + 0.8 * sectionSwell);
 
+      // Stand-ins for src/audio/stemSplit.ts's two levels: Hats rides the
+      // off-beat hat envelope, Lead a slow held swell, both through the
+      // section arc like the bands.
+      const hats = clamp01(hatEnv * sectionGain);
+      const lead = clamp01((0.35 + 0.45 * shimmer) * sectionGain);
+
       // beat/beatPhase above are genuinely a synthetic metronome's beat grid
       // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
       // just what FeatureFrame calls that same edge/phase pair. There's no
       // silence gate here to differ from it, so pulseOnset = onset.
-      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level };
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead };
     },
   };
 }

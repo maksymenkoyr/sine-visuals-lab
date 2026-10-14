@@ -23,6 +23,8 @@ const fullFrame = {
   bpm: 999,
   onsetPhase: 1,
   level: 1,
+  hats: 0,
+  lead: 0,
 };
 
 describe("the feature frame and the relay's binary cap", () => {

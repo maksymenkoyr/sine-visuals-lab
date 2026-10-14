@@ -137,6 +137,8 @@ export type SignalId =
   | "anim.low"
   | "anim.mid"
   | "anim.high"
+  | "anim.hats"
+  | "anim.lead"
   | "anim.energy"
   | "anim.sectionIntensity"
   | "anim.centroid"
@@ -309,6 +311,24 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) => anim.high,
     bandRange: "high",
+  }),
+  "anim.hats": signal({
+    id: "anim.hats",
+    label: "Hats",
+    description:
+      "The drum part of the treble range (AnimFrame.hats, src/audio/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
+    kind: "level",
+    read: (_frame, anim) => anim.hats,
+    bandRange: "high",
+  }),
+  "anim.lead": signal({
+    id: "anim.lead",
+    label: "Lead",
+    description:
+      "The held part of the mid range (AnimFrame.lead, src/audio/stemSplit.ts) — vocals, synths and guitar with the drums taken out, so it doesn't jump on a snare the way Mid level does.",
+    kind: "level",
+    read: (_frame, anim) => anim.lead,
+    bandRange: "mid",
   }),
   "anim.energy": signal({
     id: "anim.energy",

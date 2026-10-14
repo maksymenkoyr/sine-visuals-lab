@@ -239,7 +239,7 @@ import {
  *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
  * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Dynamics/
- * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
+ * Character) plus this file's own Bands level rows (BAND_LEVELS/STEM_LEVELS) and
  * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
  * pinned) setting, with tiny usage dots around the ring for how many of
@@ -949,9 +949,9 @@ const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0
 const FADER_HINT_TEXT =
   "Drag a knob up to boost a band, down to cut it. Pin an animation node to plug input nodes into it.";
 
-// The Bands card's Levels row: a small caption, then a 3-column grid of
-// BAND_LEVEL_CHOICES's own compact meters (below) — one row rather than
-// three full-width ones, since Low/Mid/High only ever need a bar and a jack.
+// The Bands card's Levels and Stems rows: a small caption, then a 3-column
+// grid of compact meters (BAND_LEVELS/STEM_LEVELS, below) — one row rather
+// than three full-width ones, since each only ever needs a bar and a jack.
 const levelsRowStyle = `display: flex; flex-direction: column; gap: 4px; margin-top: 10px;`;
 const levelsLabelStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.45);`;
 const levelsGridStyle = `display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;`;
@@ -2675,7 +2675,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   // ---- The Bands card's own jacks: the spectrum's own Frequencies corner,
-  // plus BAND_LEVEL_CHOICES's own three-across Levels row below eqLayer.
+  // plus the three-across Levels and Stems rows below eqLayer.
   // Built here (rather than through audioMeters.ts's mountJack) since the
   // Bands card lives in this file; onJackClick/onJackHover/jackIsShown/etc.
   // below are plain (hoisted) functions in this same closure, the same ones
@@ -2700,35 +2700,58 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const lineJack = mountBandsJack({ source: "line" }, fadersRow, fadersRow);
   lineJack.el.style.cssText += "position: absolute; top: 4px; right: 4px; z-index: 2;";
 
-  const BAND_LEVEL_CHOICES: readonly SignalId[] = ["anim.low", "anim.mid", "anim.high"];
-  const levelsLabel = document.createElement("div");
-  levelsLabel.textContent = "Levels";
-  levelsLabel.style.cssText = levelsLabelStyle;
-  const levelsGrid = document.createElement("div");
-  levelsGrid.style.cssText = levelsGridStyle;
+  interface LevelCell {
+    choice: SignalId;
+    read: (anim: AnimFrame) => number;
+  }
+  const BAND_LEVELS: readonly LevelCell[] = [
+    { choice: "anim.low", read: (a) => a.low },
+    { choice: "anim.mid", read: (a) => a.mid },
+    { choice: "anim.high", read: (a) => a.high },
+  ];
+  // Lead and Hats (src/audio/stemSplit.ts) sit under the Mid and Treble rows
+  // whose frequencies they cover, so the Bass column stays empty.
+  const STEM_LEVELS: readonly (LevelCell | null)[] = [
+    null,
+    { choice: "anim.lead", read: (a) => a.lead },
+    { choice: "anim.hats", read: (a) => a.hats },
+  ];
+  const bandLevelRows: (LevelCell & { row: ReturnType<typeof createMeterRow> })[] = [];
   // "Bass level"/"Mid level"/"Treble level" (driveSourceLabel) minus the
   // " level" every other source-picker context needs to disambiguate from a
   // hit — redundant here, where the Levels caption and the grid shape
   // already say what these three are.
-  const bandLevelRows = BAND_LEVEL_CHOICES.map((choice) => {
-    const row = createMeterRow({
-      label: driveSourceLabel(choice).replace(/ level$/, ""),
-      accent: driveSourceColor(choice),
-    });
-    row.el.style.cssText += levelsCellStyle;
-    row.el.querySelector<HTMLElement>(".vc-label")!.style.cssText += levelsCellLabelStyle;
-    const jack = mountBandsJack(choice, row.right, row.el);
-    // Heat (heat.ts): the lens glow, the row's own strip, a Heat history
-    // line and the tooltip line, like a meter card's signal jack.
-    audioMeters.addHeatJack(choice, jack.el, row.el, bandsCard.title.textContent ?? "", () => bandsCard.fold?.isFolded() ?? false);
-    levelsGrid.appendChild(row.el);
-    return { choice, row };
-  });
-  const levelsRow = document.createElement("div");
-  levelsRow.style.cssText = levelsRowStyle;
-  levelsRow.append(levelsLabel, levelsGrid);
+  function levelsGridRow(caption: string, cells: readonly (LevelCell | null)[]): HTMLElement {
+    const label = document.createElement("div");
+    label.textContent = caption;
+    label.style.cssText = levelsLabelStyle;
+    const grid = document.createElement("div");
+    grid.style.cssText = levelsGridStyle;
+    for (const cell of cells) {
+      if (!cell) {
+        grid.appendChild(document.createElement("div"));
+        continue;
+      }
+      const row = createMeterRow({
+        label: driveSourceLabel(cell.choice).replace(/ level$/, ""),
+        accent: driveSourceColor(cell.choice),
+      });
+      row.el.style.cssText += levelsCellStyle;
+      row.el.querySelector<HTMLElement>(".vc-label")!.style.cssText += levelsCellLabelStyle;
+      const jack = mountBandsJack(cell.choice, row.right, row.el);
+      // Heat (heat.ts): the lens glow, the row's own strip, a Heat history
+      // line and the tooltip line, like a meter card's signal jack.
+      audioMeters.addHeatJack(cell.choice, jack.el, row.el, bandsCard.title.textContent ?? "", () => bandsCard.fold?.isFolded() ?? false);
+      grid.appendChild(row.el);
+      bandLevelRows.push({ ...cell, row });
+    }
+    const el = document.createElement("div");
+    el.style.cssText = levelsRowStyle;
+    el.append(label, grid);
+    return el;
+  }
 
-  bandsCard.body.append(fadersRow, eqLayer, levelsRow);
+  bandsCard.body.append(fadersRow, eqLayer, levelsGridRow("Levels", BAND_LEVELS), levelsGridRow("Stems", STEM_LEVELS));
 
   // One at a time — set by buildPatchPanel() below whenever the pinned row
   // builds an output graph, cleared by togglePin()/patchChanged() when
@@ -7794,10 +7817,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const cableDtSec = Math.min(1 / 15, Math.max(1e-4, (cableNowMs - lastCableTickMs) / 1000));
       lastCableTickMs = cableNowMs;
       if (!bandsCard.fold?.isFolded()) {
-        for (const r of bandLevelRows) {
-          const v = anim ? (r.choice === "anim.low" ? anim.low : r.choice === "anim.mid" ? anim.mid : anim.high) : null;
-          r.row.setValue(v, cableDtSec);
-        }
+        for (const r of bandLevelRows) r.row.setValue(anim ? r.read(anim) : null, cableDtSec);
       }
       if (!narrowMQ.matches) cableLayer.tick(cableDtSec);
       // Unthrottled, same reasoning as audioMeters' own fills — see
