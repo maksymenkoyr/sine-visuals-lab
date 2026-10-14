@@ -82,7 +82,7 @@ const SETTINGS: SceneSetting[] = [
     key: "move",
     label: "Move",
     description:
-      "The music pays for every frame of the dance: the wired signal times this sets how fast the loop plays, " +
+      "The music pays for every frame of the dance: the wired input node times this sets how fast the loop plays, " +
       "gliding rather than jumping. At 1 a loud song plays it as it was danced; silence buys no frames, so the alien holds still",
     group: "Motion",
     min: 0,
@@ -94,7 +94,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "bounce",
     label: "Bounce",
-    description: "How deep the alien squashes toward the floor and springs back each time the wired signal hits, on top of the dance",
+    description: "How deep the alien squashes toward the floor and springs back each time the wired input node hits, on top of the dance",
     group: "Motion",
     min: 0,
     max: 1,
@@ -118,7 +118,7 @@ const SETTINGS: SceneSetting[] = [
     key: "cut",
     label: "Cut",
     description:
-      "On: the loop repeats until the wired signal jumps out from its everyday ones, over the dotted line on its graph, " +
+      "On: the loop repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
       "then cuts to another of the three angles (never twice within a couple of seconds). Off: the loop on screen repeats",
     group: "Camera",
     type: "boolean",

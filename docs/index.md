@@ -16,7 +16,7 @@ rules before adding a note here; this file doesn't restate them.
 - [Tuning](tuning.md) — the live-tuning loop: param bus, mark, numeric probe,
   contact sheet, A/B.
 - [Vocabulary](vocabulary.md) — the words the panel uses for wiring the sound
-  into a scene (signal, jack, wire, port, reactive setting), mapped to the
+  into a scene (input node, jack, wire, port, animation node), mapped to the
   code's own names.
 - [Video house style](video-house-style.md) — the three promo videos (release,
   hook, explainer) and the taste calls every one of them follows.

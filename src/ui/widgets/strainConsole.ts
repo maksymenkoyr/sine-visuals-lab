@@ -465,7 +465,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     const randomBtn = el("button", undefined, "Random");
     randomBtn.type = "button";
     const rolled = randomParams.map((p) => specs.get(p)![0]!.label).join(", ");
-    randomBtn.title = `Roll ${rolled || "nothing"} for every strain, and plug every slider into random signals`;
+    randomBtn.title = `Roll ${rolled || "nothing"} for every strain, and plug every slider into random input nodes`;
     randomBtn.addEventListener("click", randomize);
     mixRow.appendChild(randomBtn);
   }

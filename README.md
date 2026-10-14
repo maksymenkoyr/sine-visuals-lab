@@ -15,7 +15,7 @@ Press **F** for fullscreen and **S** for settings.
   WebGL2/GLSL with its state kept on the GPU, so it runs on phones as well as
   desktops.
 - **It listens for rhythm, not just loudness.** It has its own beat and tempo
-  tracker, and every reactive setting can pick what drives it: hits, the beat
+  tracker, and every animation node can pick what drives it: hits, the beat
   grid, the level, or a frequency line you draw.
 - **It tunes itself.** An auto-tune engine adapts each scene's sensitivity,
   contrast and smoothing to the music's character in real time, and every

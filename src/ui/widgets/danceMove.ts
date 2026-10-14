@@ -39,7 +39,7 @@ function buildDanceMove(container: HTMLElement, section: PanelSection, ctx: Widg
   moveHead.append(moveLabel, beatOut);
   const moveCanvas = document.createElement("canvas");
   moveCanvas.style.cssText = "width:100%;height:52px;display:block;border-radius:2px;background:rgba(255,255,255,0.03);";
-  moveCanvas.title = "The move Dance learned from its signal: one bar of it, the four beats marked. The dot is where the cast is in it.";
+  moveCanvas.title = "The move Dance learned from its input node: one bar of it, the four beats marked. The dot is where the cast is in it.";
   moveBox.append(moveHead, moveCanvas);
   container.appendChild(moveBox);
 
@@ -104,7 +104,7 @@ function buildDanceMove(container: HTMLElement, section: PanelSection, ctx: Widg
       if (flat) {
         g.fillStyle = "rgba(255,255,255,0.4)";
         g.font = `${Math.round(h * 0.24)}px ${FONT_MONO}`;
-        g.fillText(p.bpm > 0 ? "learning the move…" : "waiting for the signal's beat", w * 0.03, h * 0.58);
+        g.fillText(p.bpm > 0 ? "learning the move…" : "waiting for the input node's beat", w * 0.03, h * 0.58);
       } else {
         g.beginPath();
         for (let i = 0; i <= bins; i++) {

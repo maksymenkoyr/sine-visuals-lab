@@ -847,7 +847,7 @@ describeMoves("toonrave dance (dance.ts)", () => {
 import { describe as describePause, it as itPause, expect as expectPause } from "vitest";
 import { createConductor as createConductorP, type ConductorInput as ConductorInputP } from "../src/render/scenes/toonrave/conductor.ts";
 
-describePause("toonrave conductor pause (Clock on signal)", () => {
+describePause("toonrave conductor pause (Clock on input node)", () => {
   const FPS = 60;
   const mk = (t: number, lock: number, beats: number, paused: boolean, drop = false): ConductorInputP => ({
     timeSec: t,

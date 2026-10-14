@@ -23,7 +23,7 @@ on the app's bar lines. In development, on main.
   AnimFrame's beats/`tempoLock`/bpm into `c`. Locked, `c` follows the beats and
   re-anchors only at a drop; unlocked, it free-runs and slews back to a bar line
   when the lock returns. `dropFired` can start a cycle early, gated by
-  `MIN_DROP_GAP_BEATS`. `paused` (Clock on signal) holds `c` as a lost lock
+  `MIN_DROP_GAP_BEATS`. `paused` (Clock on input node) holds `c` as a lost lock
   that doesn't advance; a returning lock re-anchors on the next bar line.
 - `src/render/scenes/toonrave/dance.ts` — Dance and Energy, pure: `createDance`
   finds a beat in the Dance signal's fires (tempoComb.ts's `estimateTempo` +
@@ -155,11 +155,11 @@ and are not recorded here yet.
   lag). No visible change.
 - 2026-10-05 — "toon rave. no music but they moves". Measured on a fake mic
   playing only hiss: All level read 0.06–0.17 (auto-gain lifts hiss to
-  mid-range; about 0.4 through the drive), over Clock on signal's 0.05 mark,
+  mid-range; about 0.4 through the drive), over Clock on input node's 0.05 mark,
   so the clock ran the whole cycle (gags, build, drops) with no music. Energy
   boost on All level held energy at the ¼x step, and the learned move kept
   learning the silence, so a stopped cast's pose drifted and then snapped
-  flat. Now Clock on signal and Energy boost default to a new signal, Level
+  flat. Now Clock on input node and Energy boost default to a new signal, Level
   (the Dynamics card's Level row, the input's absolute loudness, never
   auto-gained: 0 on hiss, 0.32–0.67 on a real song through the fake mic); the
   run mark is 0.1 in Level units; and the move learns nothing while its beat
@@ -187,7 +187,7 @@ and are not recorded here yet.
   default pump sits near 0.6, so the 1x line is below that. A silent fake mic
   (`--use-file-for-fake-audio-capture` on a silent wav) is the honest "no
   signal" check; synthetic audio always has hits.
-- Clock on signal: the threshold under its graph is the run mark; once running
+- Clock on input node: the threshold under its graph is the run mark; once running
   it stops only below `CLOCK_STOP_SHARE` of it, so a level at the line doesn't
   stutter. Nothing wired = held.
 
