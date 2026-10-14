@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
@@ -167,39 +167,91 @@ describe("fix-conflicts-pr.sh", () => {
     }
   });
 
-  // A pre-push hook, standing in for npm run check, that refuses the first `refusals` pushes.
-  const refusePushes = (root: string, work: string, git: (cwd: string, ...args: string[]) => string, refusals: number) => {
+  // A pre-push hook, standing in for npm run check, that refuses the first `refusals` pushes and
+  // reports why in $CHECK_REPORT_FILE as the check does: a test out of time, or a real failure.
+  // Returns how many pushes reached it.
+  const refusePushes = (root: string, work: string, git: (cwd: string, ...args: string[]) => string, refusals: number, why: "timeout" | "failure") => {
     const hooks = join(root, "hooks");
     mkdirSync(hooks);
-    writeFileSync(join(hooks, "pre-push"), `#!/bin/sh\nn=$(cat "$0.n" 2>/dev/null || echo 0)\necho $((n + 1)) >"$0.n"\n[ "$n" -ge ${refusals} ]\n`);
+    const report = why === "timeout" ? "Error: Test timed out in 30000ms." : "AssertionError: expected 1 to be 2";
+    writeFileSync(
+      join(hooks, "pre-push"),
+      `#!/bin/sh\nn=$(cat "$0.n" 2>/dev/null || echo 0)\necho $((n + 1)) >"$0.n"\n[ "$n" -ge ${refusals} ] && exit 0\necho "${report}" >"\${CHECK_REPORT_FILE:?}"\nexit 1\n`,
+    );
     chmodSync(join(hooks, "pre-push"), 0o755);
     git(work, "config", "core.hooksPath", hooks);
+    return () => (existsSync(join(hooks, "pre-push.n")) ? Number(readFileSync(join(hooks, "pre-push.n"), "utf8")) : 0);
+  };
+  const stderrOf = (run: () => string) => {
+    try {
+      run();
+    } catch (e) {
+      return String((e as { stderr?: string }).stderr);
+    }
+    throw new Error("the script succeeded");
   };
 
-  it("tries a refused push once more, as a slow test on a busy machine can pass the second time", () => {
+  it("pushes again when the check refused only because a test ran out of time, as on a busy machine", () => {
     const { root, work, git, run, pushed } = setup();
     try {
-      refusePushes(root, work, git, 1);
+      const pushes = refusePushes(root, work, git, 1, "timeout");
       run();
       expect(pushed()).toEqual(rebased);
+      expect(pushes()).toBe(2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("keeps the rebase and names the command that pushes it when the push is refused twice", () => {
+  it("stops at the first refusal that isn't a test out of time, keeping the rebase", () => {
     const { root, work, git, run, pushed } = setup();
     try {
-      refusePushes(root, work, git, 2);
-      let stderr = "";
-      try {
-        run();
-      } catch (e) {
-        stderr = String((e as { stderr?: string }).stderr);
-      }
-      expect(stderr).toContain("then run: fix-conflicts 7");
+      const pushes = refusePushes(root, work, git, 1, "failure");
+      expect(stderrOf(run)).toContain("then run: fix-conflicts 7");
+      expect(pushes()).toBe(1);
       expect(pushed().log).toEqual(["feature", "base"]);
       expect(git(join(work, ".claude/worktrees/feature"), "log", "--format=%s").trim().split("\n")).toEqual(rebased.log);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("gives up after its last try when every push runs out of time", () => {
+    const { root, work, git, run, pushed } = setup();
+    try {
+      const pushes = refusePushes(root, work, git, 99, "timeout");
+      expect(stderrOf(run)).toContain("then run: fix-conflicts 7");
+      expect(pushes()).toBeGreaterThan(1);
+      expect(pushes()).toBeLessThan(99);
+      expect(pushed().log).toEqual(["feature", "base"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops before the check when someone else pushed to the branch, and its commands keep their commits", () => {
+    const { root, work, git, run, pushed } = setup();
+    const wt = join(work, ".claude/worktrees/feature");
+    const other = join(root, "other");
+    try {
+      git(work, "worktree", "add", "-q", "-b", "feature", wt, "origin/feature");
+      git(root, "clone", "-q", "-b", "feature", join(root, "remote.git"), other);
+      writeFileSync(join(other, "other.md"), "theirs\n");
+      git(other, "add", "other.md");
+      git(other, "commit", "-qm", "other");
+      git(other, "push", "-q", "origin", "feature");
+      const pushes = refusePushes(root, work, git, 0, "failure");
+
+      const stderr = stderrOf(run);
+      expect(stderr).toContain(" other\n");
+      expect(pushes()).toBe(0);
+      expect(pushed().log).toEqual(["other", "feature", "base"]);
+
+      const range = /git cherry-pick (\S+)\)/.exec(stderr)?.[1] ?? "";
+      git(wt, "cherry-pick", range);
+      git(wt, "fetch", "-q", "origin", "feature");
+      run();
+      expect(pushed().log).toEqual(["other", ...rebased.log]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
