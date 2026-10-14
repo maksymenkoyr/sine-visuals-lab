@@ -43,6 +43,17 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  * never throws — a malformed or future-versioned code (a link outlives this
  * schema) comes back null, and the caller decides what "didn't parse" means.
  *
+ * `p` is the palette that was showing when the look was saved (palette.ts —
+ * one room-wide choice, so it isn't a scene setting), added the same way as
+ * `d`: optional, no `v` bump, an unknown id is ignored on apply. A look
+ * saved before it existed leaves the palette alone.
+ *
+ * A non-integer slider value is written to `CODE_DIGITS` significant digits:
+ * the sliders are continuous, so a dragged one holds a long float that
+ * deflate can't shrink, and those digits were most of a code's length. The
+ * difference is far below what a slider can show. Integers (enum indexes,
+ * counts) are written exactly.
+ *
  * Each `d` entry is one setting's captured `DriveSetting` (drives.ts), wire-
  * encoded as whichever of two shapes is smaller: a one-source, weight-1,
  * Graded, unconditioned, unmuted `add` patch — the identity shape a plain
@@ -82,10 +93,15 @@ export interface SceneLook {
    *  the same way it treats one absent from `manual` — back to default,
    *  authoritative. */
   drives?: Record<string, DriveSetting>;
+  /** The palette (palette.ts id) showing when the look was saved; absent on
+   *  a look saved before looks carried one. */
+  paletteId?: string;
 }
 
 const STORAGE_KEY = "vibe.looks";
 const CODE_VERSION = 1;
+/** Significant digits a non-integer value keeps in a share code. */
+const CODE_DIGITS = 4;
 /** Longest name decodeLook keeps from a share code. Only the name is clipped
  *  (links in the wild must keep decoding): it becomes the upsert key and is
  *  saved on page load, so an untrusted code shouldn't set its size. */
@@ -252,16 +268,20 @@ function fromBase64Url(code: string): string {
 }
 
 export function encodeLook(look: SceneLook): string {
-  const payload: { v: number; n: string; s: string; m: Record<string, number>; d?: Record<string, StoredDriveSetting> } = {
+  const payload: { v: number; n: string; s: string; m: Record<string, number>; d?: Record<string, StoredDriveSetting>; p?: string } = {
     v: CODE_VERSION,
     n: look.name,
     s: look.sceneId,
-    m: look.manual,
+    m: {},
   };
+  for (const [key, value] of Object.entries(look.manual)) {
+    payload.m[key] = Number.isInteger(value) ? value : Number(value.toPrecision(CODE_DIGITS));
+  }
   if (look.drives && Object.keys(look.drives).length > 0) {
     payload.d = {};
     for (const [key, setting] of Object.entries(look.drives)) payload.d[key] = encodeDriveSetting(setting);
   }
+  if (look.paletteId) payload.p = look.paletteId;
   const bytes = strToU8(JSON.stringify(payload));
   const plain = bytesToBase64Url(bytes);
   const packed = COMPRESSED_PREFIX + bytesToBase64Url(deflateSync(bytes, { level: 9 }));
@@ -289,7 +309,8 @@ export function decodeLook(code: string): SceneLook | null {
         drives[key] = setting;
       }
     }
-    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives };
+    const paletteId = typeof parsed.p === "string" && parsed.p ? parsed.p : undefined;
+    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives, paletteId };
   } catch {
     return null;
   }
@@ -300,8 +321,9 @@ export function decodeLook(code: string): SceneLook | null {
 // a persisted undo stack.
 const undo: Record<string, SceneLook> = {};
 
-export function primeUndo(sceneId: string, specs: readonly SceneSetting[]): void {
-  undo[sceneId] = captureLook("", sceneId, specs);
+/** `paletteId` is the palette showing now, so Undo can put it back too. */
+export function primeUndo(sceneId: string, specs: readonly SceneSetting[], paletteId?: string): void {
+  undo[sceneId] = { ...captureLook("", sceneId, specs), paletteId };
 }
 
 export function takeUndo(sceneId: string): SceneLook | null {
