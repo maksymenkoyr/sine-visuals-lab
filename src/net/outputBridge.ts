@@ -258,6 +258,8 @@ export function createOutputBridge(opts: OutputBridgeOptions): PopOutBridge {
           bands: frame.bands,
           energy: frame.energy,
           level: frame.level,
+          hats: frame.hats,
+          lead: frame.lead,
           onset: frame.onset,
           pulseOnset: frame.pulseOnset,
           bpm: frame.bpm,

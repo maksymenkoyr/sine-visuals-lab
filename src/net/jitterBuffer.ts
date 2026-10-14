@@ -8,6 +8,8 @@ export interface TimedFrame {
   pulseOnset: boolean;
   bpm: number;
   level: number;
+  hats: number;
+  lead: number;
   roomTimeMs: number;
   /** The sender's waveform since its previous frame (protocol.ts's wave
    *  tail); null, or absent, when it sent none. */
@@ -19,6 +21,9 @@ export interface Sample {
   energy: number;
   bpm: number;
   level: number;
+  /** FeatureFrame.hats/lead, interpolated like level; 0 when the feed sends none. */
+  hats: number;
+  lead: number;
   /** Not interpolated: the envelope of the frame that covers this instant,
    *  the first one at or after it, since a frame's envelope spans the time
    *  since the frame before. */
@@ -55,7 +60,7 @@ export class JitterBuffer {
   // synchronously — copied into a scene's own uniform buffer — before the
   // next call, never retained past that.
   private readonly scratchBands = new Float32Array(NUM_BANDS);
-  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5, wave: null };
+  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5, hats: 0, lead: 0, wave: null };
 
   push(frame: TimedFrame): void {
     // Network delivery can reorder; insert in timestamp order rather than
@@ -97,6 +102,8 @@ export class JitterBuffer {
     this.scratchSample.energy = a.energy + (b.energy - a.energy) * t;
     this.scratchSample.bpm = t < 0.5 ? a.bpm : b.bpm;
     this.scratchSample.level = a.level + (b.level - a.level) * t;
+    this.scratchSample.hats = a.hats + (b.hats - a.hats) * t;
+    this.scratchSample.lead = a.lead + (b.lead - a.lead) * t;
     this.scratchSample.wave = b.wave ?? null;
     return this.scratchSample;
   }
@@ -106,6 +113,8 @@ export class JitterBuffer {
     this.scratchSample.energy = f.energy;
     this.scratchSample.bpm = f.bpm;
     this.scratchSample.level = f.level;
+    this.scratchSample.hats = f.hats;
+    this.scratchSample.lead = f.lead;
     this.scratchSample.wave = f.wave ?? null;
     return this.scratchSample;
   }

@@ -869,6 +869,8 @@ async function main(): Promise<void> {
       bpm: s.bpm,
       onsetPhase: s.beatPhase,
       level: s.level,
+      hats: s.hats,
+      lead: s.lead,
     };
 
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what

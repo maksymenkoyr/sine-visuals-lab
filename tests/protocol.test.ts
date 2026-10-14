@@ -6,7 +6,7 @@ import { isClipping } from "../src/audio/waveform.ts";
 describe("protocol", () => {
   it("round-trips every field within quantization tolerance", () => {
     const bands = new Float32Array(NUM_BANDS).map((_, i) => (i % NUM_BANDS) / (NUM_BANDS - 1));
-    const frame = { bands, energy: 0.73, onset: true, pulseOnset: true, bpm: 128.4, onsetPhase: 0.61, level: 0.42 };
+    const frame = { bands, energy: 0.73, onset: true, pulseOnset: true, bpm: 128.4, onsetPhase: 0.61, level: 0.42, hats: 0, lead: 0 };
     const roomTimeMs = 1_755_000_123_456.789;
 
     const buf = encodeFeatureFrame(frame, roomTimeMs);
@@ -27,7 +27,7 @@ describe("protocol", () => {
 
   it("round-trips onset=false and boundary values", () => {
     const bands = new Float32Array(NUM_BANDS); // all zero
-    const frame = { bands, energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    const frame = { bands, energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0, hats: 0, lead: 0 };
 
     const decoded = decodeFeatureFrame(encodeFeatureFrame(frame, 0));
 
@@ -44,7 +44,7 @@ describe("protocol", () => {
     const bands = new Float32Array(NUM_BANDS);
     for (const onset of [false, true]) {
       for (const pulseOnset of [false, true]) {
-        const frame = { bands, energy: 0, onset, pulseOnset, bpm: 0, onsetPhase: 0, level: 0 };
+        const frame = { bands, energy: 0, onset, pulseOnset, bpm: 0, onsetPhase: 0, level: 0, hats: 0, lead: 0 };
         const decoded = decodeFeatureFrame(encodeFeatureFrame(frame, 0));
         expect(decoded!.onset, `onset=${onset} pulseOnset=${pulseOnset}`).toBe(onset);
         // Decode ORs bit1 with onset (see protocol.ts's header on the
@@ -56,7 +56,7 @@ describe("protocol", () => {
 
   it("clamps out-of-range inputs instead of wrapping or corrupting the buffer", () => {
     const bands = new Float32Array(NUM_BANDS).fill(1.5); // out of [0,1]
-    const frame = { bands, energy: -0.5, onset: true, pulseOnset: true, bpm: 99999, onsetPhase: 2, level: 1.5 };
+    const frame = { bands, energy: -0.5, onset: true, pulseOnset: true, bpm: 99999, onsetPhase: 2, level: 1.5, hats: 0, lead: 0 };
 
     const decoded = decodeFeatureFrame(encodeFeatureFrame(frame, 1000));
 
@@ -70,7 +70,7 @@ describe("protocol", () => {
   it("rejects buffers of the wrong length or wrong message type", () => {
     expect(decodeFeatureFrame(new ArrayBuffer(10))).toBeNull();
     const good = encodeFeatureFrame(
-      { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 },
+      { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0, hats: 0, lead: 0 },
       0,
     );
     const corrupted = good.slice(0);
@@ -79,7 +79,7 @@ describe("protocol", () => {
   });
 
   it("rejects a frame whose room time is NaN or infinite", () => {
-    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0, hats: 0, lead: 0 };
     for (const bad of [NaN, Infinity, -Infinity]) {
       expect(decodeFeatureFrame(encodeFeatureFrame(frame, bad))).toBeNull();
     }
@@ -119,14 +119,14 @@ describe("protocol", () => {
   });
 
   it("leaves the wave tail off without a waveform, and decodes that as none", () => {
-    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0, hats: 0, lead: 0 };
     const buf = encodeFeatureFrame(frame, 1000);
     expect(buf.byteLength).toBe(1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8);
     expect(decodeFeatureFrame(buf)!.wave).toBeNull();
   });
 
   it("round-trips the waveform, finer near silence than near full scale", () => {
-    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.3, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0, level: 0.4 };
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.3, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0, level: 0.4, hats: 0, lead: 0 };
     const loud = decodeFeatureFrame(encodeFeatureFrame(frame, 1000, { min: -0.7, max: 0.65 }))!;
     expect(loud.wave!.min).toBeCloseTo(-0.7, 1);
     expect(loud.wave!.max).toBeCloseTo(0.65, 1);
@@ -138,7 +138,7 @@ describe("protocol", () => {
   });
 
   it("keeps a clipped sample clipped and a quiet one quiet", () => {
-    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0, hats: 0, lead: 0 };
     const clipped = decodeFeatureFrame(encodeFeatureFrame(frame, 0, { min: -1, max: 0.99 }))!;
     expect(isClipping(new Float32Array([clipped.wave!.min, clipped.wave!.max]))).toBe(true);
     const below = decodeFeatureFrame(encodeFeatureFrame(frame, 0, { min: -0.9, max: 0.9 }))!;
@@ -148,13 +148,62 @@ describe("protocol", () => {
   });
 
   it("reads the known prefix of a frame longer than this layout", () => {
-    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.5, onset: false, pulseOnset: false, bpm: 90, onsetPhase: 0, level: 0.5 };
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.5, onset: false, pulseOnset: false, bpm: 90, onsetPhase: 0, level: 0.5, hats: 0, lead: 0 };
     const buf = encodeFeatureFrame(frame, 777, { min: -0.25, max: 0.25 });
     const longer = new Uint8Array(buf.byteLength + 3);
     longer.set(new Uint8Array(buf));
     const decoded = decodeFeatureFrame(longer.buffer);
     expect(decoded!.roomTimeMs).toBe(777);
     expect(decoded!.wave!.max).toBeCloseTo(0.25, 2);
+  });
+});
+
+describe("stem tail", () => {
+  const stemFrame = {
+    bands: new Float32Array(NUM_BANDS),
+    energy: 0.2,
+    onset: false,
+    pulseOnset: false,
+    bpm: 120,
+    onsetPhase: 0,
+    level: 0.3,
+    hats: 0.25,
+    lead: 0.8,
+  };
+
+  it("carries hats and lead after the wave tail, 44 bytes in all", () => {
+    const buf = encodeFeatureFrame(stemFrame, 1000, { min: -0.5, max: 0.5 });
+    expect(buf.byteLength).toBe(44);
+    const decoded = decodeFeatureFrame(buf)!;
+    expect(decoded.hats).toBeCloseTo(0.25, 2); // 8-bit quantization
+    expect(decoded.lead).toBeCloseTo(0.8, 2);
+    expect(decoded.wave).not.toBeNull();
+    expect(decoded.wave!.min).toBeCloseTo(-0.5, 1);
+    expect(decoded.wave!.max).toBeCloseTo(0.5, 1);
+  });
+
+  it("leaves the stem tail off without a waveform, and decodes hats and lead as 0", () => {
+    const buf = encodeFeatureFrame(stemFrame, 1000);
+    expect(buf.byteLength).toBe(40);
+    const decoded = decodeFeatureFrame(buf)!;
+    expect(decoded.hats).toBe(0);
+    expect(decoded.lead).toBe(0);
+  });
+
+  it("decodes an older 42-byte sender's frame with hats and lead as 0", () => {
+    const full = encodeFeatureFrame(stemFrame, 1000, { min: -0.5, max: 0.5 });
+    const older = decodeFeatureFrame(full.slice(0, 42))!;
+    expect(older.wave).not.toBeNull();
+    expect(older.hats).toBe(0);
+    expect(older.lead).toBe(0);
+  });
+
+  it("clamps hats and lead to [0,1]", () => {
+    const decoded = decodeFeatureFrame(
+      encodeFeatureFrame({ ...stemFrame, hats: 1.7, lead: -0.3 }, 1000, { min: -0.5, max: 0.5 }),
+    )!;
+    expect(decoded.hats).toBe(1);
+    expect(decoded.lead).toBe(0);
   });
 });
 

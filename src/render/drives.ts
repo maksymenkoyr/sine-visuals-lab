@@ -1213,6 +1213,8 @@ const driveFrameScratch: FeatureFrame = {
   bpm: 0,
   onsetPhase: 0,
   level: 0,
+  hats: 0,
+  lead: 0,
 };
 
 // forScene()'s key -> spec lookup, built once per `settings` array rather

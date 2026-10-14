@@ -241,6 +241,8 @@ const frame = (over: Partial<WireFrame> = {}): WireFrame => ({
   bands: new Float32Array(24),
   energy: 0,
   level: 0,
+  hats: 0,
+  lead: 0,
   onset: false,
   pulseOnset: false,
   bpm: 0,

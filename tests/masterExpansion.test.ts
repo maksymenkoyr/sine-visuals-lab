@@ -14,6 +14,8 @@ const FRAME: FeatureFrame = {
   bands: new Float32Array(NUM_BANDS),
   energy: 0,
   level: 1,
+  hats: 0,
+  lead: 0,
   onset: false,
   pulseOnset: false,
   bpm: 120,

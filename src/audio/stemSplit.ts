@@ -73,7 +73,7 @@ const PEAK_FLOOR_DB = -90;
 const MAX_DT_SEC = 1;
 
 /** A frequency range in Hz, low edge inclusive, high edge exclusive. */
-export interface HzRange {
+interface HzRange {
   lo: number;
   hi: number;
 }
@@ -84,7 +84,7 @@ export interface StemRanges {
 }
 
 /** Both levels in [0,1]. */
-export interface StemLevels {
+interface StemLevels {
   hats: number;
   lead: number;
 }

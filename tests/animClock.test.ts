@@ -17,6 +17,8 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     bands: new Float32Array(NUM_BANDS),
     energy: 0,
     level: 1,
+    hats: 0,
+    lead: 0,
     onset: false,
     pulseOnset: false,
     bpm: 0,
@@ -43,6 +45,23 @@ describe("createAnimClock", () => {
     const marks: SilenceGateMarks = { closed: 0.1, open: 0.5 };
     const anim = clock.advance(DT, frame({ level: 0 }), undefined, marks);
     expect(anim.gateDimmer).toBeLessThan(1);
+  });
+
+  it("hats and lead ease up to the frame's values when no gate is given", () => {
+    const clock = createAnimClock();
+    let anim = clock.advance(DT, frame({ hats: 1, lead: 1 }));
+    for (let i = 0; i < 59; i++) anim = clock.advance(DT, frame({ hats: 1, lead: 1 }));
+    expect(anim.hats).toBeGreaterThan(0.9);
+    expect(anim.lead).toBeGreaterThan(0.9);
+  });
+
+  it("a fully closed silence gate holds hats and lead at 0", () => {
+    const clock = createAnimClock();
+    const marks: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    let anim = clock.advance(DT, frame({ hats: 1, lead: 1, level: 0 }), undefined, marks);
+    for (let i = 0; i < 59; i++) anim = clock.advance(DT, frame({ hats: 1, lead: 1, level: 0 }), undefined, marks);
+    expect(anim.hats).toBe(0);
+    expect(anim.lead).toBe(0);
   });
 
   it("hits.low/mid/high mirror bandEnergy's own per-group diagnostics", () => {

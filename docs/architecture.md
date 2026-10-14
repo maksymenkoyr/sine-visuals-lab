@@ -25,7 +25,11 @@ to an auto mode (on by default) that tracks the room's own quiet level instead
 of a manual drag, fed each tick by `feedSilenceGateMeasurement` — mirroring
 `src/audio/autoGain.ts`'s own auto flag rather than resolving through
 `musicProfile.ts`'s dials. `src/audio/sensitivity.ts` applies the user's
-Sensitivity/Expansion/Smoothing controls on top of that.
+Sensitivity/Expansion/Smoothing controls on top of that. Beside the bands,
+`src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
+would level held sound away), and splits them into a drum part and a held part
+for the Hats and Lead signals; `app.ts` writes both into the frame, so a TV gets
+them over the wire rather than working them out itself.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar

@@ -70,6 +70,9 @@ export interface VisualSample {
   timeSec: number;
   /** Absolute input loudness [0,1] — see FeatureFrame.level. */
   level: number;
+  /** Hats/Lead [0,1] — see FeatureFrame.hats/lead; 0 when the feed sends none. */
+  hats: number;
+  lead: number;
   /** The feed's waveform envelope at this instant (JitterBuffer.sampleAt);
    *  null when the feed sends none. */
   wave: WaveEnvelope | null;
@@ -506,6 +509,8 @@ abstract class RoomConnectionBase {
       pulseFired: this.buffer.consumePulseIfDue(targetMs),
       timeSec: roomTimeToSeconds(targetMs),
       level: s.level,
+      hats: s.hats,
+      lead: s.lead,
       wave: s.wave,
     };
   }

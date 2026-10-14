@@ -72,6 +72,8 @@ export interface ProbeSnapshot {
    *  header) — but a run with it ≠ 1 reacts differently, so it's reported. */
   masterExpansion: number;
   bands: { low: number; mid: number; high: number; energy: number };
+  /** AnimFrame.hats/lead (src/audio/stemSplit.ts), eased and gated. */
+  stems: { hats: number; lead: number };
   /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
    *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a
    *  headless check can confirm a bar resync / ×2 / ÷2 landed without
@@ -130,6 +132,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     master: getSceneMaster(),
     masterExpansion: getSceneExpansion(),
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
+    stems: { hats: anim?.hats ?? 0, lead: anim?.lead ?? 0 },
     beat: {
       fired: anim?.onset ?? false,
       bpm: vis?.bpm ?? 0,
@@ -154,7 +157,7 @@ export function formatProbe(snap: ProbeSnapshot): string {
     `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} quality=${snap.quality} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel} master=${snap.master.toFixed(2)}`,
   );
   lines.push(
-    `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)}`,
+    `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)} | hats=${snap.stems.hats.toFixed(2)} lead=${snap.stems.lead.toFixed(2)}`,
   );
   lines.push(
     `beat=${snap.beat.fired ? 1 : 0} bpm=${snap.beat.bpm.toFixed(1)} phase=${snap.beat.phase.toFixed(2)} barPhase=${snap.beat.barPhase.toFixed(2)} metroBpm=${snap.beat.metronomeBpm.toFixed(1)} | section=${snap.section.toFixed(2)} drop=${snap.drop.toFixed(2)} centroid=${snap.centroid.toFixed(2)}`,
