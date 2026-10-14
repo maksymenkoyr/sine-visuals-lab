@@ -8,8 +8,9 @@
  *   2. the Heat history card in the meters column, folded by default, with one
  *      strip per wired setting and per signal jack;
  *   3. the heat lens (L, or the column head's HEAT chip): every wired
- *      setting's row and every signal jack glows in its heat colour, brighter
- *      the more it's moving right now;
+ *      setting's row, every signal jack and every signal's monitor row glows
+ *      in its heat colour, brighter the more it's moving right now (a monitor
+ *      row shared by several jacks takes its hottest and brightest);
  *   4. a dot after each wire's name in the wire panel, and a line in the
  *      tooltips of a port and a jack.
  * heatHistory reads the same buckets as a single reading, so the history

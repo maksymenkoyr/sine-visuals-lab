@@ -846,9 +846,10 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-heat-hist-group { grid-column: 1 / -1; font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-top: 6px; }
 .vc-heat-hist-axis { display: flex; justify-content: space-between; font: 400 9.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); margin: 6px 0 0 104px; }
 .vc-heat-hist-note { font: 400 11px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,0.55); margin-bottom: 4px; }
-/* The heat lens (L, or the column head's HEAT chip): a wired setting's row
- * and every signal jack on the meter cards (.vc-heat-jack, audioMeters.ts's
- * mountJack) glow in their heat colour (--vc-heat, recoloured at most every
+/* The heat lens (L, or the column head's HEAT chip): a wired setting's row,
+ * every signal's monitor row on the meter cards and every signal jack there
+ * (.vc-heat-row and .vc-heat-jack, audioMeters.ts's mountJack) glow in their
+ * heat colour (--vc-heat, recoloured at most every
  * HEAT_REFRESH_MS), brighter the more they move right now (--vc-heat-glow,
  * 0..1, written as it changes). On a pseudo-element, so the row's own hover,
  * pinned and fed rings and the jack's fill are untouched. --vc-heat is a

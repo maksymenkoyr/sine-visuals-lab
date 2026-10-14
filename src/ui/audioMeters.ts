@@ -1998,14 +1998,22 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // cleared, recorded every tick in update() panel open or closed. Each signal
   // jack's heat colour refreshes at most every HEAT_REFRESH_MS while its card
   // is on screen and unfolded; while the heat lens is on, each jack glows,
-  // brighter as its reading moves, written only when the level changes.
+  // brighter as its reading moves, written only when the level changes. Its
+  // monitor row (the jack's feedEl) glows with it, like a wired setting's row:
+  // in its hottest jack's colour, as bright as its brightest jack, since
+  // several jacks can share one row (the Hits lanes, Wave, Tempo).
   // Parallel arrays so the per-tick record loop allocates nothing.
   const heatIds = Object.keys(SIGNALS) as SignalId[];
   const heatTracks: HeatTrack[] = heatIds.map(() => createHeatTrack());
   const heatById = new Map<SignalId, HeatTrack>(heatIds.map((id, i) => [id, heatTracks[i]!]));
+  // A monitor row under the lens: what was last written, and this pass's
+  // hottest heat and brightest glow among its jacks.
+  type HeatRow = { el: HTMLElement; color: string; glow: number; hottest: number; brightest: number };
+  const heatRows: HeatRow[] = [];
   // Each signal jack, for its lens glow and the Heat history card: the jack's
-  // element, the card whose span chip it reads, and its index into heatIds.
-  const heatJacks: { id: SignalId; card: MeterCardId; el: HTMLElement; idx: number; color: string; glow: number }[] = [];
+  // element, its monitor row, the card whose span chip it reads, and its
+  // index into heatIds.
+  const heatJacks: { id: SignalId; card: MeterCardId; el: HTMLElement; row: HeatRow; idx: number; color: string; glow: number }[] = [];
   // This tick's reading of every signal, by heatIds index, for the lens glow.
   const heatLive = new Float32Array(heatIds.length);
   const heatIdx = new Map<SignalId, number>(heatIds.map((id, i) => [id, i]));
@@ -2038,7 +2046,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     if (typeof choice === "string") {
       const card = heatCard ?? SIGNALS[choice].monitor?.card ?? "signal";
       jack.el.classList.add("vc-heat-jack");
-      heatJacks.push({ id: choice, card, el: jack.el, idx: heatIdx.get(choice)!, color: "", glow: -1 });
+      let row = heatRows.find((r) => r.el === feedEl);
+      if (!row) {
+        row = { el: feedEl, color: "", glow: -1, hottest: -1, brightest: -1 };
+        heatRows.push(row);
+        feedEl.classList.add("vc-heat-row");
+      }
+      heatJacks.push({ id: choice, card, el: jack.el, row, idx: heatIdx.get(choice)!, color: "", glow: -1 });
       heatCardByKey.set(jackKey(choice), card);
     }
     return jack;
@@ -2843,24 +2857,36 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
       if (!onScreen) return;
 
-      // Heat: each jack's colour and the Heat history card at most every
-      // HEAT_REFRESH_MS; the lens glow every tick it's on (a write only when
-      // a jack's level changes). Only on unfolded cards.
+      // Heat: each jack's and monitor row's colour and the Heat history card
+      // at most every HEAT_REFRESH_MS; the lens glow every tick it's on (a
+      // write only when a level changes). Only on unfolded cards.
       const heatSec = nowMs / 1000;
       if (nowMs - lastHeatMs >= HEAT_REFRESH_MS) {
         lastHeatMs = nowMs;
+        for (const row of heatRows) row.hottest = -1;
         for (const j of heatJacks) {
           if (meterCards[j.card].fold?.isFolded()) continue;
           const r = heatTracks[j.idx]!.read(getHistorySpan(j.card), heatSec);
-          const color = heatToColor(r ? r.heat : 0);
+          const heat = r ? r.heat : 0;
+          const color = heatToColor(heat);
           if (color !== j.color) {
             j.color = color;
             j.el.style.setProperty("--vc-heat", color);
+          }
+          if (heat > j.row.hottest) j.row.hottest = heat;
+        }
+        for (const row of heatRows) {
+          if (row.hottest < 0) continue;
+          const color = heatToColor(row.hottest);
+          if (color !== row.color) {
+            row.color = color;
+            row.el.style.setProperty("--vc-heat", color);
           }
         }
         if (!heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);
       }
       if (heatLensOn) {
+        for (const row of heatRows) row.brightest = -1;
         for (const j of heatJacks) {
           if (meterCards[j.card].fold?.isFolded()) continue;
           const glow = heatGlowLevel(heatLive[j.idx]!);
@@ -2868,6 +2894,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             j.glow = glow;
             j.el.style.setProperty("--vc-heat-glow", String(glow));
           }
+          if (glow > j.row.brightest) j.row.brightest = glow;
+        }
+        for (const row of heatRows) {
+          if (row.brightest < 0 || row.brightest === row.glow) continue;
+          row.glow = row.brightest;
+          row.el.style.setProperty("--vc-heat-glow", String(row.glow));
         }
       }
 
@@ -3137,6 +3169,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     setHeatLens(on) {
       heatLensOn = on;
       for (const j of heatJacks) j.glow = -1;
+      for (const row of heatRows) row.glow = -1;
     },
     jackElements(): ReadonlyMap<string, HTMLElement> {
       return jackElementsMap;
