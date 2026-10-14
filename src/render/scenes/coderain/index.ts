@@ -557,7 +557,7 @@ function createCodeRainScene(): Scene {
         camera(figProg);
         figProg.setV3v("uFigOrigin", [camX + Math.sin(figYaw) * FIG_DIST, centreY - figH * 0.5, camZ - Math.cos(figYaw) * FIG_DIST]);
         figProg.setF("uFigScale", FIG_SCALE);
-        gl.uniform2f(gl.getUniformLocation(figProg.program, "uFigSize"), FIG_WIDTH, FIGURE_HEIGHT);
+        figProg.setV2("uFigSize", FIG_WIDTH, FIGURE_HEIGHT);
         figProg.setV4v("uCaps", f.caps);
         figProg.setFv("uCapR", f.radii);
         figProg.setV3v("uSkull", f.skull);

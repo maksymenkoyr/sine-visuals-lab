@@ -27,9 +27,9 @@
 // empty VAO with gl_InstanceID/gl_VertexID doing all the work (no per-
 // instance upload -- ambience.ts's DOT_VERT is the other precedent for that
 // trick), a full-res sharp target with its own depth renderbuffer plus a
-// half-res two-pass blur for the halo, sampler units set with GLProgram.setI,
-// and the GL-state restore block at the end of render() (the gallery renders
-// every scene into one shared context each tick).
+// half-res two-pass blur for the halo, sampler units set through
+// GLProgram.setI, and the GL-state restore block at the end of render()
+// (the gallery renders every scene into one shared context each tick).
 //
 // Sync (see the plan's "Sync hypotheses" -- no rewritten copy here, name the
 // mechanism instead): each ring reads a band from uBands every frame (pole =

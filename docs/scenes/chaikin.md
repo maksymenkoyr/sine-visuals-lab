@@ -280,3 +280,5 @@ and `ours-chaikin/cells-ours.json`):
 - #380 (draft): the scene, its clock, seed texture, record and materials.
 - #394 (draft): the Swell and Fireflies motion layers, from the motion
   prototype page.
+- #349 cleanup — uniforms set through GLProgram's own setters (setI for samplers) instead of
+  looking up locations by hand. No change on screen.

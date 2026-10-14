@@ -45,14 +45,14 @@ import { advanceCrystal, createCrystalState, type CrystalState } from "./driver.
 // Three passes, hand-rolled (createFullscreenScene can't run more than one
 // program): (1) raymarch into `sharpFbo`, a LINEAR/CLAMP RGBA8 target at
 // `MARCH_SCALE` of the drawing buffer; (2) a two-level separable-Gaussian
-// bloom copied from powder.ts's chain (blur program, sampler units set with
-// GLProgram.setI, half-then-quarter-style ping-pong — see BLUR_FRAG/glsl.ts and
-// render() below); (3) composite sharp + both glow levels with a
-// per-channel Reinhard knee then an exponential shoulder, to the default
-// framebuffer. All three targets rebuild on a drawing-buffer resize (the
-// quality governor moves renderScale at runtime) and every pass restores
-// GL state afterward — the gallery shares this context with every other
-// scene's tile.
+// bloom copied from powder.ts's chain (blur program, sampler units set
+// through GLProgram.setI, half-then-quarter-style ping-pong — see
+// BLUR_FRAG/glsl.ts and render() below); (3) composite sharp + both glow
+// levels with a per-channel Reinhard knee then an exponential shoulder, to
+// the default framebuffer. All three targets rebuild on a drawing-buffer
+// resize (the quality governor moves renderScale at runtime) and every pass
+// restores GL state afterward — the gallery shares this context with every
+// other scene's tile.
 //
 // The driver (driver.ts's advanceCrystal) is v3's, moved verbatim and kept
 // exactly because it's already right and already tested: a wandering

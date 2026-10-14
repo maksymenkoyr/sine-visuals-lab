@@ -480,9 +480,9 @@ function beforeDraw(ctx: SceneContext, prog: GLProgram, viewport: Viewport): voi
     filledRows = rows;
   }
   prog.setI("uSeeds", 0);
-  gl.uniform1f(gl.getUniformLocation(prog.program, "uRows"), filledRows);
-  gl.uniform1f(gl.getUniformLocation(prog.program, "uKidLo"), kidLo);
-  gl.uniform1f(gl.getUniformLocation(prog.program, "uKidHi"), kidHi);
+  prog.setF("uRows", filledRows);
+  prog.setF("uKidLo", kidLo);
+  prog.setF("uKidHi", kidHi);
 }
 
 const inner = createFullscreenScene(ID, NAME, CHAIKIN_FRAG, {

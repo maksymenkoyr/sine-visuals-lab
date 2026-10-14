@@ -31,6 +31,13 @@
 // program object, so it lives and dies with that program: a scene never keeps
 // location maps of its own and never clears them when it rebuilds a program.
 
+// WebGL2 plumbing shared by every scene: context creation (createGL), the
+// context-loss watch (watchContextLoss), shader compile and link, the
+// GLProgram wrapper with its per-program cached uniform setters
+// (createProgram), the one-triangle fullscreen draw (createFullscreenQuad,
+// drawFullscreenQuad), and canvas sizing (refreshCssSize,
+// resizeCanvasToDisplaySize).
+
 export function createGL(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   overrides: WebGLContextAttributes = {},
@@ -103,6 +110,12 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
+/**
+ * A linked shader program plus its uniform setters. Each program caches its
+ * uniform locations by name for its own lifetime, so scenes call the setters
+ * (`setI` for samplers and ints, `setF` and the rest for floats) and never
+ * keep their own location maps or clear them on a rebuild.
+ */
 export interface GLProgram {
   program: WebGLProgram;
   use(): void;
@@ -111,11 +124,16 @@ export interface GLProgram {
    *  for samplers, not setF (a float call on a sampler is a GL error). Like
    *  the other setters, call it after use(). */
   setI(name: string, v: number): void;
+  /** An int uniform. A sampler takes its texture unit through this (`setI("uTex", 0)`). */
+  setI(name: string, v: number): void;
   setV2(name: string, x: number, y: number): void;
+  setV3(name: string, x: number, y: number, z: number): void;
   setV4(name: string, x: number, y: number, z: number, w: number): void;
   setFv(name: string, arr: Float32Array | number[]): void;
   setV3v(name: string, arr: Float32Array | number[]): void;
   setV4v(name: string, arr: Float32Array | number[]): void;
+  /** A column-major mat3, as `gl.uniformMatrix3fv` takes it untransposed. */
+  setM3(name: string, arr: Float32Array | number[]): void;
   dispose(): void;
 }
 
@@ -155,10 +173,12 @@ export function createProgram(
     setF: (name, v) => gl.uniform1f(loc(name), v),
     setI: (name, v) => gl.uniform1i(loc(name), v),
     setV2: (name, x, y) => gl.uniform2f(loc(name), x, y),
+    setV3: (name, x, y, z) => gl.uniform3f(loc(name), x, y, z),
     setV4: (name, x, y, z, w) => gl.uniform4f(loc(name), x, y, z, w),
     setFv: (name, arr) => gl.uniform1fv(loc(name), arr as Float32Array),
     setV3v: (name, arr) => gl.uniform3fv(loc(name), arr as Float32Array),
     setV4v: (name, arr) => gl.uniform4fv(loc(name), arr as Float32Array),
+    setM3: (name, arr) => gl.uniformMatrix3fv(loc(name), false, arr as Float32Array),
     dispose: () => gl.deleteProgram(program),
   };
 }

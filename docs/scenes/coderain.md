@@ -76,3 +76,5 @@ hear run but ~106.7 on the ref-shoot run.
 
 - Branch `worktree-coderain-scene`: first version, never opened as a PR.
 - Draft PR #398 (`worktree-coderain-scene-v2`): the same version, rebased onto main.
+- #349 cleanup — uniforms set through GLProgram's own setters (setI for samplers) instead of
+  looking up locations by hand. No change on screen.

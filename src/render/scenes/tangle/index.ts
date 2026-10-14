@@ -298,7 +298,6 @@ function createTangleScene(): Scene {
   let targetW = 0;
   let targetH = 0;
 
-  const locs = new Map<GLProgram, Map<string, WebGLUniformLocation | null>>();
   const rot = new Float32Array(9);
 
   let lastTime: number | null = null;
@@ -309,22 +308,6 @@ function createTangleScene(): Scene {
   const glide = createGlide();
   /** The fine octave's envelope, 0..1 -- see CRINKLE_TAU. */
   let crinkle = 1;
-
-  /** Locations for the uniform calls GLProgram has no setter for (uRot's
-   *  matrix, uGround's vec3 from a const tuple). Samplers go through setI. */
-  function loc(gl: WebGL2RenderingContext, prog: GLProgram, name: string): WebGLUniformLocation | null {
-    let byName = locs.get(prog);
-    if (!byName) {
-      byName = new Map();
-      locs.set(prog, byName);
-    }
-    let l = byName.get(name);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      byName.set(name, l);
-    }
-    return l;
-  }
 
   function sampler(gl: WebGL2RenderingContext, prog: GLProgram, name: string, unit: number, tex: WebGLTexture | null): void {
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -449,7 +432,6 @@ function createTangleScene(): Scene {
       glowSrcProg = createProgram(gl, GLOW_SRC_FRAG);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      locs.clear();
       quadVao = createFullscreenQuad(gl);
       // The segment pass addresses everything by gl_InstanceID/gl_VertexID
       // and has no attributes, so it draws from an empty VAO.
@@ -555,7 +537,7 @@ function createTangleScene(): Scene {
         sampler(gl, prog, "uPosA", 0, posA[read]);
         sampler(gl, prog, "uPosB", 1, posB[read]);
         prog.setF("uSide", side);
-        gl.uniformMatrix3fv(loc(gl, prog, "uRot"), false, rot);
+        prog.setM3("uRot", rot);
         prog.setF("uCamDist", CAM_DIST);
         prog.setF("uFocal", SPHERE_HALF_HEIGHTS * size * Math.sqrt(CAM_DIST * CAM_DIST - 1));
         prog.setV2("uRoomPx", roomW, roomH);
@@ -647,7 +629,7 @@ function createTangleScene(): Scene {
       compositeProg.setF("uHaloGain", FLARE_HALO_GAIN * glow);
       compositeProg.setF("uLine", 1);
       compositeProg.setF("uGlowGain", GLOW_GAIN * glow);
-      gl.uniform3f(loc(gl, compositeProg, "uGround"), GROUND[0], GROUND[1], GROUND[2]);
+      compositeProg.setV3("uGround", GROUND[0], GROUND[1], GROUND[2]);
       drawFullscreenQuad(gl, quadVao);
 
       // The gallery renders every scene into one shared context each tick:
@@ -670,7 +652,6 @@ function createTangleScene(): Scene {
       quadVao = emptyVao = null;
       for (const p of [simProg, segProg, knotProg, glowSrcProg, blurProg, compositeProg]) p?.dispose();
       simProg = segProg = knotProg = glowSrcProg = blurProg = compositeProg = null;
-      locs.clear();
     },
   };
 }
