@@ -23,8 +23,8 @@ import { bindHint, hideTooltip } from "./tooltip.ts";
  * both.
  *
  * Every row button gets tooltip.ts's instant hint rather than a `title`,
- * which shows late on a mouse and never on touch. The copy button copies a
- * link; "Paste a look" takes that link, or the bare code inside it.
+ * which shows late on a mouse and never on touch. One button copies a link,
+ * one the bare code; "Paste a look" takes either.
  *
  * Renaming and "Paste a look" use an inline <input> rather than
  * prompt(): this panel runs over a fullscreen canvas on a phone or TV, and a
@@ -44,6 +44,8 @@ export interface LooksCardDeps {
   /** The full share URL for a Look — app.ts owns the query-before-hash shape
    *  the boot()-time decode side expects. */
   buildShareLink: (look: SceneLook) => string;
+  /** The code alone — for pasting into "Paste a look". */
+  buildShareCode: (look: SceneLook) => string;
   hasUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
 }
@@ -86,6 +88,8 @@ const LINK_ICON = svgIcon(
     '<path d="M7.3 4.9l1.4-1.4a2.6 2.6 0 0 1 3.8 3.8l-1.4 1.4"/>' +
     '<path d="M8.7 11.1l-1.4 1.4a2.6 2.6 0 0 1-3.8-3.8l1.4-1.4"/>',
 );
+/** `</>`: copy the bare code. */
+const CODE_ICON = svgIcon('<path d="M5 4.5L1.8 8 5 11.5M11 4.5L14.2 8 11 11.5M9.2 3.5l-2.4 9"/>');
 const DELETE_ICON = svgIcon('<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>');
 
 /** The code in a pasted look link, or the text itself when it isn't one. */
@@ -265,7 +269,10 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
       );
 
       const copyBtn = rowButton(LINK_ICON, iconBtnStyle, ["Copy link", "Whoever opens it gets this look and its palette"], () =>
-        void copyLink(look),
+        void copyText(deps.buildShareLink(look), `a link to "${look.name}"`),
+      );
+      const codeBtn = rowButton(CODE_ICON, iconBtnStyle, ["Copy code", "The look as text, for “Paste a look”"], () =>
+        void copyText(deps.buildShareCode(look), `the code for "${look.name}"`),
       );
 
       const deleteBtn = rowButton(DELETE_ICON, iconBtnStyle, [`Delete "${look.name}"`], () => {
@@ -273,18 +280,17 @@ export function createLooksCard(deps: LooksCardDeps): LooksCard {
         refresh();
       });
 
-      row.append(iconBtn, nameBtn, copyBtn, deleteBtn);
+      row.append(iconBtn, nameBtn, copyBtn, codeBtn, deleteBtn);
       list.appendChild(row);
       if (look.name === renameName) startRename(sceneId, look, nameBtn);
     }
   }
 
-  /** Copies the look's share link and says so. */
-  async function copyLink(look: SceneLook): Promise<void> {
-    const text = deps.buildShareLink(look);
+  /** Copies `text` and says it copied `what`. */
+  async function copyText(text: string, what: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(text);
-      showFeedback(`Copied a link to "${look.name}".`);
+      showFeedback(`Copied ${what}.`);
     } catch {
       // Clipboard access can be unavailable (permissions, insecure
       // context) — fall back to a selectable field instead of failing
