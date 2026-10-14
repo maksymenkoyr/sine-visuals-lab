@@ -18,6 +18,14 @@ export interface FeatureFrame {
    *  render/musicProfile.ts) has something to actually react to when the
    *  room gets quieter or louder. */
   level: number;
+  /** Hats [0,1]: the drum part of the Treble range, from src/audio/stemSplit.ts
+   *  on the device that hears the sound, sent to followers in the frame. 0
+   *  wherever there is no split to read (no analyser, a sender that predates
+   *  it). Unslewed and ungated here; AnimFrame.hats is the eased, gated form. */
+  hats: number;
+  /** Lead [0,1]: the held part of the Mid range (vocals, synths, guitar), the
+   *  same way as `hats`. */
+  lead: number;
   /** True on the frame a spectral-flux onset was detected — broadband, no
    *  tempo attached (see features.ts). Not the same concept as a musical
    *  beat: that's AnimFrame.beatPhase/tempoLock (render/beatClock.ts), which

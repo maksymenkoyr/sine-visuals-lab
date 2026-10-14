@@ -446,7 +446,10 @@ export class FeatureExtractor {
 
     const onsetPhase = this.bpm > 0 ? (((time - this.lastOnsetPhaseTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 
-    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level };
+    // hats/lead need the analyser's full FFT bins, which this extractor never
+    // sees (only the bands), so app.ts writes them in from stemSplit.ts before
+    // the frame leaves currentVisual(), the same way it overwrites bpm.
+    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level, hats: 0, lead: 0 };
   }
 
   /** @param strength flux over the firing threshold — 1 is a bare trigger. */

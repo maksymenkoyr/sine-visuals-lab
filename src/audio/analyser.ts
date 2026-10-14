@@ -13,6 +13,13 @@ export interface BandAnalyser {
   node: AnalyserNode;
   /** Raw per-band magnitude in dB (unnormalized), low band -> high band. */
   readBandsDb(): Float32Array;
+  /** The FFT bins the last readBandsDb() read, in dB (-Infinity for an empty
+   *  bin), low to high — refilled by every readBandsDb() call, so read it
+   *  after one. For src/audio/stemSplit.ts, which needs finer frequency than
+   *  the bands. */
+  binsDb: Float32Array;
+  /** Width of one bin of `binsDb`, in Hz. */
+  binHz: number;
   /** This band ladder's actual Hz edges (length NUM_BANDS + 1), against this
    *  context's real sample rate — not the nominal 40Hz-16kHz ceiling, since a
    *  phone mic context can run well below 32kHz. For UI axis labels. */
@@ -60,6 +67,8 @@ export function createBandAnalyser(
 
   return {
     node,
+    binsDb: freqData,
+    binHz,
     bandEdgesHz: edgesHz,
     dbRange: { min: node.minDecibels, max: node.maxDecibels },
     readBandsDb(): Float32Array {

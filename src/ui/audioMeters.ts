@@ -244,7 +244,7 @@ import { createColumnStore } from "./columnStore.ts";
  * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
  * (Tempo), and one per hits-history lane plus one for the Surge lane
  * under them, Onset surge's own (createHitsHistory's own laneMounts, Hits)
- * — plus the Bands card's own level rows (BAND_LEVEL_CHOICES, deviceMenu.ts)
+ * — plus the Bands card's own level rows (BAND_LEVELS/STEM_LEVELS, deviceMenu.ts)
  * and its Frequencies corner, built directly
  * in deviceMenu.ts. Every jack's click/hover/fill/usage state is
  * `deps.patch` (AudioMetersDeps's own doc comment); this file only ever

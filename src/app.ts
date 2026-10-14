@@ -22,6 +22,7 @@ import {
 } from "./audio/inputDevice.ts";
 import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
+import { createStemSplitter, type StemRanges, type StemSplitter } from "./audio/stemSplit.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
 import { minMax, peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
@@ -370,6 +371,9 @@ let laptopWaiting = false;
 
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
+/** Hats and Lead off bandAnalyser's full FFT bins (src/audio/stemSplit.ts),
+ *  written into each frame readLocalCapture() builds. */
+let stemSplitter: StemSplitter | null = null;
 /** Time-domain sibling of bandAnalyser — the waveform for the controls
  *  panel's Dynamics card, its Waveform row (src/ui/audioMeters.ts). Never
  *  touches FeatureExtractor or the wire frame: this is display-only data
@@ -1372,6 +1376,7 @@ function attachCapture(handle: CaptureHandle): void {
   // is far quieter than captured system audio).
   extractor = new FeatureExtractor();
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
+  stemSplitter = createStemSplitter(bandAnalyser.binsDb.length, bandAnalyser.binHz);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
   inputHealthTap?.dispose();
@@ -1447,6 +1452,7 @@ function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   handle.stop();
   capture = null;
   bandAnalyser = null;
+  stemSplitter = null;
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
@@ -3299,6 +3305,19 @@ function clearLocalReadings(): void {
   lastInputHealth = null;
 }
 
+const stemRangesScratch: StemRanges = { hats: { lo: 0, hi: 0 }, lead: { lo: 0, hi: 0 } };
+
+/** Lead covers the band split's Mid range and Hats its Treble range, so
+ *  each sits on the same frequencies as the Mid/Treble rows beside it. */
+function stemRanges(edgesHz: Float32Array): StemRanges {
+  const { lowMid, midHigh } = getBandSplit();
+  stemRangesScratch.lead.lo = edgesHz[lowMid];
+  stemRangesScratch.lead.hi = edgesHz[midHigh];
+  stemRangesScratch.hats.lo = edgesHz[midHigh];
+  stemRangesScratch.hats.hi = edgesHz[NUM_BANDS];
+  return stemRangesScratch;
+}
+
 /** One tick's read of this device's own live capture — the bands, scope,
  *  input health and LUFS readings, the extractor's frame, and the meters'
  *  diagnostics off it — shared by currentVisual()'s solo and host branches,
@@ -3320,6 +3339,12 @@ function readLocalCapture(
   lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
   lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+  if (stemSplitter) {
+    // readBandsDb() above just refilled binsDb.
+    const stems = stemSplitter.update(bandAnalyser.binsDb, now, stemRanges(bandAnalyser.bandEdgesHz));
+    f.hats = stems.hats;
+    f.lead = stems.lead;
+  }
   lastFixedEnergy = extractor.fixedEnergy;
   lastBeatDiag = extractor.onsetDiag;
   lastFluxRatio = extractor.fluxRatio;
@@ -3467,6 +3492,8 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     bpm: s.bpm,
     onsetPhase: s.beatPhase,
     level: s.level,
+    hats: s.hats,
+    lead: s.lead,
   };
 }
 
