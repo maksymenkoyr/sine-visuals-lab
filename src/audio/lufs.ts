@@ -164,6 +164,10 @@ export interface LufsMeter {
    *  a larger buffer can hand over just its tail). */
   push(samples: Float32Array, from?: number): void;
   read(): LufsReading;
+  /** Samples still to come before the block being filled closes. read()
+   *  can't change until then, so a caller polling a live stream can wait
+   *  that long between reads (lufsAnalyser.ts does). */
+  samplesToNextBlock(): number;
   /** Starts the integrated reading over; momentary/short-term keep running. */
   reset(): void;
 }
@@ -234,6 +238,9 @@ export function createLufsMeter(sampleRate: number): LufsMeter {
         blockSum += v * v;
         if (++blockCount === blockSamples) closeBlock();
       }
+    },
+    samplesToNextBlock(): number {
+      return blockSamples - blockCount;
     },
     read(): LufsReading {
       return {
