@@ -155,6 +155,7 @@ import {
   saveLook,
   saveSharedLook,
   takeUndo,
+  type SceneLook,
 } from "./render/sceneLooks.ts";
 import {
   AUTOPILOT_EVERY_BARS,
@@ -1057,6 +1058,18 @@ function applyPalette(next: Palette): void {
   activeConn()?.sendHello(scene.id, palette.id);
 }
 
+/** Switches to a palette a pad or a look carries — unless it is already
+ *  showing, or is one this app doesn't have (a link from a newer one). */
+function applyCarriedPalette(id: string | undefined): void {
+  if (id && id !== palette.id && PALETTES.some((p) => p.id === id)) applyPalette(getPalette(id));
+}
+
+/** A saved look, with the palette it was saved under. */
+function applyLookAndPalette(look: SceneLook): void {
+  applyLook(look, getScene(look.sceneId)?.settings ?? []);
+  applyCarriedPalette(look.paletteId);
+}
+
 // ---- The Set: pads of looks, keys 1-9, Autopilot ----
 // Model and store: render/sceneSet.ts; the card: ui/setCard.ts; the timing:
 // render/setAutopilot.ts. A pad is fired through applyScene/applyPalette like
@@ -1091,9 +1104,7 @@ function firePad(id: string, byAutopilot = false): void {
     return;
   }
   applyLook(pad.look, next.settings ?? []);
-  if (pad.paletteId && pad.paletteId !== palette.id && PALETTES.some((p) => p.id === pad.paletteId)) {
-    applyPalette(getPalette(pad.paletteId));
-  }
+  applyCarriedPalette(pad.paletteId);
   if (next.id !== scene.id) applyScene(next);
   setPreviewPadId = pad.id;
   if (!byAutopilot) restartAutopilot(setAutopilotState, pad.id);
@@ -1905,24 +1916,22 @@ function wireDeviceMenu(): void {
     listLooks,
     onSaveLook: (sceneId) => {
       const name = funnyLookName(listLooks(sceneId).map((l) => l.name));
-      saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? []));
+      saveLook({ ...captureLook(name, sceneId, getScene(sceneId)?.settings ?? []), paletteId: palette.id });
       return name;
     },
     onRenameLook: renameLook,
     onApplyLook: (look) => {
-      const specs = getScene(look.sceneId)?.settings ?? [];
-      primeUndo(look.sceneId, specs);
-      applyLook(look, specs);
+      primeUndo(look.sceneId, getScene(look.sceneId)?.settings ?? [], palette.id);
+      applyLookAndPalette(look);
     },
     onDeleteLook: deleteLook,
     decodeLook,
     buildShareLink: (look) =>
       `${location.origin}${location.pathname}?look=${encodeLook(look)}#/v/${encodeURIComponent(look.sceneId)}`,
-    buildShareCode: encodeLook,
     hasLookUndo,
     onUndoLook: (sceneId) => {
       const look = takeUndo(sceneId);
-      if (look) applyLook(look, getScene(sceneId)?.settings ?? []);
+      if (look) applyLookAndPalette(look);
     },
     set: {
       pads: () => listPads(),
@@ -3169,9 +3178,8 @@ async function boot(): Promise<void> {
         setTimeout(() => showHud("that look is for an unknown scene", true), 0);
       } else {
         saveSharedLook(look);
-        const specs = targetScene.settings ?? [];
-        primeUndo(look.sceneId, specs);
-        applyLook(look, specs);
+        primeUndo(look.sceneId, targetScene.settings ?? [], palette.id);
+        applyLookAndPalette(look);
         navigate({ kind: "viz", sceneId: look.sceneId }, "replace");
       }
       history.replaceState(null, "", location.pathname + location.hash);

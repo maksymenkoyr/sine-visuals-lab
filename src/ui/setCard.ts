@@ -1,6 +1,7 @@
 import type { AutopilotConfig, AutopilotOrder, SetPad } from "../render/sceneSet.ts";
 import { FONT_LABEL, FONT_MONO, LIVE_DOT, SCENE_VIOLET } from "./controlsTheme.ts";
 import { chipBtnLitStyle, chipBtnStyle, createCard, createChipButton, spacer } from "./controlsKit.ts";
+import { bindHint, hideTooltip } from "./tooltip.ts";
 
 /**
  * The Set card — pads of saved looks from any scene, fired live, with an
@@ -236,6 +237,8 @@ export function createSetCard(deps: SetCardDeps): SetCard {
   }
 
   function renderList(pads: readonly SetPad[], preview: string | null, live: string | null, split: boolean): void {
+    // A hint up over a button about to go would stay: no pointerleave comes.
+    hideTooltip();
     list.innerHTML = "";
     if (pads.length === 0) {
       const empty = document.createElement("div");
@@ -279,13 +282,15 @@ export function createSetCard(deps: SetCardDeps): SetCard {
       // this card can move the row from under the pointer before the second.
       const renameBtn = document.createElement("button");
       renameBtn.textContent = "✎";
-      renameBtn.title = `Rename "${label}"`;
+      renameBtn.setAttribute("aria-label", `Rename "${label}"`);
+      bindHint(renameBtn, SCENE_VIOLET, [`Rename "${label}"`]);
       renameBtn.style.cssText = iconBtnStyle;
       renameBtn.addEventListener("click", () => startRename(pad, nameBtn));
 
       const deleteBtn = document.createElement("button");
       deleteBtn.textContent = "✕";
-      deleteBtn.title = `Delete "${label}"`;
+      deleteBtn.setAttribute("aria-label", `Delete "${label}"`);
+      bindHint(deleteBtn, SCENE_VIOLET, [`Delete "${label}"`]);
       deleteBtn.style.cssText = iconBtnStyle;
       deleteBtn.addEventListener("click", () => {
         deps.onDeletePad(pad.id);

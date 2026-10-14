@@ -12,9 +12,11 @@ import {
   deleteLook,
   encodeLook,
   listLooks,
+  primeUndo,
   renameLook,
   saveLook,
   saveSharedLook,
+  takeUndo,
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
 import { clearCustomValue, getCustomValue, getSliderStretch, setCustomValue, stretchSlider } from "../src/render/customValues.ts";
@@ -48,6 +50,21 @@ describe("encodeLook / decodeLook", () => {
     const look: SceneLook = { name: "Café Drift ✨", sceneId: "mesh", manual: { focus: 0.72, breathe: 0.1 } };
     const decoded = decodeLook(encodeLook(look));
     expect(decoded).toEqual(look);
+  });
+
+  it("round-trips the palette (`p`); a look without one has none, and a non-string `p` is dropped", () => {
+    const look: SceneLook = { name: "Tinted", sceneId: "mesh", manual: { focus: 0.5 }, paletteId: "ember" };
+    expect(wireOf(encodeLook(look)).p).toBe("ember");
+    expect(decodeLook(encodeLook(look))?.paletteId).toBe("ember");
+    expect("p" in wireOf(encodeLook({ ...look, paletteId: undefined }))).toBe(false);
+    const odd = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, p: 7 })).replace(/=+$/, "");
+    expect(decodeLook(odd)).not.toBeNull();
+    expect(decodeLook(odd)?.paletteId).toBeUndefined();
+  });
+
+  it("writes a dragged slider's long float short, and an integer exactly", () => {
+    const look: SceneLook = { name: "Long", sceneId: "mesh", manual: { focus: 0.623456789, breathe: 0.000123456, count: 1234567 } };
+    expect(wireOf(encodeLook(look)).m).toEqual({ focus: 0.6235, breathe: 0.0001235, count: 1234567 });
   });
 
   it("round-trips an empty manual set", () => {
@@ -350,5 +367,13 @@ describe("custom values in a Look", () => {
     expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
     expect(getSliderStretch(sceneId, FOCUS.key)).toBeUndefined();
     expect(getSliderStretch(sceneId, BREATHE.key)).toBeUndefined();
+  });
+});
+
+describe("primeUndo / takeUndo", () => {
+  it("keeps the palette that was showing, so Undo can put it back", () => {
+    primeUndo("undoScene", SPECS, "neon");
+    expect(takeUndo("undoScene")?.paletteId).toBe("neon");
+    expect(takeUndo("undoScene")).toBeNull();
   });
 });
