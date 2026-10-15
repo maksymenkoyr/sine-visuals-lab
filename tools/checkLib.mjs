@@ -3,6 +3,8 @@
 // plain data, so tests/check.test.ts can cover it without running a tool.
 // Types: checkLib.d.mts, kept in sync by hand.
 
+import { posix } from "node:path";
+
 /** SPDX ids a dependency may carry: CONTRIBUTING.md's "permissively
  *  licensed" list, spelled the way package.json license fields spell it. */
 export const PERMISSIVE = new Set([
@@ -212,4 +214,85 @@ export function addedLines(diffText) {
     }
   }
   return out;
+}
+
+// ---- Size: what a build makes a page load --------------------------------
+
+/** The JS a page (a Vite build manifest's HTML entry) loads before its first
+ *  paint: its chunk and every chunk imported statically from there, all the
+ *  way down. Dynamic imports load later. Paths are relative to the outDir. */
+export function firstPaintChunks(manifest, page) {
+  const seen = new Set();
+  const files = [];
+  const visit = (key) => {
+    if (seen.has(key) || !manifest[key]) return;
+    seen.add(key);
+    if (manifest[key].file.endsWith(".js")) files.push(manifest[key].file);
+    for (const dep of manifest[key].imports ?? []) visit(dep);
+  };
+  visit(page);
+  return files;
+}
+
+const PINNED_IMPORT_RE = /import\s+(\w+)\s+from\s+["']([^"']+\?(?:worker&url|url))["']/g;
+const FONT_IMPORT_RE = /\.(?:woff2?|ttf|otf)\?url$/i;
+
+/** The built files pinAsset() fetches after load (src/pinnedAssets.ts): each
+ *  `?url` or `?worker&url` import in `sources` (`{ path, text }`, paths from
+ *  the repo root) that its file passes to pinAsset(), fonts aside, the
+ *  pairing tests/pinnedAssets.test.ts enforces. A `?url` file is found in the
+ *  manifest under its source path, and one missing there was inlined
+ *  (build.assetsInlineLimit), so it costs no fetch. Vite leaves workers out
+ *  of the manifest: a worker is the one `assets/<name>-<hash>.js` among
+ *  `assetPaths`. What can't be placed comes back in `problems`. */
+export function pinnedFiles(sources, manifest, assetPaths) {
+  const files = new Set();
+  const problems = [];
+  for (const { path, text } of sources) {
+    for (const [, name, spec] of text.matchAll(PINNED_IMPORT_RE)) {
+      if (FONT_IMPORT_RE.test(spec) || !new RegExp(`pinAsset\\(\\s*${name}\\s*[,)]`).test(text)) continue;
+      const [bare, query] = spec.split("?");
+      const source = posix.join(posix.dirname(path), bare);
+      const stem = `assets/${posix.basename(bare).replace(/\.[^.]+$/, "")}-`;
+      const workers = assetPaths.filter((p) => p.startsWith(stem) && p.endsWith(".js"));
+      if (!bare.startsWith(".")) problems.push(`can't place the package import ${spec} (${path})`);
+      else if (manifest[source]) files.add(manifest[source].file);
+      else if (query === "worker&url") {
+        if (workers.length === 1) files.add(workers[0]);
+        else problems.push(`can't find the built worker of ${source}`);
+      }
+    }
+  }
+  return { files: [...files].sort(), problems };
+}
+
+/** The step's verdict on `measured` (`{ pages: { [page]: gzip bytes },
+ *  pinned: bytes }`) against size-budget.json. A page without a budget, or a
+ *  budget for a page the build lacks, fails too, so the file always names
+ *  exactly the build's pages. `summary` is a pass's line, `detail` a failure's. */
+export function compareSizes(measured, budget) {
+  const kb = (bytes) => (bytes / 1024).toFixed(1);
+  const parts = [];
+  const problems = [];
+  for (const page of [...new Set([...Object.keys(measured.pages), ...Object.keys(budget.pages ?? {})])].sort()) {
+    const bytes = measured.pages[page];
+    const limit = budget.pages?.[page];
+    if (bytes === undefined) problems.push(`  ${page} has a budget in size-budget.json, but the build has no such page: remove it.`);
+    else if (typeof limit !== "number") problems.push(`  ${page} has no budget in size-budget.json: add one.`);
+    else {
+      parts.push(`${page} ${kb(bytes)} of ${kb(limit)} kB`);
+      if (bytes > limit) problems.push(`  ${page} loads ${kb(bytes)} kB of gzipped JS before its first paint, ${kb(bytes - limit)} kB over its budget.`);
+    }
+  }
+  if (typeof budget.pinned !== "number") problems.push("  size-budget.json has no `pinned` budget: add one.");
+  else {
+    parts.push(`pinned ${kb(measured.pinned)} of ${kb(budget.pinned)} kB`);
+    if (measured.pinned > budget.pinned) problems.push(`  pinAsset() fetches ${kb(measured.pinned)} kB after load, ${kb(measured.pinned - budget.pinned)} kB over its budget.`);
+  }
+  if (!problems.length) return { ok: true, summary: parts.join(" · "), detail: "" };
+  problems.push(
+    "  The budgets are in size-budget.json: make the change smaller, or edit the number there.",
+    "  Lowering a budget is always welcome; raising one needs a reason in the pull request description.",
+  );
+  return { ok: false, summary: parts.join(" · "), detail: problems.join("\n") };
 }
