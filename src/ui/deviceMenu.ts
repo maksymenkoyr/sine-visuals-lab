@@ -5605,9 +5605,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Input rows: only for an input or node focus — a setting's focus already dims the meters through .vc-patching.
     const dimInputs = focus !== null && focus.kind !== "setting";
     const rowLit = new Map<HTMLElement, boolean>();
+    // The Bands card's level and stem jacks sit beside rows of their own (mountBandsJack's feedEl), not inside a .vc-row.
+    const bandsFeed = new Map<HTMLElement, HTMLElement>(bandsJacks.map((b) => [b.jack.el, b.feedEl]));
     for (const [key, el] of combinedJackElements()) {
       if (shapingCol.el.contains(el)) continue;
-      const row = el.closest<HTMLElement>(".vc-row");
+      const row = bandsFeed.get(el) ?? el.closest<HTMLElement>(".vc-row");
       if (!row) continue;
       rowLit.set(row, (rowLit.get(row) ?? false) || (!!chain && chain.inputs.has(key)));
     }
