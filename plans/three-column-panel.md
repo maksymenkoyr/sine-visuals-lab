@@ -24,7 +24,7 @@ The build session read Patch Focus as the answer and filled each open question w
 - What users already saved keeps working: the engine still honours a setting's own Window/Smoothness and a wire's Height (Looks and share links carry them). The wire panel shows those rows only while one is in effect (the gate switched on, a wire on Fixed or Loud). A wire's Shape button makes a node from that wire and carries them into it: the wire's Height always, the setting's window when the wire is its only one.
 - A node made by Shape starts with its window off, so the picture doesn't change until the node is edited; a node made from "+ New shaping node" starts with it on.
 - Focus: input rows and node cards light their chain on hover; a node pins with a click on its monitor row or input port, and Escape lets go. While a node is pinned, a click on an input jack makes the node read that input. Pinning a node unpins a setting and the other way round.
-- Name: the code and panel keep "shaping node" until the user picks. Still blocks merging.
+- Name, decided 2026-10-16: **modifier** (the user: "agree on modifier", after hearing that Notch calls these modifiers and Bitwig modulators). The panel says modifier; the code and stored data keep "shaping node"/`shaped` (#547 had already shipped to Insiders, so stored names stay), and `docs/vocabulary.md` maps the two.
 
 ## Prototypes
 
@@ -43,7 +43,6 @@ https://claude.ai/artifact/3QHry9fsgTsZ9HTDXeNxM9
 ## Open questions
 
 - Each answer under "Taken as answers on 2026-10-15" above still needs the user's yes.
-- Name: the user says "sound transforming node"; the code and `docs/vocabulary.md` say "shaping node". Pick one before any string ships. Blocks merging.
 
 ## What the branch has
 
@@ -70,7 +69,7 @@ Built on 2026-10-15/16 in this one PR rather than one PR per phase (the user: "c
 - [x] **3. Focus across the columns, and drag to connect.** `src/ui/patchChain.ts` computes a chain; `deviceMenu.ts`'s `refreshChain` dims what's off it and `litSignalFan` draws the chain's wires. Kept the setting-only `pinned`/`preview` and added `pinnedNode`/`hoverNode` beside them, instead of one focus model replacing both: smaller change, same behaviour. An input row lights on hover or keyboard focus but doesn't pin. Drag: a jack onto a setting row, a node card, or the middle column (`dropTargetAt`/`dropJack`; `cableLayer.ts`'s `setDrag`). The column's placement beside an open Power card is JS (`placeShapingColumn`): it drops below Power when the gap is narrower than `SHAPE_COL_MIN_PX`.
 
 Still open:
-- The user's yes on the answers above, and the name.
+- The user's yes on the answers above.
 - Known small edges: a drag cancelled with Escape and released on its own jack still clicks it; the "live on shaping nodes now" note shows even when every wire already runs through a node.
 - A line-by-line review of `shapingNodes.ts` and `shapingColumn.ts` beyond the session's own diff reads.
 

@@ -189,15 +189,15 @@ export function jackKey(choice: DriveSourceChoice): string {
   return sourceSlot(choice);
 }
 
-/** A shaping node's panel label: its input node's label plus "shaped" (the
- *  second node on the same input says "shaped 2", and so on). A node that is
+/** A shaping node's panel label (the panel calls it a modifier, docs/vocabulary.md): its input node's label plus "modifier" (the
+ *  second one on the same input says "modifier 2", and so on). A node that is
  *  gone reads as removed, which is what its dangling wire reads as. */
 export function shapingNodeLabel(id: string): string {
   const node = getShapingNode(id);
-  if (!node) return "Removed shaping node";
+  if (!node) return "Removed modifier";
   const base = driveSourceLabel(node.src);
   const n = 1 + listShapingNodes().filter((x) => x.src === node.src).findIndex((x) => x.id === id);
-  return n === 1 ? `${base} shaped` : `${base} shaped ${n}`;
+  return n === 1 ? `${base} modifier` : `${base} modifier ${n}`;
 }
 
 /** The full display label — a row's source summary, a patch source line's
@@ -225,22 +225,22 @@ export function driveSourceDescription(choice: DriveSourceChoice): string {
   if (isShapedChoice(choice)) {
     const node = getShapingNode(choice.id);
     return node
-      ? `${driveSourceLabel(node.src)}, changed by its shaping node: Expansion, Threshold and Smoothness.`
-      : "A shaping node that was removed — this wire reads nothing.";
+      ? `${driveSourceLabel(node.src)}, through its modifier: Window, Smoothness, Length and Height.`
+      : "A modifier that was removed — this wire reads nothing.";
   }
   if (typeof choice === "object") return choice.source === "beat" ? GRID_SOURCE_DESCRIPTION : LINE_SOURCE_DESCRIPTION;
   return SIGNAL_SOURCE_DESCRIPTION[choice];
 }
 
-/** Every "+ Add by name" group: DRIVE_ADD_GROUPS, then a "Shaped" group with
+/** Every "+ Add by name" group: DRIVE_ADD_GROUPS, then a "Modifiers" group with
  *  one choice per existing shaping node, only while any node exists. */
 export function driveAddGroups(): readonly DriveAddGroup[] {
   const nodes = listShapingNodes();
   if (nodes.length === 0) return DRIVE_ADD_GROUPS;
-  return [...DRIVE_ADD_GROUPS, { label: "Shaped", choices: nodes.map((n) => ({ source: "shaped" as const, id: n.id })) }];
+  return [...DRIVE_ADD_GROUPS, { label: "Modifiers", choices: nodes.map((n) => ({ source: "shaped" as const, id: n.id })) }];
 }
 
-/** The shaping column's "+ New shaping node" chips: the input choices of
+/** The shaping column's "+ New modifier" chips: the input choices of
  *  DRIVE_ADD_GROUPS only (plain signals), groups left empty dropped, so there
  *  is no Line group and no beat grid. */
 export function shapingInputGroups(): readonly { label: string; choices: SignalId[] }[] {

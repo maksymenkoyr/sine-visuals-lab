@@ -233,8 +233,8 @@ import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render
  * (that only writes the store and a readout) and never from the panel's
  * periodic refresh, matching the click-loss lesson in this file's carried
  * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
- * line per source (colour dot, name, weight 0–2×, a Shape button on a
- * catalogue wire that puts a shaping node on it, a hit source's Height
+ * line per source (colour dot, name, weight 0–2×, a "+ Modifier" button on a
+ * catalogue wire that puts a modifier (shaping node) on it, a hit source's Height
  * Graded/Fixed/Loud only while it still carries an old one, a grid source's
  * division chips, the line source's
  * Strength + Clear reusing lineEditor.strengthRow), a 4 s output graph off
@@ -3792,7 +3792,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return btn;
   }
 
-  /** A wire's Shape button: puts a new shaping node (shapingNodes.ts) on this
+  /** A wire's "+ Modifier" button: puts a new shaping node (shapingNodes.ts) on this
    *  catalogue wire and re-points the wire at it, so the picture doesn't
    *  change until the node is edited. The node takes the wire's Height, and
    *  the setting's own window too when this is its only wire and the gate is
@@ -3802,9 +3802,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.style.cssText = driveResetLinkStyle;
-    btn.textContent = "Shape";
-    btn.setAttribute("aria-label", `Shape ${driveSourceLabel(src.choice)}`);
-    setHint(btn, "Put a shaping node on this wire: it reads the same until you change the node.");
+    btn.textContent = "+ Modifier";
+    btn.setAttribute("aria-label", `Put a modifier on ${driveSourceLabel(src.choice)}`);
+    setHint(btn, "Put a modifier on this wire: it reads the same until you change the modifier.");
     btn.addEventListener("click", () => {
       const setting = deps.getDriveSetting(sceneId, spec);
       if (setting === "scene") return;
@@ -3825,7 +3825,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           : {}),
       });
       if (!node) {
-        showToast("No room for another shaping node");
+        showToast("No room for another modifier");
         return;
       }
       deps.onSetDriveSetting(sceneId, spec, shapeSource(setting, src.choice, node.id));
@@ -4423,7 +4423,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (generic && patch.sources.length) {
       const shapeNote = document.createElement("div");
       shapeNote.style.cssText = driveEmptySrcStyle;
-      shapeNote.textContent = "Window, Smoothness, Length and Height live on shaping nodes now. Press Shape on a wire to give it one.";
+      shapeNote.textContent = "Window, Smoothness, Length and Height live on modifiers now. Press + Modifier on a wire to give it one.";
       list.appendChild(shapeNote);
     }
     panel.appendChild(list);
@@ -4444,8 +4444,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         // Shape carries the window into the node only from a setting's only wire (buildShapeButton).
         legacyNote.textContent =
           patch.sources.length === 1
-            ? "This setting's own window, from before shaping nodes. Press Shape on its wire to move it into a node."
-            : "This setting's own window, from before shaping nodes. To move it, shape its wires, set each node's window, then switch this Off.";
+            ? "This setting's own window, from before modifiers. Press + Modifier on its wire to move it into a modifier."
+            : "This setting's own window, from before modifiers. To move it, give its wires modifiers, set each one's window, then switch this Off.";
         panel.appendChild(legacyNote);
       }
       panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
@@ -5053,7 +5053,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
     const name = driveSourceLabel(choice);
     if (pinnedNode && getShapingNode(pinnedNode)) {
-      const aria = typeof choice === "string" ? `Make ${shapingNodeLabel(pinnedNode)} read ${name}` : `${name} — a shaping node reads one input node`;
+      const aria = typeof choice === "string" ? `Make ${shapingNodeLabel(pinnedNode)} read ${name}` : `${name} — a modifier reads one input node`;
       return { aria, title: name };
     }
     const target = jackTarget();
@@ -5073,7 +5073,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const heat = audioMeters.jackHeatText(choice) ?? shapingCol.jackHeatText(choice);
     const tail = heat ? [heat] : [];
     if (pinnedNode && getShapingNode(pinnedNode)) {
-      const line2 = typeof choice === "string" ? `Click to make ${shapingNodeLabel(pinnedNode)} read this` : "A shaping node reads one input node";
+      const line2 = typeof choice === "string" ? `Click to make ${shapingNodeLabel(pinnedNode)} read this` : "A modifier reads one input node";
       return [line1, line2, ...tail];
     }
     const target = jackTarget();
@@ -5095,7 +5095,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const node = getShapingNode(pinnedNode);
       if (node) {
         if (typeof choice !== "string") {
-          showToast("A shaping node reads one input node");
+          showToast("A modifier reads one input node");
           return;
         }
         if (node.src !== choice) {
@@ -5173,10 +5173,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     const node = addShapingNode(choice);
     if (!node) {
-      showToast("No room for another shaping node");
+      showToast("No room for another modifier");
       return;
     }
-    showToast(`New shaping node: ${shapingNodeLabel(node.id)}. Drag its jack onto a setting.`);
+    showToast(`New modifier: ${shapingNodeLabel(node.id)}. Drag its jack onto a setting.`);
     // Pinned after the add: the column rebuilds itself from the store.
     toggleNodePin(node.id);
   }

@@ -8,13 +8,13 @@ afterEach(() => {
 });
 
 describe("shaping node labels", () => {
-  it("a node reads as its input's label plus 'shaped', and the second on the same input as 'shaped 2'", () => {
+  it("a node reads as its input's label plus 'modifier', and the second on the same input as 'modifier 2'", () => {
     const base = driveSourceLabel("anim.low");
     const first = addShapingNode("anim.low")!;
     const second = addShapingNode("anim.low")!;
     expect(driveSourceLabel({ source: "shaped", id: first.id })).toBe(`${base} shaped`);
-    expect(driveSourceLabel({ source: "shaped", id: second.id })).toBe(`${base} shaped 2`);
-    expect(shapingNodeLabel(second.id)).toBe(`${base} shaped 2`);
+    expect(driveSourceLabel({ source: "shaped", id: second.id })).toBe(`${base} modifier 2`);
+    expect(shapingNodeLabel(second.id)).toBe(`${base} modifier 2`);
   });
 
   it("a node that is gone reads as removed", () => {
@@ -29,12 +29,12 @@ describe("shaping node labels", () => {
 });
 
 describe("add groups", () => {
-  it("has a final Shaped group only while a node exists", () => {
-    expect(driveAddGroups().some((g) => g.label === "Shaped")).toBe(false);
+  it("has a final Modifiers group only while a node exists", () => {
+    expect(driveAddGroups().some((g) => g.label === "Modifiers")).toBe(false);
     const node = addShapingNode("anim.low")!;
     const groups = driveAddGroups();
     const last = groups[groups.length - 1]!;
-    expect(last.label).toBe("Shaped");
+    expect(last.label).toBe("Modifiers");
     expect(last.choices).toEqual([{ source: "shaped", id: node.id }]);
   });
 
