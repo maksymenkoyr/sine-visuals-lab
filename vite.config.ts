@@ -46,4 +46,11 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
+  server: {
+    // Agents' worktrees live under .claude/worktrees/, each a full checkout:
+    // watched, a config or tsconfig change in any of them made this dev
+    // server fully reload every page it serves. Anchored at this config's own
+    // folder, so a dev server running inside a worktree still watches itself.
+    watch: { ignored: [`${root(".claude")}/**`] },
+  },
 }));
