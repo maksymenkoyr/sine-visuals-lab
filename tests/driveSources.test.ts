@@ -12,13 +12,13 @@ describe("shaping node labels", () => {
     const base = driveSourceLabel("anim.low");
     const first = addShapingNode("anim.low")!;
     const second = addShapingNode("anim.low")!;
-    expect(driveSourceLabel({ source: "shaped", id: first.id })).toBe(`${base} shaped`);
+    expect(driveSourceLabel({ source: "shaped", id: first.id })).toBe(`${base} modifier`);
     expect(driveSourceLabel({ source: "shaped", id: second.id })).toBe(`${base} modifier 2`);
     expect(shapingNodeLabel(second.id)).toBe(`${base} modifier 2`);
   });
 
   it("a node that is gone reads as removed", () => {
-    expect(driveSourceLabel({ source: "shaped", id: "n999999" })).toBe("Removed shaping node");
+    expect(driveSourceLabel({ source: "shaped", id: "n999999" })).toBe("Removed modifier");
   });
 
   it("a node takes its input's colour, and a missing node a neutral one", () => {
