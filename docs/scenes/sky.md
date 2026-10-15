@@ -585,4 +585,4 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   cumulus round from a photo, reverted; bench cut to six controls.
 - Rainbow, Blue-field sprites, Floater glide, Gradient dither; light-wave
   halo and Haidinger's brush beat swell (2026-10-04).
-- #533 (2026-10-15): fluidSim.ts's passes look their uniforms up on first draw, so a mount compiles all of the sim's programs at once. No change on screen.
+- #533 (2026-10-15): fluidSim.ts's passes look their uniforms up on first draw, so a mount compiles all of the sim's programs at once. No change on screen. Measured headless (Metal, M1 Pro): a first mount 60 → 40 ms, a revisit 63 → 5 ms, a move from its gallery tile to the scene 50–275 → 38–52 ms, and the longest frame gap after switching back to Sky 25–43 → 10 ms.
