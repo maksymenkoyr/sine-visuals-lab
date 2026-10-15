@@ -1,14 +1,17 @@
 /**
  * The middle column of the panel (Sound → Shaping → Scene): one card per
  * shaping node (src/render/shapingNodes.ts). A node takes one input node and
- * sends a changed copy of it out of its own jack: Expansion pushes the value
- * away from its own running mean, Threshold reads 0 under a line, and
- * Smoothness smooths the output. The node's monitor row carries its output
+ * sends a changed copy of it out of its own jack, with the same controls a
+ * setting's own wire panel has: Window (Min and Max riding the input's own
+ * learned floor and peak, reusing the generic gate in src/render/gateWindow.ts),
+ * Smoothness (the window's knee), Length (a straight fall after each rise) and,
+ * for a hit-kind input, Height. The node's monitor row carries its output
  * jack, so any setting plugs into a node exactly as it plugs into an input
  * node. The row's input port is where the cable from the input node's own
  * jack ends (feedGroups). Graphs never rescale: input and output are drawn on
- * the fixed 0..1 scale every monitor uses. Each card has a heat strip, as
- * every input node's monitor does.
+ * the fixed 0..1 scale every monitor uses, and the window's Min and Max lines
+ * are drawn dashed on that same scale. Each card has a heat strip, as every
+ * input node's monitor does.
  *
  * Each node keeps its rings and heat track by id, so a rebuild (a node added,
  * removed, or changed elsewhere) keeps every card's history. A slider writes
@@ -23,18 +26,17 @@ import { createCard, paletteChipStyle, type CardFold } from "./controlsKit.ts";
 import { createHeatTrack, heatHistory, heatStripBackground, heatText, HEAT_HISTORY_CELLS, HEAT_REFRESH_MS, type HeatTrack } from "./heat.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { getHistorySpan } from "./historySpan.ts";
-import { driveSourceColor, driveSourceLabel, jackKey, shapingInputGroups, shapingNodeLabel } from "./driveSources.ts";
+import { driveSourceColor, driveSourceLabel, HEIGHT_OPTIONS, jackKey, shapingInputGroups, shapingNodeLabel } from "./driveSources.ts";
 import { FONT_LABEL, FONT_MONO } from "./controlsTheme.ts";
 import { isShapedChoice, type DriveSourceChoice } from "../render/drives.ts";
 import { removeShapedSource } from "../render/driveStore.ts";
-import type { SignalId } from "../render/signals.ts";
+import { SIGNALS, type SignalId } from "../render/signals.ts";
 import {
   addShapingNode,
   getShapingNode,
   listShapingNodes,
   removeShapingNode,
-  SHAPING_EXPANSION_MAX,
-  SHAPING_EXPANSION_MIN,
+  SHAPING_LENGTH_MAX_SEC,
   SHAPING_NODES_MAX,
   subscribeShapingNodes,
   type ShapingNode,
@@ -45,7 +47,7 @@ export interface ShapingColumnDeps {
   /** The same jack logic every meter jack uses (deviceMenu.ts passes the bundle it gives audioMeters). */
   patch: AudioMetersDeps["patch"];
   /** A node's live reading (DriveEngine.shaped) — works with the panel closed. */
-  getReading(id: string): { input: number; output: number } | null;
+  getReading(id: string): { input: number; output: number; line: number; top: number } | null;
   /** A node was added or removed: wire panels, row summaries, jacks and cables must refresh. */
   onStructureChanged(): void;
   /** The column's layout moved (cards rebuilt, a fold): recompute cables. */
@@ -96,6 +98,11 @@ const controlNameStyle = `display: flex; align-items: center; gap: 7px; font: 50
 const controlValueStyle = `font: 400 12px/1 ${FONT_MONO}; color: rgba(255,255,255,0.6);`;
 const sliderStyle = `width: 100%; margin: 0;`;
 const endsStyle = `display: flex; justify-content: space-between; font: 400 11px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
+const windowRowStyle = `display: flex; align-items: center; gap: 8px;`;
+const windowRowNameStyle = `font: 400 11px/1 ${FONT_MONO}; width: 28px; flex: none; color: rgba(255,255,255,0.6);`;
+const segStyle = `display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255,255,255,0.06);`;
+const segBtnStyle = `font: 500 12px/1 ${FONT_LABEL}; color: rgba(255,255,255,0.6); background: transparent; border: 0; border-radius: 999px; padding: 5px 10px; cursor: pointer;`;
+const segBtnLitStyle = `font: 500 12px/1 ${FONT_LABEL}; color: #fff; background: rgba(255,255,255,0.14); border: 0; border-radius: 999px; padding: 5px 10px; cursor: pointer;`;
 
 /** Per node, kept across rebuilds: its rings, heat track and canvas. */
 interface NodeState {
@@ -104,6 +111,9 @@ interface NodeState {
   sizer: CanvasSizer;
   inRing: Float32Array;
   outRing: Float32Array;
+  /** The window's Min and Max lines on the input's scale, one sample per tick. */
+  lineRing: Float32Array;
+  topRing: Float32Array;
   head: number;
   input: number;
   output: number;
@@ -152,7 +162,7 @@ function setFill(input: HTMLInputElement, v: number, min: number, max: number): 
 
 interface ControlOpts {
   name: string;
-  /** The slider's aria-label, e.g. "<node label> expansion". */
+  /** The slider's aria-label, e.g. "<node label> smoothness". */
   aria: string;
   accent: string;
   hint: string;
@@ -168,8 +178,8 @@ interface ControlOpts {
 }
 
 /** One control: a head line (optional switch, name, value), its slider, and
- *  for Expansion the Flatter/Punchier ends. A switch that is off dims the
- *  slider and its value, in place. */
+ *  optional ends labels under it. A switch that is off dims the slider and
+ *  its value, in place. */
 function buildControl(opts: ControlOpts): HTMLElement {
   const el = document.createElement("div");
   el.style.cssText = controlStyle;
@@ -249,6 +259,161 @@ function buildControl(opts: ControlOpts): HTMLElement {
   return el;
 }
 
+/** The Window control: an On/Off switch on its head line, the window's value
+ *  ("Min – Max"), then Min and Max sliders. Min and Max keep Min ≤ Max: dragging
+ *  one past the other drags the other along, and both are written. */
+function buildWindowControl(node: ShapingNode, label: string, accent: string): HTMLElement {
+  const hint =
+    "Which stretch of this input's own range moves the output: under Min it reads 0, over Max it reads full. The floor and peak are learned from the music, so the window holds from one song to the next.";
+  const el = document.createElement("div");
+  el.style.cssText = controlStyle;
+  const head = document.createElement("div");
+  head.style.cssText = controlHeadStyle;
+  const name = document.createElement("div");
+  name.style.cssText = controlNameStyle;
+
+  const sw = document.createElement("button");
+  sw.type = "button";
+  sw.className = "vc-mute-switch";
+  sw.setAttribute("role", "switch");
+  sw.setAttribute("aria-checked", String(node.windowOn));
+  sw.setAttribute("aria-label", `${label} window on/off`);
+  sw.style.setProperty("--c", accent);
+  sw.title = hint;
+  const nameText = document.createElement("span");
+  nameText.textContent = "Window";
+  name.append(sw, nameText);
+
+  const value = document.createElement("output");
+  value.style.cssText = controlValueStyle;
+
+  let min = node.min;
+  let max = node.max;
+  const showValue = (): void => {
+    value.textContent = `${min.toFixed(2)} – ${max.toFixed(2)}`;
+  };
+  showValue();
+  head.append(name, value);
+
+  const range = (aria: string, v: number): HTMLInputElement => {
+    const input = document.createElement("input");
+    input.type = "range";
+    input.className = "vc-slider";
+    input.min = "0";
+    input.max = "1";
+    input.step = "0.01";
+    input.value = String(v);
+    input.style.cssText = sliderStyle;
+    input.style.setProperty("--vc-accent", accent);
+    input.title = hint;
+    input.setAttribute("aria-label", aria);
+    setFill(input, v, 0, 1);
+    return input;
+  };
+  const minInput = range(`${label} window min`, min);
+  const maxInput = range(`${label} window max`, max);
+
+  const rowFor = (text: string, input: HTMLInputElement): HTMLElement => {
+    const row = document.createElement("div");
+    row.style.cssText = windowRowStyle;
+    const n = document.createElement("span");
+    n.style.cssText = windowRowNameStyle;
+    n.textContent = text;
+    row.append(n, input);
+    return row;
+  };
+
+  minInput.addEventListener("input", () => {
+    const v = Number(minInput.value);
+    setFill(minInput, v, 0, 1);
+    min = v;
+    if (v > max) {
+      max = v;
+      maxInput.value = String(v);
+      setFill(maxInput, v, 0, 1);
+      updateShapingNode(node.id, { min: v, max: v });
+    } else {
+      updateShapingNode(node.id, { min: v });
+    }
+    showValue();
+  });
+  maxInput.addEventListener("input", () => {
+    const v = Number(maxInput.value);
+    setFill(maxInput, v, 0, 1);
+    max = v;
+    if (v < min) {
+      min = v;
+      minInput.value = String(v);
+      setFill(minInput, v, 0, 1);
+      updateShapingNode(node.id, { min: v, max: v });
+    } else {
+      updateShapingNode(node.id, { max: v });
+    }
+    showValue();
+  });
+
+  const dimmed: HTMLElement[] = [minInput, maxInput, value];
+  const setDim = (on: boolean): void => {
+    for (const d of dimmed) d.style.opacity = on ? "" : DIMMED_OPACITY;
+  };
+  sw.addEventListener("click", () => {
+    const next = sw.getAttribute("aria-checked") !== "true";
+    sw.setAttribute("aria-checked", String(next));
+    setDim(next);
+    updateShapingNode(node.id, { windowOn: next });
+  });
+  setDim(node.windowOn);
+
+  const ends = document.createElement("div");
+  ends.style.cssText = endsStyle;
+  const floor = document.createElement("span");
+  floor.textContent = "Its floor";
+  const peak = document.createElement("span");
+  peak.textContent = "Its peak";
+  ends.append(floor, peak);
+
+  el.append(head, rowFor("Min", minInput), rowFor("Max", maxInput), ends);
+  return el;
+}
+
+/** The Height row for a hit-kind input: a segmented group of HEIGHT_OPTIONS.
+ *  A click writes the store and restyles the three buttons in place. */
+function buildHeightRow(node: ShapingNode, label: string): HTMLElement {
+  const el = document.createElement("div");
+  el.style.cssText = controlHeadStyle;
+  const name = document.createElement("div");
+  name.style.cssText = controlNameStyle;
+  name.textContent = "Height";
+  const seg = document.createElement("div");
+  seg.style.cssText = segStyle;
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", `${label} height`);
+  const buttons = HEIGHT_OPTIONS.map((opt) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = opt.label;
+    b.title = opt.hint;
+    return { opt, b };
+  });
+  const paint = (h: string): void => {
+    for (const { opt, b } of buttons) {
+      const lit = opt.h === h;
+      b.setAttribute("aria-pressed", String(lit));
+      b.style.cssText = lit ? segBtnLitStyle : segBtnStyle;
+    }
+  };
+  for (const { opt, b } of buttons) {
+    b.addEventListener("click", () => {
+      updateShapingNode(node.id, { height: opt.h });
+      paint(opt.h);
+    });
+  }
+  paint(node.height);
+  seg.append(...buttons.map((x) => x.b));
+  el.append(name, seg);
+  return el;
+}
+
 export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
   const el = document.createElement("div");
   el.className = "vc-shape-col vc-scroll";
@@ -292,6 +457,8 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
         sizer: createCanvasSizer(canvas, ctx, { heightCssPx: GRAPH_CSS_PX }),
         inRing: new Float32Array(RING_LEN),
         outRing: new Float32Array(RING_LEN),
+        lineRing: new Float32Array(RING_LEN),
+        topRing: new Float32Array(RING_LEN),
         head: 0,
         input: 0,
         output: 0,
@@ -403,7 +570,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
 
     const legend = document.createElement("div");
     legend.style.cssText = legendStyle;
-    legend.textContent = "Faint = in · White = out";
+    legend.textContent = "Faint = in · White = out · Dashed = window";
 
     const monitor = document.createElement("div");
     monitor.className = "vc-heat-monitor";
@@ -415,38 +582,12 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
     line.append(strip);
     monitor.append(line);
 
-    const expansion = buildControl({
-      name: "Expansion",
-      aria: `${label} expansion`,
-      accent: color,
-      hint: "Pushes the value away from its own recent average: right for bigger swings, left for flatter.",
-      min: SHAPING_EXPANSION_MIN,
-      max: SHAPING_EXPANSION_MAX,
-      step: 0.01,
-      value: node.expansion,
-      format: (v) => `${v.toFixed(2)}×`,
-      onInput: (v) => updateShapingNode(node.id, { expansion: v }),
-      ends: ["Flatter", "Punchier"],
-    });
-    const threshold = buildControl({
-      name: "Threshold",
-      aria: `${label} threshold`,
-      accent: color,
-      hint: "Reads 0 while the value is under this line.",
-      min: 0,
-      max: 1,
-      step: 0.01,
-      value: node.threshold,
-      format: (v) => v.toFixed(2),
-      onInput: (v) => updateShapingNode(node.id, { threshold: v }),
-      switchOn: node.thresholdOn,
-      onSwitch: (on) => updateShapingNode(node.id, { thresholdOn: on }),
-    });
+    const windowEl = buildWindowControl(node, label, color);
     const smoothness = buildControl({
       name: "Smoothness",
       aria: `${label} smoothness`,
       accent: color,
-      hint: "Smooths the output: right for slower, steadier moves.",
+      hint: "How gently the window starts and ends. Left: exactly at Min and Max. Right: a wider, softer rise.",
       min: 0,
       max: 1,
       step: 0.01,
@@ -455,9 +596,24 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
       onInput: (v) => updateShapingNode(node.id, { smoothness: v }),
       switchOn: node.smoothOn,
       onSwitch: (on) => updateShapingNode(node.id, { smoothOn: on }),
+      ends: ["Exact", "Soft edges"],
+    });
+    const length = buildControl({
+      name: "Length",
+      aria: `${label} length`,
+      accent: color,
+      hint: "How long the output takes to fall after each rise. Off: it falls as fast as the input does.",
+      min: 0,
+      max: SHAPING_LENGTH_MAX_SEC,
+      step: 0.01,
+      value: node.length,
+      format: (v) => (v === 0 ? "Off" : `${v.toFixed(2)} s`),
+      onInput: (v) => updateShapingNode(node.id, { length: v }),
+      ends: ["Off", "Long tail"],
     });
 
-    card.body.append(row.el, st.canvas, legend, monitor, expansion, threshold, smoothness);
+    card.body.append(row.el, st.canvas, legend, monitor, windowEl, smoothness, length);
+    if (SIGNALS[node.src].kind === "edge") card.body.append(buildHeightRow(node, label));
 
     return {
       id: node.id,
@@ -500,15 +656,12 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
     const ctx = st.ctx;
     const w = st.sizer.width;
     ctx.clearRect(0, 0, w, GRAPH_CSS_PX);
-    if (node?.thresholdOn) {
+    if (node?.windowOn) {
       ctx.strokeStyle = THRESHOLD_LINE;
       ctx.lineWidth = 1;
       ctx.setLineDash(THRESHOLD_DASH);
-      const y = yOf(node.threshold);
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
+      tracePath(ctx, st.lineRing, st.head, w);
+      tracePath(ctx, st.topRing, st.head, w);
       ctx.setLineDash(NO_DASH);
     }
     ctx.strokeStyle = INPUT_TRACE;
@@ -584,6 +737,8 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
         st.output = output;
         st.inRing[st.head] = input;
         st.outRing[st.head] = output;
+        st.lineRing[st.head] = r ? r.line : 0;
+        st.topRing[st.head] = r ? r.top : 0;
         st.head = (st.head + 1) % RING_LEN;
         if (level !== null && r) st.heat.push(output, level, nowSec);
       }

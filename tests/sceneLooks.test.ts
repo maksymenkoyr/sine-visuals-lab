@@ -20,7 +20,7 @@ import {
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
 import { clearCustomValue, getCustomValue, getSliderStretch, setCustomValue, stretchSlider } from "../src/render/customValues.ts";
-import { addShapingNode, listShapingNodes, removeShapingNode, SHAPING_SMOOTHNESS_DEFAULT, SHAPING_THRESHOLD_DEFAULT } from "../src/render/shapingNodes.ts";
+import { addShapingNode, listShapingNodes, removeShapingNode } from "../src/render/shapingNodes.ts";
 
 // Vitest runs under environment: "node" (vitest.config.ts) — no localStorage
 // global at all, mirroring panelFolds.test.ts. Proves the module tolerates
@@ -380,11 +380,13 @@ describe("primeUndo / takeUndo", () => {
 });
 
 describe("shaping nodes in a Look (h)", () => {
-  const DEF = { src: "anim.low" as const, expansion: 1.7, thresholdOn: false, threshold: SHAPING_THRESHOLD_DEFAULT, smoothOn: false, smoothness: SHAPING_SMOOTHNESS_DEFAULT };
+  // A node that differs from every default: its window off, a Min/Max pair, a Length.
+  const NODE = { windowOn: false, min: 0.4, max: 0.9, smoothOn: false, smoothness: 0.02, height: "graded" as const, length: 0.5 };
+  const DEF = { src: "anim.low" as const, ...NODE };
   const wireJson = (payload: unknown): string => btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
   it("captureLook embeds the definitions its wires reference", () => {
-    const node = addShapingNode("anim.low", { expansion: 1.7, smoothOn: false })!;
+    const node = addShapingNode("anim.low", NODE)!;
     const sceneId = "look-shaped-capture";
     setDriveSetting(sceneId, FLASH, { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }, { choice: "anim.high", weight: 1 }] });
     const look = captureLook("L", sceneId, [FLASH]);
@@ -424,14 +426,14 @@ describe("shaping nodes in a Look (h)", () => {
     applyLook(look, [FLASH]);
     expect(listShapingNodes().length).toBe(before + 1);
     const added = listShapingNodes()[before]!;
-    expect(added.expansion).toBe(1.7);
+    expect(added.min).toBe(0.4);
     expect(getDriveSetting(sceneId, FLASH)).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: added.id }, weight: 1 }] });
     removeShapingNode(added.id);
   });
 
   it("applyLook reuses an identical node that is already on the device", () => {
     const sceneId = "look-shaped-apply-reuse";
-    const existing = addShapingNode("anim.low", { expansion: 1.7, smoothOn: false })!;
+    const existing = addShapingNode("anim.low", NODE)!;
     const before = listShapingNodes().length;
     const look: SceneLook = {
       name: "L",

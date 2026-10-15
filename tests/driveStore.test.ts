@@ -29,10 +29,11 @@ import {
   removeShapedSource,
 } from "../src/render/driveStore.ts";
 import { normalizeDriveSetting } from "../src/render/drives.ts";
-import { driveSettingFromChoice, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, type DrivePatch } from "../src/render/drives.ts";
+import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "../src/render/gateWindow.ts";
 
 // vitest runs under environment: "node" (vitest.config.ts), so there is no
 // localStorage global at all here for the plain round-trip tests below —

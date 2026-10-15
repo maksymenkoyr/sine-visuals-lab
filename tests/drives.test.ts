@@ -5,7 +5,6 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
-  GENERIC_THRESHOLD_DEFAULT,
   hasLiveSource,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
@@ -37,6 +36,7 @@ import { listScenes } from "../src/render/scene.ts";
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
+import { GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
 
 const DT = 1 / 60;
 
@@ -1945,7 +1945,7 @@ describe("Only this (driveSolo)", () => {
 
 describe("drives: shaping nodes (shapingNodes.ts)", () => {
   it("a setting wired to a node reads the node output after accumulate", () => {
-    const node = addShapingNode("anim.low", { smoothOn: false })!;
+    const node = addShapingNode("anim.low", { windowOn: false })!;
     const sceneId = "shaped-read";
     const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }] });
     const engine = createDriveEngine();

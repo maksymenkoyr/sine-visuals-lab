@@ -162,7 +162,7 @@ describe("shaping nodes (vibe.shapingNodes)", () => {
     const { fake, synced } = await fresh({
       "vibe.shapingNodes": JSON.stringify({
         next: 2,
-        nodes: [{ id: "n1", src: "anim.low", expansion: 1, thresholdOn: false, threshold: 0.3, smoothOn: true, smoothness: 0.5 }],
+        nodes: [{ id: "n1", src: "anim.low", windowOn: true, min: 0.3, max: 1, smoothOn: true, smoothness: 0.5, height: "graded", length: 0 }],
       }),
     });
     const { listShapingNodes } = await import("../src/render/shapingNodes.ts");

@@ -11,9 +11,6 @@ import {
   driveSettingFromChoice,
   DRIVE_EVERY_VALUES,
   isShapedChoice,
-  GENERIC_SMOOTHNESS_DEFAULT,
-  GENERIC_THRESHOLD_DEFAULT,
-  GENERIC_WINDOW_MAX_DEFAULT,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
   setSourceEvery as pureSetSourceEvery,
@@ -30,6 +27,7 @@ import {
   type DriveSourceChoice,
   type HitHeight,
 } from "./drives.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "./gateWindow.ts";
 
 /**
  * Storage for `SceneSetting.drive` — the patch (src/render/drives.ts's

@@ -12,6 +12,20 @@ Researched 2026-10-14 and 2026-10-15.
 - It should feel like a node editor. The user: "it should work kind of like in Vizibeat. and probably some other similar software." In Vizibeat a Normalize → Tail chain is built once, written out as a named signal, and read anywhere (memory note on the Vizibeat reel, `tools/.cache/refs/reel-1012/analysis.md` in the main checkout).
 - Start from main, not from closed PR #512 (a V2 switch that moved a pinned setting's wire panel into its own column). The user: "ignore 512 and what was done in different session."
 
+### Taken as answers on 2026-10-15 (the user said "implement", not confirmed point by point)
+
+The build session read Patch Focus as the answer and filled each open question with its default. Each line can be overturned; say which.
+
+- Into the node: Window (Min/Max, On/Off), Smoothness (the window's knee, On/Off), Length and Height. Window and Smoothness reuse the setting gate's tracker and knee (`src/render/gateWindow.ts`), so a node's window behaves exactly like a setting's.
+- A setting still takes an input node straight, with no node between.
+- Each wire keeps its own weight. Mix and Reaction stay on the setting.
+- Length is a new per-node fall time (seconds, 0 = off) on top of the Hits card's shared tail, not a replacement for it.
+- Scene-handled thresholds (Dose, Cut, Ring threshold) and a hit driver's standout threshold stay on the setting: they are the scene's own, not the generic gate.
+- What users already saved keeps working: the engine still honours a setting's own Window/Smoothness and a wire's Height (Looks and share links carry them). The wire panel shows those rows only while one is in effect (the gate switched on, a wire on Fixed or Loud). A wire's Shape button makes a node from that wire and carries them into it: the wire's Height always, the setting's window when the wire is its only one.
+- A node made by Shape starts with its window off, so the picture doesn't change until the node is edited; a node made from "+ New shaping node" starts with it on.
+- Focus: input rows and node cards light their chain on hover; a node pins with a click on its monitor row or input port, and Escape lets go. While a node is pinned, a click on an input jack makes the node read that input. Pinning a node unpins a setting and the other way round.
+- Name: the code and panel keep "shaping node" until the user picks. Still blocks merging.
+
 ## Prototypes
 
 Three Column Panel (the user's first prototype: Sound, Shaping, Scene)
@@ -28,15 +42,8 @@ https://claude.ai/artifact/3QHry9fsgTsZ9HTDXeNxM9
 
 ## Open questions
 
-- Is Patch Focus what the user means? In particular, which controls move into the node: Window and Smoothness only, or Length and Height too? Blocks phase 1.
-- Can a setting still take an input node straight, with no node between (Patch Focus allows it: Energy → Glow)? Blocks phase 2.
-- Does each wire keep its own weight, or does weight move into the node? Blocks phase 2.
-- Reaction (Flat/Sized) on hit settings: stays on the setting in Patch Focus. Confirm. Blocks phase 2.
-- What happens to what users already saved: a setting's own Window/Smoothness (`vibe.drives` entries' `threshold`, `windowMax`, `smoothness` fields) and a wire's Height (`DriveSource.height`, also inside Looks' `d`, and links in the wild outlive the schema, `src/render/sceneLooks.ts` header). Options: turn each into a node on first load, or keep honouring the old fields without showing them. Blocks phase 2.
-- Scene-handled thresholds (`SceneSetting.drive.threshold`: Physarum 2's Dose, Alien's Cut, Caustics' Ring threshold) and hit drivers' standout detector (`drive.hit`) are the scene's own, not the generic gate. Do they stay on the setting? Blocks phase 2.
-- "Length" today is the Hits card's tail per lane, shared by every setting (`vibe.hitTail*`), not a per-setting control. Is a node's Length a new per-node tail on top of it? Blocks phase 1.
-- Name: the user says "sound transforming node"; the branch's code and `docs/vocabulary.md` say "shaping node". Pick one before any string ships. Blocks merging.
-- The middle column's CSS centres it in the gap between the meters and the settings, ignoring the Power card's width when Power is open: they overlap at roughly 1000 to 1430 px wide with Power open. Fix in phase 3.
+- Each answer under "Taken as answers on 2026-10-15" above still needs the user's yes.
+- Name: the user says "sound transforming node"; the code and `docs/vocabulary.md` say "shaping node". Pick one before any string ships. Blocks merging.
 
 ## What the branch has
 

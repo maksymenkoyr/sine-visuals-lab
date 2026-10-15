@@ -5,7 +5,7 @@ import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
 import { fitCustom, getCustomValue, resetCustomValue, setCustomValue, stretchSlider } from "./customValues.ts";
 import { defaultDriveSetting, isShapedChoice, remapShapedSources, sameDriveSetting, type DriveSetting } from "./drives.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
-import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingNodeDef, type ShapingNodeDef } from "./shapingNodes.ts";
+import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingNodeDef, shapingNodeDef, type ShapingNodeDef } from "./shapingNodes.ts";
 
 /**
  * Named, shareable snapshots of one scene's own settings — the sliders in the
@@ -214,14 +214,7 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
         if (!isShapedChoice(src.choice)) continue;
         const node = getShapingNode(src.choice.id);
         if (node) {
-          (shapingNodes ??= {})[node.id] = {
-            src: node.src,
-            expansion: node.expansion,
-            thresholdOn: node.thresholdOn,
-            threshold: node.threshold,
-            smoothOn: node.smoothOn,
-            smoothness: node.smoothness,
-          };
+          (shapingNodes ??= {})[node.id] = shapingNodeDef(node);
         }
       }
     }

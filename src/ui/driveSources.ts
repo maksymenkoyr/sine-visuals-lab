@@ -1,5 +1,5 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { isShapedChoice, sourceSlot, type DriveSourceChoice } from "../render/drives.ts";
+import { isShapedChoice, sourceSlot, type DriveSourceChoice, type HitHeight } from "../render/drives.ts";
 import { DIAL_SIGNALS, type DialSignalId, type SignalId } from "../render/signals.ts";
 import { getShapingNode, listShapingNodes } from "../render/shapingNodes.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
@@ -293,4 +293,12 @@ const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
     ],
   },
   { label: "Line", choices: [{ source: "line" }] },
+];
+
+/** The Fixed/Loud/Graded height choices a hit-kind wire takes (a setting's
+ *  wire, and a shaping node's Height row in shapingColumn.ts). */
+export const HEIGHT_OPTIONS: readonly { h: HitHeight; label: string; hint: string }[] = [
+  { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
+  { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
+  { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
 ];

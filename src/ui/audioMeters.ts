@@ -1717,8 +1717,8 @@ const HIT_CURVE_HEIGHT_CSS_PX = 56;
 // a pulse stops reading on screen.
 const TAIL_FADE_TIME_CONSTANTS = 3;
 /** Each lane's base pulse decay rate, per second — read from the modules
- *  that own them, never re-typed, the same rule as drives.ts's
- *  heightDecayPerSec. */
+ *  that own them, never re-typed, the same rule as gateWindow.ts's
+ *  stepHeightEnv. */
 const LANE_DECAY_PER_SEC: Readonly<Record<HitLane, number>> = {
   beat: BEAT_PULSE_DECAY_PER_SEC,
   low: GROUP_TUNING.low.pulseDecayRate,

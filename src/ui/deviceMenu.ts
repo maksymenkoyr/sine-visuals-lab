@@ -61,8 +61,6 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
-  GENERIC_SMOOTHNESS_DEFAULT,
-  GENERIC_THRESHOLD_DEFAULT,
   isEngineHitDriver,
   sameDriveSetting,
   smoothstep,
@@ -86,6 +84,7 @@ import {
   driveSourceColor,
   driveSourceDescription,
   driveSourceLabel,
+  HEIGHT_OPTIONS,
   isGridSourceChoice,
   isLineSourceChoice,
   jackKey,
@@ -181,6 +180,7 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render/gateWindow.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -607,7 +607,7 @@ export interface DeviceMenuDeps {
    *  drawn lines — see getDriveLine below). */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
   /** A shaping node's live input/output (DriveEngine.shaped), panel open or closed. */
-  getShapingReading(id: string): { input: number; output: number } | null;
+  getShapingReading(id: string): { input: number; output: number; line: number; top: number } | null;
   /** Writes a whole DriveSetting straight through (driveStore.ts's own
    *  `setDriveSetting`) — the one generic primitive every other `onSetXxx`
    *  below is a narrower pure-function wrapper around. appendSettingRow's
@@ -3231,12 +3231,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       label: "Only when",
       hint: "Some wires play, but only while the condition is high — e.g. treble hits, only when the song is intense.",
     },
-  ];
-
-  const HEIGHT_OPTIONS: { h: HitHeight; label: string; hint: string }[] = [
-    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
-    { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
-    { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
   ];
 
   // Beat wave's own every-N-beats divider (DriveSource.every) — only shown

@@ -1,12 +1,17 @@
 /**
  * Shaping nodes: a card in the panel's middle column takes ONE input node (a
  * SignalId from signals.ts) and sends a changed copy of it out of its own
- * jack. The change is three controls: Expansion pushes the value away from
- * its own running mean (flatter below 1, punchier above), Threshold reads 0
- * while the expanded value is under a line, and Smoothness is a one-pole
- * smoothing of the output. A node knows nothing about the scene: any scene
- * setting wires to it the same way it wires to an input node, as a
- * `{ source: "shaped", id }` choice (drives.ts).
+ * jack. The change uses the same controls a scene setting's own wire panel
+ * has. Window picks the stretch of the input, between its own learned floor
+ * and peak, that moves the output (Min and Max, with an On/Off), and reuses
+ * the generic gate in gateWindow.ts, so the window's math is never copied.
+ * Smoothness is that window's knee. Length is a straight fall after each
+ * rise, in seconds, off at the bottom of its slider. Height only matters for
+ * a hit-kind input (Graded, Fixed or Loud, as a setting's own wire chooses);
+ * a level-kind input ignores it. Re-pointing a node's input starts its
+ * learning over: the floor, the peak and the envelopes reset. A node knows
+ * nothing about the scene: any scene setting wires to it the same way it
+ * wires to an input node, as a `{ source: "shaped", id }` choice (drives.ts).
  *
  * The store is device-wide, not per scene, and synced: it is mirrored to the
  * pop-out output and to a room's TV through registerSyncedStore, so every
@@ -19,35 +24,47 @@
  */
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "./animClock.ts";
+import type { HitHeight } from "./drives.ts";
+import {
+  advanceGateTracker,
+  createGateTracker,
+  GENERIC_SMOOTHNESS_DEFAULT,
+  GENERIC_THRESHOLD_DEFAULT,
+  GENERIC_WINDOW_MAX_DEFAULT,
+  stepHeightEnv,
+  windowReading,
+  type GateTrackerState,
+} from "./gateWindow.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 
-export const SHAPING_EXPANSION_MIN = 0.5;
-export const SHAPING_EXPANSION_MAX = 3;
-export const SHAPING_EXPANSION_DEFAULT = 1;
-export const SHAPING_THRESHOLD_DEFAULT = 0.3;
-export const SHAPING_SMOOTHNESS_DEFAULT = 0.5;
-/** Time constant of the running mean Expansion pushes away from. */
-export const SHAPING_MEAN_TAU_SEC = 1.67;
-/** Smoothness 1 keeps this much of the old output per 1/60 s. */
-export const SHAPING_SMOOTH_RETAIN_MAX = 0.93;
+/** Length's right end: the longest fall a node's output can take, in seconds. */
+export const SHAPING_LENGTH_MAX_SEC = 1.5;
 /** Most nodes a device keeps (bounds a Look's size). */
 export const SHAPING_NODES_MAX = 24;
 export const SHAPING_NODE_ID_RE = /^n[1-9]\d{0,5}$/;
 
 export interface ShapingNodeDef {
   src: SignalId;
-  expansion: number;
-  thresholdOn: boolean;
-  threshold: number;
+  /** The window: Min and Max between the input's own learned floor (0) and peak (1). */
+  windowOn: boolean;
+  min: number;
+  max: number;
+  /** The window's knee (gateWindow.ts windowReading); off means an exact window. */
   smoothOn: boolean;
   smoothness: number;
+  /** How a hit-kind input reads (drives.ts HitHeight); a level-kind input ignores it. */
+  height: HitHeight;
+  /** Seconds the output takes to fall from 1 to 0 after a rise; 0 = off. */
+  length: number;
 }
 export interface ShapingNode extends ShapingNodeDef {
   id: string;
 }
 
 const STORAGE_KEY = "vibe.shapingNodes";
+
+const HEIGHTS: ReadonlySet<string> = new Set<HitHeight>(["graded", "fixed", "loud"]);
 
 function clampTo(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
@@ -65,18 +82,23 @@ export function sanitizeShapingNodeDef(raw: unknown): ShapingNodeDef | null {
   const r = raw as Record<string, unknown>;
   const src = r.src;
   if (typeof src !== "string" || !SIGNAL_IDS.has(src)) return null;
-  const { expansion, threshold, smoothness, thresholdOn, smoothOn } = r;
-  if (typeof expansion !== "number" || !Number.isFinite(expansion)) return null;
-  if (typeof threshold !== "number" || !Number.isFinite(threshold)) return null;
+  const { windowOn, min, max, smoothOn, smoothness, height, length } = r;
+  if (typeof windowOn !== "boolean" || typeof smoothOn !== "boolean") return null;
+  if (typeof min !== "number" || !Number.isFinite(min)) return null;
+  if (typeof max !== "number" || !Number.isFinite(max)) return null;
   if (typeof smoothness !== "number" || !Number.isFinite(smoothness)) return null;
-  if (typeof thresholdOn !== "boolean" || typeof smoothOn !== "boolean") return null;
+  if (typeof length !== "number" || !Number.isFinite(length)) return null;
+  if (typeof height !== "string" || !HEIGHTS.has(height)) return null;
+  const lo = clampTo(min, 0, 1);
   return {
     src: src as SignalId,
-    expansion: clampTo(expansion, SHAPING_EXPANSION_MIN, SHAPING_EXPANSION_MAX),
-    thresholdOn,
-    threshold: clampTo(threshold, 0, 1),
+    windowOn,
+    min: lo,
+    max: Math.max(clampTo(max, 0, 1), lo),
     smoothOn,
     smoothness: clampTo(smoothness, 0, 1),
+    height: height as HitHeight,
+    length: clampTo(length, 0, SHAPING_LENGTH_MAX_SEC),
   };
 }
 
@@ -156,15 +178,31 @@ export function getShapingNode(id: string): ShapingNode | undefined {
   return state.nodes.find((n) => n.id === id);
 }
 
+/** A node's definition without its id. */
+export function shapingNodeDef(node: ShapingNode): ShapingNodeDef {
+  return {
+    src: node.src,
+    windowOn: node.windowOn,
+    min: node.min,
+    max: node.max,
+    smoothOn: node.smoothOn,
+    smoothness: node.smoothness,
+    height: node.height,
+    length: node.length,
+  };
+}
+
 export function addShapingNode(src: SignalId, def: Partial<Omit<ShapingNodeDef, "src">> = {}): ShapingNode | null {
   if (state.nodes.length >= SHAPING_NODES_MAX) return null;
   const clean = sanitizeShapingNodeDef({
     src,
-    expansion: def.expansion ?? SHAPING_EXPANSION_DEFAULT,
-    thresholdOn: def.thresholdOn ?? false,
-    threshold: def.threshold ?? SHAPING_THRESHOLD_DEFAULT,
+    windowOn: def.windowOn ?? true,
+    min: def.min ?? GENERIC_THRESHOLD_DEFAULT,
+    max: def.max ?? GENERIC_WINDOW_MAX_DEFAULT,
     smoothOn: def.smoothOn ?? true,
-    smoothness: def.smoothness ?? SHAPING_SMOOTHNESS_DEFAULT,
+    smoothness: def.smoothness ?? GENERIC_SMOOTHNESS_DEFAULT,
+    height: def.height ?? "graded",
+    length: def.length ?? 0,
   });
   if (!clean) return null;
   const node: ShapingNode = { id: `n${state.next}`, ...clean };
@@ -173,7 +211,7 @@ export function addShapingNode(src: SignalId, def: Partial<Omit<ShapingNodeDef, 
   return node;
 }
 
-export function updateShapingNode(id: string, patch: Partial<Omit<ShapingNodeDef, "src">>): void {
+export function updateShapingNode(id: string, patch: Partial<ShapingNodeDef>): void {
   const at = state.nodes.findIndex((n) => n.id === id);
   if (at < 0) return;
   const cur = state.nodes[at];
@@ -195,11 +233,13 @@ export function removeShapingNode(id: string): void {
 export function sameShapingNodeDef(a: ShapingNodeDef, b: ShapingNodeDef): boolean {
   return (
     a.src === b.src &&
-    a.expansion === b.expansion &&
-    a.thresholdOn === b.thresholdOn &&
-    a.threshold === b.threshold &&
+    a.windowOn === b.windowOn &&
+    a.min === b.min &&
+    a.max === b.max &&
     a.smoothOn === b.smoothOn &&
-    a.smoothness === b.smoothness
+    a.smoothness === b.smoothness &&
+    a.height === b.height &&
+    a.length === b.length
   );
 }
 
@@ -231,34 +271,62 @@ export function subscribeShapingNodes(cb: () => void): () => void {
 // ---- pure math ----------------------------------------------------------
 
 export interface ShapingState {
+  /** The value the window sees: the input, or its Fixed/Loud envelope. */
   input: number;
   output: number;
-  mean: number;
-  warm: boolean;
+  /** The window's Min and Max lines on the input's scale (tracker.line/top); 0 while the window is off. */
+  line: number;
+  top: number;
+  tracker: GateTrackerState;
+  heightEnv: number;
+  /** Length's falling envelope. */
+  env: number;
+  /** The input this state learned from; a different one starts it over. */
+  src: SignalId | null;
 }
 
 export function createShapingState(): ShapingState {
-  return { input: 0, output: 0, mean: 0, warm: false };
+  return { input: 0, output: 0, line: 0, top: 0, tracker: createGateTracker(), heightEnv: 0, env: 0, src: null };
+}
+
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
 /** One step of a node. The output is clamped to 0..1, the scale every
- *  monitor draws. Smoothness is frame-rate independent: the retain factor is
- *  raised to the elapsed 1/60 s count. */
-export function stepShapingNode(st: ShapingState, node: ShapingNodeDef, input: number, dtSec: number): number {
-  if (!st.warm) {
-    st.mean = input;
-    st.warm = true;
+ *  monitor draws. Length's fall is a straight line at 1/length per second,
+ *  so it is frame-rate independent. */
+export function stepShapingNode(st: ShapingState, node: ShapingNodeDef, dtSec: number, frame: FeatureFrame, anim: AnimFrame): number {
+  if (st.src !== node.src) {
+    st.tracker = createGateTracker();
+    st.heightEnv = 0;
+    st.env = 0;
+    st.src = node.src;
   }
-  st.input = input;
-  st.mean += (input - st.mean) * (1 - Math.exp(-dtSec / SHAPING_MEAN_TAU_SEC));
-  let v = Math.min(1, Math.max(0, st.mean + (input - st.mean) * node.expansion));
-  if (node.thresholdOn && v < node.threshold) v = 0;
-  if (node.smoothOn) {
-    const retain = Math.pow(SHAPING_SMOOTH_RETAIN_MAX * node.smoothness, dtSec * 60);
-    st.output = v + (st.output - v) * retain;
+  const sig = SIGNALS[node.src];
+  let v = sig.read(frame, anim);
+  if (sig.kind === "edge" && node.height !== "graded") {
+    st.heightEnv = stepHeightEnv(st.heightEnv, node.src, node.height, dtSec, anim, frame.energy);
+    v = st.heightEnv;
+  }
+  st.input = v;
+  let y = v;
+  if (node.windowOn) {
+    advanceGateTracker(st.tracker, dtSec, v, node.min, node.max);
+    y = windowReading(st.tracker, v, node.smoothOn ? node.smoothness : 0);
+    st.line = st.tracker.line;
+    st.top = st.tracker.top;
   } else {
-    st.output = v;
+    st.line = 0;
+    st.top = 0;
   }
+  if (node.length > 0) {
+    st.env = Math.max(y, st.env - dtSec / node.length);
+    y = st.env;
+  } else {
+    st.env = y;
+  }
+  st.output = clamp01(y);
   return st.output;
 }
 
@@ -290,7 +358,7 @@ export function createShapingBank(): ShapingBank {
           st = createShapingState();
           states.set(node.id, st);
         }
-        stepShapingNode(st, node, SIGNALS[node.src].read(frame, anim), dtSec);
+        stepShapingNode(st, node, dtSec, frame, anim);
       }
     },
     output(id) {
