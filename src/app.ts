@@ -108,6 +108,7 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
+import { createFrameMisses } from "./render/frameMisses.ts";
 import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import {
   clearOverlayLogo,
@@ -702,6 +703,12 @@ let outputSens = 1;
 let outputExp = 1;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
+/** The Power card's Missed frames and Longest gap (render/frameMisses.ts):
+ *  fed by drawScene, restarted wherever drawing stops or starts over. */
+const frameMisses = createFrameMisses();
+// A hidden tab draws nothing, or draws unseen on the background clock: the
+// gap across it says nothing about frames coming late.
+document.addEventListener("visibilitychange", () => frameMisses.restart());
 /** The Power card's CPU / GPU / heap readouts (render/resourceMeter.ts);
  *  created with the main GL context in boot(). */
 let resourceMeter: ResourceMeter | null = null;
@@ -1021,6 +1028,8 @@ function updateSceneVersionLabel(next: Scene): void {
  *  when it returns false: `scene` has been put back and the HUD explains. */
 function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   const host = mainHost!;
+  // Mounting compiles shaders: the gap across it is not frames coming late.
+  frameMisses.restart();
   // A crossfade still running ends here, its outgoing scene dropped at once.
   compositor?.cancel();
   // A different scene on screen already: it stays mounted, drawn under the new
@@ -2156,6 +2165,7 @@ function wireDeviceMenu(): void {
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
       ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
+      ...frameMisses.read(performance.now()),
     }),
     customValues: {
       get: getCustomValue,
@@ -3716,6 +3726,9 @@ function tick(): void {
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
+    // Nothing to draw this tick (no feed yet, or it went quiet): the gap to
+    // the next drawn frame is not frames coming late.
+    else frameMisses.restart();
     return;
   }
 
@@ -3792,6 +3805,7 @@ function drawScene(
   // A frame with two scenes (a crossfade) or none (Freeze) says nothing about
   // what one scene costs, so the governor does not see it.
   if (governable) governor?.recordFrame(nowRafMs);
+  frameMisses.frame(nowRafMs, intervalMs, document.hidden);
 }
 
 /** Sizes the drawing buffer for this frame and says whether it changed: to
