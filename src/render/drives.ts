@@ -13,6 +13,7 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
 import { getDriveSolo } from "./driveSolo.ts";
+import { createShapingBank, type ShapingState } from "./shapingNodes.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -142,6 +143,12 @@ import { getDriveSolo } from "./driveSolo.ts";
  *   src/render/bandEnergy.ts's own GROUP_TUNING for a band onset — reused
  *   directly (never re-typed by hand) so a Fixed pulse decays exactly as
  *   fast as the Graded pulse it replaces, just with a different height.
+ *
+ * **Shaping nodes.** A `{source:"shaped", id}` source reads a shaping node's
+ * output (src/render/shapingNodes.ts). It is a level-kind reading, like a
+ * level catalogue entry: no height, and a Schmitt trigger for `fired()`. The
+ * bank of node states advances once per tick at the top of `accumulate()`,
+ * so every setting reads the same value that tick. An id with no node reads 0.
  *
  * **Inspection, for the panel.** `sourceValues(key)` returns each source's
  * own `weight·value` this tick, in patch order — un-gained, so the panel can
@@ -341,7 +348,7 @@ import { getDriveSolo } from "./driveSolo.ts";
 
 /** One source inside a patch — never `"scene"` (that's the whole setting's
  *  own escape hatch, not a thing you'd mix alongside real sources). */
-export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex } | { source: "line" };
+export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex } | { source: "line" } | { source: "shaped"; id: string };
 
 /** What a drive setting can be on. `"scene"` keeps its old meaning exactly
  *  (see this file's header); anything else is now a full patch rather than
@@ -757,11 +764,16 @@ function isLineChoice(choice: DriveSourceChoice): choice is { source: "line" } {
   return typeof choice === "object" && choice.source === "line";
 }
 
-/** Plain id, `grid:<i>`, or `line` — what makes a source unique within one
+export function isShapedChoice(choice: DriveSourceChoice): choice is { source: "shaped"; id: string } {
+  return typeof choice === "object" && choice.source === "shaped";
+}
+
+/** Plain id, `grid:<i>`, `shaped:<id>`, or `line` — what makes a source unique within one
  *  patch (see `normalizeDriveSetting`'s dedupe below) and what keys its own
  *  per-tick engine state alongside the setting's own key. */
 export function sourceKey(choice: DriveSourceChoice): string {
   if (typeof choice === "string") return choice;
+  if (choice.source === "shaped") return `shaped:${choice.id}`;
   return choice.source === "beat" ? `grid:${choice.grid}` : "line";
 }
 
@@ -784,6 +796,7 @@ export function sameDriveChoice(a: DriveChoice, b: DriveChoice): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object") return false;
   if (a.source !== b.source) return false;
+  if (a.source === "shaped" && b.source === "shaped") return a.id === b.id;
   return a.source === "beat" && b.source === "beat" ? a.grid === b.grid : true;
 }
 
@@ -895,6 +908,20 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
   }
 
   return { mix: setting.mix, sources };
+}
+
+/** `setting` with every shaped source whose id is a key of `map` re-pointed
+ *  at the mapped id — a Look's node ids are per device, so applying a Look
+ *  rewires its wires to the local nodes it adopted (shapingNodes.ts's
+ *  adoptShapingNodes). Other sources stay as they are. */
+export function remapShapedSources(setting: DriveSetting, map: ReadonlyMap<string, string>): DriveSetting {
+  if (setting === "scene") return "scene";
+  const sources = setting.sources.map((src) => {
+    if (!isShapedChoice(src.choice)) return src;
+    const next = map.get(src.choice.id);
+    return next === undefined ? src : { ...src, choice: { source: "shaped" as const, id: next } };
+  });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
 // ---- Pure patch-editing helpers (deviceMenu.ts, Phase 2) -------------------
@@ -1271,6 +1298,8 @@ export interface DriveEngine {
   /** A read-only view for `anim` — see this file's header for the render
    *  vs. panel distinction in which AnimFrame each caller hands in. */
   forScene(sceneId: string, settings: readonly SceneSetting[], anim: AnimFrame): SceneDrives;
+  /** A shaping node's live input/output this tick (shapingNodes.ts), for the panel; null for an unknown id. */
+  shaped(id: string): Readonly<ShapingState> | null;
 }
 
 export function createDriveEngine(): DriveEngine {
@@ -1288,6 +1317,8 @@ export function createDriveEngine(): DriveEngine {
   // One standout detector per engine-run hit driver (this file's header,
   // "Hit drivers"), advanced by fired() once per AnimFrame.
   const hitDetectors = new Map<string, HitDetector>();
+  // One bank of shaping-node states for this engine (shapingNodes.ts).
+  const shaping = createShapingBank();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -1336,6 +1367,7 @@ export function createDriveEngine(): DriveEngine {
       return wantsHeight ? st.heightEnv : st.gridPulse;
     }
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
+    if (isShapedChoice(choice)) return shaping.output(choice.id);
     // Beat wave's own every-N-beats divider (DriveSource.every): the plain
     // catalogue read is exactly this formula at every=1 (it swings over the
     // metronome's own phase, and metronomePhase is the fractional part of
@@ -1380,6 +1412,8 @@ export function createDriveEngine(): DriveEngine {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
       driveFrameScratch.level = gainedFrame.level;
+      // Every node steps every tick, used by a setting or not: the panel's node monitors read it too.
+      shaping.advance(dtSec, driveFrameScratch, anim);
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();
       for (const spec of settings) {
@@ -1411,6 +1445,8 @@ export function createDriveEngine(): DriveEngine {
             if (result.drive > st.linePulse) st.linePulse = result.drive;
             st.lineExcess.set(result.excess);
             // Height ignored — see this file's header.
+          } else if (isShapedChoice(choice)) {
+            // level-kind: the bank already advanced it above; height ignored
           } else if (SIGNALS[choice].kind === "edge" && wantsHeight) {
             const lane = heightTailLane(choice);
             const rate = heightDecayPerSec(choice) * (lane === null ? 1 : anim.hitTail[lane]);
@@ -1544,7 +1580,7 @@ export function createDriveEngine(): DriveEngine {
           st.gridFiredPending = false;
           return fired;
         }
-        if (!isLineChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
+        if (!isLineChoice(choice) && !isShapedChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
         const st = stateFor(sceneId, key, sourceKey(choice));
         const raw = clampWeight(src.weight) * sourceRaw(key, src);
         return stepValueTrigger(st.valueTrigger, raw, upper, anim);
@@ -1760,6 +1796,10 @@ export function createDriveEngine(): DriveEngine {
           return count ? sum / count : null;
         },
       };
+    },
+
+    shaped(id) {
+      return shaping.reading(id);
     },
   };
 }

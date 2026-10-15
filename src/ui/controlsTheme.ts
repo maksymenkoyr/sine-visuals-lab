@@ -243,6 +243,26 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
+/* The shaping column (src/ui/shapingColumn.ts) sits in the open gap between
+ * the meters column and the settings column, centred in it, so the cables
+ * have room on both sides. The gap runs from the meters column's right edge
+ * (its width and left inset, see .vc-spectrum-col) to the settings column's
+ * left edge (its width, right inset and a gap, see .vc-controls-col); the
+ * column is as wide as that gap allows, up to its own cap. */
+.vc-shape-col {
+  position: fixed; top: 60px; z-index: 30;
+  --vc-shape-gap: calc(100vw - 409px - 346px);
+  width: min(300px, var(--vc-shape-gap));
+  left: calc(409px + (var(--vc-shape-gap) - min(300px, var(--vc-shape-gap))) / 2);
+  max-height: calc(var(--vc-vh) - 150px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.vc-shape-col > * { flex-shrink: 0; }
+.vc-root.vc-meters-hidden .vc-shape-col { display: none; }
+.vc-shape-inport {
+  display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
+  border: 2px solid var(--c); border-radius: 3px; box-sizing: border-box; background: transparent;
+}
 /* Power folds to a small square (POWER_SQUARE_PX) instead of a full-width
  * title bar, in the wide layout only (see powerCard.ts's own header for why:
  * it sits against the settings column, so growing leftward on unfold keeps
@@ -339,6 +359,7 @@ const stylesheet = `
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
+  .vc-shape-col { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
   /* The horizontal triangle-collapse only makes sense beside other columns;
    * a single stacked mobile column has nothing to shrink next to, so
    * dissolve the wrapper the same way .vc-spectrum-col dissolves above and

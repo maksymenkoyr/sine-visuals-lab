@@ -275,7 +275,6 @@
     "knip | exports | src/render/tempoSettle.ts | TEMPO_SETTLE_TOL",
     "knip | exports | src/render/valueTrigger.ts | VALUE_TRIGGER_LOWER_RATIO",
     "knip | exports | src/ui/controlsKit.ts | paletteChipLitStyle",
-    "knip | exports | src/ui/controlsKit.ts | paletteChipStyle",
     "knip | exports | src/ui/controlsKit.ts | paletteListStyle",
     "knip | exports | src/ui/controlsTheme.ts | CABLE_GUTTER_PX",
     "knip | exports | src/ui/fullscreen.ts | fullscreenSupported",

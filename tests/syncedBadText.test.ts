@@ -155,6 +155,27 @@ describe("drive line strength (vibe.drives)", () => {
   });
 });
 
+describe("shaping nodes (vibe.shapingNodes)", () => {
+  // Break: the old hook would swap in whatever loadInitial() made of "{oops"
+  // (the empty store), dropping the node the device already had.
+  it("keeps the current nodes on unreadable text, and empties when absent", async () => {
+    const { fake, synced } = await fresh({
+      "vibe.shapingNodes": JSON.stringify({
+        next: 2,
+        nodes: [{ id: "n1", src: "anim.low", expansion: 1, thresholdOn: false, threshold: 0.3, smoothOn: true, smoothness: 0.5 }],
+      }),
+    });
+    const { listShapingNodes } = await import("../src/render/shapingNodes.ts");
+    expect(listShapingNodes().map((n) => n.id)).toEqual(["n1"]);
+
+    synced.applySyncedStorage({ "vibe.shapingNodes": "{oops" }, fake);
+    expect(listShapingNodes().map((n) => n.id)).toEqual(["n1"]);
+
+    synced.applySyncedStorage({}, fake);
+    expect(listShapingNodes()).toEqual([]);
+  });
+});
+
 describe("custom values (vibe.customValues)", () => {
   // Break: the old hook sets the cache to null, so the next read reloads lazily,
   // parses "nope", gets {} and returns undefined.

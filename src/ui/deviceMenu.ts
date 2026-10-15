@@ -80,7 +80,7 @@ import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from ".
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
-  DRIVE_ADD_GROUPS,
+  driveAddGroups,
   DRIVE_WHITE,
   driveGridDivisionLabel,
   driveSourceColor,
@@ -95,7 +95,8 @@ import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading } from "./audioMeters.ts";
+import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading, type AudioMetersDeps } from "./audioMeters.ts";
+import { createShapingColumn } from "./shapingColumn.ts";
 import {
   createHeatPip,
   createHeatTrack,
@@ -605,6 +606,8 @@ export interface DeviceMenuDeps {
    *  patches (and, while a patch has a source on Frequencies, independent
    *  drawn lines — see getDriveLine below). */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
+  /** A shaping node's live input/output (DriveEngine.shaped), panel open or closed. */
+  getShapingReading(id: string): { input: number; output: number } | null;
   /** Writes a whole DriveSetting straight through (driveStore.ts's own
    *  `setDriveSetting`) — the one generic primitive every other `onSetXxx`
    *  below is a narrower pure-function wrapper around. appendSettingRow's
@@ -2410,6 +2413,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
   });
   const spectrumStrip = bandFaders.strip;
+  // Every function referenced below is a plain (hoisted) function
+  // declaration further down this same closure, in the patch-bay
+  // section — see each one's own doc comment there. Referencing them
+  // here, ahead of their textual declaration, is safe: none of these are
+  // ever called until well after createDeviceMenu() has finished running
+  // and every one of them exists. One bundle, shared by the meters and
+  // the shaping column (shapingColumn.ts).
+  const jackPatch: AudioMetersDeps["patch"] = {
+    usage: jackUsage,
+    isShown: jackIsShown,
+    isPinned: jackIsPinned,
+    isPreview: jackFeedsPreview,
+    isPinnedActive: jackIsPinnedActive,
+    isPreviewActive: jackFeedsPreviewActive,
+    previewIsActive: () => !!activePreview(),
+    isSceneSource: jackIsSceneSource,
+    describe: jackDescribe,
+    onJackClick,
+    onJackHover,
+  };
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
     heatSettings: heatSettingRows,
@@ -2420,25 +2443,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       get: () => deps.getHitShape(),
       set: (partial) => deps.setHitShape(partial),
     },
-    // Every function referenced below is a plain (hoisted) function
-    // declaration further down this same closure, in the patch-bay
-    // section — see each one's own doc comment there. Referencing them
-    // here, ahead of their textual declaration, is safe: none of these are
-    // ever called until well after createDeviceMenu() has finished running
-    // and every one of them exists.
-    patch: {
-      usage: jackUsage,
-      isShown: jackIsShown,
-      isPinned: jackIsPinned,
-      isPreview: jackFeedsPreview,
-      isPinnedActive: jackIsPinnedActive,
-      isPreviewActive: jackFeedsPreviewActive,
-      previewIsActive: () => !!activePreview(),
-      isSceneSource: jackIsSceneSource,
-      describe: jackDescribe,
-      onJackClick,
-      onJackHover,
-    },
+    patch: jackPatch,
+  });
+  // The middle column: shaping nodes (shapingColumn.ts).
+  const shapingCol = createShapingColumn({
+    patch: jackPatch,
+    getReading: deps.getShapingReading,
+    onStructureChanged: shapingStructureChanged,
+    onLayout: scheduleCableRecompute,
   });
 
   const spectrumCol = document.createElement("div");
@@ -3873,7 +3885,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     } else {
       groupsHost.style.cssText = driveAddGroupsStyle;
     }
-    for (const group of DRIVE_ADD_GROUPS) {
+    for (const group of driveAddGroups()) {
       const row = document.createElement("div");
       row.style.cssText = driveAddGroupRowStyle;
       const label = document.createElement("b");
@@ -4955,7 +4967,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  previewed yet, unplug what's already there, or plug in. */
   function jackTooltipLines(choice: DriveSourceChoice): string[] {
     const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
-    const heat = audioMeters.jackHeatText(choice);
+    const heat = audioMeters.jackHeatText(choice) ?? shapingCol.jackHeatText(choice);
     const tail = heat ? [heat] : [];
     const target = jackTarget();
     if (!target) return [line1, "Pin a setting first", ...tail];
@@ -5098,8 +5110,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let lastCableTickMs = performance.now();
   const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
 
+  /** A shaping node was added or removed (shapingColumn.ts): every wire panel
+   *  shows the new set, and the jacks and cables follow. */
+  function shapingStructureChanged(): void {
+    for (const h of driveRowHandles) {
+      h.refreshMeta();
+      h.rebuildIfPinned();
+    }
+    refreshLineMode();
+    refreshPatchHighlight();
+  }
+
   function combinedJackElements(): ReadonlyMap<string, HTMLElement> {
     const merged = new Map(audioMeters.jackElements());
+    for (const [k, v] of shapingCol.jackElements()) merged.set(k, v);
     for (const [k, v] of bandsJackEls) merged.set(k, v);
     return merged;
   }
@@ -5201,7 +5225,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
-      cableLayer.recompute(pinnedGroup, previewGroup, litSignalFan());
+      cableLayer.recompute(pinnedGroup, previewGroup, [...shapingCol.feedGroups(combinedJackElements()), ...litSignalFan()]);
     });
   }
 
@@ -5380,6 +5404,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  anything, on its own rAF-batched schedule. */
   function refreshPatchHighlight(): void {
     audioMeters.refreshPatchView();
+    shapingCol.refreshPatchView();
     refreshBandsJacks();
     refreshSpectrumDriveHighlight();
     spectrumCol.classList.toggle("vc-patching", isAnythingShown());
@@ -5501,6 +5526,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   controlsCol.className = "vc-controls-col vc-scroll";
   cableColumnsRO.observe(controlsCol);
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+  cableColumnsRO.observe(shapingCol.el);
+  shapingCol.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
   // The global "Auto" master switch — toggles every auto-capable row, scene
   // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
@@ -7623,7 +7650,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     : null;
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
-  root.append(columnsWrap, controlsCol);
+  root.append(columnsWrap, controlsCol, shapingCol.el);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
@@ -7901,6 +7928,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (!isOpen || !draw) {
         audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
+        shapingCol.update(frame?.level ?? null, false);
         return;
       }
       // A scene switch (or a renderer with nothing playing) leaves `pinned`
@@ -7912,6 +7940,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // rebuilds anything on the rare tick this fires.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
+      shapingCol.update(frame?.level ?? null, true);
       // Unthrottled, same reasoning as the Bands strip a few lines below —
       // the live row's meter should track frame.level as closely as any
       // other live meter in this panel, not just at the row list's own

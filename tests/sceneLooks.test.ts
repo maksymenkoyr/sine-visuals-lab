@@ -20,6 +20,7 @@ import {
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
 import { clearCustomValue, getCustomValue, getSliderStretch, setCustomValue, stretchSlider } from "../src/render/customValues.ts";
+import { addShapingNode, listShapingNodes, removeShapingNode, SHAPING_SMOOTHNESS_DEFAULT, SHAPING_THRESHOLD_DEFAULT } from "../src/render/shapingNodes.ts";
 
 // Vitest runs under environment: "node" (vitest.config.ts) — no localStorage
 // global at all, mirroring panelFolds.test.ts. Proves the module tolerates
@@ -375,5 +376,73 @@ describe("primeUndo / takeUndo", () => {
     primeUndo("undoScene", SPECS, "neon");
     expect(takeUndo("undoScene")?.paletteId).toBe("neon");
     expect(takeUndo("undoScene")).toBeNull();
+  });
+});
+
+describe("shaping nodes in a Look (h)", () => {
+  const DEF = { src: "anim.low" as const, expansion: 1.7, thresholdOn: false, threshold: SHAPING_THRESHOLD_DEFAULT, smoothOn: false, smoothness: SHAPING_SMOOTHNESS_DEFAULT };
+  const wireJson = (payload: unknown): string => btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  it("captureLook embeds the definitions its wires reference", () => {
+    const node = addShapingNode("anim.low", { expansion: 1.7, smoothOn: false })!;
+    const sceneId = "look-shaped-capture";
+    setDriveSetting(sceneId, FLASH, { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }, { choice: "anim.high", weight: 1 }] });
+    const look = captureLook("L", sceneId, [FLASH]);
+    expect(look.shapingNodes).toEqual({ [node.id]: DEF });
+    removeShapingNode(node.id);
+  });
+
+  it("encode then decode keeps shapingNodes", () => {
+    const look: SceneLook = {
+      name: "S",
+      sceneId: "caustics",
+      manual: {},
+      drives: { flash: { mix: "add", sources: [{ choice: { source: "shaped", id: "n4" }, weight: 1 }, { choice: "anim.high", weight: 1 }] } },
+      shapingNodes: { n4: DEF },
+    };
+    expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  it("decode rejects a bad h key or value", () => {
+    const base = { v: 1, n: "x", s: "caustics", m: {}, d: { flash: "anim.high" } };
+    expect(decodeLook(wireJson({ ...base, h: { x1: DEF } }))).toBeNull();
+    expect(decodeLook(wireJson({ ...base, h: { n1: { ...DEF, src: "__proto__" } } }))).toBeNull();
+    expect(decodeLook(wireJson({ ...base, h: { n1: "x" } }))).toBeNull();
+    expect(decodeLook(wireJson({ ...base, h: [] }))).toBeNull();
+  });
+
+  it("applyLook adds the node a Look needs and rewires its wire to the new id", () => {
+    const sceneId = "look-shaped-apply-new";
+    const look: SceneLook = {
+      name: "L",
+      sceneId,
+      manual: {},
+      drives: { flash: { mix: "add", sources: [{ choice: { source: "shaped", id: "n77" }, weight: 1 }] } },
+      shapingNodes: { n77: DEF },
+    };
+    const before = listShapingNodes().length;
+    applyLook(look, [FLASH]);
+    expect(listShapingNodes().length).toBe(before + 1);
+    const added = listShapingNodes()[before]!;
+    expect(added.expansion).toBe(1.7);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: added.id }, weight: 1 }] });
+    removeShapingNode(added.id);
+  });
+
+  it("applyLook reuses an identical node that is already on the device", () => {
+    const sceneId = "look-shaped-apply-reuse";
+    const existing = addShapingNode("anim.low", { expansion: 1.7, smoothOn: false })!;
+    const before = listShapingNodes().length;
+    const look: SceneLook = {
+      name: "L",
+      sceneId,
+      manual: {},
+      drives: { flash: { mix: "add", sources: [{ choice: { source: "shaped", id: "n9" }, weight: 1 }] } },
+      shapingNodes: { n9: DEF },
+    };
+    applyLook(look, [FLASH]);
+    expect(listShapingNodes().length).toBe(before);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: existing.id }, weight: 1 }] });
+    removeShapingNode(existing.id);
   });
 });

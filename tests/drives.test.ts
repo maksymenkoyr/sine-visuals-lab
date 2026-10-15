@@ -9,12 +9,14 @@ import {
   hasLiveSource,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
+  remapShapedSources,
   sameDriveChoice,
   sameDriveSetting,
   setPatchMix,
   setSourceMuted,
   setSourceRole,
   smoothstep,
+  sourceKey,
   specMapFor,
   togglePatchSource,
   type DriveChoice,
@@ -24,6 +26,7 @@ import {
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
 import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
 import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
+import { addShapingNode, removeShapingNode } from "../src/render/shapingNodes.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -1939,3 +1942,54 @@ describe("Only this (driveSolo)", () => {
   });
 });
 
+
+describe("drives: shaping nodes (shapingNodes.ts)", () => {
+  it("a setting wired to a node reads the node output after accumulate", () => {
+    const node = addShapingNode("anim.low", { smoothOn: false })!;
+    const sceneId = "shaped-read";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }] });
+    const engine = createDriveEngine();
+    const f = frame({ bands: new Float32Array(NUM_BANDS).fill(0.6) });
+    const anim = createAnimClock().advance(DT, f);
+    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+    const out = engine.shaped(node.id)!.output;
+    expect(out).toBeGreaterThan(0);
+    expect(engine.forScene(sceneId, [spec], anim).value("k", -999)).toBeCloseTo(out, 9);
+    removeShapingNode(node.id);
+  });
+
+  it("a dangling id reads 0 and does not throw in value, fired or sourceValues", () => {
+    const sceneId = "shaped-dangling";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: "n999999" }, weight: 1 }] });
+    const engine = createDriveEngine();
+    const f = frame();
+    const anim = createAnimClock().advance(DT, f);
+    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("k", -999)).toBe(0);
+    expect(typeof drives.fired("k", false)).toBe("boolean");
+    expect(drives.sourceValues("k")).not.toBeNull();
+    expect(engine.shaped("n999999")).toBeNull();
+  });
+
+  it("sourceKey and sameDriveChoice tell shaped ids apart", () => {
+    expect(sourceKey({ source: "shaped", id: "n3" })).toBe("shaped:n3");
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n1" })).toBe(true);
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n2" })).toBe(false);
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "line" })).toBe(false);
+  });
+
+  it("normalizeDriveSetting dedupes one shaped id, and keeps two different ones", () => {
+    const same = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n1" }, weight: 0.5 }] });
+    expect(same).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
+    const two = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }] });
+    expect((two as DrivePatch).sources.length).toBe(2);
+  });
+
+  it("remapShapedSources rewrites mapped ids only", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] };
+    const out = remapShapedSources(setting, new Map([["n1", "n7"]]));
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n7" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
+    expect(remapShapedSources("scene", new Map([["n1", "n7"]]))).toBe("scene");
+  });
+});

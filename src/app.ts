@@ -2012,6 +2012,7 @@ function wireDeviceMenu(): void {
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     getDriveSetting: (sceneId, spec) => getDriveSetting(sceneId, spec),
+    getShapingReading: (id) => driveEngine.shaped(id),
     onSetDriveSetting: (sceneId, spec, setting) => setDriveSetting(sceneId, spec, setting),
     onResetDriveSetting: (sceneId, spec) => resetDriveSetting(sceneId, spec),
     onUnplugAll: (sceneId, spec) => setDriveSetting(sceneId, spec, { mix: "add", sources: [] }),
