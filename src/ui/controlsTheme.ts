@@ -248,7 +248,10 @@ const stylesheet = `
  * have room on both sides. The gap runs from the meters column's right edge
  * (its width and left inset, see .vc-spectrum-col) to the settings column's
  * left edge (its width, right inset and a gap, see .vc-controls-col); the
- * column is as wide as that gap allows, up to its own cap. */
+ * column is as wide as that gap allows, up to its own cap. The JS places it
+ * (deviceMenu.ts placeShapingColumn writes inline left, top, width and
+ * max-height on every recompute, moving it below Power when the gap closes);
+ * the left and width here are only the fallback before the first placement. */
 .vc-shape-col {
   position: fixed; top: 60px; z-index: 30;
   --vc-shape-gap: calc(100vw - 409px - 346px);
@@ -263,6 +266,11 @@ const stylesheet = `
   display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
   border: 2px solid var(--c); border-radius: 3px; box-sizing: border-box; background: transparent;
 }
+/* Patch focus (deviceMenu.ts refreshChain, src/ui/patchChain.ts): while a chain is lit, everything off it steps back. */
+.vc-root.vc-chain-on .vc-chain-off { opacity: 0.32; }
+.vc-shape-node.vc-chain-focus { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 18px -6px var(--vc-node-c, #fff); }
+.vc-shape-node.vc-shape-pinned { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 22px -4px var(--vc-node-c, #fff); }
+.vc-shape-inport.vc-shape-inport-on { background: var(--c); }
 /* Power folds to a small square (POWER_SQUARE_PX) instead of a full-width
  * title bar, in the wide layout only (see powerCard.ts's own header for why:
  * it sits against the settings column, so growing leftward on unfold keeps

@@ -91,7 +91,7 @@ import {
   jackKey,
   shapingNodeLabel,
 } from "./driveSources.ts";
-import { addShapingNode } from "../render/shapingNodes.ts";
+import { addShapingNode, getShapingNode, listShapingNodes, updateShapingNode } from "../render/shapingNodes.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
@@ -99,6 +99,7 @@ import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading, type AudioMetersDeps } from "./audioMeters.ts";
 import { createShapingColumn } from "./shapingColumn.ts";
+import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import {
   createHeatPip,
   createHeatTrack,
@@ -2456,6 +2457,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     getReading: deps.getShapingReading,
     onStructureChanged: shapingStructureChanged,
     onLayout: scheduleCableRecompute,
+    onNodePress: toggleNodePin,
+    isNodePinned: (id) => pinnedNode === id,
   });
 
   const spectrumCol = document.createElement("div");
@@ -2573,6 +2576,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  below, Escape (onKeyDown), or a scene switch (renderSceneSettings's
    *  own tail). */
   let pinned: { sceneId: string; spec: SceneSetting } | null = null;
+  /** A pinned shaping node (shapingColumn.ts): its chain stays lit, and a click on an input jack makes it read that input. Never set together with `pinned`. */
+  let pinnedNode: string | null = null;
+  /** The shaping node card under the pointer, lighting its chain. */
+  let hoverNode: string | null = null;
   // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
   // because togglePin and every pinned patch panel's own Solo chip read it.
   let soloOn = false;
@@ -4843,6 +4850,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cancelPendingPreview();
     const next = { sceneId, spec };
     pinned = samePair(pinned, next) ? null : next;
+    if (pinned) pinnedNode = null;
     preview = null;
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
@@ -4944,15 +4952,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return n;
   }
 
+  /** The pinned shaping node's input jack, when a node is pinned and no setting is — the node's input lights as the one it reads. */
+  function pinnedNodeInput(choice: DriveSourceChoice): boolean {
+    if (!pinnedNode) return false;
+    const node = getShapingNode(pinnedNode);
+    return !!node && jackKey(node.src) === jackKey(choice);
+  }
+
   function jackIsShown(choice: DriveSourceChoice): boolean {
     const sel = shownSelection();
-    if (!sel) return false;
+    if (!sel) return pinnedNodeInput(choice);
     const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
   function jackIsPinned(choice: DriveSourceChoice): boolean {
-    if (!pinned) return false;
+    if (!pinned) return pinnedNodeInput(choice);
     const setting = deps.getDriveSetting(pinned.sceneId, pinned.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
@@ -4983,7 +4998,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  mute-agnostic — it's still plugged in) while its row stops lighting up
    *  (this file's own header's Muting paragraph). */
   function jackIsPinnedActive(choice: DriveSourceChoice): boolean {
-    if (!pinned) return false;
+    if (!pinned) return pinnedNodeInput(choice);
     const src = sourceForChoice(deps.getDriveSetting(pinned.sceneId, pinned.spec), choice);
     return !!src && !src.off;
   }
@@ -5030,6 +5045,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
     const name = driveSourceLabel(choice);
+    if (pinnedNode && getShapingNode(pinnedNode)) {
+      const aria = typeof choice === "string" ? `Make ${shapingNodeLabel(pinnedNode)} read ${name}` : `${name} — a shaping node reads one input node`;
+      return { aria, title: name };
+    }
     const target = jackTarget();
     if (!target) return { aria: `${name} — pick a setting first`, title: name };
     const already = jackFeeds(target, choice);
@@ -5046,6 +5065,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
     const heat = audioMeters.jackHeatText(choice) ?? shapingCol.jackHeatText(choice);
     const tail = heat ? [heat] : [];
+    if (pinnedNode && getShapingNode(pinnedNode)) {
+      const line2 = typeof choice === "string" ? `Click to make ${shapingNodeLabel(pinnedNode)} read this` : "A shaping node reads one input node";
+      return [line1, line2, ...tail];
+    }
     const target = jackTarget();
     if (!target) return [line1, "Pin a setting first", ...tail];
     const line2 = jackFeeds(target, choice) ? `Click to unplug from ${target.spec.label}` : `Click to plug into ${target.spec.label}`;
@@ -5060,6 +5083,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let justAddedKey: string | null = null;
 
   function onJackClick(choice: DriveSourceChoice): void {
+    if (pinnedNode) {
+      const node = getShapingNode(pinnedNode);
+      if (node) {
+        if (typeof choice !== "string") {
+          showToast("A shaping node reads one input node");
+          return;
+        }
+        if (node.src !== choice) {
+          updateShapingNode(node.id, { src: choice });
+          showToast(`${shapingNodeLabel(node.id)} now reads ${driveSourceLabel(choice)}`);
+        }
+        return;
+      }
+    }
     const target = jackTarget();
     if (!target) {
       showToast("Pick a setting first");
@@ -5190,6 +5227,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** A shaping node was added or removed (shapingColumn.ts): every wire panel
    *  shows the new set, and the jacks and cables follow. */
   function shapingStructureChanged(): void {
+    if (pinnedNode && !getShapingNode(pinnedNode)) pinnedNode = null;
+    if (hoverNode && !getShapingNode(hoverNode)) hoverNode = null;
     for (const h of driveRowHandles) {
       h.refreshMeta();
       h.rebuildIfPinned();
@@ -5299,6 +5338,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cableRecomputeQueued = true;
     requestAnimationFrame(() => {
       cableRecomputeQueued = false;
+      placeShapingColumn();
       positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
@@ -5328,30 +5368,38 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     hoverJackRow = hover;
     focusJackRow = focus;
     if (hadFan || hover || focus) scheduleCableRecompute();
+    refreshChain();
   }
   // Not for a finger: a tap is no hover, and drawing a wired jack's cables
   // as the tap lands cost the tap its click on iPad Safari.
   root.addEventListener("pointerover", (e) => {
-    if (e.pointerType !== "touch") setLitJackRows(jackRowOf(e.target), focusJackRow);
+    if (e.pointerType === "touch") return;
+    setLitJackRows(jackRowOf(e.target), focusJackRow);
+    const card = e.target instanceof Element ? e.target.closest<HTMLElement>(".vc-shape-node") : null;
+    setHoverNode(card?.dataset.nodeId ?? null);
   });
-  root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
+  root.addEventListener("pointerleave", () => {
+    setLitJackRows(null, focusJackRow);
+    setHoverNode(null);
+  });
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
 
-  /** One fan group per port the lit row's jack(s) reach in the active
-   *  scene — one cable per (setting, jack), so a jack draws exactly as
-   *  many cables as it has usage dots. */
+  /** One fan group per port the chain's fan jacks reach in the active
+   *  scene (patchChain.ts's fanKeys: a hovered or focused input row's own
+   *  jacks and its nodes' jacks, or a hovered or pinned node's own jack) —
+   *  one cable per (setting, jack), so a jack draws exactly as many cables
+   *  as it has usage dots. A setting's focus draws nothing here: its own
+   *  cables already run. */
   function litSignalFan(): CableGroupSpec[] {
-    const rows = [hoverJackRow, focusJackRow].filter((r): r is HTMLElement => r !== null);
-    if (!rows.length) return [];
-    const keyOfEl = new Map<HTMLElement, string>();
-    for (const [key, el] of combinedJackElements()) keyOfEl.set(el, key);
+    const focus = shownChainFocus();
+    if (!focus || focus.kind === "setting") return [];
+    const chain = chainOf(chainGraph(), focus);
+    const jackEls = combinedJackElements();
     const litJacks = new Map<string, HTMLElement>();
-    for (const row of rows) {
-      for (const el of row.querySelectorAll<HTMLElement>(".vc-jack")) {
-        const key = keyOfEl.get(el);
-        if (key) litJacks.set(key, el);
-      }
+    for (const key of chain.fanKeys) {
+      const el = jackEls.get(key);
+      if (el) litJacks.set(key, el);
     }
     const sceneId = deps.currentSceneId();
     const groups: CableGroupSpec[] = [];
@@ -5485,7 +5533,132 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshBandsJacks();
     refreshSpectrumDriveHighlight();
     spectrumCol.classList.toggle("vc-patching", isAnythingShown());
+    refreshChain();
     scheduleCableRecompute();
+  }
+
+  // ---- Patch focus across the three columns (patchChain.ts) ----
+  // What is focused lights its chain: input rows, shaping node cards and
+  // settings dim to whatever is off it. chainGraph() reads the patch as
+  // plain keys; refreshChain() paints the result. Runs only on focus and
+  // patch changes, never per frame.
+
+  /** A pinned shaping node's pin toggle (shapingColumn.ts onNodePress). Pinning one unpins any setting. */
+  function toggleNodePin(id: string): void {
+    const next = pinnedNode === id ? null : id;
+    if (next && pinned) togglePin(pinned.sceneId, pinned.spec);
+    pinnedNode = next;
+    refreshPatchHighlight();
+    scheduleCableRecompute();
+  }
+
+  function setHoverNode(id: string | null): void {
+    if (id === hoverNode) return;
+    hoverNode = id;
+    refreshChain();
+    scheduleCableRecompute();
+  }
+
+  /** What the panel's chain light follows (patchChain.ts): a hovered node card, a hovered or keyboard-focused input row, a previewed setting, a pinned node, a pinned setting — in that order. */
+  function shownChainFocus(): ChainFocus | null {
+    if (hoverNode) return { kind: "node", id: hoverNode };
+    const row = hoverJackRow ?? focusJackRow;
+    if (row) {
+      const card = row.closest<HTMLElement>(".vc-shape-node");
+      if (card?.dataset.nodeId) return { kind: "node", id: card.dataset.nodeId };
+      const keyOfEl = new Map<HTMLElement, string>();
+      for (const [key, el] of combinedJackElements()) keyOfEl.set(el, key);
+      const keys: string[] = [];
+      for (const el of row.querySelectorAll<HTMLElement>(".vc-jack")) {
+        const key = keyOfEl.get(el);
+        if (key) keys.push(key);
+      }
+      if (keys.length) return { kind: "input", keys };
+    }
+    const ap = activePreview();
+    if (ap) return { kind: "setting", key: ap.spec.key };
+    if (pinnedNode) return { kind: "node", id: pinnedNode };
+    if (pinned?.spec.drive) return { kind: "setting", key: pinned.spec.key };
+    return null;
+  }
+
+  /** The patch as plain keys (patchChain.ts's ChainGraph): every shaping node with its own jack key and its input's, and every wired setting in the active scene with its wires' jack keys. */
+  function chainGraph(): ChainGraph {
+    const nodes = listShapingNodes().map((n) => ({ id: n.id, key: jackKey({ source: "shaped", id: n.id }), inputKey: jackKey(n.src) }));
+    const sceneId = deps.currentSceneId();
+    const settings: ChainGraph["settings"][number][] = [];
+    for (const h of driveRowHandles) {
+      if (h.sceneId !== sceneId || !h.spec.drive) continue;
+      const setting = deps.getDriveSetting(h.sceneId, h.spec);
+      settings.push({ key: h.spec.key, wireKeys: setting === "scene" ? [] : setting.sources.map((s) => jackKey(s.choice)) });
+    }
+    return { nodes, settings };
+  }
+
+  /** Paints the chain of shownChainFocus(): dims the settings, shaping nodes and input rows off it, marks the focused node, and root's vc-chain-on switches the dimming on. */
+  function refreshChain(): void {
+    const focus = shownChainFocus();
+    const chain = focus ? chainOf(chainGraph(), focus) : null;
+    root.classList.toggle("vc-chain-on", chain !== null);
+    for (const h of driveRowHandles) h.rowEl.classList.toggle("vc-chain-off", !!chain && !chain.settings.has(h.spec.key));
+    shapingCol.setChain(chain ? chain.nodes : null, focus?.kind === "node" ? focus.id : null);
+    // Input rows: only for an input or node focus — a setting's focus already dims the meters through .vc-patching.
+    const dimInputs = focus !== null && focus.kind !== "setting";
+    const rowLit = new Map<HTMLElement, boolean>();
+    for (const [key, el] of combinedJackElements()) {
+      if (shapingCol.el.contains(el)) continue;
+      const row = el.closest<HTMLElement>(".vc-row");
+      if (!row) continue;
+      rowLit.set(row, (rowLit.get(row) ?? false) || (!!chain && chain.inputs.has(key)));
+    }
+    for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-off", dimInputs && !lit);
+  }
+
+  // The middle column's place in the open gap (controlsTheme.ts's
+  // .vc-shape-col rules are only the fallback before the first placement).
+  const SHAPE_COL_MIN_PX = 240;
+  const SHAPE_COL_MAX_PX = 300;
+  const SHAPE_COL_GAP_PX = 16;
+  /** Matches .vc-shape-col's CSS top (controlsTheme.ts). */
+  const SHAPE_COL_TOP_PX = 60;
+  /** What .vc-shape-col's max-height leaves below its top (the CSS fallback's own subtraction). */
+  const SHAPE_COL_BELOW_PX = 90;
+  const SHAPE_COL_CLEAR = { left: "", top: "", width: "", maxHeight: "" };
+
+  /** Writes each inline value only when it differs, since this runs on every scroll's recompute. */
+  function setShapePlacement(p: { left: string; top: string; width: string; maxHeight: string }): void {
+    const style = shapingCol.el.style;
+    if (style.left !== p.left) style.left = p.left;
+    if (style.top !== p.top) style.top = p.top;
+    if (style.width !== p.width) style.width = p.width;
+    if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
+  }
+
+  /** Places the shaping column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. Writes only when a value changes, since this runs on every scroll's recompute. */
+  function placeShapingColumn(): void {
+    if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
+      setShapePlacement(SHAPE_COL_CLEAR);
+      return;
+    }
+    const meters = spectrumCol.getBoundingClientRect();
+    const settings = controlsCol.getBoundingClientRect();
+    const powerRect = powerCol.querySelector<HTMLElement>(".vc-power-card")?.getBoundingClientRect();
+    const power = powerRect && powerRect.width > 0 ? powerRect : null;
+    const left0 = meters.right + SHAPE_COL_GAP_PX;
+    let right0 = (power ? power.left : settings.left) - SHAPE_COL_GAP_PX;
+    let top = SHAPE_COL_TOP_PX;
+    if (right0 - left0 < SHAPE_COL_MIN_PX && power) {
+      right0 = settings.left - SHAPE_COL_GAP_PX;
+      top = Math.max(SHAPE_COL_TOP_PX, power.bottom + 8);
+    }
+    const width = Math.max(0, Math.min(SHAPE_COL_MAX_PX, right0 - left0));
+    const left = left0 + (right0 - left0 - width) / 2;
+    setShapePlacement({
+      left: `${Math.round(left)}px`,
+      top: `${Math.round(top)}px`,
+      width: `${Math.round(width)}px`,
+      maxHeight: `calc(var(--vc-vh) - ${Math.round(top + SHAPE_COL_BELOW_PX)}px)`,
+    });
   }
 
   // A hover-scheduled preview change not yet committed — see
@@ -7836,6 +8009,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function onKeyDown(e: KeyboardEvent) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (isTypingTarget(e.target)) return;
+    if (e.key === "Escape" && pinnedNode) {
+      pinnedNode = null;
+      refreshPatchHighlight();
+      scheduleCableRecompute();
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Escape" && pinned) {
       togglePin(pinned.sceneId, pinned.spec);
       e.preventDefault();

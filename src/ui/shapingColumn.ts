@@ -52,6 +52,10 @@ export interface ShapingColumnDeps {
   onStructureChanged(): void;
   /** The column's layout moved (cards rebuilt, a fold): recompute cables. */
   onLayout(): void;
+  /** A node's monitor row or input port was clicked (the pin toggle, deviceMenu.ts toggleNodePin). */
+  onNodePress(id: string): void;
+  /** Whether this node is the pinned one (deviceMenu.ts), read on every patch view refresh. */
+  isNodePinned(id: string): boolean;
 }
 
 export interface ShapingColumn {
@@ -65,6 +69,8 @@ export interface ShapingColumn {
   jackHeatText(choice: DriveSourceChoice): string | null;
   /** Every tick, panel open or closed: records each node's history and heat; draws only when onScreen. */
   update(level: number | null, onScreen: boolean): void;
+  /** Dims every card off the chain (null: no chain lit) and marks the focused node's card. Kept across rebuilds. */
+  setChain(nodes: ReadonlySet<string> | null, focusId: string | null): void;
 }
 
 /** Height of a node's graph, in CSS px. */
@@ -437,6 +443,9 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
 
   const states = new Map<string, NodeState>();
   const views = new Map<string, NodeView>();
+  /** The last setChain arguments, re-applied at the end of rebuild(). */
+  let chainNodes: ReadonlySet<string> | null = null;
+  let chainFocusId: string | null = null;
   const jackMap = new Map<string, HTMLElement>();
   const cardEls: HTMLElement[] = [];
   let renderedKey = "";
@@ -551,12 +560,20 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
     });
 
     const card = createCard({ title: label, accent: color, foldId: `shape-${node.id}`, right: removeBtn });
+    card.el.classList.add("vc-shape-node");
+    card.el.dataset.nodeId = node.id;
+    card.el.style.setProperty("--vc-node-c", color);
 
     const row = createMeterRow({
       label: `In: ${driveSourceLabel(node.src)}`,
       accent: color,
       description: "This node takes the input node named here and sends a changed copy out of its jack. Plug the jack into any setting, like an input node's.",
     });
+    // A click on the row or its input port (inportEl sits inside the row)
+    // pins the node; the jack's own click stops propagation before here.
+    row.el.style.cursor = "pointer";
+    row.el.title = "Click to pin this node: its chain stays lit, and a click on an input jack makes it read that input.";
+    row.el.addEventListener("click", () => deps.onNodePress(node.id));
     const inportEl = document.createElement("span");
     inportEl.className = "vc-shape-inport";
     inportEl.style.setProperty("--c", color);
@@ -648,7 +665,15 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
       jackMap.set(jackKey(v.choice), v.jack.el);
     }
     updateAddVisibility();
+    applyChain();
     if (notifyLayout) deps.onLayout();
+  }
+
+  function applyChain(): void {
+    for (const v of views.values()) {
+      v.el.classList.toggle("vc-chain-off", chainNodes !== null && !chainNodes.has(v.id));
+      v.el.classList.toggle("vc-chain-focus", v.id === chainFocusId);
+    }
   }
 
   function drawGraph(st: NodeState, node: ShapingNode | undefined): void {
@@ -709,10 +734,19 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
         v.jack.setUses(deps.patch.usage(c));
         const { aria, title } = deps.patch.describe(c);
         v.jack.setLabel(aria, title);
+        const pinnedNode = deps.isNodePinned(v.id);
+        v.el.classList.toggle("vc-shape-pinned", pinnedNode);
+        v.inportEl.classList.toggle("vc-shape-inport-on", pinnedNode);
         if (previewOn && deps.patch.isPreviewActive(c)) setRowFed(v.row.el, "soft", v.color);
         else if (deps.patch.isPinnedActive(c)) setRowFed(v.row.el, previewOn ? "faint" : "full", v.color);
         else setRowFed(v.row.el, "none", "");
       }
+    },
+
+    setChain(nodes, focusId) {
+      chainNodes = nodes;
+      chainFocusId = focusId;
+      applyChain();
     },
 
     jackHeatText(choice) {

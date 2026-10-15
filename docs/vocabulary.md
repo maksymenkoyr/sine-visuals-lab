@@ -35,7 +35,7 @@ on its way to an animation node.
 
 | Say | For |
 |---|---|
-| **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). |
+| **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). A shaping node can be pinned too (click its monitor row or input port): its chain stays lit, and a click on an input jack makes it read that input. |
 | **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, a "+ Add by name" chip, or Unplug. |
 | **switch off** / **switch on** | Muting a wire without unplugging it; its weight, height and role are kept. |
 | **only this** / **all back** | The **O** chip on a reactive setting's row (beside A and T), and a button in its wire panel, that switch off every other setting's reaction so only this one moves, then bring them back; a preview on this screen, the wires are kept. |
