@@ -2175,4 +2175,7 @@ function createPowderScene(): Scene {
   };
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-04" } as const;
+
 export const powderScene = createPowderScene();

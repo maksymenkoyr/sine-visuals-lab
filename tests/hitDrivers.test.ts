@@ -5,7 +5,7 @@
 // drives.hitSize says the reaction is.
 
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createDriveEngine, isEngineHitDriver, PASSTHROUGH_DRIVES, type DrivePatch } from "../src/render/drives.ts";
 import { createAnimClock } from "../src/render/animClock.ts";
@@ -13,8 +13,8 @@ import { getDriveReadout, setDriveReadout, setDriveSetting, setDriveThreshold, s
 import { takeSettingMarks } from "../src/render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
-import type { Scene } from "../src/render/scene.ts";
-import { fileClosure, parseRegistryImports } from "../tools/sceneVersionLib.mjs";
+import { isScene } from "../src/render/scenes/privateScenes.ts";
+import { fileClosure, SCENES_DIR, sceneEntries } from "../tools/sceneVersionLib.mjs";
 
 const DT = 1 / 60;
 
@@ -234,13 +234,10 @@ describe("hit drivers: every drives.fired() setting declares drive.hit", () => {
     }
   };
   const exists = (rel: string) => existsSync(path.join(root, rel));
-  const registry = read("src/render/scenes/index.ts")!;
-  const entries = parseRegistryImports(registry) as { binding: string; unit: string; path: string }[];
-  const entryFileOf = (p: string) => path.posix.join("src/render/scenes", p.replace(/^\.\//, ""));
+  const entries = sceneEntries(readdirSync(path.join(root, SCENES_DIR)), read, exists);
 
-  for (const entry of entries) {
-    it(entry.binding, async () => {
-      const entryFile = entryFileOf(entry.path);
+  for (const { unit, file: entryFile } of entries) {
+    it(unit, async () => {
       // Every scene file it imports, shared ones included (Physarum 2 runs on
       // physarum.ts's helpers); a key this scene has no setting for belongs
       // to another scene sharing the file.
@@ -251,8 +248,8 @@ describe("hit drivers: every drives.fired() setting declares drive.hit", () => {
         if (!src) continue;
         for (const m of src.matchAll(/drives\.fired\(\s*"([^"]+)"/g)) keys.add(m[1]!);
       }
-      const mod = (await import(path.join(root, entryFile))) as Record<string, Scene>;
-      const scene = mod[entry.binding]!;
+      const mod = (await import(path.join(root, entryFile))) as Record<string, unknown>;
+      const scene = Object.values(mod).find(isScene)!;
       for (const key of keys) {
         const spec = scene.settings?.find((s) => s.key === key);
         if (!spec) continue;

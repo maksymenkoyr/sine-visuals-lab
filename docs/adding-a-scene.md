@@ -11,9 +11,9 @@ says what goes in it and what never does.
 A **paid** scene is built the same way but lives elsewhere: in its own folder
 of the private scenes repo, checked out at `src/render/scenes/private/<id>/`,
 with an `index.ts` exporting `scene` (and `draft = true` while it's rough),
-its tests next to it, and its record as `RECORD.md` there. It is never
-registered in `scenes/index.ts` by hand, and nothing about it goes in this
-repo. `src/render/scenes/privateScenes.ts` has the contract.
+its tests next to it, and its record as `RECORD.md` there. It is
+never a free scene module (no `gallery` record), and nothing about it goes in
+this repo. `src/render/scenes/privateScenes.ts` has the contract.
 
 ## The mechanical path
 
@@ -65,11 +65,14 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    `src/ui/widgets/registry.ts` to show the group as boxes/rows instead of
    the plain per-setting loop (Physarum 2's Strains card is the worked
    example).
-3. Register the scene as a side effect in `src/render/scenes/index.ts`
-   (`registerScene(yourScene)`) and export it there like its neighbours. A new
-   scene goes *first* among the drafts — that file's header comment owns the
-   ordering rule and why. Once it's registered this way, it gets its own
-   MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
+3. Make it a scene module: `src/render/scenes/<unit>.ts` or
+   `src/render/scenes/<unit>/index.ts`, exporting the scene and
+   `export const gallery = { stage: "draft", added: "<today>" } as const;` —
+   `src/render/scenes/sceneModules.ts`'s header owns the contract and the
+   ordering (each gallery section lists the newest first).
+   `src/render/scenes/index.ts` finds it on its own; nothing shared is
+   edited, so parallel branches adding scenes don't conflict. Once it's a
+   scene module, it gets its own MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
    how it's counted and how to raise its major by hand.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
    on the `Scene` object — see `src/render/quality.ts` for what each preset means.

@@ -6,7 +6,7 @@ lit white with a sparse share glowing red, a soft ice-blue light washing the
 core on alternating bars. Beats swell the frame's brightness and push the
 camera's travel speed; drops light a fan of spokes; a slow mood cycle decides
 how much of a beat's light goes to the red strips versus the white edges.
-Draft scene (in `DRAFT_SCENE_IDS`, `src/render/scenes/index.ts`), shipped on
+Draft scene (`stage: "draft"` in its `gallery` record), shipped on
 `main` via a single merged PR.
 
 ## Where the code is

@@ -89,7 +89,8 @@ Darker means more important.
   - ●●● **Featured scenes** — the Released section, shown first: the scenes
     `sceneStage` calls released · `src/render/scenes/index.ts`
   - ●●○ **In development scenes** — scenes being worked on now, shown open
-    below Released as small tiles · `IN_DEVELOPMENT_SCENE_IDS`
+    below Released as small tiles · `sceneStage` (each scene's own
+    `gallery.stage`, `src/render/scenes/sceneModules.ts`)
   - ●●○ **Draft scenes** — rougher scenes, greyed out behind the gallery's
     draft toggle. Measured: more than half of all scene views land on drafts
     or scenes in development · `DRAFT_SCENE_IDS`

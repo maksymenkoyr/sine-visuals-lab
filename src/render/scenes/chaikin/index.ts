@@ -513,6 +513,9 @@ const inner = createFullscreenScene(ID, NAME, CHAIKIN_FRAG, {
   },
 });
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "development", added: "2026-10-06" } as const;
+
 export const chaikinScene: Scene = {
   ...inner,
   probe: () => ({ front, tau: state.tau, k: rate, z: state.z, sync: fireOrder(flies) }),

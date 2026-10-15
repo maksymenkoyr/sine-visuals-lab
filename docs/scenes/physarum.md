@@ -12,8 +12,8 @@ itself over seconds rather than an instant. Draft, on main (featured until
 
 `src/render/scenes/physarum.ts` — the header comment is the primary source
 for the whole simulation design (packing, passes, evaporation precision,
-dt handling, composite). Registered as `physarumScene` via `registerScene`
-in `src/render/scenes/index.ts`.
+dt handling, composite). Exported as `physarumScene`, which
+`src/render/scenes/index.ts` registers on its own (`scenes/sceneModules.ts`).
 
 Reuses `grainTextureSide` from `chladni.ts` for its agent-state texture
 sizing, and shares that file's hash family and its reasoning for RGBA8

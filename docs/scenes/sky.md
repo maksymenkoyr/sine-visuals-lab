@@ -6,12 +6,13 @@ of floaters a wandering brush stamps on each beat, a ring of light (pale,
 or split into a spectrum by Rainbow) that glints through them on each beat,
 Haidinger's brush turning over the centre of view and swelling on the beat,
 and blue-field sprites darting all over the sky, surging on each beat. The
-sky runs a 24-hour day with no night. Featured,
-registered right after Physarum 2 and absent from `draftIds` in
-`src/render/scenes/index.ts`.
+sky runs a 24-hour day with no night. Featured: `stage: "released"` in
+its `gallery` record (`sky/index.ts`).
 
 ## Where the code is
 
+- `src/render/scenes/sky/index.ts` — the scene module: re-exports the
+  scene and holds its `gallery` record (`scenes/sceneModules.ts`).
 - `src/render/scenes/sky/sky.ts` — the whole scene: `SETTINGS`, the display
   shader (`buildDisplayFrag`), and the pure, tested helpers the render loop
   drives it with. The file header walks through every part.

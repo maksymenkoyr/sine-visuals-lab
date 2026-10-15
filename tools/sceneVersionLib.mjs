@@ -9,16 +9,15 @@
  * version rule itself, and formatting.
  *
  * **Territory** — which files are "a scene's own" — is a static import
- * closure from the scene's entry module, the one
- * `src/render/scenes/index.ts` imports it from: `import { fooScene } from
- * "./foo.ts"` makes `foo.ts` the entry, and every relative import it
- * reaches (recursing through `.ts` files; a non-`.ts` file, e.g. a shader
- * string or `clips.bin`, is a leaf) belongs to it too. A **unit name** — the
- * key everything here and `src/render/scenes/sceneMajors.json` uses — comes
- * from that import path: the file's own basename for a direct file
- * (`"./caustics.ts"` → `"caustics"`), or the folder for anything nested
- * (`"./sky/sky.ts"`, `"./tessera/index.ts"` → `"sky"`, `"tessera"`) —
- * `unitNameFromImportPath`. A file reachable from two or more scenes' closures
+ * closure from the scene's entry module, its scene module under
+ * src/render/scenes/sceneModules.ts's contract (`sceneEntries` finds them
+ * without running any code): `caustics.ts`, or `tessera/index.ts`, and every
+ * relative import it reaches (recursing through `.ts` files; a non-`.ts`
+ * file, e.g. a shader string or `clips.bin`, is a leaf) belongs to it too. A
+ * **unit name** — the key everything here and
+ * `src/render/scenes/sceneMajors.json` uses — is the entry file's basename
+ * (`caustics.ts` → `"caustics"`) or its folder (`tessera/index.ts` →
+ * `"tessera"`). A file reachable from two or more scenes' closures
  * is shared and belongs to no scene — the same rule
  * `vite-scene-links-plugin.ts`'s `scenesInFlight` uses for "which scene is a
  * changed file working on" — and so is a file the app's own core reaches
@@ -99,52 +98,38 @@ export function parseImportSpecifiers(source) {
   return [...specs];
 }
 
-/** The scene registry's own `import { binding } from "./path"` lines
- *  (`src/render/scenes/index.ts`, one per registered scene) as
- *  `{ binding, unit, path }` triples, in source order — `unit` is
- *  `unitNameFromImportPath(path)` and `path` is the raw (still relative,
- *  unresolved) specifier, since both a git-side reader
- *  (tools/sceneVersions.mjs, resolving it to build a territory) and the
- *  build-side plugin (vite-scene-versions-plugin.ts, matching it against the
- *  binding already in scope in that same module) need it.
- *
- *  A named import only counts as a *scene* if its binding is also passed to
- *  a `registerScene(binding)` call somewhere in the same source — the actual
- *  mechanism that makes something a scene, not just its being imported from a
- *  relative path. That one check is what keeps the registry's own non-scene
- *  imports out: `listScenes`/`registerScene` themselves (from `"../scene.ts"`)
- *  and `collectPrivateScenes` (from `"./privateScenes.ts"`, used to build the
- *  paid scenes checked out under `private/` — never registered this way, so a
- *  paid scene never gets a public version computed for it either). `import
- *  { a, b as c } from "./x"` yields a triple named `c` (not `b`) if `c` is
- *  what's registered — the registry doesn't rename an import today, but
- *  nothing stops it. */
-export function parseRegistryImports(source) {
-  const registered = new Set();
-  const registerCallRe = /\bregisterScene\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
-  let rm;
-  while ((rm = registerCallRe.exec(source))) registered.add(rm[1]);
+/** The directory scene modules live in, repo-relative. */
+export const SCENES_DIR = "src/render/scenes";
 
-  const importRe = /^[ \t]*import\s*\{\s*([^}]+?)\s*\}\s*from\s*["'](\.[^"']+)["']/gm;
+// A scene module's own gallery record, the line that makes it one (see
+// src/render/scenes/sceneModules.ts's header).
+const GALLERY_EXPORT_RE = /^export const gallery\b/m;
+
+/** The scene modules in `SCENES_DIR`, given that directory's top-level
+ *  `names` (a listing of it): each `<unit>.ts` and `<unit>/index.ts` whose
+ *  source has a line starting `export const gallery` —
+ *  src/render/scenes/sceneModules.ts's contract, read without running it.
+ *  `private/` (paid scenes) never counts, so a paid scene never gets a
+ *  public version. `{ unit, file }` pairs, `file` repo-relative, sorted by
+ *  unit. */
+export function sceneEntries(names, readFile, exists) {
   const out = [];
-  let m;
-  while ((m = importRe.exec(source))) {
-    const path = m[2];
-    const unit = unitNameFromImportPath(path);
-    for (const part of m[1].split(",")) {
-      const binding = part.trim().split(/\s+as\s+/).pop()?.trim();
-      if (binding && registered.has(binding)) out.push({ binding, unit, path });
+  for (const name of [...names].sort()) {
+    let unit;
+    let file;
+    if (name.endsWith(".ts")) {
+      if (name === "index.ts") continue;
+      unit = name.slice(0, -".ts".length);
+      file = `${SCENES_DIR}/${name}`;
+    } else {
+      if (name === "private") continue;
+      unit = name;
+      file = `${SCENES_DIR}/${name}/index.ts`;
+      if (!exists(file)) continue;
     }
+    if (GALLERY_EXPORT_RE.test(readFile(file) ?? "")) out.push({ unit, file });
   }
   return out;
-}
-
-/** A scene's unit name from the import path the registry uses for it — see
- *  this file's header. Just the first path segment once `./` and a trailing
- *  `.ts` are stripped: a direct file has no further segment, so that segment
- *  *is* its basename; a nested one's first segment is its folder. */
-export function unitNameFromImportPath(specifier) {
-  return specifier.replace(/^\.\//, "").replace(/\.ts$/, "").split("/")[0];
 }
 
 // ---------------------------------------------------------------------------

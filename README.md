@@ -21,10 +21,11 @@ Press **F** for fullscreen and **S** for settings.
   contrast and smoothing to the music's character in real time, and every
   control can be taken over by hand.
 
-The gallery has three sections, set in `src/render/scenes/index.ts`: scenes
-in `IN_DEVELOPMENT_SCENE_IDS` show below the featured ones, and scenes in
-`DRAFT_SCENE_IDS` sit greyed out behind the gallery's draft toggle. Every other
-scene is featured.
+The gallery has three sections, and each scene picks its own in the `gallery`
+record its module exports (`src/render/scenes/sceneModules.ts`): `released`
+scenes are featured, `development` ones show below them, and `draft` ones sit
+greyed out behind the gallery's draft toggle. Each section lists the newest
+first.
 
 It's early and built by one person. Criticism, device reports, scene ideas and
 pull requests are all welcome: open an issue, start a

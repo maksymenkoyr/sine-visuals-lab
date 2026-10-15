@@ -88,7 +88,7 @@ run's hook is a candidate only if it still opens a loop.
 
 Candidates are what the current Stable does best on screen:
 
-- the featured scenes (those not in `DRAFT_SCENE_IDS` in Stable's `src/render/scenes/index.ts`),
+- the featured scenes (on Stable, the ones whose scene module exports `gallery` with `stage: "released"`; before that change reached Stable, the ones not in `draftIds` in its `src/render/scenes/index.ts`),
   reacting to the song;
 - this release's changes: `notes` writes the changelog to the work folder; read the PR bodies too.
 

@@ -474,6 +474,9 @@ void main() {
 }
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-05" } as const;
+
 export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidoscope", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: `uniform float uFlowPos;\nuniform float uMorphPos;\nuniform float uSpinPos;\nuniform float uZoomPos;\nuniform float uSurgePos;\nuniform float uPalShift;\nuniform float uBeatSwell;`,

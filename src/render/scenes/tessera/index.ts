@@ -313,6 +313,9 @@ const BOX_VERT = boxVert(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl);
 const BOX_FRAG = boxFrag(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl);
 const COMPOSITE_FRAG = compositeFrag(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl);
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-20" } as const;
+
 export const tesseraScene: Scene = (() => {
   let bgProg: GLProgram | null = null;
   let boxProg: GLProgram | null = null;

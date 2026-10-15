@@ -474,6 +474,9 @@ function createCrystalSceneImpl(): Scene {
   };
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-19" } as const;
+
 export const crystalScene: Scene = createCrystalSceneImpl();
 
 // Re-exports so tests/crystal.test.ts and tests/autoTune.test.ts (which

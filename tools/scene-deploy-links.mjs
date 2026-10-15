@@ -38,8 +38,9 @@ function changedScenePaths() {
 
 // A changed file directly under scenes/ is its own entry module
 // (scenes/caustics.ts); a file inside a scene's own folder belongs to that
-// folder's index.ts (scenes/dancers/rig.ts -> scenes/dancers/index.ts), which
-// is the file actually registered in scenes/index.ts.
+// folder's index.ts (scenes/dancers/rig.ts -> scenes/dancers/index.ts), the
+// scene module (scenes/sceneModules.ts). A helper file exports no scene and
+// drops out below.
 function sceneEntryFor(path) {
   const rest = path.slice(SCENES_DIR.length);
   const slash = rest.indexOf("/");

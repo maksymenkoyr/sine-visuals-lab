@@ -420,4 +420,7 @@ function createCoilScene(): Scene {
   };
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "development", added: "2026-10-02" } as const;
+
 export const coilScene = createCoilScene();

@@ -132,6 +132,9 @@ const SETTINGS: SceneSetting[] = [
 let looks: LookState = createLookState();
 let flightZ = 0;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-10-12" } as const;
+
 export const portalScene = createFullscreenScene("portal", "Portal", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: [

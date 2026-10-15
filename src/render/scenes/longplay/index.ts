@@ -321,6 +321,9 @@ function ensure(ctx: SceneContext, i: number): void {
   ready.add(i);
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "development", added: "2026-10-03" } as const;
+
 export const longPlayScene: Scene = {
   id: ID,
   name: NAME,

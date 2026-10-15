@@ -657,6 +657,9 @@ export function advanceWander(st: WanderState, dtSec: number, inputs: WanderInpu
 // otherwise spend the intro before the scene is ever opened.
 let elapsedSec = 0;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-18" } as const;
+
 export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: `uniform float uSeed;\nuniform float uSlowT;\nuniform float uDepthEnv;\nuniform float uBlackoutPhase;\nuniform float uCurtainLevel;\nuniform float uStretchNow;\nuniform float uAngle;\nuniform float uDetailMix;\nuniform float uTilt;`,

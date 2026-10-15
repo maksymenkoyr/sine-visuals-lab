@@ -80,6 +80,9 @@ void main() {
 }
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-08-27" } as const;
+
 // The heaviest of the small raymarch scenes (see comment above) — worse than tunnel.ts, which
 // itself is gated to minQuality "low". uMaxSteps alone isn't enough protection:
 // gate the gallery/scene picker too, or a floor-quality device can select it.

@@ -148,6 +148,9 @@ const SETTING_BY_KEY = new Map(SETTINGS.map((s) => [s.key, s]));
  *  and its smoothness. */
 const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth"] }];
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "development", added: "2026-10-05" } as const;
+
 export const alienScene: Scene = (() => {
   const get = (key: string): number => resolveSceneSetting(ALIEN_ID, SETTING_BY_KEY.get(key)!);
 

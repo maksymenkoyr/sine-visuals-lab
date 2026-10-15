@@ -531,4 +531,7 @@ function createSwarmScene(): Scene {
   };
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "development", added: "2026-10-03" } as const;
+
 export const swarmScene = createSwarmScene();

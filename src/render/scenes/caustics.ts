@@ -1630,6 +1630,9 @@ const PANEL: readonly PanelSection[] = [
   },
 ];
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "released", added: "2026-08-27" } as const;
+
 export const causticsScene = createFullscreenScene(
   "caustics",
   "Caustics",

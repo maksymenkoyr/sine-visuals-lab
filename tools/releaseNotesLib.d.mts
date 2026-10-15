@@ -22,7 +22,7 @@ export interface SceneVersionNote {
 export function prNumberFromSubject(subject: string): number | null;
 export function stripPrSuffix(subject: string): string;
 export function extractHighlights(body: string | null | undefined): string;
-export function addedSceneUnits(registryDiff: string | null | undefined): string[];
+export function newSceneUnits(before: readonly string[], after: readonly string[]): string[];
 export function sceneNameFromSource(source: string | null | undefined): string | null;
 export function areaOfFile(path: string): Exclude<CategoryKey, "newScene"> | null;
 export function categorize(change: {

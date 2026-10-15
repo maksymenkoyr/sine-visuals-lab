@@ -6,11 +6,10 @@ import {
   majorOf,
   ownedFiles,
   parseImportSpecifiers,
-  parseRegistryImports,
   parseSceneMajors,
   resolveImport,
+  sceneEntries,
   sceneVersion,
-  unitNameFromImportPath,
 } from "../tools/sceneVersionLib.mjs";
 
 describe("parseImportSpecifiers", () => {
@@ -57,51 +56,36 @@ describe("parseImportSpecifiers", () => {
   });
 });
 
-describe("unitNameFromImportPath", () => {
-  it("is the basename for a direct file", () => {
-    expect(unitNameFromImportPath("./caustics.ts")).toBe("caustics");
-    expect(unitNameFromImportPath("./meshGrid.ts")).toBe("meshGrid");
-  });
+describe("sceneEntries", () => {
+  const GALLERY = `export const gallery = { stage: "draft", added: "2026-10-01" } as const;\n`;
+  const sources: Record<string, string> = {
+    "src/render/scenes/index.ts": `import { collectScenes } from "./sceneModules.ts";\nconst gallery = 1;\n`,
+    "src/render/scenes/caustics.ts": `export const causticsScene = {};\n${GALLERY}`,
+    "src/render/scenes/meshGrid.ts": `${GALLERY}export const meshGridScene = {};\n`,
+    "src/render/scenes/fluidSim.ts": `export function step() {}\n`,
+    "src/render/scenes/sceneModules.ts": ` * exports \`gallery\`\n * export const gallery in a comment doesn't start a line\n`,
+    "src/render/scenes/sky/index.ts": `export { skyScene } from "./sky.ts";\n${GALLERY}`,
+    "src/render/scenes/sky/sky.ts": `export const skyScene = {};\n`,
+    "src/render/scenes/tessera/index.ts": `${GALLERY}`,
+    "src/render/scenes/notes/readme.md": `export const gallery`,
+    "src/render/scenes/private/index.ts": `${GALLERY}`,
+  };
+  const readFile = (p: string) => sources[p] ?? null;
+  const exists = (p: string) => p in sources;
+  const names = ["index.ts", "caustics.ts", "meshGrid.ts", "fluidSim.ts", "sceneModules.ts", "sceneMajors.json", "sky", "tessera", "notes", "private"];
 
-  it("is the folder for a nested path", () => {
-    expect(unitNameFromImportPath("./sky/sky.ts")).toBe("sky");
-    expect(unitNameFromImportPath("./tessera/index.ts")).toBe("tessera");
-    expect(unitNameFromImportPath("./dancers/index.ts")).toBe("dancers");
-  });
-});
-
-describe("parseRegistryImports", () => {
-  it("pairs each binding with its unit and raw path, in order", () => {
-    const source = `
-      import { causticsScene } from "./caustics.ts";
-      import { skyScene } from "./sky/sky.ts";
-      registerScene(causticsScene);
-      registerScene(skyScene);
-    `;
-    expect(parseRegistryImports(source)).toEqual([
-      { binding: "causticsScene", unit: "caustics", path: "./caustics.ts" },
-      { binding: "skyScene", unit: "sky", path: "./sky/sky.ts" },
+  it("finds a file or a folder's index.ts that exports gallery, keyed by unit", () => {
+    expect(sceneEntries(names, readFile, exists)).toEqual([
+      { unit: "caustics", file: "src/render/scenes/caustics.ts" },
+      { unit: "meshGrid", file: "src/render/scenes/meshGrid.ts" },
+      { unit: "sky", file: "src/render/scenes/sky/index.ts" },
+      { unit: "tessera", file: "src/render/scenes/tessera/index.ts" },
     ]);
   });
 
-  it("ignores an import never passed to registerScene", () => {
-    // The registry's own real shape: listScenes/registerScene imported from
-    // "../scene.ts", and collectPrivateScenes from "./privateScenes.ts" —
-    // neither is itself ever registered, so neither should read as a scene
-    // (the bug this guards: unitNameFromImportPath("../scene.ts") would
-    // otherwise produce the bogus unit "..", and "privateScenes" a scene
-    // that was never registered).
-    const source = `
-      import { listScenes, registerScene } from "../scene.ts";
-      import { collectPrivateScenes } from "./privateScenes.ts";
-      import { causticsScene } from "./caustics.ts";
-      registerScene(causticsScene);
-      const privateScenes = collectPrivateScenes(import.meta.glob("./private/*/index.ts", { eager: true }));
-      for (const scene of privateScenes.scenes) registerScene(scene);
-    `;
-    expect(parseRegistryImports(source)).toEqual([
-      { binding: "causticsScene", unit: "caustics", path: "./caustics.ts" },
-    ]);
+  it("skips the registry, helpers, a folder without index.ts, and private/", () => {
+    const units = sceneEntries(names, readFile, exists).map((e) => e.unit);
+    for (const unit of ["index", "fluidSim", "sceneModules", "notes", "private"]) expect(units).not.toContain(unit);
   });
 });
 
