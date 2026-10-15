@@ -1433,15 +1433,15 @@ describe("drives: the generic engine gate — every drive setting without its ow
     expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
   });
 
-  it("smoothness: a reading just under the Min line — 0 is a hard cut, the default widens the window a little, high widens it more", () => {
-    // Settle on a flat reading (floor and peak equal, so the spread is nothing),
-    // then read just under it. The spread stays under GATE_KNEE_SPREAD_MIN's
-    // floor, so the knee is applyGenericGate's minimum width, read from the same
-    // smoothness-scaled formula it uses.
-    function readBelowLine(sceneId: string, smoothness?: number) {
+  it("smoothness: never reaches past the floor or the peak — silence reads 0 and a reading at the peak reads the peak at every value, and more smoothness lets more of the middle through", () => {
+    // Min == Max == 1 (both lines on the tracked peak): with no smoothness only
+    // a new high gets through; smoothness eases the Min line down toward the
+    // floor, but the Max line stays on the peak, which it can't pass.
+    function settle(sceneId: string, smoothness: number) {
       const spec = energySetting();
       setDriveThresholdOn(sceneId, spec, true);
-      if (smoothness !== undefined) setDriveSmoothness(sceneId, spec, smoothness);
+      setDriveThreshold(sceneId, spec, 1);
+      setDriveSmoothness(sceneId, spec, smoothness);
       const clock = createAnimClock();
       const engine = createDriveEngine();
       const tick = (e: number) => {
@@ -1449,35 +1449,50 @@ describe("drives: the generic engine gate — every drive setting without its ow
         engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
         return engine.forScene(sceneId, [spec], anim);
       };
-      for (let i = 0; i < 120; i++) tick(0.1);
-      const drives = tick(0.099);
-      return { drives, line: drives.gateLine("k")! };
+      for (let i = 0; i < 5; i++) tick(1); // a loud burst teaches the peak
+      for (let i = 0; i < 120; i++) tick(0.1); // the floor settles low
+      return tick;
     }
 
-    const hard = readBelowLine("gate-smoothness-hard", 0);
-    expect(hard.line).toBeGreaterThan(0.099);
-    expect(hard.drives.value("k", -1)).toBe(0);
+    for (const s of [0, 0.11, 0.5, 0.81, 1]) {
+      const silent = settle(`gate-smoothness-silence-${s}`, s)(0);
+      expect(silent.value("k", -1)).toBe(0);
+      const tick = settle(`gate-smoothness-peak-${s}`, s);
+      let d = tick(0.1);
+      d = tick(d.gateTop("k")!); // a reading on the peak itself
+      expect(d.value("k", -1)).toBeCloseTo(d.gateTop("k")!, 2);
+    }
 
-    // Switched off, the slider is ignored: the same hard cut as 0.
-    const offSpec = energySetting();
-    setDriveSmoothnessOn("gate-smoothness-off", offSpec, false);
-    setDriveSmoothness("gate-smoothness-off", offSpec, 1);
-    const off = readBelowLine("gate-smoothness-off");
-    expect(off.drives.value("k", -1)).toBe(0);
+    const middle = (s: number) => {
+      const tick = settle(`gate-smoothness-middle-${s}`, s);
+      let d = tick(0.1);
+      d = tick(0.1 + (d.gateTop("k")! - 0.1) / 2); // halfway from the resting level to the peak
+      return d.value("k", -1);
+    };
+    expect(middle(0)).toBe(0);
+    expect(middle(0.5)).toBeGreaterThan(0);
+    expect(middle(1)).toBeGreaterThan(middle(0.5));
+  });
 
-    const dflt = readBelowLine("gate-smoothness-default");
-    const knee = 0.04 * 0.1;
-    // The window runs from the Min line less the knee to the Max line plus it,
-    // a straight rise (applyGenericGate). Max defaults to 1, so the Max line is the peak.
-    const peak = dflt.drives.gateTop("k")!;
-    const lo = dflt.line - knee;
-    const frac = (0.099 - lo) / (peak + knee - lo);
-    expect(dflt.drives.value("k", -1)).toBeCloseTo(peak * Math.min(1, Math.max(0, frac)), 6);
-    expect(dflt.drives.value("k", -1)).toBeGreaterThan(0);
-
-    const wide = readBelowLine("gate-smoothness-wide", 1);
-    expect(wide.drives.value("k", -1)).toBeGreaterThan(0);
-    expect(wide.drives.value("k", -1)).toBeGreaterThan(dflt.drives.value("k", -1));
+  it("smoothness switched off ignores the slider: the same hard cut as 0", () => {
+    const sceneId = "gate-smoothness-off";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 1);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    setDriveSmoothness(sceneId, spec, 1);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const tick = (e: number) => {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    };
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    let d = tick(0.1);
+    d = tick(0.1 + (d.gateTop("k")! - 0.1) / 2);
+    expect(d.value("k", -1)).toBe(0);
   });
 
   it("on: fired() blocks an edge whose own combined value falls under the line", () => {

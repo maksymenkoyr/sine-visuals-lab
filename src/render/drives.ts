@@ -231,11 +231,13 @@ import { getDriveSolo } from "./driveSolo.ts";
  * min/max gives, except its ends ride this signal's own floor and peak, so
  * it holds from one song to the next. The setting's Smoothness
  * (getDriveSmoothness in driveStore.ts, defaulting to
- * GENERIC_SMOOTHNESS_DEFAULT) widens the window at both ends so a reading
- * riding the Min line doesn't flicker; at its far left, or switched off
- * with getDriveSmoothnessOn, the window is exact. `fired()` blocks an edge
- * whose own combined value falls under the Min line, on top of whatever
- * that mix already required. A setting
+ * GENERIC_SMOOTHNESS_DEFAULT) moves the Min line toward the floor and the Max
+ * line toward the peak, by that share of the room on each side, so a reading
+ * riding the Min line doesn't flicker; it never moves them past the floor or
+ * the peak, so silence still reads 0 and a new high still reads full. At its
+ * far left, or switched off with getDriveSmoothnessOn, the window is exact.
+ * `fired()` blocks an edge whose own combined value falls under the Min
+ * line, on top of whatever that mix already required. A setting
  * still on its built-in reaction (`"scene"`) gets the same gate through
  * `value()` only — forScene()'s gateBuiltIn advances its tracker there, on
  * the scene's own value, since accumulate() never sees it. The panel's
@@ -581,10 +583,10 @@ export const GENERIC_THRESHOLD_DEFAULT = 0.25;
 /** The generic gate window's Max default (driveStore.ts's getDriveWindowMax) — 1 puts the Max line on the tracked peak, so only a new high reads full. */
 export const GENERIC_WINDOW_MAX_DEFAULT = 1;
 
-/** The generic engine gate's knee-width default (driveStore.ts's
- *  getDriveSmoothness; the knee itself is applyGenericGate's) — the resting
- *  position of the Smoothness slider, and the knee every generic setting has
- *  always had. A scene-handled threshold never reads it. */
+/** The generic engine gate's Smoothness default (driveStore.ts's
+ *  getDriveSmoothness; the window itself is applyGenericGate's) — the resting
+ *  position of the Smoothness slider, and the small softening every generic
+ *  setting starts with. A scene-handled threshold never reads it. */
 export const GENERIC_SMOOTHNESS_DEFAULT = 0.02;
 
 /** The longest step a hit driver's standout detector takes between two
@@ -617,16 +619,6 @@ function usesGenericGate(spec: SceneSetting): boolean {
 const GATE_FLOOR_DOWN_TAU_SEC = 0.3;
 const GATE_FLOOR_UP_TAU_SEC = 4;
 const GATE_PEAK_DECAY_TAU_SEC = 4;
-// How far Smoothness widens the window at each end (value()/uniformPair()/
-// valueOf() below): a fraction of the tracker's own floor-to-peak spread, with a
-// minimum so a dead-flat signal (peak == floor) still has *some* knee rather
-// than a hard step. The fraction is the generic gate's Smoothness setting
-// (driveStore.ts getDriveSmoothness, 0..1) scaled by GATE_KNEE_MAX_FRACTION,
-// so the setting's default, GENERIC_SMOOTHNESS_DEFAULT, is the knee every
-// generic gate had before the slider existed.
-const GATE_KNEE_MAX_FRACTION = 2;
-const GATE_KNEE_SPREAD_MIN = 0.1;
-
 // Master Expansion (this file's header): `normal`'s fixed averaging time,
 // and the dial's mapping onto `usual`'s catch-up time and the reach. At 1×
 // usual's time equals normal's and the reach is 1 — the passthrough the
@@ -1499,8 +1491,10 @@ export function createDriveEngine(): DriveEngine {
 
       // value()/uniformPair()/valueOf()'s window (this file's header's
       // threshold paragraph): 0 at or under the Min line, the tracked peak at
-      // or over the Max line, a straight rise between; Smoothness widens both
-      // ends by the knee so a reading riding the Min line doesn't flicker.
+      // or over the Max line, a straight rise between. Smoothness moves the
+      // Min line toward the tracked floor and the Max line toward the tracked
+      // peak, by that share of the room on each side and never past them, so
+      // silence still reads 0 and a new high still reads the peak.
       // No-op (returns `v` unchanged) whenever genericGate(key) has nothing
       // to gate on.
       function applyGenericGate(key: string, v: number): number {
@@ -1508,9 +1502,8 @@ export function createDriveEngine(): DriveEngine {
         if (!tr) return v;
         const spec = specByKey.get(key)!;
         const s = getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
-        const k = GATE_KNEE_MAX_FRACTION * s * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
-        const lo = tr.line - k;
-        const hi = tr.top + k;
+        const lo = tr.line - s * (tr.line - tr.floor);
+        const hi = tr.top + s * (tr.peak - tr.top);
         if (hi - lo <= 1e-6) return v >= tr.line ? tr.peak : 0;
         return tr.peak * clamp01((v - lo) / (hi - lo));
       }

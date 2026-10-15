@@ -653,11 +653,11 @@ export interface DeviceMenuDeps {
   /** The generic gate window's Max — driveStore.ts's getDriveWindowMax/setDriveWindowMax. Generic gates only; its Min is the threshold above. */
   getDriveWindowMax: (sceneId: string, spec: SceneSetting) => number;
   onSetDriveWindowMax: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** The generic gate's Smoothness (its knee width, 0..1) — driveStore.ts's
+  /** The generic gate's Smoothness (how far its window softens, 0..1) — driveStore.ts's
    *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
   getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
   onSetDriveSmoothness: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** Whether that knee is on, independent of the threshold — driveStore.ts's
+  /** Whether that softening is on, independent of the threshold — driveStore.ts's
    *  getDriveSmoothnessOn/setDriveSmoothnessOn. */
   getDriveSmoothnessOn: (sceneId: string, spec: SceneSetting) => boolean;
   onSetDriveSmoothnessOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
@@ -3388,10 +3388,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const GENERIC_SMOOTHNESS_HINT =
-    "How gently the window starts and ends. Left: exactly at the two lines. Right: a wider, softer rise. Off: exactly at the two lines, whatever the slider says.";
+    "How gently the window starts and ends. Left: exactly at the two lines. Right: a softer rise that stretches toward the quietest and loudest the signal has been, while silence still gives nothing and the loudest still gives full. Off: exactly at the two lines, whatever the slider says.";
 
   /** The generic gate's Smoothness row — a 0..1 slider for how far the
-   *  window widens at both ends (driveStore.ts's getDriveSmoothness).
+   *  window softens toward the signal's floor and peak (driveStore.ts's
+   *  getDriveSmoothness).
    *  Its own On/Off, independent of the threshold's. Same live-write,
    *  no-rebuild rule as buildThresholdRow. */
   function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {

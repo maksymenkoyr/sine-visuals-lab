@@ -92,9 +92,9 @@ interface DriveEntry {
   thresholdOn?: boolean;
   /** The generic gate window's Max, 0..1 on the same floor→peak scale as `threshold` (its Min) — see getDriveWindowMax. */
   windowMax?: number;
-  /** The generic engine gate's knee width, 0..1 — see getDriveSmoothness. */
+  /** The generic engine gate's window softening, 0..1 — see getDriveSmoothness. */
   smoothness?: number;
-  /** Whether that knee is switched on, independent of the threshold — absent
+  /** Whether that softening is switched on, independent of the threshold — absent
    *  means on. See getDriveSmoothnessOn. */
   smoothnessOn?: boolean;
   /** A hit driver's Reaction row, Flat or Sized — see getDriveReadout. */
@@ -593,11 +593,11 @@ export function setDriveWindowMax(sceneId: string, spec: SceneSetting, value: nu
   persist();
 }
 
-/** How wide the generic engine gate's soft knee is, 0..1 (drives.ts's header's
- *  threshold paragraph) — the bottom of the range is a hard cut at the line.
- *  Every drive setting starts at `GENERIC_SMOOTHNESS_DEFAULT`, which is the
- *  knee the gate always had. Only the generic gate reads it: a scene-handled
- *  threshold shapes its own gate. */
+/** How far the generic engine gate's window softens toward the tracked
+ *  floor and peak, 0..1 (drives.ts's header's threshold paragraph) — the
+ *  bottom of the range is a hard cut at the line. Every drive setting starts
+ *  at `GENERIC_SMOOTHNESS_DEFAULT`, a small softening. Only the generic gate
+ *  reads it: a scene-handled threshold shapes its own gate. */
 export function getDriveSmoothness(sceneId: string, spec: SceneSetting): number {
   const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.smoothness;
   return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : GENERIC_SMOOTHNESS_DEFAULT;
@@ -609,7 +609,7 @@ export function setDriveSmoothness(sceneId: string, spec: SceneSetting, value: n
   persist();
 }
 
-/** Whether the knee is on, separately from the threshold itself: off is a
+/** Whether the softening is on, separately from the threshold itself: off is a
  *  hard cut at the line whatever the Smoothness slider says (the slider keeps
  *  its value). Starts on, so nothing changes until it is switched off. */
 export function getDriveSmoothnessOn(sceneId: string, spec: SceneSetting): boolean {
