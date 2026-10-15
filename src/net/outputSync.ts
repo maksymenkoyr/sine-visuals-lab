@@ -11,7 +11,10 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  * (src/app.ts) says to the output page (output.html -> src/output.ts) on the
  * same machine, and the pure state machines on each end. No DOM, no
  * transport: src/net/outputBridge.ts rides these messages on a
- * BroadcastChannel, and the pop-out still does. The room connection
+ * BroadcastChannel, and the pop-out still does. They are all there is between
+ * the two windows: the output is opened `noopener` (outputBridge.ts), in a
+ * renderer process of its own, and neither window holds the other's Window.
+ * The room connection
  * (net/room.ts) carries a different, narrower thing — the room's look
  * document, kept in step by net/lookSync.ts — not these messages. A TV in the
  * laptop's room is cued and played by the same `createCueController`, with the
@@ -63,11 +66,16 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    output the moment it is held whatever the output's program is. Sent on
  *    every change and re-sent with every heartbeat reply, so a lost one heals
  *    and a reloaded main window releases whatever it can no longer release.
+ *  - `raise`: POP OUT pressed while an output is open or still loading
+ *    (outputBridge.ts's open(), which knows an output only by its hello and
+ *    bye). Holding no handle on that window, the main window can only ask it
+ *    to come to the front; a browser may ignore a window.focus() that no
+ *    click in that window led to.
  *  - `hello`/`bye` from the output: a once-a-second heartbeat (so the main
  *    window's button reflects a closed window) and a goodbye on unload.
  *  - `status` from the output: its live render readouts (preset, fps,
- *    governor), twice a second, for the Output Power card in the main
- *    window's panel. Also counts as a sign of life, but unlike `hello` it
+ *    missed frames, governor), twice a second, for the Output Power card in
+ *    the main window's panel. Also counts as a sign of life, but unlike `hello` it
  *    never makes the main window re-send state.
  */
 
@@ -126,6 +134,11 @@ export interface OutputRenderStatus {
   standingDown: boolean;
   bufferWidth: number;
   bufferHeight: number;
+  /** The output's own missed frames and longest frame gap
+   *  (render/frameMisses.ts), null while it has measured nothing. Optional:
+   *  an output window older than these doesn't send them, and reads "--". */
+  missedFrames?: number | null;
+  longestGapMs?: number | null;
 }
 
 /** `glideMs` (state only): the output arrives at this look over that long
@@ -137,7 +150,8 @@ export type ToOutput =
   | { t: "state"; state: OutputState; glideMs?: number }
   | { t: "frame"; f: WireFrame }
   | { t: "power"; power: OutputPower }
-  | { t: "effects"; effects: HeldEffects };
+  | { t: "effects"; effects: HeldEffects }
+  | { t: "raise" };
 export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" } | { t: "status"; s: OutputRenderStatus };
 
 /** Identity of what the output is showing, for "does the output match the

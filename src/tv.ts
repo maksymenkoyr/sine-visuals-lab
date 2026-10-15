@@ -3,6 +3,7 @@
 import "./net/tvStorageBoot.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
+import { deferProgramChecks } from "./render/programCache.ts";
 import { detectQuality, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import type { QualityChoice } from "./render/qualityPref.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
@@ -19,7 +20,7 @@ import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -177,10 +178,11 @@ function showResetBtn(how: "big" | "corner" | "hidden"): void {
   else resetBtn.blur();
 }
 
-// Fetches every pinned asset (src/pinnedAssets.ts — the same registry
+// Fetches every pinned build file (src/pinnedAssets.ts — the same registry
 // app.ts's own call warms) after load, at idle, so a TV left open across a
 // deploy doesn't 404 the first time something it's already holding onto
-// (the Dancers clip library, the tempo worklet, a panel font) is needed.
+// (the tempo worklet, a panel font) is needed. Scene media waits until the
+// TV joins a room (joinRoom).
 pinEverything();
 
 let scene: Scene = getScene("spectrum")!;
@@ -320,7 +322,7 @@ function switchScene(next: Scene, crossfade = false): void {
   const fade = crossfade && prev !== next;
   if (!fade) prev.dispose(sceneCtx);
   try {
-    next.init(sceneCtx);
+    deferProgramChecks(() => next.init(sceneCtx));
     scene = next;
     if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
   } catch (err) {
@@ -332,7 +334,7 @@ function switchScene(next: Scene, crossfade = false): void {
     }
     if (!fade) {
       try {
-        prev.init(sceneCtx);
+        deferProgramChecks(() => prev.init(sceneCtx));
       } catch (err2) {
         console.error(`TV: "${prev.name}" failed to restart:`, err2);
       }
@@ -348,7 +350,7 @@ function mountFirstScene(): boolean {
   const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
   for (const next of candidates) {
     try {
-      next.init(sceneCtx);
+      deferProgramChecks(() => next.init(sceneCtx));
       scene = next;
       return true;
     } catch (err) {
@@ -543,6 +545,9 @@ function closeConn(): void {
 function joinRoom(room: string, key: string | null): void {
   closeConn();
   paired = true;
+  // A paired screen is there for a show: pin every scene's media
+  // (src/pinnedAssets.ts's header, "Scene media"). Only the first call acts.
+  pinSceneMedia();
   roomCode = room;
   replica = createLookReplica();
   lastDocScene = "";

@@ -42,6 +42,20 @@
 //              CPU-heavy tests then ran out of time with nothing wrong. CI
 //              and a plain `npm test` keep the default, so a test that hangs
 //              fails fast there.
+//   size       builds the app (vite build, into a temporary directory) and
+//              holds it to size-budget.json: for each page, the JS it loads
+//              before its first paint (its entry chunk and every chunk that
+//              one imports statically, from the build manifest), gzipped at
+//              level 9, and the raw bytes pinAsset() fetches after load
+//              (src/pinnedAssets.ts). Lowering a budget is always welcome;
+//              raising one needs a reason in the pull request.
+//              Skipped in --changed runs, and wherever
+//              src/render/scenes/private/ is checked out: paid scenes would
+//              count, and CI measures the public tree on every pull request.
+//              A push to main only warns: two pull requests each within
+//              budget can merge into a main that isn't, and that mustn't hold
+//              up the deploy. The next pull request then fails until the
+//              build or size-budget.json is fixed.
 //
 // The baseline. rules, lint and knip were added to a codebase that already
 // broke some of them, so check-baseline.json lists the findings that existed
@@ -62,24 +76,29 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, globSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import {
   addedLines,
   astGrepFindings,
   biomeFindings,
+  compareSizes,
   compareToBaseline,
   fingerprint,
+  firstPaintChunks,
   knipFindings,
   licenseProblems,
   missingNotices,
+  pinnedFiles,
   testFilesDone,
 } from "./checkLib.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_PATH = join(ROOT, "check-baseline.json");
+const SIZE_BUDGET_PATH = join(ROOT, "size-budget.json");
 const BIN = (name) => join(ROOT, "node_modules", ".bin", name);
 const SHOW = 30;
 const LOCAL_TEST_LIMIT_MS = 30_000;
@@ -94,7 +113,7 @@ const GITLEAKS = {
   },
 };
 
-const STEPS = ["typecheck", "rules", "lint", "knip", "dupes", "licenses", "secrets", "tests"];
+const STEPS = ["typecheck", "rules", "lint", "knip", "dupes", "licenses", "secrets", "tests", "size"];
 const BASELINED = new Set(["rules", "lint", "knip"]);
 
 const args = process.argv.slice(2);
@@ -324,6 +343,43 @@ const steps = {
     const r = await run(BIN("vitest"), ["run", ...limits], { onOut: (out) => note(`${testFilesDone(out)}${total ? `/${total}` : ""} test files`) });
     return r.code === 0 ? { ok: true } : { ok: false, detail: tail(r.out, 60) };
   },
+
+  async size() {
+    if (changedMode) return { skipped: "not in --changed runs; a push and CI run it" };
+    // Paid scenes join the bundle where they are checked out. Skip without
+    // naming them: CI measures the public tree.
+    if (existsSync(join(ROOT, "src/render/scenes/private"))) {
+      return { skipped: "src/render/scenes/private/ is checked out here; CI measures the public tree" };
+    }
+    const budget = JSON.parse(readFileSync(SIZE_BUDGET_PATH, "utf8"));
+    const outDir = mkdtempSync(join(tmpdir(), "check-size-"));
+    try {
+      const built = await run(BIN("vite"), ["build", "--outDir", outDir, "--emptyOutDir", "--manifest", "--logLevel", "error"]);
+      if (built.code !== 0) return { ok: false, detail: `vite build failed:\n${tail(built.out)}` };
+      const manifest = JSON.parse(readFileSync(join(outDir, ".vite", "manifest.json"), "utf8"));
+      const gz = (file) => gzipSync(readFileSync(join(outDir, file)), { level: 9 }).length;
+      const pages = {};
+      for (const page of Object.keys(manifest).filter((key) => manifest[key].isEntry && key.endsWith(".html"))) {
+        pages[page] = firstPaintChunks(manifest, page).reduce((sum, file) => sum + gz(file), 0);
+      }
+      const sources = globSync("src/**/*.ts", { cwd: ROOT }).map((path) => ({ path, text: readFileSync(join(ROOT, path), "utf8") }));
+      const assetPaths = readdirSync(join(outDir, "assets")).map((name) => `assets/${name}`);
+      const { files, problems } = pinnedFiles(sources, manifest, assetPaths);
+      if (problems.length) {
+        return { ok: false, detail: [...problems.map((p) => `  ${p}`), "  Teach pinnedFiles in tools/checkLib.mjs how this import is built."].join("\n") };
+      }
+      const pinned = files.reduce((sum, file) => sum + statSync(join(outDir, file)).size, 0);
+      const verdict = compareSizes({ pages, pinned }, budget);
+      if (verdict.ok) return { ok: true, note: verdict.summary };
+      // A push to main (deploy.yml) only warns: see this file's header.
+      if (process.env.GITHUB_EVENT_NAME === "push") {
+        return { ok: true, note: `OVER BUDGET, a warning on a push to main: ${verdict.summary}` };
+      }
+      return { ok: false, detail: verdict.detail };
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  },
 };
 
 /** The pinned gitleaks binary, downloaded into ~/.cache/sine-visuals-lab on first
@@ -414,7 +470,7 @@ for (const [i, name] of wanted.entries()) {
     } else settle(`✓ ${name} (${secs}s)`);
     continue;
   }
-  if (res.ok) settle(`✓ ${name} (${secs}s)`);
+  if (res.ok) settle(`✓ ${name} (${secs}s)${res.note ? ` · ${res.note}` : ""}`);
   else {
     failed = true;
     settle(`✗ ${name} (${secs}s)`, res.detail);

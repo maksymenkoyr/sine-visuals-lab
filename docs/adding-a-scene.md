@@ -26,6 +26,12 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    palette — read it by role, `palRamp()`/`uPalInk`/`uPalGround`/`uPalAccent`,
    rather than sampling `palette()` at a `t` of your own; `src/render/palette.ts`'s
    header says what each role promises).
+   A scene that writes its own `init()` creates all of its programs before it
+   looks up a uniform or calls `use()` on one: a lookup waits for that program
+   to compile, while the programs created before it compile alongside
+   (`src/render/programCache.ts`'s header).
+   A fallback that catches a compile error to switch something off must create
+   that program on first draw, not in `init()`, where it is checked at once.
 2. Each entry in `settings: SceneSetting[]` (spec'd in `sceneSettings.ts`) becomes
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. A setting that is an amount of reaction to the music also declares a
@@ -68,15 +74,25 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
    on the `Scene` object — see `src/render/quality.ts` for what each preset means.
 5. If the scene needs data it can't compute (the dancers' captured moves are
-   the precedent — `src/render/scenes/dancers/clipFormat.ts` and the `clips.bin`
-   beside it), generate it with a script under `tools/` and commit the output;
-   import it with Vite's `?url` and `fetch` it when the scene is created,
-   guarded so the module still imports under node (the tests import every
-   scene), and dance something sensible until it arrives. Third-party data
-   gets an entry in `THIRD-PARTY-NOTICES.md` like the fonts do.
+   the precedent — `src/render/scenes/dancers/clipFormat.ts` and the library
+   its `CLIP_LIBRARY_URL` names), generate it with a script under `tools/` and
+   commit the output under `public/media/<scene>/`, with a version in its name
+   (`<name>-v1.<ext>`), and add it to `tests/mediaManifest.ts`. Reach it
+   through `sceneMedia()` and fetch it the first time the scene mounts, never
+   at import, guarded so the module still imports under node (the tests import
+   every scene); dance something sensible until it arrives.
+   `src/pinnedAssets.ts`'s header has why, and why a committed file never
+   changes. Third-party data gets an entry in `THIRD-PARTY-NOTICES.md` like
+   the fonts do.
 
 Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.
+
+Comment and indent shader code as freely as any other code: a production
+build strips comments and indentation from every template literal that
+reads as GLSL and keeps every line, so a compile error's line number still
+matches (`vite-glsl-strip-plugin.ts`'s header has the rules, including the
+templates it leaves alone).
 
 Once it renders, keep `npm run dev` running and give whoever is reviewing a
 direct link to the scene rather than the gallery root — the dev server prints

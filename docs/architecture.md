@@ -50,6 +50,11 @@ autoTune.ts` sits between a scene's declared `settings` and what actually reache
 the shader, resolving each one against `src/render/musicProfile.ts`'s dials unless
 the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 
+A scene's shader programs come from `src/render/programCache.ts` (through
+`gl.ts`'s `createProgram`): the programs one mount creates compile together
+and are checked once its `init()` returns, and a disposed program waits in
+its GL context's pool for the next mount that asks for the same shaders.
+
 `src/router.ts` decides which scene mounts (`#/` → gallery, `#/v/<sceneId>` → one
 scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 (`index.html`).
@@ -153,9 +158,19 @@ Quality and Resolution, in a smaller box), and the output has its own Quality,
 Resolution and Energy saving, set from the Output Power card;
 `src/render/outputPower.ts` owns those settings.
 
-The Record button (bottom right) saves a clip of the picture with the sound: it
-records the output's canvas while a pop-out is open, because the main window
-shows only the preview then. Why and how is the header of `src/ui/clipRecorder.ts`.
+The output is opened `noopener`, so the browser runs it in a renderer process
+of its own: work on the main window's main thread (the panel, a scene switch)
+no longer drops its frames, and a crash in either window leaves the other
+running. Neither window holds the other's `Window`; the messages are all there
+is between them, and the `src/net/outputBridge.ts` header says how POP OUT
+keeps to one output without a handle on it.
+
+The Record button (bottom right) saves a clip of the picture with the sound,
+always from the main window's canvas: the output's is in another process, out
+of reach. So while a take runs with a pop-out open, the main window's preview
+renders at the output's Quality, Energy saving and buffer size, and goes back
+to its own settings when the take ends. Why and how is the header of
+`src/ui/clipRecorder.ts`.
 
 ## Drawing a frame: crossfades and held effects
 

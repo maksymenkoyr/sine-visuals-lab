@@ -168,14 +168,15 @@ const SPARKLE: SceneSetting = {
   // is Scene — see the sparkle block in extraUniforms. Used to have its own
   // continuous "Sparkle from line" dial blending toward the sensitivity
   // line; that's now Frequencies, a discrete alternative source on this
-  // same picker. A hit driver (drives.ts's header): each hit starts the
-  // picked shape (causticsSparkle.ts), Sized by default so a soft hat
-  // sparkles less than a hard one, as the graded treble pulse did.
+  // same picker. Each edge starts the picked shape (causticsSparkle.ts).
+  // Not a hit driver: no standout detector, so its graph has no reach line,
+  // reaction dots or Reaction row. The built-in treble hit is still sized by
+  // the graded treble pulse, so a soft hat sparkles less than a hard one.
   drive: {
     default: "scene",
     sceneLabel: "Scene: treble hits + sustain wash",
     sceneSources: ["anim.highOnset", "anim.high"],
-    hit: { readout: "sized", reactionLabel: "sparkle" },
+    noStandout: "The user wanted no reaction dots or standout Threshold on sparkle (2026-10-15)",
   },
 };
 
@@ -1792,13 +1793,15 @@ float softCeil(float x, float knee, float ceil) {
             : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
         buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
 
-        // Treble sparkle: each hit of the sparkle drive starts the picked
-        // shape at the hit's size (a hit driver — the "sparkle" setting's
-        // own comment); at its Scene default the detector reads the treble
-        // pulse. Sparkle sustain's wash is a floor under the shape, as it
-        // was under the pulse, and keeps a below-zero swing's direction.
-        const sparkleFired = drives.fired("sparkle", anim.highOnset, undefined, anim.highPulse);
-        const shapeEnv = advanceSparkleHits(sparkleHits, anim.dtSec, sparkleFired, drives.hitSize("sparkle"), {
+        // Treble sparkle: each edge of the sparkle drive starts the picked
+        // shape (the "sparkle" setting's own comment). A treble onset plays
+        // at the graded pulse's height, so a soft hat is a smaller hit; a
+        // wire's edge plays at full size. Sparkle sustain's wash is a floor
+        // under the shape, as it was under the pulse, and keeps a below-zero
+        // swing's direction.
+        const sparkleFired = drives.fired("sparkle", anim.highOnset);
+        const sparkleSize = anim.highOnset ? anim.highPulse : 1;
+        const shapeEnv = advanceSparkleHits(sparkleHits, anim.dtSec, sparkleFired, sparkleSize, {
           shape: Math.round(getSetting("sparkleShape")),
           length: getSetting("sparkleLength"),
           vibration: getSetting("sparkleVibration"),

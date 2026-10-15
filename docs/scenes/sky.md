@@ -411,6 +411,18 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   GPU at 1600×1000 with Floaters and Light waves wired to the Metronome:
   defaults, Rainbow 1 with pinned floaters, sprites at 1.
 - 2026-10-08 — Light waves and Floaters became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales each wave's brightness (a per-slot uSweepAmp next to the start times) and the floater count of a stamp by how far the hit stood out; Flat, the default, is unchanged. Their built-in Scene reaction feeds the detector the beat pulse.
+- 2026-10-08 — Legal audit: Sky's own `hash21` was the fract/dot hash
+  from a Shadertoy author (Art of Code) whose terms are unclear; the repo
+  had retired it everywhere with `FLOAT_HASH_GLSL` (#135) and Sky brought
+  it back under an "independently written" comment. Sky now pastes
+  `FLOAT_HASH_GLSL` for its one-shot draws (seeds, sprite ids, dither),
+  the bench page hashes its lattice with lowbias32, and
+  `tests/noiseHash.test.ts` fails if the old constants appear in `src/` or
+  `docs/` again. Seeds still wrap to `SHADER_SEED_PERIOD`: the shader
+  scales them into sin() phases and noise coordinates too. Headless on the
+  real GPU at 1280×800, before and after side by side: the clouds are
+  identical (they hash with `NOISE_HASH_GLSL`); only which spots the
+  floaters and sprites land on moved.
 
 ## Tuning notes
 
@@ -572,3 +584,4 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   cumulus round from a photo, reverted; bench cut to six controls.
 - Rainbow, Blue-field sprites, Floater glide, Gradient dither; light-wave
   halo and Haidinger's brush beat swell (2026-10-04).
+- #533 (2026-10-15): fluidSim.ts's passes look their uniforms up on first draw, so a mount compiles all of the sim's programs at once. No change on screen.

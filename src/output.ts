@@ -17,10 +17,11 @@ import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects
 import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { createOverlayLayer } from "./render/overlayLayer.ts";
+import { createFrameMisses } from "./render/frameMisses.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
 import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
@@ -111,6 +112,9 @@ window.addEventListener("pagehide", () => {
 });
 
 pinEverything();
+// The pop-out is only ever opened for a show: pin every scene's media too
+// (src/pinnedAssets.ts's header, "Scene media").
+pinSceneMedia();
 
 // ---- Rendering ----
 
@@ -144,6 +148,11 @@ let lastRafMs = 0;
 let lastRenderMs = 0;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
+/** The Output card's Missed frames and Longest gap (render/frameMisses.ts),
+ *  sent with the other readouts. */
+const frameMisses = createFrameMisses();
+// A hidden window draws nothing: the gap across it is not frames coming late.
+document.addEventListener("visibilitychange", () => frameMisses.restart());
 let blank = false;
 /** The look the output is showing right now (a glide's half-way step
  *  included) — what the next glide starts from. */
@@ -204,6 +213,8 @@ function applyQuality(): void {
  *  none or it is `next` itself being re-initialised: never a half-built scene
  *  whose render() throws every frame. */
 function mountScene(next: Scene, crossfade?: { lengthMs?: number }): void {
+  // Mounting compiles shaders: the gap across it is not frames coming late.
+  frameMisses.restart();
   const prev = scene;
   compositor?.cancel();
   const fade = crossfade !== undefined && prev !== null && prev !== next && !blank && host.isMounted(prev);
@@ -277,6 +288,9 @@ transport.onMessage((m) => {
   } else if (m.t === "effects") {
     heldEffects = parseEffects(m.effects);
     compositor?.setEffects(heldEffects);
+  } else if (m.t === "raise") {
+    // POP OUT pressed while this window is open (net/outputSync.ts's `raise`).
+    window.focus();
   }
 });
 
@@ -344,6 +358,7 @@ async function main(): Promise<void> {
         standingDown: governor?.standingDown ?? false,
         bufferWidth: canvas.width,
         bufferHeight: canvas.height,
+        ...frameMisses.read(performance.now()),
       },
     });
   }, STATUS_MS);
@@ -367,6 +382,9 @@ async function main(): Promise<void> {
         gl.clear(gl.COLOR_BUFFER_BIT);
         blank = true;
       }
+      // Nothing drawn while black: the gap until the scene is back is not
+      // frames coming late.
+      frameMisses.restart();
       return;
     }
     blank = false;
@@ -412,6 +430,7 @@ async function main(): Promise<void> {
     overlay.draw();
     // Two scenes at once (a crossfade) or none (Freeze) say nothing about what one costs.
     if (outcome.governable) governor?.recordFrame(nowMs);
+    frameMisses.frame(nowMs, interval, document.hidden);
   }
 
   requestAnimationFrame(loop);

@@ -8,7 +8,8 @@ import { setLiveText } from "./liveText.ts";
  * round pads after a CDJ's, CUE orange and PLAY green; the keys are
  * src/ui/outputKeys.ts).
  *
- * POP OUT opens (or focuses) the output window. Once one is alive the bar
+ * POP OUT opens the output window, or asks one already open to come to the
+ * front (net/outputBridge.ts's open()). Once one is alive the bar
  * appears, and works like a DJ mixer's Cue and Play: the output window is the
  * master and keeps its look however the main window is tuned. HOLD CUE to put
  * the main window's look on the master — only while it's held; let go and the
@@ -145,7 +146,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     const popOpen = s.canCue;
     setLiveText(popBtn, popOpen ? "OUTPUT ●" : "POP OUT"); // in place: a glide re-renders every frame
     popBtn.setAttribute("aria-pressed", String(popOpen));
-    popBtn.title = popOpen ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
+    popBtn.title = popOpen ? "Output window is open — click to ask it to come to the front" : "Open the scene in its own window for a second screen or projector";
     const show = visible && s.open;
     cueBtn.style.display = show && s.canCue ? "block" : "none";
     goBtn.style.display = show && s.canPlay !== false ? "block" : "none";

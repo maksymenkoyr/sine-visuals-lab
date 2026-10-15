@@ -5,6 +5,7 @@ import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { applyGlassBlur, getGlassBlur, setGlassBlur } from "./glassPref.ts";
+import { MISS_WINDOW_MS } from "../render/frameMisses.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -34,6 +35,8 @@ import {
  * governor.ts's "Authority probe"). The Readouts list also shows what the
  * page is costing the device (main-thread load, GPU time, JS memory) — where
  * those come from and what they leave out is src/render/resourceMeter.ts's
+ * header. Missed frames and Longest gap say how evenly frames arrive; what
+ * counts as missed, and when nothing is counted, is src/render/frameMisses.ts's
  * header.
  *
  * Shape, top to bottom: the status line right under the title (the Bands
@@ -114,6 +117,11 @@ export interface PowerStatus {
   cpuLoad: number | null;
   gpuMs: number | null;
   heapMb: number | null;
+  /** Frames that came late within render/frameMisses.ts's window, and the
+   *  longest gap between drawn frames in it; null while nothing was
+   *  measured, or from an output window too old to report them. */
+  missedFrames: number | null;
+  longestGapMs: number | null;
 }
 
 export interface PowerCardDeps {
@@ -782,10 +790,15 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const cpu = createReadoutLine("Main thread");
   const gpu = createReadoutLine("GPU time");
   const heap = createReadoutLine("JS memory");
+  const missed = createReadoutLine("Missed frames");
+  const longest = createReadoutLine("Longest gap");
   cpu.el.title = "How busy this page kept the browser's main thread, as a share of one core. Not the whole computer's CPU";
   gpu.el.title = "How long the scene's drawing took on the GPU, per frame. Chrome only; leaves out the browser compositing and the Panel blur";
   heap.el.title = "JavaScript memory in use by this page. Chrome only; graphics memory can't be read from a web page";
-  readouts.append(fps.el, res.el, detail.el, cpu.el, gpu.el, heap.el);
+  const missWindowS = MISS_WINDOW_MS / 1000;
+  missed.el.title = `Frames that came too late to be shown in the last ${missWindowS} s, against the frame-rate cap. Not counted while the window is hidden or a scene is starting`;
+  longest.el.title = `The longest wait between two drawn frames in the last ${missWindowS} s. With nothing missed it is about one frame at the frame-rate cap`;
+  readouts.append(fps.el, missed.el, longest.el, res.el, detail.el, cpu.el, gpu.el, heap.el);
 
   // Seed <html>'s glass class from the saved choice before the panel first shows.
   applyGlassBlur();
@@ -825,6 +838,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     cpu.set(status.cpuLoad === null ? [text("--")] : [digits(String(Math.round(status.cpuLoad * 100))), join("%")]);
     gpu.set(status.gpuMs === null ? [text("--")] : [digits(status.gpuMs.toFixed(1)), join("ms")]);
     heap.set(status.heapMb === null ? [text("--")] : [digits(String(Math.round(status.heapMb))), join("MB")]);
+    missed.set(status.missedFrames === null ? [text("--")] : [digits(String(status.missedFrames))]);
+    longest.set(status.longestGapMs === null ? [text("--")] : [digits(String(Math.round(status.longestGapMs))), join("ms")]);
   }
   refresh();
 

@@ -1,5 +1,6 @@
 import type { Scene, SceneContext } from "./scene.ts";
 import type { QualitySettings } from "./quality.ts";
+import { deferProgramChecks } from "./programCache.ts";
 
 export interface SceneHost {
   readonly ctx: SceneContext;
@@ -9,10 +10,12 @@ export interface SceneHost {
    *  context at a time — this makes that invariant structural instead of a
    *  call-ordering convention callers have to get right.
    *
-   *  Throws if the scene's `init()` does (a shader that won't compile on this
-   *  GPU, an unsupported render target). Whatever it half-built is disposed
-   *  first and the scene is not counted as mounted, so a retry starts clean;
-   *  callers catch it and fall back to another scene. */
+   *  Throws if the scene's `init()` does (an unsupported render target), or
+   *  if a program it created won't compile or link on this GPU: init() only
+   *  submits its programs, and deferProgramChecks (programCache.ts) checks
+   *  them all once it returns. Whatever it half-built is disposed first and
+   *  the scene is not counted as mounted, so a retry starts clean; callers
+   *  catch it and fall back to another scene. */
   mount(scene: Scene): void;
   unmount(scene: Scene): void;
   unmountAll(): void;
@@ -36,7 +39,7 @@ export function createSceneHost(gl: WebGL2RenderingContext, quality: QualitySett
       if (owners.get(scene) === host) return;
       owners.get(scene)?.unmount(scene);
       try {
-        scene.init(ctx);
+        deferProgramChecks(() => scene.init(ctx));
       } catch (err) {
         // init() assigns its programs/FBOs to closure variables as it goes, so
         // a throw part-way leaves live GL objects only dispose() can free. A

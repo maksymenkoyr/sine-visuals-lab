@@ -1,7 +1,8 @@
 /**
  * The dance clip library: captured moves, retargeted onto the rig offline by
- * tools/clip-convert.mjs and shipped as one binary (`clips.bin`, loaded by
- * index.ts). A clip is a loop of `frames` Poses (rig.ts layout: root x/z,
+ * tools/clip-convert.mjs and shipped as one binary at `CLIP_LIBRARY_URL`
+ * (fetched by index.ts and by Code Rain). A clip is a loop of `frames` Poses
+ * (rig.ts layout: root x/z,
  * lift, a quaternion per bone) spanning `beats` beats of its source
  * performance — playback never advances by wall time; player.ts turns the
  * beat clock into a phase and sampleClip() interpolates between frames, so
@@ -18,6 +19,11 @@
  * tests/dancersClipFormat.test.ts round-trips it.
  */
 import { BONES, BONE_COUNT, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, POSE_LENGTH, boneChannel, quatNlerp, type Pose } from "./rig.ts";
+
+/** Where the site serves the clip library: a file under public/media/ that is
+ *  never replaced (src/pinnedAssets.ts's header, "Scene media"). A rebuilt
+ *  library is a new file with the next version in its name; point this at it. */
+export const CLIP_LIBRARY_URL = "/media/dancers/clips-v1.bin";
 
 export interface ClipMeta {
   /** Unique within the library; the `?clip=` DEV override and logs use it. */

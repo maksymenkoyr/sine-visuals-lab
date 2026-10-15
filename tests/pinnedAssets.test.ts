@@ -1,6 +1,6 @@
 import { globSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pinAsset } from "../src/pinnedAssets.ts";
+import { pinAsset, pinEverything, pinSceneMedia, sceneMedia } from "../src/pinnedAssets.ts";
 
 /** Font imports resolve to a `@font-face` `src: url(...)`, which `pinEverything()`
  *  covers by sweeping `document.fonts` directly (src/pinnedAssets.ts's header) —
@@ -30,9 +30,9 @@ describe("every ?url / ?worker&url import is pinned", () => {
     expect(failures).toEqual([]);
   });
 
-  // A canary for the scanner itself: if this ever stops finding the two known
-  // uses, the regex above has drifted from how imports are actually written.
-  it("actually found the known worklet and clip-library imports", () => {
+  // A canary for the scanner itself: if this ever stops finding the known
+  // worklet import, the regex above has drifted from how imports are written.
+  it("actually found the known worklet import", () => {
     const text = readFileSync("src/audio/tempoSource.ts", "utf8");
     expect([...text.matchAll(IMPORT_RE)].length).toBeGreaterThan(0);
   });
@@ -83,5 +83,37 @@ describe("pinAsset", () => {
     await expect(asset.bytes()).rejects.toThrow(/404/);
     await expect(asset.bytes()).resolves.toBe(buf);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("sceneMedia", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hands out one handle per path and fetches nothing until asked", async () => {
+    const buf = new ArrayBuffer(4);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(buf) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const media = sceneMedia("/media/test/handle-v1.bin");
+    expect(sceneMedia("/media/test/handle-v1.bin")).toBe(media);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(media.bytes()).resolves.toBe(buf);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("is left to pinSceneMedia() by the after-load sweep of pinEverything()", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)) });
+    vi.stubGlobal("fetch", fetchMock);
+    // A page that has loaded, in a browser that is idle at once.
+    vi.stubGlobal("document", { readyState: "complete", fonts: { forEach: () => {} } });
+    vi.stubGlobal("window", { requestIdleCallback: (run: () => void) => run() });
+
+    sceneMedia("/media/test/show-v1.bin");
+    pinEverything();
+    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("/media/test/show-v1.bin");
+    pinSceneMedia();
+    expect(fetchMock.mock.calls.map((call) => call[0])).toContain("/media/test/show-v1.bin");
   });
 });

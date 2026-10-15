@@ -1,11 +1,17 @@
 #!/usr/bin/env node
-// Builds src/render/scenes/dancers/clips.bin from the cut list in
+// Builds the dancers' clip library from the cut list in
 // tools/clip-cuts.json: for every entry it fetches the CMU Motion Capture
 // Database trial (the cgspeed BVH conversion, via the una-dinosauria/cmu-mocap
 // mirror) into tools/.cache/, retargets it onto the dancers rig, cuts the
 // requested beats into a seamless loop and quantises it through
 // clipFormat.ts. Runs on plain node (24+, which strips TypeScript types, so
 // the rig table and the format come straight from src/).
+//
+// It writes public/media/dancers/clips-v<n>.bin, one past the newest there
+// (or --out <file>), and never overwrites a committed library: a tab loaded
+// before a deploy may still fetch it (src/pinnedAssets.ts's header, "Scene
+// media"). Then point CLIP_LIBRARY_URL (src/render/scenes/dancers/
+// clipFormat.ts) at the new file and add it to tests/mediaManifest.ts.
 //
 //   node tools/clip-convert.mjs                 # build every clip in the cut list
 //   node tools/clip-convert.mjs --only macarena # just one
@@ -21,7 +27,7 @@
 // but the weight shifts stay; `lift` is how high the source's lower foot is
 // above its own floor. CMU has no music, so the tempo is estimated from the
 // autocorrelation of joint speed and the cut list may override it.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -54,7 +60,9 @@ const flag = (name, dflt) => {
   return i >= 0 ? args[i + 1] : dflt;
 };
 const cutsPath = resolve(flag("--cuts", join(here, "clip-cuts.json")));
-const outPath = resolve(flag("--out", join(here, "..", "src", "render", "scenes", "dancers", "clips.bin")));
+const mediaDir = join(here, "..", "public", "media", "dancers");
+const newest = Math.max(0, ...readdirSync(mediaDir).map((f) => Number(/^clips-v(\d+)\.bin$/.exec(f)?.[1] ?? 0)));
+const outPath = resolve(flag("--out", join(mediaDir, `clips-v${newest + 1}.bin`)));
 const cacheDir = join(here, ".cache");
 const only = flag("--only", null);
 const estimateOnly = flag("--estimate", null);
@@ -554,3 +562,4 @@ for (const k of ["energy", "bigness"]) {
 const bytes = encodeClipLibrary(clips);
 writeFileSync(outPath, bytes);
 console.log(`wrote ${outPath}: ${clips.length} clips, ${(bytes.length / 1024).toFixed(1)} KB`);
+console.log("Next: point CLIP_LIBRARY_URL (src/render/scenes/dancers/clipFormat.ts) at it and add it to tests/mediaManifest.ts (tests/sceneMedia.test.ts prints the line).");

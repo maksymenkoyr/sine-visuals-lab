@@ -1,0 +1,1946 @@
+{
+ "schema": 1,
+ "takenAt": "2026-10-14T22:42:21.651Z",
+ "commit": {
+  "sha": "5a44e63a2ddcdfb096b15a01fe3de02fd846375b",
+  "subject": "Merge pull request #522 from maksymenkoyr/worktree-looks-copy-hints",
+  "date": "2026-10-14T22:42:49+01:00"
+ },
+ "machine": {
+  "model": "MacBookPro18,3",
+  "cpu": "Apple M1 Pro",
+  "memGb": 16,
+  "os": "darwin 26.5.1",
+  "chromeRunning": true,
+  "loadAvg1m": 5.83,
+  "browser": "151.0.7922.34"
+ },
+ "settings": {
+  "quick": false,
+  "timing": {
+   "switchMs": 1500,
+   "settleMs": 1000,
+   "measureMs": 3000,
+   "panelSettleMs": 1500,
+   "galleryMs": 4000
+  },
+  "gpuSizes": [
+   [
+    1920,
+    1080
+   ],
+   [
+    3024,
+    1890
+   ]
+  ],
+  "gpuFrames": 60,
+  "viewport": {
+   "width": 1512,
+   "height": 945,
+   "dpr": 2
+  }
+ },
+ "errors": {},
+ "scenes": [
+  {
+   "id": "physarum2",
+   "name": "Physarum 2",
+   "stage": "released"
+  },
+  {
+   "id": "sky",
+   "name": "Sky",
+   "stage": "released"
+  },
+  {
+   "id": "portal",
+   "name": "Portal",
+   "stage": "draft"
+  },
+  {
+   "id": "fractalgrid",
+   "name": "Fractal Grid",
+   "stage": "draft"
+  },
+  {
+   "id": "coderain",
+   "name": "Code Rain",
+   "stage": "draft"
+  },
+  {
+   "id": "sweep",
+   "name": "Sweep",
+   "stage": "draft"
+  },
+  {
+   "id": "chaikin",
+   "name": "Chaikin Curves",
+   "stage": "development"
+  },
+  {
+   "id": "alien",
+   "name": "Alien",
+   "stage": "development"
+  },
+  {
+   "id": "tangle",
+   "name": "Tangle",
+   "stage": "development"
+  },
+  {
+   "id": "toonrave",
+   "name": "Toon Rave",
+   "stage": "development"
+  },
+  {
+   "id": "longplay",
+   "name": "Long Play",
+   "stage": "development"
+  },
+  {
+   "id": "swarm",
+   "name": "Entropic Collapse",
+   "stage": "development"
+  },
+  {
+   "id": "coil",
+   "name": "Coil",
+   "stage": "development"
+  },
+  {
+   "id": "silk",
+   "name": "Silk",
+   "stage": "draft"
+  },
+  {
+   "id": "slats",
+   "name": "Slats",
+   "stage": "draft"
+  },
+  {
+   "id": "physarum",
+   "name": "Physarum",
+   "stage": "draft"
+  },
+  {
+   "id": "chladni",
+   "name": "Chladni",
+   "stage": "released"
+  },
+  {
+   "id": "caustics",
+   "name": "Caustics",
+   "stage": "released"
+  },
+  {
+   "id": "fluid",
+   "name": "Neon Fluid",
+   "stage": "draft"
+  },
+  {
+   "id": "gates",
+   "name": "Neon Gates",
+   "stage": "draft"
+  },
+  {
+   "id": "tessera",
+   "name": "Tessera",
+   "stage": "draft"
+  },
+  {
+   "id": "moire",
+   "name": "Moiré",
+   "stage": "draft"
+  },
+  {
+   "id": "petri",
+   "name": "Petri",
+   "stage": "draft"
+  },
+  {
+   "id": "shards",
+   "name": "Shards",
+   "stage": "development"
+  },
+  {
+   "id": "ink",
+   "name": "Ink Synth",
+   "stage": "draft"
+  },
+  {
+   "id": "crystal",
+   "name": "Crystal Wall",
+   "stage": "draft"
+  },
+  {
+   "id": "kaleidoscope",
+   "name": "Kaleidoscope",
+   "stage": "draft"
+  },
+  {
+   "id": "powder",
+   "name": "Powder",
+   "stage": "draft"
+  },
+  {
+   "id": "ambience",
+   "name": "Ambience",
+   "stage": "development"
+  },
+  {
+   "id": "storm",
+   "name": "Storm",
+   "stage": "draft"
+  },
+  {
+   "id": "dancers",
+   "name": "Dancers",
+   "stage": "draft"
+  },
+  {
+   "id": "mesh",
+   "name": "Mesh Grid",
+   "stage": "draft"
+  },
+  {
+   "id": "spectrum",
+   "name": "Spectrum",
+   "stage": "draft"
+  },
+  {
+   "id": "particles",
+   "name": "Particles",
+   "stage": "draft"
+  },
+  {
+   "id": "tunnel",
+   "name": "Tunnel",
+   "stage": "draft"
+  },
+  {
+   "id": "cymatics",
+   "name": "Cymatics",
+   "stage": "draft"
+  },
+  {
+   "id": "moire2",
+   "name": "Moiré 2",
+   "stage": "draft"
+  },
+  {
+   "id": "riso",
+   "name": "Riso",
+   "stage": "draft"
+  },
+  {
+   "id": "ferrofluid",
+   "name": "Ferrofluid",
+   "stage": "draft"
+  }
+ ],
+ "gpu": {
+  "scenes": {
+   "physarum2": {
+    "1920x1080": 12.44,
+    "3024x1890": 13.38
+   },
+   "sky": {
+    "1920x1080": 8.23,
+    "3024x1890": 15.27
+   },
+   "portal": {
+    "1920x1080": null,
+    "3024x1890": null
+   },
+   "fractalgrid": {
+    "1920x1080": 3.72,
+    "3024x1890": 13.25
+   },
+   "coderain": {
+    "1920x1080": 1.98,
+    "3024x1890": 2.84
+   },
+   "sweep": {
+    "1920x1080": 1.38,
+    "3024x1890": 2.93
+   },
+   "chaikin": {
+    "1920x1080": 5.74,
+    "3024x1890": 13.08
+   },
+   "alien": {
+    "1920x1080": 0.38,
+    "3024x1890": 0.64
+   },
+   "tangle": {
+    "1920x1080": 5.66,
+    "3024x1890": 6.1
+   },
+   "toonrave": {
+    "1920x1080": 2.96,
+    "3024x1890": 2.81
+   },
+   "longplay": {
+    "1920x1080": 0.86,
+    "3024x1890": 2.4
+   },
+   "swarm": {
+    "1920x1080": 0.37,
+    "3024x1890": 0.8
+   },
+   "coil": {
+    "1920x1080": 4.56,
+    "3024x1890": 5.66
+   },
+   "silk": {
+    "1920x1080": 29.66,
+    "3024x1890": 65.15
+   },
+   "slats": {
+    "1920x1080": 2.35,
+    "3024x1890": 2.67
+   },
+   "physarum": {
+    "1920x1080": 3.77,
+    "3024x1890": 4.61
+   },
+   "chladni": {
+    "1920x1080": 3.82,
+    "3024x1890": 4.81
+   },
+   "caustics": {
+    "1920x1080": 4.81,
+    "3024x1890": 12.68
+   },
+   "fluid": {
+    "1920x1080": 9.73,
+    "3024x1890": 7.77
+   },
+   "gates": {
+    "1920x1080": 8.94,
+    "3024x1890": 22.56
+   },
+   "tessera": {
+    "1920x1080": 3,
+    "3024x1890": 3.71
+   },
+   "moire": {
+    "1920x1080": 1.5,
+    "3024x1890": 4.28
+   },
+   "petri": {
+    "1920x1080": 1.94,
+    "3024x1890": 2.45
+   },
+   "shards": {
+    "1920x1080": 2.44,
+    "3024x1890": 4.02
+   },
+   "ink": {
+    "1920x1080": 5.15,
+    "3024x1890": 17.11
+   },
+   "crystal": {
+    "1920x1080": 12.04,
+    "3024x1890": 34.19
+   },
+   "kaleidoscope": {
+    "1920x1080": 2.56,
+    "3024x1890": 5.7
+   },
+   "powder": {
+    "1920x1080": 5.09,
+    "3024x1890": 7.52
+   },
+   "ambience": {
+    "1920x1080": 0.49,
+    "3024x1890": 1.41
+   },
+   "storm": {
+    "1920x1080": 1.14,
+    "3024x1890": 3.22
+   },
+   "dancers": {
+    "1920x1080": 14.22,
+    "3024x1890": 39.27
+   },
+   "mesh": {
+    "1920x1080": 2.35,
+    "3024x1890": 3.26
+   },
+   "spectrum": {
+    "1920x1080": 0.3,
+    "3024x1890": 1.51
+   },
+   "particles": {
+    "1920x1080": 2.64,
+    "3024x1890": 8.7
+   },
+   "tunnel": {
+    "1920x1080": 3.48,
+    "3024x1890": 9.29
+   },
+   "cymatics": {
+    "1920x1080": 3.11,
+    "3024x1890": 8.89
+   },
+   "moire2": {
+    "1920x1080": 0.36,
+    "3024x1890": 1.31
+   },
+   "riso": {
+    "1920x1080": 0.95,
+    "3024x1890": 1.49
+   },
+   "ferrofluid": {
+    "1920x1080": 19,
+    "3024x1890": 79.72
+   }
+  },
+  "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+  "timerQuery": true,
+  "errors": {
+   "portal": "Error: no scene \"portal\" — have alien, ambience, caustics, chaikin, chladni, coderain, coil, crystal, cymatics, dancers, ferrofluid, fluid, fractalgrid, gates, ink, kaleidoscope, longplay, mesh, moire2, moire, particles, petri, physarum2, physarum, powder, riso, shards, silk, sky, slats, spectrum, storm, swarm, sweep, tangle, tessera, toonrave, tunnel"
+  }
+ },
+ "buildSeconds": 6.6,
+ "load": {
+  "build": {
+   "other": {
+    "raw": 68571,
+    "gz": 30979,
+    "files": 8
+   },
+   "media": {
+    "raw": 4864593,
+    "gz": 4799613,
+    "files": 9
+   },
+   "font": {
+    "raw": 143560,
+    "gz": 143596,
+    "files": 9
+   },
+   "js": {
+    "raw": 1841671,
+    "gz": 662863,
+    "files": 7
+   },
+   "css": {
+    "raw": 981,
+    "gz": 455,
+    "files": 2
+   },
+   "html": {
+    "raw": 41486,
+    "gz": 11897,
+    "files": 3
+   },
+   "all": {
+    "raw": 6960862,
+    "gz": 5649403,
+    "files": 38
+   }
+  },
+  "largestJs": [
+   {
+    "file": "assets/wakeLock.js",
+    "raw": 1191144,
+    "gz": 434460
+   },
+   {
+    "file": "assets/main.js",
+    "raw": 565180,
+    "gz": 195534
+   },
+   {
+    "file": "assets/version.js",
+    "raw": 56184,
+    "gz": 20002
+   },
+   {
+    "file": "assets/tv.js",
+    "raw": 11141,
+    "gz": 4811
+   },
+   {
+    "file": "assets/tempoWorklet.js",
+    "raw": 7311,
+    "gz": 3026
+   },
+   {
+    "file": "assets/output.js",
+    "raw": 5678,
+    "gz": 2730
+   },
+   {
+    "file": "assets/outputBridge.js",
+    "raw": 5033,
+    "gz": 2300
+   }
+  ],
+  "pages": {
+   "gallery": {
+    "domContentLoadedMs": 173,
+    "loadMs": 175,
+    "firstDrawMs": 170,
+    "fetched": {
+     "html": {
+      "raw": 37819,
+      "gz": 10209,
+      "files": 1
+     },
+     "js": {
+      "raw": 1824852,
+      "gz": 655322,
+      "files": 5
+     },
+     "css": {
+      "raw": 981,
+      "gz": 455,
+      "files": 2
+     },
+     "media": {
+      "raw": 4724720,
+      "gz": 4662722,
+      "files": 4
+     },
+     "font": {
+      "raw": 70940,
+      "gz": 71060,
+      "files": 5
+     },
+     "all": {
+      "raw": 6659312,
+      "gz": 5399768,
+      "files": 17
+     }
+    }
+   },
+   "scene": {
+    "domContentLoadedMs": 221,
+    "loadMs": 223,
+    "firstDrawMs": 219,
+    "fetched": {
+     "html": {
+      "raw": 37819,
+      "gz": 10209,
+      "files": 1
+     },
+     "js": {
+      "raw": 1824852,
+      "gz": 655322,
+      "files": 5
+     },
+     "css": {
+      "raw": 981,
+      "gz": 455,
+      "files": 2
+     },
+     "media": {
+      "raw": 4724720,
+      "gz": 4662722,
+      "files": 4
+     },
+     "font": {
+      "raw": 70940,
+      "gz": 71060,
+      "files": 5
+     },
+     "all": {
+      "raw": 6659312,
+      "gz": 5399768,
+      "files": 17
+     }
+    }
+   },
+   "tv": {
+    "domContentLoadedMs": 193,
+    "loadMs": 205,
+    "firstDrawMs": 187,
+    "fetched": {
+     "html": {
+      "raw": 1986,
+      "gz": 905,
+      "files": 1
+     },
+     "js": {
+      "raw": 1258469,
+      "gz": 459273,
+      "files": 3
+     },
+     "css": {
+      "raw": 239,
+      "gz": 171,
+      "files": 1
+     },
+     "media": {
+      "raw": 4724720,
+      "gz": 4662722,
+      "files": 4
+     },
+     "font": {
+      "raw": 9956,
+      "gz": 9979,
+      "files": 1
+     },
+     "all": {
+      "raw": 5995370,
+      "gz": 5133050,
+      "files": 10
+     }
+    }
+   }
+  }
+ },
+ "app": {
+  "scenes": {
+   "physarum2": {
+    "switch": {
+     "maxGapMs": 217,
+     "longTaskMs": 223
+    },
+    "closed": {
+     "fps": 52.9,
+     "rafHz": 83.6,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 33.6,
+     "gapMaxMs": 59,
+     "hitchesPerMin": 619.2,
+     "longTaskMs": 0,
+     "main": 0.16,
+     "script": 0.144,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 902.5,
+     "heapMb": 8.6
+    },
+    "open": {
+     "fps": 28.5,
+     "rafHz": 35.8,
+     "gapP50Ms": 33.2,
+     "gapP95Ms": 83.3,
+     "gapMaxMs": 108.5,
+     "hitchesPerMin": 397.3,
+     "longTaskMs": 999,
+     "main": 0.562,
+     "script": 0.497,
+     "layoutStyle": 0.023,
+     "gpuMsPerSec": null,
+     "heapMb": 12.1
+    }
+   },
+   "sky": {
+    "switch": {
+     "maxGapMs": 84,
+     "longTaskMs": 289
+    },
+    "closed": {
+     "fps": 60.1,
+     "rafHz": 118.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.7,
+     "gapMaxMs": 25.4,
+     "hitchesPerMin": 39.8,
+     "longTaskMs": 0,
+     "main": 0.055,
+     "script": 0.035,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 1055.9,
+     "heapMb": 8.4
+    },
+    "open": {
+     "fps": 40.7,
+     "rafHz": 57.7,
+     "gapP50Ms": 24.2,
+     "gapP95Ms": 49.5,
+     "gapMaxMs": 107.7,
+     "hitchesPerMin": 606,
+     "longTaskMs": 68,
+     "main": 0.55,
+     "script": 0.448,
+     "layoutStyle": 0.031,
+     "gpuMsPerSec": null,
+     "heapMb": 11.8
+    }
+   },
+   "portal": {
+    "switch": {
+     "maxGapMs": 42,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 48.6,
+     "rafHz": 66.2,
+     "gapP50Ms": 19.1,
+     "gapP95Ms": 33.8,
+     "gapMaxMs": 50.3,
+     "hitchesPerMin": 279.6,
+     "longTaskMs": 0,
+     "main": 0.028,
+     "script": 0.016,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 878.9,
+     "heapMb": 8.4
+    },
+    "open": {
+     "fps": 32.3,
+     "rafHz": 43.9,
+     "gapP50Ms": 32.9,
+     "gapP95Ms": 67.1,
+     "gapMaxMs": 99.7,
+     "hitchesPerMin": 439.3,
+     "longTaskMs": 498,
+     "main": 0.498,
+     "script": 0.424,
+     "layoutStyle": 0.025,
+     "gpuMsPerSec": null,
+     "heapMb": 12.9
+    }
+   },
+   "fractalgrid": {
+    "switch": {
+     "maxGapMs": 42,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 47.6,
+     "rafHz": 56,
+     "gapP50Ms": 18.8,
+     "gapP95Ms": 33.2,
+     "gapMaxMs": 49.2,
+     "hitchesPerMin": 299.8,
+     "longTaskMs": 0,
+     "main": 0.029,
+     "script": 0.017,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 885.3,
+     "heapMb": 9.6
+    },
+    "open": {
+     "fps": 31.3,
+     "rafHz": 38.9,
+     "gapP50Ms": 33.2,
+     "gapP95Ms": 66.6,
+     "gapMaxMs": 91.3,
+     "hitchesPerMin": 439.3,
+     "longTaskMs": 670,
+     "main": 0.484,
+     "script": 0.416,
+     "layoutStyle": 0.024,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "coderain": {
+    "switch": {
+     "maxGapMs": 150,
+     "longTaskMs": 181
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 119.8,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.4,
+     "gapMaxMs": 19.8,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.053,
+     "script": 0.031,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 235.8,
+     "heapMb": 9.8
+    },
+    "open": {
+     "fps": 60.4,
+     "rafHz": 99.2,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 33.3,
+     "gapMaxMs": 41.8,
+     "hitchesPerMin": 577.1,
+     "longTaskMs": 0,
+     "main": 0.486,
+     "script": 0.325,
+     "layoutStyle": 0.047,
+     "gpuMsPerSec": null,
+     "heapMb": 11.8
+    }
+   },
+   "sweep": {
+    "switch": {
+     "maxGapMs": 11,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 120.1,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.3,
+     "gapMaxMs": 17.7,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.05,
+     "script": 0.031,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 314.8,
+     "heapMb": 9.2
+    },
+    "open": {
+     "fps": 60.2,
+     "rafHz": 94.5,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 33,
+     "gapMaxMs": 34.3,
+     "hitchesPerMin": 618.7,
+     "longTaskMs": 0,
+     "main": 0.491,
+     "script": 0.347,
+     "layoutStyle": 0.045,
+     "gpuMsPerSec": null,
+     "heapMb": 13.7
+    }
+   },
+   "chaikin": {
+    "switch": {
+     "maxGapMs": 34,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 51.9,
+     "rafHz": 65.2,
+     "gapP50Ms": 17,
+     "gapP95Ms": 33.4,
+     "gapMaxMs": 50,
+     "hitchesPerMin": 419.5,
+     "longTaskMs": 0,
+     "main": 0.042,
+     "script": 0.03,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 908.7,
+     "heapMb": 9.7
+    },
+    "open": {
+     "fps": 38.1,
+     "rafHz": 52.7,
+     "gapP50Ms": 24.8,
+     "gapP95Ms": 58.2,
+     "gapMaxMs": 79.1,
+     "hitchesPerMin": 446.1,
+     "longTaskMs": 0,
+     "main": 0.512,
+     "script": 0.42,
+     "layoutStyle": 0.027,
+     "gpuMsPerSec": null,
+     "heapMb": 12.6
+    }
+   },
+   "alien": {
+    "switch": {
+     "maxGapMs": 41,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 59.9,
+     "rafHz": 119.8,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 17.7,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.058,
+     "script": 0.034,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 158.8,
+     "heapMb": 9.2
+    },
+    "open": {
+     "fps": 59.6,
+     "rafHz": 107.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 25.3,
+     "gapMaxMs": 41.6,
+     "hitchesPerMin": 319.6,
+     "longTaskMs": 0,
+     "main": 0.467,
+     "script": 0.303,
+     "layoutStyle": 0.05,
+     "gpuMsPerSec": null,
+     "heapMb": 12.8
+    }
+   },
+   "tangle": {
+    "switch": {
+     "maxGapMs": 17,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.3,
+     "rafHz": 120.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.4,
+     "gapMaxMs": 17.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.048,
+     "script": 0.027,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 443.2,
+     "heapMb": 8.9
+    },
+    "open": {
+     "fps": 56.2,
+     "rafHz": 84.4,
+     "gapP50Ms": 16.5,
+     "gapP95Ms": 34.4,
+     "gapMaxMs": 50.4,
+     "hitchesPerMin": 957.5,
+     "longTaskMs": 0,
+     "main": 0.472,
+     "script": 0.341,
+     "layoutStyle": 0.041,
+     "gpuMsPerSec": null,
+     "heapMb": 13
+    }
+   },
+   "toonrave": {
+    "switch": {
+     "maxGapMs": 83,
+     "longTaskMs": 83
+    },
+    "closed": {
+     "fps": 47.9,
+     "rafHz": 53.2,
+     "gapP50Ms": 17.4,
+     "gapP95Ms": 33.4,
+     "gapMaxMs": 41.7,
+     "hitchesPerMin": 399.4,
+     "longTaskMs": 0,
+     "main": 0.107,
+     "script": 0.092,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 208.5,
+     "heapMb": 11.6
+    },
+    "open": {
+     "fps": 37.3,
+     "rafHz": 58.6,
+     "gapP50Ms": 25.1,
+     "gapP95Ms": 50.9,
+     "gapMaxMs": 67.5,
+     "hitchesPerMin": 679.3,
+     "longTaskMs": 228,
+     "main": 0.578,
+     "script": 0.484,
+     "layoutStyle": 0.029,
+     "gpuMsPerSec": null,
+     "heapMb": 13.3
+    }
+   },
+   "longplay": {
+    "switch": {
+     "maxGapMs": 58,
+     "longTaskMs": 56
+    },
+    "closed": {
+     "fps": 60.1,
+     "rafHz": 119.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 20.2,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.052,
+     "script": 0.03,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 230.3,
+     "heapMb": 15.1
+    },
+    "open": {
+     "fps": 59.9,
+     "rafHz": 98.5,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 33.3,
+     "gapMaxMs": 34.2,
+     "hitchesPerMin": 699.1,
+     "longTaskMs": 0,
+     "main": 0.497,
+     "script": 0.35,
+     "layoutStyle": 0.044,
+     "gpuMsPerSec": null,
+     "heapMb": 13.4
+    }
+   },
+   "swarm": {
+    "switch": {
+     "maxGapMs": 9,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 120,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.4,
+     "gapMaxMs": 17.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.146,
+     "script": 0.12,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 126.9,
+     "heapMb": 17.3
+    },
+    "open": {
+     "fps": 58.9,
+     "rafHz": 107.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 25.3,
+     "gapMaxMs": 41.6,
+     "hitchesPerMin": 259.6,
+     "longTaskMs": 0,
+     "main": 0.509,
+     "script": 0.356,
+     "layoutStyle": 0.045,
+     "gpuMsPerSec": null,
+     "heapMb": 12.8
+    }
+   },
+   "coil": {
+    "switch": {
+     "maxGapMs": 27,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 58.6,
+     "rafHz": 96.9,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 25.1,
+     "gapMaxMs": 42.5,
+     "hitchesPerMin": 179.8,
+     "longTaskMs": 0,
+     "main": 0.045,
+     "script": 0.025,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 591,
+     "heapMb": 12.7
+    },
+    "open": {
+     "fps": 40.7,
+     "rafHz": 62.3,
+     "gapP50Ms": 17.4,
+     "gapP95Ms": 58.6,
+     "gapMaxMs": 66.8,
+     "hitchesPerMin": 834.6,
+     "longTaskMs": 53,
+     "main": 0.531,
+     "script": 0.43,
+     "layoutStyle": 0.031,
+     "gpuMsPerSec": null,
+     "heapMb": 14.9
+    }
+   },
+   "silk": {
+    "switch": {
+     "maxGapMs": 100,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 14.3,
+     "rafHz": 16.3,
+     "gapP50Ms": 67.2,
+     "gapP95Ms": 133.2,
+     "gapMaxMs": 145.4,
+     "hitchesPerMin": 99.9,
+     "longTaskMs": 0,
+     "main": 0.011,
+     "script": 0.005,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 1017.2,
+     "heapMb": 16.6
+    },
+    "open": {
+     "fps": 11,
+     "rafHz": 14.3,
+     "gapP50Ms": 109.1,
+     "gapP95Ms": 184.1,
+     "gapMaxMs": 189.3,
+     "hitchesPerMin": 79.9,
+     "longTaskMs": 1251,
+     "main": 0.453,
+     "script": 0.419,
+     "layoutStyle": 0.012,
+     "gpuMsPerSec": null,
+     "heapMb": 12.1
+    }
+   },
+   "slats": {
+    "switch": {
+     "maxGapMs": 143,
+     "longTaskMs": 276
+    },
+    "closed": {
+     "fps": 59.9,
+     "rafHz": 119.9,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.3,
+     "gapMaxMs": 17.5,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.053,
+     "script": 0.029,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 320.9,
+     "heapMb": 12.9
+    },
+    "open": {
+     "fps": 60,
+     "rafHz": 101.2,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 33.3,
+     "gapMaxMs": 34.3,
+     "hitchesPerMin": 696.7,
+     "longTaskMs": 0,
+     "main": 0.486,
+     "script": 0.326,
+     "layoutStyle": 0.047,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "physarum": {
+    "switch": {
+     "maxGapMs": 25,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 59.9,
+     "rafHz": 120,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 17.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.06,
+     "script": 0.033,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 464.8,
+     "heapMb": 13.5
+    },
+    "open": {
+     "fps": 56.9,
+     "rafHz": 92.5,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 34.1,
+     "gapMaxMs": 42.4,
+     "hitchesPerMin": 778.7,
+     "longTaskMs": 0,
+     "main": 0.487,
+     "script": 0.34,
+     "layoutStyle": 0.044,
+     "gpuMsPerSec": null,
+     "heapMb": 12.8
+    }
+   },
+   "chladni": {
+    "switch": {
+     "maxGapMs": 33,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 120,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.4,
+     "gapMaxMs": 17.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.063,
+     "script": 0.038,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 428.8,
+     "heapMb": 15.4
+    },
+    "open": {
+     "fps": 53.6,
+     "rafHz": 80.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 34.1,
+     "gapMaxMs": 50,
+     "hitchesPerMin": 778.4,
+     "longTaskMs": 0,
+     "main": 0.514,
+     "script": 0.383,
+     "layoutStyle": 0.039,
+     "gpuMsPerSec": null,
+     "heapMb": 12.9
+    }
+   },
+   "caustics": {
+    "switch": {
+     "maxGapMs": 34,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 59.6,
+     "rafHz": 110.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 24.9,
+     "gapMaxMs": 42,
+     "hitchesPerMin": 155.5,
+     "longTaskMs": 0,
+     "main": 0.057,
+     "script": 0.033,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 798.3,
+     "heapMb": 16.7
+    },
+    "open": {
+     "fps": 30.2,
+     "rafHz": 47.6,
+     "gapP50Ms": 25.9,
+     "gapP95Ms": 83,
+     "gapMaxMs": 92.3,
+     "hitchesPerMin": 669.2,
+     "longTaskMs": 469,
+     "main": 0.563,
+     "script": 0.479,
+     "layoutStyle": 0.027,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "fluid": {
+    "switch": {
+     "maxGapMs": 79,
+     "longTaskMs": 70
+    },
+    "closed": {
+     "fps": 60.1,
+     "rafHz": 119.1,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.7,
+     "gapMaxMs": 20.8,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.063,
+     "script": 0.037,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 1111.8,
+     "heapMb": 14.1
+    },
+    "open": {
+     "fps": 49.1,
+     "rafHz": 69.7,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 42.4,
+     "gapMaxMs": 59.2,
+     "hitchesPerMin": 975.6,
+     "longTaskMs": 0,
+     "main": 0.514,
+     "script": 0.397,
+     "layoutStyle": 0.035,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "gates": {
+    "switch": {
+     "maxGapMs": 42,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 41,
+     "rafHz": 51.6,
+     "gapP50Ms": 24.7,
+     "gapP95Ms": 42.2,
+     "gapMaxMs": 58.5,
+     "hitchesPerMin": 277.8,
+     "longTaskMs": 0,
+     "main": 0.035,
+     "script": 0.021,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 939.6,
+     "heapMb": 15.7
+    },
+    "open": {
+     "fps": 32.9,
+     "rafHz": 43.8,
+     "gapP50Ms": 33,
+     "gapP95Ms": 66.4,
+     "gapMaxMs": 75.9,
+     "hitchesPerMin": 438.1,
+     "longTaskMs": 390,
+     "main": 0.495,
+     "script": 0.419,
+     "layoutStyle": 0.022,
+     "gpuMsPerSec": null,
+     "heapMb": 13.5
+    }
+   },
+   "tessera": {
+    "switch": {
+     "maxGapMs": 58,
+     "longTaskMs": 65
+    },
+    "closed": {
+     "fps": 60.1,
+     "rafHz": 119.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.7,
+     "gapMaxMs": 19.7,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.066,
+     "script": 0.037,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 350.5,
+     "heapMb": 13
+    },
+    "open": {
+     "fps": 54.8,
+     "rafHz": 85.1,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 41,
+     "gapMaxMs": 50,
+     "hitchesPerMin": 817.5,
+     "longTaskMs": 0,
+     "main": 0.503,
+     "script": 0.365,
+     "layoutStyle": 0.041,
+     "gpuMsPerSec": null,
+     "heapMb": 13.2
+    }
+   },
+   "moire": {
+    "switch": {
+     "maxGapMs": 17,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 59.9,
+     "rafHz": 119.4,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.6,
+     "gapMaxMs": 19.4,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.059,
+     "script": 0.033,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 328.5,
+     "heapMb": 12.3
+    },
+    "open": {
+     "fps": 56.4,
+     "rafHz": 88.9,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 34.1,
+     "gapMaxMs": 47.9,
+     "hitchesPerMin": 875.5,
+     "longTaskMs": 0,
+     "main": 0.498,
+     "script": 0.364,
+     "layoutStyle": 0.04,
+     "gpuMsPerSec": null,
+     "heapMb": 14.2
+    }
+   },
+   "petri": {
+    "switch": {
+     "maxGapMs": 17,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.3,
+     "rafHz": 119.9,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.4,
+     "gapMaxMs": 17.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.063,
+     "script": 0.034,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 225,
+     "heapMb": 13.7
+    },
+    "open": {
+     "fps": 59.9,
+     "rafHz": 101.8,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 26.8,
+     "gapMaxMs": 40.7,
+     "hitchesPerMin": 439.2,
+     "longTaskMs": 0,
+     "main": 0.485,
+     "script": 0.319,
+     "layoutStyle": 0.052,
+     "gpuMsPerSec": null,
+     "heapMb": 12.5
+    }
+   },
+   "shards": {
+    "switch": {
+     "maxGapMs": 9,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 59.9,
+     "rafHz": 119.8,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 17.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.056,
+     "script": 0.031,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 333.4,
+     "heapMb": 16.9
+    },
+    "open": {
+     "fps": 60.2,
+     "rafHz": 100.8,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 33.3,
+     "gapMaxMs": 42.4,
+     "hitchesPerMin": 674.3,
+     "longTaskMs": 0,
+     "main": 0.499,
+     "script": 0.329,
+     "layoutStyle": 0.053,
+     "gpuMsPerSec": null,
+     "heapMb": 13.1
+    }
+   },
+   "ink": {
+    "switch": {
+     "maxGapMs": 34,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.3,
+     "rafHz": 119,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.6,
+     "gapMaxMs": 25.9,
+     "hitchesPerMin": 38.9,
+     "longTaskMs": 0,
+     "main": 0.056,
+     "script": 0.032,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 710.6,
+     "heapMb": 14.7
+    },
+    "open": {
+     "fps": 38.9,
+     "rafHz": 58.5,
+     "gapP50Ms": 24.8,
+     "gapP95Ms": 58.7,
+     "gapMaxMs": 74.7,
+     "hitchesPerMin": 618.1,
+     "longTaskMs": 55,
+     "main": 0.522,
+     "script": 0.425,
+     "layoutStyle": 0.033,
+     "gpuMsPerSec": null,
+     "heapMb": 14.7
+    }
+   },
+   "crystal": {
+    "switch": {
+     "maxGapMs": 67,
+     "longTaskMs": 53
+    },
+    "closed": {
+     "fps": 29.3,
+     "rafHz": 29.3,
+     "gapP50Ms": 33.6,
+     "gapP95Ms": 44.8,
+     "gapMaxMs": 54.1,
+     "hitchesPerMin": 20,
+     "longTaskMs": 0,
+     "main": 0.022,
+     "script": 0.013,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 957.3,
+     "heapMb": 13.4
+    },
+    "open": {
+     "fps": 20.4,
+     "rafHz": 26,
+     "gapP50Ms": 57.9,
+     "gapP95Ms": 99.4,
+     "gapMaxMs": 149.5,
+     "hitchesPerMin": 118.3,
+     "longTaskMs": 974,
+     "main": 0.411,
+     "script": 0.363,
+     "layoutStyle": 0.017,
+     "gpuMsPerSec": null,
+     "heapMb": 13
+    }
+   },
+   "kaleidoscope": {
+    "switch": {
+     "maxGapMs": 134,
+     "longTaskMs": 143
+    },
+    "closed": {
+     "fps": 60.1,
+     "rafHz": 120.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 17.7,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.058,
+     "script": 0.033,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 381.7,
+     "heapMb": 15.3
+    },
+    "open": {
+     "fps": 46.4,
+     "rafHz": 70.5,
+     "gapP50Ms": 17.1,
+     "gapP95Ms": 50.3,
+     "gapMaxMs": 71.4,
+     "hitchesPerMin": 849.6,
+     "longTaskMs": 0,
+     "main": 0.514,
+     "script": 0.391,
+     "layoutStyle": 0.038,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "powder": {
+    "switch": {
+     "maxGapMs": 58,
+     "longTaskMs": 61
+    },
+    "closed": {
+     "fps": 60.3,
+     "rafHz": 120.3,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 17.6,
+     "gapMaxMs": 17.7,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.065,
+     "script": 0.039,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 454.5,
+     "heapMb": 15.4
+    },
+    "open": {
+     "fps": 51.9,
+     "rafHz": 76.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 41.7,
+     "gapMaxMs": 58,
+     "hitchesPerMin": 806.6,
+     "longTaskMs": 0,
+     "main": 0.533,
+     "script": 0.376,
+     "layoutStyle": 0.05,
+     "gpuMsPerSec": null,
+     "heapMb": 12.8
+    }
+   },
+   "ambience": {
+    "switch": {
+     "maxGapMs": 25,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.3,
+     "rafHz": 120.6,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 25.1,
+     "hitchesPerMin": 19.9,
+     "longTaskMs": 0,
+     "main": 0.059,
+     "script": 0.033,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 266.1,
+     "heapMb": 15.2
+    },
+    "open": {
+     "fps": 59.6,
+     "rafHz": 106.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 25.4,
+     "gapMaxMs": 41.9,
+     "hitchesPerMin": 449.6,
+     "longTaskMs": 0,
+     "main": 0.476,
+     "script": 0.294,
+     "layoutStyle": 0.06,
+     "gpuMsPerSec": null,
+     "heapMb": 14.4
+    }
+   },
+   "storm": {
+    "switch": {
+     "maxGapMs": 392,
+     "longTaskMs": 394
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 120.7,
+     "gapP50Ms": 16.6,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 24,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.064,
+     "script": 0.039,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 307,
+     "heapMb": 16.6
+    },
+    "open": {
+     "fps": 58.8,
+     "rafHz": 94.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 33.2,
+     "gapMaxMs": 41.3,
+     "hitchesPerMin": 515.7,
+     "longTaskMs": 0,
+     "main": 0.516,
+     "script": 0.34,
+     "layoutStyle": 0.057,
+     "gpuMsPerSec": null,
+     "heapMb": 14.2
+    }
+   },
+   "dancers": {
+    "switch": {
+     "maxGapMs": 93,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 13.6,
+     "rafHz": 31.8,
+     "gapP50Ms": 73.5,
+     "gapP95Ms": 101.7,
+     "gapMaxMs": 113.8,
+     "hitchesPerMin": 38.9,
+     "longTaskMs": 0,
+     "main": 0.025,
+     "script": 0.013,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 948.7,
+     "heapMb": 15.9
+    },
+    "open": {
+     "fps": 13.9,
+     "rafHz": 18.5,
+     "gapP50Ms": 84.1,
+     "gapP95Ms": 162.4,
+     "gapMaxMs": 175.8,
+     "hitchesPerMin": 138.5,
+     "longTaskMs": 1284,
+     "main": 0.478,
+     "script": 0.428,
+     "layoutStyle": 0.023,
+     "gpuMsPerSec": null,
+     "heapMb": 13.5
+    }
+   },
+   "mesh": {
+    "switch": {
+     "maxGapMs": 134,
+     "longTaskMs": 198
+    },
+    "closed": {
+     "fps": 60.4,
+     "rafHz": 120.8,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.6,
+     "gapMaxMs": 24.5,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.068,
+     "script": 0.038,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 348.6,
+     "heapMb": 11.8
+    },
+    "open": {
+     "fps": 48.7,
+     "rafHz": 76.9,
+     "gapP50Ms": 16.8,
+     "gapP95Ms": 41.7,
+     "gapMaxMs": 58.4,
+     "hitchesPerMin": 835.2,
+     "longTaskMs": 0,
+     "main": 0.565,
+     "script": 0.416,
+     "layoutStyle": 0.047,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "spectrum": {
+    "switch": {
+     "maxGapMs": 10,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 120.2,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 17.7,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.052,
+     "script": 0.027,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 141,
+     "heapMb": 12.4
+    },
+    "open": {
+     "fps": 59.7,
+     "rafHz": 106.3,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 25.5,
+     "gapMaxMs": 41.8,
+     "hitchesPerMin": 334.7,
+     "longTaskMs": 0,
+     "main": 0.481,
+     "script": 0.276,
+     "layoutStyle": 0.068,
+     "gpuMsPerSec": null,
+     "heapMb": 13.9
+    }
+   },
+   "particles": {
+    "switch": {
+     "maxGapMs": 13,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 119.1,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 21.5,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.047,
+     "script": 0.024,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 560.8,
+     "heapMb": 12.5
+    },
+    "open": {
+     "fps": 39.3,
+     "rafHz": 61.3,
+     "gapP50Ms": 17.2,
+     "gapP95Ms": 67.5,
+     "gapMaxMs": 103.3,
+     "hitchesPerMin": 728.4,
+     "longTaskMs": 348,
+     "main": 0.559,
+     "script": 0.43,
+     "layoutStyle": 0.049,
+     "gpuMsPerSec": null,
+     "heapMb": 13.2
+    }
+   },
+   "tunnel": {
+    "switch": {
+     "maxGapMs": 33,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 55.2,
+     "rafHz": 83.8,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 33.3,
+     "gapMaxMs": 41.7,
+     "hitchesPerMin": 419,
+     "longTaskMs": 0,
+     "main": 0.038,
+     "script": 0.019,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 725,
+     "heapMb": 12.6
+    },
+    "open": {
+     "fps": 42.9,
+     "rafHz": 59.7,
+     "gapP50Ms": 24.3,
+     "gapP95Ms": 49.7,
+     "gapMaxMs": 91.9,
+     "hitchesPerMin": 445.5,
+     "longTaskMs": 220,
+     "main": 0.509,
+     "script": 0.37,
+     "layoutStyle": 0.051,
+     "gpuMsPerSec": null,
+     "heapMb": 13.3
+    }
+   },
+   "cymatics": {
+    "switch": {
+     "maxGapMs": 51,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 54.9,
+     "rafHz": 74.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 33.4,
+     "gapMaxMs": 50,
+     "hitchesPerMin": 578.8,
+     "longTaskMs": 0,
+     "main": 0.038,
+     "script": 0.017,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 763.4,
+     "heapMb": 10.8
+    },
+    "open": {
+     "fps": 39.7,
+     "rafHz": 59.3,
+     "gapP50Ms": 24.9,
+     "gapP95Ms": 53.3,
+     "gapMaxMs": 92.3,
+     "hitchesPerMin": 548.8,
+     "longTaskMs": 117,
+     "main": 0.552,
+     "script": 0.426,
+     "layoutStyle": 0.046,
+     "gpuMsPerSec": null,
+     "heapMb": 12.4
+    }
+   },
+   "moire2": {
+    "switch": {
+     "maxGapMs": 43,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 60.2,
+     "rafHz": 119.4,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.6,
+     "gapMaxMs": 19.6,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.051,
+     "script": 0.025,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 186.3,
+     "heapMb": 11
+    },
+    "open": {
+     "fps": 59.4,
+     "rafHz": 103.5,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 32.6,
+     "gapMaxMs": 49.7,
+     "hitchesPerMin": 489.6,
+     "longTaskMs": 0,
+     "main": 0.498,
+     "script": 0.303,
+     "layoutStyle": 0.063,
+     "gpuMsPerSec": null,
+     "heapMb": 12.7
+    }
+   },
+   "riso": {
+    "switch": {
+     "maxGapMs": 11,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 59.9,
+     "rafHz": 119.4,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 17.5,
+     "gapMaxMs": 24.8,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.049,
+     "script": 0.024,
+     "layoutStyle": 0.001,
+     "gpuMsPerSec": 177,
+     "heapMb": 11.7
+    },
+    "open": {
+     "fps": 58.2,
+     "rafHz": 98.4,
+     "gapP50Ms": 16.7,
+     "gapP95Ms": 33.4,
+     "gapMaxMs": 42.3,
+     "hitchesPerMin": 478.5,
+     "longTaskMs": 0,
+     "main": 0.495,
+     "script": 0.319,
+     "layoutStyle": 0.059,
+     "gpuMsPerSec": null,
+     "heapMb": 13.3
+    }
+   },
+   "ferrofluid": {
+    "switch": {
+     "maxGapMs": 52,
+     "longTaskMs": 0
+    },
+    "closed": {
+     "fps": 20.6,
+     "rafHz": 44.3,
+     "gapP50Ms": 49.7,
+     "gapP95Ms": 59.3,
+     "gapMaxMs": 66.9,
+     "hitchesPerMin": 0,
+     "longTaskMs": 0,
+     "main": 0.019,
+     "script": 0.009,
+     "layoutStyle": 0,
+     "gpuMsPerSec": 935.2,
+     "heapMb": 11.4
+    },
+    "open": {
+     "fps": 12.6,
+     "rafHz": 16.9,
+     "gapP50Ms": 88.3,
+     "gapP95Ms": 159.6,
+     "gapMaxMs": 183.7,
+     "hitchesPerMin": 158.7,
+     "longTaskMs": 1210,
+     "main": 0.408,
+     "script": 0.37,
+     "layoutStyle": 0.016,
+     "gpuMsPerSec": null,
+     "heapMb": 13.1
+    }
+   }
+  },
+  "heapAfterGcStartMb": 6.3,
+  "gallery": {
+   "fps": 59.9,
+   "rafHz": 120.1,
+   "gapP50Ms": 16.7,
+   "gapP95Ms": 17.4,
+   "gapMaxMs": 25.6,
+   "hitchesPerMin": 15,
+   "longTaskMs": 0,
+   "main": 0.111,
+   "script": 0.049,
+   "layoutStyle": 0.009,
+   "gpuMsPerSec": 853.3,
+   "heapMb": 6.9
+  },
+  "canvas": "3024x1890",
+  "heapAfterGcEndMb": 10.7,
+  "panelOpened": true,
+  "pageErrors": []
+ }
+}

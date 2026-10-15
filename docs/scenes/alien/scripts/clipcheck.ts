@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 const W = new URL("../../../../src/render/scenes/dancers/", import.meta.url).pathname;
-const { decodeClipLibrary, sampleClip } = await import(W + "clipFormat.ts");
+const { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip } = await import(W + "clipFormat.ts");
 const rig = await import(W + "rig.ts");
 
-const bin = readFileSync(W + "clips.bin");
+const bin = readFileSync(new URL(`../../../../public${CLIP_LIBRARY_URL}`, import.meta.url));
 const lib = decodeClipLibrary(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
 const pose = rig.createPose();
 const world = rig.createRigWorld();

@@ -2,18 +2,12 @@
 
 This project bundles the following third-party packages and data into its client build.
 
-## CMU Graphics Lab Motion Capture Database (the dance clips in `src/render/scenes/dancers/clips.bin`)
+## CMU Graphics Lab Motion Capture Database (the dance clips in `public/media/dancers/`)
 
 - The data used in this project was obtained from mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217.
 - License: the database's terms of use — the motion capture data "may be copied, modified, or redistributed without permission" and may be included in commercially-sold products; it may not be resold directly, even in converted form.
 - Source: http://mocap.cs.cmu.edu — BVH conversion by Bruce Hahne (cgspeed), https://sites.google.com/a/cgspeed.com/cgspeed/motion-capture, mirrored at https://github.com/una-dinosauria/cmu-mocap. The trials used, and how they are cut, are listed in `tools/clip-cuts.json`; `tools/clip-convert.mjs` does the conversion.
-- Used by the Dancers scene and the Alien scene (`src/render/scenes/alien/reel.ts` names the clips it dances; the videos in `src/render/scenes/alien/loops/` are renders of those motions).
-
-## Green alien-cat meme (the look icon in `src/ui/lookIcon.ts`)
-
-- An internet meme picture (a cat with a green face), picked by the project owner. Its author and license are unknown.
-- Bundled only as a tiny downscale (`ICON_W` × `ICON_H` pixels), inline in `src/ui/lookIcon.ts`; the full-size picture is not in this repo.
-- Source: unknown. If you hold rights to it and want it credited or removed, open an issue.
+- Used by the Dancers scene, Code Rain's dancer and the Alien scene (`src/render/scenes/alien/reel.ts` names the clips it dances; the videos in `public/media/alien/` are renders of those motions).
 
 ## Chakra Petch (via `@fontsource/chakra-petch`)
 

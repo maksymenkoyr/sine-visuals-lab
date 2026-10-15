@@ -151,6 +151,10 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   layer is already empty (every non-Lightning style, the gaps between
   strikes), still doing the one clear and mip rebuild on the frame the last
   bolt dies.
+- 2026-10-08 — Legal audit: the app now carries a photosensitivity warning
+  (`src/ui/flashWarning.ts`, in the gallery footer and on a TV's pairing
+  screen), and `STROBE_PATTERN`'s comment describes the strobe cut plainly.
+  No change to the picture.
 
 ## Tuning notes
 
@@ -194,3 +198,4 @@ pivot above.
   outlines, through the MacCormack/beat-puff, mirror-mode, Auto-symmetry,
   Currents/neon-tone-map, and screen-space-lightning pivots described above.
 - #462 (draft, 2026-10-09): Rendering: the lightning bolt layer's render target (`fluidBolts.ts`) now comes from gl.ts's `createColorTarget`; no change to the look.
+- #533 (2026-10-15): the sim's passes (fluidSim.ts) look their uniforms up on first draw, and init() looks the display program's samplers up after every program is created, so a mount compiles all of the scene's programs at once. No change on screen.

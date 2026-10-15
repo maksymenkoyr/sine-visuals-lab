@@ -17,6 +17,7 @@ import { getPowerMode } from "../render/powerMode.ts";
 import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
 import type { SceneStage } from "../render/scenes/index.ts";
 import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
+import { FLASH_WARNING } from "./flashWarning.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
@@ -242,6 +243,7 @@ const stylesheet = `
 /* The version reads as typed ("0.1.4 - beta"), not in the footer's capitals. */
 .gal-foot a.gal-ver { text-transform: none; }
 .gal-foot a:hover { color: #fff; }
+.gal-foot-warn { flex-basis: 100%; text-transform: none; letter-spacing: .02em; }
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
   .gal-root { padding: 24px 16px 32px; }
@@ -604,7 +606,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   instagramLink.rel = "noopener";
   const footLinks = el("div", "gal-foot-links");
   footLinks.append(sourceLink, instagramLink, licensesLink, privacyLink);
-  foot.append(versionLink, footLinks);
+  // A full row under the version and links: see ui/flashWarning.ts.
+  const flashWarn = el("div", "gal-foot-warn", FLASH_WARNING);
+  foot.append(versionLink, footLinks, flashWarn);
 
   page.append(mast, errorBanner, released, devSection, draftSection, foot);
   root.appendChild(page);

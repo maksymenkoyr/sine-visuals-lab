@@ -108,6 +108,7 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
+import { createFrameMisses } from "./render/frameMisses.ts";
 import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import {
   clearOverlayLogo,
@@ -278,7 +279,7 @@ import { createScenePicker, type ScenePickEntry, type ScenePicker } from "./ui/s
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
-import { createBroadcastTransport, createOutputBridge, type PopOutBridge } from "./net/outputBridge.ts";
+import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
 import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
 import { thisDevice } from "./net/deviceKind.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
@@ -296,7 +297,7 @@ import {
   spaceIsCue,
 } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./ui/tooltip.ts";
@@ -485,6 +486,14 @@ let outputPower: OutputPower = {
  *  real picture — so for it this is just "a scene is showing"; a phone or iPad
  *  that is one of those screens (`fillsScreen`) never previews. */
 let previewActive = false;
+/** True while a clip is being recorded (ui/clipRecorder.ts) and previewActive.
+ *  The output renders in a process of its own (net/outputBridge.ts opens it
+ *  `noopener`), out of the recorder's reach, so for the take this window draws
+ *  what the output would: its Quality and Energy saving (renderPreset,
+ *  activePowerMode) and its drawing-buffer size (sizeCanvas); the recorder
+ *  takes this canvas. The preview box keeps its size on screen. Recomputed
+ *  every tick, right after previewActive. */
+let recordAsOutput = false;
 /** A phone or iPad controller is a screen of the room (see `handheldScreen`)
  *  unless the Room view has turned its screen off, which makes it a remote.
  *  Before the roster lists it, it is what the room gives a newcomer: a screen. */
@@ -502,11 +511,13 @@ function quietScreen(): boolean {
  *  DEVICE's preset and stays the one every scene-availability check uses, so
  *  the preview's lower quality never hides a scene from the gallery; this is
  *  only what the mounted scene is drawn with. While previewing, the preview
- *  choice, raised to the scene's own `minQuality` floor. A dev pin wins, so
- *  headless `?quality=` captures stay reproducible. */
+ *  choice (the output's while recordAsOutput), raised to the scene's own
+ *  `minQuality` floor. A dev pin wins, so headless `?quality=` captures stay
+ *  reproducible. */
 function renderPreset(): QualityPreset {
   if (!previewActive || pinned) return effectivePreset();
-  const wanted = previewChoice === "auto" ? detectedPreset : previewChoice;
+  const choice = recordAsOutput ? outputPower.quality : previewChoice;
+  const wanted = choice === "auto" ? detectedPreset : choice;
   const floor = scene.minQuality;
   return floor && presetRank(floor) > presetRank(wanted) ? floor : wanted;
 }
@@ -665,7 +676,7 @@ let lastAnim: AnimFrame | null = null;
 /** The pop-out output window (net/outputBridge.ts), created at boot. The two
  *  numbers are this window's last resolved Sensitivity/Expansion, which the
  *  bridge streams along with each frame (net/outputSync.ts's `p`). */
-let outputBridge: PopOutBridge | null = null;
+let outputBridge: OutputBridge | null = null;
 /** A keyed room's Main as an output (net/roomBridge.ts): PLAY sends this
  *  device's look to every Main screen, like the pop-out's. Null outside a keyed
  *  room. */
@@ -692,6 +703,12 @@ let outputSens = 1;
 let outputExp = 1;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
+/** The Power card's Missed frames and Longest gap (render/frameMisses.ts):
+ *  fed by drawScene, restarted wherever drawing stops or starts over. */
+const frameMisses = createFrameMisses();
+// A hidden tab draws nothing, or draws unseen on the background clock: the
+// gap across it says nothing about frames coming late.
+document.addEventListener("visibilitychange", () => frameMisses.restart());
 /** The Power card's CPU / GPU / heap readouts (render/resourceMeter.ts);
  *  created with the main GL context in boot(). */
 let resourceMeter: ResourceMeter | null = null;
@@ -726,7 +743,13 @@ let powerMode: PowerMode = getPowerMode();
  *  which On/Off take away, so the two can't disagree in the one mode
  *  (Auto) where the governor is actually watching. */
 function renderIntervalMs(): number {
-  return powerMode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+  return activePowerMode() === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+}
+
+/** The Energy saving mode this window renders under: the output's while a
+ *  take records its picture here (recordAsOutput), else this device's own. */
+function activePowerMode(): PowerMode {
+  return recordAsOutput ? outputPower.mode : powerMode;
 }
 
 /** Applies a mode change to the live governor: Auto hands it back control
@@ -736,7 +759,7 @@ function renderIntervalMs(): number {
  *  before the first frame renders. */
 function applyPowerMode(mode: PowerMode): void {
   powerMode = mode;
-  governor?.setEnabled(mode === "auto");
+  governor?.setEnabled(activePowerMode() === "auto");
 }
 
 /** Applies a change of what this window renders at (src/render/qualityPref.ts,
@@ -1009,6 +1032,8 @@ function updateSceneVersionLabel(next: Scene): void {
  *  when it returns false: `scene` has been put back and the HUD explains. */
 function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   const host = mainHost!;
+  // Mounting compiles shaders: the gap across it is not frames coming late.
+  frameMisses.restart();
   // A crossfade still running ends here, its outgoing scene dropped at once.
   compositor?.cancel();
   // A different scene on screen already: it stays mounted, drawn under the new
@@ -1631,6 +1656,18 @@ function syncEars(): void {
   }
 }
 
+/** A room with another device online in it (a TV, a phone controller, the
+ *  laptop this page follows) means a show: pin every scene's media, so a
+ *  venue's wifi dropping mid-set can't cost a scene its media
+ *  (src/pinnedAssets.ts's header, "Scene media"). pinSceneMedia() acts once. */
+function pinMediaOncePaired(conn: AnyConn): void {
+  const check = (roster: RosterEntry[]): void => {
+    if (roster.some((d) => d.online && d.deviceId !== conn.deviceId)) pinSceneMedia();
+  };
+  conn.onRosterChange(check);
+  check(conn.currentRoster);
+}
+
 /** Follows this connection's roster and refusals: the room's record is what
  *  settles a pending choice, and any change of the answer is acted on. */
 function wireEars(conn: AnyConn): void {
@@ -2132,6 +2169,7 @@ function wireDeviceMenu(): void {
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
       ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
+      ...frameMisses.read(performance.now()),
     }),
     customValues: {
       get: getCustomValue,
@@ -2658,10 +2696,10 @@ async function boot(): Promise<void> {
   // after a deploy has moved on. Idempotent and scoped to panel classes, so
   // calling it this early changes nothing the gallery itself shows.
   ensureControlsStyles();
-  // Starts the after-load, at-idle sweep that fetches every pinAsset() (the
-  // tempo worklet, the Dancers clip library) and loads every registered font
-  // — see src/pinnedAssets.ts's header for why a page must never need its
-  // own origin's files again after this point.
+  // Starts the after-load, at-idle sweep that fetches every pinAsset() file
+  // and loads every registered font — see src/pinnedAssets.ts's header for
+  // why. Scene media waits for its scene, or for a show (pinMediaOncePaired,
+  // and the pop-out's onStatus below).
   pinEverything();
 
   // The scene's own version corner (#sceneVersion in index.html) is filled
@@ -2894,6 +2932,7 @@ async function boot(): Promise<void> {
   wireDeviceMenu();
   const conn = activeConn();
   if (conn) wireEars(conn);
+  if (conn) pinMediaOncePaired(conn);
   // Same link as the room-code badge's overlay: the controller link for the
   // laptop's keyed room, the plain/watch link for any other room member.
   if (conn) {
@@ -2936,6 +2975,11 @@ async function boot(): Promise<void> {
       look: () => ({ scene: scene.id, palette: palette.id }),
       power: () => outputPower,
     });
+    // A pop-out means a show: this window pins every scene's media too, for
+    // its own preview (src/pinnedAssets.ts's header, "Scene media").
+    outputBridge.onStatus((s) => {
+      if (s.open) pinSceneMedia();
+    });
   }
   if (play && joinedConn) {
     roomBridge = createRoomBridge({
@@ -2953,7 +2997,6 @@ async function boot(): Promise<void> {
   if (!isController) {
     clipRecorder = createClipRecorder({
       mainCanvas: canvas,
-      outputWindow: () => outputBridge?.popupWindow() ?? null,
       audioStream: () => capture?.stream ?? null,
       sceneId: () => scene.id,
       aspect: () => recordControls?.aspect() ?? "screen",
@@ -3570,6 +3613,20 @@ function tick(): void {
     applyRenderQuality(true);
     applyPreviewBox();
   }
+  // Before this tick draws, so a take's first frame already has the output's
+  // size. While a take holds, the two calls also follow an Output Quality or
+  // Energy saving change made mid-take; both do nothing when nothing changed.
+  const nextRecordAsOutput = previewActive && (clipRecorder?.recording() ?? false);
+  const recordFlipped = nextRecordAsOutput !== recordAsOutput;
+  if (recordFlipped) {
+    recordAsOutput = nextRecordAsOutput;
+    // The buffer takes the output's shape; the box keeps the window's.
+    canvas.style.objectFit = recordAsOutput ? "contain" : "";
+  }
+  if (recordFlipped || recordAsOutput) {
+    applyRenderQuality(true);
+    applyPowerMode(powerMode);
+  }
   if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: wave ? peak(wave) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
@@ -3683,6 +3740,9 @@ function tick(): void {
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
+    // Nothing to draw this tick (no feed yet, or it went quiet): the gap to
+    // the next drawn frame is not frames coming late.
+    else frameMisses.restart();
     return;
   }
 
@@ -3710,7 +3770,7 @@ function drawScene(
   lastRenderFpsMs = nowRafMs;
   lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
 
-  const resized = resizeCanvasToDisplaySize(canvas, renderScale());
+  const resized = sizeCanvas();
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
   const displayFrame = applySensitivity(gained, sensitivity, expansion);
@@ -3759,6 +3819,22 @@ function drawScene(
   // A frame with two scenes (a crossfade) or none (Freeze) says nothing about
   // what one scene costs, so the governor does not see it.
   if (governable) governor?.recordFrame(nowRafMs);
+  frameMisses.frame(nowRafMs, intervalMs, document.hidden);
+}
+
+/** Sizes the drawing buffer for this frame and says whether it changed: to
+ *  the CSS box (render/gl.ts's resizeCanvasToDisplaySize), or while
+ *  recordAsOutput to the output's own buffer as its last `status` reported
+ *  it, so a take has the output's pixel size. */
+function sizeCanvas(): boolean {
+  const out = recordAsOutput ? outputBridge?.outputStatus() : null;
+  if (!out || !(out.bufferWidth > 0) || !(out.bufferHeight > 0)) return resizeCanvasToDisplaySize(canvas, renderScale());
+  const w = Math.round(out.bufferWidth);
+  const h = Math.round(out.bufferHeight);
+  if (canvas.width === w && canvas.height === h) return false;
+  canvas.width = w;
+  canvas.height = h;
+  return true;
 }
 
 /** Whether anything currently wants a live picture reading — the Master
