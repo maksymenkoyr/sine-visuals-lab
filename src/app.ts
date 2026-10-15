@@ -53,7 +53,7 @@ import {
   type QualityPreset,
   type QualitySettings,
 } from "./render/quality.ts";
-import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, paletteRampHex, PALETTES, type Palette } from "./render/palette.ts";
@@ -716,6 +716,10 @@ let resourceMeter: ResourceMeter | null = null;
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
 // with tv.ts) — see that file for why the gate needs a tolerance at all.
 let lastRenderMs = 0;
+/** When the panel last drew (the tick loop's panelDraws): it draws on every
+ *  tick the scene renders, and on any other once RENDER_FPS_CAP's interval
+ *  has passed since this. */
+let lastPanelDrawMs = 0;
 
 /** Closed-loop counterpart to detectQuality()'s one-shot boot benchmark —
  *  steps the shared `quality` object's numeric knobs down under sustained
@@ -3646,8 +3650,9 @@ function tick(): void {
   // moved (the loop used to return, further down, before ever reaching
   // animClock.advance in that case). Feature extraction and the anim clock
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
-  // rAF tick regardless of the render-rate cap below — only the GPU draw is
-  // rate-capped. `lastFluxRatio` is this same tick's local extractor reading
+  // rAF tick regardless of the render-rate cap below — only the GPU draw
+  // and the panel's drawing are rate-capped (panelDraws below).
+  // `lastFluxRatio` is this same tick's local extractor reading
   // (null on host/renderer paths with no local extractor — see its own doc
   // comment below) — passed as the graded broadband pulse's own ratio so it
   // doesn't have to fall back to a band's own ratio on a device that has a
@@ -3722,7 +3727,16 @@ function tick(): void {
   // Only built while the panel is open: update() returns before it touches
   // `drives` when closed, and forScene() allocates a view object and its closures.
   const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
+  // The panel draws on a tick the scene renders — framePace.ts's gate, asked
+  // before drawScene() below moves lastRenderMs — or once a full
+  // RENDER_FPS_CAP interval has passed since its own last draw: a display
+  // faster than the cap redraws it once per scene frame, and a lowered cap
+  // (Energy saving, the pop-out's preview) doesn't slow its meters.
+  const panelDraws =
+    shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs()) ||
+    shouldRenderFrame(nowRafMs, lastPanelDrawMs, 1000 / RENDER_FPS_CAP);
+  if (panelDraws) lastPanelDrawMs = nowRafMs;
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);

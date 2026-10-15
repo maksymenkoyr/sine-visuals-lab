@@ -8,7 +8,6 @@
     "knip | exports | src/audio/inputHealth.ts | HUM_FLOOR_DB",
     "knip | exports | src/audio/inputHealth.ts | HUM_PEAK_SPAN_SEC",
     "knip | exports | src/audio/inputHealth.ts | HUM_PEAK_TOL",
-    "knip | exports | src/audio/lufs.ts | BLOCK_MS",
     "knip | exports | src/audio/lufs.ts | LUFS_OFFSET",
     "knip | exports | src/audio/lufs.ts | MOMENTARY_BLOCKS",
     "knip | exports | src/audio/lufs.ts | RELATIVE_GATE_LU",
