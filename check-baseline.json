@@ -18,7 +18,6 @@
     "knip | exports | src/net/outputBridge.ts | OUTPUT_CHANNEL",
     "knip | exports | src/net/outputBridge.ts | OUTPUT_URL",
     "knip | exports | src/net/outputBridge.ts | OUTPUT_WINDOW_NAME",
-    "knip | exports | src/net/outputSync.ts | OUTPUT_PRESENCE_TIMEOUT_MS",
     "knip | exports | src/render/bandEnergy.ts | NUM_BANDS",
     "knip | exports | src/render/beatListener.ts | PULSE_DECAY_DEFAULT",
     "knip | exports | src/render/bolt.ts | BOLT_BRANCH_ANGLE_MAX",

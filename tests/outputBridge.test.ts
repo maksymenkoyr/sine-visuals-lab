@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { createOutputBridge, type Transport } from "../src/net/outputBridge.ts";
+import { describe, it, expect, vi } from "vitest";
+import { createOutputBridge, OUTPUT_OPEN_GRACE_MS, type Transport } from "../src/net/outputBridge.ts";
 import { NO_EFFECTS } from "../src/render/heldEffects.ts";
-import type { OutputPower, OutputRenderStatus, ToMain, ToOutput } from "../src/net/outputSync.ts";
+import { OUTPUT_PRESENCE_TIMEOUT_MS, type OutputPower, type OutputRenderStatus, type ToMain, type ToOutput } from "../src/net/outputSync.ts";
 
 function fakeTransport() {
   const posted: ToOutput[] = [];
@@ -186,5 +186,95 @@ describe("outputBridge frames carry the controller's gate marks", () => {
     const [m] = frames(t.posted);
     expect(m.f.p).toBeUndefined();
     expect(m.f.gate).toEqual(GATE);
+  });
+});
+
+describe("outputBridge keeps to one output window", () => {
+  /** A bridge on a clock the test moves, whose window.open is a counter. */
+  function setupOpen() {
+    const t = fakeTransport();
+    let nowMs = 10_000;
+    let opened = 0;
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene: "spectrum", palette: "neon" }),
+      storage,
+      power: () => POWER,
+      openWindow: () => {
+        opened++;
+      },
+      now: () => nowMs,
+    });
+    const advance = (ms: number) => {
+      nowMs += ms;
+    };
+    return { ...t, bridge, opened: () => opened, advance };
+  }
+  const raises = (posted: ToOutput[]) => posted.filter((m) => m.t === "raise").length;
+
+  it("asks a window still loading to come forward instead of opening a second", () => {
+    const { bridge, posted, opened, advance } = setupOpen();
+    bridge.open();
+    expect(opened()).toBe(1);
+    advance(OUTPUT_OPEN_GRACE_MS - 1);
+    bridge.open();
+    expect(opened()).toBe(1);
+    expect(raises(posted)).toBe(1);
+  });
+
+  it("asks an output whose heartbeat is current to come forward, one it did not open too", () => {
+    const { bridge, posted, receive, opened, advance } = setupOpen();
+    receive({ t: "hello", haveState: true }); // e.g. this window reloaded, the output stayed
+    advance(OUTPUT_PRESENCE_TIMEOUT_MS - 1);
+    bridge.open();
+    expect(opened()).toBe(0);
+    expect(raises(posted)).toBe(1);
+  });
+
+  it("opens again once the output said goodbye", () => {
+    const { bridge, receive, opened } = setupOpen();
+    bridge.open();
+    receive({ t: "hello", haveState: false });
+    receive({ t: "bye" });
+    bridge.open();
+    expect(opened()).toBe(2);
+  });
+
+  it("opens again once the heartbeat lapsed (a crashed output says no goodbye)", () => {
+    const { bridge, receive, opened, advance } = setupOpen();
+    bridge.open();
+    receive({ t: "hello", haveState: false });
+    advance(Math.max(OUTPUT_OPEN_GRACE_MS, OUTPUT_PRESENCE_TIMEOUT_MS));
+    bridge.open();
+    expect(opened()).toBe(2);
+  });
+
+  it("opens again once the grace is over when the window never said hello", () => {
+    const { bridge, opened, advance } = setupOpen();
+    bridge.open();
+    advance(OUTPUT_OPEN_GRACE_MS);
+    bridge.open();
+    expect(opened()).toBe(2);
+  });
+
+  it("does not take another main window's messages for an output", () => {
+    const { bridge, receive } = setupOpen();
+    receive({ t: "raise" } as unknown as ToMain);
+    expect(bridge.status().open).toBe(false);
+  });
+
+  it("opens the output page noopener, so it gets a renderer process of its own", () => {
+    const open = vi.fn((_url: string, _name: string, _features: string) => null);
+    vi.stubGlobal("window", { open });
+    vi.stubGlobal("location", { search: "" });
+    try {
+      setup().bridge.open();
+      expect(open).toHaveBeenCalledTimes(1);
+      const [url, , features] = open.mock.calls[0];
+      expect(url).toBe("/output.html");
+      expect(features.split(",")).toContain("noopener");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

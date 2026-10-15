@@ -277,6 +277,9 @@ transport.onMessage((m) => {
   } else if (m.t === "effects") {
     heldEffects = parseEffects(m.effects);
     compositor?.setEffects(heldEffects);
+  } else if (m.t === "raise") {
+    // POP OUT pressed while this window is open (net/outputSync.ts's `raise`).
+    window.focus();
   }
 });
 
