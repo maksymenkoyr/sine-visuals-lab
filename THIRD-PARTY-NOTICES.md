@@ -9,6 +9,12 @@ This project bundles the following third-party packages and data into its client
 - Source: http://mocap.cs.cmu.edu — BVH conversion by Bruce Hahne (cgspeed), https://sites.google.com/a/cgspeed.com/cgspeed/motion-capture, mirrored at https://github.com/una-dinosauria/cmu-mocap. The trials used, and how they are cut, are listed in `tools/clip-cuts.json`; `tools/clip-convert.mjs` does the conversion.
 - Used by the Dancers scene, Code Rain's dancer and the Alien scene (`src/render/scenes/alien/reel.ts` names the clips it dances; the videos in `public/media/alien/` are renders of those motions).
 
+## Green alien-cat meme (the look icon in `src/ui/lookIcon.ts`)
+
+- An internet meme picture (a cat with a green face), picked by the project owner. Its author and license are unknown.
+- Bundled only as a tiny downscale (`ICON_W` × `ICON_H` pixels), inline in `src/ui/lookIcon.ts`; the full-size picture is not in this repo.
+- Source: unknown. If you hold rights to it and want it credited or removed, open an issue.
+
 ## Chakra Petch (via `@fontsource/chakra-petch`)
 
 - Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
