@@ -176,6 +176,7 @@ const SPARKLE: SceneSetting = {
     default: "scene",
     sceneLabel: "Scene: treble hits + sustain wash",
     sceneSources: ["anim.highOnset", "anim.high"],
+    noStandout: "The user wanted no reaction dots or standout Threshold on sparkle (2026-10-15)",
   },
 };
 

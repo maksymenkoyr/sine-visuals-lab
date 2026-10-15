@@ -267,7 +267,10 @@ import { getDriveSolo } from "./driveSolo.ts";
  * at size 1, as before. A setting with `hit.ownDetector` (Beat ripple, Dose,
  * Cut) runs standout.ts itself and only reads `readout(key)`. The detector
  * learns from every frame it sees, so a scene calls `fired()` for a hit
- * driver every frame, never behind a check on its own amount.
+ * driver every frame, never behind a check on its own amount. A setting
+ * read with `fired()` that should stay out of all this declares
+ * `drive.noStandout` (with its reason) instead of `drive.hit`, and its edges
+ * pass through the generic gate as before hit drivers existed.
  *
  * **Advancing.** Grid pulses, line peak-holds and Fixed/Loud height
  * envelopes are per-tick state that has to see every rAF tick, not just the

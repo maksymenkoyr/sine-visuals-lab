@@ -256,7 +256,10 @@ describe("hit drivers: every drives.fired() setting declares drive.hit", () => {
       for (const key of keys) {
         const spec = scene.settings?.find((s) => s.key === key);
         if (!spec) continue;
-        expect(spec.drive?.hit, `${scene.id}: "${key}" is read with drives.fired() but doesn't declare drive.hit`).toBeDefined();
+        expect(
+          spec.drive?.hit ?? spec.drive?.noStandout,
+          `${scene.id}: "${key}" is read with drives.fired() but declares neither drive.hit nor drive.noStandout`,
+        ).toBeDefined();
       }
       // And the other way: an engine-run hit driver the scene never asks
       // fired() about would have a Reaction row that does nothing.
