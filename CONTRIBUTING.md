@@ -53,7 +53,7 @@ npm run dev:worker   # Cloudflare Worker backend, for phone/TV pairing
 ```
 
 Before opening a pull request, run the check that CI enforces (typecheck,
-code rules, lint, unused code, licenses, secrets and tests; the
+code rules, lint, unused code, licenses, secrets, tests and bundle size; the
 `tools/check.mjs` header explains each):
 
 ```

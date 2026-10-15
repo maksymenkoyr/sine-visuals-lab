@@ -55,3 +55,16 @@ export function biomeFindings(
 export function knipFindings(report: { issues?: Array<Record<string, unknown> & { file: string }> }): Finding[];
 
 export function addedLines(diffText: string): AddedLine[];
+
+export type BuildManifest = Record<string, { file: string; isEntry?: boolean; imports?: string[]; [key: string]: unknown }>;
+
+export function firstPaintChunks(manifest: BuildManifest, page: string): string[];
+export function pinnedFiles(
+  sources: Array<{ path: string; text: string }>,
+  manifest: BuildManifest,
+  assetPaths: string[],
+): { files: string[]; problems: string[] };
+export function compareSizes(
+  measured: { pages: Record<string, number>; pinned: number },
+  budget: { pages?: Record<string, number>; pinned?: number },
+): { ok: boolean; summary: string; detail: string };
