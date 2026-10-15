@@ -223,18 +223,19 @@ import { getDriveSolo } from "./driveSolo.ts";
  * floor that follows the signal's resting level (down fast, up slowly — a
  * brief loud passage shouldn't instantly convince it the room got louder)
  * and a peak that jumps straight to a new high and eases back toward the
- * floor. The setting's window — two 0..1 sliders, Min (the stored
- * threshold) and Max (getDriveWindowMax), each 0 at the floor and 1 at the
- * peak — picks two lines between them. `value()`/`uniformPair()`/`valueOf()`
- * read 0 at or under the Min line, the tracked peak at or over the Max line,
- * and a straight rise in between: the stretch a hand-set "normalize"
- * min/max gives, except its ends ride this signal's own floor and peak, so
- * it holds from one song to the next. The setting's Smoothness
- * (getDriveSmoothness in driveStore.ts, defaulting to
- * GENERIC_SMOOTHNESS_DEFAULT) moves the Min line toward the floor and the Max
- * line toward the peak, by that share of the room on each side, so a reading
- * riding the Min line doesn't flicker; it never moves them past the floor or
- * the peak, so silence still reads 0 and a new high still reads full. At its
+ * floor (the floor only sets where the peak eases back to). The setting's
+ * window — two 0..1 sliders, Min (the stored threshold) and Max
+ * (getDriveWindowMax), each 0 at a reading of 0 and 1 at the peak — picks
+ * two lines between them. `value()`/`uniformPair()`/`valueOf()` read 0 at
+ * or under the Min line, the tracked peak at or over the Max line, and a
+ * straight rise in between, so a window open all the way (Min 0, Max 1,
+ * no Smoothness) hands the reading on unchanged up to the peak. The Max end
+ * rides the signal's own peak, so it holds from one song to the next. The
+ * setting's Smoothness (getDriveSmoothness in driveStore.ts, defaulting to
+ * GENERIC_SMOOTHNESS_DEFAULT) moves the Min line toward 0 and the Max line
+ * toward the peak, by that share of the room on each side, so a reading
+ * riding the Min line doesn't flicker; it never moves them past 0 or the
+ * peak, so silence still reads 0 and a new high still reads full. At its
  * far left, or switched off with getDriveSmoothnessOn, the window is exact.
  * `fired()` blocks an edge whose own combined value falls under the Min
  * line, on top of whatever that mix already required. A setting
@@ -1068,12 +1069,12 @@ interface GateTrackerState {
   init: boolean;
   floor: number;
   peak: number;
-  /** floor + t·(peak−floor), t the setting's own threshold value — what the
+  /** t·peak, t the setting's own threshold value — what the
    *  panel's graph draws dotted (SceneDrives.gateLine) and what value()/
    *  fired() gate against. Recomputed every advance, so it's always current
-   *  the instant floor/peak move even if the threshold slider itself didn't. */
+   *  the instant the peak moves even if the threshold slider itself didn't. */
   line: number;
-  /** floor + max(t, tMax)·(peak−floor) — the window's Max line (SceneDrives.gateTop). Never below `line`. */
+  /** max(t, tMax)·peak — the window's Max line (SceneDrives.gateTop). Never below `line`. */
   top: number;
 }
 
@@ -1097,8 +1098,8 @@ function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: n
     tr.floor += (v - tr.floor) * (1 - Math.exp(-dtSec / floorTau));
     tr.peak = v > tr.peak ? v : tr.floor + (tr.peak - tr.floor) * Math.exp(-dtSec / GATE_PEAK_DECAY_TAU_SEC);
   }
-  tr.line = tr.floor + clamp01(t) * (tr.peak - tr.floor);
-  tr.top = tr.floor + Math.max(clamp01(t), clamp01(tMax)) * (tr.peak - tr.floor);
+  tr.line = clamp01(t) * tr.peak;
+  tr.top = Math.max(clamp01(t), clamp01(tMax)) * tr.peak;
 }
 
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
@@ -1492,9 +1493,9 @@ export function createDriveEngine(): DriveEngine {
       // value()/uniformPair()/valueOf()'s window (this file's header's
       // threshold paragraph): 0 at or under the Min line, the tracked peak at
       // or over the Max line, a straight rise between. Smoothness moves the
-      // Min line toward the tracked floor and the Max line toward the tracked
-      // peak, by that share of the room on each side and never past them, so
-      // silence still reads 0 and a new high still reads the peak.
+      // Min line toward 0 and the Max line toward the tracked peak, by that
+      // share of the room on each side and never past them, so silence
+      // still reads 0 and a new high still reads the peak.
       // No-op (returns `v` unchanged) whenever genericGate(key) has nothing
       // to gate on.
       function applyGenericGate(key: string, v: number): number {
@@ -1502,7 +1503,7 @@ export function createDriveEngine(): DriveEngine {
         if (!tr) return v;
         const spec = specByKey.get(key)!;
         const s = getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
-        const lo = tr.line - s * (tr.line - tr.floor);
+        const lo = tr.line * (1 - s);
         const hi = tr.top + s * (tr.peak - tr.top);
         if (hi - lo <= 1e-6) return v >= tr.line ? tr.peak : 0;
         return tr.peak * clamp01((v - lo) / (hi - lo));

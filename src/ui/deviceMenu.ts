@@ -3373,7 +3373,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const WEIGHT_HINT = "This wire's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
   const GENERIC_THRESHOLD_HINT =
-    "A window on this wire. The low dotted line (Min) sits on its resting level at 0, the high one (Max) on its recent peak at 1. Under Min counts as nothing, over Max counts as full, and in between rises in a straight line. Off: everything passes as it is.";
+    "A window on this wire. Each dotted line runs from nothing at 0 to the wire's recent peak at 1: the low one is Min, the high one Max. Min at 0 and Max at 1 pass the wire through as it is. Under Min counts as nothing, over Max counts as full, and in between rises in a straight line. Off: everything passes as it is.";
 
   const HIT_THRESHOLD_HINT =
     "Moves the dotted line: how far a hit has to stand out from the everyday ones to count. Left: more reactions, even from quiet sounds. Right: only clear standouts. Off: every hit counts.";
@@ -3388,10 +3388,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const GENERIC_SMOOTHNESS_HINT =
-    "How gently the window starts and ends. Left: exactly at the two lines. Right: a softer rise that stretches toward the quietest and loudest the signal has been, while silence still gives nothing and the loudest still gives full. Off: exactly at the two lines, whatever the slider says.";
+    "How gently the window starts and ends. Left: exactly at the two lines. Right: a softer rise that stretches toward nothing and toward the loudest the signal has been, while silence still gives nothing and the loudest still gives full. Off: exactly at the two lines, whatever the slider says.";
 
   /** The generic gate's Smoothness row — a 0..1 slider for how far the
-   *  window softens toward the signal's floor and peak (driveStore.ts's
+   *  window softens toward 0 and the signal's peak (driveStore.ts's
    *  getDriveSmoothness).
    *  Its own On/Off, independent of the threshold's. Same live-write,
    *  no-rebuild rule as buildThresholdRow. */

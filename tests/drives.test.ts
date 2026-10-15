@@ -1410,7 +1410,7 @@ describe("drives: the generic engine gate — every drive setting without its ow
     expect(drives.value("k", -1)).toBeCloseTo(1, 5);
   });
 
-  it("on: t=0 sits at the resting floor, t=1 at the recent peak — the slider moves the line", () => {
+  it("on: t=0 sits at 0, t=1 at the recent peak — the slider moves the line", () => {
     const sceneId = "gate-on-t";
     const spec = energySetting();
     setDriveThresholdOn(sceneId, spec, true);
@@ -1428,15 +1428,37 @@ describe("drives: the generic engine gate — every drive setting without its ow
 
     setDriveThreshold(sceneId, spec, 0);
     const lineAt0 = tick(0.1).gateLine("k")!;
+    expect(lineAt0).toBe(0);
     setDriveThreshold(sceneId, spec, 1);
     const lineAt1 = tick(0.1).gateLine("k")!;
     expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
   });
 
-  it("smoothness: never reaches past the floor or the peak — silence reads 0 and a reading at the peak reads the peak at every value, and more smoothness lets more of the middle through", () => {
+  it("window open all the way (Min 0, Max 1, Smoothness off) hands the reading on unchanged", () => {
+    const sceneId = "gate-window-open";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0);
+    setDriveWindowMax(sceneId, spec, 1);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.3); // the floor settles at 0.3, well above 0
+    expect(tick(0.3).value("k", -1)).toBeCloseTo(0.3, 6);
+    expect(tick(0.6).value("k", -1)).toBeCloseTo(0.6, 6);
+  });
+
+  it("smoothness: never reaches past 0 or the peak — silence reads 0 and a reading at the peak reads the peak at every value, and more smoothness lets more of the middle through", () => {
     // Min == Max == 1 (both lines on the tracked peak): with no smoothness only
-    // a new high gets through; smoothness eases the Min line down toward the
-    // floor, but the Max line stays on the peak, which it can't pass.
+    // a new high gets through; smoothness eases the Min line down toward 0,
+    // but the Max line stays on the peak, which it can't pass.
     function settle(sceneId: string, smoothness: number) {
       const spec = energySetting();
       setDriveThresholdOn(sceneId, spec, true);

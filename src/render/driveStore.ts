@@ -90,7 +90,7 @@ interface DriveEntry {
    *  own default" (on for scene-handled, off for generic) — see
    *  getDriveThresholdState. */
   thresholdOn?: boolean;
-  /** The generic gate window's Max, 0..1 on the same floor→peak scale as `threshold` (its Min) — see getDriveWindowMax. */
+  /** The generic gate window's Max, 0..1 on the same 0→peak scale as `threshold` (its Min) — see getDriveWindowMax. */
   windowMax?: number;
   /** The generic engine gate's window softening, 0..1 — see getDriveSmoothness. */
   smoothness?: number;
@@ -593,8 +593,8 @@ export function setDriveWindowMax(sceneId: string, spec: SceneSetting, value: nu
   persist();
 }
 
-/** How far the generic engine gate's window softens toward the tracked
- *  floor and peak, 0..1 (drives.ts's header's threshold paragraph) — the
+/** How far the generic engine gate's window softens toward 0 and the
+ *  tracked peak, 0..1 (drives.ts's header's threshold paragraph) — the
  *  bottom of the range is a hard cut at the line. Every drive setting starts
  *  at `GENERIC_SMOOTHNESS_DEFAULT`, a small softening. Only the generic gate
  *  reads it: a scene-handled threshold shapes its own gate. */
