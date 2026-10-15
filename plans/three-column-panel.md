@@ -58,27 +58,21 @@ Keep (the plumbing a middle node needs, whatever its controls):
 - `src/ui/driveSources.ts`: labels ("Bass level shaped", "… shaped 2"), colour from the input, `driveAddGroups()` with a Shaped group, `shapingInputGroups()`.
 - `src/ui/shapingColumn.ts`: the middle column. Each node is a card with a monitor row (an input port before the label, the node's jack beside its readout), an in/out graph that never rescales, a heat strip, the controls and "+ New shaping node". It is wired into `src/ui/deviceMenu.ts` through the same jack logic as the meters (`jackPatch`), and the node-input cables ride the cable layer's static fan group (`feedGroups`).
 
-Replace in phase 1: the node's controls (`ShapingNodeDef`, `stepShapingNode`, the three control rows in `shapingColumn.ts`, their tests).
+The first session's node controls (Expansion, Threshold, one-pole Smoothness) were replaced in phase 1.
 
 ## Phases
 
-Each phase is one build session and one PR. Line numbers below are from main @ 76817850; search by symbol.
+Built on 2026-10-15/16 in this one PR rather than one PR per phase (the user: "continue with pr 547. implement. use haiku coder"); each phase is its own commit.
 
-- [ ] **0. Confirm Patch Focus and answer the open questions** marked "blocks phase 1/2". Update this file's Decisions.
-- [ ] **1. The node's controls become the setting's input controls**
-  - Window Min/Max on the input's own learned floor and peak, and the Smoothness knee: reuse the generic gate's tracker and math in `src/render/drives.ts` (`GateTrackerState`, `advanceGateTracker`, the window read in `forScene`'s `applyGenericGate`; defaults `GENERIC_THRESHOLD_DEFAULT`, `GENERIC_WINDOW_MAX_DEFAULT`, `GENERIC_SMOOTHNESS_DEFAULT`) rather than writing a second copy.
-  - Height (Graded/Fixed/Loud) needs the input's edge and its decay rate: `heightTailLane`, `heightDecayPerSec`, `loudLevel` in drives.ts. Move or export them so the node can use them.
-  - Length: per the answer above.
-  - Touches: `src/render/shapingNodes.ts`, `src/render/drives.ts`, `src/ui/shapingColumn.ts`, `tests/shapingNodes.test.ts`, `src/render/sceneLooks.ts` (the `h` def shape), `docs/vocabulary.md`.
-- [ ] **2. The setting's wire panel loses what moved**
-  - The Window/Threshold and Smoothness rows (`buildPatchPanel` ~4209 and the threshold/smoothness builders ~3400–3520 in `src/ui/deviceMenu.ts`), the per-wire Height seg (`buildHeightSeg`, used in `buildSourceLine` ~3739), plus the migration chosen above. Add a Shape button on a direct wire that inserts a node and rewires through it.
-  - Touches: `src/ui/deviceMenu.ts`, `src/render/driveStore.ts`, `src/render/drives.ts` (keep or drop the per-setting gate), `src/render/sceneLooks.ts`, their tests; every scene record whose defaults or notes mention a setting's Window, if any change (`docs/scenes/<id>.md`).
-- [ ] **3. Focus across the three columns, and drag to connect**
-  - A focus model `{ kind: input | node | setting, id }` that replaces today's setting-only `pinned`/`preview` (`togglePin` ~4724, `pinSetting`, `previewDrive`, `activePreview`, `shownSelection` in deviceMenu.ts), and generalizes today's hover fan from a meter row (`litSignalFan` ~5214, `hoverJackRow`).
-  - The chain: an input's nodes and every setting it reaches; a node's input and its settings; a setting's wires, their nodes and those nodes' inputs. Dim everything off the chain: meter rows (audioMeters' `jackRegistry` feedEl), node cards, drive rows (`driveRowHandles[].rowEl`). Draw the chain's cables bright.
-  - Drag a jack onto a port; drop an input jack on the middle column to make a node. Today a jack only clicks (`onJackClick` ~4944 via `jackTarget`). `src/ui/cableLayer.ts` needs a temporary path for the drag.
-  - Fix the column's overlap with an open Power card.
-  - Touches: `src/ui/deviceMenu.ts`, `src/ui/audioMeters.ts`, `src/ui/shapingColumn.ts`, `src/ui/cableLayer.ts`, `src/ui/controlsTheme.ts`.
+- [x] **0. Answers** taken from Patch Focus, not confirmed point by point: "Taken as answers on 2026-10-15" above.
+- [x] **1. The node's controls become the setting's input controls.** Window, Smoothness, Length, and Height for a hit input. The gate tracker, its knee and the Fixed/Loud envelope moved from `drives.ts` into `src/render/gateWindow.ts`, which both use; `drives.ts`'s behaviour is unchanged.
+- [x] **2. The wire panel loses what moved.** The generic Window/Smoothness rows show only while a setting's own gate is on, a wire's Height only while it carries Fixed/Loud; the engine still honours both. A Shape button on a catalogue wire (`shapeSource` in `drives.ts`) inserts a node and carries those values into it.
+- [x] **3. Focus across the columns, and drag to connect.** `src/ui/patchChain.ts` computes a chain; `deviceMenu.ts`'s `refreshChain` dims what's off it and `litSignalFan` draws the chain's wires. Kept the setting-only `pinned`/`preview` and added `pinnedNode`/`hoverNode` beside them, instead of one focus model replacing both: smaller change, same behaviour. An input row lights on hover or keyboard focus but doesn't pin. Drag: a jack onto a setting row, a node card, or the middle column (`dropTargetAt`/`dropJack`; `cableLayer.ts`'s `setDrag`). The column's placement beside an open Power card is JS (`placeShapingColumn`): it drops below Power when the gap is narrower than `SHAPE_COL_MIN_PX`.
+
+Still open:
+- The user's yes on the answers above, and the name.
+- Known small edges: a drag cancelled with Escape and released on its own jack still clicks it; the "live on shaping nodes now" note shows even when every wire already runs through a node.
+- A line-by-line review of `shapingNodes.ts` and `shapingColumn.ts` beyond the session's own diff reads.
 
 ## How to check
 
