@@ -45,10 +45,10 @@ import { hexToRgb, mixOklab, oklabToRgb, rgbToHex, rgbToOklab, sampleStops, type
  * change that.
  */
 
-export type PaletteGroup = "Classic" | "Night" | "Heat" | "Neon" | "Film" | "Mineral" | "Mono";
+export type PaletteGroup = "Classic" | "Contrast" | "Night" | "Heat" | "Neon" | "Film" | "Mineral" | "Mono";
 
 /** Display order of the groups in the panel's palette card. */
-export const PALETTE_GROUPS: readonly PaletteGroup[] = ["Classic", "Night", "Heat", "Neon", "Film", "Mineral", "Mono"];
+export const PALETTE_GROUPS: readonly PaletteGroup[] = ["Classic", "Contrast", "Night", "Heat", "Neon", "Film", "Mineral", "Mono"];
 
 /** `#rrggbb` colours, by job — see the header. */
 export interface PaletteRoles {
@@ -202,6 +202,45 @@ export const PALETTES: Palette[] = [
       accent: "#ffc04d",
     },
   },
+  // Contrast: two opposite hues, the darker one low on the ramp and the
+  // lighter one high, so dim things take one colour and bright things the
+  // other. The accent is a third hue for hits against the bright one.
+  rolePalette("cobalt", "Cobalt", "Contrast", {
+    ground: "#02040c",
+    ramp: ["#040a24", "#1f4fe0", "#ff8a2a", "#ffbe73", "#fff0dc"],
+    inks: ["#3d7bff", "#ff8a2a", "#62e0ff", "#ffd08a"],
+    accent: "#62e0ff",
+  }),
+  rolePalette("toxic", "Toxic", "Contrast", {
+    ground: "#05020a",
+    ramp: ["#12062a", "#7a2cf0", "#a8f030", "#d4ff7a", "#f6ffe0"],
+    inks: ["#9b3cff", "#b8ff3a", "#ff3df0", "#3dffd0"],
+    accent: "#ff3df0",
+  }),
+  rolePalette("anaglyph", "Anaglyph", "Contrast", {
+    ground: "#080203",
+    ramp: ["#1e0408", "#e01a30", "#3fe8ff", "#9ff6ff", "#ecffff"],
+    inks: ["#ff2a3a", "#3ff0ff", "#ffd23f", "#a0a0ff"],
+    accent: "#ffd23f",
+  }),
+  rolePalette("vapor", "Vapor", "Contrast", {
+    ground: "#04030c",
+    ramp: ["#0a0830", "#2f5bff", "#ff4fb8", "#ff9ad6", "#ffe6f5"],
+    inks: ["#3f7bff", "#ff4fb8", "#3ff0ff", "#ffe066"],
+    accent: "#3ff0ff",
+  }),
+  rolePalette("royal", "Royal", "Contrast", {
+    ground: "#05030c",
+    ramp: ["#120a30", "#6a30f0", "#ffb81f", "#ffd77a", "#fff5d8"],
+    inks: ["#7a3cff", "#ffc23a", "#ff5a8a", "#5ad1ff"],
+    accent: "#ff5a8a",
+  }),
+  rolePalette("reef", "Reef", "Contrast", {
+    ground: "#020809",
+    ramp: ["#04161a", "#0f8f86", "#ff5a8a", "#ff9ab5", "#ffe6ee"],
+    inks: ["#14b0a0", "#ff5a8a", "#ffd166", "#7aa8ff"],
+    accent: "#ffd166",
+  }),
   // Sodium-vapour streetlight over a night river.
   rolePalette("sodium", "Sodium", "Night", {
     ground: "#06080d",
