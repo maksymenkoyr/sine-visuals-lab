@@ -258,8 +258,9 @@ import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render
  * patch (onJackClick); with nothing pinned, it pins whichever setting was
  * last previewed (`lastPreview`, since `preview` itself goes back to null
  * the moment the pointer leaves) and plugs in in the same click, or shows a
- * toast if nothing ever was. Hovering a jack highlights every scene row it
- * already feeds (onJackHover, independent of the shown-setting highlight).
+ * toast if nothing ever was. A jack can also be dragged onto a setting, a
+ * shaping node, or the middle column. Hovering a jack highlights every scene
+ * row it already feeds (onJackHover, independent of the shown-setting highlight).
  * While a setting is shown, `refreshPatchHighlight` — called from every
  * place `pinned`/`preview`/a patch actually changes, never per frame —
  * dims the rest of the Bands+meters column (`.vc-patching`, controlsTheme.ts)
@@ -2426,6 +2427,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // ever called until well after createDeviceMenu() has finished running
   // and every one of them exists. One bundle, shared by the meters and
   // the shaping column (shapingColumn.ts).
+  // Which DriveSourceChoice each jack element carries — a jack's own
+  // identity is only its jackKey, which collapses beat-grid divisions, and
+  // a drag needs the real choice (registerJack, below; mountBandsJack).
+  const jackChoices = new WeakMap<HTMLElement, DriveSourceChoice>();
   const jackPatch: AudioMetersDeps["patch"] = {
     usage: jackUsage,
     isShown: jackIsShown,
@@ -2438,6 +2443,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     describe: jackDescribe,
     onJackClick,
     onJackHover,
+    registerJack: (el, choice) => jackChoices.set(el, choice),
   };
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
@@ -2762,6 +2768,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       () => onJackClick(choice),
       (on) => onJackHover(choice, on),
     );
+    jackChoices.set(jack.el, choice);
     host.appendChild(jack.el);
     bandsJacks.push({ choice, jack, feedEl });
     bandsJackEls.set(jackKey(choice), jack.el);
@@ -5083,6 +5090,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let justAddedKey: string | null = null;
 
   function onJackClick(choice: DriveSourceChoice): void {
+    if (jackDragJustEnded) return;
     if (pinnedNode) {
       const node = getShapingNode(pinnedNode);
       if (node) {
@@ -5108,6 +5116,123 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     deps.onTogglePatchSource(target.sceneId, target.spec, choice);
     patchChanged(target.sceneId, target.spec);
   }
+
+  // ---- Dragging a jack: a mouse or pen press that moves becomes a drag
+  // (wide layout only — cables are hidden when narrow); a press without
+  // movement stays the click onJackClick handles. Drop targets are
+  // dropTargetAt's; the drop itself is dropJack's.
+  /** A jack press that may become a drag (DRAG_START_PX of movement). */
+  let jackDrag: { el: HTMLElement; choice: DriveSourceChoice; x: number; y: number; pointerId: number; moved: boolean } | null = null;
+  /** Set on the pointerup that ends a real drag, so the click the browser may still send to the jack is ignored. */
+  let jackDragJustEnded = false;
+  let dropTargetEl: HTMLElement | null = null;
+  const DRAG_START_PX = 5;
+
+  /** A drop's target, as dropTargetAt finds it. */
+  type DropTarget =
+    | { kind: "setting"; el: HTMLElement; sceneId: string; spec: SceneSetting }
+    | { kind: "node"; el: HTMLElement; id: string }
+    | { kind: "column"; el: HTMLElement };
+
+  /** What a jack dropped at (x, y) lands on: a wireable setting row of this scene, a shaping node card, or the middle column's free space. A node's own jack (a shaped choice) only ever lands on a setting. */
+  function dropTargetAt(x: number, y: number, choice: DriveSourceChoice): DropTarget | null {
+    const under = document.elementFromPoint(x, y);
+    if (!under) return null;
+    const sceneId = deps.currentSceneId();
+    const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.drive && r.rowEl.contains(under));
+    if (h) return { kind: "setting", el: h.rowEl, sceneId, spec: h.spec };
+    if (typeof choice !== "string") return null;
+    const nodeEl = under.closest<HTMLElement>(".vc-shape-node");
+    if (nodeEl?.dataset.nodeId) return { kind: "node", el: nodeEl, id: nodeEl.dataset.nodeId };
+    if (under.closest(".vc-shape-col")) return { kind: "column", el: shapingCol.el };
+    return null;
+  }
+
+  /** A jack dropped on a target (dropTargetAt). Plugging never unplugs: dropping a wire that is already there just pins its setting. */
+  function dropJack(choice: DriveSourceChoice, t: DropTarget): void {
+    if (t.kind === "setting") {
+      pinSetting(t.sceneId, t.spec);
+      if (!jackFeeds({ sceneId: t.sceneId, spec: t.spec }, choice)) {
+        justAddedKey = jackKey(choice);
+        deps.onTogglePatchSource(t.sceneId, t.spec, choice);
+        patchChanged(t.sceneId, t.spec);
+        showToast(`${driveSourceLabel(choice)} → ${t.spec.label}`);
+      }
+      return;
+    }
+    if (typeof choice !== "string") return;
+    if (t.kind === "node") {
+      const node = getShapingNode(t.id);
+      if (!node) return;
+      if (node.src !== choice) {
+        updateShapingNode(node.id, { src: choice });
+        showToast(`${shapingNodeLabel(node.id)} now reads ${driveSourceLabel(choice)}`);
+      }
+      if (pinnedNode !== node.id) toggleNodePin(node.id);
+      return;
+    }
+    const node = addShapingNode(choice);
+    if (!node) {
+      showToast("No room for another shaping node");
+      return;
+    }
+    showToast(`New shaping node: ${shapingNodeLabel(node.id)}. Drag its jack onto a setting.`);
+    // Pinned after the add: the column rebuilds itself from the store.
+    toggleNodePin(node.id);
+  }
+
+  /** The drop highlight: moves `.vc-drop-target` to `el` (null clears it). */
+  function setDropTarget(el: HTMLElement | null): void {
+    if (el === dropTargetEl) return;
+    dropTargetEl?.classList.remove("vc-drop-target");
+    dropTargetEl = el;
+    el?.classList.add("vc-drop-target");
+  }
+
+  /** Ends any jack drag in progress: the cable, the dragging look and the drop highlight all go. No drop. */
+  function clearJackDrag(): void {
+    jackDrag = null;
+    cableLayer.setDrag(null);
+    root.classList.remove("vc-dragging");
+    setDropTarget(null);
+  }
+
+  root.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.pointerType === "touch" || narrowMQ.matches) return;
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>(".vc-jack") : null;
+    const choice = el ? jackChoices.get(el) : undefined;
+    if (!el || !choice) return;
+    jackDrag = { el, choice, x: e.clientX, y: e.clientY, pointerId: e.pointerId, moved: false };
+  });
+  window.addEventListener("pointermove", (e) => {
+    const d = jackDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (!d.moved) {
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) <= DRAG_START_PX) return;
+      d.moved = true;
+      root.classList.add("vc-dragging");
+      hideTooltip();
+    }
+    cableLayer.setDrag({ from: d.el, x: e.clientX, y: e.clientY, color: driveSourceColor(d.choice) });
+    setDropTarget(dropTargetAt(e.clientX, e.clientY, d.choice)?.el ?? null);
+  });
+  window.addEventListener("pointerup", (e) => {
+    const d = jackDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    clearJackDrag();
+    if (!d.moved) return;
+    jackDragJustEnded = true;
+    setTimeout(() => {
+      jackDragJustEnded = false;
+    }, 0);
+    const t = dropTargetAt(e.clientX, e.clientY, d.choice);
+    if (t) dropJack(d.choice, t);
+  });
+  window.addEventListener("pointercancel", (e) => {
+    const d = jackDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    clearJackDrag();
+  });
 
   /** Hovering a jack highlights every scene row it feeds right now —
    *  independent of the preview/pin highlight above (this fires for *any*
@@ -8011,6 +8136,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function onKeyDown(e: KeyboardEvent) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (isTypingTarget(e.target)) return;
+    if (e.key === "Escape" && jackDrag?.moved) {
+      clearJackDrag();
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Escape" && pinnedNode) {
       pinnedNode = null;
       refreshPatchHighlight();

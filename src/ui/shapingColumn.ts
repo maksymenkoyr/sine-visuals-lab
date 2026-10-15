@@ -583,6 +583,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
       () => deps.patch.onJackClick(choice),
       (on) => deps.patch.onJackHover(choice, on),
     );
+    deps.patch.registerJack(jack.el, choice);
     row.right.append(jack.el);
 
     const legend = document.createElement("div");

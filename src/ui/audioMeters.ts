@@ -443,6 +443,8 @@ export interface AudioMetersDeps {
      *  of the shown-setting highlight above, this is purely "what does
      *  hovering *this* jack, right now, actually reach". */
     onJackHover(choice: DriveSourceChoice, on: boolean): void;
+    /** Tells the panel which choice this jack element carries — for dragging a jack (deviceMenu.ts). */
+    registerJack(el: HTMLElement, choice: DriveSourceChoice): void;
   };
 }
 
@@ -2077,6 +2079,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       () => deps.patch.onJackClick(choice),
       (on) => deps.patch.onJackHover(choice, on),
     );
+    deps.patch.registerJack(jack.el, choice);
     host.appendChild(jack.el);
     jackRegistry.push({ choice, jack, feedEl });
     jackElementsMap.set(jackKey(choice), jack.el);

@@ -982,6 +982,15 @@ body.vc-keys-reveal [data-keycap]::after {
 /* The previewed setting's own cables — flat and quiet on purpose, so a
  * transient hover never reads as "committed" the way a pinned patch does. */
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+/* A jack being dragged (deviceMenu.ts's jack drag, cableLayer.ts setDrag). */
+.vc-cable-drag { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 6; opacity: 0.95; }
+/* While a jack is dragged: ports and the middle column say where a drop lands, and nothing stays dimmed. */
+.vc-root.vc-dragging .vc-chain-off { opacity: 1; }
+.vc-root.vc-dragging .vc-drive-port { box-shadow: 0 0 0 4px rgba(195,165,249,0.28); }
+.vc-root.vc-dragging .vc-shape-col { outline: 1px dashed rgba(249,185,108,0.6); outline-offset: 2px; }
+.vc-root.vc-dragging .vc-drop-target { box-shadow: 0 0 0 1px rgba(255,255,255,0.7), 0 0 14px -4px #fff; }
+@media (min-width: ${STACK_BELOW_PX + 1}px) { .vc-jack { cursor: grab; } }
+.vc-root.vc-dragging, .vc-root.vc-dragging * { cursor: grabbing !important; }
 /* A lit signal's wires to every port it reaches (cableLayer.ts's fan
  * group) — solid where a preview is dashed, and quieter than a pinned
  * cable, since it shows where a signal goes rather than one patch. */
