@@ -63,6 +63,7 @@ import {
   GATE_OPEN_LOW,
   isEngineHitDriver,
   sameDriveSetting,
+  shapeSource,
   smoothstep,
   sourceKey,
   type DriveMix,
@@ -88,7 +89,9 @@ import {
   isGridSourceChoice,
   isLineSourceChoice,
   jackKey,
+  shapingNodeLabel,
 } from "./driveSources.ts";
+import { addShapingNode } from "../render/shapingNodes.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
@@ -229,8 +232,10 @@ import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render
  * (that only writes the store and a readout) and never from the panel's
  * periodic refresh, matching the click-loss lesson in this file's carried
  * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
- * line per source (colour dot, name, weight 0–2×, a hit source's Height
- * Graded/Fixed/Loud, a grid source's division chips, the line source's
+ * line per source (colour dot, name, weight 0–2×, a Shape button on a
+ * catalogue wire that puts a shaping node on it, a hit source's Height
+ * Graded/Fixed/Loud only while it still carries an old one, a grid source's
+ * division chips, the line source's
  * Strength + Clear reusing lineEditor.strengthRow), a 4 s output graph off
  * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
@@ -3513,7 +3518,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  gets a Smoothness row under the window (buildSmoothnessRow), with its
    *  own On/Off. Same live-write, no-rebuild rule
    *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
-   *  own mini-segment styling. */
+   *  own mini-segment styling. A generic gate's window is built only while
+   *  its own gate is on (buildPatchPanel): shaping nodes own the window now,
+   *  and this row is what a saved Look from before them still shows. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
     const engineHit = isEngineHitDriver(spec);
@@ -3771,6 +3778,50 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return btn;
   }
 
+  /** A wire's Shape button: puts a new shaping node (shapingNodes.ts) on this
+   *  catalogue wire and re-points the wire at it, so the picture doesn't
+   *  change until the node is edited. The node takes the wire's Height, and
+   *  the setting's own window too when this is its only wire and the gate is
+   *  on; that window then goes off on the setting (the node carries it now). */
+  function buildShapeButton(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const choice = src.choice as SignalId;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.style.cssText = driveResetLinkStyle;
+    btn.textContent = "Shape";
+    btn.setAttribute("aria-label", `Shape ${driveSourceLabel(src.choice)}`);
+    setHint(btn, "Put a shaping node on this wire: it reads the same until you change the node.");
+    btn.addEventListener("click", () => {
+      const setting = deps.getDriveSetting(sceneId, spec);
+      if (setting === "scene") return;
+      const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
+      const gate = deps.getDriveThresholdState(sceneId, spec);
+      // The setting's own window moves into the node only when this is its only wire.
+      const carryGate = generic && gate.on && setting.sources.length === 1;
+      const node = addShapingNode(choice, {
+        height: src.height ?? "graded",
+        windowOn: carryGate,
+        ...(carryGate
+          ? {
+              min: gate.value,
+              max: deps.getDriveWindowMax(sceneId, spec),
+              smoothOn: deps.getDriveSmoothnessOn(sceneId, spec),
+              smoothness: deps.getDriveSmoothness(sceneId, spec),
+            }
+          : {}),
+      });
+      if (!node) {
+        showToast("No room for another shaping node");
+        return;
+      }
+      deps.onSetDriveSetting(sceneId, spec, shapeSource(setting, src.choice, node.id));
+      if (carryGate) deps.onSetDriveThresholdOn(sceneId, spec, false);
+      patchChanged(sceneId, spec);
+      showToast(`This wire now runs through ${shapingNodeLabel(node.id)}`);
+    });
+    return btn;
+  }
+
   function buildSourceLine(
     sceneId: string,
     spec: SceneSetting,
@@ -3825,7 +3876,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Fixed/Loud height only mean anything for a hit-kind source — an
     // edge-kind catalogue entry or a beat grid (drives.ts's own header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
-    if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    // Only a wire still carrying an old Fixed/Loud shows its Height; a node
+    // owns Height from now on (shaping nodes; the engine still honours this).
+    if (isHitKind && src.height !== undefined && src.height !== "graded") ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
     // Every-N-beats only ever means anything for a plain Beat wave source
     // (DriveSource.every's own doc) — never a grid/line/hit-kind source, all
     // handled by other branches here.
@@ -3839,6 +3892,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       drawHint.textContent = "Draw on the spectrum.";
       ctrls.appendChild(drawHint);
     } else {
+      // A catalogue wire can take a node, except a Beat wave on an every-N
+      // divider: shapeSource would drop that divider (DriveSource.every).
+      if (typeof src.choice === "string" && !(src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1)) {
+        ctrls.appendChild(buildShapeButton(sceneId, spec, src));
+      }
       ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
     }
 
@@ -4240,7 +4298,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** Rebuilds the pinned row's whole patch panel — called only on a genuine
    *  patch edit (patchChanged) or a fresh pin (DriveRowHandle.refreshPin),
    *  never from the panel's periodic refresh or a slider's own `input`
-   *  event (this file's own carried click-loss rule). */
+   *  event (this file's own carried click-loss rule). A generic setting's
+   *  window row is only built while its own gate is on, and a wire's Height
+   *  seg only while it still carries an old Fixed/Loud; its wires' Shape
+   *  buttons (buildSourceLine) are how both move to a shaping node. */
   function buildPatchPanel(
     sceneId: string,
     spec: SceneSetting,
@@ -4248,6 +4309,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wireHeatPips = []; // the wire pips of the panel being rebuilt replace the old panel's
     const setting = deps.getDriveSetting(sceneId, spec);
     const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
+    // The generic gate's window rows only show while the setting's own gate
+    // is on (a saved Look from before shaping nodes); see buildThresholdRow.
+    const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
+    const legacyWindow = generic && deps.getDriveThresholdState(sceneId, spec).on;
 
     const panel = document.createElement("div");
     panel.style.cssText = drivePatchPanelStyle;
@@ -4341,6 +4406,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     patch.sources.forEach((src, i) => {
       list.appendChild(buildSourceLine(sceneId, spec, patch, src, i, refreshResetVisibility));
     });
+    if (generic && patch.sources.length) {
+      const shapeNote = document.createElement("div");
+      shapeNote.style.cssText = driveEmptySrcStyle;
+      shapeNote.textContent = "Window, Smoothness, Length and Height live on shaping nodes now. Press Shape on a wire to give it one.";
+      list.appendChild(shapeNote);
+    }
     panel.appendChild(list);
     panel.appendChild(buildAddChips(sceneId, spec, patch));
 
@@ -4352,7 +4423,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       outputCanvas = graph.canvas;
       tick = graph.tick;
     }
-    panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
+    if (!generic || legacyWindow) {
+      if (legacyWindow) {
+        const legacyNote = document.createElement("div");
+        legacyNote.style.cssText = driveEmptySrcStyle;
+        // Shape carries the window into the node only from a setting's only wire (buildShapeButton).
+        legacyNote.textContent =
+          patch.sources.length === 1
+            ? "This setting's own window, from before shaping nodes. Press Shape on its wire to move it into a node."
+            : "This setting's own window, from before shaping nodes. To move it, shape its wires, set each node's window, then switch this Off.";
+        panel.appendChild(legacyNote);
+      }
+      panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
+    }
     const readoutRow = buildReadoutRow(sceneId, spec, refreshResetVisibility);
     if (readoutRow) panel.appendChild(readoutRow);
 

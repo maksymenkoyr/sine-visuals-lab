@@ -14,6 +14,7 @@ import {
   setPatchMix,
   setSourceMuted,
   setSourceRole,
+  shapeSource,
   smoothstep,
   sourceKey,
   specMapFor,
@@ -1991,5 +1992,31 @@ describe("drives: shaping nodes (shapingNodes.ts)", () => {
     const out = remapShapedSources(setting, new Map([["n1", "n7"]]));
     expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n7" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
     expect(remapShapedSources("scene", new Map([["n1", "n7"]]))).toBe("scene");
+  });
+});
+
+describe("drives: shapeSource (a wire's Shape button)", () => {
+  it("re-points the matching source and keeps its weight, when and off", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] };
+    const out = shapeSource(setting, "anim.low", "n3");
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n3" }, weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] });
+  });
+
+  it("drops height and every from the re-pointed source", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, height: "fixed", every: 4 }] };
+    const out = shapeSource(setting, "anim.beatWave", "n1");
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
+  });
+
+  it("leaves other sources untouched and in order", () => {
+    const setting: DrivePatch = { mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: "anim.high", weight: 0.5, height: "fixed" }, { choice: { source: "line" }, weight: 1 }] };
+    const out = shapeSource(setting, "anim.high", "n2");
+    expect(out).toEqual({ mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: { source: "shaped", id: "n2" }, weight: 0.5 }, { choice: { source: "line" }, weight: 1 }] });
+  });
+
+  it("returns a scene setting, or a patch with no such source, unchanged", () => {
+    expect(shapeSource("scene", "anim.low", "n1")).toBe("scene");
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.high", weight: 1 }] };
+    expect(shapeSource(setting, "anim.low", "n1")).toEqual(setting);
   });
 });

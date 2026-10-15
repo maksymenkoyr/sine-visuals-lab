@@ -927,6 +927,22 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
+/** `setting` with the source whose choice is `from` re-pointed at shaping
+ *  node `nodeId` (a wire's Shape button): it keeps its weight, role and
+ *  mute; Height and Every go, since they described the old reading and the
+ *  node now owns how it reads. A "scene" setting, or no such source, comes
+ *  back unchanged. */
+export function shapeSource(setting: DriveSetting, from: DriveSourceChoice, nodeId: string): DriveSetting {
+  if (setting === "scene") return setting;
+  const key = sourceKey(from);
+  const sources = setting.sources.map((s): DriveSource =>
+    sourceKey(s.choice) === key
+      ? { choice: { source: "shaped", id: nodeId }, weight: s.weight, ...(s.when ? { when: true as const } : {}), ...(s.off ? { off: true as const } : {}) }
+      : s,
+  );
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
 /** Beat wave's own every-N-beats divider (DriveSource.every — see that
  *  field's own doc). No-op on `"scene"` or a patch with no source matching
  *  `choice`; `normalizeDriveSetting` is what actually enforces "only on

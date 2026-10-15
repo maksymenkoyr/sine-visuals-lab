@@ -5,7 +5,7 @@ user-facing string about this — labels, hints, tooltips, aria text, summaries 
 uses these words and only these. The code keeps its own older names (the
 right-hand column), so this note is the translation table between the two.
 
-The model in one line: **an input node's jack → (a shaping node →) a wire → an animation node's port.** To **shape** an input node is to make a shaping node from it.
+The model in one line: **an input node's jack → (a shaping node →) a wire → an animation node's port.** To **shape** an input node is to make a shaping node from it; a wire's Shape button puts a shaping node on that wire.
 
 The panel reads in three columns: **input nodes** on the left (the meters hold
 them), **animation nodes** on the right (a scene's reactive settings), and in
