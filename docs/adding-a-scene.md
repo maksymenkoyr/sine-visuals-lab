@@ -78,6 +78,12 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
 Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.
 
+Comment and indent shader code as freely as any other code: a production
+build strips comments and indentation from every template literal that
+reads as GLSL and keeps every line, so a compile error's line number still
+matches (`vite-glsl-strip-plugin.ts`'s header has the rules, including the
+templates it leaves alone).
+
 Once it renders, keep `npm run dev` running and give whoever is reviewing a
 direct link to the scene rather than the gallery root — the dev server prints
 one per scene at startup, and a scene registered first among the drafts is the
