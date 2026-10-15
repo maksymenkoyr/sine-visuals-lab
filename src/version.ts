@@ -44,14 +44,14 @@
  * `versionHint()` are its link target and hover/tap hint.
  *
  * The invariant this whole system exists to protect: **a page, once loaded,
- * never needs its own origin's files again.** There's no service worker and
+ * never needs a file its own origin has since dropped.** There's no service worker and
  * this file never triggers a reload — a tab stays on the version it loaded
  * with, for its whole session, however long that is. `src/pinnedAssets.ts`
- * is the other half of that invariant: it makes sure a lazily-fetched file
- * (a worklet, a data blob, a font) that a long-lived tab only requests after
- * a later deploy has replaced dist/ still succeeds, by fetching it into a
- * cache right after load instead of waiting for the moment something actually
- * needs it.
+ * is the other half of that invariant: a lazily-fetched build file (a
+ * worklet, a font) that a long-lived tab only requests after a later deploy
+ * has replaced dist/ still succeeds because it was fetched into a cache right
+ * after load, and a scene's media lives at a path no deploy removes, so it can
+ * wait until the scene needs it.
  */
 export interface BuildInfo {
   channel: "stable" | "insider" | "preview" | "dev";

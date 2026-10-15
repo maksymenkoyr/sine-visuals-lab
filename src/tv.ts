@@ -20,7 +20,7 @@ import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -178,10 +178,11 @@ function showResetBtn(how: "big" | "corner" | "hidden"): void {
   else resetBtn.blur();
 }
 
-// Fetches every pinned asset (src/pinnedAssets.ts — the same registry
+// Fetches every pinned build file (src/pinnedAssets.ts — the same registry
 // app.ts's own call warms) after load, at idle, so a TV left open across a
 // deploy doesn't 404 the first time something it's already holding onto
-// (the Dancers clip library, the tempo worklet, a panel font) is needed.
+// (the tempo worklet, a panel font) is needed. Scene media waits until the
+// TV joins a room (joinRoom).
 pinEverything();
 
 let scene: Scene = getScene("spectrum")!;
@@ -544,6 +545,9 @@ function closeConn(): void {
 function joinRoom(room: string, key: string | null): void {
   closeConn();
   paired = true;
+  // A paired screen is there for a show: pin every scene's media
+  // (src/pinnedAssets.ts's header, "Scene media"). Only the first call acts.
+  pinSceneMedia();
   roomCode = room;
   replica = createLookReplica();
   lastDocScene = "";

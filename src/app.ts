@@ -296,7 +296,7 @@ import {
   spaceIsCue,
 } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./ui/tooltip.ts";
@@ -1643,6 +1643,18 @@ function syncEars(): void {
   }
 }
 
+/** A room with another device online in it (a TV, a phone controller, the
+ *  laptop this page follows) means a show: pin every scene's media, so a
+ *  venue's wifi dropping mid-set can't cost a scene its media
+ *  (src/pinnedAssets.ts's header, "Scene media"). pinSceneMedia() acts once. */
+function pinMediaOncePaired(conn: AnyConn): void {
+  const check = (roster: RosterEntry[]): void => {
+    if (roster.some((d) => d.online && d.deviceId !== conn.deviceId)) pinSceneMedia();
+  };
+  conn.onRosterChange(check);
+  check(conn.currentRoster);
+}
+
 /** Follows this connection's roster and refusals: the room's record is what
  *  settles a pending choice, and any change of the answer is acted on. */
 function wireEars(conn: AnyConn): void {
@@ -2670,10 +2682,10 @@ async function boot(): Promise<void> {
   // after a deploy has moved on. Idempotent and scoped to panel classes, so
   // calling it this early changes nothing the gallery itself shows.
   ensureControlsStyles();
-  // Starts the after-load, at-idle sweep that fetches every pinAsset() (the
-  // tempo worklet, the Dancers clip library) and loads every registered font
-  // — see src/pinnedAssets.ts's header for why a page must never need its
-  // own origin's files again after this point.
+  // Starts the after-load, at-idle sweep that fetches every pinAsset() file
+  // and loads every registered font — see src/pinnedAssets.ts's header for
+  // why. Scene media waits for its scene, or for a show (pinMediaOncePaired,
+  // and the pop-out's onStatus below).
   pinEverything();
 
   // The scene's own version corner (#sceneVersion in index.html) is filled
@@ -2906,6 +2918,7 @@ async function boot(): Promise<void> {
   wireDeviceMenu();
   const conn = activeConn();
   if (conn) wireEars(conn);
+  if (conn) pinMediaOncePaired(conn);
   // Same link as the room-code badge's overlay: the controller link for the
   // laptop's keyed room, the plain/watch link for any other room member.
   if (conn) {
@@ -2947,6 +2960,11 @@ async function boot(): Promise<void> {
       transport: createBroadcastTransport<ToOutput, ToMain>(),
       look: () => ({ scene: scene.id, palette: palette.id }),
       power: () => outputPower,
+    });
+    // A pop-out means a show: this window pins every scene's media too, for
+    // its own preview (src/pinnedAssets.ts's header, "Scene media").
+    outputBridge.onStatus((s) => {
+      if (s.open) pinSceneMedia();
     });
   }
   if (play && joinedConn) {

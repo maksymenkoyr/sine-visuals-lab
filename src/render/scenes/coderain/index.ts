@@ -34,18 +34,17 @@ import type { Scene, SceneContext } from "../../scene.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { paletteVecs, PALETTE_RAMP_STOPS } from "../../palette.ts";
 import type { QualityPreset } from "../../quality.ts";
-import { pinAsset } from "../../../pinnedAssets.ts";
-import clipsUrl from "../dancers/clips.bin?url";
-import { decodeClipLibrary } from "../dancers/clipFormat.ts";
+import { sceneMedia } from "../../../pinnedAssets.ts";
+import { CLIP_LIBRARY_URL, decodeClipLibrary, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { ATLAS_PX, buildGlyphAtlas } from "./glyphs.ts";
 import { createFigure, FIGURE_HEIGHT, type Figure } from "./figure.ts";
 import { BURST_SLOTS, FIGURE_FRAG, FIGURE_VERT, RAIN_FRAG, RAIN_VERT } from "./glsl.ts";
 
 const ID = "coderain";
 
-// Shared with the Dancers scene: pinAsset keys by URL, so this is the same
-// pinned copy (src/pinnedAssets.ts).
-const clips = pinAsset(clipsUrl);
+// The Dancers scene's clip library (src/pinnedAssets.ts's header, "Scene
+// media"): sceneMedia keys by path, so this is the same copy Dancers holds.
+const clips = sceneMedia(CLIP_LIBRARY_URL);
 
 /** Vertical field of view. */
 const FOV_Y = (60 * Math.PI) / 180;
@@ -329,6 +328,8 @@ function createCodeRainScene(): Scene {
   let grid = 0;
   let figure: Figure | null = null;
   let libraryRequested = false;
+  /** The decoded library, kept so a later mount's new figure gets it at once. */
+  let library: ClipLibrary | null = null;
 
   // Camera and clocks.
   let lastTime: number | null = null;
@@ -400,15 +401,20 @@ function createCodeRainScene(): Scene {
       buildAtlas(gl);
       freeGeometry(gl);
       figure = createFigure();
-      // The clip library arrives asynchronously; until it does (or if it
-      // can't) the dancer sways. libraryRequested keeps a re-init (context
-      // loss, a gallery tile) from fetching twice.
-      if (!libraryRequested && typeof window !== "undefined" && typeof fetch === "function") {
+      // The clip library arrives asynchronously after the first mount; until
+      // it does (or if it can't) the dancer sways. A later mount (context
+      // loss, the gallery tile and then the full view) makes a new figure,
+      // which gets the library already decoded; libraryRequested keeps a
+      // mount during the fetch from asking twice.
+      if (library) figure.setLibrary(library);
+      else if (!libraryRequested && typeof window !== "undefined" && typeof fetch === "function") {
         libraryRequested = true;
-        const fig = figure;
         clips
           .bytes()
-          .then((buf) => fig.setLibrary(decodeClipLibrary(buf)))
+          .then((buf) => {
+            library = decodeClipLibrary(buf);
+            figure?.setLibrary(library);
+          })
           .catch((err: unknown) => {
             libraryRequested = false;
             console.warn("coderain: clip library unavailable", err);

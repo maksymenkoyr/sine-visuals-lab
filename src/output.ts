@@ -20,7 +20,7 @@ import { createOverlayLayer } from "./render/overlayLayer.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
 import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
@@ -111,6 +111,9 @@ window.addEventListener("pagehide", () => {
 });
 
 pinEverything();
+// The pop-out is only ever opened for a show: pin every scene's media too
+// (src/pinnedAssets.ts's header, "Scene media").
+pinSceneMedia();
 
 // ---- Rendering ----
 
