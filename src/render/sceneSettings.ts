@@ -207,6 +207,12 @@ export interface SceneSetting {
        *  engine-run hit driver. "reaction" when left out. */
       reactionLabel?: string;
     };
+    /** Instead of `hit`: a setting the scene reads with `drives.fired` that
+     *  deliberately isn't a hit driver. Its edges pass straight through the
+     *  generic gate, with no standout detector, reaction dots or Reaction
+     *  row. The text says why (tests/hitDrivers.test.ts requires one or the
+     *  other). */
+    noStandout?: string;
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).

@@ -720,6 +720,16 @@ reference-measurement workflow used by later scenes.
     brightness moved into Grain's rows. New curve dials: Hit decay (Pluck,
     Bell's hit, Bounce), and Rise and Release (Swell). Every dial's middle,
     and Attack 0, draws the curve exactly as before.
+- 2026-10-15 — Treble sparkle is no longer a hit driver. The user asked to
+  "just remove standout detector from there": its graph showed a cyan
+  reaction dot per hit, plus the standout Threshold and the Flat / Sized
+  Reaction row. Without `drive.hit`, `drives.fired` passes each edge
+  straight through, so every treble onset (or a wire's edge) still plays
+  the picked Shape, and every Effect still works. The threshold row is the
+  generic gate again. The built-in treble onset is sized by the graded
+  `anim.highPulse` instead of the detector's Sized read-out, so a soft hat
+  still sparkles less. A wire's edge plays at full size. Not yet looked at
+  live with music.
 
 ## Tuning notes
 
