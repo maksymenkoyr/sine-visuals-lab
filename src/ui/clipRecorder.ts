@@ -16,16 +16,16 @@ import {
  * and the like. The Record button (recordControls.ts) drives it; the pure
  * parts — which container, the crop maths, the file name — are clipFormat.ts.
  *
- * What is recorded, picture: the canvas only, never the panel or the HUD
- * (they are DOM on top of it). While a pop-out output window is open that is
- * the OUTPUT's canvas, not the main window's: the main window then renders
- * only a cheap preview in a smaller box (docs/architecture.md, "Pop-out output
- * window"), and what the audience sees is the output's picture at its own
- * Quality and Resolution. The output is a same-origin popup, so the main
- * window can reach its canvas through the Window that net/outputBridge.ts
- * keeps (`popupWindow()`) and call `captureStream` on it; with no popup in
- * reach (none open, or the main window reloaded since it opened) the main
- * window's canvas is recorded instead.
+ * What is recorded, picture: this window's canvas only, never the panel or
+ * the HUD (they are DOM on top of it), and never a pop-out output's canvas.
+ * The output is opened `noopener` (net/outputBridge.ts), in a renderer
+ * process this window can't reach, and a MediaStreamTrack can't be handed
+ * from one window to another. So while a take runs with an output open, this
+ * window stops being a cheap preview and renders at the output's Quality,
+ * Energy saving and drawing-buffer size (app.ts's `recordAsOutput`), its box
+ * on screen unchanged, and goes back to its own settings when the take ends.
+ * The clip shows this window's look, which is the output's except while edits
+ * wait for Play (net/outputSync.ts's Cue and Play).
  *
  * Sound: the MediaStream audio/capture.ts opened (a mic, a line input or a
  * tab/screen share), the same signal the analysers hear. Synthetic and idle
@@ -38,19 +38,14 @@ import {
  * and each frame of that is drawn into an offscreen 2D canvas, whose own
  * stream is what gets recorded.
  *
- * Saved when stopped, however it ends: the button, the output window closing,
- * the recorded canvas losing its GL context (or the output page reloading
- * itself over one), or the page being hidden — a hidden window gets no
- * animation frames, so the picture would freeze. Hidden is judged on the
- * window being recorded (and on the main window for a crop, whose copy runs
- * on its animation frames); the main window hiding while the output keeps
- * rendering is not a reason to stop.
+ * Saved when stopped, however it ends: the button, the canvas losing its GL
+ * context, or this page being hidden — a hidden window gets no animation
+ * frames, so the picture would freeze. An output window closing mid-take
+ * doesn't end it: the canvas goes back to this window's own size and settings.
  */
 
 export interface ClipRecorderDeps {
   mainCanvas: HTMLCanvasElement;
-  /** The pop-out output's window while one is open, else null. */
-  outputWindow: () => Window | null;
   /** The live audio input's stream, null when there is none. */
   audioStream: () => MediaStream | null;
   /** The scene's id, for the file name. */
@@ -70,21 +65,6 @@ export interface ClipRecorder {
   /** Ends the take and saves it; a no-op when not recording. */
   stop(): void;
   toggle(): void;
-}
-
-/** How often the output window is checked for having closed. */
-const OUTPUT_WATCH_MS = 500;
-
-/** The output page's canvas, null when the window is gone or not a page of ours. */
-function outputCanvas(win: Window | null): HTMLCanvasElement | null {
-  try {
-    if (!win || win.closed) return null;
-    const el = win.document.getElementById("gl") as HTMLCanvasElement | null;
-    return el && typeof el.captureStream === "function" ? el : null;
-  } catch {
-    // A window that is no longer same-origin (navigated away) is not reachable.
-    return null;
-  }
 }
 
 function saveBlob(blob: Blob, name: string): void {
@@ -111,10 +91,7 @@ export function createClipRecorder(deps: ClipRecorderDeps): ClipRecorder {
       return;
     }
     const aspect = deps.aspect();
-    const outWin = deps.outputWindow();
-    const outCanvas = outputCanvas(outWin);
-    const source = outCanvas ?? deps.mainCanvas;
-    const sourceDoc = outCanvas && outWin ? outWin.document : document;
+    const source = deps.mainCanvas;
     const undo: Array<() => void> = [];
     const fail = (text: string): void => {
       for (const f of undo.splice(0).reverse()) f();
@@ -201,31 +178,20 @@ export function createClipRecorder(deps: ClipRecorderDeps): ClipRecorder {
         if (recorder.state !== "inactive") recorder.stop();
         else save();
       };
+      // A hidden page gets no animation frames, so the picture would freeze.
       const onHidden = (): void => {
-        // The main window's own hiding only matters when its frames feed the clip.
-        const mainFeeds = aspect !== "screen" || !outCanvas;
-        if (sourceDoc.visibilityState === "hidden" || (mainFeeds && document.visibilityState === "hidden")) stopTake();
+        if (document.visibilityState === "hidden") stopTake();
       };
       const onLost = (): void => stopTake();
       source.addEventListener("webglcontextlost", onLost);
       document.addEventListener("visibilitychange", onHidden);
-      if (sourceDoc !== document) sourceDoc.addEventListener("visibilitychange", onHidden);
-      const watch = outCanvas && outWin ? window.setInterval(() => {
-        if (outWin.closed) stopTake();
-      }, OUTPUT_WATCH_MS) : 0;
-      // A reloaded output page replaces the canvas this stream came from.
+      // A capture track the browser ends by itself ends the take too.
       const pictureTrack = picture.getVideoTracks()[0];
       pictureTrack?.addEventListener("ended", onLost);
 
       const end = (): void => {
         source.removeEventListener("webglcontextlost", onLost);
         document.removeEventListener("visibilitychange", onHidden);
-        try {
-          sourceDoc.removeEventListener("visibilitychange", onHidden);
-        } catch {
-          // The output window is already gone.
-        }
-        if (watch) window.clearInterval(watch);
         pictureTrack?.removeEventListener("ended", onLost);
         for (const f of undo.splice(0).reverse()) f();
         session = null;
