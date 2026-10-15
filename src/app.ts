@@ -3291,6 +3291,9 @@ async function boot(): Promise<void> {
     // the object initTuning just published, so it exists in dev builds only.
     const viz = (window as unknown as { __viz?: Record<string, unknown> }).__viz;
     if (viz) {
+      // For headless palette comparisons: the same path the panel's palette
+      // picker takes.
+      viz.setPalette = (id: string) => applyPalette(getPalette(id));
       viz.room = () => {
         const c = activeConn();
         return {

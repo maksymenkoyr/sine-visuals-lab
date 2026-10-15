@@ -505,7 +505,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "centroidHue",
     label: "Spectral hue",
-    description: "Palette drifts one way when the mix is brighter than usual for this track, the other way when it's darker",
+    description: "Colours lean one way when the mix is brighter than usual for this track, the other way when it's darker",
     group: "Look",
     min: 0,
     max: 1,
@@ -514,6 +514,21 @@ const SETTINGS: SceneSetting[] = [
     // Already music-driven by construction (it reads the live centroid
     // directly, see FRAG's huePhase) — no auto table needed on top of that.
     reads: ["anim.centroid"],
+  },
+  {
+    key: "colourStyle",
+    label: "Colour",
+    description:
+      "Shades: the palette from its darkest colour in the dim water to its brightest on the crests. Shades + accent: the same, with the palette's accent on loud crests. Rainbow: every colour of the palette cycling along the ridges.",
+    group: "Look",
+    min: 0,
+    max: 2,
+    step: 1,
+    default: 1,
+    type: "enum",
+    // Indexes match COLOUR_SHADES / COLOUR_RAINBOW, which FRAG branches on.
+    // A taste pick, so no auto table and no drive.
+    options: ["Shades", "Shades + accent", "Rainbow"],
   },
   SPARKLE,
   // The two picks and their own dials (causticsSparkle.ts's header). The
@@ -897,7 +912,23 @@ export function brightnessGain(levelGlow: number, levelDrive: number, flash: num
     + ring * RING_BRIGHT_GAIN;
 }
 
-// How hard the palette's cosine modulation damps where hue phase is
+// The Colour setting's (colourStyle) options, by index.
+const COLOUR_SHADES = 0;
+const COLOUR_RAINBOW = 2;
+
+// Shades: how fast brightness climbs the palette's ramp (acc times this,
+// through x/(1+x)). Lower leaves every palette in its dark half, one dim
+// colour with no crests; picked by eye (the record's 2026-10-15 entry).
+const SHADE_GAIN = 2.0;
+// How far Spectral hue at 1 slides the mid-tones along the ramp.
+const CENTROID_SHADE_GAIN = 0.6;
+// Shades + accent: where on the ramp the accent band rises to full, and how
+// much of the accent it mixes in there.
+const ACCENT_BAND_LO = 0.55;
+const ACCENT_BAND_PEAK = 0.75;
+const ACCENT_MIX = 0.75;
+
+// Rainbow: how hard the palette's cosine modulation damps where hue phase is
 // changing faster than a pixel can resolve smoothly (see the hueDamp
 // comment in FRAG). Computed on the palette's actual per-channel cosine
 // argument now, not a scalar proxy, so this one constant applies correctly
@@ -1580,7 +1611,32 @@ void main() {
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
   acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
-  // Hue phase rides brightness (a ridge crest tints differently than the
+  // Prism's fringes (prismR/prismB above), lit like the ridges they split
+  // off and in fixed prism colours rather than the palette's.
+  vec3 prism = (vec3(1.0, 0.25, 0.45) * prismR + vec3(0.35, 0.45, 1.0) * prismB) * ${PRISM_GAIN.toFixed(2)} * brightMul;
+  vec3 col;
+  if (uColourStyle < ${(COLOUR_RAINBOW - 0.5).toFixed(1)}) {
+    // Shades: brightness climbs the palette's ramp, so dim water takes its
+    // dark end and crests its bright end, never a hue the ramp lacks.
+    // Spectral hue slides the mid-tones up or down the ramp; t*(1-t) keeps
+    // the black and the brightest crest where they are.
+    float x = acc * ${SHADE_GAIN.toFixed(2)};
+    float t = x / (1.0 + x);
+    t = clamp(t + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_SHADE_GAIN.toFixed(2)} * t * (1.0 - t), 0.0, 1.0);
+    col = mix(uPalGround, palRamp(t), smoothstep(0.0, 0.25, t));
+    if (uColourStyle > ${(COLOUR_SHADES + 0.5).toFixed(1)}) {
+      // Shades + accent: a band just below the brightest crests takes the
+      // accent, which only loud passages reach.
+      float band = smoothstep(${ACCENT_BAND_LO.toFixed(2)}, ${ACCENT_BAND_PEAK.toFixed(2)}, t) * (1.0 - smoothstep(0.86, 0.98, t));
+      col = mix(col, uPalAccent, band * ${ACCENT_MIX.toFixed(2)});
+    }
+    // Screen the fringes over the shade: col is already in 0..1.
+    col = 1.0 - (1.0 - col) * (1.0 - prism / (1.0 + prism));
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  // Rainbow: the palette's cosine curve, as Caustics was coloured before
+  // the shades. Hue phase rides brightness (a ridge crest tints differently than the
   // dim water around it) through a cosine, which wraps through its full
   // hue cycle for roughly a unit change of phase. Raw acc can swing several
   // units within a couple of pixels right at a sharp ridge edge — most of
@@ -1608,10 +1664,7 @@ void main() {
     + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_HUE_GAIN.toFixed(2)};
   vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
   vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
-  vec3 col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc;
-  // Prism's fringes (prismR/prismB above), lit like the ridges they split
-  // off and in fixed prism colours rather than the palette's.
-  col += (vec3(1.0, 0.25, 0.45) * prismR + vec3(0.35, 0.45, 1.0) * prismB) * ${PRISM_GAIN.toFixed(2)} * brightMul;
+  col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc + prism;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
 
   outColor = vec4(col, 1.0);

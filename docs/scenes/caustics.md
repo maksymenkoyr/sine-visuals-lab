@@ -735,6 +735,32 @@ reference-measurement workflow used by later scenes.
     `anim.highPulse` instead of the detector's Sized read-out, so a soft hat
     still sparkles less. A wire's edge plays at full size. Not yet looked at
     live with music.
+- 2026-10-15 — Colour: Caustics takes the palette's roles (palette.ts
+  header) instead of only its cosine curve. The user: "i def don't like lots
+  of coulours combinations", then, with screenshots of Sunset, Acid and
+  Fire: "ther eis nothign vivd or contrast that would actually look good".
+  The cause was the curve: the hue
+  phase rode brightness and drifted with time, so every palette swept its
+  whole hue loop across the frame, and Sunset, Acid and Fire all passed
+  through olive and magenta. The new Colour setting (`colourStyle`) has three
+  options:
+  - Shades: brightness climbs the palette's ramp, so dim water takes its dark
+    end and crests its bright end. Spectral hue now slides the mid-tones
+    along the ramp.
+  - Shades + accent: the default. The same, with the palette's accent on a
+    band just below the brightest crests, which only loud passages reach.
+  - Rainbow: the old cosine colouring, unchanged. The user asked to keep it
+    for the old Neon look.
+
+  The ramp strength (`SHADE_GAIN`) was picked from contact sheets of every
+  palette at 0.6, 1.2 and 2 (headless, synthetic feed): at 0.6 every palette
+  sat in its dark half as one dim colour, and 2 reached the bright stops.
+  At 2, a loud section floods most of the frame with the ramp's bright end;
+  the user saw that and said "all good". The same session added palette.ts's
+  Contrast group, made on this scene: six two-hue palettes where the darker
+  hue holds the low ramp and the opposite, lighter hue starts at its middle.
+  A first draft put the second hue only at the top stops, and it barely
+  showed, because most of the frame sits below the middle of the ramp.
 
 ## Tuning notes
 
@@ -856,6 +882,10 @@ reference-measurement workflow used by later scenes.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - Artifact: [Caustics Sparkle Shapes](https://claude.ai/artifact/FqAHd9xEBS8cYJzhwoXqUR). Source saved as `caustics/artifacts/caustics-sparkle-shapes.html` (its last version, v6). The prototype the 2026-10-13 sparkle rebuild was chosen in: a live pool with fake hats, the Effect and Shape picks, and the preview window. Its effects are a sketch in its own shader; the scene's are in FRAG.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+- `caustics/scripts/colour-shot.mjs` and `colour-sheet.py` — the 2026-10-15
+  colour work: shoots the scene under each palette at each Colour option from
+  one page, then tiles the shots into a contact sheet (palettes as rows,
+  options as columns).
 - `caustics/scripts/shader-bisect.py` — the 2026-09-28 performance work: times FRAG with one part switched off at a time, and pixel-diffs the scene against any git ref. Runs on `tools/gpu-bench.mjs` (general: any scene, bench or in-app timing), whose header explains why each benchmark frame has to end its render pass on an Apple GPU.
 
 ## Resume here
@@ -924,3 +954,4 @@ reference-measurement workflow used by later scenes.
 - 2026-10-13 — Spray injection removed (see Decisions)
 - #508 (draft, 2026-10-13) — Treble sparkle as an Effect and a Shape, with a preview in the Scene card (see Decisions)
 - #538 (2026-10-15) — Sparkle preview draws only while on screen (see Decisions)
+- 2026-10-15 — Colour: Shades, Shades + accent (default) and Rainbow; the palette's ramp replaces the cosine curve by default (see Decisions)
