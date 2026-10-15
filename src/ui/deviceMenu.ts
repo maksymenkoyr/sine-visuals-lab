@@ -76,6 +76,7 @@ import {
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
+import { GATE_FORMULAS, getGateFormula, setGateFormula, type GateFormula } from "../render/gateFormulas.ts";
 import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
@@ -3463,6 +3464,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
 
     wrap.append(seg, name, rng, out);
+    // Dev only, while PR #544 picks Smoothness's formula (gateFormulas.ts's header).
+    if (import.meta.env.DEV) {
+      const pick = document.createElement("select");
+      pick.setAttribute("aria-label", "Smoothness formula (dev)");
+      pick.style.cssText =
+        "flex-basis: 100%; font: inherit; font-size: 12px; color: inherit; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; padding: 3px 6px;";
+      for (const f of GATE_FORMULAS) {
+        const opt = document.createElement("option");
+        opt.value = f.id;
+        opt.textContent = `Formula (dev): ${f.label}`;
+        pick.appendChild(opt);
+      }
+      pick.value = getGateFormula(sceneId, spec.key);
+      pick.addEventListener("change", () => {
+        setGateFormula(sceneId, spec.key, pick.value as GateFormula);
+        onLiveEdit();
+      });
+      wrap.append(pick);
+    }
     return wrap;
   }
 

@@ -13,6 +13,7 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
 import { getDriveSolo } from "./driveSolo.ts";
+import { gateFormulaOut, getGateFormula, stepGateFormula, type GateFormula, type GateFormulaState } from "./gateFormulas.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -1065,7 +1066,8 @@ function createHitDetector(): HitDetector {
   return { standout: createStandoutState(), anim: null, fired: false, size: 1 };
 }
 
-interface GateTrackerState {
+// `open`/`y`/`x` (GateFormulaState) are the Smoothness formula's own memory — gateFormulas.ts's header.
+interface GateTrackerState extends GateFormulaState {
   init: boolean;
   floor: number;
   peak: number;
@@ -1079,16 +1081,22 @@ interface GateTrackerState {
 }
 
 function createGateTracker(): GateTrackerState {
-  return { init: false, floor: 0, peak: 0, line: 0, top: 0 };
+  return { init: false, floor: 0, peak: 0, line: 0, top: 0, open: false, y: Number.NaN, x: Number.NaN };
+}
+
+/** The Smoothness a setting's generic gate runs at: 0 while it's switched off. */
+function gateSmoothness(sceneId: string, spec: SceneSetting): number {
+  return getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
 }
 
 /** Advances one setting's gate tracker by `dtSec`, given `v` (that setting's
  *  own combined, gained reading this tick — the same number value() would
  *  give with the gate itself switched off), `t` (the window's Min slider,
- *  0..1) and `tMax` (the window's Max slider, 0..1). The first call seeds
- *  floor/peak from `v` rather than from 0, so startup never reads as a
- *  signal that's fallen far below a floor of 0. */
-function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: number, tMax: number): void {
+ *  0..1) and `tMax` (the window's Max slider, 0..1), then steps the
+ *  Smoothness formula `formula` at Smoothness `s` (gateFormulas.ts). The
+ *  first call seeds floor/peak from `v` rather than from 0, so startup never
+ *  reads as a signal that's fallen far below a floor of 0. */
+function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: number, tMax: number, formula: GateFormula, s: number): void {
   if (!tr.init) {
     tr.floor = v;
     tr.peak = v;
@@ -1100,6 +1108,7 @@ function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: n
   }
   tr.line = clamp01(t) * tr.peak;
   tr.top = Math.max(clamp01(t), clamp01(tMax)) * tr.peak;
+  stepGateFormula(formula, tr, v, s, dtSec);
 }
 
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
@@ -1433,7 +1442,15 @@ export function createDriveEngine(): DriveEngine {
           const thresholdState = getDriveThresholdState(sceneId, spec);
           if (thresholdState.on) {
             const v = expandReading(raw, ex, expansion, shape);
-            advanceGateTracker(gateTrackerFor(sceneId, spec.key), dtSec, v, thresholdState.value, getDriveWindowMax(sceneId, spec));
+            advanceGateTracker(
+              gateTrackerFor(sceneId, spec.key),
+              dtSec,
+              v,
+              thresholdState.value,
+              getDriveWindowMax(sceneId, spec),
+              getGateFormula(sceneId, spec.key),
+              gateSmoothness(sceneId, spec),
+            );
           }
         }
       }
@@ -1495,18 +1512,15 @@ export function createDriveEngine(): DriveEngine {
       // or over the Max line, a straight rise between. Smoothness moves the
       // Min line toward 0 and the Max line toward the tracked peak, by that
       // share of the room on each side and never past them, so silence
-      // still reads 0 and a new high still reads the peak.
+      // still reads 0 and a new high still reads the peak. That's
+      // GATE_FORMULA_DEFAULT; a dev build can pick another formula per
+      // setting (gateFormulas.ts).
       // No-op (returns `v` unchanged) whenever genericGate(key) has nothing
       // to gate on.
       function applyGenericGate(key: string, v: number): number {
         const tr = genericGate(key);
         if (!tr) return v;
-        const spec = specByKey.get(key)!;
-        const s = getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
-        const lo = tr.line * (1 - s);
-        const hi = tr.top + s * (tr.peak - tr.top);
-        if (hi - lo <= 1e-6) return v >= tr.line ? tr.peak : 0;
-        return tr.peak * clamp01((v - lo) / (hi - lo));
+        return gateFormulaOut(getGateFormula(sceneId, key), tr, v, gateSmoothness(sceneId, specByKey.get(key)!));
       }
 
       // fired()'s own hard cut: an edge whose combined value falls under the
@@ -1555,7 +1569,15 @@ export function createDriveEngine(): DriveEngine {
         const k = gateTrackerKey(sceneId, key);
         if (builtInGateFrames.get(k) !== anim) {
           builtInGateFrames.set(k, anim);
-          advanceGateTracker(gateTrackerFor(sceneId, key), anim.dtSec, v, thresholdState.value, getDriveWindowMax(sceneId, spec));
+          advanceGateTracker(
+            gateTrackerFor(sceneId, key),
+            anim.dtSec,
+            v,
+            thresholdState.value,
+            getDriveWindowMax(sceneId, spec),
+            getGateFormula(sceneId, key),
+            gateSmoothness(sceneId, spec),
+          );
         }
         return applyGenericGate(key, v);
       }
