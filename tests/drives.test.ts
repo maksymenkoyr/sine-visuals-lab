@@ -5,16 +5,18 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
-  GENERIC_THRESHOLD_DEFAULT,
   hasLiveSource,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
+  remapShapedSources,
   sameDriveChoice,
   sameDriveSetting,
   setPatchMix,
   setSourceMuted,
   setSourceRole,
+  shapeSource,
   smoothstep,
+  sourceKey,
   specMapFor,
   togglePatchSource,
   type DriveChoice,
@@ -24,6 +26,7 @@ import {
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
 import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
 import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
+import { addShapingNode, removeShapingNode } from "../src/render/shapingNodes.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -34,6 +37,7 @@ import { listScenes } from "../src/render/scene.ts";
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
+import { GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
 
 const DT = 1 / 60;
 
@@ -1939,3 +1943,80 @@ describe("Only this (driveSolo)", () => {
   });
 });
 
+
+describe("drives: shaping nodes (shapingNodes.ts)", () => {
+  it("a setting wired to a node reads the node output after accumulate", () => {
+    const node = addShapingNode("anim.low", { windowOn: false })!;
+    const sceneId = "shaped-read";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }] });
+    const engine = createDriveEngine();
+    const f = frame({ bands: new Float32Array(NUM_BANDS).fill(0.6) });
+    const anim = createAnimClock().advance(DT, f);
+    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+    const out = engine.shaped(node.id)!.output;
+    expect(out).toBeGreaterThan(0);
+    expect(engine.forScene(sceneId, [spec], anim).value("k", -999)).toBeCloseTo(out, 9);
+    removeShapingNode(node.id);
+  });
+
+  it("a dangling id reads 0 and does not throw in value, fired or sourceValues", () => {
+    const sceneId = "shaped-dangling";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: "n999999" }, weight: 1 }] });
+    const engine = createDriveEngine();
+    const f = frame();
+    const anim = createAnimClock().advance(DT, f);
+    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("k", -999)).toBe(0);
+    expect(typeof drives.fired("k", false)).toBe("boolean");
+    expect(drives.sourceValues("k")).not.toBeNull();
+    expect(engine.shaped("n999999")).toBeNull();
+  });
+
+  it("sourceKey and sameDriveChoice tell shaped ids apart", () => {
+    expect(sourceKey({ source: "shaped", id: "n3" })).toBe("shaped:n3");
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n1" })).toBe(true);
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n2" })).toBe(false);
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "line" })).toBe(false);
+  });
+
+  it("normalizeDriveSetting dedupes one shaped id, and keeps two different ones", () => {
+    const same = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n1" }, weight: 0.5 }] });
+    expect(same).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
+    const two = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }] });
+    expect((two as DrivePatch).sources.length).toBe(2);
+  });
+
+  it("remapShapedSources rewrites mapped ids only", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] };
+    const out = remapShapedSources(setting, new Map([["n1", "n7"]]));
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n7" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
+    expect(remapShapedSources("scene", new Map([["n1", "n7"]]))).toBe("scene");
+  });
+});
+
+describe("drives: shapeSource (a wire's Shape button)", () => {
+  it("re-points the matching source and keeps its weight, when and off", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] };
+    const out = shapeSource(setting, "anim.low", "n3");
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n3" }, weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] });
+  });
+
+  it("drops height and every from the re-pointed source", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, height: "fixed", every: 4 }] };
+    const out = shapeSource(setting, "anim.beatWave", "n1");
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
+  });
+
+  it("leaves other sources untouched and in order", () => {
+    const setting: DrivePatch = { mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: "anim.high", weight: 0.5, height: "fixed" }, { choice: { source: "line" }, weight: 1 }] };
+    const out = shapeSource(setting, "anim.high", "n2");
+    expect(out).toEqual({ mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: { source: "shaped", id: "n2" }, weight: 0.5 }, { choice: { source: "line" }, weight: 1 }] });
+  });
+
+  it("returns a scene setting, or a patch with no such source, unchanged", () => {
+    expect(shapeSource("scene", "anim.low", "n1")).toBe("scene");
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.high", weight: 1 }] };
+    expect(shapeSource(setting, "anim.low", "n1")).toEqual(setting);
+  });
+});

@@ -3,15 +3,14 @@ import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
+import { SHAPING_NODE_ID_RE } from "./shapingNodes.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import type { HitReadout } from "./standout.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
   DRIVE_EVERY_VALUES,
-  GENERIC_SMOOTHNESS_DEFAULT,
-  GENERIC_THRESHOLD_DEFAULT,
-  GENERIC_WINDOW_MAX_DEFAULT,
+  isShapedChoice,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
   setSourceEvery as pureSetSourceEvery,
@@ -28,6 +27,7 @@ import {
   type DriveSourceChoice,
   type HitHeight,
 } from "./drives.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "./gateWindow.ts";
 
 /**
  * Storage for `SceneSetting.drive` — the patch (src/render/drives.ts's
@@ -178,7 +178,9 @@ function isValidGridIndex(n: unknown): n is number {
  *  Look share code; sanitizeDriveSetting/sceneLooks.ts reuse this rather
  *  than re-validating the same shape a second way). Accepts `"scene"` for
  *  the legacy top-level `choice` field/Look `d` entries; sanitizeSourceChoice
- *  below is the same check with `"scene"` rejected, for a patch source. */
+ *  below is the same check with `"scene"` rejected, for a patch source. The
+ *  object shapes are `{source:"line"}`, `{source:"beat", grid}` and
+ *  `{source:"shaped", id}` (an id matching SHAPING_NODE_ID_RE). */
 function sanitizeChoice(raw: unknown): DriveChoice | null {
   if (raw === "scene") return "scene";
   // Own-property check, not `in`: SIGNALS is a plain object, so `in` would
@@ -192,6 +194,10 @@ function sanitizeChoice(raw: unknown): DriveChoice | null {
     if (source === "beat") {
       const grid = (raw as { grid?: unknown }).grid;
       return isValidGridIndex(grid) ? { source: "beat", grid } : null;
+    }
+    if (source === "shaped") {
+      const id = (raw as { id?: unknown }).id;
+      return typeof id === "string" && SHAPING_NODE_ID_RE.test(id) ? { source: "shaped", id } : null;
     }
   }
   return null;
@@ -416,6 +422,33 @@ export function setDriveSetting(sceneId: string, spec: SceneSetting, setting: Dr
   entry.patch = encodeDriveSetting(normalizeDriveSetting(setting));
   delete entry.choice; // a fresh write always supersedes any legacy field
   persist();
+}
+
+/** Removing a shaping node unplugs its wires in every scene: each setting
+ *  whose patch holds `{source:"shaped", id}` loses that source. A setting
+ *  left with no wire reads its rest, as after any unplug. */
+export function removeShapedSource(id: string): void {
+  let changed = false;
+  for (const bucket of Object.values(cache)) {
+    for (const entry of Object.values(bucket)) {
+      const setting =
+        entry.patch !== undefined
+          ? sanitizeDriveSetting(entry.patch)
+          : entry.choice !== undefined
+            ? (() => {
+                const choice = sanitizeChoice(entry.choice);
+                return choice === null ? null : driveSettingFromChoice(choice);
+              })()
+            : null;
+      if (!setting || setting === "scene") continue;
+      if (!setting.sources.some((s) => isShapedChoice(s.choice) && s.choice.id === id)) continue;
+      const sources = setting.sources.filter((s) => !(isShapedChoice(s.choice) && s.choice.id === id));
+      entry.patch = encodeDriveSetting(normalizeDriveSetting({ mix: setting.mix, sources }));
+      delete entry.choice;
+      changed = true;
+    }
+  }
+  if (changed) persist();
 }
 
 /** Back to `spec.drive.default` — a row's reset affordance. */

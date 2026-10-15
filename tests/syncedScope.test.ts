@@ -41,6 +41,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.sceneExpansion": true,
   "vibe.sceneExpansionShape": true,
   "vibe.drives": true,
+  "vibe.shapingNodes": true, // shaping nodes (render/shapingNodes.ts) — part of the look a TV draws
   "vibe.sensitivity": true,
   "vibe.expansion": true,
   "vibe.smoothing": true,

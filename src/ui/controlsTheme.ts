@@ -243,6 +243,34 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
+/* The shaping column (src/ui/shapingColumn.ts) sits in the open gap between
+ * the meters column and the settings column, centred in it, so the cables
+ * have room on both sides. The gap runs from the meters column's right edge
+ * (its width and left inset, see .vc-spectrum-col) to the settings column's
+ * left edge (its width, right inset and a gap, see .vc-controls-col); the
+ * column is as wide as that gap allows, up to its own cap. The JS places it
+ * (deviceMenu.ts placeShapingColumn writes inline left, top, width and
+ * max-height on every recompute, moving it below Power when the gap closes);
+ * the left and width here are only the fallback before the first placement. */
+.vc-shape-col {
+  position: fixed; top: 60px; z-index: 30;
+  --vc-shape-gap: calc(100vw - 409px - 346px);
+  width: min(300px, var(--vc-shape-gap));
+  left: calc(409px + (var(--vc-shape-gap) - min(300px, var(--vc-shape-gap))) / 2);
+  max-height: calc(var(--vc-vh) - 150px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.vc-shape-col > * { flex-shrink: 0; }
+.vc-root.vc-meters-hidden .vc-shape-col { display: none; }
+.vc-shape-inport {
+  display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
+  border: 2px solid var(--c); border-radius: 3px; box-sizing: border-box; background: transparent;
+}
+/* Patch focus (deviceMenu.ts refreshChain, src/ui/patchChain.ts): while a chain is lit, everything off it steps back. */
+.vc-root.vc-chain-on .vc-chain-off { opacity: 0.32; }
+.vc-shape-node.vc-chain-focus { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 18px -6px var(--vc-node-c, #fff); }
+.vc-shape-node.vc-shape-pinned { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 22px -4px var(--vc-node-c, #fff); }
+.vc-shape-inport.vc-shape-inport-on { background: var(--c); }
 /* Power folds to a small square (POWER_SQUARE_PX) instead of a full-width
  * title bar, in the wide layout only (see powerCard.ts's own header for why:
  * it sits against the settings column, so growing leftward on unfold keeps
@@ -339,6 +367,7 @@ const stylesheet = `
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
+  .vc-shape-col { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
   /* The horizontal triangle-collapse only makes sense beside other columns;
    * a single stacked mobile column has nothing to shrink next to, so
    * dissolve the wrapper the same way .vc-spectrum-col dissolves above and
@@ -953,6 +982,15 @@ body.vc-keys-reveal [data-keycap]::after {
 /* The previewed setting's own cables — flat and quiet on purpose, so a
  * transient hover never reads as "committed" the way a pinned patch does. */
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+/* A jack being dragged (deviceMenu.ts's jack drag, cableLayer.ts setDrag). */
+.vc-cable-drag { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 6; opacity: 0.95; }
+/* While a jack is dragged: ports and the middle column say where a drop lands, and nothing stays dimmed. */
+.vc-root.vc-dragging .vc-chain-off { opacity: 1; }
+.vc-root.vc-dragging .vc-drive-port { box-shadow: 0 0 0 4px rgba(195,165,249,0.28); }
+.vc-root.vc-dragging .vc-shape-col { outline: 1px dashed rgba(249,185,108,0.6); outline-offset: 2px; }
+.vc-root.vc-dragging .vc-drop-target { box-shadow: 0 0 0 1px rgba(255,255,255,0.7), 0 0 14px -4px #fff; }
+@media (min-width: ${STACK_BELOW_PX + 1}px) { .vc-jack { cursor: grab; } }
+.vc-root.vc-dragging, .vc-root.vc-dragging * { cursor: grabbing !important; }
 /* A lit signal's wires to every port it reaches (cableLayer.ts's fan
  * group) — solid where a preview is dashed, and quieter than a pinned
  * cable, since it shows where a signal goes rather than one patch. */

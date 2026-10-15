@@ -5,12 +5,12 @@ user-facing string about this — labels, hints, tooltips, aria text, summaries 
 uses these words and only these. The code keeps its own older names (the
 right-hand column), so this note is the translation table between the two.
 
-The model in one line: **an input node's jack → a wire → an animation node's port.**
+The model in one line: **an input node's jack → (a shaping node →) a wire → an animation node's port.** To **shape** an input node is to make a shaping node from it; a wire's Shape button puts a shaping node on that wire.
 
 The panel reads in three columns: **input nodes** on the left (the meters hold
 them), **animation nodes** on the right (a scene's reactive settings), and in
-the middle the **sound-transforming nodes** (working name), the stage that
-reshapes an input node's value on its way to an animation node.
+the middle the **shaping nodes**, the stage that reshapes an input node's value
+on its way to an animation node.
 
 ## Nouns
 
@@ -22,7 +22,7 @@ reshapes an input node's value on its way to an animation node.
 | **port** | The ring at the left of an animation node's row. Wires end here; clicking it pins the setting. | input port, jack | the row's `port` button (`buildDriveRow`) |
 | **wire** | One connection from an input node's jack to a setting's port. In the wire panel each wire is one line, named after its input node. | cable, source, patch, link | one `DriveSource` in a `DrivePatch`'s `sources`; drawn by `src/ui/cableLayer.ts` |
 | **wire panel** | Opens under a pinned setting. Lists its wires, how they mix, and its graph. Headed **Wires**. | patch panel, Receives | `buildPatchPanel` |
-| **sound-transforming node** *(working name)* | The middle stage between an input node and an animation node: what a wire's weight, height, role and the mix do to the value on its way. For now the panel shows it as the wire panel's lines; no string says it yet. | filter, effect, processor | `DriveSource` weight/height/`DriveMix` |
+| **shaping node** | A card in the middle column that takes one input node and sends a changed copy out of its own jack (Window, Smoothness, Length, and Height for a hit). It knows nothing about the scene: any setting wires to it like an input node. Its label is its input node's plus "shaped". | filter, effect, processor, sound-transforming node | `ShapingNode` (`src/render/shapingNodes.ts`), the `{ source: "shaped" }` choice, `src/ui/shapingColumn.ts` |
 | **heat** | How hot an animation node, a wire or an input node runs: how much of its range it swung over the meter span, hotter on loud music and colder on quiet music. Shown as a thin strip under a setting's graph and under an input node's monitor, in the Heat history card, as a dot after a wire's name, and as a glow under the **heat lens** (L, or the HEAT chip); colder = barely moves, hotter = big moves on loud music. | activity, temperature | `src/ui/heat.ts` |
 | **built-in** | What a scene does with a setting before anything is wired: its own reaction, written by the scene. Summaries read "Built-in: …". | scene mix, scene default (for the reaction itself) | the `"scene"` `DriveSetting`; text from `drive.sceneLabel` |
 | **mix** | How a setting's wires combine — one of `MIX_OPTIONS` (`src/ui/deviceMenu.ts`). Reserved for this; never reuse it for the built-in reaction. | combine, blend mode | `DriveMix` |
@@ -35,8 +35,8 @@ reshapes an input node's value on its way to an animation node.
 
 | Say | For |
 |---|---|
-| **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). |
-| **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, a "+ Add by name" chip, or Unplug. |
+| **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). A shaping node can be pinned too (click its monitor row or input port): its chain stays lit, and a click on an input jack makes it read that input. |
+| **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, or drag it onto a setting's row, a "+ Add by name" chip, or Unplug. |
 | **switch off** / **switch on** | Muting a wire without unplugging it; its weight, height and role are kept. |
 | **only this** / **all back** | The **O** chip on a reactive setting's row (beside A and T), and a button in its wire panel, that switch off every other setting's reaction so only this one moves, then bring them back; a preview on this screen, the wires are kept. |
 | **receive** | What a setting does with its wires: "what this setting receives". |

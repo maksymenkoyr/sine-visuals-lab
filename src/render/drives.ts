@@ -6,13 +6,13 @@ import { SIGNALS, type SignalId } from "./signals.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
-import { GROUP_TUNING } from "./bandEnergy.ts";
-import type { HitLane } from "../audio/hitStrength.ts";
+import { advanceGateTracker, createGateTracker, stepHeightEnv, windowReading, type GateTrackerState } from "./gateWindow.ts";
 import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
 import { getDriveSolo } from "./driveSolo.ts";
+import { createShapingBank, type ShapingState } from "./shapingNodes.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -141,7 +141,15 @@ import { getDriveSolo } from "./driveSolo.ts";
  *   src/render/animClock.ts's BEAT_PULSE_DECAY_PER_SEC for Any hit/beat-grid,
  *   src/render/bandEnergy.ts's own GROUP_TUNING for a band onset — reused
  *   directly (never re-typed by hand) so a Fixed pulse decays exactly as
- *   fast as the Graded pulse it replaces, just with a different height.
+ *   fast as the Graded pulse it replaces, just with a different height. The
+ *   envelope itself is stepHeightEnv in gateWindow.ts, shared with shaping
+ *   nodes.
+ *
+ * **Shaping nodes.** A `{source:"shaped", id}` source reads a shaping node's
+ * output (src/render/shapingNodes.ts). It is a level-kind reading, like a
+ * level catalogue entry: no height, and a Schmitt trigger for `fired()`. The
+ * bank of node states advances once per tick at the top of `accumulate()`,
+ * so every setting reads the same value that tick. An id with no node reads 0.
  *
  * **Inspection, for the panel.** `sourceValues(key)` returns each source's
  * own `weight·value` this tick, in patch order — un-gained, so the panel can
@@ -231,7 +239,8 @@ import { getDriveSolo } from "./driveSolo.ts";
  * min/max gives, except its ends ride this signal's own floor and peak, so
  * it holds from one song to the next. The setting's Smoothness
  * (getDriveSmoothness in driveStore.ts, defaulting to
- * GENERIC_SMOOTHNESS_DEFAULT) widens the window at both ends so a reading
+ * GENERIC_SMOOTHNESS_DEFAULT in gateWindow.ts, where the window's math lives
+ * too: windowReading) widens the window at both ends so a reading
  * riding the Min line doesn't flicker; at its far left, or switched off
  * with getDriveSmoothnessOn, the window is exact. `fired()` blocks an edge
  * whose own combined value falls under the Min line, on top of whatever
@@ -341,7 +350,7 @@ import { getDriveSolo } from "./driveSolo.ts";
 
 /** One source inside a patch — never `"scene"` (that's the whole setting's
  *  own escape hatch, not a thing you'd mix alongside real sources). */
-export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex } | { source: "line" };
+export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex } | { source: "line" } | { source: "shaped"; id: string };
 
 /** What a drive setting can be on. `"scene"` keeps its old meaning exactly
  *  (see this file's header); anything else is now a full patch rather than
@@ -548,11 +557,6 @@ const SOLO_SILENCED: DrivePatch = { mix: "add", sources: [{ choice: "feature.lev
 // release at the same rate the broadband beat pulse they stand in for does.
 const GRID_PULSE_DECAY_PER_SEC = BEAT_PULSE_DECAY_PER_SEC;
 const LINE_DRIVE_RELEASE_PER_SEC = 6; // matches the release this setting's line drive had while it lived in animClock.ts
-// matches src/render/sectionIntensity.ts's own DROP_PULSE_DECAY (kept in
-// step by hand — that module doesn't export it, same convention as
-// LINE_DRIVE_RELEASE_PER_SEC above until animClock's own constant was
-// exported for GRID_PULSE_DECAY_PER_SEC).
-const DROP_PULSE_DECAY_PER_SEC = 2.5;
 
 export const DRIVE_WEIGHT_MIN = 0;
 export const DRIVE_WEIGHT_MAX = 2;
@@ -573,23 +577,6 @@ export const DRIVE_GATE_WHEN_DEFAULT = 1;
 export const GATE_OPEN_LOW = 0.35;
 export const GATE_OPEN_HIGH = 0.55;
 
-/** The generic engine gate's own threshold default (this file's header's
- *  threshold paragraph) — the slider's resting position the one time it's
- *  ever read before a user moves it. Unlike a scene-handled threshold
- *  (SceneSetting.drive.threshold's own `default`), there's one value for
- *  every generic setting, since none of them shaped this gate on purpose the
- *  way a scene-handled setting shapes its own. */
-export const GENERIC_THRESHOLD_DEFAULT = 0.25;
-
-/** The generic gate window's Max default (driveStore.ts's getDriveWindowMax) — 1 puts the Max line on the tracked peak, so only a new high reads full. */
-export const GENERIC_WINDOW_MAX_DEFAULT = 1;
-
-/** The generic engine gate's knee-width default (driveStore.ts's
- *  getDriveSmoothness; the knee itself is applyGenericGate's) — the resting
- *  position of the Smoothness slider, and the knee every generic setting has
- *  always had. A scene-handled threshold never reads it. */
-export const GENERIC_SMOOTHNESS_DEFAULT = 0.02;
-
 /** The longest step a hit driver's standout detector takes between two
  *  fired() calls — a stalled tab shouldn't read as one long decay. The same
  *  clamp Physarum 2's Dose puts on its own detector's step. */
@@ -608,27 +595,6 @@ export function isEngineHitDriver(spec: SceneSetting | undefined): boolean {
 function usesGenericGate(spec: SceneSetting): boolean {
   return spec.drive !== undefined && spec.drive.threshold === undefined && !isEngineHitDriver(spec);
 }
-// The generic gate tracker's own time constants (accumulate() below) — a
-// floor that chases a *lower* resting level quickly (so a quiet moment reads
-// as quiet almost at once) but a *higher* one slowly (so one loud passage
-// doesn't instantly convince it the room got louder), and a peak that jumps
-// to a new high immediately but eases back down toward the floor at the same
-// slow rate. Picked to feel like a noise floor, not measured against any
-// reference — nothing here plays back a released ring the way
-// standout.ts's FLOOR_RELAX_SEC/PEAK_RELAX_SEC do for its own,
-// unrelated trackers.
-const GATE_FLOOR_DOWN_TAU_SEC = 0.3;
-const GATE_FLOOR_UP_TAU_SEC = 4;
-const GATE_PEAK_DECAY_TAU_SEC = 4;
-// How far Smoothness widens the window at each end (value()/uniformPair()/
-// valueOf() below): a fraction of the tracker's own floor-to-peak spread, with a
-// minimum so a dead-flat signal (peak == floor) still has *some* knee rather
-// than a hard step. The fraction is the generic gate's Smoothness setting
-// (driveStore.ts getDriveSmoothness, 0..1) scaled by GATE_KNEE_MAX_FRACTION,
-// so the setting's default, GENERIC_SMOOTHNESS_DEFAULT, is the knee every
-// generic gate had before the slider existed.
-const GATE_KNEE_MAX_FRACTION = 2;
-const GATE_KNEE_SPREAD_MIN = 0.1;
 
 // Master Expansion (this file's header): `normal`'s fixed averaging time,
 // and the dial's mapping onto `usual`'s catch-up time and the reach. At 1×
@@ -757,11 +723,16 @@ function isLineChoice(choice: DriveSourceChoice): choice is { source: "line" } {
   return typeof choice === "object" && choice.source === "line";
 }
 
-/** Plain id, `grid:<i>`, or `line` — what makes a source unique within one
+export function isShapedChoice(choice: DriveSourceChoice): choice is { source: "shaped"; id: string } {
+  return typeof choice === "object" && choice.source === "shaped";
+}
+
+/** Plain id, `grid:<i>`, `shaped:<id>`, or `line` — what makes a source unique within one
  *  patch (see `normalizeDriveSetting`'s dedupe below) and what keys its own
  *  per-tick engine state alongside the setting's own key. */
 export function sourceKey(choice: DriveSourceChoice): string {
   if (typeof choice === "string") return choice;
+  if (choice.source === "shaped") return `shaped:${choice.id}`;
   return choice.source === "beat" ? `grid:${choice.grid}` : "line";
 }
 
@@ -784,6 +755,7 @@ export function sameDriveChoice(a: DriveChoice, b: DriveChoice): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object") return false;
   if (a.source !== b.source) return false;
+  if (a.source === "shaped" && b.source === "shaped") return a.id === b.id;
   return a.source === "beat" && b.source === "beat" ? a.grid === b.grid : true;
 }
 
@@ -897,6 +869,20 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
   return { mix: setting.mix, sources };
 }
 
+/** `setting` with every shaped source whose id is a key of `map` re-pointed
+ *  at the mapped id — a Look's node ids are per device, so applying a Look
+ *  rewires its wires to the local nodes it adopted (shapingNodes.ts's
+ *  adoptShapingNodes). Other sources stay as they are. */
+export function remapShapedSources(setting: DriveSetting, map: ReadonlyMap<string, string>): DriveSetting {
+  if (setting === "scene") return "scene";
+  const sources = setting.sources.map((src) => {
+    if (!isShapedChoice(src.choice)) return src;
+    const next = map.get(src.choice.id);
+    return next === undefined ? src : { ...src, choice: { source: "shaped" as const, id: next } };
+  });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
 // ---- Pure patch-editing helpers (deviceMenu.ts, Phase 2) -------------------
 //
 // Each takes and returns a DriveSetting — driveStore.ts's own same-named
@@ -938,6 +924,22 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
   if (setting === "scene") return setting;
   const key = sourceKey(choice);
   const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, height } : s));
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
+/** `setting` with the source whose choice is `from` re-pointed at shaping
+ *  node `nodeId` (a wire's Shape button): it keeps its weight, role and
+ *  mute; Height and Every go, since they described the old reading and the
+ *  node now owns how it reads. A "scene" setting, or no such source, comes
+ *  back unchanged. */
+export function shapeSource(setting: DriveSetting, from: DriveSourceChoice, nodeId: string): DriveSetting {
+  if (setting === "scene") return setting;
+  const key = sourceKey(from);
+  const sources = setting.sources.map((s): DriveSource =>
+    sourceKey(s.choice) === key
+      ? { choice: { source: "shaped", id: nodeId }, weight: s.weight, ...(s.when ? { when: true as const } : {}), ...(s.off ? { off: true as const } : {}) }
+      : s,
+  );
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
@@ -1053,12 +1055,6 @@ function createSourceState(): SourceState {
   };
 }
 
-/** One patched setting's own generic-gate tracker (this file's header's
- *  threshold paragraph) — `accumulate()` advances it once per tick, from the
- *  setting's own combined-and-gained value; `forScene()` only ever reads
- *  `line`/`floor`/`peak` back, never advances them itself, same split as
- *  `SourceState` above. Keyed per setting, not per source — there's one gate
- *  on the setting's own output, not one per source feeding it. */
 /** An engine-run hit driver's own standout detector (this file's header,
  *  "Hit drivers"). fired() advances it once per AnimFrame — a scene may ask
  *  more than once a frame, and gets the same answer. */
@@ -1073,113 +1069,6 @@ interface HitDetector {
 
 function createHitDetector(): HitDetector {
   return { standout: createStandoutState(), anim: null, fired: false, size: 1 };
-}
-
-interface GateTrackerState {
-  init: boolean;
-  floor: number;
-  peak: number;
-  /** floor + t·(peak−floor), t the setting's own threshold value — what the
-   *  panel's graph draws dotted (SceneDrives.gateLine) and what value()/
-   *  fired() gate against. Recomputed every advance, so it's always current
-   *  the instant floor/peak move even if the threshold slider itself didn't. */
-  line: number;
-  /** floor + max(t, tMax)·(peak−floor) — the window's Max line (SceneDrives.gateTop). Never below `line`. */
-  top: number;
-}
-
-function createGateTracker(): GateTrackerState {
-  return { init: false, floor: 0, peak: 0, line: 0, top: 0 };
-}
-
-/** Advances one setting's gate tracker by `dtSec`, given `v` (that setting's
- *  own combined, gained reading this tick — the same number value() would
- *  give with the gate itself switched off), `t` (the window's Min slider,
- *  0..1) and `tMax` (the window's Max slider, 0..1). The first call seeds
- *  floor/peak from `v` rather than from 0, so startup never reads as a
- *  signal that's fallen far below a floor of 0. */
-function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: number, tMax: number): void {
-  if (!tr.init) {
-    tr.floor = v;
-    tr.peak = v;
-    tr.init = true;
-  } else {
-    const floorTau = v < tr.floor ? GATE_FLOOR_DOWN_TAU_SEC : GATE_FLOOR_UP_TAU_SEC;
-    tr.floor += (v - tr.floor) * (1 - Math.exp(-dtSec / floorTau));
-    tr.peak = v > tr.peak ? v : tr.floor + (tr.peak - tr.floor) * Math.exp(-dtSec / GATE_PEAK_DECAY_TAU_SEC);
-  }
-  tr.line = tr.floor + clamp01(t) * (tr.peak - tr.floor);
-  tr.top = tr.floor + Math.max(clamp01(t), clamp01(tMax)) * (tr.peak - tr.floor);
-}
-
-/** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
- *  Fixed/Loud release — the lane whose pulse heightDecayPerSec below borrows
- *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
- *  section swell, not a hit's ring-out, so no Length row stretches it. */
-function heightTailLane(choice: DriveSourceChoice): HitLane | null {
-  switch (choice) {
-    case "anim.lowOnset":
-      return "low";
-    case "anim.midOnset":
-      return "mid";
-    case "anim.highOnset":
-      return "high";
-    case "anim.dropOnset":
-      return null;
-    default:
-      return "beat"; // Any hit and the metronome, timed like beatPulse
-  }
-}
-
-/** Fixed/Loud's own release rate for a hit-kind source — reused directly
- *  from the module that owns the Graded pulse it stands in for (see this
- *  file's header). Only ever called for an edge-kind catalogue entry or a
- *  grid source (accumulate()/sourceRaw below both gate on that). */
-function heightDecayPerSec(choice: DriveSourceChoice): number {
-  if (isGridChoice(choice)) return GRID_PULSE_DECAY_PER_SEC;
-  switch (choice) {
-    case "feature.onset":
-      return BEAT_PULSE_DECAY_PER_SEC;
-    case "anim.lowOnset":
-      return GROUP_TUNING.low.pulseDecayRate;
-    case "anim.midOnset":
-      return GROUP_TUNING.mid.pulseDecayRate;
-    case "anim.highOnset":
-      return GROUP_TUNING.high.pulseDecayRate;
-    case "anim.dropOnset":
-      return DROP_PULSE_DECAY_PER_SEC;
-    case "anim.metronome":
-    case "anim.metronomeBar":
-      return BEAT_PULSE_DECAY_PER_SEC; // matches animClock.ts's own metronomePulse/metronomeBarPulse decay
-    default:
-      return BEAT_PULSE_DECAY_PER_SEC; // unreached — every edge-kind SignalId is listed above
-  }
-}
-
-/** Loud height's own target on a hit-kind source's edge — "that band
- *  group's level" (this file's header): the group's own slewed level for a
- *  band onset, sectionIntensity's trend for Drop (its own composite
- *  "loudness" — Drop has no group level of its own to read), and the
- *  sensitivity-applied broadband level (matching Loudness · All exactly)
- *  for Any hit, every beat-grid stop, and the metronome (Metronome/
- *  Metronome bar), since none of those is band-specific. */
-function loudLevel(choice: DriveSourceChoice, anim: AnimFrame, driveEnergy: number): number {
-  if (isGridChoice(choice)) return driveEnergy;
-  switch (choice) {
-    case "anim.lowOnset":
-      return anim.low;
-    case "anim.midOnset":
-      return anim.mid;
-    case "anim.highOnset":
-      return anim.high;
-    case "anim.dropOnset":
-      return anim.sectionIntensity;
-    case "anim.metronome":
-    case "anim.metronomeBar":
-      return driveEnergy; // same broadband level as "feature.onset" (Any hit)
-    default:
-      return driveEnergy; // "feature.onset" (Any hit) and unreached edge cases
-  }
 }
 
 // combine()'s gate branch (below) is the one place `off`/`when` are read
@@ -1271,6 +1160,8 @@ export interface DriveEngine {
   /** A read-only view for `anim` — see this file's header for the render
    *  vs. panel distinction in which AnimFrame each caller hands in. */
   forScene(sceneId: string, settings: readonly SceneSetting[], anim: AnimFrame): SceneDrives;
+  /** A shaping node's live input/output this tick (shapingNodes.ts), for the panel; null for an unknown id. */
+  shaped(id: string): Readonly<ShapingState> | null;
 }
 
 export function createDriveEngine(): DriveEngine {
@@ -1288,6 +1179,8 @@ export function createDriveEngine(): DriveEngine {
   // One standout detector per engine-run hit driver (this file's header,
   // "Hit drivers"), advanced by fired() once per AnimFrame.
   const hitDetectors = new Map<string, HitDetector>();
+  // One bank of shaping-node states for this engine (shapingNodes.ts).
+  const shaping = createShapingBank();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -1336,6 +1229,7 @@ export function createDriveEngine(): DriveEngine {
       return wantsHeight ? st.heightEnv : st.gridPulse;
     }
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
+    if (isShapedChoice(choice)) return shaping.output(choice.id);
     // Beat wave's own every-N-beats divider (DriveSource.every): the plain
     // catalogue read is exactly this formula at every=1 (it swings over the
     // metronome's own phase, and metronomePhase is the fractional part of
@@ -1380,6 +1274,8 @@ export function createDriveEngine(): DriveEngine {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
       driveFrameScratch.level = gainedFrame.level;
+      // Every node steps every tick, used by a setting or not: the panel's node monitors read it too.
+      shaping.advance(dtSec, driveFrameScratch, anim);
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();
       for (const spec of settings) {
@@ -1411,12 +1307,10 @@ export function createDriveEngine(): DriveEngine {
             if (result.drive > st.linePulse) st.linePulse = result.drive;
             st.lineExcess.set(result.excess);
             // Height ignored — see this file's header.
+          } else if (isShapedChoice(choice)) {
+            // level-kind: the bank already advanced it above; height ignored
           } else if (SIGNALS[choice].kind === "edge" && wantsHeight) {
-            const lane = heightTailLane(choice);
-            const rate = heightDecayPerSec(choice) * (lane === null ? 1 : anim.hitTail[lane]);
-            st.heightEnv *= Math.exp(-dtSec * rate);
-            const edge = SIGNALS[choice].edge!(anim);
-            if (edge) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : loudLevel(choice, anim, driveEnergy));
+            st.heightEnv = stepHeightEnv(st.heightEnv, choice, src.height as "fixed" | "loud", dtSec, anim, driveEnergy);
           }
           // Graded catalogue sources (edge- or level-kind) have no per-tick
           // state to advance — read straight off `anim`/driveFrameScratch at
@@ -1511,11 +1405,7 @@ export function createDriveEngine(): DriveEngine {
         if (!tr) return v;
         const spec = specByKey.get(key)!;
         const s = getDriveSmoothnessOn(sceneId, spec) ? getDriveSmoothness(sceneId, spec) : 0;
-        const k = GATE_KNEE_MAX_FRACTION * s * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
-        const lo = tr.line - k;
-        const hi = tr.top + k;
-        if (hi - lo <= 1e-6) return v >= tr.line ? tr.peak : 0;
-        return tr.peak * clamp01((v - lo) / (hi - lo));
+        return windowReading(tr, v, s);
       }
 
       // fired()'s own hard cut: an edge whose combined value falls under the
@@ -1544,7 +1434,7 @@ export function createDriveEngine(): DriveEngine {
           st.gridFiredPending = false;
           return fired;
         }
-        if (!isLineChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
+        if (!isLineChoice(choice) && !isShapedChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
         const st = stateFor(sceneId, key, sourceKey(choice));
         const raw = clampWeight(src.weight) * sourceRaw(key, src);
         return stepValueTrigger(st.valueTrigger, raw, upper, anim);
@@ -1760,6 +1650,10 @@ export function createDriveEngine(): DriveEngine {
           return count ? sum / count : null;
         },
       };
+    },
+
+    shaped(id) {
+      return shaping.reading(id);
     },
   };
 }

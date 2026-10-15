@@ -3,8 +3,9 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
 import { fitCustom, getCustomValue, resetCustomValue, setCustomValue, stretchSlider } from "./customValues.ts";
-import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
+import { defaultDriveSetting, isShapedChoice, remapShapedSources, sameDriveSetting, type DriveSetting } from "./drives.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
+import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingNodeDef, shapingNodeDef, type ShapingNodeDef } from "./shapingNodes.ts";
 
 /**
  * Named, shareable snapshots of one scene's own settings — the sliders in the
@@ -74,6 +75,14 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  * same way a bare `DriveChoice` already served both before patches
  * existed — so `encodeDriveSetting`/`sanitizeDriveSetting` (driveStore.ts)
  * are reused here rather than re-derived.
+ *
+ * The `h` field carries the shaping nodes a Look's wires use (shapingNodes.ts),
+ * because node ids are per device: each id in `d` is a key of `h`, with the
+ * node's definition as its value. Applying the Look reuses an identical local
+ * node or creates one (adoptShapingNodes) and rewires to it. An app from
+ * before shaping nodes rejects a code whose `d` wires to one, since its
+ * sanitizeDriveSetting does not know the shape, so that whole code does not
+ * open there.
  */
 export interface SceneLook {
   name: string;
@@ -96,6 +105,9 @@ export interface SceneLook {
   /** The palette (palette.ts id) showing when the look was saved; absent on
    *  a look saved before looks carried one. */
   paletteId?: string;
+  /** The definitions of every shaping node `drives` wires to, keyed by the
+   *  id used in `drives` (shapingNodes.ts). Omitted when no wire reaches one. */
+  shapingNodes?: Record<string, ShapingNodeDef>;
 }
 
 const STORAGE_KEY = "vibe.looks";
@@ -185,6 +197,7 @@ export function deleteLook(sceneId: string, name: string): void {
 export function captureLook(name: string, sceneId: string, specs: readonly SceneSetting[]): SceneLook {
   const manual: Record<string, number> = {};
   let drives: Record<string, DriveSetting> | undefined;
+  let shapingNodes: Record<string, ShapingNodeDef> | undefined;
   for (const spec of specs) {
     // The variant (SceneSetting.variant) is always carried, auto or not:
     // every other key is stored per variant option, so a Look that left it
@@ -197,9 +210,16 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
     if (spec.drive) {
       const setting = getDriveSetting(sceneId, spec);
       if (!sameDriveSetting(setting, defaultDriveSetting(spec))) (drives ??= {})[spec.key] = setting;
+      for (const src of setting === "scene" ? [] : setting.sources) {
+        if (!isShapedChoice(src.choice)) continue;
+        const node = getShapingNode(src.choice.id);
+        if (node) {
+          (shapingNodes ??= {})[node.id] = shapingNodeDef(node);
+        }
+      }
     }
   }
-  return { name, sceneId, manual, drives };
+  return { name, sceneId, manual, drives, shapingNodes };
 }
 
 /** Sets every spec in the scene — pins the keys the Look lists, and returns
@@ -208,6 +228,8 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
  *  `SceneSetting.drive` spec's setting: listed in `look.drives` -> set to
  *  that setting, absent -> back to `spec.drive.default`. */
 export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void {
+  // The look's node ids are per device: reuse or add local nodes, then rewire.
+  const idMap = adoptShapingNodes(look.shapingNodes ?? {});
   // The variant goes first (sceneSettings.ts's variantFirst): every other
   // key is stored per variant option, so it has to be switched before they
   // are written or the Look would land in the profile being left.
@@ -234,7 +256,7 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
     }
     if (spec.drive) {
       const setting = look.drives?.[spec.key];
-      if (setting !== undefined) setDriveSetting(look.sceneId, spec, setting);
+      if (setting !== undefined) setDriveSetting(look.sceneId, spec, remapShapedSources(setting, idMap));
       else resetDriveSetting(look.sceneId, spec);
     }
   }
@@ -268,7 +290,15 @@ function fromBase64Url(code: string): string {
 }
 
 export function encodeLook(look: SceneLook): string {
-  const payload: { v: number; n: string; s: string; m: Record<string, number>; d?: Record<string, StoredDriveSetting>; p?: string } = {
+  const payload: {
+    v: number;
+    n: string;
+    s: string;
+    m: Record<string, number>;
+    d?: Record<string, StoredDriveSetting>;
+    p?: string;
+    h?: Record<string, ShapingNodeDef>;
+  } = {
     v: CODE_VERSION,
     n: look.name,
     s: look.sceneId,
@@ -282,6 +312,7 @@ export function encodeLook(look: SceneLook): string {
     for (const [key, setting] of Object.entries(look.drives)) payload.d[key] = encodeDriveSetting(setting);
   }
   if (look.paletteId) payload.p = look.paletteId;
+  if (look.shapingNodes && Object.keys(look.shapingNodes).length > 0) payload.h = look.shapingNodes;
   const bytes = strToU8(JSON.stringify(payload));
   const plain = bytesToBase64Url(bytes);
   const packed = COMPRESSED_PREFIX + bytesToBase64Url(deflateSync(bytes, { level: 9 }));
@@ -310,7 +341,18 @@ export function decodeLook(code: string): SceneLook | null {
       }
     }
     const paletteId = typeof parsed.p === "string" && parsed.p ? parsed.p : undefined;
-    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives, paletteId };
+    let shapingNodes: Record<string, ShapingNodeDef> | undefined;
+    if (parsed.h !== undefined) {
+      if (!parsed.h || typeof parsed.h !== "object" || Array.isArray(parsed.h)) return null;
+      shapingNodes = {};
+      for (const [id, value] of Object.entries(parsed.h)) {
+        if (!SHAPING_NODE_ID_RE.test(id)) return null;
+        const def = sanitizeShapingNodeDef(value);
+        if (def === null) return null;
+        shapingNodes[id] = def;
+      }
+    }
+    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives, paletteId, shapingNodes };
   } catch {
     return null;
   }

@@ -26,11 +26,14 @@ import {
   getDriveLineStrength,
   setDriveLineStrength,
   resetDriveLineStrength,
+  removeShapedSource,
 } from "../src/render/driveStore.ts";
-import { driveSettingFromChoice, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, type DrivePatch } from "../src/render/drives.ts";
+import { normalizeDriveSetting } from "../src/render/drives.ts";
+import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "../src/render/gateWindow.ts";
 
 // vitest runs under environment: "node" (vitest.config.ts), so there is no
 // localStorage global at all here for the plain round-trip tests below —
@@ -603,5 +606,48 @@ describe("driveStore with a stubbed localStorage", () => {
 
     const line = fresh.getDriveLine("garbage-scene-2", FLASH);
     for (let b = 0; b < NUM_BANDS; b++) expect(line[b]).toBe(LINE_HEIGHT_DEFAULT);
+  });
+});
+
+describe("shaped sources in the drive store", () => {
+  const SHAPED_SPEC: SceneSetting = { key: "shp", label: "Shp", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } };
+
+  it("sanitizeDriveSetting accepts a shaped wire, bare and inside a patch", () => {
+    expect(sanitizeDriveSetting({ source: "shaped", id: "n3" })).toEqual(driveSettingFromChoice({ source: "shaped", id: "n3" }));
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id: "n3" } }] })).toEqual({
+      mix: "add",
+      sources: [{ choice: { source: "shaped", id: "n3" }, weight: 1 }],
+    });
+  });
+
+  it("sanitizeDriveSetting rejects a malformed shaped id", () => {
+    for (const id of ["x", "n0", "__proto__", 3]) {
+      expect(sanitizeDriveSetting({ source: "shaped", id }), String(id)).toBeNull();
+      expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id } }] }), String(id)).toBeNull();
+    }
+  });
+
+  it("encode then sanitize round-trips a multi-source patch with a shaped wire", () => {
+    const setting = normalizeDriveSetting({
+      mix: "gate",
+      sources: [
+        { choice: { source: "shaped", id: "n12" }, weight: 0.5, when: true },
+        { choice: "anim.low", weight: 1, off: true },
+      ],
+    });
+    expect(sanitizeDriveSetting(encodeDriveSetting(setting))).toEqual(setting);
+  });
+
+  it("removeShapedSource unplugs that wire in every scene and leaves other wires alone", () => {
+    const a = "shaped-remove-a";
+    const b = "shaped-remove-b";
+    const c = "shaped-remove-c";
+    setDriveSetting(a, SHAPED_SPEC, { mix: "add", sources: [{ choice: { source: "shaped", id: "n5" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
+    setDriveSetting(b, SHAPED_SPEC, { mix: "add", sources: [{ choice: "anim.high", weight: 1 }, { choice: { source: "shaped", id: "n5" }, weight: 1 }] });
+    setDriveSetting(c, SHAPED_SPEC, { mix: "add", sources: [{ choice: { source: "shaped", id: "n6" }, weight: 1 }] });
+    removeShapedSource("n5");
+    expect(getDriveSetting(a, SHAPED_SPEC)).toEqual(driveSettingFromChoice("anim.low"));
+    expect(getDriveSetting(b, SHAPED_SPEC)).toEqual(driveSettingFromChoice("anim.high"));
+    expect(getDriveSetting(c, SHAPED_SPEC)).toEqual(driveSettingFromChoice({ source: "shaped", id: "n6" }));
   });
 });

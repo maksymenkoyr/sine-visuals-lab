@@ -61,10 +61,9 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
-  GENERIC_SMOOTHNESS_DEFAULT,
-  GENERIC_THRESHOLD_DEFAULT,
   isEngineHitDriver,
   sameDriveSetting,
+  shapeSource,
   smoothstep,
   sourceKey,
   type DriveMix,
@@ -80,22 +79,27 @@ import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from ".
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
-  DRIVE_ADD_GROUPS,
+  driveAddGroups,
   DRIVE_WHITE,
   driveGridDivisionLabel,
   driveSourceColor,
   driveSourceDescription,
   driveSourceLabel,
+  HEIGHT_OPTIONS,
   isGridSourceChoice,
   isLineSourceChoice,
   jackKey,
+  shapingNodeLabel,
 } from "./driveSources.ts";
+import { addShapingNode, getShapingNode, listShapingNodes, updateShapingNode } from "../render/shapingNodes.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading } from "./audioMeters.ts";
+import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading, type AudioMetersDeps } from "./audioMeters.ts";
+import { createShapingColumn } from "./shapingColumn.ts";
+import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import {
   createHeatPip,
   createHeatTrack,
@@ -180,6 +184,7 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render/gateWindow.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -228,8 +233,10 @@ import {
  * (that only writes the store and a readout) and never from the panel's
  * periodic refresh, matching the click-loss lesson in this file's carried
  * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
- * line per source (colour dot, name, weight 0–2×, a hit source's Height
- * Graded/Fixed/Loud, a grid source's division chips, the line source's
+ * line per source (colour dot, name, weight 0–2×, a Shape button on a
+ * catalogue wire that puts a shaping node on it, a hit source's Height
+ * Graded/Fixed/Loud only while it still carries an old one, a grid source's
+ * division chips, the line source's
  * Strength + Clear reusing lineEditor.strengthRow), a 4 s output graph off
  * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
@@ -251,8 +258,9 @@ import {
  * patch (onJackClick); with nothing pinned, it pins whichever setting was
  * last previewed (`lastPreview`, since `preview` itself goes back to null
  * the moment the pointer leaves) and plugs in in the same click, or shows a
- * toast if nothing ever was. Hovering a jack highlights every scene row it
- * already feeds (onJackHover, independent of the shown-setting highlight).
+ * toast if nothing ever was. A jack can also be dragged onto a setting, a
+ * shaping node, or the middle column. Hovering a jack highlights every scene
+ * row it already feeds (onJackHover, independent of the shown-setting highlight).
  * While a setting is shown, `refreshPatchHighlight` — called from every
  * place `pinned`/`preview`/a patch actually changes, never per frame —
  * dims the rest of the Bands+meters column (`.vc-patching`, controlsTheme.ts)
@@ -605,6 +613,8 @@ export interface DeviceMenuDeps {
    *  patches (and, while a patch has a source on Frequencies, independent
    *  drawn lines — see getDriveLine below). */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
+  /** A shaping node's live input/output (DriveEngine.shaped), panel open or closed. */
+  getShapingReading(id: string): { input: number; output: number; line: number; top: number } | null;
   /** Writes a whole DriveSetting straight through (driveStore.ts's own
    *  `setDriveSetting`) — the one generic primitive every other `onSetXxx`
    *  below is a narrower pure-function wrapper around. appendSettingRow's
@@ -2410,6 +2420,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
   });
   const spectrumStrip = bandFaders.strip;
+  // Every function referenced below is a plain (hoisted) function
+  // declaration further down this same closure, in the patch-bay
+  // section — see each one's own doc comment there. Referencing them
+  // here, ahead of their textual declaration, is safe: none of these are
+  // ever called until well after createDeviceMenu() has finished running
+  // and every one of them exists. One bundle, shared by the meters and
+  // the shaping column (shapingColumn.ts).
+  // Which DriveSourceChoice each jack element carries — a jack's own
+  // identity is only its jackKey, which collapses beat-grid divisions, and
+  // a drag needs the real choice (registerJack, below; mountBandsJack).
+  const jackChoices = new WeakMap<HTMLElement, DriveSourceChoice>();
+  const jackPatch: AudioMetersDeps["patch"] = {
+    usage: jackUsage,
+    isShown: jackIsShown,
+    isPinned: jackIsPinned,
+    isPreview: jackFeedsPreview,
+    isPinnedActive: jackIsPinnedActive,
+    isPreviewActive: jackFeedsPreviewActive,
+    previewIsActive: () => !!activePreview(),
+    isSceneSource: jackIsSceneSource,
+    describe: jackDescribe,
+    onJackClick,
+    onJackHover,
+    registerJack: (el, choice) => jackChoices.set(el, choice),
+  };
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
     heatSettings: heatSettingRows,
@@ -2420,25 +2455,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       get: () => deps.getHitShape(),
       set: (partial) => deps.setHitShape(partial),
     },
-    // Every function referenced below is a plain (hoisted) function
-    // declaration further down this same closure, in the patch-bay
-    // section — see each one's own doc comment there. Referencing them
-    // here, ahead of their textual declaration, is safe: none of these are
-    // ever called until well after createDeviceMenu() has finished running
-    // and every one of them exists.
-    patch: {
-      usage: jackUsage,
-      isShown: jackIsShown,
-      isPinned: jackIsPinned,
-      isPreview: jackFeedsPreview,
-      isPinnedActive: jackIsPinnedActive,
-      isPreviewActive: jackFeedsPreviewActive,
-      previewIsActive: () => !!activePreview(),
-      isSceneSource: jackIsSceneSource,
-      describe: jackDescribe,
-      onJackClick,
-      onJackHover,
-    },
+    patch: jackPatch,
+  });
+  // The middle column: shaping nodes (shapingColumn.ts).
+  const shapingCol = createShapingColumn({
+    patch: jackPatch,
+    getReading: deps.getShapingReading,
+    onStructureChanged: shapingStructureChanged,
+    onLayout: scheduleCableRecompute,
+    onNodePress: toggleNodePin,
+    isNodePinned: (id) => pinnedNode === id,
   });
 
   const spectrumCol = document.createElement("div");
@@ -2556,6 +2582,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  below, Escape (onKeyDown), or a scene switch (renderSceneSettings's
    *  own tail). */
   let pinned: { sceneId: string; spec: SceneSetting } | null = null;
+  /** A pinned shaping node (shapingColumn.ts): its chain stays lit, and a click on an input jack makes it read that input. Never set together with `pinned`. */
+  let pinnedNode: string | null = null;
+  /** The shaping node card under the pointer, lighting its chain. */
+  let hoverNode: string | null = null;
   // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
   // because togglePin and every pinned patch panel's own Solo chip read it.
   let soloOn = false;
@@ -2738,6 +2768,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       () => onJackClick(choice),
       (on) => onJackHover(choice, on),
     );
+    jackChoices.set(jack.el, choice);
     host.appendChild(jack.el);
     bandsJacks.push({ choice, jack, feedEl });
     bandsJackEls.set(jackKey(choice), jack.el);
@@ -3221,12 +3252,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
   ];
 
-  const HEIGHT_OPTIONS: { h: HitHeight; label: string; hint: string }[] = [
-    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
-    { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
-    { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
-  ];
-
   // Beat wave's own every-N-beats divider (DriveSource.every) — only shown
   // on a plain Beat wave source line (buildSourceLine below); every other
   // source ignores it outright (drives.ts's own doc on that field).
@@ -3507,7 +3532,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  gets a Smoothness row under the window (buildSmoothnessRow), with its
    *  own On/Off. Same live-write, no-rebuild rule
    *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
-   *  own mini-segment styling. */
+   *  own mini-segment styling. A generic gate's window is built only while
+   *  its own gate is on (buildPatchPanel): shaping nodes own the window now,
+   *  and this row is what a saved Look from before them still shows. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
     const engineHit = isEngineHitDriver(spec);
@@ -3765,6 +3792,50 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return btn;
   }
 
+  /** A wire's Shape button: puts a new shaping node (shapingNodes.ts) on this
+   *  catalogue wire and re-points the wire at it, so the picture doesn't
+   *  change until the node is edited. The node takes the wire's Height, and
+   *  the setting's own window too when this is its only wire and the gate is
+   *  on; that window then goes off on the setting (the node carries it now). */
+  function buildShapeButton(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const choice = src.choice as SignalId;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.style.cssText = driveResetLinkStyle;
+    btn.textContent = "Shape";
+    btn.setAttribute("aria-label", `Shape ${driveSourceLabel(src.choice)}`);
+    setHint(btn, "Put a shaping node on this wire: it reads the same until you change the node.");
+    btn.addEventListener("click", () => {
+      const setting = deps.getDriveSetting(sceneId, spec);
+      if (setting === "scene") return;
+      const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
+      const gate = deps.getDriveThresholdState(sceneId, spec);
+      // The setting's own window moves into the node only when this is its only wire.
+      const carryGate = generic && gate.on && setting.sources.length === 1;
+      const node = addShapingNode(choice, {
+        height: src.height ?? "graded",
+        windowOn: carryGate,
+        ...(carryGate
+          ? {
+              min: gate.value,
+              max: deps.getDriveWindowMax(sceneId, spec),
+              smoothOn: deps.getDriveSmoothnessOn(sceneId, spec),
+              smoothness: deps.getDriveSmoothness(sceneId, spec),
+            }
+          : {}),
+      });
+      if (!node) {
+        showToast("No room for another shaping node");
+        return;
+      }
+      deps.onSetDriveSetting(sceneId, spec, shapeSource(setting, src.choice, node.id));
+      if (carryGate) deps.onSetDriveThresholdOn(sceneId, spec, false);
+      patchChanged(sceneId, spec);
+      showToast(`This wire now runs through ${shapingNodeLabel(node.id)}`);
+    });
+    return btn;
+  }
+
   function buildSourceLine(
     sceneId: string,
     spec: SceneSetting,
@@ -3819,7 +3890,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Fixed/Loud height only mean anything for a hit-kind source — an
     // edge-kind catalogue entry or a beat grid (drives.ts's own header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
-    if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    // Only a wire still carrying an old Fixed/Loud shows its Height; a node
+    // owns Height from now on (shaping nodes; the engine still honours this).
+    if (isHitKind && src.height !== undefined && src.height !== "graded") ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
     // Every-N-beats only ever means anything for a plain Beat wave source
     // (DriveSource.every's own doc) — never a grid/line/hit-kind source, all
     // handled by other branches here.
@@ -3833,6 +3906,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       drawHint.textContent = "Draw on the spectrum.";
       ctrls.appendChild(drawHint);
     } else {
+      // A catalogue wire can take a node, except a Beat wave on an every-N
+      // divider: shapeSource would drop that divider (DriveSource.every).
+      if (typeof src.choice === "string" && !(src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1)) {
+        ctrls.appendChild(buildShapeButton(sceneId, spec, src));
+      }
       ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
     }
 
@@ -3873,7 +3951,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     } else {
       groupsHost.style.cssText = driveAddGroupsStyle;
     }
-    for (const group of DRIVE_ADD_GROUPS) {
+    for (const group of driveAddGroups()) {
       const row = document.createElement("div");
       row.style.cssText = driveAddGroupRowStyle;
       const label = document.createElement("b");
@@ -4234,7 +4312,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** Rebuilds the pinned row's whole patch panel — called only on a genuine
    *  patch edit (patchChanged) or a fresh pin (DriveRowHandle.refreshPin),
    *  never from the panel's periodic refresh or a slider's own `input`
-   *  event (this file's own carried click-loss rule). */
+   *  event (this file's own carried click-loss rule). A generic setting's
+   *  window row is only built while its own gate is on, and a wire's Height
+   *  seg only while it still carries an old Fixed/Loud; its wires' Shape
+   *  buttons (buildSourceLine) are how both move to a shaping node. */
   function buildPatchPanel(
     sceneId: string,
     spec: SceneSetting,
@@ -4242,6 +4323,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wireHeatPips = []; // the wire pips of the panel being rebuilt replace the old panel's
     const setting = deps.getDriveSetting(sceneId, spec);
     const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
+    // The generic gate's window rows only show while the setting's own gate
+    // is on (a saved Look from before shaping nodes); see buildThresholdRow.
+    const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
+    const legacyWindow = generic && deps.getDriveThresholdState(sceneId, spec).on;
 
     const panel = document.createElement("div");
     panel.style.cssText = drivePatchPanelStyle;
@@ -4335,6 +4420,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     patch.sources.forEach((src, i) => {
       list.appendChild(buildSourceLine(sceneId, spec, patch, src, i, refreshResetVisibility));
     });
+    if (generic && patch.sources.length) {
+      const shapeNote = document.createElement("div");
+      shapeNote.style.cssText = driveEmptySrcStyle;
+      shapeNote.textContent = "Window, Smoothness, Length and Height live on shaping nodes now. Press Shape on a wire to give it one.";
+      list.appendChild(shapeNote);
+    }
     panel.appendChild(list);
     panel.appendChild(buildAddChips(sceneId, spec, patch));
 
@@ -4346,7 +4437,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       outputCanvas = graph.canvas;
       tick = graph.tick;
     }
-    panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
+    if (!generic || legacyWindow) {
+      if (legacyWindow) {
+        const legacyNote = document.createElement("div");
+        legacyNote.style.cssText = driveEmptySrcStyle;
+        // Shape carries the window into the node only from a setting's only wire (buildShapeButton).
+        legacyNote.textContent =
+          patch.sources.length === 1
+            ? "This setting's own window, from before shaping nodes. Press Shape on its wire to move it into a node."
+            : "This setting's own window, from before shaping nodes. To move it, shape its wires, set each node's window, then switch this Off.";
+        panel.appendChild(legacyNote);
+      }
+      panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
+    }
     const readoutRow = buildReadoutRow(sceneId, spec, refreshResetVisibility);
     if (readoutRow) panel.appendChild(readoutRow);
 
@@ -4754,6 +4857,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cancelPendingPreview();
     const next = { sceneId, spec };
     pinned = samePair(pinned, next) ? null : next;
+    if (pinned) pinnedNode = null;
     preview = null;
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
@@ -4855,15 +4959,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return n;
   }
 
+  /** The pinned shaping node's input jack, when a node is pinned and no setting is — the node's input lights as the one it reads. */
+  function pinnedNodeInput(choice: DriveSourceChoice): boolean {
+    if (!pinnedNode) return false;
+    const node = getShapingNode(pinnedNode);
+    return !!node && jackKey(node.src) === jackKey(choice);
+  }
+
   function jackIsShown(choice: DriveSourceChoice): boolean {
     const sel = shownSelection();
-    if (!sel) return false;
+    if (!sel) return pinnedNodeInput(choice);
     const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
   function jackIsPinned(choice: DriveSourceChoice): boolean {
-    if (!pinned) return false;
+    if (!pinned) return pinnedNodeInput(choice);
     const setting = deps.getDriveSetting(pinned.sceneId, pinned.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
@@ -4894,7 +5005,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  mute-agnostic — it's still plugged in) while its row stops lighting up
    *  (this file's own header's Muting paragraph). */
   function jackIsPinnedActive(choice: DriveSourceChoice): boolean {
-    if (!pinned) return false;
+    if (!pinned) return pinnedNodeInput(choice);
     const src = sourceForChoice(deps.getDriveSetting(pinned.sceneId, pinned.spec), choice);
     return !!src && !src.off;
   }
@@ -4941,6 +5052,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
     const name = driveSourceLabel(choice);
+    if (pinnedNode && getShapingNode(pinnedNode)) {
+      const aria = typeof choice === "string" ? `Make ${shapingNodeLabel(pinnedNode)} read ${name}` : `${name} — a shaping node reads one input node`;
+      return { aria, title: name };
+    }
     const target = jackTarget();
     if (!target) return { aria: `${name} — pick a setting first`, title: name };
     const already = jackFeeds(target, choice);
@@ -4955,8 +5070,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  previewed yet, unplug what's already there, or plug in. */
   function jackTooltipLines(choice: DriveSourceChoice): string[] {
     const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
-    const heat = audioMeters.jackHeatText(choice);
+    const heat = audioMeters.jackHeatText(choice) ?? shapingCol.jackHeatText(choice);
     const tail = heat ? [heat] : [];
+    if (pinnedNode && getShapingNode(pinnedNode)) {
+      const line2 = typeof choice === "string" ? `Click to make ${shapingNodeLabel(pinnedNode)} read this` : "A shaping node reads one input node";
+      return [line1, line2, ...tail];
+    }
     const target = jackTarget();
     if (!target) return [line1, "Pin a setting first", ...tail];
     const line2 = jackFeeds(target, choice) ? `Click to unplug from ${target.spec.label}` : `Click to plug into ${target.spec.label}`;
@@ -4971,6 +5090,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let justAddedKey: string | null = null;
 
   function onJackClick(choice: DriveSourceChoice): void {
+    if (jackDragJustEnded) return;
+    if (pinnedNode) {
+      const node = getShapingNode(pinnedNode);
+      if (node) {
+        if (typeof choice !== "string") {
+          showToast("A shaping node reads one input node");
+          return;
+        }
+        if (node.src !== choice) {
+          updateShapingNode(node.id, { src: choice });
+          showToast(`${shapingNodeLabel(node.id)} now reads ${driveSourceLabel(choice)}`);
+        }
+        return;
+      }
+    }
     const target = jackTarget();
     if (!target) {
       showToast("Pick a setting first");
@@ -4982,6 +5116,123 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     deps.onTogglePatchSource(target.sceneId, target.spec, choice);
     patchChanged(target.sceneId, target.spec);
   }
+
+  // ---- Dragging a jack: a mouse or pen press that moves becomes a drag
+  // (wide layout only — cables are hidden when narrow); a press without
+  // movement stays the click onJackClick handles. Drop targets are
+  // dropTargetAt's; the drop itself is dropJack's.
+  /** A jack press that may become a drag (DRAG_START_PX of movement). */
+  let jackDrag: { el: HTMLElement; choice: DriveSourceChoice; x: number; y: number; pointerId: number; moved: boolean } | null = null;
+  /** Set on the pointerup that ends a real drag, so the click the browser may still send to the jack is ignored. */
+  let jackDragJustEnded = false;
+  let dropTargetEl: HTMLElement | null = null;
+  const DRAG_START_PX = 5;
+
+  /** A drop's target, as dropTargetAt finds it. */
+  type DropTarget =
+    | { kind: "setting"; el: HTMLElement; sceneId: string; spec: SceneSetting }
+    | { kind: "node"; el: HTMLElement; id: string }
+    | { kind: "column"; el: HTMLElement };
+
+  /** What a jack dropped at (x, y) lands on: a wireable setting row of this scene, a shaping node card, or the middle column's free space. A node's own jack (a shaped choice) only ever lands on a setting. */
+  function dropTargetAt(x: number, y: number, choice: DriveSourceChoice): DropTarget | null {
+    const under = document.elementFromPoint(x, y);
+    if (!under) return null;
+    const sceneId = deps.currentSceneId();
+    const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.drive && r.rowEl.contains(under));
+    if (h) return { kind: "setting", el: h.rowEl, sceneId, spec: h.spec };
+    if (typeof choice !== "string") return null;
+    const nodeEl = under.closest<HTMLElement>(".vc-shape-node");
+    if (nodeEl?.dataset.nodeId) return { kind: "node", el: nodeEl, id: nodeEl.dataset.nodeId };
+    if (under.closest(".vc-shape-col")) return { kind: "column", el: shapingCol.el };
+    return null;
+  }
+
+  /** A jack dropped on a target (dropTargetAt). Plugging never unplugs: dropping a wire that is already there just pins its setting. */
+  function dropJack(choice: DriveSourceChoice, t: DropTarget): void {
+    if (t.kind === "setting") {
+      pinSetting(t.sceneId, t.spec);
+      if (!jackFeeds({ sceneId: t.sceneId, spec: t.spec }, choice)) {
+        justAddedKey = jackKey(choice);
+        deps.onTogglePatchSource(t.sceneId, t.spec, choice);
+        patchChanged(t.sceneId, t.spec);
+        showToast(`${driveSourceLabel(choice)} → ${t.spec.label}`);
+      }
+      return;
+    }
+    if (typeof choice !== "string") return;
+    if (t.kind === "node") {
+      const node = getShapingNode(t.id);
+      if (!node) return;
+      if (node.src !== choice) {
+        updateShapingNode(node.id, { src: choice });
+        showToast(`${shapingNodeLabel(node.id)} now reads ${driveSourceLabel(choice)}`);
+      }
+      if (pinnedNode !== node.id) toggleNodePin(node.id);
+      return;
+    }
+    const node = addShapingNode(choice);
+    if (!node) {
+      showToast("No room for another shaping node");
+      return;
+    }
+    showToast(`New shaping node: ${shapingNodeLabel(node.id)}. Drag its jack onto a setting.`);
+    // Pinned after the add: the column rebuilds itself from the store.
+    toggleNodePin(node.id);
+  }
+
+  /** The drop highlight: moves `.vc-drop-target` to `el` (null clears it). */
+  function setDropTarget(el: HTMLElement | null): void {
+    if (el === dropTargetEl) return;
+    dropTargetEl?.classList.remove("vc-drop-target");
+    dropTargetEl = el;
+    el?.classList.add("vc-drop-target");
+  }
+
+  /** Ends any jack drag in progress: the cable, the dragging look and the drop highlight all go. No drop. */
+  function clearJackDrag(): void {
+    jackDrag = null;
+    cableLayer.setDrag(null);
+    root.classList.remove("vc-dragging");
+    setDropTarget(null);
+  }
+
+  root.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.pointerType === "touch" || narrowMQ.matches) return;
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>(".vc-jack") : null;
+    const choice = el ? jackChoices.get(el) : undefined;
+    if (!el || !choice) return;
+    jackDrag = { el, choice, x: e.clientX, y: e.clientY, pointerId: e.pointerId, moved: false };
+  });
+  window.addEventListener("pointermove", (e) => {
+    const d = jackDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (!d.moved) {
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) <= DRAG_START_PX) return;
+      d.moved = true;
+      root.classList.add("vc-dragging");
+      hideTooltip();
+    }
+    cableLayer.setDrag({ from: d.el, x: e.clientX, y: e.clientY, color: driveSourceColor(d.choice) });
+    setDropTarget(dropTargetAt(e.clientX, e.clientY, d.choice)?.el ?? null);
+  });
+  window.addEventListener("pointerup", (e) => {
+    const d = jackDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    clearJackDrag();
+    if (!d.moved) return;
+    jackDragJustEnded = true;
+    setTimeout(() => {
+      jackDragJustEnded = false;
+    }, 0);
+    const t = dropTargetAt(e.clientX, e.clientY, d.choice);
+    if (t) dropJack(d.choice, t);
+  });
+  window.addEventListener("pointercancel", (e) => {
+    const d = jackDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    clearJackDrag();
+  });
 
   /** Hovering a jack highlights every scene row it feeds right now —
    *  independent of the preview/pin highlight above (this fires for *any*
@@ -5098,8 +5349,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let lastCableTickMs = performance.now();
   const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
 
+  /** A shaping node was added or removed (shapingColumn.ts): every wire panel
+   *  shows the new set, and the jacks and cables follow. */
+  function shapingStructureChanged(): void {
+    if (pinnedNode && !getShapingNode(pinnedNode)) pinnedNode = null;
+    if (hoverNode && !getShapingNode(hoverNode)) hoverNode = null;
+    for (const h of driveRowHandles) {
+      h.refreshMeta();
+      h.rebuildIfPinned();
+    }
+    refreshLineMode();
+    refreshPatchHighlight();
+  }
+
   function combinedJackElements(): ReadonlyMap<string, HTMLElement> {
     const merged = new Map(audioMeters.jackElements());
+    for (const [k, v] of shapingCol.jackElements()) merged.set(k, v);
     for (const [k, v] of bandsJackEls) merged.set(k, v);
     return merged;
   }
@@ -5198,10 +5463,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cableRecomputeQueued = true;
     requestAnimationFrame(() => {
       cableRecomputeQueued = false;
+      placeShapingColumn();
       positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
-      cableLayer.recompute(pinnedGroup, previewGroup, litSignalFan());
+      cableLayer.recompute(pinnedGroup, previewGroup, [...shapingCol.feedGroups(combinedJackElements()), ...litSignalFan()]);
     });
   }
 
@@ -5227,30 +5493,38 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     hoverJackRow = hover;
     focusJackRow = focus;
     if (hadFan || hover || focus) scheduleCableRecompute();
+    refreshChain();
   }
   // Not for a finger: a tap is no hover, and drawing a wired jack's cables
   // as the tap lands cost the tap its click on iPad Safari.
   root.addEventListener("pointerover", (e) => {
-    if (e.pointerType !== "touch") setLitJackRows(jackRowOf(e.target), focusJackRow);
+    if (e.pointerType === "touch") return;
+    setLitJackRows(jackRowOf(e.target), focusJackRow);
+    const card = e.target instanceof Element ? e.target.closest<HTMLElement>(".vc-shape-node") : null;
+    setHoverNode(card?.dataset.nodeId ?? null);
   });
-  root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
+  root.addEventListener("pointerleave", () => {
+    setLitJackRows(null, focusJackRow);
+    setHoverNode(null);
+  });
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
 
-  /** One fan group per port the lit row's jack(s) reach in the active
-   *  scene — one cable per (setting, jack), so a jack draws exactly as
-   *  many cables as it has usage dots. */
+  /** One fan group per port the chain's fan jacks reach in the active
+   *  scene (patchChain.ts's fanKeys: a hovered or focused input row's own
+   *  jacks and its nodes' jacks, or a hovered or pinned node's own jack) —
+   *  one cable per (setting, jack), so a jack draws exactly as many cables
+   *  as it has usage dots. A setting's focus draws nothing here: its own
+   *  cables already run. */
   function litSignalFan(): CableGroupSpec[] {
-    const rows = [hoverJackRow, focusJackRow].filter((r): r is HTMLElement => r !== null);
-    if (!rows.length) return [];
-    const keyOfEl = new Map<HTMLElement, string>();
-    for (const [key, el] of combinedJackElements()) keyOfEl.set(el, key);
+    const focus = shownChainFocus();
+    if (!focus || focus.kind === "setting") return [];
+    const chain = chainOf(chainGraph(), focus);
+    const jackEls = combinedJackElements();
     const litJacks = new Map<string, HTMLElement>();
-    for (const row of rows) {
-      for (const el of row.querySelectorAll<HTMLElement>(".vc-jack")) {
-        const key = keyOfEl.get(el);
-        if (key) litJacks.set(key, el);
-      }
+    for (const key of chain.fanKeys) {
+      const el = jackEls.get(key);
+      if (el) litJacks.set(key, el);
     }
     const sceneId = deps.currentSceneId();
     const groups: CableGroupSpec[] = [];
@@ -5380,10 +5654,138 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  anything, on its own rAF-batched schedule. */
   function refreshPatchHighlight(): void {
     audioMeters.refreshPatchView();
+    shapingCol.refreshPatchView();
     refreshBandsJacks();
     refreshSpectrumDriveHighlight();
     spectrumCol.classList.toggle("vc-patching", isAnythingShown());
+    refreshChain();
     scheduleCableRecompute();
+  }
+
+  // ---- Patch focus across the three columns (patchChain.ts) ----
+  // What is focused lights its chain: input rows, shaping node cards and
+  // settings dim to whatever is off it. chainGraph() reads the patch as
+  // plain keys; refreshChain() paints the result. Runs only on focus and
+  // patch changes, never per frame.
+
+  /** A pinned shaping node's pin toggle (shapingColumn.ts onNodePress). Pinning one unpins any setting. */
+  function toggleNodePin(id: string): void {
+    const next = pinnedNode === id ? null : id;
+    if (next && pinned) togglePin(pinned.sceneId, pinned.spec);
+    pinnedNode = next;
+    refreshPatchHighlight();
+    scheduleCableRecompute();
+  }
+
+  function setHoverNode(id: string | null): void {
+    if (id === hoverNode) return;
+    hoverNode = id;
+    refreshChain();
+    scheduleCableRecompute();
+  }
+
+  /** What the panel's chain light follows (patchChain.ts): a hovered node card, a hovered or keyboard-focused input row, a previewed setting, a pinned node, a pinned setting — in that order. */
+  function shownChainFocus(): ChainFocus | null {
+    if (hoverNode) return { kind: "node", id: hoverNode };
+    const row = hoverJackRow ?? focusJackRow;
+    if (row) {
+      const card = row.closest<HTMLElement>(".vc-shape-node");
+      if (card?.dataset.nodeId) return { kind: "node", id: card.dataset.nodeId };
+      const keyOfEl = new Map<HTMLElement, string>();
+      for (const [key, el] of combinedJackElements()) keyOfEl.set(el, key);
+      const keys: string[] = [];
+      for (const el of row.querySelectorAll<HTMLElement>(".vc-jack")) {
+        const key = keyOfEl.get(el);
+        if (key) keys.push(key);
+      }
+      if (keys.length) return { kind: "input", keys };
+    }
+    const ap = activePreview();
+    if (ap) return { kind: "setting", key: ap.spec.key };
+    if (pinnedNode) return { kind: "node", id: pinnedNode };
+    if (pinned?.spec.drive) return { kind: "setting", key: pinned.spec.key };
+    return null;
+  }
+
+  /** The patch as plain keys (patchChain.ts's ChainGraph): every shaping node with its own jack key and its input's, and every wired setting in the active scene with its wires' jack keys. */
+  function chainGraph(): ChainGraph {
+    const nodes = listShapingNodes().map((n) => ({ id: n.id, key: jackKey({ source: "shaped", id: n.id }), inputKey: jackKey(n.src) }));
+    const sceneId = deps.currentSceneId();
+    const settings: ChainGraph["settings"][number][] = [];
+    for (const h of driveRowHandles) {
+      if (h.sceneId !== sceneId || !h.spec.drive) continue;
+      const setting = deps.getDriveSetting(h.sceneId, h.spec);
+      settings.push({ key: h.spec.key, wireKeys: setting === "scene" ? [] : setting.sources.map((s) => jackKey(s.choice)) });
+    }
+    return { nodes, settings };
+  }
+
+  /** Paints the chain of shownChainFocus(): dims the settings, shaping nodes and input rows off it, marks the focused node, and root's vc-chain-on switches the dimming on. */
+  function refreshChain(): void {
+    const focus = shownChainFocus();
+    const chain = focus ? chainOf(chainGraph(), focus) : null;
+    root.classList.toggle("vc-chain-on", chain !== null);
+    for (const h of driveRowHandles) h.rowEl.classList.toggle("vc-chain-off", !!chain && !chain.settings.has(h.spec.key));
+    shapingCol.setChain(chain ? chain.nodes : null, focus?.kind === "node" ? focus.id : null);
+    // Input rows: only for an input or node focus — a setting's focus already dims the meters through .vc-patching.
+    const dimInputs = focus !== null && focus.kind !== "setting";
+    const rowLit = new Map<HTMLElement, boolean>();
+    // The Bands card's level and stem jacks sit beside rows of their own (mountBandsJack's feedEl), not inside a .vc-row.
+    const bandsFeed = new Map<HTMLElement, HTMLElement>(bandsJacks.map((b) => [b.jack.el, b.feedEl]));
+    for (const [key, el] of combinedJackElements()) {
+      if (shapingCol.el.contains(el)) continue;
+      const row = bandsFeed.get(el) ?? el.closest<HTMLElement>(".vc-row");
+      if (!row) continue;
+      rowLit.set(row, (rowLit.get(row) ?? false) || (!!chain && chain.inputs.has(key)));
+    }
+    for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-off", dimInputs && !lit);
+  }
+
+  // The middle column's place in the open gap (controlsTheme.ts's
+  // .vc-shape-col rules are only the fallback before the first placement).
+  const SHAPE_COL_MIN_PX = 240;
+  const SHAPE_COL_MAX_PX = 300;
+  const SHAPE_COL_GAP_PX = 16;
+  /** Matches .vc-shape-col's CSS top (controlsTheme.ts). */
+  const SHAPE_COL_TOP_PX = 60;
+  /** What .vc-shape-col's max-height leaves below its top (the CSS fallback's own subtraction). */
+  const SHAPE_COL_BELOW_PX = 90;
+  const SHAPE_COL_CLEAR = { left: "", top: "", width: "", maxHeight: "" };
+
+  /** Writes each inline value only when it differs, since this runs on every scroll's recompute. */
+  function setShapePlacement(p: { left: string; top: string; width: string; maxHeight: string }): void {
+    const style = shapingCol.el.style;
+    if (style.left !== p.left) style.left = p.left;
+    if (style.top !== p.top) style.top = p.top;
+    if (style.width !== p.width) style.width = p.width;
+    if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
+  }
+
+  /** Places the shaping column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. Writes only when a value changes, since this runs on every scroll's recompute. */
+  function placeShapingColumn(): void {
+    if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
+      setShapePlacement(SHAPE_COL_CLEAR);
+      return;
+    }
+    const meters = spectrumCol.getBoundingClientRect();
+    const settings = controlsCol.getBoundingClientRect();
+    const powerRect = powerCol.querySelector<HTMLElement>(".vc-power-card")?.getBoundingClientRect();
+    const power = powerRect && powerRect.width > 0 ? powerRect : null;
+    const left0 = meters.right + SHAPE_COL_GAP_PX;
+    let right0 = (power ? power.left : settings.left) - SHAPE_COL_GAP_PX;
+    let top = SHAPE_COL_TOP_PX;
+    if (right0 - left0 < SHAPE_COL_MIN_PX && power) {
+      right0 = settings.left - SHAPE_COL_GAP_PX;
+      top = Math.max(SHAPE_COL_TOP_PX, power.bottom + 8);
+    }
+    const width = Math.max(0, Math.min(SHAPE_COL_MAX_PX, right0 - left0));
+    const left = left0 + (right0 - left0 - width) / 2;
+    setShapePlacement({
+      left: `${Math.round(left)}px`,
+      top: `${Math.round(top)}px`,
+      width: `${Math.round(width)}px`,
+      maxHeight: `calc(var(--vc-vh) - ${Math.round(top + SHAPE_COL_BELOW_PX)}px)`,
+    });
   }
 
   // A hover-scheduled preview change not yet committed — see
@@ -5501,6 +5903,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   controlsCol.className = "vc-controls-col vc-scroll";
   cableColumnsRO.observe(controlsCol);
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+  cableColumnsRO.observe(shapingCol.el);
+  shapingCol.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
   // The global "Auto" master switch — toggles every auto-capable row, scene
   // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
@@ -7623,7 +8027,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     : null;
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
-  root.append(columnsWrap, controlsCol);
+  root.append(columnsWrap, controlsCol, shapingCol.el);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
@@ -7732,6 +8136,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function onKeyDown(e: KeyboardEvent) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (isTypingTarget(e.target)) return;
+    if (e.key === "Escape" && jackDrag?.moved) {
+      clearJackDrag();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape" && pinnedNode) {
+      pinnedNode = null;
+      refreshPatchHighlight();
+      scheduleCableRecompute();
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Escape" && pinned) {
       togglePin(pinned.sceneId, pinned.spec);
       e.preventDefault();
@@ -7901,6 +8317,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (!isOpen || !draw) {
         audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
+        shapingCol.update(frame?.level ?? null, false);
         return;
       }
       // A scene switch (or a renderer with nothing playing) leaves `pinned`
@@ -7912,6 +8329,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // rebuilds anything on the rare tick this fires.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
+      shapingCol.update(frame?.level ?? null, true);
       // Unthrottled, same reasoning as the Bands strip a few lines below —
       // the live row's meter should track frame.level as closely as any
       // other live meter in this panel, not just at the row list's own

@@ -55,7 +55,9 @@
  *
  * Resting the pointer on a pressable cable — still, for REVEAL_REST_MS —
  * scrolls its two ends into view (revealEnds): the signal's jack in the
- * meters column and the setting's port in the settings column, each only
+ * meters column (or a shaping node's jack in the shaping column, which
+ * also takes a cable from a meter jack and sends one on to a setting) and
+ * the setting's port in the settings column, each only
  * if it's out of its column's visible band (where endpointFor clamps it).
  * The pointer is never moved; a move of more than REVEAL_STILL_PX restarts
  * the wait, and one rest reveals once. The wait lives in the layer, not on
@@ -96,6 +98,10 @@
  * the pinned group's own flow paths — no reads, so it can run every rAF
  * tick for free; the preview group never animates, so it never needs a tick
  * write either.
+ *
+ * A jack being dragged (deviceMenu.ts's jack drag) draws one temporary
+ * dashed `.vc-cable-drag` path from its own jack to the pointer (setDrag).
+ * It belongs to no group, so recompute() re-appends it after its rebuild.
  */
 
 export interface CableSourceSpec {
@@ -159,6 +165,8 @@ export interface CableLayer {
    *  prefers-reduced-motion. */
   tick(dtSec: number): void;
   setVisible(v: boolean): void;
+  /** The cable a jack drag pulls (deviceMenu.ts): from `from`'s jack to the pointer at (x, y), dashed, drawn over every other cable; null removes it. Survives recompute(). */
+  setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void;
 }
 
 const NS = "http://www.w3.org/2000/svg";
@@ -208,7 +216,8 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *     that card's own header instead (and, if the header has no box either
  *     — the column itself is hidden — there is no endpoint and no cable);
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
- *     `.vc-controls-col`) — the cable ends at the column's visible edge;
+ *     `.vc-shape-col`/`.vc-controls-col`) — the cable ends at the column's
+ *     visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   if (el.getClientRects().length === 0) {
@@ -222,7 +231,7 @@ function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   }
   const r = el.getBoundingClientRect();
   let y = r.top + r.height / 2;
-  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-controls-col");
+  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-controls-col");
   if (scroller) {
     const sr = scroller.getBoundingClientRect();
     if (y < sr.top) y = sr.top + 2;
@@ -300,7 +309,7 @@ function revealEnd(el: HTMLElement): void {
     target = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head") ?? null;
     if (!target || target.getClientRects().length === 0) return;
   }
-  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-controls-col");
+  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-controls-col");
   if (!scroller) return;
   const r = target.getBoundingClientRect();
   const sr = scroller.getBoundingClientRect();
@@ -412,6 +421,10 @@ export function createCableLayer(): CableLayer {
   svg.setAttribute("aria-hidden", "true");
 
   let flows: { el: SVGPathElement; key: string; getValue: () => number }[] = [];
+  // The jack drag's own cable (setDrag) — kept across recompute(), which
+  // clears every child of svg, so the path is re-appended after each rebuild.
+  let dragPath: SVGPathElement | null = null;
+  let dragSpec: { from: HTMLElement; x: number; y: number; color: string } | null = null;
   // Keyed by source key (namespaced per group — see this file's header) so
   // a rebuild (a patch edit, a scroll) doesn't snap a still-connected
   // cable's flow back to 0 — only a cable that stops existing loses its
@@ -518,6 +531,33 @@ export function createCableLayer(): CableLayer {
     // Forget any source's carried offset that no longer has a cable —
     // otherwise a long session leaks one Map entry per source ever shown.
     for (const k of [...offsets.keys()]) if (!liveKeys.has(k)) offsets.delete(k);
+    // recompute() cleared svg's children, drag cable included — put it back
+    // on top, where setDrag keeps it.
+    if (dragSpec && dragPath) svg.append(dragPath);
+  }
+
+  function setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void {
+    if (!drag) {
+      dragPath?.remove();
+      dragPath = null;
+      dragSpec = null;
+      return;
+    }
+    dragSpec = drag;
+    const pt = endpointFor(drag.from);
+    if (!pt) {
+      dragPath?.remove();
+      dragPath = null;
+      return;
+    }
+    const d = cablePathD(pt, { x: drag.x, y: drag.y }, null);
+    if (!dragPath) {
+      dragPath = pathEl("vc-cable-drag", d, drag.color);
+    } else {
+      dragPath.setAttribute("d", d);
+      dragPath.setAttribute("stroke", drag.color);
+    }
+    if (svg.lastChild !== dragPath) svg.append(dragPath);
   }
 
   return {
@@ -535,5 +575,6 @@ export function createCableLayer(): CableLayer {
     setVisible(v) {
       svg.style.display = v ? "" : "none";
     },
+    setDrag,
   };
 }
