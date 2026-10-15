@@ -56,6 +56,24 @@ import { createProgram, type GLProgram } from "./gl.ts";
  * `physarum2.ts`'s territory readback already uses for the same reason
  * (search that file for "PIXEL_PACK_BUFFER" if this needs revisiting).
  *
+ * That `getBufferSubData` is still a wait on the main thread, and a fixed
+ * one per *call*. In Chrome it is a round trip to the GPU process, and when
+ * that process is busy (a heavy scene under the panel's blur, another app on
+ * the GPU) each call takes tens of milliseconds whether or not the fence has
+ * signalled, however little is read, and on an otherwise idle context too;
+ * with a quiet GPU the same call is nearly free. A run sits in one state or
+ * the other for its whole length (issue #550). Neither a fence taken after
+ * the frame's last draw nor a direct `readPixels` avoids it. So the cost is
+ * cut by making fewer calls, not cheaper ones: the pack buffer holds up to
+ * MAX_READ_BATCH thumbnails (capture() writes each into the next slot), and
+ * one `getBufferSubData` brings back every slot filled so far. How many slots
+ * a call waits for follows what the last reads cost (readBatchSize): one per
+ * call while the GPU process answers quickly — every thumbnail at once, no
+ * added delay — and as many as keep the reads within READ_COST_SHARE of the
+ * main thread when it doesn't, at the price of thumbnails reaching the meter
+ * in bursts, later (holdMs()). Two pack buffers alternate, one filling while
+ * the other waits for its fence.
+ *
  * `capture()` must be called in the same task as the render that just
  * happened — the canvas context is created with `preserveDrawingBuffer:
  * false` (the default), so the browser is free to clear or reuse the default
@@ -102,6 +120,34 @@ export const DETAIL_LONG_SIDE = 640;
  *  DETAIL_LONG_SIDE / 4 and the two constants can't drift apart. */
 export const PICTURE_LONG_SIDE = DETAIL_LONG_SIDE / 4;
 
+/** Most thumbnails one pack buffer holds, so one `getBufferSubData` call can
+ *  carry that many frames — see the file header. */
+export const MAX_READ_BATCH = 16;
+
+/** Largest share of the main thread the `getBufferSubData` calls may take
+ *  before readBatchSize() starts asking each call to carry more frames. */
+export const READ_COST_SHARE = 0.03;
+
+/** How fast the running read cost follows a slower / a faster call
+ *  (nextReadCost): up quickly, so a run that has just turned slow batches
+ *  within a couple of reads; down slowly, so one lucky call doesn't undo it. */
+const READ_COST_RISE = 0.5;
+const READ_COST_FALL = 0.2;
+
+/** Thumbnails per `getBufferSubData` call that keep the reads within
+ *  READ_COST_SHARE of the main thread when each call costs `readCostMs` and a
+ *  thumbnail is captured every `sampleIntervalMs`; 1 while calls are cheap. */
+export function readBatchSize(readCostMs: number, sampleIntervalMs: number): number {
+  if (!(readCostMs > 0) || !(sampleIntervalMs > 0)) return 1;
+  return Math.min(MAX_READ_BATCH, Math.max(1, Math.ceil(readCostMs / READ_COST_SHARE / sampleIntervalMs)));
+}
+
+/** The running read cost after a call that took `measuredMs`. */
+export function nextReadCost(previousMs: number, measuredMs: number): number {
+  const rate = measuredMs > previousMs ? READ_COST_RISE : READ_COST_FALL;
+  return previousMs + (measuredMs - previousMs) * rate;
+}
+
 export interface PictureThumb {
   px: Uint8Array;
   w: number;
@@ -110,18 +156,23 @@ export interface PictureThumb {
 }
 
 export interface PictureReadback {
-  /** Right after scene.render() (and nowhere else — see the file header): starts one async readback of the default
-   *  framebuffer, unless one is still in flight (then does nothing — one
-   *  outstanding readback at a time, same discipline as physarum2.ts's
-   *  pollTerritory), or the gradient pass has been permanently disabled (see
-   *  the file header). `atMs` is stamped onto the eventual result. Does
-   *  nothing on a 0-size canvas. */
+  /** Right after scene.render() (and nowhere else — see the file header):
+   *  copies a thumbnail of the default framebuffer into the next free slot of
+   *  the pack buffer being filled, stamped with `atMs`. Does nothing while
+   *  both pack buffers are busy (one full and waiting to be read, the other
+   *  full too), or once the gradient pass has been permanently disabled (see
+   *  the file header), or on a 0-size canvas. */
   capture(canvasW: number, canvasH: number, atMs: number): void;
-  /** The finished thumbnail, once the GPU is done; null otherwise. Call it
-   *  *before* the next scene.render(), not after (see the file header). Never
-   *  waits on the GPU. Returns a buffer this readback reuses across calls — a caller
-   *  must consume it before the next poll(). */
-  poll(): PictureThumb | null;
+  /** The thumbnails that finished since the last call, oldest first — empty
+   *  while none has. Call it *before* the next scene.render(), not after (see
+   *  the file header). Waits on the GPU process once, and only when a full
+   *  batch is ready. The thumbnails and the array holding them are reused
+   *  across calls — a caller must consume them before the next poll(). */
+  poll(): readonly PictureThumb[];
+  /** Longest a captured thumbnail waits before poll() returns it, going by
+   *  what the reads cost lately: how stale the newest reading can be without
+   *  the meter having stopped. */
+  holdMs(): number;
   dispose(): void;
 }
 
@@ -335,7 +386,20 @@ function restoreState(gl: WebGL2RenderingContext, s: SavedGLState, canvasW: numb
   gl.colorMask(true, true, true, true);
 }
 
-export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadback {
+/** One pack buffer and the thumbnails written into it so far. */
+interface Batch {
+  pbo: WebGLBuffer;
+  count: number;
+  atMs: number[];
+  sync: WebGLSync | null;
+}
+
+const NO_THUMBS: readonly PictureThumb[] = [];
+
+/** `sampleIntervalMs` is how often the caller captures (app.ts's
+ *  PICTURE_SAMPLE_INTERVAL_MS); it only sets how many thumbnails a batch
+ *  needs to cover the time a read is allowed to cost. */
+export function createPictureReadback(gl: WebGL2RenderingContext, sampleIntervalMs: number): PictureReadback {
   let lastCanvasW = -1;
   let lastCanvasH = -1;
   let thumbW = 0;
@@ -348,12 +412,22 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
   let refLevel: Level | null = null;
   let halfLevel: Level | null = null;
   let thumbLevel: Level | null = null;
-  let pbo: WebGLBuffer | null = null;
-  let sync: WebGLSync | null = null;
-  let pendingAtMs = 0;
+  // The two pack buffers: `filling` takes capture()'s writes; `waiting` is a
+  // closed batch with a fence, read by poll() once that signals. Empty
+  // until ensureTargets() has run.
+  let filling: Batch | null = null;
+  let waiting: Batch | null = null;
+  let spare: Batch | null = null;
+  let thumbBytes = 0;
+  // What one getBufferSubData call has been costing, as nextReadCost()
+  // follows it; sets how many thumbnails a batch waits for (readBatchSize).
+  let readCostMs = 0;
   // Reused across polls — see poll()'s own doc comment on why a caller must
-  // consume it before the next one.
+  // consume them before the next one. `thumbs` has one entry per slot, each
+  // a view into `resultPx`; `delivered` is the prefix poll() hands back.
   let resultPx: Uint8Array | null = null;
+  let thumbs: PictureThumb[] = [];
+  const delivered: PictureThumb[] = [];
 
   // Lazily compiled once per instance — see ensureGradientProgram(). Kept
   // per instance (unlike the module-scope gradientDisabled flag) since the
@@ -372,13 +446,39 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
     halfLevel = null;
     if (thumbLevel) freeLevel(gl, thumbLevel);
     thumbLevel = null;
-    if (pbo) gl.deleteBuffer(pbo);
-    pbo = null;
     // A pending readback pointed at the targets just freed — its fence can
     // never usefully resolve into them now, and clientWaitSync on a deleted
     // buffer's fence is still legal but pointless, so just drop it.
-    if (sync) gl.deleteSync(sync);
-    sync = null;
+    for (const batch of [filling, waiting, spare]) {
+      if (!batch) continue;
+      if (batch.sync) gl.deleteSync(batch.sync);
+      gl.deleteBuffer(batch.pbo);
+    }
+    filling = null;
+    waiting = null;
+    spare = null;
+  }
+
+  function makeBatch(bytes: number): Batch {
+    const pbo = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes * MAX_READ_BATCH, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    return { pbo, count: 0, atMs: [], sync: null };
+  }
+
+  /** Fences the batch being filled and hands it to poll(); the other pack
+   *  buffer starts filling. Only while nothing is waiting already. */
+  function closeFilling(): void {
+    if (!filling || !spare || waiting || filling.count <= 0) return;
+    filling.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    waiting = filling;
+    filling = spare;
+    spare = null;
+  }
+
+  function batchTarget(): number {
+    return readBatchSize(readCostMs, sampleIntervalMs);
   }
 
   /** Compiles/links the gradient program and its empty VAO the first time
@@ -458,20 +558,26 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
       freeTargets();
       return;
     }
-    pbo = gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, thumbW * thumbH * 4, gl.STREAM_READ);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    resultPx = new Uint8Array(thumbW * thumbH * 4);
+    thumbBytes = thumbW * thumbH * 4;
+    filling = makeBatch(thumbBytes);
+    spare = makeBatch(thumbBytes);
+    resultPx = new Uint8Array(thumbBytes * MAX_READ_BATCH);
+    thumbs = [];
+    for (let i = 0; i < MAX_READ_BATCH; i++) {
+      thumbs.push({ px: resultPx.subarray(i * thumbBytes, (i + 1) * thumbBytes), w: thumbW, h: thumbH, atMs: 0 });
+    }
   }
 
   return {
     capture(canvasW, canvasH, atMs) {
-      if (sync) return; // one readback in flight at a time
       if (canvasW <= 0 || canvasH <= 0) return; // 0-size canvas: nothing to read
       if (!ensureGradientProgram()) return; // permanently disabled — see the file header
       ensureTargets(canvasW, canvasH);
-      if (!refLevel || !halfLevel || !thumbLevel || !pbo || thumbW <= 0 || thumbH <= 0) return;
+      if (!refLevel || !halfLevel || !thumbLevel || !filling || thumbW <= 0 || thumbH <= 0) return;
+      // A batch that filled while the other was still waiting closes now that
+      // poll() has emptied it (or when the target shrank under it).
+      if (filling.count >= batchTarget()) closeFilling();
+      if (filling.count >= MAX_READ_BATCH) return; // full, and its neighbour still waiting
 
       // Blits are scissored — a scissor left on from the scene's own render
       // would crop every level down to whatever rectangle it last drew,
@@ -506,28 +612,43 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
       gl.blitFramebuffer(0, 0, halfLevel.w, halfLevel.h, 0, 0, thumbLevel.w, thumbLevel.h, gl.COLOR_BUFFER_BIT, gl.LINEAR);
 
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, thumbLevel.fbo);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-      gl.readPixels(0, 0, thumbW, thumbH, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, filling.pbo);
+      gl.readPixels(0, 0, thumbW, thumbH, gl.RGBA, gl.UNSIGNED_BYTE, filling.count * thumbBytes);
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-      sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-      pendingAtMs = atMs;
+      filling.atMs[filling.count++] = atMs;
+      if (filling.count >= batchTarget()) closeFilling();
 
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
       if (scissorWasOn) gl.enable(gl.SCISSOR_TEST);
     },
     poll() {
-      if (!sync) return null;
-      const status = gl.clientWaitSync(sync, 0, 0);
-      if (status === gl.TIMEOUT_EXPIRED) return null;
-      gl.deleteSync(sync);
-      sync = null;
-      if (status === gl.WAIT_FAILED) return null; // drop this readback, try again next capture()
-      if (!pbo || !resultPx) return null;
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, resultPx);
+      const batch = waiting;
+      if (!batch?.sync) return NO_THUMBS;
+      const status = gl.clientWaitSync(batch.sync, 0, 0);
+      if (status === gl.TIMEOUT_EXPIRED) return NO_THUMBS;
+      gl.deleteSync(batch.sync);
+      batch.sync = null;
+      const count = batch.count;
+      batch.count = 0;
+      waiting = null;
+      spare = batch;
+      if (status === gl.WAIT_FAILED || !resultPx) return NO_THUMBS; // drop this batch, fill the next
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, batch.pbo);
+      const startedAt = performance.now();
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, resultPx, 0, count * thumbBytes);
+      readCostMs = nextReadCost(readCostMs, performance.now() - startedAt);
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-      return { px: resultPx, w: thumbW, h: thumbH, atMs: pendingAtMs };
+      delivered.length = count;
+      for (let i = 0; i < count; i++) {
+        const t = thumbs[i]!;
+        t.atMs = batch.atMs[i]!;
+        delivered[i] = t;
+      }
+      return delivered;
+    },
+    holdMs() {
+      return batchTarget() * sampleIntervalMs;
     },
     dispose() {
       freeTargets();
