@@ -1556,9 +1556,6 @@ function createFluidScene(): Scene {
       quadVao = createFullscreenQuad(gl);
       format = detectSimFormat(gl);
       displayProg = createProgram(gl, displayFragSrc(format));
-      dyeLoc = gl.getUniformLocation(displayProg.program, "uDye");
-      edgeLoc = gl.getUniformLocation(displayProg.program, "uEdge");
-      velSimLoc = gl.getUniformLocation(displayProg.program, "uVelSim");
 
       // Default symmetry is Auto (value 0 -> symmetryToMirror null); Auto's
       // sim domain is always MIRROR_KALEIDO (see FoldState/render below).
@@ -1568,6 +1565,11 @@ function createFluidScene(): Scene {
       sim = createFluidSim(gl, quadVao, size, format);
       const [boltW, boltH] = boltLayerSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
       bolts = createFluidBolts(gl, boltW, boltH, format);
+      // Looked up last: a lookup waits for its program's link, and by now the
+      // sim's and the bolts' programs compile alongside it (src/render/programCache.ts).
+      dyeLoc = gl.getUniformLocation(displayProg.program, "uDye");
+      edgeLoc = gl.getUniformLocation(displayProg.program, "uEdge");
+      velSimLoc = gl.getUniformLocation(displayProg.program, "uVelSim");
       boltsLoc = gl.getUniformLocation(displayProg.program, "uBolts");
       lastFrameTime = null;
       puff = createPuffState();

@@ -26,6 +26,12 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    palette — read it by role, `palRamp()`/`uPalInk`/`uPalGround`/`uPalAccent`,
    rather than sampling `palette()` at a `t` of your own; `src/render/palette.ts`'s
    header says what each role promises).
+   A scene that writes its own `init()` creates all of its programs before it
+   looks up a uniform or calls `use()` on one: a lookup waits for that program
+   to compile, while the programs created before it compile alongside
+   (`src/render/programCache.ts`'s header).
+   A fallback that catches a compile error to switch something off must create
+   that program on first draw, not in `init()`, where it is checked at once.
 2. Each entry in `settings: SceneSetting[]` (spec'd in `sceneSettings.ts`) becomes
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. A setting that is an amount of reaction to the music also declares a

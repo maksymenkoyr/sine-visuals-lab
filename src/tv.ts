@@ -3,6 +3,7 @@
 import "./net/tvStorageBoot.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
+import { deferProgramChecks } from "./render/programCache.ts";
 import { detectQuality, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import type { QualityChoice } from "./render/qualityPref.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
@@ -320,7 +321,7 @@ function switchScene(next: Scene, crossfade = false): void {
   const fade = crossfade && prev !== next;
   if (!fade) prev.dispose(sceneCtx);
   try {
-    next.init(sceneCtx);
+    deferProgramChecks(() => next.init(sceneCtx));
     scene = next;
     if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
   } catch (err) {
@@ -332,7 +333,7 @@ function switchScene(next: Scene, crossfade = false): void {
     }
     if (!fade) {
       try {
-        prev.init(sceneCtx);
+        deferProgramChecks(() => prev.init(sceneCtx));
       } catch (err2) {
         console.error(`TV: "${prev.name}" failed to restart:`, err2);
       }
@@ -348,7 +349,7 @@ function mountFirstScene(): boolean {
   const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
   for (const next of candidates) {
     try {
-      next.init(sceneCtx);
+      deferProgramChecks(() => next.init(sceneCtx));
       scene = next;
       return true;
     } catch (err) {

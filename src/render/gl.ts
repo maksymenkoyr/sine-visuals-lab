@@ -19,7 +19,9 @@
 
 // The WebGL2 plumbing every scene stands on: creating the context and keeping
 // it alive through a loss (createGL, watchContextLoss), compiling shaders and
-// linking programs (createProgram and the GLProgram setters), the one
+// linking programs (createProgram and the GLProgram setters; createProgram
+// takes its programs from programCache.ts, which compiles a mount's programs
+// together and keeps them for the next mount), the one
 // fullscreen triangle every pass draws (createFullscreenQuad,
 // drawFullscreenQuad), and sizing a canvas's backing store to its CSS box
 // (resizeCanvasToDisplaySize, refreshCssSize).
@@ -30,6 +32,8 @@
 // integer uniform; the rest take floats and vectors. The cache belongs to the
 // program object, so it lives and dies with that program: a scene never keeps
 // location maps of its own and never clears them when it rebuilds a program.
+
+import { acquireProgram } from "./programCache.ts";
 
 export function createGL(
   canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -82,19 +86,6 @@ export function watchContextLoss(
   canvas.addEventListener("webglcontextrestored", () => onRestored());
 }
 
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
-  const shader = gl.createShader(type);
-  if (!shader) throw new Error("createShader failed");
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`Shader compile error: ${log}\n${source}`);
-  }
-  return shader;
-}
-
 export const FULLSCREEN_VERT = `#version 300 es
 layout(location = 0) in vec2 aPos;
 out vec2 vUv;
@@ -116,6 +107,8 @@ export interface GLProgram {
   setFv(name: string, arr: Float32Array | number[]): void;
   setV3v(name: string, arr: Float32Array | number[]): void;
   setV4v(name: string, arr: Float32Array | number[]): void;
+  /** Gives the program back to programCache.ts, which keeps it for the next
+   *  mount instead of deleting it: don't use this GLProgram afterwards. */
   dispose(): void;
 }
 
@@ -124,20 +117,7 @@ export function createProgram(
   fragSrc: string,
   vertSrc: string = FULLSCREEN_VERT,
 ): GLProgram {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, vertSrc);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
-  const program = gl.createProgram();
-  if (!program) throw new Error("createProgram failed");
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  gl.deleteShader(vs);
-  gl.deleteShader(fs);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`Program link error: ${log}`);
-  }
+  const { program, release } = acquireProgram(gl, vertSrc, fragSrc);
 
   const locations = new Map<string, WebGLUniformLocation | null>();
   const loc = (name: string) => {
@@ -159,7 +139,7 @@ export function createProgram(
     setFv: (name, arr) => gl.uniform1fv(loc(name), arr as Float32Array),
     setV3v: (name, arr) => gl.uniform3fv(loc(name), arr as Float32Array),
     setV4v: (name, arr) => gl.uniform4fv(loc(name), arr as Float32Array),
-    dispose: () => gl.deleteProgram(program),
+    dispose: release,
   };
 }
 
