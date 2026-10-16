@@ -22,6 +22,7 @@ import {
 import { publishSettingMarks } from "../settingMarks.ts";
 import { AFFINITY_PRESETS, ATTRACT_ROWS, PAIR_WORDS, packTouch, smellWeight } from "./physarum2Affinity.ts";
 import { createSynergyTracker, wrapTurn } from "./physarum2Synergy.ts";
+import { createAgentSorter } from "./physarum2Sort.ts";
 export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
@@ -70,6 +71,12 @@ export { ATTRACT_ROWS };
 //   step, and skipped (composite-only) on a frame that owes none. A frame
 //   that owes far more steps than the cap drops the backlog rather than ever
 //   catching up in one burst (stepAccumulator's own comment).
+// - Agent order (2026-10-05): a step walks the agents in storage order, and
+//   agents stored in random screen order made every trail read and deposit
+//   miss the GPU's caches — most of a step's cost. physarum2Sort.ts puts
+//   them back in screen order every so often, on the GPU, ahead of render()'s
+//   step loop; it only permutes slots, so nothing on screen changes (that
+//   file's header).
 //
 // Turning: an agent samples its own weighted sum straight ahead and to each
 // side, at its own STRAINS entry's fixed sensor angle and its own live
@@ -2325,6 +2332,9 @@ function createPhysarum2Scene(): Scene {
   const FOOT_CLEAR = new Float32Array(4);
 
   let agentRead = 0;
+  // Puts the agents back in screen order every so often — see
+  // physarum2Sort.ts (a GPU-cost fix only; the picture doesn't change).
+  const sorter = createAgentSorter();
   let trailReadIdx = 0;
   let agentSide = 1;
   let agentCount = 0;
@@ -2814,6 +2824,7 @@ function createPhysarum2Scene(): Scene {
       ensureTrailTargets(gl);
 
       agentRead = 0;
+      sorter.reset();
       lastFrameTime = null;
       seedTrigger = createStandoutTrigger(SEED_RISE_REFRACTORY_SEC);
       seedEpoch = 0;
@@ -2968,6 +2979,11 @@ function createPhysarum2Scene(): Scene {
       depositActive.setV4v("uTouchFeedRow", touchFeedRows);
       depositActive.setI("uAgentPos", 0);
       depositActive.setI("uAgentDir", 1);
+
+      // This frame's share of the agent re-sort, ahead of the steps it
+      // speeds up; when one lands, the sorted agents are in the other half.
+      const sortTarget = { posTex: agentPosTex[agentRead]!, dirTex: agentDirTex[agentRead]!, dstFbo: agentFbo[1 - agentRead]!, side: agentSide };
+      if (sorter.advance(gl, sortTarget, quadVao, steps)) agentRead = 1 - agentRead;
 
       for (let step = 0; step < steps; step++) {
         const trailWrite = 1 - trailReadIdx;
@@ -3182,6 +3198,7 @@ function createPhysarum2Scene(): Scene {
       }
       freeTrailTargets(gl);
       census.dispose(gl);
+      sorter.dispose(gl);
       diffuseProg = null;
       simProg = null;
       depositProg = null;
