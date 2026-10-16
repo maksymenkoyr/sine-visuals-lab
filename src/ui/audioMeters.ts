@@ -1,6 +1,7 @@
 import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts";
 import { getTapRun } from "../render/tapTempo.ts";
 import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId, type SignalId } from "../render/signals.ts";
+import { isStemSignal } from "../render/stemReaders.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, driveSourceLabel, jackKey } from "./driveSources.ts";
@@ -377,6 +378,9 @@ export interface AudioMetersDeps {
   /** The Tempo card's Tap chip: one tap tempo tap, at the pointerdown's own
    *  timeStamp (src/render/tapTempo.ts) — the same path app.ts's Ctrl takes. */
   onTap: (timeStamp: number) => void;
+  /** Whether Hats and Lead were measured this tick (src/render/stemReaders.ts):
+   *  while they aren't, their heat records a gap rather than a cold stretch. */
+  stemsMeasured(): boolean;
   /** The Dynamics card's Gate row's trace guides and the Hits card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
    *  Silence below/Sound above rows edit (src/audio/silenceGate.ts). Read
@@ -2023,6 +2027,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const heatIds = Object.keys(SIGNALS) as SignalId[];
   const heatTracks: HeatTrack[] = heatIds.map(() => createHeatTrack());
   const heatById = new Map<SignalId, HeatTrack>(heatIds.map((id, i) => [id, heatTracks[i]!]));
+  const heatIsStem = heatIds.map(isStemSignal);
   // A monitor row under the lens: what was last written, and this pass's
   // hottest heat and brightest glow among its jacks.
   type HeatRow = { el: HTMLElement; color: string; glow: number; hottest: number; brightest: number };
@@ -2935,9 +2940,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // Heat: every signal's track, panel open or closed (heat.ts).
       if (frame && anim) {
         const recordSec = nowMs / 1000;
+        const stemsOff = !deps.stemsMeasured();
         for (let i = 0; i < heatIds.length; i++) {
           const x = SIGNALS[heatIds[i]!].read(frame, anim);
           heatLive[i] = x;
+          if (stemsOff && heatIsStem[i]) continue;
           heatTracks[i]!.push(x, frame.level, recordSec);
         }
       }

@@ -15,10 +15,12 @@
  *   no card has folded it away (an IntersectionObserver). The answer arrives
  *   a frame or so after a change — an element just scrolled into view reads
  *   false for that long — which is fine for work that only matters while
- *   someone can see it. The one costly user: the Master card's Picture block,
+ *   someone can see it. The costliest user: the Master card's Picture block,
  *   which asks app.ts for a GPU readback of the finished frame, a synchronous
  *   round trip in Chrome that waits behind whatever the GPU is still doing
- *   (the Panel blur's re-filtering included).
+ *   (the Panel blur's re-filtering included). The Bands card's Stems row is
+ *   another: while it is on screen the stem split runs for it
+ *   (src/render/stemReaders.ts).
  *   `disconnect()` stops watching, for an element a rebuild throws away (a
  *   Scene-card widget calls it from its dispose).
  * - `watchSize`: the element's CSS content size, rounded to whole pixels like

@@ -22,7 +22,8 @@ import {
 } from "./audio/inputDevice.ts";
 import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
-import { createStemSplitter, type StemRanges, type StemSplitter } from "./audio/stemSplit.ts";
+import { createStemSplitter, type StemRanges } from "./audio/stemSplit.ts";
+import { createStemGate, wiresReadStems, type StemGate } from "./render/stemReaders.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
 import { minMax, peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
@@ -377,8 +378,9 @@ let laptopWaiting = false;
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Hats and Lead off bandAnalyser's full FFT bins (src/audio/stemSplit.ts),
- *  written into each frame readLocalCapture() builds. */
-let stemSplitter: StemSplitter | null = null;
+ *  written into each frame readLocalCapture() builds on a tick where
+ *  stemsRead() says something reads them (src/render/stemReaders.ts). */
+let stemGate: StemGate | null = null;
 /** Time-domain sibling of bandAnalyser — the waveform for the controls
  *  panel's Dynamics card, its Waveform row (src/ui/audioMeters.ts). Never
  *  touches FeatureExtractor or the wire frame: this is display-only data
@@ -1431,7 +1433,7 @@ function attachCapture(handle: CaptureHandle): void {
   // is far quieter than captured system audio).
   extractor = new FeatureExtractor();
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
-  stemSplitter = createStemSplitter(bandAnalyser.binsDb.length, bandAnalyser.binHz);
+  stemGate = createStemGate(createStemSplitter(bandAnalyser.binsDb.length, bandAnalyser.binHz));
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
   inputHealthTap?.dispose();
@@ -1507,7 +1509,7 @@ function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   handle.stop();
   capture = null;
   bandAnalyser = null;
-  stemSplitter = null;
+  stemGate = null;
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
@@ -1894,6 +1896,8 @@ function wireDeviceMenu(): void {
     getPalettes: () => PALETTES.map((p) => ({ id: p.id, name: p.name, group: p.group, swatch: paletteRampHex(p, 6) })),
     currentSceneId: () => scene.id,
     currentPaletteId: () => palette.id,
+    // A page that follows a feed reads the sender's levels: measured.
+    stemsMeasured: () => stemGate?.measured() ?? true,
     // What the column head's status line (above the Bands card) reports as
     // the audio source. A page that follows another device has no local
     // analyser — its bands arrive over the room.
@@ -3396,6 +3400,19 @@ function stemRanges(edgesHz: Float32Array): StemRanges {
   return stemRangesScratch;
 }
 
+/** Whether anything reads Hats or Lead this tick, so the stem split must run:
+ *  src/render/stemReaders.ts's header has who reads them and why each is
+ *  here. */
+function stemsRead(): boolean {
+  if (import.meta.env.DEV) return true;
+  if (wiresReadStems(scene.id, scene.settings ?? [])) return true;
+  if (compositor?.transitioning()) return true;
+  if (deviceMenu?.isStemsRowOnScreen()) return true;
+  if (outputBridge?.status().differs) return true;
+  const conn = activeConn();
+  return !!conn && conn.currentRoster.some((d) => d.online && d.deviceId !== conn.deviceId);
+}
+
 /** One tick's read of this device's own live capture — the bands, scope,
  *  input health and LUFS readings, the extractor's frame, and the meters'
  *  diagnostics off it — shared by currentVisual()'s solo and host branches,
@@ -3417,11 +3434,14 @@ function readLocalCapture(
   lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
   lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
-  if (stemSplitter) {
-    // readBandsDb() above just refilled binsDb.
-    const stems = stemSplitter.update(bandAnalyser.binsDb, now, stemRanges(bandAnalyser.bandEdgesHz));
-    f.hats = stems.hats;
-    f.lead = stems.lead;
+  if (stemGate) {
+    // readBandsDb() above just refilled binsDb. A skipped tick keeps the
+    // frame's zeros.
+    const stems = stemGate.update(stemsRead(), bandAnalyser.binsDb, now, stemRanges(bandAnalyser.bandEdgesHz));
+    if (stems) {
+      f.hats = stems.hats;
+      f.lead = stems.lead;
+    }
   }
   lastFixedEnergy = extractor.fixedEnergy;
   lastBeatDiag = extractor.onsetDiag;

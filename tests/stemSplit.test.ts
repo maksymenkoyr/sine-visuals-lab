@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createStemSplitter, type StemRanges } from "../src/audio/stemSplit.ts";
+import { createStemSplitter, STEM_SETTLE_SEC, type StemRanges } from "../src/audio/stemSplit.ts";
+import { driveSettingFromChoice } from "../src/render/drives.ts";
+import { setDriveSetting } from "../src/render/driveStore.ts";
+import type { SceneSetting } from "../src/render/sceneSettings.ts";
+import { createStemGate, wiresReadStems } from "../src/render/stemReaders.ts";
 import { MAX_HZ_CAP, bandEdgesHz } from "../src/audio/bandScale.ts";
 import { LOW_MID_DEFAULT, MID_HIGH_DEFAULT } from "../src/audio/bandSplit.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
@@ -101,5 +105,49 @@ describe("stemSplit", () => {
       expect(Math.abs(mean(between(a, from!, to!, 1)) - mean(between(b, from!, to!, 1)))).toBeLessThan(0.1);
       expect(Math.abs(mean(between(a, from!, to!, 2)) - mean(between(b, from!, to!, 2)))).toBeLessThan(0.1);
     }
+  });
+
+  it("reads after a reset exactly as a fresh splitter does", () => {
+    const mono = song(4, 2.5, true, 0.003);
+    const used = createStemSplitter(BIN_COUNT, BIN_HZ);
+    const fresh = createStemSplitter(BIN_COUNT, BIN_HZ);
+    for (let k = 0; k < 60; k++) used.update(readBinsDb(mono, k / 60, SR), k / 60, RANGES);
+    used.reset();
+    for (let k = 120; k < 240; k++) {
+      const t = k / 60;
+      const bins = readBinsDb(mono, t, SR);
+      expect({ ...used.update(bins, t, RANGES) }).toEqual({ ...fresh.update(bins, t, RANGES) });
+    }
+  });
+});
+
+describe("stemSplit behind its gate (src/render/stemReaders.ts)", () => {
+  const LEVEL: SceneSetting = { key: "level", label: "Level", min: 0, max: 1, step: 0.05, default: 0.5, drive: { default: "anim.energy" } };
+
+  it("isn't called while nothing reads it, and reads as if it never stopped once a wire is added", () => {
+    const mono = song(5, 5, true, 0.003);
+    const wiredAt = 2;
+    const always = createStemSplitter(BIN_COUNT, BIN_HZ);
+    const split = createStemSplitter(BIN_COUNT, BIN_HZ);
+    let updates = 0;
+    const gate = createStemGate({
+      update: (...args) => {
+        updates++;
+        return split.update(...args);
+      },
+      reset: () => split.reset(),
+    });
+    const rows: [number, number, number][] = [];
+    for (let k = 0; k < 5 * 60; k++) {
+      const t = k / 60;
+      if (k === wiredAt * 60) setDriveSetting("gated-scene", LEVEL, driveSettingFromChoice("anim.hats"));
+      const bins = readBinsDb(mono, t, SR);
+      const want = always.update(bins, t, RANGES);
+      const got = gate.update(wiresReadStems("gated-scene", [LEVEL]), bins, t, RANGES) ?? { hats: 0, lead: 0 };
+      if (t < wiredAt) expect(updates).toBe(0);
+      rows.push([t, got.hats - want.hats, got.lead - want.lead]);
+    }
+    const settled = wiredAt + STEM_SETTLE_SEC;
+    for (const col of [1, 2] as const) expect(max(between(rows, settled, 5, col).map(Math.abs))).toBeLessThan(0.02);
   });
 });

@@ -507,6 +507,9 @@ export interface DeviceMenuDeps {
   getPalettes: () => PaletteMenuItem[];
   currentSceneId: () => string;
   currentPaletteId: () => string;
+  /** Whether Hats and Lead were measured this tick: false while app.ts skips
+   *  the stem split (src/render/stemReaders.ts). Heat records a gap then. */
+  stemsMeasured: () => boolean;
   onPickPalette: (id: string) => void;
   /** Shown in the column head's status line, above the Bands card — where
    *  the bars are coming from. */
@@ -886,6 +889,10 @@ export interface DeviceMenu {
    *  the controls column not scrolled past it) — app.ts samples the frame
    *  for it only then (see onScreen.ts for why that sample is not free). */
   isPictureOnScreen(): boolean;
+  /** Whether the Bands card's Stems row (Lead and Hats) is on screen: the
+   *  stem split runs while it is, so the row keeps moving
+   *  (src/render/stemReaders.ts). */
+  isStemsRowOnScreen(): boolean;
 }
 
 // ---- styles --------------------------------------------------------------
@@ -2452,6 +2459,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onLufsReset: deps.onLufsReset,
     onTap: deps.onTap,
     getSilenceGate: () => deps.getSilenceGate(),
+    stemsMeasured: () => deps.stemsMeasured(),
     hitShape: {
       get: () => deps.getHitShape(),
       set: (partial) => deps.setHitShape(partial),
@@ -2831,7 +2839,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return el;
   }
 
-  bandsCard.body.append(fadersRow, eqLayer, levelsGridRow("Levels", BAND_LEVELS), levelsGridRow("Stems", STEM_LEVELS));
+  const stemsRow = levelsGridRow("Stems", STEM_LEVELS);
+  const stemsOnScreen = watchOnScreen(stemsRow);
+  bandsCard.body.append(fadersRow, eqLayer, levelsGridRow("Levels", BAND_LEVELS), stemsRow);
 
   // One at a time — set by buildPatchPanel() below whenever the pinned row
   // builds an output graph, cleared by togglePin()/patchChanged() when
@@ -8289,6 +8299,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     applyMidiCc: (target, cc) => midiCard?.applyCc(target, cc),
     isPictureOnScreen: () => isOpen && pictureOnScreen(),
+    isStemsRowOnScreen: () => isOpen && stemsOnScreen(),
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,
