@@ -512,4 +512,7 @@ function createEchoesScene(): Scene {
   };
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-10-05" } as const;
+
 export const echoesScene = createEchoesScene();
