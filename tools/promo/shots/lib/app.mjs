@@ -47,7 +47,7 @@ export async function open(page, scene, { query = "", music = false } = {}) {
 export const openPanel = (page) => page.evaluate(() => document.querySelector("#menuBtn")?.click());
 export const hideChrome = async (page) => {
   await page.keyboard.press("h");
-  await page.addStyleTag({ content: "#roomCode,#sceneNav,#fsBtn,#menuBtn,#panelBtn,#hud{visibility:hidden!important}" });
+  await page.addStyleTag({ content: "#roomCode,#sceneNav,#fsBtn,#menuBtn,#panelBtn,#hud,#fxBar,#recRow{visibility:hidden!important}" });
   await sleep(400);
 };
 
