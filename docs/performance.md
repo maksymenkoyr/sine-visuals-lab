@@ -15,7 +15,7 @@ the newest snapshot before it. How each number is taken is in the header of
 | --- | --- | --- |
 | load | How much a visit downloads, and how soon it draws | gzip bytes fetched per page in `LOAD_PAGES`, by kind (JS, media, fonts); build total; largest JS chunks; ms to first WebGL draw |
 | gpu | What each scene's own shaders cost | GPU ms per frame at each size in `GPU_SIZES`, on the isolated bench page |
-| app | What a person actually gets, panel closed and open | drawn fps, frame-gap p95, hitches per minute, main-thread busy share (and its script / layout parts), GPU ms per second, JS heap; the freeze when switching to each scene; heap after GC before and after the whole tour |
+| app | What a person actually gets, panel closed and open | drawn fps, frame-gap p95, hitches per minute, main-thread busy share (and its script / layout parts), GPU ms per second, JS heap; the freeze when switching to each scene, on its first visit and on a revisit; heap after GC before and after the whole tour |
 
 `npm run perf -- compare` diffs the two newest snapshots, or any two files.
 It reports only changes bigger than run-to-run noise (the `RULES` table in

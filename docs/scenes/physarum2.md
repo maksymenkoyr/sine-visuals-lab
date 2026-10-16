@@ -251,6 +251,31 @@ configs are used.
     100–112). Still open: the sim's own ≈ 5 ms/step GPU cost (the spatial
     re-sort below), and the panel redrawing at the display's rate (120 Hz
     on ProMotion) while the scene renders at its cap.
+- 2026-10-16, the revisit freeze (#552; `scripts/perf/switchprof.mjs`, a
+  production build with sourcemaps, headless Chromium on the M1 Pro's Metal
+  GPU, 1456×902 at 2×, real music through the fake microphone, the user's
+  Chrome open). Longest frame gap after a hash switch, three rounds each:
+  - before: first visit (from Caustics) 71–79 ms; revisit from Caustics
+    187–192 ms, from Sky 126–148 ms.
+  - the revisit's long frame was `init()`, 164 ms, 136 of it
+    `fillStartInk`, where the xorshift32 generator closure alone took
+    105 ms (9 ms on a first visit). Each mount built a new closure, and
+    every fill after the first called it without inlining. Node doesn't
+    show the cliff: there the closure fill takes 52 ms per 1024² dish
+    every time, the inline one 17 ms.
+  - after (the stream on a local inside `fillStartInk`, the same bytes for
+    a seed): first visit 53–61 ms, revisit from Caustics 49–57 ms, from
+    Sky 47–61 ms. A revisit's `init()` is 45 ms: Start ink 13 ms, most of
+    the rest `seedAgents`' `Math.random` rolls (packing in place instead of
+    `packUnit`'s pairs saved a third of that in Node, not kept).
+  - `npm run perf -- --only app` on 5a16422e and on the fix, the user's
+    Chrome open for both: switch freeze 159 → 67 ms (the tour starts on
+    the gallery, whose Physarum 2 tile has already filled once, so the
+    cliff hit that first visit too), revisit freeze 175 → 75 ms.
+  - unchanged: the census drain (`getBufferSubData`, about 30 ms a call,
+    #559) still makes the 30–40 ms hitches in the seconds after a switch.
+  - the 2026-10-15 resource map's 258 ms "back to Caustics" didn't
+    reproduce: 24–28 ms after Ferrofluid, from Sky and from the gallery.
 
 ## Decisions and pivots
 
@@ -1016,6 +1041,12 @@ configs are used.
   the sim's reseed draw tests `uSeed * uSeedFresh` with `uSeedFresh` set to
   that size. The user, on why Dose isn't flat-only: it can take loudness.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-16 — `fillStartInk` takes a seed and runs the xorshift32 stream
+  on a local instead of calling a generator closure, which froze every
+  revisit (Measurements, 2026-10-16). The rolls are the same, byte for
+  byte, so nothing the scene draws changed. Agent seeding stays on
+  `Math.random`; if the remaining mount cost ever matters, both fills could
+  move to one GPU pass. (#552)
 
 ## Tuning notes
 
@@ -1238,7 +1269,11 @@ applies there too. Tuned so far only against the synthetic feed at
     physarum2.ts untouched again; never commit it. `panelprof.mjs`
     (panel-open CPU profile + every blocking GL read timed by caller) and
     `paneltrace.mjs` (the main thread's own style/layout/paint from a Chrome
-    trace) are the 2026-10-04 panel-lag measurements.
+    trace) are the 2026-10-04 panel-lag measurements. `switchprof.mjs` is
+    the 2026-10-16 revisit-freeze measurement: the resource map's switch
+    order repeated (`seq`), or one switch under a sourcemapped CPU profile
+    and per-call WebGL timing (`prof`); its header has the build and serve
+    steps.
   - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
     down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
     switch, the Affinity card's rows waking on hover and pinning on a press
