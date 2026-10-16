@@ -6600,13 +6600,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // tests/sceneKeys.test.ts checks widget ids are registered; a missing
       // one renders nothing rather than throwing in a live panel.
       if (!build) continue;
-      hasGroups = true;
-      const heading = groupHeading(section.title, first);
-      markBlock(heading);
-      sceneRows.appendChild(heading);
-      first = false;
       const host = document.createElement("div");
-      sceneRows.appendChild(host);
+      if (!section.card) {
+        hasGroups = true;
+        const heading = groupHeading(section.title, first);
+        markBlock(heading);
+        sceneRows.appendChild(heading);
+        first = false;
+        sceneRows.appendChild(host);
+      }
 
       const tickFns: (() => void)[] = [];
       const ctx: WidgetCtx = {

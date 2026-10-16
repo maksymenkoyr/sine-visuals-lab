@@ -1171,6 +1171,29 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-exp-pill:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
 .vc-exp-pill[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
 .vc-exp-hyp { margin: 6px 0 0; width: 100%; color: rgba(255, 255, 255, 0.4); font-size: 11.5px; }
+
+/* Mode ladder (modeLadder.ts). --vc-ladder-name is the plate's longest figure name, in ch. */
+.vc-ladder-list { position: relative; display: grid; gap: 1px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.vc-ladder-row {
+  display: grid; grid-template-columns: 22px var(--vc-ladder-name, 7ch) minmax(0, 1fr) 46px; align-items: center; gap: 7px;
+  width: 100%; min-width: 0; padding: 2px 4px; border: 1px solid transparent; border-radius: 5px; background: transparent;
+  font: 400 11px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.8); text-align: left; cursor: pointer;
+}
+.vc-ladder-row:hover { border-color: rgba(255, 255, 255, 0.18); }
+.vc-ladder-row:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 1px; }
+.vc-ladder-row canvas { width: 22px; height: 22px; display: block; border-radius: 3px; background: rgba(0, 0, 0, 0.35); }
+.vc-ladder-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vc-ladder-track { position: relative; height: 7px; border-radius: 2px; background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); overflow: hidden; }
+.vc-ladder-fill { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); background: rgba(255, 255, 255, 0.35); }
+.vc-ladder-tag { display: flex; justify-content: flex-end; color: rgba(255, 255, 255, 0.5); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vc-ladder-row[data-on="lead"] { background: ${withAlpha(SCENE_VIOLET, 0.16)}; }
+.vc-ladder-row[data-on="lead"] .vc-ladder-fill { background: ${SCENE_VIOLET}; }
+.vc-ladder-row[data-on="lead"] .vc-ladder-tag { color: ${SCENE_VIOLET}; }
+.vc-ladder-row[data-on="on"] .vc-ladder-fill { background: ${withAlpha(SCENE_VIOLET, 0.55)}; }
+.vc-ladder-row[data-on="on"] .vc-ladder-tag { color: rgba(255, 255, 255, 0.85); }
+.vc-ladder-row[aria-pressed="true"] { border-color: ${SCENE_VIOLET}; }
+.vc-ladder-row[aria-pressed="true"] .vc-ladder-tag { color: ${SCENE_VIOLET}; }
+.vc-ladder-readout { margin-top: 6px; font: 400 11px/1.4 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; }
 `;
 
 /** Installs the panel's stylesheet once; safe to call from every creator. */

@@ -142,6 +142,10 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // as the music allows — a shorter running average or a larger surprise
 // share were both measured on the tempo-eval tracks and changed the figure
 // no more often (docs/scenes/chladni.md, Measurements).
+// Locked figure (set from the Mode ladder card, src/ui/widgets/modeLadder.ts,
+// which reads every mode's ring and the active set through probe()) hands
+// the plate one table figure outright while every mode keeps ringing; it
+// counts as the top mode, so letting go under Figure hold eases back.
 //
 // The sand. Grain positions live in a ping-pong pair of RGBA8 textures,
 // 16-bit fixed point per axis (R,G = x, B,A = y), beside a pair holding each
@@ -318,9 +322,15 @@ export interface PlateResponseInputs {
    *  loudest part wins; 1 = only what is above its average counts.
    *  Omitted = SURPRISE_SHARE. */
   newness?: number;
+  /** The table index of the figure locked in the Mode ladder: the plate
+   *  shows it alone while every mode keeps ringing. Omitted or out of the
+   *  table = nothing locked. */
+  lock?: number;
 }
 
 export interface ActiveMode extends PlateMode {
+  /** Where this mode sits in the plate's table. */
+  index: number;
   /** This mode's share of the plate's motion; the active set sums to 1. */
   weight: number;
 }
@@ -387,8 +397,20 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
   const active: ActiveMode[] = [];
   for (let k = 0; k < ACTIVE_MODES; k++) {
     const mode = table[Math.min(k, table.length - 1)];
-    active.push({ ...mode, weight: k === 0 ? 1 : 0 });
+    active.push({ ...mode, index: Math.min(k, table.length - 1), weight: k === 0 ? 1 : 0 });
   }
+  const fill = (slot: ActiveMode, index: number, weight: number): void => {
+    const mode = table[index];
+    slot.n = mode.n;
+    slot.m = mode.m;
+    slot.sign = mode.sign;
+    slot.ratio = mode.ratio;
+    slot.cells = mode.cells;
+    slot.layer = mode.layer;
+    slot.desc = mode.desc;
+    slot.index = index;
+    slot.weight = weight;
+  };
 
   return {
     amplitudes,
@@ -433,23 +455,23 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
         sharpened[k] = Math.pow(k === top ? amplitudes[k] * margin : amplitudes[k], sharpen);
       }
 
+      // Locked: the plate holds the one figure, through silence too. It
+      // counts as last frame's top, so with Figure hold up, letting go
+      // doesn't jump straight to another figure.
+      const lock = inputs.lock ?? -1;
+      if (Number.isInteger(lock) && lock >= 0 && lock < table.length) {
+        fill(active[0], lock, 1);
+        for (let k = 1; k < ACTIVE_MODES; k++) active[k].weight = 0;
+        top = lock;
+        return active;
+      }
+
       order.sort((a, b) => sharpened[b] - sharpened[a]);
       let sum = 0;
       for (let k = 0; k < ACTIVE_MODES; k++) sum += sharpened[order[k]];
       if (sum < RESPONSE_FLOOR) return active;
 
-      for (let k = 0; k < ACTIVE_MODES; k++) {
-        const mode = table[order[k]];
-        const slot = active[k];
-        slot.n = mode.n;
-        slot.m = mode.m;
-        slot.sign = mode.sign;
-        slot.ratio = mode.ratio;
-        slot.cells = mode.cells;
-        slot.layer = mode.layer;
-        slot.desc = mode.desc;
-        slot.weight = sharpened[order[k]] / sum;
-      }
+      for (let k = 0; k < ACTIVE_MODES; k++) fill(active[k], order[k], sharpened[order[k]] / sum);
       top = order[0];
       return active;
     },
@@ -835,6 +857,20 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: SURPRISE_SHARE,
+  },
+  {
+    key: "lockFigure",
+    label: "Locked figure",
+    description: "The figure the plate holds whatever the music does, picked in the Mode ladder; 0 lets the music choose",
+    // Drawn as the Mode ladder (modeLadder widget), not a row. A table index
+    // plus one on whichever plate is on screen, so neither Auto nor the
+    // Master card's Scale may move it.
+    group: "Form",
+    min: 0,
+    max: MODE_TABLE.length,
+    step: 1,
+    default: 0,
+    masterScale: false,
   },
   {
     key: "plateShape",
@@ -2154,6 +2190,8 @@ function createChladniScene(): Scene {
   let side = 1;
   let grainCount = 0;
   let response: PlateResponse | null = null;
+  // The response's last active set, for probe().
+  let lastModes: readonly ActiveMode[] | null = null;
   let lastFrameTime: number | null = null;
   // The plate's drive before the Sand zones' remap, as of the last render —
   // the Sand zones gauge's needle (probe()).
@@ -2235,6 +2273,7 @@ function createChladniScene(): Scene {
     atlasFor(gl, s);
     shape = s;
     response = createPlateResponse(plateModeTable(s));
+    lastModes = null;
   }
 
   function plateSetting(): number {
@@ -2259,10 +2298,29 @@ function createChladniScene(): Scene {
         hint: "How the sand answers the plate's drive: still, drifting to a new figure, or snapping onto it. Drag an edge to move it.",
         settings: ["freezeEdge", "snapEdge"],
       },
+      {
+        widget: "modeLadder",
+        title: "Mode ladder",
+        hint: "Each figure rings at its own note; the plate draws the strongest few. Click a figure to lock the plate on it, again to let the music choose.",
+        settings: ["lockFigure"],
+        card: true,
+      },
     ],
 
     probe() {
-      return { drive: lastRawDrive, bakeMs: lastBakeMs, atlasMB: atlasBytes / 1e6, zoomOctaves: zoomTotal };
+      const out: Record<string, number> = { drive: lastRawDrive, bakeMs: lastBakeMs, atlasMB: atlasBytes / 1e6, zoomOctaves: zoomTotal };
+      // The Mode ladder's readings: the plate on screen, every figure's ring
+      // (ring0…), and the figures on the plate (slot0…, by table index) with
+      // their shares (share0…), strongest first.
+      out.plate = shape;
+      if (response) for (let k = 0; k < response.amplitudes.length; k++) out[`ring${k}`] = response.amplitudes[k];
+      if (lastModes) {
+        for (let k = 0; k < lastModes.length; k++) {
+          out[`slot${k}`] = lastModes[k].index;
+          out[`share${k}`] = lastModes[k].weight;
+        }
+      }
+      return out;
     },
 
     init(ctx: SceneContext) {
@@ -2404,7 +2462,9 @@ function createChladniScene(): Scene {
         ring: resolveSceneSetting(ID, settingFor("ring")),
         figureHold: resolveSceneSetting(ID, settingFor("figureHold")),
         newness: resolveSceneSetting(ID, settingFor("newness")),
+        lock: Math.round(resolveSceneSetting(ID, settingFor("lockFigure"))) - 1,
       });
+      lastModes = modes;
       let maxOrder = 1;
       for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.cells);
 
@@ -2582,6 +2642,7 @@ function createChladniScene(): Scene {
       quadVao = null;
       pointVao = null;
       response = null;
+      lastModes = null;
       lastFrameTime = null;
       toss = null;
     },
