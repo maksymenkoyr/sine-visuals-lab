@@ -2089,8 +2089,11 @@ function wireDeviceMenu(): void {
     // The Master card's Picture block — null whenever the meter's gone stale
     // (the panel was just opened, so nothing has pushed a reading into it
     // yet, or the sampling loop is gapped for longer than a full reset — see
-    // PICTURE_GAP_RESET_MS) rather than showing a frozen last reading.
-    getPictureReading: () => (performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS ? pictureMeter.latest() : null),
+    // PICTURE_GAP_RESET_MS, plus however long the readback is holding
+    // thumbnails back to batch its reads) rather than showing a frozen last
+    // reading.
+    getPictureReading: () =>
+      performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS + (pictureReadback?.holdMs() ?? 0) ? pictureMeter.latest() : null,
     getAutoGain: () => getAutoGain(),
     onAutoGainChange: (value) => {
       setAutoGainAuto(false);
@@ -3900,16 +3903,15 @@ function pictureWanted(): boolean {
 /** The readback is created lazily, on mainHost's own GL context, the first
  *  tick a sample is actually asked for. */
 function ensurePictureReadback(): PictureReadback {
-  if (!pictureReadback) pictureReadback = createPictureReadback(mainHost!.ctx.gl);
+  if (!pictureReadback) pictureReadback = createPictureReadback(mainHost!.ctx.gl, PICTURE_SAMPLE_INTERVAL_MS);
   return pictureReadback;
 }
 
-/** Drains whatever thumbnail finished since the last tick into the meter/
- *  averager. Runs before the scene draws (see drawScene); the readback's
- *  result buffer is reused, so the push happens immediately. */
+/** Drains whatever thumbnails finished since the last tick into the meter/
+ *  averager, oldest first. Runs before the scene draws (see drawScene); the
+ *  readback's result buffer is reused, so the pushes happen immediately. */
 function pollPicture(): void {
-  const t = ensurePictureReadback().poll();
-  if (t) {
+  for (const t of ensurePictureReadback().poll()) {
     const r = pictureMeter.push(t.px, t.w, t.h, t.atMs);
     pictureAverager.add(r);
   }
