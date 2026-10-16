@@ -16,7 +16,7 @@ Researched 2026-10-14 and 2026-10-15.
 
 The build session read Patch Focus as the answer and filled each open question with its default. Each line can be overturned; say which.
 
-- Into the node: Window (Min/Max, On/Off), Smoothness (the window's knee, On/Off), Length and Height. Window and Smoothness reuse the setting gate's tracker and knee (`src/render/gateWindow.ts`), so a node's window behaves exactly like a setting's.
+- Into the node: Window (Min/Max, On/Off), Smoothness (how far the window softens, On/Off), Length and Height. Window and Smoothness reuse the setting gate's tracker and window math (`src/render/gateWindow.ts`), so a node's window behaves exactly like a setting's.
 - ~~A setting still takes an input node straight, with no node between.~~ Overturned 2026-10-16: the user, on Treble sparkle's plain Hats + Any hit wires, "hats and any hit should be already in a modifier". Every input wire now arrives through a shared neutral modifier (`src/render/wireModifiers.ts` header): scene defaults, saved wires and new plugs alike.
 - Each wire keeps its own weight. Mix and Reaction stay on the setting.
 - Length is a new per-node fall time (seconds, 0 = off) on top of the Hits card's shared tail, not a replacement for it.

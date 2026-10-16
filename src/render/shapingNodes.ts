@@ -2,10 +2,12 @@
  * Shaping nodes: a card in the panel's middle column takes ONE input node (a
  * SignalId from signals.ts) and sends a changed copy of it out of its own
  * jack. The change uses the same controls a scene setting's own wire panel
- * has. Window picks the stretch of the input, between its own learned floor
- * and peak, that moves the output (Min and Max, with an On/Off), and reuses
+ * has. Window picks the stretch of the input, between 0 and its own learned
+ * peak, that moves the output (Min and Max, with an On/Off), and reuses
  * the generic gate in gateWindow.ts, so the window's math is never copied.
- * Smoothness is that window's knee. Length is a straight fall after each
+ * Smoothness softens that window with gateWindow.ts's default formula (a dev
+ * build can pick another per node, gateFormulas.ts).
+ * Length is a straight fall after each
  * rise, in seconds, off at the bottom of its slider. Height only matters for
  * a hit-kind input (Graded, Fixed or Loud, as a setting's own wire chooses);
  * a level-kind input ignores it. Re-pointing a node's input starts its
@@ -33,8 +35,10 @@ import {
   GENERIC_SMOOTHNESS_DEFAULT,
   GENERIC_THRESHOLD_DEFAULT,
   GENERIC_WINDOW_MAX_DEFAULT,
+  GATE_FORMULA_DEFAULT,
   stepHeightEnv,
   windowReading,
+  type GateFormula,
   type GateTrackerState,
 } from "./gateWindow.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
@@ -48,11 +52,11 @@ export const SHAPING_NODE_ID_RE = /^n[1-9]\d{0,5}$/;
 
 export interface ShapingNodeDef {
   src: SignalId;
-  /** The window: Min and Max between the input's own learned floor (0) and peak (1). */
+  /** The window: Min and Max between 0 and the input's own learned peak (1). */
   windowOn: boolean;
   min: number;
   max: number;
-  /** The window's knee (gateWindow.ts windowReading); off means an exact window. */
+  /** How far the window softens (gateWindow.ts windowReading); off means an exact window. */
   smoothOn: boolean;
   smoothness: number;
   /** How a hit-kind input reads (drives.ts HitHeight); a level-kind input ignores it. */
@@ -297,8 +301,16 @@ function clamp01(x: number): number {
 
 /** One step of a node. The output is clamped to 0..1, the scale every
  *  monitor draws. Length's fall is a straight line at 1/length per second,
- *  so it is frame-rate independent. */
-export function stepShapingNode(st: ShapingState, node: ShapingNodeDef, dtSec: number, frame: FeatureFrame, anim: AnimFrame): number {
+ *  so it is frame-rate independent. `formula` is Smoothness's formula
+ *  (gateWindow.ts GATE_FORMULAS). */
+export function stepShapingNode(
+  st: ShapingState,
+  node: ShapingNodeDef,
+  dtSec: number,
+  frame: FeatureFrame,
+  anim: AnimFrame,
+  formula: GateFormula = GATE_FORMULA_DEFAULT,
+): number {
   if (st.src !== node.src) {
     st.tracker = createGateTracker();
     st.heightEnv = 0;
@@ -314,8 +326,9 @@ export function stepShapingNode(st: ShapingState, node: ShapingNodeDef, dtSec: n
   st.input = v;
   let y = v;
   if (node.windowOn) {
-    advanceGateTracker(st.tracker, dtSec, v, node.min, node.max);
-    y = windowReading(st.tracker, v, node.smoothOn ? node.smoothness : 0);
+    const s = node.smoothOn ? node.smoothness : 0;
+    advanceGateTracker(st.tracker, dtSec, v, node.min, node.max, formula, s);
+    y = windowReading(st.tracker, v, s, formula);
     st.line = st.tracker.line;
     st.top = st.tracker.top;
   } else {
@@ -343,7 +356,9 @@ export interface ShapingBank {
   reading(id: string): Readonly<ShapingState> | null;
 }
 
-export function createShapingBank(): ShapingBank {
+/** `formulaFor` names each node's Smoothness formula (drives.ts passes a dev
+ *  build's pick, gateFormulas.ts); without it every node runs the default. */
+export function createShapingBank(formulaFor?: (id: string) => GateFormula): ShapingBank {
   const states = new Map<string, ShapingState>();
   let seenList: readonly ShapingNode[] | null = null;
   return {
@@ -360,7 +375,7 @@ export function createShapingBank(): ShapingBank {
           st = createShapingState();
           states.set(node.id, st);
         }
-        stepShapingNode(st, node, dtSec, frame, anim);
+        stepShapingNode(st, node, dtSec, frame, anim, formulaFor ? formulaFor(node.id) : GATE_FORMULA_DEFAULT);
       }
     },
     output(id) {
