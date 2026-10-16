@@ -2,9 +2,9 @@
  * The middle column of the panel (Sound → Shaping → Scene): one card per
  * shaping node (src/render/shapingNodes.ts). A node takes one input node and
  * sends a changed copy of it out of its own jack, with the same controls a
- * setting's own wire panel has: Window (Min and Max riding the input's own
- * learned floor and peak, reusing the generic gate in src/render/gateWindow.ts),
- * Smoothness (the window's knee), Length (a straight fall after each rise) and,
+ * setting's own wire panel has: Window (Min and Max from 0 up to the input's
+ * own learned peak, reusing the generic gate in src/render/gateWindow.ts),
+ * Smoothness (how far the window softens), Length (a straight fall after each rise) and,
  * for a hit-kind input, Height. The node's monitor row carries its output
  * jack, so any setting plugs into a node exactly as it plugs into an input
  * node. The row's input port is where the cable from the input node's own
@@ -270,7 +270,7 @@ function buildControl(opts: ControlOpts): HTMLElement {
  *  one past the other drags the other along, and both are written. */
 function buildWindowControl(node: ShapingNode, label: string, accent: string): HTMLElement {
   const hint =
-    "Which stretch of this input's own range moves the output: under Min it reads 0, over Max it reads full. The floor and peak are learned from the music, so the window holds from one song to the next.";
+    "Which stretch of this input, from nothing up to its own peak, moves the output: under Min it reads 0, over Max it reads full, so Min 0 and Max 1 pass it through as it is. The peak is learned from the music, so the window holds from one song to the next.";
   const el = document.createElement("div");
   el.style.cssText = controlStyle;
   const head = document.createElement("div");
@@ -372,11 +372,11 @@ function buildWindowControl(node: ShapingNode, label: string, accent: string): H
 
   const ends = document.createElement("div");
   ends.style.cssText = endsStyle;
-  const floor = document.createElement("span");
-  floor.textContent = "Its floor";
+  const zero = document.createElement("span");
+  zero.textContent = "Nothing";
   const peak = document.createElement("span");
   peak.textContent = "Its peak";
-  ends.append(floor, peak);
+  ends.append(zero, peak);
 
   el.append(head, rowFor("Min", minInput), rowFor("Max", maxInput), ends);
   return el;

@@ -2,10 +2,11 @@
  * Shaping nodes: a card in the panel's middle column takes ONE input node (a
  * SignalId from signals.ts) and sends a changed copy of it out of its own
  * jack. The change uses the same controls a scene setting's own wire panel
- * has. Window picks the stretch of the input, between its own learned floor
- * and peak, that moves the output (Min and Max, with an On/Off), and reuses
+ * has. Window picks the stretch of the input, between 0 and its own learned
+ * peak, that moves the output (Min and Max, with an On/Off), and reuses
  * the generic gate in gateWindow.ts, so the window's math is never copied.
- * Smoothness is that window's knee. Length is a straight fall after each
+ * Smoothness softens that window with gateWindow.ts's default formula.
+ * Length is a straight fall after each
  * rise, in seconds, off at the bottom of its slider. Height only matters for
  * a hit-kind input (Graded, Fixed or Loud, as a setting's own wire chooses);
  * a level-kind input ignores it. Re-pointing a node's input starts its
@@ -48,11 +49,11 @@ export const SHAPING_NODE_ID_RE = /^n[1-9]\d{0,5}$/;
 
 export interface ShapingNodeDef {
   src: SignalId;
-  /** The window: Min and Max between the input's own learned floor (0) and peak (1). */
+  /** The window: Min and Max between 0 and the input's own learned peak (1). */
   windowOn: boolean;
   min: number;
   max: number;
-  /** The window's knee (gateWindow.ts windowReading); off means an exact window. */
+  /** How far the window softens (gateWindow.ts windowReading); off means an exact window. */
   smoothOn: boolean;
   smoothness: number;
   /** How a hit-kind input reads (drives.ts HitHeight); a level-kind input ignores it. */

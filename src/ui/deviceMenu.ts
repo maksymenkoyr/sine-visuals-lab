@@ -187,7 +187,8 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
-import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render/gateWindow.ts";
+import { GATE_FORMULAS, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, type GateFormula } from "../render/gateWindow.ts";
+import { getGateFormula, setGateFormula } from "../render/gateFormulas.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -2893,7 +2894,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const WEIGHT_HINT = "This wire's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
   const GENERIC_THRESHOLD_HINT =
-    "A window on this wire. The low dotted line (Min) sits on its resting level at 0, the high one (Max) on its recent peak at 1. Under Min counts as nothing, over Max counts as full, and in between rises in a straight line. Off: everything passes as it is.";
+    "A window on this wire. Each dotted line runs from nothing at 0 to the wire's recent peak at 1: the low one is Min, the high one Max. Under Min counts as nothing, over Max counts as full, and in between rises in a straight line, so Min 0 and Max 1 pass the wire through as it is. Off: everything passes as it is.";
 
   const HIT_THRESHOLD_HINT =
     "Moves the dotted line: how far a hit has to stand out from the everyday ones to count. Left: more reactions, even from quiet sounds. Right: only clear standouts. Off: every hit counts.";
@@ -2908,11 +2909,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const GENERIC_SMOOTHNESS_HINT =
-    "How gently the window starts and ends. Left: exactly at the two lines. Right: a wider, softer rise. Off: exactly at the two lines, whatever the slider says.";
+    "How gently the window starts and ends. Left: exactly at the two lines. Right: a softer rise that stretches toward nothing and toward the loudest the wire has been, while silence still gives nothing and the loudest still gives full. Off: exactly at the two lines, whatever the slider says.";
 
-  /** 0..1 slider for how far the window widens at both ends (driveStore.ts's
-   *  getDriveSmoothness), with its own On/Off. Live-write, no rebuild, as
-   *  buildThresholdRow. */
+  /** 0..1 slider for how far the window softens (driveStore.ts's
+   *  getDriveSmoothness; the formula is gateWindow.ts's windowReading), with
+   *  its own On/Off and, in a dev build, a formula picker. Live-write, no
+   *  rebuild, as buildThresholdRow. */
   function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const wrap = document.createElement("div");
     wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;`;
@@ -2981,6 +2983,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
 
     wrap.append(seg, name, rng, out);
+    // Dev only, while PR #544 picks Smoothness's formula (gateFormulas.ts's header).
+    if (import.meta.env.DEV) {
+      const pick = document.createElement("select");
+      pick.setAttribute("aria-label", "Smoothness formula (dev)");
+      pick.style.cssText =
+        "flex-basis: 100%; font: inherit; font-size: 12px; color: inherit; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; padding: 3px 6px;";
+      for (const f of GATE_FORMULAS) {
+        const opt = document.createElement("option");
+        opt.value = f.id;
+        opt.textContent = `Formula (dev): ${f.label}`;
+        pick.appendChild(opt);
+      }
+      pick.value = getGateFormula(sceneId, spec.key);
+      pick.addEventListener("change", () => {
+        setGateFormula(sceneId, spec.key, pick.value as GateFormula);
+        onLiveEdit();
+      });
+      wrap.append(pick);
+    }
     return wrap;
   }
 
