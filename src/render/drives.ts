@@ -12,7 +12,7 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
 import { getDriveSolo } from "./driveSolo.ts";
-import { createShapingBank, type ShapingState } from "./shapingNodes.ts";
+import { createShapingBank, getShapingNode, type ShapingState } from "./shapingNodes.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -147,7 +147,11 @@ import { createShapingBank, type ShapingState } from "./shapingNodes.ts";
  *
  * **Shaping nodes.** A `{source:"shaped", id}` source reads a shaping node's
  * output (src/render/shapingNodes.ts). It is a level-kind reading, like a
- * level catalogue entry: no height, and a Schmitt trigger for `fired()`. The
+ * level catalogue entry: no height. For `fired()`, a node on a hit input
+ * passes that input's own edge whenever the node's output is above 0 (so a
+ * scene's default hit wire fires on the same hits through a modifier,
+ * src/render/wireModifiers.ts); a node on a level input takes a Schmitt
+ * trigger, like a level entry. The
  * bank of node states advances once per tick at the top of `accumulate()`,
  * so every setting reads the same value that tick. An id with no node reads 0.
  *
@@ -1178,6 +1182,12 @@ export function createDriveEngine(): DriveEngine {
           return fired;
         }
         if (!isLineChoice(choice) && !isShapedChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
+        // A modifier on a hit input passes the hit's own edge, while its
+        // output is up: its window decides which hits get through.
+        if (isShapedChoice(choice)) {
+          const node = getShapingNode(choice.id);
+          if (node && SIGNALS[node.src].kind === "edge") return SIGNALS[node.src].edge!(anim) && shaping.output(choice.id) > 0;
+        }
         const st = stateFor(sceneId, key, sourceKey(choice));
         const raw = clampWeight(src.weight) * sourceRaw(key, src);
         return stepValueTrigger(st.valueTrigger, raw, upper, anim);

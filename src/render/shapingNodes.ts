@@ -12,6 +12,8 @@
  * learning over: the floor, the peak and the envelopes reset. A node knows
  * nothing about the scene: any scene setting wires to it the same way it
  * wires to an input node, as a `{ source: "shaped", id }` choice (drives.ts).
+ * Wires from an input arrive through a shared neutral node by themselves
+ * (src/render/wireModifiers.ts).
  *
  * The store is device-wide, not per scene, and synced: it is mirrored to the
  * pop-out output and to a room's TV through registerSyncedStore, so every

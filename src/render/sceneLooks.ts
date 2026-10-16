@@ -3,7 +3,8 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
 import { fitCustom, getCustomValue, resetCustomValue, setCustomValue, stretchSlider } from "./customValues.ts";
-import { defaultDriveSetting, isShapedChoice, remapShapedSources, sameDriveSetting, type DriveSetting } from "./drives.ts";
+import { isShapedChoice, remapShapedSources, type DriveSetting } from "./drives.ts";
+import { isDefaultDriveSetting } from "./wireModifiers.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
 import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingNodeDef, shapingNodeDef, type ShapingNodeDef } from "./shapingNodes.ts";
 
@@ -96,7 +97,8 @@ export interface SceneLook {
   /** Each drive setting's captured `DriveSetting` (src/render/drives.ts),
    *  only for a setting whose setting isn't already its own `drive.default`
    *  — same "only what a plain apply wouldn't already reproduce" rule as
-   *  `manual`, compared with `sameDriveSetting`. Omitted entirely when every
+   *  `manual`, compared with `isDefaultDriveSetting` (a wire through a
+   *  neutral modifier counts as the plain default wire, wireModifiers.ts). Omitted entirely when every
    *  drive setting was already at its default, and always on a Look
    *  captured before this field existed; applyLook treats a key absent here
    *  the same way it treats one absent from `manual` — back to default,
@@ -209,7 +211,10 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
     }
     if (spec.drive) {
       const setting = getDriveSetting(sceneId, spec);
-      if (!sameDriveSetting(setting, defaultDriveSetting(spec))) (drives ??= {})[spec.key] = setting;
+      // A default through neutral modifiers is still the default: left out,
+      // so applying the Look resets it (src/render/wireModifiers.ts).
+      if (isDefaultDriveSetting(spec, setting)) continue;
+      (drives ??= {})[spec.key] = setting;
       for (const src of setting === "scene" ? [] : setting.sources) {
         if (!isShapedChoice(src.choice)) continue;
         const node = getShapingNode(src.choice.id);

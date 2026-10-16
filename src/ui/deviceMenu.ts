@@ -62,6 +62,7 @@ import {
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
   isEngineHitDriver,
+  isShapedChoice,
   sameDriveSetting,
   shapeSource,
   smoothstep,
@@ -75,6 +76,7 @@ import {
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
+import { isDefaultDriveSetting } from "../render/wireModifiers.ts";
 import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
@@ -3769,7 +3771,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const hit = spec.drive?.hit;
       const readoutMoved = !!hit && hit.flatOnly === undefined && deps.getDriveReadout(sceneId, spec) !== (hit.readout ?? "flat");
       resetBtn.hidden =
-        !thresholdMoved && !smoothnessMoved && !readoutMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+        !thresholdMoved && !smoothnessMoved && !readoutMoved && isDefaultDriveSetting(spec, deps.getDriveSetting(sceneId, spec));
     }
 
     const head = document.createElement("div");
@@ -3829,7 +3831,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     patch.sources.forEach((src, i) => {
       list.appendChild(buildSourceLine(sceneId, spec, patch, src, i, refreshResetVisibility));
     });
-    if (generic && patch.sources.length) {
+    if (generic && patch.sources.some((s) => !isShapedChoice(s.choice))) {
       const shapeNote = document.createElement("div");
       shapeNote.style.cssText = driveEmptySrcStyle;
       shapeNote.textContent = "Window, Smoothness, Length and Height live on modifiers now. Press + Modifier on a wire to give it one.";
@@ -4207,7 +4209,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  setting equal to the scene default is a reset, so Back after a Random
    *  leaves a lane on its default rather than a stored copy of it. */
   function setDriveFromWidget(sceneId: string, spec: SceneSetting, setting: DriveSetting): void {
-    if (sameDriveSetting(setting, defaultDriveSetting(spec))) deps.onResetDriveSetting(sceneId, spec);
+    if (isDefaultDriveSetting(spec, setting)) deps.onResetDriveSetting(sceneId, spec);
     else deps.onSetDriveSetting(sceneId, spec, setting);
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
     h?.refreshMeta();
