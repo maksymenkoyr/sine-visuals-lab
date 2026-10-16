@@ -4,6 +4,9 @@ A browser-based, real-time WebGL2 audio visualizer.
   of any related open PR (its diff only if the overlap is still unclear).
 - Explain code in a comment at the top of its file. Write a doc in `docs/`
   only for an explanation that spans several files.
+- Inside a file, comment only a non-obvious why: a constraint, a trap, a
+  measured or tuned value, a link to another file. Never narrate what the
+  code does or how it got there; git keeps the history.
 - In comments and docs, don't copy numbers or lists from the code: name the
   variable that holds them ("the dials in `MUSIC_DIALS`", not "the seven
   dials"). Dated notes (`docs/status.md`, a scene record's measurements and

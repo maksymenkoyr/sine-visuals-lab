@@ -472,91 +472,52 @@ export interface MenuItem {
 
 export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
 
-/** What the Source row's device list shows — see DeviceMenuDeps.getInputDevices. */
 export interface InputDevicesState {
-  /** Pickable inputs; empty until the mic permission's first grant, which
-   *  shows a single "Microphone" placeholder row instead (there's nothing
-   *  nameable to choose between yet). */
+  /** Empty until the mic permission's first grant (the row shows one "Microphone" placeholder meanwhile). */
   options: InputDeviceOption[];
-  /** The OS default's device name — its own row gets a "System default"
-   *  sub-line. */
   defaultLabel: string | null;
-  /** A chosen input that isn't plugged in — its own dashed "not connected"
-   *  row, so the list still says what was picked while the default fills in. */
   missing: InputDevicePref | null;
-  /** The device the live mic is actually hearing, or null. */
   liveLabel: string | null;
 }
 export interface AudioStatus {
   source: AudioSource;
-  /** The local AudioContext's rate, when there is one. */
   sampleRate: number | null;
 }
 
-/** A palette as the Palette card shows it. */
 export interface PaletteMenuItem extends MenuItem {
-  /** Rows are grouped by this, in the order groups first appear. */
+  /** Groups in order of first appearance. */
   group: string;
-  /** The palette's ramp, darkest first, drawn as the chip's swatch. */
+  /** Ramp, darkest first. */
   swatch: readonly string[];
 }
 
 export interface DeviceMenuDeps {
-  /** The MIDI session (ui/midiInput.ts), wired in app.ts. Absent: no MIDI card. */
+  /** Absent: no MIDI card. */
   midi?: MidiController;
   getPalettes: () => PaletteMenuItem[];
   currentSceneId: () => string;
   currentPaletteId: () => string;
-  /** Whether Hats and Lead were measured this tick: false while app.ts skips
-   *  the stem split (src/render/stemReaders.ts). Heat records a gap then. */
+  /** False while app.ts skips the stem split (src/render/stemReaders.ts); Heat records a gap. */
   stemsMeasured: () => boolean;
   onPickPalette: (id: string) => void;
-  /** Shown in the column head's status line, above the Bands card — where
-   *  the bars are coming from. */
   getAudioStatus: () => AudioStatus;
-  /** This device's mic-vs-screen capture state (src/audio/sourcePref.ts's
-   *  SourceState) — drives the Input card's Source row, including whether the
-   *  lit chip means "listening now" (the only thing it ever highlights — see
-   *  SourceState's doc comment). Same signal drives the gallery masthead's
-   *  picker (src/ui/gallery.ts's refreshSource). Null on a renderer or the
-   *  synthetic feed (no local capture to choose a source for), which is what
-   *  hides the row — the same null-hides-itself convention as the Loudness
-   *  card's `lufs` frame field. */
+  /** Mic-vs-screen state (src/audio/sourcePref.ts). Null on a renderer or the synthetic feed, which hides the Source row. */
   getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
-  /** A tap on the row that's already live: disconnect it, so it can be
-   *  picked again (src/app.ts's stopOwnCapture). */
   onStopAudio: () => void;
-  /** The Source row's device list — which device the Mic source opens
-   *  (src/audio/inputDevice.ts). Read on the row's own refresh timer, so
-   *  src/app.ts answers from a cache, never a fresh enumerateDevices(). */
+  /** Read on the row's own refresh timer, so src/app.ts answers from a cache, never a fresh enumerateDevices(). */
   getInputDevices: () => InputDevicesState;
-  /** A pick from that list. src/app.ts also switches to it (see its
-   *  chooseInputDevice). */
+  /** src/app.ts also switches the capture to it. */
   onInputDeviceChange: (deviceId: string) => void;
-  /** Whether this browser can offer the Screen option at all — see
-   *  sourcePref.ts's header for the exact browser/OS matrix. */
+  /** Browser/OS matrix: sourcePref.ts's header. */
   canCaptureDisplay: () => boolean;
-  /** This tick's src/audio/inputHealth.ts reading for the live capture. Null
-   *  wherever there's no local tap to read one off (a renderer, the
-   *  synthetic feed, or before the very first tick after a capture starts) —
-   *  a healthy input reads `{ kind: "ok" }`, never null. Read on the Source
-   *  row's own refresh(), not every rAF tick — see createSourceRow's
-   *  refresh. */
+  /** Null where there is no local tap to read (renderer, synthetic feed, before a capture's first tick); a healthy input is `{ kind: "ok" }`, never null. Read on the Source row's refresh(), not every rAF tick. */
   getInputHealth: () => InputHealthReading | null;
-  /** 0..1 signal-preview level for a device that ISN'T the live one, or null
-   *  wherever its preview isn't open (src/audio/inputPreview.ts — an
-   *  unsupported browser, or it just hasn't opened yet). The live row uses
-   *  this tick's FeatureFrame.level instead (handed to DeviceMenu.update()),
-   *  not this — see createSourceRow's updateMeters. */
+  /** 0..1 preview level for a device that isn't the live one; null where its preview isn't open (inputPreview.ts). The live row uses FeatureFrame.level instead. */
   getInputLevel: (deviceId: string) => number | null;
-  /** Whether the Source row's idle meters should be running at all — true
-   *  only while the panel is open; see inputPreview.ts's header for why it's
-   *  gated further (browser support, whether there's anything to preview). */
+  /** True only while the panel is open; inputPreview.ts's header says why it is gated further. */
   setInputPreviewActive: (active: boolean) => void;
-  /** The Source row's Edit mode hid or showed an input, by label (see
-   *  inputDevice.ts's hidden-inputs paragraph). src/app.ts stores it and
-   *  re-syncs the idle preview, which skips hidden inputs. */
+  /** By label (inputDevice.ts's hidden-inputs paragraph); app.ts stores it and re-syncs the idle preview, which skips hidden inputs. */
   onInputHiddenChange: (label: string, hide: boolean) => void;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
@@ -564,15 +525,12 @@ export interface DeviceMenuDeps {
   onExpansionChange: (sceneId: string, value: number) => void;
   getSmoothing: (sceneId: string) => number;
   onSmoothingChange: (sceneId: string, value: number) => void;
-  /** Empty for scenes with nothing to tune — the card hides itself. */
+  /** Empty: the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
-  /** The active scene object, for its optional `panel` (src/render/scene.ts)
-   *  — used only to render a scene-declared item widget ahead of the flat
-   *  settings loop; nothing else here reaches into a Scene directly. */
+  /** For its optional `panel` (src/render/scene.ts); nothing else here reaches into a Scene. */
   getScene: (sceneId: string) => Scene | undefined;
   getSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
-  /** A setting's resting value under the scene's current variant (see
-   *  SceneSetting.variant) — what the row's reset arrow returns it to. */
+  /** The row's reset target under the scene's current variant (SceneSetting.variant). */
   getSceneSettingDefault: (sceneId: string, spec: SceneSetting) => number;
   onSceneSettingChange: (
     sceneId: string,
@@ -580,10 +538,7 @@ export interface DeviceMenuDeps {
     value: number,
   ) => void;
   onSceneSettingsReset: (sceneId: string) => void;
-  /** Named, shareable snapshots of the Scene card's own settings — see
-   *  src/render/sceneLooks.ts. Rendered by the Looks card, next to Scene. */
   listLooks: (sceneId: string) => SceneLook[];
-  /** Saves the current tuning under a generated name and returns it. */
   onSaveLook: (sceneId: string) => string;
   onRenameLook: (sceneId: string, from: string, to: string) => boolean;
   onApplyLook: (look: SceneLook) => void;
@@ -593,143 +548,84 @@ export interface DeviceMenuDeps {
   buildShareCode: (look: SceneLook) => string;
   hasLookUndo: (sceneId: string) => boolean;
   onUndoLook: (sceneId: string) => void;
-  /** The Set card's pads and Autopilot — see src/ui/setCard.ts for what each
-   *  call means; the card's scene names come from `getScene` above. */
+  /** See src/ui/setCard.ts. */
   set: Omit<SetCardDeps, "sceneName">;
-  /** The Overlay card (text and a logo over the visuals) — see ui/overlayCard.ts. */
   overlay: OverlayCardDeps;
-  /** Low/mid/high crossover, global per device (not per scene) — fixed, not
-   *  user-facing, and unrelated to the faders: it only colors the spectrum
-   *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
+  /** Per device, not per scene; only colours the strip's bars by pulse group, unrelated to the faders (src/audio/bandSplit.ts). */
   getBandSplit: () => BandSplit;
-  /** This device's real Hz band edges once the analyser exists; falls back to
-   *  the nominal ladder before mic access is granted. Also labels the faders. */
+  /** Real Hz edges once the analyser exists, the nominal ladder before mic access. Also labels the faders. */
   getBandEdgesHz: () => Float32Array;
-  /** Per-scene band fader gains, by fader index — see src/audio/bandGains.ts. */
   getBandGain: (sceneId: string, fader: number) => number;
   onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
-  /** A drive setting's whole patch (src/render/drives.ts's DriveSetting —
-   *  `"scene"` or a DrivePatch), and the store-level editing helpers the
-   *  patch panel's controls call through — named to match
-   *  driveStore.ts's own exports 1:1, keyed per (scene, setting) rather than
-   *  per scene: two drive settings on the same scene keep independent
-   *  patches (and, while a patch has a source on Frequencies, independent
-   *  drawn lines — see getDriveLine below). */
+  /** A drive setting's whole patch plus the store-level editing helpers below, mirroring driveStore.ts's exports. Keyed per (scene, setting): two settings on one scene keep independent patches and drawn lines. */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
-  /** A shaping node's live input/output (DriveEngine.shaped), panel open or closed. */
+  /** A shaping node's live input/output, panel open or closed. */
   getShapingReading(id: string): { input: number; output: number; line: number; top: number } | null;
-  /** Writes a whole DriveSetting straight through (driveStore.ts's own
-   *  `setDriveSetting`) — the one generic primitive every other `onSetXxx`
-   *  below is a narrower pure-function wrapper around. appendSettingRow's
-   *  multi-item-selection bridge (registry.ts's `appendRow` `linked` option)
-   *  is the only caller today: after any patch edit on a row with `linked`
-   *  siblings, it copies the row's own freshly-written DriveSetting onto
-   *  each of them verbatim — correct even for a `"scene"` choice, since two
-   *  items' own scene defaults can legitimately differ (see
-   *  itemBoxes.ts/physarum2.ts's Nutrient, whose scene default is each
-   *  strain's own band). */
+  /** Writes a whole DriveSetting (driveStore.ts's setDriveSetting), the primitive the narrower onSetXxx wrap. appendSettingRow's multi-item bridge uses it to copy a row's patch onto its `linked` siblings verbatim; right even for a "scene" choice, since items' scene defaults can differ. */
   onSetDriveSetting: (sceneId: string, spec: SceneSetting, setting: DriveSetting) => void;
   onResetDriveSetting: (sceneId: string, spec: SceneSetting) => void;
-  /** Leaves the setting with nothing plugged in — it stops reacting to the
-   *  music (drives.ts's normalizeDriveSetting keeps an empty patch empty).
-   *  The panel offers it while the setting plays its scene's own mix, which
-   *  otherwise has no source line of its own to unplug. */
+  /** Offered while the setting plays its scene's own mix, which has no source line to unplug; an empty patch stays empty (drives.ts's normalizeDriveSetting). */
   onUnplugAll: (sceneId: string, spec: SceneSetting) => void;
   onTogglePatchSource: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice) => void;
   onSetSourceWeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number) => void;
   onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
-  /** Beat wave's own every-N-beats divider (buildEverySeg) — only ever shown
-   *  on a plain Beat wave source line. See drives.ts's setSourceEvery. */
+  /** Only on a plain Beat wave source line (drives.ts's setSourceEvery). */
   onSetSourceEvery: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number) => void;
   onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
   onSetPatchMix: (sceneId: string, spec: SceneSetting, mix: DriveMix) => void;
-  /** The Only when role toggle (buildRoleToggle) — marks `sources[index]`
-   *  "plays" or "when". See drives.ts's setSourceRole. */
   onSetSourceRole: (sceneId: string, spec: SceneSetting, index: number, role: "plays" | "when") => void;
-  /** The source line's own mute switch (buildMuteSwitch) — turns
-   *  `sources[index]` off without unplugging it, or back on. See
-   *  drives.ts's setSourceMuted. */
+  /** Off without unplugging (drives.ts's setSourceMuted). */
   onSetSourceMuted: (sceneId: string, spec: SceneSetting, index: number, muted: boolean) => void;
   getDriveLine: (sceneId: string, spec: SceneSetting) => Float32Array;
   setDriveLineBand: (sceneId: string, spec: SceneSetting, band: number, height: number) => void;
   setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
   resetDriveLine: (sceneId: string, spec: SceneSetting) => void;
   getDriveLineStrength: (sceneId: string, spec: SceneSetting) => number;
-  /** Every drive setting's own threshold row, under its graph: on/off +
-   *  value — driveStore.ts's getDriveThresholdState/setDriveThreshold/
-   *  setDriveThresholdOn. Scene-handled (SceneSetting.drive.threshold
-   *  declared) or the generic engine gate every other drive setting gets
-   *  (drives.ts's header's threshold paragraph) — the row looks the same
-   *  either way, just with a different label/hint. */
+  /** Under each drive setting's graph. Scene-handled (SceneSetting.drive.threshold) or the generic engine gate (drives.ts's header); the row looks the same, with a different label/hint. */
   getDriveThresholdState: (sceneId: string, spec: SceneSetting) => DriveThresholdState;
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
-  /** The generic gate window's Max — driveStore.ts's getDriveWindowMax/setDriveWindowMax. Generic gates only; its Min is the threshold above. */
+  /** Generic gates only; its Min is the threshold above. */
   getDriveWindowMax: (sceneId: string, spec: SceneSetting) => number;
   onSetDriveWindowMax: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** The generic gate's Smoothness (its knee width, 0..1) — driveStore.ts's
-   *  getDriveSmoothness/setDriveSmoothness. Generic gates only. */
+  /** Knee width, 0..1. Generic gates only. */
   getDriveSmoothness: (sceneId: string, spec: SceneSetting) => number;
   onSetDriveSmoothness: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** Whether that knee is on, independent of the threshold — driveStore.ts's
-   *  getDriveSmoothnessOn/setDriveSmoothnessOn. */
+  /** Whether that knee is on, independent of the threshold. */
   getDriveSmoothnessOn: (sceneId: string, spec: SceneSetting) => boolean;
   onSetDriveSmoothnessOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
-  /** A hit driver's Reaction row, Flat or Sized (SceneSetting.drive.hit) —
-   *  driveStore.ts's getDriveReadout/setDriveReadout. Undefined for a
-   *  setting that isn't a hit driver. */
+  /** Flat or Sized (SceneSetting.drive.hit); undefined for a setting that isn't a hit driver. */
   getDriveReadout: (sceneId: string, spec: SceneSetting) => HitReadout | undefined;
   onSetDriveReadout: (sceneId: string, spec: SceneSetting, readout: HitReadout) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
-  /** The Dynamics card's Reset chip (its header, beside Loudness) — starts
-   *  the integrated LUFS reading over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
-  /** The Tempo card's Tap chip — one tap tempo tap at this timeStamp (see
-   *  audioMeters.ts's AudioMetersDeps.onTap). */
   onTap: (timeStamp: number) => void;
-  /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
+  /** Live value for a row on auto (autoTune.ts). */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
   resolveExpansionValue: (sceneId: string) => number;
   resolveSmoothingValue: (sceneId: string) => number;
-  /** Synthetic SceneSettings for the Sensitivity/Expansion/Smoothing
-   *  pseudo-params, so they can drive an auto chip through the same
-   *  isSettingAutoEnabled/onSettingAutoToggle contract as a real scene
-   *  setting row. */
+  /** Synthetic SceneSettings so these pseudo-params drive an auto chip through the same contract as a real row. */
   getSensitivitySpec: () => SceneSetting;
   getExpansionSpec: () => SceneSetting;
   getSmoothingSpec: () => SceneSetting;
   isSettingAutoEnabled: (sceneId: string, key: string) => boolean;
   onSettingAutoToggle: (sceneId: string, spec: SceneSetting, on: boolean) => void;
-  /** Whether every auto-capable setting on this scene (incl. Sensitivity/Expansion/Smoothing) is auto. */
   isSceneAuto: (sceneId: string) => boolean;
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
-  /** The device-wide scene master (sceneSettings.ts's getSceneMaster) — one
-   *  dial over every numeric scene param, resolved in autoTune.ts's
-   *  resolveSceneSetting. Device-local, so it is neither captured in a Look
-   *  nor sent to the TV. */
+  /** Device-local: neither captured in a Look nor sent to the TV. Resolved in autoTune.ts's resolveSceneSetting. */
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
-  /** The master's Expansion dial (sceneSettings.ts's getSceneExpansion) —
-   *  how far and how long every drive reading may pull the picture away
-   *  from the normal line Scale sets (drives.ts's header, "Master
-   *  Expansion"). Device-local like Scale. */
+  /** How far and how long a drive reading may pull the picture from the line Scale sets (drives.ts's header, "Master Expansion"). Device-local. */
   getSceneExpansion: () => number;
   onSceneExpansionChange: (value: number) => void;
-  /** Expansion's shape chip, as an index into sceneSettings.ts's
-   *  EXPANSION_SHAPES (getSceneExpansionShape). Device-local like Scale. */
+  /** Index into sceneSettings.ts's EXPANSION_SHAPES. Device-local. */
   getSceneExpansionShape: () => number;
   onSceneExpansionShapeChange: (index: number) => void;
-  /** This tick's picture reading for the Master card's Picture block — null
-   *  whenever the meter has gone stale (the panel was just opened, or
-   *  nothing has forced sampling with the panel closed) rather than a frozen
-   *  last value. See src/render/pictureMeter.ts for what each measure
-   *  means. */
+  /** Null once the meter has gone stale (panel just opened, or nothing forced sampling while closed), never a frozen last value. See src/render/pictureMeter.ts. */
   getPictureReading: () => PictureReading | null;
-  /** A scene setting's custom value — one typed into its readout past the
-   *  slider's ends — and how far its slider is stretched to fit one
-   *  (render/customValues.ts). */
+  /** A value typed past the slider's ends, and how far the slider stretches to fit it (render/customValues.ts). */
   customValues: {
     get(sceneId: string, key: string): number | undefined;
     set(sceneId: string, key: string, value: number): void;
@@ -738,128 +634,65 @@ export interface DeviceMenuDeps {
     stretchTo(sceneId: string, key: string, to: number): void;
     reset(sceneId: string, key: string): void;
   };
-  /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
-   *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
-   *  own dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is
-   *  fully adaptive. */
+  /** Global per-band adaptive normalization (src/audio/autoGain.ts). AUTO_GAIN_MIN is the fixed mapping against the analyser's dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is fully adaptive. */
   getAutoGain: () => number;
   onAutoGainChange: (value: number) => void;
-  /** The row's own "A" chip — auto-resolves the amount from the room's
-   *  measured span rather than MUSIC_DIALS (see autoGain.ts's header for
-   *  why). Independent of the master Auto button: that toggle is scoped to
-   *  isSceneAuto's per-scene auto-on store, and this setting is device-global
-   *  like getAutoGain above. */
+  /** The row's own A chip: resolves from the room's measured span, not MUSIC_DIALS (autoGain.ts's header). Independent of the master Auto button, which is scoped to isSceneAuto's per-scene store. */
   isAutoGainAuto: () => boolean;
   onAutoGainAutoToggle: (on: boolean) => void;
   resolveAutoGain: () => number;
-  /** The two silence-gate marks (src/audio/silenceGate.ts) — the Input
-   *  card's Silence below/Sound above rows. Device-wide, like Auto-gain
-   *  above: how quiet this room/mic actually is describes the input, not one
-   *  scene's look. Setting one can push the other (the invariant `open >=
-   *  closed + SILENCE_GATE_MIN_WIDTH`), which is why both rows re-sync from
-   *  getSilenceGate() after either change rather than trusting the value the
-   *  row that fired onChange was itself showing. */
+  /** The two silence-gate marks (src/audio/silenceGate.ts), device-wide: how quiet the room is describes the input, not one scene. Setting one can push the other (open >= closed + SILENCE_GATE_MIN_WIDTH), so both rows re-sync from getSilenceGate() after either change. */
   getSilenceGate: () => SilenceGateMarks;
   onSilenceGateClosedChange: (value: number) => void;
   onSilenceGateOpenChange: (value: number) => void;
-  /** The gate rows' own "A" chips — one flag for both marks (see
-   *  silenceGate.ts's "Auto mode" header paragraph for why steadiness, not
-   *  MUSIC_DIALS, is what they resolve against). Independent of the master
-   *  Auto button the same way isAutoGainAuto above is. */
+  /** One flag for both marks; they resolve against steadiness, not MUSIC_DIALS (silenceGate.ts's "Auto mode" paragraph). Independent of the master Auto button. */
   isSilenceGateAuto: () => boolean;
   onSilenceGateAutoToggle: (on: boolean) => void;
   resolveSilenceGate: () => SilenceGateMarks;
-  /** The Hits card's Shape sliders (src/audio/hitStrength.ts) — see
-   *  audioMeters.ts's AudioMetersDeps.hitShape. Global per device, like
-   *  getSilenceGate above, not per scene: how a hit's stand-out and
-   *  loudness should blend into its pulse height is a taste about
-   *  detection itself, not one scene's look. */
+  /** Global per device, not per scene: how a hit's stand-out and loudness blend into pulse height is a taste about detection (src/audio/hitStrength.ts). */
   getHitShape: () => HitShape;
   setHitShape: (partial: HitShapePatch) => void;
-  /** Whether every member of "the whole mic" is on auto for this scene —
-   *  drives the Input card's own Auto button. See src/audio/micAuto.ts's
-   *  header for exactly what that membership is and how it overlaps
-   *  isSceneAuto above. */
+  /** Whether every member of "the whole mic" is auto for this scene (src/audio/micAuto.ts's header); overlaps isSceneAuto. */
   isMicAuto: (sceneId: string) => boolean;
   onMicAutoToggle: (sceneId: string, on: boolean) => void;
-  /** Energy saving mode (src/render/powerMode.ts) — the Power card's
-   *  Auto/On/Off override for the quality governor. Device-wide, like
-   *  Auto-gain above. */
+  /** Device-wide (src/render/powerMode.ts). */
   getPowerMode: () => PowerMode;
   onPowerModeChange: (mode: PowerMode) => void;
-  /** Quality choice (src/render/qualityPref.ts) — the Power card's
-   *  Auto/High/Mid/Low/Floor override for which preset the governor steps
-   *  from. Device-wide, like Power mode above. */
+  /** Device-wide (src/render/qualityPref.ts). */
   getQualityChoice: () => QualityChoice;
   onQualityChoiceChange: (choice: QualityChoice) => void;
-  /** Snapshot for the Power card's status line and readouts — what the
-   *  governor actually decided this session, and why. Polled at the panel's
-   *  existing ~10Hz auto-refresh tick, not per frame. */
+  /** Polled on the panel's auto-refresh tick, not per frame. */
   getPowerStatus: () => PowerStatus;
-  /** True while a pop-out output window is open: the main Power card then
-   *  describes this window's preview (titled "Preview", Quality bound to the
-   *  preview's own choice) and gains the size and resolution rows. */
+  /** True while a pop-out output window is open: the main Power card then describes the window's preview and gains Size and Resolution rows. */
   isPreview: () => boolean;
-  /** False when the preview has no box to resize (a phone controller's), which
-   *  hides the Size row; absent means it can. */
+  /** False when the preview has no box to resize (a phone controller's); hides Size. Absent means it can. */
   canResizePreview?: () => boolean;
   getPreviewSize: () => PreviewSize;
   onPreviewSizeChange: (size: PreviewSize) => void;
-  /** The preview's and the output's Resolution scale (src/render/outputPower.ts),
-   *  a fraction from RESOLUTION_MIN to RESOLUTION_MAX. */
+  /** Fraction from RESOLUTION_MIN to RESOLUTION_MAX (src/render/outputPower.ts), for preview and output. */
   getPreviewResolution: () => number;
   onPreviewResolutionChange: (value: number) => void;
-  /** The pop-out output's live render readouts, null while none is open —
-   *  the second, "Output" Power card shows only while this is non-null. */
+  /** Null while none is open; the "Output" Power card shows only while non-null. */
   getOutputPowerStatus: () => OutputRenderStatus | null;
-  /** The output's own Quality choice, Resolution and Energy saving
-   *  (src/render/outputPower.ts), edited on the Output card and sent to its window. */
   getOutputQualityChoice: () => QualityChoice;
   onOutputQualityChoiceChange: (choice: QualityChoice) => void;
   getOutputResolution: () => number;
   onOutputResolutionChange: (value: number) => void;
   getOutputPowerMode: () => PowerMode;
   onOutputPowerModeChange: (mode: PowerMode) => void;
-  /** The button that opens this menu — excluded from the tap-outside
-   *  focus reset, and ringed (aria-pressed) while the panel is open. */
+  /** Excluded from the tap-outside focus reset; ringed (aria-pressed) while open. */
   toggleButton: HTMLElement;
 }
 
 export interface DeviceMenu {
   toggle(): void;
   close(): void;
-  /** Fed every frame while in a viz (any may be null: frame/ungained/anim
-   *  before audio is up, rawBands additionally on a mic-less renderer
-   *  device, mono there too unless the feed sends its waveform — see
-   *  AudioMeters.update) — drives the Input card's level wash, the spectrum strip's
-   *  feeds, and the meters. `frame` has the band faders applied; `ungained`
-   *  is the same frame before them (the strip's ghost bars); `pinnedBands`
-   *  is which bands the gain stage clamped (bandGains.ts's own pinnedBands);
-   *  `anim`/`mono`/`fixedEnergy`/`lufs` feed the meters (audioMeters.ts) —
-   *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
-   *  device isn't running its own extractor (renderer, synthetic feed);
-   *  `lufs` is this device's lufsAnalyser reading, null on the same paths
-   *  (the Dynamics card's Loudness row hides itself). `rateScale` is app.ts's
-   *  already-resolved sensitivity.ts's smoothingRateScale for this tick's
-   *  Smoothing value — forwarded to the meters so their own BPM settle and
-   *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
-   *  of the pipeline does; not re-resolved here, since resolveSmoothing()
-   *  slews its auto value and this runs every rAF tick. `beatDiag` is
-   *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
-   *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
-   *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
-   *  Dynamics card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
-   *  off the same *un-latched* AnimFrame as `anim` — null on the same paths.
-   *  A drive row's live pill reads its uniformPair() (the same number a
-   *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
-   *  its excess(); neither ever calls fired(), so polling it here every
-   *  tick can't steal a grid setting's pending edge out from under the
-   *  scene that's about to render it. `draw` is whether the panel draws this
-   *  tick (app.ts: every tick the scene renders, and at least the full
-   *  render cap's rate): false records only what must see every tick — the
-   *  meters' traces, the heat, the drive graphs' peaks — and skips every draw
-   *  and DOM write, so a display faster than the render cap doesn't redraw
-   *  the panel on every tick. */
+  /** Fed every frame while in a viz. Any may be null (frame/ungained/anim before audio is up; rawBands on a mic-less renderer, mono there too unless the feed sends its waveform).
+   *  `frame` has the band faders applied, `ungained` is the same before them (the ghost bars).
+   *  `fixedEnergy`, `lufs`, `beatDiag`, `gate` and `drives` are null wherever this device runs no extractor of its own (renderer, synthetic feed).
+   *  `rateScale` is app.ts's already-resolved smoothingRateScale; not re-resolved here because resolveSmoothing() slews its auto value and this runs every rAF tick.
+   *  `drives` comes off the same un-latched AnimFrame as `anim`: row pills read uniformPair() and the Frequencies overlay reads excess(); neither calls fired(), so polling can't steal a grid setting's pending edge from the scene.
+   *  `draw` is false on ticks the panel skips (a display faster than the render cap): only the meters' traces, the heat and the drive graphs' peaks record, with no draw or DOM write. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -875,34 +708,22 @@ export interface DeviceMenu {
     drives: SceneDrives | null,
     draw: boolean,
   ): void;
-  /** Moves the slider a MIDI mapping aims at (ui/midiCard.ts's applyCc), by
-   *  target id and controller value 0..127. Works with the panel shut. */
+  /** By target id and controller value 0..127; works with the panel shut. */
   applyMidiCc(target: string, cc: number): void;
-  /** Whether the panel is currently open — lets immersive fullscreen mode
-   *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
+  /** Lets immersive fullscreen (src/ui/fullscreen.ts) skip idle-hiding the gear under an open panel. */
   isOpen(): boolean;
-  /** The scene (or its palette) changed from outside the panel — a Set pad,
-   *  a key, Autopilot: rebuilds everything that follows the active scene, as
-   *  open() does. No-op while closed (open() does it then). */
+  /** The scene or palette changed from outside (Set pad, key, Autopilot): rebuilds what follows the scene. No-op while closed (open() does it). */
   sceneChanged(): void;
-  /** Whether the Master card's Picture block is on screen (panel open and
-   *  the controls column not scrolled past it) — app.ts samples the frame
-   *  for it only then (see onScreen.ts for why that sample is not free). */
+  /** app.ts samples the frame for the Picture block only while it is on screen (onScreen.ts says why that sample isn't free). */
   isPictureOnScreen(): boolean;
-  /** Whether the Bands card's Stems row (Lead and Hats) is on screen: the
-   *  stem split runs while it is, so the row keeps moving
-   *  (src/render/stemReaders.ts). */
+  /** The stem split runs only while this is true (src/render/stemReaders.ts). */
   isStemsRowOnScreen(): boolean;
 }
 
 // ---- styles --------------------------------------------------------------
-// Layout-level rules (columns, slider, hint reveal, toggle) are class rules in
-// controlsTheme.ts; the card and row-head grammar shared with the meters is
-// in controlsKit.ts; everything else per-element is inline here, in the same
-// cssText-constant convention as the rest of src/ui/.
+// Layout-level rules are class rules in controlsTheme.ts; the row-head grammar
+// shared with the meters is in controlsKit.ts; the rest is inline here.
 
-// "A" chip: filled when auto owns the row, outlined when the user does. The
-// "T" chip below shares the outlined style (autoChipManualStyle) unlit.
 const autoChipBaseStyle = `
   width: 17px; height: 16px; display: grid; place-items: center; border-radius: 3px;
   font: 500 9.5px/1 ${FONT_MONO}; cursor: pointer; padding: 0; flex-shrink: 0;
@@ -911,15 +732,10 @@ const autoChipLitStyle = (accent: string) =>
   `${autoChipBaseStyle} background: ${accent}; border: 1px solid ${accent}; color: #070a09;`;
 const autoChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
-// "T" chip: mutes the row to its floor and back (see the header comment).
-// Shares the A chip's geometry and unlit style, but lit it fills with FADER_OFF — the panel's
-// one "this is off" colour, the band faders' too — rather than the row's
-// accent, so a muted row never reads as a lit A chip at a glance.
+// Lit, "T" fills with FADER_OFF (the panel's one "this is off" colour), never
+// the row accent, so a muted row can't read as a lit A chip.
 const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
-/** Paints a row's O chip (createControlRow's `onlyThis`) from the current
- *  solo: filled with the row's accent while this setting is the solo, outlined
- *  otherwise. Also the title and aria-pressed. */
 function paintOnlyChip(chip: HTMLElement): void {
   const solo = getDriveSolo();
   const on = !!solo && `${solo.sceneId}:${solo.key}` === chip.dataset.soloKey;
@@ -931,14 +747,9 @@ function paintOnlyChip(chip: HTMLElement): void {
     : "Only this: switch off every other setting's reaction, so only this one moves";
 }
 
-/** The Master card's Expansion shape chips by name, in sceneSettings.ts's
- *  EXPANSION_SHAPES order — the chips' own labels and the output graph's
- *  Expansion tag both read these. */
+/** In sceneSettings.ts's EXPANSION_SHAPES order. */
 const EXPANSION_SHAPE_NAMES = ["Even", "Soft top", "Big moves only", "Up only", "Down only"] as const;
 
-// The Auto master bar — its own slim full-width strip at the top of the
-// settings column, a folded card's title-bar height (FOLDED_BAR_PX,
-// controlsTheme.ts).
 const autoMasterBaseStyle = `
   width: 100%; box-sizing: border-box; height: ${FOLDED_BAR_PX}px; flex-shrink: 0;
   cursor: pointer; padding: 0; border-radius: 3px;
@@ -946,19 +757,12 @@ const autoMasterBaseStyle = `
 `;
 const autoMasterStyle = `${autoMasterBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
 const autoMasterLitStyle = `${autoMasterBaseStyle} background: linear-gradient(${withAlpha("#1479b0", 0.28)}, ${withAlpha("#1479b0", 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
-// Label + ON/OFF sub-label inline on one line, centred in the bar.
 const autoMasterInnerStyle = `display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%;`;
 const autoMasterLabelStyle = (lit: boolean) =>
   `font: 500 13px/1.2 ${FONT_LABEL}; color: ${lit ? "#a0e7ff" : "rgba(255,255,255,0.55)"};`;
 const autoMasterSubStyle = (lit: boolean) =>
   `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: ${lit ? withAlpha("#8dccf9", 0.8) : "rgba(255,255,255,0.4)"};`;
 
-// The Input card's own "Auto" button (see micAuto.ts's header for what
-// "the whole mic" covers) — a compact, header-sized member of the
-// autoMaster* family above: same lit/unlit shape, same glass-tinted
-// pill, scaled down to sit beside a Reset chip in a card header instead of
-// spanning the settings column, and given the Input card's own accent
-// (INPUT_GREEN) rather than the Auto bar's sky blue.
 const micAutoBaseStyle = `
   font: 500 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; padding: 2.5px 8px;
   border-radius: 4px; cursor: pointer;
@@ -966,82 +770,55 @@ const micAutoBaseStyle = `
 `;
 const micAutoStyle = `${micAutoBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
 const micAutoLitStyle = `${micAutoBaseStyle} background: linear-gradient(${withAlpha(INPUT_GREEN, 0.28)}, ${withAlpha(INPUT_GREEN, 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
-// Wraps the Auto button and the Reset chip in the Input card's header —
 // createCard's `right` slot takes one element, not a list.
 const inputCardHeaderRightStyle = `display: flex; align-items: center; gap: 6px;`;
 
-// The column head above the Bands card (live dot · audio source, and the
-// column's one RAW chip) — a plain label side and a chip side, no card of
-// its own, the same shape audioMeters.ts's own meterGroupHeading rides
-// alongside (that file's meterGroupHeadingStyle sizes its own top margin
-// for sitting flush under a strip like this one).
+// Column head above the Bands card, no card of its own; audioMeters.ts's
+// meterGroupHeadingStyle sizes its top margin to sit flush under it.
 const columnHeadStyle = `display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px;`;
 const spectrumStatusStyle = `display: flex; align-items: center; gap: 6px; flex-shrink: 0;`;
 const liveDotStyle = (on: boolean) =>
   `width: 4px; height: 4px; border-radius: 50%; background: ${on ? LIVE_DOT : "rgba(255,255,255,0.3)"};`;
 const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
 
-// The Equaliser readouts' hint — plain text, not .vc-hint: that class waits
-// for hover/focus on an enclosing .vc-row, and this line has no row of its
-// own to wait on (it's always on screen alongside the readouts, not tucked
-// under a control someone has to find).
+// Plain text, not .vc-hint: that class waits for hover/focus on an enclosing
+// .vc-row, and this line has none.
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
   "Drag a knob up to boost a band, down to cut it. Pin an animation node to plug input nodes into it.";
 
-// The Bands card's Levels and Stems rows: a small caption, then a 3-column
-// grid of compact meters (BAND_LEVELS/STEM_LEVELS, below) — one row rather
-// than three full-width ones, since each only ever needs a bar and a jack.
 const levelsRowStyle = `display: flex; flex-direction: column; gap: 4px; margin-top: 10px;`;
 const levelsLabelStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.45);`;
 const levelsGridStyle = `display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;`;
-// Each cell is ~110px wide (377px card minus padding, over three columns and
-// two gaps) — tight enough that the row grammar's own label wants a smaller
-// font than a full-width row; no readout to shrink (bandLevelRows never
-// calls setReadout — the bar and jack already say everything one of these
-// needs to). padding/margin match the old full-width rows' own trick: a
-// `.vc-row`'s hover glow (controlsTheme.ts) reaches past its content, so
-// this cancels it back to the grid cell's own edge.
+// Cells are narrow, so the row label wants a smaller font. Padding/margin
+// cancel a `.vc-row` hover glow (controlsTheme.ts), which reaches past its
+// content, back to the cell's edge.
 const levelsCellStyle = `padding: 2px 8px; margin: -2px -8px;`;
 const levelsCellLabelStyle = `font-size: 11.5px;`;
 
-// The column head's one RAW chip — see its own build site (below, near
-// spectrumCol) for why one chip drives two independent raw modes at once.
-// The Smoothing paragraph is the useful half of audioMeters.ts's own former
-// RAW_CHIP_TITLE (that file no longer owns a chip to title).
+// See the build site near spectrumCol for why one chip drives two raw modes.
 const RAW_CHIP_TITLE =
   "Raw: the spectrum before the adaptive envelope and Bands gain, and every meter reading below its pre-smoothing value. Drag Smoothing (Input card) to Off instead to close that second gap for good — at Off, every eased reading already lands on exactly what this shows.";
-// The column head's HEAT chip (heat.ts's lens) — see its build site below.
 const HEAT_CHIP_TITLE =
   "Heat lens: every wired animation node and input node glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
 
-// ---- The patch bay (a drive row's port/summary/sparkline, and its pinned
-// patch panel) — see this file's own header doc-comment paragraph. Every
-// colour/label comes from src/ui/driveSources.ts; this is only layout.
+// ---- The patch bay: layout only; colours and labels come from
+// src/ui/driveSources.ts.
 
-// createControlRow's own drivePanel slot: the label + summary wrapper that
-// pins on click. Stacked (label, then the summary on its own line) rather
-// than side by side — inline, the summary had nowhere left to grow in the
-// narrow controls column and ellipsized to unreadable ("Built-in: two-st…")
-// even at a middling width; a second line wraps instead, however long the
-// source list gets.
+// Label and summary stack: side by side, the summary ellipsized to unreadable
+// in the narrow controls column.
 const driveRowLeftStyle = `display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; cursor: pointer;`;
 const driveSummaryStyle = `
   font: 400 11px/1.35 ${FONT_MONO}; color: rgba(255,255,255,0.45); min-width: 0;
   overflow-wrap: break-word;
 `;
-// The input port: a 10 px ring at the row's own left edge, facing the
-// meters column (which docks to the screen's own left edge — see
-// controlsTheme.ts's .vc-spectrum-col). Position/size/shape live in
-// controlsTheme.ts's own .vc-drive-port class rule, not here; drivePortStyle()
-// below only ever writes what actually depends on this row's own live
-// state — the setting's plugged sources' colours, and the pinned/preview
-// ring.
+// Port position/size/shape live in controlsTheme.ts's .vc-drive-port rule;
+// drivePortStyle() writes only what depends on live state (source colours,
+// pinned/preview ring).
 
 const driveSparkWrapStyle = `margin-top: 4px; height: 20px;`;
 const driveSparkCanvasStyle = `display: block; width: 100%; height: 100%;`;
 
-// The pinned row's expanded panel.
 const drivePatchPanelStyle = `
   margin-top: 8px; padding: 9px 9px 8px; border-radius: 7px;
   background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08);
@@ -1050,7 +827,6 @@ const drivePatchPanelStyle = `
 const drivePatchHeadStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;`;
 const driveEyebrowStyle = `font: 500 9.5px/1 ${FONT_LABEL}; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.4);`;
 
-// Mix segmented control (Add/Strongest/Only when).
 const driveSegStyle = `display: inline-flex; border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; overflow: hidden;`;
 const driveSegBtnBase = `
   font: 500 10px/1 ${FONT_LABEL}; letter-spacing: 0.08em; text-transform: uppercase;
@@ -1060,13 +836,9 @@ const driveSegBtnStyle = `${driveSegBtnBase} color: rgba(255,255,255,0.6);`;
 const driveSegBtnLitStyle = `${driveSegBtnBase} color: #fff; background: rgba(255,255,255,0.12);`;
 const driveSegBtnDisabledStyle = `${driveSegBtnBase} color: rgba(255,255,255,0.22); cursor: not-allowed;`;
 
-// One source line. Five fixed columns so every line — condition or plain,
-// muted or not — aligns identically (this file's own header): a left gutter
-// for the condition marker (driveSrcGutterStyle, never a border+padding on
-// the whole line — see controlsTheme.ts's .vc-drive-gutter-cond), the mute
-// switch, the colour dot, the name, then the unplug button; driveSrcCtrlsStyle
-// (row 2) spans from the name's own column so it indents under the name, not
-// under the gutter/switch/dot.
+// Five fixed columns so every line aligns, condition or plain, muted or not.
+// The condition marker is a gutter column, never border+padding on the line
+// (controlsTheme.ts's .vc-drive-gutter-cond); row 2 indents under the name.
 const driveSrcListStyle = `display: flex; flex-direction: column;`;
 const driveSrcLineStyle = `
   display: grid; grid-template-columns: 12px 20px 10px minmax(0,1fr) auto; align-items: center; gap: 6px 9px;
@@ -1082,9 +854,6 @@ const driveSrcRemoveStyle = `
 const driveSrcCtrlsStyle = `grid-column: 4 / -1; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;`;
 const driveEmptySrcStyle = `font: 400 12px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,0.55); padding: 3px 0;`;
 
-// Height (mini) segmented control, the grid division chips, and the role
-// toggle — smaller than the mix control, since a source line already
-// carries a lot.
 const driveMiniSegStyle = `display: inline-flex; border: 1px solid rgba(255,255,255,0.16); border-radius: 5px; overflow: hidden;`;
 const driveMiniSegBtnBase = `
   font: 500 9px/1 ${FONT_LABEL}; letter-spacing: 0.05em; text-transform: uppercase;
@@ -1100,15 +869,13 @@ const driveWeightRangeStyle = `flex: 1;`;
 const driveWeightOutStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.6); min-width: 34px; text-align: right;`;
 const driveDrawHintStyle = `font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255,255,255,0.5);`;
 
-// The Line add-chip's own tooltip — a source line has no room for a fourth
-// line of prose once it's plugged in (buildSourceLine's own drawHint is the
-// short version shown there instead).
+// Too long for a plugged-in source line, which shows buildSourceLine's short
+// drawHint instead.
 const LINE_HINT_TEXT =
   "Draw the line down onto the bars this setting listens to — keep it just above where they rest so only the hits poke over it. A band left at the top is ignored.";
 
-// "+ Add by name" chip groups — always open in the stacked layout (jacks
-// are far away there, this phase has none yet either); behind a small
-// disclosure in the wide layout.
+// Always open in the stacked layout (jacks are far away there); a disclosure
+// in the wide layout.
 const driveAddDisclosureStyle = `
   align-self: flex-start; background: none; border: none; padding: 0;
   font: 400 11.5px/1.4 ${FONT_LABEL}; color: ${withAlpha(BANDS_AMBER, 0.85)}; text-decoration: underline;
@@ -1125,7 +892,6 @@ const driveChipStyle = `
 const driveChipLitStyle = (color: string) =>
   `${driveChipStyle} color: #fff; border-color: ${color}; background: ${withAlpha(color, 0.16)};`;
 
-// The output graph — 4 s of sourceValues()/valueOf().
 const driveOutHeadStyle = `display: flex; justify-content: space-between; align-items: baseline;`;
 const driveOutValStyle = `font: 400 12px/1 ${FONT_MONO}; color: #fff;`;
 const driveOutCanvasStyle = `display: block; width: 100%; height: 56px; border-radius: 5px; background: rgba(255,255,255,0.02);`;
@@ -1136,11 +902,9 @@ const driveResetLinkStyle = `
 `;
 
 
-/** Solo's eye (positionSoloEye) — its box, which controlsTheme.ts's
- *  .vc-solo-eye rule sizes to match. */
+/** Matches the .vc-solo-eye box in controlsTheme.ts. */
 const SOLO_EYE_PX = 18;
 
-// Footer strip.
 const footerStyle = `
   display: flex; align-items: center; justify-content: space-between; padding: 7px 12px;
   background: ${GLASS_BG};
@@ -1153,29 +917,18 @@ const footerBtnStyle = `
   background: none; border: none; padding: 0; cursor: pointer;
 `;
 
-// The Input card doubles as a level meter: two stacked background washes
-// (sized per frame in update()) under the glass, not separate bars — a bar
-// stacked over a slider read as a second, draggable control it wasn't:
-//  - the tick: a 2px hard edge at FeatureFrame.level, the room's absolute
-//    loudness against a fixed dB window — always input-green, and unmoved by
-//    the Auto-gain toggle below or by Sensitivity, since neither ever
-//    touches it.
-//  - the fill: a solid wash out to the shaped (post-Auto-gain,
-//    post-sensitivity) level — where the scene is actually reacting right
-//    now. Its color rides the --wash custom property (see washColor()) so
-//    only that one value needs writing each frame as the level nears
-//    clipping.
-// The gap between tick and fill edge is Auto-gain and Sensitivity together,
-// visibly: flip Auto-gain on in a quiet room and the gap visibly opens.
-//
-// Hot-zone ramp for the fill wash: green all the way up to HOT_START, then
-// green -> yellow over the next slice, then yellow -> red in the last
-// PEAK_START..1 sliver — a silent "the scene has stopped reacting, you're
-// pinned at max" cue that the flat level wash alone doesn't give.
-const HOT_START = 0.96; // last 4%: green -> yellow
-const PEAK_START = 0.99; // last 1%: yellow -> red
-const WASH_ALPHA = 0x26; // resting fill alpha
-const WASH_HOT_ALPHA = 0x40; // fill alpha at full clip — needs to be more opaque to read as a warning
+// The Input card doubles as a level meter via two background washes sized per
+// frame in update(); a bar over a slider read as a second, draggable control.
+//  - tick: 2px edge at FeatureFrame.level (absolute loudness on a fixed dB
+//    window), always input-green, untouched by Auto-gain or Sensitivity.
+//  - fill: out to the shaped (post-Auto-gain, post-sensitivity) level; its
+//    colour rides --wash (washColor()), the only value written per frame.
+// Fill ramp: green up to HOT_START, then yellow, red from PEAK_START: a silent
+// "pinned at max" cue.
+const HOT_START = 0.96;
+const PEAK_START = 0.99;
+const WASH_ALPHA = 0x26;
+const WASH_HOT_ALPHA = 0x40; // more opaque at full clip, to read as a warning
 
 const inputCardWashStyle = `
   --wash: ${withAlpha(INPUT_GREEN, WASH_ALPHA / 255)};
@@ -1205,8 +958,6 @@ function toHex(n: number): string {
   return Math.round(n).toString(16).padStart(2, "0");
 }
 
-/** The fill wash's color for a shaped level in [0,1]: input-green below
- *  HOT_START, ramping through yellow to red as the level nears 1 (clipped). */
 function washColor(level: number): string {
   let rgb = INPUT_GREEN_RGB;
   let alpha = WASH_ALPHA;
@@ -1227,15 +978,9 @@ function washColor(level: number): string {
 
 // ---- builders ------------------------------------------------------------
 
-/** Marks a heading as a keyboard block — see the header comment's keyboard
- *  paragraph. Idempotent (safe to call on every render of a heading that's
- *  rebuilt fresh each time, and a no-op on one that's already marked), so a
- *  static card title can be marked once at construction while a per-scene
- *  group heading gets marked on every renderSceneSettings without doubling
- *  up. The badge itself is filled in later by renumberBlocks. `data-key`
- *  (keyHints.ts) is the badge's own, not the heading's, since the badge is
- *  what actually shows the digit the hover tooltip reads off — it carries
- *  no `data-keycap`, on purpose: it already shows that digit as plain text. */
+/** Idempotent: card titles mark once, per-scene group headings on every
+ *  renderSceneSettings. The badge is filled by renumberBlocks. No `data-keycap`
+ *  on it, on purpose: it already shows the digit as text. */
 function markBlock(heading: HTMLElement): void {
   if (heading.classList.contains("vc-block")) return;
   heading.classList.add("vc-block");
@@ -1245,153 +990,82 @@ function markBlock(heading: HTMLElement): void {
   heading.prepend(badge);
 }
 
-/** The other half of markBlock — used where a heading's block-ness depends on
- *  the active scene (the Scene card title, see renderSceneSettings). */
 function unmarkBlock(heading: HTMLElement): void {
   if (!heading.classList.contains("vc-block")) return;
   heading.classList.remove("vc-block");
   heading.querySelector(".vc-block-n")?.remove();
 }
 
-// Exported so audioMeters.ts's Hits card's Shape section
-// (src/audio/hitStrength.ts) can reuse this same slider row instead of
-// duplicating it — the meters panel already builds one control this way.
+// Exported for audioMeters.ts's Hits card Shape section (hitStrength.ts).
 export interface ControlRowSpec {
   label: string;
   accent: string;
-  /** Makes the row mappable to a MIDI knob (ui/midiCard.ts): `id` is the
-   *  target a mapping stores (ui/midiMap.ts), `label` what the mapping list
-   *  calls it. */
+  /** `id` is the target a mapping stores (ui/midiMap.ts), `label` its name in the mapping list (ui/midiCard.ts). */
   midi?: { id: string; label: string };
   min: number;
   max: number;
-  /** Linear rows only — the slider's native step. */
   step?: number;
   defaultValue: number;
-  /** log: the slider is a 0..100 position mapped so the midpoint lands near
-   *  defaultValue (the gain rows); linear: the slider is the value itself. */
+  /** log: a 0..100 slider position whose midpoint lands near defaultValue; linear: the value itself. */
   mapping: "log" | "linear";
-  /** Log rows only. When set, the slider's bottom position snaps to exactly 0
-   *  (an explicit kill, DJ-mixer style) instead of continuing the log curve
-   *  down to `min` — log(0) has no position, so 0 needs this special case.
-   *  The curve itself still spans `min`..`max` across the rest of the track. */
+  /** Log rows only: the slider's bottom snaps to exactly 0 (a kill), since log(0) has no position. */
   zeroAtMin?: boolean;
-  /** Mono suffix after the digits ("×"). */
   unit?: string;
   format: (value: number) => string;
-  /** Set when `format` shows the value scaled (a % row shows value × 100):
-   *  a typed number is divided by it, so the row takes what its readout
-   *  shows. Spread controlsKit.ts's `percentReadout` rather than setting it
-   *  apart from `format`. */
+  /** Set when `format` scales the value (a % row shows value × 100): typed numbers are divided by it. Spread controlsKit.ts's `percentReadout`. */
   typedScale?: number;
   description?: string;
-  /** Wires the auto chip — see autoTune.ts. Omit to leave the row manual-only. */
   auto?: {
     isEnabled: () => boolean;
     toggle: (on: boolean) => void;
     resolveLive: () => number;
-    /** The manually-stored value — read when the chip turns auto off, since
-     *  that reveals whatever's stored, not whatever the slider happened to be showing. */
+    /** Read when the chip turns auto off: reveals what's stored, not what the slider showed. */
     getManual: () => number;
   };
-  /** Fires after every chip click that flips `auto` (either direction), and
-   *  after every commit() — a drag or reset hands the row back to manual
-   *  through its own onChange, which flips the flag just the same — the one
-   *  hook the Input card's rows use to keep its own Auto button in
-   *  sync (deviceMenu.ts's refreshMicAuto) instead of each row sprinkling
-   *  that call individually, and the scene rows use to keep the Auto
-   *  master bar in sync (refreshAutoMaster). Omit for a row nothing else
-   *  needs to hear about. */
+  /** After every chip click that flips `auto` and every commit() (a drag or reset hands the row back to manual through onChange). The one hook the Input card rows use for refreshMicAuto and the scene rows for refreshAutoMaster. */
   onAutoToggled?: () => void;
-  /** Lets a value typed past the slider's ends through as a custom value
-   *  (render/customValues.ts), bound to a scene+key already, and shows ⚠ by
-   *  the number while one is set. Every row's readout is typable either way;
-   *  without this (a row with no scene setting behind it) a typed value
-   *  clamps to the slider's ends. */
+  /** Lets a value typed past the slider's ends stand as a custom value (render/customValues.ts), shown with ⚠. Without it, typed values clamp. */
   custom?: {
     get(): number | undefined;
     set(value: number): void;
-    /** Drops the custom value, keeping the slider's stretch. */
     clear(): void;
-    /** Where the slider is stretched to past one of its ends, if it is. */
     stretch(): number | undefined;
     stretchTo(to: number): void;
-    /** Drops the custom value and the stretch. */
     reset(): void;
-    /** `raw` as this row's custom value, or null when it takes none: inside
-     *  the slider (the store takes it) or a count (render/customValues.ts's
-     *  fitCustom). */
+    /** `raw` as this row's custom value; null when it takes none: inside the slider, or a count (customValues.ts's fitCustom). */
     fit(raw: number): number | null;
-    /** How far a custom value may go, for the ⚠'s tooltip — null for
-     *  unbounded (a dev build). */
+    /** For the ⚠ tooltip; null for unbounded (a dev build). */
     reach(): { lo: number; hi: number } | null;
-    /** What to fall back to once emptying the field drops a custom value —
-     *  the row's already-resolved live value (auto/override-aware, same
-     *  getter the row's own auto path uses), not a raw manual read, so
-     *  dropping it never fights whatever else currently owns the row. */
+    /** The already-resolved live value (auto/override-aware, as the row's auto path reads it), not a raw manual read, so dropping a custom value never fights whatever else owns the row. */
     resolve(): number;
   };
-  /** SceneSetting.reads (sceneSettings.ts), resolved to concrete signals and
-   *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
-   *  a setting with no `reads` entries. */
+  /** SceneSetting.reads resolved to signals and callbacks by appendSettingRow. */
   reads?: readonly ResolvedSignalRead[];
-  /** The one extension point a drive setting's row needs (this file's own
-   *  doc-comment paragraph) — built by appendSettingRow's buildDriveRow,
-   *  never forked out of this function: `port` mounts absolutely at the
-   *  row's left edge (`.vc-row` is already `position: relative`); `summary`
-   *  mounts inline right after the label, inside the same clickable wrapper;
-   *  `below` mounts as the row's last child (the sparkline, and — once
-   *  pinned — the patch panel); `onPin` fires on a click anywhere in the
-   *  label/summary wrapper or on `port` (stopPropagation'd so it never also
-   *  triggers this row's own click-to-focus-slider handler below) and
-   *  toggles. Omit for a setting with no `drive`. */
+  /** A drive setting's row extension, built by appendSettingRow's buildDriveRow. `port` mounts absolutely at the row's left edge; `summary` inline after the label, inside the clickable wrapper; `below` as the last child (sparkline, then the pinned patch panel). `onPin` fires on a click on that wrapper or on `port` (stopPropagation'd so the row's click-to-focus-slider handler doesn't also run). */
   drivePanel?: {
     port: HTMLElement;
     summary: HTMLElement;
     below: HTMLElement;
     onPin: () => void;
   };
-  /** The O chip beside A and T: "Only this" (driveSolo.ts) for this setting.
-   *  Omit for a setting with no `drive`. The chip carries `data-solo-key`
-   *  so the menu's one onDriveSoloChange listener can relight every row. */
+  /** The O chip: "Only this" (driveSolo.ts). It carries `data-solo-key` so the menu's one onDriveSoloChange listener can relight every row. */
   onlyThis?: { sceneId: string; key: string };
-  /** Fires on a click anywhere on the card, the slider included, that isn't
-   *  one of its side controls (isCardPress) — pin-only, so a stray click on
-   *  a pinned card can't close it. Every Scene-card row passes it, drive or
-   *  not; omit for a row that can't be pinned. */
+  /** Fires on a click anywhere on the card that isn't a side control (isCardPress); pin-only, so a stray click can't close a pinned card. */
   onCardPin?: () => void;
-  /** Other selected items' own current value for this exact setting — the
-   *  multi-item-selection bridge (registry.ts's `appendRow` `linked` option,
-   *  itemBoxes.ts's multi-strain edit). Present (possibly with 0 entries)
-   *  only for a row appendSettingRow built with `linked`; every other row
-   *  omits this field entirely, so it never allocates the tick-mark DOM at
-   *  all. A tick is drawn on the slider track at a linked value's own
-   *  position (its own colour, or a neutral one) only while it disagrees
-   *  with this row's current value — `row.setLinkedTicks` (the returned
-   *  object) is how a caller keeps this current after its own commit
-   *  changes which of them still disagree, since only this row's own edits
-   *  can ever change any of them (their own rows never render while
-   *  selected together). */
+  /** Other selected items' value for this exact setting (registry.ts's `appendRow` `linked` option, the multi-item selection bridge). Present only for a row built with `linked`, so other rows never allocate the tick DOM. A tick is drawn at a linked value's position only while it disagrees with this row; a caller keeps it current via the returned `setLinkedTicks`, since only this row's own edits change which still disagree (their own rows don't render while selected together). */
   linkedTicks?: readonly { value: number; colour?: string }[];
 }
 
-/** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
- *  against the active scene: `active` closes over the sibling-setting getter
- *  a SignalLink.activeWhen predicate needs (built once in appendSettingRow,
- *  not per frame), and `onReveal`, present only when the SignalSpec itself
- *  has a `monitor` anchor, is the click target for its pill — unfold/scroll/
- *  flash the meter row that shows it (audioMeters.ts's revealRow). */
+/** One SceneSetting.reads entry resolved against the active scene. `active` closes over the sibling-setting getter (built once in appendSettingRow, not per frame); `onReveal`, present only when the SignalSpec has a `monitor` anchor, unfolds/scrolls to/flashes that meter row (audioMeters.ts's revealRow). */
 interface ResolvedSignalRead {
   signal: SignalSpec;
   active: () => boolean;
   onReveal?: () => void;
 }
 
-/** Shared by every document-level hotkey (H, Tab, the digits) and by
- *  wireHoverFocus below, and imported into app.ts for its own beat-trim keys
- *  (B, [, ], comma, period): ignored while typing somewhere (a range slider
- *  keeping focus after a drag is fine — that's still "in the panel", there's
- *  just nothing to type in the panel itself). */
+/** Shared by every document-level hotkey and wireHoverFocus, and imported by
+ *  app.ts for its beat-trim keys. A range slider keeping focus after a drag is
+ *  not typing. */
 export function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   const tag = t.tagName;
@@ -1400,16 +1074,11 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   return false;
 }
 
-/** Wires A/R/T on a row's own focusable control (the slider or the toggle
- *  pill) — kept on the control itself, not the document, so the keys always
- *  act on whichever row the Tab ring last focused. Routes through the row's
- *  existing click handlers (`.click()`) rather than re-implementing them, so
- *  a hotkey and its chip can never drift apart. `auto` is omitted for rows
- *  with no auto weights (the A key then no-ops, matching the hidden chip).
- *  The single place all three keys report to keyHints.ts's noteKeyUse, so
- *  every row (this file's own scene-setting rows, and the hand-rolled Auto
- *  strength row that also calls this) shares one count per id rather than
- *  each call site remembering to. */
+/** A/R/T on a row's focusable control, kept on the control (not the document)
+ *  so the keys act on whichever row the Tab ring last focused. Goes through the
+ *  chips' `.click()` handlers so key and chip can't drift apart. `auto` is
+ *  omitted for rows with no auto weights. The one place all three report to
+ *  keyHints.ts's noteKeyUse. */
 function wireRowKeys(
   control: HTMLElement,
   actions: { auto?: () => void; reset: () => void; toggleOff: () => void },
@@ -1437,19 +1106,14 @@ function wireRowKeys(
   });
 }
 
-// How far from the thumb (in px) the magnetic pull starts, and how much
-// extra scale it stacks on top of the row's existing 1.7x hover/focus boost
-// (controlsTheme.ts) at zero distance — see wireThumbMagnet below.
+// Pull radius from the thumb, and the extra scale stacked on the row's
+// hover/focus boost (controlsTheme.ts) at zero distance.
 const THUMB_MAGNET_RADIUS_PX = 48;
 const THUMB_MAGNET_MAX_BOOST = 1.3;
 
-/** Makes a slider's thumb grow further as the pointer nears it, on top of
- *  the row's existing hover/focus scale-up — a bigger target exactly where
- *  the pointer already is, rather than uniformly across the row. Written as
- *  a --vc-thumb-boost custom property that the thumb's transform multiplies
- *  in (controlsTheme.ts), so it composes with that existing rule instead of
- *  fighting it, and costs nothing when the pointer is elsewhere (falls back
- *  to 1). Purely a mouse nicety — keyboard/touch interaction never sets it. */
+/** Grows the thumb as the pointer nears it. Written as --vc-thumb-boost, which
+ *  the thumb's transform multiplies in (controlsTheme.ts), so it composes with
+ *  the row's hover rule and falls back to 1. Mouse only. */
 function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
   row.addEventListener("mousemove", (e) => {
     const rect = slider.getBoundingClientRect();
@@ -1464,43 +1128,30 @@ function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
   row.addEventListener("mouseleave", () => row.style.removeProperty("--vc-thumb-boost"));
 }
 
-// The last real mouse position seen anywhere in the panel — shared across
-// every wireHoverFocus call (there's exactly one device menu instance) rather
-// than kept per-row, because the case this exists to catch is cross-row:
-// scrolling `.vc-controls-col` (or a keyboard jumpToBlock's scrollIntoView)
-// with a stationary cursor carries a *different* row under it and fires a
-// synthetic mousemove there at the unchanged coordinates. A per-row last-seen
-// position wouldn't catch that — the newly-arrived row has never seen this
-// position before even though the real cursor didn't move — so the check has
-// to be panel-wide to recognize "nothing actually moved."
+// Last real mouse position in the panel, shared across rows: scrolling with a
+// stationary cursor (or jumpToBlock's scrollIntoView) puts a different row
+// under it and fires a synthetic mousemove at unchanged coordinates, which only
+// a panel-wide check can recognize as "nothing moved."
 let lastHoverX = -1;
 let lastHoverY = -1;
 
-// True only for the duration of a wireHoverFocus-triggered control.focus()
-// call below — appendSettingRow's onRowFocusIn reads this (synchronously,
-// from inside the focusin its own control.focus() call below dispatches) to
-// tell a real pointer-originated focus apart from a keyboard/click one, so
-// only the former waits out HOVER_SELECT_DELAY_MS before selecting. One
-// shared flag rather than per-row state, same reasoning as lastHoverX/Y
-// above — there's exactly one device menu instance.
+// True only during wireHoverFocus's control.focus(); appendSettingRow's
+// onRowFocusIn reads it synchronously from the resulting focusin to tell
+// pointer focus (which waits HOVER_SELECT_DELAY_MS) from keyboard/click. One
+// flag, not per row, like lastHoverX/Y.
 let pointerFocusOriginated = false;
 
-// How long a pointer-originated row focus waits before it actually selects
-// (appendSettingRow's onRowFocusIn) — long enough that a fast diagonal
-// sweep toward the spectrum strip never lands, short enough that resting
-// the pointer on a row still feels immediate.
+// Long enough that a fast diagonal sweep toward the spectrum strip never
+// selects, short enough that resting on a row feels immediate.
 const HOVER_SELECT_DELAY_MS = 150;
 
-/** Focuses `control` on real pointer movement over `row` — a hover row reads
- *  as focused already (controlsTheme.ts styles :hover and :focus-within
- *  identically), so this makes the keyboard agree without a click first.
- *  Must use `preventScroll` — the panel's columns are `.vc-scroll`, and a bare
- *  focus() would scroll the row into view, sliding it out from under the
- *  cursor (see bandFaders.ts's own hit.focus() for the same reason). Never
- *  steals focus from a typing target (a typed readout's blur commits its
- *  value, so mid-type is off limits) — checked against document.activeElement,
- *  not the event target, since the pointer is over this row, not the readout
- *  holding focus elsewhere. */
+/** Focus on real pointer movement, so the keyboard agrees with the hover
+ *  styling (controlsTheme.ts styles :hover and :focus-within alike).
+ *  `preventScroll` is required: a bare focus() would scroll the `.vc-scroll`
+ *  column and slide the row from under the cursor (as bandFaders.ts's
+ *  hit.focus()). Never steals from a typing target: a typed readout's blur
+ *  commits, and the check is on document.activeElement since the pointer is
+ *  over this row, not the readout. */
 function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   row.addEventListener("mousemove", (e) => {
     if (e.clientX === lastHoverX && e.clientY === lastHoverY) return;
@@ -1513,36 +1164,26 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   });
 }
 
-/** What a click on a row's card leaves alone rather than pinning
- *  (isCardPress): anything that's a control in its own right — the A/T/reset
- *  chips, the signal pills — and the pinned patch panel, whose own chips and
- *  buttons rebuild it. The row's own value control counts as the card. */
+/** What a card click leaves alone (isCardPress): real controls (chips, signal
+ *  pills) and the pinned patch panel, whose buttons rebuild it. The row's own
+ *  value control counts as the card. */
 const ROW_OWN_CONTROLS = "button, input, select, textarea, a, [role], .vc-drive-patch";
 
-/** A click on `row` counts as pressing the card itself — its padding, text,
- *  sparkline, or its own value control `main` (the slider, switch or picker
- *  strip; `click` only lands once the pointer is up, so a slider drag
- *  finishes before a patch panel elsewhere collapses and shifts the row) —
- *  rather than one of its side controls. */
+/** A click counts as pressing the card itself, including its value control
+ *  `main`. `click` lands only once the pointer is up, so a slider drag finishes
+ *  before a patch panel elsewhere collapses and shifts the row. */
 function isCardPress(row: HTMLElement, main: HTMLElement, target: EventTarget | null): boolean {
   const own = (target as Element | null)?.closest(ROW_OWN_CONTROLS);
   return !own || !row.contains(own) || main.contains(own);
 }
 
-/** The pointer's fraction along `slider`'s track (0 at min, 1 at max,
- *  clamped) — used by wireSliderQuickJump's c binding below. A keydown
- *  carries no coordinates, so this reads lastHoverX/lastHoverY, the same
- *  panel-wide last-real-cursor-position wireHoverFocus above maintains.
- *  Undefined when the pointer hasn't entered the panel yet, or sits outside
- *  `row` — the desync wireHoverFocus's own comment describes, where
- *  scrolling carries a different row under a stationary cursor without
- *  moving focus there; c should no-op then rather than edit a row the
- *  pointer has left. Maps across the slider's full rect, not its thumb's
- *  inset travel, matching both wireThumbMagnet's thumbX above and the
- *  --vc-fill percentage (controlsTheme.ts) that paints the track — the
- *  boundary the eye reads as "the value" sits at this position, and the
- *  thumb itself is only 3px wide, so the half-thumb inset this skips is
- *  sub-pixel. */
+/** The pointer's fraction along the track (0..1, clamped), for
+ *  wireSliderQuickJump's c. A keydown has no coordinates, so it reads
+ *  lastHoverX/Y. Undefined before the pointer enters the panel or when it sits
+ *  outside `row` (the scroll desync wireHoverFocus describes), so c no-ops
+ *  rather than edit a row the pointer left. Maps across the slider's full rect,
+ *  matching wireThumbMagnet and the --vc-fill track paint (controlsTheme.ts);
+ *  the skipped half-thumb inset is sub-pixel. */
 function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | undefined {
   if (lastHoverX < 0) return undefined;
   const rowRect = row.getBoundingClientRect();
@@ -1559,19 +1200,11 @@ function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | u
   return Math.min(1, Math.max(0, (lastHoverX - rect.left) / rect.width));
 }
 
-/** z centers a focused slider, x maxes it out, c jumps it to wherever the
- *  pointer last was along the track (pointerFraction above) — a fast way to
- *  land on any value without dragging. No key for the low end: Home already
- *  jumps a native range input to its min for free (onKeyDown, below, doesn't
- *  intercept it), so the only capabilities worth adding are the ones
- *  Home/End don't cover. Plain single keys, not a chord — z/x/c collide with
- *  nothing else live while a slider has focus (A/R/T/D, the panel's
- *  H/M/Tab/Shift+1-9, the arrows, and Home/End are all spoken for). c no-ops when
- *  pointerFraction returns undefined, rather than falling back to some other
- *  value — see its comment for why. Sets .value then redispatches "input"
- *  rather than duplicating each slider's own commit logic, so this stays a
- *  one-line addition at every call site regardless of what that site's
- *  "input" listener does. */
+/** z centers a focused slider, x maxes it, c jumps to where the pointer last
+ *  was (pointerFraction). No low-end key: Home does it natively (onKeyDown
+ *  leaves it alone). Plain keys are safe: z/x/c collide with nothing live
+ *  while a slider has focus. Sets .value and redispatches "input" so each
+ *  site's own commit logic runs. */
 function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
   slider.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -1585,9 +1218,8 @@ function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
   });
 }
 
-/** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
- *  hint. Gain rows (log-mapped) and scene setting rows (linear) are the same
- *  shape, so the construction and pos<->value mapping live here once. */
+/** Gain rows (log) and scene setting rows (linear) share one shape; the
+ *  pos<->value mapping lives here. */
 export function createControlRow(spec: ControlRowSpec) {
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -1612,21 +1244,17 @@ export function createControlRow(spec: ControlRowSpec) {
   if (!spec.unit) unit.style.display = "none";
   readout.append(digits, unit);
 
-  // Last value display() rendered and whether auto owned it — what the typed
-  // field opens on, and what a cancelled edit puts back.
+  // What the typed field opens on, and what a cancelled edit restores.
   let lastValue = spec.defaultValue;
   let lastAuto = false;
 
-  // Typed entry: a click on the digits makes that same span editable in
-  // place — the same digits, with only a caret added (.vc-digits-edit,
-  // controlsTheme.ts): no input box, underline or background. typedValue.ts
-  // says what the text means. Enter, Tab or a click away commits through
-  // commit(), the same path as a drag; Escape puts the value back.
-  // Pointer-only, like the thumb magnet: the panel's ring (ringElements()
-  // below) walks the sliders, and Enter (Play) and the bare digits (the
-  // Set's pads) are already spoken for, so no key is left to open it. While
-  // `editing`, setReadout leaves the digits alone and refreshAuto skips the
-  // row, so a live value can't overwrite what's being typed.
+  // Typed entry: a click on the digits makes that span editable in place
+  // (.vc-digits-edit, controlsTheme.ts; typedValue.ts says what the text
+  // means). Enter, Tab or a click away commits through commit(); Escape
+  // restores. Pointer-only: ringElements() walks the sliders and Enter and the
+  // bare digits are taken, so no key is left to open it. While `editing`,
+  // setReadout leaves the digits alone and refreshAuto skips the row, so a live
+  // value can't overwrite what's typed.
   let editing = false;
   let openedText = "";
   digits.classList.add("vc-digits-typable");
@@ -1647,9 +1275,9 @@ export function createControlRow(spec: ControlRowSpec) {
       slider.focus({ preventScroll: true });
     }
   });
-  // Only characters parseTyped can read get in: anything else typed, pasted
-  // or dropped is filtered (a comma becomes the point), and a line break or
-  // formatting (contenteditable's own Enter/Cmd+B paths) never lands.
+  // Only characters parseTyped can read get in; anything else typed, pasted or
+  // dropped is filtered (a comma becomes the point), and no line break or
+  // formatting lands.
   digits.addEventListener("beforeinput", (e) => {
     if (e.inputType.startsWith("delete") || e.inputType.startsWith("history")) return;
     if (e.inputType === "insertCompositionText") return; // not cancelable; parseTyped judges the result
@@ -1664,11 +1292,9 @@ export function createControlRow(spec: ControlRowSpec) {
   });
   digits.addEventListener("drop", (e) => e.preventDefault());
 
-  // ⚠ left of the number while a custom value is set (ControlRowSpec.custom),
-  // in the row's own accent, glowing faintly (.vc-custom-mark,
-  // controlsTheme.ts). A drawn triangle, not the ⚠ character, which some
-  // systems render as a colour emoji; drawn twice, the copy underneath
-  // blurred into the glow that pulses.
+  // ⚠ in the row's accent while a custom value is set (.vc-custom-mark). A
+  // drawn triangle, not the character, which some systems render as a colour
+  // emoji; drawn twice, the copy underneath blurred into the pulsing glow.
   let customMark: HTMLSpanElement | null = null;
   if (spec.custom) {
     const triangle = (cls: string) =>
@@ -1689,12 +1315,11 @@ export function createControlRow(spec: ControlRowSpec) {
     readout.insertBefore(customMark, digits);
   }
 
-  // Function declarations, hoisted within this call, so the listeners above
-  // can name them before display(), commit() and clearOff() exist below.
+  // Hoisted, so the listeners above can name them before display(), commit()
+  // and clearOff() exist.
   function openEdit(): void {
     editing = true;
-    // An "Off" readout (muted, or a row's Off stop) is in the mono face —
-    // the field always opens on the number, in the digits' own face.
+    // An "Off" readout is in the mono face; the field always opens on the number.
     openedText = spec.format(lastValue);
     setDigitsText(openedText);
     digits.style.cssText = digitsStyle;
@@ -1740,8 +1365,7 @@ export function createControlRow(spec: ControlRowSpec) {
   function commitTyped(text: string): void {
     const typed = parseTyped(text);
     if (typed === null) {
-      // Emptying the field is how a custom value is dropped, and the
-      // slider's stretch with it.
+      // Emptying the field drops a custom value and the slider's stretch.
       if (spec.custom && text.trim() === "" && (spec.custom.get() ?? spec.custom.stretch()) !== undefined) {
         spec.custom.reset();
         display(spec.custom.resolve(), false);
@@ -1750,8 +1374,7 @@ export function createControlRow(spec: ControlRowSpec) {
     }
     const custom = spec.custom?.fit(typed / (spec.typedScale ?? 1)) ?? null;
     clearOff();
-    // A value typed past the slider's end moves the end there, thumb and all
-    // (customValues.ts's stretch).
+    // A value typed past the slider's end moves the end there (customValues.ts's stretch).
     if (custom !== null) spec.custom!.stretchTo(custom);
     commitValue(
       custom ??
@@ -1764,14 +1387,12 @@ export function createControlRow(spec: ControlRowSpec) {
         }),
     );
   }
-  // Every value the row's own controls set goes through here: a typed value,
-  // a drag (a stretched slider reaches past spec.min/max), a T restore. Past
-  // the slider's own range it is a custom value — the nearest end goes
-  // through commit() first (Auto off, the store, the room and the pop-out,
-  // and what a reader that doesn't know custom values falls back to), then
-  // the custom value over it. Inside, a plain commit drops any custom value
-  // (setSceneSetting does too) and keeps the stretch. An Off stop's 0 is
-  // inside, whatever its min.
+  // Every value the row's controls set goes through here. Past the slider's
+  // range it is a custom value: the nearest end goes through commit() first
+  // (Auto off, the store, the room and the pop-out, and what a reader that
+  // doesn't know custom values falls back to), then the custom value over it.
+  // Inside, a plain commit drops any custom value and keeps the stretch. An Off
+  // stop's 0 counts as inside.
   function commitValue(v: number): void {
     const custom = spec.zeroAtMin && v <= 0 ? null : (spec.custom?.fit(v) ?? null);
     if (custom !== null) {
@@ -1788,18 +1409,13 @@ export function createControlRow(spec: ControlRowSpec) {
   chip.textContent = "A";
   chip.title = `Auto-tune ${spec.label} (A)`;
   chip.style.cssText = autoChipManualStyle(spec.accent);
-  // data-key/data-keycap (keyHints.ts): every row's A chip shares the one
-  // "auto" id, so a keys-list hover/click (deviceMenu.ts's flashOn) and a
-  // held Shift's keycap reach all of them at once, not just this row's.
+  // Every row's A chip shares the one "auto" id (keyHints.ts), so a keys-list
+  // hover/click (flashOn) and a held Shift's keycap reach all of them.
   chip.classList.add("vc-keycap-anchor");
   chip.dataset.key = "auto";
   chip.dataset.keycap = "A";
-  // A row with no auto weights has nothing for the chip to do — leave it out
-  // rather than show a toggle that can't change anything.
   if (!spec.auto) chip.style.display = "none";
 
-  // Mutes the row to its floor and restores it on a second press — see the
-  // header comment's row-grammar paragraph for the full contract.
   const offChip = document.createElement("button");
   offChip.textContent = "T";
   offChip.title = `Turn ${spec.label} off (T)`;
@@ -1808,8 +1424,7 @@ export function createControlRow(spec: ControlRowSpec) {
   offChip.dataset.key = "mute";
   offChip.dataset.keycap = "T";
 
-  // "Only this" (driveSolo.ts), same chip geometry as A and T. No hotkey: O
-  // stays the panel's Solo view toggle. Lit while this setting is the solo.
+  // "Only this" (driveSolo.ts). No hotkey: O stays the Solo view toggle.
   let onlyChip: HTMLButtonElement | null = null;
   if (spec.onlyThis) {
     const { sceneId, key } = spec.onlyThis;
@@ -1836,12 +1451,9 @@ export function createControlRow(spec: ControlRowSpec) {
   resetBtn.dataset.key = "reset";
   resetBtn.dataset.keycap = "R";
 
-  // src/render/signals.ts's link from this setting to the live values that
-  // drive it — a small always-on chip in `right` (leftmost, read as a badge
-  // on the row rather than another action) plus a hover-revealed pill strip
-  // appended below, outside .vc-hint (see the .vc-reads rule,
-  // controlsTheme.ts, for why that placement matters). Omit both entirely
-  // for the common case of no `reads` — most rows have none.
+  // Chip in `right` (leftmost, reads as a badge) plus a hover-revealed pill
+  // strip below, outside .vc-hint (see the .vc-reads rule in controlsTheme.ts
+  // for why). Both omitted without `reads`.
   const signalIndicator = spec.reads?.length
     ? createSignalStrip(
         spec.reads.map((r) => ({
@@ -1861,9 +1473,8 @@ export function createControlRow(spec: ControlRowSpec) {
   if (spec.drivePanel) {
     const left = document.createElement("div");
     left.style.cssText = driveRowLeftStyle;
-    // Room for the port at this row's own left edge (controlsTheme.ts's
-    // .vc-drive-row-left/.vc-drive-port) — a plain gap would leave the
-    // port floating over the text.
+    // Room for the port at the row's left edge (controlsTheme.ts); a plain gap
+    // leaves the port floating over the text.
     left.classList.add("vc-drive-row-left");
     spec.drivePanel.summary.classList.add("vc-drive-summary");
     left.append(label, spec.drivePanel.summary);
@@ -1885,14 +1496,13 @@ export function createControlRow(spec: ControlRowSpec) {
   slider.type = "range";
   slider.className = "vc-slider";
   slider.setAttribute("aria-label", spec.label);
-  // The accent rides the row (not just the slider) so the hover/focus
-  // highlight on the title and track share it — see controlsTheme.ts.
+  // The accent rides the row so the hover/focus highlight on title and track
+  // shares it (controlsTheme.ts).
   el.style.setProperty("--vc-accent", spec.accent);
   const isLog = spec.mapping === "log";
-  // Continuous, not stepped: a declared `step` is the uniform's meaningful
-  // resolution, not a detent, and snapping to it made a 0..1 row jump in
-  // twenty visible hops across the track. Only a step of 1 or more marks a
-  // genuinely discrete control (integer counts), which keeps its detents.
+  // Continuous: a declared `step` is the uniform's resolution, not a detent
+  // (snapping made a 0..1 row jump in visible hops). Only a step of 1 or more
+  // is a discrete control (integer counts).
   const discrete = !isLog && spec.step !== undefined && spec.step >= 1;
   if (isLog) {
     slider.min = "0";
@@ -1909,10 +1519,8 @@ export function createControlRow(spec: ControlRowSpec) {
     if (!isLog && spec.step !== undefined) slider.dataset.midiStep = String(spec.step);
   }
 
-  // Two lines: the setting's own description, always present when it has
-  // one, and beneath it the auto takeover note, shown only while auto holds
-  // the row — an addition, never a replacement, so the description stays
-  // readable whichever side owns the value.
+  // The description, plus an auto takeover note below it only while auto holds
+  // the row; an addition, so the description stays readable.
   const hint = document.createElement("div");
   hint.className = "vc-hint";
   const hintDesc = document.createElement("div");
@@ -1922,13 +1530,9 @@ export function createControlRow(spec: ControlRowSpec) {
   hintAuto.textContent = AUTO_HOLDING_HINT;
   hint.append(hintDesc, hintAuto);
 
-  // A divergent-value tick per linked item (ControlRowSpec.linkedTicks) is
-  // drawn absolutely inside a small wrapper sized exactly to the slider's own
-  // box, rather than over the whole row — only built when a row actually
-  // has `linkedTicks` at all (undefined, not just empty, so an ordinary
-  // single-item row never allocates this). See renderTicks()/setLinkedTicks
-  // below for how a tick's own left offset matches the slider's log/linear
-  // mapping.
+  // Linked-item ticks sit in a wrapper sized to the slider's box, not the whole
+  // row. Built only when `linkedTicks` is defined (not merely empty), so
+  // single-item rows never allocate it.
   let ticksWrap: HTMLElement | null = null;
   if (spec.linkedTicks !== undefined) {
     const sliderBox = document.createElement("div");
@@ -1945,11 +1549,10 @@ export function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
   el.addEventListener("click", (e) => {
-    // The pinned patch panel sits inside this row, so its clicks bubble
-    // here too: they keep their own focus, since pulling it to the slider
-    // (far above, once the panel's scrolled into view) scrolled the column
-    // up under the pointer. preventScroll for the same reason as
-    // wireHoverFocus.
+    // The pinned patch panel sits inside this row, so its clicks bubble here:
+    // they keep their own focus, since pulling it to the slider (far above once
+    // the panel is scrolled into view) scrolled the column under the pointer.
+    // preventScroll for the same reason as wireHoverFocus.
     if (!spec.drivePanel?.below.contains(e.target as Node)) slider.focus({ preventScroll: true });
     if (spec.onCardPin && isCardPress(el, slider, e.target)) spec.onCardPin();
   });
@@ -1957,12 +1560,9 @@ export function createControlRow(spec: ControlRowSpec) {
   wireThumbMagnet(el, slider);
   wireSliderQuickJump(el, slider);
 
-  // Log-mapped so the midpoint lands close to defaultValue instead of skewing
-  // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
-  // out as an explicit kill and the log curve covers 1..100 instead of 0..100
-  // — reserving a single position for it (vs. letting the curve asymptote
-  // toward 0) is what makes the kill a deliberate, findable stop rather than
-  // something you might land on by accident.
+  // Log-mapped so the midpoint lands near defaultValue. With zeroAtMin,
+  // position 0 is an explicit kill and the curve covers 1..100: a reserved
+  // position makes the kill a deliberate stop, not one you land on by accident.
   function posToValue(pos: number): number {
     if (spec.zeroAtMin && pos <= 0) return 0;
     const loPos = spec.zeroAtMin ? 1 : 0;
@@ -2005,10 +1605,8 @@ export function createControlRow(spec: ControlRowSpec) {
     hint.style.display = spec.description || auto ? "" : "none";
   }
 
-  // The slider's own left-offset percentage for `value`, sharing the exact
-  // log/linear/zeroAtMin mapping display() uses for its own fill — a
-  // linked-item tick (renderTicks below) has to land at the same spot on the
-  // track a slider drag to that same value would.
+  // Same log/linear/zeroAtMin mapping as display()'s fill, so a linked tick
+  // lands where a drag to that value would.
   function valueToPercent(value: number): number {
     const sliderValue = valueToSlider(value);
     const lo = Number(slider.min);
@@ -2017,16 +1615,14 @@ export function createControlRow(spec: ControlRowSpec) {
     return Math.max(0, Math.min(100, pct));
   }
 
-  // Other selected items' own values (ControlRowSpec.linkedTicks) — kept
-  // live by setLinkedTicks below, initialized from the spec so the very
-  // first render (a fresh selection with already-differing values) shows
-  // them without waiting for an edit.
+  // Seeded from the spec so a fresh selection with differing values shows them
+  // before any edit.
   let linkedTicksData: readonly { value: number; colour?: string }[] = spec.linkedTicks ?? [];
   function renderTicks(): void {
     if (!ticksWrap) return;
     ticksWrap.replaceChildren();
     for (const t of linkedTicksData) {
-      if (Math.abs(t.value - lastValue) <= 1e-6) continue; // only while they differ
+      if (Math.abs(t.value - lastValue) <= 1e-6) continue;
       const tick = document.createElement("i");
       tick.className = "vc-slider-tick";
       tick.style.left = `${valueToPercent(t.value)}%`;
@@ -2035,24 +1631,22 @@ export function createControlRow(spec: ControlRowSpec) {
     }
   }
 
-  // Non-null while the row is muted (T pressed) — the value to restore on the
-  // next T, and where display() holds the thumb meanwhile. Any write to the
-  // row that isn't the mute/restore itself forgets this, via clearOff(), so
-  // the chip never claims a restore point that no longer means anything.
+  // Non-null while muted (T): the value the next T restores, and where
+  // display() holds the thumb. Any other write to the row forgets it via
+  // clearOff(), so the chip never claims a stale restore point.
   let offStoredValue: number | null = null;
 
   function display(value: number, auto: boolean): void {
     lastValue = value;
     lastAuto = auto;
-    // Muted (T): the setting runs at its floor, but the thumb stays where it
-    // was — on the value a second T brings back — and the row greys out
-    // (.vc-row-off, controlsTheme.ts) instead of sliding to the left end.
+    // Muted: the setting runs at its floor but the thumb stays on the value a
+    // second T restores, and the row greys out (.vc-row-off) rather than
+    // sliding left.
     const muted = offStoredValue !== null && !auto;
     const shown = muted ? offStoredValue! : value;
-    // A stretched slider (customValues.ts) spans its own range plus the
-    // stretch and any custom value — set before the value, which the input
-    // clamps to its range. Linear rows only; the log rows' 0..100 track
-    // never takes a custom value outside a dev build.
+    // A stretched slider (customValues.ts) spans its range plus the stretch and
+    // any custom value; set before the value, which the input clamps. Linear
+    // rows only: log rows never take a custom value outside a dev build.
     if (!isLog && spec.custom) {
       const span = sliderSpan(spec, spec.custom.stretch(), spec.custom.get());
       if (Number(slider.min) !== span.lo) slider.min = String(span.lo);
@@ -2135,10 +1729,9 @@ export function createControlRow(spec: ControlRowSpec) {
       auto.toggle(on);
       if (on) {
         clearOff();
-        // A custom value beats auto in resolve()'s precedence, so without this the
-        // chip would light up while the row visibly stayed put — clearing it
-        // here is what actually hands the row to auto. Auto stays inside the
-        // slider's own range, so the stretch goes too.
+        // A custom value beats auto in resolve()'s precedence, so without this
+        // the chip would light while the row stayed put. Auto stays inside the
+        // slider's range, so the stretch goes too.
         spec.custom?.reset();
       }
       refreshChip();
@@ -2161,42 +1754,33 @@ export function createControlRow(spec: ControlRowSpec) {
     onChange(cb: (value: number) => void): void {
       onCommit = cb;
     },
-    /** Called from the throttled per-frame refresh — pulls the live
-     *  auto-resolved value while auto is on and this row isn't being dragged
-     *  or mid-edit in its typed readout (`editing` — same reasoning as
-     *  dragging: don't overwrite what the user is actively doing). */
+    /** Pulls the live auto value unless the row is being dragged or typed in. */
     refreshAuto(): void {
       if (!spec.auto || dragging || editing || !spec.auto.isEnabled()) return;
       display(spec.auto.resolveLive(), true);
     },
     refreshChip,
-    /** Forgets this row's T restore point — for the card-level Reset chips
-     *  (Bands, Input), which write straight through setValue() rather than
-     *  this row's own resetBtn. Call it BEFORE setValue(): display() renders
-     *  the row muted while a restore point is held, and clearOff() itself
-     *  only repaints the T chip. */
+    /** Forgets the T restore point, for card-level Reset chips that write
+     *  through setValue(). Call it BEFORE setValue(): display() renders the row
+     *  muted while a restore point is held, and clearOff() only repaints the T
+     *  chip. */
     clearOff,
-    /** Show whatever's right for the row now: the live auto value if auto
-     *  owns it (resolveLive() already reflects a custom value ahead of auto — see
-     *  autoTune.ts's resolve() — so no separate check is needed there), a
-     *  custom value ahead of the manual store otherwise. */
+    /** The live auto value if auto owns the row (resolveLive() already puts a
+     *  custom value ahead of auto, autoTune.ts's resolve()), else a custom value
+     *  ahead of the manual store. */
     sync(manualValue: () => number): void {
       refreshChip();
       if (spec.auto && spec.auto.isEnabled()) {
-        // Auto owns the row, so a T restore point means nothing any more —
-        // drop it, or the T chip stays lit and the next T would write the
-        // stale value and take the row off auto. The manual branch keeps it:
-        // open() syncs every row, and a muted manual row must stay muted.
+        // Drop the T restore point: otherwise the T chip stays lit and the next
+        // T writes the stale value, taking the row off auto. The manual branch
+        // keeps it: open() syncs every row, and a muted manual row must stay
+        // muted.
         clearOff();
         display(spec.auto.resolveLive(), true);
       } else display(spec.custom?.get() ?? manualValue(), false);
     },
-    /** Called on every tick DeviceMenu.update() draws, unconditionally — a
-     *  no-op when this row has no `reads`, otherwise pushes each linked
-     *  SignalSpec's live read() (0 while frame/anim aren't up yet) and
-     *  activeWhen predicate into the strip. Every drawn tick, to match the
-     *  meters' own "fills move every frame" rule (audioMeters.ts) — a
-     *  beat-driven pill should feel as live as the meter it points at. */
+    /** Every drawn tick; no-op without `reads`. Per drawn tick to match the
+     *  meters' "fills move every frame" rule (audioMeters.ts). */
     updateSignalPills(frame: FeatureFrame | null, anim: AnimFrame | null): void {
       if (!signalIndicator || !spec.reads) return;
       signalIndicator.update(
@@ -2206,11 +1790,9 @@ export function createControlRow(spec: ControlRowSpec) {
         })),
       );
     },
-    /** Replaces linkedTicks with fresh values and redraws — the caller
-     *  (appendSettingRow) calls this right after propagating its own commit
-     *  to every linked setting, so a tick that just became equal disappears
-     *  immediately rather than waiting for the next full rebuild. A no-op
-     *  when this row was never built with `linkedTicks` in the first place. */
+    /** Redraws with fresh values; appendSettingRow calls it after propagating
+     *  its commit to linked settings, so a tick that just became equal vanishes
+     *  at once. No-op without `linkedTicks`. */
     setLinkedTicks(ticks: readonly { value: number; colour?: string }[]): void {
       if (!ticksWrap) return;
       linkedTicksData = ticks;
@@ -2226,18 +1808,13 @@ interface ToggleRowSpec {
   description?: string;
   get: () => number;
   set: (value: number) => void;
-  /** A drive-capable toggle's port, summary and sparkline (the same slot
-   *  createControlRow has; buildDriveRow makes them), so a trigger toggle can
-   *  be wired to any signal like a slider row. */
+  /** Port, summary and sparkline as in createControlRow, so a trigger toggle can be wired to a signal like a slider row. */
   drivePanel?: { port: HTMLElement; summary: HTMLElement; below: HTMLElement; onPin: () => void };
 }
 
-/** A boolean setting's row: same head as a slider row, a pill toggle where
- *  the slider would be. Never auto-tunable (see autoTune.ts — a display
- *  toggle between two discrete states doesn't fit the continuous glide
- *  model), so no chip and nothing to refresh per frame. Its own on/off state
- *  already *is* an "off state", so the T hotkey just flips it rather than
- *  adding a redundant chip — see wireRowKeys below. */
+/** A boolean setting's row: a pill toggle where the slider would be. Never
+ *  auto-tunable (autoTune.ts: a toggle between two discrete states doesn't fit
+ *  the glide model), so no A chip; T just flips it (wireRowKeys). */
 function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -2262,8 +1839,6 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   resetBtn.dataset.keycap = "R";
   right.append(readout, resetBtn);
   if (spec.drivePanel) {
-    // As createControlRow's drive head: the port at the row's left edge, the
-    // summary under the label, either one pins.
     const dp = spec.drivePanel;
     const left = document.createElement("div");
     left.style.cssText = driveRowLeftStyle;
@@ -2356,12 +1931,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
-  // ---- power column: energy saving mode ----
-  // Leftmost — a compact card, not a scrolling stack, so it isn't wired into
-  // the digit-block keyboard jump (renumberBlocks/markBlock): its controls
-  // are plain chip buttons plus the Resolution slider, all kept outside the
-  // Tab ring (ringElements() skips this column), the same as the palette
-  // chips they're modeled on.
+  // Leftmost; a compact card, so it isn't wired into the digit-block keyboard
+  // jump (renumberBlocks/markBlock). Its controls are chip buttons plus the
+  // Resolution slider, outside the Tab ring (ringElements() skips this column).
   const powerCard = createPowerCard({
     getPowerMode: deps.getPowerMode,
     onPowerModeChange: deps.onPowerModeChange,
@@ -2375,9 +1947,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     getResolution: deps.getPreviewResolution,
     onResolutionChange: deps.onPreviewResolutionChange,
   });
-  // The pop-out output's own Power card, under the main one, shown only
-  // while an output window is open. Same card, other deps: its status is
-  // what the output reports (net/outputSync.ts's OutputRenderStatus).
+  // The pop-out output's own Power card, shown only while an output window is
+  // open; its status is what the output reports (net/outputSync.ts's
+  // OutputRenderStatus).
   const outputPowerCard = createPowerCard(
     {
       getPowerMode: deps.getOutputPowerMode,
@@ -2416,28 +1988,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   powerCol.className = "vc-power-col";
   powerCol.append(powerCard.el, outputPowerCard.el);
 
-  // ---- spectrum column: the Bands card ----
-  // The live spectrum and the band gains are one card: the strip is the
-  // control (bandFaders.ts draws the faders over the bars), so what you
-  // tune and what you watch are the same pixels — and a standing "is the
-  // mic actually hearing anything" check comes free. Always mounted (unlike
-  // the Scene card) since it isn't tied to which scene is active; the
-  // per-scene fader values are pushed in by refreshBandFaders on open() and
-  // after a Reset, the same way the Input rows are synced.
+  // One card for the live spectrum and the band gains: bandFaders.ts draws the
+  // faders over the bars, so what you tune and what you watch are the same
+  // pixels. Always mounted (unlike the Scene card); per-scene fader values are
+  // pushed in by refreshBandFaders on open() and after a Reset.
   const bandFaders = createBandFaders({
     onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
   });
   const spectrumStrip = bandFaders.strip;
-  // Every function referenced below is a plain (hoisted) function
-  // declaration further down this same closure, in the patch-bay
-  // section — see each one's own doc comment there. Referencing them
-  // here, ahead of their textual declaration, is safe: none of these are
-  // ever called until well after createDeviceMenu() has finished running
-  // and every one of them exists. One bundle, shared by the meters and
-  // the shaping column (shapingColumn.ts).
-  // Which DriveSourceChoice each jack element carries — a jack's own
-  // identity is only its jackKey, which collapses beat-grid divisions, and
-  // a drag needs the real choice (registerJack, below; mountBandsJack).
+  // The functions referenced below are hoisted declarations further down this
+  // closure (patch-bay section); none is called until createDeviceMenu() has
+  // finished, so referencing them early is safe. One bundle, shared by the
+  // meters and the shaping column (shapingColumn.ts).
+  // The real choice each jack element carries: its jackKey collapses beat-grid
+  // divisions, and a drag needs the choice (registerJack, mountBandsJack).
   const jackChoices = new WeakMap<HTMLElement, DriveSourceChoice>();
   const jackPatch: AudioMetersDeps["patch"] = {
     usage: jackUsage,
@@ -2453,7 +2017,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onJackHover,
     registerJack: (el, choice) => jackChoices.set(el, choice),
   };
-  // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
     heatSettings: heatSettingRows,
     onLufsReset: deps.onLufsReset,
@@ -2466,7 +2029,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     patch: jackPatch,
   });
-  // The middle column: shaping nodes (shapingColumn.ts).
   const shapingCol = createShapingColumn({
     patch: jackPatch,
     getReading: deps.getShapingReading,
@@ -2491,10 +2053,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   markBlock(bandsCard.title);
 
-  // The column head above the Bands card: live dot + audio-source status on
-  // the left, this column's one RAW chip on the right. No scene name/
-  // "Equaliser" label here any more — the top bar already names the scene.
-  // See columnHeadStyle above for its own shape.
   const columnHead = document.createElement("div");
   columnHead.style.cssText = columnHeadStyle;
   const spectrumStatus = document.createElement("div");
@@ -2504,27 +2062,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const statusLabel = document.createElement("div");
   statusLabel.style.cssText = statusTextStyle;
   spectrumStatus.append(liveDot, statusLabel);
-  // One chip, two raw modes: lit shows the raw mic signal exactly as it
-  // comes in — no adaptive envelope (features.ts), no Bands gain (NOT "no
-  // sensitivity": Sensitivity/Expansion are applied later, only on the
-  // render path — applySensitivity in app.ts, after this strip is already
-  // fed — so the processed side shown here never had them either) — and, in
-  // the same click, every meter row's own raw mode (audioMeters.ts's
-  // AudioMeters.setRaw; see that file's header for which of its rows this
-  // changes and why). The two halves differ in what "raw" actually undoes:
-  // the spectrum's half always shows something different whenever Auto-gain
-  // is on, since the two sides normalize against different windows
-  // regardless of Smoothing (features.ts's autoGain doc); the meters' half
-  // is a genuine no-op once Smoothing (Input card) is dragged to Off, since
-  // every eased reading there already lands on exactly what raw shows.
+  // One chip, two raw modes. Lit, the spectrum shows the raw mic signal: no
+  // adaptive envelope (features.ts), no Bands gain. Sensitivity/Expansion are
+  // not undone: they apply later, on the render path only (applySensitivity in
+  // app.ts), after this strip is fed. The same click sets every meter row's raw
+  // mode (audioMeters.ts's setRaw; its header says which rows change). The
+  // halves differ: the spectrum's always differs while Auto-gain is on (the two
+  // sides normalize against different windows, features.ts's autoGain doc); the
+  // meters' half is a no-op once Smoothing (Input card) is Off, since eased
+  // readings then equal raw.
   const rawChip = createChipButton("RAW", RAW_CHIP_TITLE, () => {
     const on = !spectrumStrip.showRaw();
     spectrumStrip.setShowRaw(on);
     audioMeters.setRaw(on);
     rawChip.style.cssText = on ? chipBtnLitStyle : chipBtnStyle;
   });
-  // The heat lens (heat.ts): every wired setting's row and every signal jack
-  // glows in its heat colour, brighter as it moves. Also L. Off on every load.
+  // The heat lens (heat.ts). Off on every load.
   const heatChip = createChipButton("HEAT", HEAT_CHIP_TITLE, () => setHeatLens(!heatLensOn));
   heatChip.dataset.key = "heat";
   const headChips = document.createElement("div");
@@ -2532,25 +2085,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   headChips.append(heatChip, rawChip);
   columnHead.append(spectrumStatus, headChips);
 
-  // The fader bank sits in a .vc-row so it wakes (glow) on hover and on
-  // focus-within exactly like a slider row.
+  // In a .vc-row so it wakes (glow) on hover and focus-within like a slider row.
   const fadersRow = document.createElement("div");
-  // vc-row-keep: the primary spectrum display opts out of .vc-patching's
-  // flat dim (controlsTheme.ts) — it gets its own band-range dimming
-  // instead (refreshSpectrumDriveHighlight, below).
+  // vc-row-keep: opts out of .vc-patching's flat dim (controlsTheme.ts);
+  // refreshSpectrumDriveHighlight dims by band range instead.
   fadersRow.className = "vc-row vc-row-keep";
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
-  // Always-on: explains the sky-blue marker spectrumStrip.ts's
-  // drawCentroidMarker draws over the bars (same AUTO_SKY constant, so the
-  // swatch can't drift from the line) — the spectral centroid, same signal
-  // as the Character card's Brightness row traces beneath its own bar
-  // (audioMeters.ts).
+  // Explains the sky-blue centroid marker spectrumStrip.ts's drawCentroidMarker
+  // draws (same AUTO_SKY, so the swatch can't drift); same signal as the
+  // Character card's Brightness trace (audioMeters.ts).
   const spectrumLegend = createTraceLegend([
     { color: AUTO_SKY, label: "Centroid", note: "where the spectrum's energy balances" },
   ]);
   fadersRow.append(bandFaders.el, spectrumLegend.el);
-  // R/T on a focused fader, through the same wiring as every row; no A —
-  // the faders have no auto weights.
+  // R/T on a focused fader, like every row; no A (faders have no auto weights).
   bandFaders.faders.forEach((el, i) => {
     wireRowKeys(el, {
       reset: () => bandFaders.reset(i),
@@ -2559,14 +2107,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wireHoverFocus(el, el);
   });
 
-  // Equaliser readouts + hint — hidden by default (in flow: the card grows
-  // while shown, rather than reserving the space at all times), revealed by
-  // hover/focus/drag over fadersRow (refreshEqLayer/its wiring below, past
-  // lineMode's own declaration) and forced hidden whenever the pinned
-  // setting's patch has a source on Frequencies instead (refreshLineMode
-  // below) — refreshEqLayer is the one writer of eqLayer.style.display, so
-  // the two conditions can't stomp each other the way two direct writers
-  // once did.
+  // Hidden by default (in flow: the card grows while shown), revealed by
+  // hover/focus/drag over fadersRow (refreshEqLayer's wiring) and forced hidden
+  // while the pinned setting's patch has a Frequencies source (refreshLineMode).
+  // refreshEqLayer is the one writer of eqLayer.style.display, so the two
+  // conditions can't stomp each other.
   const fadersHint = document.createElement("div");
   fadersHint.style.cssText = eqHintStyle;
   fadersHint.textContent = FADER_HINT_TEXT;
@@ -2574,60 +2119,41 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   eqLayer.append(bandFaders.readouts, fadersHint);
   eqLayer.style.display = "none";
 
-  // ---------------------------------------------------------------------
-  // The patch bay: every drive-capable scene-setting row (appendSettingRow
-  // below) gets an input port, a source summary and a live sparkline
-  // (createControlRow's own `drivePanel` slot — see its doc comment).
-  // Clicking a row's label, summary or port pins it and expands its patch
-  // panel inline, below the sparkline. See this file's own header
-  // doc-comment paragraph for the full contract.
-  // ---------------------------------------------------------------------
+  // ---- The patch bay (this file's header doc comment has the contract) ----
 
-  /** Previewed on hover/keyboard-focus — port lit only, no layout change.
-   *  Written only by previewDrive() below. */
+  /** Hover/keyboard focus: port lit only, no layout change. Written only by previewDrive(). */
   let preview: { sceneId: string; spec: SceneSetting } | null = null;
-  /** Pinned by an explicit click on a row's label/summary/port — expands
-   *  that row's patch panel. One at a time; written only by togglePin()
-   *  below, Escape (onKeyDown), or a scene switch (renderSceneSettings's
-   *  own tail). */
+  /** An explicit click on a row's label/summary/port; expands its patch panel.
+   *  One at a time; written only by togglePin(), Escape (onKeyDown), or a scene
+   *  switch (renderSceneSettings's tail). */
   let pinned: { sceneId: string; spec: SceneSetting } | null = null;
   /** A pinned shaping node (shapingColumn.ts): its chain stays lit, and a click on an input jack makes it read that input. Never set together with `pinned`. */
   let pinnedNode: string | null = null;
-  /** The shaping node card under the pointer, lighting its chain. */
   let hoverNode: string | null = null;
-  // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
-  // because togglePin and every pinned patch panel's own Solo chip read it.
+  // Solo's on/off (setSolo/applySolo); declared here because togglePin and
+  // every pinned panel's Solo chip read it.
   let soloOn = false;
-  // Whether the wide layout's "+ Add by name" disclosure is open
-  // (buildAddChips). Kept here, not per panel, because adding a source
-  // rebuilds the patch panel, and a fresh `false` closed the chip list
-  // under the pointer after every add. View state for this session only,
-  // like Solo.
+  // Wide layout's "+ Add by name" disclosure (buildAddChips). Kept here, not
+  // per panel: adding a source rebuilds the panel, and a fresh `false` closed
+  // the list under the pointer after every add. Session view state, like Solo.
   let addChipsOpen = false;
-  // Whether the panel is open (open/close, below) — declared up here since
-  // setSolo's cable-visibility refresh runs during construction.
+  // Declared up here: setSolo's cable-visibility refresh runs during construction.
   let isOpen = false;
-  // Set by a mountRows dispose that removed the pinned row; consumed by the
-  // very next mountRows (see mountRows).
+  // Set by a mountRows dispose that removed the pinned row; consumed by the next mountRows.
   let pinHandoff: { family: string; param: string; other?: number } | null = null;
-  /** The last setting `previewDrive` was actually handed a non-null value
-   *  for — unlike `preview` itself, this never goes back to null when the
-   *  pointer leaves. It's what a jack click reaches for when nothing's
-   *  pinned (Phase 2b's own plan): "pin whatever I was just looking at,
-   *  then plug this in", rather than a bare toast every time. */
+  /** The last non-null setting previewDrive got; unlike `preview` it survives
+   *  the pointer leaving. A jack click with nothing pinned pins it and plugs
+   *  in, rather than a bare toast. */
   let lastPreview: { sceneId: string; spec: SceneSetting } | null = null;
-  /** The Bands card's line-drawing mode — derived from `pinned`'s own patch
-   *  by refreshLineMode() below, not from focus: only a pinned setting's
-   *  panel can actually add/remove its line source. Kept as its own
-   *  variable (like the picker system it replaces) because
-   *  DeviceMenu.update()'s per-tick overlay refresh needs to know which
-   *  setting's excess() to read without re-deriving it every tick. */
+  /** The Bands card's line-drawing mode, derived from `pinned`'s patch by
+   *  refreshLineMode() (only a pinned setting's panel can add/remove its line
+   *  source), not from focus. A variable so update()'s per-tick overlay refresh
+   *  knows which excess() to read without re-deriving. */
   let lineMode: { sceneId: string; spec: SceneSetting } | null = null;
-  /** The pinned setting's own DriveSetting as of the last time its panel
-   *  was built — what DeviceMenu.update()'s ~10 Hz refresh compares against
-   *  to notice an external change (a paired device's own command) without
-   *  rebuilding the panel every tick regardless (this file's own carried
-   *  click-loss rule). `null` whenever nothing's pinned. */
+  /** The pinned setting's DriveSetting as of its panel's last build; update()'s
+   *  refresh compares against it to notice an external change (a paired
+   *  device's command) without rebuilding every tick (the click-loss rule).
+   *  Null when nothing is pinned. */
   let lastPinnedSetting: DriveSetting | null = null;
 
   function samePair(a: { sceneId: string; spec: SceneSetting } | null, b: typeof a): boolean {
@@ -2643,14 +2169,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
   });
   lineEditor.el.style.display = "none";
-  // Appended after the fader hit divs already in bandFaders.el, so it sits
-  // on top of them in DOM/paint order and captures every pointer event over
-  // the strip while visible — no separate suppression of the faders' own
-  // pointer handlers needed, only spectrumStrip.setShowFaders for the drawn
-  // markers themselves.
+  // Appended after the faders' hit divs, so it paints on top and captures every
+  // pointer event over the strip while visible; the faders' handlers need no
+  // suppression, only spectrumStrip.setShowFaders for the drawn markers.
   bandFaders.el.appendChild(lineEditor.el);
-  // Reused inside the pinned row's own patch panel (buildSourceLine below)
-  // for its line source's controls — see this file's header doc comment.
+  // Also used in the pinned row's patch panel (buildSourceLine) for its line source.
   const clearLineChip = createChipButton("Clear line", "Erase the drawn line — every band is ignored again.", () => {
     if (!lineMode) return;
     deps.resetDriveLine(lineMode.sceneId, lineMode.spec);
@@ -2659,16 +2182,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
   });
   clearLineChip.dataset.hint = clearLineChip.title;
-  // Static (this row's own text never changes), so set once here rather
-  // than every buildSourceLine() rebuild — the panel's bottom hint line
-  // reads it off this same element wherever it's currently appended.
+  // Static, so set once here, not per buildSourceLine() rebuild; the panel's
+  // bottom hint line reads it off this element wherever it is appended.
   lineEditor.strengthRow.title = "How hard the drawn line drives the setting when bars rise above it.";
   lineEditor.strengthRow.dataset.hint = lineEditor.strengthRow.title;
 
-  /** Derives lineMode from `pinned`'s own current patch — called after
-   *  every pin change and every patch edit (patchChanged below), never per
-   *  tick. Swaps the strip's fader markers for the line overlay the same
-   *  way the picker this replaces did. */
+  /** Called after every pin change and patch edit (patchChanged), never per tick. */
   function refreshLineMode(): void {
     const setting = pinned ? deps.getDriveSetting(pinned.sceneId, pinned.spec) : "scene";
     const hasLine = !!pinned && setting !== "scene" && setting.sources.some((s) => isLineSourceChoice(s.choice));
@@ -2690,10 +2209,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // ---- eqLayer's own hover/focus/drag reveal — see its own comment above
-  // for why refreshEqLayer is the one writer of its display style. Showing
-  // is immediate; hiding waits EQ_HIDE_DELAY_MS so a pointer crossing a knob
-  // gap, or a quick refocus between faders, doesn't flash it off and back on.
+  // ---- eqLayer's hover/focus/drag reveal (refreshEqLayer is the one writer of
+  // its display). Hiding waits EQ_HIDE_DELAY_MS so a pointer crossing a knob
+  // gap, or a quick refocus between faders, doesn't flash it off and on.
   let eqHovering = false;
   let eqFocused = false;
   let eqDragging = false;
@@ -2711,8 +2229,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     if (eqLayer.style.display === "none") return;
     if (lineMode) {
-      // The drawing overlay needs the space now, so hide at once rather
-      // than waiting out the delay below.
+      // The drawing overlay needs the space now: hide at once.
       eqLayer.style.display = "none";
     } else {
       eqHideTimer = setTimeout(() => {
@@ -2732,10 +2249,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     eqHovering = false;
     refreshEqLayer();
   });
-  // Keyboard focus only: wireHoverFocus also focuses a fader on plain
-  // pointer movement, and that focus outlives the pointer — counting it
-  // would leave the readouts up after the pointer has gone. Its
-  // pointerFocusOriginated flag is true exactly during that focus() call.
+  // Keyboard focus only: wireHoverFocus also focuses a fader on plain pointer
+  // movement, and that focus outlives the pointer; counting it would leave the
+  // readouts up. pointerFocusOriginated is true exactly during that focus().
   fadersRow.addEventListener("focusin", () => {
     eqFocused = !pointerFocusOriginated;
     refreshEqLayer();
@@ -2761,15 +2277,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     window.addEventListener("pointercancel", stopDrag);
   });
 
-  // ---- The Bands card's own jacks: the spectrum's own Frequencies corner,
-  // plus the three-across Levels and Stems rows below eqLayer.
-  // Built here (rather than through audioMeters.ts's mountJack) since the
-  // Bands card lives in this file; onJackClick/onJackHover/jackIsShown/etc.
-  // below are plain (hoisted) functions in this same closure, the same ones
-  // createAudioMeters's own `patch` deps call through, so every jack in the
-  // panel — meters or Bands — answers to identical logic. bandsJackEls is
-  // this card's own half of the cable layer's source-endpoint lookup (see
-  // combinedJackElements below).
+  // ---- The Bands card's own jacks: the Frequencies corner plus the Levels and
+  // Stems rows below eqLayer. Built here, not via audioMeters.ts's mountJack,
+  // because the Bands card lives in this file; they share the hoisted
+  // onJackClick/onJackHover/jackIsShown with the meters' `patch` deps, so every
+  // jack answers to identical logic. bandsJackEls is this card's half of the
+  // cable layer's source-endpoint lookup (combinedJackElements).
   const bandsJackEls = new Map<string, HTMLElement>();
   function mountBandsJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
     const jack = createJack(
@@ -2798,17 +2311,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     { choice: "anim.high", read: (a) => a.high },
   ];
   // Lead and Hats (src/audio/stemSplit.ts) sit under the Mid and Treble rows
-  // whose frequencies they cover, so the Bass column stays empty.
+  // they cover; Bass stays empty.
   const STEM_LEVELS: readonly (LevelCell | null)[] = [
     null,
     { choice: "anim.lead", read: (a) => a.lead },
     { choice: "anim.hats", read: (a) => a.hats },
   ];
   const bandLevelRows: (LevelCell & { row: ReturnType<typeof createMeterRow> })[] = [];
-  // "Bass level"/"Mid level"/"Treble level" (driveSourceLabel) minus the
-  // " level" every other source-picker context needs to disambiguate from a
-  // hit — redundant here, where the Levels caption and the grid shape
-  // already say what these three are.
+  // Labels drop driveSourceLabel's " level" suffix (needed elsewhere to tell it
+  // from a hit); the Levels caption already says it.
   function levelsGridRow(caption: string, cells: readonly (LevelCell | null)[]): HTMLElement {
     const label = document.createElement("div");
     label.textContent = caption;
@@ -2827,8 +2338,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       row.el.style.cssText += levelsCellStyle;
       row.el.querySelector<HTMLElement>(".vc-label")!.style.cssText += levelsCellLabelStyle;
       const jack = mountBandsJack(cell.choice, row.right, row.el);
-      // Heat (heat.ts): the lens glow, the row's own strip, a Heat history
-      // line and the tooltip line, like a meter card's signal jack.
+      // Heat (heat.ts), as for a meter card's signal jack.
       audioMeters.addHeatJack(cell.choice, jack.el, row.el, bandsCard.title.textContent ?? "", () => bandsCard.fold?.isFolded() ?? false);
       grid.appendChild(row.el);
       bandLevelRows.push({ ...cell, row });
@@ -2843,76 +2353,62 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const stemsOnScreen = watchOnScreen(stemsRow);
   bandsCard.body.append(fadersRow, eqLayer, levelsGridRow("Levels", BAND_LEVELS), stemsRow);
 
-  // One at a time — set by buildPatchPanel() below whenever the pinned row
-  // builds an output graph, cleared by togglePin()/patchChanged() when
-  // there's nothing (any more) to feed. DeviceMenu.update() calls through
-  // this rather than iterating every row, since only the pinned row ever
-  // has a graph.
+  // One at a time: set by buildPatchPanel() when the pinned row builds an
+  // output graph, cleared by togglePin()/patchChanged() when there's nothing to
+  // feed. update() calls through it rather than iterating rows, since only the
+  // pinned row has a graph.
   let activeOutputTick: ((drives: SceneDrives, slots: number) => void) | null = null;
 
-  // Every drive row appendSettingRow builds below, reset at the top of
-  // renderSceneSettings alongside sceneRowHandles — a scene switch/Look
-  // apply/undo/card Reset rebuilds the whole Scene card from scratch.
+  // Every drive row appendSettingRow builds; reset at the top of
+  // renderSceneSettings with sceneRowHandles (any rebuild remakes the Scene card).
   interface DriveRowHandle {
     sceneId: string;
     spec: SceneSetting;
-    /** The row's own input-port ring — a cable's target endpoint
-     *  (src/ui/cableLayer.ts). */
+    /** A cable's target endpoint (src/ui/cableLayer.ts). */
     portEl: HTMLElement;
-    /** The whole row element — a jack-hover's own highlight target
-     *  (onJackHover below). */
+    /** Jack-hover's highlight target (onJackHover). */
     rowEl: HTMLElement;
     refreshMeta(): void;
     refreshPin(): void;
     refreshPreviewLit(): void;
     rebuildIfPinned(): void;
     tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void;
-    /** Recolours the row's heat from settingHeat: its strip under the graph
-     *  and its heat colour. */
     refreshHeat(nowSec: number): void;
-    /** Writes the lens glow from heatLive when its level changes. */
     tickHeatGlow(): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
   // "Only this" (driveSolo.ts) changes from any row's button or the scene
-  // change in update(): the pinned row's own panel shows whichever label
-  // is current. rebuildIfPinned() is a no-op on every row but the pinned one.
+  // change in update(); the pinned panel shows the current label.
+  // rebuildIfPinned() is a no-op except on the pinned row.
   onDriveSoloChange(() => {
     for (const h of driveRowHandles) h.rebuildIfPinned();
     for (const chip of document.querySelectorAll<HTMLElement>("[data-solo-key]")) paintOnlyChip(chip);
   });
 
-  // Heat (heat.ts) for the current scene's wired settings and each of their
-  // wires (keyed by the wire's jackKey), recorded every tick by recordHeat,
-  // panel open or closed, and cleared on a scene change. The strip under each
-  // setting's graph and the Heat history card read settingHeat; the pinned
-  // wire panel's dot per wire reads wireHeat; the heat lens's glow reads
-  // heatLive. All of them read the Dynamics card's span chip: the Scene card
-  // has none of its own.
+  // Heat (heat.ts) for the current scene's wired settings and each wire (keyed
+  // by jackKey), recorded every tick by recordHeat, panel open or closed, and
+  // cleared on a scene change. All read the Dynamics card's span chip: the
+  // Scene card has none of its own.
   const HEAT_SPAN_CARD = "signal";
   let heatSceneId: string | null = null;
   const settingHeat = new Map<string, HeatTrack>();
   const wireHeat = new Map<string, Map<string, HeatTrack>>();
   let wireHeatPips: { key: string; wireKey: string; pip: HeatPip }[] = [];
-  // Each wired setting's live reading this tick for the lens glow, relative
-  // to its weight-1 line (the graph's dotted line), so one full-weight wire
-  // can light it fully.
+  // Each wired setting's live reading for the lens glow, relative to its
+  // weight-1 line (the graph's dotted line), so one full-weight wire can light
+  // it fully.
   const heatLive = new Map<string, number>();
   let heatLensOn = false;
   let lastHeatMs = -Infinity;
 
-  /** The output graph's corner tag while Expansion moves a reading: the
-   *  dial, plus the shape chip's name when it isn't the first (Even). */
   const expansionTagText = (expansion: number, shapeIndex: number): string =>
     `Expansion ${expansion.toFixed(2)}×` + (shapeIndex > 0 ? ` · ${EXPANSION_SHAPE_NAMES[shapeIndex] ?? ""}` : "");
 
-  // Peak-hold between graph samples. The sparklines and the output graph
-  // sample at SPARKLINE_REFRESH_MS, but a hit is a one-tick spike that
-  // decays right away — a sample landing a tick or two after the hit drew
-  // a Fixed hit (every one starts at exactly 1) at 0.8-0.9 and the peaks
-  // looked uneven. notePeaks() runs every frame and remembers the highest
-  // reading per setting (combined and per source); the 30 Hz tick draws
-  // max(now, that), then the update loop clears it.
+  // Peak-hold between graph samples: a hit is a one-tick spike that decays
+  // right away, and a sample landing a tick or two after it drew a Fixed hit
+  // (exactly 1) at 0.8-0.9, so peaks looked uneven. notePeaks() runs every
+  // frame keeping the highest reading per setting (combined and per source);
+  // the graph tick draws max(now, that), then the update loop clears it.
   const peakSeen = new Map<string, { v: number; src: number[]; before: number; after: number }>();
   function notePeaks(drives: SceneDrives): void {
     for (const h of driveRowHandles) {
@@ -2940,11 +2436,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return { before: Math.max(now.before, p?.before ?? 0), after: Math.max(now.after, p?.after ?? 0) };
   };
 
-  /** Every Scene-card row that can be pinned — all of them, drive or not,
-   *  in document order: what togglePin refreshes, Tab walks (moveTabPin)
-   *  and a rebuild re-finds the pin in. A drive row's refreshPin is its
-   *  DriveRowHandle's (patch panel and all); any other row's just toggles
-   *  the .vc-drive-pinned ring, so Solo, its eye and Tab treat both alike. */
+  /** Every Scene-card row that can be pinned (drive or not), in document order:
+   *  what togglePin refreshes, Tab walks (moveTabPin) and a rebuild re-finds
+   *  the pin in. A non-drive row's refreshPin just toggles the
+   *  .vc-drive-pinned ring, so Solo, its eye and Tab treat both alike. */
   interface PinRowHandle {
     sceneId: string;
     spec: SceneSetting;
@@ -2953,21 +2448,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   let pinRowHandles: PinRowHandle[] = [];
   // Every row's sparkline canvas, so renderSceneSettings can unobserve them
-  // (driveCanvasRO below) before discarding the old Scene card's rows —
-  // otherwise a scene switch would leave the observer holding a detached
-  // canvas per old row for the rest of the session.
+  // (driveCanvasRO) before discarding the old rows; otherwise the observer
+  // holds a detached canvas per old row.
   let driveSparkCanvases: HTMLCanvasElement[] = [];
 
-  // Sparkline/output-graph canvases are sized only from ResizeObserver
-  // entries, never measured in a draw call (this file's own carried rule:
-  // no per-tick layout reads) — the Scene card's rows are built while the
-  // panel is still `display:none` (open() calls renderSceneSettings()
-  // before adding vc-open below), so a synchronous read at creation time
-  // would just read zero anyway.
+  // Canvases are sized only from ResizeObserver entries, never measured in a
+  // draw (no per-tick layout reads); and the Scene card's rows are built while
+  // the panel is still `display:none` (open() calls renderSceneSettings()
+  // before adding vc-open), so a synchronous read would give zero.
   interface CanvasSize {
     w: number;
     h: number;
-    /** In view (driveCanvasIO below). */
     onScreen: boolean;
   }
   const driveCanvasSizes = new WeakMap<HTMLCanvasElement, CanvasSize>();
@@ -2984,12 +2475,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   });
-  // Which of them are in view. A Scene card is often taller than its column,
-  // so most of its rows can sit scrolled out of sight (or under a closed
-  // panel): their sparklines keep recording (tickSparkline) and skip only
-  // the draw, like the meters' cards (audioMeters.ts). One observer for all
-  // of them, unobserved with driveCanvasRO in untrackDriveCanvas, since
-  // onScreen.ts's watchOnScreen can't stop watching a row a rebuild drops.
+  // Which canvases are in view. Rows scrolled out of sight (or under a closed
+  // panel) keep recording (tickSparkline) and skip only the draw, like the
+  // meters' cards (audioMeters.ts). One observer for all, unobserved in
+  // untrackDriveCanvas, since onScreen.ts's watchOnScreen can't stop watching
+  // a row a rebuild drops.
   const driveCanvasIO =
     typeof IntersectionObserver === "undefined"
       ? null
@@ -2999,20 +2489,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
             if (size) size.onScreen = entry.isIntersecting;
           }
         });
-  /** The drive graphs' one fixed top — the row sparkline and the "What it
-   *  receives" graph alike: one source at the most weight it can have
-   *  (DRIVE_WEIGHT_MAX) reading full scale, times the setting's own gain.
-   *  It never moves — not with a weight drag, a source plugged in or muted,
-   *  or a peak scrolling past — so a taller line always means the setting is
-   *  receiving more. A weight-1 source peaks at `gain` (the dotted line);
-   *  anything past the top clips. */
+  /** The one fixed top of the drive graphs (row sparkline and "What it
+   *  receives" graph): one source at the most weight it can have
+   *  (DRIVE_WEIGHT_MAX) reading full scale, times the setting's gain. It never
+   *  moves (not with a weight drag, a plug or mute, or a peak), so a taller
+   *  line always means more received. A weight-1 source peaks at `gain` (the
+   *  dotted line); past the top clips. */
   function driveGraphTop(spec: SceneSetting): number {
     return Math.max(1e-3, DRIVE_WEIGHT_MAX * (spec.drive?.gain ?? 1));
   }
 
-  /** One tick of heat for the current scene's wired settings and their wires
-   *  (this file's settingHeat/wireHeat), each scaled by its graph's own fixed
-   *  top (driveGraphTop) — the same scale the row's sparkline uses. */
+  /** One tick of heat for wired settings and their wires, scaled by
+   *  driveGraphTop like the row's sparkline. */
   function recordHeat(drives: SceneDrives | null, frame: FeatureFrame | null): void {
     const sceneId = deps.currentSceneId();
     if (sceneId !== heatSceneId) {
@@ -3056,9 +2544,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  /** Recolours every row's heat and every wire's heat dot — at most every
-   *  HEAT_REFRESH_MS, from update(), while the Scene card is on screen and
-   *  unfolded. */
+  /** At most every HEAT_REFRESH_MS, from update(), while the Scene card is on screen and unfolded. */
   function refreshHeatPips(nowSec: number): void {
     const span = getHistorySpan(HEAT_SPAN_CARD);
     for (const h of driveRowHandles) h.refreshHeat(nowSec);
@@ -3068,8 +2554,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  /** The Heat history card's Settings group (audioMeters.ts's deps.heatSettings):
-   *  the current scene's wired settings that have a track yet. */
+  /** The Heat history card's Settings group (audioMeters.ts's deps.heatSettings). */
   function heatSettingRows(): { label: string; track: HeatTrack }[] {
     const sceneId = deps.currentSceneId();
     const rows: { label: string; track: HeatTrack }[] = [];
@@ -3081,10 +2566,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return rows;
   }
 
-  /** The drive graphs' frame, drawn under their traces: a faint band over
-   *  the whole 0…top range, a line along its top (driveGraphTop — a trace
-   *  that touches it is at the most the graph shows) and a dimmer one at 0,
-   *  so how close a reading is to the top reads at a glance. */
+  /** The graphs' frame under their traces: a faint band over 0…top, a line at
+   *  the top (driveGraphTop; a trace touching it is at the most the graph
+   *  shows) and a dimmer one at 0. */
   function drawDriveGraphFrame(ctx: CanvasRenderingContext2D, w: number, yTop: number, yZero: number): void {
     ctx.fillStyle = "rgba(255,255,255,0.035)";
     ctx.fillRect(0, yTop, w, yZero - yTop);
@@ -3103,7 +2587,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   function trackDriveCanvas(canvas: HTMLCanvasElement): CanvasSize {
-    // Without the observer every canvas counts as in view, as before.
+    // Without the observer every canvas counts as in view.
     const size: CanvasSize = { w: 0, h: 0, onScreen: driveCanvasIO === null };
     driveCanvasSizes.set(canvas, size);
     driveCanvasRO.observe(canvas);
@@ -3117,18 +2601,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     driveCanvasSizes.delete(canvas);
   }
 
-  /** A `drive.sceneLabel` as the built-in summary shows it: the scene's
-   *  own "Scene: " prefix and a leading "this scene's own " dropped, since
-   *  "Built-in: " already says both (docs/vocabulary.md). Empty when the
-   *  scene names no label. */
+  /** Drops the scene's "Scene: " prefix and a leading "this scene's own ",
+   *  since "Built-in: " already says both (docs/vocabulary.md). */
   function builtInText(spec: SceneSetting): string {
     return (spec.drive?.sceneLabel ?? "").replace(/^Scene:\s*/, "").replace(/^this scene's own\s+/, "");
   }
 
-  /** A row's own one-line source summary — every muted source is left out
-   *  of the plain-language list (this file's header's Muting paragraph) and
-   *  folded into one short "· N off" suffix instead, so a summary never
-   *  grows a parenthetical per muted source. */
+  /** Muted sources are left out of the list and folded into one "· N off"
+   *  suffix (the Muting paragraph of drives.ts's header). */
   function driveSummaryText(spec: SceneSetting, setting: DriveSetting): string {
     if (setting === "scene") {
       const label = builtInText(spec);
@@ -3152,27 +2632,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return `${names.join(setting.mix === "max" ? " or " : " + ")}${suffix}`;
   }
 
-  /** `Reset to scene default`'s own hint (buildPatchPanel) — the setting's
-   *  own default patch, described in the same words a normal summary uses,
-   *  so the hint reads as "this is what you'd get" rather than jargon. */
+  /** The setting's default patch in a normal summary's words, so the hint reads
+   *  as "this is what you'd get". */
   function driveDefaultSummary(spec: SceneSetting): string {
     return driveSummaryText(spec, defaultDriveSetting(spec));
   }
 
-  /** The short form driveSummaryText's own "scene" branch would otherwise
-   *  spell out ("Built-in: bass level") — just "Built-in", for the "Mixed —
-   *  …" line below, where every part has to stay short enough to read as a
-   *  list. */
+  /** Short form for the "Mixed — …" line, where every part must stay short. */
   function driveShortSummary(spec: SceneSetting, setting: DriveSetting): string {
     return setting === "scene" ? "Built-in" : driveSummaryText(spec, setting);
   }
 
-  /** A drive row's own summary text, "Mixed — …" once its linked siblings
-   *  (registry.ts's `appendRow` `linked` option) actually disagree with
-   *  `setting` — the multi-item-selection bridge's drive-summary half (the
-   *  tick marks on a numeric row are createControlRow's own concern; this is
-   *  buildDriveRow's). Plain `driveSummaryText` otherwise, identical to a
-   *  row with no `linked` at all. */
+  /** "Mixed — …" once linked siblings (registry.ts's `appendRow` `linked`
+   *  option) disagree with `setting`: the drive-summary half of the multi-item
+   *  bridge (tick marks are createControlRow's). Plain otherwise. */
   function driveSummaryForRow(sceneId: string, spec: SceneSetting, setting: DriveSetting): string {
     const entry = linkedByKey.get(spec.key);
     if (!entry?.linked.length) return driveSummaryText(spec, setting);
@@ -3184,22 +2657,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     ]);
   }
 
-  /** The setting's own first plugged source's colour, or SCENE_VIOLET for
-   *  a `"scene"` mix with nothing plugged in — shared by drivePortStyle's
-   *  own glow below and refreshMeta's --vc-pin-color (controlsTheme.ts's
-   *  .vc-drive-pinned/.vc-drive-preview), so a row's pinned/preview border
-   *  always matches what its own port is showing. */
+  /** First plugged source's colour, SCENE_VIOLET for a "scene" mix with nothing
+   *  plugged. Shared by drivePortStyle's glow and refreshMeta's --vc-pin-color
+   *  (controlsTheme.ts), so a row's pinned/preview border matches its port. */
   function driveRowAccent(setting: DriveSetting): string {
     if (setting === "scene" || !setting.sources.length) return SCENE_VIOLET;
     return driveSourceColor(setting.sources[0]!.choice);
   }
 
-  /** `state` is "none" while the row is neither pinned nor being previewed
-   *  (hover/focus short of a click): pinned gets a solid, glowing ring —
-   *  this *is* the shown patch right now; preview gets a bare outline, no
-   *  glow — a passing look, not a commitment (see this file's header doc
-   *  comment's row-grammar paragraph for why only a click expands the
-   *  patch panel). */
+  /** Pinned: solid glowing ring (the shown patch). Preview: a bare outline, a
+   *  passing look (only a click expands the panel; see the header doc). */
   function drivePortStyle(setting: DriveSetting, state: "pinned" | "preview" | "none"): string {
     const ring =
       state === "pinned"
@@ -3220,9 +2687,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   /** registry.ts's `WidgetCtx.portLook`: an unpinned port's look for one
-   *  setting, or for several that one port wires together — theirs when they
-   *  all receive the same, else every wire colour among them on a dashed
-   *  ring ("mixed"). */
+   *  setting, or for several wired by one port: theirs if all receive the same,
+   *  else every wire colour on a dashed ring ("mixed"). */
   function portLookFor(sceneId: string, specs: readonly SceneSetting[]): string {
     const settings = specs.map((s) => deps.getDriveSetting(sceneId, s));
     const first = settings[0];
@@ -3235,19 +2701,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return `border: 1.5px dashed rgba(255,255,255,0.7); background: ${bg}; box-shadow: 0 0 0 2px rgba(8,11,10,0.75);`;
   }
 
-  // ---- Patch-panel sub-builders — each takes the (sceneId, spec) pair and
-  // whatever local data it needs, and wires its own controls straight to
-  // `deps`; patchChanged() below is the one place a mutation is followed by
-  // a rebuild. ----
+  // ---- Patch-panel sub-builders: each wires its controls straight to `deps`;
+  // patchChanged() is the one place a mutation is followed by a rebuild. ----
 
-  /** Sets a control's plain-language hint: `data-hint` (buildPatchPanel's
-   *  own bottom hint line reads this off whichever control is hovered/
-   *  focused right now — the "cover everything with hints" pass's one
-   *  delegated mechanism, never a per-control listener) and
-   *  `aria-description` for a screen reader. Deliberately no `title`: the
-   *  native tooltip repeated the bottom line's text a second time on top of
-   *  the panel. Every element inside the patch panel goes through this, so
-   *  the two never drift apart. */
+  /** `data-hint` is read by buildPatchPanel's bottom hint line off whichever
+   *  control is hovered/focused (one delegated mechanism, no per-control
+   *  listener); `aria-description` is for screen readers. No `title`: the
+   *  native tooltip repeated the bottom line. Everything in the patch panel
+   *  goes through this so the two never drift. */
   function setHint(el: HTMLElement, text: string): void {
     el.setAttribute("aria-description", text);
     el.dataset.hint = text;
@@ -3263,9 +2724,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
   ];
 
-  // Beat wave's own every-N-beats divider (DriveSource.every) — only shown
-  // on a plain Beat wave source line (buildSourceLine below); every other
-  // source ignores it outright (drives.ts's own doc on that field).
+  // Only on a plain Beat wave source line (buildSourceLine); other sources
+  // ignore DriveSource.every (drives.ts).
   const EVERY_OPTIONS: readonly number[] = [1, 2, 4, 8, 16];
   const EVERY_HINT = "How many beats one swing takes: 1 = every beat, 4 = once a bar.";
 
@@ -3336,12 +2796,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return seg;
   }
 
-  /** Beat wave's own every-N-beats divider — a visible "Every" label (the
-   *  numbers alone don't say what they count, unlike Height's own
-   *  self-explanatory Graded/Fixed/Loud) plus a buildHeightSeg-styled row of
-   *  chips, one per EVERY_OPTIONS value. Live write + patchChanged, same as
-   *  buildHeightSeg. Only ever built for a plain Beat wave source line
-   *  (buildSourceLine below). */
+  /** A visible "Every" label (the numbers alone don't say what they count) plus
+   *  a row of chips, one per EVERY_OPTIONS value. Only for a plain Beat wave
+   *  source line. */
   function buildEverySeg(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
     const wrap = document.createElement("div");
     wrap.style.cssText = `display: flex; align-items: center; gap: 6px;`;
@@ -3372,16 +2829,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
-  /** The Only when role toggle (drives.ts's setSourceRole) — shown on every
-   *  source line while the patch is gating. Both halves are independently
-   *  clickable now (this file's own header): marking this line "when" never
-   *  touches any other line's own role, so several can be conditions at
-   *  once. "Only when" disables itself — with `ROLE_REFUSE_HINT` — on the
-   *  one line whose marking would leave zero "plays" sources among the
-   *  rest, mirroring drives.ts's own refusal there rather than letting a
-   *  click visibly do nothing. `index` is this source's own current
-   *  position in `patch.sources` (buildSourceLine's own loop index), which
-   *  is exactly what setSourceRole wants. */
+  /** The Only when role toggle (drives.ts's setSourceRole), on every source
+   *  line while gating. Both halves are clickable independently: marking this
+   *  line "when" never touches another line's role. "Only when" disables itself
+   *  (ROLE_REFUSE_HINT) on the one line whose marking would leave zero "plays"
+   *  sources, mirroring drives.ts's refusal instead of a click visibly doing
+   *  nothing. `index` is the source's position in `patch.sources`. */
   function buildRoleToggle(sceneId: string, spec: SceneSetting, patch: DrivePatch, index: number): HTMLElement {
     const seg = document.createElement("div");
     seg.style.cssText = driveMiniSegStyle;
@@ -3455,10 +2908,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const GENERIC_SMOOTHNESS_HINT =
     "How gently the window starts and ends. Left: exactly at the two lines. Right: a wider, softer rise. Off: exactly at the two lines, whatever the slider says.";
 
-  /** The generic gate's Smoothness row — a 0..1 slider for how far the
-   *  window widens at both ends (driveStore.ts's getDriveSmoothness).
-   *  Its own On/Off, independent of the threshold's. Same live-write,
-   *  no-rebuild rule as buildThresholdRow. */
+  /** 0..1 slider for how far the window widens at both ends (driveStore.ts's
+   *  getDriveSmoothness), with its own On/Off. Live-write, no rebuild, as
+   *  buildThresholdRow. */
   function buildSmoothnessRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const wrap = document.createElement("div");
     wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;`;
@@ -3530,22 +2982,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
-  /** Every drive setting's own threshold row — On/Off + a labelled 0..1
-   *  slider, right under its graph (or where the graph would be with
-   *  nothing plugged in yet). Scene-handled (SceneSetting.drive.threshold
-   *  declared — Physarum 2's Dose threshold) uses its own label/hint
-   *  and starts on; every other drive setting uses the generic label/hint
-   *  and starts off, gated by drives.ts's own engine (that file's header's
-   *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
-   *  setDriveThreshold/setDriveThresholdOn either way. A generic gate's row
-   *  is a window rather than one threshold slider: a Min slider (the stored
-   *  threshold) and a Max slider (getDriveWindowMax), side by side. It also
-   *  gets a Smoothness row under the window (buildSmoothnessRow), with its
-   *  own On/Off. Same live-write, no-rebuild rule
-   *  as buildWeightSlider below; the On/Off buttons share buildHeightSeg's
-   *  own mini-segment styling. A generic gate's window is built only while
-   *  its own gate is on (buildPatchPanel): shaping nodes own the window now,
-   *  and this row is what a saved Look from before them still shows. */
+  /** On/Off + a labelled 0..1 slider under the graph (or where it would be with
+   *  nothing plugged). Scene-handled (SceneSetting.drive.threshold) uses its own
+   *  label/hint and starts on; every other drive setting uses the generic ones
+   *  and starts off, gated by drives.ts's engine. A generic gate's row is a
+   *  window: Min (the stored threshold) and Max (getDriveWindowMax), plus a
+   *  Smoothness row (buildSmoothnessRow). Live-write, no rebuild, as
+   *  buildWeightSlider. A generic window is built only while its gate is on
+   *  (buildPatchPanel): shaping nodes own the window now, and this row is what
+   *  a saved Look from before them still shows. */
   function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
     const declared = spec.drive?.threshold;
     const engineHit = isEngineHitDriver(spec);
@@ -3569,7 +3014,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     offBtn.textContent = "Off";
     seg.append(onBtn, offBtn);
 
-    // One labelled slider: its name span, range and output, with its own show().
     const slider = (text: string, ariaLabel: string) => {
       const name = document.createElement("span");
       name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
@@ -3592,7 +3036,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return { name, rng, out, show };
     };
 
-    // A generic gate's window: Min (the threshold) and Max. Anything else has one slider.
     const main = generic ? slider("Min", "Window Min") : slider(label, label);
     const top = generic ? slider("Max", "Window Max") : undefined;
     const sliders = top ? [main, top] : [main];
@@ -3659,8 +3102,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
 
     if (top) {
-      // Min and Max each get a full line under "On/Off Window": two sliders
-      // side by side in the panel's column squeeze each down to its thumb.
+      // Min and Max each get a full line: side by side in the panel's column
+      // they squeeze to their thumbs.
       const title = document.createElement("span");
       title.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
       title.textContent = label;
@@ -3682,10 +3125,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return column;
   }
 
-  /** A hit driver's Reaction row (SceneSetting.drive.hit): Flat or Sized,
-   *  right under its threshold row — driveStore.ts's getDriveReadout/
-   *  setDriveReadout. A `flatOnly` setting shows Sized greyed out, with the
-   *  declaration's own hint saying why. Same live-write, no-rebuild rule as
+  /** A hit driver's Reaction row (SceneSetting.drive.hit): Flat or Sized, under
+   *  the threshold row. A `flatOnly` setting shows Sized greyed out, the
+   *  declaration's hint saying why. Live-write, no rebuild, as
    *  buildThresholdRow. */
   function buildReadoutRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement | null {
     const hit = spec.drive?.hit;
@@ -3737,11 +3179,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const rng = document.createElement("input");
     rng.type = "range";
     rng.setAttribute("aria-description", WEIGHT_HINT);
-    // The same track/thumb/fill CSS every other slider in the panel uses
-    // (controlsTheme.ts's .vc-slider rules, reading --vc-accent/--vc-fill)
-    // — without this class an <input type="range"> renders as the bare
-    // native control, and this one also joins the panel's own Tab ring
-    // (ringElements() below) for free, same as a setting row's own slider.
+    // The class gives the panel's shared track/thumb/fill CSS (controlsTheme.ts,
+    // --vc-accent/--vc-fill) and a place in the Tab ring (ringElements());
+    // without it this is the bare native control.
     rng.className = "vc-slider";
     rng.min = String(DRIVE_WEIGHT_MIN);
     rng.max = String(DRIVE_WEIGHT_MAX);
@@ -3756,12 +3196,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const setOut = (w: number) => (out.textContent = `${w.toFixed(2)}×`);
     setFill(src.weight);
     setOut(src.weight);
-    // Live store write + readout on every drag frame, no rebuild — a full
-    // buildPatchPanel() here would tear out the very slider being dragged
-    // (this file's own carried click-loss rule). The snapshot moves with the
-    // write for the same reason: sameDriveSetting compares weights, so a
-    // stale lastPinnedSetting reads this drag as an external change and
-    // update()'s ~10 Hz check rebuilds the panel mid-drag anyway.
+    // Live store write + readout per drag frame, no rebuild: buildPatchPanel()
+    // would tear out the slider being dragged (the click-loss rule). The
+    // snapshot moves with the write too: sameDriveSetting compares weights, so
+    // a stale lastPinnedSetting would read the drag as an external change and
+    // update()'s check would rebuild mid-drag.
     rng.addEventListener("input", () => {
       const w = Number(rng.value);
       setFill(w);
@@ -3778,14 +3217,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const MUTE_HINT_ON = "Switch this wire off without unplugging it — its settings are kept.";
   const MUTE_HINT_OFF = "Switch this wire back on.";
 
-  /** The source line's own on/off switch (drives.ts's setSourceMuted) —
-   *  lives in its own gutter column (driveSrcLineStyle) on every line, so
-   *  it never shifts alignment depending on whether a line happens to have
-   *  one. Styled like the panel's own boolean toggle (`.vc-toggle`,
-   *  controlsTheme.ts) at a compact size of its own (`.vc-mute-switch`)
-   *  rather than reusing that class outright — `.vc-toggle` is also this
-   *  file's own Tab-ring selector (ringElements()), and a mute switch inside
-   *  a pinned setting's own patch panel isn't meant to join that ring. */
+  /** Lives in its own gutter column on every line, so alignment never depends
+   *  on whether a line has one. Styled like `.vc-toggle` (controlsTheme.ts) at a
+   *  compact size (`.vc-mute-switch`) without reusing the class: `.vc-toggle` is
+   *  the Tab ring's selector (ringElements()), and a mute switch isn't meant to
+   *  join it. */
   function buildMuteSwitch(sceneId: string, spec: SceneSetting, index: number, src: DriveSource): HTMLElement {
     const muted = !!src.off;
     const btn = document.createElement("button");
@@ -3803,11 +3239,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return btn;
   }
 
-  /** A wire's "+ Modifier" button: puts a new shaping node (shapingNodes.ts) on this
-   *  catalogue wire and re-points the wire at it, so the picture doesn't
-   *  change until the node is edited. The node takes the wire's Height, and
-   *  the setting's own window too when this is its only wire and the gate is
-   *  on; that window then goes off on the setting (the node carries it now). */
+  /** "+ Modifier": puts a new shaping node (shapingNodes.ts) on this catalogue
+   *  wire and re-points the wire at it, so the picture doesn't change until the
+   *  node is edited. The node takes the wire's Height, and the setting's window
+   *  too when this is its only wire and the gate is on (the setting's own window
+   *  then goes off). */
   function buildShapeButton(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
     const choice = src.choice as SignalId;
     const btn = document.createElement("button");
@@ -3862,9 +3298,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     line.style.cssText = driveSrcLineStyle;
     line.classList.toggle("vc-drive-src-muted", muted);
 
-    // The condition marker lives in its own gutter column, not a
-    // border+padding on the whole line — every line's dots/names/controls
-    // align regardless of role (this file's own header).
+    // The condition marker is a gutter column, not border+padding on the line,
+    // so dots/names/controls align regardless of role.
     const gutter = document.createElement("span");
     gutter.style.cssText = driveSrcGutterStyle;
     gutter.classList.toggle("vc-drive-gutter-cond", isCondition);
@@ -3876,8 +3311,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const name = document.createElement("div");
     name.style.cssText = driveSrcNameStyle;
     name.textContent = driveSourceLabel(src.choice);
-    // The wire's heat dot (heat.ts); its line shows in the panel's bottom
-    // hint bar while the name is hovered.
     const wireKey = jackKey(src.choice);
     const wirePip = createHeatPip(name);
     name.appendChild(wirePip.el);
@@ -3898,15 +3331,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const ctrls = document.createElement("div");
     ctrls.style.cssText = driveSrcCtrlsStyle;
     if (isGate) ctrls.appendChild(buildRoleToggle(sceneId, spec, patch, i));
-    // Fixed/Loud height only mean anything for a hit-kind source — an
-    // edge-kind catalogue entry or a beat grid (drives.ts's own header).
+    // Fixed/Loud height only mean something for a hit-kind source: an
+    // edge-kind catalogue entry or a beat grid (drives.ts's header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
-    // Only a wire still carrying an old Fixed/Loud shows its Height; a node
-    // owns Height from now on (shaping nodes; the engine still honours this).
+    // Only a wire still carrying an old Fixed/Loud shows Height; nodes own it
+    // now (the engine still honours it).
     if (isHitKind && src.height !== undefined && src.height !== "graded") ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
-    // Every-N-beats only ever means anything for a plain Beat wave source
-    // (DriveSource.every's own doc) — never a grid/line/hit-kind source, all
-    // handled by other branches here.
+    // Every-N-beats only means something for a plain Beat wave (DriveSource.every).
     if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
     if (isLineSourceChoice(src.choice)) {
@@ -3931,12 +3362,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function buildAddChips(sceneId: string, spec: SceneSetting, patch: DrivePatch): HTMLElement {
     const wrap = document.createElement("div");
-    // Always open in the stacked layout (jacks — the primary way in once
-    // Phase 2b lands — are far away there); behind a small disclosure in
-    // the wide layout. A one-time check, not a resize listener: this panel
-    // is rebuilt on every patch edit anyway (this file's own carried rule
-    // against per-tick layout work), and a live breakpoint crossing
-    // mid-edit is a vanishingly rare case to chase.
+    // Always open in the stacked layout (jacks are far away there). A one-time
+    // check, not a resize listener: the panel is rebuilt on every patch edit
+    // anyway, and a breakpoint crossing mid-edit is too rare to chase.
     const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
     let groupsHost = wrap;
     if (!stacked) {
@@ -3945,10 +3373,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       toggle.style.cssText = driveAddDisclosureStyle;
       toggle.textContent = "+ Add by name";
       groupsHost = document.createElement("div");
-      // A plain style toggle, not the `hidden` attribute: `driveAddGroupsStyle`
-      // already sets an inline `display`, which would otherwise outrank the
-      // UA stylesheet's `[hidden] { display: none }` rule and leave this
-      // visible regardless of the attribute.
+      // A style toggle, not `hidden`: driveAddGroupsStyle sets an inline
+      // `display`, which outranks the UA's `[hidden] { display: none }`.
       const sync = () => {
         groupsHost.style.cssText = `${driveAddGroupsStyle} display: ${addChipsOpen ? "flex" : "none"};`;
         toggle.setAttribute("aria-expanded", String(addChipsOpen));
@@ -3976,21 +3402,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           : patch.sources.some((s) => sourceKey(s.choice) === sourceKey(choice));
         const btn = document.createElement("button");
         btn.type = "button";
-        // The Tempo chip is generic ("Beat grid", not "Beat grid · Beat") —
-        // it adds a rhythmic pulse source; which division plays is the
-        // source line's own division chips (buildGridChips), not this one.
+        // The Tempo chip is generic ("Beat grid"): which division plays is the
+        // source line's division chips (buildGridChips).
         const chipLabel = isTempo ? "Beat grid" : driveSourceLabel(choice);
         btn.textContent = chipLabel;
         btn.setAttribute("aria-pressed", String(pressed));
         btn.style.cssText = pressed ? driveChipLitStyle(driveSourceColor(choice)) : driveChipStyle;
-        // The line chip keeps its own longer draw-it-yourself instructions
-        // (LINE_HINT_TEXT) — every other chip gets "Plug <Source> in" plus
-        // driveSources.ts's own one-line description of what it is.
+        // The line chip keeps its own longer instructions (LINE_HINT_TEXT); the
+        // rest get "Plug <Source> in" plus driveSources.ts's description.
         setHint(btn, isLineSourceChoice(choice) ? LINE_HINT_TEXT : `Plug ${chipLabel} in — ${driveSourceDescription(choice)}`);
         btn.addEventListener("click", () => {
-          // The Tempo chip toggles whichever grid source is already
-          // present, not just this exact division — see driveSources.ts's
-          // own comment on DRIVE_ADD_GROUPS.
+          // The Tempo chip toggles whichever grid source is present, not just
+          // this division (driveSources.ts's DRIVE_ADD_GROUPS comment).
           const target = isTempo ? (patch.sources.find((s) => isGridSourceChoice(s.choice))?.choice ?? choice) : choice;
           deps.onTogglePatchSource(sceneId, spec, target);
           patchChanged(sceneId, spec);
@@ -4023,9 +3446,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     head.append(eyebrow, val);
     const canvas = document.createElement("canvas");
     canvas.style.cssText = driveOutCanvasStyle;
-    // Key for a scene's own marks (settingMarks.ts), shown only once the
-    // scene has published some: the first line's label for the dotted trace,
-    // and the cyan dot under the scene's own word for a reaction.
+    // Key for a scene's own marks (settingMarks.ts), shown only once the scene
+    // has published some.
     const key = document.createElement("div");
     key.style.cssText = "display:none;gap:12px;margin-top:4px;font-size:11px;color:rgba(255,255,255,0.6);";
     const keyReaction = document.createElement("span");
@@ -4040,21 +3462,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const RING = 120; // 4 s at 30 Hz
     const combined = new Float32Array(RING);
     const perSource = patch.sources.map(() => new Float32Array(RING));
-    // Every marked condition (there can be more than one now — this file's
-    // own header) draws its trace dashed; `gateOpen` below tracks the same
+    // Every marked condition draws dashed; `gateOpen` tracks the same
     // AND-of-smoothsteps combine()/fired() gate on (drives.ts's
-    // GATE_OPEN_LOW/HIGH, reused rather than re-typed), reduced to a bit per
-    // tick for the shading.
+    // GATE_OPEN_LOW/HIGH, reused), reduced to a bit per tick for the shading.
     const isGate = patch.mix === "gate";
     const conditionIdxs = isGate ? gateConditionIndices(patch) : [];
     const gateOpen = new Uint8Array(RING);
-    // A scene's own reference lines and reactions for this setting
-    // (settingMarks.ts) — e.g. Beat ripple's salience bar and each ring sent.
-    // Lines are recorded per tick (a scene's line can move — Beat ripple's
-    // rides the signal) and drawn as traces, labelled at their latest point.
+    // A scene's own reference lines and reactions (settingMarks.ts). Lines are
+    // recorded per tick (a scene's line can move) and drawn as traces, labelled
+    // at their latest point.
     const reactions = new Float32Array(RING);
-    // The Master Expansion's own gap (drives.ts expansionPair): the reading
-    // before and after it, NaN on a tick it passed the reading through.
+    // Master Expansion's gap (drives.ts expansionPair): before/after, NaN on a
+    // tick it passed the reading through.
     const expBefore = new Float32Array(RING).fill(NaN);
     const expAfter = new Float32Array(RING).fill(NaN);
     let expansionTag = "";
@@ -4062,27 +3481,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let ringHead = 0;
     let filled = 0;
 
-    // The panel's own polish pass: darken the BLOCKED time clearly (not a
-    // faint wash over the open time — that read too subtly on the synthetic
-    // feed) plus a thin lit-when-open strip along the graph's own bottom
-    // edge, in a neutral white rather than picking one condition's colour
-    // when several are marked.
+    // Blocked time is darkened clearly (a faint wash over the open time read too
+    // subtly on the synthetic feed), plus a thin lit-when-open strip along the
+    // bottom edge, neutral white since several conditions may be marked.
     const BLOCKED_FILL = "rgba(0,0,0,0.4)";
     const STRIP_OPEN = "rgba(255,255,255,0.9)";
     const STRIP_BLOCKED = "rgba(255,255,255,0.16)";
     const STRIP_H = 3;
     const MARK_LINE = "rgba(255,255,255,0.55)";
     const MARK_REACTION = "rgba(110,235,225,0.9)";
-    // Expansion's gap in the Master card's own colour (its dial and leash
-    // gauge): a solid fill where it pushed the reading up, a hatch where it
-    // pulled it down.
+    // Expansion's gap in the Master card's colour: solid where it pushed the
+    // reading up, hatched where it pulled down.
     const EXP_UP = withAlpha(SCENE_VIOLET, 0.45);
     const EXP_DOWN = withAlpha(SCENE_VIOLET, 0.14);
     const EXP_HATCH = withAlpha(SCENE_VIOLET, 0.6);
-    // The generic engine gate's own lines have no scene of their own to name
-    // them (unlike Beat ripple's "reach to ring") — one fixed label each, used
-    // as both a trace's key in `markTraces` and the text the key row shows for
-    // it: the Min line (gateLine) and the Max line (gateTop).
+    // The generic gate's lines have no scene to name them: one fixed label each,
+    // both a `markTraces` key and the key row's text (Min line gateLine, Max
+    // line gateTop).
     const GENERIC_GATE_LINE_LABEL = "below this counts as nothing";
     const GENERIC_GATE_TOP_LABEL = "above this counts as full";
 
@@ -4094,12 +3509,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const xs = (k: number) => (k / (RING - 1)) * w;
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
-      // driveGraphTop: fixed, so the trace never rescales. A scene's own
-      // mark line that rides above the signal clips at the top.
-      // `sourceValues()` and the generic gate's line are un-gained
-      // (weight·value — drives.ts's header), the combined value and this top
-      // are gained: every trace is scaled by `gain` below so they share one
-      // axis (a 0.15-gain setting drew its source traces 7× off the top).
+      // driveGraphTop is fixed, so the trace never rescales; a mark line riding
+      // above the signal clips at the top. `sourceValues()` and the generic
+      // gate's line are un-gained (weight·value, drives.ts's header) while the
+      // combined value and this top are gained, so every trace is scaled by
+      // `gain` to share one axis (a 0.15-gain setting drew its source traces 7×
+      // off the top).
       const gain = spec.drive?.gain ?? 1;
       const top = driveGraphTop(spec);
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
@@ -4120,7 +3535,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
 
       for (let i = 0; i < patch.sources.length; i++) {
-        if (patch.sources[i]!.off) continue; // muted — no trace at all
+        if (patch.sources[i]!.off) continue;
         ctx.strokeStyle = withAlpha(driveSourceColor(patch.sources[i]!.choice), 0.65);
         ctx.lineWidth = 1;
         ctx.setLineDash(conditionIdxs.includes(i) ? [3, 3] : []);
@@ -4153,7 +3568,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      // Where one weight-1 source peaks (gain), and the top's own number.
       ctx.setLineDash([2, 3]);
       ctx.lineWidth = 1;
       ctx.strokeStyle = MARK_LINE;
@@ -4167,7 +3581,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(top.toFixed(top < 1 ? 2 : 1), 4, 3);
 
-      // Expansion's gap, under the white line: one column per tick.
       const colW = w / (RING - 1);
       for (let k = RING - n; k < RING; k++) {
         const idx = at(k);
@@ -4209,9 +3622,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       ctx.stroke();
 
-      // A reaction that spans several ticks (a slow climb) is one dot, at the
-      // tick it started, sized by its total — drawn on the white line so it
-      // sits on the bump that caused it.
+      // A reaction spanning several ticks (a slow climb) is one dot at the tick
+      // it started, sized by its total, on the white line so it sits on the bump
+      // that caused it.
       ctx.fillStyle = MARK_REACTION;
       for (let k = RING - n; k < RING; k++) {
         if (reactions[at(k)]! <= 0.01) continue;
@@ -4246,11 +3659,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    /** `slots` is how many SPARKLINE_REFRESH_MS columns this call covers
-     *  (more than 1 after a slow frame — see the update loop), so the graph's
-     *  x axis stays real time: the held peak lands in the first, the live
-     *  reading fills the rest, and the scene's own marks (taken once) land
-     *  with the peak. */
+    /** `slots` is how many SPARKLINE_REFRESH_MS columns this call covers (more
+     *  than 1 after a slow frame), so the x axis stays real time: the held peak
+     *  lands in the first, the live reading fills the rest, and the scene's
+     *  marks (taken once) land with the peak. */
     function tick(drives: SceneDrives, slots: number): void {
       const src = drives.sourceValues(spec.key);
       const now = drives.valueOf(spec.key);
@@ -4259,12 +3671,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const pairHeld = pairNow && heldExpansion(spec.key, pairNow);
       expansionTag = pairNow ? expansionTagText(deps.getSceneExpansion(), deps.getSceneExpansionShape()) : "";
       const marks = takeSettingMarks(sceneId, spec.key, "graph");
-      // The generic engine gate's own window (drives.ts's header's threshold
-      // paragraph): its Min line (gateLine) and Max line (gateTop) — both
-      // undefined for a scene-handled setting (it draws its own line above
-      // instead, through settingMarks.ts) or while the gate is off. Drawn the
-      // same dotted way as a scene's own mark lines, under one fixed label
-      // each so they get their own key entries.
+      // The generic gate's window (drives.ts's header): Min line gateLine, Max
+      // line gateTop; undefined for a scene-handled setting (it draws its own
+      // line through settingMarks.ts) or while the gate is off. Drawn dotted
+      // like a scene's mark lines, one fixed label each so they get key entries.
       const gateLine = drives.gateLine(spec.key);
       const gateTop = drives.gateTop(spec.key);
       for (const line of marks?.lines ?? []) {
@@ -4320,22 +3730,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return { el: wrap, canvas, tick };
   }
 
-  /** Rebuilds the pinned row's whole patch panel — called only on a genuine
-   *  patch edit (patchChanged) or a fresh pin (DriveRowHandle.refreshPin),
-   *  never from the panel's periodic refresh or a slider's own `input`
-   *  event (this file's own carried click-loss rule). A generic setting's
-   *  window row is only built while its own gate is on, and a wire's Height
-   *  seg only while it still carries an old Fixed/Loud; its wires' Shape
-   *  buttons (buildSourceLine) are how both move to a shaping node. */
+  /** Rebuilds the pinned row's whole patch panel; only on a genuine patch edit
+   *  (patchChanged) or a fresh pin, never from the periodic refresh or a
+   *  slider's `input` event (the click-loss rule). */
   function buildPatchPanel(
     sceneId: string,
     spec: SceneSetting,
   ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives, slots: number) => void) | null } {
-    wireHeatPips = []; // the wire pips of the panel being rebuilt replace the old panel's
+    wireHeatPips = [];
     const setting = deps.getDriveSetting(sceneId, spec);
     const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
-    // The generic gate's window rows only show while the setting's own gate
-    // is on (a saved Look from before shaping nodes); see buildThresholdRow.
+    // Legacy window rows: a saved Look from before shaping nodes (buildThresholdRow).
     const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
     const legacyWindow = generic && deps.getDriveThresholdState(sceneId, spec).on;
 
@@ -4352,10 +3757,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       patchChanged(sceneId, spec);
     });
     function refreshResetVisibility(): void {
-      // A moved threshold counts too — on/off or value, scene-handled or
-      // generic (this row's own default is "on" for the former, "off" for
-      // the latter, mirroring driveStore.ts's getDriveThresholdState). A
-      // generic gate's moved Smoothness counts as well.
+      // A moved threshold counts too; the row's default is "on" for a
+      // scene-handled gate, "off" for a generic one (driveStore.ts).
       const declared = spec.drive?.threshold;
       const thresholdState = spec.drive ? deps.getDriveThresholdState(sceneId, spec) : undefined;
       const thresholdMoved =
@@ -4363,7 +3766,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
       const smoothnessMoved =
         !!spec.drive && declared === undefined && !isEngineHitDriver(spec) && (deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT || !deps.getDriveSmoothnessOn(sceneId, spec));
-      // And a hit driver's Reaction row, away from its declared read-out.
       const hit = spec.drive?.hit;
       const readoutMoved = !!hit && hit.flatOnly === undefined && deps.getDriveReadout(sceneId, spec) !== (hit.readout ?? "flat");
       resetBtn.hidden =
@@ -4375,9 +3777,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
     eyebrow.textContent = "Wires";
-    // "Only this" (driveSolo.ts): a local preview, not a wire edit, so it
-    // deliberately does not go through patchChanged() (which copies the
-    // setting to linked rows). onDriveSoloChange's own rebuild refreshes it.
+    // "Only this" (driveSolo.ts) is a local preview, not a wire edit, so it
+    // skips patchChanged() (which copies the setting to linked rows).
     const soloNow = getDriveSolo();
     const isSolo = !!soloNow && soloNow.sceneId === sceneId && soloNow.key === spec.key;
     const soloBtn = document.createElement("button");
@@ -4402,8 +3803,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const list = document.createElement("div");
     list.style.cssText = driveSrcListStyle;
     if (setting === "scene") {
-      // The built-in reaction has no wire line of its own, so it gets its
-      // own Unplug — without it the built-in could never be disconnected.
+      // The built-in has no wire line, so it needs its own Unplug.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
       const builtIn = builtInText(spec);
@@ -4421,8 +3821,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       });
       list.append(empty, unplug);
     } else if (!patch.sources.length) {
-      // An empty patch stays empty (normalizeDriveSetting): nothing plugged
-      // in, so the setting holds still.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
       empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in an input node, or reset to the scene default.";
@@ -4467,15 +3865,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     panel.appendChild(resetBtn);
     refreshResetVisibility();
 
-    // The panel's own bottom hint line (the "cover everything with hints"
-    // pass): a fixed-height readout of whichever control inside this panel
-    // is hovered or keyboard-focused right now, so nothing else in the
-    // panel has to grow/shrink to show its own description. One delegated
-    // pointerover/pointerout/focusin/focusout pair, reading each control's
-    // own `data-hint` (set by setHint above) — never a per-control
-    // listener, never touched by refreshAuto/update(). In the stacked
-    // layout jacks are far away, so the rest state points at the add-by-
-    // name chips instead of a signal's jack.
+    // Bottom hint line: one delegated listener set reads the hovered or
+    // focused control's `data-hint`; never per-control, never touched by
+    // refreshAuto/update(). Stacked, the jacks are far away, so the rest
+    // hint points at the add-by-name chips.
     const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
     const restHint = stacked ? "Add an input node by name below." : "Click an input node's jack to plug it in or out.";
     const hintBar = document.createElement("div");
@@ -4508,12 +3901,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return { el: panel, outputCanvas, tick };
   }
 
-  /** Builds one drive-capable setting's port/summary/sparkline trio —
-   *  appendSettingRow passes `port`/`summary`/`below` into
-   *  createControlRow's own `drivePanel` slot, then calls `bind(row.el)`
-   *  once the row exists (this needs the finished element for the pinned
-   *  row's own highlight; the row needs `port`/`summary` before it exists —
-   *  see appendSettingRow below for the two-step order this implies). */
+  /** One drive-capable setting's port/summary/sparkline trio. appendSettingRow
+   *  needs `port`/`summary` before the row exists and calls `bind(row.el)`
+   *  after (the pinned highlight needs the element). */
   function buildDriveRow(
     sceneId: string,
     spec: SceneSetting,
@@ -4521,19 +3911,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const port = document.createElement("button");
     port.type = "button";
     port.className = "vc-drive-port";
-    // The port's tooltip gets a heat line under its own (heat.ts).
     const portTooltip = (): string[] => {
       if (deps.getDriveSetting(sceneId, spec) === "scene") return [port.title];
       const span = getHistorySpan(HEAT_SPAN_CARD);
       return [port.title, heatText(settingHeat.get(spec.key)?.read(span, performance.now() / 1000) ?? null, span)];
     };
-    // The row port's own instant tooltip (outside the pinned panel, so it
-    // gets the floating tooltip rather than the panel's bottom hint line —
-    // this file's header's "cover everything with hints" pass). Reads
-    // port.title live at hover/focus time (refreshMeta below keeps it
-    // current), so this never needs its own state.
-    // Not for a finger, as a jack's own (jack.ts): a tooltip popping up
-    // mid-tap could cost the tap its click on iPad Safari.
+    // Not for a finger, as a jack's (jack.ts): a tooltip mid-tap could cost
+    // the tap its click on iPad Safari.
     port.addEventListener("pointerenter", (e) => {
       if (e.pointerType !== "touch") showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), portTooltip());
     });
@@ -4559,8 +3943,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sparkCtx = sparkCanvas.getContext("2d")!;
     const sparkSize = trackDriveCanvas(sparkCanvas);
     driveSparkCanvases.push(sparkCanvas);
-    // The thin heat history strip under the graph (heat.ts), hidden for a
-    // setting that follows the scene.
     const heatStrip = document.createElement("div");
     heatStrip.className = "vc-heat-strip";
     let heatStripBg = "";
@@ -4574,18 +3956,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const SPARK_LEN = 90; // ~3 s at 30 Hz
     const sparkVals = new Float32Array(SPARK_LEN);
     const sparkCols: string[] = new Array(SPARK_LEN).fill(DRIVE_WHITE);
-    // The scene's own reactions for this setting (settingMarks.ts — Beat
-    // ripple's rings), read under this view's own "row" slot. While the
-    // scene reports any, the sparkline shows what the setting *did* (a dot
-    // per reaction) over a dimmed trace of what it received.
+    // The scene's own reactions (settingMarks.ts) under this view's "row"
+    // slot: with any, the sparkline draws a dot per reaction over a dimmed trace.
     const sparkReact = new Float32Array(SPARK_LEN);
     let sparkHasMarks = false;
     let sparkHead = 0;
     let sparkFilled = 0;
-    // The same fixed top as the panel's "What it receives" graph
-    // (driveGraphTop), so the two read on one scale. A Scene row's
-    // approximation is an un-gained catalogue signal, so its top drops the
-    // gain to put full scale at the same height.
+    // Same fixed top as the panel's "What it receives" graph (driveGraphTop);
+    // a Scene row's un-gained approximation drops the gain to match.
     let sparkTop = driveGraphTop(spec);
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
@@ -4606,10 +3984,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ? "Pinned — click again or press Esc to close."
         : "Click to pin this setting and choose what it listens to.";
       summary.textContent = driveSummaryForRow(sceneId, spec, setting);
-      // --vc-pin-color: read by controlsTheme.ts's .vc-drive-pinned/
-      // .vc-drive-preview for this row's own border/tint — always kept
-      // current even at state "none" so it's already right the instant
-      // either class lands.
+      // --vc-pin-color: read by controlsTheme.ts; set even at "none" so it is
+      // right the instant a class lands.
       boundRowEl?.style.setProperty("--vc-pin-color", driveRowAccent(setting));
     }
 
@@ -4633,7 +4009,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    /** Writes the lens glow from heatLive when this row's level changes. */
     function tickHeatGlow(): void {
       const glow = heatGlowLevel(heatLive.get(spec.key) ?? 0);
       if (glow === heatGlowNow) return;
@@ -4641,11 +4016,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       boundRowEl?.style.setProperty("--vc-heat-glow", String(glow));
     }
 
-    /** Always resyncs .vc-drive-preview from the current global `preview`
-     *  first (so a stale preview class left over from a different row/
-     *  click gets cleared here too — see togglePin's own call), then only
-     *  bails out of a full refreshMeta() if this row is pinned, which
-     *  always wins visually over a preview elsewhere. */
+    /** Resyncs .vc-drive-preview from the global `preview` (also clears a stale
+     *  one; see togglePin); a pinned row wins visually, so it skips refreshMeta(). */
     function refreshPreviewLit(): void {
       boundRowEl?.classList.toggle("vc-drive-preview", !isPinned() && samePair(preview, { sceneId, spec }));
       if (isPinned()) return;
@@ -4703,8 +4075,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           if (runColor) sparkCtx.stroke();
           sparkCtx.strokeStyle = col;
           sparkCtx.beginPath();
-          // Start the new colour from the previous point, so a change of
-          // loudest source doesn't leave a gap in the line.
+          // Continue from the previous point so no gap appears.
           if (runColor) {
             sparkCtx.moveTo(prevX, prevY);
             sparkCtx.lineTo(px, py);
@@ -4735,21 +4106,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    /** `slots`: same as the output graph's own tick — the held peak in the
-     *  first column, the live reading in the rest. */
     function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null, slots: number): void {
       const setting = deps.getDriveSetting(sceneId, spec);
       let now: number;
       let v: number;
       let col: string;
       if (setting === "scene") {
-        // drives.valueOf() is defined to return 0 for "scene" (there's no
-        // patch to sum) — without this branch every scene-mix row's own
-        // sparkline drew flat. Its composite isn't the engine's to read, so
-        // this approximates it from the loudest of the catalogue signals it
-        // honestly listens to (drive.sceneSources — display-only, see
-        // drives.ts's header), at a dimmed alpha that visibly marks it as
-        // an approximation rather than the setting's own real output.
+        // drives.valueOf() is 0 for "scene" (no patch to sum), so approximate
+        // from the loudest of drive.sceneSources (display-only, see drives.ts
+        // header), dimmed to mark it as an approximation.
         const sources = spec.drive?.sceneSources;
         if (sources?.length && frame && anim) {
           let best = 0;
@@ -4764,8 +4129,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           now = v = best;
           col = withAlpha(driveSourceColor(bestId), 0.55);
         } else {
-          // No sceneSources to approximate from — a faint flat baseline
-          // rather than a literal 0 (invisible at the track's very bottom).
+          // Faint baseline: a literal 0 is invisible at the track's bottom.
           now = v = 0.04;
           col = withAlpha(SCENE_VIOLET, 0.35);
         }
@@ -4814,16 +4178,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
-  /** The multi-item-selection bridge's drive/patch choke point (registry.ts's
-   *  `appendRow` `linked` option) — copies `spec`'s own just-written
-   *  DriveSetting onto every linked setting verbatim (`deps.onSetDriveSetting`
-   *  — DeviceMenuDeps's own doc comment on why a straight copy, "scene"
-   *  included, is always correct here). A no-op when `spec.key` has no
-   *  `linked` entries (every ordinary row). Called from `patchChanged` below
-   *  and, separately, from buildWeightSlider's own live `input` (which never
-   *  calls patchChanged — see that comment) since a weight drag is still a
-   *  patch mutation this bridge has to fan out, even though it doesn't
-   *  otherwise rebuild anything. */
+  /** Copies `spec`'s just-written DriveSetting onto every linked setting
+   *  verbatim (registry.ts's `appendRow` `linked`; DeviceMenuDeps says why a
+   *  straight copy is right). No-op without `linked` entries. patchChanged
+   *  calls it, and so does buildWeightSlider's live `input`, which never
+   *  rebuilds. */
   function syncLinkedDriveSetting(sceneId: string, spec: SceneSetting): void {
     const entry = linkedByKey.get(spec.key);
     if (!entry?.linked.length) return;
@@ -4831,12 +4190,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const l of entry.linked) deps.onSetDriveSetting(sceneId, l.spec, setting);
   }
 
-  /** The only place a patch mutation is followed by a rebuild — every
-   *  control inside buildPatchPanel() calls through here after writing to
-   *  `deps`, except a weight slider's own `input` (buildWeightSlider's
-   *  onLiveEdit only refreshes the reset link, never rebuilds — this file's
-   *  own carried click-loss rule; it calls syncLinkedDriveSetting itself
-   *  instead of going through here). */
+  /** The only place a patch mutation is followed by a rebuild. A weight
+   *  slider's `input` is the exception (click-loss rule): it only refreshes the
+   *  reset link and calls syncLinkedDriveSetting itself. */
   function patchChanged(sceneId: string, spec: SceneSetting): void {
     syncLinkedDriveSetting(sceneId, spec);
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
@@ -4860,10 +4216,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPatchHighlight();
   }
 
-  /** Pins/unpins — the only place `pinned` is written (besides Escape in
-   *  onKeyDown and the scene-mismatch check in renderSceneSettings's own
-   *  tail). Clears any pending preview so a click doesn't leave a stale
-   *  dwell timer racing it. */
+  /** The only place `pinned` is written (besides Escape in onKeyDown and the
+   *  scene-mismatch check in renderSceneSettings). Clears a pending preview so
+   *  a stale dwell timer can't race the click. */
   function togglePin(sceneId: string, spec: SceneSetting): void {
     cancelPendingPreview();
     const next = { sceneId, spec };
@@ -4873,15 +4228,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
     for (const h of pinRowHandles) h.refreshPin();
-    // preview just went to null above — resyncs every row's own
-    // .vc-drive-preview against that, since refreshPin() (above) never
-    // touches it and a row other than the one just clicked could otherwise
-    // be left showing a stale preview tint.
+    // refreshPin() never touches the preview tint; resync so another row isn't
+    // left showing a stale one.
     for (const h of driveRowHandles) h.refreshPreviewLit();
     refreshLineMode();
     refreshPatchHighlight();
-    // Solo follows the pin: onto the newly pinned row, or back to the
-    // Scene card once nothing is pinned — and its eye follows the row.
+    // Solo follows the pin.
     if (soloOn) applySolo();
     scheduleCableRecompute();
   }
@@ -4891,18 +4243,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
   }
 
-  /** Registers `rowEl` into `pinRowHandles` outside the drive system's own
-   *  `DriveRowHandle` path — `appendSettingRow`'s own `registerPinRow` calls
-   *  this for its non-drive branch (a toggle/enum/plain-slider row), and
-   *  `WidgetCtx.registerCard` (registry.ts's own doc comment has the full
-   *  contract, including why `spec` is often a synthetic identity rather
-   *  than a real setting) is the exact same call for a widget's own custom
-   *  row. `main`, when given, is the row's own value control: a click
-   *  anywhere on `rowEl` that isn't some OTHER in-row control (isCardPress)
-   *  pins — passing `rowEl` itself as `main` (every WidgetCtx.registerCard
-   *  caller does) makes every press anywhere in the row count, pads/faders/
-   *  buttons included, matching this file's header's "press anywhere on the
-   *  card pins it" rule for an ordinary row. */
+  /** Registers `rowEl` into `pinRowHandles` outside the DriveRowHandle path
+   *  (appendSettingRow's non-drive rows; `WidgetCtx.registerCard`, see
+   *  registry.ts for why `spec` may be a synthetic identity). A click on
+   *  `rowEl` pins unless it hits some other in-row control (isCardPress);
+   *  passing `rowEl` itself as `main` makes every press in the row count. */
   function registerPinnableRow(sceneId: string, spec: SceneSetting, accent: string, rowEl: HTMLElement, main?: HTMLElement | null): void {
     if (main) {
       rowEl.addEventListener("click", (e) => {
@@ -4918,9 +4263,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  /** The only place `preview` is written. See previewDrive's own callers
-   *  (appendSettingRow's onRowFocusIn) for the hover-dwell contract this
-   *  mirrors from the row-selection system it replaces. */
+  /** The only place `preview` is written (hover-dwell contract: appendSettingRow's onRowFocusIn). */
   function previewDrive(next: { sceneId: string; spec: SceneSetting } | null): void {
     cancelPendingPreview();
     if (samePair(preview, next)) return;
@@ -4930,34 +4273,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPatchHighlight();
   }
 
-  // ---------------------------------------------------------------------
-  // Jacks (src/ui/jack.ts) and cables (src/ui/cableLayer.ts) — Phase 2b of
-  // this file's own plan. Every predicate below answers "does `choice` feed
-  // the shown (preview ?? pinned) setting" purely from `pinned`/`preview`
-  // and `deps.getDriveSetting`, so createAudioMeters's own jacks and this
-  // card's own (mountBandsJack, above) both call through the exact same
-  // logic — one contract, two mount points. driveSources.ts's jackKey is
-  // the identity every comparison below uses: it collapses every beat-grid
-  // division to one shared key, since a patch carries at most one and the
-  // Timing strip's Grid jack always means "whichever one's there", never a
-  // specific division.
-  // ---------------------------------------------------------------------
+  // ---- Jacks (jack.ts) and cables (cableLayer.ts) ----
+  // These predicates answer "does `choice` feed the shown (preview ?? pinned)
+  // setting" for both createAudioMeters's jacks and the Bands card's
+  // (mountBandsJack). jackKey (driveSources.ts) collapses every beat-grid
+  // division to one key: a patch carries at most one, and the Grid jack means
+  // whichever is there.
 
   function shownSelection(): { sceneId: string; spec: SceneSetting } | null {
     return preview ?? pinned;
   }
 
-  /** `preview`, but only when it's a genuinely *different* setting from
-   *  whatever's pinned — hovering the pinned row itself (or nothing) isn't
-   *  a competing preview to draw a second cable group for or fade the
-   *  pinned one over (see cableSpecsForShown/refreshBandsJacks below, and
-   *  cableLayer.ts's own two-group recompute). */
+  /** `preview` only when it differs from the pinned setting: hovering the
+   *  pinned row isn't a competing preview (cableSpecsForShown). */
   function activePreview(): { sceneId: string; spec: SceneSetting } | null {
     return preview && !samePair(preview, pinned) ? preview : null;
   }
 
-  /** How many of the *active scene's* settings currently use `choice` —
-   *  each jack's own usage dots, independent of selection. */
+  /** How many of the active scene's settings use `choice` (the jack's usage dots). */
   function jackUsage(choice: DriveSourceChoice): number {
     const sceneId = deps.currentSceneId();
     const key = jackKey(choice);
@@ -4990,9 +4323,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
-  /** `choice` is a source of the *active preview* specifically (see
-   *  activePreview() above) — a row/lane's soft glow, always taking
-   *  priority over a competing pinned feed on the same row. */
+  /** `choice` feeds the active preview: a soft row/lane glow that takes
+   *  priority over a pinned feed. */
   function jackFeedsPreview(choice: DriveSourceChoice): boolean {
     const ap = activePreview();
     if (!ap) return false;
@@ -5000,29 +4332,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
-  /** The matching `DriveSource` for `choice` in `setting`, or undefined —
-   *  jackIsPinnedActive/jackFeedsPreviewActive below share this rather than
-   *  each re-deriving "which source is this jack" a second way. */
+  /** The `DriveSource` for `choice` in `setting`, if any. */
   function sourceForChoice(setting: DriveSetting, choice: DriveSourceChoice): DriveSource | undefined {
     if (setting === "scene") return undefined;
     const key = jackKey(choice);
     return setting.sources.find((s) => jackKey(s.choice) === key);
   }
 
-  /** `jackIsPinned`, but false for a *muted* source — the mute-aware pair
-   *  (with jackFeedsPreviewActive below) refreshBandsJacks/audioMeters.ts's
-   *  refreshPatchView use specifically for a row/lane's own fed glow, so a
-   *  muted source's jack still fills solid (jackIsPinned/jackIsShown stay
-   *  mute-agnostic — it's still plugged in) while its row stops lighting up
-   *  (this file's own header's Muting paragraph). */
+  /** `jackIsPinned`, but false for a muted source: its jack stays filled
+   *  (still plugged in) while its row stops lighting (header's Muting). */
   function jackIsPinnedActive(choice: DriveSourceChoice): boolean {
     if (!pinned) return pinnedNodeInput(choice);
     const src = sourceForChoice(deps.getDriveSetting(pinned.sceneId, pinned.spec), choice);
     return !!src && !src.off;
   }
 
-  /** `jackFeedsPreview`, but false for a *muted* source — see
-   *  jackIsPinnedActive above. */
+  /** `jackFeedsPreview`, but false for a muted source. */
   function jackFeedsPreviewActive(choice: DriveSourceChoice): boolean {
     const ap = activePreview();
     if (!ap) return false;
@@ -5030,9 +4355,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return !!src && !src.off;
   }
 
-  /** `choice` is named in the shown setting's own display-only
-   *  `drive.sceneSources` (drives.ts's header) — never a real patch source,
-   *  so never a jack fill, only a row/lane's softer glow. */
+  /** `choice` is in the shown setting's display-only `drive.sceneSources`
+   *  (drives.ts header): a softer row/lane glow, never a jack fill. */
   function jackIsSceneSource(choice: DriveSourceChoice): boolean {
     if (typeof choice !== "string") return false;
     const sel = shownSelection();
@@ -5042,8 +4366,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return (sel.spec.drive?.sceneSources ?? []).includes(choice);
   }
 
-  /** Something (preview ?? pinned) is currently shown at all — the Bands
-   *  card's own `.vc-patching` dim-everything-unfed switch. */
+  /** Something is shown: drives the Bands card's `.vc-patching` dim. */
   function isAnythingShown(): boolean {
     return shownSelection() !== null;
   }
@@ -5075,10 +4398,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return { aria: `${verb} ${name} ${prep} ${target.spec.label}`, title: name };
   }
 
-  /** The jack's own instant tooltip lines (onJackHover below) — line 1
-   *  names the source and what it is (driveSources.ts's own description),
-   *  line 2 says what a click on it would do right now: nothing pinned or
-   *  previewed yet, unplug what's already there, or plug in. */
+  /** The jack's tooltip lines (onJackHover): what the source is, then what a
+   *  click does now. */
   function jackTooltipLines(choice: DriveSourceChoice): string[] {
     const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
     const heat = audioMeters.jackHeatText(choice) ?? shapingCol.jackHeatText(choice);
@@ -5093,11 +4414,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return [line1, line2, ...tail];
   }
 
-  // The most recent jack toggled ON, for one recompute — buildCables below
-  // consumes it to draw that one cable on rather than snapping in instantly
-  // (controlsTheme.ts's vc-cable-new rule), then clears it. Set right
-  // before the store write that adds it, since add-vs-remove has to be
-  // known ahead of the toggle.
+  // Consumed once by buildCables to draw that cable on (controlsTheme.ts's
+  // vc-cable-new) instead of snapping in; set before the store write, since
+  // add-vs-remove must be known ahead.
   let justAddedKey: string | null = null;
 
   function onJackClick(choice: DriveSourceChoice): void {
@@ -5128,10 +4447,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     patchChanged(target.sceneId, target.spec);
   }
 
-  // ---- Dragging a jack: a mouse or pen press that moves becomes a drag
-  // (wide layout only — cables are hidden when narrow); a press without
-  // movement stays the click onJackClick handles. Drop targets are
-  // dropTargetAt's; the drop itself is dropJack's.
+  // ---- Jack drag: a mouse or pen press that moves (wide layout only; cables
+  // are hidden when narrow). Without movement it stays onJackClick's click.
   /** A jack press that may become a drag (DRAG_START_PX of movement). */
   let jackDrag: { el: HTMLElement; choice: DriveSourceChoice; x: number; y: number; pointerId: number; moved: boolean } | null = null;
   /** Set on the pointerup that ends a real drag, so the click the browser may still send to the jack is ignored. */
@@ -5139,13 +4456,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let dropTargetEl: HTMLElement | null = null;
   const DRAG_START_PX = 5;
 
-  /** A drop's target, as dropTargetAt finds it. */
   type DropTarget =
     | { kind: "setting"; el: HTMLElement; sceneId: string; spec: SceneSetting }
     | { kind: "node"; el: HTMLElement; id: string }
     | { kind: "column"; el: HTMLElement };
 
-  /** What a jack dropped at (x, y) lands on: a wireable setting row of this scene, a shaping node card, or the middle column's free space. A node's own jack (a shaped choice) only ever lands on a setting. */
+  /** What a jack dropped at (x, y) lands on. A node's own jack (a shaped choice) only lands on a setting. */
   function dropTargetAt(x: number, y: number, choice: DriveSourceChoice): DropTarget | null {
     const under = document.elementFromPoint(x, y);
     if (!under) return null;
@@ -5159,7 +4475,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return null;
   }
 
-  /** A jack dropped on a target (dropTargetAt). Plugging never unplugs: dropping a wire that is already there just pins its setting. */
+  /** Plugging never unplugs: dropping a wire that is already there just pins its setting. */
   function dropJack(choice: DriveSourceChoice, t: DropTarget): void {
     if (t.kind === "setting") {
       pinSetting(t.sceneId, t.spec);
@@ -5192,7 +4508,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toggleNodePin(node.id);
   }
 
-  /** The drop highlight: moves `.vc-drop-target` to `el` (null clears it). */
   function setDropTarget(el: HTMLElement | null): void {
     if (el === dropTargetEl) return;
     dropTargetEl?.classList.remove("vc-drop-target");
@@ -5200,7 +4515,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     el?.classList.add("vc-drop-target");
   }
 
-  /** Ends any jack drag in progress: the cable, the dragging look and the drop highlight all go. No drop. */
   function clearJackDrag(): void {
     jackDrag = null;
     cableLayer.setDrag(null);
@@ -5245,12 +4559,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     clearJackDrag();
   });
 
-  /** Hovering a jack highlights every scene row it feeds right now —
-   *  independent of the preview/pin highlight above (this fires for *any*
-   *  jack, fed or not, pinned setting or none) — and shows/hides its own
-   *  instant tooltip (jackTooltipLines above), the jack half of the
-   *  "cover everything with hints" pass. Called from every jack's own
-   *  pointerenter/pointerleave/focus/blur (jack.ts's createJack), never a
+  /** Highlights every scene row the jack feeds and shows its tooltip;
+   *  independent of the preview/pin highlight (fires for any jack). Called
+   *  from every jack's pointerenter/leave/focus/blur (jack.ts), never a
    *  timer. */
   function onJackHover(choice: DriveSourceChoice, on: boolean): void {
     const key = jackKey(choice);
@@ -5269,16 +4580,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  /** The Bands card's own 4 jacks (mountBandsJack, above) — the same
-   *  fill/pressed/uses/aria refresh audioMeters.ts's own refreshPatchView
-   *  does for its jacks, plus the same row-level fed/dim (jack.ts's
-   *  setRowFed) for the 3 level rows and the faders row itself. Priority
-   *  for a shared row's own glow: the active preview always wins (soft)
-   *  over a competing pinned feed (full when uncontested, faint when
-   *  a different preview is live), which in turn wins over the softer
-   *  scene-mix fallback (jackIsSceneSource — a `"scene"` setting has no
-   *  patch sources of its own, so it can never win the pinned/preview
-   *  checks above; see jack.ts's setRowFed for what each kind draws). */
+  /** The Bands card's jacks: the same refresh as audioMeters.ts's
+   *  refreshPatchView, plus the row-level fed/dim (jack.ts's setRowFed). Glow
+   *  priority per shared row: active preview (soft), then pinned feed (full,
+   *  faint while another preview is live), then the scene-mix fallback
+   *  (jackIsSceneSource; a "scene" setting has no patch sources). */
   function refreshBandsJacks(): void {
     const ap = activePreview();
     const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
@@ -5296,8 +4602,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       list.push(choice);
     }
     for (const [rowEl, choices] of feedGroups) {
-      // The mute-aware pair — a muted source keeps its jack filled (above)
-      // but stops lighting the row it feeds (this file's own header).
+      // Mute-aware: a muted source keeps its jack filled but doesn't light the row.
       const previewHit = ap ? choices.find((c) => jackFeedsPreviewActive(c)) : undefined;
       const pinnedHit = pinned ? choices.find((c) => jackIsPinnedActive(c)) : undefined;
       const sceneSoftHit = previewHit || pinnedHit ? undefined : choices.find((c) => jackIsSceneSource(c));
@@ -5313,12 +4618,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  /** The spectrum strip's own dim-the-unheard-bands overlay for the shown
-   *  setting — real patch sources for an editable patch, `sceneSources` for
-   *  a `"scene"` one (both narrowed to a plain SignalId; a grid/line source
-   *  has no band range of its own). Recomputed alongside every other
-   *  selection-driven refresh here, never per frame or per hover — a drive
-   *  row has no `reads` of its own for wireBandHighlight to key off. */
+  /** Dims the unheard bands on the spectrum strip for the shown setting:
+   *  patch sources, or `sceneSources` for a "scene" one (a grid/line source has
+   *  no band range). Recomputed with the other selection refreshes, never per
+   *  frame (a drive row has no `reads` for wireBandHighlight). */
   function refreshSpectrumDriveHighlight(): void {
     const sel = shownSelection();
     if (!sel) {
@@ -5354,14 +4657,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // ---- Cables ----
   const cableLayer = createCableLayer();
   document.body.appendChild(cableLayer.el);
-  // Also drives the Bands card's own level rows, bandLevelRows (setValue's
-  // dtSec is only ever a peak-hold decay rate, so a rough per-tick delta is
-  // plenty).
+  // Also drives bandLevelRows (setValue's dtSec is only a peak-hold decay
+  // rate, so a rough per-tick delta is enough).
   let lastCableTickMs = performance.now();
   const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
 
-  /** A shaping node was added or removed (shapingColumn.ts): every wire panel
-   *  shows the new set, and the jacks and cables follow. */
+  /** A shaping node was added or removed (shapingColumn.ts). */
   function shapingStructureChanged(): void {
     if (pinnedNode && !getShapingNode(pinnedNode)) pinnedNode = null;
     if (hoverNode && !getShapingNode(hoverNode)) hoverNode = null;
@@ -5380,27 +4681,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return merged;
   }
 
-  // The latest tick's own SceneDrives/frame/anim — cableSpecsForShown's own
-  // per-source getValue() closures read these fresh every tick (via
-  // cableLayer.tick, never a snapshot), so a cable's flow speed always
-  // tracks the live signal even though geometry itself is rebuilt far less
-  // often. Written once per update() call below.
+  // Read fresh each tick by cableSpecsForShown's getValue() closures, so cable
+  // flow tracks the live signal though geometry is rebuilt less often.
   let lastDrives: SceneDrives | null = null;
   let lastFrame: FeatureFrame | null = null;
   let lastAnim: AnimFrame | null = null;
 
-  /** One cable group (src/ui/cableLayer.ts's CableGroupSpec) for whichever
-   *  (sceneId, spec) pair is passed — `pinned` or activePreview(), called
-   *  once each from cableSpecsForShown below. `isNew`/justAddedKey only
-   *  ever applies to the pinned group in practice (a patch can't be edited
-   *  without pinning it first — see onJackClick), but there's no reason to
-   *  special-case that away here. `interactive` marks the pinned group: its
-   *  real patch sources get cableLayer.ts's own onPress, so pressing a
-   *  cable unplugs that source — the same toggle the source line's own ×
-   *  button takes (below). A preview group is never interactive (a hover
-   *  preview isn't a committed patch), and a `"scene"` setting's display-
-   *  only sceneSources are never interactive from either group (they have
-   *  no per-source unplug — the row's own Unplug button owns that). */
+  /** One cable group (cableLayer.ts's CableGroupSpec) for `pinned` or
+   *  activePreview(). `interactive` marks the pinned group: pressing a real
+   *  source's cable unplugs it, like the source line's × button. A preview
+   *  isn't a committed patch, and display-only sceneSources have no per-source
+   *  unplug (the row's Unplug owns that). */
   function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null, interactive: boolean): CableGroupSpec {
     if (!sel) return { sources: [], portEl: null };
     const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);
@@ -5421,12 +4712,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         });
       }
     } else {
-      // Every marked condition (there can be more than one now — this
-      // file's own header) draws with the same dashed-long style
-      // (controlsTheme.ts's .vc-cable-cond), consistent with the source
-      // line's own dashed marker and the output graph's dashed trace. A
-      // muted source draws in the flat, dashed `.vc-cable-muted` style
-      // instead (no glow/flow) regardless of role.
+      // Marked conditions draw dashed-long (controlsTheme.ts's .vc-cable-cond);
+      // a muted source draws flat dashed `.vc-cable-muted` (no glow/flow).
       const target = sel;
       const conditionIdxs = setting.mix === "gate" ? gateConditionIndices(setting) : [];
       setting.sources.forEach((src, idx) => {
@@ -5443,8 +4730,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           jackEl,
           getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
           isNew: key === justAddedKey,
-          // Press-to-unplug, pinned group only — the same toggle the
-          // source line's own × button takes (see this function's header).
           onPress: interactive
             ? () => {
                 justAddedKey = null;
@@ -5458,9 +4743,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return { sources, portEl: handle.portEl };
   }
 
-  /** Both groups cableLayer.ts's own two-path-group recompute takes — see
-   *  its header and activePreview() above for why these are independent
-   *  rather than one "shown" selection. */
+  /** Both groups of cableLayer.ts's two-path-group recompute; independent, see activePreview(). */
   function cableSpecsForShown(): { pinned: CableGroupSpec; preview: CableGroupSpec } {
     const pinnedGroup = cableGroupFor(pinned, true);
     const previewGroup = cableGroupFor(activePreview(), false);
@@ -5483,16 +4766,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   // ---- The lit signal's fan (cableLayer.ts's third group) ----
-  // A signal row lights on hover or focus (controlsTheme.ts's
-  // `.vc-row:hover, .vc-row:focus-within`); while it's lit, every wire
-  // leaving its jack(s) — the very ones its usage dots count (jackUsage) —
-  // is drawn to its port. Tracked by one delegated pointer/focus pair on
-  // the panel root, both kept because the glow itself answers to either:
-  // a pointer over one row while focus sits on another lights both.
+  // While a signal row is lit (hover or focus; controlsTheme.ts's
+  // `.vc-row:hover, .vc-row:focus-within`), every wire leaving its jack(s) is
+  // drawn to its port. Pointer and focus are tracked separately: the glow
+  // answers to either.
   let hoverJackRow: HTMLElement | null = null;
   let focusJackRow: HTMLElement | null = null;
-  /** The signal row `t` sits in — a `.vc-row` carrying at least one jack
-   *  (a Hits row carries one per lane) — or null. */
+  /** The signal row `t` sits in: a `.vc-row` carrying a jack (a Hits row
+   *  carries one per lane), or null. */
   function jackRowOf(t: EventTarget | null): HTMLElement | null {
     if (!(t instanceof Element)) return null;
     const row = t.closest<HTMLElement>(".vc-row");
@@ -5521,12 +4802,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
 
-  /** One fan group per port the chain's fan jacks reach in the active
-   *  scene (patchChain.ts's fanKeys: a hovered or focused input row's own
-   *  jacks and its nodes' jacks, or a hovered or pinned node's own jack) —
-   *  one cable per (setting, jack), so a jack draws exactly as many cables
-   *  as it has usage dots. A setting's focus draws nothing here: its own
-   *  cables already run. */
+  /** One fan group per port the chain's fan jacks reach (patchChain.ts's
+   *  fanKeys), one cable per (setting, jack) so a jack draws as many cables as
+   *  it has usage dots. A setting's focus draws nothing: its own cables run. */
   function litSignalFan(): CableGroupSpec[] {
     const focus = shownChainFocus();
     if (!focus || focus.kind === "setting") return [];
@@ -5555,8 +4833,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return groups;
   }
   function refreshCableVisibility(): void {
-    // Soloed, the meters column is hidden, so a cable would run to a jack
-    // that isn't on screen — the cables go with it.
+    // Soloed, the meters column is hidden: cables would run to jacks off screen.
     cableLayer.setVisible(isOpen && !narrowMQ.matches && !soloOn);
   }
   narrowMQ.addEventListener("change", () => {
@@ -5564,35 +4841,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     scheduleCableRecompute();
   });
   window.addEventListener("resize", scheduleCableRecompute);
-  // Geometry is recomputed on every layout trigger the plan names: scroll
-  // of the two scrolling columns and of the root itself (the stacked
-  // layout's own scroller — cables are hidden there, but a resize crossing
-  // the breakpoint mid-scroll should still land on fresh geometry), resize,
-  // and a ResizeObserver on both columns (spectrumCol here; controlsCol —
-  // declared further down — observes itself once it exists) and on every
-  // card in them (observed once the panel is assembled, below). A column is
-  // a fixed-height scroller, so a card growing inside it — a row's .vc-hint
-  // unfolding on hover/focus — never resizes the column itself; without the
-  // per-card observation every jack/port below that card moved while its
-  // cable stayed put. The hint's max-height
-  // transition fires this observer every frame it animates, which
-  // scheduleCableRecompute's rAF batching folds into one recompute per
-  // frame. Card fold/unfold piggybacks on the existing columnsWrap
-  // MutationObserver (refreshColumnsFold, below); renderSceneSettings
-  // schedules one from its own tail.
+  // Recompute triggers: scroll (columns and root), resize, and a
+  // ResizeObserver on the columns and every card. A column is a fixed-height
+  // scroller, so a card growing inside it (a .vc-hint unfolding) never resizes
+  // the column; without per-card observation cables stay put while their jacks
+  // move. Card fold/unfold rides refreshColumnsFold's MutationObserver.
   const cableColumnsRO = new ResizeObserver(scheduleCableRecompute);
   cableColumnsRO.observe(spectrumCol);
   audioMeters.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
   root.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
-  // ---- "Pick a setting first" toast (also keyHints.ts's tips/welcome,
-  // given a longer durationMs than a plain patch-bay toast needs) ----
-  // Solo's eye: one floating button just outside the pinned row's left
-  // edge, under its port (positionSoloEye) — on <body>, not in the row,
-  // since the Scene card's overflow: hidden clips anything hung past the
-  // row's own edge. A tile in the pin colour with an eye-shaped hole cut
-  // through it — dark depth and a pupil down inside, behind two rounded
-  // lids that draw apart to open (controlsTheme.ts's .vc-solo-eye rules).
+  // ---- Solo eye ----
+  // A floating button on <body> just outside the pinned row's left edge
+  // (positionSoloEye): the Scene card's overflow: hidden would clip it inside
+  // the row. Look: controlsTheme.ts's .vc-solo-eye rules.
   const soloEyeEl = document.createElement("button");
   soloEyeEl.type = "button";
   soloEyeEl.className = "vc-solo-eye";
@@ -5604,22 +4866,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     '<linearGradient id="vc-eye-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="currentColor"/><stop offset="1" stop-color="currentColor" stop-opacity="0.78"/></linearGradient>' +
     '<linearGradient id="vc-eye-depth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#15191b"/></linearGradient>' +
     '<radialGradient id="vc-eye-ball" cx="0.5" cy="0.5" r="0.5"><stop offset="0.72" stop-color="currentColor"/><stop offset="1" stop-color="currentColor" stop-opacity="0.45"/></radialGradient>' +
-    // one shade over both lids (user space), so shut they read as a single rounded bump
     '<radialGradient id="vc-eye-lidshade" gradientUnits="userSpaceOnUse" cx="12" cy="12" r="8.4"><stop offset="0.35" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.6"/></radialGradient>' +
     '<mask id="vc-eye-hole"><rect width="24" height="24" fill="#fff"/><path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z" fill="#000"/></mask>' +
     '<clipPath id="vc-eye-clip"><path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z"/></clipPath>' +
     "</defs>" +
-    // the tile with the hole cut out, and a faint bevel
     '<rect x="1.4" y="1.4" width="21.2" height="21.2" rx="4.2" fill="url(#vc-eye-tile)" mask="url(#vc-eye-hole)"/>' +
     '<path d="M3.2 19.5 V5.6 Q3.2 3.2 5.6 3.2 H19.5" fill="none" stroke="#fff" stroke-opacity="0.2" stroke-width="0.9" stroke-linecap="round"/>' +
     '<path d="M20.8 4.5 V18.4 Q20.8 20.8 18.4 20.8 H4.5" fill="none" stroke="#000" stroke-opacity="0.2" stroke-width="0.9" stroke-linecap="round"/>' +
     '<g clip-path="url(#vc-eye-clip)">' +
-    // down in the hole: depth, the pupil, the upper rim's shadow
     '<rect width="24" height="24" fill="url(#vc-eye-depth)"/>' +
     '<circle cx="12" cy="12.4" r="3.3" fill="url(#vc-eye-ball)"/>' +
     '<path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z" fill="none" stroke="#000" stroke-opacity="0.7" stroke-width="2.2" transform="translate(0 -1.1)"/>' +
-    // the lids: upper and lower meet at a seam when shut, and draw back
-    // toward the hole's top and bottom edges to open
     '<g class="vc-eye-lid-top"><path d="M2 2 H22 V12 Q12 13.2 2 12 Z" fill="currentColor"/><path d="M2 2 H22 V12 Q12 13.2 2 12 Z" fill="url(#vc-eye-lidshade)"/>' +
     '<path d="M2 12 Q12 13.2 22 12" fill="none" stroke="#000" stroke-opacity="0.55" stroke-width="0.9"/></g>' +
     '<g class="vc-eye-lid-bot"><path d="M2 22 H22 V12 Q12 13.2 2 12 Z" fill="currentColor"/><path d="M2 22 H22 V12 Q12 13.2 2 12 Z" fill="url(#vc-eye-lidshade)"/></g>' +
@@ -5628,9 +4885,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     "</svg>";
   soloEyeEl.addEventListener("click", () => setSolo(!soloOn));
   document.body.appendChild(soloEyeEl);
-  /** Parks the eye beside the pinned row, in the row's own pin colour, or
-   *  hides it — closed panel, nothing pinned, or the row scrolled out of
-   *  its column. Rides every cable recompute (scroll, resize, pin, solo). */
+  /** Parks the eye beside the pinned row in its pin colour, or hides it
+   *  (closed, nothing pinned, row scrolled out of its column). Rides every
+   *  cable recompute. */
   function positionSoloEye(): void {
     const row = isOpen ? findPinnedRowEl() : null;
     const r = row?.getBoundingClientRect();
@@ -5656,13 +4913,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toastTimer = setTimeout(() => toastEl.classList.remove("vc-toast-show"), durationMs);
   }
 
-  /** The one place every selection-driven visual gets recomputed together —
-   *  called on a pin, a preview change, and a patch edit (togglePin,
-   *  previewDrive, patchChanged above) and once more from
-   *  renderSceneSettings's own tail (a scene switch/Look apply rebuilds
-   *  every row, including the pinned one's). Content only — never a layout
-   *  read itself; scheduleCableRecompute() is what actually measures
-   *  anything, on its own rAF-batched schedule. */
+  /** Recomputes every selection-driven visual together: on a pin, a preview
+   *  change, a patch edit, and from renderSceneSettings's tail. Content only;
+   *  scheduleCableRecompute() does the measuring. */
   function refreshPatchHighlight(): void {
     audioMeters.refreshPatchView();
     shapingCol.refreshPatchView();
@@ -5674,10 +4927,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   // ---- Patch focus across the three columns (patchChain.ts) ----
-  // What is focused lights its chain: input rows, shaping node cards and
-  // settings dim to whatever is off it. chainGraph() reads the patch as
-  // plain keys; refreshChain() paints the result. Runs only on focus and
-  // patch changes, never per frame.
+  // chainGraph() reads the patch as plain keys; refreshChain() paints it. Runs
+  // only on focus and patch changes, never per frame.
 
   /** A pinned shaping node's pin toggle (shapingColumn.ts onNodePress). Pinning one unpins any setting. */
   function toggleNodePin(id: string): void {
@@ -5772,7 +5023,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
   }
 
-  /** Places the shaping column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. Writes only when a value changes, since this runs on every scroll's recompute. */
+  /** Places the shaping column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. */
   function placeShapingColumn(): void {
     if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
       setShapePlacement(SHAPE_COL_CLEAR);
@@ -5799,12 +5050,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // A hover-scheduled preview change not yet committed — see
-  // wireHoverFocus's own pointerFocusOriginated flag and appendSettingRow's
-  // onRowFocusIn below for the dwell this exists to implement (only a
-  // pointer-originated focus waits; keyboard/click focus previews
-  // immediately). One shared timer, not per-row, since only one such change
-  // can ever be in flight.
+  // A hover-scheduled preview change not yet committed (wireHoverFocus's
+  // pointerFocusOriginated, appendSettingRow's onRowFocusIn): only pointer-
+  // originated focus waits; keyboard/click focus previews at once. One shared
+  // timer, since only one change is ever in flight.
   let pendingPreviewTimer: ReturnType<typeof setTimeout> | null = null;
   function cancelPendingPreview(): void {
     if (pendingPreviewTimer !== null) {
@@ -5813,13 +5062,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // The column head, the "Sound" heading (audioMeters.ts's own
-  // meterGroupHeading, reused so the three group headings can't drift apart
-  // in look), and the Bands card travel as one unit — named vc-bands-block
-  // and carrying .vc-spectrum-card (which used to sit on bandsCard.el
-  // alone) for the stacked layout in controlsTheme.ts, so a narrow screen
-  // keeps head+heading+card together rather than scattering them across
-  // the single stacked column.
+  // The column head, "Sound" heading (audioMeters.ts's meterGroupHeading,
+  // shared so group headings can't drift) and Bands card travel as one unit,
+  // vc-bands-block, so the stacked layout (controlsTheme.ts) keeps them
+  // together.
   const bandsBlock = document.createElement("div");
   bandsBlock.className = "vc-bands-block vc-spectrum-card";
   bandsBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
@@ -5827,12 +5073,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   spectrumCol.append(bandsBlock, audioMeters.el);
 
-  // Power travels with this column for the purposes of the all-folded
-  // triangle collapse below: they're wrapped together so the CSS
-  // (vc-cols-wrap, controlsTheme.ts) can hide both as a unit. columnsToggle
-  // stays in the DOM at all times and is the one element vc-cols-folded
-  // keeps visible; clicking it unfolds every folded card by clicking its
-  // own chevron (jumpToBlock below does the same for a single card).
+  // Power travels with this column so the CSS (vc-cols-wrap, controlsTheme.ts)
+  // can hide both when everything is folded. columnsToggle stays visible then;
+  // clicking it unfolds every folded card via its chevron.
   const columnsToggle = document.createElement("button");
   columnsToggle.type = "button";
   columnsToggle.className = "vc-cols-toggle";
@@ -5847,27 +5090,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   columnsWrap.className = "vc-cols-wrap";
   columnsWrap.append(columnsToggle, powerCol, spectrumCol);
 
-  // Recomputed off each card's own vc-folded class (via the observer below)
-  // rather than a callback threaded through createCard/audioMeters.ts.
-  // When "Hide left" is active, Bands and the meter cards are excluded
-  // from the check (isFolded(METERS_COLUMN), not an offsetParent probe —
-  // that forces a synchronous layout on every class mutation in the
-  // column, which stalled the panel once enough cards had folded) — and so
-  // is Power itself, since folded Power is already its own compact square
-  // (powerCard.ts) in the wide layout; the wrapper only ever needs the "▸"
-  // triangle to stand in for a folded *card*, so with meters hidden there's
-  // nothing left for it to collapse for. With meters shown, every card in
-  // Power + the meters column folded still counts as "everything folded".
+  // Recomputed off each card's vc-folded class via the observer below. With
+  // "Hide left" active, Bands and the meter cards are excluded
+  // (isFolded(METERS_COLUMN), not an offsetParent probe: that forced a
+  // synchronous layout per class mutation and stalled the panel), and so is
+  // Power, whose folded square (powerCard.ts) needs no "▸".
   function refreshColumnsFold(): void {
     const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")].filter((c) => c.style.display !== "none");
     columnsWrap.classList.toggle(
       "vc-cols-folded",
       !isFolded(METERS_COLUMN) && cards.length > 0 && cards.every((c) => c.classList.contains("vc-folded")),
     );
-    // This MutationObserver already fires for every fold/unfold in the
-    // Power+Bands+meters column (it observes columnsWrap's own subtree) —
-    // reused here as the cable layer's own fold trigger rather than a
-    // second observer over the same nodes.
+    // This observer already fires for every fold/unfold here; reuse it as the cable layer's trigger.
     scheduleCableRecompute();
   }
   new MutationObserver(refreshColumnsFold).observe(columnsWrap, {
@@ -5877,9 +5111,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   let lastStatusText = "";
-  // Only the column head's dot + text now — the scene name it used to carry
-  // alongside them ("<scene> · Equaliser") is gone; the top bar already
-  // names the scene, so this is a pure audio-source status line.
   function refreshSpectrumHeader(): void {
     const status = deps.getAudioStatus();
     const text = statusText(status);
@@ -5899,11 +5130,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
 
-  // The split is fixed (it only tints the bars by pulse group), so the strip
-  // needs it set up once — the Hz edges do still depend on the analyser's
-  // real sample rate, though, which isn't known until mic access is granted,
-  // so this is re-run on every open(). The edges also label the faders. The
-  // Frequencies overlay draws on top of this same strip, so it needs neither.
+  // The split is fixed (it only tints bars by pulse group), but the Hz edges
+  // depend on the analyser's sample rate, unknown until mic access is granted,
+  // so re-run on every open(). The Frequencies overlay needs neither.
   function refreshBandsSplit(): void {
     bandFaders.setEdgesHz(deps.getBandEdgesHz());
     spectrumStrip.setSplit(deps.getBandSplit());
@@ -5917,14 +5146,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   cableColumnsRO.observe(shapingCol.el);
   shapingCol.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
-  // The global "Auto" master switch — toggles every auto-capable row, scene
-  // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
-  // isSceneAuto wiring). Its own slim full-width bar at the top of the
-  // settings column, beside folded Power's square.
-  // Overlaps the Input card's own Auto button (below, and see micAuto.ts's
-  // header) on the Sensitivity/Expansion/Smoothing rows only — a scene's own
-  // settings stay this button's alone — so toggling either refreshes the
-  // other's lit state (see toggleAutoMaster/toggleMicAuto).
+  // Global "Auto" master switch: toggles every auto-capable row (app.ts's
+  // isSceneAuto). Overlaps the Input card's Auto button (micAuto.ts header) on
+  // Sensitivity/Expansion/Smoothing only, so toggling either refreshes the
+  // other's lit state (toggleAutoMaster/toggleMicAuto).
   const autoMasterBtn = document.createElement("button");
   autoMasterBtn.className = GLASS_PANE_CLASS;
   autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
@@ -5937,23 +5162,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoMasterBtn.appendChild(autoMasterInner);
 
   // Master: device-wide dials. Scale sets every numeric scene param's normal
-  // line at autoTune.ts's resolveSceneSetting (once, never on drives,
-  // enums/booleans, or the Input card's gain stages — see that doc);
-  // Expansion sets how far and how long the music pulls the picture away
-  // from it, in the drive engine (drives.ts's header, "Master Expansion"). Sits
-  // between the Auto bar and Input as its own always-visible card: it is
-  // not part of the auto system, and unlike the Scene card below it must
-  // not disappear on a scene that declares no settings of its own — those
-  // scenes simply have nothing for it to move. The Scene card's violet,
-  // because what it scales is that card's contents.
+  // line (autoTune.ts's resolveSceneSetting; not drives, enums/booleans or the
+  // Input card's gain stages); Expansion sets how far and how long the music
+  // pulls the picture from it (drives.ts header, "Master Expansion"). Its own
+  // always-visible card, not part of the auto system, so it stays on scenes
+  // with no settings. Violet like the Scene card because it scales that card.
   //
-  // Below the Scale row, the Picture block answers "how intense is the
-  // *picture*, in every way" — five compact traces (Brightness/Colour/
-  // Motion/Detail/Flashes), measured from the rendered frame itself rather
-  // than from any setting or drive, since a setting carries no "more
-  // intense" direction of its own. See src/render/pictureMeter.ts for what
-  // each measure means and why; tools/master-sweep.mjs walks the same five
-  // numbers across every scene and every Scale value headlessly.
+  // The Picture block measures the rendered frame itself, since a setting has
+  // no "more intense" direction (src/render/pictureMeter.ts;
+  // tools/master-sweep.mjs sweeps it).
   const masterCard = createCard({ title: "Master", accent: SCENE_VIOLET });
   markBlock(masterCard.title);
   const masterRow = createControlRow({
@@ -5971,8 +5188,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
   // Same range, log slider and readout as the Input card's Expansion row.
-  // Acts on every drive reading around its own recent level — see
-  // drives.ts's header, "Master Expansion".
   const masterExpansionRow = createControlRow({
     label: "Expansion",
     accent: SCENE_VIOLET,
@@ -5986,11 +5201,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "How far the music pulls the picture from its normal, and how long it stays away — 1 is as dialed",
   });
   masterExpansionRow.onChange((value) => deps.onSceneExpansionChange(value));
-  // Expansion's shape (drives.ts's header, "Master Expansion"): icon chips
-  // in EXPANSION_SHAPES order, so the chosen index is what's stored. Each
-  // icon draws its curve — the music's change from usual across, the
-  // picture's change from normal up — and the name rides as its tooltip
-  // and, with what it does, in the hint line under the strip.
+  // Expansion's shape (drives.ts header, "Master Expansion"): icon chips in
+  // EXPANSION_SHAPES order, so the chosen index is what's stored. Each icon
+  // draws its curve: music's change from usual across, picture's up.
   const curveIcon = (d: string) =>
     `<svg width="30" height="18" viewBox="0 0 30 18" fill="none" aria-hidden="true">` +
     `<path d="M2 9H28M15 1V17" stroke="currentColor" stroke-opacity="0.25" stroke-width="1"/>` +
@@ -6022,8 +5235,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
     },
   });
-  // The leash gauge (leashGauge.ts): Scale's normal as a notch, Expansion's
-  // reach as a band, the picture now as a needle — drawn every tick below.
+  // The leash gauge (leashGauge.ts), drawn every tick below.
   const leashGauge = createLeashGauge(SCENE_VIOLET);
   const leashRow = document.createElement("div");
   leashRow.className = "vc-row";
@@ -6031,31 +5243,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const leashOnScreen = watchOnScreen(leashRow);
   masterCard.body.append(masterRow.el, masterExpansionRow.el, masterShapeRow.el, leashRow);
 
-  // Picture block — see the comment above const masterCard. A plain
-  // .vc-row/.vc-hint block (not createMeterRow's bar-meter shape: there's no
-  // single "amount" here to fill a track with, just independent readouts).
-  // Folded (the default) it's one Overall row: a taller trace overlaying
-  // every PICTURE_MEASURES entry in its PICTURE_COLORS colour, with
-  // overallLevel's combined line on top in the card's violet and its number
-  // as the readout. A click (or Enter/Space) unfolds one grid row per
-  // measure: caption · 10s trace (createTraceStrip, exported from
-  // audioMeters.ts for this) · 0-100 readout, each caption in its trace's
-  // colour so the rows double as the legend. Each row records while folded,
-  // so it unfolds with its last 10 s already drawn. caption uses the same
-  // register as powerCard.ts's own readoutCaptionStyle (kept local — the two
-  // files' row shapes otherwise share nothing worth a third file).
+  // Picture block (see above): a plain .vc-row/.vc-hint block, not
+  // createMeterRow's bar shape, since there's no single amount to fill.
+  // Folded, one Overall row: every PICTURE_MEASURES trace in its PICTURE_COLORS
+  // colour plus overallLevel's line in violet. Unfolded, a row per measure
+  // (createTraceStrip). Rows record while folded, so they unfold with their
+  // last 10 s drawn. Captions follow powerCard.ts's readoutCaptionStyle (kept
+  // local).
   const pictureHeading = groupHeading("Picture");
   const pictureCaptionStyle = `
     font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
     color: rgba(255,255,255,0.5); white-space: nowrap;
   `;
-  // digitsTextStyle for "--": DSEG7 (digitsStyle's face) has no dashes — the
-  // same textual/digits swap createMeterRow's own setReadout makes.
+  // DSEG7 (the face of the digits style) has no dashes, so "--" needs the
+  // text style (as createMeterRow's setReadout does).
   const pictureReadoutDigitsStyle = `${digitsStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
   const pictureReadoutTextStyle = `${digitsTextStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
-  // One colour per measure, shared by its own row and its line in the Overall
-  // overlay. Kept clear of SCENE_VIOLET, which is the Overall line itself; a
-  // Record so a new PictureMeasureKey can't ship without one.
+  // One colour per measure, for its row and its Overall overlay line; clear of
+  // SCENE_VIOLET (the Overall line). A Record so a new key can't ship without.
   const PICTURE_COLORS: Record<PictureMeasureKey, string> = {
     brightness: "#f4f4f4",
     colour: "#f28bd0",
@@ -6091,9 +5296,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   pictureSummary.append(pictureSummaryCaption, pictureSummaryStrip.canvas, pictureSummaryReadout);
   let pictureSummaryText = "--";
 
-  // Folded, the overlay's colours need naming somewhere: a one-line key
-  // under the combined trace, hidden once the rows (whose captions carry the
-  // same colours) show.
+  // Folded, a key naming the overlay's colours; hidden once the rows show.
   const pictureLegend = document.createElement("div");
   pictureLegend.style.cssText = `flex-wrap: wrap; gap: 2px 10px; margin: 5px 0 0 84px; font: 400 8.5px/1.2 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;`;
   for (const m of PICTURE_MEASURES) {
@@ -6149,13 +5352,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   masterCard.body.append(pictureHeading, pictureBlock);
   const pictureOnScreen = watchOnScreen(pictureBlock);
 
-  // Binds a row's typed entry to deps.customValues for one (scene, setting).
-  // `sceneId` and `spec` are getters because the Input card's three rows are
-  // built once and outlive scene switches (see makeInputRow below); a
-  // scene-setting row is rebuilt fresh per scene by renderSceneSettings and
-  // could just close over constants, but taking getters here either way
-  // keeps this one function correct for both callers instead of needing two
-  // shapes. A dev build lifts customReach's bound, for tuning.
+  // Binds a row's typed entry to deps.customValues. The args are getters
+  // because the Input card's rows outlive scene switches (makeInputRow). A dev
+  // build lifts customReach's bound, for tuning.
   function customConfig(sceneId: () => string, spec: () => SceneSetting, resolve: () => number): ControlRowSpec["custom"] {
     const store = deps.customValues;
     return {
@@ -6174,10 +5373,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
-  // Input: Sensitivity/Expansion/Smoothing — three instances of the same
-  // log-mapped row, sharing the auto-refresh call sites below (master
-  // toggle, open(), live-drift refresh) through one array, which is what
-  // keeps a future fourth row from shipping half-wired to Auto.
+  // Input: Sensitivity/Expansion/Smoothing share one array of rows (and so the
+  // auto-refresh call sites), so a fourth row can't ship half-wired to Auto.
   function makeInputRow(
     label: string,
     range: { min: number; max: number; defaultValue: number; zeroAtMin?: boolean },
@@ -6204,16 +5401,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         resolveLive,
         getManual,
       },
-      // This row is one of the whole-mic Auto button's own members (see
-      // micAuto.ts's header) — refreshMicAuto keeps that button's lit state
-      // honest whenever a chip click could have changed it. It also
-      // refreshes the Auto master bar (refreshMicAutoAndMaster).
+      // One of the whole-mic Auto button's members (micAuto.ts header); also
+      // refreshes the Auto master bar.
       onAutoToggled: refreshMicAutoAndMaster,
-      // Dev only: these rows keep their own store (audio/sensitivity.ts),
-      // which doesn't drop a custom value on a write the way
-      // setSceneSetting does, so the public build clamps them. A custom value
-      // is one past the slider's own range, not the Auto spec's: Smoothing's
-      // slider reaches past SMOOTHING_SPEC.max (see SMOOTHING_AUTO_MAX).
+      // Dev only: these rows keep their own store (audio/sensitivity.ts), which
+      // doesn't drop a custom value on a write the way setSceneSetting does, so
+      // the public build clamps them. A custom value is one past the slider's
+      // own range, not the Auto spec's (Smoothing's slider reaches past
+      // SMOOTHING_SPEC.max, see SMOOTHING_AUTO_MAX).
       custom: import.meta.env.DEV
         ? customConfig(() => deps.currentSceneId(), () => ({ ...spec(), min: range.min, max: range.max }), resolveLive)
         : undefined,
@@ -6231,8 +5426,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       (value) => deps.onSensitivityChange(deps.currentSceneId(), value),
       "How hard the visuals react to the room",
     ),
-    // Widens or narrows the gap between quiet and loud, independent of the
-    // overall gain Sensitivity controls — see shapeExpansion for the curve.
     makeInputRow(
       "Expansion",
       { min: EXPANSION_MIN, max: EXPANSION_MAX, defaultValue: EXPANSION_DEFAULT },
@@ -6242,13 +5435,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       (value) => deps.onExpansionChange(deps.currentSceneId(), value),
       "Distance between the quiet parts and the loud parts",
     ),
-    // How fast the visuals chase the audio, independent of Sensitivity's gain
-    // and Expansion's curve — see smoothingRateScale for the rate mapping.
-    // zeroAtMin: unlike Sensitivity/Expansion, this row's slider bottom is
-    // a carved-out Off stop rather than SMOOTHING_MIN — genuinely unsmoothed,
-    // not just the calmest setting (see sensitivity.ts's header). Auto-tune
-    // never lands here on its own: SMOOTHING_SPEC.min in autoTune.ts stays
-    // SMOOTHING_MIN, so this is reachable only by a deliberate drag or R-reset-then-drag.
+    // zeroAtMin: this slider's bottom is a carved-out Off stop, genuinely
+    // unsmoothed (sensitivity.ts header). Auto never lands there
+    // (SMOOTHING_SPEC.min in autoTune.ts stays SMOOTHING_MIN); only a
+    // deliberate drag or R-reset-then-drag does.
     makeInputRow(
       "Smoothing",
       { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT, zeroAtMin: true },
@@ -6261,36 +5451,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
   function syncInputRows(): void {
     for (const { row, getManual } of inputRows) row.sync(getManual);
-    // Auto-gain and the Silence gate rows aren't in inputRows (see their own
-    // comments below on why they're built separately) but need the same
-    // resync wherever this is called.
+    // Not in inputRows (built separately) but need the same resync.
     autoGainRow.sync(() => deps.getAutoGain());
     syncSilenceGateRows();
   }
 
-  // Source: one list of every pickable input, plus Screen at the bottom
-  // (src/audio/sourcePref.ts for mic-vs-display, src/audio/inputDevice.ts for
-  // which device Mic opens). Not gain-mapped like the rows below, so it's not
-  // built through createControlRow — a label plus a list of rows where a
-  // slider would sit. Sits first in the card, above Auto-gain, since it
-  // decides what everything below is even listening to. Deliberately left
-  // out of this card's Reset chip below, same as Auto-gain and the Silence
-  // gate rows further down — that chip resets per-scene taste, not a
-  // device-wide input choice — and out of inputRows, since it has no Auto
-  // behavior to wire through that array's shared call sites.
+  // Source: one list of every pickable input plus Screen (sourcePref.ts for
+  // mic-vs-display, inputDevice.ts for which device Mic opens). Not built
+  // through createControlRow: a list of rows where a slider would sit. Left
+  // out of the card's Reset chip (that resets per-scene taste, not a
+  // device-wide choice) and out of inputRows (no Auto behavior).
   //
-  // CRITICAL: refresh() runs on the panel's own ~10Hz timer (this file's own
-  // update()) — rebuilding the row list's DOM there breaks a click in
-  // progress (pointerdown lands on one node, pointerup on its replacement,
-  // and the browser never fires "click" across that gap). buildRows() below
-  // is called only when a structure key says the actual set of rows changed
-  // (which options exist, the missing device, the default label, whether
-  // Screen is offered); every other refresh() call updates the existing
-  // nodes' classes/text in place, same as this file's other polled rows.
+  // CRITICAL: refresh() runs on update()'s ~10Hz timer; rebuilding the row
+  // list's DOM there breaks a click in progress (pointerdown lands on one
+  // node, pointerup on its replacement, so no "click" fires). syncRowList()
+  // rebuilds only when a structure key says the set of rows changed; every
+  // other refresh() updates nodes in place.
   const sourceListStyle = `display: flex; flex-direction: column; gap: 4px; margin-top: 4px;`;
   // One row: [dot or glyph] [name + optional dim sub-line] [meter] [kind tag].
-  // Shared by a real device, the "not connected" placeholder, the
-  // pre-permission "Microphone" placeholder, and the Screen row.
   const sourceRowStyle = `
     display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center;
     width: 100%; box-sizing: border-box; text-align: left; cursor: pointer;
@@ -6298,32 +5476,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; padding: 7px 8px;
     font: 400 12.5px/1.25 ${FONT_LABEL};
   `;
-  // Live = green border + green tint, the same INPUT_GREEN language as the
-  // gallery masthead's .gal-src[data-state="live"] and this row's own accent
-  // (--vc-accent, set below) — echoing "listening now" in the same colour on
-  // both surfaces rather than a generic "lit" look.
+  // Live = green border + tint: INPUT_GREEN like the gallery masthead's
+  // .gal-src[data-state="live"] and this row's accent.
   const sourceRowLiveStyle = `${sourceRowStyle} border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; color: #fff;`;
-  // Dashed = not a real, present option right now — the missing device and
-  // the Screen row (a share, not a device, always reads this way) both use it.
+  // Dashed = not a real, present option: the missing device and the Screen row.
   const sourceRowDashedStyle = `${sourceRowStyle} border-style: dashed; border-color: rgba(255,255,255,0.22); color: rgba(255,255,255,0.55);`;
   const sourceRowDotStyle = `width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box;`;
   const sourceRowDotLiveStyle = `${sourceRowDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
-  // The name truncates on one line (device names run long — "Steam Streaming
-  // Microphone"); the sub-line under it wraps instead, since it's the hint a
-  // truncation would cut in half.
+  // The name truncates (device names run long); the sub-line wraps, since a
+  // truncation would cut its hint in half.
   const sourceRowNameWrapStyle = `min-width: 0; display: flex; flex-direction: column;`;
   const sourceRowNameStyle = `display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`;
   const sourceRowSubStyle = `display: block; white-space: normal; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.45);`;
-  // The missing row's own sub-line ("not connected") reads as a warning, not
-  // just a description — same amber this file uses for any other "pay
-  // attention" text (BANDS_AMBER).
+  // Amber (BANDS_AMBER) so "not connected" reads as a warning.
   const sourceRowSubWarnStyle = `${sourceRowSubStyle} color: ${BANDS_AMBER};`;
   const sourceRowRightStyle = `display: flex; align-items: center; gap: 8px; flex-shrink: 0;`;
-  // Kind tag: what the browser's device name sounds like (inputDevice.ts's
-  // inputKind) — neutral for a mic, INPUT_GREEN for a line input (this
-  // file's own accent for "the input actually carrying signal"), a cool
-  // violet-blue for a loopback driver so it reads as clearly different from
-  // both.
+  // Kind tag (inputDevice.ts's inputKind): neutral for a mic, INPUT_GREEN for
+  // a line input, cool violet-blue for a loopback driver.
   const sourceTagStyle = `
     font: 400 9px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;
     padding: 3px 5px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.22);
@@ -6336,11 +5505,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     line: sourceTagLineStyle,
     loopback: sourceTagLoopbackStyle,
   };
-  // 12-segment level meter, reused for the live row (green, taller) and an
-  // idle row's signal preview (grey, shorter — see inputPreview.ts). Segment
-  // nodes are fixed once built; only their own style is ever touched, on
-  // every tick the open panel draws (this file's own update(), not
-  // this row's slower structural refresh() — see the CRITICAL note above).
+  // Level meter for the live row (green, taller) and an idle row's signal
+  // preview (grey, shorter; inputPreview.ts). Segment nodes are built once;
+  // only their style changes, per update() tick, not refresh() (CRITICAL
+  // above).
   const SOURCE_METER_SEGMENTS = 12;
   const sourceMeterStyle = (tall: boolean) =>
     `display: inline-grid; grid-template-columns: repeat(${SOURCE_METER_SEGMENTS}, 3px); gap: 1.5px; height: ${tall ? 9 : 7}px; align-items: stretch; flex-shrink: 0;`;
@@ -6348,32 +5516,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const sourceMeterSegLiveOffStyle = `background: rgba(255,255,255,0.12); border-radius: 1px;`;
   const sourceMeterSegIdleOnStyle = `background: rgba(255,255,255,0.35); border-radius: 1px;`;
   const sourceMeterSegIdleOffStyle = `background: rgba(255,255,255,0.08); border-radius: 1px;`;
-  // The small caption over the Screen row — set apart from the device list
-  // above it (a share isn't a device this computer has), same mono/uppercase
-  // idiom as driveEyebrowStyle elsewhere in this file, dimmer since it's not
-  // a card-level label.
-  // The "2 hidden" line under the device rows — plain dim text that opens
-  // Edit, deliberately quieter than a row so it never reads as an input.
+  // The "N hidden" line under the device rows: dim text that opens Edit,
+  // quiet enough never to read as an input.
   const sourceHiddenLineStyle = `align-self: flex-start; margin-top: 2px; padding: 2px 0; background: none; border: 0; cursor: pointer; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.4); text-decoration: underline dotted rgba(255,255,255,0.25); text-underline-offset: 3px;`;
   const sourceScreenCaptionStyle = `margin-top: 10px; font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.35);`;
-  // Always visible while Screen is the active source, not a .vc-hint: the hint
-  // only reveals on hover/focus, and on touch that means after the tap that
-  // already opened the picker — too late to be a guide. Same reasoning as
-  // createTraceLegend's always-on comment in controlsKit.ts.
+  // Always visible while Screen is active, not a .vc-hint: on touch a hint
+  // shows only after the tap that already opened the picker (as
+  // createTraceLegend in controlsKit.ts).
   const sourceGuideStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
-  // Same always-on reasoning as sourceGuideStyle just above — the status line
-  // built from this state (refresh() below) is the row's answer to "which
-  // one is picked and is it actually listening", so it can't be hover-gated
-  // either. No inline color: the .vc-src-status class (controlsTheme.ts) owns
-  // it instead, so its [data-prompting] shimmer override — set in refresh()
-  // below — can actually win; an inline color here would beat any class rule
-  // regardless of specificity.
+  // Always on too: it answers "which is picked and is it listening". No
+  // inline color: the .vc-src-status class (controlsTheme.ts) owns it so its
+  // [data-prompting] shimmer override can win; an inline color would beat any
+  // class rule.
   const sourceStatusStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL};`;
 
   const SVG_NS = "http://www.w3.org/2000/svg";
-  // A small monitor glyph in place of a device row's dot — Screen isn't a
-  // device this computer has, so it gets its own icon rather than borrowing
-  // the dot language real inputs use.
+  // A monitor glyph: Screen isn't a device, so it doesn't borrow the dot.
   function buildScreenGlyph(): SVGSVGElement {
     const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
     svg.setAttribute("width", "14");
@@ -6403,8 +5561,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return svg;
   }
 
-  // One row's live nodes, built once and reused across refresh()es that
-  // don't change the row list itself — see the CRITICAL note above.
+  // One row's live nodes, reused across refresh()es that keep the row list (CRITICAL above).
   interface SourceRowHandle {
     btn: HTMLButtonElement;
     dot: HTMLSpanElement | null;
@@ -6414,19 +5571,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     meter: HTMLSpanElement;
     segments: HTMLSpanElement[];
     tag: HTMLSpanElement | null;
-    /** null for the Screen row and the pre-permission placeholder — nothing
-     *  to hand onInputDeviceChange. */
+    /** null for the Screen row and the pre-permission placeholder. */
     deviceId: string | null;
     isScreen: boolean;
-    /** The chosen-but-absent device's own row — dashed, fixed "not
-     *  connected" sub-line, never the live row's default-label/loopback text. */
+    /** The chosen-but-absent device's row: dashed, fixed "not connected"
+     *  sub-line. */
     isMissing: boolean;
     isLive: boolean; // set by refresh(), read by the per-tick meter update
-    /** The build-time tooltip, kept by refresh() while the live row's own
-     *  "tap to disconnect" one stands in for it. */
+    /** Build-time tooltip, which the live row's "tap to disconnect" replaces. */
     idleTitle?: string;
-    /** What updateMeters last painted (live flag + lit segment count, or
-     *  hidden), so a tick where nothing changed skips every style write. */
+    /** What updateMeters last painted, so an unchanged tick skips every style write. */
     meterKey?: string;
   }
 
@@ -6481,13 +5635,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
-  /** silent's wording depends on what kind of input is live — a line, mic or
-   *  loopback device, or a screen share — unlike clipping/skipping/hum's
-   *  fixed text, so it's broken out. Screen share is checked via
-   *  state.choice, same as the status line's own "Listening to screen
-   *  share" branch in refresh(); a real device via inputDevice.ts's
-   *  inputKind on liveLabel, defaulting to the mic wording where the label
-   *  itself is unknown — the same fallback the "Listening to …" line uses. */
+  /** silent's wording depends on the live input kind (line, mic, loopback,
+   *  screen share). Screen share comes from state.choice, a device from
+   *  inputKind on liveLabel, defaulting to the mic wording like the "Listening
+   *  to …" line. */
   function silentSourceText(state: SourceState, liveLabel: string | null): string {
     if (state.choice === "display") return "Nothing playing";
     const kind = liveLabel ? inputKind(liveLabel) : "mic";
@@ -6496,12 +5647,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return "The mic hears nothing";
   }
 
-  /** The Source row's status line while a deps.getInputHealth() reading is
-   *  anything but "ok" — src/audio/inputHealth.ts's header explains what
-   *  triggers each kind. Null for "ok" (nothing to show — refresh() falls
-   *  back to "Listening to …"). Red only for clipping, the one kind with an
-   *  immediate, obvious fix (turn something down); the rest are amber
-   *  "check your setup" nudges. */
+  /** The Source row's status line for a non-"ok" getInputHealth() reading
+   *  (src/audio/inputHealth.ts header explains the kinds); null for "ok". Red
+   *  only for clipping, the one kind with an obvious fix; the rest are amber
+   *  nudges. */
   function inputHealthText(
     reading: InputHealthReading,
     state: SourceState,
@@ -6536,10 +5685,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     label.style.cssText = rowLabelStyle;
     head.appendChild(label);
 
-    // Edit mode: tapping an input hides or shows it instead of picking it
-    // (inputDevice.ts's hidden inputs). A mode, not a per-row ✕, because the
-    // rows are buttons already (no nesting a second one inside) and a hover-
-    // only control would be unreachable on touch.
+    // Edit mode: tapping an input hides or shows it (inputDevice.ts's hidden
+    // inputs). A mode, not a per-row ✕: rows are buttons already (no nesting)
+    // and a hover-only control is unreachable on touch.
     let editing = false;
     const editBtn = createChipButton("Edit", "Hide inputs you never use, or show them again", () => {
       editing = !editing;
@@ -6571,9 +5719,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     el.append(head, list, guide, status);
 
-    // The pre-permission placeholder is its own row, not a device row: it
-    // has no deviceId, no kind tag, and starts the mic instead of switching
-    // input — one tap grants the permission that fills the real list in.
+    // The pre-permission placeholder has no deviceId or kind tag and starts
+    // the mic instead of switching input.
     function buildPermissionRow(): SourceRowHandle {
       const row = buildRow("device");
       row.name.textContent = "Microphone";
@@ -6593,8 +5740,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       row.tag!.style.cssText = SOURCE_TAG_STYLE[kind];
       row.btn.addEventListener("click", () => {
         if (editing) {
-          // The input being listened to stays — hiding it would hide the
-          // answer to "what am I hearing".
+          // The input being heard stays: hiding it would hide the answer to what you hear.
           if (row.isLive) return;
           deps.onInputHiddenChange(label, !isInputHidden(label));
           refresh();
@@ -6628,10 +5774,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function buildScreenRow(): SourceRowHandle {
       const row = buildRow("screen");
       row.name.textContent = "Screen share";
-      // Apps (Spotify, a DJ app) aren't inputs, so they never appear in the
-      // list above — sharing the app's window (just its sound; see
-      // sourcePref.ts's share-TYPE paragraph) or the Entire screen is how a
-      // browser hears them.
+      // Apps aren't inputs, so they never appear above: a browser hears them
+      // by sharing the app's window (sound only; sourcePref.ts's share-TYPE
+      // paragraph) or the Entire screen.
       row.sub.textContent = "an app's sound: share its window (e.g. Spotify) — or Entire screen for everything";
       row.btn.title = "Share screen audio";
       row.btn.addEventListener("click", () => {
@@ -6648,16 +5793,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let rows: SourceRowHandle[] = [];
     let structureKey = "";
 
-    // Rebuilds the row list only when what it should contain changed — see
-    // the CRITICAL note above buildRow for why a rebuild on every refresh()
-    // would eat clicks. Returns the live device's label, same contract
-    // refreshInputSelect used to have.
+    // Rebuilds the row list only when its content changed (CRITICAL note
+    // above). Returns the live device's label.
     function syncRowList(): string | null {
       const devices = deps.getInputDevices();
       const canDisplay = deps.canCaptureDisplay();
-      // Outside Edit a hidden input drops out of the list — unless it's the
-      // one being heard, which always shows. In Edit every input shows (the
-      // hidden ones dimmed, see refresh()) so any of them can come back.
+      // Outside Edit a hidden input drops out unless it's the one being heard;
+      // in Edit every input shows (hidden ones dimmed, see refresh()).
       const shown = devices.options.filter((o) => editing || !isInputHidden(o.label) || o.label === devices.liveLabel);
       const hiddenCount = devices.options.length - shown.length;
       const key = JSON.stringify([shown, devices.missing, devices.defaultLabel, canDisplay, editing, hiddenCount]);
@@ -6674,9 +5816,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         if (canDisplay && !editing) next.push(buildScreenRow());
         rows = next;
         hiddenLine.textContent = `${hiddenCount} hidden — Edit to show`;
-        // The caption sits directly above the Screen row, whatever came
-        // before it (real devices, the missing placeholder, or the
-        // pre-permission row) — it's what marks Screen as not one of them.
+        // The caption sits directly above the Screen row, marking it as not a device.
         const children: Node[] = [];
         for (const row of rows) {
           if (row.isScreen) {
@@ -6708,11 +5848,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           row.isLive = isLive;
           row.idleTitle ??= row.btn.title;
           row.btn.title = isLive && !editing ? "Listening — tap to disconnect" : row.idleTitle;
-          // The missing row's own sub-line ("not connected") and the
-          // pre-permission placeholder's ("allow access to list every
-          // input") are fixed at build time and never touched here — only a
-          // real, present device row's sub-line depends on live/default/kind
-          // state that can change without the row list itself being rebuilt.
+          // The missing and pre-permission rows' sub-lines are fixed at build
+          // time; only a present device row's depends on live/default/kind.
           const label = row.name.textContent ?? "";
           const isHidden = row.deviceId !== null && !row.isMissing && isInputHidden(label);
           if (!row.isScreen && !row.isMissing && row.deviceId !== null) {
@@ -6740,17 +5877,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           if (row.glyph) row.glyph.style.color = isLive ? INPUT_GREEN : "rgba(255,255,255,0.55)";
         }
         guide.style.display = state.choice === "display" && !editing ? "" : "none";
-        // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
-        // shimmer this drives while nothing's live yet.
+        // Shimmer while nothing's live: .vc-src-status[data-prompting] (controlsTheme.ts).
         status.toggleAttribute("data-prompting", !state.live && !editing);
-        // src/audio/inputHealth.ts's reading, worded by inputHealthText
-        // above — takes over the status line in place of "Listening to …"
-        // whenever the live input isn't ok. Never checked while editing:
-        // that state already owns the line ("Tap an input to hide or show
-        // it"), and while nothing's live there's no input to read health on.
+        // inputHealth.ts's reading takes over the status line when the live
+        // input isn't ok. Not while editing (that owns the line) or when
+        // nothing's live.
         const warning = state.live && !editing ? inputHealthText(deps.getInputHealth() ?? { kind: "ok" }, state, liveLabel) : null;
-        // See .vc-src-status[data-warn] (controlsTheme.ts) for the colour —
-        // absent (not just falsy) so its CSS rule doesn't match at all.
+        // Colour: .vc-src-status[data-warn] (controlsTheme.ts); removed, not
+        // falsy, so its CSS rule doesn't match.
         if (warning) status.setAttribute("data-warn", warning.warn);
         else status.removeAttribute("data-warn");
         status.textContent = editing
@@ -6772,21 +5906,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       endEdit(): void {
         editing = false;
       },
-      // Meter segments only — called on every tick the open panel draws
-      // (this file's own update(), like the Bands strip), so the
-      // live meter tracks frame.level as closely as the rest of the panel's
-      // live meters. `liveLevel` is this tick's FeatureFrame.level; idle rows
-      // read deps.getInputLevel(id) instead (src/audio/inputPreview.ts),
-      // null wherever that device's preview isn't open (unsupported browser,
-      // or it just hasn't opened yet) — its meter keeps its slot but shows
-      // no lit segments.
+      // Meter segments only, per update() tick. `liveLevel` is this tick's
+      // FeatureFrame.level; idle rows read deps.getInputLevel(id)
+      // (inputPreview.ts), null where no preview is open: the meter keeps its
+      // slot but shows no segments.
       updateMeters(liveLevel: number | null): void {
         for (const row of rows) {
           const level = row.isLive ? Math.min(1, Math.max(0, liveLevel ?? 0)) : row.deviceId ? deps.getInputLevel(row.deviceId) : null;
           const lit = level === null ? 0 : Math.round(level * SOURCE_METER_SEGMENTS);
-          // The level is quantised to a few steps and idle rows mostly sit at
-          // zero, so most ticks repeat the last paint — assigning cssText
-          // re-parses and invalidates style even for an identical string.
+          // Level is quantised and idle rows mostly sit at zero; assigning
+          // cssText re-parses and invalidates style even for an identical string.
           const key = `${row.isLive ? 1 : 0}|${level === null ? "h" : lit}`;
           if (key === row.meterKey) continue;
           row.meterKey = key;
@@ -6801,25 +5930,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   const sourceRow = createSourceRow();
 
-  // Auto-gain: how much of the per-band adaptive normalization in features.ts
-  // reaches the output. At the bottom (the default) the mic's real levels
-  // show — bass louder than treble, like real music — which the adaptive
-  // path otherwise flattens by re-normalizing each band to its own recent
-  // range; at the top different mics/rooms converge toward the same look at
-  // the cost of that balance, and a Bands boost clamps against an
-  // already-full band. Between, some of each. Linear, not log-mapped like
-  // the three gain rows below: it's a mix amount, and 50% should sit at the
-  // middle of the track. Sits first in this card since it changes what the
-  // three rows below it are even shaping. Global per device, like Bands'
-  // crossover (getBandSplit), so it's deliberately left out of this card's
-  // own Reset chip below — that chip resets per-scene taste
-  // (Sensitivity/Expansion/Smoothing), not a device-wide input
-  // preference. Its "A" chip resolves from the room's own measured span
-  // (FeatureExtractor.bandSpanDb), not MUSIC_DIALS like the rows below —
-  // no dial describes how much of the analyser's window the room is
-  // actually using, which is exactly what this amount fixes — and eases
-  // slowly (autoGain.ts's EASE_RATE) so the Dynamics card's history trace
-  // still reads as room drift, not something chasing the beat.
+  // Auto-gain: how much of features.ts's per-band adaptive normalization
+  // reaches the output. At the bottom the mic's real levels show (bass louder
+  // than treble); at the top mics and rooms converge toward one look at the
+  // cost of that balance, and a Bands boost clamps against a full band.
+  // Linear, not log: it's a mix amount. Global per device, so left out of this
+  // card's Reset chip (per-scene taste). Its "A" chip resolves from the room's
+  // measured span (FeatureExtractor.bandSpanDb), not MUSIC_DIALS, which has no
+  // dial for how much of the analyser's window the room uses, and eases slowly
+  // (autoGain.ts's EASE_RATE) so the Dynamics history trace reads as room
+  // drift.
   const autoGainRow = createControlRow({
     label: "Auto-gain",
     accent: INPUT_GREEN,
@@ -6836,30 +5956,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       resolveLive: () => deps.resolveAutoGain(),
       getManual: () => deps.getAutoGain(),
     },
-    // Auto-gain is one of the whole-mic Auto button's own members (see
-    // micAuto.ts's header) — refreshMicAuto keeps that button's lit state
-    // honest whenever this chip is clicked.
+    // One of the whole-mic Auto button's members (micAuto.ts header);
+    // refreshMicAuto keeps its lit state honest.
     onAutoToggled: refreshMicAuto,
   });
   autoGainRow.onChange((value) => deps.onAutoGainChange(value));
   autoGainRow.sync(() => deps.getAutoGain());
 
-  // Silence gate: two volume marks in FeatureFrame.level units (see
-  // src/audio/silenceGate.ts for the why — relative onset detection
-  // misfiring on mic hiss in a quiet room). Both rows share one `auto`
-  // block, driven by isSilenceGateAuto/resolveSilenceGate: unlike a scene
-  // setting's own auto weights, this doesn't resolve against MUSIC_DIALS —
-  // nothing there describes "how quiet is this room" — it leans on
-  // silenceGate.ts's own room-floor tracker instead, the same reason
-  // Auto-gain's own "A" chip above leans on FeatureExtractor.bandSpanDb
-  // rather than the music profile (see that file's "Auto mode" header
-  // paragraph for the tracker itself). One flag drives both marks (they're
-  // one gate — silenceGate.ts's own ordering invariant couples them
-  // anyway), which is why each row's own `toggle` below also refreshes the
-  // other row's chip: nothing else would. `syncSilenceGateRows` still
-  // re-reads both *manual* marks from the store after either row's own
-  // manual drag, since moving one can push the other — trusting just the
-  // row that fired onChange would leave the other stale.
+  // Silence gate: two volume marks in FeatureFrame.level units (silenceGate.ts
+  // for the why: relative onset detection misfiring on mic hiss in a quiet
+  // room). Both rows share one `auto` block (isSilenceGateAuto /
+  // resolveSilenceGate), resolved from silenceGate.ts's room-floor tracker, not
+  // MUSIC_DIALS (nothing there describes how quiet a room is). One flag drives
+  // both marks, so each row's `toggle` also refreshes the other's chip.
+  // syncSilenceGateRows re-reads both manual marks after either drags, since
+  // moving one can push the other.
   const silenceClosedRow = createControlRow({
     label: "Silence below",
     accent: INPUT_GREEN,
@@ -6918,12 +6029,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   syncSilenceGateRows();
 
-  // The Input card's own Auto button — hands the whole mic to auto in one
-  // tap (see micAuto.ts's header for exactly what that covers). refreshMicAuto
-  // and toggleMicAuto themselves live further down, by refreshAutoMaster/
-  // toggleAutoMaster — the scene master toggle they overlap on the
-  // Sensitivity/Expansion/Smoothing rows — but the button is built here
-  // since it's part of this card's own header.
+  // The Input card's Auto button: hands the whole mic to auto in one tap
+  // (micAuto.ts header). refreshMicAuto/toggleMicAuto live further down beside
+  // refreshAutoMaster, which they overlap; the button is built here as part of
+  // this card's header.
   const micAutoBtn = document.createElement("button");
   micAutoBtn.textContent = "Auto";
   micAutoBtn.title = "Auto for the whole mic — gain, silence gate, sensitivity, expansion, smoothing";
@@ -6938,14 +6047,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (const { row, defaultValue, onChange } of inputRows) {
         onChange(defaultValue);
         // Clear the T restore point first: setValue() renders a row muted
-        // for as long as one is held, so clearing after would leave it
-        // showing "Off" over the restored default.
+        // while one is held.
         row.clearOff();
         row.setValue(defaultValue);
         row.refreshChip();
       }
-      // onChange above took those rows back to manual without going through
-      // a row's own commit(), so its onAutoToggled hook never heard about it.
+      // onChange took those rows back to manual without a row's commit(), so onAutoToggled never heard.
       refreshMicAuto();
       refreshAutoMaster();
     }),
@@ -6974,9 +6081,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     inputRows[2].row.el,
   );
 
-  // Scene: per-scene look knobs (e.g. Caustics' focus/breathe/ripple/flash).
-  // Rebuilt on every open() since the set of rows depends on which scene is
-  // active.
+  // Scene: per-scene look knobs; rebuilt on every open() since the rows depend on the active scene.
   const sceneCard = createCard({
     title: "Scene",
     accent: SCENE_VIOLET,
@@ -6988,28 +6093,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.el.style.display = "none";
   const sceneRows = document.createElement("div");
   sceneCard.body.appendChild(sceneRows);
-  // Cards a widget mounts alongside the Scene card (WidgetCtx.mountCard,
-  // registry.ts — Physarum 2's Affinity card is the first) — a plain host,
-  // not a card of its own, sitting right after the Scene card in the
-  // controls column (controlsCol.append below) so a mounted card reads as
-  // "one more block after the Scene card" rather than a floating extra.
-  // Cleared at the top of every renderSceneSettings() call exactly like
-  // sceneRows.innerHTML, so a widget card never survives a scene switch/Look
-  // apply/card Reset it wasn't rebuilt by. pinnableCards()/findPinnedRowEl()
-  // below search it alongside sceneCard.el for whichever card holds the
-  // currently pinned row, since a row built through WidgetCtx.registerCard
-  // pins exactly like a Scene-card row (registerPinnableRow, below) but can
-  // live in either card.
+  // Cards a widget mounts beside the Scene card (WidgetCtx.mountCard,
+  // registry.ts): a plain host right after it in the controls column. Cleared
+  // at the top of every renderSceneSettings() like sceneRows, so a widget card
+  // never survives a rebuild that didn't rebuild it. pinnableCards() and
+  // findPinnedRowEl() search it too, since a registerCard row pins like a
+  // Scene-card row but can live in either card.
   const sceneWidgetCardsHost = document.createElement("div");
-  /** Every top-level card a Scene-setting row's pin can live in — the Scene
-   *  card itself, plus whatever `sceneWidgetCardsHost` currently holds. */
+  /** Every top-level card a Scene-setting row's pin can live in. */
   function pinnableCards(): HTMLElement[] {
     return [sceneCard.el, ...sceneWidgetCardsHost.querySelectorAll<HTMLElement>(":scope > .vc-card")];
   }
-  /** The currently `.vc-drive-pinned` row, wherever it lives — replaces the
-   *  several `sceneCard.el.querySelector(".vc-drive-pinned")` call sites
-   *  Solo/the solo eye/jumpToBlock used before a widget could mount a second
-   *  pinnable card. */
+  /** The currently `.vc-drive-pinned` row, wherever it lives. */
   function findPinnedRowEl(): HTMLElement | null {
     for (const card of pinnableCards()) {
       const row = card.querySelector<HTMLElement>(".vc-drive-pinned");
@@ -7017,25 +6112,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     return null;
   }
-  // What the per-tick loop and the auto refresh need from a scene row — a
-  // slider row (createControlRow) satisfies it as is; an enum picker with
-  // `reads` supplies its own pair (see appendSettingRow).
+  // What the per-tick loop and auto refresh need from a scene row; an enum
+  // picker with `reads` supplies its own pair (appendSettingRow).
   interface SceneRowHandle {
     updateSignalPills(frame: FeatureFrame | null, anim: AnimFrame | null): void;
     refreshAuto(): void;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
-  // Cleanup callbacks a widget registered via WidgetCtx.onDispose
-  // (widgets/registry.ts) — run once, right before the next full rebuild.
+  // Cleanup callbacks from WidgetCtx.onDispose (widgets/registry.ts), run once before the next full rebuild.
   let widgetDisposers: (() => void)[] = [];
 
-  // registry.ts's `appendRow` `linked` option, by the primary row's own
-  // spec.key — rebuilt from scratch on every renderSceneSettings() call
-  // exactly like sceneRowHandles/driveRowHandles above, since it's only ever
-  // read for a row on the currently-mounted card. `ownLabel` is the primary
-  // item's own short name, needed only to build a "Mixed — …" drive summary
-  // alongside `linked`'s own labels (see buildDriveRow's refreshMeta and
-  // patchChanged's syncLinkedDriveSetting below).
+  // registry.ts's `appendRow` `linked` option, by the primary row's spec.key;
+  // rebuilt on every renderSceneSettings(). `ownLabel` is the primary item's
+  // short name, for a "Mixed — …" drive summary (buildDriveRow's refreshMeta).
   let linkedByKey: Map<string, { ownLabel?: string; linked: readonly LinkedSetting[] }> = new Map();
 
   // The scene the Scene card's rows were last built for. They are rebuilt
@@ -7043,9 +6132,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // the previous scene's until something asks (midiCard.ts's applyCc).
   let renderedSceneId: string | null = null;
 
-  // Looks: named snapshots of the Scene card's own settings above — see
-  // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
-  // active scene has no settings to snapshot (renderSceneSettings below).
+  // Looks: named snapshots of the Scene card's settings (sceneLooks.ts);
+  // hidden with the Scene card when there are no settings.
   const looksCard = createLooksCard({
     currentSceneId: deps.currentSceneId,
     listLooks: deps.listLooks,
@@ -7077,12 +6165,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // independent of the scene, so it is always shown.
   const overlayCard = createOverlayCard(deps.overlay);
 
-  // Walks every .vc-block heading in document order and writes its digit —
-  // called whenever the block set can change (only renderSceneSettings does:
-  // group headings come and go with the active scene). Blanks anything past
-  // the ninth rather than doubling up on "9", so a scene with more groups
-  // than digit keys degrades to "those last ones aren't reachable by number"
-  // instead of a wrong or ambiguous badge.
+  // Writes each .vc-block heading's digit in document order; only
+  // renderSceneSettings changes the block set. Blanks past the ninth rather
+  // than doubling up on "9": those blocks aren't reachable by number.
   function renumberBlocks(): void {
     const blocks = root.querySelectorAll<HTMLElement>(".vc-block");
     blocks.forEach((heading, i) => {
@@ -7091,8 +6176,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // "all"/"low"/"mid"/"high" (SignalSpec.bandRange, signals.ts) resolved
-  // against the *live* split rather than a fixed index range, since
+  // SignalSpec.bandRange (signals.ts) against the live split, since
   // bandSplit.ts's crossover is user-configurable.
   function resolveBandRange(kind: "all" | "low" | "mid" | "high", split: BandSplit): { lo: number; hi: number } {
     switch (kind) {
@@ -7107,18 +6191,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // Lights the bands a signal-linked row actually listens to on the
-  // spectrum strip while the row is being touched — hover, keyboard focus,
-  // or a drag — and clears back to the normal view on release. A no-op for
-  // a row with no `reads`, or whose reads are all band-agnostic (drop
-  // detection: section loudness, not a frequency read) — which in practice
-  // makes this a non-drive-row-only affordance, since a drive setting
-  // declares no static `reads` at all (signals.ts's own header). A drive
-  // row has no spectrum tint of its own in this phase — see this file's
-  // header doc comment; Phase 2b's jacks/cables own that instead.
-  // Recomputed on every `input` (not just on entry) since dragging Ripple
-  // source across its own threshold changes which signal is actually active
-  // mid-drag — see RIPPLE_SRC_BEAT_THRESHOLD's own comment in caustics.ts.
+  // Lights the bands a signal-linked row listens to on the spectrum strip
+  // while it's touched (hover, focus, drag). No-op without `reads`, or for
+  // band-agnostic ones (drop detection); a drive setting declares no static
+  // `reads` (signals.ts header), its jacks and cables do that job. Recomputed
+  // on every `input`: dragging Ripple source across its threshold changes the
+  // active signal (RIPPLE_SRC_BEAT_THRESHOLD in caustics.ts).
   function wireBandHighlight(el: HTMLElement, reads: ResolvedSignalRead[] | undefined): void {
     const withRange = reads?.filter((r) => r.signal.bandRange !== undefined);
     if (!withRange?.length) return;
@@ -7151,27 +6229,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
 
-  // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
-  // shared by the direct-to-sceneRows path and the advanced-section path
-  // below, so a row behaves identically wherever it lands.
-  // `specs` is the active scene's full settings list, needed only to resolve
-  // a SignalLink.activeWhen predicate against a *sibling* setting by key
-  // (spec.reads below) — every other branch here only ever touches `spec`
-  // itself. `accent` defaults to the Scene card's usual SCENE_VIOLET;
-  // renderSceneSettings passes a family's own colour instead for a row
-  // in a family (spec.family), so the A/T chips — styled
-  // directly from this parameter, not from the row's `--vc-accent` CSS
-  // variable — tint correctly too.
-  // `opts.linked`/`opts.ownLabel` are registry.ts's `appendRow` own
-  // multi-item-selection bridge (itemBoxes.ts's multi-strain edit,
-  // 2026-09-27) — see that file's doc comment on `appendRow` for the full
-  // contract; `setLinkedValue` below is the one choke point every plain
-  // value edit (slider drag, typed value, reset arrow, T mute, an Auto
-  // toggle) goes through, so `linked` only has to be threaded once here
-  // rather than at each of the three branches below. A drive/patch edit's
-  // own choke point is `patchChanged`/`syncLinkedDriveSetting`, further down
-  // this file, since a patch mutation is never a `deps.onSceneSettingChange`
-  // call in the first place.
+  // Builds one setting's row (enum picker, boolean toggle or slider) into
+  // `container`, shared by the direct and advanced-section paths. `specs` is
+  // the scene's full list, used only to resolve a SignalLink.activeWhen against
+  // a sibling by key. `accent` is a family's colour for a family row; the A/T
+  // chips are styled from it directly, not from `--vc-accent`.
+  // `opts.linked`/`opts.ownLabel` are registry.ts's `appendRow` multi-item
+  // bridge (see its doc comment); `setLinkedValue` is the one choke point for
+  // plain value edits, so `linked` is threaded once. A patch edit's choke point
+  // is `patchChanged`/`syncLinkedDriveSetting`: it never goes through
+  // deps.onSceneSettingChange.
   function appendSettingRow(
     container: HTMLElement,
     sceneId: string,
@@ -7188,11 +6255,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (const l of linked) deps.onSceneSettingChange(sceneId, l.spec, value);
     }
 
-    // A sibling setting's live (auto-aware) value, by key — what a
-    // SignalLink.activeWhen predicate reads (see signals.ts's SignalLink doc
-    // comment). Falls back to 0 for an unknown key rather than throwing: a
-    // typo here is exactly what tests/signals.test.ts's key check exists to
-    // catch ahead of time, not something a live panel should crash over.
+    // A sibling setting's live value by key, for SignalLink.activeWhen
+    // (signals.ts). 0 for an unknown key rather than throwing;
+    // tests/signals.test.ts's key check catches typos.
     const getSiblingSetting = (key: string): number => {
       const sibling = specs.find((s) => s.key === key);
       return sibling ? deps.resolveSceneSettingValue(sceneId, sibling) : 0;
@@ -7213,19 +6278,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       };
     });
 
-    // The preview signal (see previewDrive's own doc comment) — every
-    // scene-setting row gets this, regardless of type, so focusing a
-    // non-drive row (an enum picker, a toggle) correctly clears a previous
-    // preview too, not just sliders. Pointer-originated focus
-    // (wireHoverFocus's pointerFocusOriginated flag) waits out
-    // HOVER_SELECT_DELAY_MS before actually previewing, canceled by
-    // whichever comes first: a newer focusin (any row, cancelPendingPreview
-    // at the top of both this and previewDrive) or this row losing focus
-    // before the timer fires (wirePreviewFocus's focusout below) — together
-    // these are what let a fast sweep across several rows toward the spectrum
-    // strip leave the starting preview alone. Keyboard/click focus (not
-    // pointer-originated) previews immediately. Never touches `pinned` —
-    // only an explicit click (togglePin) does that.
+    // The preview signal (see previewDrive), for every row type so focusing a
+    // non-drive row also clears a previous preview. Pointer-originated focus
+    // (wireHoverFocus's pointerFocusOriginated) waits HOVER_SELECT_DELAY_MS,
+    // canceled by a newer focusin (cancelPendingPreview) or this row losing
+    // focus (wirePreviewFocus), so a fast sweep toward the spectrum strip
+    // leaves the starting preview alone. Keyboard/click focus previews at
+    // once. Never touches `pinned`.
     function onRowFocusIn(): void {
       cancelPendingPreview();
       const next = spec.drive ? { sceneId, spec } : null;
@@ -7239,11 +6298,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    /** Makes this row pinnable (pinRowHandles). A drive row brings its own
-     *  handle, and createControlRow wires its card press (onCardPin); any
-     *  other row's `main` control is passed so a press on it, or on the card
-     *  around it, pins — the non-drive case is `registerPinnableRow`, shared
-     *  with `WidgetCtx.registerCard` (see that function's own doc comment). */
+    /** Makes this row pinnable (pinRowHandles). A drive row brings its handle;
+     *  any other row's `main` control is passed so a press on it or its card
+     *  pins (registerPinnableRow, shared with WidgetCtx.registerCard). */
     function registerPinRow(rowEl: HTMLElement, drive: DriveRowHandle | null, main?: HTMLElement | null): void {
       if (drive) {
         if (main) {
@@ -7257,15 +6314,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       registerPinnableRow(sceneId, spec, accent, rowEl, main);
     }
 
-    /** Wires `el`'s focusin to onRowFocusIn, and a focusout that cancels
-     *  this row's own still-pending hover preview if focus leaves it for
-     *  somewhere that never calls onRowFocusIn at all (the spectrum
-     *  strip, the meters, another card) before the dwell fires — a newer
-     *  row's own focusin already cancels via onRowFocusIn's own call, but
-     *  that only fires for focus landing on *another row*, not for focus
-     *  leaving the ring of rows entirely. `el` is the whole row (slider,
-     *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
-     *  its own reset chip) isn't a leave. */
+    /** Wires `el`'s focusin to onRowFocusIn, and a focusout that cancels a
+     *  still-pending hover preview when focus leaves for somewhere that never
+     *  calls onRowFocusIn (spectrum strip, meters, another card). `el` is the
+     *  whole row, so a focus change within it isn't a leave. */
     function wirePreviewFocus(el: HTMLElement): void {
       el.addEventListener("focusin", onRowFocusIn);
       el.addEventListener("focusout", (e) => {
@@ -7274,12 +6326,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
 
     if (spec.type === "enum" && spec.options) {
-      // An enum's `reads` get the same chip + pill strip a slider row builds
-      // for itself inside createControlRow — here the host builds it, since
-      // the picker only mounts it (PickerRowSpec.signals). The pills are
-      // how a picker that chooses *what the scene listens to* (shards' Cut
-      // on: Beat vs Bass hit, via complementary activeWhen predicates)
-      // shows which trigger the current choice actually rides.
+      // An enum's `reads` get the same chip + pill strip a slider builds in
+      // createControlRow; here the host builds it (PickerRowSpec.signals). The
+      // pills show which trigger the current choice rides, for pickers that
+      // choose what the scene listens to.
       const signals = reads?.length
         ? createSignalStrip(
             reads.map((r) => ({ label: r.signal.label, description: r.signal.description, onReveal: r.onReveal })),
@@ -7327,8 +6377,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
     if (spec.type === "boolean") {
-      // A trigger toggle (Toon Rave's Drop on big hits) gets the same port and
-      // patch panel as a slider row, so its signal can be rewired.
+      // A trigger toggle gets the same port and patch panel as a slider, so its signal can be rewired.
       const toggleDrive = spec.drive ? buildDriveRow(sceneId, spec) : null;
       const toggleEl = createToggleRow({
         label: spec.label,
@@ -7349,11 +6398,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
 
-    // A drive-capable setting (spec.drive) gets the patch bay's own port,
-    // summary and sparkline — built before the row itself (createControlRow
-    // needs them ready in its `drivePanel` slot) and bound after (bind()
-    // needs the finished row element for the pinned-row highlight) — see
-    // buildDriveRow's own doc comment.
+    // A drive-capable setting gets the patch bay's port/summary/sparkline:
+    // built before the row (createControlRow's `drivePanel` needs them) and
+    // bound after (the pinned-row highlight needs the element); see
+    // buildDriveRow.
     const driveBuild = spec.drive ? buildDriveRow(sceneId, spec) : null;
 
     const row = createControlRow({
@@ -7367,9 +6415,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       mapping: "linear",
       format: formatSetting,
       description: spec.description,
-      // A macro-driven setting (spec.macro) is auto-capable the same way an
-      // `auto` one is — it just tracks another setting instead of the music
-      // profile — so it gets the same A chip and live-refresh wiring.
+      // A macro-driven setting is auto-capable like an `auto` one (it tracks
+      // another setting, not the music profile): same A chip and refresh.
       auto: spec.auto || spec.macro
         ? {
             isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
@@ -7381,8 +6428,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
             getManual: () => deps.getSceneSettingValue(sceneId, spec),
           }
         : undefined,
-      // isSceneAuto is true only while EVERY auto-capable row is auto, so any
-      // one row's A chip or a drag off auto flips the master bar's state.
+      // isSceneAuto is true only while every auto-capable row is auto, so any row's A chip or drag off auto flips the master bar.
       onAutoToggled: refreshAutoMaster,
       custom: customConfig(() => sceneId, () => spec, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
@@ -7409,18 +6455,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wireBandHighlight(row.el, reads);
   }
 
-  /** registry.ts's `WidgetCtx.mountRows` — a scoped sibling of
-   *  `appendSettingRow` above: builds `rows` into a single host div appended
-   *  to `container`, snapshotting `sceneRowHandles`/`driveRowHandles`/
-   *  `driveSparkCanvases` before and after so the returned `dispose()` can
-   *  unregister exactly what this call added (and `linkedByKey` entries by
-   *  the same rows' own keys) rather than the whole card's worth
-   *  `renderSceneSettings` resets. Mirrors that function's own pinned-row
-   *  reconciliation (its tail, below) for just the rows this call built: a
-   *  mount that happens to recreate the currently-pinned row picks the
-   *  patch panel back up instead of waiting for the next full rebuild. See
-   *  registry.ts's header for why a widget (itemBoxes.ts's selection
-   *  change) reaches for this instead of `ctx.rerender()`. */
+  /** registry.ts's `WidgetCtx.mountRows`: a scoped sibling of appendSettingRow
+   *  that builds `rows` into one host div, snapshotting the handle arrays so
+   *  `dispose()` unregisters exactly what it added (and its `linkedByKey`
+   *  entries). Mirrors renderSceneSettings's pinned-row reconciliation for
+   *  these rows, so a mount that recreates the pinned row picks the patch
+   *  panel back up. See registry.ts's header for why a widget (itemBoxes.ts)
+   *  uses this instead of `ctx.rerender()`. */
   function mountRows(
     container: HTMLElement,
     sceneId: string,
@@ -7457,9 +6498,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const stillHere = addedPinRows.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
       stillHere?.refreshPin();
     }
-    // A pin handed off by the previous mount's dispose (below): re-pin the
-    // same per-item control on whichever item this mount shows, so switching
-    // strains keeps the patch bay aimed at "Nutrient", not at a hidden row.
+    // A pin handed off by the previous mount's dispose: re-pin the same
+    // per-item control on this mount's item, so switching items keeps the
+    // patch bay aimed at it.
     const handoff = pinHandoff;
     pinHandoff = null;
     if (handoff && !pinned) {
@@ -7487,9 +6528,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const port of movedPorts) port.remove();
         const ownsKey = (p: { sceneId: string; spec: SceneSetting } | null): boolean =>
           p !== null && p.sceneId === sceneId && rows.some((r) => r.spec.key === p.spec.key);
-        // Never leave the pin (or a hover preview) on a row that no longer
-        // exists: unpin, and remember which per-item control it was so the
-        // next mountRows can re-pin its counterpart (see above).
+        // Never leave the pin (or preview) on a row that no longer exists;
+        // remember the per-item control so the next mountRows can re-pin its
+        // counterpart.
         if (ownsKey(pinned)) {
           const item = pinned!.spec.item;
           togglePin(pinned!.sceneId, pinned!.spec);
@@ -7519,25 +6560,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
     refreshAutoMaster();
-    // Not scene-specific like the rest of this function, but this is the
-    // one place that already re-syncs on every open()/scene-change/Look
-    // apply (see this function's own callers) — piggybacking here means
-    // mic-auto's own asymmetry (see micAuto.ts's header: some members are
-    // per-scene, some device-wide) can never leave the button stale after a
-    // scene switch without a second call site to remember.
+    // Not scene-specific, but the one place already re-syncing on every
+    // open()/scene-change/Look apply; mic-auto has per-scene and device-wide
+    // members (micAuto.ts header), so piggybacking avoids a stale button.
     refreshMicAuto();
 
     let lastGroup: string | undefined;
     let first = true;
     let hasGroups = false;
-    // The currently-open advanced-section body a run of consecutive
-    // spec.advanced entries is being appended into, or null between runs —
-    // reset whenever a group heading appears so a run never spans a group.
+    // The open advanced-section body a run of spec.advanced entries appends
+    // into; null between runs, reset at a group heading.
     let advancedBody: HTMLElement | null = null;
-    // familyAccents hands out FAMILY_ACCENTS (SceneSetting.family) in the
-    // order this scene's family names are first seen, wrapping past the
-    // end, and remembers the assignment for the rest of this render so
-    // every row of a family gets the same colour.
+    // familyAccents hands out FAMILY_ACCENTS in the order family names are
+    // first seen (wrapping), fixed for this render so a family keeps one colour.
     const familyAccents = new Map<string, string>();
     const accentForFamily = (family: string): string => {
       let accent = familyAccents.get(family);
@@ -7548,24 +6583,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return accent;
     };
 
-    // Scene-declared item widgets (src/render/sceneItems.ts, scene.ts's
-    // Scene.panel) render first, inside this same card — see
-    // src/ui/widgets/registry.ts's header. Every setting whose
-    // `item.family` a section claims is then skipped by the flat loop
-    // below, exactly as if it weren't in `specs` at all.
+    // Scene-declared item widgets (sceneItems.ts, Scene.panel) render first in
+    // this card (widgets/registry.ts header); the flat loop below skips every
+    // setting whose `item.family` a section claims.
     const scene = deps.getScene(sceneId);
     const panelSections = scene?.panel ?? [];
     const claimedFamilies = new Set(
       panelSections.map((s) => s.items).filter((x): x is string => x !== undefined),
     );
-    // Plain settings a section renders itself (PanelSection.settings) — the
-    // flat loop below skips these too.
+    // Plain settings a section renders itself (PanelSection.settings) are skipped too.
     const claimedKeys = new Set(panelSections.flatMap((s) => s.settings ?? []));
     for (const section of panelSections) {
       const build = getWidget(section.widget);
-      // tests/sceneKeys.test.ts checks every panel widget id is registered
-      // ahead of time — a missing one here just renders nothing rather than
-      // throwing in a live panel.
+      // tests/sceneKeys.test.ts checks widget ids are registered; a missing
+      // one renders nothing rather than throwing in a live panel.
       if (!build) continue;
       hasGroups = true;
       const heading = groupHeading(section.title, first);
@@ -7591,26 +6622,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         setDrive: (spec, setting) => setDriveFromWidget(sceneId, spec, setting),
         mountCard: (spec) => {
           const card = createCard(spec);
-          // Own class beyond the generic .vc-card so a script (padcheck.mjs)
-          // or a future second widget card can find "a card a widget
-          // mounted" without matching on its title text.
+          // Own class so a script (padcheck.mjs) can find a widget-mounted card without matching its title.
           card.el.classList.add("vc-widget-card");
           markBlock(card.title);
           sceneWidgetCardsHost.appendChild(card.el);
           return { el: card.el, body: card.body };
         },
         registerCard: (rowEl, spec) => registerPinnableRow(sceneId, spec, SCENE_VIOLET, rowEl, rowEl),
-        // The exact same live reading a row's own sparkline draws — see
-        // WidgetCtx.driveValue's own doc comment (registry.ts).
+        // The exact reading a row's sparkline draws (WidgetCtx.driveValue, registry.ts).
         driveValue: (spec, rest) => lastDrives?.valueOf(spec.key, rest) ?? rest ?? 0,
         probe: () => deps.getScene(sceneId)?.probe?.() ?? null,
         command: (name, args) => deps.getScene(sceneId)?.command?.(name, args),
         onTick: (fn) => tickFns.push(fn),
         onDispose: (fn) => widgetDisposers.push(fn),
-        // A whole-card rebuild rather than patching this section's own DOM
-        // — see registry.ts's header for why that's the right amount of
-        // work here (it reuses every bit of jack/cable/pin teardown below
-        // for free).
+        // A whole-card rebuild, not a DOM patch of this section (registry.ts header says why).
         rerender: () => renderSceneSettings(),
       };
       build(host, section, ctx);
@@ -7639,8 +6664,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lastGroup = spec.group;
 
       if (spec.advanced) {
-        // Families don't reach into an advanced run — see SceneSetting.family's
-        // own doc comment (sceneSettings.ts).
+        // Families don't reach into an advanced run (SceneSetting.family in sceneSettings.ts).
         if (!advancedBody) {
           if (!groupChanged && !first) sceneRows.appendChild(spacer());
           let count = 1;
@@ -7663,34 +6687,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       if (!groupChanged && !first) sceneRows.appendChild(spacer());
       first = false;
-      // A family's own colour rides straight in as this row's `accent` (not
-      // a post-hoc --vc-accent override) so the A/T chips — styled directly
-      // from the accent passed to createControlRow/createPickerRow/
-      // createToggleRow, not from that CSS variable — tint correctly too,
-      // not just the slider fill and label.
+      // A family's colour is the row's `accent` (not a --vc-accent override) so
+      // the A/T chips, styled from that parameter, tint too.
       const accent = spec.family !== undefined ? accentForFamily(spec.family) : SCENE_VIOLET;
       appendSettingRow(sceneRows, sceneId, spec, specs, accent);
     }
 
-    // The Scene card title is itself the block only when the active scene
-    // has settings but emits no group headings — otherwise it and the first
-    // group heading would both resolve to the same first row. Every scene
-    // with settings groups them today (tests/settingGroups.test.ts requires
-    // it — see SETTING_GROUPS in sceneSettings.ts), so this branch is dead
-    // until some future scene's settings all go ungrouped again.
+    // The Scene card title is the block only when the scene has settings but
+    // no group headings; otherwise it and the first group heading would
+    // resolve to the same row. tests/settingGroups.test.ts requires grouping
+    // (SETTING_GROUPS in sceneSettings.ts), so this stays dead until a scene
+    // goes ungrouped.
     if (specs.length > 0 && !hasGroups) markBlock(sceneCard.title);
     else unmarkBlock(sceneCard.title);
     renumberBlocks();
 
-    // A preview never survives a rebuild — it's transient by design, and
-    // the row it pointed at may not even exist any more (a variant switch
-    // changes which settings are on the card). A pin does survive, but its
-    // panel has to be rebuilt against the freshly-built row (every caller
-    // here — a scene switch, a Look apply/undo, a variant switch, a card
-    // Reset, every open() — replaces every row from scratch above): found
-    // by (sceneId, key) in the new driveRowHandles, or dropped if the pinned
-    // setting no longer exists on this scene (including a genuine scene
-    // switch, since every row just built carries the *new* sceneId).
+    // A preview never survives a rebuild (its row may be gone, e.g. after a
+    // variant switch). A pin survives if its (sceneId, key) is found in the new
+    // rows; otherwise it's dropped, including on a real scene switch (every new
+    // row carries the new sceneId).
     preview = null;
     cancelPendingPreview();
     if (pinned) {
@@ -7699,20 +6714,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       else {
         pinned = null;
         lastPinnedSetting = null;
-        // The old output graph is detached with its patch panel — stop
-        // update() redrawing it (togglePin clears this the same way).
+        // The old output graph went with its patch panel: stop update() redrawing it.
         activeOutputTick = null;
       }
     }
-    // A jack click with nothing pinned reaches for lastPreview — drop it on
-    // a genuine scene switch, same reasoning as the pinned check above,
-    // rather than let a jack click quietly pin a setting on the scene that
-    // was just left.
+    // A jack click with nothing pinned reaches for lastPreview: drop it on a
+    // scene switch so a click can't pin a setting on the scene just left.
     if (lastPreview && lastPreview.sceneId !== sceneId) lastPreview = null;
     refreshLineMode();
     refreshPatchHighlight();
-    // The rows were just rebuilt, unmarked — re-hide around whatever solo
-    // now isolates.
+    // Rows were just rebuilt unmarked: re-hide around the solo.
     if (soloOn) applySolo();
   }
 
@@ -7745,27 +6756,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.append(swatch, item.name);
       btn.addEventListener("click", () => {
         deps.onPickPalette(item.id);
-        // Stay open — the scene isn't hidden behind a backdrop, so tapping
-        // through palettes to watch the scene recolor is the point.
+        // Stay open: tapping through palettes to watch the scene recolor is the point.
         renderPalettes();
       });
       row.appendChild(btn);
     }
   }
 
-  // Footer strip: the view toggles (keys, solo, the meters column) and a way
-  // out. It lives in the column that never hides, rather than above Bands: a
-  // chip up there had to be its own row, which pushed the whole column down
-  // out of line with Power and the Auto bar. The dock that holds it is
-  // sticky to the bottom of that column (.vc-dock, controlsTheme.ts) — at
-  // the bottom of the scroll, the buttons were out of sight whenever the
-  // column overflowed, which it almost always does.
+  // Footer strip: view toggles and a way out, in the column that never hides
+  // (a chip above Bands needed its own row and pushed the column out of line
+  // with Power and the Auto bar). The dock is sticky to the bottom (.vc-dock,
+  // controlsTheme.ts): at the bottom of the scroll the buttons were out of
+  // sight whenever the column overflowed.
   const footer = document.createElement("div");
   footer.style.cssText = footerStyle;
-  // data-key/data-keycap (keyHints.ts): each footer button *is* the control
-  // its shortcut performs, so it's tagged at creation rather than looked
-  // up later — the hover tooltip, the held-Shift keycap, and the keys
-  // list's own hover/click flash (targetsFor below) all key off this.
+  // data-key/data-keycap (keyHints.ts): each button is the control its
+  // shortcut performs, tagged at creation; the hover tooltip, held-Shift
+  // keycap and keys-list flash (targetsFor) key off it.
   function makeFooterBtn(id: string, keycap: string, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -7786,14 +6793,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   hideBtn.title = "Close the panel (H)";
   footer.append(keysBtn, soloBtn, metersBtn, hideBtn);
 
-  // The keys list behind "Keys" — one row per src/ui/keyHints.ts's own
-  // SHORTCUTS entry, built here (not there) since a row is also this
-  // file's own click/hover target: hovering it flashes every visible
-  // `[data-key="<id>"]` control it names (targetsFor/flashOn — capped,
-  // since a busy scene can carry many rows' worth of A/R/T chips); clicking
-  // it performs the action for the handful of ids with exactly one
-  // (singleAction), or just re-flashes for the rest (⇧1–9, 1–9, A/R/T, Z X C,
-  // Esc — nothing single to do for those from a click).
+  // The keys list behind "Keys": one row per keyHints.ts SHORTCUTS entry,
+  // built here since a row is also this file's hover/click target. Hover
+  // flashes every visible `[data-key="<id>"]` control (targetsFor/flashOn;
+  // capped, a busy scene carries many A/R/T chips); click performs
+  // singleAction where one exists, else re-flashes.
   const keysCard = document.createElement("div");
   keysCard.className = "vc-keys";
 
@@ -7808,13 +6812,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function flashOn(id: string): void {
     for (const el of targetsFor(id)) el.classList.add("vc-key-flash");
   }
-  // Reuses each control's own click handler rather than re-implementing its
-  // effect, so the two can never drift apart — a side effect is that
-  // keyHints.ts's own delegated click listener then also credits that
-  // control with a genuine mouse use. "panel" has no button local to this
-  // file (the gear lives in app.ts) — deps.toggleButton is that same
-  // data-key="panel" control, so clicking it here still reaches it, and
-  // since the panel is open, still closes it (deviceMenu.toggle()).
+  // Reuses each control's click handler so the two can't drift; a side effect
+  // is that keyHints.ts's delegated listener credits a genuine mouse use.
+  // "panel" has no local button (the gear is in app.ts), so deps.toggleButton,
+  // the same data-key="panel" control, closes the open panel
+  // (deviceMenu.toggle()).
   const singleAction: Record<string, () => void> = {
     panel: () => deps.toggleButton.click(),
     hide: () => hideBtn.click(),
@@ -7841,9 +6843,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wireKeysRow(row, s.id);
     keysCard.appendChild(row);
   }
-  // Not a SHORTCUTS entry: it names no single control of its own (holding
-  // it reveals every tagged control's keycap at once), so it's neither a
-  // click action nor a flash target — disabled rather than wired.
+  // Not a SHORTCUTS entry: it names no single control (holding it reveals
+  // every keycap), so it's disabled rather than wired.
   const shiftRow = document.createElement("button");
   shiftRow.type = "button";
   shiftRow.className = "vc-keys-row";
@@ -7872,16 +6873,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     metersBtn.title = hidden
       ? "Bring back the Bands card and the meters (M)"
       : "Hide the Bands card and the meters, keep the controls (M)";
-    // Hiding/showing the column changes which cards have a layout box
-    // without touching any card's own vc-folded class, so the observer
-    // above never fires for it on its own — recompute here instead.
+    // Hiding/showing the column changes which cards have a layout box without
+    // touching any vc-folded class, so the observer never fires: recompute.
     refreshColumnsFold();
   }
   setMetersHidden(isFolded(METERS_COLUMN));
 
   // ---- solo ----
-  /** The heat lens on or off — the HEAT chip and L. View state for this
-   *  session only, like Solo below. */
+  /** The heat lens on or off (HEAT chip and L). Session-only view state, like Solo. */
   function setHeatLens(on: boolean): void {
     heatLensOn = on;
     root.classList.toggle("vc-heat-lens", on);
@@ -7889,18 +6888,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     audioMeters.setHeatLens(on);
   }
 
-  // Everything but the pinned setting (or, unpinned, the Scene card)
-  // hidden, until O again — hidden by walking up from it and the dock
-  // (which always stays) to the root, and marking every sibling off those
-  // paths .vc-solo-hidden — so no
-  // column, heading or neighbouring button needs its own rule, in either
-  // layout. View state for this session only, like the keys list.
+  // Everything but the pinned setting (or, unpinned, the Scene card) hidden
+  // until O again: walk up from it and the dock (which stays) to the root and
+  // mark every sibling off those paths .vc-solo-hidden, so no column, heading
+  // or button needs its own rule in either layout. Session-only view state.
   function setSolo(on: boolean): void {
-    // Soloed, what's isolated slides down to the bottom of the column, just
-    // above the footer (.vc-solo's rules in controlsTheme.ts). Un-soloed it
-    // stays where it is — the column scrolls so the rest of the panel comes
-    // back around it; only when the column can't scroll that far (a pane
-    // near the top of the list) does it slide the rest of the way.
+    // Soloed, what's isolated slides to the bottom of the column above the
+    // footer (.vc-solo, controlsTheme.ts). Un-soloed it stays put and the
+    // column scrolls so the rest comes back around it; only when the column
+    // can't scroll that far does it slide the rest of the way.
     const anchor = findPinnedRowEl() ?? sceneCard.el;
     const before = anchor.getBoundingClientRect().top;
     soloOn = on;
@@ -7915,9 +6911,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     scheduleCableRecompute();
   }
   const reducedMotionMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
-  /** Plays `el` from `dy` px away back to where layout now puts it — a
-   *  quick ease-out, skipped under reduced motion. Cables and the solo eye
-   *  are re-placed once it lands. */
+  /** Plays `el` from `dy` px away back to where layout now puts it (quick
+   *  ease-out, skipped under reduced motion), then re-places cables and the
+   *  solo eye. */
   function slideFrom(el: HTMLElement, dy: number): void {
     if (Math.abs(dy) < 1 || reducedMotionMQ.matches) return;
     el.style.transition = "none";
@@ -7943,12 +6939,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
-    // A pinned setting (its row plus its patch pane, the one outlined in
-    // its source colour) is the thing being worked on — it alone stays, the
-    // meters column included in what goes. The pinned row can live in the
-    // Scene card or a card a widget mounted beside it (WidgetCtx.mountCard);
-    // whichever one holds it is unfolded the same way the Scene card alone
-    // used to be.
+    // A pinned setting (its row plus its patch pane) alone stays, meters column
+    // included in what goes. The pinned row can live in the Scene card or a
+    // widget-mounted card (WidgetCtx.mountCard); whichever holds it is
+    // unfolded.
     const pinnedRow = findPinnedRowEl();
     const activeCard = pinnedRow?.closest<HTMLElement>(".vc-card") ?? sceneCard.el;
     if (activeCard.classList.contains("vc-folded")) activeCard.querySelector<HTMLButtonElement>(".vc-fold")?.click();
@@ -7965,15 +6959,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   setSolo(false);
 
-  // keyHints.ts's hover badge, hold-to-reveal keycaps, and the mouse half
-  // of its light-suggestion tracking — one install for the panel's whole
-  // lifetime (there's exactly one device menu instance). A tip gets longer
-  // on screen than showToast's own default toast duration.
+  // keyHints.ts's hover badge, hold-to-reveal keycaps and the mouse half of
+  // light-suggestion tracking: one install for the panel's lifetime. A tip
+  // stays longer than showToast's default.
   installKeyHints((text) => showToast(text, 4000));
 
-  // What each button last painted — refreshAutoMaster/refreshMicAuto also run
-  // on the 10 Hz tick, and re-assigning four cssTexts every time is wasteful.
-  // null until the first paint, so that one always writes.
+  // What each button last painted: these also run on the slow tick and
+  // re-assigning cssTexts is wasteful. null so the first paint writes.
   let autoMasterLitShown: boolean | null = null;
   let micAutoLitShown: boolean | null = null;
 
@@ -7987,11 +6979,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     autoMasterSub.textContent = lit ? "ON" : "OFF";
   }
 
-  // Overlaps the Input card's own Auto button (micAuto.ts) on the
-  // Sensitivity/Expansion/Smoothing rows, which both toggles share — refresh
-  // that button too, since flipping every scene setting to manual/auto here
-  // can just as easily have flipped it out from under mic-auto's own lit
-  // state as the reverse.
+  // Overlaps the Input card's Auto button (micAuto.ts) on
+  // Sensitivity/Expansion/Smoothing, so refresh it too: flipping every scene
+  // setting can flip it out from under mic-auto's lit state.
   function toggleAutoMaster(): void {
     const sceneId = deps.currentSceneId();
     deps.onSceneAutoToggle(sceneId, !deps.isSceneAuto(sceneId));
@@ -8001,9 +6991,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   autoMasterBtn.addEventListener("click", toggleAutoMaster);
 
-  // The Input card's own Auto button — see micAuto.ts's header for exactly
-  // which members "the whole mic" covers, and this file's card-anatomy
-  // header comment for how it relates to the scene master above.
+  // The Input card's Auto button (micAuto.ts header says which members "the
+  // whole mic" covers).
   function refreshMicAuto(): void {
     const lit = deps.isMicAuto(deps.currentSceneId());
     if (lit === micAutoLitShown) return;
@@ -8020,9 +7009,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     deps.onMicAutoToggle(sceneId, !deps.isMicAuto(sceneId));
     syncInputRows();
     refreshMicAuto();
-    // The Sensitivity/Expansion/Smoothing members are shared with the scene
-    // master (see toggleAutoMaster above) — a mic-auto toggle can just as
-    // easily have flipped that button's own lit state.
+    // Those members are shared with the scene master (toggleAutoMaster):
+    // refresh its lit state too.
     refreshAutoMaster();
   }
 
@@ -8040,28 +7028,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
   root.append(columnsWrap, controlsCol, shapingCol.el);
-  // Every card is built once above and lives for the panel's lifetime, so
-  // one pass covers them all — see cableColumnsRO's own comment.
+  // Every card is built once and lives for the panel's lifetime: one pass covers them (cableColumnsRO).
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
   document.body.appendChild(root);
 
   // ---- open / close ----
   // (isOpen itself is declared up with soloOn — setSolo reads it.)
 
-  // A tap outside the panel leaves it open — it's corner-docked so you can
-  // work the scene beside it, and it closes only from the gear, Hide UI, S
-  // or H — but it does let go of whatever the panel was holding: keyboard
-  // focus (so A/R/T/z/x/c stop landing on the last row), a pinned patch (as
-  // Escape does) and the keys list. Solo (always the Scene card now) stays
-  // as it was. With no full-screen backdrop to catch outside taps, this
-  // listens on the document instead; the gear is excluded since it's the
-  // panel's own switch.
+  // A tap outside leaves the panel open (corner-docked; it closes only from
+  // the gear, Hide UI, S or H) but releases what it held: keyboard focus (so
+  // A/R/T/z/x/c stop landing on the last row), a pinned patch (as Escape does)
+  // and the keys list. Solo stays. Listens on the document (no backdrop); the
+  // gear is excluded as the panel's own switch.
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
-    // The cable layer sits on <body>, outside root (cableLayer.ts's own
-    // header — it's above every card on purpose), but pressing a cable is a
-    // patch edit like a jack click, not a click on the scene: without this
-    // clause a cable press would unpin the setting it just unplugged from.
+    // The cable layer sits on <body> outside root (cableLayer.ts header), but
+    // pressing a cable is a patch edit like a jack click: without this clause
+    // it would unpin the setting it just unplugged from.
     if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t)))
       return;
     const active = document.activeElement;
@@ -8070,18 +7053,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     setKeysShown(false);
   }
 
-  // The Tab ring: every param control, in document order — see the header
-  // comment. Derived from the DOM each call rather than cached, so a Scene
-  // card rebuilt by renderSceneSettings can never leave it stale. Filtered
-  // to controls with a layout box: a folded card's body is display:none, a
-  // pinned setting's patch panel is display:none while unpinned, and
-  // lineEditor.strengthRow sits detached entirely outside line mode (it's
-  // only ever appended into a source line, this card's own assembly
-  // section) — a control inside any of those would otherwise sit in the
-  // ring and fail to focus.
-  // The Power column's Resolution slider is left out, as its chips are: a
-  // folded Power card is only visibility:hidden (it keeps its layout box), so
-  // it would pass the filter below and Tab would dead-end on a hidden control.
+  // The Tab ring: every param control in document order, derived from the DOM
+  // each call so a rebuilt Scene card can't leave it stale. Filtered to
+  // controls with a layout box: folded card bodies are display:none, an
+  // unpinned setting's patch panel is display:none, and lineEditor.strengthRow
+  // is detached outside line mode; such a control would sit in the ring and
+  // fail to focus. The Power column's Resolution slider is left out, as its
+  // chips are: a folded Power card is only visibility:hidden (it keeps its
+  // layout box), so Tab would dead-end on a hidden control.
   function ringElements(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
       (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col"),
@@ -8089,9 +7068,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   /** Tab while something is pinned: the pin moves to the next/previous
-   *  visible drive row (wrapping), and keyboard focus follows onto that
-   *  row's own control — focused first, pinned second, since togglePin
-   *  clears the preview that focus just set. */
+   *  visible drive row (wrapping) and focus follows, focused first since
+   *  togglePin clears the preview that focus just set. */
   function moveTabPin(e: KeyboardEvent, from: { sceneId: string; spec: SceneSetting }): void {
     const rows = pinRowHandles.filter((h) => h.rowEl.getClientRects().length > 0);
     if (rows.length === 0) return;
@@ -8120,21 +7098,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     next.focus();
   }
 
-  // A digit key resolves the nth .vc-block heading (numbered by
-  // renumberBlocks) and focuses the first ring control after it in document
-  // order — found by document position rather than by walking a specific
-  // container, since a block heading is sometimes a card title (siblings:
-  // its card's body) and sometimes a group heading (siblings: the following
-  // rows in the same Scene card body).
+  // A digit key resolves the nth .vc-block heading (renumberBlocks) and
+  // focuses the first ring control after it by document position: a heading
+  // is sometimes a card title (siblings: its body) and sometimes a group
+  // heading (siblings: the following rows).
   function jumpToBlock(n: number): void {
     const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
     if (!heading) return;
-    // Soloed, a jump outside what's soloed needs the rest of the panel
-    // back rather than trying to move the solo onto it.
+    // Soloed, a jump outside the solo needs the rest of the panel back.
     if (soloOn && !(findPinnedRowEl() ?? sceneCard.el).contains(heading)) setSolo(false);
-    // A folded card's controls have no layout box and are invisible to
-    // ringElements() below — unfold first, or the jump would silently land
-    // on the next block's control instead.
+    // A folded card's controls are invisible to ringElements(): unfold first,
+    // or the jump lands on the next block.
     const card = heading.closest<HTMLElement>(".vc-card");
     if (card?.classList.contains("vc-folded")) card.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     const target = ringElements().find(
@@ -8204,15 +7178,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // Everything in the panel that follows the active scene or palette — what
-  // open() brings up to date, and what a scene change from outside (a Set
-  // pad, Autopilot) does again while the panel stays open.
+  // Everything that follows the active scene or palette: what open() brings
+  // up to date, and what an outside scene change (Set pad, Autopilot) redoes
+  // while the panel is open.
   function syncToScene(): void {
     renderPalettes();
     syncInputRows();
-    // The panel may have been closed on a different scene since `pinned`
-    // was last checked — renderSceneSettings()'s own tail unpins it if so,
-    // and rebuilds its patch panel for whatever's still pinned either way.
+    // The panel may have been closed on another scene: renderSceneSettings()'s
+    // tail unpins if so and rebuilds the pinned patch panel.
     renderSceneSettings();
     refreshBandsSplit();
     refreshBandFaders();
@@ -8257,33 +7230,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sourceRow.endEdit();
   }
 
-  // Cache of the last --wash value written, so update() (drawing on every
-  // drawn tick while open) only touches the DOM when the fill color moves.
+  // Last --wash value written, so update() only touches the DOM when it moves.
   let lastWash = "";
-  // ~10Hz — auto-driven values move on a multi-second timescale, so per-frame
-  // DOM writes here would be pure cost. The spectrum header rides the same
-  // tick; its status changes even more rarely.
+  // Slow cadence: auto-driven values move over seconds, so per-frame DOM
+  // writes would be pure cost. The spectrum header rides it.
   const AUTO_UI_REFRESH_MS = 100;
   let lastAutoRefreshMs = 0;
-  // ~30 Hz — every drive row's own sparkline, plus the pinned row's output
-  // graph if it has one (this file's own carried rule: canvas draws, not
-  // DOM rebuilds, so this rides its own faster cadence rather than
-  // AUTO_UI_REFRESH_MS's 10 Hz).
-  // A fixed clock, not "whenever 1/30 s has passed since the last draw":
-  // a frame that arrives late owes the graphs every column it spanned, so
-  // "last 4 s" is 4 s of real time at any frame rate and evenly timed hits
-  // land evenly spaced, as on the meters' own time-axis strips (the old
-  // reset-to-now dropped the remainder, so a 40 fps panel drew at 20 Hz and
-  // a heavy scene's graph covered 6 s, unevenly). A gap past
+  // Every drive row's sparkline plus the pinned row's output graph: canvas
+  // draws, not DOM rebuilds, on a faster cadence than AUTO_UI_REFRESH_MS.
+  // A fixed clock, not "since the last draw": a late frame owes the graphs
+  // every column it spanned, so the window is real time at any frame rate and
+  // hits land evenly spaced like the meters' strips. A gap past
   // SPARKLINE_MAX_SLOTS (folded card, closed panel, hidden tab) restarts the
   // clock instead of filling seconds with one reading.
   const SPARKLINE_REFRESH_MS = 1000 / 30;
   const SPARKLINE_MAX_SLOTS = 15;
   let lastSparklineMs = 0;
-  // The Picture block's five readouts (its traces redraw every tick, same
-  // reasoning as the sparklines above); the readout text itself rides this
-  // slower cadence, same reasoning and rate as AUTO_UI_REFRESH_MS but kept
-  // separate since the two blocks' DOM writes are otherwise independent.
+  // The Picture block's readout text rides a slow cadence like
+  // AUTO_UI_REFRESH_MS, kept separate since the two blocks' DOM writes are
+  // independent (its traces redraw every tick, like the sparklines).
   const PICTURE_TEXT_REFRESH_MS = 100;
   let lastPictureTextMs = 0;
 
@@ -8317,40 +7282,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     ) {
       // Heat records panel open or closed, like the meters' traces (heat.ts).
       recordHeat(drives, frame);
-      // "Only this" (driveSolo.ts) is dropped on a scene switch too. Checked
-      // before the closed return below, so it still clears with the panel shut.
+      // Dropped on a scene switch; checked before the closed return so it
+      // clears with the panel shut.
       const solo = getDriveSolo();
       if (solo && solo.sceneId !== deps.currentSceneId()) clearDriveSolo();
-      // Closed, only the meters' traces (audioMeters.ts's update(), onScreen
-      // false) and heat record, so they open on what they missed; every DOM write
-      // here is skipped — this runs every rAF tick while in a viz. Open, a
-      // tick the panel doesn't draw (`draw` false) records the same plus
-      // the drive graphs' peak-hold (notePeaks), so a one-tick hit still
-      // reaches the next drawn sparkline; all drawing waits for that tick.
+      // Closed, only the meters' traces and heat record (so they open on what
+      // they missed); every DOM write is skipped since this runs every rAF
+      // tick. Open but not `draw`, it also records the drive graphs' peak-hold
+      // (notePeaks) so a one-tick hit reaches the next drawn sparkline.
       if (!isOpen || !draw) {
         audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
         shapingCol.update(frame?.level ?? null, false);
         return;
       }
-      // A scene switch (or a renderer with nothing playing) leaves `pinned`
-      // pointing at a setting that no longer belongs to the active scene —
-      // checked here rather than at every scene-change call site, since this
-      // runs every tick regardless of how the switch happened (gallery pick,
-      // Look apply, a paired device's own command). Cheap when nothing's
-      // pinned or the scene hasn't changed — togglePin() only actually
-      // rebuilds anything on the rare tick this fires.
+      // A scene switch leaves `pinned` on a setting of another scene; checked
+      // here, not at each scene-change call site, since this runs every tick
+      // however the switch happened. Cheap when nothing changed.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
       shapingCol.update(frame?.level ?? null, true);
-      // Unthrottled, same reasoning as the Bands strip a few lines below —
-      // the live row's meter should track frame.level as closely as any
-      // other live meter in this panel, not just at the row list's own
-      // AUTO_UI_REFRESH_MS structural-refresh cadence.
+      // Unthrottled: the live row's meter should track frame.level like any
+      // other live meter, not the structural-refresh cadence.
       sourceRow.updateMeters(frame?.level ?? null);
-      // The cable layer's own per-tick flow (dashoffset only, no reads —
-      // see cableLayer.ts's header) and the Bands card's own level rows;
-      // both need a live dtSec and the freshest anim/drives this tick.
+      // The cable layer's per-tick flow (dashoffset only, no reads;
+      // cableLayer.ts header) and the Bands level rows need a live dtSec.
       lastDrives = drives;
       lastFrame = frame;
       lastAnim = anim;
@@ -8361,15 +7317,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const r of bandLevelRows) r.row.setValue(anim ? r.read(anim) : null, cableDtSec);
       }
       if (!narrowMQ.matches) cableLayer.tick(cableDtSec);
-      // Unthrottled, same reasoning as audioMeters' own fills — see
-      // createControlRow's updateSignalPills doc comment. A no-op per row
-      // with no `reads`, so this costs nothing for the common case.
+      // Unthrottled, like audioMeters' fills (createControlRow's
+      // updateSignalPills). Free for rows without `reads`.
       for (const row of sceneRowHandles) row.updateSignalPills(frame, anim);
-      // The tick is FeatureFrame.level — absolute, fixed-window loudness,
-      // untouched by Auto-gain — so it reads the room regardless of that
-      // amount. The fill starts from .energy, which Auto-gain does shape,
-      // then runs the same sensitivity+expansion curve the render path
-      // applies, so it reads what the scene is actually reacting to.
+      // The tick is FeatureFrame.level: absolute, fixed-window loudness that
+      // Auto-gain doesn't touch, so it reads the room. The fill starts from
+      // .energy (which Auto-gain shapes) and runs the render path's
+      // sensitivity+expansion curve, so it shows what the scene reacts to.
       const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
       const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
       const sceneId = deps.currentSceneId();
@@ -8387,41 +7341,34 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const shapedPct = Math.round(shaped * 100);
       inputCard.el.style.backgroundSize = `${tickPct}% 100%, ${shapedPct}% 100%`;
 
-      // Driven off the unrounded shaped level (not shapedPct) so the ramp
-      // starts exactly at HOT_START rather than snapping in 1%-wide steps.
+      // From the unrounded shaped level so the ramp starts exactly at HOT_START, not in 1% steps.
       const wash = washColor(shaped);
       if (wash !== lastWash) {
         inputCard.el.style.setProperty("--wash", wash);
         lastWash = wash;
       }
 
-      // The strip's raw feed shows the mic as-is; the default processed feed
-      // is the exact same sensitivity+expansion pipeline the render path
-      // applies before scene.render() (see applySensitivity in app.ts) — so
-      // it always shows literally what the visuals are reacting to. The
-      // ghost is that same pipeline over the pre-fader frame, and it goes in
-      // first: applySensitivity hands back one shared scratch buffer off its
-      // fast path, so the ghost must be copied into the strip before the
-      // second call overwrites it.
+      // The processed feed is the render path's sensitivity+expansion pipeline
+      // (applySensitivity in app.ts); the raw feed shows the mic as-is. The
+      // ghost is the same pipeline over the pre-fader frame and goes first:
+      // applySensitivity returns one shared scratch buffer on its fast path, so
+      // the ghost must be copied into the strip before the second call
+      // overwrites it.
       spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
       spectrumStrip.setPinned(pinnedBands);
       const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
       spectrumStrip.update(rawBands, processedBands);
-      // The Frequencies overlay draws on this same strip's own canvas (no
-      // second one — see bandLineEditor.ts's header) and reads this same
-      // tick's live excess, unthrottled like the strip above (a beat
-      // driving the line should feel as live as the meters it's shaping).
-      // Skipped entirely while lineMode is unset or the Bands card is
-      // folded — a folded card has nothing to show it on (the meters' own
-      // cards skip the same way).
+      // The Frequencies overlay draws on this strip's own canvas
+      // (bandLineEditor.ts header) from this tick's live excess, unthrottled
+      // like the strip. Skipped without lineMode or with the Bands card
+      // folded.
       const nowMs = performance.now();
       if (lineMode && !bandsCard.fold?.isFolded()) {
         lineEditor.update(drives?.excess(lineMode.spec.key) ?? null);
       }
-      // Sparklines: every drive row's own `valueOf()`, drawn at ~30 Hz — the
-      // pinned row's output graph (if it has one) rides the same tick.
-      // Skipped while the Scene card is folded or there's nothing to read
-      // yet — canvas draws only, never a DOM rebuild.
+      // Sparklines: every drive row's valueOf() plus the pinned row's output
+      // graph; canvas draws only. Skipped while the Scene card is folded or
+      // nothing is readable.
       if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) {
         notePeaks(drives);
         let slots = Math.floor((nowMs - lastSparklineMs) / SPARKLINE_REFRESH_MS);
@@ -8438,8 +7385,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         }
       }
 
-      // Heat: the strips under the graphs and each row's heat colour, at most
-      // every HEAT_REFRESH_MS, while the Scene card is unfolded.
+      // Heat strips and row colours, at most every HEAT_REFRESH_MS.
       if (nowMs - lastHeatMs >= HEAT_REFRESH_MS && !sceneCard.fold?.isFolded()) {
         lastHeatMs = nowMs;
         refreshHeatPips(nowMs / 1000);
@@ -8449,15 +7395,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const h of driveRowHandles) h.tickHeatGlow();
       }
 
-      // Picture: the Overall trace plus one compact trace per measure of the
-      // finished frame's own intensity (src/render/pictureMeter.ts) — drawn every tick, same
-      // reasoning as the sparklines above (canvas draws are cheap; a DOM
-      // write is what's throttled). deps.getPictureReading() is null
-      // whenever the meter's gone stale, which a null level draws as a gap
-      // in the trace and "--" in the readout, same as every other meter row.
-      // While the controls column is scrolled past them, the traces still
-      // record and only skip the draw — and app.ts stops sampling the
-      // frame for them (isPictureOnScreen), so they record gaps.
+      // Picture: the Overall trace plus one per measure (pictureMeter.ts),
+      // drawn every tick (canvas draws are cheap; the DOM write is throttled).
+      // getPictureReading() is null once the meter goes stale: a gap in the
+      // trace and "--". While the column is scrolled past, traces record and
+      // skip the draw; app.ts stops sampling the frame (isPictureOnScreen), so
+      // they record gaps.
       const pictureShown = pictureOnScreen();
       if (leashOnScreen()) {
         leashGauge.draw({
@@ -8486,8 +7429,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       pictureRows.forEach((row, i) => {
         const level = pictureLevels[i]!;
-        // Folded rows still record (see the Picture block's comment); they
-        // only skip the redraw and the readout nobody can see.
+        // Folded rows still record; they skip only the redraw and the readout.
         row.strip.push([level], nowMs);
         if (!pictureOpen || !pictureShown) return;
         row.strip.draw();
@@ -8516,9 +7458,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       sourceRow.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       autoGainRow.refreshAuto();
-      // The gate rows ease continuously while their own auto is on, same as
-      // Auto-gain above — without this they'd only ever show the value they
-      // had when the row was last touched.
+      // The gate rows ease continuously while their auto is on; without this
+      // they'd show the value from when last touched.
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
@@ -8529,13 +7470,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // The Set's markers move when Play or Autopilot acts, and a paired
       // device or the pop-out can change its pads; it redraws only on change.
       setCard.refresh();
-      // The pinned setting's patch panel — re-synced here rather than every
-      // tick, same reasoning as every other refreshAuto() above (an
-      // external change, e.g. a paired device's own command, could move the
-      // pinned setting's patch without a click here). Compared by value, not
-      // just presence, so an unrelated 100ms tick never rebuilds a panel the
-      // user might have a pointer down on (this file's own carried
-      // click-loss rule).
+      // The pinned patch panel is re-synced here, not every tick, for an
+      // external change (a paired device's command). Compared by value so an
+      // unrelated tick never rebuilds a panel with a pointer down on it
+      // (click-loss rule).
       if (pinned?.spec.drive) {
         const current = deps.getDriveSetting(pinned.sceneId, pinned.spec);
         if (!sameDriveSetting(current, lastPinnedSetting ?? "scene")) patchChanged(pinned.sceneId, pinned.spec);
