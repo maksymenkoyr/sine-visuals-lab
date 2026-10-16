@@ -53,10 +53,18 @@ import { MAX_HZ_CAP } from "./bandScale.ts";
  * Treble ranges of the band split, src/audio/bandSplit.ts), so Lead and Hats
  * cover the same frequencies as the Mid and Treble rows beside them. Store-
  * free, like features.ts: the caller resolves anything persisted.
+ *
+ * The caller runs it only on ticks where something reads Hats or Lead
+ * (src/render/stemReaders.ts says who does). After ticks without a call, it
+ * comes back through `reset()`: everything heard before is forgotten, and the
+ * levels settle the way a fresh splitter's do, within STEM_SETTLE_SEC.
  */
 
 /** How long a bin's sound must have held to count as held — the time median's window. */
 const HELD_WINDOW_SEC = 0.3;
+/** How long a fresh (or reset) splitter takes to read as one that ran all
+ *  along: once a whole time-median window has filled. */
+export const STEM_SETTLE_SEC = HELD_WINDOW_SEC;
 /** Half-width of the across-frequency median. */
 const SPREAD_HALF_HZ = 190;
 /** The time median keeps one spectrum per this many seconds, so it spans the
@@ -84,7 +92,7 @@ export interface StemRanges {
 }
 
 /** Both levels in [0,1]. */
-interface StemLevels {
+export interface StemLevels {
   hats: number;
   lead: number;
 }
@@ -94,6 +102,8 @@ export interface StemSplitter {
    *  -Infinity reads as an empty bin), `nowSec` the capture's clock. Returns
    *  the same object every call, mutated in place. */
   update(binsDb: ArrayLike<number>, nowSec: number, ranges: StemRanges): StemLevels;
+  /** Forgets everything heard, so the next update starts like a fresh splitter's first. */
+  reset(): void;
 }
 
 interface PeakState {
@@ -177,6 +187,17 @@ export function createStemSplitter(binCount: number, binHz: number): StemSplitte
   }
 
   return {
+    reset() {
+      // The sorted windows need no clearing: every read is bounded by `count`.
+      oldest = 0;
+      count = 0;
+      lastSnapSec = -Infinity;
+      lastSec = null;
+      hatsPeak.peak = PEAK_FLOOR_DB;
+      leadPeak.peak = PEAK_FLOOR_DB;
+      out.hats = 0;
+      out.lead = 0;
+    },
     update(binsDb, nowSec, ranges) {
       const dt = lastSec === null ? 0 : Math.min(MAX_DT_SEC, Math.max(0, nowSec - lastSec));
       lastSec = nowSec;

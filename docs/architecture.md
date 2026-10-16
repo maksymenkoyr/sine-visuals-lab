@@ -29,7 +29,8 @@ Sensitivity/Expansion/Smoothing controls on top of that. Beside the bands,
 `src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
 would level held sound away), and splits them into a drum part and a held part
 for the Hats and Lead signals; `app.ts` writes both into the frame, so a TV gets
-them over the wire rather than working them out itself.
+them over the wire rather than working them out itself. The split runs only on
+ticks where something reads them; `src/render/stemReaders.ts` says who does.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
