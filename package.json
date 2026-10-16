@@ -30,6 +30,7 @@
     "workflow-stats": "node tools/workflow-stats.mjs",
     "doc-check": "node tools/doc-check.mjs",
     "dupes": "node tools/dupes.mjs",
+    "difficulty": "node tools/difficulty.mjs",
     "pr-shots": "node tools/pr-shots.mjs",
     "fix-conflicts": "bash tools/fix-conflicts.sh",
     "aliases": "cat tools/aliases.txt",
