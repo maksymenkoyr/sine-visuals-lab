@@ -187,8 +187,9 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
-import { GATE_FORMULAS, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, type GateFormula } from "../render/gateWindow.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render/gateWindow.ts";
 import { getGateFormula, setGateFormula } from "../render/gateFormulas.ts";
+import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -2985,22 +2986,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wrap.append(seg, name, rng, out);
     // Dev only, while PR #544 picks Smoothness's formula (gateFormulas.ts's header).
     if (import.meta.env.DEV) {
-      const pick = document.createElement("select");
-      pick.setAttribute("aria-label", "Smoothness formula (dev)");
-      pick.style.cssText =
-        "flex-basis: 100%; font: inherit; font-size: 12px; color: inherit; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; padding: 3px 6px;";
-      for (const f of GATE_FORMULAS) {
-        const opt = document.createElement("option");
-        opt.value = f.id;
-        opt.textContent = `Formula (dev): ${f.label}`;
-        pick.appendChild(opt);
-      }
-      pick.value = getGateFormula(sceneId, spec.key);
-      pick.addEventListener("change", () => {
-        setGateFormula(sceneId, spec.key, pick.value as GateFormula);
-        onLiveEdit();
-      });
-      wrap.append(pick);
+      wrap.append(
+        buildGateFormulaPicker(getGateFormula(sceneId, spec.key), (f) => {
+          setGateFormula(sceneId, spec.key, f);
+          onLiveEdit();
+        }),
+      );
     }
     return wrap;
   }

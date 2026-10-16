@@ -8,7 +8,7 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { advanceGateTracker, createGateTracker, stepHeightEnv, windowReading, type GateTrackerState } from "./gateWindow.ts";
 import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
-import { getGateFormula } from "./gateFormulas.ts";
+import { getGateFormula, getNodeGateFormula } from "./gateFormulas.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
@@ -979,7 +979,7 @@ export function createDriveEngine(): DriveEngine {
   // `normal`/`usual`.
   const expansionTrackers = new Map<string, ExpansionTracker>();
   const hitDetectors = new Map<string, HitDetector>();
-  const shaping = createShapingBank();
+  const shaping = createShapingBank(getNodeGateFormula);
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;

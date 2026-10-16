@@ -30,6 +30,8 @@ import { driveSourceColor, driveSourceLabel, HEIGHT_OPTIONS, jackKey, shapingInp
 import { FONT_LABEL, FONT_MONO } from "./controlsTheme.ts";
 import { isShapedChoice, type DriveSourceChoice } from "../render/drives.ts";
 import { removeShapedSource } from "../render/driveStore.ts";
+import { getNodeGateFormula, setNodeGateFormula } from "../render/gateFormulas.ts";
+import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
 import { SIGNALS, type SignalId } from "../render/signals.ts";
 import {
   addShapingNode,
@@ -605,7 +607,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
       name: "Smoothness",
       aria: `${label} smoothness`,
       accent: color,
-      hint: "How gently the window starts and ends. Left: exactly at Min and Max. Right: a wider, softer rise.",
+      hint: "How gently the window starts and ends. Left: exactly at Min and Max. Right: a softer rise toward nothing and toward the peak, while silence still gives nothing and the peak still gives full.",
       min: 0,
       max: 1,
       step: 0.01,
@@ -630,7 +632,10 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
       ends: ["Off", "Long tail"],
     });
 
-    card.body.append(row.el, st.canvas, legend, monitor, windowEl, smoothness, length);
+    card.body.append(row.el, st.canvas, legend, monitor, windowEl, smoothness);
+    // Dev only, while PR #544 picks Smoothness's formula (render/gateFormulas.ts's header).
+    if (import.meta.env.DEV) card.body.append(buildGateFormulaPicker(getNodeGateFormula(node.id), (f) => setNodeGateFormula(node.id, f)));
+    card.body.append(length);
     if (SIGNALS[node.src].kind === "edge") card.body.append(buildHeightRow(node, label));
 
     return {
