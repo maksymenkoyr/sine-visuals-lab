@@ -66,7 +66,7 @@ everyone has left, the room waits a fixed period
 (`ROOM_IDLE_TTL_MS` in [`server/roomRules.ts`](server/roomRules.ts)) and then
 deletes all of it. The relay also reads your IP address from Cloudflare's
 `CF-Connecting-IP` header to rate-limit how often one visitor can create
-rooms or ask to pair a screen, keeping only recent timestamps per IP in
+rooms, ask to pair a screen or connect to a room, keeping only recent timestamps per IP in
 memory for that purpose. It keeps no logs of the relayed data, and apart
 from a claimed room's settings, device records and key hashes, the only thing it stores at
 all is the anonymous usage count described below.

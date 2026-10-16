@@ -70,6 +70,11 @@ export const ROOM_CODE_RE = /^[A-Z2-9]{4}$/;
 /** WebSocket close code for a refused join; every other close code is transient. */
 export const ROOM_CLOSE_DENIED = 4003;
 
+/** WebSocket close code for a socket that kept sending frames or pings far
+ *  past its budget (server/roomCore.ts `overBudget`). Transient like any other
+ *  but ROOM_CLOSE_DENIED: a client that only misbehaved once redials. */
+export const ROOM_CLOSE_FLOOD = 4029;
+
 /** Sockets one room accepts; past it a new upgrade is refused with HTTP 429.
  *  A party is a host, a TV or two and a few phones. Not a credential check, so
  *  not a ROOM_CLOSE_DENIED: the client sees a transient close and redials. */

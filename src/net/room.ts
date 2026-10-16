@@ -3,7 +3,7 @@ import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame, type WaveE
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
-import { WireDecimator } from "./wireDecimator.ts";
+import { BROADCAST_INTERVAL_MS, WireDecimator } from "./wireDecimator.ts";
 import { realStorage } from "./realStorage.ts";
 import { reconnectDelayMs, isTerminalClose, isSilent, PROBE_TIMEOUT_MS } from "./reconnect.ts";
 import {
@@ -31,9 +31,6 @@ import {
 export type { RosterEntry, DeviceReject } from "./roomMessages.ts";
 export type { RoomRole };
 export { RENDER_DELAY_MS };
-
-/** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
-const BROADCAST_INTERVAL_MS = 1000 / 30;
 
 /** Max fraction of elapsed real time the effective render delay is allowed to
  *  move per sample() call. Keeps a change in target (e.g. a TV joining a
