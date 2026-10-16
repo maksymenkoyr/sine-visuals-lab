@@ -137,6 +137,7 @@ import { createLeashGauge } from "./leashGauge.ts";
 import { watchOnScreen } from "./onScreen.ts";
 import { allowedChar, fitTyped, parseTyped } from "./typedValue.ts";
 import { setLiveText } from "./liveText.ts";
+import { GLASS_PANE_CLASS } from "./glassPanes.ts";
 import { customReach, fitCustom, sliderSpan } from "../render/customValues.ts";
 import {
   AUTO_SKY,
@@ -5915,6 +5916,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // settings stay this button's alone — so toggling either refreshes the
   // other's lit state (see toggleAutoMaster/toggleMicAuto).
   const autoMasterBtn = document.createElement("button");
+  autoMasterBtn.className = GLASS_PANE_CLASS;
   autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
   const autoMasterLabel = document.createElement("div");
   autoMasterLabel.textContent = "Auto";

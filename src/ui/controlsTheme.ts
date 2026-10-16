@@ -25,6 +25,8 @@ import "@fontsource/chakra-petch/latin-300.css";
 import "@fontsource/chakra-petch/latin-500.css";
 import "@fontsource/share-tech-mono/latin-400.css";
 import dseg7Url from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Regular.woff2?url";
+import { GLASS_PANE_CLASS } from "./glassPanes.ts";
+import { GLASS_LOOK, glassFilterCss } from "./glassPref.ts";
 import { HEAT_COLORS, HEAT_REFRESH_MS } from "./heat.ts";
 
 /** Mic input gain — Sensitivity/Expansion/Smoothing and the live level wash. */
@@ -111,7 +113,10 @@ export function withAlpha(hex: string, alpha: number): string {
 // custom properties set from the `vc-glass-blur` class on <html> (the
 // stylesheet below; the preference is src/ui/glassPref.ts, which also holds
 // what the blur costs): a backdrop-filter re-processes the WebGL canvas
-// behind it every frame, so it is a real GPU cost.
+// behind it every frame, so it is a real GPU cost. While the renderer draws
+// the blur itself (Panel blur's Fast look, `vc-glass-drawn` on <html>), the
+// surfaces it draws under (glassPanes.ts's GLASS_PANE_CLASS) drop their
+// backdrop-filter and keep the lighter tint.
 // Every glass surface takes both properties inline — GLASS_BG for the
 // `background`, GLASS_FILTER for the (-webkit-)backdrop-filter — so the
 // switch is one class toggle.
@@ -148,7 +153,11 @@ const stylesheet = `
 }
 :root.vc-glass-blur {
   --vc-glass-bg: rgba(8, 11, 10, 0.2);
-  --vc-glass-filter: blur(20px) saturate(.6) brightness(.5) contrast(1.08);
+  --vc-glass-filter: ${glassFilterCss(GLASS_LOOK)};
+}
+/* Important, so it beats the surface's inline backdrop-filter. */
+:root.vc-glass-drawn .${GLASS_PANE_CLASS} {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
 @font-face {
   font-family: 'DSEG7-Classic';

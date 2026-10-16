@@ -4,58 +4,62 @@ This file is expected to be rewritten wholesale each session — it's a snapshot
 not a history. Keep it short enough to read in one glance. Use `/wrap` to
 regenerate it at session close.
 
-_2026-10-12_
+_2026-10-16_
 
 ## In flight
 
-- **Haiku handoff rule** — draft #486. A session hands a change to
-  `haiku-coder` when asked, or unasked only when it's plainly large and
-  mechanical; when unsure it suggests one instead of weighing it. Replaces
-  "the plan would be half the change or less". Why: the last 100 merged PRs
-  add a median of ~11K characters, so for most changes an Opus plan costs
-  more than Opus writing the change.
-- **Landed today:** #487 records the planner's check of a coder's diff as a
-  review stage in the handoff stats (cost and lines fixed), and #488 limits
-  the Chladni bake test against a same-machine yardstick instead of a fixed
-  600 ms, after that test flaked on a slow CI runner.
-- **Agent models and cost** — `plans/agent-models-and-cost.md`, issue #455.
-  Phase 1 (honest Haiku pricing) merged in #459, with the shared run log
-  (`WORKFLOW_STATS_REPO`, the private `svlab-logs` repo; #460) and the
-  `blocked: "none"` fix. Runs r10–r12 compared three setups on 3 easy and 5
-  mid issues: one run per setup is mostly noise. Dashboard:
-  https://claude.ai/artifact/2zLK4nfv1JWGPWnEmpZaiN
-- **The best branch from r10–r12 per issue, as drafts:** #461 (#347), #462
-  (#358), #463 (#349), #464 (#431), #465 (#449), #467 (#357), #468 (#411),
-  #469 (#356). Each lists what a human still has to check.
-- **Other open PRs:** #481 and #479 (more `GLProgram.setI` builds of #349,
-  alongside #463), #471 status and agent trials (also edits this file), #470
-  workflow REST, #458 issue difficulty, #451 lean Haiku coder, #441 legal
-  fixes, #433 worktree pruning, #430 drives hot path (#353), #403 tempo, #401
-  custom slider value, #400 Echoes, #378 real-song tuning, #335 Physarum 2,
-  #236 Cast mode, #160 Magnet slider (ready), #74 architecture doc.
+- **Panel blur Fast** — draft #562 (issue #561). A third Panel blur look:
+  the renderer draws the panel's glass from a small copy of the frame, so
+  the browser stops re-filtering the canvas under every card. On stays the
+  default.
+  - GPU-process CPU per frame falls to about Off's level headless. In a
+    visible window, Caustics runs at 104 fps with Fast, 76 with On and 120
+    with the blur off.
+  - Comparison page for the look call:
+    https://claude.ai/artifact/23ak4UAyf8hPe1xfSxZdN3
+- **The rest of the performance work (#549):**
+  - #560 batches the Picture meter's readbacks (#550).
+  - #551 closed: the panel blur was its whole cost, now #561.
+  - #552–#556 not started.
+  - #546 (draft) is the 2026-10-15 series review and size-budget tightening;
+    it also rewrites this file.
+- **Other open PRs:**
+  - #558 "modifier" for the middle column's nodes
+  - #544 gate smoothness (waits on the Gate Smoothness Lab pick)
+  - #515 row hints
+  - #500 synced stores
+  - #498 handoff wording
+  - #479 `setI`, already on main through #481
+  - #467 panel a11y
+  - #458 issue difficulty
+  - #433 worktree pruning
+  - #400 Echoes
+  - #378 real-song tuning
+  - #335 Physarum 2 sort
+  - #236 Cast mode
+  - #160 Magnet slider (ready)
+  - #74 architecture doc
 
 ## Open questions
 
-- Which of the three `GLProgram.setI` PRs (#463, #479, #481) to keep; the
-  other two close.
-- #468 and #401 both change how far a typed custom value reaches past a
-  slider: keep one, or fold them together?
-- The fixed grader for phase 5: the reviewer model, or one never used as a
-  reviewer? (`plans/agent-models-and-cost.md`.)
-- Skip the review on easy issues whose checks pass? (#457.)
-- The handoff review stage's cost window runs from the coder's finish to
-  `handoff-ship`, so it also counts `/ship`'s first steps. Good enough, or
-  should it stop earlier? The first real handoff after #486 will show.
+- Fast (#562): is the look close enough to replace On? Is "Fast", between
+  Off and On, the right chip? It also wants a fast trackpad flick on a real
+  display, which the headless checks can't give.
+- Since #538, Physarum 2's strain-box previews step 30 times a second on
+  120 Hz screens too. Keep that, or spend a time budget that doubles their
+  cost on 60 Hz screens?
+- Since #541, a Record take needs the main window visible. Build #542
+  (record inside the pop-out)?
+- #536: lazy-load each scene's code? It took the TV's first paint from 2.73
+  to 1.06 s on slow 4G in a prototype.
+- Close #479?
 
 ## Next up
 
-- Merge #486, then judge the first handoffs by `workflow-stats handoffs`.
-- Review and merge #461–#469; #356, #357 and #449 need a look by eye or a
-  screen reader first, as their PRs say.
-- `/handoff agent-models-and-cost` for phase 2: one doc on which model and
-  effort each kind of agent work gets.
-- Resolve the `docs/status.md` overlap between #471 and this PR.
-- The main checkout's `node_modules` predates #464 and lacks `jscpd`, so
-  `npm run check` fails every step there and in worktrees that link it; run
-  `npm ci` in the main checkout.
-- 153 worktrees are on disk; #433's pruning would clear the merged ones.
+- Once the look is accepted: make Fast the default. A further saving is to
+  blit only the panel columns' areas instead of the whole frame.
+- #540: `/ship` compares a render change's GPU cost per scene.
+- An `npm run perf` snapshot of main with Chrome closed.
+- #552 scene revisit freezes, #553 the Hats/Lead split running when nothing
+  reads it, #555 the resource map in `npm run perf`.
+- 177 worktrees are on disk; #433's pruning would clear the merged ones.

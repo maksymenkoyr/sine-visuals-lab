@@ -1,4 +1,5 @@
 import { FONT_DIGITS, FONT_LABEL, FONT_MONO, glassCardStyle, scanlineStyle } from "./controlsTheme.ts";
+import { GLASS_PANE_CLASS } from "./glassPanes.ts";
 import { isFolded, setFolded } from "./panelFolds.ts";
 import { setHintText } from "./hintSwatches.ts";
 
@@ -135,7 +136,7 @@ export function createCard(
   spec: CardSpec,
 ): { el: HTMLDivElement; body: HTMLDivElement; title: HTMLDivElement; fold?: CardFold } {
   const el = document.createElement("div");
-  el.className = "vc-card";
+  el.className = `vc-card ${GLASS_PANE_CLASS}`;
   el.style.cssText = glassCardStyle;
   const scanlines = document.createElement("div");
   scanlines.style.cssText = scanlineStyle;
