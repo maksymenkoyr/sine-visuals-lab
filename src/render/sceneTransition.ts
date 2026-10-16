@@ -32,33 +32,47 @@ export interface SceneTransition {
 
 export const TRANSITION_DEFAULT: SceneTransition = { style: "fade", bars: 1 };
 
-/** A stored value, or the defaults for anything missing or out of range. */
+/** A stored value, field by field: the default for a field missing or out of
+ *  range, the defaults when absent or empty, and null when the text cannot be
+ *  read (not JSON, or not an object), so a synced re-seed can keep what it has
+ *  (net/syncedStores.ts's header). */
+function readTransition(raw: string | null): SceneTransition | null {
+  if (!raw) return TRANSITION_DEFAULT;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const t = v as Partial<SceneTransition>;
+  return {
+    style: t.style === "cut" ? "cut" : "fade",
+    bars: typeof t.bars === "number" && TRANSITION_BARS.includes(t.bars) ? t.bars : TRANSITION_DEFAULT.bars,
+  };
+}
+
+/** A stored value, or the defaults for anything missing, out of range or unreadable. */
 export function parseTransition(raw: string | null): SceneTransition {
-  if (raw === null) return TRANSITION_DEFAULT;
+  return readTransition(raw) ?? TRANSITION_DEFAULT;
+}
+
+function readStored(): SceneTransition | null {
   try {
-    const v = JSON.parse(raw) as Partial<SceneTransition> | null;
-    return {
-      style: v?.style === "cut" ? "cut" : "fade",
-      bars: typeof v?.bars === "number" && TRANSITION_BARS.includes(v.bars) ? v.bars : TRANSITION_DEFAULT.bars,
-    };
+    return readTransition(localStorage.getItem(KEY));
   } catch {
-    return TRANSITION_DEFAULT;
+    return null;
   }
 }
 
-function load(): SceneTransition {
-  try {
-    return parseTransition(localStorage.getItem(KEY));
-  } catch {
-    return TRANSITION_DEFAULT;
-  }
-}
+let current = readStored() ?? TRANSITION_DEFAULT;
 
-let current = load();
-
-// Re-seeds from localStorage for the pop-out window and a TV (net/syncedStores.ts).
+// Re-seeds from localStorage for the pop-out window and a TV
+// (net/syncedStores.ts); text it cannot read keeps the current transition.
 registerSyncedStore(KEY, () => {
-  current = load();
+  const next = readStored();
+  if (next === null) return;
+  current = next;
 });
 
 export function getSceneTransition(): SceneTransition {
