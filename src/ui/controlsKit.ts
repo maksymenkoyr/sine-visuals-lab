@@ -397,7 +397,7 @@ export function createSignalStrip(specs: SignalPillSpec[], accent: string): Sign
   chip.type = "button";
   chip.style.cssText = signalChipStyle(accent);
   chip.textContent = `∿${specs.length}`;
-  chip.title = `Reacts to ${specs.length} live input node${specs.length === 1 ? "" : "s"} — hover for detail`;
+  chip.title = `Reacts to ${specs.length} live input node${specs.length === 1 ? "" : "s"} — click for detail`;
 
   const strip = document.createElement("div");
   strip.className = "vc-reads";

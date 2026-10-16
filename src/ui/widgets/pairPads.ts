@@ -355,8 +355,8 @@ function rowSpec(stateKey: string, part: string, label: string): SceneSetting {
 }
 
 /** One of this card's four `.vc-row`s: a `.vc-label` head, a body the caller
- *  fills, and a `.vc-hint` that unfolds on hover/focus like any other row
- *  (controlsTheme.ts) — pinnable through `ctx.registerCard` with `row`
+ *  fills, and a `.vc-hint` shown on hover/focus like any other row's
+ *  (rowHints.ts) — pinnable through `ctx.registerCard` with `row`
  *  itself as its own "value control" (registry.ts's own doc comment), so a
  *  press anywhere in it — a pad, a fader, a button — pins it. */
 function buildRow(ctx: WidgetCtx, spec: SceneSetting, title: string, hint: string): { row: HTMLElement; body: HTMLElement; hintEl: HTMLElement } {

@@ -64,7 +64,7 @@ export default async function (ctx) {
     .vc-spectrum-col { max-height: ${colMax} !important; overflow-y: auto !important; scrollbar-width: none !important; }
     .vc-meters { overflow: visible !important; max-height: none !important; }
     .vc-controls-col { max-height: ${colMax} !important; scrollbar-width: none !important; }
-    .vc-hint { display: none !important; }
+    .vc-hint, .vc-row-hint { display: none !important; }
     .vc-cable-layer, .vc-cable-layer * { pointer-events: none !important; }
     ${zoom !== 1 ? `.vc-cable-layer { zoom: ${1 / zoom} !important; width: 100vw !important; height: 100vh !important; }` : ""}
     ${mode === "L" ? ".vc-controls-col { transform: translateX(calc(100% + 60px)); pointer-events: none !important; }" : ""}

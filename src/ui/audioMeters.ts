@@ -101,7 +101,8 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * derives besides the bands in spectrumStrip.ts, plus the two things a
  * spectrum can't show at all. Read-only cards in the panel's own row grammar
  * (see deviceMenu.ts / controlsKit.ts) — label, seven-segment readout, a
- * meter where a slider would be, and a hint that unfolds on hover or tap so
+ * meter where a slider would be, and a hint shown beside the panel on hover
+ * or tap (rowHints.ts) so
  * every reading explains itself. Grouped under plain divider headings (Sound/
  * Beat/Song — this file's own meterGroupHeadingStyle, modelled on controlsKit.ts's
  * groupHeadingFirstStyle) so a card's place in the pipeline reads at a
@@ -670,8 +671,8 @@ export interface MeterRowSpec {
   accent: string;
   /** Mono suffix after the digits ("%", "bpm"). */
   unit?: string;
-  /** The hint that unfolds on hover/tap. Omit for a self-explaining row: no
-   *  hint, not focusable. */
+  /** The hint shown beside the panel on hover/tap (rowHints.ts). Omit for a
+   *  self-explaining row: no hint, not focusable. */
   description?: string;
   /** The colour a word in `description` stands for (hintSwatches.ts): "red"
    *  beat ticks are `BEAT_COLOR`, not the generic red. */
