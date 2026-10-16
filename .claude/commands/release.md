@@ -3,7 +3,7 @@ description: Write the Stable release — a plain-words description with picture
 ---
 
 **The idea:** one text per release, written once and read three ways: by whoever merges the release
-pull request, by anyone who opens the GitHub Release, and by `/video-release-stable`, which takes its
+pull request, by anyone who opens the GitHub Release, and by `/video-release`, which takes its
 demos and list rows from it. It's for people who play music with the app open (DJs, artists, party
 hosts), not for people who read its code.
 
@@ -45,7 +45,7 @@ reorder before any picture is taken.
 open one's title and body; re-run it after every change to the notes. Add `--print` to read the
 title and body first without opening anything. Give the user the link: the PR is where they read
 the notes as they'll be published, pictures and all, and ask for changes. Merging is the user's call. After the merge, `.github/workflows/release.yml` opens the GitHub Release with the
-same notes, and `/video-release-stable` can start from them.
+same notes, and `/video-release` can start from them.
 
 ## Shape
 

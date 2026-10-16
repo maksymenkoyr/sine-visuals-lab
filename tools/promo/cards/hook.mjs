@@ -1,5 +1,5 @@
 // The hook video's text, rendered once as transparent PNGs that compose.py lays over the footage.
-// cards.mjs dispatches here; /video-hook-stable approved this look.
+// cards.mjs dispatches here; /video-hook approved this look.
 //   node tools/promo/cards.mjs --work <work> --video hook
 //
 // Reads <work>/lines.json:

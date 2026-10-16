@@ -3,7 +3,7 @@
     python3 tools/promo/shapes/explainer.py --work DIR
 
 The explainer is a calm 9:16 + 16:9 video for someone already interested: intro, gallery, the drop, the
-wiring, optional feature chapters, a shuffle of scene shots, an end card (.claude/commands/video-explainer-stable.md
+wiring, optional feature chapters, a shuffle of scene shots, an end card (.claude/commands/video-explainer.md
 says why). This file turns showcase.json (showcase/showcase.example.json is the schema) into one cut list per
 format. It replays the timeline arithmetic of the approved v10 edit.py (main 3dc5a92f) in the same order, so
 the floats are bit-equal (edit.py itself now reads cuts.json instead of recomputing it).

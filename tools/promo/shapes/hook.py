@@ -3,7 +3,7 @@
     python3 tools/promo/shapes/hook.py --work DIR [--drop-beat N] [--print-segs]
 
 The hook video opens on the user's look with one line over it, proves the line with short clips from the
-drop on, and ends on the opening's scene with the version card (.claude/commands/video-hook-stable.md says
+drop on, and ends on the opening's scene with the version card (.claude/commands/video-hook.md says
 why). This file lays that out on the song's beats, replaying the arithmetic of main's compose.py in the same
 order, so the floats match.
 

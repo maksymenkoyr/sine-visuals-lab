@@ -8,7 +8,7 @@
  * `npm run release` (tools/release-pr.mjs) puts in. `/release`
  * (.claude/commands/release.md) writes them for people who use the app, not
  * its code — and the same text is where the release video's lines start
- * (`/video-release-stable`). A body without that line falls back to its
+ * (`/video-release`). A body without that line falls back to its
  * "## Highlights" section, the shape release pull requests had before.
  *
  * **The generated list** is modelled on the GitHub CLI's own release pages:

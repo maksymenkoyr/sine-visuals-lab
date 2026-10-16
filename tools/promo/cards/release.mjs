@@ -1,5 +1,5 @@
 // The release video's text, rendered once as transparent PNGs that compose.py lays over the footage.
-// cards.mjs dispatches here; /video-release-stable approved this look.
+// cards.mjs dispatches here; /video-release approved this look.
 //   node tools/promo/cards.mjs --work <work> --video release
 //
 // Reads <work>/lines.json:
