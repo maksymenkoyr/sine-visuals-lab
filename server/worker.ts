@@ -1,5 +1,5 @@
 import { Room, type Env } from "./room.ts";
-import { createRateLimiter } from "./rateLimit.ts";
+import { createRateLimiter, rateLimitKey } from "./rateLimit.ts";
 import { isBotUserAgent, parseUsageEvent, usageDataPoint } from "./usage.ts";
 
 export { Room };
@@ -33,13 +33,14 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Best-effort per-IP throttles (server/rateLimit.ts says why they are only
-// best-effort: the real backstop for a public URL is a Cloudflare WAF
-// rate-limiting rule). Room creation, TV adopt and room connections each get
-// their own, so a phone retrying an adopt can't use up the laptop's room
-// creation. Connections are the most generous: everyone at a party shares the
-// venue's one IP, and after a Wi-Fi drop each device redials on its backoff
-// (src/net/reconnect.ts) until the room answers.
+// Best-effort per-address throttles, keyed by `rateLimitKey`
+// (server/rateLimit.ts says why they are only best-effort: the real backstop
+// for a public URL is a Cloudflare WAF rate-limiting rule). Room creation, TV
+// adopt and room connections each get their own, so a phone retrying an adopt
+// can't use up the laptop's room creation. Connections are the most generous:
+// everyone at a party shares the venue's one IP (or IPv6 /64), and after a
+// Wi-Fi drop each device redials on its backoff (src/net/reconnect.ts) until
+// the room answers.
 const roomCreateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 const adoptLimiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
 const roomConnectLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
@@ -72,7 +73,7 @@ export default {
     }
 
     if (url.pathname === "/api/room" && request.method === "POST") {
-      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const ip = rateLimitKey(request.headers.get("CF-Connecting-IP"));
       if (!roomCreateLimiter.allow(ip)) {
         return new Response("too many rooms, slow down", {
           status: 429,
@@ -87,7 +88,7 @@ export default {
     // the Worker only throttles it and adds CORS to whatever comes back.
     const adopt = url.pathname.match(ADOPT_PATH_RE);
     if (adopt && request.method === "POST") {
-      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const ip = rateLimitKey(request.headers.get("CF-Connecting-IP"));
       if (!adoptLimiter.allow(ip)) {
         return new Response("too many requests, slow down", {
           status: 429,
@@ -122,7 +123,7 @@ export default {
       // Refused before the room's Durable Object is woken, whose requests are
       // the scarcer allowance. A browser sees only a failed connect, which its
       // backoff retries like any other.
-      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const ip = rateLimitKey(request.headers.get("CF-Connecting-IP"));
       if (!roomConnectLimiter.allow(ip)) {
         return new Response("too many connections, slow down", { status: 429, headers: { "Retry-After": "60" } });
       }
