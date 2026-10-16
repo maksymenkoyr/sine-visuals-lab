@@ -34,8 +34,8 @@ const CORS_HEADERS = {
 };
 
 // Best-effort per-IP throttles (server/rateLimit.ts says why they are only
-// best-effort: the real backstop for a public URL is a Cloudflare WAF
-// rate-limiting rule). Room creation and TV adopt each get their own, so a
+// best-effort, and describes the Cloudflare WAF rule in front of /api/ that
+// stops a flood before it reaches the Worker). Room creation and TV adopt each get their own, so a
 // phone retrying an adopt can't use up the laptop's room creation.
 const roomCreateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 const adoptLimiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
