@@ -752,19 +752,29 @@ describe("Auto level (levelPeaks / levelGainsFull / levelGain)", () => {
 describe("Start ink (fillStartInk)", () => {
   it("is all zero at 0 — the old black start", () => {
     const buf = new Uint8Array(64 * 4).fill(7);
-    fillStartInk(buf, 4, 0, () => 0.99);
+    fillStartInk(buf, 4, 0, 99);
     expect(buf.every((v) => v === 0)).toBe(true);
   });
   it("fills only the live channels, more at a higher setting", () => {
-    let x = 1;
-    const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
     const lo = new Uint8Array(1024 * 4);
     const hi = new Uint8Array(1024 * 4);
-    fillStartInk(lo, 3, 0.2, rnd);
-    fillStartInk(hi, 3, 1, rnd);
+    fillStartInk(lo, 3, 0.2, 1);
+    fillStartInk(hi, 3, 1, 2);
     const mean = (b: Uint8Array) => b.reduce((a, v) => a + v, 0) / b.length;
     expect(mean(hi)).toBeGreaterThan(mean(lo) * 2);
     for (let i = 3; i < hi.length; i += 4) expect(hi[i]).toBe(0);
+  });
+  it("is the same ink for the same seed, another for another, and a seed of 0 still rolls", () => {
+    const a = new Uint8Array(256 * 4);
+    const b = new Uint8Array(256 * 4);
+    const c = new Uint8Array(256 * 4);
+    fillStartInk(a, 4, 1, 12345);
+    fillStartInk(b, 4, 1, 12345);
+    fillStartInk(c, 4, 1, 54321);
+    expect(b).toEqual(a);
+    expect(c).not.toEqual(a);
+    fillStartInk(c, 4, 1, 0);
+    expect(c.some((v) => v > 0)).toBe(true);
   });
 });
 

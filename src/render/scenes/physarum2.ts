@@ -688,29 +688,27 @@ export const START_INK_DEFAULT = 0.15;
 
 /** Fills an RGBA8 trail buffer with a fresh dish's ink: each live channel an
  *  independent uniform roll over [0, startInk * START_INK_MAX). All zero at
- *  startInk 0 — the old black start, exactly. `rnd` is injected so tests can
- *  seed it. */
-export function fillStartInk(out: Uint8Array, count: number, startInk: number, rnd: () => number): void {
+ *  startInk 0 — the old black start, exactly. The rolls are an xorshift32
+ *  stream from `seed` (0 takes a fixed non-zero seed): a full-size dish
+ *  needs millions of them, too many for Math.random at scene open. Its state
+ *  is a local, not a generator closure: in Chrome a fresh closure per mount
+ *  made every mount after the first fill several times slower, a freeze on
+ *  each revisit (the record's Measurements, 2026-10-16). */
+export function fillStartInk(out: Uint8Array, count: number, startInk: number, seed: number): void {
   out.fill(0);
   const top = clamp01(startInk) * START_INK_MAX * 255;
   if (top <= 0) return;
-  for (let i = 0; i < out.length; i += 4) {
-    for (let k = 0; k < count; k++) out[i + k] = Math.floor(rnd() * top);
-  }
-}
-
-/** A fast seeded generator for the start-ink fill — a full-size dish needs
- *  millions of rolls, too many for Math.random at scene open. */
-function xorshift32(seed: number): () => number {
   let x = seed >>> 0 || 0x9e3779b9;
-  return () => {
-    x ^= x << 13;
-    x >>>= 0;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    x >>>= 0;
-    return x / 4294967296;
-  };
+  for (let i = 0; i < out.length; i += 4) {
+    for (let k = 0; k < count; k++) {
+      x ^= x << 13;
+      x >>>= 0;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      x >>>= 0;
+      out[i + k] = Math.floor((x / 4294967296) * top);
+    }
+  }
 }
 
 /** Composite smoothing kernel: how much of a channel's read comes from the
@@ -2543,7 +2541,7 @@ function createPhysarum2Scene(): Scene {
    *  setting's current value. */
   function startInkData(side: number): Uint8Array {
     const buf = new Uint8Array(side * side * 4);
-    fillStartInk(buf, SPECIES_COUNT, resolveSceneSetting(ID, settingFor("startInk")), xorshift32((Math.random() * 4294967296) >>> 0));
+    fillStartInk(buf, SPECIES_COUNT, resolveSceneSetting(ID, settingFor("startInk")), (Math.random() * 4294967296) >>> 0);
     return buf;
   }
 

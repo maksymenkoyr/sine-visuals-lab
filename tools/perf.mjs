@@ -23,7 +23,9 @@
 //  - app: the production build in a window the size of APP_VIEWPORT, tour of
 //    the gallery and then every scene by hash change, panel closed and then
 //    open. Per scene: the longest freeze while switching to it (shader
-//    compiles), then the steady draw rate and frame-gap spread, how busy the
+//    compiles) and while switching to it again on a second panel-closed tour
+//    (programs come from the pool then, so what's left is the mount's own
+//    work), then the steady draw rate and frame-gap spread, how busy the
 //    main thread is (Chrome's own task counters, so the panel, audio
 //    analysis and layout all count), the GPU time of everything drawn
 //    (panel closed only — the panel's own GPU readout uses the same timer
@@ -320,6 +322,10 @@ async function appSection(browser, url, scenes, timing, snap) {
   }
   app.heapAfterGcEndMb = await heapAfterGc(cdp);
 
+  // Panel closed, every scene again: a revisit (src/render/programCache.ts).
+  // After the heap reading, so that stays comparable with older snapshots.
+  for (const s of scenes) app.scenes[s.id].revisit = await switchTo(page, s.id, timing.switchMs);
+
   // Panel open: one click on the scene menu button, and it stays open across
   // scene switches.
   await page.evaluate(() => document.querySelector("#menuBtn")?.click());
@@ -521,6 +527,7 @@ function printSummary(snap) {
   top("main thread busy, panel open", (x) => x.app?.open?.main, (v) => `${Math.round(v * 100)}%`);
   top("hitches per minute, panel closed", (x) => x.app?.closed?.hitchesPerMin, (v) => `${v}`);
   top("scene switch freeze", (x) => x.app?.switch?.maxGapMs, (v) => `${v} ms`);
+  top("scene revisit freeze", (x) => x.app?.revisit?.maxGapMs, (v) => `${v} ms`);
   if (snap.app) {
     const g = snap.app.gallery;
     console.log(`\ngallery  ${g.fps} fps, main ${Math.round(g.main * 100)}%, gpu ${g.gpuMsPerSec ?? "--"} ms/s, ${g.hitchesPerMin} hitches/min`);
@@ -557,6 +564,7 @@ function flatten(s) {
     steady("app gallery", s.app.gallery);
     for (const [id, a] of Object.entries(s.app.scenes)) {
       add(`app ${id} switch freeze`, "freeze", a.switch?.maxGapMs);
+      add(`app ${id} revisit freeze`, "freeze", a.revisit?.maxGapMs);
       if (a.closed) steady(`app ${id} closed`, a.closed);
       if (a.open) steady(`app ${id} open`, a.open);
     }
