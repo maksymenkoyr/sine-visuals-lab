@@ -1,0 +1,693 @@
+<title>How Chladni Picks a Figure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a single lab card (plate left, mixer + slice bars right, timeline under both), then the rule in words. */
+:root {
+  --bg: #edf0f1;
+  --surface: #f8fafa;
+  --fg: #172026;
+  --muted: #56636d;
+  --line: #d2d9de;
+  --track: #e2e7ea;
+  --accent: #96661a;
+  --plate: #1a232a;
+  --sand: #ecd9ae;
+  --s0: hsl(12 66% 48%);
+  --s1: hsl(30 74% 45%);
+  --s2: hsl(46 72% 40%);
+  --s3: hsl(92 42% 38%);
+  --s4: hsl(162 48% 34%);
+  --s5: hsl(192 60% 38%);
+  --s6: hsl(220 56% 50%);
+  --s7: hsl(262 44% 54%);
+  --font-display: "Spectral", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #161d22; --fg: #e2e8eb; --muted: #8e9ba5; --line: #28313a; --track: #1f272e;
+    --accent: #dcaa55; --plate: #0a0f12; --sand: #f0deb4;
+    --s0: hsl(12 72% 60%); --s1: hsl(30 78% 58%); --s2: hsl(46 74% 55%); --s3: hsl(92 46% 52%);
+    --s4: hsl(162 50% 48%); --s5: hsl(192 62% 55%); --s6: hsl(220 70% 66%); --s7: hsl(262 60% 70%);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #161d22; --fg: #e2e8eb; --muted: #8e9ba5; --line: #28313a; --track: #1f272e;
+  --accent: #dcaa55; --plate: #0a0f12; --sand: #f0deb4;
+  --s0: hsl(12 72% 60%); --s1: hsl(30 78% 58%); --s2: hsl(46 74% 55%); --s3: hsl(92 46% 52%);
+  --s4: hsl(162 50% 48%); --s5: hsl(192 62% 55%); --s6: hsl(220 70% 66%); --s7: hsl(262 60% 70%);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+}
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-inline: 20px;
+  padding-block: 36px 72px;
+  display: grid;
+  gap: 48px;
+}
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: clamp(2rem, 4.5vw, 2.9rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.6rem; }
+h3 { font-size: 1.18rem; }
+p { margin: 0; }
+b, strong { font-weight: 600; }
+code { font-family: var(--font-mono); font-size: 0.86em; }
+
+.intro { display: grid; gap: 14px; max-width: 64ch; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.lede { font-size: 1.14rem; color: var(--fg); }
+
+/* The lab card */
+.lab {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+  gap: 22px 30px;
+}
+.plate-col { display: grid; gap: 10px; align-content: start; }
+#plate {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 6px;
+  background: var(--plate);
+  image-rendering: pixelated;
+}
+.now-line { font-size: 1.05rem; }
+.now-line b { color: var(--accent); }
+.now-sub { font-family: var(--font-mono); font-size: 0.82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.ctrl-col { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.label {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px 6px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.chip:hover { border-color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.chip:focus-visible, .try:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dots { display: inline-flex; gap: 2px; }
+.dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--line); display: block; }
+.chip[aria-pressed="true"] .dots i:not(.on) { background: color-mix(in srgb, var(--surface) 30%, transparent); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.hold { display: inline-flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+.hold input { accent-color: var(--accent); width: 140px; }
+.hold output { font-family: var(--font-mono); font-size: 0.82rem; color: var(--muted); min-width: 3ch; font-variant-numeric: tabular-nums; }
+.example { font-size: 0.88rem; color: var(--accent); min-height: 1.4em; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { display: inline-block; width: 10px; height: 12px; border-radius: 2px; }
+.sw.pale { background: color-mix(in srgb, var(--s4) 45%, transparent); }
+.sw.solid { background: var(--s4); }
+.sw.tick { height: 2px; width: 14px; background: var(--fg); border-radius: 0; }
+.sw.ring { width: 12px; height: 12px; border: 2px solid var(--accent); border-radius: 3px; }
+#slices { width: 100%; display: block; }
+.names { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); text-align: center; font-size: 0.72rem; color: var(--muted); line-height: 1.25; margin-top: -4px; }
+.axis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 4px; }
+
+.timeline { grid-column: 1 / -1; display: grid; gap: 6px; }
+#timeline { width: 100%; height: 28px; display: block; border-radius: 4px; }
+
+/* Reading sections */
+.prose { display: grid; gap: 16px; max-width: 70ch; }
+.steps { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 14px; counter-reset: step; }
+.steps li { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr); gap: 2px 12px; counter-increment: step; }
+.steps li::before {
+  content: counter(step);
+  grid-row: 1 / span 2;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1.1;
+  color: var(--accent);
+}
+.steps p { color: var(--muted); }
+.formula { font-family: var(--font-mono); font-size: 0.95em; color: var(--fg); white-space: nowrap; }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.win td { color: var(--accent); }
+.caption { color: var(--muted); font-size: 0.92rem; }
+
+.cases { display: grid; gap: 18px; }
+.case-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.case {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  background: var(--surface);
+}
+.case p { color: var(--muted); }
+.try {
+  justify-self: start;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.try:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.btnrow { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.not ul { margin: 0; padding-left: 1.1em; display: grid; gap: 10px; }
+.not li::marker { color: var(--accent); }
+.note { font-size: 0.86rem; color: var(--muted); max-width: 78ch; border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 780px) {
+  .lab { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .plate-col { max-width: 420px; }
+  .case-grid { grid-template-columns: minmax(0, 1fr); }
+  .wrap { padding-inline: 16px; gap: 40px; }
+}
+</style>
+
+<main class="wrap">
+  <header class="intro">
+    <p class="eyebrow">Chladni scene · how the plate chooses</p>
+    <h1>How Chladni picks a figure</h1>
+    <p class="lede">The plate splits the sound into pitch slices, and the slice that is <strong>loudest compared with its own usual level</strong> puts its figure on the plate. So when the figure stays put, nothing new is happening in the music. The same slice keeps winning.</p>
+  </header>
+
+  <section class="lab" id="lab" aria-label="Toy plate you can play">
+    <div class="plate-col">
+      <canvas id="plate" width="240" height="240" role="img" aria-label="The toy plate: sand gathers on the lines of the figure that is winning"></canvas>
+      <p class="now-line">On the plate: the <b id="figName">Sub</b> figure</p>
+      <p class="now-sub" id="nowSub">held 0.0 s</p>
+    </div>
+
+    <div class="ctrl-col">
+      <div class="label"><span>Music · tap to switch parts on and off</span></div>
+      <div class="chips" id="chips"></div>
+      <div class="row">
+        <button class="chip" id="mute" aria-pressed="false">Silence</button>
+        <label class="hold" for="hold">Figure hold
+          <input type="range" id="hold" min="0" max="1" step="0.05" value="0">
+          <output id="holdOut" for="hold">0</output>
+        </label>
+      </div>
+      <p class="example" id="example" aria-live="polite"></p>
+
+      <div class="label"><span>Pitch slices</span><span>each one owns a figure</span></div>
+      <div class="legend">
+        <span><i class="sw pale"></i>loud now</span>
+        <span><i class="sw tick"></i>usual (last 4 s)</span>
+        <span><i class="sw solid"></i>score</span>
+        <span><i class="sw ring"></i>on the plate</span>
+      </div>
+      <canvas id="slices" role="img" aria-label="For each pitch slice: its figure, how loud it is now, its usual level, and its score"></canvas>
+      <div class="names" id="names"></div>
+      <div class="axis"><span>low pitch</span><span>high pitch</span></div>
+    </div>
+
+    <div class="timeline">
+      <div class="label"><span>Figure on the plate, last 20 seconds</span><span id="changes">0 changes</span></div>
+      <canvas id="timeline" role="img" aria-label="A strip coloured by which slice's figure was on the plate over the last 20 seconds"></canvas>
+      <div class="axis"><span>20 s ago</span><span>now</span></div>
+    </div>
+  </section>
+
+  <section class="prose" aria-labelledby="rule-h">
+    <h2 id="rule-h">The rule, in three steps</h2>
+    <ol class="steps">
+      <li>
+        <h3>Cut the sound into pitch slices</h3>
+        <p>From the deepest bass to the highest treble. Each slice owns one figure. Low slices own big, simple figures; high slices own fine grids. You can see them above the bars.</p>
+      </li>
+      <li>
+        <h3>Each slice remembers its usual loudness</h3>
+        <p>Its average over the last 4 seconds. That is the thin line across each bar. A part that has been playing for a while has a high usual level. A part that just came in has a low one.</p>
+      </li>
+      <li>
+        <h3>Score = <span class="formula">loud now − 80% of usual</span></h3>
+        <p>The slice with the highest score puts its figure on the plate. When a sound stops, its score fades out over a moment, so the plate rings a little.</p>
+      </li>
+    </ol>
+    <p>Another way to read the score: a slice gets <strong>a small credit (20%) for how loud it usually is</strong>, plus <strong>full credit for anything above its usual right now</strong>. That is what “compared with its own recent average” means. The plate cares about what changed, not about what is loudest.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Slice</th><th>Loud now</th><th>Usual</th><th>Score</th></tr></thead>
+        <tbody>
+          <tr><td>Bass, playing the whole time</td><td class="num">0.60</td><td class="num">0.60</td><td class="num">0.60 − 0.48 = 0.12</td></tr>
+          <tr class="win"><td>A melody note that just started</td><td class="num">0.40</td><td class="num">0.10</td><td class="num">0.40 − 0.08 = 0.32 · wins</td></tr>
+          <tr><td>The same note, held about 10 s</td><td class="num">0.40</td><td class="num">0.40</td><td class="num">0.40 − 0.32 = 0.08 · bass wins again</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">The melody note is quieter than the bass, yet it takes the plate, because it is new. Once it stops being new, the bass gets the plate back.</p>
+  </section>
+
+  <section class="cases" aria-labelledby="cases-h">
+    <h2 id="cases-h">So a figure that stays means one of these</h2>
+    <div class="case-grid">
+      <article class="case">
+        <h3>The same hit keeps coming</h3>
+        <p>A kick on every beat jumps far above its usual each time, so its slice wins on every beat. The steady parts around it, bass and pads, only get their small credit.</p>
+        <button class="try" data-scene="loop">Try a steady loop</button>
+      </article>
+      <article class="case">
+        <h3>One long note, and nothing new</h3>
+        <p>A held note wins when it starts. Later it only keeps its small credit, but no other slice beats that, so its figure stays.</p>
+        <button class="try" data-scene="drone">Try pads, then a held note</button>
+      </article>
+      <article class="case">
+        <h3>Silence</h3>
+        <p>No slice scores anything, so the plate keeps the last figure. The sand stops moving too.</p>
+        <button class="try" data-scene="silence">Try music, then silence</button>
+      </article>
+      <article class="case">
+        <h3>Figure hold is turned up</h3>
+        <p>The figure on the plate gets a head start. A new one has to ring clearly stronger to take over, up to four times stronger at the top of the slider.</p>
+        <button class="try" data-scene="hold">Try a melody with hold on</button>
+      </article>
+    </div>
+    <div class="prose">
+      <h3>What makes it change</h3>
+      <p>Something new in another slice: a melody, a vocal line, a chord change, a drop. Or a break: when the kick stops, the other slices finally get a turn.</p>
+    </div>
+    <div class="btnrow">
+      <button class="try" data-scene="melody">Try a melody coming in</button>
+      <button class="try" data-scene="break">Try the kick stopping</button>
+    </div>
+  </section>
+
+  <section class="prose not" aria-labelledby="not-h">
+    <h2 id="not-h">What the figure does not tell you</h2>
+    <ul>
+      <li><strong>How loud the music is.</strong> Loudness shows in how hard the sand bounces, not in which figure wins.</li>
+      <li><strong>The tempo or the beat.</strong> A kick wins because each hit is new, not because it lands on the beat.</li>
+      <li><strong>Which instrument.</strong> A kick and a low bass note in the same slice give the same figure.</li>
+      <li><strong>An exact pitch.</strong> Pattern complexity is the plate's size. It slides every figure to a higher or lower slice, so the same note can give a different figure.</li>
+    </ul>
+  </section>
+
+  <p class="note">This is a toy with 8 slices and one figure each, at the scene's default Resonance and Ring. The real plate has a figure for every (n, m) pair in <code>MODE_TABLE</code>, its slices overlap, and it draws a mix of the strongest <code>ACTIVE_MODES</code> figures, as this toy does too. The rule is <code>createPlateResponse</code> in <code>src/render/scenes/chladni.ts</code>: the 4-second memory is <code>BASELINE_SEC</code> and the 80% is <code>SURPRISE_SHARE</code>, as on main on 5 October 2026. The “on the plate” label follows the sand, which takes about a second to re-form, so it ignores flips faster than that.</p>
+</main>
+
+<script>
+// Toy copy of createPlateResponse's rule (src/render/scenes/chladni.ts, 2026-10-05):
+// 8 pitch slices instead of the real mode table, default Resonance/Ring.
+const USUAL_SEC = 4;        // BASELINE_SEC
+const SURPRISE = 0.8;       // SURPRISE_SHARE
+const RELEASE = 0.1 + 0.4 * 1.4;            // ringSeconds(0.4)
+const ATTACK = Math.max(0.03, RELEASE * 0.15);
+const SHARPEN = 1 + 3 * 0.6;                // Resonance 0.6
+const FLOOR = 1e-9;
+const N = 8;
+const BEAT = 0.5;           // 120 BPM
+
+function holdMargin(h) { h = Math.max(0, Math.min(1, h)); return 1 + 3 * h * h; }
+
+// Each instrument returns its loudness per slice at time t.
+const LEAD_NOTES = [3, 4, 5, 4, 3, 5, 6, 4];
+const INSTRUMENTS = {
+  kick:   t => { const tb = t % BEAT; const e = Math.exp(-tb / 0.09); const o = new Array(N).fill(0); o[0] = 1.0 * e; o[1] = 0.3 * e; return o; },
+  bass:   t => { const t8 = t % (BEAT / 2); const e = 0.55 + 0.45 * Math.exp(-t8 / 0.12); const o = new Array(N).fill(0); o[1] = 0.6 * e; o[2] = 0.15 * e; return o; },
+  chords: t => { const bar = Math.floor(t / (BEAT * 8)) % 2; const o = new Array(N).fill(0); o[2] = bar ? 0.35 : 0.5; o[3] = bar ? 0.5 : 0.35; return o; },
+  hats:   t => { const t8 = (t + BEAT / 4) % (BEAT / 2); const e = Math.exp(-t8 / 0.035); const o = new Array(N).fill(0); o[6] = 0.5 * e; o[7] = 0.8 * e; return o; },
+  lead:   t => { const k = Math.floor(t / BEAT); const tb = t % BEAT; const e = 0.6 + 0.4 * Math.exp(-tb / 0.2); const o = new Array(N).fill(0); o[LEAD_NOTES[k % LEAD_NOTES.length]] = 0.7 * e; return o; },
+  drone:  t => { const o = new Array(N).fill(0); o[4] = 0.9 + 0.02 * Math.sin(t * 3.1); return o; },
+};
+
+function createPlate() {
+  return {
+    now: new Float32Array(N),
+    usual: new Float32Array(N),
+    excite: new Float32Array(N),
+    amp: new Float32Array(N),
+    weight: new Float32Array(N),
+    top: 0,
+    step(dt, now, hold) {
+      const margin = holdMargin(hold);
+      const sharp = new Float32Array(N);
+      for (let k = 0; k < N; k++) {
+        const raw = now[k];
+        this.now[k] = raw;
+        this.usual[k] += (raw - this.usual[k]) * (1 - Math.exp(-dt / USUAL_SEC));
+        const ex = Math.max(0, raw - SURPRISE * this.usual[k]);
+        this.excite[k] = ex;
+        const tau = ex > this.amp[k] ? ATTACK : RELEASE;
+        this.amp[k] += (ex - this.amp[k]) * (1 - Math.exp(-dt / tau));
+        sharp[k] = Math.pow(k === this.top ? this.amp[k] * margin : this.amp[k], SHARPEN);
+      }
+      const order = [...Array(N).keys()].sort((a, b) => sharp[b] - sharp[a]);
+      let sum = 0;
+      for (let i = 0; i < 4; i++) sum += sharp[order[i]];
+      if (sum < FLOOR) return; // silence: keep the last figure
+      this.weight.fill(0);
+      for (let i = 0; i < 4; i++) this.weight[order[i]] = sharp[order[i]] / sum;
+      this.top = order[0];
+    },
+  };
+}
+
+function mix(t, on, mute) {
+  const out = new Array(N).fill(0);
+  if (mute) return out;
+  for (const name of Object.keys(INSTRUMENTS)) {
+    if (!on[name]) continue;
+    const o = INSTRUMENTS[name](t);
+    for (let k = 0; k < N; k++) out[k] += o[k];
+  }
+  return out.map(v => Math.min(1.2, v));
+}
+
+if (typeof module !== "undefined") module.exports = { createPlate, mix, INSTRUMENTS, N, USUAL_SEC, SURPRISE };
+
+(function () {
+  "use strict";
+  const STEP = 1 / 60;
+  const SAND_SEC = 0.8;          // how fast the drawn figure follows the plate
+  const HIST_SEC = 20, HIST_RATE = 30;
+  const NAMES = ["Sub", "Bass", "Low mid", "Mid", "High mid", "Presence", "Treble", "Air"];
+  const PARTS = [
+    { id: "kick", label: "Kick", slices: [0, 1] },
+    { id: "bass", label: "Bass line", slices: [1, 2] },
+    { id: "chords", label: "Pads", slices: [2, 3] },
+    { id: "hats", label: "Hi-hats", slices: [6, 7] },
+    { id: "lead", label: "Melody", slices: [3, 4, 5, 6] },
+    { id: "drone", label: "Held note", slices: [4] },
+  ];
+  const SCENES = {
+    loop: { text: "Steady loop: kick, bass line and pads.", steps: [{ at: 0, on: ["kick", "bass", "chords"], mute: false, hold: 0 }] },
+    drone: { text: "Pads alone, then a held note joins at 4 s.", steps: [{ at: 0, on: ["chords"], mute: false, hold: 0 }, { at: 4, on: ["chords", "drone"] }] },
+    silence: { text: "A loop with a melody, then silence at 4 s.", steps: [{ at: 0, on: ["kick", "bass", "chords", "lead"], mute: false, hold: 0 }, { at: 4, mute: true }] },
+    hold: { text: "Melody over the loop, with Figure hold at the top.", steps: [{ at: 0, on: ["kick", "bass", "chords", "lead"], mute: false, hold: 1 }] },
+    melody: { text: "Steady loop, then a melody comes in at 3 s.", steps: [{ at: 0, on: ["kick", "bass", "chords"], mute: false, hold: 0 }, { at: 3, on: ["kick", "bass", "chords", "lead"] }] },
+    break: { text: "Steady loop, then the kick stops at 3 s.", steps: [{ at: 0, on: ["kick", "bass", "chords"], mute: false, hold: 0 }, { at: 3, on: ["bass", "chords"] }] },
+  };
+
+  // ---- the figures (same mode shape as the scene) ----
+  function buildModeTable(max) {
+    const pairs = [];
+    for (let n = 1; n < max; n++) for (let m = n + 1; m <= max; m++) pairs.push({ n, m });
+    pairs.sort((a, b) => a.n * a.n + a.m * a.m - (b.n * b.n + b.m * b.m) || a.n - b.n);
+    return pairs.map((p, i) => ({ n: p.n, m: p.m, sign: i % 2 === 0 ? -1 : 1 }));
+  }
+  const TABLE = buildModeTable(9);
+  const MODES = [0, 1, 2, 4, 5, 8, 11, 17].map(i => TABLE[i]);
+  function modeAt(md, x, y) {
+    const P = Math.PI;
+    return (Math.cos(md.n * P * x) * Math.cos(md.m * P * y) + md.sign * Math.cos(md.m * P * x) * Math.cos(md.n * P * y)) / 2;
+  }
+  const R = 240, RR = R * R;
+  const fields = MODES.map(md => {
+    const a = new Float32Array(RR);
+    for (let j = 0; j < R; j++) {
+      const y = -1 + 2 * (j + 0.5) / R;
+      for (let i = 0; i < R; i++) a[j * R + i] = modeAt(md, -1 + 2 * (i + 0.5) / R, y);
+    }
+    return a;
+  });
+  const grain = new Float32Array(RR * 2);
+  const shade = new Float32Array(RR);
+  for (let i = 0; i < grain.length; i++) grain[i] = Math.random();
+  for (let i = 0; i < RR; i++) shade[i] = Math.random();
+  const sum = new Float32Array(RR);
+
+  // ---- state ----
+  const state = { on: { kick: true, bass: true, chords: true }, mute: false, hold: 0 };
+  const plate = createPlate();
+  const disp = new Float32Array(N); disp[0] = 1;
+  let simT = 0, fig = 0, figSince = 0, grainOff = 0;
+  const hist = new Uint8Array(HIST_SEC * HIST_RATE);
+  let histPos = 0, stepCount = 0;
+  const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function simStep() {
+    plate.step(STEP, mix(simT, state.on, state.mute), state.hold);
+    simT += STEP;
+    const k = 1 - Math.exp(-STEP / SAND_SEC);
+    let best = 0;
+    for (let i = 0; i < N; i++) {
+      disp[i] += (plate.weight[i] - disp[i]) * k;
+      if (disp[i] > disp[best]) best = i;
+    }
+    if (best !== fig) { fig = best; figSince = simT; }
+    if (++stepCount % 2 === 0) { hist[histPos] = fig; histPos = (histPos + 1) % hist.length; }
+  }
+  for (let i = 0; i < 10 * 60; i++) simStep();   // start with settled usual levels
+  hist.fill(fig);
+  figSince = simT - 10;
+
+  // ---- colours ----
+  let colors = null;
+  function hexRGB(s) {
+    s = s.trim();
+    if (s[0] === "#" && s.length === 7) return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
+    return [20, 28, 34];
+  }
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = n => cs.getPropertyValue(n).trim();
+    colors = {
+      fg: v("--fg"), muted: v("--muted"), track: v("--track"), accent: v("--accent"), line: v("--line"),
+      plate: hexRGB(v("--plate")), sand: hexRGB(v("--sand")),
+      slice: [...Array(N).keys()].map(i => v("--s" + i)),
+    };
+    renderThumbs();
+  }
+
+  // ---- figure thumbnails ----
+  const TH = 72;
+  const thumbs = MODES.map(() => { const c = document.createElement("canvas"); c.width = c.height = TH; return c; });
+  function renderThumbs() {
+    MODES.forEach((md, k) => {
+      const ctx = thumbs[k].getContext("2d");
+      const img = ctx.createImageData(TH, TH);
+      for (let j = 0; j < TH; j++) {
+        const y = -1 + 2 * (j + 0.5) / TH;
+        for (let i = 0; i < TH; i++) {
+          const f = modeAt(md, -1 + 2 * (i + 0.5) / TH, y);
+          const d = Math.exp(-(f * f) / (0.13 * 0.13));
+          const o = (j * TH + i) * 4;
+          for (let c = 0; c < 3; c++) img.data[o + c] = colors.plate[c] + (colors.sand[c] - colors.plate[c]) * d;
+          img.data[o + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    });
+  }
+
+  // ---- DOM ----
+  const $ = id => document.getElementById(id);
+  const chipsEl = $("chips");
+  PARTS.forEach(p => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.id = "part-" + p.id; b.type = "button";
+    const dots = [...Array(N).keys()].map(i => p.slices.includes(i) ? `<i class="on" style="background:var(--s${i})"></i>` : "<i></i>").join("");
+    b.innerHTML = `<span>${p.label}</span><span class="dots" aria-hidden="true">${dots}</span>`;
+    b.addEventListener("click", () => {
+      cancelScene();
+      state.on[p.id] = !state.on[p.id];
+      state.mute = false;
+      syncControls();
+    });
+    chipsEl.appendChild(b);
+  });
+  $("names").innerHTML = NAMES.map(n => `<span>${n}</span>`).join("");
+  const muteBtn = $("mute"), holdIn = $("hold"), holdOut = $("holdOut"), exampleEl = $("example");
+  muteBtn.addEventListener("click", () => { cancelScene(); state.mute = !state.mute; syncControls(); });
+  holdIn.addEventListener("input", () => { cancelScene(); state.hold = parseFloat(holdIn.value); syncControls(); });
+  function syncControls() {
+    PARTS.forEach(p => $("part-" + p.id).setAttribute("aria-pressed", String(!!state.on[p.id])));
+    muteBtn.setAttribute("aria-pressed", String(state.mute));
+    holdIn.value = String(state.hold);
+    holdOut.textContent = state.hold === 0 ? "off" : state.hold.toFixed(2);
+  }
+
+  // ---- guided examples ----
+  let sceneTimers = [];
+  function cancelScene() { sceneTimers.forEach(clearTimeout); sceneTimers = []; exampleEl.textContent = ""; }
+  function applyStep(s) {
+    if (s.on) { state.on = {}; s.on.forEach(id => { state.on[id] = true; }); }
+    if (s.mute !== undefined) state.mute = s.mute;
+    if (s.hold !== undefined) state.hold = s.hold;
+    syncControls();
+  }
+  document.querySelectorAll("[data-scene]").forEach(btn => btn.addEventListener("click", () => {
+    const sc = SCENES[btn.dataset.scene];
+    cancelScene();
+    exampleEl.textContent = "Example: " + sc.text;
+    sc.steps.forEach(s => {
+      if (s.at === 0) applyStep(s);
+      else sceneTimers.push(setTimeout(() => applyStep(s), s.at * 1000));
+    });
+    $("lab").scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  }));
+  syncControls();
+
+  // ---- drawing ----
+  const plateCv = $("plate"), plateCtx = plateCv.getContext("2d");
+  const plateImg = plateCtx.createImageData(R, R);
+  function drawPlate(loud) {
+    sum.fill(0);
+    for (let k = 0; k < N; k++) {
+      const w = disp[k];
+      if (w < 0.004) continue;
+      const f = fields[k];
+      for (let p = 0; p < RR; p++) sum[p] += w * f[p];
+    }
+    if (!reduceMotion && Math.random() < loud * 0.9) grainOff = (grainOff + 1 + Math.floor(Math.random() * 9973)) % RR;
+    const d = plateImg.data, pc = colors.plate, sc = colors.sand;
+    const inv = 1 / (0.075 * 0.075);
+    for (let p = 0; p < RR; p++) {
+      const f = sum[p];
+      const lit = grain[p + grainOff] < 0.03 + 0.84 * Math.exp(-f * f * inv);
+      const o = p * 4;
+      if (lit) {
+        const b = 0.55 + 0.45 * shade[p];
+        d[o] = sc[0] * b; d[o + 1] = sc[1] * b; d[o + 2] = sc[2] * b;
+      } else {
+        d[o] = pc[0]; d[o + 1] = pc[1]; d[o + 2] = pc[2];
+      }
+      d[o + 3] = 255;
+    }
+    plateCtx.putImageData(plateImg, 0, 0);
+  }
+
+  const slicesCv = $("slices"), slicesCtx = slicesCv.getContext("2d");
+  function fitCanvas(cv, cssH) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(cv.clientWidth * dpr)), h = Math.round(cssH * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; cv.style.height = cssH + "px"; }
+    return dpr;
+  }
+  function drawSlices() {
+    const W = slicesCv.clientWidth;
+    const colW = W / N;
+    const th = Math.max(24, Math.min(64, colW - 12));
+    const loudH = 80, scoreH = 56, gap = 12;
+    const top = th + 14, H = top + loudH + gap + scoreH + 6;
+    const dpr = fitCanvas(slicesCv, H);
+    const ctx = slicesCtx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = true;
+    const barW = Math.min(26, colW * 0.46);
+    for (let k = 0; k < N; k++) {
+      const x0 = k * colW, cx = x0 + colW / 2, bx = cx - barW / 2;
+      if (k === fig) {
+        ctx.strokeStyle = colors.accent; ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x0 + 2, 1, colW - 4, H - 2, 8); else ctx.rect(x0 + 2, 1, colW - 4, H - 2);
+        ctx.stroke();
+      }
+      ctx.drawImage(thumbs[k], cx - th / 2, 6, th, th);
+      // loud now + usual
+      ctx.fillStyle = colors.track; ctx.fillRect(bx, top, barW, loudH);
+      const nowH = Math.min(1, plate.now[k] / 1.2) * loudH;
+      ctx.globalAlpha = 0.45; ctx.fillStyle = colors.slice[k];
+      ctx.fillRect(bx, top + loudH - nowH, barW, nowH);
+      ctx.globalAlpha = 1;
+      const uy = top + loudH - Math.min(1, plate.usual[k] / 1.2) * loudH;
+      ctx.fillStyle = colors.fg; ctx.fillRect(bx - 4, uy - 1, barW + 8, 2);
+      // score
+      const sy = top + loudH + gap;
+      ctx.fillStyle = colors.track; ctx.fillRect(bx, sy, barW, scoreH);
+      const sH = Math.min(1, plate.amp[k] / 0.8) * scoreH;
+      ctx.fillStyle = colors.slice[k]; ctx.fillRect(bx, sy + scoreH - sH, barW, sH);
+    }
+  }
+
+  const tlCv = $("timeline"), tlCtx = tlCv.getContext("2d");
+  function drawTimeline() {
+    const W = tlCv.clientWidth, H = 28;
+    const dpr = fitCanvas(tlCv, H);
+    tlCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const n = hist.length, sw = W / n;
+    let changes = 0, runStart = 0, prev = hist[histPos % n];
+    for (let i = 1; i <= n; i++) {
+      const v = i < n ? hist[(histPos + i) % n] : -1;
+      if (v !== prev) {
+        tlCtx.fillStyle = colors.slice[prev];
+        tlCtx.fillRect(runStart * sw, 0, (i - runStart) * sw + 0.5, H);
+        if (i < n) changes++;
+        runStart = i; prev = v;
+      }
+    }
+    $("changes").textContent = changes === 1 ? "1 change" : changes + " changes";
+  }
+
+  let lastText = 0;
+  function drawText() {
+    if (simT - lastText < 0.2) return;
+    lastText = simT;
+    $("figName").textContent = NAMES[fig];
+    const silent = state.mute || !PARTS.some(p => state.on[p.id]);
+    $("nowSub").textContent = "held " + (simT - figSince).toFixed(1) + " s" + (silent ? " · no sound, figure frozen" : "");
+  }
+
+  // ---- loop ----
+  let last = null, acc = 0;
+  function frame(ts) {
+    if (last === null) last = ts;
+    acc += Math.min(0.1, (ts - last) / 1000);
+    last = ts;
+    while (acc >= STEP) { simStep(); acc -= STEP; }
+    let loud = 0;
+    for (let k = 0; k < N; k++) loud += plate.now[k];
+    drawPlate(Math.min(1, loud / 2));
+    drawSlices();
+    drawTimeline();
+    drawText();
+    requestAnimationFrame(frame);
+  }
+  readColors();
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readColors);
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  requestAnimationFrame(frame);
+})();
+</script>

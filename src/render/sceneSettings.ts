@@ -1,6 +1,8 @@
 import type { SignalId, SignalLink } from "./signals.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedNumber, parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
+import { proUnlocked } from "./pro.ts";
+import { clearCustomValue, resetCustomValue } from "./customValues.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -10,14 +12,15 @@ import { registerSyncedStore } from "../net/syncedStores.ts";
  * mode) — only cross-reload persistence depends on it.
  *
  * Also home to the device-wide master (getSceneMaster and getSceneExpansion
- * below): the Master card's Scale and Expansion dials over every numeric
- * scene param, each stored as a scalar rather
+ * below): the Master card's Scale dial over every numeric scene param and
+ * its Expansion dial over every drive reading, each stored as a scalar rather
  * than per scene because it describes this room's taste, not one scene's —
  * the same class of preference as audio/sensitivity.ts's gain stages, so like
  * them it stays out of Looks/share codes. Their keys do ride in a room's look
  * (net/syncedStores.ts's `isRoomKey`), so a paired TV draws with the phone's
- * master dials. Storage lives here; the scaling itself happens at the single resolve
- * choke point, resolveSceneSetting in autoTune.ts, which honours a per-
+ * master dials. Storage lives here; Scale happens at the single resolve
+ * choke point, resolveSceneSetting in autoTune.ts, and Expansion in the
+ * drive engine (drives.ts's header, "Master Expansion"). Scale honours a per-
  * setting `masterScale: false` opt-out (see SceneSetting.masterScale below)
  * for a value the master would otherwise distort past recognition.
  */
@@ -50,7 +53,9 @@ export type SettingGroup = (typeof SETTING_GROUPS)[number];
 export interface SceneSetting {
   /** Uniform suffix — "focus" becomes uFocus. Keep it a valid GLSL identifier tail. */
   key: string;
-  /** Shown in the device menu. */
+  /** Shown in the device menu. Moving the slider right makes more of what
+   *  this names: if the value works the other way, name what grows ("Speed",
+   *  not "Period") or invert the mapping. */
   label: string;
   /** One-line plain-language note shown under the slider. Omit for no caption. */
   description?: string;
@@ -82,6 +87,11 @@ export interface SceneSetting {
   type?: "boolean" | "enum";
   /** The names an "enum" setting picks between, in value order. */
   options?: readonly string[];
+  /** The `options` that are Pro content (src/render/pro.ts). While Pro is
+   *  locked, a locked option can't be stored or read back — clamp() turns
+   *  it into `default`, which must itself be a free option — and the
+   *  device menu shows it as a locked chip. */
+  proOptions?: readonly string[];
   /** How this parameter responds to music character. Signed weights per dial;
    *  omit for a parameter that should stay manual. See autoTune.ts. Inline
    *  type-only import avoids a runtime cycle with autoTune.ts, which imports
@@ -126,9 +136,11 @@ export interface SceneSetting {
    *  (reused as the drive catalogue, not a parallel enum — see that file's
    *  header), `{ source: "beat", grid }` for a beat-grid tick
    *  (src/audio/beatGrid.ts), `{ source: "line" }` for this setting's own
-   *  drawn frequency line (src/audio/bandLine.ts), or `"scene"` for a
-   *  coupling that mixes more than one signal and can't be reduced to a
-   *  single catalogue pick without changing the look — see drives.ts's
+   *  drawn frequency line (src/audio/bandLine.ts), a `DrivePatch` for a
+   *  coupling that sums several catalogue signals (one weighted source per
+   *  term, `add` — real wires from the start, so nothing is drawn as a
+   *  ghost), or `"scene"` for a coupling that mixes more than one signal and
+   *  can't be written as such a patch without changing the look — see drives.ts's
    *  header for why `mix(sceneDefault, drive, 0)` makes that choice exactly
    *  as bit-identical as any catalogue default. `sceneLabel` names the
    *  Scene composite in the picker (e.g. "Scene: treble hits + line") —
@@ -142,7 +154,7 @@ export interface SceneSetting {
    *  unplugged jack must do instead: leave the setting exactly where its
    *  slider puts it, never collapse, vanish or run backwards). */
   drive?: {
-    default: import("./drives.ts").DriveChoice;
+    default: import("./drives.ts").DriveChoice | import("./drives.ts").DrivePatch;
     sceneLabel?: string;
     gain?: number;
     /** Display-only, for a `default: "scene"` setting: the meters its own
@@ -159,8 +171,9 @@ export interface SceneSetting {
     sceneSources?: readonly SignalId[];
     /** Declares this setting scene-handled for its own threshold — a gate
      *  the scene applies itself to whatever this setting receives, shaped
-     *  however its own signal needs (Beat ripple's adaptive "reach to ring"
-     *  line, rippleEmitter.ts, is the original of this). The panel shows the
+     *  however its own signal needs (Physarum 2's Dose threshold, on
+     *  standout.ts's trackers, is one; that file's header has how to wire
+     *  another). The panel shows the
      *  On/Off toggle + slider right under this setting's graph
      *  (deviceMenu.ts), starting on; it's saved with the rest of this
      *  setting's patch (driveStore.ts's getDriveThresholdState), and the
@@ -170,6 +183,36 @@ export interface SceneSetting {
      *  gate instead (drives.ts's header's "The threshold" paragraph explains
      *  why a setting is never gated both ways). */
     threshold?: { default: number; label: string; hint: string };
+    /** Declares a hit driver: a setting that does one thing per hit (spawn,
+     *  jump, cut) rather than following a level. The panel adds a Reaction
+     *  row under its graph, Flat or Sized (standout.ts's HitReadout), saved
+     *  with the rest of the setting (driveStore.ts's getDriveReadout).
+     *  Unless `ownDetector` is set, the scene reads it with `drives.fired`
+     *  and scales its reaction by `drives.hitSize`, and the engine runs the
+     *  standout detector as this setting's threshold instead of the generic
+     *  gate (drives.ts's header, "Hit drivers"). */
+    hit?: {
+      /** The read-out an untouched setting uses. Flat when left out. */
+      readout?: import("./standout.ts").HitReadout;
+      /** The flag for a reaction that has no size (a cut, a new path): the
+       *  setting always reads Flat, and the panel greys out Sized with this
+       *  hint saying why. */
+      flatOnly?: string;
+      /** The scene runs standout.ts itself on `drives.value` and only reads
+       *  the choice back with `drives.readout` (Beat ripple, Dose, Cut). Its
+       *  threshold row is then whatever `threshold` above or the generic gate
+       *  makes it, as before. */
+      ownDetector?: boolean;
+      /** What the graph's key calls one reaction ("burst", "jump"), for an
+       *  engine-run hit driver. "reaction" when left out. */
+      reactionLabel?: string;
+    };
+    /** Instead of `hit`: a setting the scene reads with `drives.fired` that
+     *  deliberately isn't a hit driver. Its edges pass straight through the
+     *  generic gate, with no standout detector, reaction dots or Reaction
+     *  row. The text says why (tests/hitDrivers.test.ts requires one or the
+     *  other). */
+    noStandout?: string;
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).
@@ -242,8 +285,8 @@ export function registerVariant(sceneId: string, specs: readonly SceneSetting[] 
 }
 
 // How the variant's *effective* value is read. The stored value by default;
-// autoTune.ts swaps in its resolver at load, so a dev override or pin on
-// the variant (tuning/overrides.ts, pins.ts) switches profiles the same way
+// autoTune.ts swaps in its resolver at load, so a custom value or dev override on
+// the variant (customValues.ts, tuning/overrides.ts) switches profiles the same way
 // a chip click does — the profile in effect is always the one the shader
 // is drawing. A callback rather than an import: autoTune.ts imports this
 // module, and the reverse edge would be a cycle.
@@ -283,12 +326,15 @@ export function settingDefault(sceneId: string, spec: SceneSetting): number {
 
 type Store = Record<string, Record<string, number>>;
 
+// Strict: throws on text that is not a JSON object, so the reload hook can keep
+// the cache it has (net/syncedStores.ts's parseSyncedObject).
+function readStore(): Store {
+  return (parseSyncedObject(localStorage.getItem(STORAGE_KEY)) ?? {}) as Store;
+}
+
 function loadInitial(): Store {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return readStore();
   } catch {
     return {};
   }
@@ -297,10 +343,12 @@ function loadInitial(): Store {
 const cache: Store = loadInitial();
 
 // Re-seeds the cache from localStorage — how the pop-out output window picks
-// up a snapshot (net/syncedStores.ts).
+// up a snapshot (net/syncedStores.ts). It reads before it clears, so unreadable
+// text leaves the cache as it was.
 registerSyncedStore(STORAGE_KEY, () => {
+  const next = readStore();
   for (const k of Object.keys(cache)) delete cache[k];
-  Object.assign(cache, loadInitial());
+  Object.assign(cache, next);
 });
 
 function persist(): void {
@@ -315,7 +363,15 @@ function clamp(spec: SceneSetting, value: number): number {
   if (!Number.isFinite(value)) return spec.default;
   // An enum's value is an index — a stored 0.7 must not linger between chips.
   if (spec.type === "enum") value = Math.round(value);
-  return Math.min(spec.max, Math.max(spec.min, value));
+  value = Math.min(spec.max, Math.max(spec.min, value));
+  return isProLocked(spec, value) ? spec.default : value;
+}
+
+/** True when `value` is an enum option listed in `proOptions` and Pro is
+ *  locked (src/render/pro.ts). */
+export function isProLocked(spec: SceneSetting, value: number): boolean {
+  if (!spec.proOptions?.length || !spec.options || proUnlocked()) return false;
+  return spec.proOptions.includes(spec.options[Math.round(value)] ?? "");
 }
 
 export function getSceneSetting(sceneId: string, spec: SceneSetting): number {
@@ -326,6 +382,9 @@ export function getSceneSetting(sceneId: string, spec: SceneSetting): number {
 export function setSceneSetting(sceneId: string, spec: SceneSetting, value: number): void {
   (cache[settingScope(sceneId, spec.key)] ??= {})[spec.key] = clamp(spec, value);
   persist();
+  // Any write to the setting supersedes a custom value typed past its slider
+  // (customValues.ts), so one never shadows a later edit.
+  clearCustomValue(sceneId, spec.key);
 }
 
 /** Every listed spec back to its default — within the current variant's
@@ -333,7 +392,10 @@ export function setSceneSetting(sceneId: string, spec: SceneSetting, value: numb
  *  itself is reset too, first, so what follows lands in the default
  *  option's profile. */
 export function resetSceneSettings(sceneId: string, specs: SceneSetting[]): void {
-  for (const spec of variantFirst(specs)) setSceneSetting(sceneId, spec, settingDefault(sceneId, spec));
+  for (const spec of variantFirst(specs)) {
+    setSceneSetting(sceneId, spec, settingDefault(sceneId, spec));
+    resetCustomValue(sceneId, spec.key); // a stretched slider too (customValues.ts)
+  }
 }
 
 /** The specs with the scene's variant (if any) moved to the front: anything
@@ -357,13 +419,11 @@ export const SCENE_MASTER_MIN = 0;
 export const SCENE_MASTER_MAX = 2;
 export const SCENE_MASTER_DEFAULT = 1;
 
-// The master's second dial: Expansion — the Input card's own Expansion curve
-// (audio/sensitivity.ts's shapeExpansion, same range) bent over each numeric
-// scene param's position along its slider, after Scale (autoTune.ts's
-// resolveSceneSetting). A param sitting past the middle of its track is
-// pushed further toward max, one short of the middle further toward min —
-// the gap between a scene's low and high params widens, as the mic's widens
-// the gap between quiet and loud. 1 is identity.
+// The master's second dial: Expansion — how far the music may pull the
+// picture away from the normal line Scale sets, and how long it stays away
+// (drives.ts's header, "Master Expansion"). It moves drive readings, never a
+// setting's own value. Same range and log slider as the Input card's
+// Expansion. 1 is identity.
 export const SCENE_EXPANSION_MIN = EXPANSION_MIN;
 export const SCENE_EXPANSION_MAX = EXPANSION_MAX;
 export const SCENE_EXPANSION_DEFAULT = EXPANSION_DEFAULT;
@@ -377,13 +437,18 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
     return Math.min(max, Math.max(min, value));
   }
 
+  // Strict: throws on text that is not a finite number, so the reload hook
+  // keeps the value it has. An absent key is the default: parseSyncedNumber
+  // checks for null before converting, since Number(null) is 0, not NaN, and an
+  // absent key must mean the default (identity), not a master that blanks every param.
+  function reload(): number {
+    const n = parseSyncedNumber(localStorage.getItem(storageKey));
+    return n === null ? defaultValue : clamp(n);
+  }
+
   function load(): number {
     try {
-      const raw = localStorage.getItem(storageKey);
-      // Number(null) is 0, not NaN — an absent key must mean the default
-      // (identity), not a master that blanks every param.
-      if (raw === null) return defaultValue;
-      return clamp(Number(raw));
+      return reload();
     } catch {
       return defaultValue;
     }
@@ -391,7 +456,7 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
 
   let value = load();
   registerSyncedStore(storageKey, () => {
-    value = load();
+    value = reload();
   });
   return {
     get: (): number => value,
@@ -422,3 +487,20 @@ const expansionDial = createDeviceDial(
 );
 export const getSceneExpansion = expansionDial.get;
 export const setSceneExpansion = expansionDial.set;
+
+// Expansion's shape: how the music's distance from its usual level becomes
+// the picture's (drives.ts's header, "Master Expansion"). A choice, not an
+// amount, so the Master card shows it as chips. Stored as an index into
+// EXPANSION_SHAPES — append new shapes, never reorder, or saved picks move.
+export const EXPANSION_SHAPES = ["even", "softTop", "bigMoves", "upOnly", "downOnly"] as const;
+export type ExpansionShape = (typeof EXPANSION_SHAPES)[number];
+export const EXPANSION_SHAPE_DEFAULT: ExpansionShape = "even";
+export const SCENE_EXPANSION_SHAPE_KEY = "vibe.sceneExpansionShape";
+
+const shapeDial = createDeviceDial(SCENE_EXPANSION_SHAPE_KEY, 0, EXPANSION_SHAPES.length - 1, 0);
+export function getSceneExpansionShape(): ExpansionShape {
+  return EXPANSION_SHAPES[Math.round(shapeDial.get())] ?? EXPANSION_SHAPE_DEFAULT;
+}
+export function setSceneExpansionShape(shape: ExpansionShape): void {
+  shapeDial.set(Math.max(0, EXPANSION_SHAPES.indexOf(shape)));
+}

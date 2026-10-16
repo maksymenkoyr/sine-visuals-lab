@@ -193,6 +193,9 @@ export interface CrystalInputs {
    *  separate from `onset` itself, which still drives beatCount/the light
    *  layers regardless of this setting's own choice. */
   pulseOnset?: boolean;
+  /** How big the hit behind `pulseOnset` was, 0..1 (default 1): scales the
+   *  zoomVel and swell impulses it starts. */
+  pulseSize?: number;
 }
 
 export interface CrystalOpts {
@@ -235,6 +238,7 @@ export function advanceCrystal(st: CrystalState, input: CrystalInputs, opts: Cry
   const drop = input.dropOnset && !st.prevDropOnset;
   st.prevDropOnset = input.dropOnset;
   const pulseFired = input.pulseOnset ?? input.onset;
+  const pulseAmt = opts.pulse * (input.pulseSize ?? 1);
 
   for (const l of [st.blobs, st.fan, st.red, st.edges]) l.age += dt;
   if (input.onset) st.beatCount++;
@@ -249,7 +253,7 @@ export function advanceCrystal(st: CrystalState, input: CrystalInputs, opts: Cry
   st.travel += dt * ((FLY_MIN + FLY_MAX * opts.speed) * (1 + FLY_LOW_GAIN * input.low) + st.zoomVel);
   st.roll += dt * ROLL_RATE * opts.speed;
   st.zoomVel *= Math.exp(-dt / ZOOM_SURGE_TAU_SEC);
-  if (pulseFired) st.zoomVel = Math.min(st.zoomVel + opts.pulse * ZOOM_SURGE_IMPULSE, ZOOM_SURGE_VEL_CAP);
+  if (pulseFired) st.zoomVel = Math.min(st.zoomVel + pulseAmt * ZOOM_SURGE_IMPULSE, ZOOM_SURGE_VEL_CAP);
   const logZoom = ZOOM_MID + ZOOM_AMP * wander(st.zoomT);
 
   st.panT += dt * PAN_RATE * opts.speed;
@@ -282,8 +286,8 @@ export function advanceCrystal(st: CrystalState, input: CrystalInputs, opts: Cry
   const edges = layerOut(st.edges, EDGE_ATTACK_SEC, EDGE_RELEASE_SEC);
 
   if (pulseFired) {
-    st.rel = Math.min(st.rel + opts.pulse, SWELL_STACK_CAP);
-    st.att = Math.min(st.att + opts.pulse, SWELL_STACK_CAP);
+    st.rel = Math.min(st.rel + pulseAmt, SWELL_STACK_CAP);
+    st.att = Math.min(st.att + pulseAmt, SWELL_STACK_CAP);
   }
   st.rel *= Math.exp(-dt * SWELL_KR);
   st.att *= Math.exp(-dt * SWELL_KA);

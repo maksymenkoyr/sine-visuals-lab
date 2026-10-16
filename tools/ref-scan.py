@@ -1569,6 +1569,8 @@ def main() -> None:
     else:
         z_ = np.zeros(v["n"])
         aud = {"onset_env": z_, "low": z_, "mid": z_, "high": z_, "rms": z_}
+    # A boundary can land one past the last beat (the segmenter's closing edge).
+    section_beats = [i for i in section_beats if i < len(beat_t)]
     section_t = np.array([beat_t[i] for i in section_beats]) if section_beats else np.array([])
     chapters_all = load_chapters(src, args.chapters)
     chapters = clip_chapters(chapters_all, args.start, dur, beat_t)

@@ -115,6 +115,15 @@ function groupSpecsFromSplit(): Record<"low" | "mid" | "high", GroupSpec> {
   };
 }
 
+/** One tick of a group's level slew: rises at LEVEL_ATTACK_PER_SEC, falls at
+ *  LEVEL_RELEASE_PER_SEC, both times rateScale (the Smoothing row). Exported
+ *  so animClock.ts eases its Hats and Lead levels the same way. */
+export function slewLevel(level: number, raw: number, dtSec: number, rateScale: number): number {
+  const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
+  const rate = raw > level ? LEVEL_ATTACK_PER_SEC : LEVEL_RELEASE_PER_SEC;
+  return level + (raw - level) * Math.min(1, rate * rateScale * dt);
+}
+
 function meanRange(bands: Float32Array, lo: number, hi: number): number {
   let sum = 0;
   for (let i = lo; i < hi; i++) sum += bands[i];
@@ -171,8 +180,7 @@ function advanceGroup(
 ): void {
   const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
   const raw = meanRange(bands, spec.lo, spec.hi);
-  const levelRate = raw > state.level ? LEVEL_ATTACK_PER_SEC : LEVEL_RELEASE_PER_SEC;
-  state.level += (raw - state.level) * Math.min(1, levelRate * rateScale * dt);
+  state.level = slewLevel(state.level, raw, dt, rateScale);
 
   // Rate of rise, in band-mean per second — normalized by dt (not a raw
   // per-frame delta) so the trigger reads the same at 60Hz and 120Hz. A

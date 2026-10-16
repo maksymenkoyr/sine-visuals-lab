@@ -80,7 +80,7 @@ export const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.4, attack: 0.2 },
     // anim.onset directly (advanceOnsetEnvelope's trigger, index.ts) — a
     // plain Beat default.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "kick" } },
   },
   {
     key: "flutter",

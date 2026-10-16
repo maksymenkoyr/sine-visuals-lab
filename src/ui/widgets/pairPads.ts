@@ -38,6 +38,8 @@ import type { PreviewEffective, PreviewSource } from "./previews.ts";
 import { rowHeadStyle, rowLabelStyle, spacer } from "../controlsKit.ts";
 import { SCENE_VIOLET } from "../controlsTheme.ts";
 import { setHintText } from "../hintSwatches.ts";
+import { setLiveText } from "../liveText.ts";
+import { watchSize, type WatchedSize } from "../onScreen.ts";
 
 /**
  * The Pairs widget: one live two-strain culture per pad, a Smell/Touch
@@ -114,7 +116,7 @@ import { setHintText } from "../hintSwatches.ts";
  * applies on both axes: right/up always reads more of whatever the axis
  * names, never less.
  *
- * **The mix row (Phase 3).** Nudge/Keep own trails/Rivals/Back, every
+ * **The mix row (Phase 3).** Random/Nudge/Keep own trails/Back, every
  * preset pill and `randomize` share one rule: **push before you write**.
  * Each first snapshots both live tables (`snapshot()`) onto
  * `PairState.history` (a module-level stack, same survives-a-rebuild
@@ -123,16 +125,15 @@ import { setHintText } from "../hintSwatches.ts";
  * Random/Nudge/Back/a preset would otherwise persist all 12 (Touch) or 16
  * (Smell) settings to localStorage on every click regardless of how many
  * cells actually moved (`sceneSettings.ts`'s own per-`ctx.set` persist).
- * Nudge only ever touches the layer on screen; `randomize`, a preset and
- * Back write both tables. Random itself has no button here (2026-10-03, the
- * user: "group this all in one cool random button. random smell, touch, per
- * strain card"): the Strains card's one Random (itemBoxes.ts) calls
- * `randomize` and the Strain Console's own, so this card's Back still undoes
- * just its half of a roll. Keep own trails and Rivals
- * (2026-10-02: Random's lean toward a territorial table, on by default — see
- * `randomSmell`) are plain toggles (Smell only, hidden on Touch like the
- * own-trail strip itself) with no history entry of their own — flipping one
- * changes no value. None of this
+ * This card's Random and Nudge only ever touch the layer on screen;
+ * `randomize`, a preset and Back write both tables. Random's button was
+ * folded into the Strains card's one Random on 2026-10-03 and came back on
+ * 2026-10-04 (the user: "return those buttons … but also keep global
+ * random"): the Strains card's Random (itemBoxes.ts) still calls
+ * `randomize` and the Strain Console's own, so this card's Back undoes just
+ * its half of that roll. Keep own trails is a plain toggle (Smell only,
+ * hidden on Touch like the own-trail strip itself) with no history entry of
+ * its own — flipping it changes no value. None of this
  * calls `ctx.rerender()`; `tick()` already reflects a `ctx.set` on the next
  * frame the same way a slider drag does.
  *
@@ -212,7 +213,7 @@ export interface PairPadsSpec {
 
 export interface PairPadsHandle {
   /** The Strains card's Random (itemBoxes.ts): rolls Smell (`randomSmell`,
-   *  under this card's Keep own trails and Rivals toggles) and Touch
+   *  under this card's Keep own trails toggle) and Touch
    *  (`randomTouch`) together, as one entry on this card's Back. */
   randomize(): void;
   /** Reads live values, redraws changed pads' markers/header/status, and
@@ -233,9 +234,6 @@ interface PairState {
   /** Smell-only: Random/Nudge leave the own-trail diagonal untouched instead
    *  of rolling/jittering it — see `randomSmell`/`nudgeTable`. */
   keepOwn: boolean;
-  /** Smell-only: Random leans every roll toward rivals — own trail followed,
-   *  everyone else's avoided (`randomSmell`'s `rivals`). On by default. */
-  rivals: boolean;
   /** The mix-row undo stack — see this file's header. Module-level so it
    *  survives a Look apply or a card Reset the same way `pairCultureCache`
    *  does; in memory only (a reload starts empty). */
@@ -390,7 +388,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   let state = pairState.get(stateKey);
   if (!state) {
-    state = { layer: "smell", keepOwn: false, rivals: true, history: [] };
+    state = { layer: "smell", keepOwn: false, history: [] };
     pairState.set(stateKey, state);
   }
   const hasTouch = !!tables.touch;
@@ -611,6 +609,10 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     lastX: number | undefined;
     lastY: number | undefined;
     visible: boolean;
+    /** The canvas's observed size: paintPad runs after this tick's style
+     *  writes, so reading clientWidth there forced a style and layout pass
+     *  per pad (onScreen.ts). */
+    cssSize: WatchedSize | null;
     /** The pointer is over the pad / a drag on it is live — the spotlight, the
      *  cursor hint and the hold-still rule (no beat reseed) read these. */
     hot: boolean;
@@ -704,6 +706,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       lastX: undefined,
       lastY: undefined,
       visible: false,
+      cssSize: null,
       hot: false,
       dragging: false,
       exposure: culture ? [trailQuantile(culture.trails()[0], 0.98), trailQuantile(culture.trails()[1], 0.98)] : [0, 0],
@@ -949,12 +952,17 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
   }
 
-  // --- Row 4: mix row (Phase 3: Nudge / Keep own trails / Rivals / Back) +
+  // --- Row 4: mix row (Phase 3: Random / Nudge / Keep own trails / Back) +
   // presets --------------------------------------------------------------
   const mixSectionRow = buildRow(ctx, rowSpec(stateKey, "mix", "Affinity mix"), words.ui.mixTitle, words.ui.mixHint);
 
   const mixRow = document.createElement("div");
   mixRow.className = "vc-mix-row";
+  // This card's own Random rolls the layer on screen (back 2026-10-04); the
+  // Strains card's Random still rolls both through `randomize`.
+  const randomBtn = document.createElement("button");
+  randomBtn.type = "button";
+  randomBtn.textContent = words.ui.random[state.layer];
   const nudgeBtn = document.createElement("button");
   nudgeBtn.type = "button";
   nudgeBtn.textContent = words.ui.nudge;
@@ -962,24 +970,19 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   keepOwnBtn.type = "button";
   keepOwnBtn.setAttribute("aria-pressed", "false");
   keepOwnBtn.textContent = words.ui.keepOwn;
-  const rivalsBtn = document.createElement("button");
-  rivalsBtn.type = "button";
-  rivalsBtn.setAttribute("aria-pressed", "false");
-  rivalsBtn.textContent = words.ui.rivals;
   const backBtn = document.createElement("button");
   backBtn.type = "button";
   backBtn.disabled = true;
   backBtn.textContent = words.ui.back;
-  mixRow.append(nudgeBtn, keepOwnBtn, rivalsBtn, backBtn);
+  mixRow.append(randomBtn, nudgeBtn, keepOwnBtn, backBtn);
   mixSectionRow.body.appendChild(mixRow);
 
-  /** Reflects `state.history`/`state.keepOwn`/`state.rivals` onto the mix
+  /** Reflects `state.history`/`state.keepOwn` onto the mix
    *  row's own button state — called after every action that can change one
    *  (push, pop, a toggle) and once at mount, since all survive a rebuild. */
   function refreshMixRow(): void {
     backBtn.disabled = state!.history.length === 0;
     keepOwnBtn.setAttribute("aria-pressed", String(state!.keepOwn));
-    rivalsBtn.setAttribute("aria-pressed", String(state!.rivals));
   }
 
   function pushSnapshot(): void {
@@ -988,11 +991,18 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   function randomize(): void {
     pushSnapshot();
-    writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random, state!.rivals));
+    writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random));
     if (hasTouch) writeTable("touch", randomTouch(count, Math.random));
     refreshAll();
     refreshMixRow();
   }
+  randomBtn.addEventListener("click", () => {
+    pushSnapshot();
+    if (state!.layer === "smell") writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random));
+    else writeTable("touch", randomTouch(count, Math.random));
+    refreshAll();
+    refreshMixRow();
+  });
   nudgeBtn.addEventListener("click", () => {
     pushSnapshot();
     writeTable(state!.layer, nudgeTable(tableOf(state!.layer), state!.layer, state!.keepOwn, Math.random));
@@ -1001,10 +1011,6 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   });
   keepOwnBtn.addEventListener("click", () => {
     state!.keepOwn = !state!.keepOwn;
-    refreshMixRow();
-  });
-  rivalsBtn.addEventListener("click", () => {
-    state!.rivals = !state!.rivals;
     refreshMixRow();
   });
   backBtn.addEventListener("click", () => {
@@ -1104,7 +1110,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     // Keep own trails only means anything on Smell (Touch's diagonal has no
     // setting to preserve at all) — same visibility rule as the strip itself.
     keepOwnBtn.style.display = layer === "smell" ? "" : "none";
-    rivalsBtn.style.display = layer === "smell" ? "" : "none";
+    randomBtn.textContent = words.ui.random[layer];
     setHintText(layerRow.hintEl, words.layers[layer].how);
     focusIdx = -1;
     for (const pad of pads) {
@@ -1129,6 +1135,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       )
     : undefined;
   if (io) for (const pad of pads) io.observe(pad.canvas);
+  if (pair) for (const pad of pads) pad.cssSize = watchSize(pad.canvas);
 
   function colorFor(k: number): readonly [number, number, number] {
     return effective ? effective(k).color : parseCssRgb(colours[k] ?? "rgb(255,255,255)");
@@ -1174,7 +1181,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
         // Numbers only (2026-09-27 feedback: the band words read as
         // "very confusing") — PAIR_WORDS' bands stay as data (like
         // showRelations, unused by default) rather than deleted.
-        f.valueEl.textContent = fmtSigned(v);
+        setLiveText(f.valueEl, fmtSigned(v));
       }
     }
 
@@ -1276,8 +1283,8 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     pairContactPixelsInto(pad.culture.trails(), pair.size, pad.imgBuf, [colorFor(pad.a), colorFor(pad.b)], pad.exposure);
     const octx = pad.offscreen.getContext("2d");
     if (octx) octx.putImageData(pad.img, 0, 0);
-    const w = Math.round(pad.canvas.clientWidth);
-    const h = Math.round(pad.canvas.clientHeight);
+    const w = pad.cssSize ? pad.cssSize.w : Math.round(pad.canvas.clientWidth);
+    const h = pad.cssSize ? pad.cssSize.h : Math.round(pad.canvas.clientHeight);
     if (w > 0 && h > 0) {
       if (pad.canvas.width !== w) pad.canvas.width = w;
       if (pad.canvas.height !== h) pad.canvas.height = h;
@@ -1391,6 +1398,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   function dispose(): void {
     io?.disconnect();
+    for (const pad of pads) pad.cssSize?.disconnect();
     hintEl.remove();
     for (const pad of pads) {
       if (pad.settleTimer !== undefined) window.clearTimeout(pad.settleTimer);

@@ -7,7 +7,7 @@
 // >48px to look right on search results, browsers asking for /favicon.ico get
 // the same mark.
 //
-//   node tools/make-icons.mjs        # writes public/icon-*.png, -apple-touch-icon, favicon.ico
+//   node tools/make-icons.mjs        # writes public/icon-*.png (one maskable), -apple-touch-icon, favicon.ico
 //
 // Runs a throwaway Vite dev server (configFile: false — the app's plugins are
 // irrelevant here and the app itself is route-blocked below), imports the mark
@@ -46,19 +46,24 @@ const page = await context.newPage();
 await page.route("**/src/app.ts", (route) => route.abort());
 await page.goto(`${base}/`, { waitUntil: "load" });
 
-const render = async (size) => {
-  await page.evaluate(async (s) => {
-    document.body.innerHTML = "";
-    document.body.style.margin = "0";
-    const { createBrandMark } = await import("/src/ui/brandMark.ts");
-    const mark = createBrandMark(s);
-    mark.style.position = "fixed";
-    mark.style.left = "0";
-    mark.style.top = "0";
-    document.body.appendChild(mark);
-    await document.fonts.load('800 22px "Shippori Mincho B1"');
-    await document.fonts.ready;
-  }, size);
+// The screenshot is a `size` tile on the mark's own black with the mark
+// centered in it at `markSize` — the same picture as the bare mark unless
+// `markSize` is smaller, which is how the maskable icon gets its padding.
+const render = async (size, markSize = size) => {
+  await page.evaluate(
+    async ({ s, m }) => {
+      document.body.innerHTML = "";
+      document.body.style.margin = "0";
+      const { createBrandMark } = await import("/src/ui/brandMark.ts");
+      const tile = document.createElement("div");
+      tile.style.cssText = `position: fixed; left: 0; top: 0; width: ${s}px; height: ${s}px; background: #000; display: flex; align-items: center; justify-content: center;`;
+      tile.appendChild(createBrandMark(m));
+      document.body.appendChild(tile);
+      await document.fonts.load('800 22px "Shippori Mincho B1"');
+      await document.fonts.ready;
+    },
+    { s: size, m: markSize },
+  );
   // One paint past fonts.ready: the face is loaded but may not be applied yet.
   await page.waitForTimeout(150);
   const png = await page.locator("body > div").first().screenshot({ type: "png" });
@@ -102,6 +107,15 @@ for (const [size, name] of files) {
   bySize.set(size, png);
   console.log(`wrote public/${name} (${size}x${size}, ${png.length} B)`);
 }
+// Android crops a maskable icon to its launcher's own shape, keeping only the
+// central circle whose diameter is MASKABLE_SAFE of the icon (the Web App
+// Manifest spec's safe zone); the whole square mark fits inside that circle
+// when its side is the circle's diameter over √2.
+const MASKABLE_SAFE = 0.8;
+const MASKABLE_SIZE = 512;
+const maskable = await render(MASKABLE_SIZE, Math.floor((MASKABLE_SIZE * MASKABLE_SAFE) / Math.SQRT2));
+fs.writeFileSync(path.join(outDir, "icon-maskable-512.png"), maskable);
+console.log(`wrote public/icon-maskable-512.png (${MASKABLE_SIZE}x${MASKABLE_SIZE}, maskable, ${maskable.length} B)`);
 // ICO frames, largest first: 192 (Google's >48px preference), then the
 // classic small sizes browsers request when the link tag is ignored.
 const icoSizes = [192, 48, 32, 16];

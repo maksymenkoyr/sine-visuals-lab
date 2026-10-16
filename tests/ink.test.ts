@@ -219,9 +219,9 @@ describe("ink parameter drift", () => {
 
 describe("ink stretch envelope", () => {
   it("snaps to 1 on an onset and relaxes under 5 % within a second", () => {
-    let env = advanceStretch(0, 1 / 60, true);
+    let env = advanceStretch(0, 1 / 60, 1);
     expect(env).toBe(1);
-    for (let i = 0; i < 60; i++) env = advanceStretch(env, 1 / 60, false);
+    for (let i = 0; i < 60; i++) env = advanceStretch(env, 1 / 60, 0);
     expect(env).toBeLessThan(0.05);
     expect(Math.exp(-STRETCH_DECAY_PER_SEC)).toBeLessThan(0.05);
   });

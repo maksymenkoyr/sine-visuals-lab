@@ -33,6 +33,19 @@ export type QualityChoice = "auto" | QualityPreset;
 const STORAGE_KEY = "vibe.quality";
 export const QUALITY_CHOICE_DEFAULT: QualityChoice = "high";
 
+/** Each choice and its name on screen, in the order a row of chips shows them:
+ *  the Power card's Quality row (ui/powerCard.ts) and a TV's in the Room view
+ *  (ui/roomView.ts). */
+export const QUALITY_OPTIONS: { choice: QualityChoice; text: string }[] = [
+  { choice: "auto", text: "Auto" },
+  { choice: "high", text: "High" },
+  { choice: "mid", text: "Mid" },
+  { choice: "low", text: "Low" },
+  { choice: "floor", text: "Floor" },
+];
+
+export const PRESET_LABEL: Record<QualityPreset, string> = { high: "High", mid: "Mid", low: "Low", floor: "Floor" };
+
 /** Also what outputPower.ts validates its two stored choices with. */
 export function isQualityChoice(value: string): value is QualityChoice {
   return value === "auto" || isQualityPreset(value);

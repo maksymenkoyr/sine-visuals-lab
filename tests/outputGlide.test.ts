@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
-import { createGlide, glideSafe, GLIDE_MAX_MS } from "../src/net/outputGlide.ts";
+import { createGlide, createPaletteFade, glideSafe, GLIDE_MAX_MS } from "../src/net/outputGlide.ts";
 import type { OutputState } from "../src/net/outputSync.ts";
+import { getPalette } from "../src/render/palette.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 
 const slider = (key: string, over: Partial<SceneSetting> = {}): SceneSetting => ({
@@ -116,6 +117,29 @@ describe("createGlide", () => {
   it("caps an absurd duration", () => {
     const g = createGlide(look("a", { a: { speed: 0 } }), look("a", { a: { speed: 1 } }), SPECS, 0, 10 * GLIDE_MAX_MS)!;
     expect(g.lookAt(GLIDE_MAX_MS).done).toBe(true);
+  });
+});
+
+describe("createPaletteFade", () => {
+  const from = getPalette("neon");
+  const to = getPalette("sodium");
+
+  it("has nothing to do for the same palette", () => {
+    expect(createPaletteFade(from, from, 0, 6000)).toBeNull();
+  });
+
+  it("starts on the old colours, is between them half-way, and lands on the new palette itself", () => {
+    const f = createPaletteFade(from, to, 1000, 6000)!;
+    expect(f.paletteAt(1000).roles.ground).toBe(from.roles.ground);
+    const mid = f.paletteAt(4000);
+    expect(mid.roles.ground).not.toBe(from.roles.ground);
+    expect(mid.roles.ground).not.toBe(to.roles.ground);
+    expect(f.paletteAt(7000)).toBe(to);
+    expect(f.paletteAt(99_000)).toBe(to);
+  });
+
+  it("caps an absurd duration like a glide does", () => {
+    expect(createPaletteFade(from, to, 0, 10 * GLIDE_MAX_MS)!.paletteAt(GLIDE_MAX_MS)).toBe(to);
   });
 });
 

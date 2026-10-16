@@ -3,20 +3,24 @@
 import "./net/tvStorageBoot.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
-import { detectQuality, presetAllows, qualitySettings, type QualitySettings } from "./render/quality.ts";
+import { deferProgramChecks } from "./render/programCache.ts";
+import { detectQuality, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
+import type { QualityChoice } from "./render/qualityPref.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
+import { createRenderGate, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
-import { pinEverything } from "./pinnedAssets.ts";
+import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -24,10 +28,11 @@ import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import type { FeatureFrame } from "./audio/types.ts";
 import { createDriveEngine } from "./render/drives.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookReplica, type LookReplica } from "./net/lookSync.ts";
-import { createGlide, type Glide } from "./net/outputGlide.ts";
+import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
 import { DEFAULT_OUTPUT_PARAMS } from "./net/outputSync.ts";
 import { newKey, TV_SLOT_ROTATE_MS } from "./net/pairing.ts";
 import { clearSession, readSession, writeSession } from "./net/sessions.ts";
@@ -40,8 +45,8 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
 /**
  * The paired display entry (tv.html). A renderer in the room's mould: the
  * device it follows (the laptop by default; any device the room's Room view
- * puts on its own input) streams feature frames, any device's Play sets the
- * room's look document (Main, net/mainPlay.ts), and this page draws what they
+ * puts on its own input) streams feature frames, a Play from the owner or a
+ * device it has allowed sets the room's look document (Main, net/mainPlay.ts), and this page draws what they
  * say — it has no panel and no audio of its own, so it always follows. Its one
  * choice is its screen in the Room view: `main` shows Main; `own` freezes the
  * picture on what it shows now and ignores the room's looks (the replica keeps
@@ -173,17 +178,30 @@ function showResetBtn(how: "big" | "corner" | "hidden"): void {
   else resetBtn.blur();
 }
 
-// Fetches every pinned asset (src/pinnedAssets.ts — the same registry
+// Fetches every pinned build file (src/pinnedAssets.ts — the same registry
 // app.ts's own call warms) after load, at idle, so a TV left open across a
 // deploy doesn't 404 the first time something it's already holding onto
-// (the Dancers clip library, the tempo worklet, a panel font) is needed.
+// (the tempo worklet, a panel font) is needed. Scene media waits until the
+// TV joins a room (joinRoom).
 pinEverything();
 
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
 let quality: QualitySettings = qualitySettings("mid");
+/** What detectQuality() found on this TV: what an `auto` choice renders at,
+ *  and what the hello tells the Room view. Null until the benchmark is done. */
+let detectedPreset: QualityPreset | null = null;
+/** The room's Quality choice for this screen (server/roomDevices.ts
+ *  `quality`): a TV page has no panel, so the Room view sets it. `auto` until
+ *  a roster says otherwise, which is how a TV rendered before the choice. */
+let qualityChoice: QualityChoice = "auto";
 let sceneCtx: SceneContext;
+/** Draws every frame (render/compositor.ts): here only to crossfade a scene
+ *  change (the held effects are the laptop's and pop-out's, not a TV's). */
+let compositor: Compositor | null = null;
+/** Drawn right after the scene each frame; made once the GL context is up. */
+let overlay: OverlayLayer | null = null;
 let join: JoinScreen;
 
 /** True from the canvas's `webglcontextlost` until the page reloads on the
@@ -203,7 +221,7 @@ let lastRafMs = 0;
 
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
 // with app.ts) — see that file for why the gate needs a tolerance at all.
-let lastRenderMs = 0;
+const renderGate = createRenderGate();
 let governor: QualityGovernor | null = null;
 
 // ---- Room, pairing and look state ----
@@ -251,25 +269,62 @@ let shown: LookDoc | null = null;
 let glide: Glide | null = null;
 /** The look the running glide arrives at, applied whole when it lands. */
 let glideTarget: LookDoc | null = null;
+/** The colours a held Play is fading to (net/outputGlide.ts's
+ *  createPaletteFade), drawn instead of `palette` until the next whole look is
+ *  applied or the glide is cut. */
+let paletteFade: PaletteFade | null = null;
 
 function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
-/** Tells the room what this screen shows, so the roster stays current. */
+/** Tells the room what this screen shows, so the roster stays current, and
+ *  what its own benchmark picks, so the Room view can say what Auto means here. */
 function announce(): void {
-  conn?.sendHello(scene.id, palette.id, viewport);
+  conn?.sendHello(scene.id, palette.id, viewport, detectedPreset ?? undefined);
+}
+
+function resolvePreset(): QualityPreset {
+  return qualityChoice === "auto" ? (detectedPreset ?? quality.preset) : qualityChoice;
+}
+
+/** The roster's Quality for this screen. When the preset it resolves to moves,
+ *  `quality` is changed in place (the scene context and the governor hold it),
+ *  the governor starts again from the new baseline, and the scene is mounted
+ *  again, since geometry is sized at init. A scene whose `minQuality` is above
+ *  the new preset keeps running as it was mounted, as the pop-out output does
+ *  (output.ts's applyQuality); scenes the look picks from then on must allow
+ *  the preset. Before the GL context is up only the choice is kept: main()
+ *  resolves it when it builds `quality`. */
+function onQualityChoice(choice: QualityChoice | undefined): void {
+  if (choice === undefined) return;
+  qualityChoice = choice;
+  if (!governor) return;
+  const preset = resolvePreset();
+  if (preset === quality.preset) return;
+  Object.assign(quality, qualitySettings(preset));
+  governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  if (presetAllows(scene, quality.preset)) switchScene(scene);
 }
 
 /** Swaps the running scene for `next`. If `next`'s init() throws (a shader
  *  this TV's GPU won't compile) the scene it replaced is brought back, rather
- *  than leaving a half-built one whose render() throws every frame. */
-function switchScene(next: Scene): void {
+ *  than leaving a half-built one whose render() throws every frame. With
+ *  `crossfade` the replaced scene stays up under the new one until the
+ *  compositor's blend is done (render/crossfade.ts: from the next beat, a cut
+ *  on the floor preset); the room's look carries no glide length for a scene
+ *  change, so a TV takes the room's stored transition
+ *  (render/sceneTransition.ts, a room key applied before the scene). */
+function switchScene(next: Scene, crossfade = false): void {
   const prev = scene;
-  prev.dispose(sceneCtx);
+  // A crossfade still running ends here, its outgoing scene dropped at once.
+  compositor?.cancel();
+  const fade = crossfade && prev !== next;
+  if (!fade) prev.dispose(sceneCtx);
   try {
-    next.init(sceneCtx);
+    deferProgramChecks(() => next.init(sceneCtx));
     scene = next;
+    if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
   } catch (err) {
     console.error(`TV: "${next.name}" failed to start:`, err);
     try {
@@ -277,10 +332,12 @@ function switchScene(next: Scene): void {
     } catch {
       // Whatever init() half-built; the original error is the one to report.
     }
-    try {
-      prev.init(sceneCtx);
-    } catch (err2) {
-      console.error(`TV: "${prev.name}" failed to restart:`, err2);
+    if (!fade) {
+      try {
+        deferProgramChecks(() => prev.init(sceneCtx));
+      } catch (err2) {
+        console.error(`TV: "${prev.name}" failed to restart:`, err2);
+      }
     }
   }
   announce();
@@ -293,7 +350,7 @@ function mountFirstScene(): boolean {
   const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
   for (const next of candidates) {
     try {
-      next.init(sceneCtx);
+      deferProgramChecks(() => next.init(sceneCtx));
       scene = next;
       return true;
     } catch (err) {
@@ -488,6 +545,9 @@ function closeConn(): void {
 function joinRoom(room: string, key: string | null): void {
   closeConn();
   paired = true;
+  // A paired screen is there for a show: pin every scene's media
+  // (src/pinnedAssets.ts's header, "Scene media"). Only the first call acts.
+  pinSceneMedia();
   roomCode = room;
   replica = createLookReplica();
   lastDocScene = "";
@@ -495,6 +555,7 @@ function joinRoom(room: string, key: string | null): void {
   shown = null;
   glide = null;
   glideTarget = null;
+  paletteFade = null;
   hostInRoom = null;
   screenOwn = false;
   // A room joined by a typed code has no records, so no screen choice to wait for.
@@ -512,6 +573,7 @@ function joinRoom(room: string, key: string | null): void {
     if (conn !== c) return;
     onRoster(r);
     onScreenChoice(c.self?.screen);
+    onQualityChoice(c.self?.quality);
   });
   c.onState((s) => {
     if (conn !== c) return;
@@ -547,11 +609,13 @@ function onScreenChoice(screen: string | undefined): void {
   if (screenOwn) {
     glide = null;
     glideTarget = null;
+    paletteFade = null;
     return;
   }
   if (wasShowing || !screenKnown) return;
   glide = null;
   glideTarget = null;
+  paletteFade = null;
   const doc = replica.doc();
   if (doc) applyDoc(doc);
   else if (lookHeld) applyRoomStorage({}, localStorage);
@@ -569,6 +633,7 @@ function onLook(m: LookServerMsg): void {
     }
     glide = null;
     glideTarget = null;
+    paletteFade = null;
     const doc = replica.doc();
     // An empty room (no look yet) is the defaults, not whatever was left from another room.
     if (doc) applyDoc(doc);
@@ -577,21 +642,29 @@ function onLook(m: LookServerMsg): void {
     const r = replica.onPatch(m.rev, m);
     if (r.status === "applied") {
       if (!followsMain()) return;
+      const nowMs = performance.now();
+      const drawn = paletteFade?.paletteAt(nowMs) ?? palette;
       if (!startGlide(r.doc, m.glideMs)) {
         glide = null;
         glideTarget = null;
         applyDoc(r.doc);
       }
+      // Glide or not, a held Play's palette fades over the same length.
+      paletteFade = isGlideMs(m.glideMs) ? createPaletteFade(drawn, docPalette(r.doc), nowMs, m.glideMs) : null;
     } else if (r.status === "gap") conn?.requestLook();
   }
   // lookAck / lookReject answer a controller's own patch; a TV never sends one.
+}
+
+function isGlideMs(ms: number | undefined): ms is number {
+  return typeof ms === "number" && ms > 0;
 }
 
 /** Starts walking to `doc` over `ms` when the look allows it: the same scene
  *  on screen, and a setting that is safe to move and does differ. False means
  *  switch at once. */
 function startGlide(doc: LookDoc, ms: number | undefined): boolean {
-  if (typeof ms !== "number" || !(ms > 0) || shown === null) return false;
+  if (!isGlideMs(ms) || shown === null) return false;
   const from = { scene: scene.id, palette: palette.id, storage: shown.storage, params: DEFAULT_OUTPUT_PARAMS };
   const to = { scene: doc.scene === "" ? scene.id : doc.scene, palette: doc.palette, storage: doc.storage, params: DEFAULT_OUTPUT_PARAMS };
   const started = createGlide(from, to, scene.settings ?? [], performance.now(), ms);
@@ -602,7 +675,8 @@ function startGlide(doc: LookDoc, ms: number | undefined): boolean {
 }
 
 /** One step of a glide: stores only. The scene and palette stay as they were
- *  until the glide lands through applyDoc(). */
+ *  until the glide lands through applyDoc(); the colours fade on their own
+ *  meanwhile (paletteFade). */
 function stepGlide(nowMs: number): void {
   if (!glide || !glideTarget) return;
   const { state, done } = glide.lookAt(nowMs);
@@ -617,6 +691,16 @@ function stepGlide(nowMs: number): void {
   applyRoomStorage(state.storage, localStorage);
 }
 
+/** The palette applyDoc() puts up for `doc`. The look re-asserts its palette
+ *  only when it differs from the last document's (lastDocPalette), and
+ *  getPalette() falls back to the first palette for an id it doesn't know: a
+ *  look naming one this build lacks must not repaint the screen. */
+function docPalette(doc: LookDoc): Palette {
+  if (doc.palette === lastDocPalette || doc.palette === "") return palette;
+  const named = getPalette(doc.palette);
+  return named.id === doc.palette ? named : palette;
+}
+
 /** Makes the page show this look: settings first, so a scene's init() and
  *  first render already see the settings that go with it, then palette, then
  *  scene. The whole storage is applied every time (once per message, and
@@ -624,22 +708,18 @@ function stepGlide(nowMs: number): void {
  *  re-seeded too. */
 function applyDoc(doc: LookDoc): void {
   shown = doc;
+  paletteFade = null;
   applyRoomStorage(doc.storage, localStorage);
-  let paletteChanged = false;
-  if (doc.palette !== lastDocPalette) {
-    lastDocPalette = doc.palette;
-    // getPalette() falls back to the first palette for an id it doesn't know;
-    // a look naming one this build lacks must not repaint the screen.
-    if (doc.palette !== "" && getPalette(doc.palette).id === doc.palette && palette.id !== doc.palette) {
-      palette = getPalette(doc.palette);
-      paletteChanged = true;
-    }
-  }
+  const nextPalette = docPalette(doc);
+  const paletteChanged = nextPalette !== palette;
+  palette = nextPalette;
+  lastDocPalette = doc.palette;
   if (doc.scene !== lastDocScene) {
     lastDocScene = doc.scene;
     const next = doc.scene === "" ? undefined : getScene(doc.scene);
     if (next && next !== scene && presetAllows(next, quality.preset)) {
-      switchScene(next); // announces the new palette with it
+      // Only a picture that is up crossfades; a TV still waiting for its frames just switches.
+      switchScene(next, phase === "live"); // announces the new palette with it
       return;
     }
   }
@@ -670,10 +750,23 @@ async function main(): Promise<void> {
     () => location.reload(),
   );
 
-  quality = qualitySettings(await detectQuality());
+  detectedPreset = await detectQuality();
+  quality = qualitySettings(resolvePreset());
   sceneCtx = { gl, quality };
+  // The text-and-logo overlay (render/overlayLayer.ts); its settings ride in
+  // the room's look like any synced store.
+  overlay = createOverlayLayer(gl);
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  compositor = createCompositor(gl, {
+    onOutgoingDone: (outgoing) => {
+      try {
+        outgoing.dispose(sceneCtx);
+      } catch {
+        // A crossfade's old scene failing to let go must not stop the new one.
+      }
+    },
+  });
   if (!mountFirstScene()) {
     badge.textContent = "No scene can run on this TV's GPU";
     badge.style.display = "block";
@@ -708,6 +801,10 @@ async function main(): Promise<void> {
       },
       get palette() {
         return palette.id;
+      },
+      /** The preset this TV renders at, and what its benchmark picked. */
+      get quality() {
+        return { preset: quality.preset, detected: detectedPreset, choice: qualityChoice };
       },
       get msSinceLastFrame() {
         return conn ? conn.msSinceLastFrame : Infinity;
@@ -777,6 +874,8 @@ async function main(): Promise<void> {
       bpm: s.bpm,
       onsetPhase: s.beatPhase,
       level: s.level,
+      hats: s.hats,
+      lead: s.lead,
     };
 
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what
@@ -801,8 +900,7 @@ async function main(): Promise<void> {
     driveEngine.accumulate(dtSec, gained, applySensitivity(gained, sensitivity, expansion).energy, anim, scene.id, scene.settings ?? []);
 
     const intervalMs = targetFrameIntervalMs(quality.preset);
-    if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
-    lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
+    if (!renderGate.pass(nowRafMs, intervalMs)) return;
 
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
@@ -810,8 +908,20 @@ async function main(): Promise<void> {
     const displayFrame = applySensitivity(gained, sensitivity, expansion);
     const latchedAnim = renderLatch.consume(anim, nowRafMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
-    scene.render(sceneCtx, displayFrame, viewport, palette, latchedAnim, drives);
-    governor?.recordFrame(nowRafMs);
+    const outcome = compositor!.render({
+      ctx: sceneCtx,
+      scene,
+      frame: displayFrame,
+      viewport,
+      palette: paletteFade?.paletteAt(nowRafMs) ?? palette,
+      anim: latchedAnim,
+      drives,
+      drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
+      nowMs: nowRafMs,
+    });
+    overlay?.draw();
+    // Two scenes at once (a crossfade) say nothing about what one costs.
+    if (outcome.governable) governor?.recordFrame(nowRafMs);
   }
 
   requestAnimationFrame(loop);

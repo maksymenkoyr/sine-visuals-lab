@@ -250,7 +250,7 @@ const SETTINGS: SceneSetting[] = [
     // Gates only the chance-rolled bass-hit flip (advanceBlackout) — a
     // plain Bass hit default. The section-drop flip alongside it is
     // unconditional, independent of this choice.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { flatOnly: "A flip either happens or it doesn't, so it can't be sized.", reactionLabel: "flip" } },
   },
   {
     key: "curtain",
@@ -656,6 +656,9 @@ export function advanceWander(st: WanderState, dtSec: number, inputs: WanderInpu
 // closure lives as long as the page, and a gallery tile's earlier mount would
 // otherwise spend the intro before the scene is ever opened.
 let elapsedSec = 0;
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-18" } as const;
 
 export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
   settings: SETTINGS,

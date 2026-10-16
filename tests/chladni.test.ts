@@ -8,14 +8,55 @@ import {
   grainTextureSide,
   grainGain,
   drawnGrainCount,
+  grainWeightAt,
+  grainSizeFactor,
+  grainSizeMoment,
+  WEIGHT_REF,
+  SIZE_MIX_DEFAULT,
   MAX_BED_COVERAGE,
   SAND_AMOUNT_MAX,
   MODE_TABLE,
   ACTIVE_MODES,
   FUNDAMENTAL_HZ_SMALL,
   FUNDAMENTAL_HZ_LARGE,
+  holdMargin,
+  SURPRISE_SHARE,
+  nextToss,
+  advanceToss,
+  glslFloat,
+  tossLaunch,
+  tossLongestFlight,
+  TOSS_ARM_SEC,
+  TOSS_IDLE_AGE,
+  TOSS_REFRACTORY_SEC,
+  chladniScene,
+  powderShare,
+  POWDER_SPLIT,
+  POWDER_EDGE,
+  advanceWave,
+  THROWN_TO,
+  WAVE_REACH,
+  WAVE_SPEED,
+  SPEC_RATE,
+  SPEC_ROWS,
+  SPEC_SPEED,
   type PlateResponseInputs,
+  type TossEvent,
+  type WaveState,
 } from "../src/render/scenes/chladni.ts";
+import {
+  distanceFromGrit,
+  litGrit,
+  litPowder,
+  powderInk,
+  POWDER_L_MIN,
+  POWDER_MIN_DISTANCE,
+} from "../src/render/scenes/chladniPowder.ts";
+import { resolveSceneSetting } from "../src/render/autoTune.ts";
+import { setSceneMaster, SCENE_MASTER_DEFAULT } from "../src/render/sceneSettings.ts";
+import { PALETTES, getPalette } from "../src/render/palette.ts";
+import { hexToRgb, oklabDistance, oklabLightness, rgbToHex } from "../src/render/oklab.ts";
+import { clampZoneEdges, zoneDrive, FREEZE_REF, SNAP_REF, ZONE_MIN_GAP } from "../src/render/scenes/chladniSand.ts";
 import { qualitySettings } from "../src/render/quality.ts";
 import { MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
@@ -135,7 +176,7 @@ describe("bed coverage", () => {
     const platePx2 = 1920 * 1080;
     for (const grainPx of [10, 20, 30, 50]) {
       const drawn = drawnGrainCount(count, grainPx, platePx2);
-      const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+      const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT);
       if (drawn < count) {
         expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE + 1e-6);
       }
@@ -167,7 +208,7 @@ describe("sand amount", () => {
       for (const grainPx of [10, 40]) {
         const drawn = drawnGrainCount(count, grainPx, platePx2, amount);
         if (amount <= 1) expect(drawn).toBeLessThanOrEqual(drawnGrainCount(count, grainPx, platePx2, 1));
-        const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+        const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT);
         if (drawn > 0) {
           expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE * Math.max(1, amount) + 1e-6);
         }
@@ -326,5 +367,431 @@ describe("plate response", () => {
     const held = { n: first[0].n, m: first[0].m };
     const second = run(r, tone(17), 2, inputs({ complexity: 0.5 }));
     expect(second[0]).not.toMatchObject(held);
+  });
+});
+
+/** Two tones at once: `a` at level 1, `b` at `bLevel`. */
+function twoTones(a: number, b: number, bLevel: number): Float32Array {
+  const bands = tone(a);
+  bands[b] = bLevel;
+  return bands;
+}
+
+describe("figure hold", () => {
+  // On the default plate (complexity 0.5) band 5 sits on (1, 2) and band 8
+  // on (1, 3).
+  const plate = (figureHold?: number) => inputs({ complexity: 0.5, figureHold });
+
+  it("0 is the plain model, bit for bit", () => {
+    const plain = createPlateResponse();
+    const held = createPlateResponse();
+    for (const bands of [tone(5), twoTones(5, 8, 0.6), tone(12), SILENCE, tone(15)]) {
+      expect(run(held, bands, 1.5, plate(0))).toEqual(run(plain, bands, 1.5, plate()));
+      expect(Array.from(held.amplitudes)).toEqual(Array.from(plain.amplitudes));
+    }
+  });
+
+  it("the top mode's head start grows across the slider", () => {
+    expect(holdMargin(0)).toBe(1);
+    expect(holdMargin(0.5)).toBeGreaterThan(holdMargin(0.25));
+    expect(holdMargin(1)).toBeGreaterThan(holdMargin(0.5));
+    expect(holdMargin(-1)).toBe(holdMargin(0));
+    expect(holdMargin(2)).toBe(holdMargin(1));
+  });
+
+  it("holds the figure against a new tone the plain plate switches to, but not against a much stronger one", () => {
+    const after = (figureHold: number, bLevel: number) => {
+      const r = createPlateResponse();
+      const first = run(r, tone(5), 3, plate(figureHold));
+      expect(first[0]).toMatchObject({ n: 1, m: 2 });
+      return run(r, twoTones(5, 8, bLevel), 3, plate(figureHold))[0];
+    };
+    expect(after(0, 0.6)).toMatchObject({ n: 1, m: 3 });
+    expect(after(1, 0.6)).toMatchObject({ n: 1, m: 2 });
+    expect(after(1, 2)).toMatchObject({ n: 1, m: 3 });
+  });
+
+  it("hands the figure on the plate a bigger share of a blur", () => {
+    const flat = new Float32Array(NUM_BANDS).fill(0.5);
+    const top = (figureHold: number) => {
+      const r = createPlateResponse();
+      run(r, SILENCE, 0.5, plate(figureHold));
+      return run(r, flat, 2, plate(figureHold))[0].weight;
+    };
+    expect(top(1)).toBeGreaterThan(top(0));
+  });
+
+  it("silence still freezes the figure at full hold", () => {
+    const r = createPlateResponse();
+    const during = run(r, tone(8), 1, plate(1));
+    const after = run(r, SILENCE, 2, plate(1));
+    expect(after[0]).toMatchObject({ n: during[0].n, m: during[0].m });
+  });
+});
+
+describe("loud ↔ new", () => {
+  // As in figure hold: band 5 sits on (1, 2) and band 8 on (1, 3).
+  const plate = (newness?: number) => inputs({ complexity: 0.5, newness });
+
+  it("omitted is the default share, bit for bit", () => {
+    const plain = createPlateResponse();
+    const set = createPlateResponse();
+    for (const bands of [tone(5), twoTones(5, 8, 0.6), tone(12), SILENCE, tone(15)]) {
+      expect(run(set, bands, 1.5, plate(SURPRISE_SHARE))).toEqual(run(plain, bands, 1.5, plate()));
+      expect(Array.from(set.amplitudes)).toEqual(Array.from(plain.amplitudes));
+    }
+  });
+
+  it("toward Loud, a louder steady tone keeps the plate against a quieter new one the default hands it to", () => {
+    const after = (newness: number) => {
+      const r = createPlateResponse();
+      run(r, tone(5), 10, plate(newness));
+      return run(r, twoTones(5, 8, 0.5), 1, plate(newness))[0];
+    };
+    expect(after(SURPRISE_SHARE)).toMatchObject({ n: 1, m: 3 });
+    expect(after(0)).toMatchObject({ n: 1, m: 2 });
+  });
+
+  it("at New, a held tone stops scoring but its figure stays", () => {
+    const r = createPlateResponse();
+    const early = run(r, tone(10), 1, plate(1));
+    const late = run(r, tone(10), 20, plate(1));
+    expect(Math.max(...r.amplitudes)).toBeLessThan(0.01);
+    expect(late[0]).toMatchObject({ n: early[0].n, m: early[0].m });
+  });
+});
+
+describe("grain weight", () => {
+  it("spreads the bed's weight by Size mix around Grain weight, clamped to [0, 1]", () => {
+    expect(grainWeightAt(0, 0.5, 0)).toBe(0.5);
+    expect(grainWeightAt(1, 0.5, 0)).toBe(0.5);
+    expect(grainWeightAt(0, 0.5, 1)).toBe(0);
+    expect(grainWeightAt(1, 0.5, 1)).toBe(1);
+    expect(grainWeightAt(0, 0.1, 1)).toBe(0);
+    expect(grainWeightAt(1, 0.9, 1)).toBe(1);
+  });
+
+  it("draws a grain of the reference weight at exactly Grain size, heavier ones bigger", () => {
+    expect(grainSizeFactor(WEIGHT_REF)).toBe(1);
+    expect(grainSizeFactor(0)).toBeLessThan(0.5);
+    expect(grainSizeFactor(1)).toBeGreaterThan(1);
+  });
+
+  it("an unmixed bed's area moment is its one grain's size squared", () => {
+    for (const w of [0, 0.3, WEIGHT_REF, 1]) {
+      expect(grainSizeMoment(w, 0)).toBeCloseTo(grainSizeFactor(w) ** 2, 9);
+    }
+  });
+
+  it("the default bed covers about what the old ±25% size scatter did", () => {
+    expect(grainSizeMoment(WEIGHT_REF, SIZE_MIX_DEFAULT)).toBeCloseTo(1 + 0.5 ** 2 / 12, 1);
+  });
+
+  it("a powder bed fits more grains under the coverage cap than a grit bed", () => {
+    const count = qualitySettings("high").maxParticles * SAND_AMOUNT_MAX;
+    const platePx2 = 1280 * 720;
+    const powder = drawnGrainCount(count, 6, platePx2, SAND_AMOUNT_MAX, grainSizeMoment(0, 0));
+    const grit = drawnGrainCount(count, 6, platePx2, SAND_AMOUNT_MAX, grainSizeMoment(1, 0));
+    expect(powder).toBeGreaterThan(grit);
+  });
+});
+
+describe("sand zones", () => {
+  it("is the identity at the default edges — the plate as it was", () => {
+    for (let d = 0; d <= 4; d += 0.05) expect(zoneDrive(d, FREEZE_REF, SNAP_REF)).toBeCloseTo(d, 9);
+  });
+
+  it("makes the user's edges act as the measured ones", () => {
+    expect(zoneDrive(0.6, 0.6, 2.2)).toBeCloseTo(FREEZE_REF, 9);
+    expect(zoneDrive(2.2, 0.6, 2.2)).toBeCloseTo(SNAP_REF, 9);
+    expect(zoneDrive(0.3, 0.05, 0.4)).toBeGreaterThan(FREEZE_REF);
+  });
+
+  it("is continuous and rising at any edges, slope 1 past the snap edge", () => {
+    for (const [f, s] of [[0.05, 0.15], [0.2, 1.5], [1, 1.2], [0.5, 3]] as const) {
+      let prev = -1;
+      for (let d = 0; d <= 4; d += 0.01) {
+        const v = zoneDrive(d, f, s);
+        expect(v).toBeGreaterThan(prev);
+        if (prev >= 0) expect(v - prev).toBeLessThan(0.2);
+        prev = v;
+      }
+      expect(zoneDrive(s + 1, f, s) - zoneDrive(s + 0.5, f, s)).toBeCloseTo(0.5, 9);
+    }
+  });
+
+  it("keeps the edges apart when they cross", () => {
+    const { freeze, snap } = clampZoneEdges(1.2, 0.8);
+    expect(snap - freeze).toBeCloseTo(ZONE_MIN_GAP, 9);
+  });
+});
+
+describe("toss trigger", () => {
+  const tossed: TossEvent = { at: 10, seed: 3, power: 0.5 };
+
+  it("tosses only on a fired edge", () => {
+    expect(nextToss(null, 10, false, 0.5, 1)).toBeNull();
+    expect(nextToss(null, 10, true, 0.5, 1)).toEqual({ at: 10, seed: 1, power: 0.5 });
+  });
+
+  it("never tosses at 0", () => {
+    expect(nextToss(null, 10, true, 0, 1)).toBeNull();
+    expect(nextToss(null, 10, true, -0.2, 1)).toBeNull();
+  });
+
+  it("takes its power from the setting, clamped to the slider", () => {
+    expect(nextToss(null, 10, true, 0.25, 1)?.power).toBe(0.25);
+    expect(nextToss(null, 10, true, 1.7, 1)?.power).toBe(1);
+  });
+
+  it("throws once per drop: edges inside the refractory are ignored", () => {
+    expect(nextToss(tossed, tossed.at + 1, true, 0.5, 2)).toBeNull();
+    expect(nextToss(tossed, tossed.at + TOSS_REFRACTORY_SEC - 0.01, true, 0.5, 2)).toBeNull();
+    expect(nextToss(tossed, tossed.at + TOSS_REFRACTORY_SEC, true, 0.5, 2)).toEqual({
+      at: tossed.at + TOSS_REFRACTORY_SEC,
+      seed: 2,
+      power: 0.5,
+    });
+  });
+
+  it("a clock that went backwards doesn't hold the refractory", () => {
+    expect(nextToss(tossed, TOSS_ARM_SEC + 0.5, true, 0.5, 2)?.at).toBe(TOSS_ARM_SEC + 0.5);
+  });
+
+  it("never tosses while the audio clock is young (every new source starts it at 0)", () => {
+    expect(nextToss(null, 0.4, true, 0.5, 1)).toBeNull();
+    expect(nextToss(null, TOSS_ARM_SEC - 0.01, true, 1, 1)).toBeNull();
+    expect(nextToss(null, TOSS_ARM_SEC, true, 0.5, 1)?.at).toBe(TOSS_ARM_SEC);
+    // An old toss doesn't open the gate early on a restarted clock either.
+    expect(nextToss(tossed, 0.4, true, 0.5, 1)).toBeNull();
+  });
+
+  it("the refractory outlasts every flight, so one toss lands before the next", () => {
+    expect(TOSS_REFRACTORY_SEC).toBeGreaterThan(tossLongestFlight());
+  });
+
+  it("shaders get the flight constants at full precision", () => {
+    expect(glslFloat(0.875)).toBe("0.875");
+    expect(glslFloat(0.075)).toBe("0.075");
+    expect(glslFloat(1)).toBe("1.0");
+    expect(glslFloat(1e-7)).toBe("1e-7");
+    expect(Number(glslFloat(tossLongestFlight()))).toBe(tossLongestFlight());
+  });
+
+  it("a harder toss flies longer", () => {
+    expect(tossLaunch(1)).toBe(1);
+    expect(tossLaunch(0)).toBeGreaterThan(0);
+    for (let p = 0; p < 1; p += 0.1) expect(tossLaunch(p + 0.1)).toBeGreaterThan(tossLaunch(p));
+  });
+});
+
+describe("powder colour", () => {
+  // Readable as small dust on the plate: far enough from the palette's ground.
+  const GROUND_MIN_DISTANCE = 0.4;
+
+  for (const p of PALETTES) {
+    it(`${p.id}: powder stands apart from every grit colour and reads on the ground`, () => {
+      const c = powderInk(p);
+      expect(distanceFromGrit(p, c)).toBeGreaterThanOrEqual(POWDER_MIN_DISTANCE);
+      expect(oklabLightness(c)).toBeGreaterThanOrEqual(POWDER_L_MIN);
+      expect(oklabDistance(c, hexToRgb(p.roles.ground))).toBeGreaterThanOrEqual(GROUND_MIN_DISTANCE);
+    });
+  }
+
+  it("takes a palette's own ink when one stands apart (Neon's blue against its pink sand)", () => {
+    expect(rgbToHex(powderInk(getPalette("neon")))).toBe(getPalette("neon").roles.inks[1]);
+  });
+
+  it("makes one for the single-hue palettes", () => {
+    for (const id of ["fire", "amber", "phosphor"]) {
+      const p = getPalette(id);
+      expect([...p.roles.inks, p.roles.accent]).not.toContain(rgbToHex(powderInk(p)));
+    }
+  });
+
+  it("lit powder keeps its hue where lit grit clips", () => {
+    const blue = hexToRgb("#1870f3");
+    const lit = litPowder(blue);
+    expect(Math.max(...lit)).toBeCloseTo(1, 9);
+    expect(lit[0] / lit[2]).toBeCloseTo(blue[0] / blue[2], 9);
+    expect(litGrit(blue)[2]).toBe(1);
+  });
+
+  it("splits the bed at POWDER_SPLIT with a short edge", () => {
+    expect(powderShare(0)).toBe(1);
+    expect(powderShare(1)).toBe(0);
+    expect(powderShare(POWDER_SPLIT)).toBeCloseTo(0.5, 9);
+    expect(powderShare(POWDER_SPLIT - POWDER_EDGE)).toBe(1);
+    expect(powderShare(POWDER_SPLIT + POWDER_EDGE)).toBe(0);
+  });
+
+  it("colours almost none of the default bed and about half of a light mixed one", () => {
+    const meanShare = (weight: number, mix: number): number => {
+      let s = 0;
+      const N = 1000;
+      for (let i = 0; i < N; i++) s += powderShare(grainWeightAt((i + 0.5) / N, weight, mix));
+      return s / N;
+    };
+    expect(meanShare(WEIGHT_REF, SIZE_MIX_DEFAULT)).toBeLessThan(0.01);
+    const mixed = meanShare(0.5, 1);
+    expect(mixed).toBeGreaterThan(0.35);
+    expect(mixed).toBeLessThan(0.55);
+  });
+});
+
+describe("toss frames (advanceToss)", () => {
+  const FRAME = 1 / 60;
+  const seed = () => 42;
+
+  /** Steps frames from `from` to `to` (exclusive) with no edge, returning
+   *  each frame's ages and the toss left at the end. */
+  function run(start: TossEvent | null, from: number, to: number, prev: number | null) {
+    let toss = start;
+    let p = prev;
+    const ages: { now: number; age: number; prevAge: number }[] = [];
+    for (let now = from; now < to; now += FRAME) {
+      const f = advanceToss(toss, now, p, false, 0.5, seed);
+      toss = f.toss;
+      ages.push({ now, age: f.age, prevAge: f.prevAge });
+      p = now;
+    }
+    return { toss, ages };
+  }
+
+  it("starts on an edge with a drawn seed, prevAge -1 only on that frame", () => {
+    let draws = 0;
+    const f = advanceToss(null, 10, 10 - FRAME, true, 0.5, () => (draws++, 7));
+    expect(f.toss).toEqual({ at: 10, seed: 7, power: 0.5 });
+    expect(f.age).toBe(0);
+    expect(f.prevAge).toBe(-1);
+    expect(draws).toBe(1);
+    const next = advanceToss(f.toss, 10 + FRAME, 10, false, 0.5, seed);
+    expect(next.prevAge).toBe(0);
+    expect(next.age).toBeCloseTo(FRAME, 9);
+  });
+
+  it("an edge it ignores draws no seed", () => {
+    let draws = 0;
+    const count = () => (draws++, 1);
+    advanceToss(null, 10, 9.9, true, 0, count); // Toss 0
+    advanceToss(null, 0.5, 0.4, true, 0.5, count); // clock too young
+    advanceToss({ at: 9, seed: 1, power: 0.5 }, 10, 9.9, true, 0.5, count); // refractory
+    expect(draws).toBe(0);
+  });
+
+  it("goes idle once the longest flight has passed", () => {
+    const { ages } = run({ at: 10, seed: 1, power: 1 }, 10 + FRAME, 12, 10);
+    for (const a of ages) {
+      if (a.now - FRAME > 10 + tossLongestFlight()) {
+        expect(a.age).toBe(TOSS_IDLE_AGE);
+        expect(a.prevAge).toBe(TOSS_IDLE_AGE);
+      } else {
+        expect(a.age).toBeCloseTo(a.now - 10, 9);
+      }
+    }
+  });
+
+  it("a clock that went backwards ends the toss: idle ages, and it never replays", () => {
+    // A toss at 10, landed, then a new source restarts the clock near 0 and
+    // runs past 10 again with no edge.
+    const landed = run(null, 9, 12, null);
+    expect(landed.toss).toBeNull();
+    const first = advanceToss(null, 10, 10 - FRAME, true, 1, seed);
+    const after = run(first.toss, 10 + FRAME, 12, 10);
+    const rewound = run(after.toss, 0.3, 12, 12 - FRAME);
+    expect(rewound.toss).toBeNull();
+    for (const a of rewound.ages) {
+      expect(a.age).toBe(TOSS_IDLE_AGE);
+      expect(a.prevAge).toBe(TOSS_IDLE_AGE);
+    }
+  });
+
+  it("a rewind mid-flight ends it too, even with Toss since set to 0", () => {
+    const first = advanceToss(null, 10, 10 - FRAME, true, 1, seed);
+    const mid = advanceToss(first.toss, 10.2, 10, false, 1, seed);
+    expect(mid.toss).not.toBeNull();
+    let toss = mid.toss;
+    let prev: number | null = 10.2;
+    for (let now = 0.5; now < 11; now += FRAME) {
+      const f = advanceToss(toss, now, prev, false, 0, seed);
+      expect(f.age).toBe(TOSS_IDLE_AGE);
+      toss = f.toss;
+      prev = now;
+    }
+  });
+});
+
+describe("sand colour settings", () => {
+  const spec = (key: string) => (chladniScene.settings ?? []).find((s) => s.key === key)!;
+
+  it("default to the plate as it was: thrown grains toward white by their hop, every new look off", () => {
+    expect(spec("thrownColour").default).toBe(1);
+    expect(spec("thrownTo").default).toBe(0);
+    expect(THROWN_TO[0]).toBe("Toward white");
+    for (const key of ["twoSides", "embers", "spectrumRings", "beatWaves", "glitter"]) expect(spec(key).default).toBe(0);
+  });
+
+  it("Thrown to picks between exactly the THROWN_TO choices", () => {
+    const s = spec("thrownTo");
+    expect(s.type).toBe("enum");
+    expect(s.options).toEqual(THROWN_TO);
+    expect([s.min, s.max, s.step]).toEqual([0, THROWN_TO.length - 1, 1]);
+  });
+
+  it("Ember fade is a time, so the Master dial never moves it", () => {
+    expect(spec("emberFade").masterScale).toBe(false);
+  });
+
+  it("the spectrum history outlasts a ring's run to the square plate's corner", () => {
+    expect(SPEC_ROWS / SPEC_RATE).toBeGreaterThan(Math.SQRT2 / SPEC_SPEED);
+  });
+});
+
+describe("beat waves", () => {
+  const none: WaveState = { count: 0, at: 0 };
+
+  it("has no wave until the first edge", () => {
+    expect(advanceWave(none, 5, false)).toEqual({ wave: none, radius: -1 });
+  });
+
+  it("an edge starts the next wave from the centre, which runs out at WAVE_SPEED", () => {
+    const start = advanceWave(none, 10, true);
+    expect(start.wave).toEqual({ count: 1, at: 10 });
+    expect(start.radius).toBe(0);
+    const later = advanceWave(start.wave, 10.25, false);
+    expect(later.radius).toBeCloseTo(0.25 * WAVE_SPEED, 9);
+  });
+
+  it("stops dyeing once it has run past WAVE_REACH", () => {
+    const start = advanceWave(none, 0, true).wave;
+    expect(advanceWave(start, (WAVE_REACH / WAVE_SPEED) * 0.99, false).radius).toBeGreaterThan(0);
+    expect(advanceWave(start, (WAVE_REACH / WAVE_SPEED) * 1.01, false).radius).toBe(-1);
+  });
+
+  it("a new edge restarts from the centre with the next id, even mid-run", () => {
+    const first = advanceWave(none, 0, true).wave;
+    const second = advanceWave(first, 0.1, true);
+    expect(second.wave.count).toBe(2);
+    expect(second.radius).toBe(0);
+  });
+
+  it("drops the wave when the audio clock goes back past its start (a new source)", () => {
+    const start = advanceWave(none, 20, true).wave;
+    expect(advanceWave(start, 3, false).radius).toBe(-1);
+  });
+});
+
+describe("Zoom", () => {
+  it("is framing, so the Master dial never moves it", () => {
+    const spec = (chladniScene.settings ?? []).find((s) => s.key === "plateZoom")!;
+    expect(spec.masterScale).toBe(false);
+    try {
+      for (const m of [0, 0.6, 1.5, 2]) {
+        setSceneMaster(m);
+        expect(resolveSceneSetting("chladni", spec)).toBeCloseTo(spec.default, 9);
+      }
+    } finally {
+      setSceneMaster(SCENE_MASTER_DEFAULT);
+    }
   });
 });

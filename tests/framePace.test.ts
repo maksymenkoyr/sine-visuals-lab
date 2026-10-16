@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "../src/render/framePace.ts";
+import {
+  CATCH_UP_GAP,
+  GATE_TOLERANCE_MS,
+  RENDER_FPS_CAP,
+  RENDER_FPS_CAP_FLOOR,
+  createRenderGate,
+  nextRenderAnchor,
+  shouldRenderFrame,
+  targetFrameIntervalMs,
+} from "../src/render/framePace.ts";
 
 describe("targetFrameIntervalMs", () => {
   it("is 1000/30 on the floor preset", () => {
@@ -138,5 +147,105 @@ describe("nextRenderAnchor", () => {
     const anchor = nextRenderAnchor(1500, 1000, interval); // 500 ms stall
     expect(anchor).toBe(1500);
     expect(shouldRenderFrame(1500 + 6.9, anchor, interval)).toBe(false);
+  });
+});
+
+describe("createRenderGate", () => {
+  const interval = targetFrameIntervalMs("high");
+
+  /** The times a gate draws at over `seconds` of rAF ticks at `hz`, with small
+   *  timing jitter. `lost(k)` drops tick k, as a busy main thread or GPU does. */
+  function draws(hz: number, intervalMs: number, seconds: number, lost: (k: number) => boolean = () => false): number[] {
+    const gate = createRenderGate();
+    const vsync = 1000 / hz;
+    const out: number[] = [];
+    let seed = 12345;
+    const jitter = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return (seed / 0xffffffff - 0.5) * 0.6; // +-0.3 ms
+    };
+    for (let k = 1; k * vsync < seconds * 1000; k++) {
+      const now = k * vsync + jitter();
+      if (lost(k)) continue;
+      if (gate.pass(now, intervalMs)) out.push(now);
+    }
+    return out;
+  }
+
+  const gaps = (times: number[]) => times.slice(1).map((t, i) => t - times[i]);
+
+  it("still draws ~60 fps on every display refresh at or above 60 Hz", () => {
+    for (const hz of [60, 75, 90, 100, 120, 144, 165, 240]) {
+      const n = draws(hz, interval, 10).length;
+      expect(n, `${hz} Hz`).toBeGreaterThan(588);
+      expect(n, `${hz} Hz`).toBeLessThan(hz === 144 || hz === 165 ? 625 : 612);
+    }
+  });
+
+  it("draws every tick of a panel a hair faster than 60 Hz", () => {
+    for (const hz of [60.02, 60.06, 60.5, 61]) {
+      expect(draws(hz, interval, 60).length, `${hz} Hz`).toBeGreaterThanOrEqual(Math.floor(hz * 60) - 2);
+    }
+  });
+
+  // Not a display four times the cap (240 Hz at 60, 120 Hz at the floor's
+  // 30): there a frame one tick late is followed by a gap of three ticks,
+  // three quarters of an interval, which the gate can't tell from the healthy
+  // short gaps of other refresh rates without knowing the display's. The
+  // frame it shortens was only one tick late.
+  it("draws no catch-up frames after a hiccup: no gap shorter than the display's own healthy ones", () => {
+    for (const [hz, intervalMs] of [
+      [120, interval],
+      [144, interval],
+      [165, interval],
+      [60, targetFrameIntervalMs("floor")],
+    ]) {
+      const shortest = Math.min(...gaps(draws(hz, intervalMs, 10)));
+      // Every run of 1 to 6 lost ticks, at every phase against the grid.
+      for (let run = 1; run <= 6; run++) {
+        for (let phase = 0; phase < 8; phase++) {
+          const start = 300 + phase;
+          const times = draws(hz, intervalMs, 10, (k) => k >= start && k < start + run);
+          expect(Math.min(...gaps(times)), `${hz} Hz, ${run} lost from tick ${start}`).toBeGreaterThan(shortest - 1);
+        }
+      }
+    }
+  });
+
+  it("follows a frame late on a 120 Hz panel with one interval, not a back-to-back frame", () => {
+    // Two ticks lost: the frame lands one tick after its slot.
+    const times = draws(120, interval, 1, (k) => k === 9 || k === 10);
+    const late = gaps(times).findIndex((g) => g > 1.25 * interval);
+    expect(late).toBeGreaterThan(0);
+    expect(gaps(times)[late + 1]).toBeGreaterThan(interval - GATE_TOLERANCE_MS);
+  });
+
+  it("refuses a tick closer than CATCH_UP_GAP intervals to the last drawn frame", () => {
+    const gate = createRenderGate();
+    expect(gate.pass(1000, interval)).toBe(true);
+    // A frame half an interval late: the grid stays one interval behind it.
+    const lateMs = 1000 + 1.5 * interval;
+    expect(gate.pass(lateMs, interval)).toBe(true);
+    const tooSoon = lateMs + CATCH_UP_GAP * interval - 0.1;
+    expect(shouldRenderFrame(tooSoon, 1000 + interval, interval)).toBe(true); // the grid alone would draw it
+    expect(gate.due(tooSoon, interval)).toBe(false);
+    expect(gate.pass(tooSoon, interval)).toBe(false);
+    expect(gate.pass(lateMs + interval, interval)).toBe(true);
+  });
+
+  it("due() answers like pass() without moving the gate", () => {
+    const gate = createRenderGate();
+    expect(gate.due(1000, interval)).toBe(true);
+    expect(gate.due(1000, interval)).toBe(true);
+    expect(gate.pass(1000, interval)).toBe(true);
+    expect(gate.due(1000 + interval / 2, interval)).toBe(false);
+    expect(gate.due(1000 + interval, interval)).toBe(true);
+  });
+
+  it("draws the first tick after reset()", () => {
+    const gate = createRenderGate();
+    gate.pass(1000, interval);
+    gate.reset();
+    expect(gate.pass(1001, interval)).toBe(true);
   });
 });

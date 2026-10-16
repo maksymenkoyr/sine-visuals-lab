@@ -1,0 +1,512 @@
+<title>Sand Zones Gauge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: one reading column. Each section is a short plain-words text and one
+   live figure, all running on the Chladni scene's real constants and sand rule.
+   Single dark look, the app's own panel palette and faces. */
+:root {
+  color-scheme: dark;
+  --ground: #08090c;
+  --panel: #10121a;
+  --line: rgba(233, 230, 242, 0.1);
+  --line-hi: rgba(233, 230, 242, 0.22);
+  --ink: #ebe8f3;
+  --ink-2: rgba(235, 232, 243, 0.7);
+  --ink-3: rgba(235, 232, 243, 0.46);
+  --freeze: #9aa9c2;
+  --drift: #c3a5f9;
+  --snap: #8ce6a0;
+  --kick: #f6c177;
+  --grain: #f6e7ee;
+  --label: 'Chakra Petch', system-ui, sans-serif;
+  --mono: 'Share Tech Mono', ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 400 15px/1.6 var(--label); padding-inline: 16px; padding-block: 28px 72px; }
+.wrap { max-width: 860px; margin: 0 auto; display: grid; gap: 48px; }
+section { display: grid; gap: 14px; min-width: 0; }
+.eyebrow { font: 11px/1.2 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+h1 { font: 600 30px/1.1 var(--label); margin: 4px 0 0; text-wrap: balance; }
+h2 { font: 600 20px/1.2 var(--label); margin: 0; text-wrap: balance; }
+h2 small { font: 11px var(--mono); letter-spacing: 0.14em; color: var(--ink-3); text-transform: uppercase; margin-right: 8px; vertical-align: 2px; }
+p { margin: 0; max-width: 68ch; color: var(--ink-2); }
+p b, li b { color: var(--ink); font-weight: 500; }
+.short { border-left: 2px solid var(--drift); padding: 2px 0 2px 14px; display: grid; gap: 4px; max-width: 72ch; }
+.short p { color: var(--ink); }
+code, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+code { font-size: 13px; color: var(--ink); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
+.fig { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; min-width: 0; }
+canvas { display: block; width: 100%; border-radius: 6px; background: rgba(0,0,0,0.45); touch-action: none; }
+canvas:focus-visible, button:focus-visible, input:focus-visible { outline: 1px solid var(--drift); outline-offset: 2px; }
+.status { font: 13px var(--mono); }
+.legend { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.legend li { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.sw { flex: none; width: 14px; height: 10px; border-radius: 2px; display: inline-block; transform: translateY(1px); }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 20px; }
+.ctl { display: grid; gap: 2px; font-size: 13px; color: var(--ink-2); }
+.ctl .row { display: flex; justify-content: space-between; gap: 8px; }
+.ctl .row .num { color: var(--ink); }
+input[type=range] { width: 100%; accent-color: var(--drift); }
+.seg { display: inline-flex; border: 1px solid var(--line-hi); border-radius: 6px; overflow: hidden; }
+.seg button, .btn { font: 12px var(--mono); color: var(--ink-2); background: none; border: 0; padding: 5px 10px; cursor: pointer; }
+.seg button[aria-pressed=true] { background: rgba(195,165,249,0.16); color: var(--ink); }
+.btn { border: 1px solid var(--line-hi); border-radius: 6px; }
+.btn:hover { color: var(--ink); border-color: var(--drift); }
+.btn.kick { border-color: rgba(246,193,119,0.5); color: var(--kick); }
+.bar-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.formula { font: 13px/1.7 var(--mono); color: var(--ink-2); overflow-x: auto; white-space: nowrap; padding-bottom: 2px; }
+.formula b { color: var(--ink); font-weight: 400; }
+.formula .k { color: var(--kick); }
+.formula .out { color: #fff; }
+.cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 560px) { .cells { grid-template-columns: minmax(0, 1fr); } }
+.cell { display: grid; gap: 4px; }
+.cell .cap { font: 12px var(--mono); color: var(--ink-2); display: flex; justify-content: space-between; gap: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tablewrap { overflow-x: auto; }
+th { text-align: left; font: 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; padding: 0 8px 6px 0; }
+td { padding: 4px 8px 4px 0; vertical-align: middle; }
+td.d { font-family: var(--mono); width: 56px; }
+.mbar { position: relative; height: 12px; background: rgba(255,255,255,0.05); border-radius: 2px; min-width: 120px; }
+.mbar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; }
+.mbar span { position: absolute; right: 4px; top: -2px; font: 11px var(--mono); color: var(--ink); }
+.mbar .floor { position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,0.45); }
+.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.preset { text-align: left; background: rgba(255,255,255,0.03); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; color: var(--ink); font: inherit; display: grid; gap: 2px; }
+.preset:hover { border-color: var(--line-hi); }
+.preset[aria-pressed=true] { border-color: var(--drift); background: rgba(195,165,249,0.08); }
+.preset b { font-weight: 500; }
+.preset span { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.preset code { font-size: 11.5px; }
+.foot { font-size: 12.5px; color: var(--ink-3); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="wrap">
+  <header style="display:grid;gap:12px">
+    <div class="eyebrow">Chladni · Scene card · Sand zones</div>
+    <h1>How the Sand zones gauge works</h1>
+    <div class="short">
+      <p>The gauge shows one number: the plate's <b>drive</b>, how hard the plate is shaking right now.</p>
+      <p>The sand answers that number in three ways: it <b style="color:var(--freeze)">freezes</b>, <b style="color:var(--drift)">drifts</b> to a new figure over seconds, or <b style="color:var(--snap)">snaps</b> onto it within a beat or two.</p>
+      <p>The two handles decide where those ranges start. The dots are a live preview of the sand at every drive.</p>
+    </div>
+  </header>
+
+  <!-- 1 · the gauge -->
+  <section aria-labelledby="h-gauge">
+    <h2 id="h-gauge"><small>The gauge</small>Reading it</h2>
+    <p>This is the same gauge as in the panel, running here on fake music. Drag either handle (or anywhere on the gauge to grab the nearer one).</p>
+    <div class="fig">
+      <canvas id="gauge" height="150" tabindex="0" aria-label="Sand zones gauge. Left and right arrows move the selected edge, Tab switches edge."></canvas>
+      <div class="status" id="status">drive 0.00 · sand freezes</div>
+      <ul class="legend">
+        <li><span class="sw" style="background:#fff;clip-path:polygon(0 0,100% 0,50% 100%)"></span><span><b>White triangle</b>: the drive right now.</span></li>
+        <li><span class="sw" style="background:linear-gradient(90deg,rgba(255,255,255,.1),rgba(255,255,255,.45))"></span><span><b>Grey ticks</b>: where it was over the last half second.</span></li>
+        <li><span class="sw" style="background:var(--drift)"></span><span><b>Purple handle</b>: freeze edge. Below it the sand holds still.</span></li>
+        <li><span class="sw" style="background:var(--snap)"></span><span><b>Green handle</b>: snap edge. Above it the sand jumps onto the figure.</span></li>
+        <li><span class="sw" style="background:var(--grain)"></span><span><b>Dots</b>: grains, each one at a fixed drive, moved by the real sand rule.</span></li>
+        <li><span class="sw" style="background:repeating-linear-gradient(90deg,rgba(255,255,255,.5) 0 2px,transparent 2px 5px)"></span><span><b>Dashed line</b>: a still line on the plate, where sand ends up.</span></li>
+      </ul>
+      <p style="font-size:13px">The axis is squeezed toward the top end (a square-root scale) so the narrow freeze range near 0 stays wide enough to see and grab. It never rescales: 3 is always at the right end.</p>
+    </div>
+  </section>
+
+  <!-- 2 · where the drive comes from -->
+  <section aria-labelledby="h-drive">
+    <h2 id="h-drive"><small>Step 1</small>Where the drive number comes from</h2>
+    <p>Every frame the scene adds two things: <b>Vibration</b> times how loud the music is, and <b>Bass kick</b> times the bass-hit pulse, which jumps up on each kick and falls back within a fraction of a second. Silence gives a small drive from Vibration alone, so a quiet plate barely moves.</p>
+    <div class="fig">
+      <div class="bar-row">
+        <span class="seg" role="group" aria-label="Signal">
+          <button type="button" id="srcMusic" aria-pressed="true">fake music</button>
+          <button type="button" id="srcHand" aria-pressed="false">your hand</button>
+        </span>
+        <button type="button" class="btn kick" id="kickBtn">hit a kick</button>
+        <span class="eyebrow" id="phrase">intro</span>
+      </div>
+      <div class="controls">
+        <label class="ctl"><span class="row"><span>Vibration</span><span class="num" id="vibV">0.50</span></span><input type="range" id="vib" min="0" max="1" step="0.05" value="0.5"></label>
+        <label class="ctl"><span class="row"><span>Bass kick</span><span class="num" id="kickSetV">0.50</span></span><input type="range" id="kickSet" min="0" max="1" step="0.05" value="0.5"></label>
+        <label class="ctl"><span class="row"><span>Loudness (your hand)</span><span class="num" id="handV">0.30</span></span><input type="range" id="hand" min="0" max="1" step="0.01" value="0.3" disabled></label>
+      </div>
+      <div class="formula" id="formula"></div>
+      <canvas id="trace" height="150" aria-label="The drive over the last six seconds against the zones"></canvas>
+      <p style="font-size:13px">The trace is the last six seconds of the drive, on the same three ranges. In the drop the kicks poke up toward the snap edge; in the intro the drive sits low.</p>
+    </div>
+  </section>
+
+  <!-- 3 · what the handles do -->
+  <section aria-labelledby="h-remap">
+    <h2 id="h-remap"><small>Step 2</small>What the handles do to that number</h2>
+    <p>The handles don't change the physics. The scene measured once where its sand freezes (drive <span class="num">0.2</span>) and where it snaps (<span class="num">1.5</span>). Your handles say <b>"treat my freeze edge as 0.2 and my snap edge as 1.5"</b>, and the scene stretches or squeezes the drive in between before the sand sees it. Above the snap edge it adds the rest one to one, so a harder shake still throws harder.</p>
+    <div class="fig">
+      <canvas id="remap" height="330" aria-label="Chart: drive from the music across, drive the sand feels up. Drag the vertical lines to move the edges."></canvas>
+      <p id="remapSay" style="color:var(--ink)"></p>
+      <p style="font-size:13px">Across: the drive from the music. Up: the drive the sand actually feels. The dashed diagonal is "no change", which is exactly what the default handles give. The vertical lines are your handles and can be dragged here too.</p>
+    </div>
+  </section>
+
+  <!-- 4 · why three zones -->
+  <section aria-labelledby="h-rule">
+    <h2 id="h-rule"><small>Step 3</small>Why the sand has three ranges</h2>
+    <p>Each frame, every grain does two things. It <b>hops</b> a random distance, bigger where its spot of the plate shakes harder. And each hop <b>leans a little toward the nearest still line</b>. Below a small shake (the lift knee, <span class="num">0.05</span>) a grain only rattles in place and the lean fades to nothing, so the sand stays where it is. Higher up the lean adds up, slowly at first, then fast.</p>
+    <div class="fig">
+      <canvas id="rule" height="250" aria-label="Chart: random hop and pull toward the line, per second, against the drive the sand feels"></canvas>
+      <p style="font-size:13px">Measured where the plate shakes hardest, in nodal cells per second (a cell is the gap between two still lines). The grey curve is how far grains wander at random; the coloured one is how fast they are pulled toward the line. Below <span class="num">0.2</span> both are almost zero. By <span class="num">1.5</span> the pull is fast enough to bring half the sand in within a second.</p>
+      <div class="cells">
+        <div class="cell"><canvas id="c0" height="120" aria-label="Sand at drive 0.15"></canvas><div class="cap"><span style="color:var(--freeze)">felt 0.15 · freezes</span><span id="c0v">0%</span></div></div>
+        <div class="cell"><canvas id="c1" height="120" aria-label="Sand at drive 0.8"></canvas><div class="cap"><span style="color:var(--drift)">felt 0.8 · drifts</span><span id="c1v">0%</span></div></div>
+        <div class="cell"><canvas id="c2" height="120" aria-label="Sand at drive 2.0"></canvas><div class="cap"><span style="color:var(--snap)">felt 2.0 · snaps</span><span id="c2v">0%</span></div></div>
+      </div>
+      <p style="font-size:13px">Three zoomed cells, each held at one drive and scattered again every 4 seconds, like a new figure starting. The percentage is how many grains sit on the line right now. That's what one column of dots in the gauge is doing.</p>
+    </div>
+  </section>
+
+  <!-- 5 · measured -->
+  <section aria-labelledby="h-meas">
+    <h2 id="h-meas"><small>Measured</small>Where 0.2 and 1.5 come from</h2>
+    <p>The scene's sand rule, run on 3000 scattered grains over four different figures at a steady drive. The share of grains on the lines after one second and after four. Scattered sand already has about <span class="num">16%</span> on a line by chance (the white tick).</p>
+    <div class="fig tablewrap">
+      <table>
+        <thead><tr><th>Drive</th><th>On the lines after 1 s</th><th>After 4 s</th></tr></thead>
+        <tbody id="meas"></tbody>
+      </table>
+    </div>
+    <p>Nothing happens below about 0.2, so the figure holds there. From 1.5, half the bed is on the lines within a second, about two beats at 124 BPM. In between the sand gets there, just slowly. The first explainer put the snap edge at 0.8; the real rule needs about twice that.</p>
+  </section>
+
+  <!-- 6 · try -->
+  <section aria-labelledby="h-try">
+    <h2 id="h-try"><small>Try</small>A few settings and what they do</h2>
+    <p>These move the handles on the gauge above. Watch the trace and the dots.</p>
+    <div class="presets" id="presets"></div>
+  </section>
+
+  <p class="foot">Code: <code>src/render/scenes/chladniSand.ts</code> (the numbers, <code>zoneDrive</code>, <code>rawPlateDrive</code>), <code>src/ui/widgets/sandZones.ts</code> (the gauge), and the record <code>docs/scenes/chladni.md</code>. The fake music here is a stand-in; in the app the drive comes from your real signal.</p>
+</div>
+
+<script>
+(() => {
+  // ---- the scene's numbers (src/render/scenes/chladniSand.ts) ----
+  const LIFT = 0.05, HOP = 1, PULL = 0.15, FREEZE_REF = 0.2, SNAP_REF = 1.5, GAP = 0.1, AXIS = 3;
+  const CELL_SCALE = 6, STEP_CAP = 0.5, CELL_PLATE = 2 / 6;
+  const COL = { freeze: "#9aa9c2", drift: "#c3a5f9", snap: "#8ce6a0", kick: "#f6c177", grain: "#f6e7ee" };
+  const ZONES = [{ w: "freezes", c: COL.freeze }, { w: "drifts", c: COL.drift }, { w: "snaps", c: COL.snap }];
+  const S = { freeze: FREEZE_REF, snap: SNAP_REF, vib: 0.5, kickSet: 0.5, src: "music", hand: 0.3, handKick: 0, sel: "freeze" };
+
+  const clampEdges = (f, s) => { f = Math.max(0.01, f); return { f, s: Math.max(s, f + GAP) }; };
+  function zoneDrive(d) {
+    const { f, s } = clampEdges(S.freeze, S.snap);
+    if (d < f) return (d * FREEZE_REF) / f;
+    if (d < s) return FREEZE_REF + ((d - f) * (SNAP_REF - FREEZE_REF)) / (s - f);
+    return SNAP_REF + (d - s);
+  }
+  const rawDrive = (vib, loud, kickSet, kick) => Math.pow(vib, 1.5) * 2 * (0.25 + 2.4 * loud) + kickSet * kick * 1.5;
+  const bounce = (a, l) => (a * a) / (a + l);
+  const ss = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+  const zoneOf = (d) => { const { f, s } = clampEdges(S.freeze, S.snap); return d < f ? 0 : d < s ? 1 : 2; };
+  const refZone = (d) => (d < FREEZE_REF ? 0 : d < SNAP_REF ? 1 : 2);
+  const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+  const MONO = "'Share Tech Mono', ui-monospace, monospace";
+
+  function setEdge(which, v) {
+    v = Math.round(v / 0.05) * 0.05;
+    if (which === "freeze") v = Math.max(0.05, Math.min(AXIS - 0.2, Math.min(v, S.snap - GAP)));
+    else v = Math.max(0.15, Math.min(AXIS, Math.max(v, S.freeze + GAP)));
+    S[which] = Number(v.toFixed(2));
+    S.sel = which;
+    markPreset();
+  }
+
+  // One tick of the sand rule for a grain across one cell: field sin(pi y/2),
+  // still line at y = 0, hardest shaking at the edges.
+  function stepCell(y, felt, dt) {
+    const f = Math.sin((Math.PI * y) / 2);
+    const accel = Math.abs(f) * 0.5 * felt;
+    const b = bounce(accel, LIFT);
+    const step = (HOP * b * Math.sqrt(dt * 60)) / 60 * CELL_SCALE;
+    const hop = (Math.random() - 0.5) * 2 * step;
+    const pull = Math.min(STEP_CAP, HOP * b * PULL * ss(0, 3 * LIFT, accel) * dt * CELL_SCALE);
+    let ny = y + hop - Math.sign(y) * Math.min(pull, Math.abs(y));
+    if (ny > 1) ny = 2 - ny; else if (ny < -1) ny = -2 - ny;
+    return [ny, hop];
+  }
+
+  function fit(c) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (!c.dataset.h) { c.dataset.h = c.getAttribute("height"); c.style.height = c.dataset.h + "px"; }
+    const w = c.clientWidth;
+    const H = Number(c.dataset.h);
+    const pw = Math.round(w * dpr), ph = Math.round(H * dpr);
+    if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; }
+    const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, H);
+    return { g, W: w, H };
+  }
+
+  // ---- fake music: 124 BPM, 4-bar phrases intro → build → drop → break ----
+  const BEAT = 60 / 124;
+  const PH = [{ n: "intro", e: 0.12, k: false }, { n: "build", e: 0.26, k: true }, { n: "drop", e: 0.44, k: true }, { n: "break", e: 0.18, k: false }];
+  let mt = 0, lastBeat = -1, kickPulse = 0, loud = 0.12, phrase = PH[0], barIn = 1;
+  function music(dt) {
+    mt += dt;
+    const bar = Math.floor(mt / (BEAT * 4));
+    phrase = PH[Math.floor(bar / 4) % 4]; barIn = (bar % 4) + 1;
+    const bp = mt / BEAT, bi = Math.floor(bp), inB = (bp % 1) * BEAT;
+    if (bi !== lastBeat) { lastBeat = bi; if (phrase.k) kickPulse = 1; }
+    kickPulse *= Math.exp(-dt * 7);
+    const target = phrase.e * (1 + (phrase.k ? 0.3 : 0.08) * Math.exp(-inB / 0.12)) + 0.025 * Math.sin(mt * 2.3);
+    loud += (target - loud) * Math.min(1, dt * 6);
+  }
+
+  // ---- 1 · gauge ----
+  const gauge = document.getElementById("gauge");
+  const G = { strip: 104, pad: 10 };
+  const gN = 300, gx = new Float32Array(gN), gy = new Float32Array(gN), gh = new Float32Array(gN);
+  for (let i = 0; i < gN; i++) { gx[i] = AXIS * ((i + Math.random()) / gN) ** 2; gy[i] = Math.random() * 2 - 1; }
+  let gSince = 0, active = null, hover = null;
+  const trail = [];
+  const gx2 = (W) => (d) => G.pad + Math.sqrt(Math.max(0, Math.min(d, AXIS)) / AXIS) * (W - 2 * G.pad);
+  const gd2 = (W) => (x) => AXIS * Math.max(0, Math.min(1, (x - G.pad) / (W - 2 * G.pad))) ** 2;
+  function gaugePick(e) {
+    const r = gauge.getBoundingClientRect(), d = gd2(r.width)(e.clientX - r.left);
+    return { d, which: Math.abs(d - S.freeze) <= Math.abs(d - S.snap) ? "freeze" : "snap" };
+  }
+  gauge.addEventListener("pointerdown", (e) => { const p = gaugePick(e); active = p.which; gauge.setPointerCapture(e.pointerId); setEdge(active, p.d); });
+  gauge.addEventListener("pointermove", (e) => {
+    if (active) setEdge(active, gaugePick(e).d);
+    else { const r = gauge.getBoundingClientRect(), X = gx2(r.width), x = e.clientX - r.left; hover = Math.abs(x - X(S.freeze)) < 12 ? "freeze" : Math.abs(x - X(S.snap)) < 12 ? "snap" : null; gauge.style.cursor = hover ? "ew-resize" : "pointer"; }
+  });
+  const rel = () => (active = null);
+  gauge.addEventListener("pointerup", rel); gauge.addEventListener("pointercancel", rel);
+  gauge.addEventListener("pointerleave", () => (hover = null));
+  gauge.addEventListener("keydown", (e) => {
+    if (e.key === "Tab" && !e.shiftKey && S.sel === "freeze") { S.sel = "snap"; e.preventDefault(); return; }
+    if (e.key === "Tab" && e.shiftKey && S.sel === "snap") { S.sel = "freeze"; e.preventDefault(); return; }
+    const d = e.key === "ArrowRight" || e.key === "ArrowUp" ? 0.05 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -0.05 : 0;
+    if (d) { e.preventDefault(); setEdge(S.sel, S[S.sel] + d * (e.shiftKey ? 4 : 1)); }
+  });
+
+  function drawGauge(drive, dt) {
+    const { g, W, H } = fit(gauge), X = gx2(W);
+    gSince += dt;
+    if (gSince > 4) { gSince = 0; for (let i = 0; i < gN; i++) gy[i] = Math.random() * 2 - 1; }
+    for (let i = 0; i < gN; i++) { const r = stepCell(gy[i], zoneDrive(gx[i]), dt); gy[i] = r[0]; gh[i] = r[1]; }
+    const st = G.strip, bounds = [X(0), X(S.freeze), X(S.snap), X(AXIS)], now = zoneOf(drive);
+    g.font = `12px ${MONO}`; g.textBaseline = "top";
+    for (let z = 0; z < 3; z++) {
+      const a = bounds[z], b = bounds[z + 1];
+      g.fillStyle = rgba(ZONES[z].c, now === z ? 0.2 : 0.08); g.fillRect(a, 0, b - a, st);
+      if (b - a > 50) { g.fillStyle = rgba(ZONES[z].c, now === z ? 1 : 0.6); g.textAlign = "left"; g.fillText(ZONES[z].w, a + 6, 5); }
+    }
+    const mid = st / 2, half = st / 2 - 7, Y = (y) => mid + y * half;
+    g.strokeStyle = "rgba(255,255,255,0.14)"; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(bounds[0], mid); g.lineTo(bounds[3], mid); g.stroke(); g.setLineDash([]);
+    for (let i = 0; i < gN; i++) {
+      const px = X(gx[i]), py = Y(gy[i]), hp = gh[i] * half * 3;
+      if (Math.abs(hp) > 0.6) { g.strokeStyle = "rgba(255,230,240,0.35)"; g.beginPath(); g.moveTo(px, py); g.lineTo(px, py - hp); g.stroke(); }
+      g.fillStyle = COL.grain; g.fillRect(px - 1.1, py - 1.1, 2.2, 2.2);
+    }
+    for (const w of ["freeze", "snap"]) {
+      const x = X(S[w]), lit = active === w || hover === w || (document.activeElement === gauge && S.sel === w), col = w === "freeze" ? COL.drift : COL.snap;
+      g.strokeStyle = rgba(col, lit ? 1 : 0.6); g.lineWidth = lit ? 2 : 1; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, st + 8); g.stroke(); g.lineWidth = 1;
+      g.fillStyle = rgba(col, lit ? 1 : 0.85); g.fillRect(x - 5, st + 3, 10, 12);
+      const label = `${w} ${S[w].toFixed(2)}`, tw = g.measureText(label).width, lx = Math.max(2, Math.min(W - tw - 8, x - tw / 2 - 3));
+      if (lit) { g.fillStyle = "rgba(0,0,0,0.8)"; g.fillRect(lx, 22, tw + 6, 16); g.fillStyle = "#fff"; g.textAlign = "left"; g.fillText(label, lx + 3, 24); }
+    }
+    const ay = st + 9;
+    g.strokeStyle = "rgba(255,255,255,0.25)"; g.beginPath(); g.moveTo(bounds[0], ay); g.lineTo(bounds[3], ay); g.stroke();
+    g.fillStyle = "rgba(255,255,255,0.45)"; g.textBaseline = "alphabetic";
+    for (const t of [0, 0.5, 1, 2, 3]) { const x = X(t); g.fillRect(x - 0.5, ay - 2, 1, 4); g.textAlign = t === 0 ? "left" : t === 3 ? "right" : "center"; g.fillText(String(t), x, H - 4); }
+    trail.push(drive); if (trail.length > 30) trail.shift();
+    for (let k = 0; k < trail.length; k++) { const a = (k + 1) / trail.length; g.fillStyle = `rgba(255,255,255,${0.4 * a * a})`; g.fillRect(X(trail[k]) - 1, ay - 5, 2, 10); }
+    const x = X(drive); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(x, ay - 1); g.lineTo(x - 5, ay - 10); g.lineTo(x + 5, ay - 10); g.closePath(); g.fill();
+    const s = document.getElementById("status"); s.textContent = `drive ${drive.toFixed(2)} · sand ${ZONES[now].w}`; s.style.color = ZONES[now].c;
+  }
+
+  // ---- 2 · drive controls, formula, trace ----
+  const $ = (id) => document.getElementById(id);
+  const srcMusic = $("srcMusic"), srcHand = $("srcHand"), handIn = $("hand");
+  function setSrc(src) { S.src = src; srcMusic.setAttribute("aria-pressed", String(src === "music")); srcHand.setAttribute("aria-pressed", String(src === "hand")); handIn.disabled = src !== "hand"; }
+  srcMusic.addEventListener("click", () => setSrc("music"));
+  srcHand.addEventListener("click", () => setSrc("hand"));
+  $("kickBtn").addEventListener("click", () => { S.handKick = 1; if (S.src === "music") setSrc("hand"); });
+  $("vib").addEventListener("input", (e) => { S.vib = +e.target.value; $("vibV").textContent = S.vib.toFixed(2); });
+  $("kickSet").addEventListener("input", (e) => { S.kickSet = +e.target.value; $("kickSetV").textContent = S.kickSet.toFixed(2); });
+  handIn.addEventListener("input", (e) => { S.hand = +e.target.value; $("handV").textContent = S.hand.toFixed(2); });
+
+  const TR = 360, trace = new Float32Array(TR), kTrace = new Float32Array(TR); let th = 0;
+  function drawTrace(drive, kickPart) {
+    trace[th] = drive; kTrace[th] = kickPart; th = (th + 1) % TR;
+    const c = $("trace"), { g, W, H } = fit(c), L = 30, R = W - 8, T = 8, B = H - 18;
+    const Y = (v) => B - (Math.min(v, AXIS) / AXIS) * (B - T);
+    const { f, s } = clampEdges(S.freeze, S.snap), bands = [[0, f], [f, s], [s, AXIS]];
+    for (let z = 0; z < 3; z++) { g.fillStyle = rgba(ZONES[z].c, 0.08); g.fillRect(L, Y(bands[z][1]), R - L, Y(bands[z][0]) - Y(bands[z][1])); }
+    g.font = `11px ${MONO}`; g.fillStyle = "rgba(255,255,255,0.45)"; g.textAlign = "right"; g.textBaseline = "middle";
+    for (const t of [0, 1, 2, 3]) { g.fillText(String(t), L - 6, Y(t)); g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(L, Y(t), R - L, 1); g.fillStyle = "rgba(255,255,255,0.45)"; }
+    for (const [v, col] of [[f, COL.drift], [s, COL.snap]]) { g.strokeStyle = rgba(col, 0.7); g.setLineDash([4, 3]); g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke(); g.setLineDash([]); }
+    const X = (k) => L + (k / (TR - 1)) * (R - L);
+    // kick share, filled under the line
+    g.beginPath();
+    for (let k = 0; k < TR; k++) { const i = (th + k) % TR; const v = trace[i] - kTrace[i]; k ? g.lineTo(X(k), Y(v)) : g.moveTo(X(k), Y(v)); }
+    for (let k = TR - 1; k >= 0; k--) { const i = (th + k) % TR; g.lineTo(X(k), Y(trace[i])); }
+    g.closePath(); g.fillStyle = rgba(COL.kick, 0.35); g.fill();
+    g.beginPath();
+    for (let k = 0; k < TR; k++) { const v = trace[(th + k) % TR]; k ? g.lineTo(X(k), Y(v)) : g.moveTo(X(k), Y(v)); }
+    g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke(); g.lineWidth = 1;
+    g.textAlign = "left"; g.textBaseline = "alphabetic"; g.fillStyle = "rgba(255,255,255,0.45)"; g.fillText("6 s ago", L, H - 4); g.textAlign = "right"; g.fillText("now", R, H - 4);
+    g.fillStyle = rgba(COL.kick, 0.9); g.textAlign = "left"; g.fillText("■ from Bass kick", L + 60, H - 4);
+  }
+
+  // ---- 3 · remap chart ----
+  const remap = $("remap"); let rActive = null;
+  const RM = { L: 42, R: 14, T: 12, B: 34 };
+  function rScale(W, H) { const X = (v) => RM.L + (v / AXIS) * (W - RM.L - RM.R), Y = (v) => H - RM.B - (Math.min(v, 3.3) / 3.3) * (H - RM.T - RM.B); return { X, Y, xd: (x) => ((x - RM.L) / (W - RM.L - RM.R)) * AXIS }; }
+  remap.addEventListener("pointerdown", (e) => {
+    const r = remap.getBoundingClientRect(), { X, xd } = rScale(r.width, r.height), x = e.clientX - r.left;
+    const df = Math.abs(x - X(S.freeze)), dsn = Math.abs(x - X(S.snap));
+    rActive = df <= dsn ? "freeze" : "snap"; remap.setPointerCapture(e.pointerId); setEdge(rActive, xd(x));
+  });
+  remap.addEventListener("pointermove", (e) => { if (!rActive) return; const r = remap.getBoundingClientRect(); setEdge(rActive, rScale(r.width, r.height).xd(e.clientX - r.left)); });
+  remap.addEventListener("pointerup", () => (rActive = null)); remap.addEventListener("pointercancel", () => (rActive = null));
+  function drawRemap(drive) {
+    const { g, W, H } = fit(remap), { X, Y } = rScale(W, H);
+    const { f, s } = clampEdges(S.freeze, S.snap);
+    // column bands: your edges
+    for (const [a, b, z] of [[0, f, 0], [f, s, 1], [s, AXIS, 2]]) { g.fillStyle = rgba(ZONES[z].c, 0.07); g.fillRect(X(a), Y(3.3), X(b) - X(a), Y(0) - Y(3.3)); }
+    // reference levels the sand reacts to
+    g.font = `11px ${MONO}`;
+    for (const [v, col, t] of [[FREEZE_REF, COL.drift, "sand freezes below 0.2"], [SNAP_REF, COL.snap, "sand snaps above 1.5"]]) {
+      g.strokeStyle = rgba(col, 0.45); g.setLineDash([2, 4]); g.beginPath(); g.moveTo(X(0), Y(v)); g.lineTo(X(AXIS), Y(v)); g.stroke(); g.setLineDash([]);
+      g.fillStyle = rgba(col, 0.85); g.textAlign = "right"; g.textBaseline = "bottom"; g.fillText(t, X(AXIS) - 2, Y(v) - 2);
+    }
+    // axes
+    g.fillStyle = "rgba(255,255,255,0.45)"; g.textBaseline = "middle"; g.textAlign = "right";
+    for (const t of [0, 1, 2, 3]) { g.fillText(String(t), RM.L - 6, Y(t)); }
+    g.textAlign = "center"; g.textBaseline = "top";
+    for (const t of [0, 1, 2, 3]) g.fillText(String(t), X(t), H - RM.B + 6);
+    g.fillText("drive from the music →", (X(0) + X(AXIS)) / 2, H - 14);
+    g.save(); g.translate(12, (Y(0) + Y(3.3)) / 2); g.rotate(-Math.PI / 2); g.textBaseline = "middle"; g.fillText("drive the sand feels →", 0, 0); g.restore();
+    // identity
+    g.strokeStyle = "rgba(255,255,255,0.25)"; g.setLineDash([5, 5]); g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(3.3 > AXIS ? AXIS : 3.3), Y(AXIS)); g.stroke(); g.setLineDash([]);
+    // the remap, coloured by the zone each piece lands in
+    g.lineWidth = 2.5;
+    for (let i = 0; i < 300; i++) {
+      const a = (i / 300) * AXIS, b = ((i + 1) / 300) * AXIS;
+      g.strokeStyle = ZONES[zoneOf((a + b) / 2)].c; g.beginPath(); g.moveTo(X(a), Y(zoneDrive(a))); g.lineTo(X(b), Y(zoneDrive(b))); g.stroke();
+    }
+    g.lineWidth = 1;
+    // handles
+    for (const [w, col] of [["freeze", COL.drift], ["snap", COL.snap]]) {
+      const x = X(S[w]); g.strokeStyle = rgba(col, rActive === w ? 1 : 0.7); g.lineWidth = rActive === w ? 2 : 1;
+      g.beginPath(); g.moveTo(x, Y(3.3)); g.lineTo(x, Y(0)); g.stroke(); g.lineWidth = 1;
+      g.fillStyle = col; g.fillRect(x - 5, Y(0) - 6, 10, 12);
+      g.textAlign = "center"; g.textBaseline = "top"; g.fillStyle = rgba(col, 0.95); g.fillText(`${w} ${S[w].toFixed(2)}`, Math.max(X(0) + 34, Math.min(X(AXIS) - 34, x)), Y(3.3) + 2 + (w === "snap" ? 14 : 0));
+    }
+    // the drive right now
+    const fd = zoneDrive(drive), px = X(Math.min(drive, AXIS)), py = Y(fd);
+    g.strokeStyle = "rgba(255,255,255,0.6)"; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(px, Y(0)); g.lineTo(px, py); g.lineTo(X(0), py); g.stroke(); g.setLineDash([]);
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(px, py, 4.5, 0, 7); g.fill();
+    const z = refZone(fd);
+    $("remapSay").innerHTML = `Right now the music gives <b class="num">${drive.toFixed(2)}</b>. With your handles the sand feels <b class="num">${fd.toFixed(2)}</b>, which is in its <b style="color:${ZONES[z].c}">${ZONES[z].w}</b> range.`;
+  }
+
+  // ---- 4 · the rule: hop and pull, and three cells ----
+  const A_PEAK = 0.5; // amplitude where the plate shakes hardest
+  const hopPerSec = (D) => (Math.sqrt(60) * HOP * bounce(A_PEAK * D, LIFT)) / 60 / Math.sqrt(3) / CELL_PLATE;
+  const pullPerSec = (D) => (HOP * bounce(A_PEAK * D, LIFT) * PULL * ss(0, 3 * LIFT, A_PEAK * D)) / CELL_PLATE;
+  const RULE_YMAX = Math.ceil(Math.max(hopPerSec(AXIS), pullPerSec(AXIS)) * 10) / 10;
+  function drawRule(drive) {
+    const c = $("rule"), { g, W, H } = fit(c), L = 40, R = W - 12, T = 12, B = H - 34;
+    const X = (v) => L + (v / AXIS) * (R - L), Y = (v) => B - (v / RULE_YMAX) * (B - T);
+    for (const [a, b, z] of [[0, FREEZE_REF, 0], [FREEZE_REF, SNAP_REF, 1], [SNAP_REF, AXIS, 2]]) {
+      g.fillStyle = rgba(ZONES[z].c, 0.08); g.fillRect(X(a), T, X(b) - X(a), B - T);
+      g.fillStyle = rgba(ZONES[z].c, 0.8); g.font = `11px ${MONO}`; g.textAlign = "left"; g.textBaseline = "top"; if (X(b) - X(a) > 46) g.fillText(ZONES[z].w, X(a) + 5, T + 4);
+    }
+    g.fillStyle = "rgba(255,255,255,0.45)"; g.textAlign = "right"; g.textBaseline = "middle";
+    for (let v = 0; v <= RULE_YMAX + 1e-6; v += 0.2) { g.fillText(v.toFixed(1), L - 6, Y(v)); g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(L, Y(v), R - L, 1); g.fillStyle = "rgba(255,255,255,0.45)"; }
+    g.textAlign = "center"; g.textBaseline = "top";
+    for (const t of [0, 0.2, 1, 1.5, 2, 3]) g.fillText(String(t), X(t), B + 6);
+    g.fillText("drive the sand feels →", (L + R) / 2, H - 14);
+    const curve = (fn, col, w) => { g.beginPath(); for (let i = 0; i <= 200; i++) { const d = (i / 200) * AXIS; i ? g.lineTo(X(d), Y(fn(d))) : g.moveTo(X(d), Y(fn(d))); } g.strokeStyle = col; g.lineWidth = w; g.stroke(); g.lineWidth = 1; };
+    curve(hopPerSec, "rgba(255,255,255,0.5)", 1.5);
+    curve(pullPerSec, COL.drift, 2.5);
+    g.textAlign = "right"; g.textBaseline = "bottom";
+    g.fillStyle = "rgba(255,255,255,0.7)"; g.fillText("random hop", X(AXIS) - 4, Y(hopPerSec(AXIS)) - 4);
+    g.fillStyle = COL.drift; g.fillText("pull to the line", X(AXIS) - 4, Y(pullPerSec(AXIS)) - 4);
+    const fd = Math.min(zoneDrive(drive), AXIS);
+    g.strokeStyle = "rgba(255,255,255,0.7)"; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(X(fd), T); g.lineTo(X(fd), B); g.stroke(); g.setLineDash([]);
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(X(fd), Y(pullPerSec(fd)), 4, 0, 7); g.fill();
+    g.textAlign = "left"; g.textBaseline = "top"; g.fillText("now", Math.min(X(fd) + 5, R - 30), T + 18);
+  }
+  const CELLS = [0.15, 0.8, 2.0].map((felt, k) => {
+    const n = 140, y = new Float32Array(n), xs = new Float32Array(n), h = new Float32Array(n);
+    for (let i = 0; i < n; i++) { xs[i] = Math.random(); y[i] = Math.random() * 2 - 1; }
+    return { felt, n, y, xs, h, c: $("c" + k), v: $("c" + k + "v"), since: 0 };
+  });
+  function drawCells(dt) {
+    for (const cell of CELLS) {
+      cell.since += dt;
+      if (cell.since > 4) { cell.since = 0; for (let i = 0; i < cell.n; i++) cell.y[i] = Math.random() * 2 - 1; }
+      let on = 0;
+      for (let i = 0; i < cell.n; i++) { const r = stepCell(cell.y[i], cell.felt, dt); cell.y[i] = r[0]; cell.h[i] = r[1]; if (Math.abs(r[0]) < 0.1) on++; }
+      const { g, W, H } = fit(cell.c), mid = H / 2, half = H / 2 - 8;
+      // how hard each height shakes, as a faint glow at the edges
+      const grd = g.createLinearGradient(0, 0, 0, H);
+      grd.addColorStop(0, "rgba(195,165,249,0.14)"); grd.addColorStop(0.5, "rgba(195,165,249,0)"); grd.addColorStop(1, "rgba(195,165,249,0.14)");
+      g.fillStyle = grd; g.fillRect(0, 0, W, H);
+      g.strokeStyle = "rgba(255,255,255,0.18)"; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(0, mid); g.lineTo(W, mid); g.stroke(); g.setLineDash([]);
+      for (let i = 0; i < cell.n; i++) {
+        const px = 6 + cell.xs[i] * (W - 12), py = mid + cell.y[i] * half, hp = cell.h[i] * half * 3;
+        if (Math.abs(hp) > 0.6) { g.strokeStyle = "rgba(255,230,240,0.35)"; g.beginPath(); g.moveTo(px, py); g.lineTo(px, py - hp); g.stroke(); }
+        g.fillStyle = COL.grain; g.fillRect(px - 1.2, py - 1.2, 2.4, 2.4);
+      }
+      g.strokeStyle = "rgba(255,255,255,0.15)"; g.lineWidth = 2.5; g.beginPath(); g.arc(W - 13, 13, 6, 0, 7); g.stroke();
+      g.strokeStyle = "rgba(255,255,255,0.7)"; g.beginPath(); g.arc(W - 13, 13, 6, -Math.PI / 2, -Math.PI / 2 + (cell.since / 4) * Math.PI * 2); g.stroke(); g.lineWidth = 1;
+      g.fillStyle = "rgba(255,255,255,0.4)"; g.font = `10px ${MONO}`; g.textAlign = "left"; g.textBaseline = "top"; g.fillText("shakes most", 5, 3); g.textBaseline = "bottom"; g.fillText("still line", 5, mid - 2);
+      cell.v.textContent = `${Math.round((on / cell.n) * 100)}% on the line`;
+    }
+  }
+
+  // ---- 5 · measured table ----
+  const MEAS = [[0.1, 0.16, 0.16], [0.2, 0.17, 0.17], [0.4, 0.18, 0.18], [0.6, 0.18, 0.24], [0.8, 0.2, 0.47], [1.0, 0.23, 0.75], [1.2, 0.32, 0.91], [1.5, 0.48, 0.98], [1.6, 0.53, 0.99], [2.0, 0.71, 1.0]];
+  const bar = (v, col) => `<div class="mbar"><i style="width:${v * 100}%;background:${rgba(col, 0.55)}"></i><b class="floor" style="left:16%"></b><span>${Math.round(v * 100)}%</span></div>`;
+  $("meas").innerHTML = MEAS.map(([d, a, b]) => { const col = ZONES[refZone(d)].c; return `<tr><td class="d" style="color:${col}">${d.toFixed(1)}</td><td>${bar(a, col)}</td><td>${bar(b, col)}</td></tr>`; }).join("");
+
+  // ---- 6 · presets ----
+  const PRESETS = [
+    { n: "Default", f: 0.2, s: 1.5, d: "The plate as it was before the handles existed. Mostly drifting; strong kicks in a drop briefly reach snapping." },
+    { n: "Every kick snaps", f: 0.2, s: 0.7, d: "Snap edge pulled down: any loud moment pulls the sand into a crisp figure almost at once." },
+    { n: "Quiet holds still", f: 0.6, s: 1.5, d: "Freeze edge pushed up: intros and breaks stop moving the sand, so one figure stays on screen." },
+    { n: "Always drifting", f: 0.05, s: 3, d: "Both edges out of the way: the sand is always wandering and rarely forms a sharp figure." },
+  ];
+  const presetsEl = $("presets");
+  PRESETS.forEach((p) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "preset";
+    b.innerHTML = `<b>${p.n}</b><span>${p.d}</span><span><code>freeze ${p.f.toFixed(2)}</code> <code>snap ${p.s.toFixed(2)}</code></span>`;
+    b.addEventListener("click", () => { S.freeze = p.f; S.snap = p.s; markPreset(); });
+    p.el = b; presetsEl.appendChild(b);
+  });
+  function markPreset() { PRESETS.forEach((p) => p.el && p.el.setAttribute("aria-pressed", String(Math.abs(p.f - S.freeze) < 1e-6 && Math.abs(p.s - S.snap) < 1e-6))); }
+  markPreset();
+
+  // ---- loop ----
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000)); last = now;
+    music(dt);
+    S.handKick *= Math.exp(-dt * 7);
+    const L = S.src === "music" ? loud : S.hand, K = S.src === "music" ? kickPulse : S.handKick;
+    const kickPart = S.kickSet * K * 1.5, drive = rawDrive(S.vib, L, S.kickSet, K);
+    $("phrase").textContent = S.src === "music" ? `${phrase.n} · bar ${barIn} of 4` : "your hand";
+    $("formula").innerHTML = `2 × Vibration <b>${S.vib.toFixed(2)}</b><sup>1.5</sup> × (0.25 + 2.4 × loudness <b>${L.toFixed(2)}</b>) <span class="k">+ 1.5 × Bass kick <b>${S.kickSet.toFixed(2)}</b> × kick pulse <b>${K.toFixed(2)}</b></span> = drive <b class="out">${drive.toFixed(2)}</b>`;
+    drawGauge(drive, dt);
+    drawTrace(drive, kickPart);
+    drawRemap(drive);
+    drawRule(drive);
+    drawCells(dt);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>

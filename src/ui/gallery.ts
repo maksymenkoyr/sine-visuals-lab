@@ -12,18 +12,21 @@ import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
-import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
+import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, createRenderGate, targetFrameIntervalMs } from "../render/framePace.ts";
 import { getPowerMode } from "../render/powerMode.ts";
 import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
+import type { SceneStage } from "../render/scenes/index.ts";
 import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
+import { FLASH_WARNING } from "./flashWarning.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
   /** Whether this device's GPU quality preset can run the scene fullscreen. */
   enabled: boolean;
-  /** Rougher, unpolished scenes sit behind the gallery's collapsed "draft"
-   *  section and carry a small badge — see DRAFT_SCENE_IDS in scenes/index.ts. */
-  draft: boolean;
+  /** Which section the tile sits in: Released (large tiles), In development
+   *  (small tiles, open), or Draft (small greyed tiles behind a fold) — see
+   *  sceneStage in scenes/index.ts. */
+  stage: SceneStage;
   /** Shown on a disabled tile, e.g. "Needs a faster device". */
   reason?: string;
 }
@@ -92,7 +95,8 @@ const NARROW_BELOW_PX = 820;
 // The gallery design (option 1a of "Gallery & Scene", in the same Claude
 // Design project as the controls panel's "Viz Controls"): masthead with the
 // mark and the sound-source picker, a Released section of large
-// tiles, a Draft section of small ones behind a fold, and a one-line footer.
+// tiles, an In development section of small ones, a Draft section of small
+// greyed ones behind a fold, and a one-line footer.
 // A stylesheet rather than inline cssText because nearly every rule here
 // needs :hover, :focus-visible or a media query. Accents and fonts come from
 // controlsTheme.ts so the gallery and the panel can't drift apart.
@@ -178,7 +182,7 @@ const stylesheet = `
 .gal-fold-arrow { font-size: 8px; }
 
 .gal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.gal-grid-draft { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.gal-grid-small { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
 
 .gal-tile {
   display: block; width: 100%; padding: 0; text-align: left; font: inherit; color: #fff;
@@ -186,8 +190,16 @@ const stylesheet = `
   border-radius: 3px; background: rgba(255,255,255,.025); overflow: hidden; cursor: pointer;
 }
 .gal-tile:hover, .gal-tile:focus-visible { border-color: ${BRAND_RED}; outline: none; }
-.gal-tile[data-draft] { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.02); }
-.gal-tile[data-draft]:hover, .gal-tile[data-draft]:focus-visible { border-color: ${withAlpha(SCENE_VIOLET, 0.7)}; }
+.gal-tile[data-stage="development"] { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.02); }
+.gal-tile[data-stage="development"]:hover, .gal-tile[data-stage="development"]:focus-visible { border-color: ${withAlpha(SCENE_VIOLET, 0.7)}; }
+/* Drafts read quieter than everything above them: grey caption and tag, and
+ * a grey, dimmed picture that comes back to colour under the pointer. */
+.gal-tile[data-stage="draft"] { border-color: rgba(255,255,255,.07); background: rgba(255,255,255,.015); }
+.gal-tile[data-stage="draft"]:hover, .gal-tile[data-stage="draft"]:focus-visible { border-color: rgba(255,255,255,.4); }
+.gal-tile[data-stage="draft"] .gal-canvas { filter: grayscale(1) brightness(.6); transition: filter .2s ease; }
+.gal-tile[data-stage="draft"]:hover .gal-canvas, .gal-tile[data-stage="draft"]:focus-visible .gal-canvas { filter: none; }
+.gal-tile[data-stage="draft"] .gal-cap-name { color: rgba(255,255,255,.55); }
+.gal-tile[data-stage="draft"] .gal-tag { color: rgba(255,255,255,.45); border-color: rgba(255,255,255,.2); }
 .gal-tile[data-disabled] { opacity: .45; }
 .gal-shot { position: relative; aspect-ratio: 16 / 9; background: ${GROUND}; }
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -231,6 +243,7 @@ const stylesheet = `
 /* The version reads as typed ("0.1.4 - beta"), not in the footer's capitals. */
 .gal-foot a.gal-ver { text-transform: none; }
 .gal-foot a:hover { color: #fff; }
+.gal-foot-warn { flex-basis: 100%; text-transform: none; letter-spacing: .02em; }
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
   .gal-root { padding: 24px 16px 32px; }
@@ -254,6 +267,10 @@ const stylesheet = `
   .gal-fold { min-height: 40px; padding: 8px 14px; }
 }
 `;
+
+function sceneCount(n: number): string {
+  return `${n} ${n === 1 ? "scene" : "scenes"}`;
+}
 
 function ensureGalleryStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -399,9 +416,10 @@ interface Tile {
    *  budget for tiles the user can actually pick. */
   enabled: boolean;
   /** This tile's last IntersectionObserver ratio (0..1) — drives both the
-   *  eligibility cutoff and the near/far priority split. Draft tiles start
-   *  at 0 (built into a possibly still-collapsed section, before the
-   *  observer's first callback can fire); featured tiles start at 1. */
+   *  eligibility cutoff and the near/far priority split. Draft and
+   *  in-development tiles start at 0 (built below the fold or into a
+   *  still-collapsed section, before the observer's first callback can
+   *  fire); featured tiles start at 1. */
   visibleRatio: number;
 }
 
@@ -431,7 +449,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     sourceRow.setAttribute("aria-label", "Sound source");
   }
   const LIVE_LABEL = "LISTENING";
-  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; nameEl: HTMLElement; hintEl: HTMLElement; descriptor: string }>();
+  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; nameEl: HTMLElement; hintEl: HTMLElement; descriptor: string; title: string }>();
   // Only where there's an actual choice to nudge toward — the solo path (no
   // display capture) has nothing to pick between, so it keeps just the plain
   // label, same as before this hint existed.
@@ -453,6 +471,8 @@ export function createGallery(deps: GalleryDeps): Gallery {
       entry.btn.dataset.state = uiState;
       if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState === "live"));
       entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : entry.descriptor;
+      // Tapping the live one disconnects it (src/app.ts's onSourceChoice).
+      if (canChoose) entry.btn.title = uiState === "live" ? "Listening — tap to disconnect" : entry.title;
       // The Mic button's own name is the CHOSEN input's kind ("Mic"/"Line
       // in"/"Loopback" — src/audio/inputDevice.ts), not a fixed "Microphone":
       // a picked USB interface or loopback driver should read as what it is
@@ -485,7 +505,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       btn.dataset.solo = "";
       btn.tabIndex = -1;
     }
-    sourceButtons.set(choice, { btn, nameEl, hintEl, descriptor });
+    sourceButtons.set(choice, { btn, nameEl, hintEl, descriptor, title: title ?? "" });
     sourceRow.appendChild(btn);
   };
   // "Microphone" is only the initial paint — refreshSource() below repaints
@@ -522,19 +542,29 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const grid = el("div", "gal-grid");
   released.append(releasedHead, grid);
 
+  // Open like Released, but small tiles: scenes being worked on now.
+  const devSection = el("div", "gal-section");
+  const devHead = el("div", "gal-section-head");
+  const devName = el("div", "gal-mono gal-section-name", "In development");
+  devName.style.color = SCENE_VIOLET;
+  const devCount = el("div", "gal-mono gal-count");
+  devHead.append(devName, el("div", "gal-rule"), devCount);
+  const devGrid = el("div", "gal-grid-small");
+  devSection.append(devHead, devGrid);
+
   // Collapsed by default — see expandDrafts/collapseDrafts below. Built lazily
   // so a first-time visitor never pays for compiling the draft shaders.
   const draftSection = el("div", "gal-section");
   const draftHead = el("div", "gal-section-head");
   const draftName = el("div", "gal-mono gal-section-name", "Draft");
-  draftName.style.color = SCENE_VIOLET;
+  draftName.style.color = "rgba(255,255,255,.45)";
   const draftToggle = el("button", "gal-mono gal-fold");
   draftToggle.type = "button";
   const draftArrow = el("span", "gal-fold-arrow");
   const draftLabel = el("span", "");
   draftToggle.append(draftArrow, draftLabel);
   draftHead.append(draftName, el("div", "gal-rule"), draftToggle);
-  const draftGrid = el("div", "gal-grid-draft");
+  const draftGrid = el("div", "gal-grid-small");
   draftGrid.style.display = "none";
   draftSection.append(draftHead, draftGrid);
 
@@ -576,15 +606,17 @@ export function createGallery(deps: GalleryDeps): Gallery {
   instagramLink.rel = "noopener";
   const footLinks = el("div", "gal-foot-links");
   footLinks.append(sourceLink, instagramLink, licensesLink, privacyLink);
-  foot.append(versionLink, footLinks);
+  // A full row under the version and links: see ui/flashWarning.ts.
+  const flashWarn = el("div", "gal-foot-warn", FLASH_WARNING);
+  foot.append(versionLink, footLinks, flashWarn);
 
-  page.append(mast, errorBanner, released, draftSection, foot);
+  page.append(mast, errorBanner, released, devSection, draftSection, foot);
   root.appendChild(page);
   document.body.appendChild(root);
 
   let preview: PreviewRenderer | null = null;
   let tiles: Tile[] = [];
-  let lastDrawMs = 0;
+  const drawGate = createRenderGate();
   let visible = false;
   // True from show() until the next tick has run: that tick draws only scenes
   // already mounted — see tick()'s lazy-mount comment.
@@ -682,29 +714,32 @@ export function createGallery(deps: GalleryDeps): Gallery {
   function buildTile(entry: GallerySceneEntry, i: number, into: HTMLElement): void {
     const btn = el("button", "gal-tile");
     btn.type = "button";
-    if (entry.draft) btn.dataset.draft = "";
+    btn.dataset.stage = entry.stage;
     if (!entry.enabled) btn.dataset.disabled = "";
 
     const shot = el("div", "gal-shot");
     const canvas = el("canvas", "gal-canvas");
     canvas.width = PREVIEW_W;
     canvas.height = PREVIEW_H;
-    // Not marked not-visible here: a draft tile's initial visibleRatio (0,
+    // Not marked not-visible here: a small tile's initial visibleRatio (0,
     // set on the Tile object below) already covers the gap before the
     // IntersectionObserver's first callback — see the Tile field's comment.
     shot.appendChild(canvas);
 
     const reason = entry.enabled ? null : (entry.reason ?? "Unavailable");
     const verBadge = sceneVersionBadge(entry.scene.id);
-    if (entry.draft) {
+    if (entry.stage !== "released") {
       // Small tile: the picture, then a caption bar with the name (plus its
-      // own version, if it has one) and a tag (the reason it can't run here
-      // takes the tag's place when it can't).
+      // own version, if it has one) and a tag — "Draft" on a draft, nothing
+      // on a scene in development (its section heading says it), and the
+      // reason it can't run here on either when it can't.
       const cap = el("div", "gal-cap");
       const capName = el("div", "gal-cap-name");
       capName.append(el("div", "gal-cap-name-text", entry.scene.name));
       if (verBadge) capName.append(verBadge);
-      cap.append(capName, el("div", "gal-tag", reason ?? "Draft"));
+      cap.append(capName);
+      const tag = reason ?? (entry.stage === "draft" ? "Draft" : null);
+      if (tag) cap.append(el("div", "gal-tag", tag));
       btn.append(shot, cap);
     } else {
       // Large tile: the name (plus its own version) sits over the picture's
@@ -742,10 +777,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
       anim: createAnimClock(),
       lastDrawMs: 0,
       enabled: entry.enabled,
-      // Draft tiles may be built into a still-collapsed (display: none)
-      // section — start at 0 so tick() never draws one in the brief window
-      // before the IntersectionObserver's first callback can fire.
-      visibleRatio: entry.draft ? 0 : 1,
+      // Small tiles may be built below the fold or into a still-collapsed
+      // (display: none) section — start at 0 so tick() never draws one in the
+      // brief window before the IntersectionObserver's first callback can fire.
+      visibleRatio: entry.stage === "released" ? 1 : 0,
     };
     tiles.push(tile);
     tileByCanvas.set(canvas, tile);
@@ -815,6 +850,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   function buildTiles(): void {
     for (const t of tiles) observer.unobserve(t.canvas);
     grid.innerHTML = "";
+    devGrid.innerHTML = "";
     draftGrid.innerHTML = "";
     tiles = [];
     draftsBuilt = false;
@@ -828,14 +864,18 @@ export function createGallery(deps: GalleryDeps): Gallery {
     const entries = deps.scenes();
     preview?.setSize(PREVIEW_W, PREVIEW_H);
 
-    const featured = entries.filter((e) => !e.draft);
-    pendingDrafts = entries.filter((e) => e.draft);
-    pendingDraftStartIndex = featured.length;
+    const featured = entries.filter((e) => e.stage === "released");
+    const developing = entries.filter((e) => e.stage === "development");
+    pendingDrafts = entries.filter((e) => e.stage === "draft");
+    pendingDraftStartIndex = featured.length + developing.length;
 
     featured.forEach((entry, i) => buildTile(entry, i, grid));
+    developing.forEach((entry, j) => buildTile(entry, featured.length + j, devGrid));
 
-    releasedCount.textContent = `${featured.length} ${featured.length === 1 ? "scene" : "scenes"}`;
+    releasedCount.textContent = sceneCount(featured.length);
     released.style.display = featured.length > 0 ? "" : "none";
+    devCount.textContent = sceneCount(developing.length);
+    devSection.style.display = developing.length > 0 ? "" : "none";
     draftSection.style.display = pendingDrafts.length > 0 ? "" : "none";
     refreshSource();
     updateToggleLabel();
@@ -866,7 +906,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       root.style.display = "block";
       visible = true;
       justShown = true;
-      lastDrawMs = 0;
+      drawGate.reset();
     },
 
     hide(): void {
@@ -899,12 +939,11 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // the restore is coming. drawTo's own guard covers already-mounted ones.
       if (preview.isLost()) return;
       const intervalMs = tickIntervalMs(preset);
-      // shouldRenderFrame(), not a raw `<` comparison — see framePace.ts's
-      // header for why the naive comparison quantizes against vsync and
-      // silently loses a third of the intended rate, and for why the
-      // timestamp it keeps is nextRenderAnchor()'s, not simply `nowMs`.
-      if (!shouldRenderFrame(nowMs, lastDrawMs, intervalMs)) return;
-      lastDrawMs = nextRenderAnchor(nowMs, lastDrawMs, intervalMs);
+      // framePace.ts's gate, not a raw `<` comparison — see that file for why
+      // the naive comparison quantizes against vsync and silently loses a
+      // third of the intended rate, why the gate keeps nextRenderAnchor()'s
+      // grid rather than simply `nowMs`, and why it skips catch-up frames.
+      if (!drawGate.pass(nowMs, intervalMs)) return;
 
       const timeSec = nowMs / 1000;
       const live = deps.liveFrame();

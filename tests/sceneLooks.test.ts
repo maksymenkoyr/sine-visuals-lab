@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { deflateSync, inflateSync, strFromU8 } from "fflate";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
 import { isAutoEnabled, setAutoEnabled } from "../src/render/autoTune.ts";
@@ -11,10 +12,15 @@ import {
   deleteLook,
   encodeLook,
   listLooks,
+  primeUndo,
+  renameLook,
   saveLook,
   saveSharedLook,
+  takeUndo,
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
+import { clearCustomValue, getCustomValue, getSliderStretch, setCustomValue, stretchSlider } from "../src/render/customValues.ts";
+import { addShapingNode, listShapingNodes, removeShapingNode } from "../src/render/shapingNodes.ts";
 
 // Vitest runs under environment: "node" (vitest.config.ts) — no localStorage
 // global at all, mirroring panelFolds.test.ts. Proves the module tolerates
@@ -34,6 +40,12 @@ const FLASH: SceneSetting = {
 const SPECS = [FOCUS, BREATHE];
 const SPECS_WITH_DRIVE = [FOCUS, BREATHE, FLASH];
 
+/** The JSON inside a share code, plain or deflated (`Z`-prefixed). */
+const wireOf = (code: string) => {
+  const bytes = Uint8Array.from(atob(code.replace(/^Z/, "").replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  return JSON.parse(strFromU8(code.startsWith("Z") ? inflateSync(bytes) : bytes));
+};
+
 describe("encodeLook / decodeLook", () => {
   it("round-trips a look, including a non-ASCII name", () => {
     const look: SceneLook = { name: "Café Drift ✨", sceneId: "mesh", manual: { focus: 0.72, breathe: 0.1 } };
@@ -41,9 +53,48 @@ describe("encodeLook / decodeLook", () => {
     expect(decoded).toEqual(look);
   });
 
+  it("round-trips the palette (`p`); a look without one has none, and a non-string `p` is dropped", () => {
+    const look: SceneLook = { name: "Tinted", sceneId: "mesh", manual: { focus: 0.5 }, paletteId: "ember" };
+    expect(wireOf(encodeLook(look)).p).toBe("ember");
+    expect(decodeLook(encodeLook(look))?.paletteId).toBe("ember");
+    expect("p" in wireOf(encodeLook({ ...look, paletteId: undefined }))).toBe(false);
+    const odd = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, p: 7 })).replace(/=+$/, "");
+    expect(decodeLook(odd)).not.toBeNull();
+    expect(decodeLook(odd)?.paletteId).toBeUndefined();
+  });
+
+  it("writes a dragged slider's long float short, and an integer exactly", () => {
+    const look: SceneLook = { name: "Long", sceneId: "mesh", manual: { focus: 0.623456789, breathe: 0.000123456, count: 1234567 } };
+    expect(wireOf(encodeLook(look)).m).toEqual({ focus: 0.6235, breathe: 0.0001235, count: 1234567 });
+  });
+
   it("round-trips an empty manual set", () => {
     const look: SceneLook = { name: "Bare", sceneId: "mesh", manual: {} };
     expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  const bigLook = (): SceneLook => {
+    const manual: Record<string, number> = {};
+    for (let i = 0; i < 30; i++) manual[`setting${i}Amount`] = Math.round(i * 37.3) / 100;
+    return { name: "Big", sceneId: "chladni", manual };
+  };
+
+  it("deflates a long look into a shorter `Z` code that round-trips", () => {
+    const look = bigLook();
+    const code = encodeLook(look);
+    expect(code.startsWith("Z")).toBe(true);
+    expect(code.length).toBeLessThan(btoa(JSON.stringify({ v: 1, n: look.name, s: look.sceneId, m: look.manual })).length);
+    expect(decodeLook(code)).toEqual(look);
+  });
+
+  it("keeps the plain code when deflating wouldn't be shorter", () => {
+    const look: SceneLook = { name: "Bare", sceneId: "mesh", manual: {} };
+    expect(encodeLook(look).startsWith("ey")).toBe(true);
+  });
+
+  it("returns null for a deflated code that unpacks past the cap", () => {
+    const bomb = "Z" + btoa(String.fromCharCode(...deflateSync(new Uint8Array(5e6)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(decodeLook(bomb)).toBeNull();
   });
 
   it("returns null for garbage input", () => {
@@ -94,7 +145,7 @@ describe("encodeLook / decodeLook", () => {
   it("a one-source, weight-1, Graded patch encodes on the wire as the bare DriveChoice (old-app compatible)", () => {
     const look: SceneLook = { name: "D", sceneId: "caustics", manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } };
     const code = encodeLook(look);
-    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    const wire = wireOf(code);
     expect(wire.d).toEqual({ flash: "anim.lowOnset" });
   });
 
@@ -108,7 +159,7 @@ describe("encodeLook / decodeLook", () => {
     };
     const look: SceneLook = { name: "Gated", sceneId: "caustics", manual: {}, drives: { flash: patch } };
     const code = encodeLook(look);
-    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    const wire = wireOf(code);
     expect(wire.d.flash).toEqual({
       m: "gate",
       s: [
@@ -130,7 +181,7 @@ describe("encodeLook / decodeLook", () => {
     };
     const look: SceneLook = { name: "Gated when", sceneId: "caustics", manual: {}, drives: { flash: patch } };
     const code = encodeLook(look);
-    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    const wire = wireOf(code);
     expect(wire.d.flash.s[1].g).toBe(1);
     expect(wire.d.flash.s[2]).toMatchObject({ g: 1, o: 1 });
     expect(decodeLook(code)).toEqual(look);
@@ -139,7 +190,7 @@ describe("encodeLook / decodeLook", () => {
   it("an old look with no `d` at all still round-trips (the field is simply absent, not empty)", () => {
     const look: SceneLook = { name: "Old", sceneId: "mesh", manual: { focus: 0.3 } };
     const code = encodeLook(look);
-    expect(JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/"))).d).toBeUndefined();
+    expect(wireOf(code).d).toBeUndefined();
     expect(decodeLook(code)).toEqual(look);
   });
 
@@ -239,6 +290,21 @@ describe("saveLook / listLooks / deleteLook", () => {
     expect(listLooks(sceneId).map((l) => l.name)).toEqual(["B"]);
     expect(listLooks(otherScene).map((l) => l.name)).toEqual(["A"]);
   });
+
+  it("renames in place, and refuses a blank or taken name", () => {
+    const sceneId = "look-store-3";
+    saveLook({ name: "A", sceneId, manual: { focus: 0.2 } });
+    saveLook({ name: "B", sceneId, manual: {} });
+
+    expect(renameLook(sceneId, "A", "C")).toBe(true);
+    expect(listLooks(sceneId).map((l) => l.name)).toEqual(["C", "B"]);
+    expect(listLooks(sceneId)[0].manual.focus).toBe(0.2);
+
+    expect(renameLook(sceneId, "C", "B")).toBe(false);
+    expect(renameLook(sceneId, "C", "")).toBe(false);
+    expect(renameLook(sceneId, "missing", "D")).toBe(false);
+    expect(listLooks(sceneId).map((l) => l.name)).toEqual(["C", "B"]);
+  });
 });
 
 describe("saveSharedLook", () => {
@@ -264,5 +330,121 @@ describe("saveSharedLook", () => {
     saveLook(look);
     saveSharedLook({ ...look });
     expect(listLooks("shared-scene-c")).toHaveLength(1);
+  });
+});
+
+describe("custom values in a Look", () => {
+  it("captures a custom value as the number on screen, not the slider's end", () => {
+    const sceneId = "look-custom-capture";
+    setSceneSetting(sceneId, FOCUS, 1);
+    setCustomValue(sceneId, FOCUS.key, 1.4);
+    expect(captureLook("L", sceneId, SPECS).manual.focus).toBe(1.4);
+    clearCustomValue(sceneId, FOCUS.key);
+  });
+
+  it("applies a value past the slider as the slider's end plus a custom value", () => {
+    const sceneId = "look-custom-apply";
+    applyLook({ name: "L", sceneId, manual: { focus: 1.4, breathe: 0.2 } }, SPECS);
+    expect(getSceneSetting(sceneId, FOCUS)).toBe(1);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBe(1.4);
+    expect(getSliderStretch(sceneId, FOCUS.key)).toBe(1.4);
+    expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
+  });
+
+  it("bounds a shared link's custom value like a typed one", () => {
+    const sceneId = "look-custom-bound";
+    applyLook({ name: "L", sceneId, manual: { focus: 1e9 } }, SPECS);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBe(2);
+  });
+
+  it("drops a custom value the Look doesn't carry, whether listed in range or absent", () => {
+    const sceneId = "look-custom-drop";
+    setCustomValue(sceneId, FOCUS.key, 1.5);
+    stretchSlider(sceneId, FOCUS.key, 1.5);
+    setCustomValue(sceneId, BREATHE.key, 1.5);
+    stretchSlider(sceneId, BREATHE.key, 1.5);
+    applyLook({ name: "L", sceneId, manual: { focus: 0.4 } }, SPECS);
+    expect(getCustomValue(sceneId, FOCUS.key)).toBeUndefined();
+    expect(getCustomValue(sceneId, BREATHE.key)).toBeUndefined();
+    expect(getSliderStretch(sceneId, FOCUS.key)).toBeUndefined();
+    expect(getSliderStretch(sceneId, BREATHE.key)).toBeUndefined();
+  });
+});
+
+describe("primeUndo / takeUndo", () => {
+  it("keeps the palette that was showing, so Undo can put it back", () => {
+    primeUndo("undoScene", SPECS, "neon");
+    expect(takeUndo("undoScene")?.paletteId).toBe("neon");
+    expect(takeUndo("undoScene")).toBeNull();
+  });
+});
+
+describe("shaping nodes in a Look (h)", () => {
+  // A node that differs from every default: its window off, a Min/Max pair, a Length.
+  const NODE = { windowOn: false, min: 0.4, max: 0.9, smoothOn: false, smoothness: 0.02, height: "graded" as const, length: 0.5 };
+  const DEF = { src: "anim.low" as const, ...NODE };
+  const wireJson = (payload: unknown): string => btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  it("captureLook embeds the definitions its wires reference", () => {
+    const node = addShapingNode("anim.low", NODE)!;
+    const sceneId = "look-shaped-capture";
+    setDriveSetting(sceneId, FLASH, { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }, { choice: "anim.high", weight: 1 }] });
+    const look = captureLook("L", sceneId, [FLASH]);
+    expect(look.shapingNodes).toEqual({ [node.id]: DEF });
+    removeShapingNode(node.id);
+  });
+
+  it("encode then decode keeps shapingNodes", () => {
+    const look: SceneLook = {
+      name: "S",
+      sceneId: "caustics",
+      manual: {},
+      drives: { flash: { mix: "add", sources: [{ choice: { source: "shaped", id: "n4" }, weight: 1 }, { choice: "anim.high", weight: 1 }] } },
+      shapingNodes: { n4: DEF },
+    };
+    expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  it("decode rejects a bad h key or value", () => {
+    const base = { v: 1, n: "x", s: "caustics", m: {}, d: { flash: "anim.high" } };
+    expect(decodeLook(wireJson({ ...base, h: { x1: DEF } }))).toBeNull();
+    expect(decodeLook(wireJson({ ...base, h: { n1: { ...DEF, src: "__proto__" } } }))).toBeNull();
+    expect(decodeLook(wireJson({ ...base, h: { n1: "x" } }))).toBeNull();
+    expect(decodeLook(wireJson({ ...base, h: [] }))).toBeNull();
+  });
+
+  it("applyLook adds the node a Look needs and rewires its wire to the new id", () => {
+    const sceneId = "look-shaped-apply-new";
+    const look: SceneLook = {
+      name: "L",
+      sceneId,
+      manual: {},
+      drives: { flash: { mix: "add", sources: [{ choice: { source: "shaped", id: "n77" }, weight: 1 }] } },
+      shapingNodes: { n77: DEF },
+    };
+    const before = listShapingNodes().length;
+    applyLook(look, [FLASH]);
+    expect(listShapingNodes().length).toBe(before + 1);
+    const added = listShapingNodes()[before]!;
+    expect(added.min).toBe(0.4);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: added.id }, weight: 1 }] });
+    removeShapingNode(added.id);
+  });
+
+  it("applyLook reuses an identical node that is already on the device", () => {
+    const sceneId = "look-shaped-apply-reuse";
+    const existing = addShapingNode("anim.low", NODE)!;
+    const before = listShapingNodes().length;
+    const look: SceneLook = {
+      name: "L",
+      sceneId,
+      manual: {},
+      drives: { flash: { mix: "add", sources: [{ choice: { source: "shaped", id: "n9" }, weight: 1 }] } },
+      shapingNodes: { n9: DEF },
+    };
+    applyLook(look, [FLASH]);
+    expect(listShapingNodes().length).toBe(before);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: existing.id }, weight: 1 }] });
+    removeShapingNode(existing.id);
   });
 });

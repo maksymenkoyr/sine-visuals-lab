@@ -672,13 +672,15 @@ ${CAMERA_GLSL}
 ${COMPOSITE_BODY}
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-25" } as const;
+
 export const gatesScene: Scene = (() => {
   let gateProg: GLProgram | null = null;
   let blurProg: GLProgram | null = null;
   let compProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
   let emptyVao: WebGLVertexArrayObject | null = null;
-  const intLocs = new Map<string, WebGLUniformLocation | null>();
 
   // Render targets: the sharp gates at full size, two blur levels below it.
   let sharpTex: WebGLTexture | null = null;
@@ -714,12 +716,6 @@ export const gatesScene: Scene = (() => {
   let arcListener: BeatListener | null = null;
 
   const get = (key: string): number => resolveSceneSetting(ID, SETTING_BY_KEY.get(key)!);
-
-  function intLoc(gl: WebGL2RenderingContext, prog: GLProgram, tag: string, name: string): WebGLUniformLocation | null {
-    const k = `${tag}.${name}`;
-    if (!intLocs.has(k)) intLocs.set(k, gl.getUniformLocation(prog.program, name));
-    return intLocs.get(k) ?? null;
-  }
 
   function makeTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -811,7 +807,6 @@ export const gatesScene: Scene = (() => {
       gateProg = createProgram(gl, GATE_FRAG, GATE_VERT);
       blurProg = createProgram(gl, BLUR_FRAG);
       compProg = createProgram(gl, COMPOSITE_FRAG);
-      intLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // The gate pass has no vertex attributes — corner from gl_VertexID,
       // (object, copy, segment) from gl_InstanceID — so it draws from an
@@ -899,8 +894,8 @@ export const gatesScene: Scene = (() => {
       gateProg.setV4v("uObjA", outA);
       gateProg.setV4v("uObjB", outB);
       gateProg.setV4v("uObjC", outC);
-      gl.uniform1i(intLoc(gl, gateProg, "gate", "uObjCount"), n);
-      gl.uniform1i(intLoc(gl, gateProg, "gate", "uCopies"), copies);
+      gateProg.setI("uObjCount", n);
+      gateProg.setI("uCopies", copies);
       gateProg.setF("uTravel", st.travel);
       gateProg.setF("uTravelDelta", st.flyVel * shutter);
       gateProg.setF("uSpinPos", st.spinPos);
@@ -943,7 +938,7 @@ export const gatesScene: Scene = (() => {
       gl.activeTexture(gl.TEXTURE0);
       if (passes >= 1) {
         blurProg.use();
-        gl.uniform1i(intLoc(gl, blurProg, "blur", "uTex"), 0);
+        blurProg.setI("uTex", 0);
         blurLevel(gl, 0, sharpTex);
         if (passes >= 2) blurLevel(gl, 1, levelTex[1]);
       }
@@ -959,9 +954,9 @@ export const gatesScene: Scene = (() => {
       gl.bindTexture(gl.TEXTURE_2D, levelTex[1]);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, levelTex[3]);
-      gl.uniform1i(intLoc(gl, compProg, "comp", "uSharpTex"), 0);
-      gl.uniform1i(intLoc(gl, compProg, "comp", "uGlowATex"), 1);
-      gl.uniform1i(intLoc(gl, compProg, "comp", "uGlowBTex"), 2);
+      compProg.setI("uSharpTex", 0);
+      compProg.setI("uGlowATex", 1);
+      compProg.setI("uGlowBTex", 2);
       const glowScale = 0.8 + 1.4 * glow;
       const glowA = lookFrom.glowA + (lookTo.glowA - lookFrom.glowA) * e;
       const glowB = lookFrom.glowB + (lookTo.glowB - lookFrom.glowB) * e;
@@ -997,7 +992,6 @@ export const gatesScene: Scene = (() => {
       compProg = null;
       quadVao = null;
       emptyVao = null;
-      intLocs.clear();
       fromLayout = null;
       toLayout = null;
       pairs = null;

@@ -70,7 +70,7 @@
  * straight to the default framebuffer.
  */
 import { NUM_BANDS } from "../../../audio/types.ts";
-import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../../gl.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { uploadCommonUniforms } from "../../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
@@ -168,6 +168,9 @@ function smoothstep01(x: number): number {
   return x * x * (3 - 2 * x);
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-18" } as const;
+
 export const slatsScene: Scene = (() => {
   let slatProg: GLProgram | null = null;
   let blurProg: GLProgram | null = null;
@@ -190,8 +193,8 @@ export const slatsScene: Scene = (() => {
   let fullH = 0;
   let halfW = 0;
   let halfH = 0;
+  const glowTargets = createTargetList();
 
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   let rng: Rng = createRng(RNG_SEED);
@@ -204,15 +207,6 @@ export const slatsScene: Scene = (() => {
   let lastTime: number | null = null;
   let prevBarPhase = 0;
   const onsetEnv = createOnsetEnvelope();
-
-  function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function uploadInstanceBuffer(gl: WebGL2RenderingContext, buf: WebGLBuffer, data: Float32Array): void {
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -232,35 +226,8 @@ export const slatsScene: Scene = (() => {
     uploadInstanceBuffer(gl, bufA!, packedA);
   }
 
-  function makeHalfColourTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-  }
-
-  function attachColour(gl: WebGL2RenderingContext, tex: WebGLTexture | null): WebGLFramebuffer | null {
-    const f = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`slats: framebuffer incomplete (0x${status.toString(16)})`);
-    }
-    return f;
-  }
-
   function freeGlowTargets(gl: WebGL2RenderingContext): void {
-    if (fullFbo) gl.deleteFramebuffer(fullFbo);
-    if (halfFboA) gl.deleteFramebuffer(halfFboA);
-    if (halfFboB) gl.deleteFramebuffer(halfFboB);
-    if (fullTex) gl.deleteTexture(fullTex);
-    if (halfTexA) gl.deleteTexture(halfTexA);
-    if (halfTexB) gl.deleteTexture(halfTexB);
+    glowTargets.freeAll(gl);
     fullFbo = halfFboA = halfFboB = null;
     fullTex = halfTexA = halfTexB = null;
     fullW = fullH = halfW = halfH = 0;
@@ -275,12 +242,9 @@ export const slatsScene: Scene = (() => {
     fullH = h;
     halfW = Math.max(1, w >> 1);
     halfH = Math.max(1, h >> 1);
-    fullTex = makeHalfColourTexture(gl, fullW, fullH);
-    halfTexA = makeHalfColourTexture(gl, halfW, halfH);
-    halfTexB = makeHalfColourTexture(gl, halfW, halfH);
-    fullFbo = attachColour(gl, fullTex);
-    halfFboA = attachColour(gl, halfTexA);
-    halfFboB = attachColour(gl, halfTexB);
+    ({ tex: fullTex, fbo: fullFbo } = glowTargets.add(gl, fullW, fullH, { label: "slats" }));
+    ({ tex: halfTexA, fbo: halfFboA } = glowTargets.add(gl, halfW, halfH, { label: "slats" }));
+    ({ tex: halfTexB, fbo: halfFboB } = glowTargets.add(gl, halfW, halfH, { label: "slats" }));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
@@ -295,7 +259,6 @@ export const slatsScene: Scene = (() => {
       slatProg = createProgram(gl, SLAT_FRAG, SLAT_VERT);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
 
       slatCount = slatCountForQuality(ctx.quality.detail);
@@ -343,7 +306,8 @@ export const slatsScene: Scene = (() => {
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
       lastTime = anim.timeSec;
 
-      advanceOnsetEnvelope(onsetEnv, dt, drives.fired("pulse", anim.onset));
+      const pulseFired = drives.fired("pulse", anim.onset);
+      advanceOnsetEnvelope(onsetEnv, dt, pulseFired ? drives.hitSize("pulse") : 0);
 
       const morphSeconds = resolveSceneSetting(ID, settingFor("morph"));
       const reshuffleProb = resolveSceneSetting(ID, settingFor("reshuffle"));
@@ -398,7 +362,7 @@ export const slatsScene: Scene = (() => {
 
         blurProg.use();
         gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+        blurProg.setI("uTex", 0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, halfFboA);
         gl.viewport(0, 0, halfW, halfH);
         gl.bindTexture(gl.TEXTURE_2D, fullTex);
@@ -419,8 +383,8 @@ export const slatsScene: Scene = (() => {
         gl.bindTexture(gl.TEXTURE_2D, fullTex);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, halfTexB);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uSharpTex", "uSharpTex"), 0);
-        gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uBlurTex", "uBlurTex"), 1);
+        compositeProg.setI("uSharpTex", 0);
+        compositeProg.setI("uBlurTex", 1);
         drawFullscreenQuad(gl, quadVao);
 
         // The gallery renders every scene into one shared context each tick
@@ -452,7 +416,6 @@ export const slatsScene: Scene = (() => {
       if (bufA) gl.deleteBuffer(bufA);
       if (bufB) gl.deleteBuffer(bufB);
       freeGlowTargets(gl);
-      samplerLocs.clear();
       slatProg = null;
       blurProg = null;
       compositeProg = null;

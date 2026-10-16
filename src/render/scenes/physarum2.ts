@@ -12,15 +12,17 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { composeSettings, defineItemPairs, defineItems } from "../sceneItems.ts";
 import { packUnit, SEED_RISE_REFRACTORY_SEC } from "./physarum.ts";
 import {
-  advanceStandout,
-  createRippleEmissionState,
-  RING_THRESHOLD_DEFAULT,
-  salienceMarks,
-  type RippleEmissionState,
-} from "./rippleEmitter.ts";
+  createStandoutTrigger,
+  STANDOUT_THRESHOLD_DEFAULT,
+  standoutLine,
+  standoutThreshold,
+  stepStandoutHit,
+  type StandoutTrigger,
+} from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
 import { AFFINITY_PRESETS, ATTRACT_ROWS, PAIR_WORDS, packTouch, smellWeight } from "./physarum2Affinity.ts";
 import { createSynergyTracker, wrapTurn } from "./physarum2Synergy.ts";
+import { createAgentSorter } from "./physarum2Sort.ts";
 export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
@@ -69,14 +71,20 @@ export { ATTRACT_ROWS };
 //   step, and skipped (composite-only) on a frame that owes none. A frame
 //   that owes far more steps than the cap drops the backlog rather than ever
 //   catching up in one burst (stepAccumulator's own comment).
+// - Agent order (2026-10-05): a step walks the agents in storage order, and
+//   agents stored in random screen order made every trail read and deposit
+//   miss the GPU's caches — most of a step's cost. physarum2Sort.ts puts
+//   them back in screen order every so often, on the GPU, ahead of render()'s
+//   step loop; it only permutes slots, so nothing on screen changes (that
+//   file's header).
 //
 // Turning: an agent samples its own weighted sum straight ahead and to each
 // side, at its own STRAINS entry's fixed sensor angle and its own live
 // Sensor range. Centre strongest holds course; centre weakest (both sides
 // beat it) turns its own live Turn angle in a random direction; anything
 // else turns toward whichever side read stronger. Reseeding on a beat reads
-// the driver the way Caustics' Beat ripple does (rippleEmitter.ts's
-// advanceStandout: a climb that stands out from the everyday ones, with
+// the driver the way Caustics' Beat ripple does (standout.ts's
+// StandoutTrigger: a climb that stands out from the everyday ones, with
 // Dose's own "Dose threshold" jack and graph line) behind physarum.ts's own
 // reseed refractory, but doesn't scatter the chosen agents across the whole field
 // the way physarum.ts's reseed does: they drop into a small disc (the
@@ -182,8 +190,8 @@ export { ATTRACT_ROWS };
 //
 // - **Auto level** (`level`): his renderer scales each species' grid to its
 //   own brightness range before colouring. Here LEVEL_FRAG max-pools the
-//   trail into LEVEL_SIDE² blocks, read back through the same non-blocking
-//   createPixelReadback as Territory — but on every device while `level` is
+//   trail into LEVEL_SIDE² blocks, read back as one part of the same census
+//   as Territory (createPixelReadback, kickCensus) — but on every device while `level` is
 //   above 0, since it changes the picture. levelPeaks/levelGainsFull turn
 //   that into one gain per strain that evens their brightest roads out
 //   around the geometric mean (so Exposure still owns the overall
@@ -198,11 +206,11 @@ export { ATTRACT_ROWS };
 //   trail with fillStartInk's uniform roll; Fresh dish reseeds every agent
 //   (seedAgents) and refills the trail on the next render(), phone-local
 //   like Rebalance.
-// - Random leaning to rivals, and random motion/colour, live in the panel
-//   rather than here: physarum2Affinity.ts's `randomSmell` (the Rivals
-//   toggle), and the Strain Console's mix row (MOTION_PRESETS below, its
-//   Random) and colour row (physarum2Synergy.ts's Shuffle/New palette, which
-//   only write the stains).
+// - Random Smell/Touch and random motion/colour live in the panel rather
+//   than here: physarum2Affinity.ts's `randomSmell`/`randomTouch` (the Pairs
+//   card's half of the Strains card's one Random), and the Strain Console's
+//   mix row (MOTION_PRESETS below, its Random) and colour row
+//   (physarum2Synergy.ts's Shuffle/New palette, which only write the stains).
 //
 // Phase 3 (2026-09-27): probe()/command() (scene.ts) — phone-local, cheap,
 // never reaching the TV — give the device menu's Strains widget three more
@@ -211,14 +219,14 @@ export { ATTRACT_ROWS };
 // - **Territory** per strain: SIM_FRAG's trail, box-downsampled by
 //   TERRITORY_FRAG into a 16x16 RGBA8 target, read back through a
 //   PIXEL_PACK_BUFFER + fenceSync (never a synchronous readPixels — see
-//   ensureTerritoryReadback) at most every TERRITORY_INTERVAL_MS, and only
+//   createPixelReadback) at most every TERRITORY_INTERVAL_MS, and only
 //   while probe() has actually been called within PROBE_IDLE_MS (a closed
 //   panel or the TV never triggers a single readback). `classifyTerritory`
 //   (pure, tested) turns the 256 texels into a share per strain — the cells
 //   where that strain's channel reads largest, above TERRITORY_THRESHOLD.
 // - **Population** per strain (the Headcount): *measured* — POP_FRAG counts
 //   the agents' strain channel into a POP_SIDE-square target of block fractions, read
-//   back through the same non-blocking `createPixelReadback` as Territory
+//   back in the same census as Territory (`createPixelReadback`)
 //   every POP_INTERVAL_MS while the panel is open *or* Switching is on
 //   (recruiting reads the shares every step), and `populationFromBlocks`
 //   (pure, tested) turns the blocks into shares. Since agents can change
@@ -687,29 +695,27 @@ export const START_INK_DEFAULT = 0.15;
 
 /** Fills an RGBA8 trail buffer with a fresh dish's ink: each live channel an
  *  independent uniform roll over [0, startInk * START_INK_MAX). All zero at
- *  startInk 0 — the old black start, exactly. `rnd` is injected so tests can
- *  seed it. */
-export function fillStartInk(out: Uint8Array, count: number, startInk: number, rnd: () => number): void {
+ *  startInk 0 — the old black start, exactly. The rolls are an xorshift32
+ *  stream from `seed` (0 takes a fixed non-zero seed): a full-size dish
+ *  needs millions of them, too many for Math.random at scene open. Its state
+ *  is a local, not a generator closure: in Chrome a fresh closure per mount
+ *  made every mount after the first fill several times slower, a freeze on
+ *  each revisit (the record's Measurements, 2026-10-16). */
+export function fillStartInk(out: Uint8Array, count: number, startInk: number, seed: number): void {
   out.fill(0);
   const top = clamp01(startInk) * START_INK_MAX * 255;
   if (top <= 0) return;
-  for (let i = 0; i < out.length; i += 4) {
-    for (let k = 0; k < count; k++) out[i + k] = Math.floor(rnd() * top);
-  }
-}
-
-/** A fast seeded generator for the start-ink fill — a full-size dish needs
- *  millions of rolls, too many for Math.random at scene open. */
-function xorshift32(seed: number): () => number {
   let x = seed >>> 0 || 0x9e3779b9;
-  return () => {
-    x ^= x << 13;
-    x >>>= 0;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    x >>>= 0;
-    return x / 4294967296;
-  };
+  for (let i = 0; i < out.length; i += 4) {
+    for (let k = 0; k < count; k++) {
+      x ^= x << 13;
+      x >>>= 0;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      x >>>= 0;
+      out[i + k] = Math.floor((x / 4294967296) * top);
+    }
+  }
 }
 
 /** Composite smoothing kernel: how much of a channel's read comes from the
@@ -802,9 +808,9 @@ export interface StrainRawValues {
   life: number;
 }
 
-/** A strain's live drive reading for each of the same six controls — the GPU
+/** A strain's live drive reading for each of the same controls — the GPU
  *  path reads `drives.value(key, sceneDefault, rest?)` (a per-strain band
- *  for Nutrient/Sensor range/Turn angle/Speed/Stain — STRAIN_BAND_SIGNALS —
+ *  for every control but Excitability — STRAIN_BAND_SIGNALS —
  *  `anim.beatPulse` for Excitability; Nutrient alone passes NUTRIENT_REST as
  *  its own `rest`, since an unplugged jack there must read as exactly 1, not
  *  0 — see that constant's own doc); the preview reads
@@ -817,6 +823,8 @@ export interface StrainDriveValues {
   turn: number;
   stride: number;
   stain: number;
+  angle: number;
+  life: number;
 }
 
 export interface StrainEffective {
@@ -854,8 +862,13 @@ export function resolveStrainEffective(k: number, raw: StrainRawValues, drive: S
   const stepDist = strideSliderToDist(strideEff) * surge;
   const stainShift = raw.stain + drive.stain * STAIN_DRIVE_GAIN;
   const color = hueRotateRGB(strain.color, stainShift);
-  const sensorAngleRad = Math.max(ANGLE_MIN_DEG, Math.min(ANGLE_MAX_DEG, raw.angle)) * DEG;
-  return { sensorAngleRad, decayMul: lifeToDecayMul(raw.life), stainShift, sensorDist, rotationRad, stepDist, feed, color };
+  // Sensor angle is in degrees: pushed toward the widest angle the same way
+  // the 0..1 controls are pushed toward 1, so drive 0 is the slider exactly.
+  const angleSet = Math.max(ANGLE_MIN_DEG, Math.min(ANGLE_MAX_DEG, raw.angle));
+  const angleUnit = pushToward1((angleSet - ANGLE_MIN_DEG) / (ANGLE_MAX_DEG - ANGLE_MIN_DEG), drive.angle);
+  const sensorAngleRad = (ANGLE_MIN_DEG + clamp01(angleUnit) * (ANGLE_MAX_DEG - ANGLE_MIN_DEG)) * DEG;
+  const decayMul = lifeToDecayMul(clamp01(pushToward1(clamp01(raw.life), drive.life)));
+  return { sensorAngleRad, decayMul, stainShift, sensorDist, rotationRad, stepDist, feed, color };
 }
 
 // ---------------------------------------------------------------------
@@ -1067,9 +1080,10 @@ const stainSettings = defineItems("strain", SPECIES_COUNT, {
   drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: STAIN_JACK_GAIN },
 });
 
-// Sensor angle and Trail life have no jack (plain sliders): neither was ever
-// audio-driven, and the Strain Console (src/ui/widgets/strainConsole.ts) is
-// where they live.
+// Sensor angle and Trail life got their jacks on 2026-10-04 (every lane in
+// the Strain settings card has a port): this strain's own band by default,
+// like Sensor range — a loud band widens the angle and lengthens the trail a
+// little; identity at drive 0, same reasoning as Sensor range.
 const angleSettings = defineItems("strain", SPECIES_COUNT, {
   key: "angle",
   label: "Sensor angle",
@@ -1079,6 +1093,7 @@ const angleSettings = defineItems("strain", SPECIES_COUNT, {
   max: ANGLE_MAX_DEG,
   step: 1,
   default: (k) => Math.round(STRAINS[k]!.sensorAngleRad / DEG),
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const lifeSettings = defineItems("strain", SPECIES_COUNT, {
@@ -1090,6 +1105,7 @@ const lifeSettings = defineItems("strain", SPECIES_COUNT, {
   max: 1,
   step: 0.02,
   default: LIFE_DEFAULT, // the shared Trail decay, unchanged
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const attSettings = defineItemPairs("strain", SPECIES_COUNT, {
@@ -1271,7 +1287,7 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     default: 0.01,
     auto: { attack: 0.25, dynamics: 0.15 },
     // The trigger is a *climb* in the decaying beat pulse that stands out from
-    // the everyday ones (rippleEmitter.ts's advanceStandout, the same filter
+    // the everyday ones (standout.ts's StandoutTrigger, the same filter
     // Caustics' Beat ripple uses), so a busy passage reseeds only on its
     // clear hits instead of on every tick. Scene-handled threshold: the scene
     // owns the idea (drive.threshold, read back with drives.threshold), so the
@@ -1283,8 +1299,11 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
       default: "scene",
       sceneLabel: "Scene: a beat hit that stands out",
       sceneSources: ["feature.onset"],
+      // Flat or Sized (the Reaction row): Sized moves a share of agents
+      // as big as the hit stood out, Dose times its size.
+      hit: { ownDetector: true },
       threshold: {
-        default: RING_THRESHOLD_DEFAULT,
+        default: STANDOUT_THRESHOLD_DEFAULT,
         label: "Dose threshold",
         hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to start a new colony. Left: more colonies, even from quiet sounds. Right: only clear standouts.",
       },
@@ -1508,7 +1527,7 @@ const PANEL: readonly PanelSection[] = [
       // at once, a row of lanes each, with Stain Synergy under them — see
       // src/ui/widgets/strainConsole.ts. The order is the row order.
       console: {
-        title: "Per strain",
+        title: "Strain settings",
         params: ["nutrient", "excite", "sensor", "angle", "turn", "stride", "life", "stain"],
         formats: { angle: "degrees", stain: "turns" },
         // A Stain is a hue shift over the strain's own base colour, so each
@@ -1841,16 +1860,17 @@ void main() {
 
   // Seed on the beat: only on the exact tick uSeedFresh says the epoch
   // stepped (physarum.ts's file header covers why), and only for the
-  // frame's first sim step — the caller only ever passes uSeedFresh=1 once
-  // per firing. Reseeded agents cluster around one hash-chosen point per
+  // frame's first sim step — the caller passes the firing's size (1 while
+  // Dose reads Flat) once per firing, and 0 otherwise; Sized scales the
+  // share moved. Reseeded agents cluster around one hash-chosen point per
   // epoch instead of scattering field-wide, so a beat reads as a colony
   // sprouting from a point — see the file header. Strain is untouched
   // ("Auto-inject from" only restricts which strain may be picked, unlike
   // the pipette's own inject block below, which always converts).
-  if (uSeedFresh > 0.5) {
+  if (uSeedFresh > 0.0) {
     float draw = hash21(seed + uSeedEpoch * 7.919 + 11.3);
     bool fromOk = uSeedFrom < 0.5 || k == int(uSeedFrom + 0.5) - 1;
-    if (draw < uSeed && fromOk) {
+    if (draw < uSeed * uSeedFresh && fromOk) {
       vec2 center = hash22(vec2(uSeedEpoch * 12.9898, uSeedEpoch * 78.233) + 17.0);
       vec2 seed2 = seed + uNoiseSeed * 3.13 + 91.7;
       float r = seedRadius * sqrt(hash21(seed2 + 3.7));
@@ -2048,7 +2068,7 @@ void main() {
 
 /** Territory (Phase 3): a plain box downsample of the live trail into a
  *  TERRITORY_SIDE x TERRITORY_SIDE target, read back async (see the file
- *  header's Territory paragraph and createPhysarum2Scene's pollTerritory).
+ *  header's Territory paragraph and createPhysarum2Scene's kickCensus).
  *  No COMMON_UNIFORMS_GLSL/settings/drive splice — this pass is a standalone
  *  utility over the trail texture, not part of the scene's own uniform
  *  budget. A dynamic GLSL ES 3.00 loop is fine: at most 16x16 fragments, run
@@ -2077,8 +2097,8 @@ void main() {
 `;
 
 /** Auto level: each output texel is the per-channel *peak* over one block of
- *  trail texels (a max-pool, where TERRITORY_FRAG averages), read back the
- *  same non-blocking way — levelPeaks reads the strains' levels off it. The
+ *  trail texels (a max-pool, where TERRITORY_FRAG averages), read back in
+ *  the same census — levelPeaks reads the strains' levels off it. The
  *  block wraps on the torus, so a side that isn't a multiple of LEVEL_SIDE
  *  just counts a few texels twice, which a max doesn't mind. */
 const LEVEL_FRAG = `#version 300 es
@@ -2160,44 +2180,67 @@ function seedAgents(side: number): AgentSeed {
   return { pos, dir };
 }
 
-/** A small render target read back without ever stalling the CPU: the target
- *  is drawn, `readPixels` goes to a PIXEL_PACK_BUFFER (returns immediately),
- *  and the bytes are only drained once `fenceSync` says the GPU is done — never
- *  a synchronous readPixels. Territory and Headcount each own one. Built lazily
- *  on the first `begin`, so a session that never needs it never allocates it. */
+/** Small render targets read back together without ever stalling the CPU on
+ *  a synchronous readPixels: each part is drawn into its own target, its
+ *  `readPixels` goes to its own offset in ONE PIXEL_PACK_BUFFER (returns
+ *  immediately), and one `fenceSync` covers them all; the bytes are only
+ *  drained once the fence says the GPU is done. That drain is still a
+ *  getBufferSubData, which in Chrome is a synchronous round trip queued
+ *  behind everything the GPU process has not got through yet — this scene's
+ *  sim steps, the Panel blur's re-filtering of the canvas — so the parts
+ *  share one fence and one drain instead of each paying that wait
+ *  (Territory, Headcount and Auto level each owned one until 2026-10-04: up
+ *  to ten waits a second with the panel open), and render() drains it
+ *  before queuing the frame's steps rather than after. Built lazily on the
+ *  first `begin`, so a session that never needs it never allocates it. */
 interface PixelReadback {
   /** A readback is in flight. */
   readonly busy: boolean;
-  /** The finished pixels the moment they land (once), else null. */
-  poll(gl: WebGL2RenderingContext): Uint8Array | null;
-  /** Binds the target, runs `draw` into it, and starts the readback. */
-  begin(gl: WebGL2RenderingContext, draw: () => void): void;
+  /** The moment a readback lands (once): each part's pixels, or null for a
+   *  part it didn't include. Null while nothing has landed. */
+  poll(gl: WebGL2RenderingContext): readonly (Uint8Array | null)[] | null;
+  /** Runs each non-null `draws[i]` into part i's target and starts one
+   *  readback of all of them. */
+  begin(gl: WebGL2RenderingContext, draws: readonly ((() => void) | null)[]): void;
   dispose(gl: WebGL2RenderingContext): void;
 }
 
-function createPixelReadback(side: number): PixelReadback {
-  let tex: WebGLTexture | null = null;
-  let fbo: WebGLFramebuffer | null = null;
+function createPixelReadback(sides: readonly number[]): PixelReadback {
+  const tex: (WebGLTexture | null)[] = sides.map(() => null);
+  const fbo: (WebGLFramebuffer | null)[] = sides.map(() => null);
   let pbo: WebGLBuffer | null = null;
   let sync: WebGLSync | null = null;
-  const out = new Uint8Array(side * side * 4);
+  const offsets: number[] = [];
+  let bytes = 0;
+  for (const side of sides) {
+    offsets.push(bytes);
+    bytes += side * side * 4;
+  }
+  const out = new Uint8Array(bytes);
+  const views = sides.map((side, i) => out.subarray(offsets[i]!, offsets[i]! + side * side * 4));
+  const included = sides.map(() => false);
+  const landed: (Uint8Array | null)[] = sides.map(() => null);
   function ensure(gl: WebGL2RenderingContext): void {
-    if (tex && fbo && pbo) return;
-    tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, side, side, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (pbo) return;
+    sides.forEach((side, i) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, side, side, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      tex[i] = t;
+      fbo[i] = f;
+    });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
     pbo = gl.createBuffer();
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, side * side * 4, gl.STREAM_READ);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   }
   return {
@@ -2213,7 +2256,8 @@ function createPixelReadback(side: number): PixelReadback {
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
         gl.deleteSync(sync);
         sync = null;
-        return out;
+        for (let i = 0; i < sides.length; i++) landed[i] = included[i] ? views[i]! : null;
+        return landed;
       }
       if (status === gl.WAIT_FAILED) {
         gl.deleteSync(sync);
@@ -2221,26 +2265,33 @@ function createPixelReadback(side: number): PixelReadback {
       }
       return null;
     },
-    begin(gl, draw) {
+    begin(gl, draws) {
       ensure(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.viewport(0, 0, side, side);
-      draw();
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
-      gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      sides.forEach((side, i) => {
+        const draw = draws[i];
+        included[i] = !!draw;
+        if (!draw) return;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo[i]!);
+        gl.viewport(0, 0, side, side);
+        draw();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+        gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, offsets[i]!);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      });
       sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.bindTexture(gl.TEXTURE_2D, null);
     },
     dispose(gl) {
       if (sync) gl.deleteSync(sync);
-      if (fbo) gl.deleteFramebuffer(fbo);
-      if (tex) gl.deleteTexture(tex);
+      for (let i = 0; i < sides.length; i++) {
+        if (fbo[i]) gl.deleteFramebuffer(fbo[i]!);
+        if (tex[i]) gl.deleteTexture(tex[i]!);
+        fbo[i] = null;
+        tex[i] = null;
+      }
       if (pbo) gl.deleteBuffer(pbo);
       sync = null;
-      fbo = null;
-      tex = null;
       pbo = null;
     },
   };
@@ -2280,17 +2331,18 @@ function createPhysarum2Scene(): Scene {
   let footprintFresh = false;
   const FOOT_CLEAR = new Float32Array(4);
 
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let agentRead = 0;
+  // Puts the agents back in screen order every so often — see
+  // physarum2Sort.ts (a GPU-cost fix only; the picture doesn't change).
+  const sorter = createAgentSorter();
   let trailReadIdx = 0;
   let agentSide = 1;
   let agentCount = 0;
   let trailSideCur = 0;
   let lastFrameTime: number | null = null;
-  // The automatic reseed's standout tracker (advanceStandout) and the time
-  // since the last reseed, for physarum.ts's refractory.
-  let seedEmission: RippleEmissionState | null = null;
-  let sinceSeedSec = SEED_RISE_REFRACTORY_SEC * 10;
+  // The automatic reseed's trigger: a standout, at most once per
+  // physarum.ts's refractory.
+  let seedTrigger: StandoutTrigger | null = null;
   // How many times a reseed has actually fired; rotates the reseed
   // cluster's centre, same convention as physarum.ts's own seedEpoch.
   let seedEpoch = 0;
@@ -2337,6 +2389,8 @@ function createPhysarum2Scene(): Scene {
     turn: 0,
     stride: 0,
     stain: 0,
+    angle: 0,
+    life: 0,
   }));
   let lastViewport: Viewport = FULL_VIEWPORT;
   let lastResW = 1;
@@ -2351,16 +2405,15 @@ function createPhysarum2Scene(): Scene {
   const spotVis = new Float32Array(SPECIES_COUNT).fill(1);
   // The beat reseed's one-shot, held the same way (see the `steps > 0` block
   // in render()): drives.fired() consumes its trigger on read, so a frame that
-  // owes zero sim steps must not be the one that swallows it.
-  let pendingSeed = false;
-  // Territory: a 16x16 downsample of the trail, read back through a
-  // PIXEL_PACK_BUFFER + fenceSync so the GPU never stalls the CPU (the file
-  // header's own paragraph) — kicked off at most every TERRITORY_INTERVAL_MS,
-  // and only while probe() has been called within the last PROBE_IDLE_MS.
+  // owes zero sim steps must not be the one that swallows it. Holds the
+  // firing's size (1 while Dose reads Flat), 0 for none.
+  let pendingSeed = 0;
+  // Territory: a 16x16 downsample of the trail, read back (the census below)
+  // at most every TERRITORY_INTERVAL_MS, and only while probe() has been
+  // called within the last PROBE_IDLE_MS.
   let territory: number[] = equalPopulation(SPECIES_COUNT);
   let territoryProg: GLProgram | null = null;
   const TERRITORY_SIDE = 16;
-  const territoryRb = createPixelReadback(TERRITORY_SIDE);
   let lastProbeMs = -Infinity;
   let lastTerritoryKickMs = -Infinity;
   const TERRITORY_INTERVAL_MS = 500;
@@ -2375,7 +2428,6 @@ function createPhysarum2Scene(): Scene {
   // many fragments; the shares are the same, since populationFromBlocks
   // normalises by the total and texels past the agent grid write 0.
   const POP_SIDE = 128;
-  const popRb = createPixelReadback(POP_SIDE);
   let lastPopKickMs = -Infinity;
   // Bumped by every command() that sets `population` outright (pipette tap,
   // Rebalance); a readback remembers the value it was kicked under, and one
@@ -2390,8 +2442,17 @@ function createPhysarum2Scene(): Scene {
   // full-level gain as shown (log, gliding toward levelTargetLog at
   // LEVEL_TAU); the setting's blend is applied at upload (levelGain).
   let levelProg: GLProgram | null = null;
-  const levelRb = createPixelReadback(LEVEL_SIDE);
   let lastLevelKickMs = -Infinity;
+  // The census: Territory, Headcount and Auto level read back as the parts
+  // of ONE createPixelReadback, so they share one fence and one drain (its
+  // own doc comment says why that matters). A kick takes every part that is
+  // due, plus any part past CENSUS_JOIN of its own interval, so parts on the
+  // same cadence stay in one readback instead of drifting into two.
+  const CENSUS_TERRITORY = 0;
+  const CENSUS_POP = 1;
+  const CENSUS_LEVEL = 2;
+  const census = createPixelReadback([TERRITORY_SIDE, POP_SIDE, LEVEL_SIDE]);
+  const CENSUS_JOIN = 0.5;
   const levelLog = new Float32Array(SPECIES_COUNT);
   const levelTargetLog = new Float32Array(SPECIES_COUNT);
   const levelNow = new Float32Array(SPECIES_COUNT).fill(1);
@@ -2406,20 +2467,6 @@ function createPhysarum2Scene(): Scene {
   // the Strain Console grabs when a dragged stain starts from what's on screen.
   const shownStain = new Float32Array(SPECIES_COUNT);
   let harmonyIdx = 0;
-
-  function samplerLoc(
-    gl: WebGL2RenderingContext,
-    prog: GLProgram,
-    key: string,
-    name: string,
-  ): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
 
   function makeAgentTexture(gl: WebGL2RenderingContext, side: number, data: Uint8Array): WebGLTexture | null {
     const tex = gl.createTexture();
@@ -2504,7 +2551,7 @@ function createPhysarum2Scene(): Scene {
    *  setting's current value. */
   function startInkData(side: number): Uint8Array {
     const buf = new Uint8Array(side * side * 4);
-    fillStartInk(buf, SPECIES_COUNT, resolveSceneSetting(ID, settingFor("startInk")), xorshift32((Math.random() * 4294967296) >>> 0));
+    fillStartInk(buf, SPECIES_COUNT, resolveSceneSetting(ID, settingFor("startInk")), (Math.random() * 4294967296) >>> 0);
     return buf;
   }
 
@@ -2548,92 +2595,108 @@ function createPhysarum2Scene(): Scene {
     trailReadIdx = 0;
   }
 
-  /** Territory (Phase 3): polls any in-flight readback (never a blocking
-   *  wait — see createPixelReadback), and kicks off at most one more every
-   *  TERRITORY_INTERVAL_MS, only while probe() has actually been called within
-   *  the last PROBE_IDLE_MS — see the file header. */
-  function pollTerritory(gl: WebGL2RenderingContext, nowMs: number): void {
-    const done = territoryRb.poll(gl);
-    if (done) territory = classifyTerritory(done, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
-    if (done || territoryRb.busy) return; // one readback in flight at a time
-    if (nowMs - lastProbeMs > PROBE_IDLE_MS) return;
-    if (nowMs - lastTerritoryKickMs < TERRITORY_INTERVAL_MS) return;
-    if (!territoryProg || !quadVao || trailSideCur === 0) return;
-    lastTerritoryKickMs = nowMs;
-    const block = Math.max(1, Math.floor(trailSideCur / TERRITORY_SIDE));
-    const prog = territoryProg;
-    const quad = quadVao;
-    territoryRb.begin(gl, () => {
-      prog.use();
-      prog.setF("uTrailSide", trailSideCur);
-      prog.setF("uBlock", block);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-      gl.uniform1i(samplerLoc(gl, prog, "terr.uTrail", "uTrail"), 0);
-      drawFullscreenQuad(gl, quad);
-    });
-  }
-
-  /** Headcount: the same non-blocking readback as territory, over the agents'
-   *  strain channel (POP_FRAG). Runs while the panel is open (probe() called
-   *  recently) or while Switching is on — recruiting reads the shares every
-   *  step, panel or not. */
-  function pollPopulation(gl: WebGL2RenderingContext, nowMs: number, recruiting: boolean): void {
-    const done = popRb.poll(gl);
-    if (done) {
-      if (popKickGen === popGen) population = populationFromBlocks(done, POP_SIDE * POP_SIDE, SPECIES_COUNT);
-      // A stale result is dropped; let the next frame kick a fresh read.
+  /** Hands a landed census to its readers: Territory's shares, the
+   *  Headcount (unless a command set `population` outright after that
+   *  readback was kicked — see popGen) and Auto level's target gains. Called
+   *  at the top of render(), before the frame's sim steps are queued: the
+   *  drain is a synchronous round trip that waits for whatever the GPU
+   *  process has queued ahead of it (createPixelReadback). */
+  function drainCensus(gl: WebGL2RenderingContext): void {
+    const done = census.poll(gl);
+    if (!done) return;
+    const terr = done[CENSUS_TERRITORY];
+    if (terr) territory = classifyTerritory(terr, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
+    const pop = done[CENSUS_POP];
+    if (pop) {
+      if (popKickGen === popGen) population = populationFromBlocks(pop, POP_SIDE * POP_SIDE, SPECIES_COUNT);
+      // A stale result is dropped; let the next kick take a fresh read.
       else lastPopKickMs = -Infinity;
     }
-    if (done || popRb.busy) return;
-    // A command's one-shot hasn't reached the agents yet (a zero-step frame):
-    // reading now would measure the pre-command population.
-    if (pendingInject || pendingRebalance) return;
-    if (!recruiting && nowMs - lastProbeMs > PROBE_IDLE_MS) return;
-    if (nowMs - lastPopKickMs < POP_INTERVAL_MS) return;
-    if (!popProg || !quadVao) return;
-    lastPopKickMs = nowMs;
-    popKickGen = popGen;
-    const block = Math.max(1, Math.ceil(agentSide / POP_SIDE));
-    const prog = popProg;
-    const quad = quadVao;
-    popRb.begin(gl, () => {
-      prog.use();
-      prog.setF("uAgentSide", agentSide);
-      prog.setF("uBlock", block);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
-      gl.uniform1i(samplerLoc(gl, prog, "pop.uAgentDir", "uAgentDir"), 0);
-      drawFullscreenQuad(gl, quad);
-    });
-  }
-
-  /** Auto level: polls LEVEL_FRAG's readback (never a blocking wait) into
-   *  each strain's target gain, kicks off at most one more every
-   *  LEVEL_INTERVAL_MS while `level` is above 0, and glides the shown gain
-   *  toward the target. levelNow is what the composite uploads — exactly 1
-   *  per strain at level 0. */
-  function updateLevel(gl: WebGL2RenderingContext, nowMs: number, dt: number, level: number): void {
-    const done = levelRb.poll(gl);
-    if (done) {
-      const gains = levelGainsFull(levelPeaks(done, LEVEL_SIDE * LEVEL_SIDE, SPECIES_COUNT));
+    const lvl = done[CENSUS_LEVEL];
+    if (lvl) {
+      const gains = levelGainsFull(levelPeaks(lvl, LEVEL_SIDE * LEVEL_SIDE, SPECIES_COUNT));
       for (let k = 0; k < SPECIES_COUNT; k++) levelTargetLog[k] = Math.log(gains[k]!);
     }
-    if (level > 0 && !done && !levelRb.busy && nowMs - lastLevelKickMs >= LEVEL_INTERVAL_MS && levelProg && quadVao && trailSideCur > 0) {
-      lastLevelKickMs = nowMs;
-      const block = Math.max(1, Math.ceil(trailSideCur / LEVEL_SIDE));
-      const prog = levelProg;
-      const quad = quadVao;
-      levelRb.begin(gl, () => {
+  }
+
+  /** Kicks off the next census, once nothing is in flight and any part is
+   *  due, using the freshest trail and agents this frame produced:
+   *  - Territory every TERRITORY_INTERVAL_MS, only while probe() has been
+   *    called within PROBE_IDLE_MS (the panel is showing it);
+   *  - Headcount every POP_INTERVAL_MS while the panel is open (probe()) or
+   *    Switching is on — recruiting reads the shares every step, panel or
+   *    not — but never while a command's one-shot hasn't reached the agents
+   *    yet (a zero-step frame: reading now would measure the pre-command
+   *    population);
+   *  - Auto level every LEVEL_INTERVAL_MS while `level` is above 0, on every
+   *    device, since it changes the picture.
+   *  A part that isn't due yet still joins once past CENSUS_JOIN of its own
+   *  interval (see the census's comment). */
+  function kickCensus(gl: WebGL2RenderingContext, nowMs: number, recruiting: boolean, level: number): void {
+    if (census.busy || !quadVao) return;
+    const probed = nowMs - lastProbeMs <= PROBE_IDLE_MS;
+    const terrOk = probed && !!territoryProg && trailSideCur > 0;
+    const popOk = (recruiting || probed) && !pendingInject && !pendingRebalance && !!popProg;
+    const levelOk = level > 0 && !!levelProg && trailSideCur > 0;
+    const terrAge = (nowMs - lastTerritoryKickMs) / TERRITORY_INTERVAL_MS;
+    const popAge = (nowMs - lastPopKickMs) / POP_INTERVAL_MS;
+    const levelAge = (nowMs - lastLevelKickMs) / LEVEL_INTERVAL_MS;
+    const due = (terrOk && terrAge >= 1) || (popOk && popAge >= 1) || (levelOk && levelAge >= 1);
+    if (!due) return;
+    const quad = quadVao;
+    let drawTerritory: (() => void) | null = null;
+    let drawPop: (() => void) | null = null;
+    let drawLevel: (() => void) | null = null;
+    if (terrOk && terrAge >= CENSUS_JOIN) {
+      lastTerritoryKickMs = nowMs;
+      const prog = territoryProg!;
+      const block = Math.max(1, Math.floor(trailSideCur / TERRITORY_SIDE));
+      drawTerritory = () => {
         prog.use();
         prog.setF("uTrailSide", trailSideCur);
         prog.setF("uBlock", block);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-        gl.uniform1i(samplerLoc(gl, prog, "level.uTrail", "uTrail"), 0);
+        prog.setI("uTrail", 0);
         drawFullscreenQuad(gl, quad);
-      });
+      };
     }
+    if (popOk && popAge >= CENSUS_JOIN) {
+      lastPopKickMs = nowMs;
+      popKickGen = popGen;
+      const prog = popProg!;
+      const block = Math.max(1, Math.ceil(agentSide / POP_SIDE));
+      drawPop = () => {
+        prog.use();
+        prog.setF("uAgentSide", agentSide);
+        prog.setF("uBlock", block);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
+        prog.setI("uAgentDir", 0);
+        drawFullscreenQuad(gl, quad);
+      };
+    }
+    if (levelOk && levelAge >= CENSUS_JOIN) {
+      lastLevelKickMs = nowMs;
+      const prog = levelProg!;
+      const block = Math.max(1, Math.ceil(trailSideCur / LEVEL_SIDE));
+      drawLevel = () => {
+        prog.use();
+        prog.setF("uTrailSide", trailSideCur);
+        prog.setF("uBlock", block);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+        prog.setI("uTrail", 0);
+        drawFullscreenQuad(gl, quad);
+      };
+    }
+    census.begin(gl, [drawTerritory, drawPop, drawLevel]);
+  }
+
+  /** Auto level's glide: eases each strain's shown gain toward the target
+   *  the last census set. levelNow is what the composite uploads — exactly 1
+   *  per strain at level 0. */
+  function glideLevel(dt: number, level: number): void {
     const a = 1 - Math.exp(-dt / LEVEL_TAU);
     for (let k = 0; k < SPECIES_COUNT; k++) {
       levelLog[k] = levelLog[k]! + (levelTargetLog[k]! - levelLog[k]!) * a;
@@ -2676,6 +2739,8 @@ function createPhysarum2Scene(): Scene {
         turn: d.value(turnSettings[k]!.key, motionDefault),
         stride: d.value(strideSettings[k]!.key, motionDefault),
         stain: d.value(stainSettings[k]!.key, bandDefault * STAIN_JACK_GAIN),
+        angle: d.value(angleSettings[k]!.key, motionDefault),
+        life: d.value(lifeSettings[k]!.key, motionDefault),
       };
       // What probe() reports as the strain's vigour: the signal actually
       // feeding its Nutrient this frame, scene default included (the
@@ -2729,7 +2794,6 @@ function createPhysarum2Scene(): Scene {
       territoryProg = createProgram(gl, TERRITORY_FRAG);
       popProg = createProgram(gl, POP_FRAG);
       levelProg = createProgram(gl, LEVEL_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all — every agent is addressed by
       // gl_VertexID — so this draws from an empty VAO rather than the
@@ -2760,9 +2824,9 @@ function createPhysarum2Scene(): Scene {
       ensureTrailTargets(gl);
 
       agentRead = 0;
+      sorter.reset();
       lastFrameTime = null;
-      seedEmission = createRippleEmissionState();
-      sinceSeedSec = SEED_RISE_REFRACTORY_SEC * 10;
+      seedTrigger = createStandoutTrigger(SEED_RISE_REFRACTORY_SEC);
       seedEpoch = 0;
       stepAcc = 0;
       crawlPump.vel = 0;
@@ -2775,7 +2839,7 @@ function createPhysarum2Scene(): Scene {
       territory = new Array(SPECIES_COUNT).fill(0);
       pendingInject = null;
       pendingRebalance = false;
-      pendingSeed = false;
+      pendingSeed = 0;
       popGen = 0;
       popKickGen = 0;
       lastProbeMs = -Infinity;
@@ -2793,13 +2857,15 @@ function createPhysarum2Scene(): Scene {
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!diffuseProg || !simProg || !depositProg || !depositProgMrt || !compositeProg) return;
-      if (!quadVao || !depositVao || !seedEmission) return;
+      if (!quadVao || !depositVao || !seedTrigger) return;
       const { gl } = ctx;
       ensureTrailTargets(gl);
       if (pendingFresh) {
         pendingFresh = false;
         freshDish(gl);
       }
+      // Before any of this frame's steps are queued — see drainCensus.
+      drainCensus(gl);
 
       // Cached for command("inject") (screenToFieldUv), which can be called
       // between render()s from a UI click, well outside this function's own
@@ -2812,30 +2878,29 @@ function createPhysarum2Scene(): Scene {
       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.05, frame.time - lastFrameTime));
       lastFrameTime = frame.time;
 
-      // The tracker always advances so its learned floor/peak keep running
+      // The trigger steps every frame so its learned floor/peak keep running
       // whatever drive Dose is patched to; drives.value() is the beat pulse
       // by default, or the patched source's envelope (a hit, a grid tick, a
-      // level, a drawn line). drives.threshold() is null while Dose
-      // threshold's Off switch is pressed (every climb counts) and undefined
-      // only with no engine at all (PASSTHROUGH_DRIVES). seedEpoch rotates
-      // the reseed cluster's centre, so every fire lands somewhere new.
-      const seedThreshold = drives.threshold("seed");
-      const standout = advanceStandout(
-        seedEmission,
+      // level, a drawn line). seedEpoch rotates the reseed cluster's centre,
+      // so every fire lands somewhere new.
+      const seedSize = stepStandoutHit(
+        seedTrigger,
         dt,
         drives.value("seed", anim.beatPulse),
-        seedThreshold === undefined ? RING_THRESHOLD_DEFAULT : seedThreshold,
+        standoutThreshold(drives, "seed"),
+        drives.readout("seed") ?? "flat",
       );
-      sinceSeedSec += dt;
-      const seedFresh = standout && sinceSeedSec >= SEED_RISE_REFRACTORY_SEC;
       // The panel draws the line a climb has to reach, and a dot for each
       // colony started (settingMarks.ts); no line while the threshold is off.
-      const seedMarks = salienceMarks(seedEmission);
-      publishSettingMarks(ID, "seed", seedMarks ? [{ value: seedMarks.ringsAbove, label: "reach to start a colony" }] : [], seedFresh ? 1 : 0);
-      if (seedFresh) {
-        sinceSeedSec = 0;
+      publishSettingMarks(
+        ID,
+        "seed",
+        { lines: standoutLine(seedTrigger.detector, "reach to start a colony"), reactionLabel: "colony started" },
+        seedSize,
+      );
+      if (seedSize > 0) {
         seedEpoch++;
-        pendingSeed = true;
+        pendingSeed = seedSize;
       }
 
       resolveStrains(dt, frame, anim, drives);
@@ -2879,8 +2944,8 @@ function createPhysarum2Scene(): Scene {
       diffuseProg.setF("uTrailSide", trailSideCur);
       diffuseProg.setV4v("uEatCol", eatCols);
       diffuseProg.setV4("uLifeMul", strainLifeMul[0]!, strainLifeMul[1]!, strainLifeMul[2]!, strainLifeMul[3]!);
-      gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uTrailIn", "uTrailIn"), 0);
-      gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uFootprint", "uFootprint"), 1);
+      diffuseProg.setI("uTrailIn", 0);
+      diffuseProg.setI("uFootprint", 1);
 
       simProg.use();
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
@@ -2903,21 +2968,22 @@ function createPhysarum2Scene(): Scene {
       simProg.setF("uInjectX", pendingInject ? pendingInject.fieldX : 0);
       simProg.setF("uInjectY", pendingInject ? pendingInject.fieldY : 0);
       simProg.setF("uInjectStrain", pendingInject ? pendingInject.strain : 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentPos", "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentDir", "uAgentDir"), 1);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uTrail", "uTrail"), 2);
+      simProg.setI("uAgentPos", 0);
+      simProg.setI("uAgentDir", 1);
+      simProg.setI("uTrail", 2);
 
       depositActive.use();
       uploadCommonUniforms(depositActive, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       depositActive.setF("uAgentSide", agentSide);
       depositActive.setV4("uStrainFeed", strainFeed[0]!, strainFeed[1]!, strainFeed[2]!, strainFeed[3]!);
       depositActive.setV4v("uTouchFeedRow", touchFeedRows);
-      // Keyed by which program is active (not a shared "dep." prefix): the
-      // two deposit programs are distinct WebGLProgram objects, and a
-      // uniform location cached from one is not valid on the other.
-      const depKeyPrefix = mrt ? "depMrt." : "dep.";
-      gl.uniform1i(samplerLoc(gl, depositActive, `${depKeyPrefix}uAgentPos`, "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, depositActive, `${depKeyPrefix}uAgentDir`, "uAgentDir"), 1);
+      depositActive.setI("uAgentPos", 0);
+      depositActive.setI("uAgentDir", 1);
+
+      // This frame's share of the agent re-sort, ahead of the steps it
+      // speeds up; when one lands, the sorted agents are in the other half.
+      const sortTarget = { posTex: agentPosTex[agentRead]!, dirTex: agentDirTex[agentRead]!, dstFbo: agentFbo[1 - agentRead]!, side: agentSide };
+      if (sorter.advance(gl, sortTarget, quadVao, steps)) agentRead = 1 - agentRead;
 
       for (let step = 0; step < steps; step++) {
         const trailWrite = 1 - trailReadIdx;
@@ -2946,7 +3012,7 @@ function createPhysarum2Scene(): Scene {
         gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbo[agentWrite]);
         gl.viewport(0, 0, agentSide, agentSide);
         simProg.use();
-        simProg.setF("uSeedFresh", step === 0 && pendingSeed ? 1 : 0);
+        simProg.setF("uSeedFresh", step === 0 ? pendingSeed : 0);
         simProg.setF("uInjectFresh", step === 0 && pendingInject ? 1 : 0);
         simProg.setF("uRebalanceFresh", step === 0 && pendingRebalance ? 1 : 0);
         simProg.setF("uNoiseSeed", Math.random() * 100);
@@ -2992,17 +3058,17 @@ function createPhysarum2Scene(): Scene {
       if (steps > 0) {
         pendingInject = null;
         pendingRebalance = false;
-        pendingSeed = false;
+        pendingSeed = 0;
       }
 
-      // Territory (Phase 3): poll any in-flight readback and maybe kick off
-      // another, using the freshest trail this frame produced — see the file
-      // header and pollTerritory's own doc comment. Never affects the
-      // uniforms/bindings the composite pass below sets up itself.
+      // The census (Territory, Headcount, Auto level): maybe kick off the
+      // next one from the freshest trail this frame produced — see
+      // kickCensus. Never affects the uniforms/bindings the composite pass
+      // below sets up itself.
       const nowMs = performance.now();
-      pollTerritory(gl, nowMs);
-      pollPopulation(gl, nowMs, resolveSceneSetting(ID, settingFor("switching")) > 0);
-      updateLevel(gl, nowMs, dt, resolveSceneSetting(ID, settingFor("level")));
+      const level = resolveSceneSetting(ID, settingFor("level"));
+      kickCensus(gl, nowMs, resolveSceneSetting(ID, settingFor("switching")) > 0, level);
+      glideLevel(dt, level);
 
       // 4. Composite to the default framebuffer — always, even when this
       //    frame owed zero steps (the picture just doesn't advance).
@@ -3025,7 +3091,7 @@ function createPhysarum2Scene(): Scene {
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uTrail", "uTrail"), 0);
+      compositeProg.setI("uTrail", 0);
       drawFullscreenQuad(gl, quadVao);
 
       // 5. The gallery renders every scene into one shared context each
@@ -3131,10 +3197,8 @@ function createPhysarum2Scene(): Scene {
         agentDirTex[i] = null;
       }
       freeTrailTargets(gl);
-      territoryRb.dispose(gl);
-      popRb.dispose(gl);
-      levelRb.dispose(gl);
-      samplerLocs.clear();
+      census.dispose(gl);
+      sorter.dispose(gl);
       diffuseProg = null;
       simProg = null;
       depositProg = null;
@@ -3146,14 +3210,14 @@ function createPhysarum2Scene(): Scene {
       quadVao = null;
       depositVao = null;
       lastFrameTime = null;
-      seedEmission = null;
+      seedTrigger = null;
       seedEpoch = 0;
       stepAcc = 0;
       crawlPump.vel = 0;
       trailSideCur = 0;
       pendingInject = null;
       pendingRebalance = false;
-      pendingSeed = false;
+      pendingSeed = 0;
       spotA = -1;
       spotB = -1;
       spotUntilMs = 0;
@@ -3164,5 +3228,8 @@ function createPhysarum2Scene(): Scene {
     },
   };
 }
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "released", added: "2026-09-27" } as const;
 
 export const physarum2Scene = createPhysarum2Scene();

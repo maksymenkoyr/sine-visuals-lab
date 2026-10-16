@@ -17,6 +17,12 @@
  */
 export const PRODUCT_NAME = "Sine Visuals Lab";
 export const SOURCE_URL = "https://github.com/maksymenkoyr/sine-visuals-lab";
+/** The label under an installed app's home-screen icon, where launchers cut
+ *  long names short, and the initials that stand in for the name on a
+ *  non-Stable channel's label so the channel's own name fits beside them
+ *  (vite-app-manifest-plugin.ts). */
+export const PRODUCT_SHORT_NAME = "Sine Visuals";
+export const PRODUCT_INITIALS = "SVL";
 /** The project's Instagram — linked from the gallery footer and listed in
  *  index.html's Organization `sameAs` (keep the two in step). */
 export const INSTAGRAM_URL = "https://www.instagram.com/sinevisualslab/";

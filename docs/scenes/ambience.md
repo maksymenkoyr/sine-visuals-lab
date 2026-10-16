@@ -7,8 +7,8 @@ lives as a sheet — rippling, bending, tumbling, stretched, seen in
 perspective from a camera that sweeps between poses on bar boundaries — but
 is really a set of dots free to take any formation (dot, line, sheet, tube,
 cube, tesseract). A musical hit sends a swell running along one row or
-column that balloons and merges the discs inside it into one blob. Draft, on
-main.
+column that balloons and merges the discs inside it into one blob. In
+development, on main.
 
 ## Where the code is
 
@@ -86,6 +86,10 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   ripple clock was `flowPhase * Wave speed`, which teleports the ripples
   whenever Wave speed (or its Auto drift) moves; it is now accumulated with
   `createScaledPhase`, so Wave speed only changes the ripple rate.
+- 2026-10-08 — Beat swell became a hit driver (the Reaction row, Flat or
+  Sized; drives.ts's header, "Hit drivers"). Sized scales the strength of the
+  swell a hit spawns by how far the hit stood out; Flat, the default, is
+  unchanged.
 
 ## Tuning notes
 

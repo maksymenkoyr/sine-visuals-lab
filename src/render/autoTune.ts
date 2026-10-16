@@ -1,10 +1,8 @@
 import type { SceneSetting } from "./sceneSettings.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import {
-  getSceneExpansion,
   getSceneMaster,
   getSceneSetting,
-  SCENE_EXPANSION_DEFAULT,
   SCENE_MASTER_DEFAULT,
   setVariantResolver,
   settingDefault,
@@ -21,13 +19,13 @@ import {
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
   shapeExpansion,
+  SMOOTHING_AUTO_MAX,
   SMOOTHING_DEFAULT,
-  SMOOTHING_MAX,
   SMOOTHING_MIN,
 } from "../audio/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
 import { getOverride, isAutoPinned } from "../tuning/overrides.ts";
-import { getPin } from "../tuning/pins.ts";
+import { getCustomValue } from "./customValues.ts";
 
 /**
  * Layers "let the music pick a good value" on top of sceneSettings.ts's
@@ -164,7 +162,8 @@ const SMOOTHING_SPEC: SceneSetting = {
   key: SMOOTHING_AUTO_KEY,
   label: "Smoothing",
   min: SMOOTHING_MIN,
-  max: SMOOTHING_MAX,
+  // Auto's span, not the slider's: see SMOOTHING_AUTO_MAX in sensitivity.ts.
+  max: SMOOTHING_AUTO_MAX,
   step: 0.05,
   default: SMOOTHING_DEFAULT,
   // Smoothing scales how fast the visuals chase the audio (bandEnergy.ts's
@@ -230,27 +229,34 @@ function pruneDefaultEntries(store: AutoStore): boolean {
   return changed;
 }
 
+// Strict: throws on text that is not a JSON object, so the reload hook keeps
+// what it had (net/syncedStores.ts's parseSyncedObject). Then the same tidy-up
+// the initial load has always run: drop bad scope entries, migrate, prune and
+// write back if anything changed.
+function readAutoStore(): AutoStore {
+  const parsed = parseSyncedObject(localStorage.getItem(STORAGE_KEY_AUTO_ON)) as AutoStore | null;
+  if (parsed === null) return {};
+  // A scope entry that isn't an object (hand-edited or corrupted storage)
+  // would make the migrate/prune passes below throw and the catch discard
+  // every scene's choice — drop just that entry instead.
+  let dropped = false;
+  for (const sceneId of Object.keys(parsed)) {
+    const entry = parsed[sceneId];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      delete parsed[sceneId];
+      dropped = true;
+    }
+  }
+  const migrated = migrateLegacyExpansionKeys(parsed);
+  const pruned = pruneDefaultEntries(parsed);
+  if (dropped || migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
+  return parsed;
+}
+
+// Initial load: unreadable text reads as empty, as it always has.
 function loadAutoStore(): AutoStore {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_AUTO_ON);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    // A scope entry that isn't an object (hand-edited or corrupted storage)
-    // would make the migrate/prune passes below throw and the catch discard
-    // every scene's choice — drop just that entry instead.
-    let dropped = false;
-    for (const sceneId of Object.keys(parsed)) {
-      const entry = parsed[sceneId];
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-        delete parsed[sceneId];
-        dropped = true;
-      }
-    }
-    const migrated = migrateLegacyExpansionKeys(parsed);
-    const pruned = pruneDefaultEntries(parsed);
-    if (dropped || migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
-    return parsed;
+    return readAutoStore();
   } catch {
     return {};
   }
@@ -259,9 +265,11 @@ function loadAutoStore(): AutoStore {
 const autoOn: AutoStore = loadAutoStore();
 
 // Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+// Reads before it clears, so unreadable text leaves the store as it was.
 registerSyncedStore(STORAGE_KEY_AUTO_ON, () => {
+  const next = readAutoStore();
   for (const k of Object.keys(autoOn)) delete autoOn[k];
-  Object.assign(autoOn, loadAutoStore());
+  Object.assign(autoOn, next);
 });
 
 function persistAutoStore(): void {
@@ -401,18 +409,18 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // Dev-only tuning override — see tuning/overrides.ts. Wrapped in DEV so a
   // prod build never pays for the check and the override module tree-shakes
   // out entirely (Vite replaces import.meta.env.DEV with a literal false).
-  // A pin (tuning/pins.ts — a typed-in out-of-range value, persisted) beats
-  // auto-pin but loses to a file override: applyTuningParams clears every
-  // override and rewrites only the keys in its payload, so a stale pin from
-  // an earlier manual session must never shadow a key a scripted run
-  // explicitly set.
+  // A custom value (customValues.ts — typed past the slider, persisted)
+  // beats auto and auto-pin but loses to a file override: applyTuningParams
+  // clears every override and rewrites only the keys in its payload, so a
+  // stale custom value from an earlier session must never shadow a key a
+  // scripted run explicitly set.
   if (import.meta.env.DEV) {
     const override = getOverride(sceneId, spec.key);
     if (override !== undefined) return override;
-    const pin = getPin(sceneId, spec.key);
-    if (pin !== undefined) return pin;
-    if (isAutoPinned()) return manualValue;
   }
+  const custom = getCustomValue(sceneId, spec.key);
+  if (custom !== undefined) return custom;
+  if (import.meta.env.DEV && isAutoPinned()) return manualValue;
 
   if ((!spec.auto && !spec.macro) || !isAutoEnabled(sceneId, spec.key)) return manualValue;
 
@@ -477,33 +485,34 @@ function resolveUnscaled(sceneId: string, spec: SceneSetting): number {
  *  - never to Sensitivity/Expansion/Smoothing, which resolve through
  *    resolveSensitivity and friends below and are audio gain, not scene
  *    params;
- *  - never over a DEV override or pin: those are deliberately typed,
- *    often out-of-range values (tuning/overrides.ts, tuning/pins.ts), and
- *    clamping them back in would break the tuning affordance.
- *  Then the master's Expansion (sceneSettings.ts's getSceneExpansion): the
- *  scaled value's position along its slider, (v − min) / (max − min),
- *  through the Input card's own shapeExpansion curve and back — the same
- *  S-curve about the midpoint, in the same order (gain first, then curve)
- *  as applySensitivity runs Sensitivity then Expansion. Every rule above
- *  covers it too; `masterScale: false` opts a spec out of both dials.
+ *  - never over a custom value or a DEV override: those are deliberately typed,
+ *    often out-of-range values (customValues.ts, tuning/overrides.ts), and
+ *    clamping them back in would undo them.
+ *  Scale is the picture's normal line, and nothing else moves it here: the
+ *  master's Expansion dial (sceneSettings.ts's getSceneExpansion) acts on
+ *  the music instead — how far a drive reading may pull the picture away
+ *  from this value and for how long (drives.ts's header, "Master
+ *  Expansion").
  *
- *  Both dials at 1 return the resolved value untouched, so every identity
- *  test (auto at NEUTRAL, drives at defaults) stays bit-for-bit. */
+ *  Scale at 1 returns the resolved value untouched, so every identity test
+ *  (auto at NEUTRAL, drives at defaults) stays bit-for-bit. */
 export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number {
   const value = resolveUnscaled(sceneId, spec);
   const master = getSceneMaster();
-  const expansion = getSceneExpansion();
-  if (master === SCENE_MASTER_DEFAULT && expansion === SCENE_EXPANSION_DEFAULT) return value;
+  if (master === SCENE_MASTER_DEFAULT) return value;
   if (spec.type === "boolean" || spec.type === "enum") return value;
   if (spec.masterScale === false) return value;
-  if (import.meta.env.DEV && (getOverride(sceneId, spec.key) !== undefined || getPin(sceneId, spec.key) !== undefined)) {
-    return value;
-  }
-  const scaled = master === SCENE_MASTER_DEFAULT ? value : clampToSpec(spec, value * master);
-  if (expansion === SCENE_EXPANSION_DEFAULT || spec.max <= spec.min) return scaled;
-  const span = spec.max - spec.min;
-  const pos = (scaled - spec.min) / span;
-  return clampToSpec(spec, spec.min + shapeExpansion(pos, expansion) * span);
+  if (getCustomValue(sceneId, spec.key) !== undefined) return value;
+  if (import.meta.env.DEV && getOverride(sceneId, spec.key) !== undefined) return value;
+  return clampToSpec(spec, value * master);
+}
+
+/** The effective value before the scene master's Scale: for a scene that
+ *  must decide whether a setting is on at all (a framing switch) apart from
+ *  how much of it the master lets through. Every amount reads
+ *  resolveSceneSetting. */
+export function resolveSceneSettingUnscaled(sceneId: string, spec: SceneSetting): number {
+  return resolveUnscaled(sceneId, spec);
 }
 
 // A scene's variant (SceneSetting.variant) is read through this resolver

@@ -17,20 +17,26 @@ for the whole simulation design (strain/attraction-table packing, the
 per-step fixed-rate stepper, the RGBA=strain trail, evaporation precision,
 the composite's exposure/gamma, and — since 2026-09-27 — the per-strain
 settings and the "Uniform budget" note on how they reach the shader without
-their own uniforms). Registered as `physarum2Scene` via `registerScene` in
-`src/render/scenes/index.ts` (first line of registration, newest first within
-its gallery group), and absent from that file's `draftIds`, so featured.
+their own uniforms). Exported as `physarum2Scene`, with
+`stage: "released"` in its `gallery` record, so featured.
 
 The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (the
 lanes, the mix row with Random/Back/the motion presets, and the Synergy row
 with Shuffle/New palette — its header is the source for the gestures),
 `src/ui/widgets/consoleMath.ts` (the pure arithmetic,
-`tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own "Per
-strain" card between the Strains block and the Affinity card. The colour
+`tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own
+"Strain settings" card (the panel title, `PANEL`'s `console.title`) between
+the Strains block and the Affinity card. The colour
 harmony fit is `physarum2Synergy.ts` (pure, `tests/physarum2Synergy.test.ts`),
 the recruiting rule is `SIM_FRAG`'s Headcount block (`SWITCH_MAX`'s comment
 has the rule), and the measured headcount is `POP_FRAG` through
-`createPixelReadback` (the same non-blocking readback Territory uses).
+`createPixelReadback` (one census with Territory and Auto level: one fence,
+one drain).
+
+The agent re-sort (2026-10-05): `src/render/scenes/physarum2Sort.ts` (its
+header is the source: key pass, bitonic network, gather), called from
+`render()` just ahead of the step loop; its pure twins are tested in
+`tests/physarum2Sort.test.ts`.
 
 Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
 packing round trip and the same beat-rise detector with its own refractory),
@@ -62,7 +68,7 @@ labelled Rivalry, then Hostility — Crawl speed, Beat seeding, Exposure, Palett
 tint, Beat flash), each of the latter still carrying its own `auto` weights as before;
 and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
 Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
-pair (`pairsOf`), a Nudge/Keep own trails/Rivals/Back mix row and named
+pair (`pairsOf`), a Nudge/Keep own trails/Back mix row and named
 presets — replacing the old plain-word rows/SVG-web pair,
 `relationRows.ts`/`relationWeb.ts`, both deleted) in its own Affinity card
 right after the Scene card ("The Affinity card" below). `src/render/scenes/
@@ -215,6 +221,89 @@ configs are used.
     single jump, the first sweep's mistake before raw trails were read
     (`PairCulture.trails()`). `padmodels.mjs`: neither a probability gate
     nor a value-scaled smell reach made avoid strength change the overlap.
+- 2026-10-04, promo footage (PR #313, `tools/promo/motion.py`, Stable 0.2.0,
+  a 175 BPM drum & bass track through the fake mic, 64 beats after the drop):
+  the scene's **defaults** plus Random every 8 beats barely pulse with the
+  music — motion 4.61, beat pulse 1.08, sync to onsets 0.11. The user's saved
+  look (drives: Speed boost ← beat wave, Speed pump and Seed ← low onset,
+  Flash ← onset) pulses clearly: 5.32 / 1.48 / 0.32 untouched, 5.80 / 1.52
+  with Random every 8 beats on top (Random keeps the drives). The first promo
+  cut re-rolled presets every 2 beats on the synthetic feed; the user found
+  half of it flat — a dish needs a few beats to grow into its pattern.
+- 2026-10-04, "strong lags" with the panel open (user's Power card: High
+  pinned, 2912×1804, 24 fps falling to 11, main thread 54%, GPU 16.2 ms, Panel
+  blur on). Headless Chromium on the same M1 Pro (ANGLE/Metal, 1456×902 at
+  dpr 2, synthetic 124 BPM, panel open, 6 s CPU profiles plus a wrapped
+  `getBufferSubData` timer):
+  - Panel closed: 120 fps rAF, every readback ≈ 0.3 ms. Panel open with blur
+    off: ≈ 1 ms a readback. Panel open with blur on: 10–15 ms a readback —
+    each one waits behind the GPU process's backlog (the blur re-filters the
+    canvas every frame). The main thread then shows ~35% in
+    `getBufferSubData`: the Master card's Picture meter (15 a second,
+    whenever the panel was open) and this scene's Territory/Headcount/Auto
+    level (up to ten a second between them, drained after the frame's steps).
+  - Forced layouts: the leash gauge read `clientWidth` every tick (≈ 5% of
+    the main thread); the strain boxes wrote `--c` and then read the preview
+    canvases' size every tick (≈ 10%). The spectrum strip's axis text ≈ 2%.
+  - Fixed in one PR: the Picture meter samples only while its block is on
+    screen, the three readbacks are one census (one fence, one drain, before
+    the steps), observed sizes instead of per-tick reads, boxes redraw only
+    on the ticks they step, the axis is cached, and the box sim uses one
+    cos/sin pair per agent. Scrolled to the Scene card, blur on: renderer
+    main thread 84% → 60% busy (Chrome trace), readbacks 136–152 → 23–24
+    per 6 s and 1.5–2.1 s → 0.3–0.4 s of stall, preview `step` 754 → 490 ms.
+    fps was too noisy to call on a shared machine (main 63–101, fix
+    100–112). Still open: the sim's own ≈ 5 ms/step GPU cost (the spatial
+    re-sort below), and the panel redrawing at the display's rate (120 Hz
+    on ProMotion) while the scene renders at its cap.
+- 2026-10-16, the revisit freeze (#552; `scripts/perf/switchprof.mjs`, a
+  production build with sourcemaps, headless Chromium on the M1 Pro's Metal
+  GPU, 1456×902 at 2×, real music through the fake microphone, the user's
+  Chrome open). Longest frame gap after a hash switch, three rounds each:
+  - before: first visit (from Caustics) 71–79 ms; revisit from Caustics
+    187–192 ms, from Sky 126–148 ms.
+  - the revisit's long frame was `init()`, 164 ms, 136 of it
+    `fillStartInk`, where the xorshift32 generator closure alone took
+    105 ms (9 ms on a first visit). Each mount built a new closure, and
+    every fill after the first called it without inlining. Node doesn't
+    show the cliff: there the closure fill takes 52 ms per 1024² dish
+    every time, the inline one 17 ms.
+  - after (the stream on a local inside `fillStartInk`, the same bytes for
+    a seed): first visit 53–61 ms, revisit from Caustics 49–57 ms, from
+    Sky 47–61 ms. A revisit's `init()` is 45 ms: Start ink 13 ms, most of
+    the rest `seedAgents`' `Math.random` rolls (packing in place instead of
+    `packUnit`'s pairs saved a third of that in Node, not kept).
+  - `npm run perf -- --only app` on 5a16422e and on the fix, the user's
+    Chrome open for both: switch freeze 159 → 67 ms (the tour starts on
+    the gallery, whose Physarum 2 tile has already filled once, so the
+    cliff hit that first visit too), revisit freeze 175 → 75 ms.
+  - unchanged: the census drain (`getBufferSubData`, about 30 ms a call,
+    #559) still makes the 30–40 ms hitches in the seconds after a switch.
+  - the 2026-10-15 resource map's 258 ms "back to Caustics" didn't
+    reproduce: 24–28 ms after Ferrofluid, from Sky and from the gallery.
+- 2026-10-05, the GPU agent re-sort (`physarum2Sort.ts`; `scripts/perf/sortbench.mjs`
+  with `sort-measure-hook.diff` applied). Headless Chromium, ANGLE/Metal, M1
+  Pro, quality high (800k agents), 1456×902 at dpr 2 (the user's 2912×1804
+  window), synthetic 124 BPM; every row three interleaved runs, sort off vs on:
+  - Correctness on the GPU: with the sim frozen, a forced sort kept the
+    order-free checksum of every agent's position and direction (a true
+    permutation), and the mean screen distance between storage neighbours
+    fell from 0.38 of the field (random) to 0.0035 (≈ 3 trail texels); with
+    the sim running and re-sorting, it hovers ≈ 0.045.
+  - Forced 10 steps a frame, vsync off, GPU synced per frame: 5.02–5.24 →
+    1.79–1.87 ms/step (≈ 2.8×), with the sort running back to back — its
+    own cost is inside the "on" figure.
+  - Normal pacing, panel closed, GPU timer around `render()` (ANGLE's timer
+    carries a fixed offset, so read the difference): 11.8–12.1 → 7.6–8.0 ms a
+    frame, p95 15.6–15.9 → 12.1–13.3. Frames with sort stages cost ≈ 1.5 ms
+    more and were about a quarter of all frames.
+  - Panel open, Panel blur on: rAF 85–86 → 120 (the display cap); the GPU
+    process's main thread 97–98% → 51–53% busy; each readback's wait 12.5–13.2
+    → 0.9–1.0 ms — the stall the 2026-10-04 panel-lag entry chased was this
+    GPU backlog.
+  - The look: the app's Picture meter over 30 s, 450 samples a run —
+    brightness 0.217–0.227 off vs 0.218–0.229 on; colour, motion, detail and
+    flashes within 0.003.
 
 ## Decisions and pivots
 
@@ -808,10 +897,13 @@ configs are used.
     noise. Half of the first `START_INK_MAX` washed the first frames pink,
     so the range came down and the default is small (`START_INK_DEFAULT`).
     Fresh dish is phone-local, like Rebalance and the pipette.
-  - **Rivals** (Affinity mix row, on by default): Random smell rolls own
-    trails positive and every other trail negative (`RIVAL_OWN_RANDOM`/
-    `RIVAL_OTHER_RANDOM`), so a roll always splits into territories. Off is
-    the old any-sign roll.
+  - **Random over the whole range** (the Pairs card's half of the Strains
+    card's one Random): every Smell cell rolls over the whole range, even
+    across the control that draws it — own trails across the fader
+    (`rollOwn`, so a strain can come out self-avoiding), other pairs across
+    the pad (`rollSmellPair`). A Rivals toggle that kept every roll in the
+    Rivals preset's shape (own trail followed, everyone else's avoided) was
+    removed on 2026-10-03; the Rivals preset gives that table in one press.
   - **Random motion and motion presets** (the Strain Console's new mix row):
     Random rolls `MOTION_PARAMS` for every strain over the sliders' whole
     ranges (which already span his random
@@ -901,6 +993,102 @@ configs are used.
   screenshots of the panel before and after, six scripted rolls reading the
   own-trail values back.
 
+- **2026-10-03: Random rolls Smell over the whole range; the Rivals toggle
+  is gone.** The user, with a screenshot of the own-trail faders after a
+  Random (all four positive): "something weird with how random works in
+  physarum 2 … these never goes below", then "double check on others param
+  randomisation. if they randoming in whole range". The audit: motion
+  (`MOTION_PARAMS`) and Touch already rolled their sliders' whole ranges;
+  Nutrient, Excitability and Trail life are not rolled at all, and Stain
+  only by Shuffle/New palette. Smell did not: the own trail rolled
+  +0.05…+1.1 with Rivals off and +0.1…+1.1 with it on (the default), and
+  with Rivals on every other pair rolled −1.4…−0.4 — where, by
+  `padresponse.mjs`, every value looks the same — so a default Random only
+  varied own-trail strength. Twelve scripted rolls of the old build
+  (`rollshot.mjs`): 0 of 48 own trails negative, all 141 stored other
+  values in −1.4…−0.4. Asked what Rivals was, the user: "doesn't it
+  duplicate some other params" — it did: the toggle only kept Random's
+  rolls in the Rivals preset's shape, a pill right under it. "remove". Now
+  `randomSmell` rolls every cell over the whole range, even across the
+  control that draws it (`rollOwn` over the fader's `padPos`,
+  `rollSmellPair` over a Smell pad's `smellPadPos`), so a strain can come
+  out self-avoiding and the pads' live 0…+1 band gets most of the pair
+  rolls; Keep own trails still holds the own trails. A side effect of the
+  even-across-the-fader roll: the fader is flat around zero, so the 0.05
+  snap lands about a seventh of own trails on exactly 0 (a strain that
+  ignores its own trail). Nutrient, Excitability and Trail life stay
+  unrolled (not asked for). Twelve rolls of the new build: 22 of 48 own
+  trails negative, reaching both −1.50 and +1.50; other values 30 below 0,
+  96 in 0…+1, 18 above +1. A roll with three self-avoiding strains
+  rendered as one strain's network over the others' dust, as Self-avoid
+  does. Checks: typecheck, the full suite (one unrelated, load-dependent
+  `moire.test.ts` timeout that passes alone), the Affinity card before and
+  after.
+
+- **2026-10-04: the card is "Strain settings", and every slider has a
+  port.** The user: "per strain card. we should find different name for
+  it. also now lets add signal input on each slider and also one for a
+  group". Asked, they picked "Strain settings" (over Traits, Behaviour,
+  Tuning) and, for the group port, "wires all four" over a separate group
+  drive added on top: the group port mounts strain 0's row with the other
+  strains `linked` (the panel's multi-item path), so a wire plugged in
+  there is written to every strain's own patch and each lane can still be
+  changed alone; the group port then reads mixed (dashed ring in every
+  wire's colour). A lane's port is a stand-in with the real port's look
+  (`WidgetCtx.portLook`) until it is pressed; then the real row mounts
+  pinned under the lanes and its port moves into the lane
+  (`mountRows`'s `portHost`), so the cables end on the lane. Sensor angle
+  and Trail life had no jack; they now take the strain's own band at
+  `MOTION_JACK_GAIN` through `pushToward1` like Sensor range, so with the
+  default wire a loud band widens the angle and lengthens the trail a
+  little (a small change to the default look; identity with nothing
+  plugged in). Checked headless: Nutrient's group port wired the drawn line
+  into all four `nutrient<k>`, a second signal on PP-C3's lane port alone
+  turned the group port mixed, the cable landed on the lane port.
+
+- **2026-10-04: each card's Random is back, and Random rewires.** The user:
+  "before we had random button like for different section but we replaced
+  with one that has all. can we return those buttons and also add random
+  button to strain settings but also keep global random. and make random
+  for strains to connect to random signals with random parameters". The
+  Affinity card's Random rolls the layer on screen again ("Random smell" /
+  "Random touch", as before 2026-10-03), the Strain settings card has its
+  Random again, and the Strains card's Random stays and calls both. The
+  strain Random still rolls `MOTION_PARAMS` and now also plugs every lane
+  that has a port into one wire, or two under a random mix, from the signal
+  catalogue (`consoleMath.ts`'s `randomPatch`: random weight, a random
+  height on a hit, random beats per swing on Beat wave; Tempo and Tempo
+  lock left out because they hardly move). Back puts the wires back too.
+  Assumed, not asked: every lane is rewired (not only the rolled rows),
+  and Nutrient, Excitability, Trail life and Stain values stay unrolled as
+  before.
+- 2026-10-08 — Dose gets a Reaction row under its graph (`drive.hit`, with
+  `ownDetector`). Flat, the default, starts a colony exactly as before.
+  Sized moves a share of agents as big as the hit stood out: the trigger is
+  stepped with `stepStandoutHit`, `pendingSeed` holds the firing's size, and
+  the sim's reseed draw tests `uSeed * uSeedFresh` with `uSeedFresh` set to
+  that size. The user, on why Dose isn't flat-only: it can take loudness.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-16 — `fillStartInk` takes a seed and runs the xorshift32 stream
+  on a local instead of calling a generator closure, which froze every
+  revisit (Measurements, 2026-10-16). The rolls are the same, byte for
+  byte, so nothing the scene draws changed. Agent seeding stays on
+  `Math.random`; if the remaining mount cost ever matters, both fills could
+  move to one GPU pass. (#552)
+- 2026-10-05, the agent re-sort built (user: "lets apply it and then … compare
+  actual increase in performance"), on the GPU rather than the CPU prototype's
+  way: the prototype read every agent's position back (a getBufferSubData of
+  the whole agent texture, which waits behind the GPU's backlog — 10–15 ms a
+  call with the panel and its blur open) and sorted on the main thread. A
+  bitonic sort of (Morton cell, slot) pairs in RG32UI targets needs no
+  readback and no extension, is spread over a few frames
+  (`SORT_PASSES_PER_FRAME`), and lands as one gather into the agents' other
+  ping-pong half. The keys are a few frames stale by then, which only makes
+  the order slightly less tidy; it is still a permutation. Cadence
+  (`SORT_EVERY_STEPS`) and grid (`SORT_GRID_BITS`) kept from the prototype;
+  not tuned further, since the sort's own share is already small next to the
+  saving (Measurements).
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
@@ -919,6 +1107,10 @@ applies there too. Tuned so far only against the synthetic feed at
 
 ## Known issues and next steps
 
+- The defaults barely answer real music (2026-10-04, Measurements: beat pulse
+  1.08 vs 1.48 for the user's own look). The look's drives — Speed boost on
+  the beat wave, Speed pump and Seed on the low onset, Flash on onsets — are
+  what make the dish move with a song; a candidate for the defaults.
 - Fogleman's extras (2026-10-02) were judged only headlessly on SwiftShader
   with the synthetic feed: the motion presets, Auto level's default and
   Wander all want a look on a real GPU with music. Fresh dish is
@@ -953,10 +1145,14 @@ applies there too. Tuned so far only against the synthetic feed at
   colony per trigger (default a beat-pulse rise), and the share each Pipette
   tap converts. At 0.48 half the dish jumps every beat and the rest goes
   dark. The label and description don't say that plainly yet.
-- Performance: the spatial re-sort in Measurements (≈ 3.5× cheaper steps,
-  look unchanged) is prototyped, not built. A real version needs an async
-  readback (PBO + fence) and the sort off the main thread; the same fix
-  likely applies to `physarum.ts`.
+- Performance: the agent re-sort is built (2026-10-05, `physarum2Sort.ts`);
+  `physarum.ts` (Mesh Grid) stores its agents the same random way and would
+  likely gain the same from it.
+- Chrome logs "performance warning: READ-usage buffer was written, then
+  fenced, but written again before being read back" several times a second
+  on this scene, with or without the re-sort (seen 2026-10-05) — one of the
+  `createPixelReadback` buffers is re-armed before its result is read.
+  Harmless for the picture; not traced yet.
 - The reseed burst's brightness/size still trades off against `DEPOSIT` and
   `GLOW_MIN`/`GLOW_MAX`; a future pass might want its own exposure term
   instead of sharing the composite's global exposure, if a louder track needs
@@ -1048,6 +1244,10 @@ applies there too. Tuned so far only against the synthetic feed at
 
 ## Materials
 
+- The user's own look that opened the v0.2.0 promo (2026-10-04), a Looks-card
+  share link: `physarum2/looks/promo-0.2.0.txt`. Its drives are the ones that
+  make the dish answer music (Measurements, 2026-10-04); `tools/promo` uses it
+  as the Physarum footage's starting point.
 - Artifact "Physarum Lab" (controls prototype, private):
   https://claude.ai/artifact/UhgRTMw36hB6mFBccP7ada — source in
   `physarum2/artifacts/`: `lab.src.html`, `strainPreview.js` (the shared
@@ -1111,7 +1311,16 @@ applies there too. Tuned so far only against the synthetic feed at
     now documents, rather than links to a stale diff for, the temporary
     forced-step-count hook a Touch/War perf run needs in `physarum2.ts`'s
     `render()` — copy it in by hand, measure, then `git diff` must show
-    physarum2.ts untouched again; never commit it.
+    physarum2.ts untouched again; never commit it. `panelprof.mjs`
+    (panel-open CPU profile + every blocking GL read timed by caller) and
+    `paneltrace.mjs` (the main thread's own style/layout/paint from a Chrome
+    trace) are the 2026-10-04 panel-lag measurements. `sortbench.mjs` (modes
+    steps/natural/panel/picture/check) with `sort-measure-hook.diff` is the
+    2026-10-05 re-sort measurement — the same apply, measure, check out
+    routine. `switchprof.mjs` is the 2026-10-16 revisit-freeze measurement:
+    the resource map's switch order repeated (`seq`), or one switch under a
+    sourcemapped CPU profile and per-call WebGL timing (`prof`); its header
+    has the build and serve steps.
   - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
     down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
     switch, the Affinity card's rows waking on hover and pinning on a press
@@ -1137,6 +1346,11 @@ applies there too. Tuned so far only against the synthetic feed at
   - `padshot.mjs` — the Pairs pads at rest, held mid-drag (cursor hint and
     spotlight) and 1 s after release, `--layer touch` for the second table;
     the before/after shots of the Clearer pads build.
+  - `rollshot.mjs` — presses the Strains card's one Random a dozen times
+    with real presses, prints every Smell value after each roll and where
+    they landed (own trails below 0; other values below 0, in 0…+1, above
+    +1), and shoots the Affinity card before and after plus the window;
+    the before/after of the 2026-10-03 whole-range Random.
   - `padmodels.mjs` — node, no server: the shipped steering against two
     rejected models (probability gate, value-scaled reach) for avoid
     strength; see its header.
@@ -1196,14 +1410,24 @@ refractory (`SEED_RISE_REFRACTORY_SEC`, now exported). The pipette is
 untouched. Not yet judged on real music; the default line is
 `RING_THRESHOLD_DEFAULT`, the ripple's own.
 
+2026-10-06: the detector moved to the shared `src/render/standout.ts`, and
+Dose now holds a `StandoutTrigger` (`createStandoutTrigger` with
+`SEED_RISE_REFRACTORY_SEC` as its gap, stepped by `stepStandoutTrigger`)
+instead of its own state and refractory counter; `standoutThreshold` and
+`standoutLine` replace the inline reads. Same behaviour; Alien's Cut fires on
+the same trigger. How to wire another setting to it is in that file's header.
+The graph's key now calls Dose's dots "colony started"; it had said "ring
+sent", Beat ripple's word, for every scene.
+
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
 and why), and Fogleman's extras are in (2026-10-02: Auto level, Wander,
-Start ink and Fresh dish, Rivals, the one Random (2026-10-03), presets and
+Start ink and Fresh dish, the one Random (2026-10-03), presets and
 Shuffle/New palette). What's left is Known issues: a real-GPU, real-music
-look at those, a real-music listen at Switching's default and
-`SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
+look at those, and a real-music listen at Switching's default and
+`SWITCH_PRESSURE`. Every lane and every row has a port since 2026-10-04.
+The console's
 rows are the existing per-strain settings (`nutrient`/`excite`/`sensor`/
 `angle`/`turn`/`stride`/`life`/`stain` `<k>`), so a change there reads,
 resets and shares through Looks like any slider. The user reviews panel UX
@@ -1232,7 +1456,7 @@ device-wide master. `tests/physarum2Affinity.test.ts` is
 math, the vocabulary shape (`PAIR_WORDS`, `AFFINITY_PRESETS`), the pad/preset
 pure helpers (`wordBand`/`pairZone`/`pairRelation`/`fillTemplate`/
 `padPos`/`padValue`/`pairsOf`/`tablesMatch`), and the mix row's own pure
-logic (`randomSmell` with and without its Rivals lean/`randomTouch`/
+logic (`randomSmell`'s whole-range rolls, even across fader and pad/`randomTouch`/
 `nudgeTable`/`pushHistory`/`popHistory`, each exercised with a seeded
 `mulberry32`, never `Math.random`). Shuffle/New palette's pure half is in
 `tests/physarum2Synergy.test.ts`, the console's Random/preset matching in
@@ -1272,3 +1496,6 @@ panel rendering in system fonts headlessly (not needed for the scripts to pass).
 - #213 (draft, 2026-09-29): the Strain Console in the app — Lanes and Knobs,
   Sensor angle, Trail life, Switching (Headcount) and Synergy; the box
   selection and its rows went.
+- #405 (draft, 2026-10-06): Dose on the shared `StandoutTrigger`
+  (`src/render/standout.ts`), same behaviour; its graph's dots keyed
+  "colony started".

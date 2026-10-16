@@ -155,6 +155,10 @@ and had to be re-fetched).
   hands every style the fixed `CELL_LOCAL` and Mandala's `su` rescales to
   `CELL_MID`. Constants only used inside their own file stopped being
   exported, and `styles.ts` imports `glsl.ts` once.
+- 2026-10-08 — Beat surge became a hit driver (the Reaction row, Flat or
+  Sized; drives.ts's header, "Hit drivers"). Sized scales the amount passed
+  to `advanceBeatSurge` by how far the hit stood out; Flat, the default, is
+  unchanged.
 
 ## Tuning notes
 

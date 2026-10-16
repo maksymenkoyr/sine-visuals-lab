@@ -15,5 +15,8 @@ export default defineConfig({
     // Paid scenes keep their tests next to them in the private checkout
     // (src/render/scenes/privateScenes.ts); nothing matches in the public repo.
     include: ["tests/**/*.test.ts", "src/render/scenes/private/**/*.test.ts"],
+    // No time limit here: vitest's default keeps a hanging test quick to fail
+    // in CI and `npm test`. `npm run check` gives a longer one on a busy
+    // laptop (LOCAL_TEST_LIMIT_MS, tools/check.mjs header).
   },
 });

@@ -1,9 +1,9 @@
 import { WORKER_ORIGIN } from "./config.ts";
-import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame } from "./protocol.ts";
+import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame, type WaveEnvelope } from "./protocol.ts";
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
-import { WireDecimator } from "./wireDecimator.ts";
+import { BROADCAST_INTERVAL_MS, WireDecimator } from "./wireDecimator.ts";
 import { realStorage } from "./realStorage.ts";
 import { reconnectDelayMs, isTerminalClose, isSilent, PROBE_TIMEOUT_MS } from "./reconnect.ts";
 import {
@@ -22,6 +22,7 @@ import {
   type DeviceKind,
   type DeviceRecord,
   type DeviceSetPatch,
+  type ScreenPreset,
 } from "../../server/roomDevices.ts";
 
 // The roster shape lives with the rest of the JSON vocabulary (roomMessages.ts);
@@ -30,9 +31,6 @@ import {
 export type { RosterEntry, DeviceReject } from "./roomMessages.ts";
 export type { RoomRole };
 export { RENDER_DELAY_MS };
-
-/** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
-const BROADCAST_INTERVAL_MS = 1000 / 30;
 
 /** Max fraction of elapsed real time the effective render delay is allowed to
  *  move per sample() call. Keeps a change in target (e.g. a TV joining a
@@ -69,6 +67,12 @@ export interface VisualSample {
   timeSec: number;
   /** Absolute input loudness [0,1] — see FeatureFrame.level. */
   level: number;
+  /** Hats/Lead [0,1] — see FeatureFrame.hats/lead; 0 when the feed sends none. */
+  hats: number;
+  lead: number;
+  /** The feed's waveform envelope at this instant (JitterBuffer.sampleAt);
+   *  null when the feed sends none. */
+  wave: WaveEnvelope | null;
 }
 
 /** The room's keys, as the laptop minted them. A host presents both; a phone
@@ -198,6 +202,11 @@ abstract class RoomConnectionBase {
   // The roster as the records the room's own rules read (feedOf, followersOf,
   // pictureDelayMs); rebuilt whenever a roster arrives, not per frame.
   private rosterView: { records: Map<string, DeviceRecord>; online: Set<string> } | null = null;
+  // Whether the latest roster lists a renderer other than this device; null
+  // until a roster has arrived. The legacy room relays a host's frames to its
+  // renderers only, so with none listed a frame sent is a billed Durable Object
+  // request that reaches nobody.
+  private rosterHasRenderer: boolean | null = null;
   private rosterListeners: Array<(r: RosterEntry[]) => void> = [];
   private rejectListeners: Array<(m: DeviceReject) => void> = [];
   private _endedReason: "removed" | null = null;
@@ -210,7 +219,7 @@ abstract class RoomConnectionBase {
   // than silently dropping it, or the device would never appear in anyone's
   // roster. Kept after sending too: a reconnect is a new socket the room has
   // never heard from, so it needs the same hello again.
-  private lastHello: { scene: string; palette: string; viewport?: Viewport } | null = null;
+  private lastHello: { scene: string; palette: string; viewport?: Viewport; autoQuality?: ScreenPreset } | null = null;
 
   private readonly code: string;
   private readonly role: RoomRole;
@@ -261,7 +270,7 @@ abstract class RoomConnectionBase {
     return this.roster;
   }
 
-  /** This device's own roster entry (its stored name, ears and screen), or
+  /** This device's own roster entry (its stored name, ears, screen and quality), or
    *  null until the room has listed it. */
   get self(): RosterEntry | null {
     for (const e of this.roster) if (e.deviceId === this.deviceId) return e;
@@ -315,15 +324,16 @@ abstract class RoomConnectionBase {
   }
 
   /** Announce (or update) this device's own scene/palette(+viewport) so the roster stays current.
-   *  `viewport` is optional — omit it to leave the room's idea of this device's slice untouched. */
-  sendHello(scene: string, palette: string, viewport?: Viewport): void {
+   *  `viewport` is optional — omit it to leave the room's idea of this device's slice untouched.
+   *  `autoQuality` is a TV's: the preset its GPU benchmark picks (roomMessages.ts `hello`). */
+  sendHello(scene: string, palette: string, viewport?: Viewport, autoQuality?: ScreenPreset): void {
     // A later hello that omits the viewport must not forget an earlier one
     // when it is replayed to a fresh socket.
-    this.lastHello = { scene, palette, viewport: viewport ?? this.lastHello?.viewport };
-    this.sendRaw(JSON.stringify({ type: "hello", scene, palette, viewport }));
+    this.lastHello = { scene, palette, viewport: viewport ?? this.lastHello?.viewport, autoQuality: autoQuality ?? this.lastHello?.autoQuality };
+    this.sendRaw(JSON.stringify({ type: "hello", scene, palette, viewport, autoQuality }));
   }
 
-  /** Change one member's name, ears or screen (roomMessages.ts `deviceSet`;
+  /** Change one member's name, ears, screen or quality (roomMessages.ts `deviceSet`;
    *  server/roomDevices.ts has what each means). The answer is a new roster, or
    *  `onDeviceReject`. False when the socket is not open, so nothing was sent. */
   sendDeviceSet(targetId: string, patch: DeviceSetPatch): boolean {
@@ -394,20 +404,25 @@ abstract class RoomConnectionBase {
    *  shows a device that follows this one; a connection with no room key (the
    *  legacy room, whose roster only looks like records), or a roster that
    *  doesn't list this device yet, takes every frame and relays it as it
-   *  always did. Whether this device is *allowed* to be a feed
-   *  is the room's call, by the same records. */
-  sendFrame(frame: EncodableFrame): void {
+   *  always did, unless its latest roster lists no renderer to relay to (the
+   *  room bills every message it receives, watched or not). Whether this device is *allowed* to be a feed
+   *  is the room's call, by the same records. `wave` is this tick's mic
+   *  envelope for a follower's Waveform row (protocol.ts's wave tail), null
+   *  with no mic samples; this device's own buffer never keeps it, since its
+   *  own panel reads the mic directly. */
+  sendFrame(frame: EncodableFrame, wave: WaveEnvelope | null = null): void {
     const roomTimeMs = this.clock.roomNow();
-    this.pushFrame({ ...frame, roomTimeMs });
+    this.pushFrame({ ...frame, roomTimeMs, wave: null });
 
-    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave);
     if (!d.send) return;
     // The latches are cleared even when nothing goes out (socket not open, no
     // follower), so a stale hit isn't replayed on reconnect or when a follower
     // arrives.
     const view = this.rosterView;
     if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
-    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
+    if (!this.keyed && this.rosterHasRenderer === false) return;
+    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs, d.wave));
   }
 
   /** Forget every frame this device has buffered or is about to send, as if
@@ -441,6 +456,7 @@ abstract class RoomConnectionBase {
     } else if (msg.type === "roster") {
       this.roster = msg.devices;
       this.rosterView = recordsFromRoster(msg.devices);
+      this.rosterHasRenderer = msg.devices.some((e) => e.role === "renderer" && e.deviceId !== this.deviceId);
       for (const cb of this.rosterListeners) cb(this.roster);
     } else if (msg.type === "deviceReject") {
       for (const cb of this.rejectListeners) cb(msg);
@@ -490,6 +506,9 @@ abstract class RoomConnectionBase {
       pulseFired: this.buffer.consumePulseIfDue(targetMs),
       timeSec: roomTimeToSeconds(targetMs),
       level: s.level,
+      hats: s.hats,
+      lead: s.lead,
+      wave: s.wave,
     };
   }
 

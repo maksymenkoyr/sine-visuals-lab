@@ -9,7 +9,10 @@ import {
 } from "../server/roomCore.ts";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
 import { DEVICE_LIMITS } from "../server/roomDevices.ts";
-import { ROOM_CLOSE_DENIED, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
+import { ROOM_CLOSE_DENIED, ROOM_CLOSE_FLOOD, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
+import { BROADCAST_INTERVAL_MS } from "../src/net/wireDecimator.ts";
+import { BURST_COUNT, BURST_SPACING_MS, RESYNC_INTERVAL_MS } from "../src/net/clock.ts";
+import { SILENCE_LIMIT_MS } from "../src/net/reconnect.ts";
 
 /** How often the old live publisher sent a patch while a control was being dragged.
  *  Nothing sends at that pace any more (a device sends on Play), but the room's
@@ -156,6 +159,15 @@ class Room {
   }
   controller(deviceId = "phone", extra: Presented = {}): Promise<FakeSocket> {
     return this.need({ role: "controller", deviceId, k: K, ...extra });
+  }
+  /** A controller the owner has let Play: connects it, then the live owner
+   *  grants `canPlay` with a `deviceSet`. The owner must already be connected. */
+  async player(deviceId = "phone", extra: Presented = {}): Promise<FakeSocket> {
+    const ws = await this.controller(deviceId, extra);
+    const owner = this.host.live.find((s) => s.attachment.keyed && s.attachment.role === "host");
+    if (!owner) throw new Error("player() needs the owner connected first");
+    this.say(owner, { type: "deviceSet", targetId: deviceId, canPlay: true });
+    return ws;
   }
   renderer(deviceId = "tv", extra: Presented = {}): Promise<FakeSocket> {
     return this.need({ role: "renderer", deviceId, k: K, kind: "tv", ...extra });
@@ -732,7 +744,7 @@ describe("the look", () => {
   it("opens with a null document at revision 0 for every keyed socket, the host's included", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     expect(host.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
     expect(phone.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
@@ -748,8 +760,8 @@ describe("the look", () => {
   it("applies a patch: ack, one revision, broadcast to everyone but the sender, the host included, naming the sender", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller("phone");
-    const phone2 = await room.controller("phone2");
+    const phone = await room.player("phone");
+    const phone2 = await room.player("phone2");
     const tv = await room.renderer();
     [host, phone, phone2, tv].forEach((s) => s.clear());
 
@@ -765,7 +777,7 @@ describe("the look", () => {
   it("broadcasts only the entries that changed", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1", "vibe.b": "2" } });
     tv.clear();
@@ -776,7 +788,7 @@ describe("the look", () => {
   it("treats a no-op patch as acked with the same revision: no bump, no write, no broadcast", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1" } });
     phone.clear();
@@ -799,7 +811,7 @@ describe("the look", () => {
   it("applies a delete and removes its row", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.a": "1", "vibe.b": "2" } });
     tv.clear();
@@ -812,7 +824,7 @@ describe("the look", () => {
   it("replies to lookGet with the current document, and a late joiner gets the same", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", palette: "ember", set: { "vibe.a": "1" } });
     const doc = { scene: "mesh", palette: "ember", storage: { "vibe.a": "1" } };
     phone.clear();
@@ -825,7 +837,7 @@ describe("the look", () => {
   it("rejects bad patches without touching state", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.keep": "1" } });
     const rowsBefore = new Map(room.host.store);
@@ -863,7 +875,7 @@ describe("the look", () => {
   it("rejects a patch with no integer n as a shape error addressed to nobody", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     phone.clear();
     for (const n of [undefined, "1", 1.5, null, Infinity]) {
       room.say(phone, `{"type":"lookPatch","n":${JSON.stringify(n) ?? "null"},"set":{"vibe.a":"1"}}`);
@@ -877,7 +889,7 @@ describe("the look", () => {
   it("rejects a patch that would take the document past the key or size limit", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
 
     const many: Record<string, string> = {};
     for (let i = 0; i < LOOK_LIMITS.maxKeys; i++) many[`vibe.k${i}`] = "v";
@@ -889,7 +901,7 @@ describe("the look", () => {
 
     const room2 = new Room();
     await room2.claimed();
-    const phone2 = await room2.controller();
+    const phone2 = await room2.player();
     const chunk = "x".repeat(LOOK_LIMITS.maxValueBytes);
     room2.say(phone2, { type: "lookPatch", n: 1, set: { "vibe.a": chunk } });
     room2.say(phone2, { type: "lookPatch", n: 2, set: { "vibe.b": chunk } });
@@ -901,7 +913,7 @@ describe("the look", () => {
   it("persists rows that equal the in-memory document", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", palette: "ember", set: { "vibe.a": "1", "vibe.b": "2" } });
     room.say(phone, { type: "lookPatch", n: 2, del: ["vibe.a"], set: { "vibe.c": "3" } });
     expect(JSON.parse(room.host.store.get("look") ?? "null")).toEqual({ rev: 2, scene: "mesh", palette: "ember" });
@@ -918,7 +930,7 @@ describe("the look", () => {
   it("writes only the rows a patch changed", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.a": "1", "vibe.b": "2" } });
     room.host.puts = [];
     room.say(phone, { type: "lookPatch", n: 2, set: { "vibe.a": "1", "vibe.b": "3" } });
@@ -937,7 +949,7 @@ describe("the patch budget", () => {
   it("lets a controller through at the publisher's pace for as long as it likes", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     phone.clear();
     // Stop-and-wait at its cadence is the most a real phone sends; an hour of dragging.
     const sends = Math.ceil((60 * 60 * 1000) / LOOK_PUBLISH_MS);
@@ -957,7 +969,7 @@ describe("the patch budget", () => {
   it("answers a flood with lookReject, writes nothing for the excess, and tells the others nothing", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     phone.clear();
     tv.clear();
@@ -978,7 +990,7 @@ describe("the patch budget", () => {
   it("refills as time passes, and never beyond the burst", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     for (let n = 1; n <= LOOK_LIMITS.patchBurst; n++) room.say(phone, flip(n));
     phone.clear();
     room.say(phone, flip(1000));
@@ -1001,8 +1013,8 @@ describe("the patch budget", () => {
   it("keeps one budget per socket", async () => {
     const room = new Room();
     await room.claimed();
-    const noisy = await room.controller("noisy");
-    const calm = await room.controller("calm");
+    const noisy = await room.player("noisy");
+    const calm = await room.player("calm");
     for (let n = 1; n <= LOOK_LIMITS.patchBurst + 1; n++) room.say(noisy, flip(n));
     calm.clear();
     room.say(calm, flip(1));
@@ -1012,10 +1024,10 @@ describe("the patch budget", () => {
   it("gives a reconnecting socket a fresh budget", async () => {
     const room = new Room();
     await room.claimed();
-    const first = await room.controller("phone");
+    const first = await room.player("phone");
     for (let n = 1; n <= LOOK_LIMITS.patchBurst; n++) room.say(first, flip(n));
     room.close(first);
-    const second = await room.controller("phone");
+    const second = await room.player("phone");
     second.clear();
     room.say(second, flip(1));
     expect(second.msgs("lookAck").length).toBe(1);
@@ -1024,7 +1036,7 @@ describe("the patch budget", () => {
   it("charges a patch whether or not it changes anything", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, flip(1));
     phone.clear();
     for (let n = 2; n <= LOOK_LIMITS.patchBurst + 2; n++) room.say(phone, { type: "lookPatch", n }); // all no-ops
@@ -1041,11 +1053,146 @@ describe("the patch budget", () => {
   });
 });
 
+describe("the frame and ping budgets", () => {
+  /** The owner's laptop on its own input with a TV following it. */
+  async function feed(): Promise<{ room: Room; host: FakeSocket; tv: FakeSocket }> {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv = await room.renderer();
+    tv.clear();
+    return { room, host, tv };
+  }
+  const ping = (room: Room, ws: FakeSocket): void => room.say(ws, { type: "ping", t0: room.host.time });
+
+  it("is sized well over what a device really sends", () => {
+    expect(LOOK_LIMITS.framesPerSec).toBeGreaterThanOrEqual((2 * 1000) / BROADCAST_INTERVAL_MS);
+    expect(LOOK_LIMITS.frameBurst).toBeGreaterThanOrEqual(SILENCE_LIMIT_MS / BROADCAST_INTERVAL_MS);
+    expect(LOOK_LIMITS.pingBurst).toBeGreaterThanOrEqual(3 * BURST_COUNT);
+    expect((LOOK_LIMITS.pingsPerSec * RESYNC_INTERVAL_MS) / 1000).toBeGreaterThanOrEqual(3);
+  });
+
+  it("relays every frame a feed sends at the wire's pace, for as long as it likes", async () => {
+    const { room, host, tv } = await feed();
+    const sends = Math.ceil((60 * 60 * 1000) / BROADCAST_INTERVAL_MS); // an hour
+    for (let i = 0; i < sends; i++) {
+      room.bytes(host);
+      room.host.time += BROADCAST_INTERVAL_MS;
+    }
+    expect(tv.frames().length).toBe(sends);
+    expect(host.closedWith).toBeNull();
+  });
+
+  it("relays the backlog a stalled connection delivers all at once", async () => {
+    const { room, host, tv } = await feed();
+    const backlog = Math.floor(SILENCE_LIMIT_MS / BROADCAST_INTERVAL_MS);
+    for (let i = 0; i < backlog; i++) room.bytes(host); // the clock never moves
+    for (let i = 0; i < 100; i++) {
+      room.host.time += BROADCAST_INTERVAL_MS;
+      room.bytes(host);
+    }
+    expect(tv.frames().length).toBe(backlog + 100);
+    expect(host.closedWith).toBeNull();
+  });
+
+  it("cuts a frame flood at the burst, and closes the socket a burst later", async () => {
+    const { room, host, tv } = await feed();
+    for (let i = 0; i < 2 * LOOK_LIMITS.frameBurst - 1; i++) room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+    expect(host.closedWith).toBeNull();
+    room.bytes(host);
+    expect(host.closedWith).toEqual({ code: ROOM_CLOSE_FLOOD, reason: "too fast" });
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+  });
+
+  it("lets a sender that slowed down pay off what it was dropped for, then relays again", async () => {
+    const { room, host, tv } = await feed();
+    for (let i = 0; i < 2 * LOOK_LIMITS.frameBurst - 10; i++) room.bytes(host);
+    room.host.time += 1000; // a second's refill still leaves it in debt
+    room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+    room.host.time += (1000 * LOOK_LIMITS.frameBurst) / LOOK_LIMITS.framesPerSec;
+    room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst + 1);
+    expect(host.closedWith).toBeNull();
+  });
+
+  it("charges frames from a device that is not a feed too", async () => {
+    const { room, tv } = await feed();
+    for (let i = 0; i < 2 * LOOK_LIMITS.frameBurst; i++) room.bytes(tv);
+    expect(tv.closedWith?.code).toBe(ROOM_CLOSE_FLOOD);
+  });
+
+  it("answers every ping clock sync sends, through reconnects and wake probes", async () => {
+    const room = new Room();
+    await room.claimed();
+    let answered = 0;
+    let sent = 0;
+    // An hour of a phone that drops and rejoins every five minutes: each socket
+    // starts with the connect burst, a wake probe beside every ping of it, then resyncs.
+    for (let socket = 0; socket < 12; socket++) {
+      const phone = await room.controller("phone");
+      const start = room.host.time;
+      for (let i = 0; i < BURST_COUNT; i++) {
+        room.host.time = start + i * BURST_SPACING_MS;
+        ping(room, phone);
+        ping(room, phone);
+        sent += 2;
+      }
+      for (let t = RESYNC_INTERVAL_MS; t < 5 * 60 * 1000; t += RESYNC_INTERVAL_MS) {
+        room.host.time = start + t;
+        ping(room, phone);
+        sent++;
+      }
+      answered += phone.msgs("pong").length;
+      expect(phone.closedWith).toBeNull();
+      room.close(phone);
+      room.host.time = start + 5 * 60 * 1000;
+    }
+    expect(answered).toBe(sent);
+  });
+
+  it("leaves a ping flood unanswered past the burst, and closes the socket a burst later", async () => {
+    const room = new Room();
+    await room.claimed();
+    const phone = await room.controller("phone");
+    for (let i = 0; i < 2 * LOOK_LIMITS.pingBurst - 1; i++) ping(room, phone);
+    expect(phone.msgs("pong").length).toBe(LOOK_LIMITS.pingBurst);
+    expect(phone.closedWith).toBeNull();
+    room.say(phone, { type: "ping", t0: "not even a number" });
+    expect(phone.closedWith?.code).toBe(ROOM_CLOSE_FLOOD);
+  });
+
+  it("keeps one budget per socket and per kind", async () => {
+    const { room, host, tv } = await feed();
+    const phone = await room.controller("phone");
+    for (let i = 0; i <= LOOK_LIMITS.pingBurst; i++) ping(room, phone);
+    expect(phone.msgs("pong").length).toBe(LOOK_LIMITS.pingBurst);
+    // The phone's empty ping budget is not the laptop's.
+    ping(room, host);
+    expect(host.msgs("pong").length).toBe(1);
+    // A laptop out of frames still gets its pings answered.
+    for (let i = 0; i <= LOOK_LIMITS.frameBurst; i++) room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+    ping(room, host);
+    expect(host.msgs("pong").length).toBe(2);
+  });
+
+  it("gives a reconnecting socket a fresh budget", async () => {
+    const { room, host, tv } = await feed();
+    for (let i = 0; i < LOOK_LIMITS.frameBurst + 5; i++) room.bytes(host);
+    room.close(host);
+    const again = await room.claimed();
+    tv.clear();
+    room.bytes(again);
+    expect(tv.frames().length).toBe(1);
+  });
+});
+
 describe("a cold start", () => {
   it("rebuilds the claim, the revision and the document from the persisted rows", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1", "vibe.b": "2" } });
     room.say(phone, { type: "lookPatch", n: 2, palette: "ember", set: { "vibe.a": "one" }, del: ["vibe.b"] });
     room.say(phone, { type: "lookGet" });
@@ -1061,7 +1208,7 @@ describe("a cold start", () => {
     expect(tv.msgs("look")).toEqual([before]);
 
     // And revisions go on from where they were.
-    const phone2 = await again.controller("phone");
+    const phone2 = await again.player("phone");
     tv.clear();
     again.say(phone2, { type: "lookPatch", n: 1, set: { "vibe.z": "9" } });
     expect(phone2.msgs("lookAck").pop()).toEqual({ type: "lookAck", n: 1, rev: 3 });
@@ -1075,7 +1222,7 @@ describe("a cold start", () => {
     expect(await room.connect({ role: "controller", k: K })).toBeNull();
     const host = await room.claimed();
     expect(host.attachment.keyed).toBe(true);
-    const phone = await room.controller();
+    const phone = await room.player();
     expect(phone.msgs("look")).toEqual([{ type: "look", rev: 0, doc: null }]);
   });
 
@@ -1100,7 +1247,7 @@ describe("expiry", () => {
   it("schedules the wipe when the last socket of a claimed room leaves", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.close(phone);
     expect(room.host.alarmAt).toBeNull();
     room.close(host);
@@ -1134,7 +1281,7 @@ describe("expiry", () => {
   it("does nothing when the alarm fires while a socket is connected", async () => {
     const room = new Room();
     await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.a": "1" } });
     room.core.alarm();
     expect(room.host.removeAlls).toBe(0);
@@ -1145,7 +1292,7 @@ describe("expiry", () => {
   it("wipes an empty claimed room when the alarm fires, leaving the code unclaimed", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     room.say(phone, { type: "lookPatch", n: 1, scene: "mesh", set: { "vibe.a": "1" } });
     room.close(phone);
     room.close(host);
@@ -1178,24 +1325,37 @@ describe("the roster", () => {
     const host = await room.claimed();
     const phone = await room.controller("phone", { name: "Ann's phone", mic: true });
     const tv = await room.renderer();
-    room.say(tv, { type: "hello", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 } });
-    room.say(phone, { type: "hello", scene: "phone-scene", palette: "ice" });
+    room.say(tv, { type: "hello", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 }, autoQuality: "mid" });
+    room.say(phone, { type: "hello", scene: "phone-scene", palette: "ice", autoQuality: "ultra" });
 
     const devices = [
       {
         deviceId: "laptop", role: "host", scene: "", palette: "", viewport: { x: 0, y: 0, w: 1, h: 1 },
-        kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", online: true, owner: true,
+        kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", quality: "auto", canPlay: true, autoQuality: null, online: true, owner: true,
       },
       {
         deviceId: "phone", role: "controller", scene: "phone-scene", palette: "ice", viewport: { x: 0, y: 0, w: 1, h: 1 },
-        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "off", online: true, owner: false,
+        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "main", quality: "auto", canPlay: false, autoQuality: null, online: true, owner: false,
       },
       {
         deviceId: "tv", role: "renderer", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 },
-        kind: "tv", name: "TV", hasMic: false, ears: "follow", follow: null, screen: "main", online: true, owner: false,
+        kind: "tv", name: "TV", hasMic: false, ears: "follow", follow: null, screen: "main", quality: "auto", canPlay: false, autoQuality: "mid", online: true, owner: false,
       },
     ];
     for (const ws of [host, phone, tv]) expect(ws.msgs("roster").pop()).toEqual({ type: "roster", devices });
+  });
+
+  it("stores a TV's quality from any member, and lists what its own benchmark picks only while it is online", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller("phone");
+    const tv = await room.renderer();
+    room.say(tv, { type: "hello", scene: "mesh", autoQuality: "high" });
+    room.say(phone, { type: "deviceSet", targetId: "tv", quality: "low" });
+    const listed = (ws: typeof host) => roster(ws).find((d) => d.deviceId === "tv");
+    for (const ws of [host, phone, tv]) expect(listed(ws)).toMatchObject({ quality: "low", autoQuality: "high" });
+    room.close(tv);
+    expect(listed(host)).toMatchObject({ quality: "low", autoQuality: null, online: false });
   });
 
   it("is sent to every socket when one opens, and when one leaves, which leaves its device listed but offline", async () => {
@@ -1301,7 +1461,7 @@ describe("device records", () => {
     await room.renderer("tv");
     expect(row(room, "laptop")).toMatchObject({ role: "host", kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main" });
     expect(row(room, "pad")).toMatchObject({ role: "controller", kind: "tablet", name: "Studio iPad", hasMic: true, ears: "follow", screen: "main" });
-    expect(row(room, "phone")).toMatchObject({ kind: "phone", name: "Phone", ears: "follow", screen: "off" });
+    expect(row(room, "phone")).toMatchObject({ kind: "phone", name: "Phone", ears: "follow", screen: "main" });
     expect(row(room, "tv")).toMatchObject({ role: "renderer", kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main" });
     expect(row(room, "pad")).toMatchObject({ added: room.host.time, seen: room.host.time });
   });
@@ -1677,11 +1837,108 @@ describe("deviceForget", () => {
   });
 });
 
+describe("who may Play", () => {
+  it("refuses a controller's lookPatch with role by default, and the look stays empty", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller();
+    const tv = await room.renderer();
+    [host, phone, tv].forEach((s) => s.clear());
+    room.host.puts = [];
+    room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.a": "1" } });
+    expect(phone.msgs()).toEqual([{ type: "lookReject", n: 1, reason: "role" }]);
+    expect(tv.msgs()).toEqual([]);
+    expect(host.msgs()).toEqual([]);
+    expect(room.host.puts).toEqual([]);
+  });
+
+  it("lets the owner Play without being granted anything", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv = await room.renderer();
+    tv.clear();
+    room.say(host, { type: "lookPatch", n: 1, set: { "vibe.a": "1" } });
+    expect(host.msgs("lookAck")).toEqual([{ type: "lookAck", n: 1, rev: 1 }]);
+    expect(tv.msgs("lookPatch").length).toBe(1);
+  });
+
+  it("answers a controller's deviceSet carrying canPlay with owner-only, and changes nothing", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller("phone");
+    await room.controller("phone2");
+    [host, phone].forEach((s) => s.clear());
+    room.host.puts = [];
+    room.say(phone, { type: "deviceSet", targetId: "phone", canPlay: true });
+    room.say(phone, { type: "deviceSet", targetId: "phone2", name: "Sneaky", canPlay: true });
+    expect(phone.msgs("deviceReject")).toEqual([
+      { type: "deviceReject", targetId: "phone", reason: "owner-only" },
+      { type: "deviceReject", targetId: "phone2", reason: "owner-only" },
+    ]);
+    expect(phone.msgs("roster")).toEqual([]);
+    expect(host.msgs()).toEqual([]);
+    expect(room.host.puts).toEqual([]);
+  });
+
+  it("refuses a canPlay that is not a boolean as a shape error", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    await room.controller("phone");
+    host.clear();
+    room.say(host, { type: "deviceSet", targetId: "phone", canPlay: "yes" });
+    expect(host.msgs("deviceReject")).toEqual([{ type: "deviceReject", targetId: "phone", reason: "shape" }]);
+  });
+
+  it("accepts and relays a controller's lookPatch once the owner grants canPlay, and refuses again when it is taken back", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller();
+    const tv = await room.renderer();
+    room.say(host, { type: "deviceSet", targetId: "phone", canPlay: true });
+    [host, phone, tv].forEach((s) => s.clear());
+
+    room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.a": "1" } });
+    expect(phone.msgs()).toEqual([{ type: "lookAck", n: 1, rev: 1 }]);
+    expect(tv.msgs()).toEqual([{ type: "lookPatch", rev: 1, by: "phone", set: { "vibe.a": "1" } }]);
+
+    room.say(host, { type: "deviceSet", targetId: "phone", canPlay: false });
+    [phone, tv].forEach((s) => s.clear());
+    room.say(phone, { type: "lookPatch", n: 2, set: { "vibe.a": "2" } });
+    expect(phone.msgs()).toEqual([{ type: "lookReject", n: 2, reason: "role" }]);
+    expect(tv.msgs()).toEqual([]);
+  });
+
+  it("keeps a grant across hibernation and across the device dropping and coming back", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller();
+    room.say(host, { type: "deviceSet", targetId: "phone", canPlay: true });
+    room.close(phone);
+    const again = room.reborn();
+    await again.need({ role: "host", deviceId: "laptop", hk: HK, k: K, mic: true });
+    const back = await again.controller();
+    back.clear();
+    again.say(back, { type: "lookPatch", n: 1, set: { "vibe.a": "1" } });
+    expect(back.msgs()).toEqual([{ type: "lookAck", n: 1, rev: 1 }]);
+  });
+
+  it("lists the effective canPlay in the roster: true for the owner, false until granted, true after", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller();
+    const tv = await room.renderer();
+    const flags = (ws: FakeSocket) => Object.fromEntries(roster(ws).map((d) => [d.deviceId, d.canPlay]));
+    expect(flags(host)).toEqual({ laptop: true, phone: false, tv: false });
+    room.say(host, { type: "deviceSet", targetId: "phone", canPlay: true });
+    for (const ws of [host, phone, tv]) expect(flags(ws)).toEqual({ laptop: true, phone: true, tv: false });
+  });
+});
+
 describe("endRoom", () => {
   it("lets the claimed room's host end it: claim, look and alarm wiped, every socket closed as denied", async () => {
     const room = new Room();
     const host = await room.claimed();
-    const phone = await room.controller();
+    const phone = await room.player();
     const tv = await room.renderer();
     room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.ok": "1" } });
     expect(room.host.store.size).toBeGreaterThan(0);
@@ -1743,6 +2000,14 @@ describe("readAttachment", () => {
     const room = new Room();
     const tv = await room.need({ role: "renderer", deviceId: "tv" });
     expect(readAttachment(JSON.parse(JSON.stringify(tv.attachment)))).toEqual(tv.attachment);
+  });
+
+  it("keeps what a TV's hello said its own benchmark picks, and drops a preset it doesn't know", async () => {
+    const room = new Room();
+    const tv = await room.need({ role: "renderer", deviceId: "tv" });
+    room.say(tv, { type: "hello", scene: "mesh", autoQuality: "low" });
+    expect(readAttachment(JSON.parse(JSON.stringify(tv.attachment))).autoQuality).toBe("low");
+    expect(readAttachment({ ...tv.attachment, autoQuality: "ultra" }).autoQuality).toBeUndefined();
   });
 
   it("upgrades the shape written before roles, keys and socket ids existed", () => {

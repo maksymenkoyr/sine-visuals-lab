@@ -114,6 +114,7 @@ From the bundle's `report.md` and PR #90's verification (2026-09-05/06 and
   compile-time strike constants.
 - **2026-09-30 (#231):** the Gate density setting opted out of the Cue/Play
   glide (`glide: false`), since it changes the object count.
+- 2026-10-11 — Sampler units and the int uniforms (`uObjCount`, `uCopies`) now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

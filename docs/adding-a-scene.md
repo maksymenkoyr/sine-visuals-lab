@@ -5,15 +5,15 @@ first (`docs/tuning.md`, "Tuning against a reference video") — a contact
 sheet shows the look, not the motion, and the motion is the sync.
 
 Every scene ships with its record, `docs/scenes/<id>.md`, started from
-[the template](scenes/_template.md) — the standing rule in `AGENTS.md` says
-what goes in it and what never does.
+[the template](scenes/_template.md) — the scene-record rule in `CLAUDE.md`
+says what goes in it and what never does.
 
 A **paid** scene is built the same way but lives elsewhere: in its own folder
 of the private scenes repo, checked out at `src/render/scenes/private/<id>/`,
 with an `index.ts` exporting `scene` (and `draft = true` while it's rough),
-its tests next to it, and its record as `RECORD.md` there. It is never
-registered in `scenes/index.ts` by hand, and nothing about it goes in this
-repo. `src/render/scenes/privateScenes.ts` has the contract.
+its tests next to it, and its record as `RECORD.md` there. It is
+never a free scene module (no `gallery` record), and nothing about it goes in
+this repo. `src/render/scenes/privateScenes.ts` has the contract.
 
 ## The mechanical path
 
@@ -26,12 +26,23 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    palette — read it by role, `palRamp()`/`uPalInk`/`uPalGround`/`uPalAccent`,
    rather than sampling `palette()` at a `t` of your own; `src/render/palette.ts`'s
    header says what each role promises).
+   A scene that writes its own `init()` creates all of its programs before it
+   looks up a uniform or calls `use()` on one: a lookup waits for that program
+   to compile, while the programs created before it compile alongside
+   (`src/render/programCache.ts`'s header).
+   A fallback that catches a compile error to switch something off must create
+   that program on first draw, not in `init()`, where it is checked at once.
 2. Each entry in `settings: SceneSetting[]` (spec'd in `sceneSettings.ts`) becomes
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. A setting that is an amount of reaction to the music also declares a
    `drive` and reads its signal through the generated `<key>Drive(…)` helper
    (or `drives.value`/`drives.fired` in JS), so the user can choose what it
-   reacts to — `src/render/drives.ts`'s header is the full story. `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
+   reacts to — `src/render/drives.ts`'s header is the full story. A setting
+   read with `drives.fired` does one thing per hit: it also declares
+   `drive.hit` (with `flatOnly` when its reaction has no size, like a cut),
+   calls `fired()` every frame, and scales its reaction by
+   `drives.hitSize(key)` (that header's "Hit drivers"; `tests/hitDrivers.test.ts`
+   checks every scene). `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
    are what the user sees (`description` is the hint that unfolds under the row
    on hover/focus; `group` is a closed vocabulary — see `SETTING_GROUPS`'s own
    doc comment in `sceneSettings.ts` for the rule that picks one);
@@ -54,30 +65,43 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    `src/ui/widgets/registry.ts` to show the group as boxes/rows instead of
    the plain per-setting loop (Physarum 2's Strains card is the worked
    example).
-3. Register the scene as a side effect in `src/render/scenes/index.ts`
-   (`registerScene(yourScene)`) and export it there like its neighbours. A new
-   scene goes *first* among the drafts — that file's header comment owns the
-   ordering rule and why. Once it's registered this way, it gets its own
-   MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
+3. Make it a scene module: `src/render/scenes/<unit>.ts` or
+   `src/render/scenes/<unit>/index.ts`, exporting the scene and
+   `export const gallery = { stage: "draft", added: "<today>" } as const;` —
+   `src/render/scenes/sceneModules.ts`'s header owns the contract and the
+   ordering (each gallery section lists the newest first).
+   `src/render/scenes/index.ts` finds it on its own; nothing shared is
+   edited, so parallel branches adding scenes don't conflict. Once it's a
+   scene module, it gets its own MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
    how it's counted and how to raise its major by hand.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
    on the `Scene` object — see `src/render/quality.ts` for what each preset means.
 5. If the scene needs data it can't compute (the dancers' captured moves are
-   the precedent — `src/render/scenes/dancers/clipFormat.ts` and the `clips.bin`
-   beside it), generate it with a script under `tools/` and commit the output;
-   import it with Vite's `?url` and `fetch` it when the scene is created,
-   guarded so the module still imports under node (the tests import every
-   scene), and dance something sensible until it arrives. Third-party data
-   gets an entry in `THIRD-PARTY-NOTICES.md` like the fonts do.
+   the precedent — `src/render/scenes/dancers/clipFormat.ts` and the library
+   its `CLIP_LIBRARY_URL` names), generate it with a script under `tools/` and
+   commit the output under `public/media/<scene>/`, with a version in its name
+   (`<name>-v1.<ext>`), and add it to `tests/mediaManifest.ts`. Reach it
+   through `sceneMedia()` and fetch it the first time the scene mounts, never
+   at import, guarded so the module still imports under node (the tests import
+   every scene); dance something sensible until it arrives.
+   `src/pinnedAssets.ts`'s header has why, and why a committed file never
+   changes. Third-party data gets an entry in `THIRD-PARTY-NOTICES.md` like
+   the fonts do.
 
 Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.
 
+Comment and indent shader code as freely as any other code: a production
+build strips comments and indentation from every template literal that
+reads as GLSL and keeps every line, so a compile error's line number still
+matches (`vite-glsl-strip-plugin.ts`'s header has the rules, including the
+templates it leaves alone).
+
 Once it renders, keep `npm run dev` running and give whoever is reviewing a
 direct link to the scene rather than the gallery root — the dev server prints
 one per scene at startup, and a scene registered first among the drafts is the
-first draft link in that list. The standing rule in `AGENTS.md` spells out the
-URL form (query before the hash).
+first draft link in that list. Any query goes before the hash: one placed
+after it lands on the gallery.
 
 ## The invariant you can't get from typecheck
 

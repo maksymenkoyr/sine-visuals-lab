@@ -1,0 +1,474 @@
+<title>Toon Rave Dance Card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: a stage on the left, the panel's Dance card on the right (stacks on a phone); one dark world, like the app's glass panel. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0d10;
+  --stage: #1a0f24;
+  --glass: rgba(14, 17, 16, 0.92);
+  --line: rgba(255, 255, 255, 0.13);
+  --line-hi: rgba(255, 255, 255, 0.22);
+  --fg: #f2f4f3;
+  --muted: rgba(255, 255, 255, 0.62);
+  --faint: rgba(255, 255, 255, 0.36);
+  --violet: #c3a5f9;   /* the Scene card's accent */
+  --green: #8ce6a0;    /* live signal */
+  --amber: #f9b96c;    /* energy */
+  --pink: #f28bd0;     /* the found beat */
+  --sky: #59bbfb;
+  --label: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --mono: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 400 13px/1.45 var(--label); padding: 16px; padding-block: 16px; box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; max-width: 1240px; margin: 0 auto; }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+
+.stage-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.stage-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.stage-head h1 { font: 600 18px/1.2 var(--label); letter-spacing: 0.02em; margin: 0; text-wrap: balance; }
+.stage-head p { margin: 0; color: var(--muted); max-width: 64ch; }
+.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; border: 1px solid var(--line); border-top-color: var(--line-hi); border-radius: 4px; overflow: hidden; background: var(--stage); }
+.stage canvas { width: 100%; height: 100%; display: block; }
+.timeline { border: 1px solid var(--line); border-radius: 4px; background: var(--glass); padding: 8px 10px 6px; }
+.timeline canvas { width: 100%; height: 120px; display: block; }
+.tl-head { display: flex; justify-content: space-between; color: var(--faint); font: 400 11px/1 var(--label); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+
+.transport { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { font: 500 12px/1 var(--label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 3px; padding: 8px 12px; cursor: pointer; }
+.btn:hover { background: rgba(255, 255, 255, 0.1); }
+.btn:focus-visible, select:focus-visible, input[type=range]:focus-visible { outline: 1px solid var(--fg); outline-offset: 2px; }
+.btn[aria-pressed="true"] { border-color: var(--green); color: var(--green); }
+.btn.tap { border-color: var(--pink); color: var(--pink); min-width: 120px; }
+.btn.tap.hit { background: rgba(242, 139, 208, 0.25); }
+.transport .note { color: var(--faint); font-size: 12px; }
+.sect { font: 400 11px/1 var(--mono); color: var(--faint); margin-left: auto; }
+
+/* the panel card: ordinary rows, a port per reactive row, one graph */
+.card { background: var(--glass); border: 1px solid var(--line); border-top-color: var(--line-hi); border-radius: 4px; padding: 12px 12px 14px; display: flex; flex-direction: column; align-self: start; }
+.card-title { font: 600 12px/1 var(--label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); padding: 2px 2px 8px; border-bottom: 1px solid var(--line); }
+.row { padding: 10px 2px 9px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; gap: 6px; }
+.row:last-child { border-bottom: none; }
+.row-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.port { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 5px currentColor; background: currentColor; }
+.label { font: 500 14px/1.2 var(--label); }
+.readout { margin-left: auto; font: 400 15px/1 var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+select.sig { font: 400 11px/1.2 var(--mono); color: var(--muted); background: transparent; border: none; padding: 0; margin: 0; cursor: pointer; -webkit-appearance: none; appearance: none; }
+select.sig option { background: #111; color: var(--fg); }
+.sigwrap::after { content: " ▾"; font: 400 10px/1 var(--mono); color: var(--faint); }
+.hint { font-size: 11.5px; color: var(--muted); }
+.graph { width: 100%; height: 64px; display: block; border-radius: 2px; background: rgba(255, 255, 255, 0.03); }
+.status { font: 400 10px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 6px; border-radius: 2px; border: 1px solid currentColor; }
+.st-locked { color: var(--green); } .st-finding { color: var(--amber); } .st-holding { color: var(--sky); } .st-none { color: var(--faint); }
+.family { margin-top: 8px; border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; }
+.family-name { font: 600 11px/1 var(--label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber); padding: 10px 2px 2px; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; cursor: pointer; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: linear-gradient(var(--acc), var(--acc)) no-repeat 0 0 / var(--fill, 50%) 100%, rgba(255, 255, 255, 0.18); }
+input[type=range]::-moz-range-track { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); }
+input[type=range]::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--acc); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 4px; height: 16px; margin-top: -6.5px; border-radius: 1px; background: #fff; box-shadow: 0 0 6px var(--acc); }
+input[type=range]::-moz-range-thumb { width: 4px; height: 16px; border: none; border-radius: 1px; background: #fff; }
+.ends { display: flex; justify-content: space-between; font: 400 10px/1 var(--mono); color: var(--faint); }
+.meter { height: 10px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); position: relative; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--amber); width: 0; }
+.meter b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; opacity: 0.7; }
+.meter u { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(0, 0, 0, 0.55); }
+.tiers { position: relative; height: 12px; font: 400 10px/1 var(--mono); color: var(--faint); }
+.tiers span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.tiers span.on { color: var(--amber); }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font: 400 11px/1 var(--mono); color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 2px; margin-right: 5px; vertical-align: middle; background: var(--c); }
+.foot { color: var(--faint); font-size: 11.5px; padding: 8px 2px 0; }
+</style>
+
+<div class="wrap">
+  <div class="stage-col">
+    <div class="stage-head">
+      <h1>Dance card prototype</h1>
+      <p>Dance turns any signal into a move: it finds the beat, folds the signal over one bar and uses that loop as the move. Energy is how fast they go through it, in steps that stay on the beat.</p>
+    </div>
+    <div class="stage"><canvas id="stage" width="1280" height="720" aria-label="A cartoon dancer and crowd"></canvas></div>
+    <div class="transport">
+      <button class="btn" id="musicBtn" aria-pressed="true">Music playing</button>
+      <button class="btn tap" id="tapBtn" title="Tap, or press the space bar">Tap (space)</button>
+      <span class="note">124 BPM: 4 bars full, 2 bars breakdown (no kick), 2 bars build.</span>
+      <span class="sect" id="sect">beat 0 · full</span>
+    </div>
+    <div class="timeline">
+      <div class="tl-head"><span>Last 6 seconds</span><span>now →</span></div>
+      <canvas id="tl" width="1200" height="240"></canvas>
+      <div class="legend">
+        <span style="--c: var(--green)">Dance signal</span>
+        <span style="--c: var(--pink)">Found beat (bar lines taller)</span>
+        <span style="--c: var(--amber)">Energy</span>
+      </div>
+    </div>
+  </div>
+
+  <aside class="card" aria-label="Dance card">
+    <div class="card-title">Dance</div>
+
+    <div class="row">
+      <div class="row-head">
+        <span class="port" style="color: var(--green)"></span>
+        <div><div class="label">Dance</div><label class="sigwrap"><select class="sig" id="danceSig" aria-label="Dance signal"></select></label></div>
+        <span class="status st-none" id="danceStatus">—</span>
+        <span class="readout" id="bpmOut">— BPM</span>
+      </div>
+      <canvas class="graph" id="shapeG" width="632" height="128" aria-label="The move Dance learned from its signal, one bar long"></canvas>
+      <div class="hint">The move, learned from the signal: one bar of it, with the four beats marked. The dot is where the dancers are in it.</div>
+    </div>
+
+    <div class="family">
+      <div class="family-name">Energy</div>
+      <div class="row">
+        <div class="row-head"><div class="label">Energy</div><span class="readout" id="baseOut">0.00</span></div>
+        <input type="range" id="base" min="0" max="1" step="0.01" value="0" style="--acc: var(--amber)">
+        <div class="hint">Where energy settles with no signal. 0 = they end up standing still.</div>
+      </div>
+      <div class="row">
+        <div class="row-head">
+          <span class="port" style="color: var(--green)"></span>
+          <div><div class="label">Energy boost</div><label class="sigwrap"><select class="sig" id="boostSig" aria-label="Energy boost signal"></select></label></div>
+          <span class="readout" id="boostOut">0.40</span>
+        </div>
+        <input type="range" id="boost" min="0" max="1" step="0.01" value="0.4" style="--acc: var(--amber)">
+        <div class="hint">Lifts energy while the signal is high.</div>
+      </div>
+      <div class="row">
+        <div class="row-head">
+          <span class="port" style="color: var(--green)"></span>
+          <div><div class="label">Energy pump</div><label class="sigwrap"><select class="sig" id="pumpSig" aria-label="Energy pump signal"></select></label></div>
+          <span class="readout" id="pumpOut">0.50</span>
+        </div>
+        <input type="range" id="pump" min="0" max="1" step="0.01" value="0.5" style="--acc: var(--amber)">
+        <div class="hint">Each hit kicks energy up.</div>
+      </div>
+      <div class="row">
+        <div class="row-head"><div class="label">Energy drop</div><span class="readout" id="dropOut">0.35</span></div>
+        <input type="range" id="drop" min="0" max="1" step="0.01" value="0.35" style="--acc: var(--amber)">
+        <div class="ends"><span>slow drain</span><span>fast drain</span></div>
+        <div class="hint">How fast energy drains back. It drains slower the lower it gets.</div>
+      </div>
+      <div class="row">
+        <div class="row-head"><div class="label">Speed</div><span class="readout" id="speedOut" style="color: var(--amber)">stop</span></div>
+        <div class="meter" aria-hidden="true"><i id="eBar"></i><b id="eFloor"></b><span id="tierLines"></span></div>
+        <div class="tiers" id="tierLabels" aria-hidden="true"></div>
+        <div class="hint">Energy now, and the speed it gives: through the move at ¼, ½, 1 or 2 times the music, so it stays on the beat.</div>
+      </div>
+    </div>
+    <div class="foot">Prototype only: the signals are simulated in this page, not the app's audio.</div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const BPM = 124, SPB = 60 / BPM, ARR = 32, MAX_E = 1.5;
+  const BINS = 64;                 // the learned move: one bar, 64 steps
+  const $ = (id) => document.getElementById(id);
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  const frac = (x) => x - Math.floor(x);
+
+  // ---- settings ----
+  const S = { dance: "kick", base: 0, boost: 0.4, boostSig: "loud", pump: 0.5, pumpSig: "kick", drop: 0.35 };
+  const SIGNALS = { kick: "Kick", hat: "Hi-hat", break: "Breakbeat", loud: "Loudness", swell: "Swell", tap: "Taps", none: "Nothing" };
+  function fillSelect(el, ids, key, onPick) {
+    for (const id of ids) { const o = document.createElement("option"); o.value = id; o.textContent = SIGNALS[id]; el.appendChild(o); }
+    el.value = S[key];
+    el.addEventListener("change", () => { S[key] = el.value; onPick && onPick(); });
+  }
+  fillSelect($("danceSig"), ["kick", "hat", "break", "loud", "swell", "tap", "none"], "dance", () => { follower.reset(); move.reset(); });
+  fillSelect($("boostSig"), ["loud", "swell", "kick", "none"], "boostSig");
+  fillSelect($("pumpSig"), ["kick", "hat", "break", "tap", "none"], "pumpSig");
+  for (const k of ["base", "boost", "pump", "drop"]) {
+    const el = $(k);
+    const sync = () => { S[k] = +el.value; $(k + "Out").textContent = S[k].toFixed(2); el.style.setProperty("--fill", S[k] * 100 + "%"); };
+    el.addEventListener("input", sync); sync();
+  }
+
+  // ---- the simulated track ----
+  let playing = true, songT = 0;
+  $("musicBtn").addEventListener("click", () => {
+    playing = !playing;
+    $("musicBtn").setAttribute("aria-pressed", String(playing));
+    $("musicBtn").textContent = playing ? "Music playing" : "Music stopped";
+  });
+  const section = (beat) => { const b = ((beat % ARR) + ARR) % ARR; return b < 16 ? "full" : b < 24 ? "breakdown" : "build"; };
+  const hashf = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  function hitsInBeat(sig, n) {
+    const sec = section(n);
+    if (sig === "kick") return sec === "breakdown" ? [] : sec === "build" && (n % ARR) >= 28 ? [0, 0.5] : [0];
+    if (sig === "hat") return sec === "full" && (n % 4) === 3 ? [0.5, 0.75] : [0.5];
+    if (sig === "break") {
+      if (sec === "breakdown") return (n % 2) ? [0.5] : [];
+      const pat = (n % 4 === 0) ? [0, 0.75] : (n % 4 === 1) ? [0.5, 0.75] : (n % 4 === 2) ? [0.25, 0.75] : [0.5];
+      return pat.map((p, i) => p + (hashf(n * 7 + i) - 0.5) * 0.05);
+    }
+    return [];
+  }
+  function levelAt(sig, beats) {
+    const b = ((beats % ARR) + ARR) % ARR, ph = frac(beats);
+    if (sig === "loud") {
+      const sec = section(Math.floor(beats));
+      const body = sec === "full" ? 0.42 : sec === "breakdown" ? 0.26 : 0.3 + 0.14 * ((b - 24) / 8);
+      return Math.min(1, body + (sec === "breakdown" ? 0 : 0.42 * Math.exp(-ph * 6)));
+    }
+    if (sig === "swell") return 0.5 + 0.45 * Math.sin((b / ARR) * Math.PI * 2 - Math.PI / 2);
+    return 0;
+  }
+  const LEVELS = { loud: 1, swell: 1 };
+  // hits as a decaying pulse (how the app reads a hit as a value), per signal
+  const pulse = { kick: 0, hat: 0, break: 0, tap: 0 };
+  const trig = {}; // level → fire: rising past its line
+  function levelFire(id, v) {
+    const t = trig[id] || (trig[id] = { on: false });
+    if (!t.on && v > 0.6) { t.on = true; return true; }
+    if (t.on && v < 0.45) t.on = false;
+    return false;
+  }
+  let tapPending = false;
+  function tap() { tapPending = true; const t = $("tapBtn"); t.classList.add("hit"); setTimeout(() => t.classList.remove("hit"), 90); }
+  $("tapBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); tap(); });
+  window.addEventListener("keydown", (e) => { if (e.code === "Space" && !e.repeat) { e.preventDefault(); tap(); } });
+
+  // ---- step 1 of the magic: find the beat in the signal's fires ----
+  const follower = {
+    fires: [], period: SPB, phase: 0, conf: 0, last: -1e9, found: false,
+    reset() { this.fires = []; this.conf = 0; this.found = false; },
+    fire(t) {
+      this.fires.push(t); this.last = t;
+      while (this.fires.length && this.fires[0] < t - 6) this.fires.shift();
+      const e = this.phase - Math.round(this.phase);
+      if (this.found && Math.abs(e) < 0.35) this.phase -= e * 0.35;
+      this.conf += ((Math.abs(e) < 0.12 ? 1 : 0) - this.conf) * 0.2;
+      const f = this.fires; if (f.length < 3) return;
+      let best = 0, bestP = this.period;
+      for (let p = 0.4; p < 0.8; p += 0.002) {
+        let s = 0;
+        for (let i = 0; i < f.length; i++) for (let j = i + 1; j < f.length; j++) {
+          let d = f[j] - f[i]; if (d > 2.4) break; if (d < 0.1) continue;
+          let w = 1; while (d < 0.4) { d *= 2; w *= 0.6; } while (d >= 0.8) { d /= 2; w *= 0.8; }
+          const z = (p - d) / 0.012; s += w * Math.exp(-z * z);
+        }
+        if (s > best) { best = s; bestP = p; }
+      }
+      if (!this.found) { this.period = bestP; this.phase = Math.round(this.phase); this.found = true; }
+      else this.period += (bestP - this.period) * 0.25;
+    },
+    advance(dt) { this.phase += dt / this.period; },
+    status(now) {
+      if (!this.found) return "none";
+      if (now - this.last > 3 * this.period) return "holding";
+      return this.conf > 0.55 ? "locked" : "finding";
+    },
+  };
+
+  // ---- step 2: fold the signal over one bar of that beat; the average loop is the move ----
+  const move = {
+    raw: new Float32Array(BINS), shape: new Float32Array(BINS), flat: true,
+    reset() { this.raw.fill(0); this.shape.fill(0); this.flat = true; },
+    learn(bar, v) { // bar = position in the bar, 0..1
+      const i = Math.floor(bar * BINS) % BINS;
+      this.raw[i] += (v - this.raw[i]) * 0.2;
+    },
+    rebuild() { // smooth around the loop, then stretch to 0..1
+      const sm = new Float32Array(BINS);
+      for (let i = 0; i < BINS; i++) { let s = 0, w = 0; for (let k = -2; k <= 2; k++) { const kw = 3 - Math.abs(k); s += kw * this.raw[(i + k + BINS) % BINS]; w += kw; } sm[i] = s / w; }
+      let lo = Infinity, hi = -Infinity; for (const x of sm) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+      this.flat = hi - lo < 0.04;
+      for (let i = 0; i < BINS; i++) this.shape[i] = this.flat ? 0 : (sm[i] - lo) / (hi - lo);
+    },
+    at(p) { // the move's value at loop position p (0..1), interpolated
+      const x = frac(p) * BINS, i = Math.floor(x), f = x - i;
+      return this.shape[i % BINS] * (1 - f) + this.shape[(i + 1) % BINS] * f;
+    },
+  };
+
+  // ---- energy: pumps and boosts fill it, it drains toward the floor (slower the lower it is) ----
+  let E = 0, floorNow = 0;
+  function stepEnergy(dt, level, pumpHit) {
+    floorNow = Math.min(MAX_E, S.base + S.boost * level);
+    if (pumpHit) E += S.pump * 0.2;
+    if (E < floorNow) E += (floorNow - E) * Math.min(1, dt * 8);
+    else E -= (E - floorNow) * Math.min(1, dt * (0.12 + 2.2 * S.drop * S.drop));
+    E = Math.max(0, Math.min(MAX_E, E));
+  }
+  // energy → speed through the move, in steps that stay on the beat
+  const TIERS = [{ at: 0, m: 0, name: "stop" }, { at: 0.08, m: 0.25, name: "¼×" }, { at: 0.3, m: 0.5, name: "½×" }, { at: 0.6, m: 1, name: "1×" }, { at: 1.0, m: 2, name: "2×" }];
+  let tier = 0;
+  function pickTier() { // a little hysteresis so a level on a line doesn't flicker
+    while (tier + 1 < TIERS.length && E > TIERS[tier + 1].at + 0.02) tier++;
+    while (tier > 0 && E < TIERS[tier].at - 0.02) tier--;
+  }
+  // where the dancers are in the move: always bar × speed (so it stays in sync); a speed change crossfades
+  const play = { from: 0, to: 0, w: 1, held: 0 };
+  function posFor(m, bar) { return m === 0 ? play.held : frac(bar * m); }
+
+  // tier marks on the meter
+  TIERS.slice(1).forEach((t) => {
+    const u = document.createElement("u"); u.style.left = (t.at / MAX_E) * 100 + "%"; $("tierLines").appendChild(u);
+  });
+  TIERS.forEach((t, i) => {
+    const s = document.createElement("span");
+    const right = i + 1 < TIERS.length ? TIERS[i + 1].at : MAX_E;
+    s.style.left = ((t.at + right) / 2 / MAX_E) * 100 + "%"; s.textContent = t.name; $("tierLabels").appendChild(s);
+  });
+
+  // ---- drawing: the stage ----
+  const cv = $("stage"), g = cv.getContext("2d"), W = cv.width, H = cv.height;
+  function limb(x0, y0, len, deg, w, col) {
+    const r = (deg * Math.PI) / 180, x1 = x0 + Math.sin(r) * len, y1 = y0 + Math.cos(r) * len;
+    g.lineCap = "round"; g.strokeStyle = "#140a1c"; g.lineWidth = w + 6; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+    g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+  }
+  function blob(x, y, rx, ry, col) {
+    g.fillStyle = "#140a1c"; g.beginPath(); g.ellipse(x, y, rx + 3, ry + 3, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = col; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill();
+  }
+  // the primitive move: one value v (0..1) from the learned loop → dip, squash, arms up, head nod
+  function dancer(cx, groundY, sc, v, side, look) {
+    const dip = 30 * v, sq = 1 - 0.1 * v, arm = 70 * v, nod = 8 * v * side;
+    g.save(); g.translate(cx, groundY); g.scale(sc, sc);
+    const hipY = -120 + dip * 0.5;
+    limb(-22, hipY, 118 - dip * 0.5, -6 * v, 22, look.legs); limb(22, hipY, 118 - dip * 0.5, 6 * v, 22, look.legs);
+    blob(-26, -6, 26, 12, "#1d1d22"); blob(26, -6, 26, 12, "#1d1d22");
+    g.save(); g.translate(0, hipY); g.scale(1 + 0.06 * v, sq);
+    g.fillStyle = "#140a1c"; g.beginPath(); g.roundRect(-58, -150, 116, 156, 30); g.fill();
+    g.fillStyle = look.shirt; g.beginPath(); g.roundRect(-54, -146, 108, 148, 27); g.fill();
+    limb(-50, -126, 104, -22 - arm, 20, look.skin); limb(50, -126, 104, 22 + arm, 20, look.skin);
+    g.save(); g.translate(0, -160); g.rotate((nod * Math.PI) / 180);
+    blob(0, -64, 72, 70, look.skin);
+    g.fillStyle = look.hair; g.beginPath(); g.ellipse(0, -112, 76, 34, 0, Math.PI, 0); g.fill();
+    for (const ex of [-26, 26]) { blob(ex, -66, 20, 24, "#ffffff"); g.fillStyle = look.eye; g.beginPath(); g.arc(ex + 3, -62, 10, 0, Math.PI * 2); g.fill(); g.fillStyle = "#0b0b0b"; g.beginPath(); g.arc(ex + 4, -61, 5, 0, Math.PI * 2); g.fill(); }
+    g.strokeStyle = "#140a1c"; g.lineWidth = 6; g.beginPath(); g.arc(0, -30, 20, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+    g.restore(); g.restore(); g.restore();
+  }
+  const HERO = { legs: "#2c2340", shirt: "#a3f34a", skin: "#ffd9b8", hair: "#6b2fd6", eye: "#9b5cff" };
+  const CROWD = [
+    { legs: "#291d33", shirt: "#ff6fb5", skin: "#f1c29b", hair: "#1c1c24", eye: "#3b82f6" },
+    { legs: "#291d33", shirt: "#5ee7df", skin: "#e8b68f", hair: "#d14b2f", eye: "#16a34a" },
+    { legs: "#291d33", shirt: "#ffcf5c", skin: "#ffd9b8", hair: "#22c3ee", eye: "#9b5cff" },
+    { legs: "#291d33", shirt: "#c3a5f9", skin: "#c99b77", hair: "#111", eye: "#f59e0b" },
+  ];
+  function drawStage(beatN, flash, vAt) {
+    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, "#251339"); sky.addColorStop(1, "#140a20");
+    g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#2a1640"; g.fillRect(0, H * 0.72, W, H * 0.28);
+    g.fillStyle = "rgba(255,255,255,0.05)"; for (let i = 0; i < 12; i++) g.fillRect(i * 110 + 20, H * 0.72, 2, H * 0.28);
+    for (let i = 0; i < 4; i++) {
+      const on = i === ((beatN % 4) + 4) % 4;
+      g.fillStyle = on ? `rgba(242,139,208,${0.35 + 0.65 * flash})` : "rgba(242,139,208,0.12)";
+      g.beginPath(); g.arc(W * 0.36 + i * W * 0.09, 46, 16, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = "rgba(255,255,255,0.55)"; g.font = "500 20px 'Chakra Petch', sans-serif"; g.fillText("found beat", W * 0.36 - 18, 94);
+    // the crowd's rows sit half a beat apart in the move, like the scene's rows
+    CROWD.forEach((look, i) => dancer(W * (0.1 + i * 0.27), H * 0.86, 0.42, vAt(i % 2 ? 0.125 : 0), i % 2 ? -1 : 1, look));
+    dancer(W * 0.5, H * 0.97, 0.78, vAt(0), 1, HERO);
+  }
+
+  // ---- drawing: the move graph in the card ----
+  const sg = $("shapeG"), s2 = sg.getContext("2d");
+  function drawShape(pos) {
+    const w = sg.width, h = sg.height, pad = 10, y = (v) => h - pad - v * (h - 2 * pad);
+    s2.clearRect(0, 0, w, h);
+    s2.fillStyle = "rgba(242,139,208,0.35)";
+    for (let b = 0; b < 4; b++) s2.fillRect((b / 4) * w, 0, b ? 1 : 2, h);
+    if (move.flat) { s2.fillStyle = "rgba(255,255,255,0.4)"; s2.font = "400 22px 'Share Tech Mono', monospace"; s2.fillText("no move yet: the signal is flat over the bar", 16, h / 2 + 7); return; }
+    s2.beginPath();
+    for (let i = 0; i <= BINS; i++) { const px = (i / BINS) * w, py = y(move.shape[i % BINS]); i ? s2.lineTo(px, py) : s2.moveTo(px, py); }
+    s2.lineTo(w, h); s2.lineTo(0, h); s2.closePath(); s2.fillStyle = "rgba(140,230,160,0.14)"; s2.fill();
+    s2.beginPath();
+    for (let i = 0; i <= BINS; i++) { const px = (i / BINS) * w, py = y(move.shape[i % BINS]); i ? s2.lineTo(px, py) : s2.moveTo(px, py); }
+    s2.strokeStyle = "#8ce6a0"; s2.lineWidth = 3; s2.stroke();
+    const px = frac(pos) * w; s2.fillStyle = "#fff"; s2.beginPath(); s2.arc(px, y(move.at(pos)), 7, 0, Math.PI * 2); s2.fill();
+  }
+
+  // ---- drawing: the timeline ----
+  const hist = [], beatHist = [];
+  const tl = $("tl"), t2 = tl.getContext("2d");
+  function drawTimeline(now) {
+    const w = tl.width, h = tl.height, span = 6, x = (t) => w - ((now - t) / span) * w;
+    t2.clearRect(0, 0, w, h);
+    const rowS = [0, 70], rowB = [76, 116], rowE = [122, h - 4];
+    t2.fillStyle = "rgba(255,255,255,0.03)"; [rowS, rowB, rowE].forEach((r) => t2.fillRect(0, r[0], w, r[1] - r[0]));
+    t2.font = "400 20px 'Share Tech Mono', monospace"; t2.fillStyle = "rgba(255,255,255,0.4)";
+    t2.fillText("dance signal", 8, rowS[0] + 22); t2.fillText("found beat", 8, rowB[0] + 22); t2.fillText("energy (0 – 1.5)", 8, rowE[0] + 22);
+    const line = (row, key, max, col, wdt) => {
+      const yy = (v) => row[1] - (v / max) * (row[1] - row[0] - 6);
+      t2.strokeStyle = col; t2.lineWidth = wdt; t2.beginPath();
+      hist.forEach((p, i) => { const px = x(p.t), py = yy(p[key]); i ? t2.lineTo(px, py) : t2.moveTo(px, py); }); t2.stroke();
+    };
+    line(rowS, "sig", 1, "#8ce6a0", 3);
+    for (const b of beatHist) if (now - b.t < span) { t2.fillStyle = b.bar ? "#f28bd0" : "rgba(242,139,208,0.5)"; const top = b.bar ? rowB[0] + 4 : rowB[0] + 18; t2.fillRect(x(b.t) - (b.bar ? 2 : 1), top, b.bar ? 4 : 2, rowB[1] - top - 2); }
+    t2.setLineDash([6, 6]); line(rowE, "floor", MAX_E, "rgba(255,255,255,0.45)", 2); t2.setLineDash([]);
+    line(rowE, "e", MAX_E, "#f9b96c", 3);
+  }
+
+  // ---- the loop ----
+  let last = performance.now() / 1000, clock = 0, flash = 0, lastBeatN = 0, rebuildT = 0;
+  function frame() {
+    const nowR = performance.now() / 1000, dt = Math.min(0.1, nowR - last); last = nowR; clock += dt;
+    const prevBeats = songT / SPB; if (playing) songT += dt; const beats = songT / SPB;
+    // signals this frame: fires and values
+    const fired = { kick: false, hat: false, break: false, tap: tapPending, none: false }; tapPending = false;
+    if (playing) for (let n = Math.floor(prevBeats); n <= Math.floor(beats); n++)
+      for (const sig of ["kick", "hat", "break"]) for (const p of hitsInBeat(sig, n)) { const tb = n + p; if (tb > prevBeats && tb <= beats) fired[sig] = true; }
+    for (const k in pulse) { pulse[k] *= Math.exp(-dt * 6); if (fired[k]) pulse[k] = 1; }
+    const value = (id) => (LEVELS[id] ? (playing ? levelAt(id, beats) : 0) : id === "none" ? 0 : pulse[id]);
+    const fires = (id) => (LEVELS[id] ? levelFire(id, value(id)) : !!fired[id]);
+    // Dance: find the beat, then learn the move from the signal's value over the bar
+    const v = value(S.dance);
+    if (fires(S.dance)) follower.fire(clock);
+    follower.advance(dt);
+    const bar = frac(follower.phase / 4);
+    if (follower.found) move.learn(bar, v);
+    rebuildT += dt; if (rebuildT > 0.1) { move.rebuild(); rebuildT = 0; }
+    // Energy → speed tier
+    stepEnergy(dt, value(S.boostSig), S.pumpSig !== "none" && (LEVELS[S.pumpSig] ? false : !!fired[S.pumpSig]));
+    const prevTier = tier; pickTier();
+    if (tier !== prevTier) {
+      play.held = posFor(TIERS[prevTier].m, follower.phase / 4);
+      play.from = prevTier; play.to = tier; play.w = 0;
+    }
+    play.w = Math.min(1, play.w + dt / (0.5 * follower.period)); // crossfade over half a beat
+    const vAt = (offset) => {
+      const barPos = follower.phase / 4 + offset;
+      const a = move.at(posFor(TIERS[play.from].m, barPos) + (TIERS[play.from].m ? 0 : offset));
+      const b = move.at(posFor(TIERS[play.to].m, barPos) + (TIERS[play.to].m ? 0 : offset));
+      return a + (b - a) * play.w;
+    };
+    // beat lines + flash
+    const bN = Math.floor(follower.phase);
+    if (follower.found && bN !== lastBeatN) { beatHist.push({ t: clock, bar: ((bN % 4) + 4) % 4 === 0 }); flash = 1; }
+    lastBeatN = bN; flash *= Math.exp(-dt * 8);
+    hist.push({ t: clock, e: E, floor: floorNow, sig: v });
+    while (hist.length && clock - hist[0].t > 6.2) hist.shift();
+    while (beatHist.length && clock - beatHist[0].t > 6.2) beatHist.shift();
+    // draw (the move sampled on twos, about 12 steps a second, like the scene)
+    const spb = Math.max(4, Math.round(720 / (60 / follower.period)));
+    const quant = (fn) => (o) => { const keep = follower.phase; follower.phase = Math.floor(keep * spb) / spb; const r = fn(o); follower.phase = keep; return r; };
+    drawStage(bN, flash, reduced ? () => 0 : quant(vAt));
+    const m = TIERS[tier].m;
+    drawShape(m ? frac((follower.phase / 4) * m) : play.held);
+    drawTimeline(clock);
+    // readouts
+    const st = follower.status(clock), stEl = $("danceStatus");
+    stEl.className = "status st-" + st; stEl.textContent = { none: "no beat", locked: "locked", finding: "finding", holding: "holding" }[st];
+    $("bpmOut").textContent = follower.found ? (60 / follower.period).toFixed(1) + " BPM" : "— BPM";
+    $("speedOut").textContent = TIERS[tier].name;
+    [...$("tierLabels").children].forEach((s, i) => s.classList.toggle("on", i === tier));
+    $("eBar").style.width = (E / MAX_E) * 100 + "%";
+    $("eFloor").style.left = `calc(${(floorNow / MAX_E) * 100}% - 1px)`;
+    $("sect").textContent = playing ? `beat ${Math.floor(beats % ARR)} · ${section(Math.floor(beats))}` : "stopped";
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>

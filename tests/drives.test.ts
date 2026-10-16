@@ -1,27 +1,32 @@
 import { UNIT_TAILS } from "../src/audio/hitStrength.ts";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   createDriveEngine,
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
-  GENERIC_THRESHOLD_DEFAULT,
   hasLiveSource,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
+  remapShapedSources,
   sameDriveChoice,
   sameDriveSetting,
   setPatchMix,
   setSourceMuted,
   setSourceRole,
+  shapeSource,
   smoothstep,
+  sourceKey,
+  specMapFor,
   togglePatchSource,
   type DriveChoice,
   type DrivePatch,
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
+import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
+import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
+import { addShapingNode, removeShapingNode } from "../src/render/shapingNodes.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -31,6 +36,8 @@ import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
+import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
+import { GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
 
 const DT = 1 / 60;
 
@@ -40,6 +47,8 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     bands: new Float32Array(NUM_BANDS),
     energy: 0,
     level: 1,
+    hats: 0,
+    lead: 0,
     onset: false,
     pulseOnset: false,
     bpm: 120,
@@ -73,11 +82,13 @@ describe("drives: catalogue identity", () => {
     const anim = clock.advance(DT, frame({ bands, onset: true }));
 
     const engine = createDriveEngine();
-    // "anim.energy" is the one entry whose read() actually uses `frame`
-    // (see signals.ts's header) — the engine only ever feeds it the
-    // sensitivity-applied `driveEnergy` accumulate() was given, never a
-    // plain FeatureFrame, so it has to be seeded through accumulate() here
-    // rather than compared against an ad-hoc frame() the engine never saw.
+    // "anim.energy" and "feature.level" are the entries whose read() actually
+    // uses `frame` (see signals.ts's header) — the engine only ever feeds the
+    // first the sensitivity-applied `driveEnergy` accumulate() was given,
+    // never a plain FeatureFrame, so it has to be seeded through accumulate()
+    // here rather than compared against an ad-hoc frame() the engine never
+    // saw; the second reads the gained frame's own `level`, which is that
+    // same frame({ bands })'s.
     const driveEnergy = 0.42;
     engine.accumulate(DT, frame({ bands }), driveEnergy, anim, "identity-scene", []);
 
@@ -430,6 +441,39 @@ describe("drives: identity at defaults, across every registered scene", () => {
     }
     expect(checked).toBeGreaterThan(0);
   });
+
+  it("a patch default reads exactly its weighted sum of catalogue signals (the sum it replaced on Scene)", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    clock.advance(DT, frame({ bands, onset: true }));
+    const f = frame({ bands, onset: true });
+    const anim = clock.advance(DT, f);
+    const engine = createDriveEngine();
+
+    let checked = 0;
+    for (const scene of listScenes()) {
+      const settings = scene.settings ?? [];
+      engine.accumulate(DT, f, 0.5, anim, scene.id, settings);
+      const drives = engine.forScene(scene.id, settings, anim);
+      for (const spec of settings) {
+        const def = spec.drive?.default;
+        if (typeof def !== "object" || !("mix" in def)) continue;
+        checked++;
+        expect(def.mix, `${scene.id}'s "${spec.key}"`).toBe("add");
+        if (def.sources.length === 0) {
+          // A jack that starts unplugged (drives.ts's header, rule 1's
+          // exception) reads its caller's rest — nothing — until wired.
+          expect(drives.valueOf(spec.key), `${scene.id}'s "${spec.key}"`).toBe(0);
+          continue;
+        }
+        let sum = 0;
+        for (const src of def.sources) sum += src.weight * SIGNALS[src.choice as SignalId].read(f, anim);
+        expect(sum, `${scene.id}'s "${spec.key}" reads 0 here, so this check would be vacuous`).toBeGreaterThan(0);
+        expect(drives.valueOf(spec.key), `${scene.id}'s "${spec.key}"`).toBeCloseTo(sum * (spec.drive!.gain ?? 1), 6);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
 });
 
 // The lexical backstop for rule 1 of the 2026-09-28 audit (this file's
@@ -504,11 +548,11 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     }
   });
 
-  // None was ever a real composite — breathe read a bare 0 (no reaction at
-  // all), injection and causticDensity a bare 1 (an unfiltered
-  // pass-through) — so per drives.ts's header's "Nothing plugged in"
-  // paragraph they now each carry a real catalogue default instead of "scene".
-  it("breathe defaults to Bar wave, injection to Treble hit and causticDensity to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
+  // Neither was ever a real composite — breathe read a bare 0 (no reaction at
+  // all), causticDensity a bare 1 (an unfiltered pass-through) — so per
+  // drives.ts's header's "Nothing plugged in" paragraph they now each carry a
+  // real catalogue default instead of "scene".
+  it("breathe defaults to Bar wave and causticDensity to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.8), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
@@ -516,8 +560,6 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.value("causticDensity", -1)).toBe(anim.sectionIntensity);
     expect(byKey("breathe").drive!.default).toBe("anim.barWave");
     expect(drives.uniformPair("breathe")).toEqual({ drive: SIGNALS["anim.barWave"].read(frame(), anim), custom: 1 });
-    expect(byKey("injection").drive!.default).toBe("anim.highOnset");
-    expect(drives.uniformPair("injection")).toEqual({ drive: anim.highPulse, custom: 1 });
   });
 
   it("ripple's Scene default reproduces today's exact trigger (bass hit OR beat hit, unconditionally)", () => {
@@ -531,6 +573,14 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     const sceneDefaultNeither = neither.lowOnset || neither.onset;
     expect(sceneDefaultNeither).toBe(false);
     expect(engine.forScene("caustics", settings, neither).fired("ripple", sceneDefaultNeither)).toBe(false);
+  });
+
+  it("ripple takes the generic Threshold like every other drive setting; Ring threshold is its own plain setting", () => {
+    expect(byKey("ripple").drive!.threshold).toBeUndefined();
+    const ring = byKey("ringThreshold");
+    expect(ring.label).toBe("Ring threshold");
+    expect(ring.drive).toBeUndefined();
+    expect(ring.default).toBe(STANDOUT_THRESHOLD_DEFAULT);
   });
 });
 
@@ -1339,10 +1389,11 @@ describe("drives: the generic engine gate — every drive setting without its ow
     }
   });
 
-  it("on: a signal hovering below the line reads ~0 through value(), a bump above passes ≈ its own value", () => {
+  it("on, Smoothness off: a signal hovering below the Min line reads ~0 through value(), a bump to the peak reads ≈ the peak", () => {
     const sceneId = "gate-on-value";
     const spec = energySetting();
     setDriveThresholdOn(sceneId, spec, true);
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: a bump at the peak reads the peak itself
     const clock = createAnimClock();
     const engine = createDriveEngine();
 
@@ -1363,7 +1414,7 @@ describe("drives: the generic engine gate — every drive setting without its ow
     expect(drives.value("k", -1)).toBeCloseTo(1, 5);
   });
 
-  it("on: t=0 sits at the resting floor, t=1 at the recent peak — the slider moves the line", () => {
+  it("on: t=0 sits at 0, t=1 at the recent peak — the slider moves the line", () => {
     const sceneId = "gate-on-t";
     const spec = energySetting();
     setDriveThresholdOn(sceneId, spec, true);
@@ -1381,9 +1432,93 @@ describe("drives: the generic engine gate — every drive setting without its ow
 
     setDriveThreshold(sceneId, spec, 0);
     const lineAt0 = tick(0.1).gateLine("k")!;
+    expect(lineAt0).toBe(0);
     setDriveThreshold(sceneId, spec, 1);
     const lineAt1 = tick(0.1).gateLine("k")!;
     expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
+  });
+
+  it("window open all the way (Min 0, Max 1, Smoothness off) hands the reading on unchanged", () => {
+    const sceneId = "gate-window-open";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0);
+    setDriveWindowMax(sceneId, spec, 1);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.3); // the floor settles at 0.3, well above 0
+    expect(tick(0.3).value("k", -1)).toBeCloseTo(0.3, 6);
+    expect(tick(0.6).value("k", -1)).toBeCloseTo(0.6, 6);
+  });
+
+  it("smoothness: never reaches past 0 or the peak — silence reads 0 and a reading at the peak reads the peak at every value, and more smoothness lets more of the middle through", () => {
+    // Min == Max == 1 (both lines on the tracked peak): with no smoothness only
+    // a new high gets through; smoothness eases the Min line down toward 0,
+    // but the Max line stays on the peak, which it can't pass.
+    function settle(sceneId: string, smoothness: number) {
+      const spec = energySetting();
+      setDriveThresholdOn(sceneId, spec, true);
+      setDriveThreshold(sceneId, spec, 1);
+      setDriveSmoothness(sceneId, spec, smoothness);
+      const clock = createAnimClock();
+      const engine = createDriveEngine();
+      const tick = (e: number) => {
+        const anim = clock.advance(DT, frame());
+        engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+        return engine.forScene(sceneId, [spec], anim);
+      };
+      for (let i = 0; i < 5; i++) tick(1); // a loud burst teaches the peak
+      for (let i = 0; i < 120; i++) tick(0.1); // the reading settles low
+      return tick;
+    }
+
+    for (const s of [0, 0.11, 0.5, 0.81, 1]) {
+      const silent = settle(`gate-smoothness-silence-${s}`, s)(0);
+      expect(silent.value("k", -1)).toBe(0);
+      const tick = settle(`gate-smoothness-peak-${s}`, s);
+      let d = tick(0.1);
+      d = tick(d.gateTop("k")!); // a reading on the peak itself
+      expect(d.value("k", -1)).toBeCloseTo(d.gateTop("k")!, 2);
+    }
+
+    const middle = (s: number) => {
+      const tick = settle(`gate-smoothness-middle-${s}`, s);
+      let d = tick(0.1);
+      d = tick(0.1 + (d.gateTop("k")! - 0.1) / 2); // halfway from the resting level to the peak
+      return d.value("k", -1);
+    };
+    expect(middle(0)).toBe(0);
+    expect(middle(0.5)).toBeGreaterThan(0);
+    expect(middle(1)).toBeGreaterThan(middle(0.5));
+  });
+
+  it("smoothness switched off ignores the slider: the same hard cut as 0", () => {
+    const sceneId = "gate-smoothness-off";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 1);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    setDriveSmoothness(sceneId, spec, 1);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const tick = (e: number) => {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    };
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    let d = tick(0.1);
+    d = tick(0.1 + (d.gateTop("k")! - 0.1) / 2);
+    expect(d.value("k", -1)).toBe(0);
   });
 
   it("on: fired() blocks an edge whose own combined value falls under the line", () => {
@@ -1391,6 +1526,7 @@ describe("drives: the generic engine gate — every drive setting without its ow
     const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
     setDriveThresholdOn(sceneId, spec, true);
     setDriveThreshold(sceneId, spec, 0.5);
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: the loud hit reads the peak itself
     const clock = createAnimClock();
     const engine = createDriveEngine();
 
@@ -1423,7 +1559,136 @@ describe("drives: the generic engine gate — every drive setting without its ow
       }
     }
     expect(lastLoudFired).toBe(true); // the loud hit still fires
-    expect(lastLoudValue).toBe(1);
+    expect(lastLoudValue).toBeCloseTo(1, 6);
+  });
+
+  it("a built-in (\"scene\") reaction read through value() is gated too, once switched on — off, it passes straight through", () => {
+    const sceneId = "gate-built-in";
+    const spec = settingWithDrive("k", "scene");
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: read(1) lands on the peak itself
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function read(v: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), 0, anim, sceneId, [spec]);
+      const drives = engine.forScene(sceneId, [spec], anim);
+      const out = drives.value("k", v);
+      expect(drives.value("k", v)).toBe(out); // a second read the same frame doesn't advance the tracker again
+      return { out, drives };
+    }
+
+    expect(read(0.1).out).toBe(0.1); // off: identity
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0.5);
+    for (let i = 0; i < 5; i++) read(1); // a loud burst teaches the peak
+    let last = read(0.1);
+    for (let i = 0; i < 180; i++) last = read(0.1); // settles low, well under the line
+    expect(last.out).toBe(0);
+    expect(last.drives.gateLine("k")).toBeGreaterThan(0.1);
+    expect(read(1).out).toBeCloseTo(1, 5);
+  });
+
+  it("window, Smoothness off: at the Min line reads ~0, at the tracked peak reads the peak, halfway between reads about half the peak", () => {
+    const sceneId = "gate-window-exact";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1); // a loud burst teaches the peak
+    for (let i = 0; i < 120; i++) tick(0.1); // the floor settles low, the peak eases down from the burst
+
+    // Each reading is placed on the lines the tick before read; floor and peak move only a little in one tick.
+    let d = tick(0.1);
+    d = tick(d.gateLine("k")!);
+    expect(d.value("k", -1)).toBeCloseTo(0, 2);
+    d = tick(d.gateTop("k")!);
+    expect(d.value("k", -1)).toBeCloseTo(d.gateTop("k")!, 2);
+    d = tick((d.gateLine("k")! + d.gateTop("k")!) / 2);
+    expect(d.value("k", -1)).toBeCloseTo(d.gateTop("k")! / 2, 2);
+  });
+
+  it("Max below 1: a reading at or over the Max line reads the full peak", () => {
+    const sceneId = "gate-window-max-half";
+    const full = energySetting("full");
+    const half = energySetting("half");
+    for (const s of [full, half]) {
+      setDriveThresholdOn(sceneId, s, true);
+      setDriveSmoothnessOn(sceneId, s, false);
+    }
+    setDriveWindowMax(sceneId, half, 0.5);
+    const specs = [full, half];
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, specs);
+      return engine.forScene(sceneId, specs, anim);
+    }
+
+    // Both settings see the same signal, so their floor and peak match; only half's Max line sits lower.
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    let d = tick(0.1);
+    d = tick(d.gateTop("half")!); // a reading exactly on half's Max line
+    expect(d.value("half", -1)).toBeCloseTo(d.gateTop("full")!, 6); // full's Max line is the peak
+    d = tick(1); // over it
+    expect(d.value("half", -1)).toBeCloseTo(1, 6);
+  });
+
+  it("Min == Max with Smoothness off is a step: under → 0, at/over → the peak", () => {
+    const sceneId = "gate-window-step";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0.5);
+    setDriveWindowMax(sceneId, spec, 0.5);
+    setDriveSmoothnessOn(sceneId, spec, false);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    const under = tick(0.1);
+    expect(under.gateTop("k")).toBe(under.gateLine("k"));
+    expect(under.value("k", -1)).toBe(0);
+    const over = tick(1);
+    expect(over.value("k", -1)).toBe(1);
+  });
+
+  it("gateTop: undefined while the gate is off; on, never below gateLine, and on the peak at the default Max", () => {
+    const sceneId = "gate-window-top";
+    const spec = energySetting();
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    expect(tick(0.1).gateTop("k")).toBeUndefined(); // off
+    setDriveThresholdOn(sceneId, spec, true);
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1);
+    let d = tick(0.1);
+    expect(d.gateTop("k")!).toBeGreaterThan(d.gateLine("k")!);
+    d = tick(1); // a new high: the default Max line sits on the peak
+    expect(d.gateTop("k")).toBeCloseTo(1, 6);
+    setDriveThreshold(sceneId, spec, 0.8);
+    setDriveWindowMax(sceneId, spec, 0.2); // Max under Min: the Max line still never drops below the Min line
+    d = tick(0.1);
+    expect(d.gateTop("k")).toBe(d.gateLine("k"));
   });
 });
 
@@ -1490,3 +1755,305 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
   });
 });
 
+describe("drives: per-frame allocation (#353)", () => {
+  // One settled AnimFrame with its anim.* readings, the same setup as the
+  // "a patch default reads exactly its weighted sum" test above.
+  function allocFixture() {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    clock.advance(DT, frame({ bands, onset: true }));
+    const f = frame({ bands, onset: true });
+    const anim = clock.advance(DT, f);
+    return {
+      anim,
+      low: SIGNALS["anim.low"].read(f, anim),
+      mid: SIGNALS["anim.mid"].read(f, anim),
+      high: SIGNALS["anim.high"].read(f, anim),
+    };
+  }
+
+  it("specMapFor() caches the key -> spec map per settings array, and empty arrays share one map", () => {
+    const a = settingWithDrive("a", "anim.low");
+    const b = settingWithDrive("b", "anim.mid");
+    const settings = [a, b];
+    const m1 = specMapFor(settings);
+    expect(m1.get("b")).toBe(b);
+    expect(m1.size).toBe(2);
+    expect(specMapFor(settings)).toBe(m1);
+    expect(specMapFor([a, b])).not.toBe(m1);
+    expect(specMapFor([])).toBe(specMapFor([]));
+  });
+
+  it("the combined reading stays bit-identical in float64 for add (muted terms skipped, sum order kept)", () => {
+    const { anim, low, mid, high } = allocFixture();
+    expect(low).toBeGreaterThan(0);
+    expect(mid).toBeGreaterThan(0);
+    expect(high).toBeGreaterThan(0);
+    const spec = patchSetting("alloc-add", "k", {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.3, off: true },
+      ],
+    });
+    let e = 0;
+    e += 0.3 * low;
+    e += 0.7 * mid;
+    const engine = createDriveEngine();
+    expect(engine.forScene("alloc-add", [spec], anim).valueOf("k")).toBe(e);
+    // A Float32Array scratch would round each term first and land on this instead.
+    expect(Math.fround(0.3 * low) + Math.fround(0.7 * mid)).not.toBe(e);
+  });
+
+  it("the combined reading stays bit-identical in float64 for max (a muted source never wins)", () => {
+    const { anim, low, mid, high } = allocFixture();
+    // The muted term must be the largest, so only skipping it can give the right answer.
+    expect(1.3 * high).toBeGreaterThan(Math.max(0.3 * low, 0.7 * mid));
+    const spec = patchSetting("alloc-max", "k", {
+      mix: "max",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.3, off: true },
+      ],
+    });
+    const engine = createDriveEngine();
+    expect(engine.forScene("alloc-max", [spec], anim).valueOf("k")).toBe(Math.max(0, 0.3 * low, 0.7 * mid));
+  });
+
+  it("the combined reading stays bit-identical in float64 for gate (the condition scales the plays)", () => {
+    const { anim, low, mid, high } = allocFixture();
+    const expected = (0 + 0.3 * low + 0.7 * mid) * (1 * smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, 1.3 * high));
+    expect(expected).toBeGreaterThan(0);
+    const spec = patchSetting("alloc-gate", "k", {
+      mix: "gate",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.3, when: true },
+      ],
+    });
+    const engine = createDriveEngine();
+    expect(engine.forScene("alloc-gate", [spec], anim).valueOf("k")).toBe(expected);
+  });
+
+  it("no stale scratch entries: a narrower read after a wider one reads only its own terms", () => {
+    const { anim, low, mid, high } = allocFixture();
+    const wide = patchSetting("alloc-width", "wide", {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+        { choice: "anim.high", weight: 1.9 },
+      ],
+    });
+    const narrow = patchSetting("alloc-width", "narrow", {
+      mix: "max",
+      sources: [
+        { choice: "anim.low", weight: 0.3 },
+        { choice: "anim.mid", weight: 0.7 },
+      ],
+    });
+    const engine = createDriveEngine();
+    const drives = engine.forScene("alloc-width", [wide, narrow], anim);
+    drives.valueOf("wide");
+    // The wide read's third term must be larger than anything the narrow max could show.
+    expect(1.9 * high).toBeGreaterThan(Math.max(0.3 * low, 0.7 * mid));
+    expect(drives.valueOf("narrow")).toBe(Math.max(0, 0.3 * low, 0.7 * mid));
+  });
+});
+
+// "Only this" (driveSolo.ts): one setting keeps following the sound while
+// every other setting of its scene reads as if its wires were all switched
+// off. The stored wires are never touched, so ending the solo restores them.
+describe("Only this (driveSolo)", () => {
+  afterEach(() => {
+    clearDriveSolo();
+  });
+
+  it("a soloed setting reads its normal value; a patch-driven sibling reads rest", () => {
+    const sceneId = "solo-patch-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const aBefore = engine.forScene(sceneId, [a, b], anim).value("A", 0, -1);
+    expect(aBefore).toBeGreaterThan(0);
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBeGreaterThan(0);
+
+    setDriveSolo(sceneId, "A");
+    const drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.value("B", 0, -1)).toBe(-1);
+    expect(drives.value("A", 0, -1)).toBe(aBefore);
+  });
+
+  it("a built-in reaction on a sibling reads its rest, not the scene's own value", () => {
+    const sceneId = "solo-builtin-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = settingWithDrive("B", "scene");
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0.6, 0.1)).toBe(0.6);
+
+    setDriveSolo(sceneId, "A");
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0.6, 0.1)).toBe(0.1);
+  });
+
+  it("clearing the solo restores every sibling exactly, and the stored wires are untouched", () => {
+    const sceneId = "solo-restore-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const bBefore = engine.forScene(sceneId, [a, b], anim).value("B", 0, -1);
+    const storedBefore = JSON.parse(JSON.stringify(getDriveSetting(sceneId, b)));
+
+    setDriveSolo(sceneId, "A");
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBe(-1);
+
+    clearDriveSolo();
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBe(bBefore);
+    expect(getDriveSetting(sceneId, b)).toEqual(storedBefore);
+    expect((getDriveSetting(sceneId, b) as DrivePatch).sources[0]!.off).toBeUndefined();
+  });
+
+  it("a solo set for a different scene changes nothing in this one", () => {
+    const sceneId = "solo-elsewhere-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const bBefore = engine.forScene(sceneId, [a, b], anim).value("B", 0, -1);
+
+    setDriveSolo("some-other-scene", "A");
+    expect(engine.forScene(sceneId, [a, b], anim).value("B", 0, -1)).toBe(bBefore);
+  });
+
+  it("soloing a second key moves the solo: the first is silenced, the second stays live", () => {
+    const sceneId = "solo-move-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    const aBefore = engine.forScene(sceneId, [a, b], anim).value("A", 0, -1);
+    const bBefore = engine.forScene(sceneId, [a, b], anim).value("B", 0, -1);
+
+    setDriveSolo(sceneId, "A");
+    let drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.value("B", 0, -1)).toBe(-1);
+    expect(drives.value("A", 0, -1)).toBe(aBefore);
+
+    setDriveSolo(sceneId, "B");
+    drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.value("A", 0, -1)).toBe(-1);
+    expect(drives.value("B", 0, -1)).toBe(bBefore);
+  });
+
+  it("a silenced setting's uniform is exactly 0 and it leaves the Master excursion", () => {
+    const sceneId = "solo-uniform-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const b = patchSetting(sceneId, "B", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const anim = { ...createAnimClock().advance(DT, frame()), mid: 0.8 };
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame(), 0, anim, sceneId, [a, b]);
+    expect(engine.forScene(sceneId, [a, b], anim).uniformPair("B").drive).toBeGreaterThan(0);
+
+    setDriveSolo(sceneId, "A");
+    const drives = engine.forScene(sceneId, [a, b], anim);
+    expect(drives.uniformPair("B")).toEqual({ drive: 0, custom: 1 });
+    expect(drives.sourceValues("B")![0]).toBe(0);
+    // Only A is live now, so the excursion is A's alone.
+    expect(drives.masterExcursion()).toBe(engine.forScene(sceneId, [a], anim).masterExcursion());
+  });
+
+  it("fired() on a silenced edge setting is false", () => {
+    const sceneId = "solo-fired-scene";
+    const a = patchSetting(sceneId, "A", { mix: "add", sources: [{ choice: "anim.mid", weight: 1 }] });
+    const e = settingWithDrive("E", "feature.onset");
+    const anim = { ...createAnimClock().advance(DT, frame()), onset: true, mid: 0.8 };
+    const engine = createDriveEngine();
+    expect(engine.forScene(sceneId, [a, e], anim).fired("E", false)).toBe(true);
+
+    setDriveSolo(sceneId, "A");
+    expect(engine.forScene(sceneId, [a, e], anim).fired("E", false)).toBe(false);
+  });
+});
+
+
+describe("drives: shaping nodes (shapingNodes.ts)", () => {
+  it("a setting wired to a node reads the node output after accumulate", () => {
+    const node = addShapingNode("anim.low", { windowOn: false })!;
+    const sceneId = "shaped-read";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }] });
+    const engine = createDriveEngine();
+    const f = frame({ bands: new Float32Array(NUM_BANDS).fill(0.6) });
+    const anim = createAnimClock().advance(DT, f);
+    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+    const out = engine.shaped(node.id)!.output;
+    expect(out).toBeGreaterThan(0);
+    expect(engine.forScene(sceneId, [spec], anim).value("k", -999)).toBeCloseTo(out, 9);
+    removeShapingNode(node.id);
+  });
+
+  it("a dangling id reads 0 and does not throw in value, fired or sourceValues", () => {
+    const sceneId = "shaped-dangling";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: "n999999" }, weight: 1 }] });
+    const engine = createDriveEngine();
+    const f = frame();
+    const anim = createAnimClock().advance(DT, f);
+    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("k", -999)).toBe(0);
+    expect(typeof drives.fired("k", false)).toBe("boolean");
+    expect(drives.sourceValues("k")).not.toBeNull();
+    expect(engine.shaped("n999999")).toBeNull();
+  });
+
+  it("sourceKey and sameDriveChoice tell shaped ids apart", () => {
+    expect(sourceKey({ source: "shaped", id: "n3" })).toBe("shaped:n3");
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n1" })).toBe(true);
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n2" })).toBe(false);
+    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "line" })).toBe(false);
+  });
+
+  it("normalizeDriveSetting dedupes one shaped id, and keeps two different ones", () => {
+    const same = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n1" }, weight: 0.5 }] });
+    expect(same).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
+    const two = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }] });
+    expect((two as DrivePatch).sources.length).toBe(2);
+  });
+
+  it("remapShapedSources rewrites mapped ids only", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] };
+    const out = remapShapedSources(setting, new Map([["n1", "n7"]]));
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n7" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
+    expect(remapShapedSources("scene", new Map([["n1", "n7"]]))).toBe("scene");
+  });
+});
+
+describe("drives: shapeSource (a wire's Shape button)", () => {
+  it("re-points the matching source and keeps its weight, when and off", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] };
+    const out = shapeSource(setting, "anim.low", "n3");
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n3" }, weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] });
+  });
+
+  it("drops height and every from the re-pointed source", () => {
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, height: "fixed", every: 4 }] };
+    const out = shapeSource(setting, "anim.beatWave", "n1");
+    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
+  });
+
+  it("leaves other sources untouched and in order", () => {
+    const setting: DrivePatch = { mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: "anim.high", weight: 0.5, height: "fixed" }, { choice: { source: "line" }, weight: 1 }] };
+    const out = shapeSource(setting, "anim.high", "n2");
+    expect(out).toEqual({ mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: { source: "shaped", id: "n2" }, weight: 0.5 }, { choice: { source: "line" }, weight: 1 }] });
+  });
+
+  it("returns a scene setting, or a patch with no such source, unchanged", () => {
+    expect(shapeSource("scene", "anim.low", "n1")).toBe("scene");
+    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.high", weight: 1 }] };
+    expect(shapeSource(setting, "anim.low", "n1")).toEqual(setting);
+  });
+});

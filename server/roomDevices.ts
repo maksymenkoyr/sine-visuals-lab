@@ -1,7 +1,7 @@
 /**
- * The members of a claimed room and the three choices the Room view makes for
- * each: its name, where its sound comes from (`ears`) and what its screen
- * shows (`screen`). The room stores one record per device id
+ * The members of a claimed room and the choices the Room view makes for each:
+ * its name, where its sound comes from (`ears`), what its screen shows
+ * (`screen`) and, for a TV, how finely it draws (`quality`). The room stores one record per device id
  * (server/roomCore.ts keeps them as rows, so a device that drops and comes
  * back keeps its choices), lists every record in the roster, online or not,
  * and routes feature frames by them. The client reads the same records from
@@ -23,11 +23,27 @@
  * skipped by Play. `off` is a remote with no picture of its own. A TV page has
  * no panel to be a remote with, so it can't be `off`.
  *
- * Who decides. Any keyed member may change any device (the QR is the
- * permission: only people in the room can scan it); only the owner may forget
- * a device. The defaults for a newcomer come from what it is: the owner is on
- * its own input and shows Main, everyone else follows the owner, and a phone
- * starts as a remote.
+ * Quality. The quality preset a TV renders at (src/render/quality.ts), or
+ * `auto` for the one its own GPU benchmark picks, which it says in its
+ * `hello` as `autoQuality` so the Room view can show it. A TV page has no
+ * panel to choose it in, so the room holds the choice for it, and src/tv.ts
+ * applies it as it arrives. Every record has one, but only a TV reads it: a
+ * laptop, tablet or phone sets its own Quality in its panel. `auto` is the
+ * default, which is how every TV rendered before the choice existed.
+ *
+ * Play. Whether a device's Play reaches Main (the room's look document). The
+ * owner always may; every other device starts without it until the owner
+ * grants it, and the owner can take it back. A TV never plays. `mayPlay` is
+ * the one rule the room checks.
+ *
+ * Who decides. Any keyed member may change any device's name, ears, screen and
+ * quality (the QR is the permission: only people in the room can scan it); only
+ * the owner may grant or take back Play, or forget a device. The defaults for a
+ * newcomer come from what it is: the owner is on its own input, everyone else
+ * follows the owner, only the owner may Play, and every device shows Main.
+ * A phone or iPad that scans the laptop's QR opens as one more screen of the
+ * room, full screen with its controls hidden until a tap (src/app.ts
+ * `handheldScreen`); the Room view turns it into a remote with `off`.
  *
  * Plain TS with no DOM or Workers types (listed in the root tsconfig `files`
  * like server/roomRules.ts): the room, the client and the tests share it.
@@ -44,6 +60,12 @@ export const RENDER_DELAY_MS = 120;
 export type DeviceKind = "laptop" | "tablet" | "phone" | "tv";
 export type Ears = "own" | "follow";
 export type ScreenUse = "main" | "own" | "off";
+/** src/render/quality.ts's QualityPreset, spelled out because the Worker
+ *  can't import the client's render code; tests/roomDevices.test.ts checks it
+ *  against QUALITY_PRESET_ORDER. */
+export type ScreenPreset = "high" | "mid" | "low" | "floor";
+/** src/render/qualityPref.ts's QualityChoice, likewise. */
+export type ScreenQuality = "auto" | ScreenPreset;
 
 /** What the Room view sets for a device. */
 export interface DeviceSettings {
@@ -54,6 +76,12 @@ export interface DeviceSettings {
    *  so switching back to follow returns to the same feed. */
   follow: string | null;
   screen: ScreenUse;
+  /** The quality a TV renders at; see the header. */
+  quality: ScreenQuality;
+  /** Whether this device's Play may change Main. The owner always may
+   *  (`mayPlay` ignores the field for it); every other device starts without
+   *  it, and only the owner can grant it (server/roomCore.ts `deviceSet`). */
+  canPlay: boolean;
 }
 
 /** What a device is, as it says itself when it joins (and may update in a hello). */
@@ -77,6 +105,8 @@ export interface DeviceSetPatch {
   ears?: Ears;
   follow?: string | null;
   screen?: ScreenUse;
+  quality?: ScreenQuality;
+  canPlay?: boolean;
 }
 
 export const DEVICE_LIMITS = {
@@ -98,6 +128,14 @@ export function parseEars(v: unknown): Ears | undefined {
 
 export function parseScreen(v: unknown): ScreenUse | undefined {
   return v === "main" || v === "own" || v === "off" ? v : undefined;
+}
+
+export function parsePreset(v: unknown): ScreenPreset | undefined {
+  return v === "high" || v === "mid" || v === "low" || v === "floor" ? v : undefined;
+}
+
+export function parseQuality(v: unknown): ScreenQuality | undefined {
+  return v === "auto" ? v : parsePreset(v);
 }
 
 /** The kind a device that didn't say is assumed to be, from its role. */
@@ -127,7 +165,9 @@ export function defaultSettings(role: RoomRole, traits: DeviceTraits, name?: str
     name: cleanName(name) ?? defaultName(traits.kind),
     ears: own ? "own" : "follow",
     follow: null,
-    screen: !own && traits.kind === "phone" ? "off" : "main",
+    screen: "main",
+    quality: "auto",
+    canPlay: own,
   };
 }
 
@@ -160,6 +200,15 @@ export function sanitizeDeviceSet(
     if (screen === undefined) return null;
     patch.screen = screen;
   }
+  if (msg.quality !== undefined) {
+    const quality = parseQuality(msg.quality);
+    if (quality === undefined) return null;
+    patch.quality = quality;
+  }
+  if (msg.canPlay !== undefined) {
+    if (typeof msg.canPlay !== "boolean") return null;
+    patch.canPlay = msg.canPlay;
+  }
   if (Object.keys(patch).length === 0) return null;
   return { targetId: msg.targetId, patch };
 }
@@ -187,6 +236,11 @@ export function parseRecord(raw: string): DeviceRecord | null {
     ears,
     follow: r.follow,
     screen,
+    // A row stored before the choice existed has none: `auto`, as it rendered then.
+    quality: parseQuality(r.quality) ?? "auto",
+    // A row stored before the choice existed has none: no Play, so a guest must
+    // be granted it; the owner is unaffected, `mayPlay` lets it through.
+    canPlay: r.canPlay === true,
     kind,
     hasMic: r.hasMic === true,
     role,
@@ -199,6 +253,15 @@ export function parseRecord(raw: string): DeviceRecord | null {
 export function ownerId(records: ReadonlyMap<string, DeviceRecord>): string | null {
   for (const [id, r] of records) if (r.role === "host") return id;
   return null;
+}
+
+/** Whether `deviceId`'s Play may change Main: a known device that is not a TV
+ *  and is either the owner (role `host`, whatever its `canPlay` says) or has
+ *  been granted `canPlay`. */
+export function mayPlay(records: ReadonlyMap<string, DeviceRecord>, deviceId: string): boolean {
+  const r = records.get(deviceId);
+  if (!r || r.role === "renderer") return false;
+  return r.role === "host" || r.canPlay;
 }
 
 /** The feed a device draws from: itself when on its own input, else the
@@ -271,6 +334,8 @@ export function applyDeviceSet(
     if (patch.ears === undefined) next.ears = "follow";
   }
   if (patch.screen !== undefined) next.screen = patch.screen;
+  if (patch.quality !== undefined) next.quality = patch.quality;
+  if (patch.canPlay !== undefined) next.canPlay = patch.canPlay;
 
   // Only what the patch sets is checked: a record that is already odd (an
   // owner without a mic, say) can still be renamed or given another screen.

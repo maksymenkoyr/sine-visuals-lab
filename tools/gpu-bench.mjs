@@ -13,19 +13,22 @@
 //     synced frames); compare scenes or versions within one run, and
 //     interleave a baseline when comparing edits, since clocks drift.
 //
-//   node tools/gpu-bench.mjs --port P --scenes caustics --dump 30,75 --out DIR
+//   node tools/gpu-bench.mjs --port P --scenes caustics --dump 30,75 --out DIR [--seed N]
 //     Writes those frames as raw RGBA (DIR/<scene>-<frame>.rgba, w*h*4
-//     bytes). Same frame index = same picture on every run, so dumping
+//     bytes). Same frame index = same picture on every run (with --seed for
+//     a scene that draws from Math.random, as Chladni does), so dumping
 //     before and after an edit and running
 //   node tools/gpu-bench.mjs --compare a.rgba b.rgba
 //     counts the pixels that changed and by how much.
 //
-//   node tools/gpu-bench.mjs --port P --app --scene caustics [--seconds 4] [--dpr 2]
+//   node tools/gpu-bench.mjs --port P --app --scene caustics [--seconds 4] [--dpr 2] [--wait 2.5]
 //     Times every draw call inside the running app instead (timer queries
 //     wrapped around drawArrays & co.), grouped by shader program, on a
 //     1512x945 viewport at the given devicePixelRatio (2 = a MacBook's
 //     Retina canvas). This is what the user actually sees, render cap and
-//     all — the fps it prints is draws per second.
+//     all — the fps it prints is draws per second. Timing starts --wait
+//     seconds after the scene loads (raise it for a scene whose opening
+//     costs differently from its steady state).
 //
 // Why each bench frame is followed by a 1-pixel readPixels: a tile-based GPU
 // (every Apple GPU) skips shading opaque fragments that a later draw in the
@@ -84,6 +87,21 @@ async function benchMode() {
   if (get("dump")) q.set("dump", get("dump"));
   const page = await browser.newPage({ ignoreHTTPSErrors: true });
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
+  // --seed N: Math.random becomes a seeded generator (mulberry32) before the
+  // page's own scripts run, for a scene that draws from it (Chladni seeds its
+  // grains and steps them with it), so a dump repeats exactly run to run.
+  if (get("seed")) {
+    await page.addInitScript((seed) => {
+      let a = seed >>> 0;
+      Math.random = () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }, Number(get("seed")));
+  }
   await page.goto(`https://localhost:${port}/tools/gpu-bench/index.html?${q}`);
   await page.waitForFunction(() => window.__bench, null, { timeout: 180_000 });
   const r = await page.evaluate(() => window.__bench);
@@ -147,7 +165,7 @@ async function appMode() {
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
   await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=124#/v/${scene}`);
   await page.waitForFunction(() => window.__viz, null, { timeout: 30_000 });
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(Number(get("wait", "2.5")) * 1000);
   await page.evaluate(() => { window.__gpuDraws.length = 0; window.__gpuOn = true; });
   await page.waitForTimeout(seconds * 1000);
   await page.evaluate(() => { window.__gpuOn = false; });

@@ -172,6 +172,11 @@ Studied, not copied, across two look references:
   with uptime). The gas march's own `uFlowPhase * 0.06` scroll is untouched:
   its multiplier is the gas type's recipe, a discrete choice rather than a
   live slider.
+- 2026-10-08 — Strike intensity became a hit driver (the Reaction row, Flat
+  or Sized; drives.ts's header, "Hit drivers"). Sized scales the strength
+  passed to `pool.trigger` by how far the hit stood out; Flat, the default,
+  is unchanged.
+- 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

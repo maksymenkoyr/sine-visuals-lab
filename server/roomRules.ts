@@ -7,7 +7,8 @@
  * host key, publishes its own look to the room's screens (Cue and Play), and
  * alone may end the room (`endRoom`, Reset) and forget a device
  * (`deviceForget`). A `controller` is a device with a panel that joined by the
- * QR (a phone, an iPad): it edits the room's look (server/lookDoc.ts). A
+ * QR (a phone, an iPad): it may Play to the room's look (server/lookDoc.ts)
+ * once the owner lets it (server/roomDevices.ts `mayPlay`). A
  * `renderer` is the TV page: it draws, and only shows the look. In a claimed
  * room every member is a device with a record (server/roomDevices.ts), whatever
  * its role, and its binary frames are relayed only while that record has it on
@@ -68,6 +69,11 @@ export const ROOM_CODE_RE = /^[A-Z2-9]{4}$/;
 
 /** WebSocket close code for a refused join; every other close code is transient. */
 export const ROOM_CLOSE_DENIED = 4003;
+
+/** WebSocket close code for a socket that kept sending frames or pings far
+ *  past its budget (server/roomCore.ts `overBudget`). Transient like any other
+ *  but ROOM_CLOSE_DENIED: a client that only misbehaved once redials. */
+export const ROOM_CLOSE_FLOOD = 4029;
 
 /** Sockets one room accepts; past it a new upgrade is refused with HTTP 429.
  *  A party is a host, a TV or two and a few phones. Not a credential check, so
@@ -192,7 +198,8 @@ export type SendKind = "binary" | "ping" | "hello" | "deviceSet" | "deviceForget
 /** Whether a socket of `role` may send a message of this kind (the messages
  *  are described in src/net/roomMessages.ts). `keyed` matters for the kinds
  *  that only exist in a claimed room: `deviceSet` (any member may change any
- *  device) and `deviceForget` and `endRoom` (the owner only). `binary` is let
+ *  device, the owner alone its `canPlay`, which the core checks) and
+ *  `deviceForget` and `endRoom` (the owner only). `binary` is let
  *  through for any keyed member, because which of them is a feed is in the
  *  room's device records, not here (a legacy room still takes the host's only).
  *  The look kinds are looked at by role alone — a legacy room has no look, so
@@ -213,8 +220,9 @@ export function canSend(keyed: boolean, role: RoomRole, kind: SendKind): boolean
     case "lookGet":
       return true;
     case "lookPatch":
-      // A phone edits the look live; the laptop publishes it with Cue and Play
-      // (src/net/roomBridge.ts). A TV only shows it.
+      // The coarse check: a TV never plays. Whether this device may Play at
+      // all is its record's (server/roomDevices.ts `mayPlay`), checked by the
+      // core (src/net/roomBridge.ts is where Cue and Play are sent from).
       return role === "controller" || role === "host";
     case "endRoom":
       // Only a claimed room's host: in a legacy room anyone may sit in the

@@ -10,7 +10,13 @@ import { kaleidoscopeScene } from "../src/render/scenes/kaleido/index.ts";
 import { crystalScene } from "../src/render/scenes/crystal/index.ts";
 import { fluidScene } from "../src/render/scenes/fluid.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
-import { setSensitivity, setExpansion, setSmoothing } from "../src/audio/sensitivity.ts";
+import {
+  SMOOTHING_AUTO_MAX,
+  SMOOTHING_MAX,
+  setSensitivity,
+  setExpansion,
+  setSmoothing,
+} from "../src/audio/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
 import {
   computeAutoTarget,
@@ -630,5 +636,13 @@ describe("caustics Fog pulse auto weights", () => {
   it("stays bounded even at computeAutoTarget's maximum scale argument", () => {
     const delta = computeAutoTarget(focusSpec, steadyPercussive, 2) - focusSpec.default;
     expect(delta).toBeLessThanOrEqual(0.3);
+  });
+});
+
+describe("Smoothing spec", () => {
+  it("keeps Auto's Smoothing span below the slider's ceiling", () => {
+    const spec = getSmoothingSpec();
+    expect(spec.max).toBe(SMOOTHING_AUTO_MAX);
+    expect(SMOOTHING_MAX).toBeGreaterThan(SMOOTHING_AUTO_MAX);
   });
 });

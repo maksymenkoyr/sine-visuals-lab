@@ -1,5 +1,6 @@
 import type { SilenceGateMarks } from "../audio/silenceGate.ts";
 import type { FeatureFrame } from "../audio/types.ts";
+import { NO_EFFECTS, type HeldEffects } from "../render/heldEffects.ts";
 import {
   createCueController,
   createOutputPresence,
@@ -19,15 +20,36 @@ import { captureSyncedStorage } from "./syncedStores.ts";
  * (createBroadcastTransport), so the output needs no server or room; a later
  * relay over the room connection is another `Transport`, same messages.
  *
+ * The page is opened `noopener` (OUTPUT_WINDOW_FEATURES says why), so this
+ * window never holds the output's Window: whether one is open is presence
+ * alone — its hello heartbeat, its bye on unload, or the heartbeat lapsing
+ * after a crash. Nor can a second window.open find it by name, so open()
+ * keeps it to one itself: while an output is alive, or one was asked for less
+ * than OUTPUT_OPEN_GRACE_MS ago and has not said hello yet, a press of POP
+ * OUT sends `raise` instead of opening another.
+ *
  * Driven by app.ts's render loop: `update()` once per tick (presence, the
  * look-change poll), `pushFrame()` whenever a feature frame exists.
  */
 
 export const OUTPUT_CHANNEL = "svl-output-v1";
-/** The output page, and the name of its window: `window.open` with a fixed
- *  name focuses the existing window instead of stacking a second one. */
+/** The output page, and the name its window is given. The name no longer finds
+ *  an open output (a `noopener` window is out of this window's reach), which
+ *  is why open() counts outputs itself. */
 export const OUTPUT_URL = "/output.html";
 export const OUTPUT_WINDOW_NAME = "svl-output";
+/** `noopener` puts the output in a browsing context group of its own, so the
+ *  browser can run it in its own renderer process: this window's main-thread
+ *  work (the panel, a scene's shader compile) no longer drops the output's
+ *  frames, and a crash in one window no longer takes the other down. In
+ *  exchange window.open returns null: the output is reached only through the
+ *  transport. */
+const OUTPUT_WINDOW_FEATURES = "popup=yes,width=1280,height=720,noopener";
+/** How long after open() asked for a window a further press still counts it as
+ *  on its way while it has not said hello: loading the page and setting up its
+ *  GL take a moment, longest on a cold dev server. A press after that with
+ *  still no hello opens again (that window never came). */
+export const OUTPUT_OPEN_GRACE_MS = 5000;
 
 /** How often the look (scene, palette, synced stores) is re-read to spot a change. */
 const LOOK_POLL_MS = 120;
@@ -70,17 +92,22 @@ export interface OutputStatus {
   /** Who changed Main while this device had unplayed edits (a display name),
    *  null or absent otherwise. Only the room bridge sets it (roomBridge.ts). */
   changedBy?: string | null;
+  /** Play means something here. False on a room device the owner has not let
+   *  play (roomBridge.ts), so the bar hides PLAY; absent means true. */
+  canPlay?: boolean;
 }
 
 export interface OutputBridge {
-  /** Open the output window, or focus it if it's already there. */
+  /** Open the output window. The pop-out's bridge asks one already open, or
+   *  still loading, to come to the front instead (outputBridge.ts's header). */
   open(): void;
   status(): OutputStatus;
   onStatus(cb: (s: OutputStatus) => void): void;
   setCue(on: boolean): void;
   /** Send the preview across. With `glideMs` > 0 the output arrives over that
-   *  long — but only within one scene (never across a scene change, which goes
-   *  instantly). Returns whether a glide was actually asked for. */
+   *  long: its settings glide within one scene, and a different scene
+   *  crossfades over it (render/crossfade.ts). Returns whether the output was
+   *  asked to take that long. */
   go(glideMs?: number): boolean;
   update(nowMs: number): void;
   pushFrame(
@@ -91,6 +118,10 @@ export interface OutputBridge {
   /** Send the output its Quality / Energy saving now (it also gets them on
    *  every heartbeat reply). No-op while no output is open. */
   sendPower(): void;
+  /** The held effects now engaged on this window (render/heldEffects.ts), sent
+   *  on as their own message — never part of the look, never held by Cue. Kept
+   *  and re-sent with every heartbeat reply. No-op while no output is open. */
+  sendEffects(effects: HeldEffects): void;
   /** The output's last reported render readouts, null while it is closed. */
   outputStatus(): OutputRenderStatus | null;
   /** Drop this device's unplayed edits and show what Main shows now (the room
@@ -101,7 +132,7 @@ export interface OutputBridge {
 /** The parts of an OutputStatus a listener cares about, as one comparable
  *  string: bridges call their listeners only when this changes. */
 export function statusKey(s: OutputStatus): string {
-  return `${s.open}|${s.cue}|${s.differs}|${s.canCue}|${s.changedBy ?? ""}`;
+  return `${s.open}|${s.cue}|${s.differs}|${s.canCue}|${s.changedBy ?? ""}|${s.canPlay ?? true}`;
 }
 
 export interface OutputBridgeOptions {
@@ -110,13 +141,19 @@ export interface OutputBridgeOptions {
   look: () => { scene: string; palette: string };
   /** Defaults to the real localStorage. */
   storage?: Pick<Storage, "getItem" | "key" | "length">;
-  openWindow?: () => Window | null;
+  /** Opens the output page; window.open with OUTPUT_WINDOW_FEATURES when
+   *  absent. Tests pass a counter. */
+  openWindow?: () => void;
+  /** The clock presence and open()'s grace run on; performance.now() when
+   *  absent. Tests pass their own. */
+  now?: () => number;
   /** The output's Quality and Energy saving choice (render/outputPower.ts). */
   power: () => OutputPower;
 }
 
 export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   const { transport } = opts;
+  const now = opts.now ?? (() => performance.now());
   const storage = opts.storage ?? localStorage;
   const presence = createOutputPresence();
   let outputOpen = false;
@@ -128,8 +165,11 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     return true;
   });
   const listeners: Array<(s: OutputStatus) => void> = [];
-  let win: Window | null = null;
+  /** Until when a press of POP OUT still counts the window open() last asked
+   *  for as on its way (OUTPUT_OPEN_GRACE_MS); a bye clears it. */
+  let openingUntilMs = -Infinity;
   let latestParams: OutputParams = { sens: 1, exp: 1, smoothing: 1 };
+  let latestEffects: HeldEffects = NO_EFFECTS;
   let lastPollMs = -Infinity;
   let lastStatusKey = "";
   let lastStatus: OutputRenderStatus | null = null;
@@ -137,7 +177,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   function closed(): void {
     presence.bye();
     outputOpen = false;
-    win = null;
+    openingUntilMs = -Infinity;
     lastStatus = null;
     cue.outputClosed();
   }
@@ -155,11 +195,14 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     if (m.t === "status") {
       // A sign of life, nothing more: the hello path below re-sends state.
       lastStatus = m.s;
-      presence.seen(performance.now());
+      presence.seen(now());
       outputOpen = true;
       return;
     }
-    presence.seen(performance.now());
+    // Only the output's own messages count: another main window (a second
+    // tab) on this channel posts frames, states and raises meant for it.
+    if (m.t !== "hello") return;
+    presence.seen(now());
     outputOpen = true;
     // A window that lost its state (fresh, or reloaded) is sent the current
     // one; one that still has it keeps its program — plus any Play or Cue
@@ -171,6 +214,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       cue.resync();
     }
     transport.post({ t: "power", power: opts.power() });
+    transport.post({ t: "effects", effects: latestEffects });
   });
 
   function status(): OutputStatus {
@@ -187,13 +231,14 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
 
   return {
     open() {
-      if (win && !win.closed) {
-        win.focus();
+      const nowMs = now();
+      if (presence.isOpen(nowMs) || nowMs < openingUntilMs) {
+        transport.post({ t: "raise" });
         return;
       }
-      win = opts.openWindow
-        ? opts.openWindow()
-        : window.open(OUTPUT_URL + qualityPinQuery(), OUTPUT_WINDOW_NAME, "popup=yes,width=1280,height=720");
+      openingUntilMs = nowMs + OUTPUT_OPEN_GRACE_MS;
+      if (opts.openWindow) opts.openWindow();
+      else window.open(OUTPUT_URL + qualityPinQuery(), OUTPUT_WINDOW_NAME, OUTPUT_WINDOW_FEATURES);
     },
     status,
     onStatus: (cb) => listeners.push(cb),
@@ -204,15 +249,14 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     },
     go(glideMs) {
       preview();
-      // A glide never crosses a scene change: that goes instantly.
+      // Across a scene change the length becomes a crossfade on the output.
       const held = cue.held();
-      const glide = !!glideMs && glideMs > 0 && !cue.cueOn() && held !== null && held.scene === opts.look().scene;
+      const glide = !!glideMs && glideMs > 0 && !cue.cueOn() && held !== null;
       cue.go(glide ? glideMs : undefined);
       emitIfChanged();
       return glide;
     },
     update(nowMs) {
-      if (win && win.closed) closed();
       outputOpen = presence.isOpen(nowMs) && outputOpen;
       if (outputOpen && nowMs - lastPollMs >= LOOK_POLL_MS) {
         lastPollMs = nowMs;
@@ -222,6 +266,10 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     },
     sendPower() {
       if (outputOpen) transport.post({ t: "power", power: opts.power() });
+    },
+    sendEffects(effects) {
+      latestEffects = effects;
+      if (outputOpen) transport.post({ t: "effects", effects });
     },
     outputStatus: () => (outputOpen ? lastStatus : null),
     pushFrame(frame, extras, params) {
@@ -234,6 +282,8 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           bands: frame.bands,
           energy: frame.energy,
           level: frame.level,
+          hats: frame.hats,
+          lead: frame.lead,
           onset: frame.onset,
           pulseOnset: frame.pulseOnset,
           bpm: frame.bpm,

@@ -14,6 +14,9 @@ function loud(): VisualSample {
     pulseFired: true,
     timeSec: 12.5,
     level: 0.8,
+    hats: 0,
+    lead: 0,
+    wave: { min: -0.6, max: 0.7 },
   };
 }
 
@@ -29,6 +32,7 @@ describe("silentSample", () => {
       onsetFired: false,
       pulseFired: false,
       timeSec: 12.5,
+      wave: null,
     });
   });
 

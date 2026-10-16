@@ -8,8 +8,8 @@
  * `computeSceneVersions({ root, channel })` does the real work, once:
  *
  *  1. Territory, from the *current* checkout on disk (§ sceneVersionLib.mjs):
- *     read `src/render/scenes/index.ts`, resolve each registered scene's
- *     entry file and walk its closure, plus the app owner's closure
+ *     list the scene modules (`sceneEntries`) and walk each one's closure,
+ *     plus the app owner's closure
  *     (`src/app.ts` + `src/tv.ts`, stopping at the registry) purely to steal
  *     shared files away from scenes.
  *  2. The release list: strict `vX.Y.Z` tags merged into `origin/production`
@@ -52,7 +52,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { parseTag } from "./appVersionLib.mjs";
 import {
@@ -61,9 +61,9 @@ import {
   intersects,
   majorOf,
   ownedFiles,
-  parseRegistryImports,
   parseSceneMajors,
-  resolveImport,
+  SCENES_DIR,
+  sceneEntries,
   sceneVersion,
 } from "./sceneVersionLib.mjs";
 
@@ -100,31 +100,20 @@ function makeExists(root) {
   return (rel) => existsSync(path.join(root, rel));
 }
 
-/** Territory (unit -> Set<repo-relative path>) and each registered binding's
- *  unit, from the checkout at `root` — see this file's header, § 1. */
+/** Territory (unit -> Set<repo-relative path>), from the checkout at
+ *  `root` — see this file's header, § 1. */
 function computeTerritory(root) {
   const readFile = makeReadFile(root);
   const exists = makeExists(root);
-  const registrySource = readFile(REGISTRY_REL);
-  if (registrySource == null) throw new Error(`${REGISTRY_REL} not found under ${root}`);
-
   const closures = new Map();
-  const bindingToUnit = new Map();
-  for (const { binding, unit, path: specifier } of parseRegistryImports(registrySource)) {
-    bindingToUnit.set(binding, unit);
-    if (closures.has(unit)) continue; // a scene registers one entry
-    const entryFile = resolveImport(REGISTRY_REL, specifier, exists);
-    if (!entryFile) {
-      warn(`${REGISTRY_REL}: couldn't resolve "${specifier}" (unit "${unit}") — it gets no version`);
-      continue;
-    }
-    closures.set(unit, fileClosure([entryFile], readFile, exists));
+  for (const { unit, file } of sceneEntries(readdirSync(path.join(root, SCENES_DIR)), readFile, exists)) {
+    closures.set(unit, fileClosure([file], readFile, exists));
   }
   closures.set("app", fileClosure(APP_ENTRIES, readFile, exists, { stopAt: new Set([REGISTRY_REL]) }));
 
   const territory = ownedFiles(closures);
   territory.delete("app"); // only existed to steal shared files from scenes
-  return { territory, bindingToUnit };
+  return territory;
 }
 
 /** Strict `vX.Y.Z` tags merged into `mergedRef`, resolved to their commit and
@@ -140,7 +129,7 @@ function releaseList(git, mergedRef) {
   const releases = [];
   for (const tag of raw ? raw.split("\n").filter(Boolean) : []) {
     const version = parseTag(tag);
-    if (!version) continue; // an Insider -beta tag, or anything non-strict
+    if (!version) continue; // an Insiders -beta tag, or anything non-strict
     const sha = git("rev-list", "-n", "1", tag);
     releases.push({ tag, version, sha });
   }
@@ -197,14 +186,14 @@ function dirtyFiles(root) {
   return files;
 }
 
-/** `{ byUnit, byBinding, changedUnits }` for every registered scene, or
- *  `null` if git/`origin/production` wasn't available — see this file's
- *  header. `changedUnits` (stable only) is which units the release being cut
- *  right now changes. */
+/** `{ byUnit, changedUnits }` for every free scene, or `null` if
+ *  git/`origin/production` wasn't available — see this file's header.
+ *  `changedUnits` (stable only) is which units the release being cut right
+ *  now changes. */
 export async function computeSceneVersions({ root, channel }) {
-  let territory, bindingToUnit;
+  let territory;
   try {
-    ({ territory, bindingToUnit } = computeTerritory(root));
+    territory = computeTerritory(root);
   } catch (err) {
     warn(`couldn't compute scene territory: ${err.message}`);
     return null;
@@ -283,12 +272,7 @@ export async function computeSceneVersions({ root, channel }) {
     if (channel === "stable" && history[history.length - 1]?.changed) changedUnits.push(unit);
   }
 
-  const byBinding = {};
-  for (const [binding, unit] of bindingToUnit) {
-    if (unit in byUnit) byBinding[binding] = byUnit[unit];
-  }
-
-  return { byUnit, byBinding, changedUnits };
+  return { byUnit, changedUnits };
 }
 
 let cache = null; // { key, promise }

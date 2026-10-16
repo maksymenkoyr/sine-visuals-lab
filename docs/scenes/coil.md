@@ -5,7 +5,7 @@ stacked into itself by the shell-coiling rule (each copy smaller and turned a
 little), streaming outward from the centre, over a background that is the
 previous frame shrunk by half, turned a quarter and tiled — so every earlier
 frame recurses into it. The music sets how fast the paste flows, when the coil
-falls back, and when it resets to a new small shape. Draft scene.
+falls back, and when it resets to a new small shape. In development, on main.
 
 ## Where the code is
 
@@ -131,6 +131,11 @@ falls back, and when it resets to a new small shape. Draft scene.
   slider (right = more resets, the default amount keeps today's cadence).
   (4) `glsl.ts`'s `paletteRamp` is generated from `COIL_RAMP`, the table
   the palette test evaluates, instead of being copied by hand.
+- 2026-10-08 — Push, Breathe and New shape became hit drivers (the Reaction
+  row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the
+  push jump (`pushJump`) and the fall-back depth (`breatheDrop`) by how far
+  the hit stood out; Flat, the default, is unchanged. New shape is flat-only:
+  a new shape either starts or it doesn't.
 
 ## Tuning notes
 

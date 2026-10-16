@@ -33,6 +33,10 @@
  * display; see its own createTempoBlock), and src/render/metronome.ts ticks
  * at it unrounded — "the metronome *is* the Tempo card's BPM, ticking" only
  * holds if both read this same settle.
+ *
+ * hold() is the one way in from outside the window: a tapped tempo
+ * (src/render/tapTempo.ts) is held as a tempo the tracker is sure of, so
+ * the same retune rule above decides whether the music later moves it on.
  */
 
 export const TEMPO_SETTLE_SEC = 1.5;
@@ -56,6 +60,11 @@ export interface TempoSettle {
    *  decides how soon a held tempo may move to a different one (see
    *  RETUNE_SURE_SEC above); omitted, it counts as sure. */
   push(rawBpm: number, dtSec: number, lock?: number): void;
+  /** Holds `bpm` at once, as a tempo the tracker is sure of (moving off it
+   *  takes a confirmed retune, RETUNE_SURE_SEC/RETUNE_UNSURE_SEC), and
+   *  empties the window, so the readings from before don't vote on it. A
+   *  tap tempo's seed; nothing else calls it. */
+  hold(bpm: number): void;
 }
 
 interface Sample {
@@ -116,6 +125,15 @@ export function createTempoSettle(): TempoSettle {
       pending = 0;
       heldSure = false;
       held = next;
+      (settle as { bpm: number }).bpm = held;
+    },
+    hold(bpm: number): void {
+      held = bpm;
+      heldSure = true;
+      pending = 0;
+      pendingSec = 0;
+      pendingSureSec = 0;
+      samples.length = 0;
       (settle as { bpm: number }).bpm = held;
     },
   };

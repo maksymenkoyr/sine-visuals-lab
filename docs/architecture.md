@@ -25,7 +25,12 @@ to an auto mode (on by default) that tracks the room's own quiet level instead
 of a manual drag, fed each tick by `feedSilenceGateMeasurement` — mirroring
 `src/audio/autoGain.ts`'s own auto flag rather than resolving through
 `musicProfile.ts`'s dials. `src/audio/sensitivity.ts` applies the user's
-Sensitivity/Expansion/Smoothing controls on top of that.
+Sensitivity/Expansion/Smoothing controls on top of that. Beside the bands,
+`src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
+would level held sound away), and splits them into a drum part and a held part
+for the Hats and Lead signals; `app.ts` writes both into the frame, so a TV gets
+them over the wire rather than working them out itself. The split runs only on
+ticks where something reads them; `src/render/stemReaders.ts` says who does.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
@@ -46,6 +51,11 @@ autoTune.ts` sits between a scene's declared `settings` and what actually reache
 the shader, resolving each one against `src/render/musicProfile.ts`'s dials unless
 the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 
+A scene's shader programs come from `src/render/programCache.ts` (through
+`gl.ts`'s `createProgram`): the programs one mount creates compile together
+and are checked once its `init()` returns, and a disposed program waits in
+its GL context's pool for the next mount that asks for the same shaders.
+
 `src/router.ts` decides which scene mounts (`#/` → gallery, `#/v/<sceneId>` → one
 scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 (`index.html`).
@@ -63,7 +73,9 @@ diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
 that same extractor's `gateDimmer` diagnostic the same way. Its Loudness row
 is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
-this device's own capture, hidden on a mic-less renderer like the Waveform row.
+this device's own capture, hidden on a mic-less renderer. (The Waveform row
+is not: there it draws the followed device's waveform, off the frame's wave
+tail in `src/net/protocol.ts`.)
 
 `src/render/signals.ts` is the seam between those meters and a scene's own
 `settings`: a scene can mark a `SceneSetting` with `reads`, naming which of
@@ -77,7 +89,9 @@ Cloudflare Durable Object, and each has a role (`RoomRole`: host, controller or
 renderer). The laptop is the **host**: it listens, runs everything in the first
 section, and streams its `FeatureFrame`s (`HostConnection`). A phone is a
 **controller**: `src/app.ts` in its mic-less renderer mode, with the whole panel
-(`ControllerConnection`); what it edits becomes the room's *look*. A TV is a
+(`ControllerConnection`); what it edits is its own preview, and it reaches the
+room's *look* only when its Play does, which the owner allows per device (by
+default only the owner's does; `server/roomDevices.ts` `mayPlay`). A TV is a
 **renderer** (`src/tv.ts`, `tv.html`): it draws the host's frames with the room's
 look and has no panel or audio of its own.
 
@@ -144,6 +158,50 @@ While an output is open the main window renders only a cheap preview (its own
 Quality and Resolution, in a smaller box), and the output has its own Quality,
 Resolution and Energy saving, set from the Output Power card;
 `src/render/outputPower.ts` owns those settings.
+
+The output is opened `noopener`, so the browser runs it in a renderer process
+of its own: work on the main window's main thread (the panel, a scene switch)
+no longer drops its frames, and a crash in either window leaves the other
+running. Neither window holds the other's `Window`; the messages are all there
+is between them, and the `src/net/outputBridge.ts` header says how POP OUT
+keeps to one output without a handle on it.
+
+The Record button (bottom right) saves a clip of the picture with the sound,
+always from the main window's canvas: the output's is in another process, out
+of reach. So while a take runs with a pop-out open, the main window's preview
+renders at the output's Quality, Energy saving and buffer size, and goes back
+to its own settings when the take ends. Why and how is the header of
+`src/ui/clipRecorder.ts`.
+
+## Drawing a frame: crossfades and held effects
+
+`app.ts` (`drawScene`), `output.ts` and `tv.ts` no longer call `scene.render`
+themselves; each hands the frame to `src/render/compositor.ts`. With nothing in
+play that is exactly a bare `scene.render`. A change to a different scene keeps
+the old one mounted next to the new one and blends them (timing in
+`src/render/crossfade.ts`: from the next beat of the metronome, over a bar); the
+caller unmounts the old scene when the compositor says the blend is over. The
+held effects (`src/render/heldEffects.ts`) ride on the same pass. They belong to
+the main window (`src/ui/effectControls.ts`: keys and the `#fxBar` buttons) and
+reach the pop-out as their own `effects` message (`src/net/outputSync.ts`) —
+never part of the look, so Cue does not hold them, and a TV does not get them.
+A frame with two scenes in it is skipped by the quality governor. The
+compositor's header says how it captures a scene without redirecting its
+framebuffer.
+
+## Text and logo over the picture
+
+The Overlay (an event or DJ name and a logo) is drawn by `src/render/
+overlayLayer.ts` right after the compositor's pass (the section above) in all
+three renderers — `src/app.ts`, `src/output.ts` and `src/tv.ts` — so it sits
+over crossfades and held effects (Blackout and Freeze included) on the main
+canvas, the pop-out and a TV without any scene knowing, and it is in whatever
+records the canvas. Its
+settings are a `vibe.*` store (`src/render/overlayStore.ts`) registered with
+`syncedStores.ts`, so they reach the pop-out and ride in the room's look like any
+other store; the exception is a logo too big for the look's size limits
+(`server/lookDoc.ts`), which the store keeps on the device. The panel's card is
+`src/ui/overlayCard.ts`; the layout and limits are `src/render/overlayLayout.ts`.
 
 ## Where the quality/perf ceiling comes from
 

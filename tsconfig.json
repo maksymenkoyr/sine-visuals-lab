@@ -20,7 +20,7 @@
     "composite": true,
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "vite-scene-links-plugin.ts", "vite-legal-notices-plugin.ts", "vite-build-info-plugin.ts", "vite-scene-versions-plugin.ts", "sceneDefaultsPatch.ts"],
+  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "vite-scene-links-plugin.ts", "vite-legal-notices-plugin.ts", "vite-build-info-plugin.ts", "vite-app-manifest-plugin.ts", "vite-scene-versions-plugin.ts", "vite-glsl-strip-plugin.ts", "sceneDefaultsPatch.ts"],
   // The Worker files the client and tests import: the usage-count wire
   // format, and the pure room rules (look document, join/send rules, rate
   // limiter, and the room core the tests drive with fake sockets). They're

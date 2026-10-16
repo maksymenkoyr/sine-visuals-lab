@@ -1,14 +1,16 @@
 import { NUM_BANDS } from "../audio/types.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
+import { SHAPING_NODE_ID_RE } from "./shapingNodes.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
+import type { HitReadout } from "./standout.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
   DRIVE_EVERY_VALUES,
-  GENERIC_THRESHOLD_DEFAULT,
+  isShapedChoice,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
   setSourceEvery as pureSetSourceEvery,
@@ -25,6 +27,7 @@ import {
   type DriveSourceChoice,
   type HitHeight,
 } from "./drives.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "./gateWindow.ts";
 
 /**
  * Storage for `SceneSetting.drive` — the patch (src/render/drives.ts's
@@ -79,26 +82,38 @@ interface DriveEntry {
   line?: number[];
   lineStrength?: number;
   /** The setting's own threshold value, 0..1 — scene-handled
-   *  (SceneSetting.drive.threshold) or the generic engine gate every other
-   *  drive setting gets (drives.ts's header's threshold paragraph); see
-   *  getDriveThresholdState. */
+   *  (SceneSetting.drive.threshold) or, for the generic engine gate every
+   *  other drive setting gets, its window's Min (drives.ts's header's
+   *  threshold paragraph); see getDriveThresholdState. */
   threshold?: number;
   /** Whether that threshold is switched on. Absent means "use this setting's
    *  own default" (on for scene-handled, off for generic) — see
    *  getDriveThresholdState. */
   thresholdOn?: boolean;
+  /** The generic gate window's Max, 0..1 on the same 0→peak scale as `threshold` (its Min) — see getDriveWindowMax. */
+  windowMax?: number;
+  /** The generic engine gate's window softening, 0..1 — see getDriveSmoothness. */
+  smoothness?: number;
+  /** Whether that softening is switched on, independent of the threshold — absent
+   *  means on. See getDriveSmoothnessOn. */
+  smoothnessOn?: boolean;
+  /** A hit driver's Reaction row, Flat or Sized — see getDriveReadout. */
+  readout?: HitReadout;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
 
 const STORAGE_KEY = "vibe.drives";
 
+// Strict: throws on text that is not a JSON object, so the reload hook keeps
+// the cache it has (net/syncedStores.ts's parseSyncedObject).
+function readStore(): Store {
+  return (parseSyncedObject(localStorage.getItem(STORAGE_KEY)) ?? {}) as Store;
+}
+
 function loadInitial(): Store {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return readStore();
   } catch {
     return {};
   }
@@ -107,9 +122,11 @@ function loadInitial(): Store {
 const cache: Store = loadInitial();
 
 // Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+// Reads before it clears, so unreadable text leaves the cache as it was.
 registerSyncedStore(STORAGE_KEY, () => {
+  const next = readStore();
   for (const k of Object.keys(cache)) delete cache[k];
-  Object.assign(cache, loadInitial());
+  Object.assign(cache, next);
 });
 
 function persist(): void {
@@ -161,7 +178,9 @@ function isValidGridIndex(n: unknown): n is number {
  *  Look share code; sanitizeDriveSetting/sceneLooks.ts reuse this rather
  *  than re-validating the same shape a second way). Accepts `"scene"` for
  *  the legacy top-level `choice` field/Look `d` entries; sanitizeSourceChoice
- *  below is the same check with `"scene"` rejected, for a patch source. */
+ *  below is the same check with `"scene"` rejected, for a patch source. The
+ *  object shapes are `{source:"line"}`, `{source:"beat", grid}` and
+ *  `{source:"shaped", id}` (an id matching SHAPING_NODE_ID_RE). */
 function sanitizeChoice(raw: unknown): DriveChoice | null {
   if (raw === "scene") return "scene";
   // Own-property check, not `in`: SIGNALS is a plain object, so `in` would
@@ -175,6 +194,10 @@ function sanitizeChoice(raw: unknown): DriveChoice | null {
     if (source === "beat") {
       const grid = (raw as { grid?: unknown }).grid;
       return isValidGridIndex(grid) ? { source: "beat", grid } : null;
+    }
+    if (source === "shaped") {
+      const id = (raw as { id?: unknown }).id;
+      return typeof id === "string" && SHAPING_NODE_ID_RE.test(id) ? { source: "shaped", id } : null;
     }
   }
   return null;
@@ -401,6 +424,33 @@ export function setDriveSetting(sceneId: string, spec: SceneSetting, setting: Dr
   persist();
 }
 
+/** Removing a shaping node unplugs its wires in every scene: each setting
+ *  whose patch holds `{source:"shaped", id}` loses that source. A setting
+ *  left with no wire reads its rest, as after any unplug. */
+export function removeShapedSource(id: string): void {
+  let changed = false;
+  for (const bucket of Object.values(cache)) {
+    for (const entry of Object.values(bucket)) {
+      const setting =
+        entry.patch !== undefined
+          ? sanitizeDriveSetting(entry.patch)
+          : entry.choice !== undefined
+            ? (() => {
+                const choice = sanitizeChoice(entry.choice);
+                return choice === null ? null : driveSettingFromChoice(choice);
+              })()
+            : null;
+      if (!setting || setting === "scene") continue;
+      if (!setting.sources.some((s) => isShapedChoice(s.choice) && s.choice.id === id)) continue;
+      const sources = setting.sources.filter((s) => !(isShapedChoice(s.choice) && s.choice.id === id));
+      entry.patch = encodeDriveSetting(normalizeDriveSetting({ mix: setting.mix, sources }));
+      delete entry.choice;
+      changed = true;
+    }
+  }
+  if (changed) persist();
+}
+
 /** Back to `spec.drive.default` — a row's reset affordance. */
 export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
@@ -416,6 +466,10 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   }
   delete entry.threshold; // "Reset to scene default" covers the threshold row too
   delete entry.thresholdOn;
+  delete entry.windowMax;
+  delete entry.smoothness;
+  delete entry.smoothnessOn;
+  delete entry.readout;
   persist();
 }
 
@@ -557,5 +611,67 @@ export function setDriveThreshold(sceneId: string, spec: SceneSetting, value: nu
 
 export function setDriveThresholdOn(sceneId: string, spec: SceneSetting, on: boolean): void {
   entryFor(settingScope(sceneId, spec.key), spec.key).thresholdOn = on;
+  persist();
+}
+
+/** The generic gate window's Max (drives.ts's header's threshold paragraph), 0..1 — GENERIC_WINDOW_MAX_DEFAULT until moved. Generic gates only. */
+export function getDriveWindowMax(sceneId: string, spec: SceneSetting): number {
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.windowMax;
+  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : GENERIC_WINDOW_MAX_DEFAULT;
+}
+
+export function setDriveWindowMax(sceneId: string, spec: SceneSetting, value: number): void {
+  if (!Number.isFinite(value)) return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).windowMax = Math.min(1, Math.max(0, value));
+  persist();
+}
+
+/** How far the generic engine gate's window softens, 0..1 (drives.ts's
+ *  header's threshold paragraph; the formula is gateWindow.ts's
+ *  windowReading) — the bottom of the range is a hard cut at the line. Every
+ *  drive setting starts at `GENERIC_SMOOTHNESS_DEFAULT`, a small softening.
+ *  Only the generic gate reads it: a scene-handled threshold shapes its own
+ *  gate. */
+export function getDriveSmoothness(sceneId: string, spec: SceneSetting): number {
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.smoothness;
+  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : GENERIC_SMOOTHNESS_DEFAULT;
+}
+
+export function setDriveSmoothness(sceneId: string, spec: SceneSetting, value: number): void {
+  if (!Number.isFinite(value)) return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).smoothness = Math.min(1, Math.max(0, value));
+  persist();
+}
+
+/** Whether the softening is on, separately from the threshold itself: off is a
+ *  hard cut at the line whatever the Smoothness slider says (the slider keeps
+ *  its value). Starts on, so nothing changes until it is switched off. */
+export function getDriveSmoothnessOn(sceneId: string, spec: SceneSetting): boolean {
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.smoothnessOn;
+  return typeof stored === "boolean" ? stored : true;
+}
+
+export function setDriveSmoothnessOn(sceneId: string, spec: SceneSetting, on: boolean): void {
+  entryFor(settingScope(sceneId, spec.key), spec.key).smoothnessOn = on;
+  persist();
+}
+
+/** A hit driver's read-out (SceneSetting.drive.hit, standout.ts's
+ *  HitReadout): what the user picked in its Reaction row, else the
+ *  declaration's own `readout`, else Flat. A `flatOnly` setting is always
+ *  Flat, whatever is stored. Undefined for a setting that isn't a hit
+ *  driver. */
+export function getDriveReadout(sceneId: string, spec: SceneSetting): HitReadout | undefined {
+  const hit = spec.drive?.hit;
+  if (!hit) return undefined;
+  if (hit.flatOnly !== undefined) return "flat";
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.readout;
+  if (stored === "flat" || stored === "sized") return stored;
+  return hit.readout ?? "flat";
+}
+
+export function setDriveReadout(sceneId: string, spec: SceneSetting, readout: HitReadout): void {
+  if (readout !== "flat" && readout !== "sized") return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).readout = readout;
   persist();
 }

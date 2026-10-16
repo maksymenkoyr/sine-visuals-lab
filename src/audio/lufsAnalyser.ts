@@ -19,6 +19,12 @@ import { createLufsMeter, kWeightingCoefficients, type LufsReading } from "./luf
  * caps at the buffer and accepts the gap; a suspended context stops the
  * clock, so the reading simply freezes.
  *
+ * read() runs on every rAF tick, but the reading only moves when one of the
+ * meter's BLOCK_MS blocks closes (lufs.ts). So the tap is copied only once
+ * the samples that close the current block have arrived
+ * (LufsMeter.samplesToNextBlock), and the same reading is handed back on the
+ * ticks in between.
+ *
  * Display-only and local to this device, same as waveformAnalyser.ts:
  * nothing here reaches FeatureExtractor or the wire frame.
  */
@@ -31,7 +37,7 @@ export interface LufsAnalyser {
 
 // The Web Audio maximum. Time-domain reads never run the FFT, so the only
 // cost of a big buffer is the copy — and it has to cover the longest gap
-// between two rAF reads, which at 48 kHz is ~680 ms here.
+// between two copies (read() below), which at 48 kHz is ~680 ms here.
 export const LUFS_TAP_FFT_SIZE = 32768;
 
 export function createLufsAnalyser(context: AudioContext, sourceNode: AudioNode): LufsAnalyser {
@@ -49,24 +55,29 @@ export function createLufsAnalyser(context: AudioContext, sourceNode: AudioNode)
   const buf = new Float32Array(node.fftSize);
   const meter = createLufsMeter(context.sampleRate);
   let lastTime: number | null = null;
+  // What read() last returned: it only moves when a block closes.
+  let reading = meter.read();
 
   return {
     read(): LufsReading {
       const now = context.currentTime;
       if (lastTime === null) {
         lastTime = now;
-        return meter.read();
+        return reading;
       }
       const n = Math.min(buf.length, Math.round((now - lastTime) * context.sampleRate));
+      // Too few new samples to close a block: nothing shown has moved, and
+      // `lastTime` stays put so the next copy still covers these samples.
+      if (n < Math.min(buf.length, meter.samplesToNextBlock())) return reading;
       lastTime = now;
-      if (n > 0) {
-        node.getFloatTimeDomainData(buf);
-        meter.push(buf, buf.length - n);
-      }
-      return meter.read();
+      node.getFloatTimeDomainData(buf);
+      meter.push(buf, buf.length - n);
+      reading = meter.read();
+      return reading;
     },
     reset(): void {
       meter.reset();
+      reading = meter.read();
     },
   };
 }

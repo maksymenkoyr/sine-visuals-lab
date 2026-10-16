@@ -90,6 +90,10 @@ addition. `/ref` bundles:
   reseed timer advances by `dt * iterations`, i.e. in sim time, which is how
   it was tuned; only the `FALLBACK_RESEED_SEC` comment and the header said
   wall time, and now say sim time. The behaviour is unchanged.
+- 2026-10-08 — Reseed and Bass wipe became hit drivers (the Reaction row,
+  Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the
+  stamp strength (Reseed) and the hole radius (Bass wipe) by how far the hit
+  stood out; Flat, the default, is unchanged.
 
 ## Tuning notes
 

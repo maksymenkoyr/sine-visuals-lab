@@ -1,4 +1,5 @@
 import { FONT_DIGITS, FONT_LABEL, FONT_MONO, glassCardStyle, scanlineStyle } from "./controlsTheme.ts";
+import { GLASS_PANE_CLASS } from "./glassPanes.ts";
 import { isFolded, setFolded } from "./panelFolds.ts";
 import { setHintText } from "./hintSwatches.ts";
 
@@ -65,6 +66,14 @@ export const readoutStyle = `display: flex; align-items: baseline; gap: 4px; col
 export const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px; -webkit-text-stroke: 1px transparent;`;
 export const digitsTextStyle = `font: 400 11px/1 ${FONT_MONO};`;
 export const unitStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
+/** A 0..1 control row shown as a percent — spread into createControlRow's
+ *  spec (deviceMenu.ts). `typedScale` keeps a number typed into the readout
+ *  reading as the percent it shows. */
+export const percentReadout = {
+  unit: "%",
+  format: (value: number) => String(Math.round(value * 100)),
+  typedScale: 100,
+};
 
 const rowSpacerStyle = `height: 12px;`;
 // A divider-with-caption between blocks of rows — a step down from a card
@@ -127,7 +136,7 @@ export function createCard(
   spec: CardSpec,
 ): { el: HTMLDivElement; body: HTMLDivElement; title: HTMLDivElement; fold?: CardFold } {
   const el = document.createElement("div");
-  el.className = "vc-card";
+  el.className = `vc-card ${GLASS_PANE_CLASS}`;
   el.style.cssText = glassCardStyle;
   const scanlines = document.createElement("div");
   scanlines.style.cssText = scanlineStyle;
@@ -388,7 +397,7 @@ export function createSignalStrip(specs: SignalPillSpec[], accent: string): Sign
   chip.type = "button";
   chip.style.cssText = signalChipStyle(accent);
   chip.textContent = `∿${specs.length}`;
-  chip.title = `Reacts to ${specs.length} live signal${specs.length === 1 ? "" : "s"} — hover for detail`;
+  chip.title = `Reacts to ${specs.length} live input node${specs.length === 1 ? "" : "s"} — hover for detail`;
 
   const strip = document.createElement("div");
   strip.className = "vc-reads";
@@ -493,6 +502,20 @@ export interface PickerRowSpec {
    *  tick; this row only mounts it. A picker whose choice decides *which*
    *  signal the scene listens to (shards' Cut on) is the motivating case. */
   signals?: SignalStrip;
+  /** Options that are Pro content (sceneSettings.ts's `proOptions`) carry a
+   *  "Pro" tag; `locked(i)` true makes that chip unselectable and skips it
+   *  when cycling. Omit both for an ordinary picker. */
+  pro?: (index: number) => boolean;
+  locked?: (index: number) => boolean;
+  /** Inline SVG markup per option, drawn in its chip instead of the name —
+   *  the name moves to the chip's tooltip and accessible label. For a choice
+   *  that reads better as a picture (the Master card's Expansion curves). */
+  icons?: readonly string[];
+  /** Just the chip strip and its hint line: no label/readout/reset head,
+   *  `description` becomes the strip's tooltip, and the hint line shows the
+   *  hovered chip's option text, else the chosen one's. Pair with `icons`,
+   *  whose tooltips name each choice. */
+  compact?: boolean;
 }
 
 /** An enum setting's row: same head as a toggle row, a strip of named chips
@@ -500,6 +523,10 @@ export interface PickerRowSpec {
  *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
  *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
  *  a toggle isn't — see createToggleRow. */
+// An icon chip (PickerRowSpec.icons): the palette chip's frame, sized to
+// its drawing rather than to a word, with the SVG inheriting the chip's ink.
+const pickerIconChipStyle = " display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; line-height: 0;";
+
 export function createPickerRow(spec: PickerRowSpec): PickerRow {
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -539,12 +566,30 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   strip.setAttribute("aria-label", spec.label);
   strip.style.cssText = paletteListStyle;
   el.style.setProperty("--vc-accent", spec.accent);
+  const isLocked = (i: number): boolean => spec.locked?.(i) ?? false;
+  if (spec.compact && spec.description) strip.title = spec.description;
   const chips = spec.options.map((name, i) => {
     const btn = document.createElement("button");
-    btn.textContent = name;
+    const icon = spec.icons?.[i];
+    if (icon) {
+      btn.innerHTML = icon;
+      btn.title = name;
+      btn.setAttribute("aria-label", name);
+    } else {
+      btn.textContent = name;
+    }
+    if (spec.pro?.(i)) {
+      const tag = document.createElement("sup");
+      tag.textContent = " PRO";
+      tag.style.cssText = "font-size: 0.6em; letter-spacing: 0.06em; opacity: 0.75;";
+      btn.appendChild(tag);
+      btn.title = isLocked(i) ? `${name} is a Pro view — coming with Pro` : `${name} (Pro)`;
+    }
     btn.setAttribute("role", "radio");
     btn.tabIndex = -1; // the strip is the ring's stop, not each chip
+    if (isLocked(i)) btn.setAttribute("aria-disabled", "true");
     btn.addEventListener("click", () => {
+      if (isLocked(i)) return;
       apply(i);
       spec.set(i);
       strip.focus();
@@ -558,7 +603,20 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   setHintText(hint, spec.description ?? "");
   if (!spec.description) hint.style.display = "none";
 
-  el.append(head, strip, hint);
+  // Compact: the hint says what the hovered chip does, falling back to the
+  // chosen one — the icons alone don't say it.
+  let hovered = -1;
+  const showHint = (): void => {
+    if (spec.compact) setHintText(hint, spec.options[hovered >= 0 ? hovered : current] ?? "");
+  };
+  if (spec.compact) {
+    hint.style.display = "";
+    chips.forEach((chip, i) => {
+      chip.addEventListener("pointerenter", () => { hovered = i; showHint(); });
+      chip.addEventListener("pointerleave", () => { if (hovered === i) hovered = -1; showHint(); });
+    });
+    el.append(strip, hint);
+  } else el.append(head, strip, hint);
   if (spec.signals) el.appendChild(spec.signals.strip);
 
   const clampIndex = (value: number): number =>
@@ -568,16 +626,23 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   function apply(value: number): void {
     current = clampIndex(value);
     chips.forEach((chip, i) => {
-      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
+      chip.style.cssText =
+        (i === current ? paletteChipLitStyle : paletteChipStyle) +
+        (spec.icons?.[i] ? pickerIconChipStyle : "") +
+        (isLocked(i) ? " opacity: 0.4; cursor: not-allowed;" : "");
       chip.setAttribute("aria-checked", String(i === current));
     });
     readout.textContent = spec.options[current];
+    showHint();
     resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
   }
   apply(current);
 
   const cycle = (step: number): void => {
-    const next = (current + step + spec.options.length) % spec.options.length;
+    const n = spec.options.length;
+    let next = current;
+    do next = (next + step + n) % n;
+    while (isLocked(next) && next !== current);
     apply(next);
     spec.set(next);
   };

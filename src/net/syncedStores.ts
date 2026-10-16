@@ -21,6 +21,13 @@
  * applied. A store that forgets still gets its text mirrored, and re-reads it
  * at the next output reload; the hook is what makes it live.
  *
+ * Text a hook cannot read must not reset its store. The hook reads and
+ * validates first, and swaps its cache only on success, using
+ * parseSyncedObject / parseSyncedNumber (they throw on unreadable text; a
+ * missing key still means the defaults). The unreadable text itself stays in
+ * storage until that store's next write, so a reload of that window falls
+ * back to the defaults.
+ *
  * Kept import-free on purpose: stores in render/ and audio/ both import it.
  */
 
@@ -33,15 +40,21 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.deviceId",
   "vibe.keyTips",
   "vibe.panelFolds",
+  "vibe.historySpans",
   "vibe.hitTailLinked",
   "vibe.hiddenInputs",
   "vibe.bakeToast",
   "vibe.audioSource",
   "vibe.audioInputDevice",
+  // Which controller knob or pad does what: a controller is plugged into one
+  // machine (ui/midiInput.ts).
+  "vibe.midiMap",
+  "vibe.recordAspect",
   "vibe.quality",
   "vibe.powerMode",
   "vibe.output.quality",
   "vibe.output.powerMode",
+  "vibe.output.cast",
   "vibe.preview.quality",
   "vibe.preview.size",
   "vibe.output.resolution",
@@ -59,18 +72,31 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
  *  never read as a difference between preview and output. */
 export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.autoGain"];
 
+/** Shelves: stores that list things to pick from (the saved Looks, the Set's
+ *  pads and its Autopilot dials) rather than describe the picture — and, for
+ *  the same reason, how a scene change arrives (render/sceneTransition.ts).
+ *  Mirrored like any key, but outputSync.ts's stateKey leaves them out, so
+ *  filling a shelf never reads as a difference between preview and output.
+ *  Exact keys, not prefixes: "vibe.set" is a prefix of unrelated keys. */
+export const SHELF_KEYS: ReadonlySet<string> = new Set(["vibe.looks", "vibe.set", "vibe.transition"]);
+
 /** Keys under `vibe.*` that are one device's own and so never join the room
  *  look, though the pop-out still mirrors them: the Looks library (a shelf of
- *  looks, not the look on screen), dev pins, each window's output/preview
+ *  looks, not the look on screen), each window's output/preview
  *  settings and the panel's own chrome (the glass blur, ui/glassPref.ts). Every `vibe.` key literal
  *  in src is classified in tests/syncedScope.test.ts, so a new key cannot
  *  slip into the room unseen — add it here if it is device-local. */
 export const ROOM_EXCLUDED_PREFIXES: readonly string[] = [
   "vibe.looks",
-  "vibe.devPins",
   "vibe.output.",
   "vibe.preview.",
   "vibe.panelBlur",
+  // A logo too detailed for a room's look (render/overlayStore.ts): shown on
+  // this device and its pop-out only. The room-sized logo key is a look key.
+  "vibe.overlayLogoLocal",
+  // A dev build's Smoothness formula pick (render/gateFormulas.ts): a
+  // temporary test on this machine, never part of a room's look.
+  "vibe.gateFormula",
 ];
 
 /** Whether `key` belongs to the room look. Only `vibe.` keys ever do, which
@@ -88,6 +114,25 @@ const hooks: Array<() => void> = [];
  *  documents which store the hook belongs to. */
 export function registerSyncedStore(_key: string, reload: () => void): void {
   if (!hooks.includes(reload)) hooks.push(reload);
+}
+
+/** A mirrored key's JSON object. Null when the key is absent (or empty): the
+ *  store resets to its defaults. Throws on text that is not a plain object,
+ *  so a reload hook that calls it before touching its cache keeps what it
+ *  had (see applySyncedStorage). */
+export function parseSyncedObject(raw: string | null): Record<string, unknown> | null {
+  if (raw === null || raw === "") return null;
+  const parsed: unknown = JSON.parse(raw); // throws on bad JSON
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+  return parsed as Record<string, unknown>;
+}
+
+/** The same for a stored number: null when absent, throws when not finite. */
+export function parseSyncedNumber(raw: string | null): number | null {
+  if (raw === null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error("not a number");
+  return n;
 }
 
 type Keyed = Pick<Storage, "getItem" | "key" | "length">;

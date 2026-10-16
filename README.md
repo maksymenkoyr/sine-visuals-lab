@@ -15,14 +15,17 @@ Press **F** for fullscreen and **S** for settings.
   WebGL2/GLSL with its state kept on the GPU, so it runs on phones as well as
   desktops.
 - **It listens for rhythm, not just loudness.** It has its own beat and tempo
-  tracker, and every reactive setting can pick what drives it: hits, the beat
+  tracker, and every animation node can pick what drives it: hits, the beat
   grid, the level, or a frequency line you draw.
 - **It tunes itself.** An auto-tune engine adapts each scene's sensitivity,
   contrast and smoothing to the music's character in real time, and every
   control can be taken over by hand.
 
-Scenes absent from `DRAFT_SCENE_IDS` (in `src/render/scenes/index.ts`) are
-featured; the rest sit behind the gallery's draft toggle.
+The gallery has three sections, and each scene picks its own in the `gallery`
+record its module exports (`src/render/scenes/sceneModules.ts`): `released`
+scenes are featured, `development` ones show below them, and `draft` ones sit
+greyed out behind the gallery's draft toggle. Each section lists the newest
+first.
 
 It's early and built by one person. Criticism, device reports, scene ideas and
 pull requests are all welcome: open an issue, start a
@@ -39,12 +42,13 @@ npm run dev:worker    # Cloudflare Worker backend, for phone/TV room pairing
 ```
 
 `npm run build` produces a static bundle (`tsc -b && vite build`). Two
-deployed channels: pushing to `main` ships the **Insider** channel
-(insider.sinevisualslab.com) automatically, on every push — see
+deployed channels: pushing to `main` ships the **Insiders** channel
+(insiders.sinevisualslab.com) automatically, on every push — see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
 channel (sinevisualslab.com)
 only updates when `main` is merged into the `production` branch
-(`npm run release` opens that pull request; merge it with a merge commit) —
+(`npm run release` opens that pull request — `/release` writes its notes,
+which become the GitHub Release; merge it with a merge commit) —
 see [`.github/workflows/release.yml`](.github/workflows/release.yml) and
 `src/version.ts`. Every merge to `main` bumps the patch version, every release
 bumps the minor, and the major is set by hand in `package.json`. Every open pull request also gets its own throwaway preview
@@ -66,9 +70,8 @@ Two entry points: `index.html` (the phone/controller view) and `tv.html`
 
 ## Documentation
 
-[`AGENTS.md`](AGENTS.md) carries the working rules ([`CLAUDE.md`](CLAUDE.md)
-imports them for Claude Code); [`docs/index.md`](docs/index.md)
-is the documentation map.
+[`CLAUDE.md`](CLAUDE.md) carries the working rules;
+[`docs/index.md`](docs/index.md) is the documentation map.
 
 ## Contributing
 

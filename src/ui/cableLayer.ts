@@ -23,6 +23,15 @@
  * same physical jack can carry both a pinned and a preview cable at once
  * without their flow offsets colliding.
  *
+ * A third group, `fan`, answers "where does this signal go": while a
+ * signal's row is lit (deviceMenu.ts's own lit-row tracking — the same
+ * hover/focus glow controlsTheme.ts's `.vc-row:hover/:focus-within` draws),
+ * every wire that leaves its jack is drawn to every port it reaches in the
+ * scene — one jack fanning out, where pinned/preview are many jacks into
+ * one port. It is drawn under the other two, flat and static like a
+ * preview (`.vc-cable-fan`, solid where a preview is dashed), so it costs
+ * the tick loop nothing.
+ *
  * A source carrying its own onPress (CableSourceSpec below) is pressable:
  * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke
  * over it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
@@ -30,6 +39,11 @@
  * width is what makes a thin cable easy to press), and a click on the
  * stroke calls onPress — deviceMenu.ts wires it to the same patch toggle
  * the source line's own × button takes, so pressing a cable unplugs it.
+ * The hit stroke answers only in the open gap between the cable's jack card
+ * and its port card (pressBandFor; a `<clipPath>` per cable): the layer
+ * paints over every card, so a cable crossing a card (Bass level's runs
+ * straight over Mid and Treble) would otherwise take a press meant for the
+ * jack, fader or slider under it and unplug itself instead.
  * The group also carries the hover lift (controlsTheme.ts's
  * .vc-cable-g:hover rules — a neon-ish bloom in the cable's own colour,
  * a thicker core, a brighter glow, and the flow beads lightened so the
@@ -38,6 +52,17 @@
  * deviceMenu.ts only ever sets onPress on the pinned group's real patch
  * sources: a preview cable and a display-only scene mix are decoration,
  * not something a press should edit.
+ *
+ * Resting the pointer on a pressable cable — still, for REVEAL_REST_MS —
+ * scrolls its two ends into view (revealEnds): the signal's jack in the
+ * meters column (or a shaping node's jack in the shaping column, which
+ * also takes a cable from a meter jack and sends one on to a setting) and
+ * the setting's port in the settings column, each only
+ * if it's out of its column's visible band (where endpointFor clamps it).
+ * The pointer is never moved; a move of more than REVEAL_STILL_PX restarts
+ * the wait, and one rest reveals once. The wait lives in the layer, not on
+ * the elements, because the scroll's own recompute() rebuilds every path —
+ * including the one under the pointer.
  *
  * Every cable leaves its jack and enters its port through a short straight
  * CABLE_STUB_PX run before the bezier takes over (cablePathD) — a real
@@ -73,6 +98,10 @@
  * the pinned group's own flow paths — no reads, so it can run every rAF
  * tick for free; the preview group never animates, so it never needs a tick
  * write either.
+ *
+ * A jack being dragged (deviceMenu.ts's jack drag) draws one temporary
+ * dashed `.vc-cable-drag` path from its own jack to the pointer (setDrag).
+ * It belongs to no group, so recompute() re-appends it after its rebuild.
  */
 
 export interface CableSourceSpec {
@@ -127,14 +156,17 @@ export interface CableGroupSpec {
 export interface CableLayer {
   el: SVGSVGElement;
   /** Full rebuild — see this file's header. `preview` is drawn on top of
-   *  `pinned`; pass an empty-sources group for either to draw only the
-   *  other (or neither). */
-  recompute(pinned: CableGroupSpec, preview: CableGroupSpec): void;
+   *  `pinned`, and `fan` (a lit signal's wires, one group per port it
+   *  reaches) under both; pass an empty-sources group (or no fan groups)
+   *  to draw only the others (or none). */
+  recompute(pinned: CableGroupSpec, preview: CableGroupSpec, fan?: readonly CableGroupSpec[]): void;
   /** Per-tick dash-offset advance for the pinned group's own flow, speed ∝
    *  each source's own live value — no DOM reads. A no-op under
    *  prefers-reduced-motion. */
   tick(dtSec: number): void;
   setVisible(v: boolean): void;
+  /** The cable a jack drag pulls (deviceMenu.ts): from `from`'s jack to the pointer at (x, y), dashed, drawn over every other cable; null removes it. Survives recompute(). */
+  setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void;
 }
 
 const NS = "http://www.w3.org/2000/svg";
@@ -148,6 +180,15 @@ const reduceMotion = () => (reduceMotionMQ ??= window.matchMedia("(prefers-reduc
 /** How far a cable runs straight out of its jack (and straight into its
  *  port) before the bezier bend starts — see this file's header. */
 const CABLE_STUB_PX = 14;
+
+/** How long the pointer must rest on a pressable cable before its ends
+ *  scroll into view, and how far it may drift and still count as resting —
+ *  see this file's header. */
+const REVEAL_REST_MS = 350;
+const REVEAL_STILL_PX = 3;
+/** Room kept between a revealed end and its column's edge, so the jack or
+ *  port lands clear of the edge rather than flush against it. */
+const REVEAL_MARGIN_PX = 40;
 
 /** Extra clearance kept above/below Power's own card before a port counts
  *  as "in its band" (cablePathD's own detour) — enough that the detoured
@@ -175,7 +216,8 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *     that card's own header instead (and, if the header has no box either
  *     — the column itself is hidden — there is no endpoint and no cable);
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
- *     `.vc-controls-col`) — the cable ends at the column's visible edge;
+ *     `.vc-shape-col`/`.vc-controls-col`) — the cable ends at the column's
+ *     visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   if (el.getClientRects().length === 0) {
@@ -189,7 +231,7 @@ function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   }
   const r = el.getBoundingClientRect();
   let y = r.top + r.height / 2;
-  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-controls-col");
+  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-controls-col");
   if (scroller) {
     const sr = scroller.getBoundingClientRect();
     if (y < sr.top) y = sr.top + 2;
@@ -258,18 +300,82 @@ function groupEl(color: string): SVGGElement {
   return g;
 }
 
+/** Scrolls one cable end (a jack or a port) into its column's visible band
+ *  if it's outside it — see this file's header. An end inside a folded card
+ *  has no box, so its card's header stands in, as in endpointFor. */
+function revealEnd(el: HTMLElement): void {
+  let target: HTMLElement | null = el;
+  if (el.getClientRects().length === 0) {
+    target = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head") ?? null;
+    if (!target || target.getClientRects().length === 0) return;
+  }
+  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-controls-col");
+  if (!scroller) return;
+  const r = target.getBoundingClientRect();
+  const sr = scroller.getBoundingClientRect();
+  let dy = 0;
+  if (r.top < sr.top + REVEAL_MARGIN_PX) dy = r.top - sr.top - REVEAL_MARGIN_PX;
+  else if (r.bottom > sr.bottom - REVEAL_MARGIN_PX) dy = r.bottom - sr.bottom + REVEAL_MARGIN_PX;
+  if (Math.abs(dy) < 1) return;
+  // scrollTo per column rather than scrollIntoView: two smooth
+  // scrollIntoView calls in one frame can cancel each other in Chromium.
+  scroller.scrollTo({ top: scroller.scrollTop + dy, behavior: reduceMotion() ? "auto" : "smooth" });
+}
+
+/** Shared by every pressable cable in one layer — see this file's header
+ *  for why the rest wait can't live on a cable's own elements. */
+interface RevealState {
+  timer: number;
+  /** Where the pointer last started resting, or last revealed from. */
+  x: number;
+  y: number;
+}
+
 /** The transparent press target over one pressable cable — see this
  *  file's header. mousedown is dropped like jack.ts does its own, so a
  *  press never moves focus off whatever row was focused (focus opening/
  *  closing a row's hint would slide the port out from under the held
- *  button); Tab still never reaches the layer (aria-hidden). */
-function attachPress(g: SVGGElement, onPress: (() => void) | undefined, d: string): void {
-  if (!onPress) return;
+ *  button); Tab still never reaches the layer (aria-hidden). Resting on
+ *  it scrolls the cable's ends into view (revealEnd). */
+function attachPress(
+  g: SVGGElement,
+  onPress: (() => void) | undefined,
+  d: string,
+  ends: { jackEl: HTMLElement; portEl: HTMLElement },
+  reveal: RevealState,
+  clipId: string | null,
+): void {
+  if (!onPress || clipId === null) return;
   const hit = pathEl("vc-cable-hit", d, "transparent");
   hit.addEventListener("mousedown", (e) => e.preventDefault());
+  hit.setAttribute("clip-path", `url(#${clipId})`);
   hit.addEventListener("click", (e) => {
     e.stopPropagation();
     onPress();
+  });
+  const rest = (e: PointerEvent): void => {
+    if (e.pointerType === "touch") return;
+    // A rebuilt cable under a still pointer, or a sub-pixel jitter, isn't
+    // a move — only a real move restarts the wait.
+    if (reveal.timer && Math.hypot(e.clientX - reveal.x, e.clientY - reveal.y) <= REVEAL_STILL_PX) return;
+    window.clearTimeout(reveal.timer);
+    reveal.x = e.clientX;
+    reveal.y = e.clientY;
+    reveal.timer = window.setTimeout(() => {
+      if (!ends.jackEl.isConnected || !ends.portEl.isConnected) return;
+      revealEnd(ends.jackEl);
+      revealEnd(ends.portEl);
+    }, REVEAL_REST_MS);
+  };
+  hit.addEventListener("pointerenter", rest);
+  hit.addEventListener("pointermove", rest);
+  hit.addEventListener("pointerleave", (e) => {
+    // The scroll this wait starts slides the cable away; that leave must
+    // not undo a reveal already under way, only a wait still pending.
+    if (Math.hypot(e.clientX - reveal.x, e.clientY - reveal.y) > REVEAL_STILL_PX) {
+      window.clearTimeout(reveal.timer);
+      reveal.timer = 0;
+    }
   });
   g.append(hit);
 }
@@ -277,15 +383,35 @@ function attachPress(g: SVGGElement, onPress: (() => void) | undefined, d: strin
 interface Resolved {
   src: CableSourceSpec;
   pt: { x: number; y: number };
+  /** Where this cable may answer a press: the open gap between its jack's
+   *  card and its port's card, or null when they leave none. */
+  pressBand: { left: number; right: number } | null;
+}
+
+/** The open gap between two ends' own cards — see this file's header for
+ *  why a cable answers the pointer only there. */
+function pressBandFor(jackEl: HTMLElement, portEl: HTMLElement): { left: number; right: number } | null {
+  const jackCard = jackEl.closest<HTMLElement>(".vc-card");
+  const portCard = portEl.closest<HTMLElement>(".vc-card");
+  if (!jackCard || !portCard) return null;
+  const j = jackCard.getBoundingClientRect();
+  const p = portCard.getBoundingClientRect();
+  if (j.right < p.left) return { left: j.right, right: p.left };
+  if (p.right < j.left) return { left: p.right, right: j.left };
+  return null;
 }
 
 function resolveGroup(group: CableGroupSpec): { portPt: { x: number; y: number }; resolved: Resolved[] } | null {
   if (!group.portEl || !group.sources.length) return null;
-  const portPt = endpointFor(group.portEl);
+  const portEl = group.portEl;
+  const portPt = endpointFor(portEl);
   if (!portPt) return null;
-  const resolved = group.sources
-    .map((src) => ({ src, pt: endpointFor(src.jackEl) }))
-    .filter((r): r is Resolved => r.pt !== null);
+  const resolved: Resolved[] = [];
+  for (const src of group.sources) {
+    const pt = endpointFor(src.jackEl);
+    if (!pt) continue;
+    resolved.push({ src, pt, pressBand: src.onPress ? pressBandFor(src.jackEl, portEl) : null });
+  }
   return { portPt, resolved };
 }
 
@@ -295,26 +421,57 @@ export function createCableLayer(): CableLayer {
   svg.setAttribute("aria-hidden", "true");
 
   let flows: { el: SVGPathElement; key: string; getValue: () => number }[] = [];
+  // The jack drag's own cable (setDrag) — kept across recompute(), which
+  // clears every child of svg, so the path is re-appended after each rebuild.
+  let dragPath: SVGPathElement | null = null;
+  let dragSpec: { from: HTMLElement; x: number; y: number; color: string } | null = null;
   // Keyed by source key (namespaced per group — see this file's header) so
   // a rebuild (a patch edit, a scroll) doesn't snap a still-connected
   // cable's flow back to 0 — only a cable that stops existing loses its
   // offset.
   const offsets = new Map<string, number>();
+  const reveal: RevealState = { timer: 0, x: 0, y: 0 };
 
-  function recompute(pinnedGroup: CableGroupSpec, previewGroup: CableGroupSpec): void {
+  function recompute(pinnedGroup: CableGroupSpec, previewGroup: CableGroupSpec, fanGroups: readonly CableGroupSpec[] = []): void {
     // Pass 1 — every getBoundingClientRect() read (resolveGroup,
     // powerAvoidBand), none of it interleaved with a DOM write (this
     // file's own header, and the carried rule against layout thrashing),
     // for both groups, before a single path element is built.
     const pinnedResolved = resolveGroup(pinnedGroup);
     const previewResolved = resolveGroup(previewGroup);
-    const avoidBand = pinnedResolved || previewResolved ? powerAvoidBand() : null;
+    const fanResolved = fanGroups.map(resolveGroup).filter((g) => g !== null);
+    const avoidBand = pinnedResolved || previewResolved || fanResolved.length ? powerAvoidBand() : null;
 
     // Pass 2 — every write: clear the old cables, build and append the new
     // ones, forget any carried flow offset nothing still uses.
     svg.textContent = "";
     flows = [];
+    const defs = document.createElementNS(NS, "defs");
+    svg.append(defs);
+    let clipCount = 0;
+    /** One cable's press band as a clip for its hit stroke (attachPress):
+     *  the band's full height, so only x limits where it answers. */
+    const pressClip = (band: { left: number; right: number }): string => {
+      const id = `vc-cable-press-${clipCount++}`;
+      const clip = document.createElementNS(NS, "clipPath");
+      clip.id = id;
+      clip.setAttribute("clipPathUnits", "userSpaceOnUse");
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", band.left.toFixed(1));
+      rect.setAttribute("y", "0");
+      rect.setAttribute("width", (band.right - band.left).toFixed(1));
+      rect.setAttribute("height", "100%");
+      clip.append(rect);
+      defs.append(clip);
+      return id;
+    };
     const liveKeys = new Set<string>();
+
+    // The lit signal's fan first, so the pinned/preview cables it may
+    // share a jack and port with draw over it — see this file's header.
+    for (const { portPt, resolved } of fanResolved) {
+      for (const { src, pt } of resolved) svg.append(pathEl("vc-cable-fan", cablePathD(pt, portPt, avoidBand), src.color));
+    }
 
     // The pinned group dims once a preview is also on screen, so it never
     // competes with the cable that's actually being previewed right now —
@@ -322,17 +479,20 @@ export function createCableLayer(): CableLayer {
     const dimmed = pinnedResolved !== null && previewResolved !== null;
     if (pinnedResolved) {
       const { portPt, resolved } = pinnedResolved;
-      for (const { src, pt } of resolved) {
+      // resolveGroup only resolves a group that has a port.
+      const portEl = pinnedGroup.portEl!;
+      for (const { src, pt, pressBand } of resolved) {
         const key = `pinned:${src.key}`;
         liveKeys.add(key);
         const d = cablePathD(pt, portPt, avoidBand);
+        const clipId = pressBand ? pressClip(pressBand) : null;
         // A muted source draws once, flat — no glow/flow layer, no offset
         // to carry — overriding cond/soft outright (this file's own
         // CableSourceSpec.muted doc).
         if (src.muted) {
           const g = groupEl(src.color);
           g.append(pathEl("vc-cable-muted", d, src.color));
-          attachPress(g, src.onPress, d);
+          attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal, clipId);
           svg.append(g);
           continue;
         }
@@ -353,7 +513,7 @@ export function createCableLayer(): CableLayer {
         flow.setAttribute("stroke-dashoffset", off.toFixed(2));
         const g = groupEl(src.color);
         g.append(glow, core, flow);
-        attachPress(g, src.onPress, d);
+        attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal, clipId);
         svg.append(g);
         flows.push({ el: flow, key, getValue: src.getValue });
       }
@@ -371,6 +531,33 @@ export function createCableLayer(): CableLayer {
     // Forget any source's carried offset that no longer has a cable —
     // otherwise a long session leaks one Map entry per source ever shown.
     for (const k of [...offsets.keys()]) if (!liveKeys.has(k)) offsets.delete(k);
+    // recompute() cleared svg's children, drag cable included — put it back
+    // on top, where setDrag keeps it.
+    if (dragSpec && dragPath) svg.append(dragPath);
+  }
+
+  function setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void {
+    if (!drag) {
+      dragPath?.remove();
+      dragPath = null;
+      dragSpec = null;
+      return;
+    }
+    dragSpec = drag;
+    const pt = endpointFor(drag.from);
+    if (!pt) {
+      dragPath?.remove();
+      dragPath = null;
+      return;
+    }
+    const d = cablePathD(pt, { x: drag.x, y: drag.y }, null);
+    if (!dragPath) {
+      dragPath = pathEl("vc-cable-drag", d, drag.color);
+    } else {
+      dragPath.setAttribute("d", d);
+      dragPath.setAttribute("stroke", drag.color);
+    }
+    if (svg.lastChild !== dragPath) svg.append(dragPath);
   }
 
   return {
@@ -388,5 +575,6 @@ export function createCableLayer(): CableLayer {
     setVisible(v) {
       svg.style.display = v ? "" : "none";
     },
+    setDrag,
   };
 }

@@ -1,6 +1,7 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { sourceSlot, type DriveSourceChoice } from "../render/drives.ts";
-import type { SignalId } from "../render/signals.ts";
+import { isShapedChoice, sourceSlot, type DriveSourceChoice, type HitHeight } from "../render/drives.ts";
+import { DIAL_SIGNALS, type DialSignalId, type SignalId } from "../render/signals.ts";
+import { getShapingNode, listShapingNodes } from "../render/shapingNodes.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
 /**
@@ -19,19 +20,38 @@ import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, ST
  * division chips show just the division on its own.
  */
 
+/** The Character card's dials (signals.ts's DIAL_SIGNALS) as wires: "Song"
+ *  in front, the way Song intensity already reads, so a slow dial can't be
+ *  mistaken for the live signal its row name would otherwise collide with
+ *  (Tempo, Loudness). Loudness is "Room" instead — it follows the input
+ *  level, not anything about the track (musicProfile.ts's header). */
+const DIAL_SOURCE_LABEL: Record<DialSignalId, string> = {
+  "dial.pulse": "Song pulse",
+  "dial.tempo": "Song tempo",
+  "dial.brightness": "Song brightness",
+  "dial.density": "Song density",
+  "dial.dynamics": "Song dynamics",
+  "dial.attack": "Song attack",
+  "dial.loudness": "Room loudness",
+};
+
 const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "feature.onset": "Any hit",
   "feature.flux": "Onset surge",
+  "feature.level": "Level",
   "anim.lowOnset": "Bass hits",
+  "anim.kickBand": "Kick band",
   "anim.midOnset": "Mid hits",
   "anim.highOnset": "Treble hits",
   "anim.dropOnset": "Drop",
   "anim.low": "Bass level",
   "anim.mid": "Mid level",
   "anim.high": "Treble level",
+  "anim.hats": "Hats",
+  "anim.lead": "Lead",
   "anim.energy": "Loudness",
   "anim.sectionIntensity": "Song intensity",
-  "anim.centroid": "Brightness",
+  "anim.centroid": "Centroid",
   "anim.wavePeak": "Waveform",
   "anim.beatWave": "Beat wave",
   "anim.barWave": "Bar wave",
@@ -39,6 +59,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.tempoLock": "Tempo lock",
   "anim.metronome": "Metronome",
   "anim.metronomeBar": "Metronome bar",
+  ...DIAL_SOURCE_LABEL,
 };
 
 /** Plain-language descriptions for every source a jack can plug in — the
@@ -53,13 +74,17 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
 const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "feature.onset": "any sudden jump across the whole spectrum.",
   "feature.flux": "how sharply the sound is changing right now, compared with the hit threshold.",
+  "feature.level": "how loud the room is on a fixed scale, before auto-gain: silence reads 0 — the Dynamics card's Level.",
   "anim.lowOnset": "kicks and bass notes landing.",
+  "anim.kickBand": "the one bass band that pulses most clearly right now, picked by itself and re-picked when the song changes.",
   "anim.midOnset": "snares, claps and vocal attacks.",
   "anim.highOnset": "hi-hats, cymbals and sharp highs.",
   "anim.dropOnset": "fires once when a drop lands.",
   "anim.low": "how loud the bass is right now, moving smoothly.",
   "anim.mid": "how loud the mids are right now, moving smoothly.",
   "anim.high": "how loud the treble is right now, moving smoothly.",
+  "anim.hats": "how loud the hi-hats and cymbals are, with held bright sounds left out. Measured on the device with the mic.",
+  "anim.lead": "how loud the melody is — vocals, synths, guitar — with the drums left out. Measured on the device with the mic.",
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
@@ -70,6 +95,13 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
   "anim.metronome": "a tick on every beat at the Tempo card's own BPM — the same pulse every beat, silent while it reads '--'.",
   "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
+  "dial.pulse": "how steadily the beat keeps hitting, judged over several seconds.",
+  "dial.tempo": "slow to fast on a dance-music scale, settling over many seconds; it rests in the middle (house tempo) until a tempo locks.",
+  "dial.brightness": "dark and bassy to bright and airy, settling over several seconds. Centroid is the live version.",
+  "dial.density": "sparse and open to wall-of-sound busy, settling over several seconds.",
+  "dial.dynamics": "flat and even to big swings between quiet and loud, judged over a long stretch of the track.",
+  "dial.attack": "soft swells to sharp hits, settling over several seconds.",
+  "dial.loudness": "how loud the room is, following the input level over a few seconds and keeping its last reading through silence.",
 };
 
 const GRID_SOURCE_DESCRIPTION = "the tracker's beat when it's sure of the tempo; the raw hits while it isn't.";
@@ -82,13 +114,17 @@ export const DRIVE_WHITE = "#f2f2f7";
 const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "feature.onset": HOT_RED,
   "feature.flux": DRIVE_WHITE,
+  "feature.level": INPUT_GREEN,
   "anim.lowOnset": STRIP_LOW,
+  "anim.kickBand": STRIP_LOW,
   "anim.midOnset": STRIP_MID,
   "anim.highOnset": STRIP_HIGH,
   "anim.dropOnset": HOT_YELLOW,
   "anim.low": STRIP_LOW,
   "anim.mid": STRIP_MID,
   "anim.high": STRIP_HIGH,
+  "anim.hats": STRIP_HIGH,
+  "anim.lead": STRIP_MID,
   "anim.energy": INPUT_GREEN,
   "anim.sectionIntensity": POWER_TEAL,
   "anim.centroid": AUTO_SKY,
@@ -99,6 +135,7 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.tempoLock": DRIVE_WHITE,
   "anim.metronome": DRIVE_WHITE,
   "anim.metronomeBar": DRIVE_WHITE,
+  ...(Object.fromEntries(DIAL_SIGNALS.map((id) => [id, AUTO_SKY])) as Record<DialSignalId, string>),
 };
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: number } {
@@ -152,9 +189,21 @@ export function jackKey(choice: DriveSourceChoice): string {
   return sourceSlot(choice);
 }
 
+/** A shaping node's panel label (the panel calls it a modifier, docs/vocabulary.md): its input node's label plus "modifier" (the
+ *  second one on the same input says "modifier 2", and so on). A node that is
+ *  gone reads as removed, which is what its dangling wire reads as. */
+export function shapingNodeLabel(id: string): string {
+  const node = getShapingNode(id);
+  if (!node) return "Removed modifier";
+  const base = driveSourceLabel(node.src);
+  const n = 1 + listShapingNodes().filter((x) => x.src === node.src).findIndex((x) => x.id === id);
+  return n === 1 ? `${base} modifier` : `${base} modifier ${n}`;
+}
+
 /** The full display label — a row's source summary, a patch source line's
  *  name, a sparkline's tooltip. */
 export function driveSourceLabel(choice: DriveSourceChoice): string {
+  if (isShapedChoice(choice)) return shapingNodeLabel(choice.id);
   if (typeof choice === "object") {
     return choice.source === "beat" ? `Beat grid · ${driveGridDivisionLabel(choice.grid)}` : "Drawn line";
   }
@@ -162,6 +211,10 @@ export function driveSourceLabel(choice: DriveSourceChoice): string {
 }
 
 export function driveSourceColor(choice: DriveSourceChoice): string {
+  if (isShapedChoice(choice)) {
+    const node = getShapingNode(choice.id);
+    return node ? driveSourceColor(node.src) : "#8a92a3";
+  }
   if (typeof choice === "object") return choice.source === "beat" ? DRIVE_WHITE : BANDS_AMBER;
   return SIGNAL_SOURCE_COLOR[choice];
 }
@@ -169,8 +222,29 @@ export function driveSourceColor(choice: DriveSourceChoice): string {
 /** The plain-language description below a source's own label — a jack's
  *  instant tooltip's first line, and an add-by-name chip's hint. */
 export function driveSourceDescription(choice: DriveSourceChoice): string {
+  if (isShapedChoice(choice)) {
+    const node = getShapingNode(choice.id);
+    return node
+      ? `${driveSourceLabel(node.src)}, through its modifier: Window, Smoothness, Length and Height.`
+      : "A modifier that was removed — this wire reads nothing.";
+  }
   if (typeof choice === "object") return choice.source === "beat" ? GRID_SOURCE_DESCRIPTION : LINE_SOURCE_DESCRIPTION;
   return SIGNAL_SOURCE_DESCRIPTION[choice];
+}
+
+/** Every "+ Add by name" group: DRIVE_ADD_GROUPS, then a "Modifiers" group with
+ *  one choice per existing shaping node, only while any node exists. */
+export function driveAddGroups(): readonly DriveAddGroup[] {
+  const nodes = listShapingNodes();
+  if (nodes.length === 0) return DRIVE_ADD_GROUPS;
+  return [...DRIVE_ADD_GROUPS, { label: "Modifiers", choices: nodes.map((n) => ({ source: "shaped" as const, id: n.id })) }];
+}
+
+/** The shaping column's "+ New modifier" chips: the input choices of
+ *  DRIVE_ADD_GROUPS only (plain signals), groups left empty dropped, so there
+ *  is no Line group and no beat grid. */
+export function shapingInputGroups(): readonly { label: string; choices: SignalId[] }[] {
+  return DRIVE_ADD_GROUPS.map((g) => ({ label: g.label, choices: g.choices.filter((c): c is SignalId => typeof c === "string") })).filter((g) => g.choices.length > 0);
 }
 
 /** One "+ Add by name" group (src/ui/deviceMenu.ts's patch panel). Tempo
@@ -185,12 +259,27 @@ export interface DriveAddGroup {
   choices: DriveSourceChoice[];
 }
 
-export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
-  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
+const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
+  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.kickBand", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
-    choices: ["anim.energy", "anim.wavePeak", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
+    choices: [
+      "anim.energy",
+      "feature.level",
+      "dial.loudness",
+      "anim.wavePeak",
+      "anim.low",
+      "anim.mid",
+      "anim.high",
+      "anim.lead",
+      "anim.hats",
+      "feature.flux",
+      "anim.centroid",
+    ],
   },
+  // Room loudness sits by Loudness under Levels, not here: it follows the
+  // input level, not the track.
+  { label: "Song", choices: ["anim.sectionIntensity", ...DIAL_SIGNALS.filter((id) => id !== "dial.loudness")] },
   {
     label: "Tempo",
     choices: [
@@ -204,4 +293,12 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
     ],
   },
   { label: "Line", choices: [{ source: "line" }] },
+];
+
+/** The Fixed/Loud/Graded height choices a hit-kind wire takes (a setting's
+ *  wire, and a shaping node's Height row in shapingColumn.ts). */
+export const HEIGHT_OPTIONS: readonly { h: HitHeight; label: string; hint: string }[] = [
+  { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
+  { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
+  { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
 ];

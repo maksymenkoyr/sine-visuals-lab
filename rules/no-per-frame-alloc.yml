@@ -1,0 +1,46 @@
+# Code that runs on every frame must not make new arrays, maps or typed
+# arrays: each one is garbage, and the collector's pauses show as dropped
+# frames (the drive engine's per-frame Map and .map(), issue #353). "Every
+# frame" means a scene's render() method, or any function whose line above
+# reads `// @per-frame` (mark hot code outside scenes this way). Reuse a
+# buffer made once in init() or at module level instead. A call that is
+# rare on purpose (a resize, a first frame) carries
+# `// ast-grep-ignore: no-per-frame-alloc` with the reason on the line above.
+id: no-per-frame-alloc
+language: TypeScript
+severity: error
+message: This runs every frame, so it must not allocate. Make the array, map or typed array once (in init() or at module level) and reuse it.
+files:
+  - src/**/*.ts
+rule:
+  all:
+    - any:
+        - pattern: new $CTOR($$$)
+        - pattern: $LIST.map($$$)
+        - pattern: $LIST.filter($$$)
+        - pattern: $LIST.flatMap($$$)
+        - pattern: $LIST.slice($$$)
+        - pattern: $LIST.concat($$$)
+        - pattern: Array.from($$$)
+        - pattern: Object.entries($$$)
+        - pattern: Object.keys($$$)
+        - pattern: Object.values($$$)
+    - inside:
+        stopBy: end
+        any:
+          - kind: method_definition
+            has:
+              field: name
+              regex: ^render$
+          - follows:
+              kind: comment
+              regex: "@per-frame"
+            any:
+              - kind: function_declaration
+              - kind: method_definition
+              - kind: lexical_declaration
+              - kind: export_statement
+              - kind: pair
+constraints:
+  CTOR:
+    regex: ^(Map|Set|Array|Object|Float32Array|Float64Array|Int8Array|Int16Array|Int32Array|Uint8Array|Uint8ClampedArray|Uint16Array|Uint32Array)$

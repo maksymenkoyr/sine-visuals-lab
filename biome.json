@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": ["src/**/*.ts", "server/**/*.ts", "tools/**/*.mjs", "tools/**/*.ts", "tests/**/*.ts", "!src/render/scenes/private"]
+  },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "none",
+      "correctness": {
+        "noUnsafeOptionalChaining": "error",
+        "noPrecisionLoss": "error",
+        "noConstantCondition": "error",
+        "noUnreachable": "error",
+        "noSwitchDeclarations": "error",
+        "noInvalidUseBeforeDeclaration": "error",
+        "noSelfAssign": "error",
+        "noConstantMathMinMaxClamp": "error",
+        "noUnusedLabels": "error"
+      },
+      "suspicious": {
+        "noSelfCompare": "error",
+        "noTemplateCurlyInString": "error",
+        "noGlobalIsFinite": "error",
+        "noGlobalIsNan": "error",
+        "noPrototypeBuiltins": "error",
+        "noDoubleEquals": "error",
+        "noDuplicateCase": "error",
+        "noDuplicateElseIf": "error",
+        "noDuplicateObjectKeys": "error",
+        "noFallthroughSwitchClause": "error",
+        "noCompareNegZero": "error",
+        "noLabelVar": "error",
+        "noShadowRestrictedNames": "error",
+        "noSparseArray": "error",
+        "noAsyncPromiseExecutor": "error",
+        "useIsArray": "error"
+      },
+      "security": { "noGlobalEval": "error" },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["tests/**"],
+      "linter": { "rules": { "suspicious": { "noFocusedTests": "error" } } }
+    }
+  ]
+}

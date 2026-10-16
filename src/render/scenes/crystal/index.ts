@@ -1,4 +1,4 @@
-import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../../gl.ts";
 import { PALETTE_GLSL } from "../../palette.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
@@ -45,8 +45,8 @@ import { advanceCrystal, createCrystalState, type CrystalState } from "./driver.
 // Three passes, hand-rolled (createFullscreenScene can't run more than one
 // program): (1) raymarch into `sharpFbo`, a LINEAR/CLAMP RGBA8 target at
 // `MARCH_SCALE` of the drawing buffer; (2) a two-level separable-Gaussian
-// bloom copied from powder.ts's chain (blur program, sampler-location
-// cache, half-then-quarter-style ping-pong — see BLUR_FRAG/glsl.ts and
+// bloom copied from powder.ts's chain (blur program, sampler units set with
+// GLProgram.setI, half-then-quarter-style ping-pong — see BLUR_FRAG/glsl.ts and
 // render() below); (3) composite sharp + both glow levels with a
 // per-channel Reinhard knee then an exponential shoulder, to the default
 // framebuffer. All three targets rebuild on a drawing-buffer resize (the
@@ -133,7 +133,7 @@ const SETTINGS: SceneSetting[] = [
     // anim.onset directly (advanceCrystal's zoomVel/swell impulses) — a
     // plain Beat default. beatCount and the light layers still run off the
     // raw onset regardless of this choice — see CrystalInputs.pulseOnset.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "pulse" } },
   },
   {
     key: "flare",
@@ -260,7 +260,6 @@ function createCrystalSceneImpl(): Scene {
   let blurProg: GLProgram | null = null;
   let compositeProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   const bandsBuf = new Float32Array(NUM_BANDS);
   let state: CrystalState | null = null;
 
@@ -285,44 +284,10 @@ function createCrystalSceneImpl(): Scene {
   let l1BFbo: WebGLFramebuffer | null = null;
   let l1W = 0;
   let l1H = 0;
-
-  /** Cached sampler locations — GLProgram has no integer setter (samplers
-   *  are the one uniform kind that needs one), same pattern as powder.ts /
-   *  shards/index.ts. */
-  function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
-
-  function makeTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-  }
-
-  function attachColour(gl: WebGL2RenderingContext, tex: WebGLTexture | null): WebGLFramebuffer | null {
-    const f = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`crystal: framebuffer incomplete (0x${status.toString(16)})`);
-    }
-    return f;
-  }
+  const targets = createTargetList();
 
   function freeTargets(gl: WebGL2RenderingContext): void {
-    for (const fbo of [sharpFbo, l0AFbo, l0BFbo, l1AFbo, l1BFbo]) if (fbo) gl.deleteFramebuffer(fbo);
-    for (const tex of [sharpTex, l0ATex, l0BTex, l1ATex, l1BTex]) if (tex) gl.deleteTexture(tex);
+    targets.freeAll(gl);
     sharpFbo = l0AFbo = l0BFbo = l1AFbo = l1BFbo = null;
     sharpTex = l0ATex = l0BTex = l1ATex = l1BTex = null;
     sharpW = sharpH = l0W = l0H = l1W = l1H = 0;
@@ -342,20 +307,15 @@ function createCrystalSceneImpl(): Scene {
     dbH = h;
     sharpW = Math.max(1, Math.round(w * MARCH_SCALE));
     sharpH = Math.max(1, Math.round(h * MARCH_SCALE));
-    sharpTex = makeTexture(gl, sharpW, sharpH);
-    sharpFbo = attachColour(gl, sharpTex);
+    ({ tex: sharpTex, fbo: sharpFbo } = targets.add(gl, sharpW, sharpH, { label: "crystal" }));
     l0W = Math.max(1, w >> 2);
     l0H = Math.max(1, h >> 2);
-    l0ATex = makeTexture(gl, l0W, l0H);
-    l0BTex = makeTexture(gl, l0W, l0H);
-    l0AFbo = attachColour(gl, l0ATex);
-    l0BFbo = attachColour(gl, l0BTex);
+    ({ tex: l0ATex, fbo: l0AFbo } = targets.add(gl, l0W, l0H, { label: "crystal" }));
+    ({ tex: l0BTex, fbo: l0BFbo } = targets.add(gl, l0W, l0H, { label: "crystal" }));
     l1W = Math.max(1, w >> 3);
     l1H = Math.max(1, h >> 3);
-    l1ATex = makeTexture(gl, l1W, l1H);
-    l1BTex = makeTexture(gl, l1W, l1H);
-    l1AFbo = attachColour(gl, l1ATex);
-    l1BFbo = attachColour(gl, l1BTex);
+    ({ tex: l1ATex, fbo: l1AFbo } = targets.add(gl, l1W, l1H, { label: "crystal" }));
+    ({ tex: l1BTex, fbo: l1BFbo } = targets.add(gl, l1W, l1H, { label: "crystal" }));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
@@ -371,7 +331,6 @@ function createCrystalSceneImpl(): Scene {
       marchProg = createProgram(gl, MARCH_FRAG);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       state = createCrystalState();
       dbW = 0;
@@ -396,6 +355,7 @@ function createCrystalSceneImpl(): Scene {
           low: anim.low,
           sectionIntensity: anim.sectionIntensity,
           pulseOnset: drives.fired("pulse", anim.onset),
+          pulseSize: drives.hitSize("pulse"),
         },
         {
           zoom: resolveSceneSetting(ID, settingFor("zoom")),
@@ -440,7 +400,7 @@ function createCrystalSceneImpl(): Scene {
       if (useBloom) {
         blurProg.use();
         gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+        blurProg.setI("uTex", 0);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, l0AFbo);
         gl.viewport(0, 0, l0W, l0H);
@@ -483,9 +443,9 @@ function createCrystalSceneImpl(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, l0BTex);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, l1BTex);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uSharpTex", "uSharpTex"), 0);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uGlowATex", "uGlowATex"), 1);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uGlowBTex", "uGlowBTex"), 2);
+      compositeProg.setI("uSharpTex", 0);
+      compositeProg.setI("uGlowATex", 1);
+      compositeProg.setI("uGlowBTex", 2);
       drawFullscreenQuad(gl, quadVao);
 
       // 4. The gallery renders every scene into one shared context each
@@ -505,7 +465,6 @@ function createCrystalSceneImpl(): Scene {
       compositeProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       freeTargets(gl);
-      samplerLocs.clear();
       marchProg = null;
       blurProg = null;
       compositeProg = null;
@@ -514,6 +473,9 @@ function createCrystalSceneImpl(): Scene {
     },
   };
 }
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-19" } as const;
 
 export const crystalScene: Scene = createCrystalSceneImpl();
 

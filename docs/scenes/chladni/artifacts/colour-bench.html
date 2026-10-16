@@ -1,0 +1,696 @@
+<title>Chladni Colour Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Hanken+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a bench of six live plates in a grid, all fed the same sand and the same fake song, so only the colouring differs between them. */
+:root {
+  --bg: #f1f0f4;
+  --panel: #ffffff;
+  --fg: #19171f;
+  --muted: #5e5868;
+  --line: #d8d4df;
+  --accent: #b3166c;
+  --accent-soft: #f7dcea;
+  --plate: #050507;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Hanken Grotesk", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sec-groove: #8b7fa8; --sec-break: #c9c2d6; --sec-build: #d9849f; --sec-drop: #b3166c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0c11; --panel: #16141c; --fg: #ece9f2; --muted: #9c95a8; --line: #2b2834;
+    --accent: #ff5fa8; --accent-soft: #3a1529;
+    --sec-groove: #5d5378; --sec-break: #2f2b3a; --sec-build: #9b4a6c; --sec-drop: #ff5fa8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0c11; --panel: #16141c; --fg: #ece9f2; --muted: #9c95a8; --line: #2b2834;
+  --accent: #ff5fa8; --accent-soft: #3a1529;
+  --sec-groove: #5d5378; --sec-break: #2f2b3a; --sec-build: #9b4a6c; --sec-drop: #ff5fa8;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 400 15px/1.55 var(--body); }
+.page { max-width: 1260px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; display: grid; gap: 28px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 1.4rem + 2.4vw, 3rem); line-height: 1.05; font-weight: 700; }
+h2 { font-size: 1.35rem; line-height: 1.2; font-weight: 700; }
+p { margin: 0; max-width: 64ch; }
+.eyebrow, .kicker { font: 500 12px/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+header.hero { display: grid; gap: 14px; }
+.hero .lede { color: var(--muted); font-size: 1.05rem; }
+.song { display: grid; gap: 6px; max-width: 640px; }
+.song .bar { position: relative; display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; height: 20px; }
+.song .bar span { border-radius: 2px; }
+.song .head { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--fg); border-radius: 1px; left: 0; }
+.song .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 400 12px/1.4 var(--mono); color: var(--muted); }
+.song .legend b { font-weight: 500; color: var(--fg); }
+.song .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding-top: 6px; }
+.toolbar .label { font: 500 12px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.palettes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 7px; font: 500 12px/1 var(--body); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px 5px 6px; cursor: pointer; }
+.chip i { display: block; width: 26px; height: 10px; border-radius: 5px; }
+.chip[aria-pressed="true"] { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.hold { font: 600 13px/1 var(--body); color: var(--bg); background: var(--fg); border: 0; border-radius: 6px; padding: 10px 14px; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: none; }
+.hold[aria-pressed="true"] { background: var(--accent); }
+.hint { font-size: 0.85rem; color: var(--muted); }
+
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; align-items: start; }
+@media (max-width: 1080px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } .page { padding-inline: 16px; padding-block: 24px 48px; } }
+
+.card { display: grid; gap: 12px; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.card .top { display: grid; gap: 4px; }
+.plate { position: relative; width: 100%; max-width: 100%; background: var(--plate); border-radius: 6px; overflow: hidden; }
+.plate canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.plate .badge { position: absolute; left: 8px; top: 8px; font: 500 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: rgba(0,0,0,0.55); padding: 5px 7px; border-radius: 4px; pointer-events: none; }
+.controls { display: grid; gap: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn { font: 500 12.5px/1 var(--body); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+.btn:hover { background: var(--accent-soft); }
+.btn[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.btn:focus-visible, .chip:focus-visible, .hold:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.slider { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 0.86rem; color: var(--muted); }
+.slider input { width: 100%; accent-color: var(--accent); }
+.slider output { font: 400 12px/1 var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; min-width: 4.5ch; text-align: right; }
+.readout { font: 400 12px/1.45 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--fg); font-weight: 500; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+.card p.what { font-size: 0.93rem; }
+.app { font-size: 0.85rem; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 10px; }
+.size { display: inline-block; font: 500 10.5px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); margin-right: 6px; }
+
+footer.next { border-top: 1px solid var(--line); padding-top: 24px; display: grid; gap: 10px; }
+footer.next ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; max-width: 70ch; color: var(--muted); }
+footer.next li b { color: var(--fg); font-weight: 600; }
+</style>
+
+<main class="page">
+  <header class="hero">
+    <p class="eyebrow">Chladni scene · sand colour · 5 Oct 2026</p>
+    <h1>Six ways the sand could change colour</h1>
+    <p class="lede">Every plate below shows the same sand on the same fake 124 BPM song. They run the scene's own sand rule on the CPU, so the sand moves as it does in the app, only sparser. The only difference between the plates is how each grain is coloured.</p>
+    <div class="song" aria-label="The fake song every plate listens to">
+      <div class="bar" id="songBar"><div class="head" id="songHead"></div></div>
+      <div class="legend"><span><i style="background:var(--sec-groove)"></i>groove</span><span><i style="background:var(--sec-break)"></i>break</span><span><i style="background:var(--sec-build)"></i>build</span><span><i style="background:var(--sec-drop)"></i>drop</span><span id="songNow">bar <b>1</b> of 16 · <b>groove</b></span></div>
+    </div>
+    <div class="toolbar">
+      <span class="label">Palette</span>
+      <div class="palettes" id="palettes" role="group" aria-label="Room palette"></div>
+    </div>
+    <div class="toolbar">
+      <button class="hold" id="holdToday" type="button" aria-pressed="false">Hold to see today</button>
+      <span class="hint">While you hold it, every plate shows today's colouring.</span>
+    </div>
+  </header>
+
+  <section class="grid">
+    <article class="card" id="thrown">
+      <div class="top"><p class="kicker">Setting</p><h2>Thrown grains</h2></div>
+      <div data-plate="thrown"></div>
+      <div class="controls">
+        <label class="slider" for="thrownAmt">How far<input id="thrownAmt" type="range" min="0" max="2" step="0.05" value="1"><output id="thrownAmtOut">1.00</output></label>
+        <div class="row" id="thrownTarget"></div>
+      </div>
+      <p class="what">While a grain is being thrown, it changes colour, and it changes back when it lands. Today it runs up the palette toward white. This setting picks how far the colour moves and where it goes. At 1, Toward white, it is today's plate.</p>
+      <p class="app"><span class="size">Small</span>Two settings on the grain shader's colour line, which already knows how hard each grain is thrown.</p>
+    </article>
+
+    <article class="card" id="sides">
+      <div class="top"><p class="kicker">Look</p><h2>Two sides of a line</h2></div>
+      <div data-plate="sides"></div>
+      <div class="controls">
+        <div class="row" id="sidesGlow"></div>
+      </div>
+      <p class="what">On either side of a still line the plate moves the opposite way: one side goes up while the other goes down. Each grain takes the colour of its side. Lines become seams between two colours, and the cells between them form a checkerboard.</p>
+      <p class="app"><span class="size">Small</span>The shader already works out the plate's value under every grain; this only reads its sign.</p>
+    </article>
+
+    <article class="card" id="figures">
+      <div class="top"><p class="kicker">Look</p><h2>Figure colours</h2></div>
+      <div data-plate="figures"></div>
+      <div class="controls">
+        <div class="readout" id="figuresNow">&nbsp;</div>
+      </div>
+      <p class="what">Each figure gets its own colour, and sand takes the colour of the figure it settles on. When the music moves to a new figure, the old colour leaves its lines and the new colour gathers on the new ones, so you can watch the sand travel.</p>
+      <p class="app"><span class="size">Medium</span>Each grain has to remember its colour: a second state texture next to its position.</p>
+    </article>
+
+    <article class="card" id="embers">
+      <div class="top"><p class="kicker">Look</p><h2>Embers</h2></div>
+      <div data-plate="embers"></div>
+      <div class="controls">
+        <label class="slider" for="emberCool">Cools over<input id="emberCool" type="range" min="0.25" max="8" step="0.25" value="2"><output id="emberCoolOut">2 bars</output></label>
+      </div>
+      <p class="what">Every hop heats a grain and rest cools it. A loud passage leaves the sand glowing, and it fades over a few bars once the plate calms. Sand that has rested a long time goes dark, so the newest lines are the brightest.</p>
+      <p class="app"><span class="size">Medium</span>Each grain keeps a heat value in a second state texture.</p>
+    </article>
+
+    <article class="card" id="dye">
+      <div class="top"><p class="kicker">Music moment</p><h2>Dyed sand</h2></div>
+      <div data-plate="dye"></div>
+      <div class="controls">
+        <div class="row" id="dyePattern"></div>
+        <div class="row"><button class="btn" id="dyeNow" type="button">Dye now</button><span class="readout" id="dyeNote">Re-dyes on every drop (bar 13).</span></div>
+      </div>
+      <p class="what">On each drop the sand is dyed in a pattern by where it lies. The next figures carry the dye along and stir it, like coloured sand in a bottle. Beat waves instead recolours the plate from the centre on every kick.</p>
+      <p class="app"><span class="size">Medium</span>A dye per grain in a second state texture, set off by the Drop signal the app already has.</p>
+    </article>
+
+    <article class="card" id="glitter">
+      <div class="top"><p class="kicker">Look</p><h2>Glitter</h2></div>
+      <div data-plate="glitter"></div>
+      <div class="controls">
+        <label class="slider" for="glitterAmt">Sparkle<input id="glitterAmt" type="range" min="0" max="1" step="0.05" value="0.7"><output id="glitterAmtOut">0.70</output></label>
+      </div>
+      <p class="what">Each grain is a flat shard facing its own way. A light circles the plate once a bar, and a grain flashes when it faces the light, so the glints run through the palette once a bar. Thrown grains tumble and twinkle.</p>
+      <p class="app"><span class="size">Small</span>The facing angle comes from the grain's hash, and the tumble from how hard it is thrown, so nothing new is stored.</p>
+    </article>
+  </section>
+
+  <footer class="next">
+    <p class="eyebrow">Already in the scene</p>
+    <ul>
+      <li><b>Powder colour</b> (draft PR #361) draws the light grains, which the air heaps between the lines, in a second palette colour. Thrown grains here use that same second colour.</li>
+      <li><b>Treble glow</b> and <b>Flash</b> brighten the sand on hats and on the beat. They sit on top of any of these and are left out here.</li>
+    </ul>
+  </footer>
+</main>
+
+<script>
+/* Chladni Colour Bench. One sand bed runs the scene's sand rule (a CPU copy
+   of src/render/scenes/chladni.ts SIM_FRAG and chladniSand.ts, taken from the
+   Chladni Idea Bench's core) on a fake 124 BPM song, and six canvases draw
+   that same bed, each with its own way of colouring a grain. Colours come
+   from the app's real palettes (palette.ts roles baked to its ramp stops,
+   and chladniPowder.ts's powder ink); a grain is lit as POINT_VERT lights it
+   at the default Grain brightness (gain GAIN, clipped per channel), or scaled
+   back into range where a colour has to keep its hue. */
+(function () {
+  "use strict";
+  const PI = Math.PI;
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  function rng(seed) { let s = (seed >>> 0) || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }
+
+  // ---- The scene's sand rule (chladniSand.ts / chladni.ts numbers).
+  const RULE = { LIFT: 0.05, HOP_RATE: 1.0, PULL_BIAS: 0.15, WEIGHT_REF: 0.7, HOP_PER_WEIGHT: 1.0, LIFT_PER_WEIGHT: 1.0,
+    STREAM_RATE: 0.3, GRAIN_HEAVY: 0.6, SIZE_PER_WEIGHT: 1.6, STEP_CELL_FRACTION: 0.25, MOTION_FULL: 1.0 };
+
+  function buildModes(maxOrder) {
+    const pairs = [];
+    for (let n = 1; n < maxOrder; n++) for (let m = n + 1; m <= maxOrder; m++) pairs.push({ n, m });
+    pairs.sort((a, b) => a.n * a.n + a.m * a.m - (b.n * b.n + b.m * b.m) || a.n - b.n);
+    return pairs.map((p, i) => { const s = i % 2 === 0 ? -1 : 1; return { n: p.n, m: p.m, s, key: p.n + "," + p.m + (s < 0 ? "-" : "+"), label: "(" + p.n + "," + p.m + ")" }; });
+  }
+  const MODES = buildModes(7);
+  const POOL = MODES.slice(0, 12);
+  function modeValue(md, x, y) {
+    return Math.cos(md.n * PI * x) * Math.cos(md.m * PI * y) + md.s * Math.cos(md.m * PI * x) * Math.cos(md.n * PI * y);
+  }
+  function addMode(md, w, x, y, o) {
+    const n = md.n, m = md.m;
+    const cnx = Math.cos(n * PI * x), cmy = Math.cos(m * PI * y), cmx = Math.cos(m * PI * x), cny = Math.cos(n * PI * y);
+    const snx = Math.sin(n * PI * x), smy = Math.sin(m * PI * y), smx = Math.sin(m * PI * x), sny = Math.sin(n * PI * y);
+    o.f += w * (cnx * cmy + md.s * cmx * cny);
+    o.gx += w * (-n * PI * snx * cmy - md.s * m * PI * smx * cny);
+    o.gy += w * (-m * PI * cnx * smy - md.s * n * PI * cmx * sny);
+  }
+  function squareField(list) {
+    let cells = 1;
+    for (const it of list) if (it.w > 0.001) cells = Math.max(cells, it.mode.m);
+    return { cells, list,
+      eval(x, y, o) { o.f = 0; o.gx = 0; o.gy = 0; for (const it of list) if (it.w > 0) addMode(it.mode, it.w, x, y, o); return o; },
+      inside: (x, y) => x >= -1 && x <= 1 && y >= -1 && y <= 1 };
+  }
+  /** Crossfades figures as a ringing plate does (attack / release per mode). */
+  class Blend {
+    constructor(attack = 0.25, release = 0.6) { this.attack = attack; this.release = release; this.cur = new Map(); this.target = new Map(); this.modes = new Map(); }
+    set(list, instant = false) {
+      this.target.clear();
+      for (const it of list) { this.target.set(it.mode.key, it.w); this.modes.set(it.mode.key, it.mode); if (instant) this.cur.set(it.mode.key, it.w); }
+      if (instant) for (const k of [...this.cur.keys()]) if (!this.target.has(k)) this.cur.delete(k);
+    }
+    step(dt) {
+      for (const k of new Set([...this.cur.keys(), ...this.target.keys()])) {
+        const c = this.cur.get(k) || 0, t = this.target.get(k) || 0, tau = t > c ? this.attack : this.release;
+        const v = c + (t - c) * (1 - Math.exp(-dt / tau));
+        if (v < 0.002 && t === 0) this.cur.delete(k); else this.cur.set(k, v);
+      }
+    }
+    field() {
+      let sum = 0; for (const v of this.cur.values()) sum += v;
+      const out = []; for (const [k, v] of this.cur) out.push({ mode: this.modes.get(k), w: sum > 0 ? v / sum : 0 });
+      return squareField(out.sort((a, b) => b.w - a.w));
+    }
+  }
+
+  /** The bed: SIM_FRAG for every grain, keeping the plate's signed value
+   *  under each grain (f) and how hard it is thrown (motion). */
+  class Bed {
+    constructor(count, seed) {
+      this.n = count; this.rand = rng(seed);
+      this.x = new Float32Array(count); this.y = new Float32Array(count); this.w = new Float32Array(count);
+      this.f = new Float32Array(count); this.motion = new Float32Array(count);
+      this.shade = new Float32Array(count); this.size = new Float32Array(count);
+      for (let i = 0; i < count; i++) {
+        this.w[i] = clamp(RULE.WEIGHT_REF + 0.45 * (this.rand() - 0.5), 0, 1);
+        this.shade[i] = 0.8 + 0.4 * this.rand();
+        this.size[i] = Math.pow(2, RULE.SIZE_PER_WEIGHT * (this.w[i] - RULE.WEIGHT_REF) * 0.5);
+      }
+      this._o = { f: 0, gx: 0, gy: 0 };
+    }
+    scatter() { for (let i = 0; i < this.n; i++) { this.x[i] = this.rand() * 2 - 1; this.y[i] = this.rand() * 2 - 1; } }
+    step(field, drive, dt) {
+      const o = this._o, R = RULE, rand = this.rand, cells = Math.max(field.cells, 1);
+      const stepCap = R.STEP_CELL_FRACTION * 2 / cells, sq = Math.sqrt(dt * 60) / 60;
+      for (let i = 0; i < this.n; i++) {
+        const x = this.x[i], y = this.y[i], w = this.w[i];
+        field.eval(x, y, o);
+        const a = Math.abs(o.f) * 0.5;
+        const hopScale = 1 + R.HOP_PER_WEIGHT * (w - R.WEIGHT_REF);
+        const lift = R.LIFT * (1 - R.LIFT_PER_WEIGHT * (w - R.WEIGHT_REF));
+        const accel = a * drive, bounce = accel * accel / (accel + lift);
+        const step = R.HOP_RATE * hopScale * bounce * sq;
+        const hx = (rand() - 0.5) * 2 * step, hy = (rand() - 0.5) * 2 * step;
+        const gl = Math.hypot(o.gx, o.gy) + 1e-4, sg = o.f >= 0 ? 1 : -1;
+        const dx = o.gx / gl * sg, dy = o.gy / gl * sg;
+        const bias = R.PULL_BIAS * (w / R.WEIGHT_REF) * smoothstep(0, 3 * lift, accel);
+        const pull = Math.min(stepCap, R.HOP_RATE * hopScale * bounce * bias * dt);
+        const light = 1 - smoothstep(0, R.GRAIN_HEAVY, w);
+        let sx = R.STREAM_RATE * light * drive * drive * 0.5 * o.f * o.gx / cells * dt;
+        let sy = R.STREAM_RATE * light * drive * drive * 0.5 * o.f * o.gy / cells * dt;
+        const sl = Math.hypot(sx, sy); if (sl > stepCap) { sx *= stepCap / sl; sy *= stepCap / sl; }
+        const nx = x + hx - dx * pull + sx, ny = y + hy - dy * pull + sy;
+        if (!field.inside(nx, ny)) { this.x[i] = rand() * 2 - 1; this.y[i] = rand() * 2 - 1; } else { this.x[i] = nx; this.y[i] = ny; }
+        this.f[i] = o.f;
+        this.motion[i] = clamp(hopScale * bounce / R.MOTION_FULL, 0, 1);
+      }
+    }
+  }
+
+  // ---- The fake song: 124 BPM, 16 bars of groove, break, build, drop.
+  const SONG = { bpm: 124, loopBars: 16, dropBar: 12 };
+  const T0 = performance.now();
+  const now = () => (performance.now() - T0) / 1000;
+  function songShape(barF) {
+    const lb = ((barF % 16) + 16) % 16;
+    if (lb < 6) return { section: "groove", energy: 0.55, kickOn: 1 };
+    if (lb < 9) return { section: "break", energy: 0.2, kickOn: 0 };
+    if (lb < 12) { const r = (lb - 9) / 3; return { section: "build", energy: 0.25 + 0.6 * r, kickOn: r }; }
+    return { section: "drop", energy: 0.95, kickOn: 1.3 };
+  }
+  function song(t) {
+    const beats = t * SONG.bpm / 60, beat = Math.floor(beats), phase = beats - beat;
+    const barF = beats / 4, bar = Math.floor(barF), sh = songShape(barF);
+    const kick = sh.kickOn * Math.exp(-phase * 7);
+    const drive = Math.pow(0.5, 1.5) * 2 * (0.25 + 2.4 * sh.energy) + 0.5 * kick * 1.5;
+    return { t, beats, beat, phase, bar, barF, loopBar: bar % 16, section: sh.section, energy: sh.energy, kickOn: sh.kickOn, kick, drive };
+  }
+  function figureAt(bar) { const k = Math.floor(bar / 2); return POOL[Math.floor(rng(9973 * (k + 1))() * POOL.length) % POOL.length]; }
+
+  // ---- Colour. Palettes are the app's, baked from palette.ts.
+  const PAL_DATA = {"neon":{"n":"Neon","g":"#07040f","r":["#160a3a","#3e1eae","#7631ec","#bc1cbf","#e12192","#fb4175","#ff97b5","#ffcade","#fff0f6"],"i":["#f92368","#1870f3","#18f370","#cab601"],"a":"#00f0ff","p":"#1870f3"},"sunset":{"n":"Sunset","g":"#0c0406","r":["#1f070d","#431111","#6a1a12","#9e3315","#d54e12","#ea6f24","#ff8e35","#ffb682","#ffdcc0"],"i":["#ff8e35","#d4507a","#8e5ac8","#ffd27a"],"a":"#ffb35c","p":"#8e5ac8"},"acid":{"n":"Acid","g":"#06030a","r":["#10081c","#2e0a26","#4e0330","#453b4c","#006469","#21967b","#3fca8a","#98e492","#ddfd98"],"i":["#e0302a","#15ab81","#c3fe99","#c3c087"],"a":"#b6ff3a","p":"#e0302a"},"ice":{"n":"Ice","g":"#03070f","r":["#0d1e3a","#173661","#214f8c","#3a73b5","#5499df","#76b3e0","#97ccdf","#c3e2ef","#eef8ff"],"i":["#5499df","#a0c8c8","#a0996d","#e0f2ff"],"a":"#bfefff","p":"#cb6701"},"fire":{"n":"Fire","g":"#080202","r":["#200710","#470a10","#720305","#a91204","#e42300","#f36829","#ff9a46","#ffc68b","#fff1c8"],"i":["#ff3300","#ff9a46","#ffd36b","#c07a39"],"a":"#ffc04d","p":"#0191c8"},"sodium":{"n":"Sodium","g":"#06080d","r":["#0a0f1d","#102436","#123a52","#185966","#1f7a7a","#8f8661","#e0892f","#f1b574","#ffe0ae"],"i":["#2a9d9a","#e58a2b","#5a82c8","#f4d7a1"],"a":"#ffb347","p":"#5a82c8"},"abyss":{"n":"Abyss","g":"#01050a","r":["#02101c","#042435","#063a4f","#09616c","#0d8a8a","#27b4a7","#3fe0c5","#9ff0de","#e2fff7"],"i":["#3fe0c5","#3a86ff","#9d7bff","#c8fff2"],"a":"#7cffd9","p":"#9d7bff"},"ember":{"n":"Ember","g":"#070302","r":["#1a0603","#420e06","#6e1408","#9e2a0c","#d1410f","#e97027","#ff9a3c","#ffc790","#fff1d6"],"i":["#e0501a","#ffa94a","#d0457a","#ffe6c0"],"a":"#ffc46b","p":"#d0457a"},"arcade":{"n":"Arcade","g":"#07020d","r":["#12051f","#2d0a43","#4b0f6b","#851e83","#c4259a","#e253b5","#ff7ad1","#f4bee8","#d9fbff"],"i":["#ff2bd6","#2bf3ff","#ffe94d","#8c5bff"],"a":"#2bf3ff","p":"#ffe94d"},"halation":{"n":"Halation","g":"#04070a","r":["#061418","#0b282e","#0f3d45","#255d65","#3b7f86","#9d9478","#f0a35e","#f9c598","#ffe7cf"],"i":["#3fa3b0","#f0a35e","#ff5a3c","#d9e4e8"],"a":"#ff5a3c","p":"#ff5a3c"},"malachite":{"n":"Malachite","g":"#020806","r":["#03140e","#06281c","#0b3d2c","#145b40","#1e7a55","#3ea074","#5cc795","#a7dfbd","#e8f7e6"],"i":["#2a9a6a","#8fe0b0","#d9b13a","#3a92b0"],"a":"#f0d36b","p":"#d9b13a"},"amethyst":{"n":"Amethyst","g":"#06030a","r":["#120822","#250f40","#3a1660","#592a87","#7a3fb0","#9f6ed0","#c79bf0","#e1c5f8","#fbefff"],"i":["#9a5cd6","#d6b0f5","#e0a24a","#5a7ae0"],"a":"#ffcf7a","p":"#e0a24a"},"phosphor":{"n":"Phosphor","g":"#010402","r":["#010a03","#03220a","#063d14","#0d6c26","#14a03a","#3bcf62","#5cff8a","#acffbb","#e6ffe9"],"i":["#1fa646","#5cff8a","#c8ffd6","#3ad6b0"],"a":"#5cff8a","p":"#b95eb4"},"amber":{"n":"Amber","g":"#050200","r":["#0d0500","#2a1100","#4a1f00","#7c3c00","#b35c00","#d98500","#ffb000","#ffd181","#fff0c8"],"i":["#d07000","#ffb000","#ffe1a0","#ff8a3a"],"a":"#ffc23d","p":"#3f85e4"}};
+  const GAIN = 0.8 + 1.7 * 0.6; // POINT_VERT's brightness at the default Grain brightness
+  const SHADE_TOP = 1.2;
+  const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+  const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const gam = (c) => c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  function toLab(c) {
+    const r = lin(c[0]), g = lin(c[1]), b = lin(c[2]);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+  }
+  function fromLab(L) {
+    const l_ = L[0] + 0.3963377774 * L[1] + 0.2158037573 * L[2], m_ = L[0] - 0.1055613458 * L[1] - 0.0638541728 * L[2], s_ = L[0] - 0.0894841775 * L[1] - 1.291485548 * L[2];
+    const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+    return [gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), gam(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)].map((v) => clamp(v, 0, 1));
+  }
+  const mixLab = (a, b, k) => fromLab(toLab(a).map((v, i) => v + (toLab(b)[i] - v) * k));
+  const hueOf = (c) => { const L = toLab(c); return Math.atan2(L[2], L[1]); };
+  const labDist = (a, b) => { const p = toLab(a), q = toLab(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
+
+  const LUT_N = 64;
+  function bake(fn) { const t = new Float32Array(LUT_N * 3); for (let i = 0; i < LUT_N; i++) { const c = fn(i / (LUT_N - 1)); t[i * 3] = c[0]; t[i * 3 + 1] = c[1]; t[i * 3 + 2] = c[2]; } return t; }
+  function lutIdx(t) { return ((clamp(t, 0, 1) * (LUT_N - 1) + 0.5) | 0) * 3; }
+  /** A path through colours in OKLab: t in [0,1] walks the stops in order. */
+  function path(stops, t, loop) {
+    const segs = loop ? stops.length : stops.length - 1, x = clamp(t, 0, 1) * segs, i = Math.min(Math.floor(x), segs - 1);
+    return mixLab(stops[i], stops[(i + 1) % stops.length], x - i);
+  }
+
+  function preparePalette(id) {
+    const d = PAL_DATA[id];
+    const P = { id, name: d.n, ground: hex(d.g), ramp: d.r.map(hex), inks: d.i.map(hex), accent: hex(d.a), powder: hex(d.p) };
+    P.rampAt = (t) => {
+      const x = clamp(t, 0, 1) * 8, i = Math.min(Math.floor(x), 7), f = x - i, a = P.ramp[i], b = P.ramp[i + 1];
+      return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+    };
+    // Grit: palRamp(0.55 + 0.45 m), chalked by 0.15 when settled (chladniPowder.ts gritColour).
+    P.grit = bake((m) => { const c = P.rampAt(0.55 + 0.45 * m), g = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], k = 0.15 * (1 - m); return c.map((v) => v + (g - v) * k); });
+    const rest = [P.grit[0], P.grit[1], P.grit[2]];
+    P.rest = rest;
+    // Through the palette: from the resting colour round the hue circle through
+    // the three inks farthest from it.
+    const hr = hueOf(rest);
+    const far = P.inks.slice().sort((a, b) => labDist(b, rest) - labDist(a, rest)).slice(0, 3)
+      .sort((a, b) => ((hueOf(a) - hr + 4 * PI) % (2 * PI)) - ((hueOf(b) - hr + 4 * PI) % (2 * PI)));
+    P.walk = bake((k) => path([rest, ...far], k, false));
+    // Embers: the ramp from its deep end up, heat lifting it.
+    P.ember = bake((h) => P.rampAt(0.35 + 0.55 * h));
+    // Glitter: a loop through the inks in hue order.
+    const loop = P.inks.slice().sort((a, b) => hueOf(a) - hueOf(b));
+    P.glit = bake((u) => path(loop, u, true));
+    // The second colour: chladniPowder.ts's powder ink, chosen per palette to
+    // stand apart from the grit curve.
+    P.second = P.powder;
+    // Figure and dye inks: the four inks, plus the powder ink where an ink sits
+    // too close to the resting sand to read.
+    P.cycle = P.inks.filter((c) => labDist(c, rest) >= 0.08);
+    if (P.cycle.length < 4 && !P.cycle.some((c) => labDist(c, P.powder) < 0.02)) P.cycle.push(P.powder);
+    if (P.cycle.length < 2) P.cycle = P.inks.slice();
+    return P;
+  }
+  const PAL_IDS = Object.keys(PAL_DATA);
+  const PALS = {};
+  for (const id of PAL_IDS) PALS[id] = preparePalette(id);
+  let pal = PALS.neon;
+
+  // Lighting a colour as POINT_VERT does: times the brightness and the grain's
+  // shade, clipped per channel (grit), or scaled so the bed's brightest shade
+  // just fits, which keeps the hue (powder).
+  function litClip(c, i3, k, shade, out) { out[0] = Math.min(1, c[i3] * k * shade); out[1] = Math.min(1, c[i3 + 1] * k * shade); out[2] = Math.min(1, c[i3 + 2] * k * shade); }
+  function litHue(c, shade, out) {
+    const top = Math.max(1, Math.max(c[0], c[1], c[2]) * GAIN * SHADE_TOP), s = GAIN * shade / top;
+    out[0] = Math.min(1, c[0] * s); out[1] = Math.min(1, c[1] * s); out[2] = Math.min(1, c[2] * s);
+  }
+  const lerp3 = (o, b, k) => { o[0] += (b[0] - o[0]) * k; o[1] += (b[1] - o[1]) * k; o[2] += (b[2] - o[2]) * k; };
+  const toWhite = (o, k) => { o[0] += (1 - o[0]) * k; o[1] += (1 - o[1]) * k; o[2] += (1 - o[2]) * k; };
+
+  // ---- The one bed and its per-grain memory for the stateful ideas.
+  const GRAINS = 6000;
+  const bed = new Bed(GRAINS, 20261005);
+  const blend = new Blend(0.25, 0.6);
+  const figCol = new Float32Array(GRAINS * 3);   // Figure colours: the colour a grain carries (unlit)
+  const heat = new Float32Array(GRAINS);         // Embers
+  const dyeCol = new Float32Array(GRAINS * 3);   // Dyed sand (unlit)
+  const waveBeat = new Int32Array(GRAINS).fill(-1);
+  const theta = new Float32Array(GRAINS);        // Glitter: the shard's facing angle
+  for (let i = 0; i < GRAINS; i++) theta[i] = bed.rand() * 2 * PI;
+
+  const state = { held: false, thrownAmt: 1, thrownTarget: "white", sidesGlow: true, emberBars: 2, dyePattern: "stripes", glitter: 0.7 };
+
+  // Figure colours: each new figure takes the next colour in the palette's cycle.
+  const figInk = new Map();
+  let figInkNext = 0, current = null, stretch = -1;
+  function inkForFigure(md) {
+    if (!figInk.has(md.key)) { figInk.set(md.key, figInkNext); figInkNext++; }
+    return pal.cycle[figInk.get(md.key) % pal.cycle.length];
+  }
+  function setFigure(md, instant) {
+    current = md; blend.set([{ mode: md, w: 1 }], instant);
+    // A figure that comes back gets a fresh colour, so a change always shows.
+    figInk.delete(md.key); inkForFigure(md);
+    const c = inkForFigure(md), el = document.getElementById("figuresNow");
+    if (el) el.innerHTML = "On the plate: <b>" + md.label + "</b> <span class=\"sw\" style=\"background:rgb(" + c.map((v) => Math.round(v * 255)).join(",") + ")\"></span>its colour";
+  }
+
+  function dye(pattern) {
+    const inks = pal.cycle, n = inks.length;
+    for (let i = 0; i < GRAINS; i++) {
+      const x = bed.x[i], y = bed.y[i]; let k;
+      if (pattern === "stripes") k = clamp(Math.floor((x + 1) / 2 * n), 0, n - 1);
+      else if (pattern === "rings") k = clamp(Math.floor(Math.hypot(x, y) / Math.SQRT2 * n), 0, n - 1);
+      else if (pattern === "quadrants") k = ((x > 0 ? 1 : 0) + (y > 0 ? 2 : 0)) % n;
+      else k = 0;
+      dyeCol[i * 3] = inks[k][0]; dyeCol[i * 3 + 1] = inks[k][1]; dyeCol[i * 3 + 2] = inks[k][2];
+      waveBeat[i] = -1;
+    }
+  }
+
+  // ---- How each plate colours grain i. out = lit rgb in [0,1].
+  const tmp = [0, 0, 0], tmp2 = [0, 0, 0];
+  function today(i, out) { litClip(pal.grit, lutIdx(bed.motion[i]), GAIN, bed.shade[i], out); }
+  const COLOUR = {
+    thrown(i, out) {
+      const m = bed.motion[i], sh = bed.shade[i], k = clamp(m * state.thrownAmt, 0, 1);
+      switch (state.thrownTarget) {
+        case "white": litClip(pal.grit, lutIdx(k), GAIN, sh, out); break;
+        case "second": litClip(pal.grit, 0, GAIN, sh, out); litHue(pal.second, sh, tmp); lerp3(out, tmp, k); break;
+        case "walk": {
+          litClip(pal.grit, 0, GAIN, sh, out);
+          const j = lutIdx(k); tmp2[0] = pal.walk[j]; tmp2[1] = pal.walk[j + 1]; tmp2[2] = pal.walk[j + 2];
+          litHue(tmp2, sh, tmp); lerp3(out, tmp, smoothstep(0, 0.2, k)); break;
+        }
+        case "shadow": { litClip(pal.grit, 0, GAIN, sh, out); const d = 1 - 0.88 * k; out[0] *= d; out[1] *= d; out[2] *= d; break; }
+      }
+    },
+    sides(i, out) {
+      const sh = bed.shade[i], s = smoothstep(-0.04, 0.04, bed.f[i]);
+      litClip(pal.grit, 0, GAIN, sh, out); litHue(pal.second, sh, tmp); lerp3(out, tmp, s);
+      toWhite(out, 0.35 * bed.motion[i]);
+    },
+    figures(i, out) {
+      tmp2[0] = figCol[i * 3]; tmp2[1] = figCol[i * 3 + 1]; tmp2[2] = figCol[i * 3 + 2];
+      litHue(tmp2, bed.shade[i], out); toWhite(out, 0.3 * bed.motion[i]);
+    },
+    embers(i, out) {
+      const h = heat[i], j = lutIdx(h), b = 0.3 + 0.85 * h;
+      tmp2[0] = pal.ember[j]; tmp2[1] = pal.ember[j + 1]; tmp2[2] = pal.ember[j + 2];
+      litHue(tmp2, bed.shade[i], out); out[0] *= b; out[1] *= b; out[2] *= b;
+      toWhite(out, 0.5 * smoothstep(0.85, 1, h));
+    },
+    dye(i, out) {
+      tmp2[0] = dyeCol[i * 3]; tmp2[1] = dyeCol[i * 3 + 1]; tmp2[2] = dyeCol[i * 3 + 2];
+      litHue(tmp2, bed.shade[i], out); toWhite(out, 0.3 * bed.motion[i]);
+    },
+    glitter(i, out) {
+      litClip(pal.grit, lutIdx(bed.motion[i]), GAIN * 0.45, bed.shade[i], out);
+      const c = Math.cos(theta[i] - glitterLight);
+      if (c > 0.8) {
+        const g = Math.pow(c, 16) * state.glitter * 2.2, j = lutIdx(((theta[i] % (2 * PI)) + 2 * PI) % (2 * PI) / (2 * PI));
+        tmp2[0] = pal.glit[j]; tmp2[1] = pal.glit[j + 1]; tmp2[2] = pal.glit[j + 2]; litHue(tmp2, 1, tmp);
+        out[0] = Math.min(1, out[0] + tmp[0] * g); out[1] = Math.min(1, out[1] + tmp[1] * g); out[2] = Math.min(1, out[2] + tmp[2] * g);
+        toWhite(out, 0.25 * Math.max(0, g - 1));
+      }
+    },
+  };
+  let glitterLight = 0;
+
+  // ---- The per-grain memory, stepped every frame whatever is on screen.
+  function stepMemory(dt, s, field) {
+    const fig = field.list;
+    const ease = 1 - Math.exp(-dt / 0.18);
+    const tau = state.emberBars * 4 * 60 / SONG.bpm, cool = Math.exp(-dt / tau);
+    const waves = state.dyePattern === "waves" && s.kickOn > 0;
+    const waveR = Math.min(1.5, s.phase * 2.4), waveInk = pal.cycle[s.beat % pal.cycle.length];
+    for (let i = 0; i < GRAINS; i++) {
+      const m = bed.motion[i], x = bed.x[i], y = bed.y[i];
+      // Figure colours: a grain resting on a ringing figure's line takes its colour.
+      if (m < 0.3) {
+        let best = null, bw = 0.3;
+        for (const it of fig) if (it.w > bw && Math.abs(modeValue(it.mode, x, y)) * 0.5 < 0.07) { best = it.mode; bw = it.w; }
+        if (best) { const c = inkForFigure(best), j = i * 3; figCol[j] += (c[0] - figCol[j]) * ease; figCol[j + 1] += (c[1] - figCol[j + 1]) * ease; figCol[j + 2] += (c[2] - figCol[j + 2]) * ease; }
+      }
+      // Embers: hops heat, rest cools.
+      heat[i] = Math.min(1, heat[i] * cool + 7 * m * dt);
+      // Beat waves: a ring from the centre recolours what it passes, once a beat.
+      if (waves && waveBeat[i] !== s.beat && Math.hypot(x, y) < waveR) {
+        waveBeat[i] = s.beat; const j = i * 3; dyeCol[j] = waveInk[0]; dyeCol[j + 1] = waveInk[1]; dyeCol[j + 2] = waveInk[2];
+      }
+      // Glitter: thrown grains tumble.
+      if (m > 0.02) theta[i] += (bed.rand() - 0.5) * m * dt * 60;
+    }
+    glitterLight = (s.barF % 1) * 2 * PI;
+  }
+
+  // ---- Drawing.
+  const GLOW = 72;
+  function glowLayer() { const c = document.createElement("canvas"); c.width = c.height = GLOW; const x = c.getContext("2d"); return { c, x, img: x.createImageData(GLOW, GLOW) }; }
+  const plainGlow = glowLayer(), sidesGlow = glowLayer();
+  /** The plate under the sand: its ground, with a glow where it moves (BG_FRAG).
+   *  `sides` tints the glow by which way the plate moves there. */
+  function paintGlow(L, field, energy, sides) {
+    const o = { f: 0, gx: 0, gy: 0 }, d = L.img.data, gr = pal.ground, A = pal.rest, B = pal.second;
+    for (let j = 0; j < GLOW; j++) for (let i = 0; i < GLOW; i++) {
+      const x = (i + 0.5) / GLOW * 2 - 1, y = 1 - (j + 0.5) / GLOW * 2, k = (j * GLOW + i) * 4;
+      field.eval(x, y, o);
+      const a = Math.min(1, Math.abs(o.f) * 0.5);
+      let c, g;
+      if (sides) { const t = smoothstep(-0.12, 0.12, o.f); c = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t]; g = a * a * 0.4 * (0.3 + energy); }
+      else { c = pal.rampAt(0.35 + 0.3 * a); g = a * a * 0.28 * (0.3 + energy); }
+      d[k] = 255 * Math.min(1, gr[0] + c[0] * g); d[k + 1] = 255 * Math.min(1, gr[1] + c[1] * g); d[k + 2] = 255 * Math.min(1, gr[2] + c[2] * g); d[k + 3] = 255;
+    }
+    L.x.putImageData(L.img, 0, 0);
+  }
+
+  const cards = [];
+  function makePlate(id, label) {
+    const host = document.querySelector('[data-plate="' + id + '"]');
+    const el = document.createElement("div"); el.className = "plate"; el.style.aspectRatio = "1";
+    const canvas = document.createElement("canvas"); canvas.setAttribute("role", "img"); canvas.setAttribute("aria-label", label);
+    const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = "Today"; badge.hidden = true;
+    el.append(canvas, badge); host.appendChild(el);
+    const card = { id, el, canvas, ctx: canvas.getContext("2d"), badge, layer: document.createElement("canvas"), img: null, buf: null, W: 1, H: 1, visible: true };
+    card.lctx = card.layer.getContext("2d");
+    const fit = () => {
+      const r = el.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
+      if (W !== canvas.width || H !== canvas.height) { canvas.width = W; canvas.height = H; }
+      card.W = W; card.H = H;
+    };
+    fit(); new ResizeObserver(fit).observe(el);
+    new IntersectionObserver((es) => { card.visible = es.some((e) => e.isIntersecting); }, { rootMargin: "100px" }).observe(el);
+    cards.push(card);
+    return card;
+  }
+
+  const col = [0, 0, 0];
+  function drawCard(card) {
+    const { W, H, ctx } = card;
+    if (card.layer.width !== W || card.layer.height !== H || !card.img) {
+      card.layer.width = W; card.layer.height = H; card.img = card.lctx.createImageData(W, H); card.buf = new Uint32Array(card.img.data.buffer);
+    }
+    const held = state.held && card.id !== "thrown";
+    card.badge.hidden = !held;
+    const s = Math.min(W, H) * 0.48, cx = W / 2, cy = H / 2;
+    const gr = pal.ground;
+    ctx.fillStyle = "rgb(" + gr.map((v) => Math.round(v * 255)).join(",") + ")"; ctx.fillRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(card.id === "sides" && state.sidesGlow && !held ? sidesGlow.c : plainGlow.c, cx - s, cy - s, 2 * s, 2 * s);
+    const buf = card.buf; buf.fill(0);
+    const fn = held ? today : COLOUR[card.id], base = Math.max(1, s * 2 * 0.0042);
+    const glints = card.id === "glitter" && !held && state.glitter > 0;
+    for (let i = 0; i < GRAINS; i++) {
+      fn(i, col);
+      let sz = Math.max(1, Math.round(base * bed.size[i]));
+      if (glints && Math.cos(theta[i] - glitterLight) > 0.96) sz = Math.round(sz * (1 + state.glitter));
+      const X = Math.round(cx + bed.x[i] * s - sz / 2), Y = Math.round(cy - bed.y[i] * s - sz / 2);
+      if (X < 0 || Y < 0 || X + sz > W || Y + sz > H) continue;
+      const px = (0xff000000 | ((col[2] * 255) << 16) | ((col[1] * 255) << 8) | (col[0] * 255)) >>> 0;
+      for (let dy = 0; dy < sz; dy++) { const row = (Y + dy) * W + X; for (let dx = 0; dx < sz; dx++) buf[row + dx] = px; }
+    }
+    card.lctx.putImageData(card.img, 0, 0);
+    ctx.drawImage(card.layer, 0, 0);
+    ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = Math.max(1, s * 0.006); ctx.strokeRect(cx - s, cy - s, 2 * s, 2 * s);
+  }
+
+  // ---- Controls.
+  function seg(parent, items, value, onChange, label) {
+    const box = document.createElement("div"); box.className = "seg"; box.setAttribute("role", "group"); box.setAttribute("aria-label", label); parent.appendChild(box);
+    const btns = items.map(([v, text]) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = text; b.dataset.value = v;
+      b.addEventListener("click", () => { set(v); onChange(v); }); box.appendChild(b); return b;
+    });
+    function set(v) { for (const b of btns) b.setAttribute("aria-pressed", String(b.dataset.value === v)); }
+    set(value); return set;
+  }
+  function slider(id, fmt, onChange) {
+    const input = document.getElementById(id), out = document.getElementById(id + "Out");
+    const upd = () => { const v = +input.value; out.textContent = fmt(v); onChange(v); };
+    input.addEventListener("input", upd); upd();
+  }
+  seg(document.getElementById("thrownTarget"), [["white", "Toward white"], ["second", "To a second colour"], ["walk", "Through the palette"], ["shadow", "Into shadow"]],
+    state.thrownTarget, (v) => { state.thrownTarget = v; }, "Where a thrown grain's colour goes");
+  slider("thrownAmt", (v) => v.toFixed(2), (v) => { state.thrownAmt = v; });
+  seg(document.getElementById("sidesGlow"), [["on", "Tint the plate too"], ["off", "Sand only"]], "on", (v) => { state.sidesGlow = v === "on"; }, "Plate glow");
+  slider("emberCool", (v) => (v === 1 ? "1 bar" : (v < 1 ? v * 4 + " beat" + (v * 4 === 1 ? "" : "s") : v + " bars")), (v) => { state.emberBars = v; });
+  seg(document.getElementById("dyePattern"), [["stripes", "Stripes"], ["rings", "Rings"], ["quadrants", "Quadrants"], ["waves", "Beat waves"]],
+    state.dyePattern, (v) => {
+      state.dyePattern = v; dye(v);
+      document.getElementById("dyeNote").textContent = v === "waves" ? "A new colour from the centre on every kick." : "Re-dyes on every drop (bar 13).";
+    }, "Dye pattern");
+  document.getElementById("dyeNow").addEventListener("click", () => dye(state.dyePattern === "waves" ? "stripes" : state.dyePattern));
+  slider("glitterAmt", (v) => v.toFixed(2), (v) => { state.glitter = v; });
+
+  // Palette chips.
+  const palBox = document.getElementById("palettes"), chips = [];
+  for (const id of PAL_IDS) {
+    const P = PALS[id], b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.dataset.id = id;
+    const sw = document.createElement("i"); sw.style.background = "linear-gradient(90deg," + PAL_DATA[id].r.slice(2).join(",") + ")";
+    b.append(sw, document.createTextNode(P.name));
+    b.addEventListener("click", () => choosePalette(id));
+    palBox.appendChild(b); chips.push(b);
+  }
+  function choosePalette(id) {
+    // Recolour the remembered colours from the old palette's cycle to the new one's.
+    const old = pal; pal = PALS[id];
+    const remap = (arr) => {
+      for (let i = 0; i < GRAINS; i++) {
+        const j = i * 3; let best = 0, bd = Infinity;
+        for (let k = 0; k < old.cycle.length; k++) { const c = old.cycle[k], d = (arr[j] - c[0]) ** 2 + (arr[j + 1] - c[1]) ** 2 + (arr[j + 2] - c[2]) ** 2; if (d < bd) { bd = d; best = k; } }
+        const n = pal.cycle[best % pal.cycle.length]; arr[j] = n[0]; arr[j + 1] = n[1]; arr[j + 2] = n[2];
+      }
+    };
+    remap(figCol); remap(dyeCol);
+    if (current) setFigure(current, false);
+    for (const c of chips) c.setAttribute("aria-pressed", String(c.dataset.id === id));
+    try { localStorage.setItem("chladniColourBench.palette", id); } catch (e) { /* storage blocked: the choice lasts this visit */ }
+  }
+
+  // Hold to see today.
+  const hold = document.getElementById("holdToday");
+  const setHeld = (v) => { state.held = v; hold.setAttribute("aria-pressed", String(v)); };
+  hold.addEventListener("pointerdown", (e) => { hold.setPointerCapture(e.pointerId); setHeld(true); });
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) hold.addEventListener(ev, () => setHeld(false));
+  hold.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); setHeld(true); } });
+  hold.addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") setHeld(false); });
+  hold.addEventListener("blur", () => setHeld(false));
+
+  // Song strip.
+  const bar = document.getElementById("songBar"), head = document.getElementById("songHead"), nowEl = document.getElementById("songNow");
+  for (let b = 0; b < 16; b++) { const sp = document.createElement("span"), sec = songShape(b + 0.5).section; sp.style.background = "var(--sec-" + sec + ")"; sp.title = "bar " + (b + 1) + " · " + sec; bar.insertBefore(sp, head); }
+
+  // ---- Start: a formed figure, and each memory filled from it.
+  const PLATES = [["thrown", "Sand coloured by how hard each grain is thrown"], ["sides", "Sand coloured by which side of a still line it lies on"],
+    ["figures", "Sand coloured by the figure it settled on"], ["embers", "Sand glowing with heat from its hops"],
+    ["dye", "Sand dyed in a pattern and stirred by the figures"], ["glitter", "Sand glinting as a light circles the plate"]];
+  for (const [id, label] of PLATES) makePlate(id, label);
+  let startPal = "neon";
+  try { const v = localStorage.getItem("chladniColourBench.palette"); if (v && PALS[v]) startPal = v; } catch (e) { /* storage blocked */ }
+  pal = PALS[startPal];
+  for (const c of chips) c.setAttribute("aria-pressed", String(c.dataset.id === startPal));
+
+  let s0 = song(now());
+  stretch = Math.floor(s0.bar / 2);
+  setFigure(figureAt(s0.bar), true);
+  bed.scatter();
+  { const f = blend.field(); for (let t = 0; t < 4; t += 1 / 60) bed.step(f, 1.3, 1 / 60); }
+  { const c = inkForFigure(current); for (let i = 0; i < GRAINS; i++) { figCol[i * 3] = c[0]; figCol[i * 3 + 1] = c[1]; figCol[i * 3 + 2] = c[2]; } }
+  dye(state.dyePattern);
+
+  let last = 0, lastLoopBar = s0.loopBar, lastSongBar = -1;
+  function frame() {
+    const t = now(), dt = last ? Math.min(0.05, t - last) : 1 / 60; last = t;
+    const s = song(t);
+    const k = Math.floor(s.bar / 2);
+    if (k !== stretch) { stretch = k; const md = figureAt(s.bar); if (md !== current) setFigure(md, false); }
+    if (s.loopBar !== lastLoopBar) { lastLoopBar = s.loopBar; if (s.loopBar === SONG.dropBar && state.dyePattern !== "waves") dye(state.dyePattern); }
+    blend.step(dt);
+    const field = blend.field();
+    bed.step(field, s.drive, dt);
+    stepMemory(dt, s, field);
+    paintGlow(plainGlow, field, s.energy, false);
+    if (state.sidesGlow && cards[1].visible) paintGlow(sidesGlow, field, s.energy, true);
+    for (const c of cards) if (c.visible) drawCard(c);
+    head.style.left = "calc(" + ((s.barF % 16) / 16 * 100).toFixed(3) + "% - 1px)";
+    if (s.bar !== lastSongBar) { lastSongBar = s.bar; nowEl.innerHTML = "bar <b>" + (s.loopBar + 1) + "</b> of 16 · <b>" + s.section + "</b>"; }
+  }
+  let raf = 0;
+  const loop = () => { frame(); raf = requestAnimationFrame(loop); };
+  frame();
+  raf = requestAnimationFrame(loop);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) last = 0; });
+  window.__bench = { state, song, now, setHeld, choosePalette, frame };
+})();
+</script>

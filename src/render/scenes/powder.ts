@@ -1,4 +1,4 @@
-import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
@@ -820,7 +820,7 @@ const SETTINGS: SceneSetting[] = [
     // term (POINT_VERT) — both anim.lowPulse/lowOnset directly, a plain
     // Bass hit default. A drop's own opposed-pair plume is unconditional,
     // independent of this choice, the same as caustics' drop ring.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "plume" } },
   },
   {
     key: "chunks",
@@ -840,6 +840,7 @@ const SETTINGS: SceneSetting[] = [
       default: "scene",
       sceneLabel: "Scene: this scene's own hit-strength detector",
       sceneSources: ["anim.low", "anim.lowOnset", "anim.sectionIntensity", "anim.dropOnset"],
+      hit: { reactionLabel: "burst" },
     },
   },
   {
@@ -1769,9 +1770,9 @@ function createPowderScene(): Scene {
   let glowFbo: WebGLFramebuffer | null = null;
   let blurFboA: WebGLFramebuffer | null = null;
   let blurFboB: WebGLFramebuffer | null = null;
+  const glowTargets = createTargetList();
   let glowW = 0;
   let glowH = 0;
-  const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let read = 0;
   let side = 1;
   let grainCount = 0;
@@ -1792,23 +1793,6 @@ function createPowderScene(): Scene {
   const chunkOrigin: [number, number, number] = [0, 0, 0];
   const chunkAxis: [number, number, number] = [0, 1, 0];
 
-  /** Cached sampler locations. GLProgram has no integer setter — samplers are
-   *  the one uniform kind that needs one — so the unit is set with
-   *  gl.uniform1i against a location looked up once per (program, name). */
-  function samplerLoc(
-    gl: WebGL2RenderingContext,
-    prog: GLProgram,
-    key: string,
-    name: string,
-  ): WebGLUniformLocation | null {
-    let l = samplerLocs.get(key);
-    if (l === undefined) {
-      l = gl.getUniformLocation(prog.program, name);
-      samplerLocs.set(key, l);
-    }
-    return l;
-  }
-
   function makeStateTexture(gl: WebGL2RenderingContext, data: Uint8Array): WebGLTexture | null {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -1820,37 +1804,8 @@ function createPowderScene(): Scene {
     return tex;
   }
 
-  /** A half-res LINEAR/CLAMP colour target. LINEAR because the composite
-   *  upsamples it 2x and the blur taps between texels. */
-  function makeGlowTexture(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture | null {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-  }
-
-  function attachColour(gl: WebGL2RenderingContext, tex: WebGLTexture | null): WebGLFramebuffer | null {
-    const f = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`powder: bloom framebuffer incomplete (0x${status.toString(16)})`);
-    }
-    return f;
-  }
-
   function freeGlowTargets(gl: WebGL2RenderingContext): void {
-    if (glowFbo) gl.deleteFramebuffer(glowFbo);
-    if (blurFboA) gl.deleteFramebuffer(blurFboA);
-    if (blurFboB) gl.deleteFramebuffer(blurFboB);
-    if (glowTex) gl.deleteTexture(glowTex);
-    if (blurTexA) gl.deleteTexture(blurTexA);
-    if (blurTexB) gl.deleteTexture(blurTexB);
+    glowTargets.freeAll(gl);
     glowFbo = null;
     blurFboA = null;
     blurFboB = null;
@@ -1863,18 +1818,17 @@ function createPowderScene(): Scene {
 
   /** Rebuilds the bloom chain when the drawing buffer changes size. The
    *  quality governor moves renderScale at runtime, so the stored size is
-   *  compared every frame rather than trusted from init. */
+   *  compared every frame rather than trusted from init. The targets are
+   *  half-res and LINEAR because the composite upsamples them and the blur
+   *  taps between texels. */
   function ensureGlowTargets(gl: WebGL2RenderingContext): void {
     const w = Math.max(1, gl.drawingBufferWidth >> 1);
     const h = Math.max(1, gl.drawingBufferHeight >> 1);
     if (w === glowW && h === glowH && glowFbo) return;
     freeGlowTargets(gl);
-    glowTex = makeGlowTexture(gl, w, h);
-    blurTexA = makeGlowTexture(gl, w, h);
-    blurTexB = makeGlowTexture(gl, w, h);
-    glowFbo = attachColour(gl, glowTex);
-    blurFboA = attachColour(gl, blurTexA);
-    blurFboB = attachColour(gl, blurTexB);
+    ({ tex: glowTex, fbo: glowFbo } = glowTargets.add(gl, w, h, { label: "powder: bloom" }));
+    ({ tex: blurTexA, fbo: blurFboA } = glowTargets.add(gl, w, h, { label: "powder: bloom" }));
+    ({ tex: blurTexB, fbo: blurFboB } = glowTargets.add(gl, w, h, { label: "powder: bloom" }));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
     glowW = w;
@@ -1894,7 +1848,6 @@ function createPowderScene(): Scene {
       chunkProg = createProgram(gl, CHUNK_FRAG, CHUNK_VERT);
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
-      samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // Both point passes address their data by gl_VertexID and have no
       // vertex attributes at all, so they draw from an empty VAO rather than
@@ -1998,14 +1951,15 @@ function createPowderScene(): Scene {
       // in opposite directions, which is what makes it read as a burst rather
       // than as a louder kick.
       bursts.tick(anim.timeSec);
+      const kickFired = drives.fired("kick", lowRose);
       if (dropRose) {
         const s = Math.min(1, 1.3 * kickS);
         const seed = Math.random() * 100;
         bursts.trigger(anim.timeSec, s, seed);
         bursts.trigger(anim.timeSec, s, seed, true);
         shakeLeft = SHAKE_SEC;
-      } else if (drives.fired("kick", lowRose) && kickS >= 0.05) {
-        bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.lowPulse), Math.random() * 100);
+      } else if (kickFired && kickS >= 0.05) {
+        bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.lowPulse) * drives.hitSize("kick"), Math.random() * 100);
       }
 
       // The detector's baseline is stepped every frame regardless, so turning
@@ -2015,9 +1969,9 @@ function createPowderScene(): Scene {
       // many frames on a level or a decaying hit pulse, which would relaunch
       // the whole pool every frame. Called whether or not the cubes are on,
       // so a grid edge is consumed the same either way.
-      const chunkFire = drives.fired("chunks", hitStrength > 0);
+      const chunkFire = drives.fired("chunks", hitStrength > 0, undefined, hitStrength);
       chunks.tick(anim.timeSec);
-      const chunkStrength = chunkFire ? drives.value("chunks", hitStrength) : 0;
+      const chunkStrength = chunkFire ? drives.value("chunks", hitStrength) * drives.hitSize("chunks") : 0;
       if (chunksS >= 0.05 && chunkStrength > 0) {
         // Whichever plume fired most recently is the one the cubes belong to.
         let newest = bursts.bursts[0];
@@ -2074,10 +2028,10 @@ function createPowderScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, texVXY[read]);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, texVZW[read]);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uPosXY", "uPosXY"), 0);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uPosZW", "uPosZW"), 1);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uVelXY", "uVelXY"), 2);
-      gl.uniform1i(samplerLoc(gl, simProg, "sim.uVelZW", "uVelZW"), 3);
+      simProg.setI("uPosXY", 0);
+      simProg.setI("uPosZW", 1);
+      simProg.setI("uVelXY", 2);
+      simProg.setI("uVelZW", 3);
       drawFullscreenQuad(gl, quadVao);
       read = write;
 
@@ -2116,9 +2070,9 @@ function createPowderScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, texZW[read]);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, texVZW[read]);
-      gl.uniform1i(samplerLoc(gl, pointProg, "pt.uPosXY", "uPosXY"), 0);
-      gl.uniform1i(samplerLoc(gl, pointProg, "pt.uPosZW", "uPosZW"), 1);
-      gl.uniform1i(samplerLoc(gl, pointProg, "pt.uVelZW", "uVelZW"), 3);
+      pointProg.setI("uPosXY", 0);
+      pointProg.setI("uPosZW", 1);
+      pointProg.setI("uVelZW", 3);
       gl.bindVertexArray(pointVao);
       gl.drawArrays(gl.POINTS, 0, grainCount);
 
@@ -2138,7 +2092,7 @@ function createPowderScene(): Scene {
       // 5. Two separable blurs, half-res throughout.
       blurProg.use();
       gl.activeTexture(gl.TEXTURE0);
-      gl.uniform1i(samplerLoc(gl, blurProg, "blur.uTex", "uTex"), 0);
+      blurProg.setI("uTex", 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, blurFboA);
       gl.bindTexture(gl.TEXTURE_2D, glowTex);
       blurProg.setV2("uBlurStep", BLUR_STRIDE / glowW, 0);
@@ -2160,8 +2114,8 @@ function createPowderScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, glowTex);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, blurTexB);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uGlowTex", "uGlowTex"), 0);
-      gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uBlurTex", "uBlurTex"), 1);
+      compositeProg.setI("uGlowTex", 0);
+      compositeProg.setI("uBlurTex", 1);
       drawFullscreenQuad(gl, quadVao);
 
       // 7. The gallery renders every scene into one shared context each tick
@@ -2198,7 +2152,6 @@ function createPowderScene(): Scene {
         texVZW[i] = null;
       }
       freeGlowTargets(gl);
-      samplerLocs.clear();
       simProg = null;
       roomProg = null;
       pointProg = null;
@@ -2221,5 +2174,8 @@ function createPowderScene(): Scene {
     },
   };
 }
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-04" } as const;
 
 export const powderScene = createPowderScene();

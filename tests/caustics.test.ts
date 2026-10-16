@@ -3,10 +3,13 @@ import {
   advanceDensityFlow,
   advanceLoudSwell,
   advancePump,
+  brightnessGain,
   causticDensityScale,
+  causticsScene,
   createDensityFlowState,
   createLoudSwellState,
   createPumpState,
+  FRAG,
   DENSITY_GLIDE_SEC,
   densityTargetFor,
   driftFlows,
@@ -377,9 +380,9 @@ describe("caustics caustic density", () => {
     expect(causticDensityScale(0.5)).toBeCloseTo(1, 10);
   });
 
-  it("the endpoints span roughly a moderate 0.43x..2.3x range, monotone across it", () => {
-    expect(causticDensityScale(0)).toBeCloseTo(0.435, 2);
-    expect(causticDensityScale(1)).toBeCloseTo(2.297, 2);
+  it("the endpoints span roughly a 0.33x..3x range, monotone across it", () => {
+    expect(causticDensityScale(0)).toBeCloseTo(0.330, 2);
+    expect(causticDensityScale(1)).toBeCloseTo(3.031, 2);
     let prev = causticDensityScale(0);
     for (let d = 0.1; d <= 1; d += 0.1) {
       const s = causticDensityScale(d);
@@ -420,7 +423,7 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
     // would accumulate.
     for (const phase of [0, 1, 123.456, -50, 1e4, HUGE_PHASE, -HUGE_PHASE]) {
       for (const densScale of [causticDensityScale(0), causticDensityScale(0.5), causticDensityScale(1)]) {
-        const flows = driftFlows(phase * densScale);
+        const flows = driftFlows(phase, phase * densScale);
         expect(flows.length).toBeGreaterThan(0);
         for (const v of flows) {
           expect(v).toBeGreaterThanOrEqual(0);
@@ -435,7 +438,7 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
     // against an independently computed modulo at a phase where fp32 would
     // have long since lost sub-cell resolution. densScale = 1 (density 0.5)
     // is the identity, so the phase passed in is the unscaled HUGE_PHASE.
-    const flows = driftFlows(HUGE_PHASE);
+    const flows = driftFlows(HUGE_PHASE, HUGE_PHASE);
     const fx = HUGE_PHASE * 0.15;
     const fy = -HUGE_PHASE * 0.09;
     const mod = (x: number) => ((x % NOISE_PERIOD) + NOISE_PERIOD) % NOISE_PERIOD;
@@ -452,8 +455,8 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
     // modulo the period, i.e. either +delta*0.15 or that minus the period.
     const period = NOISE_PERIOD / 0.15; // phase units per wrap of flows[0]
     const delta = 0.01;
-    const before = driftFlows(period * 3 - delta / 2)[0];
-    const after = driftFlows(period * 3 + delta / 2)[0];
+    const before = driftFlows(period * 3 - delta / 2, 0)[0];
+    const after = driftFlows(period * 3 + delta / 2, 0)[0];
     const step = wrapFlow(after - before);
     // Tolerance: the upload buffer is a Float32Array, so a value just under
     // the period carries fp32 rounding — still orders of magnitude below a
@@ -462,8 +465,8 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
   });
 
   it("reuses the caller's buffer, so the per-frame upload allocates nothing", () => {
-    const buf = driftFlows(1);
-    expect(driftFlows(2, buf)).toBe(buf);
+    const buf = driftFlows(1, 1);
+    expect(driftFlows(2, 2, buf)).toBe(buf);
   });
 });
 
@@ -507,13 +510,14 @@ describe("caustic density glide (advanceDensityFlow)", () => {
     advanceDensityFlow(st, 1 / 60, 0.35, 0); // seed live at the starting density
     // Stand in for a scene that's been drifting for a very long time —
     // exactly the case that made the old bug worse the longer a session ran.
+    st.phase = 1e6;
     st.scaledPhase = 1e6;
-    const before = driftFlows(st.scaledPhase);
+    const before = driftFlows(st.phase, st.scaledPhase);
 
     // The slider jumps 0.35 -> 0.9 in a single, ordinary tick.
     const phaseStep = 1 / 60;
     advanceDensityFlow(st, 1 / 60, 0.9, phaseStep);
-    const after = driftFlows(st.scaledPhase);
+    const after = driftFlows(st.phase, st.scaledPhase);
 
     for (let i = 0; i < before.length; i++) {
       // Circular distance on the wrapped [0, NOISE_PERIOD) ring — a naive
@@ -528,14 +532,73 @@ describe("caustic density glide (advanceDensityFlow)", () => {
   it("with phaseStep 0 (Drift speed at 0), a density change moves no flow entry at all", () => {
     const st = createDensityFlowState();
     advanceDensityFlow(st, 1 / 60, 0.35, 0);
+    st.phase = 12345.6789;
     st.scaledPhase = 12345.6789;
-    const before = driftFlows(st.scaledPhase);
+    const before = driftFlows(st.phase, st.scaledPhase);
 
     advanceDensityFlow(st, 1 / 60, 0.9, 0); // no phase advance at all this tick
-    const after = driftFlows(st.scaledPhase);
+    const after = driftFlows(st.phase, st.scaledPhase);
 
     for (let i = 0; i < before.length; i++) {
       expect(after[i]).toBe(before[i]);
     }
+  });
+});
+
+describe("caustic density adds filaments without zooming (#454)", () => {
+  // Density scales the ridge noise's frequency only. The warp and glint
+  // offsets keep the plain phase, so two densities that have run for the
+  // same time differ in the ridge entries alone.
+  it("a constant density scales the ridge drift but leaves the warp and glint drift alone", () => {
+    const ticks = 600;
+    const dense = createDensityFlowState();
+    const sparse = createDensityFlowState();
+    for (let i = 0; i < ticks; i++) {
+      advanceDensityFlow(dense, 1 / 60, 0.9, 0.02);
+      advanceDensityFlow(sparse, 1 / 60, 0.1, 0.02);
+    }
+    expect(dense.phase).toBeCloseTo(sparse.phase, 10);
+    expect(dense.scaledPhase / sparse.scaledPhase).toBeCloseTo(causticDensityScale(0.9) / causticDensityScale(0.1), 6);
+    const a = driftFlows(dense.phase, dense.scaledPhase);
+    const b = driftFlows(sparse.phase, sparse.scaledPhase);
+    for (const i of [0, 1, 2, 3, a.length - 1]) expect(a[i]).toBe(b[i]);
+    expect(a[4]).not.toBe(b[4]);
+  });
+});
+
+describe("caustics level glow (brightnessGain, #449)", () => {
+  const levelGlowSpec = () => causticsScene.settings!.find((s) => s.key === "levelGlow")!;
+
+  it("with Level glow at 0 the loudness reading no longer moves the brightness", () => {
+    expect(brightnessGain(0, 0.64, 0, 0, 0)).toBeCloseTo(0.35, 10);
+    expect(brightnessGain(0, 1.0, 0, 0, 0)).toBeCloseTo(0.35, 10);
+  });
+
+  it("the default reproduces the old fixed loudness brightening, spelled out as the old literal formula", () => {
+    const spec = levelGlowSpec();
+    expect(brightnessGain(spec.default, 0.64, 0, 0, 0)).toBeCloseTo(0.35 + Math.pow(0.64, 1.5) * 0.7, 6);
+    expect(brightnessGain(spec.default, 0.3, 0.75, 0.5, 0.2)).toBeCloseTo(
+      0.35 + Math.pow(0.3, 1.5) * 0.7 + 0.75 * 0.5 * 1.5 + 0.2 * 0.8,
+      6,
+    );
+  });
+
+  it("the drive defaults to All level, the number uEnergy carries", () => {
+    expect(levelGlowSpec().drive?.default).toBe("anim.energy");
+  });
+
+  it("the glow scales with its slider as a multiply, not a lift", () => {
+    const full = brightnessGain(1, 0.64, 0, 0, 0) - 0.35;
+    const half = brightnessGain(0.5, 0.64, 0, 0, 0) - 0.35;
+    expect(full).toBeCloseTo(2 * half, 10);
+  });
+
+  it("a negative loudness reading contributes nothing, matching FRAG's max(…, 0.0) before pow", () => {
+    expect(brightnessGain(1, -0.5, 0, 0, 0)).toBeCloseTo(0.35, 10);
+  });
+
+  it("FRAG's brightness line is the one brightnessGain mirrors: level glow through its drive, no raw uEnergy", () => {
+    expect(FRAG).toContain("uLevelGlow * 1.40 * pow(max(levelGlowDrive(uEnergy), 0.0), 1.50)");
+    expect(FRAG).not.toContain("pow(uEnergy");
   });
 });

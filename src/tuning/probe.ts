@@ -9,7 +9,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneExpansion, getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
 import { getOverride, isAutoPinned } from "./overrides.ts";
-import { getPin } from "./pins.ts";
+import { getCustomValue } from "../render/customValues.ts";
 import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
 
 export interface ProbeInput {
@@ -46,7 +46,7 @@ export interface ProbeSettingValue {
   base: number;
   resolved: number;
   /** "override" (pinned by the tuning bus, incl. auto-pin), "pin" (typed
-   *  into the row past its spec range — see tuning/pins.ts), "auto"
+   *  into the row past its slider — a custom value, render/customValues.ts), "auto"
    *  (music-driven), or "manual" (auto disabled for this key — base is the
    *  stored value; `resolved` is that value once resolveSceneSetting has
    *  applied the device-wide scene master, so the two only match while the
@@ -67,16 +67,28 @@ export interface ProbeSnapshot {
    *  can tell a master≠1 run apart from a params run instead of reading a
    *  mysterious uniform offset. */
   master: number;
-  /** The master's Expansion dial (getSceneExpansion), applied to every
-   *  `settings[*].resolved` after `master` — same reason for reporting it. */
+  /** The master's Expansion dial (getSceneExpansion). It never touches
+   *  `settings[*].resolved` — it reshapes drive readings (drives.ts's
+   *  header) — but a run with it ≠ 1 reacts differently, so it's reported. */
   masterExpansion: number;
   bands: { low: number; mid: number; high: number; energy: number };
+  /** AnimFrame.hats/lead (src/audio/stemSplit.ts), eased and gated. */
+  stems: { hats: number; lead: number };
   /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
    *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a
    *  headless check can confirm a bar resync / ×2 / ÷2 landed without
    *  capturing pixels (see this file's own header, "answer with numbers,
-   *  not pixels"). */
-  beat: { fired: boolean; bpm: number; phase: number; barPhase: number; metronomeBpm: number };
+   *  not pixels"). metronomePhase and tapGuided do the same for a tap tempo
+   *  (src/render/tapTempo.ts). */
+  beat: {
+    fired: boolean;
+    bpm: number;
+    phase: number;
+    barPhase: number;
+    metronomeBpm: number;
+    metronomePhase: number;
+    tapGuided: boolean;
+  };
   section: number;
   drop: number;
   centroid: number;
@@ -100,7 +112,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     const mode: ProbeSettingValue["mode"] =
       getOverride(sceneId, spec.key) !== undefined
         ? "override"
-        : getPin(sceneId, spec.key) !== undefined
+        : getCustomValue(sceneId, spec.key) !== undefined
           ? "pin"
           : isAutoPinned()
             ? "override"
@@ -120,12 +132,15 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     master: getSceneMaster(),
     masterExpansion: getSceneExpansion(),
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
+    stems: { hats: anim?.hats ?? 0, lead: anim?.lead ?? 0 },
     beat: {
       fired: anim?.onset ?? false,
       bpm: vis?.bpm ?? 0,
       phase: anim?.beatPhase ?? 0,
       barPhase: anim?.barPhase ?? 0,
       metronomeBpm: anim?.metronomeBpm ?? 0,
+      metronomePhase: anim?.metronomePhase ?? 0,
+      tapGuided: anim?.tapGuided ?? false,
     },
     section: anim?.sectionIntensity ?? 0,
     drop: anim?.dropPulse ?? 0,
@@ -142,7 +157,7 @@ export function formatProbe(snap: ProbeSnapshot): string {
     `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} quality=${snap.quality} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel} master=${snap.master.toFixed(2)}`,
   );
   lines.push(
-    `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)}`,
+    `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)} | hats=${snap.stems.hats.toFixed(2)} lead=${snap.stems.lead.toFixed(2)}`,
   );
   lines.push(
     `beat=${snap.beat.fired ? 1 : 0} bpm=${snap.beat.bpm.toFixed(1)} phase=${snap.beat.phase.toFixed(2)} barPhase=${snap.beat.barPhase.toFixed(2)} metroBpm=${snap.beat.metronomeBpm.toFixed(1)} | section=${snap.section.toFixed(2)} drop=${snap.drop.toFixed(2)} centroid=${snap.centroid.toFixed(2)}`,

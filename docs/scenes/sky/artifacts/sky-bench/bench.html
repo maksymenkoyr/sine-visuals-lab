@@ -531,6 +531,7 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
   function displayFrag(fmt) {
     return `#version 300 es
 precision highp float;
+precision highp int;
 in vec2 vUv;
 out vec4 outColor;
 ${Sim.simIoGlsl(fmt)}
@@ -572,10 +573,18 @@ const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86);
 const float SUN_X_SPAN = 0.62;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
+// lowbias32 (public domain) on the integer cell, as in src/render/noiseHash.ts.
+uint uhash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
 float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
+  ivec2 c = ivec2(p);
+  return float(uhash(uint(c.x) ^ (uint(c.y) << 16u)) >> 8u) * (1.0 / 16777216.0);
 }
 float vnoise(vec2 p) {
   vec2 i = floor(p);

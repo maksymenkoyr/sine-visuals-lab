@@ -10,6 +10,7 @@ import {
   delayReason,
   diagramHeight,
   feedChoices,
+  qualityLine,
   followPatch,
   kindLine,
   layoutNodes,
@@ -33,6 +34,9 @@ function entry(id: string, over: Partial<RosterEntry> = {}): RosterEntry {
     ears: "follow",
     follow: null,
     screen: "main",
+    quality: "auto",
+    canPlay: false,
+    autoQuality: null,
     online: true,
     owner: false,
     ...over,
@@ -179,8 +183,18 @@ describe("rejectText", () => {
     expect(rejectText("tv-off")).toBe("A TV is always a screen.");
     expect(rejectText("bad-follow")).toBe("That device isn't on its own input.");
     expect(rejectText("rate")).toMatch(/Too many changes/);
+    expect(rejectText("owner-only")).toBe("Only the owner can change who may play.");
     expect(rejectText("shape")).toBe("The room refused that change.");
     expect(rejectText("anything")).toBe("The room refused that change.");
+  });
+});
+
+describe("qualityLine", () => {
+  it("says what a TV draws at, and what its own GPU test picks once it has said", () => {
+    expect(qualityLine(entry("tv", { quality: "auto", autoQuality: "mid" }))).toBe("Draws at Mid, what its own GPU test picks.");
+    expect(qualityLine(entry("tv", { quality: "auto", autoQuality: null }))).toMatch(/when it is online/);
+    expect(qualityLine(entry("tv", { quality: "high", autoQuality: "low" }))).toBe("Draws at High. Its own GPU test picks Low.");
+    expect(qualityLine(entry("tv", { quality: "floor", autoQuality: null }))).toBe("Draws at Floor.");
   });
 });
 

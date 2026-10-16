@@ -4,13 +4,14 @@
 // header; this file only gathers the facts from git and GitHub.
 //
 //   node tools/release-notes.mjs [--tag vX.Y.Z] [--from <ref>] [--to <ref>]
-//        [--version-json dist/version.json] [--pr-body <file>] [--repo owner/name]
+//        [--version-json dist/version.json] [--pr-body <file>] [--repo owner/name] [--prs]
 //
 // --from defaults to the newest strict vX.Y.Z tag in --to's history, or, run
 // from main (whose history never holds the release tags — they sit on
 // production's merge commits), the newest one on origin/production.
-// --pr-body is a file holding the release pull request's body; its
-// "## Highlights" section opens the notes. --version-json adds the scene
+// --pr-body is a file holding the release pull request's body; its written
+// notes open the page. --prs prints only the release's pull request numbers,
+// one per line (release.yml comments on each). --version-json adds the scene
 // versions this release changed. Authors come from GitHub (`gh`), and a line
 // just goes without its "by @…" when that fails.
 //
@@ -18,20 +19,19 @@
 // publishes, and by tools/release-pr.mjs for the preview it puts in the
 // release pull request; run it by hand on main to see the next release's page.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { formatVersion, latestRelease } from "./appVersionLib.mjs";
-import { parseRegistryImports, resolveImport } from "./sceneVersionLib.mjs";
+import { parseImportSpecifiers, resolveImport, SCENES_DIR, sceneEntries } from "./sceneVersionLib.mjs";
 import {
-  addedSceneUnits,
   categorize,
-  extractHighlights,
-  prNumberFromSubject,
+  changesFromLog,
+  extractReleaseNotes,
+  newSceneUnits,
   renderNotes,
   sceneNameFromSource,
 } from "./releaseNotesLib.mjs";
 
-const REGISTRY = "src/render/scenes/index.ts";
 const STABLE_URL = "https://www.sinevisualslab.com";
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 << 20 }).trim();
@@ -45,6 +45,7 @@ const { values: opts } = parseArgs({
     "version-json": { type: "string" },
     "pr-body": { type: "string" },
     repo: { type: "string" },
+    prs: { type: "boolean" },
   },
 });
 
@@ -71,16 +72,34 @@ function repoName() {
   }
 }
 
-/** unit → display name for every scene registered in the checkout. */
+/** unit → display name for every free scene in the checkout. The name is read
+ *  from the scene module, or from the files it imports when the module only
+ *  re-exports its scene (sky/index.ts). */
 function sceneNames() {
   const names = new Map();
-  if (!existsSync(REGISTRY)) return names;
-  for (const { unit, path } of parseRegistryImports(readFileSync(REGISTRY, "utf8"))) {
-    const file = resolveImport(REGISTRY, path, existsSync);
-    const name = file ? sceneNameFromSource(readFileSync(file, "utf8")) : null;
+  if (!existsSync(SCENES_DIR)) return names;
+  const read = (file) => (existsSync(file) ? readFileSync(file, "utf8") : null);
+  for (const { unit, file } of sceneEntries(readdirSync(SCENES_DIR), read, existsSync)) {
+    const source = read(file);
+    let name = sceneNameFromSource(source);
+    for (const spec of name ? [] : parseImportSpecifiers(source ?? "")) {
+      const dep = resolveImport(file, spec, existsSync);
+      name = dep ? sceneNameFromSource(read(dep)) : null;
+      if (name) break;
+    }
     names.set(unit, name ?? unit);
   }
   return names;
+}
+
+/** The top-level names under the scenes directory at `rev`, or null if git
+ *  can't list it there. */
+function sceneDirNames(rev) {
+  try {
+    return lines(git("ls-tree", "--name-only", rev, `${SCENES_DIR}/`)).map((p) => p.slice(SCENES_DIR.length + 1));
+  } catch {
+    return null;
+  }
 }
 
 /** PR number → author login, in one GraphQL call. Empty on any failure. */
@@ -121,17 +140,32 @@ const repo = repoName();
 const names = sceneNames();
 const nameList = [...names.values()];
 
-const commits = lines(git("log", "--no-merges", "--format=%H%x1f%s", ...(from ? [`${from}..${to}`] : [to]))).map((l) => {
-  const [sha, subject] = l.split("\x1f");
-  return { sha, subject, pr: prNumberFromSubject(subject) };
-});
-const authors = prAuthors(repo, [...new Set(commits.map((c) => c.pr).filter(Boolean))]);
+const log = git("log", "--format=%x1e%H%x1f%P%x1f%s%x1f%b", ...(from ? [`${from}..${to}`] : [to]))
+  .split("\x1e")
+  .filter((rec) => rec.trim())
+  .map((rec) => {
+    const [sha, parents, subject, body = ""] = rec.trim().split("\x1f");
+    return { sha, parents: parents.split(" ").filter(Boolean), subject, body };
+  });
+const changes = changesFromLog(log, (sha) => lines(git("rev-list", `${sha}^1..${sha}^2`)));
+const prNumbers = [...new Set(changes.map((c) => c.pr).filter(Boolean))];
+if (opts.prs) {
+  process.stdout.write(prNumbers.sort((a, b) => a - b).map((n) => `${n}\n`).join(""));
+  process.exit(0);
+}
+const authors = prAuthors(repo, prNumbers);
 
-const entries = commits.map((c) => {
-  const files = lines(git("diff-tree", "--no-commit-id", "--name-only", "-r", c.sha));
-  const newScenes = files.includes(REGISTRY)
-    ? addedSceneUnits(git("show", "--format=", "--unified=0", c.sha, "--", REGISTRY)).filter((u) => names.has(u))
-    : [];
+const entries = changes.map((c) => {
+  // A merged pull request is everything since its first parent; a single
+  // commit is its own diff.
+  const files = lines(c.base ? git("diff", "--name-only", c.base, c.sha) : git("diff-tree", "--no-commit-id", "--name-only", "-r", c.sha));
+  // A new scene is a scene module whose file or folder this change created.
+  let newScenes = [];
+  if (files.some((f) => f.startsWith(`${SCENES_DIR}/`))) {
+    const before = sceneDirNames(c.base ?? `${c.sha}^`);
+    const after = sceneDirNames(c.sha);
+    if (before && after) newScenes = newSceneUnits(before, after).filter((u) => names.has(u));
+  }
   return { ...c, author: authors.get(c.pr) ?? null, newScenes, category: categorize({ subject: c.subject, files, newScenes, sceneNames: nameList }) };
 });
 
@@ -141,8 +175,8 @@ if (opts["version-json"]) {
   sceneVersions = (info.scenesChanged ?? []).map((unit) => ({ unit, name: names.get(unit), version: info.scenes?.[unit] ?? "?" }));
 }
 
-const highlights = opts["pr-body"] && existsSync(opts["pr-body"]) ? extractHighlights(readFileSync(opts["pr-body"], "utf8")) : "";
+const notes = opts["pr-body"] && existsSync(opts["pr-body"]) ? extractReleaseNotes(readFileSync(opts["pr-body"], "utf8")) : "";
 
 process.stdout.write(
-  renderNotes({ highlights, entries, sceneVersions, repo, prevTag: from, tag: opts.tag ?? null, siteUrl: opts.tag ? STABLE_URL : null }),
+  renderNotes({ notes, entries, sceneVersions, repo, prevTag: from, tag: opts.tag ?? null, siteUrl: opts.tag ? STABLE_URL : null }),
 );

@@ -27,9 +27,19 @@
  * `chipsFor`, `feedChoices` and friends) run in the unit tests; the DOM is
  * built inside `createRoomView`.
  *
+ * A Play row (every device but a TV) says whether that device’s Play reaches
+ * Main. The owner always may; for any other device the owner switches it, and
+ * everyone else sees the choice but can’t change it (server/roomDevices.ts
+ * `mayPlay`).
+ *
+ * A TV also gets a Quality row: a TV page has no panel of its own, so this is
+ * where its quality is chosen, with the Power card's choices
+ * (render/qualityPref.ts `QUALITY_OPTIONS`).
+ *
  * Styling is the controls panel's (src/ui/controlsTheme.ts): its glass, its
  * two fonts, and the accent each idea already has there (green for sound,
- * violet for the Main look, amber for a device's own screen, sky for "you").
+ * violet for the Main look, amber for a device's own screen, sky for "you",
+ * teal for quality).
  */
 
 import {
@@ -41,6 +51,7 @@ import {
   GLASS_FILTER,
   HOT_RED,
   INPUT_GREEN,
+  POWER_TEAL,
   SCENE_VIOLET,
   ensureControlsStyles,
   withAlpha,
@@ -48,6 +59,7 @@ import {
 import { createRoomCodeEntry, joinUrlFor, type AddScreenOutcome, type JoinKind, type JoinLinkInfo } from "./joinScreen.ts";
 import { drawQrCode } from "./qr.ts";
 import { recordsFromRoster, type RosterEntry } from "../net/roomMessages.ts";
+import { PRESET_LABEL, QUALITY_OPTIONS } from "../render/qualityPref.ts";
 import {
   DEVICE_LIMITS,
   RENDER_DELAY_MS,
@@ -55,6 +67,7 @@ import {
   feedOf,
   followersOf,
   ownerId,
+  parseQuality,
   pictureDelayMs,
   type DeviceKind,
   type DeviceSetPatch,
@@ -273,6 +286,17 @@ export function delayReason(entry: RosterEntry, roster: RosterEntry[]): string {
     : "Hears the music itself and draws at once.";
 }
 
+/** The line under a TV's Quality row: what it draws at, and what its own GPU
+ *  test picks (the roster's `autoQuality`, known only while it is online). */
+export function qualityLine(entry: RosterEntry): string {
+  const auto = entry.autoQuality === null ? null : PRESET_LABEL[entry.autoQuality];
+  if (entry.quality === "auto") {
+    return auto === null ? "Picks a level from its own GPU test when it is online." : `Draws at ${auto}, what its own GPU test picks.`;
+  }
+  const at = `Draws at ${PRESET_LABEL[entry.quality]}.`;
+  return auto === null ? at : `${at} Its own GPU test picks ${auto}.`;
+}
+
 /** What to say under the controls when the room refuses a change. */
 export function rejectText(reason: string): string {
   switch (reason) {
@@ -284,6 +308,8 @@ export function rejectText(reason: string): string {
       return "That device isn't on its own input.";
     case "rate":
       return "Too many changes — wait a moment.";
+    case "owner-only":
+      return "Only the owner can change who may play.";
     default:
       return "The room refused that change.";
   }
@@ -457,8 +483,11 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     `position: fixed; inset: 0; z-index: ${OVERLAY_Z}; display: none; align-items: center; justify-content: center;` +
       `background: rgba(0,0,0,0.55); color: #fff; font-family: ${FONT_LABEL};`,
   );
+  // 90dvh, not just 90vh: Safari's vh is the toolbar-hidden height, so a
+  // vh-sized dialog centred here could push its close button off the top.
+  // Browsers without dvh drop that declaration and keep the vh one.
   const panel = box(
-    `position: relative; box-sizing: border-box; width: min(980px, 96vw); max-height: 90vh; overflow-y: auto; padding: 16px 18px 18px;` +
+    `position: relative; box-sizing: border-box; width: min(980px, 96vw); max-height: 90vh; max-height: 90dvh; overflow-y: auto; padding: 16px 18px 18px;` +
       `background: ${GLASS_BG}; -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};` +
       `border: 1px solid rgba(255,255,255,0.13); border-top-color: rgba(255,255,255,0.22); border-radius: 3px;`,
   );
@@ -597,6 +626,38 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
   );
   const screenNote = box(dimLine);
 
+  // Not a TV's: a TV only shows Main, it never plays to it.
+  const playRow = box("");
+  const playLabel = box(`${monoCaps} margin-top: 16px; margin-bottom: 4px; color: ${SCENE_VIOLET};`);
+  playLabel.textContent = "Play";
+  const playSeg = segmented(
+    [
+      { value: "yes", label: "Can play" },
+      { value: "no", label: "Can’t play" },
+    ],
+    (v) => {
+      const d = roster.find((r) => r.deviceId === selected);
+      if (d && (v === "yes" || v === "no")) deps.setDevice(d.deviceId, { canPlay: v === "yes" });
+    },
+  );
+  const playNote = box(dimLine);
+  playRow.append(playLabel, playSeg.el, playNote);
+
+  // Only a TV's: every other device sets its own Quality in its panel.
+  const qualityRow = box("");
+  const qualityLabel = box(`${monoCaps} margin-top: 16px; margin-bottom: 4px; color: ${POWER_TEAL};`);
+  qualityLabel.textContent = "Quality";
+  const qualitySeg = segmented(
+    QUALITY_OPTIONS.map((o) => ({ value: o.choice, label: o.text })),
+    (v) => {
+      const d = roster.find((r) => r.deviceId === selected);
+      const quality = parseQuality(v);
+      if (d && quality) deps.setDevice(d.deviceId, { quality });
+    },
+  );
+  const qualityNote = box(dimLine);
+  qualityRow.append(qualityLabel, qualitySeg.el, qualityNote);
+
   const timingRow = box(`display: flex; justify-content: space-between; margin-top: 16px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);`);
   const timingLabel = box(monoCaps);
   timingLabel.textContent = "Picture delay";
@@ -657,6 +718,8 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
     screenLabel,
     screenSeg.el,
     screenNote,
+    playRow,
+    qualityRow,
     timingRow,
     timingNote,
     messageEl,
@@ -966,6 +1029,32 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
           : "No picture. The device is a remote.",
     );
 
+    playRow.style.display = d.kind === "tv" ? "none" : "block";
+    if (d.kind !== "tv") {
+      const locked: Record<string, string> = {};
+      if (!deps.isOwner) {
+        locked.yes = "Only the owner can change this";
+        locked.no = "Only the owner can change this";
+      } else if (d.owner) locked.no = "The owner can always play";
+      playSeg.set(d.canPlay ? "yes" : "no", locked, (v) => (v === "yes" ? SCENE_VIOLET : GREY));
+      setText(
+        playNote,
+        d.owner
+          ? "The owner can always play to Main."
+          : d.canPlay
+            ? "Its Play changes Main."
+            : deps.isOwner
+              ? "Its Play does nothing until you allow it."
+              : "Its Play does nothing. Only the owner can allow it.",
+      );
+    }
+
+    qualityRow.style.display = d.kind === "tv" ? "block" : "none";
+    if (d.kind === "tv") {
+      qualitySeg.set(d.quality, {}, () => POWER_TEAL);
+      setText(qualityNote, qualityLine(d));
+    }
+
     const { records, online } = recordsFromRoster(roster);
     setText(timingValue, `${pictureDelayMs(records, online, d.deviceId)} ms`);
     setText(timingNote, delayReason(d, roster));
@@ -992,7 +1081,7 @@ export function createRoomView(deps: RoomViewDeps): RoomView {
    *  it has landed: a refusal said about an earlier try is stale by then. */
   function selectedKey(): string {
     const d = roster.find((r) => r.deviceId === selected);
-    return d ? `${d.name}|${d.ears}|${d.follow ?? ""}|${d.screen}` : "";
+    return d ? `${d.name}|${d.ears}|${d.follow ?? ""}|${d.screen}|${d.quality}|${d.canPlay}` : "";
   }
 
   deps.onRosterChange((r) => {

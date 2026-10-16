@@ -1,5 +1,5 @@
 import { Room, type Env } from "./room.ts";
-import { createRateLimiter } from "./rateLimit.ts";
+import { createRateLimiter, rateLimitKey } from "./rateLimit.ts";
 import { isBotUserAgent, parseUsageEvent, usageDataPoint } from "./usage.ts";
 
 export { Room };
@@ -7,6 +7,10 @@ export { Room };
 // Uppercase letters + digits, minus visually ambiguous ones (0/O, 1/I/L).
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const APEX_HOST = "sinevisualslab.com";
+// The Insiders channel's first hosts, from when it was called Insider; still
+// attached to that Worker (wrangler.toml's [env.insider]) only to send the
+// homepage on to insiders.
+const OLD_INSIDERS_HOSTS = new Set([`insider.${APEX_HOST}`, `www.insider.${APEX_HOST}`]);
 const ROOM_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/ws$/;
 const ADOPT_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/adopt$/;
 
@@ -29,12 +33,17 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Best-effort per-IP throttles (server/rateLimit.ts says why they are only
-// best-effort: the real backstop for a public URL is a Cloudflare WAF
-// rate-limiting rule). Room creation and TV adopt each get their own, so a
-// phone retrying an adopt can't use up the laptop's room creation.
+// Best-effort per-address throttles, keyed by `rateLimitKey`
+// (server/rateLimit.ts says why they are only best-effort: the real backstop
+// for a public URL is a Cloudflare WAF rate-limiting rule). Room creation, TV
+// adopt and room connections each get their own, so a phone retrying an adopt
+// can't use up the laptop's room creation. Connections are the most generous:
+// everyone at a party shares the venue's one IP (or IPv6 /64), and after a
+// Wi-Fi drop each device redials on its backoff (src/net/reconnect.ts) until
+// the room answers.
 const roomCreateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 const adoptLimiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
+const roomConnectLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -47,8 +56,12 @@ export default {
     if (url.pathname === "/") {
       // The Host header, not url.hostname: `wrangler dev` rewrites request.url
       // to the first route in wrangler.toml, which is the apex.
-      if (request.headers.get("Host") === APEX_HOST) {
+      const host = request.headers.get("Host");
+      if (host === APEX_HOST) {
         return Response.redirect(`https://www.${APEX_HOST}/${url.search}`, 301);
+      }
+      if (host !== null && OLD_INSIDERS_HOSTS.has(host)) {
+        return Response.redirect(`https://insiders.${APEX_HOST}/${url.search}`, 301);
       }
       return env.ASSETS.fetch(request);
     }
@@ -60,7 +73,7 @@ export default {
     }
 
     if (url.pathname === "/api/room" && request.method === "POST") {
-      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const ip = rateLimitKey(request.headers.get("CF-Connecting-IP"));
       if (!roomCreateLimiter.allow(ip)) {
         return new Response("too many rooms, slow down", {
           status: 429,
@@ -75,7 +88,7 @@ export default {
     // the Worker only throttles it and adds CORS to whatever comes back.
     const adopt = url.pathname.match(ADOPT_PATH_RE);
     if (adopt && request.method === "POST") {
-      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const ip = rateLimitKey(request.headers.get("CF-Connecting-IP"));
       if (!adoptLimiter.allow(ip)) {
         return new Response("too many requests, slow down", {
           status: 429,
@@ -106,6 +119,13 @@ export default {
       // after a Durable Object was instantiated or woken for it.
       if (request.headers.get("Upgrade") !== "websocket") {
         return new Response("expected websocket", { status: 426 });
+      }
+      // Refused before the room's Durable Object is woken, whose requests are
+      // the scarcer allowance. A browser sees only a failed connect, which its
+      // backoff retries like any other.
+      const ip = rateLimitKey(request.headers.get("CF-Connecting-IP"));
+      if (!roomConnectLimiter.allow(ip)) {
+        return new Response("too many connections, slow down", { status: 429, headers: { "Retry-After": "60" } });
       }
       const stub = env.ROOM.get(env.ROOM.idFromName(match[1]));
       return stub.fetch(request);

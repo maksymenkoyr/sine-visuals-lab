@@ -6,6 +6,12 @@ import {
   getDriveThresholdState,
   setDriveThreshold,
   setDriveThresholdOn,
+  getDriveSmoothness,
+  getDriveSmoothnessOn,
+  setDriveSmoothness,
+  setDriveSmoothnessOn,
+  getDriveWindowMax,
+  setDriveWindowMax,
   sanitizeDriveSetting,
   encodeDriveSetting,
   togglePatchSource,
@@ -20,11 +26,14 @@ import {
   getDriveLineStrength,
   setDriveLineStrength,
   resetDriveLineStrength,
+  removeShapedSource,
 } from "../src/render/driveStore.ts";
+import { normalizeDriveSetting } from "../src/render/drives.ts";
 import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "../src/render/gateWindow.ts";
 
 // vitest runs under environment: "node" (vitest.config.ts), so there is no
 // localStorage global at all here for the plain round-trip tests below —
@@ -265,6 +274,50 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: true, value: 0.6 });
     resetDriveSetting(sceneId, SPARKLE);
     expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
+  });
+
+  it("a generic gate's smoothness: the old knee by default, clamped to 0..1, NaN ignored, cleared by Reset to scene default", () => {
+    const sceneId = "smoothness-1";
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(GENERIC_SMOOTHNESS_DEFAULT);
+    setDriveSmoothness(sceneId, SPARKLE, 0.6);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.6);
+    setDriveSmoothness(sceneId, SPARKLE, 5);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(1);
+    setDriveSmoothness(sceneId, SPARKLE, -1);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0);
+    setDriveSmoothness(sceneId, SPARKLE, 0.3);
+    setDriveSmoothness(sceneId, SPARKLE, NaN);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.3);
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(GENERIC_SMOOTHNESS_DEFAULT);
+  });
+
+  it("a generic gate's window Max: GENERIC_WINDOW_MAX_DEFAULT by default, clamped to 0..1, NaN ignored, cleared by Reset to scene default", () => {
+    const sceneId = "window-max-1";
+    expect(getDriveWindowMax(sceneId, SPARKLE)).toBe(GENERIC_WINDOW_MAX_DEFAULT);
+    setDriveWindowMax(sceneId, SPARKLE, 0.6);
+    expect(getDriveWindowMax(sceneId, SPARKLE)).toBe(0.6);
+    setDriveWindowMax(sceneId, SPARKLE, 5);
+    expect(getDriveWindowMax(sceneId, SPARKLE)).toBe(1);
+    setDriveWindowMax(sceneId, SPARKLE, -1);
+    expect(getDriveWindowMax(sceneId, SPARKLE)).toBe(0);
+    setDriveWindowMax(sceneId, SPARKLE, 0.3);
+    setDriveWindowMax(sceneId, SPARKLE, NaN);
+    expect(getDriveWindowMax(sceneId, SPARKLE)).toBe(0.3);
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveWindowMax(sceneId, SPARKLE)).toBe(GENERIC_WINDOW_MAX_DEFAULT);
+  });
+
+  it("a generic gate's smoothness on/off: on by default, independent of the threshold and the slider, cleared by Reset", () => {
+    const sceneId = "smoothness-on-1";
+    expect(getDriveSmoothnessOn(sceneId, SPARKLE)).toBe(true);
+    setDriveSmoothness(sceneId, SPARKLE, 0.7);
+    setDriveSmoothnessOn(sceneId, SPARKLE, false);
+    expect(getDriveSmoothnessOn(sceneId, SPARKLE)).toBe(false);
+    expect(getDriveSmoothness(sceneId, SPARKLE)).toBe(0.7);
+    expect(getDriveThresholdState(sceneId, SPARKLE).on).toBe(false);
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveSmoothnessOn(sceneId, SPARKLE)).toBe(true);
   });
 
   it("an empty patch survives the storage round trip", () => {
@@ -553,5 +606,48 @@ describe("driveStore with a stubbed localStorage", () => {
 
     const line = fresh.getDriveLine("garbage-scene-2", FLASH);
     for (let b = 0; b < NUM_BANDS; b++) expect(line[b]).toBe(LINE_HEIGHT_DEFAULT);
+  });
+});
+
+describe("shaped sources in the drive store", () => {
+  const SHAPED_SPEC: SceneSetting = { key: "shp", label: "Shp", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } };
+
+  it("sanitizeDriveSetting accepts a shaped wire, bare and inside a patch", () => {
+    expect(sanitizeDriveSetting({ source: "shaped", id: "n3" })).toEqual(driveSettingFromChoice({ source: "shaped", id: "n3" }));
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id: "n3" } }] })).toEqual({
+      mix: "add",
+      sources: [{ choice: { source: "shaped", id: "n3" }, weight: 1 }],
+    });
+  });
+
+  it("sanitizeDriveSetting rejects a malformed shaped id", () => {
+    for (const id of ["x", "n0", "__proto__", 3]) {
+      expect(sanitizeDriveSetting({ source: "shaped", id }), String(id)).toBeNull();
+      expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id } }] }), String(id)).toBeNull();
+    }
+  });
+
+  it("encode then sanitize round-trips a multi-source patch with a shaped wire", () => {
+    const setting = normalizeDriveSetting({
+      mix: "gate",
+      sources: [
+        { choice: { source: "shaped", id: "n12" }, weight: 0.5, when: true },
+        { choice: "anim.low", weight: 1, off: true },
+      ],
+    });
+    expect(sanitizeDriveSetting(encodeDriveSetting(setting))).toEqual(setting);
+  });
+
+  it("removeShapedSource unplugs that wire in every scene and leaves other wires alone", () => {
+    const a = "shaped-remove-a";
+    const b = "shaped-remove-b";
+    const c = "shaped-remove-c";
+    setDriveSetting(a, SHAPED_SPEC, { mix: "add", sources: [{ choice: { source: "shaped", id: "n5" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
+    setDriveSetting(b, SHAPED_SPEC, { mix: "add", sources: [{ choice: "anim.high", weight: 1 }, { choice: { source: "shaped", id: "n5" }, weight: 1 }] });
+    setDriveSetting(c, SHAPED_SPEC, { mix: "add", sources: [{ choice: { source: "shaped", id: "n6" }, weight: 1 }] });
+    removeShapedSource("n5");
+    expect(getDriveSetting(a, SHAPED_SPEC)).toEqual(driveSettingFromChoice("anim.low"));
+    expect(getDriveSetting(b, SHAPED_SPEC)).toEqual(driveSettingFromChoice("anim.high"));
+    expect(getDriveSetting(c, SHAPED_SPEC)).toEqual(driveSettingFromChoice({ source: "shaped", id: "n6" }));
   });
 });

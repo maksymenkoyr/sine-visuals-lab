@@ -6,7 +6,7 @@ lit white with a sparse share glowing red, a soft ice-blue light washing the
 core on alternating bars. Beats swell the frame's brightness and push the
 camera's travel speed; drops light a fan of spokes; a slow mood cycle decides
 how much of a beat's light goes to the red strips versus the white edges.
-Draft scene (in `DRAFT_SCENE_IDS`, `src/render/scenes/index.ts`), shipped on
+Draft scene (`stage: "draft"` in its `gallery` record), shipped on
 `main` via a single merged PR.
 
 ## Where the code is
@@ -44,9 +44,9 @@ Draft scene (in `DRAFT_SCENE_IDS`, `src/render/scenes/index.ts`), shipped on
   `anim.onset`/`anim.dropOnset` rather than `frame.*` for triggers, because
   the render cap can skip the tick a feature fired on (see `renderLatch.ts`).
   The bloom chain itself (two-level separable Gaussian, ping-pong FBOs,
-  sampler-location cache) is copied from `powder.ts`'s pattern — there is no
-  shared bloom helper between the two scenes, by design (each scene owns its
-  own GL code).
+  sampler units set with `GLProgram.setI`) is copied from `powder.ts`'s
+  pattern — there is no shared bloom helper between the two scenes, by design
+  (each scene owns its own GL code).
 
 ## References
 
@@ -176,6 +176,8 @@ are one measurement run each, not standing specs):
   carried by `travel`, `roll`, the pan clock and the morph clock), the
   `hash01` helper, and the `nearMiss`/`hitMat` locals in the march loop
   that were written and never used.
+- 2026-10-08 — Beat pulse became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the zoom surge and swell impulses it starts (CrystalInputs.pulseSize) by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 
@@ -266,3 +268,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   carrying the scene's full v1–v4 history (see "Decisions and pivots")
   plus the `tools/refburst.py` cut/fade fix. Still listed in
   `DRAFT_SCENE_IDS` on `main`.
+- #462 (draft, 2026-10-09): Rendering: the march and blur-pyramid targets now come from gl.ts's shared render-target helper (`createTargetList`); no change to the look.

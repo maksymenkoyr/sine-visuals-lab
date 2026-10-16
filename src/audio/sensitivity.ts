@@ -1,5 +1,5 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * Per-scene mic sensitivity, expansion, and smoothing: three visual gain
@@ -35,7 +35,11 @@ export const EXPANSION_MAX = 4;
 export const EXPANSION_DEFAULT = 1;
 
 export const SMOOTHING_MIN = 0.25;
-export const SMOOTHING_MAX = 4;
+export const SMOOTHING_MAX = 20;
+// Auto's own ceiling for Smoothing: autoTune.ts's SMOOTHING_SPEC.max.
+// computeAutoTarget scales Auto's swing by the spec's span, so it keeps
+// the span it was tuned on; only a manual drag reaches SMOOTHING_MAX.
+export const SMOOTHING_AUTO_MAX = 4;
 export const SMOOTHING_DEFAULT = 1;
 
 // In-memory cache is the source of truth for get/set within a session, seeded
@@ -63,19 +67,24 @@ export function createPerSceneSetting(
   legacyKeys: readonly string[] = [],
 ) {
   /** What localStorage holds under `storageKey`, as a plain record of finite
-   *  numbers. Null when nothing is saved there; garbage reads as empty. */
+   *  numbers. Null when nothing is saved there (or it is empty). Throws on
+   *  text that is not a JSON object, so the reload hook keeps its cache. */
+  function readStoredStrict(): Record<string, number> | null {
+    const parsed = parseSyncedObject(localStorage.getItem(storageKey));
+    if (parsed === null) return null;
+    const out: Record<string, number> = {};
+    for (const k of Object.keys(parsed)) {
+      const v = parsed[k];
+      if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  }
+
+  /** The load-time read: garbage reads as empty (and so never triggers the
+   *  legacy-key migration below). */
   function readStored(): Record<string, number> | null {
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      const out: Record<string, number> = {};
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
-      for (const k of Object.keys(parsed)) {
-        const v = parsed[k];
-        if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
-      }
-      return out;
+      return readStoredStrict();
     } catch {
       return {};
     }
@@ -106,9 +115,10 @@ export function createPerSceneSetting(
 
   // Replaces the cache's contents in place. Deliberately not loadInitial: a
   // snapshot applied from outside must never run the legacy-key migration or
-  // delete anything from the storage it was applied to.
+  // delete anything from the storage it was applied to. It reads before it
+  // clears, so unreadable text throws out of here and leaves the cache alone.
   registerSyncedStore(storageKey, () => {
-    const stored = readStored() ?? {};
+    const stored = readStoredStrict() ?? {};
     for (const k of Object.keys(cache)) delete cache[k];
     for (const k of Object.keys(stored)) cache[k] = stored[k];
   });
@@ -246,8 +256,8 @@ const scratchBands = new Float32Array(NUM_BANDS);
 
 /**
  * Applies the sensitivity gain and then the expansion curve to a frame's
- * [0,1] band/energy values. onset/pulseOnset/bpm/onsetPhase/time/level pass
- * through untouched — both are a visual gain, not a beat-detection
+ * [0,1] band/energy values. onset/pulseOnset/bpm/onsetPhase/time/level/hats/
+ * lead pass through untouched — both are a visual gain, not a beat-detection
  * threshold, and `level` specifically must stay the raw, un-gained reading:
  * it's auto mode's input signal for driving these very sliders (see
  * musicProfile.ts), so shaping it here would feed the gain stage its own
@@ -269,5 +279,7 @@ export function applySensitivity(frame: FeatureFrame, sensitivity: number, expan
     bpm: frame.bpm,
     onsetPhase: frame.onsetPhase,
     level: frame.level,
+    hats: frame.hats,
+    lead: frame.lead,
   };
 }

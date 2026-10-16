@@ -77,18 +77,27 @@ describe("per-scene setting reload", () => {
     expect(gains.getBandGain("s", 1)).toBe(gains.BAND_GAIN_DEFAULT);
   });
 
-  it("ignores garbage instead of throwing or keeping it", async () => {
+  it("keeps what it had on unreadable text, and resets on an empty one", async () => {
     const { fake, sens, synced } = await fresh({ "vibe.sensitivity": JSON.stringify({ a: 2 }) });
-    for (const junk of ["not json", "[1,2,3]", "null", "42", '"text"', ""]) {
+    for (const junk of ["not json", "[1,2,3]", "null", "42", '"text"']) {
       synced.applySyncedStorage({ "vibe.sensitivity": junk }, fake);
-      expect(sens.getSensitivity("a"), junk).toBe(sens.SENSITIVITY_DEFAULT);
+      expect(sens.getSensitivity("a"), junk).toBe(2);
     }
+    // Empty text is "absent", so it resets exactly like a missing key.
+    synced.applySyncedStorage({ "vibe.sensitivity": "" }, fake);
+    expect(sens.getSensitivity("a")).toBe(sens.SENSITIVITY_DEFAULT);
     // Entries that are not finite numbers are dropped; the rest are kept.
     synced.applySyncedStorage({ "vibe.sensitivity": '{"a":"loud","b":null,"c":{"x":1},"d":3}' }, fake);
     expect(sens.getSensitivity("a")).toBe(sens.SENSITIVITY_DEFAULT);
     expect(sens.getSensitivity("b")).toBe(sens.SENSITIVITY_DEFAULT);
     expect(sens.getSensitivity("c")).toBe(sens.SENSITIVITY_DEFAULT);
     expect(sens.getSensitivity("d")).toBe(3);
+  });
+
+  it("keeps a band fader's value on unreadable text too", async () => {
+    const { fake, gains, synced } = await fresh({ "vibe.bandFader.3": JSON.stringify({ s: 2.5 }) });
+    synced.applySyncedStorage({ "vibe.bandFader.3": "][" }, fake);
+    expect(gains.getBandGain("s", 3)).toBe(2.5);
   });
 
   it("still clamps what it reads back", async () => {

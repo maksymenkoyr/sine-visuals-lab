@@ -1,13 +1,11 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
+import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
 import {
-  advanceEmission,
   advanceRingRate,
   autoNarrowWidthW,
   createRingRateState,
   buildProfile,
-  createRippleEmissionState,
   createRippleEmitter,
   PROFILE_MAX_RADIUS,
   PROFILE_SAMPLES,
@@ -15,11 +13,28 @@ import {
   ringStyleFor,
   rippleSpeedFor,
   rippleWidthFor,
-  salienceMarks,
-  RING_THRESHOLD_DEFAULT,
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
+import { advanceStandout, advanceStandoutAmount, createStandoutState, STANDOUT_THRESHOLD_DEFAULT, standoutLine } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
+import type { PanelSection } from "../scene.ts";
+import {
+  advanceSparkleHits,
+  createSparkleHits,
+  EFFECT_BLOOM,
+  EFFECT_FLARE,
+  EFFECT_GRAIN,
+  EFFECT_PRISM,
+  EFFECT_RINGS,
+  EFFECT_RUN,
+  EFFECT_SHIMMER,
+  EFFECT_TIGHTEN,
+  SHAPE_PLUCK,
+  SPARKLE_EFFECTS,
+  SPARKLE_HITS,
+  SPARKLE_PANEL_KEYS,
+  SPARKLE_SHAPES,
+} from "./causticsSparkle.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Motion comes from
@@ -41,8 +56,9 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // only ever get one of "peak reachable at any setting", "resting look stays
 // put", "doesn't collapse to fog between beats" right at a time — see this
 // file's git history),
-// Caustic density scales the noise field's spatial frequency (more/fewer,
-// finer/fatter filaments; 0.5 is exactly the old fixed frequency) — wirable
+// Caustic density scales how many filaments the ridge noise resolves into,
+// at the same filament width and over the same warp (it is not a zoom; 0.5 is
+// exactly the old fixed frequency) — wirable
 // (its source lifts the slider toward a finer mesh, Section by default), and
 // eased in by advanceDensityFlow rather than applied on the frame it changes,
 // uBreathe is the depth of a zoom its own source moves — Bar wave by
@@ -65,7 +81,9 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // flat plateau), or Merge (folds emissions that land close together into
 // one stronger ring instead of changing the shape at all) — see
 // rippleEmitter.ts's own `RingStyle` section; the emission and profile-building logic live in the `extraUniforms`
-// closure below. uFlash is a brightness punch,
+// closure below. uFlash is a brightness punch, and uLevelGlow is how far the
+// whole pool brightens with its source (All level by default). It used to be
+// a fixed brightening on uEnergy that no setting could turn off (#449).
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly).
 // driftLevel adds to that rate directly, right now: the louder the music is
@@ -99,7 +117,12 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // high settings — removed; see docs/scenes/caustics.md's decision entry).
 // uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
-// / crest glints).
+// / whichever sparkle effect is picked — crest glints by default; each
+// treble hit plays the picked shape, causticsSparkle.ts's header). Every
+// music-driven term is a slider times its drive, so
+// with the sliders at 0 the picture only drifts on its own clock. The
+// exception is Caustic density, whose source still lifts the slider
+// (densityTargetFor, #453).
 //
 // Precision, or why nothing the shader hashes ever grows with session
 // length: the drift phase only ever accumulates (advanceDensityFlow's
@@ -132,7 +155,7 @@ import { publishSettingMarks } from "../settingMarks.ts";
 const SPARKLE: SceneSetting = {
   key: "sparkle",
   label: "Treble sparkle",
-  description: "Hats and cymbals glint on the ridge crests",
+  description: "How strongly hats and cymbals act on the pool, through the sparkle effect picked above",
   group: "Look",
   min: 0,
   max: 1,
@@ -142,11 +165,19 @@ const SPARKLE: SceneSetting = {
   auto: { brightness: 0.45, attack: 0.15 },
   // Two signals across two layers (a treble hit, or — with Sparkle sustain
   // dialed up — the sustained treble level too), not one, so the default
-  // is Scene — see sparkleGlintDrive in FRAG. Used to have its own
+  // is Scene — see the sparkle block in extraUniforms. Used to have its own
   // continuous "Sparkle from line" dial blending toward the sensitivity
   // line; that's now Frequencies, a discrete alternative source on this
-  // same picker.
-  drive: { default: "scene", sceneLabel: "Scene: treble hits + sustain wash", sceneSources: ["anim.highOnset", "anim.high"] },
+  // same picker. Each edge starts the picked shape (causticsSparkle.ts).
+  // Not a hit driver: no standout detector, so its graph has no reach line,
+  // reaction dots or Reaction row. The built-in treble hit is still sized by
+  // the graded treble pulse, so a soft hat sparkles less than a hard one.
+  drive: {
+    default: "scene",
+    sceneLabel: "Scene: treble hits + sustain wash",
+    sceneSources: ["anim.highOnset", "anim.high"],
+    noStandout: "The user wanted no reaction dots or standout Threshold on sparkle (2026-10-15)",
+  },
 };
 
 const SETTINGS: SceneSetting[] = [
@@ -154,7 +185,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description:
-      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
+      "How many filaments the pattern resolves into — fewer at low values, more at high, each keeping its width. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -194,7 +225,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Beat ripple",
     description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
-    // One colour for this row and the four ring controls under it, so the
+    // One colour for this row and the ring controls under it, so the
     // ripple's own set reads apart from Breathe above and Drift below.
     family: "Beat ripple",
     min: 0,
@@ -207,7 +238,7 @@ const SETTINGS: SceneSetting[] = [
     // catalogue source reproduces that union, so the default is Scene (see
     // the `extraUniforms` closure below, and drives.ts's header for why a
     // Scene default is still bit-identical to today). Fed to
-    // rippleEmitter.ts's advanceEmission as a continuous envelope rather
+    // standout.ts's advanceStandoutAmount as a continuous envelope rather
     // than read as a one-shot trigger — see that file's header for why: a
     // busy driver naturally ducks itself there (each rise only launches a
     // ring for however far the envelope climbed since it last fell back),
@@ -219,21 +250,34 @@ const SETTINGS: SceneSetting[] = [
     // dial's value, the same split the scene's very first ring pool used. A
     // drop still emits its own stronger ring on top, independent of this
     // choice.
-    // `threshold` is the adaptive "reach to ring" line's margin over its
-    // noise-floor estimate (rippleEmitter.ts's ringThresholdBar), adjusted by
-    // the On/Off toggle + slider under this setting's graph in the panel —
-    // Off (advanceEmission's `threshold: null`) makes every climb ring,
-    // sized only by how far it climbed.
+    // No `drive.threshold`: the Threshold row under this graph is the same
+    // engine gate every other drive setting has (drives.ts's header's
+    // threshold paragraph), applied to the signal before the emitter sees
+    // it. What decides whether a climb that got through sends a ring is
+    // Ring threshold, the next setting. The Reaction row (`hit`) starts on
+    // Sized, the amount above; Flat launches one full ring per climb that
+    // earns half a standout instead.
     drive: {
       default: "scene",
       sceneLabel: "Scene: bass or beat hit",
       sceneSources: ["anim.lowOnset", "feature.onset"],
-      threshold: {
-        default: RING_THRESHOLD_DEFAULT,
-        label: "Ring threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to send a ring. Left: more rings, even from quiet sounds. Right: only clear standouts.",
-      },
+      hit: { ownDetector: true, readout: "sized" },
     },
+  },
+  {
+    key: "ringThreshold",
+    label: "Ring threshold",
+    description:
+      "How far a hit has to stand out from the everyday sounds to send a ring — the \"reach to ring\" line on Beat ripple's graph. Left: more rings, even from quiet sounds. Right: only clear standouts.",
+    group: "Motion",
+    family: "Beat ripple",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: STANDOUT_THRESHOLD_DEFAULT,
+    // The adaptive line's margin over its learned noise floor
+    // (standout.ts's standoutBar), read only by advanceStandoutAmount —
+    // a response-shape, so no `auto` and no `drive`, like Ring width below.
   },
   {
     key: "ringWidth",
@@ -443,9 +487,25 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "feature.onset" },
   },
   {
+    key: "levelGlow",
+    label: "Level glow",
+    description: "The whole pool brightens with whatever is wired in, All level by default; 0 = loudness no longer brightens it",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5, // 0.5 on this dial was the scene's old fixed level brightening (LEVEL_GLOW_GAIN)
+    // The brightness that used to ride uEnergy with no setting at all (#449).
+    // A plain All level default reads exactly what uEnergy did (signals.ts
+    // header), so existing looks are unchanged. A multiply, not a lift: this
+    // brightening exists only with music, so an unplugged jack reads 0 and
+    // the glow goes, like Beat flash. No auto table, because this is taste.
+    drive: { default: "anim.energy" },
+  },
+  {
     key: "centroidHue",
     label: "Spectral hue",
-    description: "Palette drifts one way when the mix is brighter than usual for this track, the other way when it's darker",
+    description: "Colours lean one way when the mix is brighter than usual for this track, the other way when it's darker",
     group: "Look",
     min: 0,
     max: 1,
@@ -455,7 +515,172 @@ const SETTINGS: SceneSetting[] = [
     // directly, see FRAG's huePhase) — no auto table needed on top of that.
     reads: ["anim.centroid"],
   },
+  {
+    key: "colourStyle",
+    label: "Colour",
+    description:
+      "Shades: the palette from its darkest colour in the dim water to its brightest on the crests. Shades + accent: the same, with the palette's accent on loud crests. Rainbow: every colour of the palette cycling along the ridges.",
+    group: "Look",
+    min: 0,
+    max: 2,
+    step: 1,
+    default: 1,
+    type: "enum",
+    // Indexes match COLOUR_SHADES / COLOUR_RAINBOW, which FRAG branches on.
+    // A taste pick, so no auto table and no drive.
+    options: ["Shades", "Shades + accent", "Rainbow"],
+  },
   SPARKLE,
+  // The two picks and their own dials (causticsSparkle.ts's header). The
+  // panel's Sparkle section (PANEL below) shows these with a preview of the
+  // shape, mounting only the rows the picked effect and shape use, so they
+  // never appear in the flat list. Time and count dials opt out of the
+  // Master card's Scale: it would stretch a hit's length or change how fast
+  // a Bell trembles, not how much sparkle there is.
+  {
+    key: "sparkleEffect",
+    label: "Sparkle effect",
+    description: "What a treble hit does to the pool: Grain, Rings and Bloom add light on top, the rest change the filaments themselves",
+    group: "Look",
+    min: 0,
+    max: SPARKLE_EFFECTS.length - 1,
+    step: 1,
+    default: EFFECT_GRAIN, // the glints this scene always had
+    type: "enum",
+    options: SPARKLE_EFFECTS,
+  },
+  {
+    key: "sparkleShape",
+    label: "Sparkle shape",
+    description: "How the effect moves over time after each hit — the preview draws it",
+    group: "Look",
+    min: 0,
+    max: SPARKLE_SHAPES.length - 1,
+    step: 1,
+    default: SHAPE_PLUCK,
+    type: "enum",
+    options: SPARKLE_SHAPES,
+  },
+  {
+    key: "sparkleLength",
+    label: "Length",
+    description: "How long each hit's effect lasts, in seconds",
+    group: "Look",
+    min: 0.15,
+    max: 2.5,
+    step: 0.01,
+    // With Pluck, a fade as fast as the treble pulse the glints used to
+    // ride (PLUCK_TAU's comment), so the default look stays as it was.
+    default: 0.6,
+    masterScale: false,
+  },
+  {
+    key: "sparkleVibration",
+    label: "Vibration",
+    description: "How strongly a Bell hit trembles",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.5,
+  },
+  {
+    key: "sparkleSpeed",
+    label: "Speed",
+    description: "How many times a second a Bell hit trembles. A 60 Hz screen shows at most 30; faster reads as a strobe",
+    group: "Look",
+    min: 12,
+    max: 60,
+    step: 1,
+    default: 39,
+    masterScale: false,
+  },
+  {
+    key: "sparkleVibDecay",
+    label: "Vibration decay",
+    description: "How long a Bell hit's trembling rings on: left dies fast, right rings through the whole length",
+    group: "Look",
+    min: 0.05,
+    max: 1,
+    step: 0.01,
+    default: 0.5,
+    masterScale: false,
+  },
+  {
+    key: "sparkleBounces",
+    label: "Bounces",
+    description: "How many times a Bounce hit lands",
+    group: "Look",
+    min: 1,
+    max: 8,
+    step: 1,
+    default: 4,
+    masterScale: false,
+  },
+  {
+    key: "sparkleAttack",
+    label: "Attack",
+    description: "How a Pluck, Bell or Bounce hit lands: left at once, right swelling up first, then playing out from its peak",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0, // at once, as the shapes were first built
+    masterScale: false,
+  },
+  {
+    key: "sparkleDecay",
+    label: "Hit decay",
+    description: "How long the hit itself takes to fade in Pluck, Bell and Bounce: left fast, right slow",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.5, // each shape's own fade (causticsSparkle.ts's SparkleShapeParams.decay)
+    masterScale: false,
+  },
+  {
+    key: "sparkleRise",
+    label: "Rise",
+    description: "How much of the length a Swell hit spends growing before it lets go",
+    group: "Look",
+    min: 0.1,
+    max: 0.95,
+    step: 0.01,
+    default: 0.75,
+    masterScale: false,
+  },
+  {
+    key: "sparkleRelease",
+    label: "Release",
+    description: "How a Swell hit lets go at its peak: left a hard cut, right a soft fade",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.5, // the cut Swell was first built with
+    masterScale: false,
+  },
+  {
+    key: "sparkleRingWidth",
+    label: "Sparkle ring width",
+    description: "How thick each ring Rings strikes is, against Spot size",
+    group: "Look",
+    min: 0.04,
+    max: 0.4,
+    step: 0.01,
+    default: 0.12,
+  },
+  {
+    key: "sparkleSize",
+    label: "Spot size",
+    description: "How far each spot Rings or Bloom strikes spreads",
+    group: "Look",
+    min: 0.03,
+    max: 0.2,
+    step: 0.005,
+    default: 0.08,
+  },
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
@@ -540,47 +765,6 @@ const SETTINGS: SceneSetting[] = [
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
   },
-  // Spray injection rides on the glints rather than replacing them: every
-  // cell of the glint field is its own tiny nozzle, so sprays appear in as
-  // many places as glints do, share their coordinate (grain, drift, Sparkle
-  // distortion), their crest gate and their treble drive — and add nothing
-  // at 0, so the sparkle term above stays bit-for-bit what it was.
-  // Look, not Motion — droplets do fly outward, but the dial adds bright
-  // specks to the already-existing glint field rather than moving the field
-  // itself, same family call as Sparkle spread above.
-  {
-    key: "injection",
-    label: "Spray injection",
-    description:
-      "Glints also spray fine droplets outward, like fuel atomizing through a nozzle — rides Sparkle's own glints, and a treble hit throws extra spray on top; unplugged it sprays exactly what the slider says",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.67,
-    // Same reasoning as sparkleGrain: a shape/taste choice, not an
-    // intensity one, so the master knob leaves it alone.
-    macro: { driver: SPARKLE, weight: 0 },
-    // Droplets already ride Sparkle's own hits+line composite (the shared
-    // crest gate and treble drive every glint uses) — this jack is a second,
-    // independent gate on top of that, a treble hit throwing a little extra
-    // spray by default (INJECTION_DRIVE_LIFT below is a lift, identity at
-    // drive 0, so an unplugged jack still sprays exactly what the slider
-    // says rather than the old bare-1.0 "scene" reading, which an Unplug
-    // silently zeroed).
-    drive: { default: "anim.highOnset" },
-  },
-  {
-    key: "injectionReverse",
-    label: "Reverse injection",
-    description: "Droplets get sucked back into their nozzle and vanish there, instead of spraying out and fading away",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 0,
-    type: "boolean",
-  },
 ];
 
 // Beat ripple's display-side read of the continuous emitter (rippleEmitter.ts
@@ -646,10 +830,11 @@ const BREATHE_ZOOM = 0.10;
 const FOCUS_SNAP_RATIO = 1.3;
 
 // Caustic density's reach (causticDensityScale below): 0.5 is exactly today's old fixed
-// noise-sampling frequency (densScale = 1); the endpoints are ±1.2 octaves
-// off that, mild enough that both ends still read as this scene's own
-// pool-caustics look rather than a different pattern entirely.
-const DENSITY_SPAN_OCTAVES = 2.4;
+// noise-sampling frequency (densScale = 1); the endpoints sit half the span
+// either side of that in octaves. Widened once (#454) when density stopped
+// zooming: with the filament width held, a wide range reads as a sparse web
+// at one end and a dense mesh at the other, still this scene's own look.
+const DENSITY_SPAN_OCTAVES = 3.2;
 // How far Caustic density's own source lifts the slider toward the finest
 // mesh at a full reading. A lift, identity at drive 0 (drives.ts's header's
 // "Nothing plugged in" paragraph), so an unplugged jack leaves the slider's
@@ -692,14 +877,58 @@ export function focusSharp(fog: number, focus: number, beatPulse: number): numbe
   return rest / (1 + focus * beatPulse * FOCUS_SNAP_RATIO);
 }
 
-/** Caustic density (0..1) -> the noise-sampling frequency multiplier. 0.5 ->
- *  1.0, the old fixed frequency exactly. FRAG computes the same curve from
+/** Caustic density (0..1) -> the ridge noise's sampling frequency multiplier,
+ *  i.e. how many filaments there are relative to the default. 0.5 -> 1.0, the
+ *  old fixed frequency exactly. FRAG computes the same curve from
  *  uDensityLive. */
 export function causticDensityScale(density: number): number {
   return Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
 }
 
-// How hard the palette's cosine modulation damps where hue phase is
+// Level glow (the "levelGlow" setting, #449): how far the whole pool's
+// brightness rises with its source, All level by default. The default
+// reproduces the coefficient this scene used to hard-code on uEnergy (with
+// LEVEL_GLOW_GAIN). LEVEL_GLOW_EXP keeps that old curve: quiet passages
+// barely lift, loud ones lift a lot.
+const LEVEL_GLOW_GAIN = 1.4;
+const LEVEL_GLOW_EXP = 1.5;
+// The brightness multiplier's floor with nothing driving it, and the gains on
+// Beat flash and the ripple crest. FRAG's `acc *=` line reads these same
+// constants (see brightnessGain).
+const BRIGHT_BASE = 0.35;
+const FLASH_GAIN = 1.5;
+const RING_BRIGHT_GAIN = 0.8;
+
+/** The multiplier FRAG applies to `acc` before the dark-water floor: BRIGHT_BASE
+ *  plus Level glow, Beat flash and the ripple crest. Each term is its slider
+ *  times what it reads (`ring` is already the crest scaled by Beat ripple's
+ *  own slider), so with those sliders at 0 the multiplier is BRIGHT_BASE and
+ *  nothing in it moves with the music. FRAG computes the same sum from the
+ *  same constants. Exported for tests/caustics.test.ts. */
+export function brightnessGain(levelGlow: number, levelDrive: number, flash: number, flashDrive: number, ring: number): number {
+  return BRIGHT_BASE
+    + levelGlow * LEVEL_GLOW_GAIN * Math.pow(Math.max(levelDrive, 0), LEVEL_GLOW_EXP)
+    + flash * flashDrive * FLASH_GAIN
+    + ring * RING_BRIGHT_GAIN;
+}
+
+// The Colour setting's (colourStyle) options, by index.
+const COLOUR_SHADES = 0;
+const COLOUR_RAINBOW = 2;
+
+// Shades: how fast brightness climbs the palette's ramp (acc times this,
+// through x/(1+x)). Lower leaves every palette in its dark half, one dim
+// colour with no crests; picked by eye (the record's 2026-10-15 entry).
+const SHADE_GAIN = 2.0;
+// How far Spectral hue at 1 slides the mid-tones along the ramp.
+const CENTROID_SHADE_GAIN = 0.6;
+// Shades + accent: where on the ramp the accent band rises to full, and how
+// much of the accent it mixes in there.
+const ACCENT_BAND_LO = 0.55;
+const ACCENT_BAND_PEAK = 0.75;
+const ACCENT_MIX = 0.75;
+
+// Rainbow: how hard the palette's cosine modulation damps where hue phase is
 // changing faster than a pixel can resolve smoothly (see the hueDamp
 // comment in FRAG). Computed on the palette's actual per-channel cosine
 // argument now, not a scalar proxy, so this one constant applies correctly
@@ -768,63 +997,56 @@ export function sparkleBrightGain(sparkleBright: number): number {
   return sparkleBright * SPARKLE_BRIGHT_GAIN;
 }
 
-// Spray injection (see the "injection" entry in SETTINGS above and the FRAG
-// block below). The droplet field is laid out in the glint noise's
-// own coordinate — sparkleQ * sparkleFreq — at INJECTION_CELLS_PER_GRAIN
-// cells per noise unit, so one nozzle cell spans a few glint wavelengths and
-// Sparkle grain resizes the droplets right along with the glints. Everything
-// below is in those cell units. Rate and reach are fixed rather than
-// dialable: uInjection is meant to be "how much spray", not a second set of
-// Drift/Beat-style controls duplicating the ridge system.
-const INJECTION_CELLS_PER_GRAIN = 0.25; // nozzle cells per glint-noise unit
-const INJECTION_DROPS = 4; // droplets in flight per nozzle at any moment (a GLSL loop bound — int)
-const INJECTION_RATE = 0.9; // cycles/sec each droplet completes
-const INJECTION_REACH = 0.55; // how far from its nozzle a droplet is fully atomized by
-const INJECTION_NOZZLE_JITTER = 0.5; // nozzle offset from its cell center, so nozzles don't sit on a grid
-const INJECTION_NEAR_R = 0.14; // droplet radius right at the nozzle, before atomizing
-const INJECTION_FAR_R = 0.05; // droplet radius once fully atomized
-const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glint's own peak
-// Spray injection's own jack (a treble hit, by default): a lift on top of
-// the field's own brightness — `1.0 + INJECTION_DRIVE_LIFT * injectionDrive(uHighPulse)`,
-// identity at drive 0 — rather than the old bare `injectionDrive(1.0)`
-// multiplier, which read as exactly 0 (not 1) the instant the jack was
-// unplugged (drives.ts's header's "Nothing plugged in" paragraph).
-const INJECTION_DRIVE_LIFT = 1.0;
-
-// How far from its own nozzle any droplet can light a pixel — the spray
-// loop is the scene's single most expensive block (measured 2026-09-28:
-// ~60% of a Retina frame's GPU time when every pixel ran INJECTION_DROPS
-// droplets for each of the 3x3 cells around it), so FRAG uses this twice to
-// skip work that can't show. A droplet's glow is exp(-2.2 (d/r)^2), counted
-// out to INJECTION_GLOW_REACH_R of its own radius (beyond it the glow is
-// under 1e-6), and its radius shrinks linearly from NEAR_R to FAR_R over its
-// travel, so the farthest any droplet lights is the larger of the two travel
-// endpoints. FRAG skips a nozzle farther than this from the pixel outright,
-// and only visits the 2x2 nozzle cells whose centers straddle the pixel —
-// exact as long as a nozzle (within JITTER/2 of its cell center) plus this
-// reach stays inside one cell of that center, checked below, since retuning
-// reach, jitter or droplet size past it would silently clip droplets at the
-// cell seams.
-const INJECTION_GLOW_REACH_R = 2.5;
-const INJECTION_LIT_RADIUS = Math.max(
-  INJECTION_GLOW_REACH_R * INJECTION_NEAR_R,
-  INJECTION_REACH + INJECTION_GLOW_REACH_R * INJECTION_FAR_R,
-);
-if (INJECTION_NOZZLE_JITTER / 2 + INJECTION_LIT_RADIUS > 1) {
-  throw new Error("caustics: spray droplets reach past the 2x2 nozzle cells FRAG visits — widen the search or shrink reach/jitter/radius");
-}
-
-// Every hashed field in FRAG is periodic in NOISE_PERIOD cells (the shared
-// lattice hash in noiseHash.ts — see the file header's precision paragraph
-// and that file's for how the period was sized). The finest consumer is the
-// spray field: it lives at INJECTION_CELLS_PER_GRAIN cells per glint-noise
-// unit and so wraps at NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN
-// (INJECTION_MASK below), which is why that constant has to be a power-of-
-// two fraction and the period can't drop below its reciprocal.
-const INJECTION_MASK = NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN - 1;
-if (!Number.isInteger(Math.log2(INJECTION_MASK + 1))) {
-  throw new Error("caustics: NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN must be a power of two");
-}
+// The sparkle effects (causticsSparkle.ts). Each reads sparkleE in FRAG:
+// Treble sparkle times the hits' summed, signed shape (uSparkleEnv). The
+// distances are in FRAG's p units, where the frame is 3 tall.
+//
+// Flare: how much hotter a crest burns at sparkleE 1, on top of its own
+// brightness raised to FLARE_CURVE, so the brightest crests gain the most.
+const FLARE_GAIN = 0.7;
+const FLARE_CURVE = 1.8;
+// Tighten: the ridge exponent is multiplied by exp(TIGHTEN_GAIN * sparkleE),
+// so a swing below 0 loosens the filaments as much as a hit sharpens them.
+const TIGHTEN_GAIN = 1.25;
+// Shimmer: a fine jitter field (SHIMMER_FREQ cycles per p unit, scrolling at
+// SHIMMER_RATE) pushes p by up to SHIMMER_REACH at sparkleE 1.
+const SHIMMER_FREQ = 40.0;
+const SHIMMER_RATE = 31.0;
+const SHIMMER_REACH = 0.022;
+// Prism: the red and blue copies of the ridges are sampled this far either
+// side of the pixel at sparkleE 1, and their fringes drawn at PRISM_GAIN.
+const PRISM_REACH = 0.022;
+const PRISM_GAIN = 2.0;
+// Run: bands of light (RUN_FREQ_X/RUN_FREQ_Y radians per p unit) slide
+// along the warped filaments. Their phase advances at
+// RUN_IDLE_RATE always and RUN_PUSH_RATE more per unit of sparkle, so each
+// hit shoves them forward; RUN_BASE/RUN_GAIN set how bright they glow at
+// rest and on a hit.
+const RUN_FREQ_X = 11.5;
+const RUN_FREQ_Y = 7.6;
+const RUN_SHARP = 7.0;
+const RUN_IDLE_RATE = 0.6;
+const RUN_PUSH_RATE = 9.0;
+const RUN_BASE = 0.35;
+const RUN_GAIN = 2.2;
+// Rings / Bloom: each struck spot sits in its own cell of SPOT_CELL × Spot
+// size (wide enough that a spot never reaches past the 3x3 cells FRAG
+// visits), and fires on a hit with a chance set by Sparkle density, scaled
+// by the cell's area against SPOT_AREA_REF so density means the same spots
+// per screen at any Spot size. Each spot is bent by the water's own flow: a
+// noise field SPOT_BEND_FREQ cycles per p unit, so a quarter cycle or so
+// crosses a spot at the default size, pushing its edge by up to SPOT_BEND
+// × Spot size. SPOT_GROW_TAU is how fast a spot spreads, as a fraction of
+// Length. Overlapping spots saturate toward SPOT_KNEE instead of stacking.
+const SPOT_CELL = 1.6;
+const SPOT_AREA_REF = 0.11 * 0.11;
+const SPOT_MAX_CHANCE = 0.95;
+const SPOT_BEND_FREQ = 3.0;
+const SPOT_BEND = 1.6;
+const SPOT_KNEE = 2.0;
+const SPOT_GROW_TAU = 0.3;
+const RING_GAIN = 3.0;
+const BLOOM_GAIN = 1.2;
 
 // The ridge loop's octave count, and the flow multipliers FRAG applies per
 // use of the drift phase — named here because driftFlows has to reproduce
@@ -832,8 +1054,7 @@ if (!Number.isInteger(Math.log2(INJECTION_MASK + 1))) {
 // are the base flow direction (the x/y scale of the old
 // per-phase-unit flow the shader used to compute itself), and FLOW_OCTAVE_STEP the
 // per-octave speed-up on the ridge sample (the old `flow * (1.0 + fi * 0.2)`).
-// SPARKLE_FLOW is the glint field's own, faster scroll, shared with the
-// spray field laid out on top of it.
+// SPARKLE_FLOW is the glint field's own, faster scroll.
 const RIDGE_OCTAVES = 6;
 const FLOW_X = 0.15;
 const FLOW_Y = -0.09;
@@ -841,7 +1062,7 @@ const FLOW_OCTAVE_STEP = 0.2;
 const SPARKLE_FLOW = 2.0;
 // Layout of the uDriftFlow uniform array driftFlows fills: [x, y] pairs for
 // the forward warp sample and the backward one, then one pair per ridge
-// octave, then the scalar glint/spray scroll.
+// octave, then the scalar glint scroll.
 const FLOW_FWD = 0;
 const FLOW_BACK = 2;
 const FLOW_RIDGE = 4;
@@ -851,21 +1072,25 @@ const DRIFT_FLOW_LEN = FLOW_SPARKLE + 1;
 /** Fills `out` with every drift offset FRAG adds to a noise coordinate, each
  *  already wrapped by wrapFlow: the field is periodic in NOISE_PERIOD
  *  (hashCell in FRAG), so each entry is equivalent to its unwrapped value
- *  and the GPU never sees the raw, ever-growing phase. `phase` is
- *  advanceDensityFlow's `scaledPhase`, which already carries the density
- *  factor the shader applies to q (see that function for why it's folded
- *  in per tick rather than here). */
-export function driftFlows(phase: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
+ *  and the GPU never sees the raw, ever-growing phase. `phase` drives the
+ *  warp and glint samples, whose frequency Caustic density leaves alone;
+ *  `ridgePhase` drives the six ridge samples, whose frequency it scales, so
+ *  it is advanceDensityFlow's `scaledPhase`, which already carries that
+ *  factor (see that function for why it's folded in per tick rather than
+ *  here). */
+export function driftFlows(phase: number, ridgePhase: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
   const fx = phase * FLOW_X;
   const fy = phase * FLOW_Y;
   out[FLOW_FWD] = wrapFlow(fx);
   out[FLOW_FWD + 1] = wrapFlow(fy);
   out[FLOW_BACK] = wrapFlow(-fx);
   out[FLOW_BACK + 1] = wrapFlow(-fy);
+  const rx = ridgePhase * FLOW_X;
+  const ry = ridgePhase * FLOW_Y;
   for (let i = 0; i < RIDGE_OCTAVES; i++) {
     const k = 1 + i * FLOW_OCTAVE_STEP;
-    out[FLOW_RIDGE + 2 * i] = wrapFlow(fx * k);
-    out[FLOW_RIDGE + 2 * i + 1] = wrapFlow(fy * k);
+    out[FLOW_RIDGE + 2 * i] = wrapFlow(rx * k);
+    out[FLOW_RIDGE + 2 * i + 1] = wrapFlow(ry * k);
   }
   out[FLOW_SPARKLE] = wrapFlow(phase * SPARKLE_FLOW);
   return out;
@@ -879,15 +1104,16 @@ export function driftFlows(phase: number, out: Float32Array = new Float32Array(D
 export const DENSITY_GLIDE_SEC = 0.6;
 
 /** advanceDensityFlow's state: `live` is the glided density (null until the
- *  first tick), `scaledPhase` the density-scaled drift phase driftFlows
- *  reads. */
+ *  first tick), `phase` the plain drift phase (warp and glints), and
+ *  `scaledPhase` the density-scaled one (the ridges) — both for driftFlows. */
 export interface DensityFlowState {
   live: number | null;
+  phase: number;
   scaledPhase: number;
 }
 
 export function createDensityFlowState(): DensityFlowState {
-  return { live: null, scaledPhase: 0 };
+  return { live: null, phase: 0, scaledPhase: 0 };
 }
 
 /** One tick: `live` glides toward `targetDensity` over DENSITY_GLIDE_SEC
@@ -901,9 +1127,11 @@ export function createDensityFlowState(): DensityFlowState {
  *  longer the scene had run. Now a change only bends the drift rate from
  *  here on. At a constant density the sum is exactly the old product, so
  *  screen-space drift speed is still independent of density (rate ×
- *  densScale in noise space, sampled at densScale × the frequency). */
+ *  densScale in noise space, sampled at densScale × the frequency). Only the
+ *  ridges sample at that scaled frequency; the warp and glints keep `phase`. */
 export function advanceDensityFlow(state: DensityFlowState, dtSec: number, targetDensity: number, phaseStep: number): void {
   state.live = state.live === null ? targetDensity : state.live + (targetDensity - state.live) * (1 - Math.exp(-dtSec / DENSITY_GLIDE_SEC));
+  state.phase += phaseStep;
   state.scaledPhase += phaseStep * causticDensityScale(state.live);
 }
 
@@ -1069,7 +1297,9 @@ export function driftRatePerSec(s: DriftInputs): number {
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
 
-const FRAG = `
+/** The assembled fragment shader, exported so tests/caustics.test.ts can pin the
+ *  brightness line to brightnessGain's constants. */
+export const FRAG = `
 // The integer lattice hash (hashCell / hash2Cell) — see the file header's
 // precision paragraph and noiseHash.ts for why nothing here uses fract() of
 // a large product.
@@ -1085,6 +1315,45 @@ float noise(vec2 p) {
   float d = hashCell(i + vec2(1.0, 1.0), ${NOISE_MASK}, 0u);
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The ridges: RIDGE_OCTAVES octaves (iterations of them) of warped noise
+// sharpened into thin lines, summed. A function so the Prism sparkle effect
+// can sample the same field either side of a pixel; q comes back warped
+// (the glints sample there).
+float ridgeField(inout vec2 q, int iterations, float sharp, float ridgeGain, float densScale, float warpAmt, vec2 flowFwd, vec2 flowBack) {
+  float acc = 0.0;
+  float amp = 1.0;
+    for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
+      if (i >= iterations) break;
+      float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
+      float fi = float(i);
+      q += vec2(
+        noise(q * 1.7 + flowFwd + fi),
+        noise(q * 1.7 + flowBack + fi * 1.3)
+      ) * warpAmt;
+      vec2 ridgeFlow = vec2(uDriftFlow[${FLOW_RIDGE} + 2 * i], uDriftFlow[${FLOW_RIDGE + 1} + 2 * i]);
+      float v = noise(q * 2.3 * densScale + ridgeFlow);
+      float ridge = 1.0 - abs(v * 2.0 - 1.0);
+      // Anti-alias the ridge against its own screen-space footprint. pow()
+      // has no concept of pixel size, so whenever the true line width (which
+      // shrinks as sharp climbs) drops below what a pixel's worth of noise
+      // change (fwidth(v)) can resolve, the rasterizer can only stair-step
+      // between "in" and "out" — the "pixel ladder" artifact, worst at a
+      // crisp resting look (uFog low). Fog pulse only ever lowers sharp, so
+      // it widens lines and never triggers this; the cap stays for the
+      // resting case, for any drive patch that might push sharp up, and for
+      // the Tighten sparkle effect, which does. Capping
+      // the exponent used here (never the uniform "sharp" itself, so
+      // ridgeGain's brightness still tracks the real value) keeps the
+      // rendered line at least ~1px wide regardless of how sharp moves.
+      // sharp / densScale: v changes densScale times faster across the screen,
+      // so the same exponent would thin every filament by that factor.
+      float aaSharp = min(sharp / densScale, 0.3 / max(fwidth(v), 1e-4));
+      acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
+      amp *= 0.6;
+    }
+  return acc;
 }
 
 void main() {
@@ -1113,17 +1382,31 @@ void main() {
   // point — every filament near the middle gets dragged into a pinch.
   p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
-  // uDensityLive scales the noise field's own sampling frequency — more,
-  // finer filaments at higher values. It's the glided, drive-scaled density
-  // advanceDensityFlow keeps (the raw uCausticDensity setting uniform isn't
-  // read, so a change eases in instead of landing in one frame). Applied
-  // once, here, to q's starting point; every later use of q inherits it
-  // because q is built by accumulating onto that scaled start (see q's
-  // definition below), not by re-scaling p at each octave separately. The
-  // drift offsets in uDriftFlow carry the same factor, folded in per tick
-  // JS-side (advanceDensityFlow), so a finer/coarser pattern doesn't also
-  // drift visibly faster/slower on screen — screen-space drift speed is
-  // flowRate / (samplingFreq), and densScale cancels between the two.
+  // Treble sparkle (causticsSparkle.ts): the picked effect, driven by
+  // sparkleE — Treble sparkle times the hits' summed, signed shape. Shimmer
+  // acts here, on the coordinate everything below samples; the others act on
+  // the ridges further down.
+  int sparkleFx = int(uSparkleEffect + 0.5);
+  float sparkleE = uSparkle * uSparkleEnv;
+  if (sparkleFx == ${EFFECT_SHIMMER} && sparkleE != 0.0) {
+    vec2 jitter = vec2(
+      noise(p * ${SHIMMER_FREQ.toFixed(1)} + vec2(uSparkleShimmer, 0.0)),
+      noise(p * ${SHIMMER_FREQ.toFixed(1)} + vec2(17.0, -uSparkleShimmer))
+    ) - 0.5;
+    p += jitter * ${SHIMMER_REACH.toFixed(3)} * sparkleE;
+  }
+
+  // uDensityLive scales only the ridge noise's sampling frequency — more
+  // filaments at higher values, laid over the same warp field. It is the
+  // glided, drive-scaled density advanceDensityFlow keeps (the raw
+  // uCausticDensity setting uniform isn't read, so a change eases in instead
+  // of landing in one frame). Scaling q itself, as this used to, zoomed the
+  // whole pattern (warp, filament width and glints with it); here the warp
+  // and the glints stay put and the ridge loop below divides sharp by the
+  // same factor, so a filament keeps its width while there are more or fewer
+  // of them. The ridge drift offsets in uDriftFlow carry the factor, folded
+  // in per tick JS-side (advanceDensityFlow), so a denser pattern doesn't
+  // also drift faster on screen.
   float densScale = pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
 
   // This scene's own drift (uDriftFlow, uploaded by extraUniforms below)
@@ -1164,15 +1447,9 @@ void main() {
   // the picture below its own resting look — only a crest brightens it. The
   // refraction term below reads ringSlope directly, signed, unaffected.
   float ring = uRipple * max(ringCrest, 0.0);
-  // Scaled by densScale here, once — every later octave builds on q by
-  // accumulating onto it (see the loop below), so the whole pattern inherits
-  // the frequency change from this one multiply rather than re-scaling p at
-  // each octave separately.
-  vec2 q = (p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)}) * densScale;
+  vec2 q = p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)};
 
   int iterations = int(mix(3.0, 6.0, uDetail));
-  float acc = 0.0;
-  float amp = 1.0;
   // uFog sets the resting sharpness (sharpRest); uFocus is a pure divisor
   // on it, driven by uBeatPulse, so uFocus=0 always holds sharp exactly at
   // sharpRest (no pulse, at any beatPulse) and sharpRest itself never moves
@@ -1186,6 +1463,9 @@ void main() {
   float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
   float sharp = (sharpRest / (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}))
     * (1.0 - bassBulge * 0.25);
+  // Tighten (causticsSparkle.ts): a hit sharpens every filament; a swing
+  // below 0 (Bell's vibration) softens them past rest.
+  if (sparkleFx == ${EFFECT_TIGHTEN}) sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * sparkleE);
   float ridgeGain = sqrt(sharp / 4.0); // a wider ridge is proportionally dimmed, so Fog pulse eases intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
@@ -1212,54 +1492,90 @@ void main() {
   // artifact independent of warpAmt; a maxed Mid turbulence against the
   // crispest Fog is the case to eyeball for it.
   float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2);
-  for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
-    if (i >= iterations) break;
-    float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
-    float fi = float(i);
-    q += vec2(
-      noise(q * 1.7 + flowFwd + fi),
-      noise(q * 1.7 + flowBack + fi * 1.3)
-    ) * warpAmt;
-    vec2 ridgeFlow = vec2(uDriftFlow[${FLOW_RIDGE} + 2 * i], uDriftFlow[${FLOW_RIDGE + 1} + 2 * i]);
-    float v = noise(q * 2.3 + ridgeFlow);
-    float ridge = 1.0 - abs(v * 2.0 - 1.0);
-    // Anti-alias the ridge against its own screen-space footprint. pow()
-    // has no concept of pixel size, so whenever the true line width (which
-    // shrinks as sharp climbs) drops below what a pixel's worth of noise
-    // change (fwidth(v)) can resolve, the rasterizer can only stair-step
-    // between "in" and "out" — the "pixel ladder" artifact, worst at a
-    // crisp resting look (uFog low). Fog pulse only ever lowers sharp, so
-    // it widens lines and never triggers this; the cap stays for the
-    // resting case and for any drive patch that might push sharp up. Capping
-    // the exponent used here (never the uniform "sharp" itself, so
-    // ridgeGain's brightness still tracks the real value) keeps the
-    // rendered line at least ~1px wide regardless of how sharp moves.
-    float aaSharp = min(sharp, 0.3 / max(fwidth(v), 1e-4));
-    acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
-    amp *= 0.6;
+  vec2 qRidges = q;
+  float acc = ridgeField(q, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack);
+  // Prism: red and blue copies of the ridges, sampled either side of this
+  // pixel; where a copy is brighter than the ridge here, its colour shows
+  // as a fringe (added after the palette below). Costs two more passes of
+  // the ridges, only while Prism is picked and a hit is sounding.
+  float prismR = 0.0;
+  float prismB = 0.0;
+  if (sparkleFx == ${EFFECT_PRISM} && abs(sparkleE) > 0.005) {
+    vec2 prismOff = vec2(0.8, 0.6) * ${PRISM_REACH.toFixed(3)} * sparkleE;
+    vec2 qR = qRidges + prismOff;
+    vec2 qB = qRidges - prismOff;
+    prismR = max(ridgeField(qR, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack) - acc, 0.0);
+    prismB = max(ridgeField(qB, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack) - acc, 0.0);
   }
 
-  // Treble sparkle: fine glints gated to where the pattern is already bright
-  // (ridge crests), driven by a high-band onset pulse — or, once
-  // uSparkleSustain is dialed up, kept alive through a sustained wash too.
+  // The sparkle effects that act on the finished ridges (causticsSparkle.ts;
+  // Shimmer and Tighten acted above, Prism's fringes are added to the colour
+  // below). Each reads sparkleE, so at Treble sparkle 0 or between hits
+  // they leave the pool exactly as it is.
+  if (sparkleFx == ${EFFECT_FLARE}) {
+    // The brightest crests gain the most; dim water stays dim.
+    acc += ${FLARE_GAIN.toFixed(2)} * sparkleE * pow(max(acc, 0.0), ${FLARE_CURVE.toFixed(2)}) * smoothstep(0.45, 1.0, acc);
+  } else if (sparkleFx == ${EFFECT_RUN}) {
+    // Bands of light slide along the warped filaments (q), pushed forward
+    // by each hit (uSparkleRun's rate, JS-side) and glowing brighter on one.
+    float bands = pow(0.5 + 0.5 * sin(q.x * ${RUN_FREQ_X.toFixed(2)} + q.y * ${RUN_FREQ_Y.toFixed(2)} - uSparkleRun), ${RUN_SHARP.toFixed(1)});
+    acc += acc * smoothstep(0.25, 0.8, acc) * bands * uSparkle * (${RUN_BASE.toFixed(2)} + ${RUN_GAIN.toFixed(2)} * abs(uSparkleEnv));
+  } else if ((sparkleFx == ${EFFECT_RINGS} || sparkleFx == ${EFFECT_BLOOM}) && uSparkle > 0.0) {
+    // Struck spots: each hit in the ring buffer (uSparkleHit*) fires a few
+    // cells of a SPOT_CELL × Spot size grid (Sparkle density sets the
+    // chance), and each fired cell draws a ring or a bloom around its own
+    // jittered spot. The spot's shape is bent by the water's own flow (q)
+    // and shows only where the filaments are lit, so it reads as light
+    // moving through the pool rather than a circle laid over it.
+    float lit = smoothstep(0.25, 0.85, acc);
+    vec2 bend = (vec2(noise(q * ${SPOT_BEND_FREQ.toFixed(1)} + 3.0), noise(q * ${SPOT_BEND_FREQ.toFixed(1)} + 9.0)) - 0.5) * uSparkleSize * ${SPOT_BEND.toFixed(2)};
+    float cell = uSparkleSize * ${SPOT_CELL.toFixed(2)};
+    vec2 baseCell = floor(p / cell);
+    float chance = min(uSparkleDensity * uSparkleDensity * cell * cell / ${SPOT_AREA_REF.toFixed(4)}, ${SPOT_MAX_CHANCE.toFixed(2)});
+    float spots = 0.0;
+    for (int cx = -1; cx <= 1; cx++) {
+      for (int cy = -1; cy <= 1; cy++) {
+        vec2 cellId = baseCell + vec2(float(cx), float(cy));
+        vec2 spot = (cellId + 0.2 + 0.6 * hash2Cell(cellId, ${NOISE_MASK}, 11u)) * cell;
+        float dist = length(p - spot + bend);
+        // Past a grown ring plus three of its widths, nothing of this spot
+        // shows here, whichever hit struck it.
+        if (dist > uSparkleSize * (1.0 + 3.0 * uSparkleRingWidth) + 0.009) continue;
+        for (int k = 0; k < ${SPARKLE_HITS}; k++) {
+          float age = uSparkleHitAge[k];
+          if (age < 0.0) continue;
+          if (hashCell(cellId, ${NOISE_MASK}, 100u + uint(uSparkleHitSeed[k])) > chance) continue;
+          float grow = 1.0 - exp(-age / (${SPOT_GROW_TAU.toFixed(2)} * uSparkleLength));
+          if (sparkleFx == ${EFFECT_RINGS}) {
+            float dr = (dist - uSparkleSize * grow) / (uSparkleRingWidth * uSparkleSize + 0.003);
+            spots += abs(uSparkleHitEnv[k]) * exp(-dr * dr) * (0.25 + 0.75 * lit) * ${RING_GAIN.toFixed(2)};
+          } else {
+            float rad = uSparkleSize * (0.35 + 0.65 * grow);
+            spots += uSparkleHitEnv[k] * (1.0 - smoothstep(rad * 0.3, rad, dist)) * lit * ${BLOOM_GAIN.toFixed(2)};
+          }
+        }
+      }
+    }
+    // Overlapping hits saturate rather than stack into a white-out, and an
+    // already-bright pixel gains at most what a fully lit one does.
+    spots *= ${SPOT_KNEE.toFixed(1)} / (${SPOT_KNEE.toFixed(1)} + abs(spots));
+    acc += uSparkle * spots * (0.6 + min(acc, 1.0));
+  }
+
+  // Grain: fine glints gated to where the pattern is already bright (ridge
+  // crests) — the sparkle this scene always had, and still its default.
   // uSparkleBright/Density/Grain/Spread/Sustain used to be fixed constants
   // here (1.5, 8.0, 38.0, smoothstep(0.15, 0.6, ...), pulse-only); each
   // defaults to reproduce its old constant exactly (see the
   // sparkleBright..sparkleSustain entries in SETTINGS above) and is a macro
   // of uSparkle, so the master knob still moves all of them together.
-  // Picking a source other than Sparkle's own Scene default (sparkleDrive()
-  // below, generated by DRIVE_GLSL from the "sparkle" setting's own drive —
-  // sceneCommon.ts) replaces this whole composite, including Frequencies:
-  // the sensitivity line drawn for this setting in place of the treble hit
-  // detector entirely (used to be a continuous "Sparkle from line" dial
-  // blending toward it; now a discrete alternative pick).
+  // sparkleGlintDrive is the hits' shape (uSparkleEnv's positive part),
+  // which already folds in Sparkle sustain's wash JS-side; before the Shape
+  // pick existed it was sparkleDrive() of the treble pulse.
   float sparkleLo = mix(${SPARKLE_SPREAD_LO_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_LO_AT_1.toFixed(2)}, uSparkleSpread);
   float sparkleHi = mix(${SPARKLE_SPREAD_HI_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_HI_AT_1.toFixed(2)}, uSparkleSpread);
   float crestGate = smoothstep(sparkleLo, sparkleHi, acc);
-  // uHigh is the slewed continuous high-band level (vs. uHighPulse's
-  // decaying onset spike) — max() rather than a blend so sustain=0 leaves
-  // the pulse-only drive bit-for-bit untouched.
-  float sparkleGlintDrive = sparkleDrive(max(uHighPulse, uSparkleSustain * uHigh));
+  float sparkleGlintDrive = max(uSparkleEnv, 0.0);
   // uSparkleWarp bends the coordinate glints are sampled at with its own
   // small warp pass — independent of the ridge loop's warpAmt above, so
   // dragging it changes only the glints' own curvature, never the ridges'.
@@ -1273,90 +1589,54 @@ void main() {
     sparkleQ += sparkleWarpOffset * uSparkleWarp * ${SPARKLE_WARP_GAIN.toFixed(2)};
   }
   float sparkleFreq = mix(${SPARKLE_GRAIN_FREQ_LO.toFixed(1)}, ${SPARKLE_GRAIN_FREQ_HI.toFixed(1)}, uSparkleGrain);
-  float sparkleNoise = noise(sparkleQ * sparkleFreq + sparkleFlow);
-  float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
   float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
-  acc += uSparkle * sparkleGlintDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
-
-  // Spray injection, added on top of the glints rather than in place of
-  // them. The glint field is tiled into nozzle cells — in sparkleQ *
-  // sparkleFreq, the exact coordinate the glints sample, drifting with the
-  // same wrapped drift offset (sparkleFlow) — and each cell holds one nozzle spraying
-  // INJECTION_DROPS droplets outward on hashed directions and phases, so
-  // sprays appear everywhere glints can and never fire in lockstep. The
-  // motion runs on uTime (its own continuous clock, not gated to
-  // anim.onset), but the brightness is gated exactly like a glint —
-  // uSparkle * sparkleGlintDrive * crestGate * sparkleGain — so spray shows
-  // up where and when the hats sparkle, and adds nothing until uInjection is
-  // raised. injectionDrive() (generated by DRIVE_GLSL from the "injection"
-  // setting's own drive) is a second, independent gate on top of that — a
-  // treble hit throws a little extra spray by default (see that setting's
-  // own comment in SETTINGS), applied as a lift
-  // (1.0 + INJECTION_DRIVE_LIFT * injectionDrive(uHighPulse)) rather than a
-  // bare multiplier, so an unplugged jack sprays exactly what uInjection
-  // already says instead of nothing at all. Droplet
-  // radius shrinks with actual distance from its nozzle
-  // (INJECTION_REACH), not with time, so it reads as a stream atomizing
-  // into mist regardless of travel direction; the ease-out on dist makes
-  // droplets leave fast and slow as they atomize (and, reversed, gather
-  // speed as they're pulled in). Reverse Injection isn't the same path
-  // played backwards in time — it changes *what* fades: normally a droplet
-  // stays fully opaque leaving the nozzle and only dissipateFade lets it
-  // fade out once fully atomized at the far end; reversed, dissipateFade is
-  // dropped entirely, so the droplet stays opaque all the way back and only
-  // nearNozzleFade — which depends purely on distance, not on time or
-  // direction — pulls it to zero exactly as it arrives, reading as suction
-  // rather than fading mist.
-  //
-  // The loop only runs where its result can show: sprayGain is every factor
-  // the field gets multiplied by, so a pixel below the crest gate (dark
-  // water), a frame with no treble drive, or Spray at 0 skips it outright.
-  // It visits the 2x2 nozzle cells whose centers straddle ip, not the 3x3
-  // around ip's own cell, and skips any nozzle farther than
-  // INJECTION_LIT_RADIUS — see that constant for why neither drops a
-  // droplet that could light this pixel.
-  float sprayGain = uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * (1.0 + ${INJECTION_DRIVE_LIFT.toFixed(1)} * injectionDrive(uHighPulse)) * ${INJECTION_GAIN.toFixed(2)};
-  float injectionField = 0.0;
-  if (sprayGain > 0.0) {
-    vec2 ip = (sparkleQ * sparkleFreq + sparkleFlow) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
-    vec2 nearCell = floor(ip - 0.5);
-    for (int gx = 0; gx <= 1; gx++) {
-      for (int gy = 0; gy <= 1; gy++) {
-        vec2 cellId = nearCell + vec2(float(gx), float(gy));
-        // Its own lattice period (INJECTION_MASK) — this field wraps at
-        // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see INJECTION_MASK's comment.
-        vec2 nozzle = cellId + 0.5 + (hash2Cell(cellId, ${INJECTION_MASK}, 1u) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
-        vec2 toNozzle = ip - nozzle;
-        if (dot(toNozzle, toNozzle) > ${(INJECTION_LIT_RADIUS * INJECTION_LIT_RADIUS).toFixed(4)}) continue;
-        for (int k = 0; k < ${INJECTION_DROPS}; k++) {
-          vec2 rnd = hash2Cell(cellId, ${INJECTION_MASK}, 2u + uint(k));
-          float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
-          float travel = uInjectionReverse > 0.5 ? 1.0 - cyclePos : cyclePos;
-          float ang = rnd.y * TWO_PI;
-          float dist = (1.0 - (1.0 - travel) * (1.0 - travel)) * ${INJECTION_REACH.toFixed(2)};
-          vec2 dropIp = nozzle + vec2(cos(ang), sin(ang)) * dist;
-          float d = length(ip - dropIp);
-          float dropR = mix(${INJECTION_NEAR_R.toFixed(2)}, ${INJECTION_FAR_R.toFixed(2)}, dist / ${INJECTION_REACH.toFixed(2)});
-          float glow = exp(-d * d / (dropR * dropR) * 2.2);
-          float spawnFade = smoothstep(0.0, 0.06, cyclePos);
-          float nearNozzleFade = smoothstep(0.0, 0.12 * ${INJECTION_REACH.toFixed(2)}, dist);
-          float dissipateFade = uInjectionReverse > 0.5 ? 1.0 : smoothstep(1.0, 0.75, cyclePos);
-          injectionField += glow * spawnFade * nearNozzleFade * dissipateFade;
-        }
-      }
-    }
+  if (sparkleFx == ${EFFECT_GRAIN}) {
+    float sparkleNoise = noise(sparkleQ * sparkleFreq + sparkleFlow);
+    float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
+    acc += uSparkle * sparkleGlintDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
   }
-  acc += sprayGain * injectionField;
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8;
+  // Level glow, Beat flash and the ripple crest: each is its slider times what
+  // it reads (brightnessGain above), so with those sliders at 0 brightness
+  // holds at the base.
+  float brightMul = ${BRIGHT_BASE.toFixed(2)}
+    + uLevelGlow * ${LEVEL_GLOW_GAIN.toFixed(2)} * pow(max(levelGlowDrive(uEnergy), 0.0), ${LEVEL_GLOW_EXP.toFixed(2)})
+    + uFlash * flashDrive(uBeatPulse) * ${FLASH_GAIN.toFixed(2)}
+    + ring * ${RING_BRIGHT_GAIN.toFixed(2)};
+  acc *= brightMul;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
   acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
-  // Hue phase rides brightness (a ridge crest tints differently than the
+  // Prism's fringes (prismR/prismB above), lit like the ridges they split
+  // off and in fixed prism colours rather than the palette's.
+  vec3 prism = (vec3(1.0, 0.25, 0.45) * prismR + vec3(0.35, 0.45, 1.0) * prismB) * ${PRISM_GAIN.toFixed(2)} * brightMul;
+  vec3 col;
+  if (uColourStyle < ${(COLOUR_RAINBOW - 0.5).toFixed(1)}) {
+    // Shades: brightness climbs the palette's ramp, so dim water takes its
+    // dark end and crests its bright end, never a hue the ramp lacks.
+    // Spectral hue slides the mid-tones up or down the ramp; t*(1-t) keeps
+    // the black and the brightest crest where they are.
+    float x = acc * ${SHADE_GAIN.toFixed(2)};
+    float t = x / (1.0 + x);
+    t = clamp(t + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_SHADE_GAIN.toFixed(2)} * t * (1.0 - t), 0.0, 1.0);
+    col = mix(uPalGround, palRamp(t), smoothstep(0.0, 0.25, t));
+    if (uColourStyle > ${(COLOUR_SHADES + 0.5).toFixed(1)}) {
+      // Shades + accent: a band just below the brightest crests takes the
+      // accent, which only loud passages reach.
+      float band = smoothstep(${ACCENT_BAND_LO.toFixed(2)}, ${ACCENT_BAND_PEAK.toFixed(2)}, t) * (1.0 - smoothstep(0.86, 0.98, t));
+      col = mix(col, uPalAccent, band * ${ACCENT_MIX.toFixed(2)});
+    }
+    // Screen the fringes over the shade: col is already in 0..1.
+    col = 1.0 - (1.0 - col) * (1.0 - prism / (1.0 + prism));
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  // Rainbow: the palette's cosine curve, as Caustics was coloured before
+  // the shades. Hue phase rides brightness (a ridge crest tints differently than the
   // dim water around it) through a cosine, which wraps through its full
   // hue cycle for roughly a unit change of phase. Raw acc can swing several
   // units within a couple of pixels right at a sharp ridge edge — most of
@@ -1384,12 +1664,27 @@ void main() {
     + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_HUE_GAIN.toFixed(2)};
   vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
   vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
-  vec3 col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc;
+  col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc + prism;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
 
   outColor = vec4(col, 1.0);
 }
 `;
+
+// The Scene card's Sparkle section (src/ui/widgets/causticsSparkle.ts): the
+// effect and shape picks, a preview of the shape, Treble sparkle, and the
+// rows the picks use.
+const PANEL: readonly PanelSection[] = [
+  {
+    widget: "causticsSparkle",
+    title: "Sparkle",
+    hint: "What a treble hit does to the pool, and how that moves after the hit. The preview plays one hit on loop.",
+    settings: SPARKLE_PANEL_KEYS,
+  },
+];
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "released", added: "2026-08-27" } as const;
 
 export const causticsScene = createFullscreenScene(
   "caustics",
@@ -1402,19 +1697,28 @@ export const causticsScene = createFullscreenScene(
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
     // Beat ripple's own emitter state: `emission` conditions the driver
-    // signal into a launched amount each frame (advanceEmission), `emitter`
-    // holds every ring still in flight, and `crestBuf`/`slopeBuf` are the
-    // persistent arrays buildProfile fills and extraUniforms uploads — see
-    // rippleEmitter.ts's header for how the three fit together.
-    const emission = createRippleEmissionState();
+    // signal into a launched amount each frame (standout.ts's
+    // advanceStandoutAmount), `emitter` holds every ring still in flight, and
+    // `crestBuf`/`slopeBuf` are the persistent arrays buildProfile fills and
+    // extraUniforms uploads — see rippleEmitter.ts's header for how the
+    // three fit together.
+    const emission = createStandoutState();
     const ringRate = createRingRateState();
     const emitter = createRippleEmitter();
     const crestBuf = new Float32Array(PROFILE_SAMPLES);
     const slopeBuf = new Float32Array(PROFILE_SAMPLES);
     let prevDropOnset = false;
 
+    // Treble sparkle's hits (causticsSparkle.ts) and the two phases its
+    // Shimmer and Run effects scroll by — own clocks, advanced here and
+    // wrapped before upload, like the drift (this file's header).
+    const sparkleHits = createSparkleHits();
+    let shimmerClock = 0;
+    let runPhase = 0;
+
     return {
       settings: SETTINGS,
+      panel: PANEL,
       extraUniformDecls: `
 uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 // The glided, drive-scaled Caustic density (advanceDensityFlow) — see
@@ -1422,6 +1726,16 @@ uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 uniform float uDensityLive;
 uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
+// Treble sparkle (causticsSparkle.ts): the hits' summed, signed shape plus
+// Sparkle sustain's wash; Shimmer's jitter scroll and Run's band phase,
+// both wrapped JS-side; and the hit ring buffer Rings and Bloom strike from
+// (age -1 = empty slot).
+uniform float uSparkleEnv;
+uniform float uSparkleShimmer;
+uniform float uSparkleRun;
+uniform float uSparkleHitAge[${SPARKLE_HITS}];
+uniform float uSparkleHitEnv[${SPARKLE_HITS}];
+uniform float uSparkleHitSeed[${SPARKLE_HITS}];
 // Linear interpolation into a profile array built by rippleEmitter.ts's
 // buildProfile — see FRAG's own comment above the Beat ripple block for how
 // these two feed the display.
@@ -1492,28 +1806,28 @@ float softCeil(float x, float knee, float ceil) {
         // The Scene default this setting's drive picker reproduces — "bass
         // or beat hit" — read here as the two decaying pulses' max, a
         // continuous envelope rather than a one-shot edge (see the "ripple"
-        // setting's own comment and advanceEmission's own doc comment for
+        // setting's own comment and advanceStandoutAmount's own doc comment for
         // why a continuous rise-based read is what makes a busy driver duck
         // itself instead of stacking full rings).
         const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
         const rawSignal = drives.value("ripple", sceneDefaultSignal);
-        // drives.threshold() is null while Ring threshold's own Off switch is
-        // pressed (drives.ts's header's threshold paragraph) — passed through
-        // as-is, since that's exactly what advanceEmission's own `threshold`
-        // param wants for "every climb rings, sized by its own climb".
-        // undefined only means there's no engine at all (PASSTHROUGH_DRIVES).
-        const rippleThreshold = drives.threshold("ripple");
-        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, rippleThreshold === undefined ? RING_THRESHOLD_DEFAULT : rippleThreshold);
+        // rawSignal has already been through the shared Threshold gate (when
+        // it's on); Ring threshold then sets how far a climb must stand out
+        // from the learned everyday ones to send a ring.
+        // Sized (the default) launches the amount; Flat a full ring per
+        // climb that earns half a standout.
+        const ringThreshold = getSetting("ringThreshold");
+        const emitted =
+          (drives.readout("ripple") ?? "sized") === "flat"
+            ? advanceStandout(emission, anim.dtSec, rawSignal, ringThreshold)
+              ? 1
+              : 0
+            : advanceStandoutAmount(emission, anim.dtSec, rawSignal, ringThreshold);
         emitter.emit(emitted, ringStyle);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
-        // ring, and each ring actually sent. Only the one line — a second
-        // "full ring" line made the graph harder to read, and a ring's dot
-        // already shows how strong it was. No lines at all while Ring
-        // threshold is off (salienceMarks returns null) — the ring itself
-        // still shows as a reaction.
-        const marks = salienceMarks(emission);
-        publishSettingMarks("caustics", "ripple", marks ? [{ value: marks.ringsAbove, label: "reach to ring" }] : [], emitted);
+        // ring, and each ring actually sent.
+        publishSettingMarks("caustics", "ripple", { lines: standoutLine(emission, "reach to ring"), reactionLabel: "ring sent" }, emitted);
 
         // A drop is rarer and bigger than an ordinary beat — a stronger ring
         // emitted in addition to whatever the continuous driver above just
@@ -1535,8 +1849,39 @@ float softCeil(float x, float knee, float ceil) {
             : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
         buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
 
+        // Treble sparkle: each edge of the sparkle drive starts the picked
+        // shape (the "sparkle" setting's own comment). A treble onset plays
+        // at the graded pulse's height, so a soft hat is a smaller hit; a
+        // wire's edge plays at full size. Sparkle sustain's wash is a floor
+        // under the shape, as it was under the pulse, and keeps a below-zero
+        // swing's direction.
+        const sparkleFired = drives.fired("sparkle", anim.highOnset);
+        const sparkleSize = anim.highOnset ? anim.highPulse : 1;
+        const shapeEnv = advanceSparkleHits(sparkleHits, anim.dtSec, sparkleFired, sparkleSize, {
+          shape: Math.round(getSetting("sparkleShape")),
+          length: getSetting("sparkleLength"),
+          vibration: getSetting("sparkleVibration"),
+          speedHz: getSetting("sparkleSpeed"),
+          vibDecay: getSetting("sparkleVibDecay"),
+          bounces: getSetting("sparkleBounces"),
+          attack: getSetting("sparkleAttack"),
+          decay: getSetting("sparkleDecay"),
+          rise: getSetting("sparkleRise"),
+          release: getSetting("sparkleRelease"),
+        });
+        const wash = getSetting("sparkleSustain") * drives.value("sparkle", anim.high);
+        const sparkleEnv = shapeEnv >= 0 ? Math.max(shapeEnv, wash) : shapeEnv + wash;
+        shimmerClock += anim.dtSec;
+        runPhase = (runPhase + anim.dtSec * (RUN_IDLE_RATE + RUN_PUSH_RATE * Math.abs(sparkleEnv) * getSetting("sparkle"))) % (2 * Math.PI);
+
         return {
-          uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
+          uSparkleEnv: sparkleEnv,
+          uSparkleShimmer: wrapFlow(shimmerClock * SHIMMER_RATE),
+          uSparkleRun: runPhase,
+          uSparkleHitAge: sparkleHits.age,
+          uSparkleHitEnv: sparkleHits.env,
+          uSparkleHitSeed: sparkleHits.seed,
+          uDriftFlow: driftFlows(densityFlow.phase, densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,

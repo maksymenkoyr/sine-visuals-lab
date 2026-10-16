@@ -154,9 +154,20 @@ class Server {
     return { rev: first.rev, doc: first.doc };
   }
 
+  /** The laptop (the owner) once it has claimed the room. */
+  owner: WireSocket | null = null;
+
   /** The laptop claiming the room. */
-  claim(): Promise<WireSocket> {
-    return this.need({ role: "host", deviceId: "laptop", hk: HK, k: K });
+  async claim(): Promise<WireSocket> {
+    this.owner = await this.need({ role: "host", deviceId: "laptop", hk: HK, k: K });
+    return this.owner;
+  }
+
+  /** The owner lets a device Play to Main (or takes it back): a controller's
+   *  Play is refused until it does. */
+  setPlay(deviceId: string, canPlay: boolean): void {
+    if (!this.owner) throw new Error("the owner has not claimed the room");
+    this.say(this.owner, { type: "deviceSet", targetId: deviceId, canPlay });
   }
 }
 
@@ -236,6 +247,15 @@ class Phone extends Endpoint {
   /** While true a send reports success but the room never hears it. */
   blackhole = false;
   private clock = 0;
+
+  /** Whether the owner lets this phone Play when it joins (the default here is
+   *  yes; the room's own default is no). */
+  allowedToPlay = true;
+
+  async join(k: string = K, frames = false): Promise<void> {
+    await super.join(k, frames);
+    if (this.allowedToPlay && this.server.owner) this.server.setPlay(this.deviceId, true);
+  }
 
   constructor(server: Server, deviceId: string, seed: Record<string, string>, scene = "", palette = "", isOwner = false) {
     super(server, deviceId);
@@ -717,6 +737,28 @@ describe("refusals", () => {
     expect(tv.log.filter((m) => m.type === "lookReject")).toEqual([{ type: "lookReject", n: 1, reason: "role" }]);
     expect(await server.look()).toEqual(before);
     expect(a.count("lookPatch")).toBe(patches);
+  });
+
+  it("a phone the owner has not let Play is rejected for its role and changes nothing, until the owner allows it", async () => {
+    const { server, phones } = await roomWith(["phoneA", seed(), "plume", "neon"]);
+    const [a] = phones;
+    const b = new Phone(server, "phoneB", seed(), "plume", "neon");
+    b.allowedToPlay = false;
+    await b.join(K, true);
+    settle(a, b);
+    const before = await server.look();
+
+    b.set("vibe.hitAmount", "9");
+    b.play();
+    settle(a, b);
+    expect(b.rejects).toEqual(["role"]);
+    expect(await server.look()).toEqual(before);
+
+    server.setPlay("phoneB", true);
+    b.play();
+    settle(a, b);
+    expect(b.rejects).toEqual(["role"]);
+    expect((await server.look()).doc?.storage["vibe.hitAmount"]).toBe("9");
   });
 
   it("a value past the size limit is rejected, leaves the room alone, and is not resent by itself", async () => {

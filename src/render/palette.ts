@@ -1,4 +1,4 @@
-import { hexToRgb, oklabToRgb, rgbToHex, rgbToOklab, sampleStops, type Rgb } from "./oklab.ts";
+import { hexToRgb, mixOklab, oklabToRgb, rgbToHex, rgbToOklab, sampleStops, type Rgb } from "./oklab.ts";
 
 /**
  * The room palette: one choice, shared by every scene that takes its colour
@@ -45,10 +45,10 @@ import { hexToRgb, oklabToRgb, rgbToHex, rgbToOklab, sampleStops, type Rgb } fro
  * change that.
  */
 
-export type PaletteGroup = "Classic" | "Night" | "Heat" | "Neon" | "Film" | "Mineral" | "Mono";
+export type PaletteGroup = "Classic" | "Contrast" | "Night" | "Heat" | "Neon" | "Film" | "Mineral" | "Mono";
 
 /** Display order of the groups in the panel's palette card. */
-export const PALETTE_GROUPS: readonly PaletteGroup[] = ["Classic", "Night", "Heat", "Neon", "Film", "Mineral", "Mono"];
+export const PALETTE_GROUPS: readonly PaletteGroup[] = ["Classic", "Contrast", "Night", "Heat", "Neon", "Film", "Mineral", "Mono"];
 
 /** `#rrggbb` colours, by job — see the header. */
 export interface PaletteRoles {
@@ -202,6 +202,45 @@ export const PALETTES: Palette[] = [
       accent: "#ffc04d",
     },
   },
+  // Contrast: two opposite hues, the darker one low on the ramp and the
+  // lighter one high, so dim things take one colour and bright things the
+  // other. The accent is a third hue for hits against the bright one.
+  rolePalette("cobalt", "Cobalt", "Contrast", {
+    ground: "#02040c",
+    ramp: ["#040a24", "#1f4fe0", "#ff8a2a", "#ffbe73", "#fff0dc"],
+    inks: ["#3d7bff", "#ff8a2a", "#62e0ff", "#ffd08a"],
+    accent: "#62e0ff",
+  }),
+  rolePalette("toxic", "Toxic", "Contrast", {
+    ground: "#05020a",
+    ramp: ["#12062a", "#7a2cf0", "#a8f030", "#d4ff7a", "#f6ffe0"],
+    inks: ["#9b3cff", "#b8ff3a", "#ff3df0", "#3dffd0"],
+    accent: "#ff3df0",
+  }),
+  rolePalette("anaglyph", "Anaglyph", "Contrast", {
+    ground: "#080203",
+    ramp: ["#1e0408", "#e01a30", "#3fe8ff", "#9ff6ff", "#ecffff"],
+    inks: ["#ff2a3a", "#3ff0ff", "#ffd23f", "#a0a0ff"],
+    accent: "#ffd23f",
+  }),
+  rolePalette("vapor", "Vapor", "Contrast", {
+    ground: "#04030c",
+    ramp: ["#0a0830", "#2f5bff", "#ff4fb8", "#ff9ad6", "#ffe6f5"],
+    inks: ["#3f7bff", "#ff4fb8", "#3ff0ff", "#ffe066"],
+    accent: "#3ff0ff",
+  }),
+  rolePalette("royal", "Royal", "Contrast", {
+    ground: "#05030c",
+    ramp: ["#120a30", "#6a30f0", "#ffb81f", "#ffd77a", "#fff5d8"],
+    inks: ["#7a3cff", "#ffc23a", "#ff5a8a", "#5ad1ff"],
+    accent: "#ff5a8a",
+  }),
+  rolePalette("reef", "Reef", "Contrast", {
+    ground: "#020809",
+    ramp: ["#04161a", "#0f8f86", "#ff5a8a", "#ff9ab5", "#ffe6ee"],
+    inks: ["#14b0a0", "#ff5a8a", "#ffd166", "#7aa8ff"],
+    accent: "#ffd166",
+  }),
   // Sodium-vapour streetlight over a night river.
   rolePalette("sodium", "Sodium", "Night", {
     ground: "#06080d",
@@ -277,6 +316,48 @@ export function randomPalette(excludeId?: string): Palette {
 export function paletteRampHex(p: Palette, n: number): string[] {
   const stops = p.roles.ramp.map(hexToRgb);
   return Array.from({ length: n }, (_, i) => rgbToHex(sampleStops(stops, n === 1 ? 0 : i / (n - 1))));
+}
+
+/** `from` walked toward `to` by `t` (0..1), for a held Play's palette fade
+ *  (net/outputGlide.ts's createPaletteFade). Roles mix in OKLab, the ramps
+ *  baked to PALETTE_RAMP_STOPS first so ramps of different lengths line up
+ *  stop for stop. The cosine curve dissolves rather than sweeping: each
+ *  channel is a + b·cos(2π(c·x + d)), and two cosines of one frequency `c`
+ *  add up to one cosine, so `b` and `d` come from adding the two as phasors
+ *  (length b, angle 2πd). With equal `c` that is exactly the two curves'
+ *  blend, as a crossfade would show it; lerping `d` instead would walk the
+ *  hue through colours neither palette has. A `c` that differs moves
+ *  linearly. The mix carries `to`'s id, name and group. */
+export function mixPalettes(from: Palette, to: Palette, t: number): Palette {
+  const mix = (a: string, b: string): string => rgbToHex(mixOklab(hexToRgb(a), hexToRgb(b), t));
+  const mixVec = (a: Vec3, b: Vec3): Vec3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const rampFrom = paletteRampHex(from, PALETTE_RAMP_STOPS);
+  const rampTo = paletteRampHex(to, PALETTE_RAMP_STOPS);
+  const b: Vec3 = [0, 0, 0];
+  const d: Vec3 = [0, 0, 0];
+  for (let ch = 0; ch < 3; ch++) {
+    const p = 2 * Math.PI * from.d[ch];
+    const q = 2 * Math.PI * to.d[ch];
+    const x = (1 - t) * from.b[ch] * Math.cos(p) + t * to.b[ch] * Math.cos(q);
+    const y = (1 - t) * from.b[ch] * Math.sin(p) + t * to.b[ch] * Math.sin(q);
+    b[ch] = Math.hypot(x, y);
+    d[ch] = Math.atan2(y, x) / (2 * Math.PI);
+  }
+  return {
+    id: to.id,
+    name: to.name,
+    group: to.group,
+    roles: {
+      ground: mix(from.roles.ground, to.roles.ground),
+      ramp: rampFrom.map((h, i) => mix(h, rampTo[i])),
+      inks: from.roles.inks.map((h, i) => mix(h, to.roles.inks[i])) as unknown as PaletteRoles["inks"],
+      accent: mix(from.roles.accent, to.roles.accent),
+    },
+    a: mixVec(from.a, to.a),
+    b,
+    c: mixVec(from.c, to.c),
+    d,
+  };
 }
 
 export interface PaletteVecs {

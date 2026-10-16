@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { createOutputBridge, type Transport } from "../src/net/outputBridge.ts";
-import type { OutputPower, OutputRenderStatus, ToMain, ToOutput } from "../src/net/outputSync.ts";
+import { describe, it, expect, vi } from "vitest";
+import { createOutputBridge, OUTPUT_OPEN_GRACE_MS, type Transport } from "../src/net/outputBridge.ts";
+import { NO_EFFECTS } from "../src/render/heldEffects.ts";
+import { OUTPUT_PRESENCE_TIMEOUT_MS, type OutputPower, type OutputRenderStatus, type ToMain, type ToOutput } from "../src/net/outputSync.ts";
 
 function fakeTransport() {
   const posted: ToOutput[] = [];
@@ -25,8 +26,8 @@ const status: OutputRenderStatus = {
   bufferHeight: 1080,
 };
 
-// A non-default resolution, so the expectations below also show it travels.
-const POWER: OutputPower = { quality: "mid", mode: "auto", resolution: 0.5 };
+// A non-default resolution and cast mode, so the expectations below also show they travel.
+const POWER: OutputPower = { quality: "mid", mode: "auto", resolution: 0.5, cast: "soft" };
 
 function setup() {
   const t = fakeTransport();
@@ -53,11 +54,44 @@ describe("outputBridge status and power", () => {
     const { posted, receive } = setup();
     receive({ t: "hello", haveState: false });
     expect(posted[0].t).toBe("state");
-    expect(posted[posted.length - 1]).toEqual({ t: "power", power: POWER });
-    // A heartbeat from a window that has its state only re-sends power.
+    expect(posted[posted.length - 2]).toEqual({ t: "power", power: POWER });
+    // A heartbeat from a window that has its state only re-sends power and effects.
     posted.length = 0;
     receive({ t: "hello", haveState: true });
-    expect(posted.map((m) => m.t)).toEqual(["power"]);
+    expect(posted.map((m) => m.t)).toEqual(["power", "effects"]);
+  });
+
+  it("sendEffects posts only while an output is open, and every heartbeat reply repeats the last set", () => {
+    const { bridge, posted, receive } = setup();
+    const held = { ...NO_EFFECTS, freeze: true };
+    bridge.sendEffects(held);
+    expect(posted).toEqual([]);
+    receive({ t: "hello", haveState: false });
+    expect(posted[posted.length - 1]).toEqual({ t: "effects", effects: held });
+    posted.length = 0;
+    bridge.sendEffects(NO_EFFECTS);
+    expect(posted).toEqual([{ t: "effects", effects: NO_EFFECTS }]);
+    posted.length = 0;
+    receive({ t: "hello", haveState: true });
+    expect(posted[posted.length - 1]).toEqual({ t: "effects", effects: NO_EFFECTS });
+  });
+
+  it("a Play with a glide length keeps it across a scene change, for the output's crossfade", () => {
+    let scene = "spectrum";
+    const t = fakeTransport();
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene, palette: "neon" }),
+      storage,
+      power: () => POWER,
+    });
+    t.receive({ t: "hello", haveState: false });
+    t.posted.length = 0;
+    scene = "mesh";
+    expect(bridge.go(3000)).toBe(true);
+    const state = t.posted.find((m) => m.t === "state");
+    expect(state && state.t === "state" && state.glideMs).toBe(3000);
+    expect(state && state.t === "state" && state.state.scene).toBe("mesh");
   });
 
   it("a Play pressed while presence had lapsed reaches the output when it returns", () => {
@@ -119,7 +153,7 @@ describe("outputBridge status and power", () => {
 });
 
 describe("outputBridge frames carry the controller's gate marks", () => {
-  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0 };
+  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0 };
   const PARAMS = { sens: 1, exp: 1, smoothing: 1 };
   const GATE = { closed: 0.2, open: 0.3 };
   const frames = (posted: ToOutput[]) => posted.filter((m): m is Extract<ToOutput, { t: "frame" }> => m.t === "frame");
@@ -152,5 +186,95 @@ describe("outputBridge frames carry the controller's gate marks", () => {
     const [m] = frames(t.posted);
     expect(m.f.p).toBeUndefined();
     expect(m.f.gate).toEqual(GATE);
+  });
+});
+
+describe("outputBridge keeps to one output window", () => {
+  /** A bridge on a clock the test moves, whose window.open is a counter. */
+  function setupOpen() {
+    const t = fakeTransport();
+    let nowMs = 10_000;
+    let opened = 0;
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene: "spectrum", palette: "neon" }),
+      storage,
+      power: () => POWER,
+      openWindow: () => {
+        opened++;
+      },
+      now: () => nowMs,
+    });
+    const advance = (ms: number) => {
+      nowMs += ms;
+    };
+    return { ...t, bridge, opened: () => opened, advance };
+  }
+  const raises = (posted: ToOutput[]) => posted.filter((m) => m.t === "raise").length;
+
+  it("asks a window still loading to come forward instead of opening a second", () => {
+    const { bridge, posted, opened, advance } = setupOpen();
+    bridge.open();
+    expect(opened()).toBe(1);
+    advance(OUTPUT_OPEN_GRACE_MS - 1);
+    bridge.open();
+    expect(opened()).toBe(1);
+    expect(raises(posted)).toBe(1);
+  });
+
+  it("asks an output whose heartbeat is current to come forward, one it did not open too", () => {
+    const { bridge, posted, receive, opened, advance } = setupOpen();
+    receive({ t: "hello", haveState: true }); // e.g. this window reloaded, the output stayed
+    advance(OUTPUT_PRESENCE_TIMEOUT_MS - 1);
+    bridge.open();
+    expect(opened()).toBe(0);
+    expect(raises(posted)).toBe(1);
+  });
+
+  it("opens again once the output said goodbye", () => {
+    const { bridge, receive, opened } = setupOpen();
+    bridge.open();
+    receive({ t: "hello", haveState: false });
+    receive({ t: "bye" });
+    bridge.open();
+    expect(opened()).toBe(2);
+  });
+
+  it("opens again once the heartbeat lapsed (a crashed output says no goodbye)", () => {
+    const { bridge, receive, opened, advance } = setupOpen();
+    bridge.open();
+    receive({ t: "hello", haveState: false });
+    advance(Math.max(OUTPUT_OPEN_GRACE_MS, OUTPUT_PRESENCE_TIMEOUT_MS));
+    bridge.open();
+    expect(opened()).toBe(2);
+  });
+
+  it("opens again once the grace is over when the window never said hello", () => {
+    const { bridge, opened, advance } = setupOpen();
+    bridge.open();
+    advance(OUTPUT_OPEN_GRACE_MS);
+    bridge.open();
+    expect(opened()).toBe(2);
+  });
+
+  it("does not take another main window's messages for an output", () => {
+    const { bridge, receive } = setupOpen();
+    receive({ t: "raise" } as unknown as ToMain);
+    expect(bridge.status().open).toBe(false);
+  });
+
+  it("opens the output page noopener, so it gets a renderer process of its own", () => {
+    const open = vi.fn((_url: string, _name: string, _features: string) => null);
+    vi.stubGlobal("window", { open });
+    vi.stubGlobal("location", { search: "" });
+    try {
+      setup().bridge.open();
+      expect(open).toHaveBeenCalledTimes(1);
+      const [url, , features] = open.mock.calls[0];
+      expect(url).toBe("/output.html");
+      expect(features.split(",")).toContain("noopener");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

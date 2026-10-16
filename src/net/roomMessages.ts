@@ -7,22 +7,28 @@
  * can ship on either side first.
  *
  * Client to room:
- * - `ping { t0 }` — clock sync, any role; answered with `pong`.
- * - `hello { scene, palette, viewport?, kind?, hasMic? }` — a device announcing
- *   what it shows, and optionally what it is: its `kind` and whether it can
- *   open a microphone, the same two things the join URL carries. The room
- *   answers by broadcasting `roster`. The room never takes a name from a
+ * - `ping { t0 }` — clock sync, any role; answered with `pong`, unless the
+ *   socket has outrun its ping budget (server/lookDoc.ts `pingBurst`).
+ * - `hello { scene, palette, viewport?, kind?, hasMic?, autoQuality? }` — a
+ *   device announcing what it shows, and optionally what it is: its `kind` and
+ *   whether it can open a microphone, the same two things the join URL
+ *   carries. A TV adds `autoQuality`, the preset its GPU benchmark picks (what
+ *   its `quality: "auto"` renders at). The room answers by broadcasting
+ *   `roster`. The room never takes a name from a
  *   hello; a name is chosen with `deviceSet`.
- * - `deviceSet { targetId, name?, ears?, follow?, screen? }` — change one
- *   member's settings (server/roomDevices.ts says what each means and who may
- *   ask). Any member of a claimed room may; the answer is a new `roster`, or
- *   `deviceReject` when the room refused.
+ * - `deviceSet { targetId, name?, ears?, follow?, screen?, quality?, canPlay? }` —
+ *   change one member's settings (server/roomDevices.ts says what each means
+ *   and who may ask). Any member of a claimed room may, except `canPlay`, which
+ *   only the owner may set (anyone else gets `deviceReject` with reason
+ *   `owner-only`); the answer is a new `roster`, or `deviceReject` when the
+ *   room refused.
  * - `deviceForget { targetId }` — the owner removes a member from the room. The
  *   room sends that device `ended` with reason `removed` and closes it.
  * - `lookGet` — a member asks for the current look; answered with `look`.
  * - `lookPatch { n, ...patch }` — a member edits the look (server/lookDoc.ts
- *   has the patch semantics). Any member of a claimed room may, the laptop
- *   included (publishing with Cue and Play, net/roomBridge.ts); `n` numbers the
+ *   has the patch semantics). Accepted only from a device that may Play
+ *   (server/roomDevices.ts `mayPlay`: the owner, or a device it granted), the
+ *   laptop included (publishing with Cue and Play, net/roomBridge.ts); `n` numbers the
  *   patch so the sender can match the reply. A patch may carry `glideMs`:
  *   screens arrive at the look it makes over that long instead of switching.
  * - `endRoom` — the host of a claimed room ends it (the laptop's Reset). The
@@ -34,8 +40,8 @@
  * - `pong { t0, tServer }`.
  * - `roster { devices }` — every member of a claimed room, online or not, with
  *   what the room stores for it: `kind`, `name`, `hasMic`, `ears`, `follow`,
- *   `screen`, `online`, `owner` (and what it shows now: `scene`, `palette`,
- *   `viewport`). An unclaimed (legacy) room sends only the older fields, and
+ *   `screen`, `quality`, `canPlay`, `online`, `owner` (and what it shows now: `scene`,
+ *   `palette`, `viewport`, and a TV's `autoQuality` while it is online). An unclaimed (legacy) room sends only the older fields, and
  *   parseRosterEntry fills the rest with what such a device would have been
  *   given. `recordsFromRoster` turns a roster into the records that
  *   server/roomDevices.ts reads, so the client asks the same `feedOf` and
@@ -53,7 +59,8 @@
  *   (src/net/lookSync.ts owns that rule).
  * - `lookAck { n, rev }` / `lookReject { n, reason }` — the replies to the
  *   sender's patch. `reason` is a `LookRejectReason` (server/lookDoc.ts):
- *   `role` (not a member that may), `size` (past the limits in `LOOK_LIMITS`)
+ *   `role` (not a member that may, including a device the owner has not let
+ *   Play), `size` (past the limits in `LOOK_LIMITS`)
  *   or `shape` (not a valid patch).
  * - `ended { reason? }` — the room is closed to this device: the host ended it
  *   (`endRoom`), or the owner removed this device (reason `removed`). It means
@@ -87,10 +94,14 @@ import {
   kindForRole,
   parseEars,
   parseKind,
+  parseQuality,
+  parsePreset,
   parseScreen,
   type DeviceKind,
   type DeviceRecord,
   type Ears,
+  type ScreenPreset,
+  type ScreenQuality,
   type ScreenUse,
 } from "../../server/roomDevices.ts";
 
@@ -110,6 +121,15 @@ export interface RosterEntry {
   /** The feed this device listens through (a device id), or null for the owner. */
   follow: string | null;
   screen: ScreenUse;
+  /** The quality a TV renders at (server/roomDevices.ts). */
+  quality: ScreenQuality;
+  /** This device's Play reaches Main: always the owner, any other device once
+   *  the owner allows it (server/roomDevices.ts `mayPlay`). */
+  canPlay: boolean;
+  /** What `quality: "auto"` resolves to on this device: the preset its own GPU
+   *  benchmark picked, as its hello said. Null until a TV has said it, and for
+   *  every other device. */
+  autoQuality: ScreenPreset | null;
   /** Has a live socket in the room right now. */
   online: boolean;
   owner: boolean;
@@ -117,8 +137,9 @@ export interface RosterEntry {
 
 /** Why the room refused a `deviceSet`: the first four are
  *  server/roomDevices.ts's `DeviceSetResult`; `shape` is a message that is not
- *  a valid one, `rate` is too many changes too quickly. */
-export type DeviceRejectReason = "unknown" | "no-mic" | "tv-off" | "bad-follow" | "shape" | "rate";
+ *  a valid one, `rate` is too many changes too quickly, `owner-only` is a
+ *  change only the owner may make (`canPlay`) sent by someone else. */
+export type DeviceRejectReason = "unknown" | "no-mic" | "tv-off" | "bad-follow" | "shape" | "rate" | "owner-only";
 
 export interface DeviceReject {
   type: "deviceReject";
@@ -161,7 +182,7 @@ function isRejectReason(x: unknown): x is LookRejectReason {
 }
 
 function isDeviceRejectReason(x: unknown): x is DeviceRejectReason {
-  return x === "unknown" || x === "no-mic" || x === "tv-off" || x === "bad-follow" || x === "shape" || x === "rate";
+  return x === "unknown" || x === "no-mic" || x === "tv-off" || x === "bad-follow" || x === "shape" || x === "rate" || x === "owner-only";
 }
 
 function parseJson(text: string): unknown {
@@ -190,6 +211,7 @@ function parseRosterEntry(raw: unknown): RosterEntry | null {
   // palette and viewport; the rest default to what that role would have been
   // given.
   const kind = parseKind(raw.kind) ?? kindForRole(role);
+  // An older room sends no `canPlay`: there every member but a TV could Play.
   return {
     deviceId,
     role,
@@ -202,6 +224,9 @@ function parseRosterEntry(raw: unknown): RosterEntry | null {
     ears: parseEars(raw.ears) ?? (role === "host" ? "own" : "follow"),
     follow: typeof raw.follow === "string" ? raw.follow : null,
     screen: parseScreen(raw.screen) ?? "main",
+    quality: parseQuality(raw.quality) ?? "auto",
+    canPlay: typeof raw.canPlay === "boolean" ? raw.canPlay : role !== "renderer" && kind !== "tv",
+    autoQuality: parsePreset(raw.autoQuality) ?? null,
     online: raw.online !== false,
     owner: raw.owner === true || (raw.owner === undefined && role === "host"),
   };
@@ -221,6 +246,8 @@ export function recordsFromRoster(roster: RosterEntry[]): { records: Map<string,
       ears: e.ears,
       follow: e.follow,
       screen: e.screen,
+      quality: e.quality,
+      canPlay: e.canPlay,
       kind: e.kind,
       hasMic: e.hasMic,
       role: e.role,

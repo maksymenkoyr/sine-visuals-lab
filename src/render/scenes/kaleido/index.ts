@@ -309,7 +309,7 @@ const SETTINGS: SceneSetting[] = [
     // default. The section-drop palette flip alongside it is unconditional
     // — independent of this choice, gated only on this setting's own
     // resolved value being nonzero, not on which signal fires it.
-    drive: { default: "feature.onset" },
+    drive: { default: "feature.onset", hit: { reactionLabel: "surge" } },
   },
   {
     key: "ease",
@@ -474,6 +474,9 @@ void main() {
 }
 `;
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-05" } as const;
+
 export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidoscope", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: `uniform float uFlowPos;\nuniform float uMorphPos;\nuniform float uSpinPos;\nuniform float uZoomPos;\nuniform float uSurgePos;\nuniform float uPalShift;\nuniform float uBeatSwell;`,
@@ -492,7 +495,7 @@ export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidos
       flowPos += anim.dtSec * flowRate;
       // anim.onset, not frame.onset: the render cap can skip the tick the
       // feature fired on (see AnimFrame's doc and renderLatch.ts).
-      const swell = advanceBeatSurge(surge, anim.dtSec, drives.fired("pulse", anim.onset), pulse, getSetting("ease"));
+      const swell = advanceBeatSurge(surge, anim.dtSec, drives.fired("pulse", anim.onset), pulse * drives.hitSize("pulse"), getSetting("ease"));
       const morphRate =
         (MORPH_RATE_MIN + (MORPH_RATE_MAX - MORPH_RATE_MIN) * getSetting("morph")) *
         (1.0 + MORPH_SECTION_GAIN * anim.sectionIntensity + MORPH_SWELL_GAIN * swell);

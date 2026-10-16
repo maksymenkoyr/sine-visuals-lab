@@ -34,7 +34,7 @@ camera makes the regimes. Draft scene, merged to main.
   idioms: an empty VAO decoded entirely from `gl_InstanceID`/`gl_VertexID`
   (no per-instance upload, the same trick as `ambience.ts`'s `DOT_VERT`), a
   full-res sharp target with its own depth renderbuffer plus a half-res
-  two-pass blur for the halo, hand-cached sampler locations, and the
+  two-pass blur for the halo, sampler units set with `GLProgram.setI`, and the
   GL-state restore block at the end (the gallery shares one context across
   every scene's tile).
 - `tests/tessera.test.ts` — layout and instance decode, lobe/hue symmetry,
@@ -131,6 +131,7 @@ interpretation was revised:
   buffer (the code is `SHELL_RADIUS` in `lattice.ts` and a 24-bit
   renderbuffer), and comments that cited plan files not in the repo now
   point at Round 2 above.
+- 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 
 ## Tuning notes
 

@@ -1,0 +1,508 @@
+<title>Caustics Sparkle Shapes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: the pool on the left as the stage, the Scene card's Sparkle block on the right, as in the app panel. One dark look, like the app. */
+:root {
+  --bg: #0b0d12;
+  --panel: #12151d;
+  --panel-2: #181c26;
+  --line: #262b38;
+  --fg: #dde2ee;
+  --muted: #8a92a6;
+  --violet: #c3a5f9;
+  --amber: #f6b15b;
+  --sky: #59bbfb;
+  --font-label: 'Chakra Petch', system-ui, sans-serif;
+  --font-mono: 'Share Tech Mono', ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-label); font-weight: 300; padding-inline: 16px; padding-block: 18px 40px; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 18px; }
+header h1 { font-weight: 600; font-size: 1.35rem; margin: 0; letter-spacing: .02em; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 72ch; line-height: 1.45; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.stage { display: grid; gap: 10px; min-width: 0; }
+#pool { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 6px; background: #04161f; max-width: 100%; }
+.transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.transport .lbl { text-transform: uppercase; letter-spacing: .08em; }
+button { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: #3a4152; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--violet); color: var(--violet); }
+#strike { border-color: var(--amber); color: var(--amber); }
+.hitdot { width: 9px; height: 9px; border-radius: 50%; background: #2a2f3c; transition: background .05s; }
+.hitdot.on { background: var(--amber); }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px 14px; display: grid; gap: 11px; }
+.card h2 { margin: 0; font-size: .78rem; font-weight: 500; text-transform: uppercase; letter-spacing: .12em; color: var(--violet); display: flex; justify-content: space-between; }
+.card h2 span { color: var(--muted); font-family: var(--font-mono); letter-spacing: .04em; text-transform: none; }
+.pick { display: grid; gap: 5px; }
+.pick .cap { font-family: var(--font-mono); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chips button { padding: 5px 9px; font-weight: 500; font-size: .86rem; }
+.previewbox { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; align-items: stretch; }
+#preview { width: 112px; height: 112px; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.pv-side { display: grid; grid-template-rows: 1fr auto; gap: 5px; min-width: 0; }
+#strip { width: 100%; height: 100%; min-height: 90px; display: block; border-radius: 4px; background: #0e1118; border: 1px solid var(--line); }
+.legend { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.desc { font-size: .85rem; color: var(--muted); line-height: 1.4; margin: 0; }
+.desc b { color: var(--fg); font-weight: 500; }
+.rows { display: grid; gap: 9px; }
+.row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 46px; gap: 8px; align-items: center; font-size: .86rem; }
+.row label { font-weight: 500; }
+.row output { font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.row .ends { grid-column: 2; display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: -6px; }
+input[type=range] { width: 100%; accent-color: var(--violet); }
+
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.note { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; line-height: 1.45; font-size: .9rem; min-width: 0; }
+.note h3 { margin: 0 0 6px; font-size: .78rem; font-weight: 500; text-transform: uppercase; letter-spacing: .12em; color: var(--amber); }
+.note ol, .note ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.note b { font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Caustics · Sparkle shapes</h1>
+    <p>Version 4. Sparkle is two choices. <b>Effect</b> is what a hat does to the water. <b>Shape</b> is how that effect moves over time after the hit, drawn in the preview. Fake hats play at 124 BPM; <b>Strike</b> fires one by hand.</p>
+  </header>
+
+  <div class="main">
+    <div class="stage">
+      <canvas id="pool" aria-label="Caustic pool with the sparkle effect"></canvas>
+      <div class="transport">
+        <span class="lbl">Hats</span>
+        <button data-pat="4" aria-pressed="false">Quarters</button>
+        <button data-pat="off" aria-pressed="true">Off-beats</button>
+        <button data-pat="8" aria-pressed="false">8ths</button>
+        <button data-pat="16" aria-pressed="false">16ths</button>
+        <button data-pat="none" aria-pressed="false">None</button>
+        <button id="strike">Strike</button>
+        <span class="hitdot" id="hitdot"></span>
+        <button id="pause" aria-pressed="false">Pause</button>
+      </div>
+    </div>
+
+    <section class="card" aria-label="Treble sparkle">
+      <h2>Treble sparkle <span>Look</span></h2>
+      <div class="pick">
+        <span class="cap">Effect · changes the water</span>
+        <div class="chips" id="fx-water"></div>
+        <span class="cap">Effect · on top</span>
+        <div class="chips" id="fx-top"></div>
+      </div>
+      <div class="pick">
+        <span class="cap">Shape</span>
+        <div class="chips" id="shapes"></div>
+      </div>
+      <div class="previewbox">
+        <canvas id="preview" width="224" height="224" aria-label="The effect on a small patch, one hit on loop"></canvas>
+        <div class="pv-side">
+          <canvas id="strip" aria-label="The shape: effect strength over time after one hit"></canvas>
+          <div class="legend" id="legend">strength after one hit</div>
+        </div>
+      </div>
+      <p class="desc" id="desc"></p>
+      <div class="rows" id="rows"></div>
+    </section>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h3>What changed in version 4</h3>
+      <ul>
+        <li>Back to version 2, with only <b>Bell</b> changed: the hit now carries a fast vibration that trembles from the first moment and rings on after the hit fades.</li>
+        <li><b>Vibration</b> sets how strong the trembling is, and <b>Speed</b> how many times a second it shakes, and <b>Vibration decay</b> how fast the trembling dies out.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>Your call</h3>
+      <ol>
+        <li>Is this Bell right? Try Tighten, Shimmer or Prism, where the trembling pushes both ways.</li>
+        <li>Which effects go into the scene?</li>
+        <li>Keep curved Rings and Bloom, or drop them?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---- Choices ----
+const EFFECTS = [
+  { id: 0, group: "top", name: "Grain", rows: ["amount", "density", "grain"],
+    desc: "Today's sparkle. A fine grain flashes on the bright ridges." },
+  { id: 1, group: "top", name: "Rings", rows: ["amount", "density", "size"],
+    desc: "Each hit strikes a few spots. A ring spreads from each one, bent by the water and visible only on lit filaments." },
+  { id: 2, group: "top", name: "Bloom", rows: ["amount", "density", "size"],
+    desc: "Each hit lights a soft, uneven patch of filaments that swells and dissolves." },
+  { id: 3, group: "water", name: "Flare", rows: ["amount"],
+    desc: "The brightest crests ignite and burn white. Dim water stays dim." },
+  { id: 4, group: "water", name: "Tighten", rows: ["amount"],
+    desc: "Every filament snaps thin and sharp, then relaxes. A negative swing softens them past rest." },
+  { id: 5, group: "water", name: "Shimmer", rows: ["amount"],
+    desc: "The filaments quiver like heat haze, breaking into fine trembling lines." },
+  { id: 6, group: "water", name: "Prism", rows: ["amount"],
+    desc: "Each filament splits into colour fringes, like light through a prism." },
+  { id: 7, group: "water", name: "Run", rows: ["amount"],
+    desc: "Light runs along the filaments in travelling bands. Each hit pushes the bands forward." },
+];
+const SHAPES = [
+  { id: 0, name: "Pluck", rows: ["life"], desc: "Instant hit, exponential fade." },
+  { id: 1, name: "Bell", rows: ["life", "ring", "vibe", "vdecay"], desc: "Hard hit and exponential fade, with a fast vibration that trembles through it and keeps ringing after the hit has faded." },
+  { id: 2, name: "Swell", rows: ["life"], desc: "Grows exponentially after the hit, then cuts off, like a reversed cymbal." },
+  { id: 3, name: "Bounce", rows: ["life", "wobbles"], desc: "Hits again and again, each bounce lower." },
+];
+const shapeById = id => SHAPES.find(s => s.id === id);
+const ROWS = {
+  amount:  { label: "Amount", min: 0, max: 1, step: 0.01, v: 0.6, ends: ["less", "more"], fmt: v => v.toFixed(2) },
+  density: { label: "Density", min: 0, max: 1, step: 0.01, v: 0.35, ends: ["fewer", "more"], fmt: v => v.toFixed(2) },
+  grain:   { label: "Grain", min: 0, max: 1, step: 0.01, v: 0.5, ends: ["finer", "coarser"], fmt: v => v.toFixed(2) },
+  size:    { label: "Size", min: 0.02, max: 0.14, step: 0.002, v: 0.06, ends: ["small", "big"], fmt: v => (v * 1000).toFixed(0) },
+  life:    { label: "Length", min: 0.15, max: 2.5, step: 0.01, v: 0.8, ends: ["short", "long"], fmt: v => v.toFixed(2) + "s" },
+  ring:    { label: "Vibration", min: 0, max: 1, step: 0.01, v: 0.5, ends: ["none", "strong"], fmt: v => v.toFixed(2) },
+  wobbles: { label: "Wobbles", min: 1, max: 8, step: 1, v: 4, ends: ["few", "many"], fmt: v => v.toFixed(0) },
+  vdecay:  { label: "Vibration decay", min: 0.05, max: 1, step: 0.01, v: 0.5, ends: ["dies fast", "rings long"], fmt: v => v.toFixed(2) },
+  vibe:    { label: "Speed", min: 12, max: 60, step: 1, v: 39, ends: ["slow", "fast"], fmt: v => v.toFixed(0) + " Hz" },
+};
+const P = Object.fromEntries(Object.entries(ROWS).map(([k, r]) => [k, r.v]));
+let effect = 4, shape = 1;
+
+// ---- The shape: effect strength t seconds after one hit. Mirrored in FRAG's envShape. ----
+function smooth(e0, e1, x) { const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1); return t * t * (3 - 2 * t); }
+function envShape(t, sh = shape) {
+  const L = P.life;
+  if (t < 0 || t > L) return 0;
+  const endFade = 1 - smooth(0.85 * L, L, t);
+  const atk = 1 - Math.exp(-t / 0.008);
+  let e;
+  if (sh === 0) e = atk * Math.exp(-t / (0.28 * L));
+  else if (sh === 1) {
+    // The hit fades fast; the vibration (P.vibe times a second) starts with it and fades slower.
+    const main = atk * Math.exp(-t / (0.18 * L));
+    const vib = P.ring * Math.sin(2 * Math.PI * P.vibe * t) * (1 - Math.exp(-t / 0.015)) * Math.exp(-t / (P.vdecay * L));
+    e = main + vib;
+  } else if (sh === 2) {
+    const ts = 0.75 * L;
+    e = t < ts ? (Math.exp(4 * t / ts) - 1) / (Math.exp(4) - 1) : Math.exp(-(t - ts) / (0.04 * L));
+  } else e = atk * Math.exp(-t / (0.35 * L)) * Math.abs(Math.cos(Math.PI * P.wobbles * t / L));
+  return e * endFade;
+}
+// Several hits in flight add up, softly capped so fast hats don't blow out.
+function softCap(s) { const a = Math.abs(s); return a <= 1 ? s : Math.sign(s) * (1 + 0.5 * Math.tanh(a - 1)); }
+
+// ---- GLSL ----
+const VERT = `#version 300 es
+in vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+const FRAG = `#version 300 es
+precision highp float;
+precision highp int;
+out vec4 outColor;
+uniform vec2 uRes; uniform float uTime; uniform int uEffect; uniform int uShape; uniform int uPreview;
+uniform float uHitT[12]; uniform float uHitN[12];
+uniform float uE, uAmount, uDensity, uGrain, uSize, uLife, uRing, uWobbles, uVibe, uVDecay, uRunPhase, uLoop;
+
+uint pcg(uvec3 v) {
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return v.x;
+}
+float h(ivec2 c, int k) { return float(pcg(uvec3(uvec2(c + 65536), uint(k)))) / 4294967295.0; }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); ivec2 c = ivec2(i);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h(c, 0), h(c + ivec2(1, 0), 0), u.x), mix(h(c + ivec2(0, 1), 0), h(c + ivec2(1, 1), 0), u.x), u.y);
+}
+vec2 qOut;
+float caustic(vec2 p, float t, float sharp, int oct) {
+  vec2 q = p * 3.2;
+  vec2 w = vec2(vnoise(q * 0.7 + vec2(t * 0.08, 0.0)), vnoise(q * 0.7 + vec2(5.2, -t * 0.07))) - 0.5;
+  q += w * 1.7;
+  qOut = q;
+  float acc = 0.0, amp = 1.0;
+  for (int i = 0; i < 4; i++) {
+    if (i >= oct) break;
+    float dir = (i % 2 == 0) ? 1.0 : -1.0;
+    float v = vnoise(q + vec2(t * 0.12 * dir, t * 0.05));
+    float ridge = 1.0 - abs(2.0 * v - 1.0);
+    acc += amp * pow(ridge, sharp);
+    q = q * 2.03 + 7.1; amp *= 0.6;
+  }
+  return acc;
+}
+float envShape(float t) {
+  float L = uLife;
+  if (t < 0.0 || t > L) return 0.0;
+  float endFade = 1.0 - smoothstep(0.85 * L, L, t);
+  float atk = 1.0 - exp(-t / 0.008);
+  float e;
+  if (uShape == 0) e = atk * exp(-t / (0.28 * L));
+  else if (uShape == 1) {
+    float mainE = atk * exp(-t / (0.18 * L));
+    float vib = uRing * sin(6.28318 * uVibe * t) * (1.0 - exp(-t / 0.015)) * exp(-t / (uVDecay * L));
+    e = mainE + vib;
+  } else if (uShape == 2) {
+    float ts = 0.75 * L;
+    e = t < ts ? (exp(4.0 * t / ts) - 1.0) / (exp(4.0) - 1.0) : exp(-(t - ts) / (0.04 * L));
+  } else e = atk * exp(-t / (0.35 * L)) * abs(cos(3.14159 * uWobbles * t / L));
+  return e * endFade;
+}
+vec3 water(float acc) {
+  vec3 deep = vec3(0.012, 0.07, 0.10);
+  vec3 mid = vec3(0.05, 0.45, 0.55);
+  vec3 hi = vec3(0.75, 0.97, 1.0);
+  vec3 c = mix(deep, mid, smoothstep(0.0, 0.7, acc));
+  return mix(c, hi, smoothstep(0.75, 1.6, acc));
+}
+// A struck spot for Rings / Bloom. d: offset from the spot, bent by the water.
+float spot(vec2 d, float t, float lit) {
+  float L = uLife;
+  float e = envShape(t);
+  if (uEffect == 1) {
+    float rad = uSize * (1.0 - exp(-t / (0.3 * L)));
+    float dr = (length(d) - rad) / (0.12 * uSize + 0.002);
+    float ring = exp(-dr * dr) * (0.25 + 0.75 * lit);
+    return abs(e) * ring;
+  }
+  float rad = uSize * (0.35 + 0.65 * (1.0 - exp(-t / (0.3 * L))));
+  float blob = 1.0 - smoothstep(rad * 0.3, rad, length(d));
+  return e * blob * lit;
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  vec2 p;
+  float t = uTime;
+  if (uPreview == 1) {
+    vec2 uv = (frag - 0.5 * uRes) / uRes.y;
+    p = uv * 0.42 + vec2(0.18, 0.06);
+  } else {
+    p = (frag - 0.5 * uRes) / uRes.y;
+  }
+  float E = uE * uAmount;
+  float sharp = 8.0;
+  if (uEffect == 4) sharp = clamp(8.0 * exp(1.25 * E), 3.0, 40.0);
+  if (uEffect == 5) {
+    vec2 j = vec2(vnoise(p * 55.0 + vec2(t * 31.0, 0.0)), vnoise(p * 55.0 + vec2(17.0, -t * 29.0))) - 0.5;
+    p += j * 0.016 * E;
+  }
+  float acc = caustic(p, t, sharp, 4);
+  vec2 q = qOut;
+  vec3 col;
+  if (uEffect == 6) {
+    vec2 off = vec2(0.8, 0.6) * 0.016 * E;
+    float aR = caustic(p + off, t, sharp, 4);
+    float aB = caustic(p - off, t, sharp, 4);
+    col = water(acc);
+    col += vec3(1.0, 0.25, 0.45) * max(aR - acc, 0.0) * 2.0;
+    col += vec3(0.35, 0.45, 1.0) * max(aB - acc, 0.0) * 2.0;
+    col += vec3(1.0, 0.85, 0.3) * max(min(aR, aB) - acc, 0.0) * 0.6;
+    col *= 1.0 + 0.25 * abs(E);
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  if (uEffect == 4) acc *= 1.0 + 0.45 * E;
+  if (uEffect == 3) acc += 0.7 * E * pow(max(acc, 0.0), 1.8) * smoothstep(0.45, 1.0, acc);
+  if (uEffect == 7) {
+    float bands = pow(0.5 + 0.5 * sin(q.x * 5.0 + q.y * 3.3 - uRunPhase), 7.0);
+    acc += acc * smoothstep(0.25, 0.8, acc) * bands * (0.35 + 2.2 * abs(E));
+  }
+  if (uEffect == 0) {
+    float crest = smoothstep(0.3, 0.75, acc);
+    float freq = mix(90.0, 16.0, uGrain) * 0.5;
+    float n = vnoise(p * freq + vec2(t * 0.6, 0.0));
+    acc += max(E, 0.0) * crest * pow(n, mix(13.0, 3.0, uDensity)) * 4.0;
+  }
+  if (uEffect == 1 || uEffect == 2) {
+    float lit = smoothstep(0.25, 0.85, acc);
+    // Bend the spot's shape with the water's own flow.
+    vec2 bend = (vec2(vnoise(q * 1.3 + 3.0), vnoise(q * 1.3 + 9.0)) - 0.5) * uSize * 1.6;
+    float add = 0.0;
+    if (uPreview == 1) {
+      add = spot(p - vec2(0.18, 0.06) + bend, uLoop, lit);
+    } else {
+      float cell = uSize * 1.25;
+      ivec2 base = ivec2(floor(p / cell));
+      float perHit = clamp(uDensity * uDensity * 1.1 * (cell * cell) / (0.08 * 0.08), 0.0, 0.95);
+      for (int cx = -1; cx <= 1; cx++) for (int cy = -1; cy <= 1; cy++) {
+        ivec2 c = base + ivec2(cx, cy);
+        vec2 centre = (vec2(c) + 0.2 + 0.6 * vec2(h(c, 11), h(c, 12))) * cell;
+        for (int k = 0; k < 12; k++) {
+          float age = t - uHitT[k];
+          if (uHitT[k] < 0.0 || age < 0.0 || age > uLife) continue;
+          if (h(c, 100 + int(uHitN[k]) % 4096) > perHit) continue;
+          add += spot(p - centre + bend, age, lit);
+        }
+      }
+    }
+    acc += uAmount * add * (uEffect == 1 ? 2.0 : 1.1) * (0.4 + acc);
+  }
+  col = water(acc);
+  outColor = vec4(col, 1.0);
+}`;
+
+function makeGL(canvas) {
+  const gl = canvas.getContext("webgl2", { antialias: false, premultipliedAlpha: false });
+  if (!gl) return null;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "aPos"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = {}; const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(prog, i).name.replace(/\[0\]$/, ""); U[name] = gl.getUniformLocation(prog, name); }
+  return { gl, U, canvas };
+}
+
+const poolCv = document.getElementById("pool");
+const pvCv = document.getElementById("preview");
+const stripCv = document.getElementById("strip");
+let pool, pv;
+try { pool = makeGL(poolCv); pv = makeGL(pvCv); } catch (e) { console.error(e); }
+if (!pool || !pv) {
+  document.querySelector(".stage").insertAdjacentHTML("beforeend", "<p>This prototype needs WebGL2, which this browser did not provide.</p>");
+}
+
+// ---- Fake hats ----
+const BPM = 124, BEAT = 60 / BPM;
+let pattern = "off";
+const hitT = new Float32Array(12).fill(-1), hitN = new Float32Array(12);
+let hitSerial = 0, nextStep = 0;
+function hit(t) {
+  const i = hitSerial % 12; hitT[i] = t; hitN[i] = hitSerial % 4096; hitSerial++;
+  const dot = document.getElementById("hitdot"); dot.classList.add("on"); setTimeout(() => dot.classList.remove("on"), 70);
+}
+function scheduleHats(now) {
+  const div = pattern === "16" ? 4 : pattern === "4" ? 1 : 2;
+  const step = BEAT / div;
+  if (nextStep < now - 1) nextStep = Math.ceil(now / step) * step;
+  while (nextStep <= now) {
+    const idx = Math.round(nextStep / step);
+    const fire = pattern === "none" ? false : pattern === "off" ? idx % 2 === 1 : true;
+    if (fire) hit(nextStep);
+    nextStep += step;
+  }
+}
+function liveE(now) {
+  let s = 0;
+  for (let i = 0; i < 12; i++) if (hitT[i] >= 0) s += envShape(now - hitT[i]);
+  return softCap(s);
+}
+
+// ---- Panel ----
+function chip(parent, label, pressed, onClick) {
+  const b = document.createElement("button"); b.textContent = label; b.setAttribute("aria-pressed", String(pressed));
+  b.addEventListener("click", onClick); parent.appendChild(b); return b;
+}
+function buildPickers() {
+  for (const id of ["fx-water", "fx-top", "shapes"]) document.getElementById(id).innerHTML = "";
+  for (const f of EFFECTS) chip(document.getElementById(f.group === "water" ? "fx-water" : "fx-top"), f.name, f.id === effect, () => { effect = f.id; refresh(); });
+  for (const s of SHAPES) chip(document.getElementById("shapes"), s.name, s.id === shape, () => { shape = s.id; refresh(); });
+}
+function refresh() {
+  buildPickers();
+  const f = EFFECTS[effect], s = shapeById(shape);
+  document.getElementById("desc").innerHTML = `<b>${f.name}.</b> ${f.desc} <b>${s.name}.</b> ${s.desc}`;
+  const rowsEl = document.getElementById("rows");
+  rowsEl.innerHTML = "";
+  for (const key of [...f.rows, ...s.rows]) {
+    const r = ROWS[key];
+    const row = document.createElement("div"); row.className = "row";
+    const id = "r-" + key;
+    row.innerHTML = `<label for="${id}">${r.label}</label><input id="${id}" type="range" min="${r.min}" max="${r.max}" step="${r.step}" value="${P[key]}"><output for="${id}">${r.fmt(P[key])}</output><div class="ends"><span>${r.ends[0]}</span><span>${r.ends[1]}</span></div>`;
+    const input = row.querySelector("input"), out = row.querySelector("output");
+    input.addEventListener("input", () => { P[key] = +input.value; out.textContent = r.fmt(P[key]); });
+    rowsEl.appendChild(row);
+  }
+}
+document.querySelectorAll("[data-pat]").forEach(b => b.addEventListener("click", () => {
+  pattern = b.dataset.pat;
+  document.querySelectorAll("[data-pat]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+}));
+document.getElementById("strike").addEventListener("click", () => hit(clock()));
+let paused = matchMedia("(prefers-reduced-motion: reduce)").matches, pausedAt = 0, offset = 0;
+const pauseBtn = document.getElementById("pause");
+function clock() { return paused ? pausedAt : performance.now() / 1000 - offset; }
+function syncPause() { pauseBtn.setAttribute("aria-pressed", String(paused)); pauseBtn.textContent = paused ? "Play" : "Pause"; }
+pauseBtn.addEventListener("click", () => {
+  if (paused) { offset = performance.now() / 1000 - pausedAt; paused = false; }
+  else { pausedAt = clock(); paused = true; }
+  syncPause();
+});
+syncPause();
+refresh();
+
+// ---- Draw ----
+function resize(cv, scale) {
+  const r = cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, scale);
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+}
+let runPhase = 0, lastT = 0;
+function setUniforms(g, t, preview, E, loop) {
+  const { gl, U, canvas } = g;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(U.uRes, canvas.width, canvas.height);
+  gl.uniform1f(U.uTime, t);
+  gl.uniform1i(U.uEffect, effect); gl.uniform1i(U.uShape, shape); gl.uniform1i(U.uPreview, preview);
+  gl.uniform1fv(U.uHitT, hitT); gl.uniform1fv(U.uHitN, hitN);
+  gl.uniform1f(U.uE, E); gl.uniform1f(U.uAmount, P.amount); gl.uniform1f(U.uDensity, P.density);
+  gl.uniform1f(U.uGrain, P.grain); gl.uniform1f(U.uSize, P.size); gl.uniform1f(U.uLife, P.life);
+  gl.uniform1f(U.uRing, P.ring); gl.uniform1f(U.uWobbles, P.wobbles);
+  gl.uniform1f(U.uVibe, P.vibe); gl.uniform1f(U.uVDecay, P.vdecay);
+  gl.uniform1f(U.uRunPhase, runPhase); gl.uniform1f(U.uLoop, loop);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function drawCurve(cv, sh, loop, span, small) {
+  resize(cv, 2);
+  const c = cv.getContext("2d"), W = cv.width, H = cv.height, dpr = W / cv.clientWidth, pad = 6 * dpr;
+  c.clearRect(0, 0, W, H);
+  const lo = sh === 1 ? -0.6 : -0.08, hi = 1.1;
+  const x = t => pad + (W - 2 * pad) * (t / span), y = v => H - pad - (H - 2 * pad) * (Math.max(lo, Math.min(v, hi)) - lo) / (hi - lo);
+  c.strokeStyle = "#232838"; c.lineWidth = 1;
+  for (let s = 0; s <= span; s += 0.25) { c.beginPath(); c.moveTo(x(s), pad); c.lineTo(x(s), H - pad); c.stroke(); }
+  c.strokeStyle = "#3a4152"; c.beginPath(); c.moveTo(pad, y(0)); c.lineTo(W - pad, y(0)); c.stroke();
+  const N = 900;
+  c.fillStyle = "rgba(195,165,249,0.14)"; c.strokeStyle = "#c3a5f9"; c.lineWidth = 1.6 * dpr;
+  c.beginPath(); c.moveTo(x(0), y(0));
+  for (let i = 0; i <= N; i++) { const t = span * i / N; c.lineTo(x(t), y(envShape(t, sh))); }
+  c.lineTo(x(span), y(0)); c.closePath(); c.fill();
+  c.beginPath();
+  for (let i = 0; i <= N; i++) { const t = span * i / N; const v = y(envShape(t, sh)); i ? c.lineTo(x(t), v) : c.moveTo(x(t), v); }
+  c.stroke();
+  if (!small) {
+    c.fillStyle = "#8a92a6"; c.font = `${10 * dpr}px 'Share Tech Mono', monospace`;
+    c.fillText("0", pad + 2 * dpr, y(0) - 3 * dpr);
+    c.fillText(P.life.toFixed(2) + "s", W - pad - 34 * dpr, H - pad - 3 * dpr);
+  }
+  c.strokeStyle = "#59bbfb"; c.lineWidth = 1 * dpr; c.beginPath(); c.moveTo(x(loop), pad); c.lineTo(x(loop), H - pad); c.stroke();
+  c.fillStyle = "#59bbfb"; c.beginPath(); c.arc(x(loop), y(envShape(loop, sh)), 3 * dpr, 0, Math.PI * 2); c.fill();
+}
+function frame() {
+  const t = clock();
+  if (!paused) scheduleHats(t);
+  const E = liveE(t);
+  const dt = Math.max(0, Math.min(t - lastT, 0.1)); lastT = t;
+  runPhase += dt * (0.6 + 9 * Math.abs(E) * P.amount);
+  if (pool && pv) {
+    resize(poolCv, 1.25);
+    setUniforms(pool, t, 0, E, 0);
+    const span = P.life + 0.35;
+    const loop = t % span;
+    setUniforms(pv, t, 1, envShape(loop), loop);
+    drawCurve(stripCv, shape, loop, span, false);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>

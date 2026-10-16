@@ -1,6 +1,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "./animClock.ts";
 import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
+import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /**
  * The seam between the meters (src/ui/audioMeters.ts), scene settings
@@ -68,15 +69,25 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
  * *value* uploads (u<Key>Drive, drives.value()) go through this same
  * envelope read — only its edge-latched `fired()` needs the raw boolean.
  *
- * "All level" (`anim.energy`) is the one entry whose `read()` actually uses
- * its `frame` argument (`frame.energy`, not anything off `anim`) — every
- * other entry ignores `frame` entirely. drives.ts feeds it the
- * sensitivity-applied frame (matching what a scene's own `uEnergy` sees —
- * see that file's header), so a setting driven by "All level" and a scene's
- * plain `uEnergy` uniform read the identical number. Called elsewhere (a
- * setting row's live pill) with the plain band-gained frame instead, so that
- * pill can read very slightly ahead of Sensitivity/Expansion — an accepted
- * cosmetic gap, not a claim this file makes about the render path.
+ * "All level" (`anim.energy`) and "Level" (`feature.level`) are the two
+ * entries whose `read()` actually uses its `frame` argument (`frame.energy`
+ * and `frame.level`, not anything off `anim`) — every other entry ignores
+ * `frame` entirely. drives.ts feeds them the sensitivity-applied frame
+ * (matching what a scene's own `uEnergy` sees — see that file's header), so
+ * a setting driven by "All level" and a scene's plain `uEnergy` uniform read
+ * the identical number. Called elsewhere (a setting row's live pill) with
+ * the plain band-gained frame instead, so that pill can read very slightly
+ * ahead of Sensitivity/Expansion — an accepted cosmetic gap, not a claim
+ * this file makes about the render path. `level` comes through both frames
+ * raw (src/audio/sensitivity.ts's applySensitivity never shapes it), which
+ * is why Level, unlike All level, reads 0 in a silent room.
+ *
+ * The `dial.*` entries (DIAL_SIGNALS) are generated from MUSIC_DIALS, one
+ * per dial, so a new dial gets a jack by construction. Each reads the eased
+ * dial straight off AnimFrame.profile — the slow track description Auto
+ * resolves against (musicProfile.ts) — so a wire on one moves over seconds,
+ * not per hit, and does what its dial does through silence: rests at
+ * NEUTRAL, except `dial.loudness`, which keeps its last reading.
  */
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
@@ -98,19 +109,36 @@ export type MeterCardId = "signal" | "hits" | "tempo" | "character";
  *  "wave" above (the beat/bar swing trace, a different row entirely).
  *  "centroid" is the Character card's Brightness row (dialRows' own
  *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
- *  draws directly under that dial's bar rather than a row of its own. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform";
+ *  draws directly under that dial's bar rather than a row of its own. Each
+ *  dial's own cell is its DialSignalId, "dial.brightness" naming the same
+ *  Brightness row as "centroid". */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform" | DialSignalId;
+
+/** One Character-card dial as a signal — see this file's header. */
+export type DialSignalId = `dial.${MusicDial}`;
+
+export function dialSignalId(dial: MusicDial): DialSignalId {
+  return `dial.${dial}`;
+}
+
+/** Every dial signal, in MUSIC_DIALS order. */
+export const DIAL_SIGNALS: readonly DialSignalId[] = MUSIC_DIALS.map(dialSignalId);
 
 export type SignalId =
+  | DialSignalId
   | "feature.onset"
   | "feature.flux"
+  | "feature.level"
   | "anim.lowOnset"
+  | "anim.kickBand"
   | "anim.midOnset"
   | "anim.highOnset"
   | "anim.dropOnset"
   | "anim.low"
   | "anim.mid"
   | "anim.high"
+  | "anim.hats"
+  | "anim.lead"
   | "anim.energy"
   | "anim.sectionIntensity"
   | "anim.centroid"
@@ -188,7 +216,7 @@ export const surgeAtThreshold = clamp01((1 - SURGE_RATIO_FLOOR) / (SURGE_RATIO_C
  *  is ever "active" by construction. `get` reads a sibling setting's
  *  resolved value (auto-aware, the same number the shader sees) by key
  *  rather than by spec object, since the device menu already keys its
- *  settings that way for the pin/typed-entry path (src/tuning/pins.ts). */
+ *  settings that way for the typed-entry path (src/render/customValues.ts). */
 export type SignalLink =
   | SignalId
   | {
@@ -227,6 +255,15 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     read: (_frame, anim) => anim.lowPulse,
     edge: (anim) => anim.lowOnset,
     monitor: { card: "hits", row: "hits" },
+    bandRange: "low",
+  }),
+  "anim.kickBand": signal({
+    id: "anim.kickBand",
+    label: "Kick band",
+    description:
+      "The level of the single low band (below the Bands split) that has gone up and down the most over the last few seconds (AnimFrame.kickBand, bandPick.ts) — one narrow band, re-picked by itself when the music changes, unlike Bass level's average over the whole low group.",
+    kind: "level",
+    read: (_frame, anim) => anim.kickBand,
     bandRange: "low",
   }),
   "anim.midOnset": signal({
@@ -275,6 +312,24 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     read: (_frame, anim) => anim.high,
     bandRange: "high",
   }),
+  "anim.hats": signal({
+    id: "anim.hats",
+    label: "Hats",
+    description:
+      "The drum part of the treble range (AnimFrame.hats, src/audio/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
+    kind: "level",
+    read: (_frame, anim) => anim.hats,
+    bandRange: "high",
+  }),
+  "anim.lead": signal({
+    id: "anim.lead",
+    label: "Lead",
+    description:
+      "The held part of the mid range (AnimFrame.lead, src/audio/stemSplit.ts) — vocals, synths and guitar with the drums taken out, so it doesn't jump on a snare the way Mid level does.",
+    kind: "level",
+    read: (_frame, anim) => anim.lead,
+    bandRange: "mid",
+  }),
   "anim.energy": signal({
     id: "anim.energy",
     label: "All level",
@@ -282,6 +337,15 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The plain mean of every band (FeatureFrame.energy) — see this file's header for why this is the one entry whose read() actually uses its `frame` argument.",
     kind: "level",
     read: (frame) => frame.energy,
+    bandRange: "all",
+  }),
+  "feature.level": signal({
+    id: "feature.level",
+    label: "Level",
+    description:
+      "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), the Dynamics card's Level row — never auto-gained, so a silent room reads 0 where All level's auto-gain lifts mic hiss back to mid-range.",
+    kind: "level",
+    read: (frame) => frame.level,
     bandRange: "all",
   }),
   "anim.sectionIntensity": signal({
@@ -315,7 +379,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
     monitor: { card: "signal", row: "waveform" },
@@ -376,4 +440,21 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     edge: (anim) => anim.metronomeBar,
     monitor: { card: "tempo", row: "timing" },
   }),
+  ...dialSignals(),
 };
+
+function dialSignals(): Record<DialSignalId, SignalSpec> {
+  const out = {} as Record<DialSignalId, SignalSpec>;
+  for (const dial of MUSIC_DIALS) {
+    const id = dialSignalId(dial);
+    out[id] = signal({
+      id,
+      label: DIAL_LABELS[dial].label,
+      description: `The ${DIAL_LABELS[dial].label} dial (AnimFrame.profile.${dial}, musicProfile.ts) — the eased track description Auto resolves against and its Character-card cell shows (under RAW the cell shows the pre-ease target; the wire still reads the eased one), so it moves over seconds rather than per hit.`,
+      kind: "level",
+      read: (_frame, anim) => anim.profile[dial],
+      monitor: { card: "character", row: id },
+    });
+  }
+  return out;
+}

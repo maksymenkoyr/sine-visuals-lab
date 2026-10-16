@@ -586,7 +586,7 @@ const SETTINGS: SceneSetting[] = [
     // Scene.
     // uStrike's own GLSL sites are all plain gain curves on the setting's
     // own resolved value, no live signal, so nothing there needs wrapping.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"], hit: { reactionLabel: "strike" } },
   },
   {
     key: "reach",
@@ -3104,6 +3104,9 @@ function uploadGasRecipe(p: GLProgram, r: GasRecipe): void {
   p.setV3v("uGasTint", r.tint);
 }
 
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-02" } as const;
+
 export const stormScene: Scene = (() => {
   let prog: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
@@ -3251,8 +3254,8 @@ export const stormScene: Scene = (() => {
 
       // Sampler bindings are program state, so they only have to be set once.
       prog.use();
-      gl.uniform1i(gl.getUniformLocation(prog.program, "uNoise"), 0);
-      gl.uniform1i(gl.getUniformLocation(prog.program, "uShape"), 1);
+      prog.setI("uNoise", 0);
+      prog.setI("uShape", 1);
 
       // The point cloud, sampled from the same lobes variant 0 of the shape
       // volume was baked from (buildCloud seeds buildLobes exactly as
@@ -3305,8 +3308,8 @@ export const stormScene: Scene = (() => {
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, buildFilamentIndices(strandCount), gl.STATIC_DRAW);
       gl.bindVertexArray(null);
       filProg.use();
-      gl.uniform1i(gl.getUniformLocation(filProg.program, "uShape"), 1);
-      gl.uniform1i(gl.getUniformLocation(filProg.program, "uFlowTex"), 2);
+      filProg.setI("uShape", 1);
+      filProg.setI("uFlowTex", 2);
 
       // The lattice. Its contents change as the cloud morphs, so both buffers
       // are DYNAMIC_DRAW at a fixed capacity and a re-mesh is a bufferSubData
@@ -3441,8 +3444,8 @@ export const stormScene: Scene = (() => {
       };
       // Single catalogue source wouldn't cover the bass-or-beat union the
       // ordinary strike needs — see the "strike" setting's own comment.
-      if (drives.fired("strike", lowRose || beatRose)) {
-        lightStruck(pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false));
+      if (drives.fired("strike", lowRose || beatRose, undefined, Math.max(anim.lowPulse, anim.beatPulse))) {
+        lightStruck(pool.trigger((0.7 + 0.5 * (lowRose ? anim.lowPulse : 0)) * drives.hitSize("strike"), false));
       }
       // On top of whatever the strike lit: a beat picks its own sections, so
       // the cloud answers the beat even where no bolt reached, and a mid or

@@ -1,0 +1,1872 @@
+<title>Chladni Idea Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Hanken+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a lab bench of five spreads, each idea's words on the left and its live plate on the right; stacks on a phone. */
+:root {
+  --bg: #f1f0f4;
+  --panel: #ffffff;
+  --fg: #19171f;
+  --muted: #5e5868;
+  --line: #d8d4df;
+  --accent: #b3166c;
+  --accent-soft: #f7dcea;
+  --plate: #050507;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Hanken Grotesk", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sec-groove: #8b7fa8; --sec-break: #c9c2d6; --sec-build: #d9849f; --sec-drop: #b3166c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0c11; --panel: #16141c; --fg: #ece9f2; --muted: #9c95a8; --line: #2b2834;
+    --accent: #ff5fa8; --accent-soft: #3a1529;
+    --sec-groove: #5d5378; --sec-break: #2f2b3a; --sec-build: #9b4a6c; --sec-drop: #ff5fa8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0c11; --panel: #16141c; --fg: #ece9f2; --muted: #9c95a8; --line: #2b2834;
+  --accent: #ff5fa8; --accent-soft: #3a1529;
+  --sec-groove: #5d5378; --sec-break: #2f2b3a; --sec-build: #9b4a6c; --sec-drop: #ff5fa8;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; display: grid; gap: 28px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 1.4rem + 2.6vw, 3.1rem); line-height: 1.05; font-weight: 700; }
+h2 { font-size: clamp(1.45rem, 1.2rem + 1vw, 1.9rem); line-height: 1.15; font-weight: 700; }
+p { margin: 0; max-width: 62ch; }
+.eyebrow, .kicker { font: 500 12px/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+header.hero { display: grid; gap: 14px; padding-bottom: 8px; }
+.hero .lede { color: var(--muted); font-size: 1.06rem; }
+.song { display: grid; gap: 6px; margin-top: 6px; max-width: 640px; }
+.song .bar { position: relative; display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; height: 22px; }
+.song .bar span { border-radius: 2px; }
+.song .head { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--fg); border-radius: 1px; left: 0; }
+.song .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 400 12px/1.4 var(--mono); color: var(--muted); }
+.song .legend b { font-weight: 500; color: var(--fg); }
+.song .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+.idea { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 36px; align-items: start; padding-block: 36px; border-top: 1px solid var(--line); }
+.idea .copy { display: grid; gap: 14px; min-width: 0; }
+.kicker .num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 500; letter-spacing: 0; margin-right: 8px; }
+.copy .try { font-weight: 600; }
+.copy .try::before { content: "→ "; color: var(--accent); }
+dl.facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 4px 0 0; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 0.92rem; }
+dl.facts dt { font: 500 11px/1.9 var(--mono); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+dl.facts dd { margin: 0; color: var(--muted); min-width: 0; }
+dl.facts code { font: 400 0.86em var(--mono); color: var(--fg); }
+.size { display: inline-block; font: 500 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 7px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); margin-right: 6px; }
+
+/* Demo boxes: everything a demo builds goes inside [data-demo]. */
+.demo { display: grid; gap: 10px; min-width: 0; }
+.plate { position: relative; width: 100%; max-width: 100%; background: var(--plate); border-radius: 6px; overflow: hidden; touch-action: none; }
+.plate canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+.seg .btn { border: 0; border-radius: 0; border-right: 1px solid var(--line); }
+.seg .btn:last-child { border-right: 0; }
+.btn { font: 500 13px/1 var(--body); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+.btn:hover { background: var(--accent-soft); }
+.btn[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.btn:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readout { font: 400 12px/1.45 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--fg); font-weight: 500; }
+.caption { font-size: 0.86rem; color: var(--muted); }
+/* finger.css */
+[data-demo="finger"] .strip { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px 6px; }
+[data-demo="finger"] .fig { display: grid; gap: 3px; justify-items: center; min-width: 0; transition: opacity 0.2s; }
+[data-demo="finger"] .fig canvas { width: 100%; aspect-ratio: 1; display: block; border-radius: 5px; border: 2px solid var(--line); background: #0a0a0e; }
+[data-demo="finger"] .fig .lab { font: 400 11px/1.5 var(--mono); color: var(--muted); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+[data-demo="finger"] .fig.off { opacity: 0.3; }
+[data-demo="finger"] .fig.ok canvas { border-color: var(--accent); }
+[data-demo="finger"] .fig.now .lab { background: var(--accent); color: var(--bg); font-weight: 500; }
+[data-demo="finger"] .fig.now canvas { border-width: 3px; }
+@media (max-width: 560px) {
+  [data-demo="finger"] .strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+[data-demo="finger"] .fig.near canvas { border-color: var(--accent); border-style: dashed; }
+
+/* inks.css */
+[data-demo="inks"] .plate { cursor: ew-resize; }
+[data-demo="inks"] .plate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-demo="inks"] .plate { touch-action: pan-y; }
+
+/* ladder.css */
+/* Mode ladder: plate and card side by side, stacked when the demo column is narrow. */
+[data-demo="ladder"] { container-type: inline-size; }
+[data-demo="ladder"] .lad-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 252px); gap: 10px; align-items: start; }
+@container (max-width: 500px) {
+  [data-demo="ladder"] .lad-wrap { grid-template-columns: minmax(0, 1fr); }
+  [data-demo="ladder"] .lad-row { min-height: 34px; }
+}
+[data-demo="ladder"] .lad-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px 6px; display: grid; gap: 4px; min-width: 0; }
+[data-demo="ladder"] .lad-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 0 4px 2px; }
+[data-demo="ladder"] .lad-title { font: 600 13px/1.2 var(--body); color: var(--fg); }
+[data-demo="ladder"] .lad-hint { font: 400 11px/1.2 var(--mono); color: var(--muted); }
+[data-demo="ladder"] .lad-list { display: grid; gap: 1px; }
+[data-demo="ladder"] .lad-row { display: grid; grid-template-columns: 28px 36px minmax(0, 1fr) 54px; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 2px 4px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--fg); font: 400 12px/1 var(--mono); text-align: left; cursor: pointer; }
+[data-demo="ladder"] .lad-row:hover { border-color: var(--line); }
+[data-demo="ladder"] .lad-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+[data-demo="ladder"] .lad-thumb { width: 28px; height: 28px; border-radius: 3px; display: block; }
+[data-demo="ladder"] .lad-name { white-space: nowrap; }
+[data-demo="ladder"] .lad-track { position: relative; height: 8px; border-radius: 2px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+[data-demo="ladder"] .lad-fill { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); background: var(--muted); opacity: 0.5; }
+[data-demo="ladder"] .lad-tag { display: flex; align-items: center; justify-content: flex-end; gap: 3px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+[data-demo="ladder"] .lad-tag svg { width: 11px; height: 11px; flex: none; }
+[data-demo="ladder"] .lad-row[data-on="lead"] { background: var(--accent-soft); }
+[data-demo="ladder"] .lad-row[data-on="lead"] .lad-fill { background: var(--accent); opacity: 1; }
+[data-demo="ladder"] .lad-row[data-on="lead"] .lad-tag { color: var(--accent); font-weight: 500; }
+[data-demo="ladder"] .lad-row[data-on="on"] .lad-fill { background: var(--accent); opacity: 0.45; }
+[data-demo="ladder"] .lad-row[data-on="on"] .lad-tag { color: var(--fg); }
+[data-demo="ladder"] .lad-row[aria-pressed="true"] { border-color: var(--accent); }
+[data-demo="ladder"] .lad-row[aria-pressed="true"] .lad-tag { color: var(--accent); font-weight: 500; }
+
+/* shapes.css */
+/* The plate here takes no input, so let a phone scroll over it. */
+[data-demo="shapes"] .plate { touch-action: auto; }
+[data-demo="shapes"] .family { display: grid; gap: 5px; }
+[data-demo="shapes"] .thumb { width: 100%; aspect-ratio: 1; border-radius: 4px; overflow: hidden; outline: 2px solid transparent; outline-offset: 1px; filter: brightness(0.6); }
+[data-demo="shapes"] .thumb.on { outline-color: var(--accent); filter: none; }
+[data-demo="shapes"] .thumb canvas { display: block; width: 100%; height: 100%; }
+
+/* toss.css */
+[data-demo="toss"] .tl { position: relative; padding-top: 16px; padding-bottom: 10px; }
+[data-demo="toss"] .tl-labels { position: absolute; inset: 0 0 auto 0; height: 14px; font: 400 11px/14px var(--mono); color: var(--muted); }
+[data-demo="toss"] .tl-labels span { position: absolute; top: 0; white-space: nowrap; }
+[data-demo="toss"] .tl-start { left: 0; }
+[data-demo="toss"] .tl-end { right: 0; }
+[data-demo="toss"] .tl-drop { transform: translateX(-50%); color: var(--fg); font-weight: 500; }
+[data-demo="toss"] .tl-bars { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; height: 16px; }
+[data-demo="toss"] .tl-bars span { border-radius: 2px; }
+[data-demo="toss"] .tl-dropline { position: absolute; top: 13px; height: 4px; width: 2px; margin-left: -1px; background: var(--fg); }
+[data-demo="toss"] .tl-head { position: absolute; top: 12px; height: 24px; width: 2px; background: var(--fg); border-radius: 1px; left: 0; box-shadow: 0 0 0 1px var(--bg); }
+[data-demo="toss"] .tl-ticks { position: absolute; left: 0; right: 0; top: 34px; height: 8px; }
+[data-demo="toss"] .tl-tick { position: absolute; top: 0; width: 0; height: 0; margin-left: -4px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--accent); }
+[data-demo="toss"] .toss-graph { position: relative; width: 100%; }
+[data-demo="toss"] .toss-graph canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+[data-demo="toss"] .graph-label { font: 400 11px/1.3 var(--mono); color: var(--muted); margin-bottom: -6px; }
+
+
+footer.next { border-top: 1px solid var(--line); padding-top: 32px; display: grid; gap: 12px; }
+footer.next ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; max-width: 64ch; color: var(--muted); }
+footer.next li b { color: var(--fg); font-weight: 600; }
+
+@media (max-width: 820px) {
+  .idea { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-block: 28px; }
+  .page { padding-inline: 16px; padding-block: 28px 56px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<main class="page">
+  <header class="hero">
+    <p class="eyebrow">Chladni scene · ideas · 5 Oct 2026</p>
+    <h1>Five things the plate could do next</h1>
+    <p class="lede">Each idea has a live plate. They all run the scene's own sand rule on a fake 124 BPM song, so the sand moves the way it does in the app. The demos run on the CPU, so the sand is sparser than in the scene.</p>
+    <div class="song" aria-label="The fake song every demo listens to">
+      <div class="bar" id="songBar"><div class="head" id="songHead"></div></div>
+      <div class="legend"><span><i style="background:var(--sec-groove)"></i>groove</span><span><i style="background:var(--sec-break)"></i>break</span><span><i style="background:var(--sec-build)"></i>build</span><span><i style="background:var(--sec-drop)"></i>drop</span><span id="songNow">bar <b>1</b> of 16 · <b>groove</b></span></div>
+    </div>
+  </header>
+
+  <section class="idea" id="finger">
+    <div class="copy">
+      <p class="kicker"><span class="num">1</span>New control</p>
+      <h2>Finger on the plate</h2>
+      <p>A plate can only ring in shapes that stay still where you hold it. Press a fingertip on it and every figure that would move under your finger dies away. Only the figures with a line running through that spot are left.</p>
+      <p>This is how Chladni chose his figures in 1787. He bowed the edge with one hand and held a finger on the plate with the other.</p>
+      <p class="try">Tap or drag on the plate. The strip under it shows which figures your finger allows.</p>
+      <dl class="facts">
+        <dt>In the app</dt><dd>The music still picks the figure, but only from the ones your finger allows. You'd touch the plate on the laptop, or from the phone remote.</dd>
+        <dt>Work</dt><dd><span class="size">Medium</span>A weight per mode in <code>createPlateResponse</code>, plus pointer input on the plate.</dd>
+      </dl>
+    </div>
+    <div class="demo" data-demo="finger"></div>
+  </section>
+
+  <section class="idea" id="ladder">
+    <div class="copy">
+      <p class="kicker"><span class="num">2</span>New card</p>
+      <h2>Mode ladder</h2>
+      <p>Each figure rings at its own note. When the music hits that note, the figure rings, and the plate draws the strongest few. Today all of this happens out of sight.</p>
+      <p>The ladder puts it on screen. There's one row per figure and a bar for how hard it rings right now, and the figures on the plate are marked. Click a figure to pin it. The plate then holds it through a quiet break or a whole drop, until you let go.</p>
+      <p class="try">Click a figure to pin it, and click it again to let the music choose.</p>
+      <dl class="facts">
+        <dt>In the app</dt><dd>A Scene card fed by each mode's response from <code>createPlateResponse</code>. Pinning holds that one figure on the plate, whatever the music does.</dd>
+        <dt>Work</dt><dd><span class="size">Medium</span>A new card widget. The numbers it shows already exist.</dd>
+      </dl>
+    </div>
+    <div class="demo" data-demo="ladder"></div>
+  </section>
+
+  <section class="idea" id="inks">
+    <div class="copy">
+      <p class="kicker"><span class="num">3</span>Look</p>
+      <h2>Two-colour sand</h2>
+      <p>The plate already sorts its sand by weight. Heavy grit bounces its way to the still lines. Fine powder is too light to bounce, and the air over the plate blows it into heaps between the lines. Faraday saw this in 1831.</p>
+      <p>Today grit and powder are drawn in the same colour, so the sorting is hard to see. Draw them in two colours from the palette and you watch the bed split in two.</p>
+      <p class="try">Drag the divider. The left side is today, the right side is two colours.</p>
+      <dl class="facts">
+        <dt>In the app</dt><dd>A grain's colour comes from its weight, with grit in one palette ink and powder in another. The physics doesn't change.</dd>
+        <dt>Work</dt><dd><span class="size">Small</span>The grain shader already knows each grain's weight.</dd>
+      </dl>
+    </div>
+    <div class="demo" data-demo="inks"></div>
+  </section>
+
+  <section class="idea" id="toss">
+    <div class="copy">
+      <p class="kicker"><span class="num">4</span>Music moment</p>
+      <h2>Toss the sand on the drop</h2>
+      <p>Sand sitting on a line never moves, because the line is the part of the plate that stays still. So even a big kick does nothing to a figure that has formed. At a drop the old lines just slide into the new ones.</p>
+      <p>A toss throws the whole bed into the air the moment the drop lands. It comes down scattered, and over the next bar or two the new figure grows out of an even spread. The new figure takes about as long to form either way. The toss makes the drop something you can see in the sand.</p>
+      <p class="try">Wait for the drop at bar 13, or press Drop now. Switch between Today and Toss.</p>
+      <dl class="facts">
+        <dt>In the app</dt><dd>A drop trigger, a jump in loudness after a quieter build, fires a single toss in the sand shader.</dd>
+        <dt>Work</dt><dd><span class="size">Small</span>The toss is simple. Most of the work is a drop trigger that doesn't fire on every loud bar.</dd>
+      </dl>
+    </div>
+    <div class="demo" data-demo="toss"></div>
+  </section>
+
+  <section class="idea" id="shapes">
+    <div class="copy">
+      <p class="kicker"><span class="num">5</span>New figures</p>
+      <h2>Other plates</h2>
+      <p>Every figure the scene draws comes from one kind of plate: a square one with free edges. Change the plate and you get a whole new family of figures. A round plate makes rings and spokes, and a hexagon makes honeycombs. A guitar top makes the lopsided patterns luthiers use when they tune one. Clamping the square's edges gives it a new set of figures too.</p>
+      <p class="try">Pick a plate.</p>
+      <dl class="facts">
+        <dt>In the app</dt><dd>A Plate setting, where each shape brings its own outline and its own table of figures.</dd>
+        <dt>Work</dt><dd><span class="size">Large</span>Each shape needs its own figures worked out. The round plate's come from Bessel functions.</dd>
+      </dl>
+    </div>
+    <div class="demo" data-demo="shapes"></div>
+  </section>
+
+  <footer class="next">
+    <p class="eyebrow">Already in the scene record</p>
+    <ul>
+      <li><b>Heaps that swirl.</b> On a real plate, powder rolls up and over its heap. Here it only gathers.</li>
+      <li><b>Grains that collide.</b> Grains have a size but no body, so lines can't pile up into ridges.</li>
+    </ul>
+  </footer>
+</main>
+<script>
+/* Chladni ideas — the shared core every demo on the page runs on.
+   A CPU copy of the scene's plate and sand rule (src/render/scenes/chladni.ts
+   SIM_FRAG and src/render/scenes/chladniSand.ts), so the demo sand moves the
+   way the real plate's does; a fake song clock that stands in for the music;
+   canvas helpers for the plate, the grains and small figure thumbnails; and a
+   loop that runs a demo only while it is on screen. A demo registers with
+   Chladni.register(id, mount) and is mounted into its [data-demo=id] box. */
+(function () {
+  "use strict";
+  const PI = Math.PI;
+
+  // The scene's numbers, copied from chladniSand.ts and chladni.ts.
+  const RULE = {
+    LIFT: 0.05, HOP_RATE: 1.0, PULL_BIAS: 0.15,
+    WEIGHT_REF: 0.7, HOP_PER_WEIGHT: 1.0, LIFT_PER_WEIGHT: 1.0,
+    STREAM_RATE: 0.3, GRAIN_HEAVY: 0.6, SIZE_PER_WEIGHT: 1.6,
+    STEP_CELL_FRACTION: 0.25, MOTION_FULL: 1.0,
+  };
+
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+  function rng(seed) {
+    let s = (seed >>> 0) || 1;
+    return function () { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+  }
+
+  // ---- The square plate's modes (buildModeTable): n < m, by n^2 + m^2,
+  // symmetry signs alternating so neighbours come from both families.
+  function buildModes(maxOrder) {
+    const pairs = [];
+    for (let n = 1; n < maxOrder; n++) for (let m = n + 1; m <= maxOrder; m++) pairs.push({ n, m });
+    pairs.sort((a, b) => a.n * a.n + a.m * a.m - (b.n * b.n + b.m * b.m) || a.n - b.n);
+    return pairs.map((p, i) => {
+      const s = i % 2 === 0 ? -1 : 1;
+      return { n: p.n, m: p.m, s, key: p.n + "," + p.m + (s < 0 ? "−" : "+"), label: "(" + p.n + "," + p.m + ")" };
+    });
+  }
+  const MODES = buildModes(7);
+
+  /** One square-plate mode's value at (x, y), plate space [-1, 1]^2. */
+  function modeValue(md, x, y) {
+    const n = md.n, m = md.m;
+    return Math.cos(n * PI * x) * Math.cos(m * PI * y) + md.s * Math.cos(m * PI * x) * Math.cos(n * PI * y);
+  }
+  function addMode(md, w, x, y, o) {
+    const n = md.n, m = md.m;
+    const cnx = Math.cos(n * PI * x), cmy = Math.cos(m * PI * y), cmx = Math.cos(m * PI * x), cny = Math.cos(n * PI * y);
+    const snx = Math.sin(n * PI * x), smy = Math.sin(m * PI * y), smx = Math.sin(m * PI * x), sny = Math.sin(n * PI * y);
+    o.f += w * (cnx * cmy + md.s * cmx * cny);
+    o.gx += w * (-n * PI * snx * cmy - md.s * m * PI * smx * cny);
+    o.gy += w * (-m * PI * cnx * smy - md.s * n * PI * cmx * sny);
+  }
+
+  /** A plate field: eval(x, y, o) fills o.f and the gradient o.gx, o.gy;
+   *  cells is the finest mode order (the scene's uMaxOrder, for the step
+   *  cap); inside(x, y) says whether a point is on the plate. Weights should
+   *  sum to 1 so |f| <= 2, as in the scene. `list` is [{ mode, w }]. */
+  function squareField(list) {
+    let cells = 1;
+    for (const it of list) if (it.w > 0.001) cells = Math.max(cells, it.mode.m);
+    return {
+      cells,
+      eval(x, y, o) { o.f = 0; o.gx = 0; o.gy = 0; for (const it of list) if (it.w > 0) addMode(it.mode, it.w, x, y, o); return o; },
+      inside: (x, y) => x >= -1 && x <= 1 && y >= -1 && y <= 1,
+      shape: "square",
+    };
+  }
+
+  /** Crossfades between figures the way a ringing plate does: each mode's
+   *  weight chases its target with an attack and a release. set() takes
+   *  [{ mode, w }]; field() returns the current blend, weights summing to 1. */
+  class Blend {
+    constructor(attackSec = 0.25, releaseSec = 0.6) {
+      this.attack = attackSec; this.release = releaseSec; this.cur = new Map(); this.target = new Map(); this.modes = new Map();
+    }
+    set(list, instant = false) {
+      this.target.clear();
+      for (const it of list) { this.target.set(it.mode.key, it.w); this.modes.set(it.mode.key, it.mode); if (instant) this.cur.set(it.mode.key, it.w); }
+      if (instant) for (const k of [...this.cur.keys()]) if (!this.target.has(k)) this.cur.delete(k);
+    }
+    step(dt) {
+      const keys = new Set([...this.cur.keys(), ...this.target.keys()]);
+      for (const k of keys) {
+        const c = this.cur.get(k) || 0, t = this.target.get(k) || 0;
+        const tau = t > c ? this.attack : this.release;
+        const v = c + (t - c) * (1 - Math.exp(-dt / tau));
+        if (v < 0.002 && t === 0) this.cur.delete(k); else this.cur.set(k, v);
+      }
+    }
+    list() {
+      let sum = 0; for (const v of this.cur.values()) sum += v;
+      const out = [];
+      for (const [k, v] of this.cur) out.push({ mode: this.modes.get(k), w: sum > 0 ? v / sum : 0 });
+      return out.sort((a, b) => b.w - a.w);
+    }
+    field() { return squareField(this.list()); }
+  }
+
+  // ---- Sand. Each grain has a fixed draw u (its weight under Grain weight
+  // and Size mix, as grainWeightAt), a position, and, while tossed, a height.
+  class Bed {
+    constructor(count, opts = {}) {
+      this.n = count;
+      this.x = new Float32Array(count); this.y = new Float32Array(count);
+      this.u = new Float32Array(count); this.w = new Float32Array(count);
+      this.motion = new Float32Array(count);
+      this.z = new Float32Array(count); this.vx = new Float32Array(count); this.vy = new Float32Array(count); this.vz = new Float32Array(count);
+      this.rand = rng(opts.seed || 1234567);
+      for (let i = 0; i < count; i++) this.u[i] = this.rand();
+      this.setWeights(opts.weight ?? RULE.WEIGHT_REF, opts.mix ?? 0.45);
+      this.airborne = 0;
+      this._o = { f: 0, gx: 0, gy: 0 };
+    }
+    setWeights(weight, mix) {
+      this.weight = weight; this.mix = mix;
+      for (let i = 0; i < this.n; i++) this.w[i] = clamp(weight + mix * (this.u[i] - 0.5), 0, 1);
+    }
+    randomInside(field, i) {
+      for (let k = 0; k < 60; k++) {
+        const x = this.rand() * 2 - 1, y = this.rand() * 2 - 1;
+        if (field.inside(x, y)) { this.x[i] = x; this.y[i] = y; return; }
+      }
+      this.x[i] = 0; this.y[i] = 0;
+    }
+    scatter(field) { for (let i = 0; i < this.n; i++) { this.randomInside(field, i); this.z[i] = 0; this.vz[i] = 0; } this.airborne = 0; }
+    /** One frame of the scene's SIM_FRAG for every grain on the plate, plus
+     *  a plain ballistic flight for grains a toss() threw in the air. */
+    step(field, drive, dt) {
+      const o = this._o, R = RULE, rand = this.rand;
+      const cells = Math.max(field.cells || 1, 1);
+      const stepCap = R.STEP_CELL_FRACTION * 2 / cells;
+      const sq = Math.sqrt(dt * 60) / 60;
+      let airborne = 0;
+      for (let i = 0; i < this.n; i++) {
+        if (this.z[i] > 0) {
+          airborne++;
+          this.x[i] += this.vx[i] * dt; this.y[i] += this.vy[i] * dt;
+          this.vz[i] -= 7 * dt; this.z[i] += this.vz[i] * dt;
+          if (this.z[i] <= 0) { this.z[i] = 0; if (!field.inside(this.x[i], this.y[i])) this.randomInside(field, i); }
+          this.motion[i] = 1;
+          continue;
+        }
+        const x = this.x[i], y = this.y[i], w = this.w[i];
+        field.eval(x, y, o);
+        const a = Math.abs(o.f) * 0.5;
+        const hopScale = 1 + R.HOP_PER_WEIGHT * (w - R.WEIGHT_REF);
+        const lift = R.LIFT * (1 - R.LIFT_PER_WEIGHT * (w - R.WEIGHT_REF));
+        const pullScale = w / R.WEIGHT_REF;
+        const accel = a * drive;
+        const bounce = accel * accel / (accel + lift);
+        const step = R.HOP_RATE * hopScale * bounce * sq;
+        const hx = (rand() - 0.5) * 2 * step, hy = (rand() - 0.5) * 2 * step;
+        const gl = Math.hypot(o.gx, o.gy) + 1e-4, sg = o.f >= 0 ? 1 : -1;
+        const dx = o.gx / gl * sg, dy = o.gy / gl * sg;
+        const bias = R.PULL_BIAS * pullScale * smoothstep(0, 3 * lift, accel);
+        const pull = Math.min(stepCap, R.HOP_RATE * hopScale * bounce * bias * dt);
+        const light = 1 - smoothstep(0, R.GRAIN_HEAVY, w);
+        let sx = R.STREAM_RATE * light * drive * drive * 0.5 * o.f * o.gx / cells * dt;
+        let sy = R.STREAM_RATE * light * drive * drive * 0.5 * o.f * o.gy / cells * dt;
+        const sl = Math.hypot(sx, sy);
+        if (sl > stepCap) { sx *= stepCap / sl; sy *= stepCap / sl; }
+        const nx = x + hx - dx * pull + sx, ny = y + hy - dy * pull + sy;
+        if (!field.inside(nx, ny)) this.randomInside(field, i); else { this.x[i] = nx; this.y[i] = ny; }
+        this.motion[i] = hopScale * bounce / R.MOTION_FULL;
+      }
+      this.airborne = airborne;
+    }
+    /** Runs the rule for `seconds` without drawing, so a demo opens on a formed figure. */
+    warm(field, drive, seconds) { for (let t = 0; t < seconds; t += 1 / 60) this.step(field, drive, 1 / 60); }
+    /** Throws every grain into the air: it flies, lands somewhere new, and
+     *  only then feels the plate again. power 1 = a hard toss. */
+    toss(power = 1) {
+      for (let i = 0; i < this.n; i++) {
+        const ang = this.rand() * 2 * PI, sp = power * (0.35 + 1.1 * this.rand());
+        this.vx[i] = Math.cos(ang) * sp; this.vy[i] = Math.sin(ang) * sp;
+        this.vz[i] = power * (1.6 + 1.2 * this.rand()); this.z[i] = 1e-4;
+      }
+      this.airborne = this.n;
+    }
+    /** Share of grains within `tol` of a line: |f|/2 < tol. */
+    formed(field, tol = 0.08) {
+      const o = this._o; let k = 0;
+      for (let i = 0; i < this.n; i++) { if (this.z[i] > 0) continue; field.eval(this.x[i], this.y[i], o); if (Math.abs(o.f) * 0.5 < tol) k++; }
+      return k / this.n;
+    }
+  }
+
+  /** The plate's drive from the music, as rawPlateDrive with Vibration and
+   *  Bass kick at their defaults (0.5). */
+  function plateDrive(energy, kick, shake = 0.5, kickAmt = 0.5) {
+    return Math.pow(shake, 1.5) * 2 * (0.25 + 2.4 * energy) + kickAmt * kick * 1.5;
+  }
+
+  // ---- A fake song, standing in for the music: 124 BPM, a 16-bar loop of
+  // groove, break, build and drop. One clock for the whole page.
+  const SONG = { bpm: 124, loopBars: 16, sections: [
+    { name: "groove", from: 0, to: 6 }, { name: "break", from: 6, to: 9 },
+    { name: "build", from: 9, to: 12 }, { name: "drop", from: 12, to: 16 },
+  ], dropBar: 12 };
+  const T0 = performance.now();
+  const now = () => (performance.now() - T0) / 1000;
+
+  /** Loudness and kick strength at a point of the loop, bars as a float. */
+  function songShape(barF) {
+    const lb = ((barF % SONG.loopBars) + SONG.loopBars) % SONG.loopBars;
+    if (lb < 6) return { section: "groove", energy: 0.55, kickOn: 1 };
+    if (lb < 9) return { section: "break", energy: 0.2, kickOn: 0 };
+    if (lb < 12) { const r = (lb - 9) / 3; return { section: "build", energy: 0.25 + 0.6 * r, kickOn: r }; }
+    return { section: "drop", energy: 0.95, kickOn: 1.3 };
+  }
+  function song(t) {
+    const beats = t * SONG.bpm / 60, beat = Math.floor(beats), phase = beats - beat;
+    const barF = beats / 4, bar = Math.floor(barF), loopBar = bar % SONG.loopBars;
+    const sh = songShape(barF);
+    const kick = sh.kickOn * Math.exp(-phase * 7);
+    return { t, beats, beat, phase, bar, barF, loopBar, barPhase: barF - bar, section: sh.section, energy: sh.energy, kick, drive: plateDrive(sh.energy, kick) };
+  }
+
+  /** A deterministic figure for a stretch of the song: every `everyBars`
+   *  bars a new pick from `pool` (default: the first 12 modes). */
+  function figureAt(bar, everyBars = 2, pool = MODES.slice(0, 12), salt = 0) {
+    const k = Math.floor(bar / everyBars);
+    const r = rng(9973 * (k + 1) + 131 * salt)(); // one draw per stretch
+    return pool[Math.floor(r * pool.length) % pool.length];
+  }
+
+  // ---- Colour: the Neon palette's ramp (dark violet → pink → near-white) as
+  // the scene's sand, and a second ink for the two-colour idea.
+  function ramp(stops) {
+    return function (t) {
+      t = clamp(t, 0, 1);
+      for (let i = 1; i < stops.length; i++) {
+        if (t <= stops[i][0]) {
+          const a = stops[i - 1], b = stops[i], k = (t - a[0]) / (b[0] - a[0] || 1);
+          return [a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, a[3] + (b[3] - a[3]) * k];
+        }
+      }
+      const l = stops[stops.length - 1]; return [l[1], l[2], l[3]];
+    };
+  }
+  const INKS = {
+    sand: ramp([[0, 26, 10, 46], [0.35, 110, 30, 112], [0.55, 226, 64, 143], [0.8, 255, 140, 190], [1, 255, 240, 246]]),
+    powder: ramp([[0, 8, 30, 40], [0.35, 20, 90, 110], [0.55, 60, 200, 220], [0.8, 150, 235, 245], [1, 235, 253, 255]]),
+    gold: ramp([[0, 30, 20, 6], [0.35, 120, 80, 20], [0.55, 235, 170, 60], [0.8, 255, 215, 140], [1, 255, 248, 230]]),
+  };
+  const rgb = (c, k = 1) => "rgb(" + Math.round(c[0] * k) + "," + Math.round(c[1] * k) + "," + Math.round(c[2] * k) + ")";
+
+  // ---- Canvas.
+  /** Adds a square-ish canvas box to `parent`; keeps its backing store at the
+   *  device pixel ratio. Returns { el, canvas, ctx, W, H, dpr } (W/H live). */
+  function canvasBox(parent, { aspect = 1, label = "", className = "plate" } = {}) {
+    const el = document.createElement("div"); el.className = className; el.style.aspectRatio = String(aspect);
+    const canvas = document.createElement("canvas"); canvas.setAttribute("role", "img"); if (label) canvas.setAttribute("aria-label", label);
+    el.appendChild(canvas); parent.appendChild(el);
+    const box = { el, canvas, ctx: canvas.getContext("2d"), W: 1, H: 1, dpr: 1 };
+    const fit = () => {
+      const r = el.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
+      if (W !== canvas.width || H !== canvas.height) { canvas.width = W; canvas.height = H; }
+      box.W = W; box.H = H; box.dpr = dpr;
+    };
+    fit(); new ResizeObserver(fit).observe(el);
+    return box;
+  }
+
+  /** Plate space → pixels for a W×H canvas: a centred square with a margin. */
+  function view(W, H, margin = 0.06) {
+    const s = Math.min(W, H) * (0.5 - margin);
+    return { s, cx: W / 2, cy: H / 2, px: (x) => W / 2 + x * s, py: (y) => H / 2 - y * s, toPlate: (X, Y) => [(X - W / 2) / s, -(Y - H / 2) / s] };
+  }
+
+  const glowCanvas = document.createElement("canvas"); const GLOW = 72; glowCanvas.width = glowCanvas.height = GLOW;
+  const glowCtx = glowCanvas.getContext("2d"); const glowImg = glowCtx.createImageData(GLOW, GLOW);
+  /** The plate: near-black, a glow where it moves (as BG_FRAG), a faint rim
+   *  on a square plate, darker outside a shaped plate. */
+  function drawPlate(ctx, W, H, field, opts = {}) {
+    const v = opts.view || view(W, H), glow = opts.glow ?? 1, ink = INKS[opts.ink || "sand"];
+    ctx.fillStyle = "#050507"; ctx.fillRect(0, 0, W, H);
+    const o = { f: 0, gx: 0, gy: 0 }, d = glowImg.data;
+    for (let j = 0; j < GLOW; j++) for (let i = 0; i < GLOW; i++) {
+      const x = (i + 0.5) / GLOW * 2 - 1, y = 1 - (j + 0.5) / GLOW * 2, k = (j * GLOW + i) * 4;
+      if (!field.inside(x, y)) { d[k] = 3; d[k + 1] = 3; d[k + 2] = 5; d[k + 3] = 255; continue; }
+      field.eval(x, y, o);
+      const a = Math.min(1, Math.abs(o.f) * 0.5), c = ink(0.35 + 0.3 * a), g = a * a * 0.55 * glow * (opts.energy ?? 0.7);
+      d[k] = 9 + c[0] * g; d[k + 1] = 9 + c[1] * g; d[k + 2] = 12 + c[2] * g; d[k + 3] = 255;
+    }
+    glowCtx.putImageData(glowImg, 0, 0);
+    ctx.save(); ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(glowCanvas, v.px(-1), v.py(1), v.s * 2, v.s * 2);
+    if (field.shape === "square" && opts.rim !== false) { ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = Math.max(1, v.s * 0.006); ctx.strokeRect(v.px(-1), v.py(1), v.s * 2, v.s * 2); }
+    ctx.restore();
+  }
+
+  const LEVELS = 6;
+  const styleCache = new Map();
+  function inkStyle(name, level) {
+    const key = name + level; let s = styleCache.get(key);
+    if (!s) { s = rgb(INKS[name](0.55 + 0.45 * (level / (LEVELS - 1)))); styleCache.set(key, s); }
+    return s;
+  }
+  /** Draws the bed. opts: view, size (grain side in CSS px), inkOf(i) →
+   *  ink name (default all "sand"), count (draw only the first n). A grain's
+   *  brightness follows how far it is hopping, as in the scene; tossed
+   *  grains are drawn bigger with a shadow where they will land. */
+  function drawGrains(ctx, bed, opts = {}) {
+    const v = opts.view, dpr = opts.dpr || 1, base = (opts.size || 1.6) * dpr;
+    const n = Math.min(bed.n, opts.count ?? bed.n), inkOf = opts.inkOf;
+    const buckets = new Map();
+    for (let i = 0; i < n; i++) {
+      if (bed.z[i] > 0) continue;
+      const lv = Math.min(LEVELS - 1, Math.floor(clamp(bed.motion[i], 0, 1) * LEVELS));
+      const key = (inkOf ? inkOf(i) : "sand") + "|" + lv;
+      let arr = buckets.get(key); if (!arr) { arr = []; buckets.set(key, arr); } arr.push(i);
+    }
+    for (const [key, arr] of buckets) {
+      const [name, lv] = key.split("|"); ctx.fillStyle = inkStyle(name, +lv);
+      for (const i of arr) {
+        const sz = base * Math.pow(2, RULE.SIZE_PER_WEIGHT * (bed.w[i] - RULE.WEIGHT_REF) * 0.5);
+        ctx.fillRect(v.px(bed.x[i]) - sz / 2, v.py(bed.y[i]) - sz / 2, sz, sz);
+      }
+    }
+    if (bed.airborne > 0) {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      for (let i = 0; i < n; i++) if (bed.z[i] > 0) ctx.fillRect(v.px(bed.x[i]) - base / 2, v.py(bed.y[i]) - base / 2, base, base);
+      for (let i = 0; i < n; i++) {
+        if (bed.z[i] <= 0) continue;
+        const h = bed.z[i], sz = base * (1 + 2.2 * h);
+        ctx.fillStyle = inkStyle(inkOf ? inkOf(i) : "sand", LEVELS - 1);
+        ctx.fillRect(v.px(bed.x[i]) - sz / 2 + h * v.s * 0.12, v.py(bed.y[i]) - sz / 2 - h * v.s * 0.35, sz, sz);
+      }
+    }
+  }
+
+  /** A small drawing of a figure: its still lines, bright on dark.
+   *  evalF(x, y) returns the field value. */
+  function drawThumb(canvas, evalF, opts = {}) {
+    const W = canvas.width, H = canvas.height, ctx = canvas.getContext("2d"), img = ctx.createImageData(W, H), d = img.data;
+    const ink = opts.color || [255, 120, 180], inside = opts.inside || (() => true), width = opts.width ?? 0.11;
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const x = (i + 0.5) / W * 2 - 1, y = 1 - (j + 0.5) / H * 2, k = (j * W + i) * 4;
+      if (!inside(x, y)) { d[k] = d[k + 1] = 0; d[k + 2] = 0; d[k + 3] = 0; continue; }
+      const f = Math.abs(evalF(x, y)) * 0.5, line = 1 - smoothstep(0, width, f);
+      d[k] = 10 + ink[0] * line; d[k + 1] = 10 + ink[1] * line; d[k + 2] = 14 + ink[2] * line; d[k + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /** Calls frame(dt, t) every animation frame while `el` is on screen. */
+  function run(el, frame) {
+    let visible = false, raf = 0, last = 0;
+    const tick = (ms) => {
+      raf = 0; if (!visible) return;
+      const t = now(), dt = last ? Math.min(0.05, t - last) : 1 / 60; last = t;
+      frame(dt, t);
+      raf = requestAnimationFrame(tick);
+    };
+    new IntersectionObserver((es) => {
+      visible = es.some((e) => e.isIntersecting);
+      if (visible && !raf) { last = 0; raf = requestAnimationFrame(tick); }
+    }, { rootMargin: "120px" }).observe(el);
+    frame(1 / 60, now()); // one frame at once, so the page is complete at rest
+  }
+
+  // ---- Small controls, styled by the page.
+  function el(tag, cls, parent, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; }
+  function button(parent, label, onClick, cls = "btn") { const b = el("button", cls, parent, label); b.type = "button"; b.addEventListener("click", onClick); return b; }
+  /** A row of mutually exclusive buttons. Returns { el, set(value) }. */
+  function seg(parent, items, value, onChange, ariaLabel = "") {
+    const box = el("div", "seg", parent); box.setAttribute("role", "group"); if (ariaLabel) box.setAttribute("aria-label", ariaLabel);
+    const btns = items.map((it) => { const b = button(box, it.label, () => { set(it.value); onChange(it.value); }); b.dataset.value = it.value; return b; });
+    function set(v) { value = v; for (const b of btns) b.setAttribute("aria-pressed", String(b.dataset.value === String(v))); }
+    set(value); return { el: box, set };
+  }
+
+  const demos = {};
+  function register(id, mount) { demos[id] = mount; }
+  function boot() {
+    document.querySelectorAll("[data-demo]").forEach((box) => {
+      const mount = demos[box.dataset.demo]; if (!mount) return;
+      try { mount(box); } catch (e) { console.error(e); box.textContent = "This demo failed to start: " + e.message; }
+    });
+  }
+
+  window.Chladni = {
+    RULE, MODES, PI, clamp, smoothstep, rng, modeValue, squareField, Blend, Bed, plateDrive,
+    SONG, song, songShape, now, figureAt, INKS, rgb, canvasBox, view, drawPlate, drawGrains, drawThumb, run,
+    el, button, seg, register, boot,
+  };
+})();
+
+// The hero's song strip: the 16-bar loop every demo listens to, with a playhead.
+(function () {
+  const bar = document.getElementById("songBar"), head = document.getElementById("songHead"), nowEl = document.getElementById("songNow");
+  if (!bar) return;
+  for (let b = 0; b < Chladni.SONG.loopBars; b++) {
+    const s = document.createElement("span"), sec = Chladni.songShape(b + 0.5).section;
+    s.style.background = "var(--sec-" + sec + ")"; s.title = "bar " + (b + 1) + " · " + sec; bar.insertBefore(s, head);
+  }
+  let lastBar = -1;
+  Chladni.run(bar, (dt, t) => {
+    const s = Chladni.song(t), f = (s.barF % Chladni.SONG.loopBars) / Chladni.SONG.loopBars;
+    head.style.left = "calc(" + (f * 100).toFixed(3) + "% - 1px)";
+    if (s.loopBar !== lastBar) { lastBar = s.loopBar; nowEl.innerHTML = "bar <b>" + (s.loopBar + 1) + "</b> of 16 · <b>" + s.section + "</b>"; }
+  });
+})();
+
+// ---- finger.js
+/* Idea 1, Finger on the plate. A plate can only ring in figures with a still
+   line through the point you hold, so the finger picks the family of figures.
+   The music still picks a new figure every 2 bars (as Chladni.figureAt), but
+   only among the first POOL_SIZE modes whose value at the finger is within
+   ALLOW_TOL (|f|/2), the same measure the sand rule uses for "on a line".
+   When the finger leaves the current figure's line, the plate switches to the
+   allowed figure with the smallest value at the finger (it tends to stay
+   allowed while the finger slides along its line), at most once per
+   FORCE_GAP seconds during a drag, and always once on release; the music's
+   next pick waits until that figure has held for HOLD_AFTER_FORCE seconds.
+   The strip under the plate draws every figure once into an offscreen canvas
+   and redraws only the finger dot and the allowed/blocked marks when the
+   finger moves. */
+Chladni.register("finger", (root) => {
+  const C = Chladni;
+  const POOL_SIZE = 15, ALLOW_TOL = 0.15, FINGER_R = 0.09, EVERY_BARS = 2, GRAINS = 4600;
+  const THUMB_PX = 96, FORCE_GAP = 0.35, HOLD_AFTER_FORCE = 2.5;
+  const pool = C.MODES.slice(0, POOL_SIZE);
+
+  // The finger starts on a spot where several figures cross (x = -1/4, y = 1/2).
+  let finger = { x: -0.25, y: 0.5 }, down = true;
+  let allowed = [], closestOnly = false;
+  const isAllowed = (md) => !down || Math.abs(C.modeValue(md, finger.x, finger.y)) * 0.5 < ALLOW_TOL;
+  const valueAt = (md) => Math.abs(C.modeValue(md, finger.x, finger.y));
+  /** Of `list`, the figure whose still line runs closest to the finger. */
+  function closest(list) {
+    let best = list[0], bv = Infinity;
+    for (const md of list) { const v = valueAt(md); if (v < bv) { bv = v; best = md; } }
+    return best;
+  }
+  function computeAllowed() {
+    allowed = pool.filter(isAllowed);
+    closestOnly = allowed.length === 0;
+    if (closestOnly) allowed = [closest(pool)];
+  }
+
+  // ---- The plate.
+  const box = C.canvasBox(root, { aspect: 1, label: "A square plate of sand with a fingertip resting on it" });
+  const blend = new C.Blend(0.25, 0.6);
+  const bed = new C.Bed(GRAINS, { seed: 4242 });
+
+  computeAllowed();
+  let t0 = C.now(), s0 = C.song(t0);
+  let stretch = Math.floor(s0.bar / EVERY_BARS);
+  let current = C.figureAt(s0.bar, EVERY_BARS, allowed);
+  blend.set([{ mode: current, w: 1 }], true);
+  {
+    const f = blend.field();
+    bed.scatter(f);
+    bed.warm(f, 1.3, 3);
+  }
+
+  function pickFor(bar, avoid) {
+    let md = C.figureAt(bar, EVERY_BARS, allowed);
+    if (md === avoid && allowed.length > 1) md = allowed[(allowed.indexOf(md) + 1) % allowed.length];
+    return md;
+  }
+  let lastForce = -1e9, forcePending = false;
+  function switchTo(md) {
+    if (md === current) return;
+    current = md; blend.set([{ mode: md, w: 1 }]);
+    markStrip();
+  }
+  /** The finger left the current figure's line: re-form around it now,
+   *  unless a drag already forced a switch less than FORCE_GAP ago. */
+  function forceSwitch(always) {
+    forcePending = false;
+    if (allowed.includes(current)) return;
+    const t = C.now();
+    if (!always && t - lastForce < FORCE_GAP) { forcePending = true; return; }
+    lastForce = t; switchTo(closest(allowed));
+  }
+
+  // ---- Controls and readout.
+  const controls = C.el("div", "controls", root);
+  const liftBtn = C.button(controls, "Lift finger", () => {
+    down = !down; fingerChanged();
+  });
+  const readout = C.el("div", "readout", root);
+
+  // ---- The strip of figures.
+  const strip = C.el("div", "strip", root);
+  strip.setAttribute("aria-label", "The first 15 figures. Bright ones have a still line under your finger.");
+  const cells = pool.map((md) => {
+    const cell = C.el("div", "fig", strip);
+    const cv = document.createElement("canvas"); cv.width = cv.height = THUMB_PX; cell.appendChild(cv);
+    const lab = C.el("span", "lab", cell, md.label);
+    const base = document.createElement("canvas"); base.width = base.height = THUMB_PX;
+    C.drawThumb(base, (x, y) => C.modeValue(md, x, y), { width: 0.13 });
+    return { md, cell, cv, ctx: cv.getContext("2d"), base, lab };
+  });
+
+  function drawStrip() {
+    // A hollow ring the size of the fingertip, so the still line shows through it.
+    const r = Math.max(4, FINGER_R * THUMB_PX / 2 + 1);
+    for (const c of cells) {
+      c.ctx.drawImage(c.base, 0, 0);
+      if (!down) continue;
+      const X = (finger.x + 1) / 2 * THUMB_PX, Y = (1 - finger.y) / 2 * THUMB_PX;
+      c.ctx.beginPath(); c.ctx.arc(X, Y, r, 0, Math.PI * 2);
+      c.ctx.lineWidth = 5; c.ctx.strokeStyle = "rgba(0,0,0,0.85)"; c.ctx.stroke();
+      c.ctx.lineWidth = 2.5; c.ctx.strokeStyle = "#ffffff"; c.ctx.stroke();
+    }
+  }
+  function markStrip() {
+    for (const c of cells) {
+      const ok = allowed.includes(c.md);
+      c.cell.classList.toggle("ok", ok && !closestOnly);
+      c.cell.classList.toggle("near", ok && closestOnly);
+      c.cell.classList.toggle("off", !ok);
+      c.cell.classList.toggle("now", c.md === current);
+    }
+    const onPlate = " · on the plate: <b>" + current.label + "</b>";
+    readout.innerHTML = !down
+      ? "No finger: all <b>" + POOL_SIZE + "</b> figures allowed" + onPlate
+      : closestOnly
+        ? "No line under your finger. The plate rings the closest: <b>" + current.label + "</b>"
+        : "Your finger allows <b>" + allowed.length + "</b> of " + POOL_SIZE + " figures" + onPlate;
+    liftBtn.textContent = down ? "Lift finger" : "Put finger back";
+  }
+
+  function fingerChanged(always = true) {
+    computeAllowed();
+    forceSwitch(always);
+    drawStrip(); markStrip();
+  }
+  drawStrip(); markStrip();
+
+  // ---- Pointer: tap to place, drag to move.
+  let dragging = false;
+  const toPlate = (e) => {
+    const r = box.canvas.getBoundingClientRect(), v = C.view(box.W, box.H);
+    const [x, y] = v.toPlate((e.clientX - r.left) * box.dpr, (e.clientY - r.top) * box.dpr);
+    return { x: C.clamp(x, -0.96, 0.96), y: C.clamp(y, -0.96, 0.96) };
+  };
+  box.canvas.addEventListener("pointerdown", (e) => {
+    dragging = true; box.canvas.setPointerCapture(e.pointerId);
+    finger = toPlate(e); down = true; fingerChanged();
+  });
+  box.canvas.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    finger = toPlate(e); fingerChanged(false);
+  });
+  const end = () => { if (!dragging) return; dragging = false; fingerChanged(true); };
+  box.canvas.addEventListener("pointerup", end);
+  box.canvas.addEventListener("pointercancel", end);
+  box.canvas.style.cursor = "pointer";
+
+  // ---- The loop.
+  C.run(box.el, (dt, t) => {
+    const s = C.song(t);
+    const k = Math.floor(s.bar / EVERY_BARS);
+    // A figure the finger just forced keeps the plate for at least HOLD_AFTER_FORCE
+    // seconds, so the viewer sees the sand settle around the finger.
+    if (k !== stretch) { stretch = k; if (t - lastForce >= HOLD_AFTER_FORCE) switchTo(pickFor(s.bar, current)); }
+    if (forcePending && t - lastForce >= FORCE_GAP) forceSwitch(true);
+    blend.step(dt);
+    const field = blend.field();
+    bed.step(field, s.drive, dt);
+
+    const ctx = box.ctx, W = box.W, H = box.H, v = C.view(W, H);
+    C.drawPlate(ctx, W, H, field, { view: v, energy: 0.4 + 0.5 * s.energy });
+    C.drawGrains(ctx, bed, { view: v, dpr: box.dpr, size: 1.7 });
+    if (down) {
+      const X = v.px(finger.x), Y = v.py(finger.y), R = FINGER_R * v.s;
+      const g = ctx.createRadialGradient(X, Y, 0, X, Y, R);
+      g.addColorStop(0, "rgba(255,236,226,0.30)"); g.addColorStop(0.7, "rgba(255,236,226,0.20)"); g.addColorStop(1, "rgba(255,236,226,0.08)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, R, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = Math.max(1, 1.2 * box.dpr); ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.stroke();
+    }
+  });
+});
+
+// ---- inks.js
+/* Idea 3, Two-colour sand. One square plate with a bed of mixed weights (the
+   scene's sorted bed). A divider splits the view: left of it every grain is
+   drawn in one ink, as the scene does today; right of it grit and powder get
+   two inks, so the sorting the rule already does becomes visible. Grains are
+   drawn by this file (not C.drawGrains) so each grain is drawn once, on the
+   side of the divider it sits on. */
+Chladni.register("inks", (root) => {
+  const C = window.Chladni;
+  const N = 5200;
+  const POOL = C.MODES.slice(0, 5);      // low, coarse figures: big heaps
+  const EVERY = 4;                        // bars per figure
+  const SPLIT = 0.5;                      // below this weight a grain is powder
+  // Readout: grit is on a line when |f|/2 < LINE_TOL; powder is in a heap
+  // when it sits near a high point (|f|/2 > HEAP_TOL and a gentle slope,
+  // under HEAP_SLOPE times the steepest slope a figure of that order has).
+  const LINE_TOL = 0.1, HEAP_TOL = 0.15, HEAP_SLOPE = 0.35;
+  // Scatter: the plate shakes at least this hard for a while after, and the
+  // figure holds, so the viewer always sees the bed sort itself.
+  const SCATTER_DRIVE = 1.1, SCATTER_HOLD = 2.2, SCATTER_FADE = 1.3;
+  const POWDER_INK = "powder";
+  const LEVELS = 6;
+
+  const box = C.canvasBox(root, { label: "A vibrating plate of sand, split by a divider: one colour on the left, two colours on the right" });
+  const plateEl = box.el;
+  plateEl.tabIndex = 0;
+  plateEl.setAttribute("role", "slider");
+  plateEl.setAttribute("aria-label", "Divider position");
+  plateEl.setAttribute("aria-valuemin", "0");
+  plateEl.setAttribute("aria-valuemax", "100");
+
+  const controls = C.el("div", "controls", root);
+  const readout = C.el("div", "readout", root);
+  C.el("p", "caption", root, "Pink grit runs to the still lines. Blue powder heaps up between them.");
+
+  const bed = new C.Bed(N, { weight: 0.5, mix: 1, seed: 424242 });
+  const blend = new C.Blend(0.6, 1.2);
+  let t0 = C.now(), s = C.song(t0), fig = C.figureAt(s.bar, EVERY, POOL, 3);
+  blend.set([{ mode: fig, w: 1 }], true);
+  let field = blend.field();
+  bed.scatter(field);
+  bed.warm(field, 1.3, 3.5);
+
+  let scatteredAt = -1e9;
+  C.button(controls, "Scatter", () => { bed.scatter(field); scatteredAt = C.now(); });
+
+  // Divider in plate space, -1 (all two colours) .. 1 (all today).
+  let split = 0;
+  const setSplit = (v) => {
+    split = C.clamp(v, -1, 1);
+    plateEl.setAttribute("aria-valuenow", String(Math.round((split + 1) * 50)));
+    plateEl.setAttribute("aria-valuetext", Math.round((split + 1) * 50) + "% today");
+  };
+  setSplit(0);
+
+  let dragging = false;
+  const toPlateX = (e) => {
+    const r = plateEl.getBoundingClientRect(), v = C.view(r.width, r.height);
+    return v.toPlate(e.clientX - r.left, e.clientY - r.top)[0];
+  };
+  plateEl.addEventListener("pointerdown", (e) => {
+    dragging = true; plateEl.setPointerCapture(e.pointerId); setSplit(toPlateX(e)); e.preventDefault();
+  });
+  plateEl.addEventListener("pointermove", (e) => { if (dragging) setSplit(toPlateX(e)); });
+  const end = () => { dragging = false; };
+  plateEl.addEventListener("pointerup", end);
+  plateEl.addEventListener("pointercancel", end);
+  plateEl.addEventListener("keydown", (e) => {
+    const k = e.key, step = e.shiftKey ? 0.25 : 0.05;
+    if (k === "ArrowLeft" || k === "ArrowDown") setSplit(split - step);
+    else if (k === "ArrowRight" || k === "ArrowUp") setSplit(split + step);
+    else if (k === "Home") setSplit(-1);
+    else if (k === "End") setSplit(1);
+    else return;
+    e.preventDefault();
+  });
+
+  // Ink styles per brightness level. "Today" uses the core's drawGrains ramp,
+  // which runs up to near-white. The two-colour side stops lower on the ramp
+  // so its brightest grains keep their hue and the two inks stay apart.
+  const levels = (name, lo, span) => Array.from({ length: LEVELS }, (_, l) => C.rgb(C.INKS[name](lo + span * (l / (LEVELS - 1)))));
+  const styles = [levels("sand", 0.55, 0.45), levels("sand", 0.55, 0.25), levels(POWDER_INK, 0.55, 0.25)];
+  const SAND = C.rgb(C.INKS.sand(0.8)), POWDER = C.rgb(C.INKS[POWDER_INK](0.8));
+  // Buckets: [side/ink][level] → grain indices, reused every frame.
+  const NB = 3 * LEVELS;
+  const bucket = Array.from({ length: NB }, () => new Int32Array(N));
+  const bucketN = new Int32Array(NB);
+  const sizeOf = new Float32Array(N);
+  for (let i = 0; i < N; i++) sizeOf[i] = Math.pow(2, C.RULE.SIZE_PER_WEIGHT * (bed.w[i] - C.RULE.WEIGHT_REF) * 0.5);
+
+  function drawBed(ctx, v, dpr) {
+    const base = 2.1 * dpr, splitX = v.px(split);
+    bucketN.fill(0);
+    for (let i = 0; i < N; i++) {
+      const lv = Math.min(LEVELS - 1, Math.floor(C.clamp(bed.motion[i], 0, 1) * LEVELS));
+      const X = v.px(bed.x[i]);
+      const ink = X < splitX ? 0 : bed.w[i] < SPLIT ? 2 : 1; // 0 today, 1 grit, 2 powder
+      const b = ink * LEVELS + lv; bucket[b][bucketN[b]++] = i;
+    }
+    for (let b = 0; b < NB; b++) {
+      const n = bucketN[b]; if (!n) continue;
+      const ink = (b / LEVELS) | 0, lv = b % LEVELS, arr = bucket[b];
+      ctx.fillStyle = styles[ink][lv];
+      for (let k = 0; k < n; k++) {
+        const i = arr[k], sz = base * sizeOf[i];
+        ctx.fillRect(v.px(bed.x[i]) - sz / 2, v.py(bed.y[i]) - sz / 2, sz, sz);
+      }
+    }
+  }
+
+  function tag(ctx, text, x, y, align, dpr, color) {
+    ctx.font = "500 " + Math.round(11 * dpr) + "px 'JetBrains Mono', ui-monospace, monospace";
+    const w = ctx.measureText(text).width, padX = 6 * dpr, h = 18 * dpr;
+    const left = align === "left" ? x : x - w - 2 * padX;
+    ctx.fillStyle = "rgba(5,5,7,0.78)";
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(left, y, w + 2 * padX, h, 4 * dpr) : ctx.rect(left, y, w + 2 * padX, h); ctx.fill();
+    ctx.fillStyle = color; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText(text, left + padX, y + h / 2 + 0.5 * dpr);
+    return left;
+  }
+
+  function drawOverlay(ctx, v, dpr) {
+    const X = v.px(split), top = v.py(1), bot = v.py(-1), pl = v.px(-1), pr = v.px(1), inset = 8 * dpr;
+    drawDivider(ctx, X, top, bot, dpr);
+    // Labels (drawn over the divider, so it never cuts through them) on the plate's top corners, hidden when the divider covers their side.
+    ctx.save();
+    ctx.globalAlpha = C.smoothstep(-0.95, -0.55, split);
+    tag(ctx, "Today", pl + inset, top + inset, "left", dpr, "rgba(255,255,255,0.85)");
+    ctx.globalAlpha = 1 - C.smoothstep(0.55, 0.95, split);
+    tag(ctx, "Two colours", pr - inset, top + inset, "right", dpr, "rgba(255,255,255,0.85)");
+    // The key under the right label: which ink is which.
+    const y2 = bot - inset - 18 * dpr;
+    const l = tag(ctx, "powder", pr - inset, y2, "right", dpr, POWDER);
+    tag(ctx, "grit", l - 4 * dpr, y2, "right", dpr, SAND);
+    ctx.restore();
+  }
+
+  function drawDivider(ctx, X, top, bot, dpr) {
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = Math.max(1, 1.5 * dpr);
+    ctx.beginPath(); ctx.moveTo(X, top); ctx.lineTo(X, bot); ctx.stroke();
+    const gy = (top + bot) / 2, r = 11 * dpr;
+    ctx.fillStyle = "rgba(240,238,245,0.95)";
+    ctx.beginPath(); ctx.arc(X, gy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#050507"; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(X - 3 * dpr, gy - 4 * dpr); ctx.lineTo(X - 6 * dpr, gy); ctx.lineTo(X - 3 * dpr, gy + 4 * dpr);
+    ctx.moveTo(X + 3 * dpr, gy - 4 * dpr); ctx.lineTo(X + 6 * dpr, gy); ctx.lineTo(X + 3 * dpr, gy + 4 * dpr);
+    ctx.stroke();
+  }
+
+  const o = { f: 0, gx: 0, gy: 0 };
+  function measure() {
+    let g = 0, gn = 0, p = 0, pn = 0;
+    const slopeMax = HEAP_SLOPE * Math.PI * field.cells;
+    for (let i = 0; i < N; i++) {
+      field.eval(bed.x[i], bed.y[i], o);
+      const a = Math.abs(o.f) * 0.5;
+      if (bed.w[i] < SPLIT) { pn++; if (a > HEAP_TOL && Math.hypot(o.gx, o.gy) < slopeMax) p++; } else { gn++; if (a < LINE_TOL) g++; }
+    }
+    readout.innerHTML = "grit on the lines <b>" + Math.round(100 * g / gn) + "%</b> · powder in the heaps <b>" +
+      Math.round(100 * p / pn) + "%</b> · figure <b>" + fig.label + "</b>";
+  }
+
+  let sinceMeasure = 1;
+  C.run(plateEl, (dt, t) => {
+    s = C.song(t);
+    const since = t - scatteredAt;
+    const next = C.figureAt(s.bar, EVERY, POOL, 3);
+    if (next !== fig && since > SCATTER_HOLD + SCATTER_FADE) { fig = next; blend.set([{ mode: fig, w: 1 }]); }
+    blend.step(dt);
+    field = blend.field();
+    const boost = 1 - C.smoothstep(SCATTER_HOLD, SCATTER_HOLD + SCATTER_FADE, since);
+    bed.step(field, s.drive + boost * Math.max(0, SCATTER_DRIVE - s.drive), dt);
+    const { ctx, W, H, dpr } = box, v = C.view(W, H);
+    C.drawPlate(ctx, W, H, field, { view: v, energy: 0.35 + 0.5 * s.energy });
+    drawBed(ctx, v, dpr);
+    drawOverlay(ctx, v, dpr);
+    sinceMeasure += dt;
+    if (sinceMeasure > 0.25) { sinceMeasure = 0; measure(); }
+  });
+});
+
+// ---- ladder.js
+// Idea 2, the Mode ladder card: a plate on the left, a card on the right with
+// one row per figure (the first 12 of C.MODES, low to high pitch). Each row's
+// bar is how hard that figure rings right now, on a fixed 0-1 scale; the
+// plate draws the three strongest, weighted by the power they ring with. Clicking a
+// row pins its figure: the plate holds it alone while the bars keep moving.
+// The plate's weights follow the responses directly, with no crossfade of
+// their own, so the row marked as leading is always the longest bar.
+// The "music" is invented from the song clock: every 2 bars a chord excites
+// 2-3 figures, with per-beat accents and a little flicker; each figure rings
+// like a resonance (fast attack, slow release).
+Chladni.register("ladder", (root) => {
+  const C = Chladni;
+  const POOL = C.MODES.slice(0, 12);
+  const N = POOL.length;
+  const GRAINS = 4500;
+  const ATTACK = 0.08, RELEASE = 0.6; // how a figure starts and stops ringing, seconds
+  const ON_PLATE = 3;
+
+  // ---- The fake spectrum.
+  const chordCache = new Map();
+  /** The 2-3 figures a 2-bar stretch excites, each with its strength. */
+  function chord(k) {
+    let c = chordCache.get(k);
+    if (c) return c;
+    const r = C.rng(7919 * (k + 3) + 17);
+    r(); r();
+    const count = r() < 0.5 ? 2 : 3, picked = [];
+    while (picked.length < count) { const i = Math.floor(r() * N) % N; if (!picked.includes(i)) picked.push(i); }
+    const amps = [1, 0.5 + 0.15 * r(), 0.3 + 0.1 * r()];
+    c = picked.map((i, j) => ({ i, a: amps[j] }));
+    chordCache.set(k, c);
+    if (chordCache.size > 64) chordCache.delete(chordCache.keys().next().value);
+    return c;
+  }
+  const target = new Float32Array(N);
+  /** How hard each figure is being pushed at time t, 0-1. */
+  function excite(t) {
+    const s = C.song(t), sh = C.songShape(s.barF);
+    const level = 0.12 + 0.88 * sh.energy;
+    const accentAmt = 0.3 * Math.min(1, sh.kickOn + 0.25);
+    for (let i = 0; i < N; i++) {
+      const flick = Math.sin(t * 7.3 + i * 1.7) * Math.sin(t * 3.1 + i * 2.9);
+      target[i] = level * (0.05 + 0.03 * (flick + 1));
+    }
+    const ch = chord(Math.floor(s.bar / 2));
+    ch.forEach(({ i, a }, j) => {
+      const ph = (s.phase + j * 0.5) % 1; // the second figure answers on the off-beat
+      const acc = Math.exp(-ph * 6);
+      const flick = 0.06 * Math.sin(t * 11.7 + i * 2.3);
+      const v = level * a * (1 - accentAmt + accentAmt * acc + flick);
+      target[i] = Math.max(target[i], v);
+      for (const nb of [i - 1, i + 1]) if (nb >= 0 && nb < N) target[nb] = Math.max(target[nb], level * a * 0.16);
+    });
+    for (let i = 0; i < N; i++) target[i] = C.clamp(target[i], 0, 1);
+    return s;
+  }
+  const resp = new Float32Array(N);
+  function ring(dt) {
+    for (let i = 0; i < N; i++) {
+      const tau = target[i] > resp[i] ? ATTACK : RELEASE;
+      resp[i] += (target[i] - resp[i]) * (1 - Math.exp(-dt / tau));
+    }
+  }
+
+  // ---- What the plate shows: smoothed weights per figure, summing to 1.
+  let pinned = -1;
+  const plateW = new Float32Array(N);
+  const order = [...Array(N).keys()];
+  function plateTarget(out) {
+    out.fill(0);
+    if (pinned >= 0) { out[pinned] = 1; return; }
+    order.sort((a, b) => resp[b] - resp[a]);
+    // Weighted by the power each figure rings with (its response squared),
+    // so the loudest figure leads and the others shade it.
+    let sum = 0;
+    for (let k = 0; k < ON_PLATE; k++) sum += resp[order[k]] ** 2;
+    for (let k = 0; k < ON_PLATE; k++) out[order[k]] = sum > 0 ? resp[order[k]] ** 2 / sum : 1 / ON_PLATE;
+  }
+  // The responses' own attack and release give the plate its glide, as in
+  // the app's createPlateResponse, so the weights take no extra smoothing.
+  function follow() { plateTarget(plateW); }
+  function field() {
+    const list = [];
+    for (let i = 0; i < N; i++) if (plateW[i] > 0) list.push({ mode: POOL[i], w: plateW[i] });
+    return C.squareField(list);
+  }
+
+  // ---- DOM.
+  const wrap = C.el("div", "lad-wrap", root);
+  const box = C.canvasBox(wrap, { label: "A plate of sand drawing the figures that ring hardest" });
+  const card = C.el("div", "lad-card", wrap);
+  const head = C.el("div", "lad-head", card);
+  C.el("span", "lad-title", head, "Mode ladder");
+  C.el("span", "lad-hint", head, "low notes first");
+  const list = C.el("div", "lad-list", card);
+  list.setAttribute("role", "group"); list.setAttribute("aria-label", "Figures, low to high note. Press one to pin it.");
+  const LOCK = '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5.2" width="8" height="5.8" rx="1.2" fill="currentColor"/><path d="M3.9 5.4V3.9a2.1 2.1 0 0 1 4.2 0v1.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+  const rows = POOL.map((md, i) => {
+    const b = C.button(list, "", () => togglePin(i), "lad-row");
+    b.setAttribute("aria-pressed", "false");
+    const th = C.el("canvas", "lad-thumb", b); th.width = th.height = 64; th.setAttribute("aria-hidden", "true");
+    C.drawThumb(th, (x, y) => C.modeValue(md, x, y), { width: 0.14 });
+    C.el("span", "lad-name", b, md.label);
+    const track = C.el("span", "lad-track", b); track.setAttribute("aria-hidden", "true");
+    const fill = C.el("span", "lad-fill", track);
+    const tag = C.el("span", "lad-tag", b);
+    b.title = "Pin " + md.label;
+    return { b, fill, tag, on: "", tagText: null, lastScale: -1 };
+  });
+  const readout = C.el("div", "readout", root);
+  const line1 = C.el("div", "", readout), line2 = C.el("div", "", readout);
+
+  function togglePin(i) {
+    pinned = pinned === i ? -1 : i;
+    rows.forEach((r, k) => { r.b.setAttribute("aria-pressed", String(k === pinned)); r.b.title = (k === pinned ? "Let go of " : "Pin ") + POOL[k].label; });
+    lastText = "";
+    paintRows(true, true);
+  }
+
+  let lastText = "";
+  function paintRows(force, words) {
+    rows.forEach((r, i) => {
+      const s = Math.round(resp[i] * 400) / 400;
+      if (s !== r.lastScale) { r.fill.style.transform = "scaleX(" + s + ")"; r.lastScale = s; }
+    });
+    // Which rows are on the plate: the top ON_PLATE by plate weight, which
+    // is the top ON_PLATE by response, so the lead is the longest bar. Marks
+    // follow the bars every frame; the % shares change a few times a second.
+    const byW = [...order].sort((a, b) => plateW[b] - plateW[a]);
+    const onSet = new Map();
+    byW.slice(0, ON_PLATE).forEach((i, k) => { if (plateW[i] > 0.04) onSet.set(i, k === 0 ? "lead" : "on"); });
+    rows.forEach((r, i) => {
+      const on = onSet.get(i) || "";
+      const moved = on !== r.on;
+      if (moved || force) { r.on = on; if (on) r.b.dataset.on = on; else delete r.b.dataset.on; }
+      if (!(words || moved || force)) return;
+      const txt = i === pinned ? "pin" : on ? Math.round(plateW[i] * 100) + "%" : "";
+      if (txt !== r.tagText || force) {
+        r.tagText = txt;
+        r.tag.innerHTML = i === pinned ? LOCK + "pinned" : txt;
+      }
+    });
+    return byW;
+  }
+
+  function paintReadout(s, byW) {
+    let html;
+    if (pinned >= 0) html = "Pinned <b>" + POOL[pinned].label + "</b> · the music can't move it";
+    else html = "On the plate: " + byW.slice(0, ON_PLATE).filter((i) => plateW[i] > 0.04).map((i) => "<b>" + POOL[i].label + "</b> " + Math.round(plateW[i] * 100) + "%").join(" · ");
+    const mood = { groove: "steady", break: "quiet", build: "rising", drop: "loud" }[s.section];
+    const html2 = "Music: <b>" + s.section + "</b>, " + mood + " · bar " + (s.loopBar + 1) + " of " + C.SONG.loopBars;
+    if (html !== lastText) { line1.innerHTML = html; lastText = html; }
+    if (html2 !== line2.dataset.t) { line2.innerHTML = html2; line2.dataset.t = html2; }
+  }
+
+  // ---- Start on a formed figure: ring the ladder for a while, then settle the sand.
+  const t0 = C.now();
+  for (let t = t0 - 2.5; t < t0; t += 1 / 60) { excite(t); ring(1 / 60); }
+  follow();
+  const bed = new C.Bed(GRAINS, { seed: 424242 });
+  {
+    const f = field();
+    bed.scatter(f);
+    bed.warm(f, C.plateDrive(0.55, 0), 3);
+  }
+
+  let sinceText = 1;
+  C.run(box.el, (dt, t) => {
+    const s = excite(t);
+    ring(dt);
+    follow();
+    const f = field();
+    bed.step(f, s.drive, dt);
+    const { ctx, W, H, dpr } = box, v = C.view(W, H);
+    C.drawPlate(ctx, W, H, f, { view: v, energy: 0.35 + 0.45 * s.energy });
+    C.drawGrains(ctx, bed, { view: v, dpr, size: 1.5 });
+    // Bars and marks move every frame; the shares and the readout change a few times a second.
+    sinceText += dt;
+    const words = sinceText > 0.12;
+    const byW = paintRows(false, words);
+    if (words) { sinceText = 0; paintReadout(s, byW); }
+  });
+});
+
+// ---- shapes.js
+/* Idea 5, "Other plates". One plate canvas whose shape the viewer picks:
+   Square (today's free square, the scene's own modes), Round (a free round
+   plate's real modes, (J_n(k r) + C I_n(k r)) cos(n θ), with k and C solved
+   from the free edge's two conditions, each radial profile tabulated once),
+   Hexagon (a sketch: standing plane waves along the three edge normals),
+   Guitar (a sketch: half-cosine modes stretched to follow the body's width,
+   with a sound hole the sand falls through) and Clamped (a square with held
+   edges, sketched as a hinged edge: sine modes, so the rim is a line too).
+   Each shape has its own pool of figures; the song clock picks a new one
+   every EVERY bars from a fixed shuffle of that pool, crossfading over
+   FADE_SEC, and holds the figure through the song's break, where the drive
+   is too weak to draw a new one. A shape switch runs WARM_SWITCH seconds of
+   the sand rule spread over the next frames, WARM_STEPS at a time. Every field is scaled so
+   its peak |f| is 2, like one square mode, so the sand rule's drive and lift
+   behave the same on every plate; a gently sloped figure also gets more drive
+   (see GRAD_REF) so its lines come out as crisp as the square's. Under the plate: the shape's whole family
+   as small drawings, the current one marked. */
+Chladni.register("shapes", (root) => {
+  const C = Chladni, PI = Math.PI;
+  const GRAINS = 4500;
+  const EVERY = 2;          // bars per figure
+  const FADE_SEC = 0.35;    // crossfade time constant between figures
+  const WARM_SWITCH = 1.2;  // seconds of sand rule run fast after a shape switch
+  const WARM_STEPS = 6;     // ... as this many extra steps per frame
+  const WARM_OPEN = 3;      // seconds run at once when the page opens
+  const TABLE = 1024;
+  // A gently sloped figure (a low one, on a round or clamped plate) leaves a
+  // wide quiet band around its lines, so its sand stays fuzzy. Such a figure
+  // gets more drive, up to GAIN_MAX, until it is as steep as a typical
+  // square figure (GRAD_REF, the mean slope on the square pool's lines).
+  const GRAD_REF = 8, GAIN_MAX = 3;       // samples of each radial / width table
+
+  // ---- Helpers ------------------------------------------------------------
+  /** Largest |f| over a grid of points on the plate, to scale a figure to peak 2. */
+  function peakOf(raw, inside) {
+    const o = { f: 0, gx: 0, gy: 0 }; let p = 0;
+    for (let j = 0; j <= 80; j++) for (let i = 0; i <= 80; i++) {
+      const x = i / 40 - 1, y = j / 40 - 1;
+      if (!inside(x, y)) continue;
+      raw(x, y, o); p = Math.max(p, Math.abs(o.f));
+    }
+    return p || 1;
+  }
+  /** Wraps a raw field into a figure: scaled to peak 2. */
+  function figure(raw, inside, cells, info) {
+    const k = 2 / peakOf(raw, inside);
+    return Object.assign({
+      cells, inside, shape: "custom",
+      eval(x, y, o) { raw(x, y, o); o.f *= k; o.gx *= k; o.gy *= k; return o; },
+    }, info);
+  }
+  function shuffled(n, seed) {
+    const r = C.rng(seed), a = [...Array(n).keys()];
+    for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  // ---- Square: today's plate --------------------------------------------
+  const inSquare = (x, y) => x >= -1 && x <= 1 && y >= -1 && y <= 1;
+  function buildSquare() {
+    return C.MODES.slice(0, 12).map((md) => Object.assign(C.squareField([{ mode: md, w: 1 }]), {
+      shape: "custom", desc: "mode " + md.label + (md.s < 0 ? "−" : "+"),
+    }));
+  }
+
+  // ---- Round: a free round plate, real Bessel figures --------------------
+  // A Kirchhoff plate's mode is W(r) cos(n θ) with W = J_n(k r) + C I_n(k r).
+  // A free edge (r = 1) carries no bending moment and no shear, two
+  // equations in C; k is where they agree (the 2×2 determinant is zero) and
+  // C follows. The k = 0 rigid moves (lift, tilt) are skipped by starting the
+  // scan above them. J_n and I_n come from their integral forms over a full
+  // turn; the trapezoid rule on a periodic integrand converges fast, so
+  // BESSEL_N samples are plenty.
+  const BESSEL_N = 96, NU = 0.3; // NU: Poisson's ratio, about brass's
+  const SIN_T = new Float64Array(BESSEL_N), COS_T = new Float64Array(BESSEL_N), TAU = new Float64Array(BESSEL_N);
+  for (let j = 0; j < BESSEL_N; j++) { TAU[j] = (j / BESSEL_N) * 2 * PI; SIN_T[j] = Math.sin(TAU[j]); COS_T[j] = Math.cos(TAU[j]); }
+  /** J_n, J_n', I_n, I_n' at x in one pass. */
+  function bessel(n, x, o) {
+    let j = 0, jp = 0, i = 0, ip = 0;
+    for (let q = 0; q < BESSEL_N; q++) {
+      const a = n * TAU[q] - x * SIN_T[q], e = Math.exp(x * COS_T[q]) * Math.cos(n * TAU[q]);
+      j += Math.cos(a); jp += Math.sin(a) * SIN_T[q]; i += e; ip += e * COS_T[q];
+    }
+    o.j = j / BESSEL_N; o.jp = jp / BESSEL_N; o.i = i / BESSEL_N; o.ip = ip / BESSEL_N; return o;
+  }
+  /** The free edge's determinant at k (scaled by e^-k to stay tame) and C. */
+  function freeEdge(n, k) {
+    const b = bessel(n, k, {}), nn = n * n;
+    const jpp = -b.jp / k - (1 - nn / (k * k)) * b.j, ipp = -b.ip / k + (1 + nn / (k * k)) * b.i;
+    const MJ = k * k * jpp + NU * (k * b.jp - nn * b.j), MI = k * k * ipp + NU * (k * b.ip - nn * b.i);
+    const VJ = -k * k * k * b.jp - (1 - NU) * nn * (k * b.jp - b.j), VI = k * k * k * b.ip - (1 - NU) * nn * (k * b.ip - b.i);
+    return { d: (MJ * VI - MI * VJ) * Math.exp(-k), C: -MJ / MI };
+  }
+  /** The first `count` free-plate roots k for n (scan, then bisect). */
+  function plateRoots(n, count) {
+    const out = [], STEP = 0.05; let a = 0.8, fa = freeEdge(n, a).d;
+    for (let b = a + STEP; out.length < count && b < 20; b += STEP) {
+      const fb = freeEdge(n, b).d;
+      if (fa * fb < 0) {
+        let lo = b - STEP, hi = b, flo = fa;
+        for (let it = 0; it < 36; it++) { const mid = (lo + hi) / 2, fm = freeEdge(n, mid).d; if (flo * fm <= 0) hi = mid; else { lo = mid; flo = fm; } }
+        const k = (lo + hi) / 2; out.push({ k, C: freeEdge(n, k).C });
+      }
+      fa = fb;
+    }
+    return out;
+  }
+  const inDisc = (x, y) => x * x + y * y <= 1;
+  function buildRound() {
+    const modes = [];
+    for (let n = 0; n <= 4; n++) for (const rt of plateRoots(n, 3)) modes.push({ n, ...rt });
+    modes.sort((a, b) => a.k - b.k);
+    const r = C.rng(5150), b = {};
+    return modes.map(({ n, k, C: cI }) => {
+      const R = new Float32Array(TABLE + 1), D = new Float32Array(TABLE + 1);
+      for (let i = 0; i <= TABLE; i++) { bessel(n, k * i / TABLE, b); R[i] = b.j + cI * b.i; D[i] = k * (b.jp + cI * b.ip); }
+      let rings = 0;
+      for (let i = 2; i <= TABLE; i++) if (R[i - 1] * R[i] < 0) rings++;
+      const th0 = n > 0 ? (Math.floor(r() * 4) / 4) * (PI / n) * 0.5 + 0.12 : 0; // a fixed tilt per figure
+      const raw = (x, y, o) => {
+        const rr = Math.min(1, Math.hypot(x, y)), t = rr * TABLE, i = Math.min(TABLE - 1, t | 0), fr = t - i;
+        const Rv = R[i] + (R[i + 1] - R[i]) * fr, Dv = D[i] + (D[i + 1] - D[i]) * fr;
+        const rs = Math.max(rr, 1e-4);
+        if (n === 0) { o.f = Rv; o.gx = Dv * x / rs; o.gy = Dv * y / rs; return o; }
+        const ang = n * (Math.atan2(y, x) - th0), c = Math.cos(ang), s = Math.sin(ang);
+        o.f = Rv * c;
+        o.gx = Dv * c * x / rs + Rv * n * s * y / (rs * rs);
+        o.gy = Dv * c * y / rs - Rv * n * s * x / (rs * rs);
+        return o;
+      };
+      const parts = [];
+      if (rings) parts.push(rings + (rings === 1 ? " ring" : " rings"));
+      if (n) parts.push(2 * n + " spokes");
+      return figure(raw, inDisc, Math.max(1, k / PI), { desc: parts.join(", ") });
+    });
+  }
+
+  // ---- Hexagon: a sketch from standing plane waves -----------------------
+  // Flat-top, circumradius 1. Waves run along the three edge normals (or the
+  // three corner directions); a wave number of a multiple of HEX_K puts a
+  // crest on every edge, as a free edge wants.
+  const SQ3 = Math.sqrt(3), APOTHEM = SQ3 / 2, HEX_K = PI / APOTHEM;
+  const inHex = (x, y) => Math.abs(y) <= APOTHEM && SQ3 * Math.abs(x) + Math.abs(y) <= SQ3;
+  function buildHex() {
+    const dirs = (a0) => [0, 1, 2].map((j) => { const a = a0 + j * 2 * PI / 3; return [Math.cos(a), Math.sin(a)]; });
+    const EDGE = dirs(PI / 2), CORNER = dirs(0);
+    // A figure: [{ k, d: dirs, fn: "cos"|"sin", w }], offset c, a name.
+    const specs = [
+      { t: [{ k: HEX_K * 2, d: EDGE, fn: "cos", w: 1 }], c: -0.8, desc: "hexagon and arcs" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "sin", w: 1 }], c: 0, desc: "triangles" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "cos", w: 1 }], c: -0.8, desc: "honeycomb" },
+      { t: [{ k: HEX_K * 2, d: EDGE, fn: "cos", w: 1 }, { k: HEX_K * 2 * SQ3, d: CORNER, fn: "cos", w: -1 }], c: 0, desc: "flower" },
+      { t: [{ k: HEX_K * 2, d: EDGE, fn: "cos", w: 1 }, { k: HEX_K * 2 * SQ3, d: CORNER, fn: "cos", w: 1 }], c: -0.8, desc: "net of hexagons" },
+      { t: [{ k: HEX_K * 4, d: EDGE, fn: "sin", w: 1 }], c: 0, desc: "triangle grid" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "cos", w: 1 }, { k: HEX_K * 3 * SQ3, d: CORNER, fn: "cos", w: -0.5 }], c: 0, desc: "hexagons" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "cos", w: 1 }, { k: HEX_K * 3 * SQ3, d: CORNER, fn: "cos", w: -1 }], c: 0, desc: "lace" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "cos", w: 1 }], c: -1.2, desc: "small triangles" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "cos", w: 1 }], c: 0.3, desc: "rings" },
+      { t: [{ k: HEX_K * 3, d: EDGE, fn: "cos", w: 1 }, { k: HEX_K * 3 * SQ3, d: CORNER, fn: "cos", w: 1 }], c: -0.8, desc: "honeycomb and rings" },
+      { t: [{ k: HEX_K * 2, d: EDGE, fn: "cos", w: 1 }], c: -0.3, desc: "ring and arcs" },
+    ];
+    return specs.map((sp) => {
+      const terms = []; let kmax = 0;
+      for (const t of sp.t) for (const [dx, dy] of t.d) { terms.push({ kx: t.k * dx, ky: t.k * dy, sin: t.fn === "sin", w: t.w }); kmax = Math.max(kmax, t.k); }
+      const raw = (x, y, o) => {
+        let f = -sp.c, gx = 0, gy = 0;
+        for (const t of terms) {
+          const ph = t.kx * x + t.ky * y;
+          if (t.sin) { const cv = Math.cos(ph) * t.w; f += Math.sin(ph) * t.w; gx += cv * t.kx; gy += cv * t.ky; }
+          else { const sv = Math.sin(ph) * t.w; f += Math.cos(ph) * t.w; gx -= sv * t.kx; gy -= sv * t.ky; }
+        }
+        o.f = f; o.gx = gx; o.gy = gy; return o;
+      };
+      return figure(raw, inHex, Math.max(1, kmax / PI), { desc: sp.desc });
+    });
+  }
+
+  // ---- Guitar: a sketch on a guitar top ----------------------------------
+  // The outline is the smooth union of a big lower bout and a smaller upper
+  // bout; GW[] holds its half-width along y. Figures are half-cosines in
+  // u = x / width (so lines follow the waist) and v along the body.
+  const BODY = { y0: -1, y1: 0.95, lo: { cy: -0.4, ax: 0.78, ay: 0.6, p: 2.2 }, up: { cy: 0.4, ax: 0.6, ay: 0.55, p: 2.4 }, waistY: 0.05, waistBlur: 0.05 };
+  const HOLE = { x: 0, y: 0.28, r: 0.15 };
+  const GW = new Float32Array(TABLE + 1), GWP = new Float32Array(TABLE + 1);
+  {
+    const half = (b, y) => { const q = Math.abs(y - b.cy) / b.ay; return q < 1 ? b.ax * Math.pow(1 - Math.pow(q, b.p), 1 / b.p) : 0; };
+    const raw = new Float32Array(TABLE + 1);
+    for (let i = 0; i <= TABLE; i++) { const y = i / TABLE * 2 - 1; raw[i] = Math.max(half(BODY.lo, y), half(BODY.up, y)); }
+    // Round off the waist's corner with a blur that only acts near the waist.
+    for (let i = 0; i <= TABLE; i++) {
+      const y = i / TABLE * 2 - 1, sig = BODY.waistBlur * Math.exp(-(((y - BODY.waistY) / 0.2) ** 2)) * TABLE / 2;
+      if (sig < 0.5) { GW[i] = raw[i]; continue; }
+      let sw = 0, sv = 0;
+      for (let d = -Math.ceil(3 * sig); d <= Math.ceil(3 * sig); d++) { const j = i + d; if (j < 0 || j > TABLE) continue; const wt = Math.exp(-0.5 * (d / sig) ** 2); sw += wt; sv += wt * raw[j]; }
+      GW[i] = sv / sw;
+    }
+    for (let i = 0; i <= TABLE; i++) GWP[i] = (GW[Math.min(TABLE, i + 1)] - GW[Math.max(0, i - 1)]) / ((Math.min(TABLE, i + 1) - Math.max(0, i - 1)) / TABLE * 2);
+  }
+  const widthAt = (y) => { const t = (C.clamp(y, -1, 1) + 1) / 2 * TABLE, i = Math.min(TABLE - 1, t | 0), fr = t - i; return GW[i] + (GW[i + 1] - GW[i]) * fr; };
+  const inGuitar = (x, y) => {
+    if (y < -1 || y > 1 || Math.abs(x) >= widthAt(y)) return false;
+    const hx = x - HOLE.x, hy = y - HOLE.y; return hx * hx + hy * hy > HOLE.r * HOLE.r;
+  };
+  function buildGuitar() {
+    const yc = (BODY.y0 + BODY.y1) / 2, hy = (BODY.y1 - BODY.y0) / 2;
+    // [[n across, m along, weight], ...]
+    const specs = [
+      { t: [[1, 0, 1]], desc: "one line down the middle" },
+      { t: [[2, 0, 1], [0, 2, 1]], desc: "ring" },
+      { t: [[1, 1, 1]], desc: "cross" },
+      { t: [[2, 0, 1], [0, 2, -1]], desc: "X" },
+      { t: [[2, 0, 1], [0, 2, 1], [0, 1, 0.7]], desc: "long ring" },
+      { t: [[1, 2, 1]], desc: "line and two bars" },
+      { t: [[0, 3, 1], [2, 0, 0.8]], desc: "ring and bar" },
+      { t: [[2, 1, 1], [0, 2, 0.5]], desc: "lopsided cross" },
+      { t: [[3, 0, 1], [1, 2, 0.8]], desc: "three lines" },
+      { t: [[2, 2, 1], [0, 3, 0.6]], desc: "two rings" },
+    ];
+    return specs.map((sp) => {
+      let nmax = 0, mmax = 0; for (const [n, m] of sp.t) { nmax = Math.max(nmax, n); mmax = Math.max(mmax, m); }
+      const raw = (x, y, o) => {
+        const t = (C.clamp(y, -1, 1) + 1) / 2 * TABLE, i = Math.min(TABLE - 1, t | 0), fr = t - i;
+        const w = Math.max(0.05, GW[i] + (GW[i + 1] - GW[i]) * fr), wp = C.clamp(GWP[i] + (GWP[i + 1] - GWP[i]) * fr, -4, 4);
+        const u = C.clamp(x / w, -1, 1), v = C.clamp((y - yc) / hy, -1, 1);
+        let f = 0, fu = 0, fv = 0;
+        for (const [n, m, a] of sp.t) {
+          const pu = n * PI * (u + 1) / 2, pv = m * PI * (v + 1) / 2;
+          const cu = Math.cos(pu), cv = Math.cos(pv);
+          f += a * cu * cv; fu -= a * n * PI / 2 * Math.sin(pu) * cv; fv -= a * m * PI / 2 * cu * Math.sin(pv);
+        }
+        o.f = f; o.gx = fu / w; o.gy = fu * (-x * wp / (w * w)) + fv / hy; return o;
+      };
+      return figure(raw, inGuitar, Math.max(1, nmax / 1.2, mmax / 1.96), { desc: sp.desc });
+    });
+  }
+
+  // ---- Clamped: a square with its edges held ----------------------------
+  function buildClamped() {
+    const pairs = [];
+    for (let n = 1; n < 5; n++) for (let m = n + 1; m <= 5; m++) for (const s of [1, -1]) pairs.push({ n, m, s });
+    pairs.sort((a, b) => a.n * a.n + a.m * a.m - (b.n * b.n + b.m * b.m) || b.s - a.s);
+    return pairs.map(({ n, m, s }) => {
+      const a = n * PI / 2, b = m * PI / 2;
+      const raw = (x, y, o) => {
+        const X = x + 1, Y = y + 1;
+        const snx = Math.sin(a * X), cnx = Math.cos(a * X), smy = Math.sin(b * Y), cmy = Math.cos(b * Y);
+        const smx = Math.sin(b * X), cmx = Math.cos(b * X), sny = Math.sin(a * Y), cny = Math.cos(a * Y);
+        o.f = snx * smy + s * smx * sny;
+        o.gx = a * cnx * smy + s * b * cmx * sny;
+        o.gy = b * snx * cmy + s * a * smx * cny;
+        return o;
+      };
+      return figure(raw, inSquare, Math.max(1, m / 2), { desc: "mode (" + n + "," + m + ")" + (s < 0 ? "−" : "+") });
+    });
+  }
+
+  const SHAPES = {
+    square: { label: "Square", name: "Square plate", build: buildSquare, inside: inSquare, seed: 11 },
+    round: { label: "Round", name: "Round plate", build: buildRound, inside: inDisc, seed: 23 },
+    hex: { label: "Hexagon", name: "Hexagon plate", build: buildHex, inside: inHex, seed: 37 },
+    guitar: { label: "Guitar", name: "Guitar top", build: buildGuitar, inside: inGuitar, seed: 41 },
+    clamped: { label: "Clamped", name: "Square, clamped edges", build: buildClamped, inside: inSquare, seed: 53 },
+  };
+  const ORDER = ["square", "round", "hex", "guitar", "clamped"];
+  /** A shape's figures and their song order, built on first use. */
+  function poolOf(id) {
+    const sh = SHAPES[id];
+    if (!sh.pool) {
+      sh.pool = sh.build(); sh.perm = shuffled(sh.pool.length, sh.seed);
+      for (const fig of sh.pool) fig.gain = id === "square" ? 1 : C.clamp(GRAD_REF / lineSlope(fig), 1, GAIN_MAX);
+    }
+    return sh;
+  }
+  /** How steeply a figure rises off its lines: the mean |grad f| where |f| is small. */
+  function lineSlope(fig) {
+    const o = { f: 0, gx: 0, gy: 0 }; let n = 0, g = 0;
+    for (let j = 0; j <= 100; j++) for (let i = 0; i <= 100; i++) {
+      const x = i / 50 - 1, y = j / 50 - 1;
+      if (!fig.inside(x, y)) continue;
+      fig.eval(x, y, o); if (Math.abs(o.f) < 0.15) { n++; g += Math.hypot(o.gx, o.gy); }
+    }
+    return n ? g / n : GRAD_REF;
+  }
+  /** The stretch whose figure plays at `bar`: a stretch that starts in the
+   *  song's break keeps the figure before it, which the groove already drew. */
+  function figStretch(bar) {
+    let k = Math.floor(bar / EVERY);
+    for (let g = 0; g < 8 && C.songShape(k * EVERY).section === "break"; g++) k--;
+    return k;
+  }
+  const figIndexAt = (sh, bar) => { const n = sh.perm.length; return sh.perm[((figStretch(bar) % n) + n) % n]; };
+
+  // ---- Outlines in pixels -------------------------------------------------
+  function outlinePath(id, v) {
+    const p = new Path2D();
+    if (id === "round") p.arc(v.cx, v.cy, v.s, 0, 2 * PI);
+    else if (id === "hex") { for (let j = 0; j < 6; j++) { const a = j * PI / 3; const X = v.px(Math.cos(a)), Y = v.py(Math.sin(a)); j ? p.lineTo(X, Y) : p.moveTo(X, Y); } p.closePath(); }
+    else if (id === "guitar") {
+      const N = 240, y0 = BODY.y0, y1 = BODY.y1;
+      for (let i = 0; i <= N; i++) { const y = y0 + (y1 - y0) * i / N; const X = v.px(widthAt(y)), Y = v.py(y); i ? p.lineTo(X, Y) : p.moveTo(X, Y); }
+      for (let i = N; i >= 0; i--) { const y = y0 + (y1 - y0) * i / N; p.lineTo(v.px(-widthAt(y)), v.py(y)); }
+      p.closePath();
+    } else p.rect(v.px(-1), v.py(1), v.s * 2, v.s * 2);
+    return p;
+  }
+
+  // ---- DOM ----------------------------------------------------------------
+  let shapeId = "round";
+  const plateBox = C.canvasBox(root, { label: "A plate of sand whose shape you pick. Each shape draws its own family of figures." });
+  const controls = C.el("div", "controls", root);
+  C.seg(controls, ORDER.map((id) => ({ label: SHAPES[id].label, value: id })), shapeId, (id) => setShape(id), "Plate shape");
+  const family = C.el("div", "family", root);
+  family.setAttribute("aria-hidden", "true");
+  const readout = C.el("div", "readout", root);
+  C.el("p", "caption", root, "Round figures are a real round plate's, from Bessel functions. Hexagon, Guitar and Clamped are sketches made to look right.");
+
+  /** A figure's still lines as a small drawing: lit where the distance to
+   *  the nearest line, |f| / |grad f|, is small, so every line is as thin. */
+  function drawLines(cv, fig, inside) {
+    const W = cv.width, g = cv.getContext("2d"), img = g.createImageData(W, W), d = img.data, o = { f: 0, gx: 0, gy: 0 };
+    const ink = C.INKS.sand(0.85), px = 2 / W;
+    for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
+      const x = (i + 0.5) * px - 1, y = 1 - (j + 0.5) * px, k = (j * W + i) * 4;
+      d[k + 3] = 255;
+      if (!inside(x, y)) { d[k] = 2; d[k + 1] = 2; d[k + 2] = 3; continue; }
+      fig.eval(x, y, o);
+      const dist = Math.abs(o.f) / (Math.hypot(o.gx, o.gy) + 1e-3), line = 1 - C.smoothstep(0.4 * px, 1.4 * px, dist);
+      d[k] = 16 + ink[0] * line; d[k + 1] = 15 + ink[1] * line; d[k + 2] = 20 + ink[2] * line;
+    }
+    g.putImageData(img, 0, 0);
+  }
+
+  let thumbs = [];
+  function drawFamily(sh) {
+    family.textContent = "";
+    // Balanced rows: up to 12 in one row, otherwise two even rows, so no figure sits alone.
+    const n = sh.pool.length, cols = n <= 12 ? n : Math.ceil(n / 2);
+    family.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0, 34px))";
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), px = Math.round(34 * dpr);
+    thumbs = sh.pool.map((fig) => {
+      const box = C.el("div", "thumb", family), cv = C.el("canvas", null, box);
+      cv.width = cv.height = px;
+      drawLines(cv, fig, sh.inside);
+      return box;
+    });
+  }
+
+  // ---- State --------------------------------------------------------------
+  const bed = new C.Bed(GRAINS, { seed: 8080 });
+  let sh, cur, prev = null, mixA = 1, figIdx = -1, lastStretch = -1;
+  const mix = {
+    cells: 1, inside: inSquare, shape: "custom", _o: { f: 0, gx: 0, gy: 0 },
+    eval(x, y, o) {
+      cur.eval(x, y, o);
+      if (!prev || mixA >= 1) return o;
+      const f = o.f, gx = o.gx, gy = o.gy, q = prev.eval(x, y, this._o), a = mixA;
+      o.f = f * a + q.f * (1 - a); o.gx = gx * a + q.gx * (1 - a); o.gy = gy * a + q.gy * (1 - a); return o;
+    },
+  };
+  function syncMix() { mix.inside = cur.inside; mix.cells = prev && mixA < 1 ? Math.max(cur.cells, prev.cells) : cur.cells; }
+
+  function showReadout() {
+    readout.innerHTML = "<b>" + sh.name + "</b> · figure <b>" + (figIdx + 1) + "</b> of " + sh.pool.length + " · <b>" + cur.desc + "</b>";
+    thumbs.forEach((t, i) => t.classList.toggle("on", i === figIdx));
+  }
+  /** opening: run the whole warm-up now, so the first frame is formed. */
+  function setShape(id, opening = false) {
+    shapeId = id; sh = poolOf(id);
+    const s = C.song(C.now());
+    figIdx = figIndexAt(sh, s.bar); lastStretch = figStretch(s.bar);
+    cur = sh.pool[figIdx]; prev = null; mixA = 1; syncMix();
+    bed.scatter(mix);
+    if (opening) { bed.warm(mix, Math.max(1.1, s.drive) * cur.gain, WARM_OPEN); warmLeft = 0; } else warmLeft = WARM_SWITCH;
+    drawFamily(sh); showReadout();
+    pathKey = "";
+  }
+
+  let path = null, pathKey = "", warmLeft = 0;
+  setShape(shapeId, true);
+
+  C.run(plateBox.el, (dt, t) => {
+    const s = C.song(t), stretch = figStretch(s.bar);
+    if (stretch !== lastStretch) {
+      lastStretch = stretch;
+      const i = figIndexAt(sh, s.bar);
+      if (i !== figIdx) { prev = cur; mixA = 0; figIdx = i; cur = sh.pool[i]; showReadout(); }
+    }
+    if (prev) { mixA += (1 - mixA) * (1 - Math.exp(-dt / FADE_SEC)); if (mixA > 0.985) { mixA = 1; prev = null; } }
+    syncMix();
+    const gain = prev ? prev.gain + (cur.gain - prev.gain) * mixA : cur.gain;
+    if (warmLeft > 0) { // a new shape: run the rule fast until its sand settles
+      const n = Math.min(WARM_STEPS, Math.ceil(warmLeft * 60));
+      for (let q = 0; q < n; q++) bed.step(mix, Math.max(1.1, s.drive) * gain, 1 / 60);
+      warmLeft -= n / 60;
+    }
+    bed.step(mix, s.drive * gain, dt);
+
+    const { ctx, W, H, dpr } = plateBox, v = C.view(W, H);
+    const key = shapeId + W + "x" + H;
+    if (key !== pathKey) { pathKey = key; path = outlinePath(shapeId, v); }
+    ctx.fillStyle = "#010102"; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.clip(path);
+    C.drawPlate(ctx, W, H, mix, { view: v, rim: false, energy: 0.45 + 0.5 * s.energy + 0.3 * s.kick });
+    ctx.restore();
+    if (shapeId === "clamped") { ctx.strokeStyle = "rgba(200,200,215,0.2)"; ctx.lineWidth = Math.max(3, v.s * 0.03); ctx.stroke(path); }
+    ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = Math.max(1, v.s * 0.006); ctx.stroke(path);
+    if (shapeId === "guitar") {
+      const hx = v.px(HOLE.x), hy = v.py(HOLE.y), hr = HOLE.r * v.s;
+      ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(hx, hy, hr, 0, 2 * PI); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = Math.max(1, v.s * 0.005);
+      ctx.beginPath(); ctx.arc(hx, hy, hr, 0, 2 * PI); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath(); ctx.arc(hx, hy, hr * 1.22, 0, 2 * PI); ctx.stroke();
+      ctx.beginPath(); ctx.arc(hx, hy, hr * 1.3, 0, 2 * PI); ctx.stroke();
+    }
+    C.drawGrains(ctx, bed, { view: v, dpr, size: 1.6 });
+  });
+});
+
+// ---- toss.js
+/* Idea 4, "Toss the sand on the drop". One square plate on the song clock: a
+   new figure every 4 bars, and at the drop a figure that is sure to differ.
+   Today: the sand drifts from the old lines to the new ones. Toss: the whole
+   bed is thrown up as the drop lands, comes down scattered, and the new
+   figure builds from scratch. Under the plate: the 16-bar loop with the drop
+   and this loop's tosses marked, and the share of grains on the lines over
+   the last few seconds, on a fixed 0-100% scale. */
+Chladni.register("toss", (root) => {
+  const C = Chladni;
+  const POOL = C.MODES.slice(0, 12);
+  const GRAINS = 4500;
+  const EVERY = 4;            // bars per figure
+  const TOSS_POWER = 1;
+  const GRAPH_SEC = 8;        // graph window
+  const SAMPLE_HZ = 10;       // how often the share on lines is measured
+  const DROP_BEATS = 1;       // length of the hit's drive spike
+  const DROP_SPIKE = 2.5;     // extra drive on the hit
+  const KEEP_BARS = 2;        // a Drop now this recent keeps its figure past a 4-bar change
+  const SIDE = 0.5;           // share of the core toss's sideways speed kept
+
+  let mode = "toss";
+
+  // ---- DOM
+  const plateBox = C.canvasBox(root, { label: "A square plate of sand. At the drop the figure changes; in Toss mode the sand is thrown up first." });
+  const controls = C.el("div", "controls", root);
+  const segCtl = C.seg(controls, [{ label: "Today", value: "today" }, { label: "Toss", value: "toss" }], mode, (v) => { mode = v; }, "Drop behaviour");
+  C.button(controls, "Drop now", () => dropEvent(lastT, true));
+
+  const tl = C.el("div", "tl", root);
+  tl.setAttribute("aria-label", "The 16-bar loop, with the drop at bar 13");
+  const tlLabels = C.el("div", "tl-labels", tl);
+  C.el("span", "tl-start", tlLabels, "bar 1");
+  const dropLbl = C.el("span", "tl-drop", tlLabels, "drop");
+  dropLbl.style.left = (C.SONG.dropBar / C.SONG.loopBars * 100) + "%";
+  C.el("span", "tl-end", tlLabels, "16");
+  const tlBars = C.el("div", "tl-bars", tl);
+  for (let b = 0; b < C.SONG.loopBars; b++) {
+    const s = C.el("span", null, tlBars); s.style.background = "var(--sec-" + C.songShape(b + 0.5).section + ")";
+  }
+  const dropLine = C.el("div", "tl-dropline", tl);
+  dropLine.style.left = (C.SONG.dropBar / C.SONG.loopBars * 100) + "%";
+  const head = C.el("div", "tl-head", tl);
+  const ticks = C.el("div", "tl-ticks", tl);
+
+  C.el("div", "graph-label", root, "grains on the lines, last " + GRAPH_SEC + " s");
+  const graphBox = C.canvasBox(root, { aspect: 5.2, className: "toss-graph", label: "Share of grains on the lines over the last " + GRAPH_SEC + " seconds" });
+  const readout = C.el("div", "readout", root);
+  C.el("p", "caption", root, "Both modes reach the new figure in about the same time. The toss changes how it gets there.");
+
+  // ---- State
+  let lastT = C.now();
+  let s0 = C.song(lastT);
+  let cur = C.figureAt(s0.bar, EVERY, POOL);
+  let stretch = Math.floor(s0.bar / EVERY);
+  const blend = new C.Blend(0.25, 0.6);
+  blend.set([{ mode: cur, w: 1 }], true);
+  let target = C.squareField([{ mode: cur, w: 1 }]);
+  const bed = new C.Bed(GRAINS, { seed: 4242 });
+  bed.scatter(target);
+  bed.warm(target, Math.max(1.2, s0.drive), 3);
+
+  let dropAt = -1e9;          // song time of the last drop event
+  let dropWasToss = false;
+  let flash = 0;              // launch flash on the plate, 1 → 0
+  let tossLoop = -1;          // which loop the ticks belong to
+  const samples = [];         // { t, v }
+  const tossTimes = [];       // song times of tosses, for the graph
+  let nextSample = 0;
+  let share = bed.formed(target);
+  let tokens = null, tokenAge = 99;
+  // The graph opens full: the warmed bed has sat on its figure for the whole window.
+  for (let k = GRAPH_SEC * SAMPLE_HZ; k > 0; k--) samples.push({ t: lastT - k / SAMPLE_HZ, v: share });
+
+  function pickDifferent(start) {
+    let i = POOL.indexOf(start); if (i < 0) i = 0;
+    for (let k = 0; k < POOL.length; k++) { const md = POOL[(i + k) % POOL.length]; if (md.key !== cur.key) return md; }
+    return start;
+  }
+  function setFigure(md) {
+    cur = md; blend.set([{ mode: md, w: 1 }]); target = C.squareField([{ mode: md, w: 1 }]);
+  }
+  function dropEvent(t, byHand) {
+    const s = C.song(t);
+    const start = byHand ? POOL[Math.floor(Math.random() * POOL.length)] : C.figureAt(s.bar, EVERY, POOL);
+    setFigure(pickDifferent(start));
+    dropAt = t; dropWasToss = mode === "toss";
+    if (dropWasToss) {
+      bed.toss(TOSS_POWER); flash = 1; tossTimes.push(t);
+      // A kick from below throws mostly up: halve the core's sideways speed and
+      // narrow the up speeds, so the figure rises as one shape before it spreads.
+      for (let i = 0; i < bed.n; i++) { bed.vx[i] *= SIDE; bed.vy[i] *= SIDE; bed.vz[i] = 2.05 + (bed.vz[i] - 1.6) * 0.3; }
+      const loop = Math.floor(s.barF / C.SONG.loopBars);
+      if (loop !== tossLoop) { tossLoop = loop; ticks.textContent = ""; }
+      const tk = C.el("span", "tl-tick", ticks); tk.style.left = ((s.barF % C.SONG.loopBars) / C.SONG.loopBars * 100) + "%";
+    }
+  }
+
+  function driveAt(s, t) {
+    let d = s.drive;
+    const since = (t - dropAt) * C.SONG.bpm / 60; // beats since the last drop event
+    if (since >= 0 && since < 4) {
+      // The drop's own drive for a bar, even when Drop now is pressed outside the drop.
+      const ph = since - Math.floor(since);
+      d = Math.max(d, C.plateDrive(0.95, 1.3 * Math.exp(-ph * 7)));
+      if (since < DROP_BEATS) d += DROP_SPIKE * Math.exp(-since * 3);
+    }
+    return d;
+  }
+
+  // ---- Drawing
+  function readTokens() {
+    const cs = getComputedStyle(root), g = (n) => cs.getPropertyValue(n).trim();
+    tokens = { fg: g("--fg"), muted: g("--muted"), line: g("--line"), accent: g("--accent"), soft: g("--accent-soft"), panel: g("--panel"), mono: g("--mono") || "monospace" };
+  }
+
+  function drawFlight(ctx, v, dpr) {
+    // Airborne grains: a soft shadow where each will come down, and the grain
+    // itself lifted and enlarged by its height, with a short streak along its flight.
+    const base = 1.7 * dpr;
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    for (let i = 0; i < bed.n; i++) if (bed.z[i] > 0) ctx.fillRect(v.px(bed.x[i]) - base, v.py(bed.y[i]) - base * 0.6, base * 2, base * 1.2);
+    ctx.lineCap = "round";
+    const lift = v.s * 0.6;
+    ctx.strokeStyle = "rgba(255,150,200,0.28)"; ctx.lineWidth = base * 0.9;
+    ctx.beginPath();
+    for (let i = 0; i < bed.n; i++) {
+      const h = bed.z[i]; if (h <= 0) continue;
+      const X = v.px(bed.x[i]), Y = v.py(bed.y[i]) - h * lift;
+      const k = 0.045; // seconds of streak
+      ctx.moveTo(X, Y); ctx.lineTo(X - bed.vx[i] * v.s * k, Y + (bed.vy[i] * v.s + bed.vz[i] * lift) * k);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "rgb(255,214,234)";
+    for (let i = 0; i < bed.n; i++) {
+      const h = bed.z[i]; if (h <= 0) continue;
+      const sz = base * (1 + 1.8 * h);
+      ctx.fillRect(v.px(bed.x[i]) - sz / 2, v.py(bed.y[i]) - h * lift - sz / 2, sz, sz);
+    }
+  }
+
+  function drawPlateFrame(drive) {
+    const { ctx, W, H, dpr } = plateBox, v = C.view(W, H, 0.03);
+    const field = blend.field();
+    C.drawPlate(ctx, W, H, field, { view: v, energy: C.clamp(0.35 + 0.25 * drive, 0.4, 1) });
+    // Grains on the plate: the core's drawing, with the airborne ones skipped
+    // there and drawn here on top.
+    const air = bed.airborne; bed.airborne = 0;
+    C.drawGrains(ctx, bed, { view: v, dpr, size: 1.7 });
+    bed.airborne = air;
+    if (air > 0) drawFlight(ctx, v, dpr);
+    if (flash > 0.01) {
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = "rgba(255,120,180," + (0.22 * flash).toFixed(3) + ")";
+      ctx.fillRect(v.px(-1), v.py(1), v.s * 2, v.s * 2); ctx.restore();
+    }
+  }
+
+  function drawGraph(t) {
+    const { ctx, W, H, dpr } = graphBox;
+    if (!tokens || ++tokenAge > 30) { readTokens(); tokenAge = 0; }
+    ctx.clearRect(0, 0, W, H);
+    const padL = 34 * dpr, padR = 40 * dpr, padT = 8 * dpr, padB = 8 * dpr;
+    const gw = W - padL - padR, gh = H - padT - padB;
+    const X = (tt) => padL + gw * (1 - (t - tt) / GRAPH_SEC), Y = (v) => padT + gh * (1 - v);
+    ctx.font = (10 * dpr) + "px " + tokens.mono; ctx.textBaseline = "middle";
+    // Fixed grid: 0, 50, 100%.
+    ctx.lineWidth = dpr; ctx.strokeStyle = tokens.line; ctx.fillStyle = tokens.muted; ctx.textAlign = "right";
+    for (const g of [0, 0.5, 1]) {
+      const y = Math.round(Y(g)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + gw, y); ctx.stroke();
+      ctx.fillText(Math.round(g * 100) + "%", padL - 6 * dpr, y);
+    }
+    // Tosses inside the window.
+    ctx.strokeStyle = tokens.muted; ctx.setLineDash([2 * dpr, 3 * dpr]);
+    for (const tt of tossTimes) if (t - tt < GRAPH_SEC) { const x = Math.round(X(tt)) + 0.5; ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + gh); ctx.stroke(); }
+    ctx.setLineDash([]);
+    // The line, ending in now.
+    const pts = samples.filter((p) => t - p.t <= GRAPH_SEC + 0.2);
+    pts.push({ t, v: share });
+    ctx.save(); ctx.beginPath(); ctx.rect(padL, 0, gw, H); ctx.clip();
+    ctx.beginPath();
+    pts.forEach((p, i) => { const x = X(p.t), y = Y(p.v); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.lineTo(X(t), Y(0)); ctx.lineTo(X(pts[0].t), Y(0)); ctx.closePath();
+    ctx.globalAlpha = 0.55; ctx.fillStyle = tokens.soft; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath();
+    pts.forEach((p, i) => { const x = X(p.t), y = Y(p.v); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.strokeStyle = tokens.accent; ctx.lineWidth = 2 * dpr; ctx.lineJoin = "round"; ctx.stroke();
+    ctx.restore();
+    // Emphasised endpoint and its value.
+    const ex = X(t), ey = Y(share);
+    ctx.fillStyle = tokens.accent; ctx.beginPath(); ctx.arc(ex, ey, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = tokens.fg; ctx.textAlign = "left";
+    ctx.fillText(Math.round(share * 100) + "%", ex + 7 * dpr, C.clamp(ey, padT + 5 * dpr, padT + gh - 5 * dpr));
+  }
+
+  let lastText = "";
+  function updateReadout(t) {
+    const pct = Math.round(share * 100), since = t - dropAt;
+    let state;
+    if (bed.airborne > 0) state = "in the air";
+    else if (since < 4 && share < 0.75) state = dropWasToss ? "building" : "drifting";
+    else state = share > 0.5 ? "formed" : "drifting";
+    const txt = (mode === "toss" ? "Toss" : "Today") + " · on lines <b>" + pct + "%</b> · " + state;
+    if (txt !== lastText) { readout.innerHTML = txt; lastText = txt; }
+  }
+
+  // ---- Loop
+  C.run(root, (dt, t) => {
+    const jumped = t - lastT > 0.25; // the demo was off screen
+    lastT = t;
+    const s = C.song(t);
+    const k = Math.floor(s.bar / EVERY);
+    if (k !== stretch) {
+      stretch = k;
+      if (!jumped && s.loopBar === C.SONG.dropBar) dropEvent(t, false);
+      else if (t - dropAt < KEEP_BARS * 4 * 60 / C.SONG.bpm) { /* a fresh Drop now keeps its figure while it builds */ }
+      else { const md = C.figureAt(s.bar, EVERY, POOL); if (md.key !== cur.key) setFigure(md); }
+    }
+    const loop = Math.floor(s.barF / C.SONG.loopBars);
+    if (loop !== tossLoop && tossLoop !== -1) { tossLoop = loop; ticks.textContent = ""; }
+
+    const drive = driveAt(s, t);
+    blend.step(dt);
+    bed.step(blend.field(), drive, dt);
+    flash = Math.max(0, flash - dt / 0.25);
+
+    if (t >= nextSample) {
+      nextSample = t + 1 / SAMPLE_HZ;
+      share = bed.formed(blend.field());
+      samples.push({ t, v: share });
+      while (samples.length && t - samples[0].t > GRAPH_SEC + 1) samples.shift();
+      while (tossTimes.length && t - tossTimes[0] > GRAPH_SEC + 1) tossTimes.shift();
+    }
+
+    drawPlateFrame(drive);
+    head.style.left = "calc(" + ((s.barF % C.SONG.loopBars) / C.SONG.loopBars * 100).toFixed(3) + "% - 1px)";
+    drawGraph(t);
+    updateReadout(t);
+  });
+  segCtl.set(mode);
+});
+
+Chladni.boot();
+</script>

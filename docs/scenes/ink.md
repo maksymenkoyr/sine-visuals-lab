@@ -105,6 +105,10 @@ primary at a time; ground `#fafafa` vs. `#fafafa`.
   (3) Crossing the tempo-lock threshold swapped `t` from the timer to
   `barPhase` and popped the picture; the ease now re-anchors on the lock and
   unlock edges, restarting from where the picture is toward the same target.
+- 2026-10-08 — Stretch became a hit driver (the Reaction row, Flat or Sized;
+  drives.ts's header, "Hit drivers"). `advanceStretch` now takes the hit's
+  size (0 = no hit) and Sized lifts the envelope's peak to it; Flat, the
+  default, is unchanged.
 
 ## Tuning notes
 

@@ -1,8 +1,12 @@
+import { deflateSync, inflateSync, strFromU8, strToU8 } from "fflate";
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
-import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
+import { fitCustom, getCustomValue, resetCustomValue, setCustomValue, stretchSlider } from "./customValues.ts";
+import { isShapedChoice, remapShapedSources, type DriveSetting } from "./drives.ts";
+import { isDefaultDriveSetting } from "./wireModifiers.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
+import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingNodeDef, shapingNodeDef, type ShapingNodeDef } from "./shapingNodes.ts";
 
 /**
  * Named, shareable snapshots of one scene's own settings — the sliders in the
@@ -30,12 +34,27 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  * converge on identical state.
  *
  * Share-code format is version-tagged JSON (`{v:1,n,s,m,d}`), base64url of
- * its UTF-8 bytes. `d` is optional — added for SceneSetting.drive
+ * its UTF-8 bytes — or, when that is shorter, the same bytes deflated and
+ * marked with a leading `Z` (a JSON code starts `ey`, so the two never
+ * collide). encodeLook picks the shorter; decodeLook reads both, so every
+ * link ever made still opens, while an app from before `Z` codes reads a
+ * short one as a code that didn't parse. `d` is optional — added for SceneSetting.drive
  * (src/render/drives.ts) without bumping `v`: an old code simply lacks it,
  * and an old app decoding a new code just ignores the unknown key, same as
  * any other schema-outlives-the-link case this format tolerates. decodeLook
  * never throws — a malformed or future-versioned code (a link outlives this
  * schema) comes back null, and the caller decides what "didn't parse" means.
+ *
+ * `p` is the palette that was showing when the look was saved (palette.ts —
+ * one room-wide choice, so it isn't a scene setting), added the same way as
+ * `d`: optional, no `v` bump, an unknown id is ignored on apply. A look
+ * saved before it existed leaves the palette alone.
+ *
+ * A non-integer slider value is written to `CODE_DIGITS` significant digits:
+ * the sliders are continuous, so a dragged one holds a long float that
+ * deflate can't shrink, and those digits were most of a code's length. The
+ * difference is far below what a slider can show. Integers (enum indexes,
+ * counts) are written exactly.
  *
  * Each `d` entry is one setting's captured `DriveSetting` (drives.ts), wire-
  * encoded as whichever of two shapes is smaller: a one-source, weight-1,
@@ -57,6 +76,14 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  * same way a bare `DriveChoice` already served both before patches
  * existed — so `encodeDriveSetting`/`sanitizeDriveSetting` (driveStore.ts)
  * are reused here rather than re-derived.
+ *
+ * The `h` field carries the shaping nodes a Look's wires use (shapingNodes.ts),
+ * because node ids are per device: each id in `d` is a key of `h`, with the
+ * node's definition as its value. Applying the Look reuses an identical local
+ * node or creates one (adoptShapingNodes) and rewires to it. An app from
+ * before shaping nodes rejects a code whose `d` wires to one, since its
+ * sanitizeDriveSetting does not know the shape, so that whole code does not
+ * open there.
  */
 export interface SceneLook {
   name: string;
@@ -70,16 +97,25 @@ export interface SceneLook {
   /** Each drive setting's captured `DriveSetting` (src/render/drives.ts),
    *  only for a setting whose setting isn't already its own `drive.default`
    *  — same "only what a plain apply wouldn't already reproduce" rule as
-   *  `manual`, compared with `sameDriveSetting`. Omitted entirely when every
+   *  `manual`, compared with `isDefaultDriveSetting` (a wire through a
+   *  neutral modifier counts as the plain default wire, wireModifiers.ts). Omitted entirely when every
    *  drive setting was already at its default, and always on a Look
    *  captured before this field existed; applyLook treats a key absent here
    *  the same way it treats one absent from `manual` — back to default,
    *  authoritative. */
   drives?: Record<string, DriveSetting>;
+  /** The palette (palette.ts id) showing when the look was saved; absent on
+   *  a look saved before looks carried one. */
+  paletteId?: string;
+  /** The definitions of every shaping node `drives` wires to, keyed by the
+   *  id used in `drives` (shapingNodes.ts). Omitted when no wire reaches one. */
+  shapingNodes?: Record<string, ShapingNodeDef>;
 }
 
 const STORAGE_KEY = "vibe.looks";
 const CODE_VERSION = 1;
+/** Significant digits a non-integer value keeps in a share code. */
+const CODE_DIGITS = 4;
 /** Longest name decodeLook keeps from a share code. Only the name is clipped
  *  (links in the wild must keep decoding): it becomes the upsert key and is
  *  saved on page load, so an untrusted code shouldn't set its size. */
@@ -139,6 +175,18 @@ export function saveSharedLook(look: SceneLook): SceneLook {
   return saved;
 }
 
+/** Renames a saved look in place (it keeps its spot in the list). Returns
+ *  false, changing nothing, when `to` is blank or already names another look
+ *  of this scene — renaming must never silently replace one. */
+export function renameLook(sceneId: string, from: string, to: string): boolean {
+  const list = cache[sceneId];
+  const look = list?.find((l) => l.name === from);
+  if (!list || !look || !to || list.some((l) => l !== look && l.name === to)) return false;
+  look.name = to;
+  persist();
+  return true;
+}
+
 export function deleteLook(sceneId: string, name: string): void {
   const list = cache[sceneId];
   if (!list) return;
@@ -151,17 +199,32 @@ export function deleteLook(sceneId: string, name: string): void {
 export function captureLook(name: string, sceneId: string, specs: readonly SceneSetting[]): SceneLook {
   const manual: Record<string, number> = {};
   let drives: Record<string, DriveSetting> | undefined;
+  let shapingNodes: Record<string, ShapingNodeDef> | undefined;
   for (const spec of specs) {
     // The variant (SceneSetting.variant) is always carried, auto or not:
     // every other key is stored per variant option, so a Look that left it
     // out would apply its keys into whatever option the receiver was on.
-    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) manual[spec.key] = getSceneSetting(sceneId, spec);
+    // A custom value (customValues.ts) is the number on screen, so it is the
+    // one carried; an app that predates custom values clamps it on apply.
+    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) {
+      manual[spec.key] = getCustomValue(sceneId, spec.key) ?? getSceneSetting(sceneId, spec);
+    }
     if (spec.drive) {
       const setting = getDriveSetting(sceneId, spec);
-      if (!sameDriveSetting(setting, defaultDriveSetting(spec))) (drives ??= {})[spec.key] = setting;
+      // A default through neutral modifiers is still the default: left out,
+      // so applying the Look resets it (src/render/wireModifiers.ts).
+      if (isDefaultDriveSetting(spec, setting)) continue;
+      (drives ??= {})[spec.key] = setting;
+      for (const src of setting === "scene" ? [] : setting.sources) {
+        if (!isShapedChoice(src.choice)) continue;
+        const node = getShapingNode(src.choice.id);
+        if (node) {
+          (shapingNodes ??= {})[node.id] = shapingNodeDef(node);
+        }
+      }
     }
   }
-  return { name, sceneId, manual, drives };
+  return { name, sceneId, manual, drives, shapingNodes };
 }
 
 /** Sets every spec in the scene — pins the keys the Look lists, and returns
@@ -170,6 +233,8 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
  *  `SceneSetting.drive` spec's setting: listed in `look.drives` -> set to
  *  that setting, absent -> back to `spec.drive.default`. */
 export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void {
+  // The look's node ids are per device: reuse or add local nodes, then rewire.
+  const idMap = adoptShapingNodes(look.shapingNodes ?? {});
   // The variant goes first (sceneSettings.ts's variantFirst): every other
   // key is stored per variant option, so it has to be switched before they
   // are written or the Look would land in the profile being left.
@@ -177,47 +242,86 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
     const value = look.manual[spec.key];
     if (value !== undefined) {
       setAutoEnabled(look.sceneId, spec.key, false);
+      // The store takes the slider's nearest end; a value past it goes back
+      // on top as a custom value, its slider stretched to it, bounded like a
+      // typed one since a share link can carry any number. Without one, the
+      // setting's custom value and stretch go (authoritative, as above).
       setSceneSetting(look.sceneId, spec, value);
+      const custom = fitCustom(spec, value);
+      if (custom !== null) {
+        setCustomValue(look.sceneId, spec.key, custom);
+        stretchSlider(look.sceneId, spec.key, custom);
+      } else resetCustomValue(look.sceneId, spec.key);
     } else {
       const base = settingDefault(look.sceneId, spec);
       setSceneSetting(look.sceneId, spec, base);
+      resetCustomValue(look.sceneId, spec.key);
       seedAuto(look.sceneId, spec.key, base);
       setAutoEnabled(look.sceneId, spec.key, true);
     }
     if (spec.drive) {
       const setting = look.drives?.[spec.key];
-      if (setting !== undefined) setDriveSetting(look.sceneId, spec, setting);
+      if (setting !== undefined) setDriveSetting(look.sceneId, spec, remapShapedSources(setting, idMap));
       else resetDriveSetting(look.sceneId, spec);
     }
   }
 }
 
-function toBase64Url(json: string): string {
-  const bytes = new TextEncoder().encode(json);
+const COMPRESSED_PREFIX = "Z";
+
+function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function fromBase64Url(code: string): string {
+function base64UrlToBytes(code: string): Uint8Array {
   const padded = code.replace(/-/g, "+").replace(/_/g, "/");
   const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/** Most a deflated code may unpack to. A link can carry anything, so inflating
+ *  into a fixed buffer cuts a decompression bomb off: the output ends short,
+ *  no longer parses as JSON, and decodeLook returns null. Far above any look. */
+const MAX_UNPACKED_BYTES = 1 << 16;
+
+function fromBase64Url(code: string): string {
+  if (code.startsWith(COMPRESSED_PREFIX)) {
+    const packed = base64UrlToBytes(code.slice(1));
+    return strFromU8(inflateSync(packed, { out: new Uint8Array(MAX_UNPACKED_BYTES) }));
+  }
+  return strFromU8(base64UrlToBytes(code));
 }
 
 export function encodeLook(look: SceneLook): string {
-  const payload: { v: number; n: string; s: string; m: Record<string, number>; d?: Record<string, StoredDriveSetting> } = {
+  const payload: {
+    v: number;
+    n: string;
+    s: string;
+    m: Record<string, number>;
+    d?: Record<string, StoredDriveSetting>;
+    p?: string;
+    h?: Record<string, ShapingNodeDef>;
+  } = {
     v: CODE_VERSION,
     n: look.name,
     s: look.sceneId,
-    m: look.manual,
+    m: {},
   };
+  for (const [key, value] of Object.entries(look.manual)) {
+    payload.m[key] = Number.isInteger(value) ? value : Number(value.toPrecision(CODE_DIGITS));
+  }
   if (look.drives && Object.keys(look.drives).length > 0) {
     payload.d = {};
     for (const [key, setting] of Object.entries(look.drives)) payload.d[key] = encodeDriveSetting(setting);
   }
-  return toBase64Url(JSON.stringify(payload));
+  if (look.paletteId) payload.p = look.paletteId;
+  if (look.shapingNodes && Object.keys(look.shapingNodes).length > 0) payload.h = look.shapingNodes;
+  const bytes = strToU8(JSON.stringify(payload));
+  const plain = bytesToBase64Url(bytes);
+  const packed = COMPRESSED_PREFIX + bytesToBase64Url(deflateSync(bytes, { level: 9 }));
+  return packed.length < plain.length ? packed : plain;
 }
 
 export function decodeLook(code: string): SceneLook | null {
@@ -241,7 +345,19 @@ export function decodeLook(code: string): SceneLook | null {
         drives[key] = setting;
       }
     }
-    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives };
+    const paletteId = typeof parsed.p === "string" && parsed.p ? parsed.p : undefined;
+    let shapingNodes: Record<string, ShapingNodeDef> | undefined;
+    if (parsed.h !== undefined) {
+      if (!parsed.h || typeof parsed.h !== "object" || Array.isArray(parsed.h)) return null;
+      shapingNodes = {};
+      for (const [id, value] of Object.entries(parsed.h)) {
+        if (!SHAPING_NODE_ID_RE.test(id)) return null;
+        const def = sanitizeShapingNodeDef(value);
+        if (def === null) return null;
+        shapingNodes[id] = def;
+      }
+    }
+    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives, paletteId, shapingNodes };
   } catch {
     return null;
   }
@@ -252,8 +368,9 @@ export function decodeLook(code: string): SceneLook | null {
 // a persisted undo stack.
 const undo: Record<string, SceneLook> = {};
 
-export function primeUndo(sceneId: string, specs: readonly SceneSetting[]): void {
-  undo[sceneId] = captureLook("", sceneId, specs);
+/** `paletteId` is the palette showing now, so Undo can put it back too. */
+export function primeUndo(sceneId: string, specs: readonly SceneSetting[], paletteId?: string): void {
+  undo[sceneId] = { ...captureLook("", sceneId, specs), paletteId };
 }
 
 export function takeUndo(sceneId: string): SceneLook | null {

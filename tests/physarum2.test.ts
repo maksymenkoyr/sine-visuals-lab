@@ -422,7 +422,7 @@ describe("Crawl speed / Speed boost / Speed pump", () => {
 
 describe("resolveStrainEffective — the one strain-motion mapping (shared by the GPU packing and the specimen-box previews)", () => {
   const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 22, life: LIFE_DEFAULT };
-  const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+  const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 0, life: 0 };
 
   it("at zero raw values and zero drive, reproduces the sliders' own MIN and the strain's unshifted colour", () => {
     for (let k = 0; k < SPECIES_COUNT; k++) {
@@ -490,9 +490,21 @@ describe("Strain Console settings: Sensor angle, Trail life, Switching, Synergy"
 
   it("the effective sensor angle is the stored one in radians (clamped to the slider's range)", () => {
     const raw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 60, life: LIFE_DEFAULT };
-    const drive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+    const drive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 0, life: 0 };
     expect(resolveStrainEffective(0, raw, drive).sensorAngleRad).toBeCloseTo(60 * (Math.PI / 180), 9);
     expect(resolveStrainEffective(0, { ...raw, angle: 999 }, drive).sensorAngleRad).toBeCloseTo(ANGLE_MAX_DEG * (Math.PI / 180), 9);
+  });
+
+  it("a Sensor angle or Trail life drive widens the angle and lengthens the trail, and 0 leaves the slider alone", () => {
+    const raw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 30, life: LIFE_DEFAULT };
+    const still: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 0, life: 0 };
+    const rest = resolveStrainEffective(0, raw, still);
+    expect(rest.sensorAngleRad).toBeCloseTo(30 * (Math.PI / 180), 9);
+    expect(rest.decayMul).toBeCloseTo(1, 9);
+    const loud = resolveStrainEffective(0, raw, { ...still, angle: 0.5, life: 0.5 });
+    expect(loud.sensorAngleRad).toBeGreaterThan(rest.sensorAngleRad);
+    expect(loud.sensorAngleRad).toBeLessThanOrEqual(ANGLE_MAX_DEG * (Math.PI / 180));
+    expect(loud.decayMul).toBeLessThan(rest.decayMul);
   });
 
   it("Trail life defaults to the shared decay exactly and right = a longer-lived trail", () => {
@@ -740,19 +752,29 @@ describe("Auto level (levelPeaks / levelGainsFull / levelGain)", () => {
 describe("Start ink (fillStartInk)", () => {
   it("is all zero at 0 — the old black start", () => {
     const buf = new Uint8Array(64 * 4).fill(7);
-    fillStartInk(buf, 4, 0, () => 0.99);
+    fillStartInk(buf, 4, 0, 99);
     expect(buf.every((v) => v === 0)).toBe(true);
   });
   it("fills only the live channels, more at a higher setting", () => {
-    let x = 1;
-    const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
     const lo = new Uint8Array(1024 * 4);
     const hi = new Uint8Array(1024 * 4);
-    fillStartInk(lo, 3, 0.2, rnd);
-    fillStartInk(hi, 3, 1, rnd);
+    fillStartInk(lo, 3, 0.2, 1);
+    fillStartInk(hi, 3, 1, 2);
     const mean = (b: Uint8Array) => b.reduce((a, v) => a + v, 0) / b.length;
     expect(mean(hi)).toBeGreaterThan(mean(lo) * 2);
     for (let i = 3; i < hi.length; i += 4) expect(hi[i]).toBe(0);
+  });
+  it("is the same ink for the same seed, another for another, and a seed of 0 still rolls", () => {
+    const a = new Uint8Array(256 * 4);
+    const b = new Uint8Array(256 * 4);
+    const c = new Uint8Array(256 * 4);
+    fillStartInk(a, 4, 1, 12345);
+    fillStartInk(b, 4, 1, 12345);
+    fillStartInk(c, 4, 1, 54321);
+    expect(b).toEqual(a);
+    expect(c).not.toEqual(a);
+    fillStartInk(c, 4, 1, 0);
+    expect(c.some((v) => v > 0)).toBe(true);
   });
 });
 

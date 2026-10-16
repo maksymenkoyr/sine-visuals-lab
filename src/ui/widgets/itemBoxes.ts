@@ -3,9 +3,11 @@ import type { AffinityPreset, PairWords } from "../../render/scenes/physarum2Aff
 import { chipBtnLitStyle, chipBtnStyle, createChipButton } from "../controlsKit.ts";
 import { SCENE_VIOLET } from "../controlsTheme.ts";
 import { registerWidget, type WidgetCtx } from "./registry.ts";
+import { watchSize, type WatchedSize } from "../onScreen.ts";
 import { getPreviewSource, type PreviewEffective } from "./previews.ts";
 import { buildPairPads } from "./pairPads.ts";
 import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
+import { setLiveText } from "../liveText.ts";
 
 /**
  * The generic "item boxes" widget: one live specimen box per item of a
@@ -37,9 +39,12 @@ import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
  *     stepping/drawing while both the Scene card is open (`ctx.onTick` only
  *     ever fires while the device menu is open — see registry.ts's header)
  *     and the box itself is on screen (`IntersectionObserver`), and only
- *     *stepping* every other tick (the draw itself is cheap; the agent+blur
- *     loop is what four boxes' worth would otherwise cost every rAF tick —
- *     see docs/scenes/physarum2.md's Phase 3 entry for the measured cost);
+ *     stepping every other tick (the agent+blur loop is what four boxes'
+ *     worth would otherwise cost every rAF tick — see
+ *     docs/scenes/physarum2.md's Phase 3 entry for the measured cost) and
+ *     redrawing on the same ticks. Its canvas size comes from a
+ *     ResizeObserver and `--c` is written only when the colour moves, so a
+ *     tick never reads layout after a style write;
  *   - adds a POP/TERR/VIG readout row per box (`ctx.probe()` for
  *     population/territory, `ctx.driveValue()` on the item's own Nutrient
  *     setting for Vigour — no scene involvement for that last one). POP is
@@ -60,12 +65,13 @@ import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
  *     is stated in the button's own title since neither command reaches a
  *     paired TV.
  *
- * **One Random (2026-10-03).** The user: "can we group this all in one cool
- * random button. random smell, touch, per strain card". A single Random
- * under the boxes calls the Strain Console's `randomize` and the Pairs
- * pads' (Smell and Touch together); neither card has a Random of its own
- * any more. Each roll lands as one entry on each card's own Back, so a roll
- * whose motion is good but whose affinities aren't can be half-undone.
+ * **The global Random (2026-10-03).** The user: "can we group this all in
+ * one cool random button. random smell, touch, per strain card". The Random
+ * under the boxes calls the Strain Console's `randomize` (motion and every
+ * lane's wires) and the Pairs pads' (Smell and Touch together). Since
+ * 2026-10-04 each card has its own Random again beside it. Each roll lands
+ * as one entry on each card's own Back, so a roll whose motion is good but
+ * whose affinities aren't can be half-undone.
  *
  * One `effective()` reading per item per tick feeds the preview, the box's own
  * colour and the console's colours — Synergy and Stain move a strain's colour
@@ -182,6 +188,12 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   // ImageData that `sim.pixelsInto` fills each tick (no per-tick allocation).
   const previewOffCtx: (CanvasRenderingContext2D | null | undefined)[] = [];
   const previewImage: (ImageData | undefined)[] = [];
+  // Per box, the preview canvas's observed size and the `--c` colour last
+  // written: the tick below writes `--c` and then sizes the canvas, and a
+  // clientWidth read after that write forced a full style and layout pass
+  // for every box on every tick (onScreen.ts).
+  const previewCssSize: (WatchedSize | undefined)[] = [];
+  const lastBoxColour: string[] = [];
   const readoutEls: ({ pop: HTMLElement; terr: HTMLElement; vig: HTMLElement } | undefined)[] = [];
 
   let pipetteBtn: HTMLButtonElement | undefined;
@@ -343,6 +355,12 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     );
     for (const c of previewCanvases) if (c) io.observe(c);
     ctx.onDispose(() => io.disconnect());
+    previewCanvases.forEach((c, i) => {
+      if (c) previewCssSize[i] = watchSize(c);
+    });
+    ctx.onDispose(() => {
+      for (const sz of previewCssSize) sz?.disconnect();
+    });
 
     // One nutrient spec per box, resolved once — Vigour reads it every tick
     // (ctx.driveValue), the widget side of the file header's Vigour bullet.
@@ -429,9 +447,10 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     });
 
     // --- Per-tick: step/draw visible previews, refresh readouts + the
-    // population bar + the console. Stepping (not drawing) only every other
-    // tick — the agent+blur loop is the expensive part; see this file's
-    // header. ---
+    // population bar + the console. Stepping only every other tick — the
+    // agent+blur loop is the expensive part; see this file's header — and
+    // drawing only on the ticks that stepped, since the trail in between is
+    // the same picture. ---
     let tickCount = 0;
     ctx.onTick(() => {
       tickCount++;
@@ -443,15 +462,18 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       liveColours = effective.map((e) => cssRgb(e.color));
 
       for (let i = 0; i < count; i++) {
-        boxEls[i]?.style.setProperty("--c", liveColours[i]!);
+        if (liveColours[i] !== lastBoxColour[i]) {
+          lastBoxColour[i] = liveColours[i]!;
+          boxEls[i]?.style.setProperty("--c", liveColours[i]!);
+        }
         const sim = previewSims[i];
         const canvas = previewCanvases[i];
         const off = previewOffscreen[i];
-        if (sim && canvas && off && previewVisible[i]) {
+        if (sim && canvas && off && previewVisible[i] && stepThisTick) {
           if (previewOffCtx[i] === undefined) previewOffCtx[i] = off.getContext("2d");
           const octx = previewOffCtx[i];
           const eff = effective[i]!;
-          if (stepThisTick) sim.step(eff.motion);
+          sim.step(eff.motion);
           if (octx) {
             let img = previewImage[i];
             if (!img || img.width !== sim.size) img = previewImage[i] = octx.createImageData(sim.size, sim.size);
@@ -461,8 +483,8 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
           // Backing resolution follows the box's own CSS size (smooth,
           // non-pixelated scaling — this file's header); a zero-size canvas
           // (not yet laid out) just skips this tick's draw.
-          const w = Math.round(canvas.clientWidth);
-          const h = Math.round(canvas.clientHeight);
+          const w = previewCssSize[i]?.w ?? 0;
+          const h = previewCssSize[i]?.h ?? 0;
           if (w > 0 && h > 0) {
             if (canvas.width !== w) canvas.width = w;
             if (canvas.height !== h) canvas.height = h;
@@ -484,9 +506,9 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
           // Prefer the scene's own reading: it includes the scene-default
           // source, which ctx.driveValue reports as 0 until a patch exists.
           const vig = probeData?.[`vig${i}`] ?? (nutrientSpec ? ctx.driveValue(nutrientSpec) : 0);
-          readout.pop.textContent = pop !== undefined ? `${Math.round(pop * 100)}%` : "—";
-          readout.terr.textContent = terr !== undefined ? `${Math.round(terr * 100)}%` : "—";
-          readout.vig.textContent = vig.toFixed(2);
+          setLiveText(readout.pop, pop !== undefined ? `${Math.round(pop * 100)}%` : "—");
+          setLiveText(readout.terr, terr !== undefined ? `${Math.round(terr * 100)}%` : "—");
+          setLiveText(readout.vig, vig.toFixed(2));
         }
       }
 

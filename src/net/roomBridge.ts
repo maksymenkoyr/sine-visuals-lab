@@ -2,7 +2,7 @@ import { statusKey, type OutputBridge, type OutputStatus } from "./outputBridge.
 import type { MainPlay } from "./mainPlay.ts";
 
 /**
- * Play to the room's Main screens, from any device, as an `OutputBridge` so the
+ * Play to the room's Main screens, from a device that may, as an `OutputBridge` so the
  * same bar (ui/outputControls.ts) and keys (ui/outputKeys.ts) drive it as drive
  * the pop-out window.
  *
@@ -12,9 +12,13 @@ import type { MainPlay } from "./mainPlay.ts";
  * bar's words:
  *
  *  - Play sends this device's look to Main: a tap switches every Main screen at
- *    once, a hold glides there within a scene (a scene change always switches
- *    at once). The glide is walked by the TV and the pop-out; a laptop's or an
+ *    once, a hold glides there within a scene (a scene change crossfades over one
+ *    bar instead: render/compositor.ts). The glide is walked by the TV and the pop-out; a laptop's or an
  *    iPad's own main window follows a glide with a plain switch (known limit).
+ *  - Play reaches Main only while this device may Play (`mayPlay`: the owner,
+ *    or a device the owner has allowed). Without the right the status says
+ *    `canPlay: false`, so the bar hides PLAY; it still says whether Main
+ *    matches this device and still offers Take Main, and `go` sends nothing.
  *  - There is no Cue for the room: `canCue` is false, so the bar hides CUE
  *    unless the pop-out (which does have one) is open next to it.
  *  - `differs` is "Main is not what this device shows" (MAIN ≠ YOURS), and only
@@ -30,7 +34,12 @@ import type { MainPlay } from "./mainPlay.ts";
  * device's look and works out whether it is on air.
  *
  * "Open" means another device of the room is online: with nobody else there,
- * Play has nobody to reach and the bar stays away.
+ * Play has nobody to reach and the bar stays away. So that the first device to
+ * join (a phone or iPad scanning the QR) opens on what the laptop shows rather
+ * than on whatever Main was last played, the room's owner is live while it is
+ * alone (`liveWhenAlone`): `update` plays its look to Main as soon as the two
+ * differ, with no bar and no Play. The first other device online ends that,
+ * and Main waits for Play again.
  *
  * `combineBridges` lets one bar drive the pop-out and the room together on the
  * laptop. Play goes to every open bridge (the pop-out and Main), a held Cue only to
@@ -42,8 +51,14 @@ export interface RoomBridgeOptions {
   play: MainPlay;
   /** Another member of the room is online right now. */
   present: () => boolean;
+  /** This device may Play to Main right now: the owner, or a device the owner
+   *  has allowed. */
+  mayPlay: () => boolean;
   /** Clicked "POP OUT" where there is nothing to open: show the room view. */
   showRoom: () => void;
+  /** This device may keep Main in step with its look while nobody else is
+   *  online (see the header): the room's owner, once the roster has listed it. */
+  liveWhenAlone?: () => boolean;
 }
 
 /** What the app holds: a plain output bridge. */
@@ -59,7 +74,7 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
     // A closed room can't be played to, so it never reads as differing or changed
     // (else a combined bar would stay on OUT ≠ PREVIEW after Play reached only the pop-out).
     const open = opts.present();
-    return { open, cue: false, differs: open && p.known && !p.onAir, canCue: false, changedBy: open ? p.changedBy : null };
+    return { open, cue: false, differs: open && p.known && !p.onAir, canCue: false, changedBy: open ? p.changedBy : null, canPlay: opts.mayPlay() };
   }
 
   function emitIfChanged(): void {
@@ -81,21 +96,29 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
     // The room has no Cue: a held key or button does nothing here.
     setCue() {},
     go(glideMs) {
+      if (!opts.mayPlay()) return false;
       const result = play.play(glideMs);
       emitIfChanged();
       return result === "glide";
     },
     update(nowMs) {
       play.tick(nowMs);
+      // tick re-reads the look on its own clock, so onAir is never staler than that.
+      const p = play.status();
+      if (p.known && !p.onAir && !opts.present() && opts.liveWhenAlone?.()) play.play();
       emitIfChanged();
     },
     take() {
       play.take();
       emitIfChanged();
     },
-    // Frames reach a TV from HostConnection.sendFrame, and a TV's quality is its own.
+    // Frames reach a TV from HostConnection.sendFrame. A TV's quality is not the
+    // Power card's output choice: it is the TV's own record in the room, set in
+    // the Room view (server/roomDevices.ts `quality`).
     pushFrame() {},
     sendPower() {},
+    // Held effects are not part of a TV's look; they reach the pop-out only.
+    sendEffects() {},
     outputStatus: () => null,
   };
 }
@@ -104,7 +127,8 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
  *  the one that can be opened); Play goes to every output that is open and Cue
  *  only to those that can cue. The status says "open" while any is, "cue" while
  *  any is cued, "differs" while any shows something other than the preview and
- *  "canCue" while an open one can cue; `changedBy` is the first one set. `take`
+ *  "canCue" while an open one can cue, "canPlay" while any open one can (or
+ *  none is open, so the bar shows PLAY as it would alone); `changedBy` is the first one set. `take`
  *  reaches every output that has one. Frames, power and render readouts are
  *  the first output's, the pop-out's. */
 export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): OutputBridge {
@@ -115,6 +139,7 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
     let cue = false;
     let differs = false;
     let canCue = false;
+    let anyCanPlay = false;
     let changedBy: string | null = null;
     for (const b of bridges) {
       const s = b.status();
@@ -122,9 +147,10 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
       cue = cue || s.cue;
       differs = differs || s.differs;
       canCue = canCue || (s.open && s.canCue);
+      anyCanPlay = anyCanPlay || (s.open && s.canPlay !== false);
       changedBy = changedBy ?? s.changedBy ?? null;
     }
-    return { open, cue, differs, canCue, changedBy };
+    return { open, cue, differs, canCue, changedBy, canPlay: !open || anyCanPlay };
   }
   return {
     open: () => first.open(),
@@ -162,6 +188,7 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
     },
     pushFrame: (frame, extras, params) => first.pushFrame(frame, extras, params),
     sendPower: () => first.sendPower(),
+    sendEffects: (effects) => first.sendEffects(effects),
     outputStatus: () => first.outputStatus(),
   };
 }

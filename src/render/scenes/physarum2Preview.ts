@@ -140,6 +140,14 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
   }
 
   function step(m: StrainPreviewMotion): void {
+    // One cos/sin pair per agent: the two side sensors and the turned
+    // heading are rotations of it by the step's fixed sensor and turn
+    // angles (angle addition), not trig calls of their own — four boxes
+    // step on every other panel tick, and the trig was most of their cost.
+    const ca = Math.cos(m.sensorAngle);
+    const sa = Math.sin(m.sensorAngle);
+    const ct = Math.cos(m.turn);
+    const st = Math.sin(m.turn);
     for (let i = 0; i < agents; i++) {
       if (rnd() < RESPAWN_PER_STEP) {
         ax[i] = rnd() * size;
@@ -150,21 +158,28 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
       const h = ah[i]!;
       const x = ax[i]!;
       const y = ay[i]!;
-      const sC = sense(x + Math.cos(h) * m.reach, y + Math.sin(h) * m.reach);
-      const sL = sense(x + Math.cos(h - m.sensorAngle) * m.reach, y + Math.sin(h - m.sensorAngle) * m.reach);
-      const sR = sense(x + Math.cos(h + m.sensorAngle) * m.reach, y + Math.sin(h + m.sensorAngle) * m.reach);
-      let nh = h;
+      const c = Math.cos(h);
+      const sn = Math.sin(h);
+      const r = m.reach;
+      const sC = sense(x + c * r, y + sn * r);
+      const sL = sense(x + (c * ca + sn * sa) * r, y + (sn * ca - c * sa) * r);
+      const sR = sense(x + (c * ca - sn * sa) * r, y + (sn * ca + c * sa) * r);
+      // Turn direction: -1 left, +1 right, 0 hold.
+      let dir = 0;
       if (sC >= sL && sC >= sR) {
         // hold heading
       } else if (sL > sC && sR > sC) {
-        nh += (rnd() < 0.5 ? -1 : 1) * m.turn;
+        dir = rnd() < 0.5 ? -1 : 1;
       } else if (sL > sR) {
-        nh -= m.turn;
+        dir = -1;
       } else {
-        nh += m.turn;
+        dir = 1;
       }
-      let nx = x + Math.cos(nh) * m.step;
-      let ny = y + Math.sin(nh) * m.step;
+      const nh = h + dir * m.turn;
+      const nc = dir === 0 ? c : c * ct - dir * sn * st;
+      const ns = dir === 0 ? sn : sn * ct + dir * c * st;
+      let nx = x + nc * m.step;
+      let ny = y + ns * m.step;
       if (nx < 0) nx += size;
       else if (nx >= size) nx -= size;
       if (ny < 0) ny += size;

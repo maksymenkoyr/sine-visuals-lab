@@ -6,8 +6,8 @@ import { NUM_BANDS, type FeatureFrame } from "../../src/audio/types.ts";
 import { createAnimClock } from "../../src/render/animClock.ts";
 import { qualitySettings } from "../../src/render/quality.ts";
 import { PALETTES } from "../../src/render/palette.ts";
-import { FULL_VIEWPORT, type Scene } from "../../src/render/scene.ts";
-import * as sceneModules from "../../src/render/scenes/index.ts";
+import { FULL_VIEWPORT, listScenes } from "../../src/render/scene.ts";
+import "../../src/render/scenes/index.ts"; // side effect: registers every scene
 
 const params = new URLSearchParams(location.search);
 const ids = (params.get("scenes") ?? "caustics").split(",");
@@ -25,9 +25,7 @@ const ctx = { gl, quality: qualitySettings("high") };
 const px = new Uint8Array(4);
 const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2") as { TIME_ELAPSED_EXT: number } | null;
 
-const scenes = Object.values(sceneModules).filter(
-  (s): s is Scene => typeof s === "object" && s !== null && "id" in s && "render" in s,
-);
+const scenes = listScenes();
 
 // Ends the render pass. Without it a tile-based GPU (every Apple GPU) hidden-
 // surface-removes a frame's opaque fragments under the next frame's full-
@@ -48,7 +46,7 @@ async function bench(id: string) {
     t += dt;
     const beat = t % 0.5 < dt;
     for (let i = 0; i < NUM_BANDS; i++) bands[i] = 0.4 + 0.3 * Math.sin(t * 3 + i) + (beat ? 0.3 : 0);
-    const frame: FeatureFrame = { time: t, bands, energy: 0.6, level: 0.6, onset: beat, pulseOnset: beat, bpm: 120, onsetPhase: 0 };
+    const frame: FeatureFrame = { time: t, bands, energy: 0.6, level: 0.6, onset: beat, pulseOnset: beat, bpm: 120, onsetPhase: 0, hats: 0, lead: 0 };
     const anim = clock.advance(dt, frame);
     gl.viewport(0, 0, w, h);
     scene.render(ctx, frame, FULL_VIEWPORT, PALETTES[0], anim);

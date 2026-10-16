@@ -1,10 +1,11 @@
 import type { PowerMode } from "../render/powerMode.ts";
-import type { QualityChoice } from "../render/qualityPref.ts";
-import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outputPower.ts";
+import { PRESET_LABEL, QUALITY_OPTIONS, type QualityChoice } from "../render/qualityPref.ts";
+import { RESOLUTION_MAX, RESOLUTION_MIN, type CastMode, type PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
-import { applyGlassBlur, getGlassBlur, setGlassBlur } from "./glassPref.ts";
+import { applyGlassBlur, getGlassMode, type GlassMode, setGlassMode } from "./glassPref.ts";
+import { MISS_WINDOW_MS } from "../render/frameMisses.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -31,7 +32,12 @@ import {
  * governor can reach that isn't "GPU load": paced by something outside the
  * page (a browser energy-saver mode, an OS refresh-rate cap), where it has
  * deliberately stood down rather than cutting quality for nothing (see
- * governor.ts's "Authority probe").
+ * governor.ts's "Authority probe"). The Readouts list also shows what the
+ * page is costing the device (main-thread load, GPU time, JS memory) — where
+ * those come from and what they leave out is src/render/resourceMeter.ts's
+ * header. Missed frames and Longest gap say how evenly frames arrive; what
+ * counts as missed, and when nothing is counted, is src/render/frameMisses.ts's
+ * header.
  *
  * Shape, top to bottom: the status line right under the title (the Bands
  * column's own live-dot · source line is the model — small caps mono with
@@ -88,7 +94,7 @@ export interface PowerStatus {
    *  or the dev `?quality=`/`?tier=` pin. Marked as recommended in the
    *  Quality row regardless of whether the user has overridden it. */
   recommended: QualityPreset;
-  /** Rendered-frame rate (app.ts's lastFps). */
+  /** Rendered-frame rate, averaged (render/fpsMeter.ts). */
   fps: number;
   /** Governor step index, 0 = full quality; null while a dev
    *  `?quality=`/`?tier=` pin has skipped the governor entirely (see
@@ -105,6 +111,17 @@ export interface PowerStatus {
    *  resizeCanvasToDisplaySize). */
   bufferWidth: number;
   bufferHeight: number;
+  /** What this page is costing the device (render/resourceMeter.ts's
+   *  ResourceSnapshot); each is null where it can't be measured — the output
+   *  window doesn't report them, and GPU time/heap are Chrome-only. */
+  cpuLoad: number | null;
+  gpuMs: number | null;
+  heapMb: number | null;
+  /** Frames that came late within render/frameMisses.ts's window, and the
+   *  longest gap between drawn frames in it; null while nothing was
+   *  measured, or from an output window too old to report them. */
+  missedFrames: number | null;
+  longestGapMs: number | null;
 }
 
 export interface PowerCardDeps {
@@ -127,6 +144,10 @@ export interface PowerCardDeps {
    *  is — only while previewing. */
   getResolution?: () => number;
   onResolutionChange?: (value: number) => void;
+  /** The Cast row (render/outputPower.ts's CastMode), given only to the
+   *  Output card: how that window is drawn while it is being cast. */
+  getCastMode?: () => CastMode;
+  onCastModeChange?: (mode: CastMode) => void;
 }
 
 /** What tells one Power card from another: the main window's (defaults) and
@@ -211,9 +232,14 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
   };
 }
 
-const BLUR_OPTIONS: { on: boolean; text: string; title: string }[] = [
-  { on: false, text: "Off", title: "Flat dark panels — lightest on the GPU" },
-  { on: true, text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
+const BLUR_OPTIONS: { mode: GlassMode; text: string; title: string }[] = [
+  { mode: "off", text: "Off", title: "Flat dark panels — lightest on the GPU" },
+  {
+    mode: "fast",
+    text: "Fast",
+    title: "Frosted glass drawn with the scene from a small copy of it: close to On for much less GPU",
+  },
+  { mode: "on", text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
 ];
 
 /** Panel blur (glassPref.ts): the one row here that changes how the panel
@@ -240,10 +266,10 @@ function createBlurRow(accent: string) {
     btn.title = opt.title;
     btn.style.cssText = modeChipStyle;
     btn.addEventListener("click", () => {
-      setGlassBlur(opt.on);
+      setGlassMode(opt.mode);
       refresh();
     });
-    return { on: opt.on, btn };
+    return { mode: opt.mode, btn };
   });
   list.append(...buttons.map((b) => b.btn));
 
@@ -253,12 +279,69 @@ function createBlurRow(accent: string) {
   el.append(head, list, hint);
 
   function refresh(): void {
-    const on = getGlassBlur();
-    for (const b of buttons) b.btn.style.cssText = b.on === on ? modeChipLitStyle : modeChipStyle;
-    setHintText(hint, BLUR_OPTIONS.find((o) => o.on === on)?.title ?? "");
+    const mode = getGlassMode();
+    for (const b of buttons) b.btn.style.cssText = b.mode === mode ? modeChipLitStyle : modeChipStyle;
+    setHintText(hint, BLUR_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
   }
   refresh();
   return { el, refresh };
+}
+
+const CAST_OPTIONS: { mode: CastMode; text: string; title: string }[] = [
+  { mode: "off", text: "Off", title: "Draw the output as usual: window size, full frame rate" },
+  {
+    mode: "on",
+    text: "On",
+    title:
+      "For Chrome's Cast: a fixed 720-line picture at 30 fps. Chrome sends the window as video, so extra pixels and frames only cost GPU the encoder needs",
+  },
+  {
+    mode: "soft",
+    text: "Soft",
+    title: "Cast, and a slight blur: fine detail is what a video encoder turns into blocks, so softer looks cleaner",
+  },
+];
+
+/** The Cast row, shown only on the Output card: createModeRow's shape. */
+function createCastRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Cast";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = CAST_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.title = opt.title;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => deps.onCastModeChange?.(opt.mode));
+    return { mode: opt.mode, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, list, hint);
+
+  return {
+    el,
+    refresh(mode: CastMode): void {
+      for (const { mode: m, btn } of buttons) {
+        btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
+      }
+      setHintText(hint, CAST_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
+    },
+  };
 }
 
 const SIZE_OPTIONS: { size: PreviewSize; text: string }[] = [
@@ -386,16 +469,6 @@ const qualityChipLitStyle = `${chipBtnLitStyle} flex: 1 1 auto; text-align: cent
 // visible even when the user has picked something else — and composes with
 // the lit background when it's also the selected chip.
 const recommendedShadow = `inset 0 -2px 0 ${withAlpha(POWER_TEAL, 0.55)}`;
-
-const QUALITY_OPTIONS: { choice: QualityChoice; text: string }[] = [
-  { choice: "auto", text: "Auto" },
-  { choice: "high", text: "High" },
-  { choice: "mid", text: "Mid" },
-  { choice: "low", text: "Low" },
-  { choice: "floor", text: "Floor" },
-];
-
-const PRESET_LABEL: Record<QualityPreset, string> = { high: "High", mid: "Mid", low: "Low", floor: "Floor" };
 
 /** The new editable row: a wrapping chip group covering Auto plus every
  *  QualityPreset. Mirrors createModeRow's shape (label, chips, hint) but
@@ -771,6 +844,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   sizeRow.el.style.display = "none";
   const resolutionRow = createResolutionRow(deps, POWER_TEAL);
   resolutionRow.el.style.display = "none";
+  const castRow = createCastRow(deps, POWER_TEAL);
+  castRow.el.style.display = deps.getCastMode ? "" : "none";
 
   const readoutsHeading = document.createElement("div");
   readoutsHeading.textContent = "Readouts";
@@ -780,7 +855,18 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const fps = createReadoutLine("FPS");
   const res = createReadoutLine("Resolution");
   const detail = createReadoutLine("Detail");
-  readouts.append(fps.el, res.el, detail.el);
+  const cpu = createReadoutLine("Main thread");
+  const gpu = createReadoutLine("GPU time");
+  const heap = createReadoutLine("JS memory");
+  const missed = createReadoutLine("Missed frames");
+  const longest = createReadoutLine("Longest gap");
+  cpu.el.title = "How busy this page kept the browser's main thread, as a share of one core. Not the whole computer's CPU";
+  gpu.el.title = "How long the scene's drawing took on the GPU, per frame. Chrome only; leaves out the browser compositing and the Panel blur";
+  heap.el.title = "JavaScript memory in use by this page. Chrome only; graphics memory can't be read from a web page";
+  const missWindowS = MISS_WINDOW_MS / 1000;
+  missed.el.title = `Frames that came too late to be shown in the last ${missWindowS} s, against the frame-rate cap. Not counted while the window is hidden or a scene is starting`;
+  longest.el.title = `The longest wait between two drawn frames in the last ${missWindowS} s. With nothing missed it is about one frame at the frame-rate cap`;
+  readouts.append(fps.el, missed.el, longest.el, res.el, detail.el, cpu.el, gpu.el, heap.el);
 
   // Seed <html>'s glass class from the saved choice before the panel first shows.
   applyGlassBlur();
@@ -794,6 +880,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     spacer(),
     sizeRow.el,
     modeRow.el,
+    castRow.el,
     spacer(),
     blurRow.el,
     readoutsHeading,
@@ -814,9 +901,15 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     resolutionRow.el.style.display = resolutionShown ? "" : "none";
     if (resolutionShown) resolutionRow.refresh(deps.getResolution!());
     modeRow.refresh(status.mode);
+    if (deps.getCastMode) castRow.refresh(deps.getCastMode());
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
     detail.set(status.level === null ? [text("--")] : [digits(String(Math.round(status.fraction * 100))), join("%")]);
+    cpu.set(status.cpuLoad === null ? [text("--")] : [digits(String(Math.round(status.cpuLoad * 100))), join("%")]);
+    gpu.set(status.gpuMs === null ? [text("--")] : [digits(status.gpuMs.toFixed(1)), join("ms")]);
+    heap.set(status.heapMb === null ? [text("--")] : [digits(String(Math.round(status.heapMb))), join("MB")]);
+    missed.set(status.missedFrames === null ? [text("--")] : [digits(String(status.missedFrames))]);
+    longest.set(status.longestGapMs === null ? [text("--")] : [digits(String(Math.round(status.longestGapMs))), join("ms")]);
   }
   refresh();
 

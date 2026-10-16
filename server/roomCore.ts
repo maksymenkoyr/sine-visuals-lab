@@ -4,7 +4,7 @@
  * Cloudflare adapter around this (it owns the WebSocketPair, the hibernation
  * calls and `ctx.storage`); the rules themselves are server/roomRules.ts (who
  * may join, who may send what), server/roomDevices.ts (the device records:
- * name, ears, screen) and server/lookDoc.ts (the look document and its
+ * name, ears, screen, quality) and server/lookDoc.ts (the look document and its
  * patch). The messages are described in src/net/roomMessages.ts.
  *
  * The room stays a relay. A claimed room keeps one record per device that ever
@@ -22,7 +22,11 @@
  * interprets a setting; a look entry is an opaque string it stores and relays.
  * A member's patches and device changes are rationed per socket (LOOK_LIMITS
  * `patchBurst` and `patchesPerSec`) because each accepted one is durable row
- * writes.
+ * writes. Its feature frames and clock-sync pings are rationed too (`frame…`
+ * and `ping…`), because every message the room receives is billed to it and
+ * the plan's daily allowance is shared by every room: past its budget a frame
+ * or ping is dropped, and a socket that keeps sending into an empty budget is
+ * closed (ROOM_CLOSE_FLOOD) rather than billed for ever.
  *
  * A Durable Object that hibernates loses every instance field, so what must
  * outlive that is written as flat rows: the claim (hashed keys), the look's
@@ -49,6 +53,7 @@ import {
 } from "./lookDoc.ts";
 import {
   ROOM_CLOSE_DENIED,
+  ROOM_CLOSE_FLOOD,
   ROOM_CODE_RE,
   ROOM_IDLE_TTL_MS,
   ADOPT_ANY_TAG,
@@ -70,12 +75,15 @@ import {
   followersOf,
   forgetDevice,
   kindForRole,
+  mayPlay,
   ownerId,
   parseKind,
+  parsePreset,
   parseRecord,
   sanitizeDeviceSet,
   type DeviceKind,
   type DeviceRecord,
+  type ScreenPreset,
 } from "./roomDevices.ts";
 
 export interface Viewport {
@@ -104,6 +112,9 @@ export interface Attachment {
   keyed: boolean;
   kind: DeviceKind;
   hasMic: boolean;
+  /** A TV's hello says which preset its own GPU benchmark picks
+   *  (server/roomDevices.ts `quality`); listed in the roster while it is online. */
+  autoQuality?: ScreenPreset;
   joinName?: string;
 }
 
@@ -145,10 +156,17 @@ export interface JoinParams {
 
 export type JoinResult = { ok: true; attachment: Attachment; tags: string[] } | { ok: false };
 
-/** A socket's patch allowance: tokens left, as of `at`. */
-interface PatchBucket {
+/** A token bucket: tokens left, as of `at`. */
+interface Bucket {
   tokens: number;
   at: number;
+}
+
+/** One socket's allowances, made full on the first message that needs one. */
+interface Budgets {
+  patch: Bucket;
+  frame: Bucket;
+  ping: Bucket;
 }
 
 /** A roster entry as a legacy (unclaimed) room sends it. */
@@ -214,6 +232,7 @@ export function readAttachment(raw: unknown): Attachment {
     keyed: o.keyed === true,
     kind: parseKind(o.kind) ?? kindForRole(role),
     hasMic: typeof o.hasMic === "boolean" ? o.hasMic : role !== "renderer",
+    autoQuality: parsePreset(o.autoQuality),
     joinName: cleanName(o.joinName),
   };
 }
@@ -293,7 +312,7 @@ export class RoomCore {
   private readonly followerCache = new Map<string, string[]>();
   /** Per socket id, in memory only: a room that hibernates starts its sockets
    *  with a full allowance, which a sender that never goes quiet cannot use. */
-  private readonly patchBuckets = new Map<string, PatchBucket>();
+  private readonly budgets = new Map<string, Budgets>();
 
   /** `stored` is every row the adapter read from storage on wake-up. */
   constructor(
@@ -368,6 +387,7 @@ export class RoomCore {
     if (this.meta !== null ? !a.keyed : a.keyed) return;
 
     if (typeof data !== "string") {
+      if (this.overBudget(ws, "frame", LOOK_LIMITS.frameBurst, LOOK_LIMITS.framesPerSec)) return;
       this.relayFrame(a, data);
       return;
     }
@@ -384,6 +404,7 @@ export class RoomCore {
       case "ping":
         // Clock sync: echo the client's send time plus this clock, at once,
         // so the client can estimate offset and round trip.
+        if (this.overBudget(ws, "ping", LOOK_LIMITS.pingBurst, LOOK_LIMITS.pingsPerSec)) return;
         if (typeof msg.t0 === "number") {
           this.send(ws, JSON.stringify({ type: "pong", t0: msg.t0, tServer: this.host.now() }));
         }
@@ -416,7 +437,7 @@ export class RoomCore {
   closed(ws: CoreSocket): void {
     const a = ws.attachment;
     const gone = a.sid;
-    this.patchBuckets.delete(gone);
+    this.budgets.delete(gone);
     if (this.meta !== null) {
       const record = this.records.get(a.deviceId);
       if (record) this.store(a.deviceId, { ...record, seen: this.host.now() });
@@ -461,7 +482,7 @@ export class RoomCore {
 
   /** Back to an unclaimed room's memory (the rows are the caller's to wipe). */
   private forgetEverything(): void {
-    this.patchBuckets.clear();
+    this.budgets.clear();
     this.records = new Map();
     this.followerCache.clear();
     this.meta = null;
@@ -533,6 +554,7 @@ export class RoomCore {
       scene: shortString(msg.scene) ?? a.scene,
       palette: shortString(msg.palette) ?? a.palette,
       viewport: parseViewport(msg.viewport) ?? a.viewport,
+      autoQuality: parsePreset(msg.autoQuality) ?? a.autoQuality,
     };
     if (a.keyed) {
       const record = this.records.get(a.deviceId);
@@ -550,9 +572,11 @@ export class RoomCore {
   }
 
   /** `deviceSet`: any member of a claimed room changes one device's name,
-   *  ears or screen (server/roomDevices.ts `applyDeviceSet` has the rules). An
-   *  accepted change is stored and the roster goes to everyone; a refused one
-   *  is answered to the sender alone with `deviceReject` and the reason. */
+   *  ears, screen or quality (server/roomDevices.ts `applyDeviceSet` has the
+   *  rules); only the owner may set `canPlay`, anyone else carrying it is
+   *  answered `owner-only`. An accepted change is stored and the roster goes to
+   *  everyone; a refused one is answered to the sender alone with
+   *  `deviceReject` and the reason. */
   private deviceSet(ws: CoreSocket, sender: Attachment, msg: Record<string, unknown>): void {
     if (!canSend(sender.keyed, sender.role, "deviceSet")) return;
     const raw = typeof msg.targetId === "string" && msg.targetId.length <= 64 ? msg.targetId : null;
@@ -563,6 +587,10 @@ export class RoomCore {
     const clean = sanitizeDeviceSet(msg, validDeviceId);
     if (clean === null) {
       this.rejectDevice(ws, raw, "shape");
+      return;
+    }
+    if (clean.patch.canPlay !== undefined && sender.role !== "host") {
+      this.rejectDevice(ws, clean.targetId, "owner-only");
       return;
     }
     const result = applyDeviceSet(this.records, clean.targetId, clean.patch);
@@ -694,6 +722,12 @@ export class RoomCore {
       this.reject(ws, n, "role");
       return;
     }
+    // The role is the coarse check; whether this device may Play at all is its
+    // record's (server/roomDevices.ts `mayPlay`).
+    if (!mayPlay(this.records, sender.deviceId)) {
+      this.reject(ws, n, "role");
+      return;
+    }
     if (!this.takePatchToken(sender.sid)) {
       this.reject(ws, n, "size");
       return;
@@ -745,17 +779,56 @@ export class RoomCore {
   }
 
   /** Spends one patch from this socket's allowance (a token bucket: LOOK_LIMITS
-   *  `patchBurst`, refilled at `patchesPerSec`); false when it is empty. */
+   *  `patchBurst`, refilled at `patchesPerSec`); false when it is empty. A
+   *  refused patch is answered, so it costs nothing. */
   private takePatchToken(sid: string): boolean {
-    const now = this.host.now();
-    const b = this.patchBuckets.get(sid) ?? { tokens: LOOK_LIMITS.patchBurst, at: now };
-    const refill = (Math.max(0, now - b.at) * LOOK_LIMITS.patchesPerSec) / 1000;
-    b.tokens = Math.min(LOOK_LIMITS.patchBurst, b.tokens + refill);
-    b.at = now;
-    this.patchBuckets.set(sid, b);
-    if (b.tokens < 1) return false;
-    b.tokens -= 1;
+    return this.spend(this.budgetsOf(sid).patch, LOOK_LIMITS.patchBurst, LOOK_LIMITS.patchesPerSec, 0);
+  }
+
+  /** Spends one frame or ping from this socket's allowance; true when there was
+   *  none and the message is to be dropped. A dropped one is charged anyway,
+   *  down to a whole burst into debt, so a sender that never slows down keeps
+   *  the bucket empty; one that reaches the bottom is closed. */
+  private overBudget(ws: CoreSocket, kind: "frame" | "ping", burst: number, perSec: number): boolean {
+    const b = this.budgetsOf(ws.attachment.sid)[kind];
+    if (this.spend(b, burst, perSec, burst)) return false;
+    if (b.tokens <= -burst) {
+      try {
+        ws.close(ROOM_CLOSE_FLOOD, "too fast");
+      } catch {
+        // Already closing.
+      }
+    }
     return true;
+  }
+
+  /** Refills `b` to now (never beyond `burst`) and spends a token: true when
+   *  one was there. Without one, it still spends while `debt` allows (how far
+   *  below zero the bucket may go; 0 charges nothing). */
+  private spend(b: Bucket, burst: number, perSec: number, debt: number): boolean {
+    const now = this.host.now();
+    b.tokens = Math.min(burst, b.tokens + (Math.max(0, now - b.at) * perSec) / 1000);
+    b.at = now;
+    if (b.tokens >= 1) {
+      b.tokens -= 1;
+      return true;
+    }
+    if (debt > 0) b.tokens = Math.max(-debt, b.tokens - 1);
+    return false;
+  }
+
+  private budgetsOf(sid: string): Budgets {
+    let budgets = this.budgets.get(sid);
+    if (budgets === undefined) {
+      const at = this.host.now();
+      budgets = {
+        patch: { tokens: LOOK_LIMITS.patchBurst, at },
+        frame: { tokens: LOOK_LIMITS.frameBurst, at },
+        ping: { tokens: LOOK_LIMITS.pingBurst, at },
+      };
+      this.budgets.set(sid, budgets);
+    }
+    return budgets;
   }
 
   private reject(ws: CoreSocket, n: number | null, reason: "role" | "size" | "shape"): void {
@@ -770,9 +843,9 @@ export class RoomCore {
 
   /** Who is in the room, to every live socket. A claimed room lists every
    *  device record, owner first and then in the order they were added, online
-   *  or not, with its name, ears and screen (the Room view draws from it); the
-   *  scene, palette and viewport come from one of the device's live sockets,
-   *  and are empty / full while it is offline. Only keyed sockets are told: a
+   *  or not, with its name, ears, screen, quality and `canPlay` (the effective
+   *  right, so the owner reads true; the Room view draws from it); the scene, palette, viewport and a TV's autoQuality come from one of
+   *  the device's live sockets, and are empty / full / null while it is offline. Only keyed sockets are told: a
    *  keyless one left over from before the claim is being closed. A room
    *  nobody has claimed keeps the shape it always had: the live hosts and
    *  renderers (controllers see the roster but are not in it), to everyone. */
@@ -800,6 +873,9 @@ export class RoomCore {
           ears: r.ears,
           follow: r.follow,
           screen: r.screen,
+          quality: r.quality,
+          canPlay: mayPlay(this.records, id),
+          autoQuality: a?.autoQuality ?? null,
           online: mine !== undefined,
           owner: r.role === "host",
         };

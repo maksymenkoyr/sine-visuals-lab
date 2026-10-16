@@ -1,0 +1,18 @@
+id: scene-reads-drive
+valid:
+  - |
+    const glow = drives.value("glow", frame.level);
+  - |
+    const flash = drives.fired("flash", frame.onset) ? 1 : 0;
+  - |
+    const boost = d.value(boostSpec.key, Math.min(1, frame.energy * 2));
+  - |
+    // Its default follows the music level (frame.level).
+    const t = frame.time;
+invalid:
+  - |
+    const flash = frame.onset ? 1 : 0;
+  - |
+    const glow = 0.5 + frame.level;
+  - |
+    for (let i = 0; i < NUM_BANDS; i++) smooth[i] += frame.bands[i] * k;

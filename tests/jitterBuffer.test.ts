@@ -3,7 +3,7 @@ import { JitterBuffer } from "../src/net/jitterBuffer.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 
 function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy, pulseOnset = onset) {
-  return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, pulseOnset, bpm, level, roomTimeMs };
+  return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, pulseOnset, bpm, level, hats: 0, lead: 0, roomTimeMs };
 }
 
 describe("JitterBuffer", () => {
@@ -17,6 +17,13 @@ describe("JitterBuffer", () => {
     expect(mid!.energy).toBeCloseTo(0.25, 5);
     expect(mid!.bands[0]).toBeCloseTo(0.25, 5);
     expect(mid!.level).toBeCloseTo(0.25, 5); // level interpolates the same way as energy
+
+    const stems = new JitterBuffer();
+    stems.push({ ...frame(0, 0.0), hats: 0, lead: 0.2 });
+    stems.push({ ...frame(100, 1.0), hats: 1, lead: 0.6 });
+    const stemMid = stems.sampleAt(50);
+    expect(stemMid!.hats).toBeCloseTo(0.5, 5); // hats and lead interpolate like level
+    expect(stemMid!.lead).toBeCloseTo(0.4, 5);
   });
 
   it("holds the nearest edge frame outside the buffered range", () => {
@@ -80,4 +87,23 @@ describe("JitterBuffer", () => {
     expect(buf.consumePulseIfDue(1400)).toBe(false);
     expect(buf.consumePulseIfDue(1500)).toBe(true);
   });
+
+  it("hands back the waveform of the frame covering the instant, not a blend", () => {
+    const buf = new JitterBuffer();
+    buf.push({ ...frame(0, 0), wave: { min: -0.1, max: 0.1 } });
+    buf.push({ ...frame(33, 0), wave: { min: -0.8, max: 0.6 } });
+    buf.push({ ...frame(66, 0), wave: null });
+
+    expect(buf.sampleAt(10)!.wave).toEqual({ min: -0.8, max: 0.6 });
+    expect(buf.sampleAt(0)!.wave).toEqual({ min: -0.1, max: 0.1 });
+    expect(buf.sampleAt(50)!.wave).toBeNull();
+    expect(buf.sampleAt(9999)!.wave).toBeNull();
+  });
+
+  it("reads no waveform from a frame that never carried one", () => {
+    const buf = new JitterBuffer();
+    buf.push(frame(0, 0.5));
+    expect(buf.sampleAt(0)!.wave).toBeNull();
+  });
 });
+
