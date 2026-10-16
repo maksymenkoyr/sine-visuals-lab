@@ -143,6 +143,9 @@ import {
   PICTURE_SAMPLE_INTERVAL_MS,
 } from "./render/pictureMeter.ts";
 import { createPictureReadback, type PictureReadback } from "./render/pictureReadback.ts";
+import { createGlassBackdrop, type GlassBackdrop, type GlassPane } from "./render/glassBackdrop.ts";
+import { readGlassPanes } from "./ui/glassPanes.ts";
+import { GLASS_LOOK, getGlassMode, setGlassDrawn } from "./ui/glassPref.ts";
 import {
   applyLook,
   captureLook,
@@ -554,6 +557,18 @@ let pictureForced = false;
  *  PICTURE_SAMPLE_INTERVAL_MS independently of the render loop's own rate,
  *  which usually runs faster. */
 let lastPictureKickMs = -Infinity;
+
+/** Panel blur's Fast look (ui/glassPref.ts): the renderer's copy of the
+ *  panel's glass (render/glassBackdrop.ts), drawn at the end of drawScene.
+ *  Created lazily on mainHost's own GL context; `glassPanes` holds where the
+ *  glass goes, read by syncGlass() on a tick the scene draws. */
+let glassBackdrop: GlassBackdrop | null = null;
+/** This GPU could not build the passes: the browser's blur takes over for good. */
+let glassBroken = false;
+const glassPanes: GlassPane[] = [];
+let glassPaneCount = 0;
+/** The canvas box's CSS size, read with the panes. */
+const glassCanvasBox = { w: 0, h: 0 };
 
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
@@ -3736,10 +3751,10 @@ function tick(): void {
   // RENDER_FPS_CAP interval has passed since its own last draw: a display
   // faster than the cap redraws it once per scene frame, and a lowered cap
   // (Energy saving, the pop-out's preview) doesn't slow its meters.
-  const panelDraws =
-    shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs()) ||
-    shouldRenderFrame(nowRafMs, lastPanelDrawMs, 1000 / RENDER_FPS_CAP);
+  const sceneDraws = shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs());
+  const panelDraws = sceneDraws || shouldRenderFrame(nowRafMs, lastPanelDrawMs, 1000 / RENDER_FPS_CAP);
   if (panelDraws) lastPanelDrawMs = nowRafMs;
+  syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
 
   if (!lastVis || !anim) {
@@ -3820,10 +3835,40 @@ function drawScene(
   // compositor's render (crossfade, held effects), so the overlay sits on top
   // of those and stays visible over Freeze and Blackout.
   overlayLayer?.draw();
+  // Last: the browser's blur sees the overlay too, and nothing after this
+  // reads the frame.
+  if (glassPaneCount > 0) drawGlass();
   // A frame with two scenes (a crossfade) or none (Freeze) says nothing about
   // what one scene costs, so the governor does not see it.
   if (governable) governor?.recordFrame(nowRafMs);
   frameMisses.frame(nowRafMs, intervalMs, document.hidden);
+}
+
+/** Panel blur's Fast look: whether the renderer draws the glass this tick
+ *  (glassPref.ts's setGlassDrawn) and, when the scene draws, where
+ *  (glassPanes.ts). Runs before the panel writes its styles for the tick, so
+ *  the layout it reads is the one the browser already has. Off — so the
+ *  surfaces go back to the browser's blur — while the panel is closed, while
+ *  a clip records the canvas (the take would carry the glass), and while
+ *  nothing draws the scene (the last frame stays up, and its glass would not
+ *  follow the panel). */
+function syncGlass(sceneDraws: boolean, scenePlays: boolean): void {
+  const drawn =
+    getGlassMode() === "fast" &&
+    !glassBroken &&
+    !glLost &&
+    scenePlays &&
+    (deviceMenu?.isOpen() ?? false) &&
+    !(clipRecorder?.recording() ?? false);
+  setGlassDrawn(drawn);
+  glassPaneCount = drawn && sceneDraws ? readGlassPanes(canvas, glassPanes, glassCanvasBox) : 0;
+}
+
+/** Draws the glass under the panes syncGlass() read this tick. */
+function drawGlass(): void {
+  if (!glassBackdrop) glassBackdrop = createGlassBackdrop(mainHost!.ctx.gl);
+  const { w, h } = glassCanvasBox;
+  if (!glassBackdrop.draw(glassPanes, glassPaneCount, w, h, GLASS_LOOK)) glassBroken = true;
 }
 
 /** Sizes the drawing buffer for this frame and says whether it changed: to

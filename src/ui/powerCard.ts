@@ -4,7 +4,7 @@ import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outp
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
-import { applyGlassBlur, getGlassBlur, setGlassBlur } from "./glassPref.ts";
+import { applyGlassBlur, getGlassMode, type GlassMode, setGlassMode } from "./glassPref.ts";
 import { MISS_WINDOW_MS } from "../render/frameMisses.ts";
 import {
   chipBtnLitStyle,
@@ -228,9 +228,14 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
   };
 }
 
-const BLUR_OPTIONS: { on: boolean; text: string; title: string }[] = [
-  { on: false, text: "Off", title: "Flat dark panels — lightest on the GPU" },
-  { on: true, text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
+const BLUR_OPTIONS: { mode: GlassMode; text: string; title: string }[] = [
+  { mode: "off", text: "Off", title: "Flat dark panels — lightest on the GPU" },
+  {
+    mode: "fast",
+    text: "Fast",
+    title: "Frosted glass drawn with the scene from a small copy of it: close to On for much less GPU. Being tried",
+  },
+  { mode: "on", text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
 ];
 
 /** Panel blur (glassPref.ts): the one row here that changes how the panel
@@ -257,10 +262,10 @@ function createBlurRow(accent: string) {
     btn.title = opt.title;
     btn.style.cssText = modeChipStyle;
     btn.addEventListener("click", () => {
-      setGlassBlur(opt.on);
+      setGlassMode(opt.mode);
       refresh();
     });
-    return { on: opt.on, btn };
+    return { mode: opt.mode, btn };
   });
   list.append(...buttons.map((b) => b.btn));
 
@@ -270,9 +275,9 @@ function createBlurRow(accent: string) {
   el.append(head, list, hint);
 
   function refresh(): void {
-    const on = getGlassBlur();
-    for (const b of buttons) b.btn.style.cssText = b.on === on ? modeChipLitStyle : modeChipStyle;
-    setHintText(hint, BLUR_OPTIONS.find((o) => o.on === on)?.title ?? "");
+    const mode = getGlassMode();
+    for (const b of buttons) b.btn.style.cssText = b.mode === mode ? modeChipLitStyle : modeChipStyle;
+    setHintText(hint, BLUR_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
   }
   refresh();
   return { el, refresh };
