@@ -209,6 +209,7 @@ import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import {
+  getOutputCastMode,
   getOutputPowerMode,
   getOutputQualityChoice,
   getOutputResolution,
@@ -216,6 +217,7 @@ import {
   getPreviewResolution,
   getPreviewSize,
   PREVIEW_SIZE_FRACTION,
+  setOutputCastMode,
   setOutputPowerMode,
   setOutputQualityChoice,
   setOutputResolution,
@@ -430,6 +432,7 @@ let outputPower: OutputPower = {
   quality: getOutputQualityChoice(),
   mode: getOutputPowerMode(),
   resolution: getOutputResolution(),
+  cast: getOutputCastMode(),
 };
 /** An output window is open and a scene is showing; recomputed every tick. A
  *  remote controller previews whatever it shows; a screen (`fillsScreen`) never
@@ -1840,6 +1843,12 @@ function wireDeviceMenu(): void {
     onOutputPowerModeChange: (mode) => {
       setOutputPowerMode(mode);
       outputPower = { ...outputPower, mode };
+      outputBridge?.sendPower();
+    },
+    getOutputCastMode: () => outputPower.cast,
+    onOutputCastModeChange: (cast) => {
+      setOutputCastMode(cast);
+      outputPower = { ...outputPower, cast };
       outputBridge?.sendPower();
     },
     getPowerStatus: () => ({

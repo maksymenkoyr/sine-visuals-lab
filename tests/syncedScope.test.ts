@@ -91,6 +91,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.output.": false,
   "vibe.output.quality": false,
   "vibe.output.powerMode": false,
+  "vibe.output.cast": false,
   "vibe.output.resolution": false,
   "vibe.preview.": false,
   "vibe.preview.quality": false,

@@ -1,6 +1,6 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import { PRESET_LABEL, QUALITY_OPTIONS, type QualityChoice } from "../render/qualityPref.ts";
-import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outputPower.ts";
+import { RESOLUTION_MAX, RESOLUTION_MIN, type CastMode, type PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
@@ -144,6 +144,10 @@ export interface PowerCardDeps {
    *  is — only while previewing. */
   getResolution?: () => number;
   onResolutionChange?: (value: number) => void;
+  /** The Cast row (render/outputPower.ts's CastMode), given only to the
+   *  Output card: how that window is drawn while it is being cast. */
+  getCastMode?: () => CastMode;
+  onCastModeChange?: (mode: CastMode) => void;
 }
 
 /** What tells one Power card from another: the main window's (defaults) and
@@ -281,6 +285,63 @@ function createBlurRow(accent: string) {
   }
   refresh();
   return { el, refresh };
+}
+
+const CAST_OPTIONS: { mode: CastMode; text: string; title: string }[] = [
+  { mode: "off", text: "Off", title: "Draw the output as usual: window size, full frame rate" },
+  {
+    mode: "on",
+    text: "On",
+    title:
+      "For Chrome's Cast: a fixed 720-line picture at 30 fps. Chrome sends the window as video, so extra pixels and frames only cost GPU the encoder needs",
+  },
+  {
+    mode: "soft",
+    text: "Soft",
+    title: "Cast, and a slight blur: fine detail is what a video encoder turns into blocks, so softer looks cleaner",
+  },
+];
+
+/** The Cast row, shown only on the Output card: createModeRow's shape. */
+function createCastRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Cast";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = CAST_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.title = opt.title;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => deps.onCastModeChange?.(opt.mode));
+    return { mode: opt.mode, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, list, hint);
+
+  return {
+    el,
+    refresh(mode: CastMode): void {
+      for (const { mode: m, btn } of buttons) {
+        btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
+      }
+      setHintText(hint, CAST_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
+    },
+  };
 }
 
 const SIZE_OPTIONS: { size: PreviewSize; text: string }[] = [
@@ -783,6 +844,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   sizeRow.el.style.display = "none";
   const resolutionRow = createResolutionRow(deps, POWER_TEAL);
   resolutionRow.el.style.display = "none";
+  const castRow = createCastRow(deps, POWER_TEAL);
+  castRow.el.style.display = deps.getCastMode ? "" : "none";
 
   const readoutsHeading = document.createElement("div");
   readoutsHeading.textContent = "Readouts";
@@ -817,6 +880,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     spacer(),
     sizeRow.el,
     modeRow.el,
+    castRow.el,
     spacer(),
     blurRow.el,
     readoutsHeading,
@@ -837,6 +901,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     resolutionRow.el.style.display = resolutionShown ? "" : "none";
     if (resolutionShown) resolutionRow.refresh(deps.getResolution!());
     modeRow.refresh(status.mode);
+    if (deps.getCastMode) castRow.refresh(deps.getCastMode());
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
     detail.set(status.level === null ? [text("--")] : [digits(String(Math.round(status.fraction * 100))), join("%")]);

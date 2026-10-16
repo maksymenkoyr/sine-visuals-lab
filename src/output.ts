@@ -26,7 +26,7 @@ import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
 import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
-import { clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
+import { CAST_BUFFER_HEIGHT, CAST_FPS, CAST_SOFT_BLUR_PX, clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 
@@ -126,7 +126,7 @@ let detectedPreset: QualityPreset = "mid";
 /** The output's own Quality, Energy saving and Resolution (render/outputPower.ts),
  *  as the main window's Output Power card last sent them. The defaults are the
  *  stores' own, for the moment before the first `power` message arrives. */
-let power: OutputPower = { quality: "high", mode: "off", resolution: RESOLUTION_DEFAULT };
+let power: OutputPower = { quality: "high", mode: "off", resolution: RESOLUTION_DEFAULT, cast: "off" };
 /** A dev pin wins over the choice so headless `?quality=` captures stay
  *  reproducible; otherwise Auto falls back to this window's benchmark. */
 const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ? detectedPreset : power.quality);
@@ -285,6 +285,7 @@ transport.onMessage((m) => {
     } else inbox.push(m.f, performance.now());
   } else if (m.t === "power") {
     power = m.power;
+    canvas.style.filter = power.cast === "soft" ? `blur(${CAST_SOFT_BLUR_PX}px)` : "";
     if (host) applyQuality();
   } else if (m.t === "effects") {
     heldEffects = parseEffects(m.effects);
@@ -404,13 +405,19 @@ async function main(): Promise<void> {
     const displayFrame = applySensitivity(frame, p.sens, p.exp);
     driveEngine.accumulate(dtSec, frame, displayFrame.energy, anim, scene.id, scene.settings ?? []);
 
-    const interval = power.mode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+    const casting = power.cast !== "off";
+    let interval = power.mode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+    if (casting) interval = Math.max(interval, 1000 / CAST_FPS);
     if (!renderGate.pass(nowMs, interval)) return;
     fpsMeter.frame(nowMs);
 
     // Resolution multiplies the quality's scale (governor steps included), so
     // it takes effect on this very resize — no remount, unlike a Quality change.
-    const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale * clampResolution(power.resolution));
+    const resized = resizeCanvasToDisplaySize(
+      canvas,
+      quality.renderScale * clampResolution(power.resolution),
+      casting ? { dpr: 1, maxHeight: CAST_BUFFER_HEIGHT } : undefined,
+    );
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
     const latchedAnim = renderLatch.consume(anim, nowMs);

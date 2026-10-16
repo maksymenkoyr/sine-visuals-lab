@@ -26,8 +26,8 @@ const status: OutputRenderStatus = {
   bufferHeight: 1080,
 };
 
-// A non-default resolution, so the expectations below also show it travels.
-const POWER: OutputPower = { quality: "mid", mode: "auto", resolution: 0.5 };
+// A non-default resolution and cast mode, so the expectations below also show they travel.
+const POWER: OutputPower = { quality: "mid", mode: "auto", resolution: 0.5, cast: "soft" };
 
 function setup() {
   const t = fakeTransport();

@@ -126,7 +126,7 @@ import {
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
-import type { PreviewSize } from "../render/outputPower.ts";
+import type { CastMode, PreviewSize } from "../render/outputPower.ts";
 import type { OutputRenderStatus } from "../net/outputSync.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
@@ -682,6 +682,8 @@ export interface DeviceMenuDeps {
   onOutputQualityChoiceChange: (choice: QualityChoice) => void;
   getOutputResolution: () => number;
   onOutputResolutionChange: (value: number) => void;
+  getOutputCastMode: () => CastMode;
+  onOutputCastModeChange: (mode: CastMode) => void;
   getOutputPowerMode: () => PowerMode;
   onOutputPowerModeChange: (mode: PowerMode) => void;
   /** Excluded from the tap-outside focus reset; ringed (aria-pressed) while open. */
@@ -1958,6 +1960,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     {
       getPowerMode: deps.getOutputPowerMode,
       onPowerModeChange: deps.onOutputPowerModeChange,
+      getCastMode: deps.getOutputCastMode,
+      onCastModeChange: deps.onOutputCastModeChange,
       getQualityChoice: deps.getOutputQualityChoice,
       onQualityChoiceChange: deps.onOutputQualityChoiceChange,
       getResolution: deps.getOutputResolution,
