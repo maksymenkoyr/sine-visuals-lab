@@ -45,6 +45,9 @@ export interface PanelSection {
    *  `WidgetCtx.appendRow`, next to what they belong with) — the Scene card's
    *  flat list skips them so they aren't shown twice. */
   settings?: readonly string[];
+  /** The widget shows itself as its own card (`WidgetCtx.mountCard`), so the
+   *  Scene card gets no heading for it. */
+  card?: true;
   /** Widget-specific configuration — each widget's own module documents its
    *  shape (e.g. itemBoxes.ts's ItemBoxesOptions). */
   options?: unknown;

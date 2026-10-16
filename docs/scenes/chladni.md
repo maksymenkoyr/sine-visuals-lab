@@ -65,6 +65,12 @@ Featured, on main.
   zoom's shader programs separately (`makePrograms`, compiled the first time
   the zoom turns on). `tests/chladniZoom.test.ts` checks that the zoom has no
   seam at the octave wrap and that the bed stays even.
+- The Mode ladder card: `src/ui/widgets/modeLadder.ts` (its header says
+  what it shows). It reads `probe()`'s `ring<k>`/`slot<j>`/`share<j>` and
+  writes the Locked figure setting (`lockFigure`), which
+  `createPlateResponse` takes as `lock`. It mounts its own card through
+  `PanelSection.card` (src/render/scene.ts). Its thumbnails come from
+  `plateFieldAt` for the baked plates and the square's own formula.
 - `tests/chladni.test.ts` covers the mode table ordering/symmetry, resonance
   mapping, ring timing, grain-texture sizing, `grainGain`,
   `drawnGrainCount`'s coverage cap and Sand amount scaling, the toss trigger
@@ -240,6 +246,17 @@ hexagon and decagon.
   hexagon 8–9.5, round, triangle and clamped 1.5–4; the first bake of a run
   reads higher while V8 warms up. The limit keeps the old one's margin over
   the decagon, about 2.5×.
+- 2026-10-16 (Mode ladder rings): `scripts/ring-range-measure.test.ts`, the
+  tempo-eval tracks at default settings, every mode's ring (amplitude) from
+  3 s on. Every mode, every frame: p50 0.22–0.32, p90 0.38–0.46. The loudest
+  mode each frame: p50 0.33–0.40, p99 0.50–0.61, max 0.65. Live on the Metal
+  GPU through the fake mic, the ladder's bars on the first bar scale (0 to
+  0.6), mean per mode: Tarantula 0.21–0.31, the same flat spread. The plate's
+  four shares sat near even (26/26/25/23%). With the floor at 0.15, mean per
+  mode: Tarantula 0.01–0.09 (max up to 0.45), Billie Jean 0.12–0.25 (max up
+  to 0.58). Bars of the sharpened pull (the ring over 0.6 raised to
+  Resonance's exponent, what the plate weighs) on the synthetic feed:
+  max 0.115, most modes under 0.02, unreadable.
 
 ## Decisions and pivots
 
@@ -662,6 +679,31 @@ hexagon and decagon.
   default, is unchanged. Beat waves is flat-only: a wave either runs or it
   doesn't.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-16 — **Mode ladder**, idea 2 of the Idea Bench (not picked on
+  10-05), built from the bench's mockup on the user's ask: its own card after
+  the Scene card, one row per figure of the plate on screen (low notes first,
+  a thumbnail, a bar, the share on the plate), and a click locks the plate
+  on a figure. The mockup said "pin"; the panel already uses pin for opening
+  a wire panel (docs/vocabulary.md), so the word is lock.
+  Choices made here, not by the user:
+  - The lock is a setting (Locked figure, `lockFigure`: table index + 1, 0 =
+    none, exempt from the Master card's Scale), so it reaches the pop-out,
+    the room's TV and a saved Look. It names a rung, so switching plates
+    locks the same rung on the new plate. A locked figure counts as the top
+    mode, so letting go under Figure hold eases back rather than jumping.
+  - All the plate's figures are listed (every table is `MODE_TABLE.length`
+    long, and at default Pattern complexity all of them sit on the band
+    ladder), in a list that scrolls after about twelve rows, as in the
+    mockup. The line under it names the figures on the plate, since the
+    lead can be scrolled out of view.
+  - The bar is the plain ring, not the sharpened pull the plate weighs by:
+    the pull left every bar but the lead empty (Measurements, 2026-10-16).
+    It starts at a fixed floor (`RING_FLOOR`) rather than 0, because on
+    broadband music every figure rings a little and from 0 they read alike.
+    The scale never moves. With Figure hold up, a challenger can show a
+    longer bar than the lead without taking the plate yet.
+  - The bench's music readout ("build, rising · bar 10 of 16") was the
+    bench's fake song and was left out.
 
 ## Tuning notes
 
@@ -783,6 +825,11 @@ hexagon and decagon.
   belongs in `src/audio/features.ts` and needs `npm run eval:tempo` before
   and after.
 
+- Mode ladder: on broadband music the plate blends four figures nearly
+  evenly and the lead changes often, so the marks hop between rows; that is
+  the plate, not the card. The densest Round figures (30+ spokes) read as
+  discs at thumbnail size. The share numbers update every `WORDS_MS`, the
+  bars and marks every tick, so a mark can briefly sit on a shorter bar.
 - Grains never collide (they have a size and weight now, but no radius in
   the sim), so `drawnGrainCount`'s
   fixed-sand-budget approach is a workaround for a fixed grain count
@@ -836,7 +883,11 @@ hexagon and decagon.
   setting switched on 120 ms after a shot of the plate without it, so both
   see the same sand, on a song through the fake mic or the synthetic feed)
   and `bake-units-measure.test.ts` (each plate's bake in yardstick units,
-  where `BAKE_UNITS_MAX` comes from; copy into `tests/` to run).
+  where `BAKE_UNITS_MAX` comes from; copy into `tests/` to run) and
+  `ring-range-measure.test.ts` (every figure's ring on the tempo-eval
+  tracks, where the Mode ladder's bar ends come from; copy into `tests/` to
+  run). The live bar readings were sampled from the card's DOM by a session
+  script, not kept.
   For pixel checks, `tools/gpu-bench.mjs --seed N` seeds `Math.random`,
   without which this scene's dumps never repeat. The toss's share-on-lines
   readback relied on temporary in-scene hooks and wasn't kept. Captured
@@ -886,6 +937,8 @@ hexagon and decagon.
   (Treble level + Treble hit) instead of a built-in.
 - 2026-10-05 (draft) — Loud ↔ New: how much of each band's usual level comes
   off before the plate picks a figure.
+- 2026-10-16 (draft) — Mode ladder card: every figure's ring, the figures
+  on the plate, and Locked figure.
 - `#413` (2026-10-05, draft; replaces #366 and #361) — Toss on the drop, Powder colour, the
   Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
   an endless pull-back on the square plate. Then sand colour: Thrown colour
