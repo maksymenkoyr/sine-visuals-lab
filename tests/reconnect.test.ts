@@ -8,7 +8,7 @@ import {
   isTerminalClose,
   reconnectDelayMs,
 } from "../src/net/reconnect.ts";
-import { ROOM_CLOSE_DENIED } from "../server/roomRules.ts";
+import { ROOM_CLOSE_DENIED, ROOM_CLOSE_FLOOD } from "../server/roomRules.ts";
 
 const middle = () => 0.5;
 
@@ -69,7 +69,7 @@ describe("isTerminalClose", () => {
   });
 
   it("treats every ordinary close as a blink to retry", () => {
-    for (const code of [1000, 1001, 1005, 1006, 1011, 1012, 1013, 4000, 4001, 4002, 4004]) {
+    for (const code of [1000, 1001, 1005, 1006, 1011, 1012, 1013, 4000, 4001, 4002, 4004, ROOM_CLOSE_FLOOD]) {
       expect(isTerminalClose(code)).toBe(false);
     }
   });

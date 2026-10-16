@@ -1,6 +1,6 @@
 /**
  * A best-effort sliding-window limiter, one per Worker route that needs one
- * (room creation, TV adopt in server/worker.ts).
+ * (room creation, TV adopt and room connections in server/worker.ts).
  *
  * State lives in the isolate, so a determined client can exceed the limit
  * across edge locations — the real backstop for a public URL is a Cloudflare

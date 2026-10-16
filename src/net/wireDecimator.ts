@@ -1,8 +1,12 @@
 import type { WaveEnvelope } from "./protocol.ts";
 
+/** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
+export const BROADCAST_INTERVAL_MS = 1000 / 30;
+
 /**
- * Thins the host's per-render-tick frames to the wire rate (room.ts's
- * BROADCAST_INTERVAL_MS) without losing the one-tick edges.
+ * Thins the host's per-render-tick frames to the wire rate
+ * (BROADCAST_INTERVAL_MS, which room.ts decimates to; the room's frame budget
+ * is sized from it) without losing the one-tick edges.
  *
  * `onset` and `pulseOnset` are true on exactly one render tick, so a plain
  * "send every Nth tick" drops most of them: at 60 Hz down to 30 Hz, a hit

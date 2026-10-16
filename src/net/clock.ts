@@ -25,9 +25,9 @@ export function pickBestOffset(samples: ClockSample[]): number {
   return best.t1 - (best.t0 + best.t2) / 2;
 }
 
-const BURST_COUNT = 5;
-const BURST_SPACING_MS = 150;
-const RESYNC_INTERVAL_MS = 3000;
+export const BURST_COUNT = 5;
+export const BURST_SPACING_MS = 150;
+export const RESYNC_INTERVAL_MS = 3000;
 const SAMPLE_HISTORY = 8;
 
 /**

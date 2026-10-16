@@ -9,7 +9,10 @@ import {
 } from "../server/roomCore.ts";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
 import { DEVICE_LIMITS } from "../server/roomDevices.ts";
-import { ROOM_CLOSE_DENIED, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
+import { ROOM_CLOSE_DENIED, ROOM_CLOSE_FLOOD, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
+import { BROADCAST_INTERVAL_MS } from "../src/net/wireDecimator.ts";
+import { BURST_COUNT, BURST_SPACING_MS, RESYNC_INTERVAL_MS } from "../src/net/clock.ts";
+import { SILENCE_LIMIT_MS } from "../src/net/reconnect.ts";
 
 /** How often the old live publisher sent a patch while a control was being dragged.
  *  Nothing sends at that pace any more (a device sends on Play), but the room's
@@ -1047,6 +1050,141 @@ describe("the patch budget", () => {
     tv.clear();
     for (let n = 1; n <= LOOK_LIMITS.patchBurst + 5; n++) room.say(tv, flip(n));
     expect(tv.msgs("lookReject").every((m) => m.reason === "role")).toBe(true);
+  });
+});
+
+describe("the frame and ping budgets", () => {
+  /** The owner's laptop on its own input with a TV following it. */
+  async function feed(): Promise<{ room: Room; host: FakeSocket; tv: FakeSocket }> {
+    const room = new Room();
+    const host = await room.claimed();
+    const tv = await room.renderer();
+    tv.clear();
+    return { room, host, tv };
+  }
+  const ping = (room: Room, ws: FakeSocket): void => room.say(ws, { type: "ping", t0: room.host.time });
+
+  it("is sized well over what a device really sends", () => {
+    expect(LOOK_LIMITS.framesPerSec).toBeGreaterThanOrEqual((2 * 1000) / BROADCAST_INTERVAL_MS);
+    expect(LOOK_LIMITS.frameBurst).toBeGreaterThanOrEqual(SILENCE_LIMIT_MS / BROADCAST_INTERVAL_MS);
+    expect(LOOK_LIMITS.pingBurst).toBeGreaterThanOrEqual(3 * BURST_COUNT);
+    expect((LOOK_LIMITS.pingsPerSec * RESYNC_INTERVAL_MS) / 1000).toBeGreaterThanOrEqual(3);
+  });
+
+  it("relays every frame a feed sends at the wire's pace, for as long as it likes", async () => {
+    const { room, host, tv } = await feed();
+    const sends = Math.ceil((60 * 60 * 1000) / BROADCAST_INTERVAL_MS); // an hour
+    for (let i = 0; i < sends; i++) {
+      room.bytes(host);
+      room.host.time += BROADCAST_INTERVAL_MS;
+    }
+    expect(tv.frames().length).toBe(sends);
+    expect(host.closedWith).toBeNull();
+  });
+
+  it("relays the backlog a stalled connection delivers all at once", async () => {
+    const { room, host, tv } = await feed();
+    const backlog = Math.floor(SILENCE_LIMIT_MS / BROADCAST_INTERVAL_MS);
+    for (let i = 0; i < backlog; i++) room.bytes(host); // the clock never moves
+    for (let i = 0; i < 100; i++) {
+      room.host.time += BROADCAST_INTERVAL_MS;
+      room.bytes(host);
+    }
+    expect(tv.frames().length).toBe(backlog + 100);
+    expect(host.closedWith).toBeNull();
+  });
+
+  it("cuts a frame flood at the burst, and closes the socket a burst later", async () => {
+    const { room, host, tv } = await feed();
+    for (let i = 0; i < 2 * LOOK_LIMITS.frameBurst - 1; i++) room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+    expect(host.closedWith).toBeNull();
+    room.bytes(host);
+    expect(host.closedWith).toEqual({ code: ROOM_CLOSE_FLOOD, reason: "too fast" });
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+  });
+
+  it("lets a sender that slowed down pay off what it was dropped for, then relays again", async () => {
+    const { room, host, tv } = await feed();
+    for (let i = 0; i < 2 * LOOK_LIMITS.frameBurst - 10; i++) room.bytes(host);
+    room.host.time += 1000; // a second's refill still leaves it in debt
+    room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+    room.host.time += (1000 * LOOK_LIMITS.frameBurst) / LOOK_LIMITS.framesPerSec;
+    room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst + 1);
+    expect(host.closedWith).toBeNull();
+  });
+
+  it("charges frames from a device that is not a feed too", async () => {
+    const { room, tv } = await feed();
+    for (let i = 0; i < 2 * LOOK_LIMITS.frameBurst; i++) room.bytes(tv);
+    expect(tv.closedWith?.code).toBe(ROOM_CLOSE_FLOOD);
+  });
+
+  it("answers every ping clock sync sends, through reconnects and wake probes", async () => {
+    const room = new Room();
+    await room.claimed();
+    let answered = 0;
+    let sent = 0;
+    // An hour of a phone that drops and rejoins every five minutes: each socket
+    // starts with the connect burst, a wake probe beside every ping of it, then resyncs.
+    for (let socket = 0; socket < 12; socket++) {
+      const phone = await room.controller("phone");
+      const start = room.host.time;
+      for (let i = 0; i < BURST_COUNT; i++) {
+        room.host.time = start + i * BURST_SPACING_MS;
+        ping(room, phone);
+        ping(room, phone);
+        sent += 2;
+      }
+      for (let t = RESYNC_INTERVAL_MS; t < 5 * 60 * 1000; t += RESYNC_INTERVAL_MS) {
+        room.host.time = start + t;
+        ping(room, phone);
+        sent++;
+      }
+      answered += phone.msgs("pong").length;
+      expect(phone.closedWith).toBeNull();
+      room.close(phone);
+      room.host.time = start + 5 * 60 * 1000;
+    }
+    expect(answered).toBe(sent);
+  });
+
+  it("leaves a ping flood unanswered past the burst, and closes the socket a burst later", async () => {
+    const room = new Room();
+    await room.claimed();
+    const phone = await room.controller("phone");
+    for (let i = 0; i < 2 * LOOK_LIMITS.pingBurst - 1; i++) ping(room, phone);
+    expect(phone.msgs("pong").length).toBe(LOOK_LIMITS.pingBurst);
+    expect(phone.closedWith).toBeNull();
+    room.say(phone, { type: "ping", t0: "not even a number" });
+    expect(phone.closedWith?.code).toBe(ROOM_CLOSE_FLOOD);
+  });
+
+  it("keeps one budget per socket and per kind", async () => {
+    const { room, host, tv } = await feed();
+    const phone = await room.controller("phone");
+    for (let i = 0; i <= LOOK_LIMITS.pingBurst; i++) ping(room, phone);
+    expect(phone.msgs("pong").length).toBe(LOOK_LIMITS.pingBurst);
+    // The phone's empty ping budget is not the laptop's.
+    ping(room, host);
+    expect(host.msgs("pong").length).toBe(1);
+    // A laptop out of frames still gets its pings answered.
+    for (let i = 0; i <= LOOK_LIMITS.frameBurst; i++) room.bytes(host);
+    expect(tv.frames().length).toBe(LOOK_LIMITS.frameBurst);
+    ping(room, host);
+    expect(host.msgs("pong").length).toBe(2);
+  });
+
+  it("gives a reconnecting socket a fresh budget", async () => {
+    const { room, host, tv } = await feed();
+    for (let i = 0; i < LOOK_LIMITS.frameBurst + 5; i++) room.bytes(host);
+    room.close(host);
+    const again = await room.claimed();
+    tv.clear();
+    room.bytes(again);
+    expect(tv.frames().length).toBe(1);
   });
 });
 

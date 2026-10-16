@@ -61,6 +61,21 @@ export interface LookLimits {
    *  one press at a time, a few in a burst at most), which stays well inside it. */
   readonly patchBurst: number;
   readonly patchesPerSec: number;
+  /** A socket's feature-frame budget, a token bucket like the patch one. Every
+   *  frame the room receives is billed to it, and a relayed one is copied to
+   *  every follower. A device puts a frame on the wire at most every
+   *  BROADCAST_INTERVAL_MS (src/net/wireDecimator.ts), and the rate is twice that pace;
+   *  the burst holds the backlog a stalled connection delivers all at
+   *  once, up to the SILENCE_LIMIT_MS after which the client drops the socket
+   *  itself (src/net/reconnect.ts). Frames past it are dropped. */
+  readonly frameBurst: number;
+  readonly framesPerSec: number;
+  /** A socket's clock-sync budget: the burst covers the connect burst
+   *  (src/net/clock.ts `BURST_COUNT`) and a wake probe several times over, the
+   *  rate several resyncs (`RESYNC_INTERVAL_MS`) a second. A ping past it goes
+   *  unanswered. */
+  readonly pingBurst: number;
+  readonly pingsPerSec: number;
   /** The longest glide a patch may ask a screen to arrive over — the same
    *  ceiling as src/net/outputGlide.ts's GLIDE_MAX_MS (a test keeps them equal). */
   readonly maxGlideMs: number;
@@ -78,6 +93,10 @@ export const LOOK_LIMITS: LookLimits = {
   maxAdoptBodyBytes: 512,
   patchBurst: 40,
   patchesPerSec: 20,
+  frameBurst: 360,
+  framesPerSec: 60,
+  pingBurst: 20,
+  pingsPerSec: 2,
   maxGlideMs: 30_000,
 };
 

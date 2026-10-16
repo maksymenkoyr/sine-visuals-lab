@@ -7,7 +7,8 @@
  * can ship on either side first.
  *
  * Client to room:
- * - `ping { t0 }` — clock sync, any role; answered with `pong`.
+ * - `ping { t0 }` — clock sync, any role; answered with `pong`, unless the
+ *   socket has outrun its ping budget (server/lookDoc.ts `pingBurst`).
  * - `hello { scene, palette, viewport?, kind?, hasMic?, autoQuality? }` — a
  *   device announcing what it shows, and optionally what it is: its `kind` and
  *   whether it can open a microphone, the same two things the join URL
