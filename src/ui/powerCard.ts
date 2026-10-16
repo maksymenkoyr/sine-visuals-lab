@@ -94,7 +94,7 @@ export interface PowerStatus {
    *  or the dev `?quality=`/`?tier=` pin. Marked as recommended in the
    *  Quality row regardless of whether the user has overridden it. */
   recommended: QualityPreset;
-  /** Rendered-frame rate (app.ts's lastFps). */
+  /** Rendered-frame rate, averaged (render/fpsMeter.ts). */
   fps: number;
   /** Governor step index, 0 = full quality; null while a dev
    *  `?quality=`/`?tier=` pin has skipped the governor entirely (see

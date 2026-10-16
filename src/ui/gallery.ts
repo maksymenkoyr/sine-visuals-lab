@@ -12,7 +12,7 @@ import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
-import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
+import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, createRenderGate, targetFrameIntervalMs } from "../render/framePace.ts";
 import { getPowerMode } from "../render/powerMode.ts";
 import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
 import type { SceneStage } from "../render/scenes/index.ts";
@@ -616,7 +616,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
   let preview: PreviewRenderer | null = null;
   let tiles: Tile[] = [];
-  let lastDrawMs = 0;
+  const drawGate = createRenderGate();
   let visible = false;
   // True from show() until the next tick has run: that tick draws only scenes
   // already mounted — see tick()'s lazy-mount comment.
@@ -906,7 +906,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       root.style.display = "block";
       visible = true;
       justShown = true;
-      lastDrawMs = 0;
+      drawGate.reset();
     },
 
     hide(): void {
@@ -939,12 +939,11 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // the restore is coming. drawTo's own guard covers already-mounted ones.
       if (preview.isLost()) return;
       const intervalMs = tickIntervalMs(preset);
-      // shouldRenderFrame(), not a raw `<` comparison — see framePace.ts's
-      // header for why the naive comparison quantizes against vsync and
-      // silently loses a third of the intended rate, and for why the
-      // timestamp it keeps is nextRenderAnchor()'s, not simply `nowMs`.
-      if (!shouldRenderFrame(nowMs, lastDrawMs, intervalMs)) return;
-      lastDrawMs = nextRenderAnchor(nowMs, lastDrawMs, intervalMs);
+      // framePace.ts's gate, not a raw `<` comparison — see that file for why
+      // the naive comparison quantizes against vsync and silently loses a
+      // third of the intended rate, why the gate keeps nextRenderAnchor()'s
+      // grid rather than simply `nowMs`, and why it skips catch-up frames.
+      if (!drawGate.pass(nowMs, intervalMs)) return;
 
       const timeSec = nowMs / 1000;
       const live = deps.liveFrame();
