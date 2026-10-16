@@ -162,7 +162,7 @@ captions. Only the version card keeps GitHub's tag.
 
 **Rejected:**
 - the changelog montage as this video (2026-10-05): it lives on as the release video,
-  `/video-release-stable`;
+  `/video-release`;
 - slogans as the hook ("Your music, drawn live.", 2026-10-05): a statement about the product opens no
   loop. Replaced by the viral hook above, picked for an audience (steps 1–2).
 - keeping the last release's opening line by default (2026-10-05);

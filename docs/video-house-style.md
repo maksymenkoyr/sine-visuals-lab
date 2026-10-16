@@ -5,9 +5,9 @@ the header of `tools/promo/promo.mjs`):
 
 | Video | Skill | For | What it does |
 |---|---|---|---|
-| Release | `/video-release-stable` | people who already follow the app | shows what the last Stable release changed |
-| Hook | `/video-hook-stable` | strangers scrolling | the main ad: one viral hook, then proofs |
-| Explainer | `/video-explainer-stable` | someone already interested | calmly shows what the app is, its functions and use cases |
+| Release | `/video-release` | people who already follow the app | shows what the last Stable release changed |
+| Hook | `/video-hook` | strangers scrolling | the main ad: one viral hook, then proofs |
+| Explainer | `/video-explainer` | someone already interested | calmly shows what the app is, its functions and use cases |
 
 Each skill holds its own Shape (the user's calls for that video, with what they turned down). This
 file holds the calls that apply to every video. When a Shape and this file disagree, the Shape wins

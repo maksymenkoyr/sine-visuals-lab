@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The one runner for the promo videos: the release video, the hook video and the explainer all go
 // through these steps, and the playbooks (what to ask the user, how to judge each step) are the skills in
-// .claude/commands/ (video-release-stable, video-hook-stable, video-explainer-stable) with
+// .claude/commands/ (video-release, video-hook, video-explainer) with
 // docs/video-house-style.md.
 //
 //   node tools/promo/promo.mjs <step> [--video release|hook|explainer] [--work DIR] [--fmt v|h]
@@ -352,7 +352,7 @@ const steps = {
     run("node", [join(here, "deliver.mjs"), "--work", work, ...(o.dest ? ["--dest", o.dest] : [])]);
   },
   async all() {
-    if (!frames) { console.error("the explainer runs step by step: record, the prep scripts, plan, cards, render, check, deliver (see /video-explainer-stable)"); process.exit(2); }
+    if (!frames) { console.error("the explainer runs step by step: record, the prep scripts, plan, cards, render, check, deliver (see /video-explainer)"); process.exit(2); }
     if (o.song || o.bpm || !existsSync(join(work, "song.json"))) steps.song();
     for (const s of ["plan", "record", "cards", "render", "check", "deliver"]) await steps[s]();
   },
