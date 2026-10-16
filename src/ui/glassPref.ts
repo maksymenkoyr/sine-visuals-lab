@@ -9,14 +9,13 @@ import type { GlassLook } from "../render/glassBackdrop.ts";
  *   changes every frame) at full device resolution. That is a real GPU cost —
  *   measured 2026-09-29 at roughly 1 ms/frame on a light scene and 5+ ms on
  *   Caustics, and in #551 (2026-10-16) as most of what the open panel costs
- *   the GPU process. It is the default anyway: the frosted panel is the
- *   intended look, the quality governor (src/render/governor.ts) absorbs the
- *   cost on a scene that runs out of budget, and "Off" stays one click away
- *   in the Power card.
+ *   the GPU process. It is no longer the default, but "On" stays one click
+ *   away in the Power card, and the quality governor (src/render/governor.ts)
+ *   absorbs the cost on a scene that runs out of budget.
  * - Fast: the same glass drawn by the renderer (render/glassBackdrop.ts) from
  *   a small copy of the finished frame, under the surfaces that sit straight
  *   on the scene (ui/glassPanes.ts says which, and why the rest keep the
- *   browser's blur). Being tried: #561.
+ *   browser's blur). The default.
  * - Off: a darker flat tint rather than the lighter one the blur needs, to
  *   keep the text readable without it.
  *
@@ -57,7 +56,7 @@ import type { GlassLook } from "../render/glassBackdrop.ts";
 export type GlassMode = "off" | "fast" | "on";
 
 const STORAGE_KEY = "vibe.panelBlur";
-export const GLASS_MODE_DEFAULT: GlassMode = "on";
+export const GLASS_MODE_DEFAULT: GlassMode = "fast";
 const STORED: Record<GlassMode, string> = { off: "0", fast: "fast", on: "1" };
 
 /** The glass's blur and colour, for both the CSS filter (glassFilterCss) and

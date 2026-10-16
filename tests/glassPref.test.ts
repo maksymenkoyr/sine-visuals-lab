@@ -5,10 +5,10 @@ describe("glassPref", () => {
     vi.resetModules();
   });
 
-  it("defaults to the browser's blur and round-trips every mode", async () => {
+  it("defaults to Fast and round-trips every mode", async () => {
     const mod = await import("../src/ui/glassPref.ts");
     expect(mod.getGlassMode()).toBe(mod.GLASS_MODE_DEFAULT);
-    expect(mod.GLASS_MODE_DEFAULT).toBe("on");
+    expect(mod.GLASS_MODE_DEFAULT).toBe("fast");
     for (const mode of ["off", "fast", "on"] as const) {
       mod.setGlassMode(mode);
       expect(mod.getGlassMode()).toBe(mode);
@@ -20,8 +20,8 @@ describe("glassPref", () => {
     expect(parseGlassMode("1")).toBe("on");
     expect(parseGlassMode("0")).toBe("off");
     expect(parseGlassMode("fast")).toBe("fast");
-    expect(parseGlassMode(null)).toBe("on");
-    expect(parseGlassMode("garbage")).toBe("on");
+    expect(parseGlassMode(null)).toBe("fast");
+    expect(parseGlassMode("garbage")).toBe("fast");
   });
 
   it("writes the CSS filter from the look's numbers", async () => {
