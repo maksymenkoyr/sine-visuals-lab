@@ -928,7 +928,7 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
 }
 
 /** `setting` with the source whose choice is `from` re-pointed at shaping
- *  node `nodeId` (a wire's Shape button): it keeps its weight, role and
+ *  node `nodeId` (a wire's "+ Modifier" button): it keeps its weight, role and
  *  mute; Height and Every go, since they described the old reading and the
  *  node now owns how it reads. A "scene" setting, or no such source, comes
  *  back unchanged. */

@@ -424,16 +424,16 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
   const el = document.createElement("div");
   el.className = "vc-shape-col vc-scroll";
 
-  const heading = meterGroupHeading("Shaping");
+  const heading = meterGroupHeading("Modifiers");
   const blurb = document.createElement("div");
   blurb.style.cssText = blurbStyle;
-  blurb.textContent = "Changes the sound itself. Plug a node's jack into any setting.";
+  blurb.textContent = "Changes the sound itself. Plug a modifier's jack into any setting.";
 
   const addWrap = document.createElement("div");
   addWrap.style.cssText = addWrapStyle;
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.textContent = "+ New shaping node";
+  addBtn.textContent = "+ New modifier";
   addBtn.style.cssText = addBtnStyle;
   const chips = document.createElement("div");
   chips.style.cssText = chipsWrapStyle;
@@ -545,7 +545,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
     removeBtn.type = "button";
     removeBtn.textContent = "×";
     removeBtn.setAttribute("aria-label", `Remove ${label}`);
-    removeBtn.title = "Remove this shaping node — its wires are unplugged everywhere.";
+    removeBtn.title = "Remove this modifier — its wires are unplugged everywhere.";
     removeBtn.style.cssText = removeBtnStyle;
     removeBtn.addEventListener("click", () => {
       suppress = true;
@@ -567,12 +567,12 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
     const row = createMeterRow({
       label: `In: ${driveSourceLabel(node.src)}`,
       accent: color,
-      description: "This node takes the input node named here and sends a changed copy out of its jack. Plug the jack into any setting, like an input node's.",
+      description: "This modifier takes the input node named here and sends a changed copy out of its jack. Plug the jack into any setting, like an input node's.",
     });
     // A click on the row or its input port (inportEl sits inside the row)
     // pins the node; the jack's own click stops propagation before here.
     row.el.style.cursor = "pointer";
-    row.el.title = "Click to pin this node: its chain stays lit, and a click on an input jack makes it read that input.";
+    row.el.title = "Click to pin this modifier: its chain stays lit, and a click on an input jack makes it read that input.";
     row.el.addEventListener("click", () => deps.onNodePress(node.id));
     const inportEl = document.createElement("span");
     inportEl.className = "vc-shape-inport";
