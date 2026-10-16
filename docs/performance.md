@@ -44,7 +44,8 @@ backfills an older commit with today's instruments.
 - **Load bytes are exact** (gzip -9 of the built files each page fetched; the
   real CDN may use Brotli, which is a bit smaller).
 - Not covered: phones, TVs and low-end laptops (nothing to drive headlessly);
-  GPU memory (no web API); the pop-out output window and rooms.
+  GPU memory (no web API); rooms; and the pop-out output window, which
+  `docs/perf/scripts/outputIsolation.mjs` measures on its own (below).
 
 ## The other instruments
 
@@ -55,8 +56,19 @@ For digging into one finding after a snapshot points at it:
 - `docs/scenes/physarum2/scripts/perf/panelprof.mjs` — a CPU profile and
   every blocking GL read with the panel open; the tool behind the panel-lag
   fixes.
-- The Power card in the panel — live FPS, main thread, GPU and heap on a
-  real device, including the ones the snapshot can't reach.
+- `docs/perf/scripts/outputIsolation.mjs` — the pop-out output's missed
+  frames while the main window is busy (a busy loop, the panel's Picture
+  block, scene switches), the app's POP OUT next to a plain `noopener`
+  window; `outputProbes.mjs` beside it checks a second POP OUT press, a crash
+  in either window and Record's clip size, and `outputAggregate.mjs` sums
+  several runs.
+- `docs/perf/scripts/panelAB.mjs` — two builds of the app served side by
+  side, panel open, main-thread share and layout/paint counts interleaved
+  round by round; `panelDrawProbe.mjs` counts how often the panel draws and
+  what it draws while out of view.
+- The Power card in the panel — live FPS, Missed frames and Longest gap,
+  main thread, GPU and heap on a real device, including the ones the
+  snapshot can't reach.
 
 ## Standing decisions
 
@@ -67,6 +79,57 @@ For digging into one finding after a snapshot points at it:
 ## Dated findings
 
 Newest first. Each names the snapshot it came from.
+
+### 2026-10-15 — the performance series, `2026-10-15-7146dc38.json` → `2026-10-15-2813a7c6.json`
+
+Before is main just ahead of the series (7146dc38). After is main with #535,
+#534, #539, #541, #533, #532 and #537 merged (2813a7c6). The two were taken
+back to back. #538, still open then, was measured on top of after as a local
+merge, app section only.
+
+Conditions: M1 Pro, Retina canvas 3024×1890, with the user's Chrome running.
+The load average sat between 3 and 21, and one panel-open burst reached 44.
+So the app numbers below are medians of three interleaved rounds over the
+released scenes, not the single pass in the files.
+
+1. **A visit downloads about 8× less.**
+   - Gallery and a scene deep link: 5273 → 635 kB gzip. The TV page:
+     5013 → 374 kB.
+   - Media no longer comes with every page: 4553 → 0 kB (#532).
+   - The shared JS chunk lost its shader comments and indentation, 424 →
+     339 kB (#534). JS per page: 640 → 555 kB, and the TV's 449 → 364 kB.
+   - Fonts unchanged (69 kB). `size-budget.json` now holds today's
+     sizes, which include #530, merged right after. It added about
+     10 kB gzip to the TV and output pages and 9 kB to the gallery.
+2. **First draw comes 25–50 ms sooner** (median of three interleaved runs):
+   gallery 119 → 91 ms, a scene 128 → 80 ms, the TV 98 → 69 ms.
+3. **The pop-out no longer drops frames when the main window is busy**
+   (#541). Measured with `docs/perf/scripts/outputIsolation.mjs` on Caustics,
+   pressing the app's own POP OUT, as missed frames per 8 s over 4 reps:
+   - a busy main window: 120 → 0;
+   - the panel open at the Master card's Picture block: 107 → 0;
+   - idle: 0 in both.
+4. **Panel open, the main thread** (released scenes, median of three
+   rounds): 56% before and after the merged PRs, 43% with #538.
+   - Per scene: Physarum 2 60 → 50%, Sky 56 → 44%, Chladni 39 → 20%,
+     Caustics 56 → 41%.
+   - Over all scenes, #538 cut the panel-open share by more than 5 points
+     on 28 of 39, raised none, and roughly halved layout and style.
+   - With the panel open, the snapshot's fps and hitches also count the
+     panel's own WebGL draws, so they don't compare; read the main-thread
+     share.
+   - Panel closed, nothing moved: 7% main thread, 0 hitches, p95 about
+     18 ms, 60 fps.
+5. **Scene switches.**
+   - The tour visits each scene once, so it can't show #533's revisits. In
+     #533 itself, the longest frame gap after switching back to Fluid, Sky
+     or Storm went from 25–43 ms to 10 ms.
+   - First visits moved only within noise. The slowest are still Storm
+     (about 320–360 ms, its cloud bake) and Physarum 2 (about 180–200 ms).
+6. GPU per scene is unchanged (median ratio 1.000): no shader math changed.
+   Heap after GC across the whole tour: 6.4 → 10.7 MB before, 5.7 → 10.3 MB
+   after. The growth over a tour is the same in both and is still worth a
+   look.
 
 ### 2026-10-14 — first snapshot, `2026-10-14-5a44e63a.json`
 

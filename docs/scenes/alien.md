@@ -271,3 +271,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #532 (2026-10-15): the loops moved to `public/media/alien/` and download
   the first time the scene or its tile mounts, not on every page load; a
   show (the pop-out, a room with another device) still fetches them up front.
+  Measured headless, cache off: a 1280×800 gallery visit fetched 5351 KB
+  before and 735 KB after; a deep link to Alien still fetches its three
+  loops (about 4.3 MB), and so does a 1920×1080 gallery, where its tile mounts.

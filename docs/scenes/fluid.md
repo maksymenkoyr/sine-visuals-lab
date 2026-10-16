@@ -198,4 +198,4 @@ pivot above.
   outlines, through the MacCormack/beat-puff, mirror-mode, Auto-symmetry,
   Currents/neon-tone-map, and screen-space-lightning pivots described above.
 - #462 (draft, 2026-10-09): Rendering: the lightning bolt layer's render target (`fluidBolts.ts`) now comes from gl.ts's `createColorTarget`; no change to the look.
-- #533 (2026-10-15): the sim's passes (fluidSim.ts) look their uniforms up on first draw, and init() looks the display program's samplers up after every program is created, so a mount compiles all of the scene's programs at once. No change on screen.
+- #533 (2026-10-15): the sim's passes (fluidSim.ts) look their uniforms up on first draw, and init() looks the display program's samplers up after every program is created, so a mount compiles all of the scene's programs at once. No change on screen. Measured headless (Metal, M1 Pro): a first mount 78 → 32 ms, a revisit 50 → 3 ms, and the longest frame gap after switching back to Fluid 25–43 → 10 ms.
