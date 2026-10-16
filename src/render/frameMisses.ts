@@ -11,9 +11,10 @@
  * late, and counts as round(gap / interval) − 1 missed frames. The
  * threshold sits above what a healthy display produces at the cap. A refresh
  * rate the cap doesn't divide spaces frames unevenly (governor.ts's
- * MAX_ACHIEVABLE_MULT comment lists the cadences), and a frame one refresh
- * late on a fast display is caught up on the next tick by framePace.ts's
- * nextRenderAnchor, so neither loses a frame.
+ * MAX_ACHIEVABLE_MULT comment lists the cadences), and neither counts. A
+ * frame one refresh late on a fast display stays under the threshold too:
+ * the gate restarts its grid from it rather than drawing a catch-up frame
+ * (framePace.ts's CATCH_UP_GAP), so its gap is the only uneven one.
  *
  * Only gaps inside one steady run of drawing count. The caller calls
  * restart() wherever drawing stops or starts over: a scene mounting, the tab

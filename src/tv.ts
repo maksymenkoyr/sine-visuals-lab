@@ -14,7 +14,7 @@ import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
-import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { createRenderGate, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
@@ -221,7 +221,7 @@ let lastRafMs = 0;
 
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
 // with app.ts) — see that file for why the gate needs a tolerance at all.
-let lastRenderMs = 0;
+const renderGate = createRenderGate();
 let governor: QualityGovernor | null = null;
 
 // ---- Room, pairing and look state ----
@@ -900,8 +900,7 @@ async function main(): Promise<void> {
     driveEngine.accumulate(dtSec, gained, applySensitivity(gained, sensitivity, expansion).energy, anim, scene.id, scene.settings ?? []);
 
     const intervalMs = targetFrameIntervalMs(quality.preset);
-    if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
-    lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
+    if (!renderGate.pass(nowRafMs, intervalMs)) return;
 
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);

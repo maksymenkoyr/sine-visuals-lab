@@ -54,7 +54,8 @@ import {
   type QualityPreset,
   type QualitySettings,
 } from "./render/quality.ts";
-import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, createRenderGate, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { createFpsMeter } from "./render/fpsMeter.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, paletteRampHex, PALETTES, type Palette } from "./render/palette.ts";
@@ -577,8 +578,7 @@ let clipRecorder: ClipRecorder | null = null;
 let recordControls: RecordControls | null = null;
 let outputSens = 1;
 let outputExp = 1;
-let lastRenderFpsMs = 0;
-let lastFps = 0;
+const fpsMeter = createFpsMeter();
 const frameMisses = createFrameMisses();
 // A hidden tab draws nothing or draws unseen on the background clock: the gap
 // across it says nothing about late frames.
@@ -586,7 +586,7 @@ document.addEventListener("visibilitychange", () => frameMisses.restart());
 let resourceMeter: ResourceMeter | null = null;
 
 // Render-rate cap and its jitter-tolerant gate: framePace.ts (shared with tv.ts).
-let lastRenderMs = 0;
+const renderGate = createRenderGate();
 let lastPanelDrawMs = 0;
 
 /** Closed-loop counterpart to detectQuality(): steps `quality`'s numeric knobs
@@ -1846,7 +1846,7 @@ function wireDeviceMenu(): void {
       mode: powerMode,
       choice: previewActive ? previewChoice : qualityChoice,
       recommended: detectedPreset,
-      fps: lastFps,
+      fps: fpsMeter.read(),
       level: governor?.level ?? null,
       maxLevel: governor?.maxLevel ?? 0,
       fraction: governor?.fraction ?? 1,
@@ -2863,7 +2863,7 @@ async function boot(): Promise<void> {
         sceneId: scene.id,
         settings: scene.settings ?? [],
         quality: quality.preset,
-        fps: lastFps,
+        fps: fpsMeter.read(),
         vis: lastVis,
         anim: lastAnim,
         renderScale: renderScale(),
@@ -3289,10 +3289,10 @@ function tick(): void {
   // fired(), so it can't steal a grid setting's pending edge (drives.ts).
   const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   // The panel draws on a tick the scene renders (framePace.ts's gate, asked before
-  // drawScene() moves lastRenderMs) or once a full RENDER_FPS_CAP interval after
+  // drawScene() moves it) or once a full RENDER_FPS_CAP interval after
   // its last draw: a display faster than the cap redraws it once per scene frame,
   // and a lowered cap (Energy saving, the pop-out's preview) doesn't slow its meters.
-  const sceneDraws = shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs());
+  const sceneDraws = renderGate.due(nowRafMs, renderIntervalMs());
   const panelDraws = sceneDraws || shouldRenderFrame(nowRafMs, lastPanelDrawMs, 1000 / RENDER_FPS_CAP);
   if (panelDraws) lastPanelDrawMs = nowRafMs;
   syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
@@ -3322,13 +3322,8 @@ function drawScene(
 ): void {
   if (glLost) return;
   const intervalMs = renderIntervalMs();
-  if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
-  if (lastRenderFpsMs > 0) {
-    const renderDtMs = nowRafMs - lastRenderFpsMs;
-    if (renderDtMs > 0) lastFps = 1000 / renderDtMs;
-  }
-  lastRenderFpsMs = nowRafMs;
-  lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
+  if (!renderGate.pass(nowRafMs, intervalMs)) return;
+  fpsMeter.frame(nowRafMs);
 
   const resized = sizeCanvas();
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);

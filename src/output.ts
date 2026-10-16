@@ -14,7 +14,8 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects.ts";
-import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, createRenderGate, targetFrameIntervalMs } from "./render/framePace.ts";
+import { createFpsMeter } from "./render/fpsMeter.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { createOverlayLayer } from "./render/overlayLayer.ts";
 import { createFrameMisses } from "./render/frameMisses.ts";
@@ -145,9 +146,9 @@ const renderLatch = createRenderLatch();
 const driveEngine = createDriveEngine();
 let governor: QualityGovernor | null = null;
 let lastRafMs = 0;
-let lastRenderMs = 0;
-let lastRenderFpsMs = 0;
-let lastFps = 0;
+const renderGate = createRenderGate();
+/** The Output card's FPS readout (render/fpsMeter.ts), sent with the other readouts. */
+const fpsMeter = createFpsMeter();
 /** The Output card's Missed frames and Longest gap (render/frameMisses.ts),
  *  sent with the other readouts. */
 const frameMisses = createFrameMisses();
@@ -351,7 +352,7 @@ async function main(): Promise<void> {
       s: {
         preset: quality.preset,
         recommended: detectedPreset,
-        fps: lastFps,
+        fps: fpsMeter.read(),
         level: governor?.level ?? null,
         maxLevel: governor?.maxLevel ?? 0,
         fraction: governor?.fraction ?? 1,
@@ -404,10 +405,8 @@ async function main(): Promise<void> {
     driveEngine.accumulate(dtSec, frame, displayFrame.energy, anim, scene.id, scene.settings ?? []);
 
     const interval = power.mode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
-    if (!shouldRenderFrame(nowMs, lastRenderMs, interval)) return;
-    if (lastRenderFpsMs > 0 && nowMs > lastRenderFpsMs) lastFps = 1000 / (nowMs - lastRenderFpsMs);
-    lastRenderFpsMs = nowMs;
-    lastRenderMs = nextRenderAnchor(nowMs, lastRenderMs, interval);
+    if (!renderGate.pass(nowMs, interval)) return;
+    fpsMeter.frame(nowMs);
 
     // Resolution multiplies the quality's scale (governor steps included), so
     // it takes effect on this very resize — no remount, unlike a Quality change.

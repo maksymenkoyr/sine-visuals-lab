@@ -59,3 +59,60 @@ export function shouldRenderFrame(nowMs: number, lastRenderMs: number, targetInt
 export function nextRenderAnchor(nowMs: number, lastRenderMs: number, targetIntervalMs: number): number {
   return nowMs - lastRenderMs > 2 * targetIntervalMs ? nowMs : Math.min(nowMs, lastRenderMs + targetIntervalMs);
 }
+
+// A late frame leaves the grid behind it: the anchor steps one interval while
+// the frame landed later than that, so on a display faster than the cap the
+// next tick or two would pass the gate at once and draw back to back — on a
+// 120 Hz panel, one 33 ms frame and then two 8 ms ones. Those extra
+// frames are a stutter of their own, landing just when the machine is
+// busiest. So a tick closer than CATCH_UP_GAP intervals to the last drawn
+// frame doesn't draw: the grid restarts from that late frame, and the next
+// frame comes one interval after it.
+//
+// It has to sit above one tick of a display twice as fast as the cap (half an
+// interval: the catch-up on a 120 Hz panel under the 60 cap) and below the
+// shortest gap a healthy display draws at the cap, which is one tick of a
+// 100 Hz panel (0.6 of an interval). Other refresh rates the cap doesn't
+// divide also draw some gaps shorter than an interval, all of them longer
+// than that one.
+export const CATCH_UP_GAP = 0.55;
+
+/** One loop's render gate: shouldRenderFrame()'s grid, moved on by
+ *  nextRenderAnchor(), and the catch-up rule above. Each loop that draws on
+ *  rAF owns one. */
+export interface RenderGate {
+  /** Whether this tick draws. Call once per tick, and draw when it says yes:
+   *  the gate counts the frame as drawn. */
+  pass(nowMs: number, intervalMs: number): boolean;
+  /** What pass() would answer, without moving the gate. */
+  due(nowMs: number, intervalMs: number): boolean;
+  /** Drawing starts over: the next tick draws, measured from nothing. */
+  reset(): void;
+}
+
+export function createRenderGate(): RenderGate {
+  /** nextRenderAnchor()'s grid: what shouldRenderFrame() measures from. */
+  let anchorMs = 0;
+  /** When the last frame was really drawn; 0 before the first. */
+  let drawnMs = 0;
+  const catchUp = (nowMs: number, intervalMs: number) => drawnMs > 0 && nowMs - drawnMs < CATCH_UP_GAP * intervalMs;
+  return {
+    pass(nowMs, intervalMs) {
+      if (!shouldRenderFrame(nowMs, anchorMs, intervalMs)) return false;
+      if (catchUp(nowMs, intervalMs)) {
+        anchorMs = drawnMs;
+        return false;
+      }
+      anchorMs = nextRenderAnchor(nowMs, anchorMs, intervalMs);
+      drawnMs = nowMs;
+      return true;
+    },
+    due(nowMs, intervalMs) {
+      return shouldRenderFrame(nowMs, anchorMs, intervalMs) && !catchUp(nowMs, intervalMs);
+    },
+    reset() {
+      anchorMs = 0;
+      drawnMs = 0;
+    },
+  };
+}
