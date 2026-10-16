@@ -63,7 +63,10 @@ import { createProgram, type GLProgram } from "./gl.ts";
  * signalled, however little is read, and on an otherwise idle context too;
  * with a quiet GPU the same call is nearly free. A run sits in one state or
  * the other for its whole length (issue #550). Neither a fence taken after
- * the frame's last draw nor a direct `readPixels` avoids it. So the cost is
+ * the frame's last draw nor a direct `readPixels` avoids it, and nor do the
+ * promise-shaped reads: `VideoFrame.copyTo` (of the canvas, of a 2D copy or
+ * of a `createImageBitmap` thumbnail) and `getImageData` each block the main
+ * thread as long, or longer when the GPU process is quiet. So the cost is
  * cut by making fewer calls, not cheaper ones: the pack buffer holds up to
  * MAX_READ_BATCH thumbnails (capture() writes each into the next slot), and
  * one `getBufferSubData` brings back every slot filled so far. How many slots
