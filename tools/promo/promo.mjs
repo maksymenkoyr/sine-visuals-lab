@@ -6,7 +6,7 @@
 //
 //   node tools/promo/promo.mjs <step> [--video release|hook|explainer] [--work DIR] [--fmt v|h]
 //        [--version 0.3.0] [--song file|link] [--look link] [--dest DIR] [--drop-beat N] [--bpm N]
-//        [--base url] [--print-plan] [--section N|N-M] [take|clip name ...]
+//        [--base url] [--pr N] [--print-plan] [--section N|N-M] [take|clip name ...]
 //
 // The pipeline:  song -> plan -> record -> cards -> render -> check -> deliver   (`all` runs them)
 //
@@ -17,7 +17,7 @@
 // section, or the whole `render`, draws again only the segments the edit changed.
 //
 //   step     what it does                                     file that runs it            writes (in <work>)
-//   notes    the Stable release's page, for drafting lines    gh                           release-notes.md
+//   notes    the Stable release's page, for drafting lines    gh (--pr: release-notes.mjs) release-notes.md
 //   song     beat grid + first drop (or the mix.json mix)     song.py, mix.py              song.json, song.wav
 //   plan     the cut list, then the approval table            shapes/<video>.py, cuts.py   cuts.json
 //   record   the footage (needs the Metal Mac and live        capture.mjs --take (frames   record.json, mic.wav,
@@ -37,6 +37,12 @@
 // (--version overrides what Stable serves) and today's date for the explainer. song.wav and look.txt carry
 // over from the same video's earlier tags, then the older tools/.cache/promo/v* folders, then the other
 // videos' folders (remembered()). A mix is built only when <work>/mix.json exists.
+//
+// --pr N works on a release before it is merged, from its open release pull request: the version is the
+// one in its title (tools/release-pr.mjs titles it with what the merge will get), `notes` writes the page
+// the GitHub Release will open with (tools/release-notes.mjs on the PR's body, up to its head), and the
+// recorder films Insiders, which already serves main, the PR's head. The work folder is the same v<version>
+// one a run after the merge uses, so nothing is redone then; only the footer's label differs on Insiders.
 //
 // The data files and who reads them (each file's own header has the format):
 //   lines.json     written by hand per video (release: demos and groups; hook: opening and proofs); read by
@@ -63,7 +69,8 @@
 // --print-plan on record lists the captures it would make and launches nothing (it does rewrite
 // record.json, which is derived from cuts.json and song.json).
 // Needs macOS (the recorder runs on the Metal GPU, software rendering stutters), uv, Playwright's
-// Chromium, and records the DEPLOYED site (--base, default Stable), so run it after the release is live.
+// Chromium, and records the DEPLOYED site (--base, default Stable, or Insiders with --pr), so run it after
+// the release is live or with --pr.
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -77,7 +84,7 @@ const { values: o, positionals } = parseArgs({
     video: { type: "string" }, work: { type: "string" }, fmt: { type: "string" }, dest: { type: "string" },
     "print-plan": { type: "boolean" }, section: { type: "string" },
     version: { type: "string" }, song: { type: "string" }, look: { type: "string" },
-    "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" },
+    "drop-beat": { type: "string" }, bpm: { type: "string" }, base: { type: "string" }, pr: { type: "string" },
   },
 });
 const STEPS = ["notes", "song", "plan", "record", "cards", "compose", "encode", "render", "check", "deliver", "all"];
@@ -92,6 +99,7 @@ const UV_DEPS = {
 };
 const uvArgs = (deps, script, args) => ["run", "-q", ...deps.flatMap((d) => ["--with", UV_DEPS[d]]), "python", script, ...args];
 const STABLE = "https://www.sinevisualslab.com";
+const INSIDERS = "https://insiders.sinevisualslab.com";
 
 const cache = resolve(here, "../.cache/promo");
 const VIDEOS = ["release", "hook", "explainer"];
@@ -105,8 +113,26 @@ if (o.section && !(frames && ["record", "compose", "encode", "render"].includes(
   console.error("--section goes with record, compose, encode or render, on the release or hook video"); process.exit(2);
 }
 
-// Stable's version, fetched only when a release or hook step needs it and --version did not say.
+// The --pr release pull request, read once.
+let prView;
+function releasePr() {
+  if (!prView) {
+    prView = JSON.parse(execFileSync("gh", ["pr", "view", o.pr, "--json", "title,body,headRefName,state"], { encoding: "utf8" }));
+    // A merged PR's head (main) has moved on past the release, and its GitHub Release exists: drop --pr.
+    if (prView.state !== "OPEN") { console.error(`#${o.pr} is ${prView.state.toLowerCase()}: run without --pr`); process.exit(2); }
+  }
+  return prView;
+}
+
+// Stable's version (or the --pr release's), fetched only when a release or hook step needs it and
+// --version did not say.
 async function version() {
+  if (!o.version && o.pr) {
+    const { title } = releasePr();
+    o.version = title.match(/\d+\.\d+\.\d+/)?.[0];
+    if (!o.version) { console.error(`#${o.pr}: no version in its title "${title}"`); process.exit(2); }
+    console.log(`version ${o.version} (release PR #${o.pr})`);
+  }
   if (!o.version) {
     o.version = (await (await fetch(`${STABLE}/version.json`)).json()).version;
     console.log(`version ${o.version} (what Stable serves now)`);
@@ -135,8 +161,8 @@ function remembered(file) {
 if (o.look) writeFileSync(join(work, "look.txt"), o.look.trim() + "\n");
 const lookFile = frames && ["record", "all"].includes(step) ? remembered("look.txt") : null;
 const look = o.look || (lookFile && readFileSync(lookFile, "utf8").trim());
-const base = o.base || STABLE;
-const env = { ...process.env, PROMO_WORK: work, ...(look ? { PROMO_LOOK: look } : {}), ...(o.base ? { BASE: o.base } : {}) };
+const base = o.base || (o.pr ? INSIDERS : STABLE);
+const env = { ...process.env, PROMO_WORK: work, ...(look ? { PROMO_LOOK: look } : {}), ...(base !== STABLE ? { BASE: base } : {}) };
 const run = (cmd, args, extra = {}) => {
   const r = spawnSync(cmd, args, { stdio: "inherit", env: { ...env, ...extra } });
   if (r.status !== 0) { console.error(`\n${cmd} ${args[0] ?? ""} failed (${r.status})`); process.exit(r.status || 1); }
@@ -187,7 +213,17 @@ function captureTakes(names) {
 
 const steps = {
   async notes() {
-    const body = execFileSync("gh", ["release", "view", `v${await version()}`, "--json", "body", "-q", ".body"], { encoding: "utf8" });
+    let body;
+    if (o.pr) {
+      const { body: prBody, headRefName } = releasePr();
+      const repo = resolve(here, "../..");
+      execFileSync("git", ["fetch", "-q", "origin", headRefName], { cwd: repo });
+      writeFileSync(join(work, "pr-body.md"), prBody);
+      body = execFileSync("node", ["tools/release-notes.mjs", "--tag", `v${await version()}`, "--to", `origin/${headRefName}`,
+        "--pr-body", join(work, "pr-body.md")], { cwd: repo, encoding: "utf8" });
+    } else {
+      body = execFileSync("gh", ["release", "view", `v${await version()}`, "--json", "body", "-q", ".body"], { encoding: "utf8" });
+    }
     writeFileSync(join(work, "release-notes.md"), body);
     console.log(`wrote ${join(work, "release-notes.md")}`);
   },

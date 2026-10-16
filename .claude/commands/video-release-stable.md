@@ -14,6 +14,9 @@ All commands are `node tools/promo/promo.mjs <step> --video release`.
 ## Inputs
 
 - **Version**: none needed; the engine takes what Stable serves now.
+- **Before the merge**: `--pr <release PR>` on every step makes the video from the open release pull
+  request instead (the `promo.mjs` header says what changes). Its written notes come from `/release`,
+  so run that first. The takes film Insiders, so the footer label in a shot is the Insiders one.
 - **Song**: `--song <file or link>`; without it the last release's song is reused.
 - **Opening look**: `--look "<Looks-card share link>"`; without it the last release's look is reused.
   With none at all the opening is a plain Physarum 2 stand-in: say so.
