@@ -33,10 +33,16 @@ A browser-based, real-time WebGL2 audio visualizer.
   `low dif`) and, when a person is needed at some
   point or likely (over 30%), `human`. `docs/issue-labels.md` has the rules;
   a hook refuses `gh issue create` without a difficulty label.
-- Hand a change to a `haiku-coder` agent when I ask, or unasked when it's
-  plainly large and mechanical (new modules with tests, one edit across many
-  files). If it might fit but isn't obvious, suggest it; don't weigh it.
-  Its prompt holds the plan: each file, edit and check. Read its diff before
+- An agent is one subagent this session starts and reads back, like
+  `haiku-coder`. A workflow is a script in `.claude/workflows/` that runs
+  several agents, like `/plan-code-review`. Start a workflow only when I type
+  its command or say "workflow"; never on your own.
+- Once a change is settled (I asked for it, straight away or after we
+  discussed or researched it), hand it to a `haiku-coder` agent when I name
+  it ("haiku-coder", "haiku coder"), or unasked when it's plainly large and
+  mechanical (new modules with tests, one edit across many files). If it
+  might fit but isn't obvious, suggest it; don't weigh it. The agent's
+  prompt holds the plan: each file, edit and check. Read its diff before
   `/ship`.
 - Finish every change with `/ship`, and close a session with `/wrap`.
 
