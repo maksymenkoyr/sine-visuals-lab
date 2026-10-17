@@ -18,8 +18,9 @@
   // Run by tools/check.mjs through npx, which knip can't see. jscpd is
   // reached by its launcher's path under node_modules (tools/dupesLib.mjs).
   "ignoreDependencies": ["@ast-grep/cli", "@biomejs/biome", "cloudflare", "jscpd"],
-  // uv is a system tool the promo scripts call, not an npm package.
-  "ignoreBinaries": ["uv"],
+  // uv is a system tool the promo scripts call, osascript the macOS one
+  // tools/mic-gap.mjs sets the output volume with; neither is an npm package.
+  "ignoreBinaries": ["uv", "osascript"],
   // make-icons.mjs imports this inside a page served by Vite, from the site root.
   "ignoreUnresolved": ["/src/ui/brandMark.ts"]
 }
