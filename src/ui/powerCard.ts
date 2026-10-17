@@ -584,8 +584,8 @@ function describeStatus(status: PowerStatus, accent: string): { text: string; do
 // The status line: the same small-caps mono register as the Bands card's
 // "● SYNTHETIC" source line (deviceMenu.ts's statusTextStyle), a shade
 // brighter since here it's the headline, not a footnote. It's a .vc-row so
-// hovering or tapping it unfolds the explanation the way every row's hint
-// does; the hairline beneath closes the header block the way the Bands
+// hovering or tapping it shows the explanation beside the panel the way
+// every row's hint does (rowHints.ts); the hairline beneath closes the header block the way the Bands
 // card's does.
 const statusLineStyle = `display: flex; align-items: center; gap: 7px; min-height: 16px;`;
 const statusTextStyle = `

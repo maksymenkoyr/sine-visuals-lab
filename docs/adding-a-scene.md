@@ -43,8 +43,8 @@ this repo. `src/render/scenes/privateScenes.ts` has the contract.
    calls `fired()` every frame, and scales its reaction by
    `drives.hitSize(key)` (that header's "Hit drivers"; `tests/hitDrivers.test.ts`
    checks every scene). `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
-   are what the user sees (`description` is the hint that unfolds under the row
-   on hover/focus; `group` is a closed vocabulary — see `SETTING_GROUPS`'s own
+   are what the user sees (`description` is the hint shown beside the panel
+   while the row is hovered or focused; `group` is a closed vocabulary — see `SETTING_GROUPS`'s own
    doc comment in `sceneSettings.ts` for the rule that picks one);
    `type: "boolean"` renders a toggle instead, and `type: "enum"` with
    `options` renders a strip of named chips whose index is the stored value.

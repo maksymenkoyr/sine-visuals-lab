@@ -94,6 +94,7 @@ import {
   shapingNodeLabel,
 } from "./driveSources.ts";
 import { addShapingNode, getShapingNode, listShapingNodes, updateShapingNode } from "../render/shapingNodes.ts";
+import { installRowHints } from "./rowHints.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
@@ -1933,6 +1934,8 @@ const formatSetting = (value: number) => value.toFixed(2);
 
 export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ensureControlsStyles();
+  // Every row's hint shows beside the panel, not unfolded in it (rowHints.ts).
+  installRowHints();
 
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
@@ -4861,7 +4864,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   window.addEventListener("resize", scheduleCableRecompute);
   // Recompute triggers: scroll (columns and root), resize, and a
   // ResizeObserver on the columns and every card. A column is a fixed-height
-  // scroller, so a card growing inside it (a .vc-hint unfolding) never resizes
+  // scroller, so a card growing inside it (a row's signal strip, .vc-reads,
+  // unfolding; row hints no longer grow a card, rowHints.ts) never resizes
   // the column; without per-card observation cables stay put while their jacks
   // move. Card fold/unfold rides refreshColumnsFold's MutationObserver.
   const cableColumnsRO = new ResizeObserver(scheduleCableRecompute);

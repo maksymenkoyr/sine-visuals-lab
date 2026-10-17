@@ -235,8 +235,7 @@ export interface PairWords {
      *  own-strain meaning (`defineItemPairs`'s `diagonal: false`). */
     ownNote: string;
     /** The own-trail row's `.vc-hint` — hidden until that row wakes
-     *  (hover/focus), same as every other row's hint (controlsTheme.ts's
-     *  `.vc-row:hover .vc-hint`). */
+     *  (hover/focus), same as every other row's hint (src/ui/rowHints.ts). */
     ownHint: string;
     pairs: string;
     /** The pairs row's `.vc-hint`. The status line itself (`statusIdle`

@@ -8,7 +8,8 @@
  *
  * One entry point, `setHintText`, used by every hint surface in place of
  * `textContent =`: the panel rows' `.vc-hint` (controlsKit.ts,
- * audioMeters.ts, powerCard.ts, deviceMenu.ts), the patch bay's instant
+ * audioMeters.ts, powerCard.ts, deviceMenu.ts; rowHints.ts copies it, swatches
+ * and all, beside the panel), the patch bay's instant
  * tooltip (tooltip.ts) and the pinned patch panel's bottom hint line
  * (deviceMenu.ts's buildPatchPanel). A new hint that goes through it gets
  * its swatches with no extra work. Native `title` tooltips can't hold an
