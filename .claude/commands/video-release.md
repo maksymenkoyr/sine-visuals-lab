@@ -78,8 +78,9 @@ calm cuts. Agreed over six rounds on the v0.2.0 video (2026-10-03/04).
 
 1. **Opening look**: the user's look, a second, untouched, reacting to the song.
 2. **Version card**: held a couple of seconds over the look. GitHub-release flavoured: a green tag
-   icon, the version, the app name under it. Its approved size is the v0.2.0 one; the hook video's
-   slimmer card is the user's call to make here (asked 2026-10-05, not yet answered).
+   icon, the version, the app name under it. The v0.2.0 card's width and type, with smaller gaps above
+   and below the text (2026-10-17, replacing its taller block); the user picked it over the hook
+   video's slimmer card and two lighter, narrower ones.
 3. **Demos**: the song's drop lands on the first. One caption at a time along the bottom; the next
    slides in as the old one leaves (plain translucent panel, white hairline, group name and n / N).
    - Interface demos: the camera leans toward the part that changes.

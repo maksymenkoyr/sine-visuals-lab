@@ -62,7 +62,7 @@ const capCss = `${base}
 // GitHub's release header: a green tag and the version (its "Latest" badge was tried; the user cut it)
 const introCss = `${base}
 body{width:1080px;height:1920px;position:relative}
-.v{position:absolute;left:70px;top:760px;width:${W}px;height:420px;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
+.v{position:absolute;left:70px;top:815px;width:${W}px;height:310px;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
 .t{display:flex;align-items:center;gap:26px;font-size:112px;font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 16px rgba(0,0,0,.7)}
 .s{display:flex;align-items:center;gap:20px;font-size:36px;color:#b6c0cc;font-weight:500;text-shadow:0 1px 8px rgba(0,0,0,.7)}
