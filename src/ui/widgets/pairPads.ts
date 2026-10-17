@@ -170,6 +170,10 @@ import { watchSize, type WatchedSize } from "../onScreen.ts";
  * `vc-pad-sel`/`vc-pad-dim`/`vc-own-sel`/`vc-own-dim` rules it drove are
  * gone; itemBoxes.ts's own box selection (the strain rows below the boxes)
  * is unaffected.
+ *
+ * **Slider values are voiced.** Each own-trail fader is a `role="slider"`
+ * whose `aria-valuetext` is the text its visible readout shows, so a screen
+ * reader says the same value the person sees.
  */
 
 export interface PairPadsSpec {
@@ -498,6 +502,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     thumb: HTMLElement;
     fill: HTMLElement;
     valueEl: HTMLElement;
+    fader: HTMLElement;
     k: number;
   }
   const ownFaders: OwnFader[] = [];
@@ -574,7 +579,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
     box.append(code, fader, valueEl);
     ownStripEl.appendChild(box);
-    ownFaders.push({ thumb, fill, valueEl, k });
+    ownFaders.push({ thumb, fill, valueEl, fader, k });
   }
 
   // --- Row 3: pairs status + pads grid ------------------------------------
@@ -1181,7 +1186,14 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
         // Numbers only (2026-09-27 feedback: the band words read as
         // "very confusing") — PAIR_WORDS' bands stay as data (like
         // showRelations, unused by default) rather than deleted.
-        setLiveText(f.valueEl, fmtSigned(v));
+        const readout = fmtSigned(v);
+        setLiveText(f.valueEl, readout);
+        // The fader's value text is that readout, written only when it
+        // changes: this loop runs every tick.
+        if (f.fader.getAttribute("aria-valuetext") !== readout) {
+          f.fader.setAttribute("aria-valuenow", v.toFixed(2));
+          f.fader.setAttribute("aria-valuetext", readout);
+        }
       }
     }
 
