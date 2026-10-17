@@ -59,10 +59,12 @@ const capCss = `${base}
 .top span:last-of-type{letter-spacing:.04em}
 .t{font-size:40px;line-height:1.2;font-weight:600;text-shadow:0 1px 10px rgba(0,0,0,.8);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 `;
-// GitHub's release header: a green tag and the version (its "Latest" badge was tried; the user cut it)
+// GitHub's release header: a green tag and the version (its "Latest" badge was tried; the user cut it).
+// The card is centred on y 970 and sized by its padding, the gap above and below the text the user
+// approved on 2026-10-17, with or without a subtitle line.
 const introCss = `${base}
 body{width:1080px;height:1920px;position:relative}
-.v{position:absolute;left:70px;top:815px;width:${W}px;height:310px;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
+.v{position:absolute;left:70px;top:970px;transform:translateY(-50%);width:${W}px;padding:53px 0;border-radius:14px;background:rgba(13,17,23,.5);border:2px solid rgba(240,246,252,.22);
  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
 .t{display:flex;align-items:center;gap:26px;font-size:112px;font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 16px rgba(0,0,0,.7)}
 .s{display:flex;align-items:center;gap:20px;font-size:36px;color:#b6c0cc;font-weight:500;text-shadow:0 1px 8px rgba(0,0,0,.7)}
@@ -104,7 +106,7 @@ for (const g of lines.groups) {
 }
 await p.setViewportSize({ width: 1080, height: 1920 });
 await shot(`<div class="v"><div class="t">${tag("#3fb950", 84)}<span>${esc(lines.title)}</span></div>
-  <div class="s"><span>${esc(lines.subtitle || "")}</span></div></div>`, `${OUT}/intro.png`, introCss);
+  ${lines.subtitle ? `<div class="s"><span>${esc(lines.subtitle)}</span></div>` : ""}</div>`, `${OUT}/intro.png`, introCss);
 // device tags for the room's split view
 await p.setViewportSize({ width: 220, height: 56 });
 await p.setViewportSize({ width: 320, height: 56 });
