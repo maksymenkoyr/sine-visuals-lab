@@ -308,6 +308,36 @@ describe("plate response", () => {
     expect(modes[0]).toMatchObject({ n: 1, m: 2, weight: 1 });
   });
 
+  it("each active mode names its own table row", () => {
+    const modes = run(createPlateResponse(), tone(10), 1);
+    for (const m of modes) expect(MODE_TABLE[m.index]).toMatchObject({ n: m.n, m: m.m });
+  });
+
+  it("a locked figure takes the whole plate, through music and silence, while every mode keeps ringing", () => {
+    const lock = 7;
+    const r = createPlateResponse();
+    const loud = run(r, tone(3), 1, inputs({ lock }));
+    expect(loud[0]).toMatchObject({ ...MODE_TABLE[lock], index: lock, weight: 1 });
+    for (let k = 1; k < ACTIVE_MODES; k++) expect(loud[k].weight).toBe(0);
+    expect(Math.max(...r.amplitudes)).toBeGreaterThan(0);
+    const quiet = run(r, SILENCE, 1, inputs({ lock }));
+    expect(quiet[0]).toMatchObject({ index: lock, weight: 1 });
+  });
+
+  it("an out-of-table lock is ignored", () => {
+    const plain = run(createPlateResponse(), tone(10), 1);
+    const top = { n: plain[0].n, m: plain[0].m };
+    for (const lock of [-1, MODE_TABLE.length, 2.5]) expect(run(createPlateResponse(), tone(10), 1, inputs({ lock }))[0]).toMatchObject(top);
+  });
+
+  it("letting go of a lock hands the plate back to the music", () => {
+    const r = createPlateResponse();
+    const free = run(createPlateResponse(), tone(10), 2);
+    const lock = (free[0].index + 5) % MODE_TABLE.length;
+    run(r, tone(10), 1, inputs({ lock }));
+    expect(run(r, tone(10), 1)[0].index).toBe(free[0].index);
+  });
+
   it("a sharper resonance hands the dominant mode a bigger share", () => {
     const damped = run(createPlateResponse(), tone(10), 1, inputs({ resonance: 0 }));
     const sharp = run(createPlateResponse(), tone(10), 1, inputs({ resonance: 1 }));

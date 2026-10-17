@@ -850,14 +850,14 @@ export function sampleBake(bake: PlateBake, layer: number, x: number, y: number)
   return out;
 }
 
-/** A baked shape's raw evaluator, unscaled, for tests: f, df/dx, df/dy of
- *  every mode at one point. */
-const testSources = new Map<number, ShapeSource>();
+/** A baked shape's raw evaluator, unscaled, for tests and the Mode ladder's
+ *  thumbnails: f, df/dx, df/dy of every mode at one point. */
+const fieldSources = new Map<number, ShapeSource>();
 export function plateFieldAt(shape: number, x: number, y: number): Float64Array {
-  let src = testSources.get(shape);
+  let src = fieldSources.get(shape);
   if (!src) {
     src = sourceFor(shape);
-    testSources.set(shape, src);
+    fieldSources.set(shape, src);
   }
   const out = new Float64Array(3 * src.count);
   src.at(x, y, out);
