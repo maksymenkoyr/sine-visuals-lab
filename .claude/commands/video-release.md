@@ -93,6 +93,8 @@ calm cuts. Agreed over six rounds on the v0.2.0 video (2026-10-03/04).
 4. **Change lists**: every group over steady scene footage, as a list card held low in the frame
    (a header bar with the group name and a count, rows divided by rules), its rows scrolling through
    like a carousel: a new row comes in at the bottom as the top one leaves. Lists stay complete.
+   The user replaced this on 2026-10-18 (not built yet, #586): one list filling the screen over a
+   dimmed scene, of every change not shown as a demo, running quickly through them.
 5. **End**: the last list is cut away on a beat and the scene holds a couple of seconds; the video
    stops on a bar line.
 
