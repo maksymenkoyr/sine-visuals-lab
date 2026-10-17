@@ -4,9 +4,18 @@
 // tools/promo/takes.json. Run by `capture.mjs --take NAME --work DIR` (shot contract: ctx in, {casts,
 // gate} out; see its header). The flow: open, setup, tracker, beat clock, cast, script, then track.json.
 // Page helpers: shots/lib/app.mjs.
-import { open, setMouse, openPanel, beatClock, sleep, moveTo, drag, centerOf, scrollTextTo, clickText, press, P, BPM, PX, sliderOf, installTracker } from "./lib/app.mjs";
+import { open, setMouse, openPanel, hideChrome, beatClock, sleep, moveTo, drag, centerOf, scrollTextTo, clickText, press, P, BPM, PX, sliderOf, installTracker } from "./lib/app.mjs";
 
 const at = (bc, b) => bc.waitBeat(b);
+// The cursor glides to a panel text half a beat early, and the click lands on beat b.
+const tapAt = async (page, bc, b, text) => {
+  await at(bc, b - 0.5);
+  const c = await centerOf(page, text, { minX: PX });
+  if (c) await moveTo(page, c.x, c.y, 0.4 * P);
+  await at(bc, b);
+  await clickText(page, text);
+};
+const hold = async (page, bc, b0, b1, key) => { await at(bc, b0); await page.keyboard.down(key); await at(bc, b1); await page.keyboard.up(key); };
 
 const UI = {
   ui_strains: {
@@ -112,6 +121,62 @@ const UI = {
         await drag(page, s.x0 + s.w * s.frac, s.y, s.x0 + s.w * f1, s.y, ms);
       };
       await job(0.0, "Scale", 0.5, 0.95, 700); await job(2.0, "Expansion", 0.5, 0.1, 700); await job(4.0, "Scale", 0.95, 0.1, 700); await job(6.0, "Expansion", 0.1, 0.92, 700);
+    },
+  },
+
+  ui_sparkle: {
+    park: true, track: "sparkle", beats: 8,
+    setup: async (page) => { await openPanel(page); await sleep(900); await scrollTextTo(page, "Sparkle effect", "center"); await sleep(700); await page.mouse.move(120, 500); },
+    script: async (page, bc) => {
+      for (const [b, t] of [[0, "Rings"], [1.5, "Prism"], [3, "Bell"], [5, "Bloom"], [6.5, "Swell"]]) await tapAt(page, bc, b, t);
+    },
+  },
+
+  // Four pads saved in setup, one per released scene; the script fires two of them by key.
+  ui_set: {
+    park: true, track: "set", beats: 8,
+    setup: async (page) => {
+      await openPanel(page); await sleep(900); await scrollTextTo(page, "Set", "center"); await sleep(500);
+      for (const scene of ["chladni", "physarum2", "sky", null]) {
+        await clickText(page, "+ Add"); await sleep(400);
+        if (scene) { await page.evaluate((id) => { location.hash = `#/v/${id}`; }, scene); await sleep(2500); }
+      }
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.keyboard.press("1"); await sleep(4500);
+      await scrollTextTo(page, "Set", "center"); await sleep(600); await page.mouse.move(120, 500);
+    },
+    script: async (page, bc) => {
+      await at(bc, 0); await page.keyboard.press("2");
+      await at(bc, 4); await page.keyboard.press("3");
+    },
+  },
+
+  // The effects bar stays on screen, its keys lighting while held.
+  ui_fx: {
+    track: "fx", beats: 6,
+    setup: async (page) => { await openPanel(page); await sleep(900); await hideChrome(page); await page.addStyleTag({ content: "#fxBar{visibility:visible!important}" }); await sleep(400); },
+    script: async (page, bc) => {
+      await hold(page, bc, 0, 0.8, "q");
+      await at(bc, 1); await page.keyboard.press("w"); await at(bc, 1.5); await page.keyboard.press("w");
+      await hold(page, bc, 2, 2.9, "e");
+      await hold(page, bc, 3, 3.9, "d");
+    },
+  },
+
+  // The overlay text appears on a beat over the bare scene.
+  ui_overlay: {
+    track: "steady", beats: 6,
+    setup: async (page) => {
+      await openPanel(page); await sleep(900); await scrollTextTo(page, "Overlay", "center"); await sleep(500);
+      await clickText(page, "Centre"); await sleep(400); await hideChrome(page);
+    },
+    script: async (page, bc) => {
+      await at(bc, 0.5);
+      await page.evaluate(() => {
+        const f = document.querySelector('input[placeholder="Event or DJ name"]');
+        f.value = "SATURDAY · ROOFTOP";
+        f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true }));
+      });
     },
   },
 };

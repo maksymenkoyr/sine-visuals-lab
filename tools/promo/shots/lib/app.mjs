@@ -149,6 +149,10 @@ export const installTracker = (page, kind) => page.evaluate((kind) => {
     wire: () => { const e = document.querySelector(".vc-row.vc-drive-pinned"); const r = e && R(e); return r && vis(r) ? union([r]) : null; },
     hits: () => union(["Envelope", "Beat", "Low", "Mid", "High"].map(row)),
     master: () => union([card("Scale")]),
+    sparkle: () => union(["Sparkle effect", "Sparkle shape"].map(row)),
+    set: () => union([card("Set")]),
+    fx: () => { const e = document.getElementById("fxBar"); const r = e && R(e); return r && vis(r) ? union([r]) : null; },
+    steady: () => null,
     cuep: () => union(["cueBtn", "goBtn"].map((id) => { const e = document.getElementById(id); const r = e && R(e); return r && vis(r) ? r : null; })),
     room: () => { const g = (t) => { const e = byText(t)[0]; if (!e) return null; let n = e; for (let i = 0; i < 3 && n.parentElement; i++) n = n.parentElement; return R(n); }; const m = byText("the room's look")[0]; return union([m && R(m.parentElement), g("Mac"), g("TV")]); },
   }[kind];
@@ -156,7 +160,7 @@ export const installTracker = (page, kind) => page.evaluate((kind) => {
   setInterval(() => {
     let r = null; try { r = resolve(); } catch (e) {}
     const root = document.querySelector(".vc-root.vc-open"); const rb = root ? R(root) : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
-    const clip = kind === "cuep" || kind === "room" ? { left: 0, top: 0, right: innerWidth, bottom: innerHeight } : { left: Math.max(0, rb.left), top: Math.max(0, rb.top), right: Math.min(innerWidth, rb.right), bottom: Math.min(innerHeight, rb.bottom) };
+    const clip = kind === "cuep" || kind === "room" || kind === "fx" ?{ left: 0, top: 0, right: innerWidth, bottom: innerHeight } : { left: Math.max(0, rb.left), top: Math.max(0, rb.top), right: Math.min(innerWidth, rb.right), bottom: Math.min(innerHeight, rb.bottom) };
     if (r) { const l = Math.max(r.x, clip.left), t = Math.max(r.y, clip.top), rr = Math.min(r.x + r.w, clip.right), b = Math.min(r.y + r.h, clip.bottom); r = rr - l > 8 && b - t > 8 ? [l, t, rr - l, b - t] : null; } else r = null;
     window.__trk.push([(performance.timeOrigin + performance.now()) / 1000, ...(r || [])]);
   }, 70);
