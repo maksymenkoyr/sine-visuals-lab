@@ -24,9 +24,10 @@
  * Text a hook cannot read must not reset its store. The hook reads and
  * validates first, and swaps its cache only on success, using
  * parseSyncedObject / parseSyncedNumber (they throw on unreadable text; a
- * missing key still means the defaults). The unreadable text itself stays in
- * storage until that store's next write, so a reload of that window falls
- * back to the defaults.
+ * missing key still means the defaults) or a reader of its own that returns
+ * null for unreadable text (render/sceneSet.ts). The unreadable text itself
+ * stays in storage until that store's next write, so a reload of that window
+ * falls back to the defaults.
  *
  * Kept import-free on purpose: stores in render/ and audio/ both import it.
  */

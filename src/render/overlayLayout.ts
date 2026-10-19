@@ -96,22 +96,20 @@ export function cleanOverlayLogo(raw: unknown, maxChars: number): string {
 }
 
 /** The settings part of the store (everything but the logo), from its stored
- *  JSON text. Bad or missing text gives the defaults field by field. */
-export function parseOverlaySettings(raw: string | null): Omit<OverlaySettings, "logo"> {
-  const out = {
-    text: OVERLAY_DEFAULTS.text,
-    position: OVERLAY_DEFAULTS.position,
-    size: OVERLAY_DEFAULTS.size,
-    opacity: OVERLAY_DEFAULTS.opacity,
-  };
+ *  JSON text. A bad field gives that field's default; absent or empty text
+ *  gives the defaults; text that cannot be read (not JSON, or not an object)
+ *  is null, so a synced re-seed can keep what it has (net/syncedStores.ts's
+ *  header). */
+export function readOverlaySettings(raw: string | null): Omit<OverlaySettings, "logo"> | null {
+  const out = defaultSettings();
   if (!raw) return out;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return out;
+    return null;
   }
-  if (!parsed || typeof parsed !== "object") return out;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const o = parsed as Record<string, unknown>;
   out.text = cleanOverlayText(o.text);
   if (isPosition(o.position)) out.position = o.position;
@@ -120,6 +118,16 @@ export function parseOverlaySettings(raw: string | null): Omit<OverlaySettings, 
     out.opacity = clamp(o.opacity, OVERLAY_OPACITY_MIN, 1);
   }
   return out;
+}
+
+/** readOverlaySettings, with unreadable text as the defaults. */
+export function parseOverlaySettings(raw: string | null): Omit<OverlaySettings, "logo"> {
+  return readOverlaySettings(raw) ?? defaultSettings();
+}
+
+function defaultSettings(): Omit<OverlaySettings, "logo"> {
+  const { logo: _logo, ...settings } = OVERLAY_DEFAULTS;
+  return settings;
 }
 
 // ---- Logo sizes -----------------------------------------------------------

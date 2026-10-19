@@ -13,8 +13,9 @@
  *     pop-out window, which is on the same machine.
  * `getOverlay()` returns the same object until something changes, so a drawing
  * layer can tell "changed" with `!==`. A bad or missing key reads as the
- * defaults; a write that storage refuses (full, blocked) keeps the change for
- * this session only.
+ * defaults at import; on a re-seed, a key whose text cannot be read keeps its
+ * current value and the other keys still apply. A write that storage refuses
+ * (full, blocked) keeps the change for this session only.
  */
 
 import { registerSyncedStore } from "../net/syncedStores.ts";
@@ -28,6 +29,7 @@ import {
   cleanOverlayLogo,
   cleanOverlayText,
   parseOverlaySettings,
+  readOverlaySettings,
   type OverlayPosition,
   type OverlaySettings,
 } from "./overlayLayout.ts";
@@ -63,15 +65,34 @@ interface State {
   localLogo: string;
 }
 
-function load(): State {
+/** A logo key's text: "" when absent or empty, null when it is not a logo
+ *  this store would have written (a re-seed then keeps the one it has). */
+function readLogo(key: string, maxChars: number): string | null {
+  const raw = read(key);
+  if (!raw) return "";
+  return cleanOverlayLogo(raw, maxChars) || null;
+}
+
+/** Each key read on its own; a key that cannot be read is null. */
+function readState(): { [K in keyof State]: State[K] | null } {
   return {
-    settings: parseOverlaySettings(read(KEY_SETTINGS)),
-    roomLogo: cleanOverlayLogo(read(KEY_LOGO), LOGO_ROOM_MAX_CHARS),
-    localLogo: cleanOverlayLogo(read(KEY_LOGO_LOCAL), LOGO_LOCAL_MAX_CHARS),
+    settings: readOverlaySettings(read(KEY_SETTINGS)),
+    roomLogo: readLogo(KEY_LOGO, LOGO_ROOM_MAX_CHARS),
+    localLogo: readLogo(KEY_LOGO_LOCAL, LOGO_LOCAL_MAX_CHARS),
   };
 }
 
-let state: State = load();
+/** readState over `base`: each unreadable key keeps base's value. */
+function readOver(base: State): State {
+  const r = readState();
+  return {
+    settings: r.settings ?? base.settings,
+    roomLogo: r.roomLogo ?? base.roomLogo,
+    localLogo: r.localLogo ?? base.localLogo,
+  };
+}
+
+let state: State = readOver({ settings: parseOverlaySettings(null), roomLogo: "", localLogo: "" });
 let view: OverlaySettings = makeView();
 
 function makeView(): OverlaySettings {
@@ -82,9 +103,12 @@ function changed(): void {
   view = makeView();
 }
 
-// Re-seeds from localStorage for the pop-out window and a TV (net/syncedStores.ts).
+// Re-seeds from localStorage for the pop-out window and a TV
+// (net/syncedStores.ts); a key whose text cannot be read keeps its value.
 registerSyncedStore(KEY_SETTINGS, () => {
-  state = load();
+  const next = readOver(state);
+  if (next.settings === state.settings && next.roomLogo === state.roomLogo && next.localLogo === state.localLogo) return;
+  state = next;
   changed();
 });
 
