@@ -5,7 +5,15 @@ import { releaseTapTempo, tapTempoAt } from "../../src/render/tapTempo.ts";
 import { getHitShape } from "../../src/audio/hitStrength.ts";
 import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
 import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
-import { SILENCE_GATE_CLOSED_DEFAULT, SILENCE_GATE_OPEN_DEFAULT, type SilenceGateMarks } from "../../src/audio/silenceGate.ts";
+import {
+  feedSilenceGateMeasurement,
+  resolveSilenceGate,
+  setSilenceGateAuto,
+  SILENCE_GATE_CLOSED_DEFAULT,
+  SILENCE_GATE_OPEN_DEFAULT,
+  type SilenceGateMarks,
+} from "../../src/audio/silenceGate.ts";
+import { feedAutoGainMeasurement, resolveAutoGain, setAutoGainAuto } from "../../src/audio/autoGain.ts";
 import { readBandsDb } from "./bands.ts";
 import { micChain } from "./micChain.ts";
 import { SR, type Track, type TempoSegment } from "./synth.ts";
@@ -176,6 +184,11 @@ export interface EvalOptions {
    *  tracking; that's exactly what this option, combined with `mic`, is
    *  here to measure). */
   gate?: boolean;
+  /** With `gate`: run the room trackers the way app.ts does by default — the
+   *  auto-gain amount from the measured band span (autoGain.ts) and the gate
+   *  marks from the tracked room floor (silenceGate.ts), both re-seeded at
+   *  the start of the run, instead of a fixed 1 and the shipped marks. */
+  auto?: boolean;
   /** Tap tempo (src/render/tapTempo.ts): tap times in seconds on the
    *  track's own clock. Each is tapped just before the first frame at or
    *  after it, the way a keydown lands between two render ticks, and the
@@ -187,12 +200,20 @@ export interface EvalOptions {
   /** Called after every frame with its time, the extractor's frame (raw
    *  bpm) and the AnimFrame — for a test scoring something EvalMetrics
    *  doesn't (tests/tapTempoEval.test.ts). */
-  onFrame?: (time: number, frame: FeatureFrame, anim: AnimFrame) => void;
+  onFrame?: (time: number, frame: FeatureFrame, anim: AnimFrame, resolved: { autoGain: number; gate: SilenceGateMarks | undefined }) => void;
 }
 
 export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
   const mono = opts.mic ? micChain(track.mono, SR) : track.mono;
-  const gate: SilenceGateMarks | undefined = opts.gate ? { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT } : undefined;
+  const auto = opts.auto === true && opts.gate === true;
+  if (auto) {
+    // Off then on re-seeds each tracker; the setters ignore a repeat of the same state.
+    setAutoGainAuto(false);
+    setAutoGainAuto(true);
+    setSilenceGateAuto(false);
+    setSilenceGateAuto(true);
+  }
+  let gate: SilenceGateMarks | undefined = opts.gate ? { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT } : undefined;
   const dt = 1 / fps;
   const totalDurationSec = mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);
@@ -253,7 +274,14 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   for (let i = 0; i < nFrames; i++) {
     const time = i * dt;
     const bands = readBandsDb(mono, time, SR);
-    const frame = extractor.update(bands, time, 1, 1, gate);
+    const autoGain = auto ? resolveAutoGain() : 1;
+    if (auto) gate = resolveSilenceGate();
+    const frame = extractor.update(bands, time, autoGain, 1, gate);
+    if (auto) {
+      // Same order as app.ts: the readings feed the next tick.
+      feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
+      feedSilenceGateMeasurement(frame.level, extractor.dtSec);
+    }
 
     let tempoHits: TempoHit[] | undefined;
     if (analyzer) {
@@ -270,7 +298,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
 
     if (taps) while (tapNext < taps.length && taps[tapNext]! <= time) tapTempoAt(taps[tapNext++]! * 1000);
     const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits }, taps ? time * 1000 : undefined);
-    opts.onFrame?.(time, frame, anim);
+    opts.onFrame?.(time, frame, anim, { autoGain, gate });
 
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {
