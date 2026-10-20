@@ -28,7 +28,7 @@
  * it resets the setting, which puts it back through a modifier here.
  *
  * Only the main window calls the store functions here (app.ts: after a mount,
- * a Look, a Reset or any wire edit). The pop-out and a room's TV get the
+ * a Look, a Reset, any wire edit, or a room's Main it follows). The pop-out and a room's TV get the
  * result through the synced stores, and until it arrives they read the plain
  * wires, which draw the same picture.
  */
