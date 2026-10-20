@@ -1153,6 +1153,11 @@ let lastHoverY = -1;
 // flag, not per row, like lastHoverX/Y.
 let pointerFocusOriginated = false;
 
+// The control wireHoverFocus focused and nothing has used since (no press, no
+// key): leaving its row hands that focus back, so the hover preview and the
+// :focus-within ring end with the hover instead of outliving it.
+let hoverOnlyFocus: HTMLElement | null = null;
+
 // Long enough that a fast diagonal sweep toward the spectrum strip never
 // selects, short enough that resting on a row feels immediate.
 const HOVER_SELECT_DELAY_MS = 150;
@@ -1173,6 +1178,17 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
     pointerFocusOriginated = true;
     control.focus({ preventScroll: true });
     pointerFocusOriginated = false;
+    hoverOnlyFocus = control;
+  });
+  const claim = () => {
+    if (hoverOnlyFocus === control) hoverOnlyFocus = null;
+  };
+  row.addEventListener("pointerdown", claim);
+  row.addEventListener("keydown", claim);
+  row.addEventListener("mouseleave", () => {
+    if (hoverOnlyFocus !== control) return;
+    hoverOnlyFocus = null;
+    if (document.activeElement === control) control.blur();
   });
 }
 
@@ -6363,14 +6379,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       registerPinnableRow(sceneId, spec, accent, rowEl, main);
     }
 
-    /** Wires `el`'s focusin to onRowFocusIn, and a focusout that cancels a
-     *  still-pending hover preview when focus leaves for somewhere that never
-     *  calls onRowFocusIn (spectrum strip, meters, another card). `el` is the
-     *  whole row, so a focus change within it isn't a leave. */
+    /** Wires `el`'s focusin to onRowFocusIn, and a focusout that ends this
+     *  row's preview, pending or shown, when focus leaves for somewhere that
+     *  never calls onRowFocusIn (spectrum strip, meters, another card, a
+     *  blur). A jack click after that still finds the row through
+     *  `lastPreview`. `el` is the whole row, so a focus change within it isn't
+     *  a leave. */
     function wirePreviewFocus(el: HTMLElement): void {
       el.addEventListener("focusin", onRowFocusIn);
       el.addEventListener("focusout", (e) => {
-        if (!el.contains(e.relatedTarget as Node | null)) cancelPendingPreview();
+        if (el.contains(e.relatedTarget as Node | null)) return;
+        cancelPendingPreview();
+        if (samePair(preview, { sceneId, spec })) previewDrive(null);
       });
     }
 
@@ -7187,6 +7207,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     if (e.key === "Escape" && pinned) {
       togglePin(pinned.sceneId, pinned.spec);
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape" && preview) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && root.contains(active)) active.blur();
+      previewDrive(null);
       e.preventDefault();
       return;
     }
