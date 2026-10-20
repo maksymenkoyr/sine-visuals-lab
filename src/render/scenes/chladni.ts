@@ -29,7 +29,7 @@ import {
   type PlateMode,
 } from "./chladniPlates.ts";
 
-import { GRIT_CHALK, GRIT_RAMP_LO, GRIT_RAMP_SPAN, powderInk } from "./chladniPowder.ts";
+import { GRIT_CHALK, GRIT_RAMP_LO, GRIT_RAMP_SPAN, OVER_WHITE, powderInk } from "./chladniPowder.ts";
 import {
   ZOOM_LAYERS,
   ZOOM_SAND_MARGIN,
@@ -195,18 +195,23 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // one per palette, picked in chladniPowder.ts to stand apart from every colour
 // grit takes. At 0 the grain colour is exactly what it was; the default bed
 // has almost no grains that light, so the dial shows only on a light, mixed
-// bed (the setting's description says how to get one). Powder is never
-// clipped toward white by brightness, which would wash it into the grit's
-// colour: it is scaled back so its brightest shade just fits, so past that
-// point Grain brightness stops brightening it (only Flash and a toss still
-// clip it, briefly). The colour is drawing only: the sim never reads it.
+// bed (the setting's description says how to get one). Powder is scaled
+// back so the bed's brightest shade just fits, so past that point Grain
+// brightness stops brightening it (only Flash and a toss push it past full
+// scale, briefly). The colour is drawing only: the sim never reads it.
+//
+// Grain brightness runs a grain's colour well past full scale (the bed is
+// sparse, so each grain is lit about twice over at the default). A colour
+// past full scale is scaled back to it, hue kept, and lifted toward white by
+// only OVER_WHITE of the overshoot (keepHue): clipped channel by channel, the
+// bright half of most palettes' ramps came out cream or white, so the sand
+// barely showed the palette.
 //
 // More sand colour, all of it off (or the plate as it was) by default.
 // Thrown colour and Thrown to (THROWN_TO) say how far a thrown grain's colour
 // moves and where: up the ramp toward white, as it always did, to the second
-// colour, through the palette's inks, or dark. Toward white arrives early,
-// because the brightness gain clips the ramp's bright end to white, so the
-// others follow a curve (THROWN_REACH) to keep pace. Two sides colours a grain
+// colour, through the palette's inks, or dark. The others follow a curve
+// (THROWN_REACH), so a modest hop already shows them. Two sides colours a grain
 // by the sign of the plate's value under it, which side of the still line it
 // lies by (the plate moves one way on one side while the other side moves the
 // other way), and tints the plate's glow the same. Spectrum rings colours the
@@ -532,8 +537,9 @@ export const THROWN_TO = ["Toward white", "Second colour", "Through the palette"
 /** Into shadow: a fully thrown grain keeps this share of its brightness. */
 const SHADOW_KEEP = 0.12;
 /** The share of a full throw by which the Thrown to choices other than
- *  Toward white have arrived (measured on Neon: Toward white reads white
- *  from about a quarter of a throw, its ramp clipped by the brightness gain). */
+ *  Toward white have arrived. Set to keep pace with Toward white when the
+ *  brightness gain clipped it white from about a quarter of a throw (Neon);
+ *  since keepHue it arrives later, so these now lead it. */
 const THROWN_REACH = 0.4;
 /** Two sides: the width either side of a still line, in field units (|f| <= 2),
  *  over which a grain's colour changes sides. */
@@ -1814,6 +1820,12 @@ ${MEMORY_GLSL}
 vec3 litHue(vec3 c, float bright, float brightBase) {
   return c * bright / max(1.0, max(c.r, max(c.g, c.b)) * brightBase * ${glslFloat(SHADE_LO + SHADE_SPAN)});
 }
+// See OVER_WHITE; chladniPowder.ts's litGrit mirrors it.
+vec3 keepHue(vec3 c) {
+  float m = max(c.r, max(c.g, c.b));
+  if (m <= 1.0) return c;
+  return mix(c / m, vec3(1.0), ${glslFloat(OVER_WHITE)} * (1.0 - 1.0 / m));
+}
 // The palette's inks in order, t = 0 the first and 1 the last.
 vec3 inkWalk(float t) {
   float x = clamp(t, 0.0, 1.0) * 3.0;
@@ -1961,12 +1973,11 @@ void main() {
     * (1.0 + ${glslFloat(TOSS_BRIGHT)} * riseGrow);
   // Powder colour: the light grains, which the air heaps between the lines,
   // in the palette's second sand colour (chladniPowder.ts), running toward
-  // white when thrown. Grit's brightness gain clips it toward white, which
-  // would wash the two colours into one; powder is scaled back so that the
-  // bed's brightest shade sits just in range, so it keeps its hue at any
-  // Grain brightness while its shades still differ, and only a flash or a
-  // throw clips it toward white, briefly, as grit. At 0 both mixes take
-  // nothing from the powder: the grit colour, unchanged.
+  // white when thrown. Powder is scaled back so that the bed's brightest
+  // shade sits just in range, so it keeps its shades apart at any Grain
+  // brightness, and only a flash or a throw pushes it past full scale,
+  // briefly, as grit. At 0 both mixes take nothing from the powder: the
+  // grit colour, unchanged.
   float powder = uPowderColour * powderShare(w);
   vec3 dust = mix(uPowderInk, vec3(1.0), ${POWDER_THROWN_LIFT.toFixed(2)} * rampMotion);
   float dustTop = max(dust.r, max(dust.g, dust.b)) * brightBase * ${glslFloat(SHADE_LO + SHADE_SPAN)};
@@ -1974,11 +1985,8 @@ void main() {
   vCol = mix(col * bright, dustLit, powder);
 
   // The rest of Thrown to: to the second colour (Powder colour's), through
-  // the palette's inks, or dark. Toward white gets there early, because the
-  // grain's brightness gain clips the bright end of the ramp to white well
-  // before a full throw; these colours are lit to keep their hue, so they
-  // take reach, a curve that arrives by THROWN_REACH of a throw, to move
-  // as readily.
+  // the palette's inks, or dark, lit to keep their hue. They take reach, a
+  // curve that arrives by THROWN_REACH of a throw.
   float reach = smoothstep(0.0, ${glslFloat(THROWN_REACH)}, thrown);
   if (thrownTo == 1) vCol = mix(vCol, litHue(uPowderInk, bright, brightBase), reach);
   else if (thrownTo == 2) vCol = mix(vCol, litHue(inkWalk(reach), bright, brightBase), smoothstep(0.0, 0.3, reach));
@@ -2023,6 +2031,7 @@ void main() {
   // the flashes run through the inks once a bar with the light.
   if (uGlitter > 0.0) vCol *= 1.0 - ${glslFloat(GLITTER_DIM)} * uGlitter;
   if (sparkle > 0.0) vCol += litHue(inkLoop(vRot / 6.2832), bright, brightBase) * sparkle * ${glslFloat(GLITTER_GAIN)};
+  vCol = keepHue(vCol);
 
   // The halo's tint and its area normalisation (see POINT_FRAG), without the
   // falloff across the sprite: the fragment only multiplies that in. The

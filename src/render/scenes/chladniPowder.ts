@@ -19,10 +19,10 @@
 // so a single-hue palette gets the colour opposite its hue.
 //
 // Far apart as they are, and far apart as they show. POINT_VERT multiplies a
-// grain's colour by a brightness gain well above 1, which clips grit toward
-// white, while powder is scaled back into range so it keeps its hue. That can
-// pull two colours together (a pale ink washes out to the same near-white as
-// the grit) or push them apart (a saturated blue next to grit that whitens).
+// grain's colour by a brightness gain well above 1: grit past full scale is
+// scaled back and lifted a little toward white (litGrit), while powder is
+// scaled back by the bed's brightest shade. That can pull two colours
+// together (a pale ink and pale grit both lit near white) or push them apart.
 // So the distance is the smaller of the two: the colours as they are, which is
 // what a low Grain brightness shows, and both lit at POWDER_LIT_GAIN.
 // tests/chladni.test.ts holds every library palette to both promises.
@@ -36,6 +36,12 @@ export const GRIT_RAMP_LO = 0.55;
 export const GRIT_RAMP_SPAN = 0.45;
 /** How far settled grit is greyed toward its own luma (none when thrown). */
 export const GRIT_CHALK = 0.15;
+
+/** A grain lit past full scale lifts toward white by this share of how far it
+ *  overshot (1 - 1/overshoot), so a flash or a pile still reads hotter
+ *  without the per-channel clip that turned Cobalt's orange sand cream and
+ *  Neon's pink white. Read by POINT_VERT's keepHue. */
+export const OVER_WHITE = 0.3;
 
 /** The powder colour stays at least this far (OKLab) from every grit colour. */
 export const POWDER_MIN_DISTANCE = 0.1;
@@ -68,9 +74,14 @@ export function gritColour(p: Palette, motion: number): Rgb {
   return [c[0] + (grey - c[0]) * k, c[1] + (grey - c[1]) * k, c[2] + (grey - c[2]) * k];
 }
 
-/** Grit lit by this gain, clipped per channel, as POINT_VERT does. */
+/** Grit lit by this gain as POINT_VERT's keepHue does: past full scale the
+ *  colour is scaled back, not clipped per channel, and only OVER_WHITE of
+ *  how far it overshot lifts it toward white. */
 export function litGrit(c: Rgb, gain = POWDER_LIT_GAIN): Rgb {
-  return [Math.min(1, c[0] * gain), Math.min(1, c[1] * gain), Math.min(1, c[2] * gain)];
+  const m = Math.max(c[0] * gain, c[1] * gain, c[2] * gain);
+  if (m <= 1) return [c[0] * gain, c[1] * gain, c[2] * gain];
+  const w = OVER_WHITE * (1 - 1 / m);
+  return [c[0] * gain / m + (1 - c[0] * gain / m) * w, c[1] * gain / m + (1 - c[1] * gain / m) * w, c[2] * gain / m + (1 - c[2] * gain / m) * w];
 }
 
 /** Powder at the bed's brightest shade, lit by this gain and scaled back into

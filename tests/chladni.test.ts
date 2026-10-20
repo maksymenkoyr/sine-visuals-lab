@@ -48,6 +48,7 @@ import {
   distanceFromGrit,
   litGrit,
   litPowder,
+  OVER_WHITE,
   powderInk,
   POWDER_L_MIN,
   POWDER_MIN_DISTANCE,
@@ -639,12 +640,23 @@ describe("powder colour", () => {
     }
   });
 
-  it("lit powder keeps its hue where lit grit clips", () => {
+  it("lit powder keeps its hue", () => {
     const blue = hexToRgb("#1870f3");
     const lit = litPowder(blue);
     expect(Math.max(...lit)).toBeCloseTo(1, 9);
     expect(lit[0] / lit[2]).toBeCloseTo(blue[0] / blue[2], 9);
-    expect(litGrit(blue)[2]).toBe(1);
+  });
+
+  it("lit grit past full scale keeps its hue, lifted only OVER_WHITE toward white", () => {
+    // Cobalt's orange sand: a per-channel clip at this gain read cream.
+    const orange = hexToRgb("#ff8a2a");
+    const lit = litGrit(orange, 2);
+    expect(Math.max(...lit)).toBeCloseTo(1, 9);
+    expect(lit[1]).toBeLessThan(0.7);
+    expect(lit[2]).toBeLessThan(0.4);
+    const w = OVER_WHITE * (1 - 1 / 2);
+    expect(lit[2]).toBeCloseTo(orange[2] + (1 - orange[2]) * w, 9);
+    expect(litGrit([0.2, 0.3, 0.4], 2)).toEqual([0.4, 0.6, 0.8]);
   });
 
   it("splits the bed at POWDER_SPLIT with a short edge", () => {
