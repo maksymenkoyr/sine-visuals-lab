@@ -49,6 +49,7 @@ A browser-based, real-time WebGL2 audio visualizer.
 Before touching one of these, read what is listed:
 
 - Any broad question — architecture, adding a scene, tuning, what's in flight → `docs/index.md`
+- Spawning any agent or workflow agent → `docs/agent-models.md` (the only model + effort pairs allowed)
 - The binary feature-frame format (host to screens) → `src/net/protocol.ts` header
 - The room, pairing, the phone controller, or the TV's look → `src/net/roomMessages.ts` header (the JSON message vocabulary) and `server/roomRules.ts` header (who may join and send); `src/net/lookSync.ts` header for how the look stays in step
 - Why a setting resolves the way it does under Auto → `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers

@@ -7,15 +7,14 @@ Two label systems sit on top of the type labels GitHub ships (`bug`,
 ## Difficulty: who builds it
 
 One of `high dif`, `mid dif`, `low dif`. The label says which model and effort
-should pick the issue up, using the table in `CLAUDE.md` (the label's own
-description in GitHub carries the short version):
+should pick the issue up, using the table in `docs/agent-models.md` (the
+label's own description in GitHub carries the short version):
 
 - `high dif`: plans, architecture, look and shader work judged by eye, DSP and
-  tempo. Opus, high effort.
+  tempo. Opus, medium effort; higher only with the user's go-ahead.
 - `mid dif`: following a written plan, writing tests, fixing typecheck errors.
-  Sonnet, medium effort.
-- `low dif`: edits that can be spelled out exactly, renames, sweeps. Haiku, low
-  effort.
+  Sonnet, high effort, or Haiku when the plan spells out every edit.
+- `low dif`: edits that can be spelled out exactly, renames, sweeps. Haiku.
 
 Pick the label for the hardest part of the issue. A `plan` label (a written
 plan is in the issue, ready to build) can sit next to any of them.
