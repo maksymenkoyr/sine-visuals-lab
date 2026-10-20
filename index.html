@@ -116,16 +116,33 @@
         transform: translate(-50%, -50%);
         outline: 1px solid rgba(255, 255, 255, 0.25);
       }
+      /* Sits above #sceneTag, which owns the corner. */
       #hud {
         position: fixed;
         left: 12px;
-        bottom: 12px;
+        bottom: 36px;
         color: #fff9;
         font: 500 12px/1.4 ui-monospace, monospace;
         z-index: 5;
         pointer-events: none;
         white-space: pre;
         transition: opacity 0.4s;
+      }
+      /* The scene's name, bottom left, kept through chrome-idle (unlike the
+       * controls) so a screen always says what it is showing; set by app.ts's
+       * updateSceneVersionLabel. */
+      #sceneTag {
+        display: none;
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        z-index: 5;
+        pointer-events: none;
+        color: rgba(255, 255, 255, 0.7);
+        font: 400 12px/1.4 "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.1em;
+        white-space: nowrap;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
       }
       #roomCode {
         position: fixed;
@@ -848,6 +865,7 @@
     </p>
     <canvas id="gl"></canvas>
     <div id="hud"></div>
+    <div id="sceneTag"></div>
     <div id="roomCode"></div>
     <div id="sceneNav">
       <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249; GALLERY</button>
