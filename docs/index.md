@@ -34,5 +34,6 @@ rules before adding a note here; this file doesn't restate them.
   [the template](scenes/_template.md).
 
 The session rituals that walk these notes live in `.claude/commands/` — run `/`
-in Claude Code to see them. Research handed on to later build sessions lives in
-`plans/<topic>.md`.
+in Claude Code to see them. Work handed on to later build sessions lives in
+GitHub issues, written and picked up with `/handoff`; `plans/<topic>.md` holds
+older plans and the ones `/exec-cheap` runs.

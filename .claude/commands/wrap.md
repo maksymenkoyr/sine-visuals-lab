@@ -9,6 +9,8 @@ Close out this working session:
    worktrees via `git worktree list`, any branches ahead of `main`). Three
    headings: **In flight**, **Open questions**, **Next up**. Keep it short
    enough to read in one glance — this file is a snapshot, not a history.
+   Work this session settled but didn't build goes through `/handoff` first,
+   and Next up names its issue.
 
 2. **If this session did any live tuning** (touched `tuning/params.json`, ran
    the probe/mark/contact-sheet loop from `docs/tuning.md`, or resolved a
