@@ -30,6 +30,7 @@ import type { MidiController } from "./midiInput.ts";
 import { MASTER_EXPANSION_TARGET, MASTER_SCALE_TARGET, sceneTargetId } from "./midiMap.ts";
 import { createSetCard, type SetCardDeps } from "./setCard.ts";
 import { createOverlayCard, type OverlayCardDeps } from "./overlayCard.ts";
+import { routeWheelByHalves } from "./wheelHalves.ts";
 // Side-effect import: registers every built-in widget (registerWidget) so a
 // scene's Scene.panel sections resolve — see widgets/registry.ts's header
 // for the panel/widget split this file is the one place that renders.
@@ -2163,6 +2164,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let addChipsOpen = false;
   // Declared up here: setSolo's cable-visibility refresh runs during construction.
   let isOpen = false;
+  let stopWheelHalves: (() => void) | undefined;
   // Set by a mountRows dispose that removed the pinned row; consumed by the next mountRows.
   let pinHandoff: { family: string; param: string; other?: number } | null = null;
   /** The last non-null setting previewDrive got; unlike `preview` it survives
@@ -7260,6 +7262,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen = true;
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    stopWheelHalves = routeWheelByHalves({
+      left: audioMeters.el,
+      right: controlsCol,
+      enabled: () => !window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches,
+    });
     refreshCableVisibility();
     scheduleCableRecompute();
     // The Source row's idle signal-preview meters (inputPreview.ts) only run
@@ -7280,6 +7287,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen = false;
     document.removeEventListener("pointerdown", onDocPointerDown);
     document.removeEventListener("keydown", onKeyDown);
+    stopWheelHalves?.();
+    stopWheelHalves = undefined;
     refreshCableVisibility();
     toastEl.classList.remove("vc-toast-show");
     positionSoloEye();
