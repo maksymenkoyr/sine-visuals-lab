@@ -26,7 +26,11 @@
 //
 // Pass 2 (DISPLAY_FRAG) turns those two channels into colour: the measured
 // warm white on black, or — with Colours raised — the room palette's ramp by
-// freshness over its ground.
+// freshness over its ground. Because the fade is linear, 1 − G is also where
+// a pixel sits in the fan (0 at the outline, 1 at the last echo): Age tint
+// shifts hue by that place, and a Shockwave ring is a bump moving along it.
+// Mirror lives in pass 1: the flow it samples is folded into mirrored wedges
+// (MIRROR_GLSL), so the fan comes out symmetric.
 import { DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName } from "../../sceneCommon.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
@@ -35,6 +39,9 @@ import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
  *  pixels minus the local wall, normalised — docs/scenes/echoes.md's
  *  Measurements), used at Colours = 0. */
 const LINE_RGB: readonly [number, number, number] = [1.0, 0.94, 0.84];
+
+/** How many shockwave rings can be out at once (index.ts keeps the list). */
+export const MAX_RINGS = 4;
 
 function settingUniformsGlsl(settings: readonly SceneSetting[]): string {
   return settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
@@ -78,6 +85,28 @@ vec2 flowField(vec2 p) {
   vec3 q2 = vec3(mat2(0.8, -0.6, 0.6, 0.8) * q.xy * 2.1 + 17.0, q.z * 1.7);
   v += 0.2 * (vec2(vnoise3(q2, 2u), vnoise3(q2, 3u)) * 2.0 - 1.0);
   return v;
+}
+`;
+
+/** The flow folded into mirrored wedges (uMirror arms = 2·uMirror wedges of
+ *  π/uMirror each, an even count so the fold closes round the circle): the
+ *  field is read inside the first wedge and its vector turned or reflected
+ *  back, so the whole fan of echoes is symmetric. Reflected vectors don't
+ *  match across a wedge border, which is what makes the echoes meet in
+ *  V-shapes there. */
+const MIRROR_GLSL = `
+vec2 mirroredFlow(vec2 p) {
+  if (uMirror < 0.5) return flowField(p);
+  float sector = 3.1415927 / floor(uMirror + 0.5);
+  float a = atan(p.y, p.x);
+  float k = floor(a / sector);
+  float local = a - k * sector;
+  bool odd = mod(k, 2.0) > 0.5;
+  if (odd) local = sector - local;
+  vec2 v = flowField(length(p) * vec2(cos(local), sin(local)));
+  float c = (odd ? k + 1.0 : k) * sector;
+  float cc = cos(c), sc = sin(c);
+  return odd ? vec2(cc * v.x + sc * v.y, sc * v.x - cc * v.y) : vec2(cc * v.x - sc * v.y, sc * v.x + cc * v.y);
 }
 `;
 
@@ -127,6 +156,7 @@ uniform float uFieldFreq;
 uniform float uFieldZ;
 uniform vec2 uFieldOffset;
 ${FIELD_GLSL}
+${MIRROR_GLSL}
 ${OUTLINE_GLSL}
 
 void main() {
@@ -136,7 +166,7 @@ void main() {
   p.x *= aspect;
 
   // One step back along the flow: what sits there now moves here.
-  vec2 src = p - uStep * flowField(p);
+  vec2 src = p - uStep * mirroredFlow(p);
   vec2 srcRoom = vec2(src.x / aspect, src.y) * 0.5 + 0.5;
   vec2 srcUv = (srcRoom - uViewport.xy) / uViewport.zw;
   vec2 prev = vec2(0.0);
@@ -233,9 +263,15 @@ ${commonUniformsGlsl}
 ${settingUniformsGlsl(settings)}
 ${DRIVE_GLSL(settings)}
 uniform sampler2D uFrame;
+uniform float uRingPos[${MAX_RINGS}];
+uniform float uRingAmp[${MAX_RINGS}];
+uniform float uRingWidth;
 
 void main() {
   vec2 t = texture(uFrame, vUv).rg;
+  // g falls by one generation's fade each step, so 1 − g is how far down the
+  // fan a pixel sits: 0 at the outline, 1 at the last echo.
+  float age = 1.0 - t.g;
   float colours = clamp(uColours, 0.0, 1.0);
   vec3 measured = vec3(${LINE_RGB.map((c) => c.toFixed(3)).join(", ")});
   vec3 ink = mix(measured, palRamp(mix(0.45, 0.95, t.g)), colours);
@@ -244,6 +280,23 @@ void main() {
   // fan and drop off near its end, as the reference's do; the linear fade
   // in the loop alone dimmed them from the first one.
   float b = t.r * (2.0 - t.r);
+
+  // Age tint: the lines turn through a hue cycle down the fan.
+  vec3 aged = 0.55 + 0.45 * cos(6.2831853 * (age * 0.55 + vec3(0.55, 0.88, 1.21)));
+  ink = mix(ink, aged, clamp(uAgeTint, 0.0, 1.0) * smoothstep(0.0, 0.3, age));
+
+  // Shockwaves: each ring is a bump riding down the fan at uRingPos; the
+  // rest of the fan dims while one is out, so the ring reads as light.
+  float ring = 0.0;
+  float dim = 0.0;
+  for (int i = 0; i < ${MAX_RINGS}; i++) {
+    float d = (age - uRingPos[i]) / uRingWidth;
+    ring = max(ring, uRingAmp[i] * exp(-d * d));
+    dim = max(dim, uRingAmp[i] * (1.0 - uRingPos[i]));
+  }
+  b *= 1.0 - 0.5 * dim * (1.0 - ring);
+  b = mix(b, 1.0, ring * step(0.001, t.r));
+  ink = mix(ink, vec3(1.0), 0.6 * ring);
   outColor = vec4(mix(ground, ink, b), 1.0);
 }
 `;

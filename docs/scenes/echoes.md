@@ -7,7 +7,10 @@ wireframe figure instead leaves its echoes in its own space: a trail of
 copies pushed back into depth (or through the fourth dimension), seen in
 perspective from a slowly swinging camera. The music
 swings its size once a bar, pops it outward on bass hits (a ripple that runs
-down the fan) and spreads the echoes further apart as the mids get louder.
+down the fan) and spreads the echoes further apart as the mids get louder. A
+bass hit also sends a bright ring down the fan (Shockwave), Mirror folds a
+flat shape's flow into a kaleidoscope, and Age tint colours each echo by how
+far down the fan it is.
 Draft, not yet on main.
 
 ## Where the code is
@@ -18,11 +21,13 @@ Draft, not yet on main.
   drives into the step pass's uniforms. The header explains why this is a
   feedback loop and not a drawn stack of copies.
 - `src/render/scenes/echoes/glsl.ts` — `buildStepFrag` (one generation of the
-  loop: sample one step back along `flowField`, fade by `uFadeStep`, screen
-  the crisp outline from `outlineDist` on top) and `buildDisplayFrag` (the
-  two channels to colour: `LINE_RGB` on black, or the room palette's ramp by
-  freshness with Colours raised). Its header owns the R/G channel meaning and
-  why the fade is linear.
+  loop: sample one step back along the flow — `mirroredFlow`, which is
+  `flowField` unless Mirror folds it — fade by `uFadeStep`, screen the crisp
+  outline from `outlineDist` on top) and `buildDisplayFrag` (the two channels
+  to colour: `LINE_RGB` on black, or the room palette's ramp by freshness
+  with Colours raised; Age tint and the Shockwave rings both read a pixel's
+  place in the fan from its freshness). Its header owns the R/G channel
+  meaning and why the fade is linear.
 - `src/render/scenes/echoes/solids.ts` — the 3D and 4D figures in `SOLIDS`
   (vertices only; edges are derived as nearest pairs) and `buildTrail`,
   which builds a figure's whole echo trail in its own space and projects it
@@ -31,7 +36,8 @@ Draft, not yet on main.
   chips (`SHAPES`) to flat corner counts or figures, keeps the figure's
   recent turn and size for the trail, and draws the segments with glsl.ts's
   `SEGMENT_VERT`/`SEGMENT_FRAG` as instanced quads instead of the step pass.
-- Shared systems: drives (Flow, Breathe, Kick), `noiseHash.ts`
+- Shared systems: drives (Flow, Breathe, Kick, and Shockwave as a hit
+  driver), `noiseHash.ts`
   (`NOISE_HASH_GLSL` for the field, `wrapFlow` for the drift phase).
 - Tests: `tests/echoesSolids.test.ts` (each figure's vertex and edge counts,
   equal edges, projected size, and that a trail really recedes); the
@@ -67,7 +73,7 @@ Draft, not yet on main.
 | Echo gap between neighbouring lines | median 10.5–14 px (p25 5–9, p75 18–27) ≈ 0.12 of the radius | judged by eye on `compare.png`, see Decisions |
 | Line colour (bright pixels minus the local wall) | rgb (1.00, 0.94–0.97, 0.83–0.86) | `LINE_RGB` |
 | Hard cuts | none in 59 s; 28 fades of 1–4 frames | none |
-| Onset flashes | brightness rise z −0.00 over 32 strong onsets | none |
+| Onset flashes | brightness rise z −0.00 over 32 strong onsets | none when measured; since 2026-10-20 the Shockwave ring (Decisions), 0 turns it off |
 | Continuity across the beat | activity 0.26σ, brightness 0.06σ, zoom 0.25σ | continuous |
 | Transitions | 18; 9 off-beat with no onset under them | — |
 | "Strobes" | 6.3 s and 9.6 s, flash every 0.73 beat (no beat ratio) | not built |
@@ -188,6 +194,30 @@ new dimension too … we can't really see/feel the depth and complexity that
 - **Step doubled after a look.** At the first `TRAIL_STEP_PER_FLOW` the
   copies packed into a solid-looking mass on synthetic audio; doubled, they
   read as distinct copies going back.
+
+2026-10-20 — the user asked for "some cool things" and picked more figures,
+Mirror, colour by age and a hit shockwave from a list of four:
+
+- **Three more figures** (dodecahedron, cuboctahedron, 5-cell) appended to
+  the Shape chips; same nearest-pair edges and measured size as the others,
+  counts checked in `tests/echoesSolids.test.ts`.
+- **Mirror folds the flow, not the outline.** `mirroredFlow` reads the field
+  inside one wedge and turns or reflects its vector back, so the fan is
+  symmetric; the wedge count is always even so the fold closes round the
+  circle. Flat shapes only; a figure's trail doesn't use the loop.
+- **Shockwave is a bump on the fan, not a second loop.** Freshness falls by a
+  fixed amount per generation, so `1 − g` is the pixel's place in the fan and
+  a ring is a bump moving along it (`uRingPos`); the rest of the fan dims
+  while a ring is out so it reads as light. A hit driver (`anim.lowOnset`,
+  Flat or Sized), up to `MAX_RINGS` at once. **On by default**, so by default
+  the scene now brightens on a bass hit where the reference never flashed
+  (Measurements, "Onset flashes"); Shockwave 0 is the measured calm look.
+- **Age tint** shifts hue by the same place in the fan; 0 keeps the measured
+  colour, so saved looks are unchanged.
+- Real song vs silence (`tools/tune-real.mjs echoes`, Levitating from 8 s for
+  25 s, default settings): change median 1.92 / p95 3.24 on the song, 0.35 /
+  0.61 on silence (5.3×), no hits on silence. Judged by eye on synthetic
+  shots only for the new looks, not side by side with a reference.
 
 ## Tuning notes
 

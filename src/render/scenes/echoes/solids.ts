@@ -10,7 +10,8 @@
 //
 // Figures: each is its vertex list, scaled to a unit circumradius, and its
 // edges — every pair of vertices at the smallest distance apart, true for
-// all of these regular figures, so no edge list is written by hand.
+// all of these figures (the regular ones, and the cuboctahedron, whose edges
+// are all equal too), so no edge list is written by hand.
 //
 // Turning: a figure turns in the xz plane (about the vertical axis) and
 // tumbles in the yz plane at an unrelated rate; a 4D figure also turns in
@@ -50,6 +51,24 @@ function cyclic3(v: readonly number[]): number[][] {
     [v[1], v[2], v[0]],
     [v[2], v[0], v[1]],
   ];
+}
+
+/** Every vector with two of its three coordinates ±1 and the other 0. */
+function twoOfThree(): number[][] {
+  const out: number[][] = [];
+  for (let i = 0; i < 3; i++) {
+    for (let j = i + 1; j < 3; j++) {
+      for (const si of [1, -1]) {
+        for (const sj of [1, -1]) {
+          const v = [0, 0, 0];
+          v[i] = si;
+          v[j] = sj;
+          out.push(v);
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /** Every vector with two of its four coordinates ±1 and the rest 0. */
@@ -112,7 +131,16 @@ export const SOLIDS = {
   cube: build(3, signs([1, 1, 1])),
   octahedron: build(3, axes(3)),
   icosahedron: build(3, signs([0, 1, PHI]).flatMap(cyclic3)),
+  dodecahedron: build(3, [...signs([1, 1, 1]), ...signs([0, 1 / PHI, PHI]).flatMap(cyclic3)]),
+  cuboctahedron: build(3, twoOfThree()),
   tesseract: build(4, signs([1, 1, 1, 1])),
+  cell5: build(4, [
+    [1, 1, 1, -1 / Math.sqrt(5)],
+    [1, -1, -1, -1 / Math.sqrt(5)],
+    [-1, 1, -1, -1 / Math.sqrt(5)],
+    [-1, -1, 1, -1 / Math.sqrt(5)],
+    [0, 0, 0, 4 / Math.sqrt(5)],
+  ]),
   cell16: build(4, axes(4)),
   cell24: build(4, twoOfFour()),
 } as const satisfies Record<string, Solid>;
