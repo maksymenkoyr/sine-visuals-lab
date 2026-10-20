@@ -44,9 +44,11 @@
 // job on a much shorter timescale, tuned to reject a single frame's noise
 // rather than a whole song section's).
 //
-// Because every ring still shares one centre (the frame's own, same as both
-// earlier designs), the whole visible field is a single 1D function of
-// radius — there is no 2D state to simulate. createRippleEmitter keeps every
+// Because every ring in ONE emitter shares one centre (the frame's own, same as
+// both earlier designs), the whole visible field is a single 1D function of
+// radius — there is no 2D state to simulate. Caustics' "Rings start: Random
+// spot" runs one emitter per spot instead (causticsRippleSpots.ts).
+// createRippleEmitter keeps every
 // ring in flight as a plain {ageSec, amp} entry in a ring buffer; buildProfile
 // walks that buffer once per frame and sums each entry's contribution into
 // two flat arrays (crest and slope, sampled at PROFILE_SAMPLES radii up to
@@ -127,7 +129,7 @@ export function rippleWidthFor(ringWidth: number): number {
 // lone hit is back to full width.
 const NARROW_SPREAD_PER_GAP = 0.25;
 const NARROW_MAX_W = 200; // σ ≈ 0.05 p-space units, a few profile samples wide
-const NARROW_EVENT_MIN = 0.05; // an emission run has to reach this to count as a ring start
+export const NARROW_EVENT_MIN = 0.05; // an emission run has to reach this to count as a ring start
 const NARROW_INTERVAL_RATE = 0.35; // how fast the smoothed interval follows each new one
 
 export interface RingRateState {
@@ -369,6 +371,8 @@ export interface RippleEmitter {
    *  (see createRippleEmitter's own `lastParams`) without a caller having to
    *  pass it to both calls by hand. */
   tick(dtSec: number, params: RippleProfileParams): void;
+  /** Drops every ring in flight. */
+  clear(): void;
 }
 
 export function createRippleEmitter(maxEntries = DEFAULT_MAX_ENTRIES): RippleEmitter {
@@ -434,6 +438,10 @@ export function createRippleEmitter(maxEntries = DEFAULT_MAX_ENTRIES): RippleEmi
         w++;
       }
       count = w;
+    },
+
+    clear() {
+      count = 0;
     },
   };
 }

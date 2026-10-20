@@ -602,3 +602,10 @@ describe("caustics level glow (brightnessGain, #449)", () => {
     expect(FRAG).not.toContain("pow(uEnergy");
   });
 });
+
+describe("caustics Beat ripple Rings start (Random spot)", () => {
+  it("FRAG picks the centre or spot branch on uRingOrigin and samples the spot profile texture", () => {
+    expect(FRAG).toContain("if (uRingOrigin < 0.5) {");
+    expect(FRAG).toContain("textureLod(uRippleSpotTex,");
+  });
+});

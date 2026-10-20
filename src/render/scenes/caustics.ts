@@ -15,9 +15,20 @@ import {
   rippleWidthFor,
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
+import {
+  buildRippleSpots,
+  createRippleSpots,
+  emitRippleSpot,
+  RIPPLE_SPOTS,
+  ringOriginFor,
+  SPOT_REACH,
+  spotStartsRing,
+  tickRippleSpots,
+} from "./causticsRippleSpots.ts";
 import { advanceStandout, advanceStandoutAmount, createStandoutState, STANDOUT_THRESHOLD_DEFAULT, standoutLine } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
-import type { PanelSection } from "../scene.ts";
+import type { PanelSection, SceneContext } from "../scene.ts";
+import type { GLProgram } from "../gl.ts";
 import {
   advanceSparkleHits,
   createSparkleHits,
@@ -223,7 +234,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "ripple",
     label: "Beat ripple",
-    description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
+    description: "Each hit sends a ring out like a drop on water, from the center or a random spot (Rings start) — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
     // One colour for this row and the ring controls under it, so the
     // ripple's own set reads apart from Breathe above and Drift below.
@@ -314,9 +325,26 @@ const SETTINGS: SceneSetting[] = [
     // 0/1/2 to the RingStyle emit()/buildProfile actually take.
   },
   {
+    key: "ringOrigin",
+    label: "Rings start",
+    description:
+      "Center: every ring starts in the middle. Random spot: each hit starts its ring somewhere new on the water, the way Physarum 2's Dose drops each colony in a new place.",
+    group: "Motion",
+    family: "Beat ripple",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 0,
+    type: "enum",
+    options: ["Center", "Random spot"],
+    // A placement pick, like Ring style above — no `auto`, no `drive`;
+    // ringOriginFor (causticsRippleSpots.ts) maps this setting's 0/1 to the
+    // RingOrigin extraUniforms reads.
+  },
+  {
     key: "waveSpeed",
     label: "Wave speed",
-    description: "How fast a ring travels outward from the center",
+    description: "How fast a ring travels outward from where it starts",
     group: "Motion",
     family: "Beat ripple",
     min: 0,
@@ -1430,10 +1458,34 @@ void main() {
   // rising side of a ring and draws it back on the falling side, reading as
   // a wave sweeping through the filaments, where a height-based push would
   // instead drag everything near a crest toward one lump.
-  float pLen = length(p);
-  vec2 radialDir = pLen > 1e-4 ? p / pLen : vec2(1.0, 0.0);
-  float ringCrestRaw = rippleSampleCrest(pLen);
-  float ringSlopeRaw = rippleSampleSlope(pLen);
+  vec2 radialDir;
+  float ringCrestRaw;
+  float ringSlopeRaw;
+  if (uRingOrigin < 0.5) {
+    float pLen = length(p);
+    radialDir = pLen > 1e-4 ? p / pLen : vec2(1.0, 0.0);
+    ringCrestRaw = rippleSampleCrest(pLen);
+    ringSlopeRaw = rippleSampleSlope(pLen);
+  } else {
+    // Random spot: each live spot's rings push outward from that spot, so the
+    // refraction is the vector sum of the spots' pushes. p is (uv-0.5) *
+    // aspectFix * 3, so the frame's half-size in p-space is 1.5 * aspectFix.
+    float crestSum = 0.0;
+    vec2 push = vec2(0.0);
+    for (int k = 0; k < ${RIPPLE_SPOTS}; k++) {
+      vec4 s = uRippleSpot[k];
+      if (s.z < 0.5) continue;
+      vec2 d = p - s.xy * aspectFix * ${(1.5 * SPOT_REACH).toFixed(3)};
+      float r = length(d);
+      if (r >= ${PROFILE_MAX_RADIUS.toFixed(2)}) continue;
+      vec2 cs = textureLod(uRippleSpotTex, vec2((r / ${(PROFILE_MAX_RADIUS / (PROFILE_SAMPLES - 1)).toFixed(8)} + 0.5) / ${PROFILE_SAMPLES}.0, (float(k) + 0.5) / ${RIPPLE_SPOTS}.0), 0.0).rg;
+      crestSum += cs.r;
+      push += (r > 1e-4 ? d / r : vec2(0.0)) * cs.g;
+    }
+    ringCrestRaw = crestSum;
+    ringSlopeRaw = length(push);
+    radialDir = ringSlopeRaw > 1e-6 ? push / ringSlopeRaw : vec2(1.0, 0.0);
+  }
   // A soft knee, not a hard clamp: unchanged up to RIPPLE_CEIL_KNEE, exactly
   // where a single full-strength ring's own peak sits by construction (see
   // RIPPLE_CEIL_KNEE's own comment) — so one ring looks bit-for-bit like the
@@ -1707,7 +1759,42 @@ export const causticsScene = createFullscreenScene(
     const emitter = createRippleEmitter();
     const crestBuf = new Float32Array(PROFILE_SAMPLES);
     const slopeBuf = new Float32Array(PROFILE_SAMPLES);
+    const spots = createRippleSpots();
+    let spotsDirty = false;
     let prevDropOnset = false;
+    // Random spot's profile rows, one per spot (causticsRippleSpots.ts), sampled
+    // from FRAG. Built per GL context, like chaikin's seed texture.
+    let spotTex: WebGLTexture | null = null;
+    let spotGl: WebGL2RenderingContext | null = null;
+
+    function ensureSpotTex(gl: WebGL2RenderingContext): WebGLTexture | null {
+      if (spotTex && spotGl === gl) return spotTex;
+      spotGl = gl;
+      spotTex = gl.createTexture();
+      if (!spotTex) return null;
+      gl.bindTexture(gl.TEXTURE_2D, spotTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, PROFILE_SAMPLES, RIPPLE_SPOTS, 0, gl.RG, gl.FLOAT, null);
+      // RG16F is filterable in core WebGL2; a 32-bit float texture isn't without an extension.
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      spotsDirty = true;
+      return spotTex;
+    }
+
+    function beforeDraw(ctx: SceneContext, prog: GLProgram): void {
+      const { gl } = ctx;
+      const tex = ensureSpotTex(gl);
+      if (!tex) return;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      if (spotsDirty) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, PROFILE_SAMPLES, RIPPLE_SPOTS, gl.RG, gl.FLOAT, spots.tex);
+        spotsDirty = false;
+      }
+      prog.setI("uRippleSpotTex", 0);
+    }
 
     // Treble sparkle's hits (causticsSparkle.ts) and the two phases its
     // Shimmer and Run effects scroll by — own clocks, advanced here and
@@ -1726,6 +1813,8 @@ uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 uniform float uDensityLive;
 uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
+uniform vec4 uRippleSpot[${RIPPLE_SPOTS}];
+uniform sampler2D uRippleSpotTex;
 // Treble sparkle (causticsSparkle.ts): the hits' summed, signed shape plus
 // Sparkle sustain's wash; Shimmer's jitter scroll and Run's band phase,
 // both wrapped JS-side; and the hit ring buffer Rings and Bloom strike from
@@ -1801,7 +1890,9 @@ float softCeil(float x, float knee, float ceil) {
           widthGaussianW: rippleWidthFor(getSetting("ringWidth")),
         };
         const ringStyle = ringStyleFor(getSetting("ringStyle"));
+        const ringOrigin = ringOriginFor(getSetting("ringOrigin"));
         emitter.tick(anim.dtSec, rippleParams);
+        tickRippleSpots(spots, anim.dtSec, rippleParams);
 
         // The Scene default this setting's drive picker reproduces — "bass
         // or beat hit" — read here as the two decaying pulses' max, a
@@ -1823,7 +1914,8 @@ float softCeil(float x, float knee, float ceil) {
               ? 1
               : 0
             : advanceStandoutAmount(emission, anim.dtSec, rawSignal, ringThreshold);
-        emitter.emit(emitted, ringStyle);
+        if (ringOrigin === "spot") emitRippleSpot(spots, emitted, ringStyle, spotStartsRing(spots, emitted));
+        else emitter.emit(emitted, ringStyle);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
         // ring, and each ring actually sent.
@@ -1836,18 +1928,28 @@ float softCeil(float x, float knee, float ceil) {
         // pulse, but the guard keeps this robust if that ever changes.
         const drop = anim.dropOnset && !prevDropOnset;
         prevDropOnset = anim.dropOnset;
-        if (drop) emitter.emit(RIPPLE_DROP_AMP, ringStyle);
+        if (drop) {
+          if (ringOrigin === "spot") emitRippleSpot(spots, RIPPLE_DROP_AMP, ringStyle, true);
+          else emitter.emit(RIPPLE_DROP_AMP, ringStyle);
+        }
 
         // Rings that come close together are drawn narrower so they stay
         // separate instead of summing to a flat plateau (rippleEmitter.ts's
         // Auto-narrowing comment). Merge already spaces its rings out by
         // combining close ones, so it keeps the plain Ring width.
         advanceRingRate(ringRate, anim.dtSec, emitted);
-        const profileParams: RippleProfileParams =
-          ringStyle === "merge"
-            ? rippleParams
-            : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
-        buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
+        if (ringOrigin === "spot") {
+          // Auto-narrowing is for a train of evenly spaced rings; each spot's
+          // rings don't form one, so there is nothing for it to separate.
+          buildRippleSpots(spots, rippleParams, ringStyle);
+          spotsDirty = true;
+        } else {
+          const profileParams: RippleProfileParams =
+            ringStyle === "merge"
+              ? rippleParams
+              : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
+          buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
+        }
 
         // Treble sparkle: each edge of the sparkle drive starts the picked
         // shape (the "sparkle" setting's own comment). A treble onset plays
@@ -1885,7 +1987,14 @@ float softCeil(float x, float knee, float ceil) {
           uDensityLive: densityFlow.live ?? densityTarget,
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,
+          uRippleSpot: { vec4: spots.spot },
         };
+      },
+      beforeDraw,
+      onDispose: (ctx) => {
+        if (spotTex) ctx.gl.deleteTexture(spotTex);
+        spotTex = null;
+        spotGl = null;
       },
     };
   })(),
