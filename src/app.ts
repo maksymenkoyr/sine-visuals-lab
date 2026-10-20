@@ -322,6 +322,7 @@ const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
+const sceneTag = document.getElementById("sceneTag") as HTMLDivElement;
 const sceneBtn = document.getElementById("sceneBtn") as HTMLButtonElement;
 const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const recBtn = document.getElementById("recBtn") as HTMLButtonElement;
@@ -810,6 +811,7 @@ function updateSceneVersionLabel(next: Scene): void {
   const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
   const sceneVer = sceneVersionOf(next.id);
   scenePicker?.setScene(next.name);
+  sceneTag.textContent = next.name;
 
   sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
   sceneVersion.replaceChildren();
@@ -2293,6 +2295,7 @@ async function enterViz(next: Scene): Promise<void> {
     sceneBtn.style.display = "block";
   }
   sceneVersion.style.display = "inline";
+  sceneTag.style.display = "block";
   outputControls?.setVisible(true);
   effectControls?.setVisible(true);
   recordControls?.setVisible(true);
@@ -2316,6 +2319,7 @@ function exitToGallery(): void {
   sceneBtn.style.display = "none";
   scenePicker?.close();
   sceneVersion.style.display = "none";
+  sceneTag.style.display = "none";
   outputControls?.setVisible(false);
   effectControls?.setVisible(false);
   recordControls?.setVisible(false); // ends a take, saving it
