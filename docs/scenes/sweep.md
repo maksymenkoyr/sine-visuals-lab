@@ -8,7 +8,7 @@ top, on a light ground. A copy's shape can change with its place on the path
 its path, scrolls the colours through the stack, pushes the morph on with
 each bass hit and re-rolls the path each phrase; every other knob has a jack
 to wire, and a Presets row at the top of the Scene card brings back each
-piece of the reel. Draft scene (draft PR #391).
+piece of the reel. In development (draft PR #391).
 
 ## Where the code is
 

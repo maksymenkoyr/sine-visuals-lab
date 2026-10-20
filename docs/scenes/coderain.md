@@ -3,7 +3,7 @@
 A 3D field of falling glyph columns that the camera glides through, with a
 dancer drawn in tiny raining glyphs among them. Bass hits start fresh heads
 from the top of the view and flare the heads; the overall level speeds the
-fall; a drop swings the camera to a new heading. A draft, behind the gallery's draft fold.
+fall; a drop swings the camera to a new heading. In development, in the gallery's development section.
 
 ## Where the code is
 

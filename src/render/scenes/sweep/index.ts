@@ -607,7 +607,7 @@ const base = createFullscreenScene(ID, "Sweep", SWEEP_FRAG_BODY, {
 });
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-10-05" } as const;
+export const gallery = { stage: "development", added: "2026-10-05" } as const;
 
 export const sweepScene: Scene = {
   ...base,
