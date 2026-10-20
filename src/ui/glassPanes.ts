@@ -19,8 +19,8 @@ import type { GlassPane } from "../render/glassBackdrop.ts";
  * - the visible part: the box cut by every ancestor that clips its overflow
  *   (the scrolling columns) up to the first fixed-position one, and by the
  *   canvas's own box;
- * - its opacity times its ancestors' (the chain focus dims whole shaping
- *   cards), and nothing at all while it is invisible.
+ * - its opacity times its ancestors', and nothing at all while it is
+ *   invisible.
  * The clipping ancestors and the corner radius are looked up once per
  * surface and again when it moves to another parent (a dragged card) or the
  * window resizes (the stacked layout clips differently). Everything is in CSS

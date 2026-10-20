@@ -207,8 +207,16 @@ const stylesheet = `
   display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
   border: 2px solid var(--c); border-radius: 3px; box-sizing: border-box; background: transparent;
 }
-/* Patch focus (refreshChain, patchChain.ts): while a chain is lit, off-chain items step back. */
-.vc-root.vc-chain-on .vc-chain-off { opacity: 0.32; }
+/* Patch focus (refreshChain, patchChain.ts): while a chain is lit, the items on it glow.
+ * Nothing off it dims: a faded row read as switched off. */
+.vc-root.vc-chain-on .vc-chain-lit:not(:hover):not(:focus-within) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vc-accent, #fff) 35%, transparent),
+    0 0 18px color-mix(in srgb, var(--vc-accent, #fff) 28%, transparent);
+}
+.vc-root.vc-chain-on .vc-shape-node.vc-chain-lit:not(:hover):not(:focus-within) {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-node-c, #fff) 45%, transparent), 0 0 16px -6px var(--vc-node-c, #fff);
+}
 .vc-shape-node.vc-chain-focus { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 18px -6px var(--vc-node-c, #fff); }
 .vc-shape-node.vc-shape-pinned { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 22px -4px var(--vc-node-c, #fff); }
 .vc-shape-inport.vc-shape-inport-on { background: var(--c); }
@@ -787,7 +795,6 @@ body.vc-keys-reveal [data-keycap]::after {
 /* Flat and quiet on purpose: a transient hover must not read as "committed". */
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
 .vc-cable-drag { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 6; opacity: 0.95; }
-.vc-root.vc-dragging .vc-chain-off { opacity: 1; }
 .vc-root.vc-dragging .vc-drive-port { box-shadow: 0 0 0 4px rgba(195,165,249,0.28); }
 .vc-root.vc-dragging .vc-shape-col { outline: 1px dashed rgba(249,185,108,0.6); outline-offset: 2px; }
 .vc-root.vc-dragging .vc-drop-target { box-shadow: 0 0 0 1px rgba(255,255,255,0.7), 0 0 14px -4px #fff; }

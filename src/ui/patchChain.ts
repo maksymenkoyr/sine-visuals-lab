@@ -13,8 +13,8 @@
  *
  * This module only works out which keys and ids are on the chain, from a
  * plain description of the patch (ChainGraph). deviceMenu.ts builds that
- * graph from the store and the drive rows, and paints the result: dims what
- * is off the chain and draws the cables that run along it.
+ * graph from the store and the drive rows, and paints the result: glows what
+ * is on the chain and draws the cables that run along it.
  */
 
 /** What is focused: one input row (its jacks' keys — a Hits row has several), a shaping node, or a setting. */
