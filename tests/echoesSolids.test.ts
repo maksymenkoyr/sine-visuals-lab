@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { buildTrail, MAX_SOLID_EDGES, SEGMENT_FLOATS, SOLIDS, type SolidId, type TrailParams } from "../src/render/scenes/echoes/solids.ts";
 
-// Vertex and edge counts of the regular figures, by their standard counts —
+// Vertex and edge counts of the figures, by their standard counts —
 // the edges are derived (nearest pairs), so this is what checks them.
 const COUNTS: Record<SolidId, [verts: number, edges: number]> = {
   tetrahedron: [4, 6],
   cube: [8, 12],
   octahedron: [6, 12],
   icosahedron: [12, 30],
+  dodecahedron: [20, 30],
+  cuboctahedron: [12, 24],
   tesseract: [16, 32],
+  cell5: [5, 10],
   cell16: [8, 24],
   cell24: [24, 96],
 };

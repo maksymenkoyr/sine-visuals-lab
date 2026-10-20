@@ -31,7 +31,11 @@
 // is a plain wire the user can move: Breathe swings the size once a bar
 // (the reference's timer swung about once every three bars at its tempo),
 // Kick pops it outward on a bass hit (a ripple that runs down the fan), and
-// Flow spreads the echoes further apart as the mids get louder.
+// Flow spreads the echoes further apart as the mids get louder. Shockwave and
+// the Mirror and Age tint looks are additions of ours with no counterpart in
+// the reference: a hit sends a bright ring down the fan (the display pass
+// finds each pixel's place in the fan from its freshness), Mirror folds the
+// flow so the fan is symmetric, Age tint colours echoes by that same place.
 import { NUM_BANDS } from "../../../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
@@ -41,7 +45,7 @@ import { COMMON_UNIFORMS_GLSL, uploadCommonUniforms } from "../../sceneCommon.ts
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { wrapFlow } from "../../noiseHash.ts";
 import type { QualityPreset } from "../../quality.ts";
-import { buildStepFrag, buildDisplayFrag, SEGMENT_FRAG, SEGMENT_VERT } from "./glsl.ts";
+import { buildStepFrag, buildDisplayFrag, MAX_RINGS, SEGMENT_FRAG, SEGMENT_VERT } from "./glsl.ts";
 import { buildTrail, MAX_SOLID_EDGES, orbitYaw, SEGMENT_FLOATS, SOLIDS, type SolidId } from "./solids.ts";
 
 const ID = "echoes";
@@ -67,6 +71,9 @@ const SHAPES: readonly { name: string; corners: number; solid?: SolidId }[] = [
   { name: "Tesseract", corners: 0, solid: "tesseract" },
   { name: "16-cell", corners: 0, solid: "cell16" },
   { name: "24-cell", corners: 0, solid: "cell24" },
+  { name: "Dodecahedron", corners: 0, solid: "dodecahedron" },
+  { name: "Cuboctahedron", corners: 0, solid: "cuboctahedron" },
+  { name: "5-cell", corners: 0, solid: "cell5" },
 ];
 
 /** Half the line's width, in half-heights — the reference's outline against
@@ -94,6 +101,11 @@ const TRAIL_STEP_PER_FLOW = 0.45;
 const TRAIL_FREQ = 1.2;
 const TRAIL_TIME_PER_PHASE = 3;
 const DEG2RAD = Math.PI / 180;
+/** Seconds a shockwave ring takes to run from the outline to the last echo,
+ *  and its width in echoes (never under MIN_RING_WIDTH of the fan). */
+const RING_SECONDS = 0.8;
+const RING_WIDTH_ECHOES = 1.5;
+const MIN_RING_WIDTH = 0.06;
 
 const SETTINGS: SceneSetting[] = [
   // Form
@@ -109,6 +121,17 @@ const SETTINGS: SceneSetting[] = [
     default: 0,
     type: "enum",
     options: SHAPES.map((s) => s.name),
+  },
+  {
+    key: "mirror",
+    label: "Mirror",
+    description:
+      "Folds a flat shape's flow into this many mirrored arms, so the echoes fan out in a kaleidoscope — 0 leaves it free (3D and 4D shapes ignore it)",
+    group: "Form",
+    min: 0,
+    max: 8,
+    step: 1,
+    default: 0,
   },
   {
     key: "size",
@@ -187,6 +210,17 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.lowOnset" },
   },
   {
+    key: "shock",
+    label: "Shockwave",
+    description: "How bright the ring is that a hit sends down the echoes, from the outline to the last one — 0 sends none",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "ring" } },
+  },
+  {
     key: "spin",
     label: "Spin",
     description: "How fast the outline turns, in degrees a second — 3D and 4D shapes tumble at this pace",
@@ -201,6 +235,16 @@ const SETTINGS: SceneSetting[] = [
     key: "colours",
     label: "Colours",
     description: "How far the lines pull toward the app's own palette instead of the measured warm white on black",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
+  {
+    key: "ageTint",
+    label: "Age tint",
+    description: "How far the echoes change colour as they get older — the newest keep the base colour",
     group: "Look",
     min: 0,
     max: 1,
@@ -234,6 +278,13 @@ function createEchoesScene(): Scene {
   let quadVao: WebGLVertexArrayObject | null = null;
   let stepPrevLoc: WebGLUniformLocation | null = null;
   let displayFrameLoc: WebGLUniformLocation | null = null;
+  // Shockwave rings out now: when each started and how bright. The display
+  // pass gets them in the fixed-size arrays below, unused slots at 0.
+  const ringStart = new Float64Array(MAX_RINGS);
+  const ringPeak = new Float32Array(MAX_RINGS);
+  let ringCount = 0;
+  const ringPos = new Float32Array(MAX_RINGS);
+  const ringAmp = new Float32Array(MAX_RINGS);
 
   const targets: (Target | null)[] = [null, null];
   let targetW = 0;
@@ -365,6 +416,7 @@ function createEchoesScene(): Scene {
       solidPhase = 0;
       historyHead = 0;
       historyLen = 0;
+      ringCount = 0;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -393,6 +445,36 @@ function createEchoesScene(): Scene {
       const wave = drives.value("breathe", 0, 0);
       const pop = drives.value("kick", 0, 0);
       const flowReading = drives.value("flow", 0.5, 0.5);
+
+      const shock = resolveSceneSetting(ID, settingFor("shock"));
+      let kept = 0;
+      for (let i = 0; i < ringCount; i++) {
+        const age = anim.timeSec - ringStart[i];
+        if (age < 0 || age >= RING_SECONDS) continue;
+        ringStart[kept] = ringStart[i];
+        ringPeak[kept] = ringPeak[i];
+        kept++;
+      }
+      ringCount = kept;
+      // fired() every frame, even at Shockwave 0: the hit driver's detector
+      // learns from every frame it sees (drives.ts's header, "Hit drivers").
+      const shockFired = drives.fired("shock", anim.lowOnset);
+      if (shock > 0 && shockFired) {
+        if (ringCount === MAX_RINGS) {
+          ringStart.copyWithin(0, 1);
+          ringPeak.copyWithin(0, 1);
+          ringCount--;
+        }
+        ringStart[ringCount] = anim.timeSec;
+        ringPeak[ringCount] = shock * drives.hitSize("shock");
+        ringCount++;
+      }
+      ringPos.fill(0);
+      ringAmp.fill(0);
+      for (let i = 0; i < ringCount; i++) {
+        ringPos[i] = (anim.timeSec - ringStart[i]) / RING_SECONDS;
+        ringAmp[i] = ringPeak[i];
+      }
 
       const radius = size * (1 + breathe * wave + kick * pop);
       angleDeg = (angleDeg + spin * dt) % 360;
@@ -480,6 +562,9 @@ function createEchoesScene(): Scene {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, writeTarget.tex);
       gl.uniform1i(displayFrameLoc, 0);
+      displayProg.setFv("uRingPos", ringPos);
+      displayProg.setFv("uRingAmp", ringAmp);
+      displayProg.setF("uRingWidth", Math.max(MIN_RING_WIDTH, RING_WIDTH_ECHOES / Math.max(echoes, 1)));
       drawFullscreenQuad(gl, quadVao);
 
       // The gallery renders every scene into one shared context each tick —
