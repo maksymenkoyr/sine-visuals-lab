@@ -29,3 +29,6 @@ a plan or do mechanical work.
 - **Many agents means low tiers.** Fan-out work (one agent per finding, file
   or PR) goes to tier 5 or 6. Only the one agent that merges or judges their
   output goes higher.
+
+**Exception:** the `/plan-code-review` and `/grade-runs` benchmarks may run
+any model and effort, since comparing them is their job.
