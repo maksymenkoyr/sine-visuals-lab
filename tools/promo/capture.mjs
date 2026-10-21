@@ -412,7 +412,8 @@ async function take(dir) {
     baseEpochMs = micEpochMs;
     if (scene && !(await page.evaluate(() => location.hash)).includes(scene)) console.log(`WARNING: not on scene ${scene}`);
     await apply();
-    if (chrome === "none") await page.addStyleTag({ content: "body > :not(canvas) { visibility: hidden !important; }" });
+    // The cursor overlay hangs off <html>, outside body.
+    if (chrome === "none") await page.addStyleTag({ content: "body > :not(canvas), #__cur { visibility: hidden !important; }" });
     else if (chrome === "panel") await page.evaluate(() => document.getElementById("menuBtn")?.click());
     // The panel's own shortcuts (`?` lists them): "m" hides the left column —
     // the way to fit the panel on a narrow (vertical or zoomed) frame.

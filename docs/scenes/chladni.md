@@ -13,6 +13,14 @@ the spectrum flowing out in rings, waves dyed in on the beat, or a light
 circling the plate.
 Featured, on main.
 
+## Page
+
+Sand on a vibrating plate, settling into the figures your music rings out: Chladni patterns, live in your browser, free.
+
+Each figure is a note the plate resonates at. When the music moves to other notes, a new figure takes over and the sand re-forms it grain by grain, and a drop can toss the whole bed of sand into the air.
+
+Pick a square, round, hexagonal or triangular plate and leave it running on the big screen: it keeps changing with every song.
+
 ## Where the code is
 
 - `src/render/scenes/chladni.ts` — the whole scene. The file header is the

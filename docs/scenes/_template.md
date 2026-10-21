@@ -3,6 +3,18 @@
 <One or two sentences: what the scene looks like and what the music does to
 it. Draft, in development or featured, and whether it's on main.>
 
+## Page
+
+<Optional: the copy of the scene's public page, /scenes/<id>/ — with it and
+the media tools/scene-page-media.mjs films, the build makes the page
+(tools/scenePagesLib.mjs's header). Written for visitors, not developers: no
+code names, the words of docs/vocabulary.md. The first paragraph is one
+sentence of at most `DESCRIPTION_MAX` characters and doubles as the search
+snippet: what it looks like, that it follows your music, free in the browser.
+Then a paragraph on what in the music moves what, and one on the hands-off
+use (a party screen, a DJ set). Never pitch phone/TV pairing. Delete this
+section until the scene should have a page.>
+
 ## Where the code is
 
 <The files and the symbols worth knowing: the scene module, its GLSL, helpers,

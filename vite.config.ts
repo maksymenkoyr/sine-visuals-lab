@@ -6,6 +6,7 @@ import { sceneLinksPlugin } from "./vite-scene-links-plugin.ts";
 import { legalNoticesPlugin } from "./vite-legal-notices-plugin.ts";
 import { buildInfoPlugin } from "./vite-build-info-plugin.ts";
 import { sceneVersionsPlugin } from "./vite-scene-versions-plugin.ts";
+import { scenePagesPlugin } from "./vite-scene-pages-plugin.ts";
 import { appManifestPlugin } from "./vite-app-manifest-plugin.ts";
 import { glslStripPlugin } from "./vite-glsl-strip-plugin.ts";
 
@@ -32,8 +33,8 @@ export default defineConfig(({ command }) => ({
   // (see each one's header).
   plugins:
     command === "serve"
-      ? [basicSsl(), tuningPlugin(), sceneLinksPlugin(), legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin()]
-      : [legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin(), appManifestPlugin(), glslStripPlugin()],
+      ? [basicSsl(), tuningPlugin(), sceneLinksPlugin(), legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin(), scenePagesPlugin()]
+      : [legalNoticesPlugin(), buildInfoPlugin(), sceneVersionsPlugin(), scenePagesPlugin(), appManifestPlugin(), glslStripPlugin()],
   build: {
     // Global, not per-entry: webOS 5.x/6.x and Tizen 2018-2020 predate
     // optional chaining / nullish coalescing (Chrome 80). There's no
