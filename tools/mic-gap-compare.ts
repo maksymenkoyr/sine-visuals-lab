@@ -1,18 +1,11 @@
-// Runs the same tools/mic-gap.mjs takes through two detectors and scores both
-// with one scorer, so their numbers can be read side by side:
-//   app          tests/tempoEval/run.ts evaluate() with the default Auto on
-//                (auto + gate + analyzer), the way app.ts runs solo.
-//   synesthesia  the Synesthesia engine from the synesthesia-audio library.
-//
-// synesthesia-audio is a LOCAL-ONLY, OPTIONAL dependency. It is not bundled,
-// not in package.json, not in THIRD-PARTY-NOTICES.md, and none of its code is
-// copied here: it is loaded at run time from a sibling checkout (or
-// SYNESTHESIA_AUDIO_DIR). Keep it out of this repo and its bundle. The tool
-// exits with a message when that directory is missing.
+// Runs tools/mic-gap.mjs takes through the app's detector
+// (tests/tempoEval/run.ts evaluate() with the default Auto on: auto + gate +
+// analyzer, the way app.ts runs solo) and scores the tab and mic legs with one
+// scorer, so the gap between them can be read side by side.
 //
 //   node tools/mic-gap-compare.ts <session dir> [--noise-from <dir>] [--out <file>]
 //
-// Prints one table per song (tab/mic x app/synesthesia) plus the noise rows,
+// Prints one table per song (tab and mic legs) plus the noise rows,
 // and writes the full numbers as JSON (default <session dir>/compare.json).
 // A session recorded from the synthetic calibration track (a `calibration-`
 // song) also gets each take scored per section against that track's exact
@@ -34,26 +27,15 @@ interface SongSignal {
   lagMs: number;
 }
 
-interface SynEngine {
-  processAudio(chunk: Float32Array): void;
-  update(dt: number): void;
-  uniforms: Record<string, number>;
-}
-type SynCtor = new (opts: { sampleRate: number }) => SynEngine;
-
-/** One detector's output on one take, one entry per rendered frame (times in seconds). */
+/** The detector's output on one take, one entry per rendered frame (times in seconds). */
 interface Trace {
   times: number[];
   onsets: number[];
   bpm: number[];
   level: number[];
-  /** Synesthesia only: extra per-frame uniforms, kept for the JSON. */
-  extra?: Record<string, number[]>;
 }
 
 const FPS = 60;
-// The library's default analysis chunk.
-const HOP = 512;
 // Takes start with the player seeking; nothing before this is scored.
 const SKIP_SEC = 1;
 // An onset counts as on a beat within this, after the mic's delay is removed.
@@ -70,8 +52,6 @@ const TRUTH_PATH = "tools/.cache/mic-gap/synth/calibration.truth.json";
 // Per-section tempo is scored over the tail of a section, past this share of its length.
 const TEMPO_WINDOW_START_FRAC = 0.4;
 
-type Pipeline = "app" | "synesthesia";
-const PIPELINES: Pipeline[] = ["app", "synesthesia"];
 type Group = "kick" | "snareClap" | "hats" | "bass";
 const GROUPS: Record<Group, readonly Hit["instrument"][]> = {
   kick: ["kick"],
@@ -100,7 +80,7 @@ export interface NoiseScore {
   levelP90: number;
 }
 
-/** One calibration section scored on one detector's take. NaN where the section has nothing to score. */
+/** One calibration section scored on one take. NaN where the section has nothing to score. */
 export interface SectionScore {
   section: string;
   recall: Record<Group, number>;
@@ -162,7 +142,7 @@ function timeToLock(t: Trace, trueBpm: number): number {
   return NaN;
 }
 
-/** The one scorer both detectors go through. `grid` is the song's beat times in take seconds (mic already shifted by its delay). */
+/** The one scorer both legs go through. `grid` is the song's beat times in take seconds (mic already shifted by its delay). */
 function score(t: Trace, grid: number[], trueBpm: number): LegScore {
   const onsets = t.onsets.filter((o) => o >= SKIP_SEC).sort((a, b) => a - b);
   const recalled = grid.filter((b) => Math.abs(nearestDelta(onsets, b)) <= MATCH_SEC).length;
@@ -208,40 +188,6 @@ function runApp(track: Track): Trace {
       t.level.push(frame.level);
     },
   });
-  return t;
-}
-
-function runSynesthesia(mono: Float32Array, Ctor: SynCtor): Trace {
-  const e = new Ctor({ sampleRate: SR });
-  const t: Trace = { times: [], onsets: [], bpm: [], level: [], extra: { syn_BassLevel: [], syn_BPMConfidence: [], syn_Hits: [] } };
-  const dt = 1 / FPS;
-  const nFrames = Math.floor((mono.length / SR) * FPS);
-  // Only audio up to each frame's time is fed, as evaluate() feeds the app, so
-  // neither detector sees the future.
-  let fed = 0;
-  let prevOnBeat = 0;
-  for (let k = 0; k < nFrames; k++) {
-    const time = k * dt;
-    const upTo = Math.round(time * SR);
-    while (fed + HOP <= upTo) {
-      e.processAudio(mono.subarray(fed, fed + HOP));
-      fed += HOP;
-    }
-    e.update(dt);
-    const u = e.uniforms;
-    // An onset is a rise of syn_OnBeat, not a threshold on it: the value jumps to
-    // 1 only on a frame where the beat gate fires, and falls back within a frame
-    // or two, so a threshold would also depend on the Reactivity setting.
-    const onBeat = u.syn_OnBeat ?? 0;
-    if (onBeat > prevOnBeat) t.onsets.push(time);
-    prevOnBeat = onBeat;
-    t.times.push(time);
-    t.bpm.push(u.syn_BPM ?? NaN);
-    t.level.push(u.syn_Level ?? NaN);
-    t.extra!.syn_BassLevel!.push(u.syn_BassLevel ?? NaN);
-    t.extra!.syn_BPMConfidence!.push(u.syn_BPMConfidence ?? NaN);
-    t.extra!.syn_Hits!.push(u.syn_Hits ?? NaN);
-  }
   return t;
 }
 
@@ -309,25 +255,15 @@ function scoreSection(
   };
 }
 
-/** Scores one calibration take per section for both detectors. Truth moves onto the take as songTime - songTimeAtTab0 + delay. */
-function scoreCalibrationLeg(
-  song: SongSignal,
-  delaySec: number,
-  durSec: number,
-  traces: Record<Pipeline, Trace>,
-  truth: CalibrationTruth,
-): Record<Pipeline, SectionScore[]> {
+/** Scores one calibration take per section. Truth moves onto the take as songTime - songTimeAtTab0 + delay. */
+function scoreCalibrationLeg(song: SongSignal, delaySec: number, durSec: number, t: Trace, truth: CalibrationTruth): SectionScore[] {
   const shift = delaySec - song.songTimeAtTab0;
   const hits: LegHit[] = truth.hits
     .map((h) => ({ t: h.time + shift, instrument: h.instrument, section: h.section }))
     .sort((a, b) => a.t - b.t);
   const truthTimes = hits.map((h) => h.t);
-  const out = {} as Record<Pipeline, SectionScore[]>;
-  for (const p of PIPELINES) {
-    const onsets = traces[p].onsets.filter((o) => o >= SKIP_SEC).sort((a, b) => a - b);
-    out[p] = truth.sections.map((sec) => scoreSection(sec, shift, durSec, traces[p], onsets, hits, truthTimes));
-  }
-  return out;
+  const onsets = t.onsets.filter((o) => o >= SKIP_SEC).sort((a, b) => a - b);
+  return truth.sections.map((sec) => scoreSection(sec, shift, durSec, t, onsets, hits, truthTimes));
 }
 
 const TRUTH_COLS = ["kick", "snr+clp", "hats", "bass", "prec", "fa/min", "tempo", "octave", "level"];
@@ -346,11 +282,9 @@ function sectionCells(r: SectionScore): string[] {
   ];
 }
 
-function printSectionTable(title: string, byPipeline: Record<Pipeline, SectionScore[]>): void {
-  const groupRow = ["", ...PIPELINES.flatMap((p) => [p, ...TRUTH_COLS.slice(1).map(() => "")])];
-  const rows: string[][] = [groupRow, ["section", ...PIPELINES.flatMap(() => TRUTH_COLS)]];
-  byPipeline.app.forEach((r, i) => rows.push([r.section, ...PIPELINES.flatMap((p) => sectionCells(byPipeline[p][i]!))]));
-  const widths = groupRow.map((_, c) => Math.max(...rows.map((r) => r[c]!.length)));
+function printSectionTable(title: string, sections: SectionScore[]): void {
+  const rows: string[][] = [["section", ...TRUTH_COLS], ...sections.map((r) => [r.section, ...sectionCells(r)])];
+  const widths = rows[0]!.map((_, c) => Math.max(...rows.map((r) => r[c]!.length)));
   console.log(`\n${title}`);
   for (const r of rows) console.log("  " + r.map((c, i) => pad(c, widths[i]!)).join("  "));
 }
@@ -370,20 +304,11 @@ function arg(name: string): string | undefined {
 }
 
 const repoRoot = resolve(execSync("git rev-parse --path-format=absolute --git-common-dir", { encoding: "utf8" }).trim(), "..");
-const synDir = process.env.SYNESTHESIA_AUDIO_DIR ?? join(repoRoot, "..", "synesthesia-audio");
 const session = process.argv[2];
 if (!session) {
   console.error("usage: node tools/mic-gap-compare.ts <session dir> [--noise-from <dir>] [--out <file>]");
   process.exit(2);
 }
-const entry = join(synDir, "src/index.ts");
-if (!existsSync(entry)) {
-  console.error(
-    `mic-gap-compare: no synesthesia-audio checkout at ${synDir}. It is a local-only optional dependency, not bundled; set SYNESTHESIA_AUDIO_DIR to its directory.`,
-  );
-  process.exit(1);
-}
-const { SynesthesiaAudio } = (await import(entry)) as { SynesthesiaAudio: SynCtor };
 
 const noiseDir = arg("--noise-from") ?? session;
 const outPath = arg("--out") ?? join(session, "compare.json");
@@ -394,36 +319,29 @@ const f = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "  -  ");
 const pad = (s: string, n: number) => s.padEnd(n);
 const LEG_HEADER = ["leg", "recall", "prec", "on/beat", "offMs", "tempo", "octave", "lockS", "endBpm", "level"];
 
-const noiseOut: Record<string, { app: NoiseScore; synesthesia: NoiseScore }> = {};
+const noiseOut: Record<string, NoiseScore> = {};
 for (const file of readdirSync(noiseDir).filter((n) => /^noise.*\.(tab|mic)\.wav$/.test(n)).sort()) {
   const name = file.slice(0, -".wav".length);
   const mono = readWav(join(noiseDir, file));
   const dur = mono.length / SR;
   const noiseTrack: Track = { name, mono, tempo: [], beats: [], gridBeats: [] };
-  noiseOut[name] = {
-    app: scoreNoise(runApp(noiseTrack), dur),
-    synesthesia: scoreNoise(runSynesthesia(mono, SynesthesiaAudio), dur),
-  };
+  noiseOut[name] = scoreNoise(runApp(noiseTrack), dur);
 }
 if (Object.keys(noiseOut).length) {
   console.log("noise (onsets/min, level p10 / median / p90)");
-  for (const [name, legs] of Object.entries(noiseOut)) {
-    for (const k of ["app", "synesthesia"] as const) {
-      const n = legs[k];
-      console.log(`  ${pad(`${name} ${k}`, 22)} ${f(n.onsetsPerMin, 1)}/min  ${f(n.levelP10, 3)} / ${f(n.levelMedian, 3)} / ${f(n.levelP90, 3)}`);
-    }
+  for (const [name, n] of Object.entries(noiseOut)) {
+    console.log(`  ${pad(name, 22)} ${f(n.onsetsPerMin, 1)}/min  ${f(n.levelP10, 3)} / ${f(n.levelMedian, 3)} / ${f(n.levelP90, 3)}`);
   }
 }
 
 const songsOut = [];
-const synthTruth: Record<string, Record<string, Record<Pipeline, SectionScore[]>>> = {};
+const synthTruth: Record<string, Record<string, SectionScore[]>> = {};
 for (const s of signal.songs) {
   const delaySec = s.lagMs / 1000;
   const results: Record<string, LegScore> = {};
-  const extras: Record<string, Record<string, number>> = {};
   const rows: string[][] = [LEG_HEADER];
   const calibration = truth && s.name.startsWith(CALIBRATION_PREFIX) ? truth : null;
-  const truthByLeg: Record<string, Record<Pipeline, SectionScore[]>> = {};
+  const truthByLeg: Record<string, SectionScore[]> = {};
   for (const [leg, file, delay] of [
     ["tab", `${s.name}.tab.wav`, 0],
     ["mic", `${s.name}.mic.wav`, delaySec],
@@ -433,28 +351,21 @@ for (const s of signal.songs) {
     const grid = gridFor(s, dur, delay);
     const track: Track = { name: `${s.name} ${leg}`, mono, tempo: [{ from: 0, to: dur, bpm: s.bpm }], beats: grid, gridBeats: grid };
     const app = runApp(track);
-    const syn = runSynesthesia(mono, SynesthesiaAudio);
-    const sc = { app: score(app, grid, s.bpm), synesthesia: score(syn, grid, s.bpm) };
-    if (calibration) truthByLeg[leg] = scoreCalibrationLeg(s, delay, dur, { app, synesthesia: syn }, calibration);
-    for (const k of ["app", "synesthesia"] as const) {
-      const m = sc[k];
-      results[`${leg}.${k}`] = m;
-      rows.push([
-        `${leg} ${k}`,
-        f(m.beatRecall),
-        f(m.onsetPrecision),
-        f(m.onsetsPerBeat),
-        f(m.onsetOffsetMs, 0),
-        f(m.tempoOk),
-        f(m.tempoOkAnyOctave),
-        f(m.timeToLockSec, 1),
-        f(m.endBpm, 1),
-        f(m.levelMedian, 3),
-      ]);
-    }
-    extras[`${leg}.synesthesia`] = Object.fromEntries(
-      Object.entries(syn.extra!).map(([k, v]) => [`${k}Median`, percentile(v, 0.5)]),
-    );
+    const m = score(app, grid, s.bpm);
+    if (calibration) truthByLeg[leg] = scoreCalibrationLeg(s, delay, dur, app, calibration);
+    results[leg] = m;
+    rows.push([
+      leg,
+      f(m.beatRecall),
+      f(m.onsetPrecision),
+      f(m.onsetsPerBeat),
+      f(m.onsetOffsetMs, 0),
+      f(m.tempoOk),
+      f(m.tempoOkAnyOctave),
+      f(m.timeToLockSec, 1),
+      f(m.endBpm, 1),
+      f(m.levelMedian, 3),
+    ]);
   }
   console.log(`\n${s.name} (${s.bpm.toFixed(1)} BPM, lag ${s.lagMs.toFixed(1)} ms)`);
   const widths = LEG_HEADER.map((_, c) => Math.max(...rows.map((r) => r[c]!.length)));
@@ -466,11 +377,11 @@ for (const s of signal.songs) {
     for (const leg of ["tab", "mic"]) printSectionTable(`${s.name} ${leg}`, truthByLeg[leg]!);
     synthTruth[s.name] = truthByLeg;
   }
-  songsOut.push({ name: s.name, bpm: s.bpm, lagMs: s.lagMs, legs: results, synesthesiaExtras: extras });
+  songsOut.push({ name: s.name, bpm: s.bpm, lagMs: s.lagMs, legs: results });
 }
 
 writeFileSync(
   outPath,
-  JSON.stringify({ session, synesthesiaDir: synDir, noise: noiseOut, songs: songsOut, synthTruth }, null, 2),
+  JSON.stringify({ session, noise: noiseOut, songs: songsOut, synthTruth }, null, 2),
 );
 console.log(`\nwrote ${outPath}`);
