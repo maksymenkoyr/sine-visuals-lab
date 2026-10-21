@@ -5,6 +5,7 @@
 //
 //   node tools/mic-gap.mjs [--out <dir>] [--volumes 50,80] [--seconds 60]
 //        [--tracks <id,id,…>] [--noise 20] [--mic <device label part>]
+//        [--songs <dir>] [--noise-audio <wav> [--noise-level <0..1>]]
 //
 // `--volumes ""` records the room noise only.
 //
@@ -13,8 +14,8 @@
 //
 // How: a local server serves two pages to the installed Google Chrome (not
 // Playwright's Chromium — macOS grants mic access per app, and the user's
-// Chrome already has it). The player tab plays a promo song from
-// tools/.cache/promo-songs; the recorder tab calls getDisplayMedia, which
+// Chrome already has it). The player tab plays a song from `--songs`
+// (promo-songs by default); the recorder tab calls getDisplayMedia, which
 // --auto-select-tab-capture-source-by-title answers with the player tab, and
 // getUserMedia for the mic with the same three processing flags off that
 // src/audio/capture.ts uses. Both streams go into ONE AudioContext and one
@@ -25,13 +26,18 @@
 // instead. Tab capture keeps the tab audible (suppressLocalAudioPlayback
 // stays false), which is what lets the mic hear it.
 //
+// `--noise-audio` loops a file on a third tab, at `--noise-level` of its own
+// volume, for the whole run. That tab's title doesn't match the by-title flag,
+// so only the player tab is shared: the tab leg stays the music alone, while
+// the mic hears the music and the noise together.
+//
 // Output: <out>/<segment>.tab.wav and .mic.wav (mono s16 at 48 kHz, the
 // format tests/tempoEval/recordings.ts reads), and <out>/session.json with
 // each segment's song, start offset, volume and the tracks' settings.
 import { createServer } from "node:http";
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { chromium } from "playwright";
 
 const args = process.argv.slice(2);
@@ -41,13 +47,18 @@ const opt = (k, d) => {
 };
 const SR = 48000;
 const mainRoot = resolve(execSync("git rev-parse --path-format=absolute --git-common-dir", { encoding: "utf8" }).trim(), "..");
-const songsDir = join(mainRoot, "tools/.cache/promo-songs");
+const songsDir = resolve(opt("--songs", join(mainRoot, "tools/.cache/promo-songs")));
 const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
 const outDir = resolve(opt("--out", join(mainRoot, "tools/.cache/mic-gap", stamp)));
 const volumes = opt("--volumes", "50,80").split(",").filter(Boolean).map(Number);
 const seconds = +opt("--seconds", "60");
 const noiseSec = +opt("--noise", "20");
 const micLabel = opt("--mic", "");
+const noiseArg = opt("--noise-audio", null);
+const noiseAudio = noiseArg === null ? null : resolve(noiseArg);
+const noiseLevel = +opt("--noise-level", "0.5");
+if (noiseAudio && !existsSync(noiseAudio)) throw new Error(`--noise-audio: no file at ${noiseAudio}`);
+if (!(noiseLevel >= 0 && noiseLevel <= 1)) throw new Error("--noise-level must be between 0 and 1");
 // One per tempo region the tracker has to cover (86 to 175 BPM).
 const trackIds = opt("--tracks", "ium1_38q9UY,sc1688273,LPRsMPmwMf8,LAxCqlU-OAo,E_YGLT8G_00").split(",").filter(Boolean);
 mkdirSync(outDir, { recursive: true });
@@ -93,6 +104,13 @@ const PLAYER_HTML = `<!doctype html><title>${PLAYER_TITLE}</title><audio id=a></
 window.playAt = async (url, start) => { const a = document.getElementById('a'); a.src = url; a.volume = 1;
   await new Promise(r => a.addEventListener('loadedmetadata', r, { once: true })); a.currentTime = start; await a.play(); };
 window.stopPlay = () => { const a = document.getElementById('a'); a.pause(); a.removeAttribute('src'); a.load(); };
+</script>`;
+
+// The title must not contain PLAYER_TITLE, or the by-title flag would pick this tab.
+const NOISE_TITLE = "MicGap Noise";
+const NOISE_HTML = `<!doctype html><title>${NOISE_TITLE}</title><audio id=a loop></audio><script>
+window.playNoise = async (url, level) => { const a = document.getElementById('a'); a.src = url; a.volume = level; await a.play(); };
+window.stopNoise = () => { const a = document.getElementById('a'); a.pause(); a.removeAttribute('src'); a.load(); };
 </script>`;
 
 // The worklet hands every render quantum's two inputs (tab, mic) to the page
@@ -150,8 +168,10 @@ const server = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/player.html") return res.end(PLAYER_HTML);
   if (url.pathname === "/recorder.html") return res.end(RECORDER_HTML);
-  const file = url.pathname === "/sweep.wav" ? sweepPath : join(songsDir, url.pathname.replace(/^\/song\//, ""));
-  if (!existsSync(file)) return res.writeHead(404).end();
+  if (url.pathname === "/noise.html") return res.end(NOISE_HTML);
+  const file =
+    url.pathname === "/sweep.wav" ? sweepPath : url.pathname === "/noise.wav" ? noiseAudio : join(songsDir, url.pathname.replace(/^\/song\//, ""));
+  if (!file || !existsSync(file)) return res.writeHead(404).end();
   // Range support, so the player can seek.
   const size = statSync(file).size;
   const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range || "");
@@ -179,6 +199,8 @@ const browser = await chromium.launch({
 const ctx = await browser.newContext({ permissions: ["microphone"] });
 const player = await ctx.newPage();
 await player.goto(`${base}/player.html`);
+const noisePage = noiseAudio ? await ctx.newPage() : null;
+if (noisePage) await noisePage.goto(`${base}/noise.html`);
 const rec = await ctx.newPage();
 rec.on("console", (m) => m.type() === "error" && console.log("REC", m.text()));
 await rec.goto(`${base}/recorder.html`);
@@ -187,7 +209,15 @@ const tracks = await rec.evaluate((l) => window.startCapture(l), micLabel);
 console.log("capture:", JSON.stringify(tracks));
 if (tracks.display[0]?.state !== "live") throw new Error("the tab share has no live audio track");
 
-const session = { started: new Date().toISOString(), sr: SR, startVolume, tracks, segments: [] };
+const session = {
+  started: new Date().toISOString(),
+  sr: SR,
+  startVolume,
+  tracks,
+  noiseAudio: noiseAudio ? basename(noiseAudio) : null,
+  noiseLevel: noiseAudio ? noiseLevel : null,
+  segments: [],
+};
 
 async function recordSegment(name, sec, play) {
   await rec.evaluate(() => window.resetBuffers());
@@ -218,11 +248,18 @@ async function recordSegment(name, sec, play) {
 
 try {
   setVolume(0);
+  // Started once the output is at 0, so the noise never sounds at the laptop's own level.
+  // At 0 the room-noise take holds the room alone.
+  if (noisePage) await noisePage.evaluate(([u, l]) => window.playNoise(u, l), [`${base}/noise.wav`, noiseLevel]);
   const noise = await recordSegment("noise", noiseSec, null);
   session.segments.push({ name: "noise", kind: "noise", volume: 0, ...noise });
   for (const vol of volumes) {
     setVolume(vol);
     execFileSync("osascript", ["-e", "set volume without output muted"]);
+    if (noisePage) {
+      const nv = await recordSegment(`noise-audible-v${vol}`, noiseSec, null);
+      session.segments.push({ name: `noise-audible-v${vol}`, kind: "noise", volume: vol, ...nv });
+    }
     const sw = await recordSegment(`sweep-v${vol}`, 10, () => player.evaluate((u) => window.playAt(u, 0), `${base}/sweep.wav`));
     session.segments.push({ name: `sweep-v${vol}`, kind: "sweep", volume: vol, ...sw });
     for (const id of trackIds) {
@@ -236,6 +273,7 @@ try {
     }
   }
 } finally {
+  if (noisePage) await noisePage.evaluate(() => window.stopNoise()).catch((e) => console.log("noise stop failed:", e.message));
   setVolume(startVolume);
   if (startMuted === "true") execFileSync("osascript", ["-e", "set volume with output muted"]);
   writeFileSync(join(outDir, "session.json"), JSON.stringify(session, null, 2));
