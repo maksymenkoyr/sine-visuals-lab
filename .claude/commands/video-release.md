@@ -78,8 +78,10 @@ calm cuts. Agreed over six rounds on the v0.2.0 video (2026-10-03/04).
 
 1. **Opening look**: the user's look, a second, untouched, reacting to the song.
 2. **Version card**: held a couple of seconds over the look. GitHub-release flavoured: a green tag
-   icon, the version, the app name under it. Its approved size is the v0.2.0 one; the hook video's
-   slimmer card is the user's call to make here (asked 2026-10-05, not yet answered).
+   icon and the version, nothing under it (2026-10-18, replacing the app name: leave `subtitle` out of
+   lines.json). The v0.2.0 card's width and type, with smaller gaps above and below the text
+   (2026-10-17, replacing its taller block); the user picked it over the hook video's slimmer card
+   and two lighter, narrower ones.
 3. **Demos**: the song's drop lands on the first. One caption at a time along the bottom; the next
    slides in as the old one leaves (plain translucent panel, white hairline, group name and n / N).
    - Interface demos: the camera leans toward the part that changes.
@@ -91,6 +93,8 @@ calm cuts. Agreed over six rounds on the v0.2.0 video (2026-10-03/04).
 4. **Change lists**: every group over steady scene footage, as a list card held low in the frame
    (a header bar with the group name and a count, rows divided by rules), its rows scrolling through
    like a carousel: a new row comes in at the bottom as the top one leaves. Lists stay complete.
+   The user replaced this on 2026-10-18 (not built yet, #586): one list filling the screen over a
+   dimmed scene, of every change not shown as a demo, running quickly through them.
 5. **End**: the last list is cut away on a beat and the scene holds a couple of seconds; the video
    stops on a bar line.
 

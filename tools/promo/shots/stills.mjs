@@ -83,10 +83,7 @@ try {
     }
     // Smooth scrolling would leave a crop on a panel that is still moving.
     await page.addStyleTag({ content: "#sceneVersion,#roomCode{display:none!important}*{scroll-behavior:auto!important}" });
-    if (s.hide) {
-      await hideChrome(page);
-      await page.addStyleTag({ content: "#fxBar,#recRow{display:none!important}" });
-    }
+    if (s.hide) await hideChrome(page);
     if (s.css) await page.addStyleTag({ content: s.css });
     if (s.panel) {
       await openPanel(page);
