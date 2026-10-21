@@ -122,4 +122,4 @@ The silence row's change is the boil the scene has by design.
 
 ## History
 
-- 2026-10-21: first version, built from the `/ref` measurements (this PR).
+- #663 (2026-10-21): first version, built from the `/ref` measurements.
