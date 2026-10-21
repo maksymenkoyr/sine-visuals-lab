@@ -13,6 +13,7 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
 import { getDriveSolo } from "./driveSolo.ts";
+import { isDriveMuted } from "./driveMute.ts";
 import { createShapingBank, getShapingNode, type ShapingState } from "./shapingNodes.ts";
 
 /**
@@ -339,8 +340,9 @@ import { createShapingBank, getShapingNode, type ShapingState } from "./shapingN
  * setting of a scene is soloed, `forScene()` reads every other setting of
  * that scene as if all its wires were switched off, so it falls under the
  * "Nothing plugged in" rules above, and a built-in reaction reads its rest.
- * The soloed setting itself reads normally. The stored wires are never
- * touched, so ending the solo restores them exactly. `accumulate()` ignores
+ * The soloed setting itself reads normally. Mute (driveMute.ts) silences one
+ * setting the same way. The stored wires are never touched, so ending the
+ * solo restores them exactly. `accumulate()` ignores
  * the solo, so every tracker keeps learning and ending it is warm.
  *
  * **What's deliberately not a drive** (so the boundary is written down, not
@@ -1139,6 +1141,7 @@ export function createDriveEngine(): DriveEngine {
         if (!spec || !drive) return { setting: "scene", gain: 1 };
         const solo = getDriveSolo();
         if (solo && solo.sceneId === sceneId && solo.key !== key) return { setting: SOLO_SILENCED, gain: drive.gain ?? 1 };
+        if (isDriveMuted(sceneId, key)) return { setting: SOLO_SILENCED, gain: drive.gain ?? 1 };
         return { setting: getDriveSetting(sceneId, spec), gain: drive.gain ?? 1 };
       }
 

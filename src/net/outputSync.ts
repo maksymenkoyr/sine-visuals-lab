@@ -79,6 +79,13 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    missed frames, governor), twice a second, for the Output Power card in
  *    the main window's panel. Also counts as a sign of life, but unlike `hello` it
  *    never makes the main window re-send state.
+ *  - `thumbs` (main to output): send small frames while the desk's LIVE
+ *    monitor shows the output's own picture (liveMonitor.ts). Re-sent while
+ *    wanted (outputBridge.ts); the output stops on its own after
+ *    THUMBS_TIMEOUT_MS without one, so a reloaded main window never leaves it
+ *    sending.
+ *  - `thumb` (output to main): one small ImageBitmap of the frame it just
+ *    drew, at most THUMB_FPS a second (output.ts's loop).
  */
 
 /** Sensitivity, Expansion and Smoothing as the main window resolved them
@@ -150,13 +157,28 @@ export interface OutputRenderStatus {
  *  smoothly and what waits, and a different scene crossfades over it
  *  (render/crossfade.ts). Absent is the plain send: instant within a scene, a
  *  one-bar crossfade across a scene change. */
+/** The LIVE monitor's thumbnails (see the header's `thumb`): how often, and
+ *  their size. The output draws at its own size and the bitmap is resized on
+ *  the way out, so the main window never holds a full-size frame. */
+export const THUMB_FPS = 12;
+export const THUMB_WIDTH = 384;
+export const THUMB_HEIGHT = 216;
+/** Thumbnails stop this long after the last `thumbs` request. Set above the
+ *  interval the main window re-sends it at (outputBridge.ts). */
+export const THUMBS_TIMEOUT_MS = 3000;
+
 export type ToOutput =
   | { t: "state"; state: OutputState; glideMs?: number }
   | { t: "frame"; f: WireFrame }
   | { t: "power"; power: OutputPower }
   | { t: "effects"; effects: HeldEffects }
+  | { t: "thumbs"; on: boolean }
   | { t: "raise" };
-export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" } | { t: "status"; s: OutputRenderStatus };
+export type ToMain =
+  | { t: "hello"; haveState: boolean }
+  | { t: "bye" }
+  | { t: "status"; s: OutputRenderStatus }
+  | { t: "thumb"; bmp: ImageBitmap };
 
 /** Identity of what the output is showing, for "does the output match the
  *  preview" — scene, palette and the stored settings. `params` and the keys
@@ -190,6 +212,10 @@ export interface CueController {
    *  (see ToOutput); ignored while Cue is held, when the output already
    *  shows the preview. */
   go(glideMs?: number): void;
+  /** Play with a given state instead of the preview — one change sent on its own (net/lookDiff.ts's takeRow). It becomes the program, as go() makes the preview the program. */
+  goState(state: OutputState, glideMs?: number): void;
+  /** The main window's current look as last passed to preview(), null before any. */
+  current(): OutputState | null;
   /** Re-sends whatever the output should be showing right now (the preview
    *  while Cue is held, else the program) if it differs from what it was last
    *  *delivered*. For an output that reappears with its state intact after a
@@ -265,6 +291,12 @@ export function createCueController(
       programKey = previewKey;
       push(previewState, cue ? undefined : glideMs);
     },
+    goState(state, glideMs) {
+      program = state;
+      programKey = stateKey(state);
+      push(state, cue ? undefined : glideMs);
+    },
+    current: () => previewState,
     resync() {
       const target = cue ? previewState : program;
       const key = cue ? previewKey : programKey;

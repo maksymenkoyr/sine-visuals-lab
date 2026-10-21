@@ -4,8 +4,11 @@ import { crossedBeatMultiple, METRONOME_BEATS_PER_BAR } from "../src/render/metr
 import {
   AUTOPILOT_FALLBACK_SEC_PER_BAR,
   createAutopilot,
+  peekAutopilot,
   restartAutopilot,
+  skipAutopilotPick,
   stepAutopilot,
+  type AutopilotClock,
   type AutopilotState,
 } from "../src/render/setAutopilot.ts";
 
@@ -132,5 +135,128 @@ describe("autopilot with no tempo", () => {
     // The metronome starts and its beat count jumps to the live clock's (large).
     const fired = stepAutopilot(s, { timeSec: 7.05, beats: 5000.2, tempo: true }, cfg, IDS);
     expect(fired).toBeNull();
+  });
+});
+
+function seeded(seed: number): () => number {
+  let x = seed;
+  return () => {
+    x = (x * 16807) % 2147483647;
+    return x / 2147483647;
+  };
+}
+
+function beatClock(beats: number): AutopilotClock {
+  return { timeSec: beats / 2, beats, tempo: true };
+}
+
+/** Peeks, then steps, on every tick; what each step fires is what the peek showed. */
+function peekThenStep(
+  s: AutopilotState,
+  from: number,
+  to: number,
+  cfg: AutopilotConfig,
+  ids: string[],
+  random: () => number,
+): Array<{ id: string; peeked: string | null }> {
+  const out: Array<{ id: string; peeked: string | null }> = [];
+  for (let b = from; b <= to + 1e-9; b += DT_BEATS) {
+    const p = peekAutopilot(s, beatClock(b), cfg, ids, random);
+    const id = stepAutopilot(s, beatClock(b), cfg, ids, random);
+    if (id) out.push({ id, peeked: p?.padId ?? null });
+  }
+  return out;
+}
+
+describe("peek", () => {
+  it("shows the pad the next change fires, in order", () => {
+    const fired = peekThenStep(createAutopilot(), 1.05, 80, CFG, IDS, Math.random);
+    expect(fired.map((f) => f.id)).toEqual(["a", "b", "c", "a"]);
+    for (const f of fired) expect(f.peeked).toBe(f.id);
+  });
+
+  it("shows the pad the next change fires, in shuffle", () => {
+    const cfg: AutopilotConfig = { ...CFG, order: "shuffle" };
+    const ids = ["a", "b", "c", "d"];
+    const fired = peekThenStep(createAutopilot(), 0.5, 4 * BAR * 8, cfg, ids, seeded(7));
+    expect(fired.length).toBeGreaterThanOrEqual(6);
+    for (const f of fired) expect(f.peeked).toBe(f.id);
+  });
+
+  it("does not move the cursor or the count", () => {
+    const s = createAutopilot();
+    restartAutopilot(s, "b");
+    stepAutopilot(s, beatClock(1), CFG, IDS);
+    const before = { cursor: s.cursor, counting: s.counting, startBeats: s.startBeats, startSec: s.startSec };
+    expect(peekAutopilot(s, beatClock(6), CFG, IDS)?.padId).toBe("c");
+    expect({ cursor: s.cursor, counting: s.counting, startBeats: s.startBeats, startSec: s.startSec }).toEqual(before);
+  });
+
+  it("is null while off or with too few pads", () => {
+    expect(peekAutopilot(createAutopilot(), beatClock(0), { ...CFG, on: false }, IDS)).toBeNull();
+    expect(peekAutopilot(createAutopilot(), beatClock(0), CFG, ["a"])).toBeNull();
+  });
+
+  it("counts the bars to the pick down as beats advance", () => {
+    const s = createAutopilot();
+    restartAutopilot(s, "a");
+    expect(peekAutopilot(s, beatClock(0), CFG, IDS)?.inBars).toBe(CFG.everyBars);
+    stepAutopilot(s, beatClock(0), CFG, IDS); // the count starts at beat 0
+    const bars = [0, 4, 8, 12, 15.9].map((b) => peekAutopilot(s, beatClock(b), CFG, IDS)?.inBars);
+    expect(bars).toEqual([4, 3, 2, 1, 1]);
+  });
+
+  it("counts seconds with no tempo", () => {
+    const s = createAutopilot();
+    const cfg: AutopilotConfig = { ...CFG, everyBars: 4 };
+    stepAutopilot(s, { timeSec: 0, beats: 0, tempo: false }, cfg, IDS);
+    const at = (t: number) => peekAutopilot(s, { timeSec: t, beats: 0, tempo: false }, cfg, IDS)?.inBars;
+    expect(at(0)).toBe(4);
+    expect(at(3)).toBe(3);
+    expect(at(4 * AUTOPILOT_FALLBACK_SEC_PER_BAR)).toBe(0);
+  });
+});
+
+describe("skip", () => {
+  it("in order, the next change fires the pad after the skipped one", () => {
+    const s = createAutopilot();
+    restartAutopilot(s, "a");
+    stepAutopilot(s, beatClock(0), CFG, IDS);
+    expect(peekAutopilot(s, beatClock(0), CFG, IDS)?.padId).toBe("b");
+    skipAutopilotPick(s, CFG, IDS);
+    expect(peekAutopilot(s, beatClock(0), CFG, IDS)?.padId).toBe("c");
+    const fired = runBeats(s, 0.1, 40);
+    expect(fired.map((f) => f.id).slice(0, 2)).toEqual(["c", "a"]);
+  });
+
+  it("leaves the cursor and the count alone", () => {
+    const s = createAutopilot();
+    restartAutopilot(s, "a");
+    stepAutopilot(s, beatClock(0), CFG, IDS);
+    skipAutopilotPick(s, CFG, IDS);
+    expect(s.cursor).toBe("a");
+    expect(s.startBeats).toBe(0);
+    expect(s.counting).toBe("beats");
+  });
+
+  it("in shuffle, draws another pad that is neither the skipped one nor the one showing", () => {
+    const cfg: AutopilotConfig = { ...CFG, order: "shuffle" };
+    const ids = ["a", "b", "c", "d"];
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = createAutopilot();
+      restartAutopilot(s, "a");
+      const first = peekAutopilot(s, beatClock(0), cfg, ids, seeded(seed))!.padId;
+      skipAutopilotPick(s, cfg, ids, seeded(seed + 100));
+      const second = peekAutopilot(s, beatClock(0), cfg, ids, seeded(seed + 200))!.padId;
+      expect(second).not.toBe(first);
+      expect(second).not.toBe("a");
+      expect(ids).toContain(second);
+    }
+  });
+
+  it("does nothing while off", () => {
+    const s = createAutopilot();
+    skipAutopilotPick(s, { ...CFG, on: false }, IDS);
+    expect(s.pick).toBeNull();
   });
 });
