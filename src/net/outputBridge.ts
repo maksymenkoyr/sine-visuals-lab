@@ -7,6 +7,7 @@ import {
   type CueController,
   type OutputParams,
   type OutputPower,
+  type OutputState,
   type OutputRenderStatus,
   type ToMain,
   type ToOutput,
@@ -124,6 +125,10 @@ export interface OutputBridge {
   sendEffects(effects: HeldEffects): void;
   /** The output's last reported render readouts, null while it is closed. */
   outputStatus(): OutputRenderStatus | null;
+  /** NEXT (re-read now) and LIVE (what the output was last sent). Either is null while no output is open. */
+  looks?(): { next: OutputState | null; live: OutputState | null };
+  /** Sends `state` as the new program (CueController.goState). False while no output is open. */
+  sendState?(state: OutputState, glideMs?: number): boolean;
   /** Drop this device's unplayed edits and show what Main shows now (the room
    *  bridge's answer to `changedBy`). The pop-out has nothing to take. */
   take?(): void;
@@ -272,6 +277,17 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       if (outputOpen) transport.post({ t: "effects", effects });
     },
     outputStatus: () => (outputOpen ? lastStatus : null),
+    looks() {
+      if (!outputOpen) return { next: null, live: null };
+      preview();
+      return { next: cue.current(), live: cue.held() };
+    },
+    sendState(state, glideMs) {
+      if (!outputOpen) return false;
+      cue.goState(state, glideMs && glideMs > 0 ? glideMs : undefined);
+      emitIfChanged();
+      return true;
+    },
     pushFrame(frame, extras, params) {
       latestParams = params;
       if (!outputOpen) return;

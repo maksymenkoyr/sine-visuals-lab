@@ -178,6 +178,11 @@ export function applySyncedStorage(
   for (const k of Object.keys(values)) {
     if (!scope || scope(k)) storage.setItem(k, values[k]);
   }
+  reloadSyncedStores();
+}
+
+/** Re-seeds every registered store from storage, each on its own (a store that throws keeps what it had). */
+export function reloadSyncedStores(): void {
   for (const reload of hooks) {
     try {
       reload();

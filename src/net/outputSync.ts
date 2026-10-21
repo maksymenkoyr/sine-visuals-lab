@@ -190,6 +190,10 @@ export interface CueController {
    *  (see ToOutput); ignored while Cue is held, when the output already
    *  shows the preview. */
   go(glideMs?: number): void;
+  /** Play with a given state instead of the preview — one change sent on its own (net/lookDiff.ts's takeRow). It becomes the program, as go() makes the preview the program. */
+  goState(state: OutputState, glideMs?: number): void;
+  /** The main window's current look as last passed to preview(), null before any. */
+  current(): OutputState | null;
   /** Re-sends whatever the output should be showing right now (the preview
    *  while Cue is held, else the program) if it differs from what it was last
    *  *delivered*. For an output that reappears with its state intact after a
@@ -265,6 +269,12 @@ export function createCueController(
       programKey = previewKey;
       push(previewState, cue ? undefined : glideMs);
     },
+    goState(state, glideMs) {
+      program = state;
+      programKey = stateKey(state);
+      push(state, cue ? undefined : glideMs);
+    },
+    current: () => previewState,
     resync() {
       const target = cue ? previewState : program;
       const key = cue ? previewKey : programKey;

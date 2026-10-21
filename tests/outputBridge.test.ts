@@ -116,6 +116,34 @@ describe("outputBridge status and power", () => {
     expect(states[0].t === "state" && states[0].state.scene).toBe("mesh");
   });
 
+  it("sendState posts a state message carrying the given state, only while an output is open", () => {
+    const { bridge, posted, receive } = setup();
+    const next = { scene: "mesh", palette: "mono", storage: {}, params: { sens: 1, exp: 1, smoothing: 1 } };
+    expect(bridge.sendState?.(next)).toBe(false);
+    expect(posted).toEqual([]);
+    receive({ t: "hello", haveState: false });
+    posted.length = 0;
+    expect(bridge.sendState?.(next, 2000)).toBe(true);
+    expect(posted).toEqual([{ t: "state", state: next, glideMs: 2000 }]);
+  });
+
+  it("looks reports NEXT as the main window's look now and LIVE as what the output holds", () => {
+    let scene = "spectrum";
+    const t = fakeTransport();
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene, palette: "neon" }),
+      storage,
+      power: () => POWER,
+    });
+    expect(bridge.looks?.()).toEqual({ next: null, live: null });
+    t.receive({ t: "hello", haveState: false });
+    scene = "mesh";
+    const looks = bridge.looks?.();
+    expect(looks?.next?.scene).toBe("mesh");
+    expect(looks?.live?.scene).toBe("spectrum");
+  });
+
   it("sendPower posts only while an output is open", () => {
     const { bridge, posted, receive } = setup();
     bridge.sendPower();
