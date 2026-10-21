@@ -257,6 +257,21 @@ hexagon and decagon.
   to 0.58). Bars of the sharpened pull (the ring over 0.6 raised to
   Resonance's exponent, what the plate weighs) on the synthetic feed:
   max 0.115, most modes under 0.02, unreadable.
+- 2026-10-20 (hue-kept sand): `scripts/palette-shots.mjs` +
+  `scripts/palette-score.py`, Levitating through the fake mic on the Metal
+  GPU, default settings, one shot per library palette. Share of lit pixels
+  near-white / mean saturation, before → after `keepHue`: Cobalt 24.9% /
+  0.16 → 3.3% / 0.37, Ice 25.5 / 0.11 → 10.3 / 0.26, Reef 20.2 / 0.11 →
+  0.4 / 0.35, Royal 20.2 / 0.17 → 3.0 / 0.36, Toxic 21.4 / 0.16 → 0.1 /
+  0.39, Arcade 23.8 / 0.15 → 0.1 / 0.44, Neon 6.1 / 0.30 → 0.0 / 0.47,
+  Sunset 6.3 / 0.37 → 0.0 / 0.51. Still pale: Halation 21.7 / 0.10, Sodium
+  10.6 / 0.25, Vapor 9.2 / 0.28, Anaglyph 8.7 / 0.30. Fire, Ember, Amber and
+  Malachite, single-hue or dark-topped, barely changed (Amber's saturation
+  fell 0.73 → 0.58 from the white lift). `tools/tune-real.mjs` on the same
+  song, 20 s (change median / p95, % per 100 ms): song 14.77 / 18.63 →
+  11.01 / 14.20, silence 2.84 / 3.61 → 1.72 / 2.07, song p95 over silence
+  5.2× → 6.8×; hits/min 339 → 321 (the probe's, not the scene's). Some of the
+  old change was clipped grains flicking white with each beat.
 
 ## Decisions and pivots
 
@@ -704,6 +719,20 @@ hexagon and decagon.
     longer bar than the lead without taking the plate yet.
   - The bench's music readout ("build, rising · bar 10 of 16") was the
     bench's fake song and was left out.
+- 2026-10-20 (hue-kept sand) — "fix colours in chladni". On most palettes the
+  default sand read white or cream, not the palette: a grain is lit about
+  twice over at the default Grain brightness, and clipping each channel on
+  its own turned Cobalt's orange (1, 0.54, 0.17) into (1, 1, 0.33), and
+  likewise every pale upper ramp. Now every grain's colour goes through
+  `keepHue` last: past full scale it is scaled back to full scale, hue kept,
+  and lifted toward white by `OVER_WHITE` of the overshoot, so a beat's
+  flash and a toss still flare. Grit was the only colour still clipped;
+  powder and the sand colour settings were already lit to keep their hue.
+  `litGrit` mirrors it, so the powder colour's distance checks see the new
+  grit. Settled sand reads a little dimmer and much more coloured
+  (Measurements, 2026-10-20). Not changed: where the grit sits on the ramp,
+  `GRIT_CHALK`, the glint halos' tint toward white, and `THROWN_REACH`, which
+  now leads Toward white instead of keeping pace with it.
 
 ## Tuning notes
 
@@ -791,6 +820,11 @@ hexagon and decagon.
   lit). Ember, Sodium and Malachite pass by the smallest margins and haven't
   been looked at on screen. Dense heaps can blow out white where glint halos
   stack.
+- Halation's sand stays grey and cream after `keepHue`: its ramp's middle is
+  a blend of teal and orange, near grey, and its top is cream. Sodium, Vapor,
+  Anaglyph and Ice keep about a tenth of lit pixels near-white, mostly thrown
+  grains running up to the ramp's near-white top (Toward white). Either would
+  need the grit to sit elsewhere on the ramp, a per-palette look call.
 - The toss's lift scales with Zoom, so above Zoom 2 the lifted bed briefly
   leaves the top of the screen. Grains outside the sim's scissored prefix
   (after a Sand amount change mid-flight) miss their landing pass and stay
@@ -886,7 +920,9 @@ hexagon and decagon.
   where `BAKE_UNITS_MAX` comes from; copy into `tests/` to run) and
   `ring-range-measure.test.ts` (every figure's ring on the tempo-eval
   tracks, where the Mode ladder's bar ends come from; copy into `tests/` to
-  run). The live bar readings were sampled from the card's DOM by a session
+  run) and `palette-shots.mjs` / `palette-score.py` (a song-time shot on
+  every library palette, and each shot's near-white share and saturation;
+  where the hue-kept sand's numbers come from). The live bar readings were sampled from the card's DOM by a session
   script, not kept.
   For pixel checks, `tools/gpu-bench.mjs --seed N` seeds `Math.random`,
   without which this scene's dumps never repeat. The toss's share-on-lines
@@ -939,6 +975,8 @@ hexagon and decagon.
   off before the plate picks a figure.
 - 2026-10-16 (draft) — Mode ladder card: every figure's ring, the figures
   on the plate, and Locked figure.
+- 2026-10-20 (draft) — Sand keeps its palette's hue when lit past full
+  scale instead of clipping to white.
 - `#413` (2026-10-05, draft; replaces #366 and #361) — Toss on the drop, Powder colour, the
   Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
   an endless pull-back on the square plate. Then sand colour: Thrown colour
