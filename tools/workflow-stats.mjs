@@ -13,7 +13,7 @@
 //   node tools/workflow-stats.mjs materials 346 [--bench <sha>]  # what the side-by-side grader reads
 //   node tools/workflow-stats.mjs export wf_d5233a2c-fd5   # one run's rows, to carry to another machine
 //   node tools/workflow-stats.mjs import rows.jsonl        # add rows another machine exported
-//   node tools/workflow-stats.mjs handoffs [--json] [--no-gh]  # handoffs to haiku-coder, per setup
+//   node tools/workflow-stats.mjs handoffs [--json] [--no-gh]  # handoffs to builder, per setup
 //   node tools/workflow-stats.mjs handoff <id-prefix>          # one handoff in full, plan included
 //   node tools/workflow-stats.mjs handoff-ship                  # from /ship: what the session changed after each coder
 //   node tools/workflow-stats.mjs handoff-hook                  # Claude Code hook entry (stdin), see below
@@ -37,12 +37,12 @@
 // grader's grades of every run it compared, kept apart so recording a run
 // again never drops its grades. `materials` prints what that grader reads.
 //
-// A handoff is a plan a Claude Code session hands to the haiku-coder subagent
+// A handoff is a plan a Claude Code session hands to the builder subagent
 // through the Agent tool. The hooks in .claude/settings.json call `handoff-hook`
 // on PreToolUse and PostToolUse of the Agent tool and on SubagentStop. Only
 // Agent calls (the tool names handoffHook checks) whose subagent_type is
-// haiku-coder are recorded. The PreToolUse hook keeps the plan and a snapshot
-// of the working tree in PENDING; when the coder finishes, one row goes to
+// builder are recorded (rows from before its rename say haiku-coder). The
+// PreToolUse hook keeps the plan and a snapshot of the working tree in PENDING; when the coder finishes, one row goes to
 // HANDOFFS, next to the store and outside the repo, because a plan can name
 // paid-scene code and the log stays private. The diff is taken between two
 // snapshots of the working tree, each written as a git tree object through a
@@ -390,13 +390,13 @@ function finishHandoff(pending, { subagents, status, toolUses }) {
 
 /**
  * The Claude Code hook entry. Reads the hook's JSON from stdin and records a
- * haiku-coder handoff from its PreToolUse, PostToolUse and SubagentStop events.
+ * builder handoff from its PreToolUse, PostToolUse and SubagentStop events.
  * It never throws and prints nothing, so a broken hook can't block a tool call.
  */
 function handoffHook() {
   try {
     const input = JSON.parse(readFileSync(0, "utf8"));
-    const handoffCall = ["Agent", "Task"].includes(input.tool_name) && input.tool_input?.subagent_type === "haiku-coder";
+    const handoffCall = ["Agent", "Task"].includes(input.tool_name) && input.tool_input?.subagent_type === "builder";
     if (input.hook_event_name === "PreToolUse") {
       if (!handoffCall) return;
       const id = handoffId(input);
@@ -414,7 +414,7 @@ function handoffHook() {
         branch: git(input.cwd, ["branch", "--show-current"]),
         headBefore: git(input.cwd, ["rev-parse", "HEAD"]),
         title: input.tool_input.description ?? "",
-        agent: "haiku-coder",
+        agent: "builder",
         plan: input.tool_input.prompt ?? "",
         preTree: snapshotTree(input.cwd),
         agentId: null,

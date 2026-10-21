@@ -40,16 +40,17 @@ A browser-based, real-time WebGL2 audio visualizer.
   a hook refuses a new issue without a difficulty label, and `/ship` records
   the difficulty the work actually had.
 - An agent is one subagent this session starts and reads back, like
-  `haiku-coder`. A workflow is a script in `.claude/workflows/` that runs
+  `builder`. A workflow is a script in `.claude/workflows/` that runs
   several agents, like `/plan-code-review`. Start a workflow only when I type
   its command or say "workflow"; never on your own.
-- Hand work on with `/handoff`: issues for a later session, or one part as a
-  `haiku-coder` agent's prompt. Once a change is settled (I asked for it,
-  straight away or after we discussed or researched it), hand it to
-  `haiku-coder` when I name it ("haiku-coder", "haiku coder"), or unasked
-  when it's plainly large and mechanical (new modules with tests, one edit
-  across many files). If it might fit but isn't obvious, suggest it; don't
-  weigh it. Read its diff before `/ship`.
+- Hand work on with `/handoff`: issues for a later session. Once a change is
+  settled (I asked for it, straight away or after we discussed or researched
+  it), build it with `/plan-build` (you plan, a `builder` agent builds on the
+  model and effort `docs/agent-models.md` gives its difficulty) when I name
+  it ("plan-build", "plan build"; "haiku coder" means plan-build on Haiku),
+  or unasked when it's plainly large and mechanical (new modules with tests,
+  one edit across many files). If it might fit but isn't obvious, suggest
+  it; don't weigh it.
 - Finish every change with `/ship`, and close a session with `/wrap`.
 
 Before touching one of these, read what is listed:
