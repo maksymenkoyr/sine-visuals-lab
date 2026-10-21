@@ -1,7 +1,9 @@
 A browser-based, real-time WebGL2 audio visualizer.
 
-- Before starting, grep `origin/main` for the change and read the description
-  of any related open PR (its diff only if the overlap is still unclear).
+- Before starting, grep `origin/main` for the change, read any related open
+  issue (`gh issue list --search`; it may hold what the work needs), and read
+  the description of any related open PR (its diff only if the overlap is
+  still unclear). The PR closes or refers to the issue.
 - Explain code in a comment at the top of its file. Write a doc in `docs/`
   only for an explanation that spans several files.
 - Inside a file, comment only a non-obvious why: a constraint, a trap, a
