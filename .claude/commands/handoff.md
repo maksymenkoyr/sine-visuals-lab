@@ -23,22 +23,27 @@ private one.
 
 ## Rules for the writer
 
-1. **Hand on only what's settled.** The user's calls are decisions, in their
-   words where they chose, each with why or what it beat. A guess of yours
-   is an open question, never a decision.
+1. **Hand on only what's settled as settled.** The user's calls are
+   decisions, in their words where they chose, each with why or what it
+   beat. A guess of yours is an open question, never a decision. Work still
+   being found out is handed on as a research part, not turned into steps.
 2. **Write for a stranger.** Anything the receiver needs is in the issue, or
    named by path. `haiku-coder` can't open artifacts or the web, so copy in
    what decides the build; link the artifact too, its URL on its own line.
 3. **Every step names the file, the edit and the check** that proves it. A
    step you can't write that way isn't ready: it's an open question, or the
-   part needs research first.
+   part is a research part.
 4. **Say where things stand:** branch, PR, worktree; what's done and
    checked, what isn't.
 5. **Name what to read first** (the headers CLAUDE.md lists, scene records),
    the traps found, and what was rejected so it isn't tried again.
 6. **"Done when"** is what the user can see, plus the checks.
 7. **One part is one session and one PR**, ordered so each leaves `main`
-   working. A `haiku-coder` prompt is one part, or a slice of one.
+   working. A `haiku-coder` prompt is one part, or a slice of one, and never
+   a research part.
+8. **Research stays research.** When the user hands on unfinished research,
+   write what was found with its evidence, the leads still open and what's
+   ruled out; don't close it into a plan or guess the build parts after it.
 
 ## Rules for the receiver
 
@@ -60,7 +65,8 @@ private one.
    shared, and one sub-issue per part, in the layouts below.
 3. **Labels:** each issue gets its difficulty and `human` as
    `docs/issue-labels.md` says (a hook refuses one without difficulty), a
-   part whose steps are written gets `plan`, and a parent with sub-issues
+   part whose steps are written gets `plan`, a research part `research`,
+   and a parent with sub-issues
    gets a topic label that all of them share (`gh label create` if new).
 4. **Link each part to its parent:**
 
@@ -85,7 +91,11 @@ private one.
    blocks it, ask now and wait.
 4. **Build it.** For a `haiku-coder` share, its prompt is this part's
    layout plus the worktree path and branch.
-5. **Finish with `/ship`**, the PR body saying `Closes #<part>`, and the
+5. **A research part** ends when its Done when is answered, or the leads
+   run out: post the findings on the issue and bring the user what they
+   decide. Write the build parts only from their calls, then close it. Any
+   code or tool it leaves goes through `/ship` like a build part.
+6. **Finish with `/ship`**, the PR body saying `Closes #<part>`, and the
    parent's on the last part. Then comment on the parent what the next part
    needs to know, and answer any open question the part settled there.
 
@@ -143,6 +153,34 @@ Part of #<parent>.
 ## Done when
 
 - <the observable result, and its checks>
+```
+
+A research part (a sub-issue, or a single issue):
+
+```markdown
+Part of #<parent>.
+
+<The question, and what the answer will let the user decide.>
+
+## Read first
+
+- `<header, record, doc, artifact>`
+
+## Found so far
+
+- <Finding> — <evidence: measurement, command, file, link>
+
+## Ruled out
+
+- <Idea or lead> — <why>
+
+## Leads
+
+- <What to try next, and why it looks promising>
+
+## Done when
+
+- <What answers the question, or the point to stop and report>
 ```
 
 Leave out a section with nothing in it.
