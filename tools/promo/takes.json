@@ -15,12 +15,24 @@
       "shot": "take-scene.mjs", "feed": "song", "scene": "caustics", "sizes": [[720, 1280], [576, 1024]],
       "flips": { "every": 8, "from": "drop", "names": ["Sunset", "Ice", "Amethyst", "Ember", "Acid", "Halation", "Fire", "Arcade", "Sunset", "Ice", "Amethyst", "Ember"] }
     },
+    "song_chl_plates": {
+      "shot": "take-scene.mjs", "feed": "song", "scene": "chladni", "sizes": [[720, 1280], [576, 1024]],
+      "flips": { "every": 2, "from": "drop", "names": ["Round", "Square", "Hexagon", "Triangle", "Decagon", "Clamped", "Hexagon", "Round", "Triangle", "Decagon", "Square", "Hexagon"] }
+    },
+    "song_contrast": {
+      "shot": "take-scene.mjs", "feed": "song", "scene": "caustics", "sizes": [[720, 1280], [576, 1024]],
+      "flips": { "every": 2, "from": "drop", "names": ["Royal", "Reef", "Cobalt", "Vapor", "Toxic", "Anaglyph", "Royal", "Reef", "Anaglyph", "Toxic", "Cobalt", "Vapor", "Toxic", "Anaglyph"] }
+    },
     "ui_strains": { "shot": "take-ui.mjs", "scene": "physarum2" },
     "ui_palettes": { "shot": "take-ui.mjs", "scene": "caustics" },
     "ui_pads": { "shot": "take-ui.mjs", "scene": "physarum2", "sizes": [[576, 1024], [504, 896], [432, 768]] },
     "ui_wire": { "shot": "take-ui.mjs", "scene": "caustics" },
     "ui_hits": { "shot": "take-ui.mjs", "scene": "caustics" },
     "ui_master": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_sparkle": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_set": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_fx": { "shot": "take-ui.mjs", "scene": "caustics" },
+    "ui_overlay": { "shot": "take-ui.mjs", "scene": "caustics" },
     "cuep": { "shot": "take-two-screens.mjs", "feed": "song", "scene": "caustics", "sizes": [[1280, 720]] },
     "room": { "shot": "take-two-screens.mjs", "feed": "song", "scene": "caustics", "sizes": [[1280, 720]] }
   }
