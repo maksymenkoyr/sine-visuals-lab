@@ -62,8 +62,9 @@ private one.
    issue that covers it rather than opening a second.
 2. **One part:** one issue. **Several:** a parent issue holding what's
    shared, and one sub-issue per part, in the layouts below.
-3. **Labels:** each issue gets its difficulty and `human` as
-   `docs/issue-labels.md` says (a hook refuses one without difficulty), a
+3. **Labels:** each issue gets its difficulty, tokens and `human` as
+   `docs/issue-labels.md` says (a hook refuses one without difficulty or
+   tokens), a
    part whose steps are written gets `plan`, a research part `research`,
    and a parent with sub-issues
    gets a topic label that all of them share (`gh label create` if new).
