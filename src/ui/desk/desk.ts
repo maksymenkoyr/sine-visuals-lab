@@ -12,13 +12,14 @@
  *
  * The view switch in the top bar picks what the page under the monitors shows:
  * MAIN is the scrolling page; PADS swaps it for the full pads view (pads.ts);
- * NODES keeps only the panel. ORCHESTRATE is still the main page, scrolled to
- * its section.
+ * NODES keeps only the panel. ORCHESTRATE swaps it for the full Orchestrate
+ * view (orchestrate.ts); the small form sits in the page's ORCHESTRATE section.
  */
 import { clearDriveMutes } from "../../render/driveMute.ts";
 import { getSceneTransition, setSceneTransition, type SceneTransition } from "../../render/sceneTransition.ts";
 import { capturePadStill, padStillAt } from "./padStills.ts";
 import { createLiveMonitor, type LiveMonitorDeps } from "./liveMonitor.ts";
+import { createOrchestrateMini, createOrchestrateView, type OrchestrateDeps } from "./orchestrate.ts";
 import { createPadsRow, createPadsView, type PadsDeps } from "./pads.ts";
 import { createPlayList, type PlayListDeps } from "./playList.ts";
 import { createStrips, type StripsDeps } from "./strips.ts";
@@ -43,6 +44,7 @@ export interface DeskDeps {
   strips: StripsDeps;
   /** load(id) puts a pad on NEXT (the ✎ button and the view's "edit" use it). */
   pads: Omit<PadsDeps, "openAll" | "edit"> & { load(padId: string): void };
+  orchestrate: Omit<OrchestrateDeps, keyof PadsDeps>;
 }
 
 type DeskView = "main" | "pads" | "orchestrate" | "nodes";
@@ -182,8 +184,11 @@ export function createDesk(deps: DeskDeps): Desk {
   padsSlot.classList.add("desk-sec-pads");
   const padsRow = createPadsRow(padsDeps);
   padsSlot.appendChild(padsRow.el);
+  const orchDeps: OrchestrateDeps = { ...padsDeps, ...deps.orchestrate };
   const orchSlot = pageSection("ORCHESTRATE");
   orchSlot.classList.add("desk-sec-orch");
+  const orchMini = createOrchestrateMini(orchDeps, () => setView("orchestrate"));
+  orchSlot.appendChild(orchMini.el);
   const panelSlot = pageSection("PANEL");
   for (const [label, target] of [
     ["Mixer", mixer],
@@ -204,6 +209,8 @@ export function createDesk(deps: DeskDeps): Desk {
   const viewPage = el("div");
   viewPage.id = "deskView";
   viewPage.appendChild(padsView.el);
+  const orchView = createOrchestrateView(orchDeps);
+  viewPage.appendChild(orchView.el);
   root.append(lower, viewPage);
 
   const playList = createPlayList({ ...deps.playList, listEl, countEl, onHover: (key) => strips.highlight(key) });
@@ -225,9 +232,9 @@ export function createDesk(deps: DeskDeps): Desk {
   function setView(next: DeskView): void {
     view = next;
     root.classList.toggle("view-pads", next === "pads");
+    root.classList.toggle("view-orch", next === "orchestrate");
     lower.classList.toggle("desk-nodes", next === "nodes");
     for (const b of viewBtns) b.el.classList.toggle("on", b.view === next);
-    if (next === "orchestrate") orchSlot.scrollIntoView({ block: "start" });
     if (next === "nodes") lower.scrollTop = 0;
   }
 
@@ -281,6 +288,8 @@ export function createDesk(deps: DeskDeps): Desk {
     strips.tick(nowMs);
     padsRow.tick(nowMs);
     if (view === "pads") padsView.tick(nowMs);
+    orchMini.tick(nowMs);
+    if (view === "orchestrate") orchView.tick(nowMs);
     if (nowMs < nextRefreshMs) return;
     nextRefreshMs = nowMs + REFRESH_MS;
     const text = deps.bpmText();

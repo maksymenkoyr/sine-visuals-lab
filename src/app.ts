@@ -151,7 +151,9 @@ import {
 import {
   createPictureMeter,
   createPictureAverager,
+  displayLevel,
   PICTURE_GAP_RESET_MS,
+  PICTURE_MEASURES,
   PICTURE_SAMPLE_INTERVAL_MS,
 } from "./render/pictureMeter.ts";
 import { createPictureReadback, type PictureReadback } from "./render/pictureReadback.ts";
@@ -193,7 +195,9 @@ import {
   skipAutopilotPick,
   stepAutopilot,
 } from "./render/setAutopilot.ts";
-import { getLaunchOn, launchBeat, queueLaunch, takeDue, type QueuedLaunch } from "./render/launchQueue.ts";
+import { cancelLaunch, getLaunchOn, launchBeat, queueLaunch, takeDue, type QueuedLaunch } from "./render/launchQueue.ts";
+import { NO_EFFECTS } from "./render/heldEffects.ts";
+import { blendValues } from "./render/lookMap.ts";
 import { METRONOME_BEATS_PER_BAR } from "./render/metronome.ts";
 import { funnyLookName } from "./render/lookNames.ts";
 import {
@@ -607,6 +611,16 @@ const setAutopilotState = createAutopilot();
 /** Pad launches the desk has queued for a launch line (launchQueue.ts), run by the tick. */
 let launchQueue: QueuedLaunch[] = [];
 let launchQueueTempo = false;
+/** How often each pad's measured picture is eased in, and how far one reading moves the stored value. */
+const PAD_READING_MS = 500;
+const PAD_READING_EASE = 0.3;
+/** A Map blend is a short glide: short enough to follow a drag, long enough not to step. */
+const MAP_GLIDE_MS = 200;
+/** The pads' measured pictures (orchestrate.ts's Map), kept while a pad is on NEXT. */
+const padReadings = new Map<string, { busy: number; bright: number }>();
+let padReadingsAtMs = -Infinity;
+let mapFollow = false;
+let mapSceneChangedAtMs = -Infinity;
 let effectControls: EffectControls | null = null;
 let compositor: Compositor | null = null;
 let clipRecorder: ClipRecorder | null = null;
@@ -837,6 +851,26 @@ function applyDesk(): void {
           },
           skipPick: () => skipAutopilotPick(setAutopilotState, getAutopilot(), listPads().map((p) => p.id)),
           load: (id) => firePad(id),
+        },
+        orchestrate: {
+          energy: () => lastAnim?.sectionIntensity ?? 0,
+          effects: () => effectControls?.engaged() ?? NO_EFFECTS,
+          queueAt: (id, at) => {
+            launchQueue = queueLaunch(launchQueue, id, at);
+          },
+          cancelAt: (at) => {
+            launchQueue = cancelLaunch(launchQueue, at);
+          },
+          reading: (id) => padReadings.get(id) ?? null,
+          blend: mapBlend,
+          launchNow: (id) => {
+            firePad(id);
+            outputControls?.go();
+          },
+          follow: () => mapFollow,
+          setFollow: (on) => {
+            mapFollow = on;
+          },
         },
       });
       desk.setActive(previewActive && !isController && !!outputBridge?.status().open);
@@ -1192,6 +1226,54 @@ function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
     config.on ? listPads().map((p) => p.id) : NO_PADS,
   );
   if (id) firePad(id, true);
+}
+
+/** The latest picture reading, or null when the meter has gone stale (see the panel's getPictureReading). */
+function freshPictureReading(): ReturnType<typeof pictureMeter.latest> {
+  return performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS + (pictureReadback?.holdMs() ?? 0) ? pictureMeter.latest() : null;
+}
+
+/** Eases the picture of the pad on NEXT into its stored reading. Only the Map reads these; they stay null until the pad has been on NEXT with a reading. */
+function updatePadReadings(): void {
+  const id = currentPadId();
+  const r = freshPictureReading();
+  if (id === null || !r) return;
+  const level = (key: "brightness" | "motion" | "detail"): number | null => {
+    const m = PICTURE_MEASURES.find((x) => x.key === key);
+    return m ? displayLevel(m, r[key]) : null;
+  };
+  const bright = level("brightness");
+  const parts = [level("motion"), level("detail")].filter((v): v is number => v !== null);
+  if (bright === null || parts.length === 0) return;
+  const busy = parts.reduce((sum, v) => sum + v, 0) / parts.length;
+  const prev = padReadings.get(id);
+  padReadings.set(
+    id,
+    prev
+      ? { busy: prev.busy + (busy - prev.busy) * PAD_READING_EASE, bright: prev.bright + (bright - prev.bright) * PAD_READING_EASE }
+      : { busy, bright },
+  );
+}
+
+/** The Map's blend: two looks of one scene at `share`. NEXT takes it (the pad a is loaded first if it is another scene's) and plays to LIVE with a short glide. */
+function mapBlend(aId: string, bId: string, share: number): void {
+  const pads = listPads();
+  const a = pads.find((p) => p.id === aId);
+  const b = pads.find((p) => p.id === bId);
+  if (!a || !b || a.look.sceneId !== b.look.sceneId) return;
+  if (a.look.sceneId !== scene.id) firePad(a.id);
+  const specs = scene.settings ?? [];
+  for (const [key, value] of Object.entries(blendValues(a.look.manual, b.look.manual, share))) {
+    const spec = specs.find((s) => s.key === key);
+    if (!spec || spec.type !== undefined) continue;
+    setSceneSetting(scene.id, spec, value);
+  }
+  outputControls?.go(MAP_GLIDE_MS);
+  const now = performance.now();
+  if (now - mapSceneChangedAtMs >= PAD_READING_MS) {
+    mapSceneChangedAtMs = now;
+    deviceMenu?.sceneChanged();
+  }
 }
 
 /** The beat count pad launches wait on: the metronome's, or seconds at Autopilot's fallback bar length with no tempo. */
@@ -1993,8 +2075,7 @@ function wireDeviceMenu(): void {
     // Null when the meter has gone stale (the panel was just opened, or sampling
     // gapped past PICTURE_GAP_RESET_MS plus however long the readback holds
     // thumbnails back to batch reads), not a frozen last reading.
-    getPictureReading: () =>
-      performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS + (pictureReadback?.holdMs() ?? 0) ? pictureMeter.latest() : null,
+    getPictureReading: () => freshPictureReading(),
     getAutoGain: () => getAutoGain(),
     onAutoGainChange: (value) => {
       setAutoGainAuto(false);
@@ -3430,6 +3511,10 @@ function tick(): void {
       outputControls?.go();
     }
   }
+  if (nowRafMs - padReadingsAtMs >= PAD_READING_MS) {
+    padReadingsAtMs = nowRafMs;
+    updatePadReadings();
+  }
 
   // Resolved once per tick and reused below (extractor, anim clock, meters).
   const smoothing = resolveSmoothing(scene.id);
@@ -3685,7 +3770,15 @@ function sizeCanvas(): boolean {
  *  blur on a heavy scene, 2026-10-04), or a headless driver forcing it
  *  (picture.force). */
 function pictureWanted(): boolean {
-  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false);
+  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false) || deskWantsPadReading();
+}
+
+/** The desk's Map places a pad by its picture: sample while the pad on NEXT has
+ *  none yet, and only then, since every sample is a GPU readback. */
+function deskWantsPadReading(): boolean {
+  if (!(desk?.active() ?? false)) return false;
+  const id = currentPadId();
+  return id !== null && !padReadings.has(id);
 }
 
 function ensurePictureReadback(): PictureReadback {

@@ -177,8 +177,10 @@ body.desk .vc-cable-layer { clip-path: inset(var(--desk-top) 0 0 0); }
   display: flex; flex-direction: column; gap: 14px;
 }
 #deskView { display: none; }
-#desk.view-pads #deskView { display: flex; }
-#desk.view-pads #deskLower { display: none; }
+#desk.view-pads #deskView, #desk.view-orch #deskView { display: flex; }
+#desk.view-pads #deskLower, #desk.view-orch #deskLower { display: none; }
+#desk:not(.view-pads) .desk-pads-view { display: none; }
+#desk:not(.view-orch) .desk-orch-view { display: none; }
 #deskLower.desk-nodes .desk-jump,
 #deskLower.desk-nodes .desk-mixer,
 #deskLower.desk-nodes .desk-sec-pads,
@@ -339,6 +341,109 @@ body.desk.chrome-idle #fxBar { opacity: 1; pointer-events: auto; }
   border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 4px; background: #0b0f0d;
 }
 .desk-pads-upnext { font-size: 13px; color: #e9eee9; }
+.desk-orch-view { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.desk-orch-tabs { display: flex; gap: 6px; }
+.desk-orch-tab {
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: transparent; padding: 3px 9px;
+  font: 11px ${FONT_MONO}; letter-spacing: 0.08em; color: #a7b0aa; cursor: pointer;
+}
+.desk-orch-tab.on { color: #070908; background: #e9eee9; border-color: #e9eee9; }
+.desk-orch-pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.desk-orch-pane[hidden] { display: none; }
+.desk-orch-shelf { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.desk-orch-chip {
+  flex: none; width: 112px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 4px; padding: 4px;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 4px; background: #0b0f0d;
+  cursor: grab; touch-action: none; user-select: none;
+}
+.desk-orch-chip-pic { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 3px; background: #0e1311; }
+.desk-orch-chip-name {
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.desk-orch-ghost {
+  position: fixed; z-index: 60; pointer-events: none;
+  padding: 3px 8px; border-radius: 3px;
+  background: #22c55e; color: #04140a; font: 11px ${FONT_MONO};
+}
+.desk-orch-ghost[hidden] { display: none; }
+.desk-orch-lanes { position: relative; width: 100%; background: #0b0f0d; border-radius: 3px; overflow: hidden; }
+.desk-orch-lane-label {
+  position: absolute; left: 0; box-sizing: border-box;
+  display: flex; align-items: flex-start; padding: 4px 0 0 8px;
+  font: 10px ${FONT_MONO}; letter-spacing: 0.1em; color: #a7b0aa;
+  border-bottom: 1px solid rgba(232, 238, 234, 0.08);
+}
+.desk-orch-canvas { position: absolute; top: 0; display: block; }
+.desk-orch-pickbtns { position: absolute; display: flex; gap: 3px; }
+.desk-orch-pickbtns[hidden] { display: none; }
+.desk-orch-pick-btn {
+  width: 16px; height: 16px; box-sizing: border-box; padding: 0;
+  border: 1px solid #59bbfb; border-radius: 3px; background: #041018;
+  font: 11px ${FONT_MONO}; line-height: 14px; color: #59bbfb; cursor: pointer;
+}
+.desk-orch-next { font-size: 13px; color: #e9eee9; }
+.desk-orch-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 10.5px ${FONT_MONO}; color: #a7b0aa; }
+.desk-orch-key { display: inline-flex; align-items: center; gap: 5px; }
+.desk-orch-sw { display: inline-block; width: 12px; height: 8px; border-radius: 2px; box-sizing: border-box; }
+.desk-orch-sw.live { border: 2px solid #ef4444; }
+.desk-orch-sw.queued { background: rgba(34, 197, 94, 0.32); border: 1px solid #22c55e; }
+.desk-orch-sw.pick { border: 1px dashed #59bbfb; }
+.desk-orch-sw.phrase { width: 2px; height: 12px; background: rgba(232, 238, 234, 0.35); }
+.desk-orch-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.desk-orch-pill {
+  border: 1px solid #59bbfb; border-radius: 999px; background: transparent;
+  padding: 3px 11px; font: 11px ${FONT_MONO}; letter-spacing: 0.08em; color: #59bbfb; cursor: pointer;
+}
+.desk-orch-pill.on { background: #59bbfb; color: #041018; }
+.desk-orch-open {
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: #0e1311; padding: 3px 9px;
+  font: 11px ${FONT_MONO}; letter-spacing: 0.08em; color: #a7b0aa; cursor: pointer;
+}
+.desk-orch-mini { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 14px; align-items: start; }
+.desk-orch-mini-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.desk-orch-mini-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.desk-orch-map { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.desk-orch-map.full { width: 400px; flex: none; }
+.desk-orch-mappane { flex-direction: row; gap: 16px; align-items: flex-start; }
+.desk-orch-mapside { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.desk-orch-map.mini { width: 220px; }
+.desk-orch-field {
+  position: relative; width: 100%; aspect-ratio: 1 / 1; box-sizing: border-box; overflow: hidden;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 4px; background-color: #0b0f0d;
+  background-image:
+    linear-gradient(rgba(232, 238, 234, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 238, 234, 0.08) 1px, transparent 1px);
+  background-size: calc(100% / 12) calc(100% / 12);
+  touch-action: none; cursor: crosshair; user-select: none;
+}
+.desk-orch-axis {
+  position: absolute; pointer-events: none;
+  font: 10px ${FONT_MONO}; letter-spacing: 0.12em; color: #8a958e;
+}
+.desk-orch-axis-tl { left: 6px; top: 6px; }
+.desk-orch-axis-bl { left: 6px; bottom: 6px; }
+.desk-orch-caption { display: flex; justify-content: space-between; font: 10px ${FONT_MONO}; letter-spacing: 0.12em; color: #8a958e; }
+.desk-orch-dot {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px; pointer-events: none;
+}
+.desk-orch-dot-pic { display: block; border-radius: 50%; border: 1px solid rgba(232, 238, 234, 0.25); box-sizing: border-box; }
+.desk-orch-dot.near .desk-orch-dot-pic { border: 2px solid #e9eee9; }
+.desk-orch-dot-name {
+  font: 10px ${FONT_MONO}; color: #e9eee9; white-space: nowrap;
+  background: rgba(0, 0, 0, 0.5); padding: 0 3px; border-radius: 2px;
+}
+.desk-orch-dot-share { font: 10px ${FONT_MONO}; color: #f59e0b; min-height: 12px; }
+.desk-orch-puck {
+  position: absolute; width: 22px; height: 22px; box-sizing: border-box;
+  transform: translate(-50%, -50%); border: 2px solid #e9eee9; border-radius: 50%; pointer-events: none;
+}
+.desk-orch-puck::before, .desk-orch-puck::after { content: ""; position: absolute; background: #e9eee9; }
+.desk-orch-puck::before { left: 50%; top: -7px; bottom: -7px; width: 1px; transform: translateX(-50%); }
+.desk-orch-puck::after { top: 50%; left: -7px; right: -7px; height: 1px; transform: translateY(-50%); }
 `;
 
 /** Injects the desk's stylesheet once. */
