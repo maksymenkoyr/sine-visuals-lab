@@ -85,6 +85,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.audioSource": false,
   "vibe.audioInputDevice": false,
   "vibe.midiMap": false,
+  "vibe.launchOn": false, // when a pad launches (render/launchQueue.ts): this machine's own choice
   "vibe.recordAspect": false,
   "vibe.quality": false,
   "vibe.powerMode": false,
