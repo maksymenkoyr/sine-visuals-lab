@@ -142,4 +142,4 @@ frame median blue 0.58 vs 0.48 in silence.
 
 ## History
 
-- 2026-10-21: first draft, built from `/ref` on `bo8_Igv-Lyg`.
+- #653 (2026-10-21): first draft, built from `/ref` on `bo8_Igv-Lyg`.
