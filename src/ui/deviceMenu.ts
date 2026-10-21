@@ -5044,15 +5044,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return { nodes, settings };
   }
 
-  /** Paints the chain of shownChainFocus(): dims the settings, shaping nodes and input rows off it, marks the focused node, and root's vc-chain-on switches the dimming on. */
+  /** Paints the chain of shownChainFocus(): glows the settings, shaping nodes and input rows on it, marks the focused node, and root's vc-chain-on switches the glow on. */
   function refreshChain(): void {
     const focus = shownChainFocus();
     const chain = focus ? chainOf(chainGraph(), focus) : null;
     root.classList.toggle("vc-chain-on", chain !== null);
-    for (const h of driveRowHandles) h.rowEl.classList.toggle("vc-chain-off", !!chain && !chain.settings.has(h.spec.key));
+    for (const h of driveRowHandles) h.rowEl.classList.toggle("vc-chain-lit", !!chain && chain.settings.has(h.spec.key));
     shapingCol.setChain(chain ? chain.nodes : null, focus?.kind === "node" ? focus.id : null);
-    // Input rows: only for an input or node focus — a setting's focus already dims the meters through .vc-patching.
-    const dimInputs = focus !== null && focus.kind !== "setting";
+    // Input rows: only for an input or node focus — a setting's focus already marks the meters through .vc-patching.
+    const litInputs = focus !== null && focus.kind !== "setting";
     const rowLit = new Map<HTMLElement, boolean>();
     // The Bands card's level and stem jacks sit beside rows of their own (mountBandsJack's feedEl), not inside a .vc-row.
     const bandsFeed = new Map<HTMLElement, HTMLElement>(bandsJacks.map((b) => [b.jack.el, b.feedEl]));
@@ -5062,7 +5062,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (!row) continue;
       rowLit.set(row, (rowLit.get(row) ?? false) || (!!chain && chain.inputs.has(key)));
     }
-    for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-off", dimInputs && !lit);
+    for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-lit", litInputs && lit);
   }
 
   // The middle column's place in the open gap (controlsTheme.ts's

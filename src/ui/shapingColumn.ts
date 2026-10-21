@@ -71,7 +71,7 @@ export interface ShapingColumn {
   jackHeatText(choice: DriveSourceChoice): string | null;
   /** Every tick, panel open or closed: records each node's history and heat; draws only when onScreen. */
   update(level: number | null, onScreen: boolean): void;
-  /** Dims every card off the chain (null: no chain lit) and marks the focused node's card. Kept across rebuilds. */
+  /** Glows every card on the chain (null: no chain lit) and marks the focused node's card. Kept across rebuilds. */
   setChain(nodes: ReadonlySet<string> | null, focusId: string | null): void;
 }
 
@@ -677,7 +677,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
 
   function applyChain(): void {
     for (const v of views.values()) {
-      v.el.classList.toggle("vc-chain-off", chainNodes !== null && !chainNodes.has(v.id));
+      v.el.classList.toggle("vc-chain-lit", chainNodes !== null && chainNodes.has(v.id) && v.id !== chainFocusId);
       v.el.classList.toggle("vc-chain-focus", v.id === chainFocusId);
     }
   }
