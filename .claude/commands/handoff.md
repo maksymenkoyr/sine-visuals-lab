@@ -1,16 +1,16 @@
 ---
-description: Hand work on to whoever builds it next — write it down as GitHub issues for later sessions, pick an issue up and build its next part, or write a builder agent's prompt
+description: Hand work on to whoever builds it next — write it down as GitHub issues for later sessions, pick an issue up and build its next part, or write a haiku-coder agent's prompt
 argument-hint: [topic | #issue]
 ---
 
 One hand-off with two kinds of receiver: a later session, which gets GitHub
-issues, and a `builder` agent, which gets one part of the work as its
+issues, and a `haiku-coder` agent, which gets one part of the work as its
 prompt. Both start knowing only CLAUDE.md and what they're handed, so the
 same rules and the same layout serve both.
 
 **Which end:** `/handoff #<n>` picks issue `n` up and builds its next part.
 `/handoff [topic]` writes: it turns what this session worked out into
-issues, `topic` naming them. Building a change with `/plan-build` (CLAUDE.md
+issues, `topic` naming them. Handing a change to `haiku-coder` (CLAUDE.md
 says when) writes one part's layout into the agent's prompt, under the same
 rules.
 
@@ -27,7 +27,7 @@ private one.
    words where they chose, each with why or what it beat. A guess of yours
    is an open question, never a decision.
 2. **Write for a stranger.** Anything the receiver needs is in the issue, or
-   named by path. `builder` can't open artifacts or the web, so copy in
+   named by path. `haiku-coder` can't open artifacts or the web, so copy in
    what decides the build; link the artifact too, its URL on its own line.
 3. **Every step names the file, the edit and the check** that proves it. A
    step you can't write that way isn't ready: it's an open question, or the
@@ -38,7 +38,7 @@ private one.
    the traps found, and what was rejected so it isn't tried again.
 6. **"Done when"** is what the user can see, plus the checks.
 7. **One part is one session and one PR**, ordered so each leaves `main`
-   working. A `builder` prompt is one part, or a slice of one.
+   working. A `haiku-coder` prompt is one part, or a slice of one.
 
 ## Rules for the receiver
 
@@ -83,8 +83,8 @@ private one.
    `read`), then CLAUDE.md's `origin/main` and open-PR check for the part.
 3. **Say which part you're building, in one line.** If an open question
    blocks it, ask now and wait.
-4. **Build it.** For a `builder` share (`/plan-build`), its prompt is this
-   part's layout plus the worktree path and branch.
+4. **Build it.** For a `haiku-coder` share, its prompt is this part's
+   layout plus the worktree path and branch.
 5. **Finish with `/ship`**, the PR body saying `Closes #<part>`, and the
    parent's on the last part. Then comment on the parent what the next part
    needs to know, and answer any open question the part settled there.
@@ -121,7 +121,7 @@ A parent, or a single-part issue (which also carries a part's sections):
 1. #<part> <what the user can see when it's done>
 ```
 
-A part (a sub-issue, or a `builder` prompt without the first line):
+A part (a sub-issue, or a `haiku-coder` prompt without the first line):
 
 ```markdown
 Part of #<parent>.
