@@ -2024,6 +2024,10 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
     capture: look.io.read,
     apply(doc, glideMs) {
       look.io.write(doc);
+      // Main's wires replace ours, and a Main saved with plain wires stays
+      // plain unless its scene mounts here; before the pop-out copies us and
+      // before mainPlay.ts reads back what we show (its on-air anchor).
+      if (inViz) wiresThroughModifiersHere(scene.id, scene.settings ?? []);
       markMainShown();
       // The pop-out is one more Main screen of the laptop: it follows too and
       // walks the glide this window can't.
