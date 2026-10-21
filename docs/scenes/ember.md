@@ -135,4 +135,4 @@ Draft, added 2026-10-21; not yet on main.
 
 ## History
 
-- 2026-10-21 — first draft (this PR).
+- 2026-10-21 — #652, first draft.
