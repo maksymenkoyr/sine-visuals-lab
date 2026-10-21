@@ -1,5 +1,5 @@
 // The pure half of the handoff log, the record of plans a Claude Code session
-// hands to the haiku-coder subagent through the Agent tool. tools/workflow-stats.mjs
+// hands to the builder subagent through the Agent tool. tools/workflow-stats.mjs
 // writes one row per handoff from the Claude Code hooks and reads the rows back
 // for its `handoffs`, `handoff` and `handoff-ship` commands. This file turns
 // already-parsed values into those rows and sums them per setup, so tests can

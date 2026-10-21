@@ -97,7 +97,7 @@ describe("finalText", () => {
 describe("buildRow", () => {
   const pending = {
     id: "tu-1", startedAt: "2026-10-08T10:00:00.000Z", session: "s1", transcript: "/t.jsonl", cwd: "/repo",
-    branch: "b1", headBefore: "abc", title: "Do the thing", agent: "haiku-coder", plan: "x".repeat(50),
+    branch: "b1", headBefore: "abc", title: "Do the thing", agent: "builder", plan: "x".repeat(50),
     preTree: "t1", agentId: "a1",
   };
 

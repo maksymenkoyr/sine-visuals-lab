@@ -14,7 +14,8 @@ Difficulty words are the issue labels in `docs/issue-labels.md`.
 | 6 | Haiku 5.5 · low to xhigh | High volume, low complexity: gathering, checking one claim, sweeps | Free |
 
 Tiers 1–4 think: plan, design, research, review, judge. Tiers 5–6 carry out
-a plan or do mechanical work.
+a plan or do mechanical work. `/plan-build` picks its `builder` agent's row
+here by the build's difficulty, usually tier 5.
 
 - **These are the only allowed combinations.** An agent runs on a row of this
   table or not at all. Sonnet below high, Opus below medium, or any other
