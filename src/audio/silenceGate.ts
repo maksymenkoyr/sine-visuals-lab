@@ -81,6 +81,12 @@
  * doesn't gate what a paired TV's own bandEnergy onsets treat as silence;
  * only the TV's own copy of this setting does that.
  *
+ * On the device that hears the sound, the extractor's own dimmer (room path
+ * included) rides on the frame as FeatureFrame.gateDimmer, so this device's
+ * band detectors and the pop-out output use the same decision. A frame
+ * rebuilt from the wire (host mode's own jitter-buffered frame, a TV) has no
+ * gateDimmer, so its band detectors keep the level marks.
+ *
  * Auto mode: a room-floor tracker (feedSilenceGateMeasurement, gated by
  * STORAGE_KEY_AUTO) that can drive both marks instead of a manual drag. It
  * resolves against its own room-floor estimate rather than autoTune.ts's
@@ -102,6 +108,21 @@
  * the synthetic feed never do, so on either path the auto marks simply hold
  * at the seed (= the manual marks), same as if a manual drag had left them
  * there — this is what keeps every headless screenshot undimmed by default.
+ *
+ * Auto has a second way to open, the room path, because `level` clips at
+ * features.ts's LEVEL_DB_FLOOR: through a quiet laptop mic the music itself
+ * sits under it, so the marks above read music and room alike as silence and
+ * the gate stays shut through whole songs (#578). The room path reads
+ * FeatureExtractor.roomDb instead, real dB with no such floor, and holds the
+ * quietest level heard as the room's floor (feedSilenceGateRoom): the gate
+ * starts to open SILENCE_GATE_ROOM_CLOSED_DB over it and is fully open at
+ * SILENCE_GATE_ROOM_OPEN_DB. silenceGateDimmer takes the wider of the two
+ * paths, so Auto never gates more than the level marks alone did. The floor
+ * creeps up only while the input sits under the closed mark (a room that got
+ * a little louder), never under music standing clear of it. Its limit: a
+ * steady noise that starts after the floor was learned and stands as far
+ * over it as quiet music does (a noise video, a fan by the mic) opens it too;
+ * loudness can't tell the two apart. Manual marks have no room path.
  */
 
 import { parseSyncedNumber, registerSyncedStore } from "../net/syncedStores.ts";
@@ -122,6 +143,11 @@ export const SILENCE_GATE_OPEN_DEFAULT = 0.15;
 export interface SilenceGateMarks {
   closed: number;
   open: number;
+  /** The room path's two marks, in FeatureExtractor.roomDb's dB: Auto only,
+   *  and only once feedSilenceGateRoom has heard the room (see this file's
+   *  header). Absent, the room path is off. */
+  roomClosedDb?: number;
+  roomOpenDb?: number;
 }
 
 /** One tick's gate reading, off one device's own FeatureExtractor — not the
@@ -316,6 +342,22 @@ const ENVELOPE_DECAY_RATE = 1 / SILENCE_GATE_AUTO_WINDOW_SEC;
 const FLOOR_RISE_RATE = 0.25;
 const FLOOR_DROP_RATE = 1;
 
+// The room path (see this file's header), in dB over the room's floor. Tuned
+// 2026-10-21 on the mic-gap takes (#578): the open mark sits wide of the
+// closed one so a sound only just clear of the room has to stand out hard to
+// count (silenceGateDimmer's ramp), while music well clear of it counts as
+// usual. A narrower ramp kept a little more of the quietest songs but let a
+// noise video started after the room was learned fire four times as often.
+export const SILENCE_GATE_ROOM_CLOSED_DB = 10;
+export const SILENCE_GATE_ROOM_OPEN_DB = 20;
+// Following a quieter reading down, per second, like FLOOR_DROP_RATE; and how
+// fast the floor creeps up under the closed mark. Creeping only there is what
+// keeps an hour of quiet music from dragging the floor up into it.
+const ROOM_FLOOR_DROP_RATE = 1;
+const ROOM_FLOOR_CREEP_DB_PER_SEC = 0.2;
+// Same reason as AUTO_SNAPSHOT_EPS, for the room marks.
+const ROOM_SNAPSHOT_EPS_DB = 0.01;
+
 /** Pure — this tracker's current floor estimate to the two gate marks that
  *  follow from it. Exported for tests, like autoGain.ts's autoGainForSpan;
  *  feedSilenceGateMeasurement is the only real caller. Keeps the same gap
@@ -345,6 +387,10 @@ export function silenceGateMarksForFloor(floor: number): SilenceGateMarks {
 let floor = closedCache - SILENCE_GATE_AUTO_MARGIN;
 let envelopeMin = Infinity;
 let envelopeMax = -Infinity;
+// The room path's floor: the quietest room level heard this Auto session, in
+// FeatureExtractor.roomDb's dB. Infinity until feedSilenceGateRoom's first
+// reading.
+let roomFloorDb = Number.POSITIVE_INFINITY;
 
 export function setSilenceGateAuto(on: boolean): void {
   if (on === autoOn) return;
@@ -362,6 +408,7 @@ export function setSilenceGateAuto(on: boolean): void {
     floor = closedCache - SILENCE_GATE_AUTO_MARGIN;
     envelopeMin = Infinity;
     envelopeMax = -Infinity;
+    roomFloorDb = Number.POSITIVE_INFINITY;
     autoSnapshot = null;
   }
   persistAuto();
@@ -380,11 +427,19 @@ let autoSnapshot: SilenceGateMarks | null = null;
  *  otherwise. */
 export function resolveSilenceGate(): SilenceGateMarks {
   if (!autoOn) return getSilenceGate();
-  const marks = silenceGateMarksForFloor(floor);
+  const marks: SilenceGateMarks = silenceGateMarksForFloor(floor);
+  const roomKnown = Number.isFinite(roomFloorDb);
+  if (roomKnown) {
+    marks.roomClosedDb = roomFloorDb + SILENCE_GATE_ROOM_CLOSED_DB;
+    marks.roomOpenDb = roomFloorDb + SILENCE_GATE_ROOM_OPEN_DB;
+  }
+  const prevRoom = autoSnapshot?.roomClosedDb;
   if (
     autoSnapshot === null ||
     Math.abs(marks.closed - autoSnapshot.closed) > AUTO_SNAPSHOT_EPS ||
-    Math.abs(marks.open - autoSnapshot.open) > AUTO_SNAPSHOT_EPS
+    Math.abs(marks.open - autoSnapshot.open) > AUTO_SNAPSHOT_EPS ||
+    roomKnown !== (prevRoom !== undefined) ||
+    (marks.roomClosedDb !== undefined && prevRoom !== undefined && Math.abs(marks.roomClosedDb - prevRoom) > ROOM_SNAPSHOT_EPS_DB)
   ) {
     autoSnapshot = Object.freeze(marks);
   }
@@ -438,6 +493,28 @@ export function feedSilenceGateMeasurement(level: number, dtSec: number): void {
   }
 }
 
+/**
+ * The room path's floor tracker (see this file's header). Call once per tick
+ * with FeatureExtractor.roomDb and the same clock delta as
+ * feedSilenceGateMeasurement, right after it. A no-op while auto is off. A
+ * non-finite reading (nothing heard yet, digital silence) is ignored. The
+ * first reading seeds the floor; a quieter one pulls it down; one under the
+ * closed mark lets it creep up, never past the reading; anything at or over
+ * the closed mark leaves it alone.
+ */
+export function feedSilenceGateRoom(roomDb: number, dtSec: number): void {
+  if (!autoOn) return;
+  if (!Number.isFinite(roomDb) || !Number.isFinite(dtSec)) return;
+  const dt = Math.max(0, dtSec);
+  if (roomFloorDb === Number.POSITIVE_INFINITY) {
+    roomFloorDb = roomDb;
+  } else if (roomDb < roomFloorDb) {
+    roomFloorDb += (roomDb - roomFloorDb) * (1 - Math.exp(-ROOM_FLOOR_DROP_RATE * dt));
+  } else if (roomDb < roomFloorDb + SILENCE_GATE_ROOM_CLOSED_DB) {
+    roomFloorDb = Math.min(roomDb, roomFloorDb + ROOM_FLOOR_CREEP_DB_PER_SEC * dt);
+  }
+}
+
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
@@ -450,6 +527,9 @@ function clamp01(x: number): number {
  * multiplier's own rate of change eases in and out at each mark instead of
  * kinking there.
  *
+ * `roomDb` (FeatureExtractor.roomDb) feeds the room path when `marks` carry
+ * room marks; the result is the wider of the two.
+ *
  * Two special cases:
  * - `marks.closed <= SILENCE_GATE_MIN` means the gate is OFF: always returns
  *   1. Nothing is quieter than level zero, so there is nothing left to call
@@ -458,11 +538,22 @@ function clamp01(x: number): number {
  * - A non-finite `level` returns 1 (fail open). Bad data reaching this
  *   function must never be the reason the visuals go silent.
  */
-export function silenceGateDimmer(level: number, marks: SilenceGateMarks): number {
+export function silenceGateDimmer(level: number, marks: SilenceGateMarks, roomDb?: number): number {
   if (marks.closed <= SILENCE_GATE_MIN) return 1;
   if (!Number.isFinite(level)) return 1;
   const span = marks.open - marks.closed;
   if (span <= 0) return 1; // degenerate marks shouldn't reach here via the exported setters — fail open
   const t = clamp01((level - marks.closed) / span);
+  return Math.max(t * t * (3 - 2 * t), roomDimmer(roomDb, marks));
+}
+
+// The room path's share of silenceGateDimmer: 0 without room marks or a room
+// reading. Unlike `level`, a missing reading closes it rather than failing
+// open: it is only ever the second way in.
+function roomDimmer(roomDb: number | undefined, marks: SilenceGateMarks): number {
+  const closed = marks.roomClosedDb;
+  const open = marks.roomOpenDb;
+  if (roomDb === undefined || !Number.isFinite(roomDb) || closed === undefined || open === undefined || !(open > closed)) return 0;
+  const t = clamp01((roomDb - closed) / (open - closed));
   return t * t * (3 - 2 * t);
 }

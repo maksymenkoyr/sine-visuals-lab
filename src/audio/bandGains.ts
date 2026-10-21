@@ -192,6 +192,7 @@ export function applyBandGains(frame: FeatureFrame, gains: ArrayLike<number>): F
     bpm: frame.bpm,
     onsetPhase: frame.onsetPhase,
     level: frame.level,
+    gateDimmer: frame.gateDimmer,
     hats: frame.hats,
     lead: frame.lead,
   };

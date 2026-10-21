@@ -787,4 +787,76 @@ describe("silence gate", () => {
 
     expect(run(SILENCE_MARKS)).toEqual(run(undefined));
   });
+
+  it("roomDb is NaN until a second of input, then reads the band level", () => {
+    const extractor = new FeatureExtractor();
+    let time = 0;
+    for (let i = 0; i < 30; i++) {
+      time += dt;
+      extractor.update(bandsFrame(-80), time);
+    }
+    expect(extractor.roomDb).toBeNaN();
+    for (let i = 0; i < 90; i++) {
+      time += dt;
+      extractor.update(bandsFrame(-80), time);
+    }
+    expect(extractor.roomDb).toBeCloseTo(-80, 0);
+  });
+
+  it("digital silence resets roomDb", () => {
+    const extractor = new FeatureExtractor();
+    let time = 0;
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      extractor.update(bandsFrame(-80), time);
+    }
+    expect(Number.isFinite(extractor.roomDb)).toBe(true);
+    time += dt;
+    extractor.update(new Float32Array(NUM_BANDS).fill(Number.NEGATIVE_INFINITY), time);
+    expect(extractor.roomDb).toBeNaN();
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      extractor.update(bandsFrame(-80), time);
+    }
+    expect(Number.isFinite(extractor.roomDb)).toBe(true);
+  });
+
+  it("the room path opens the gate where level's window stays shut", () => {
+    const hitEvery = Math.round(60 / 120 / dt);
+    const hitOverrides = { 0: -68, 1: -68, 2: -68, 3: -68, 4: -68, 5: -68, 6: -68, 7: -68 };
+    const warmupFrames = Math.round(3 / dt);
+    const totalFrames = warmupFrames + Math.round(15 / dt);
+
+    function run(gate?: SilenceGateMarks): number {
+      const rand = makeRand(5);
+      const extractor = new FeatureExtractor();
+      let time = 0;
+      let onsets = 0;
+      for (let i = 0; i < totalFrames; i++) {
+        time += dt;
+        const hit = i % hitEvery < 2;
+        const frame = extractor.update(jitteredBands(rand, -88, 2, hit ? hitOverrides : {}), time, 1, 1, gate);
+        if (i >= warmupFrames && frame.onset) onsets++;
+      }
+      return onsets;
+    }
+
+    expect(run(undefined)).toBeGreaterThan(10);
+    expect(run(SILENCE_MARKS)).toBe(0);
+    expect(run({ ...SILENCE_MARKS, roomClosedDb: -100, roomOpenDb: -95 })).toBeGreaterThan(10);
+    expect(run({ ...SILENCE_MARKS, roomClosedDb: -40, roomOpenDb: -30 })).toBe(0);
+  });
+
+  it("frame.gateDimmer is the dimmer the extractor used", () => {
+    const rand = makeRand(9);
+    const extractor = new FeatureExtractor();
+    let time = 0;
+    for (let i = 0; i < 60; i++) {
+      time += dt;
+      const frame = extractor.update(jitteredBands(rand, i % 20 < 5 ? -40 : -80, 3), time, 1, 1, SILENCE_MARKS);
+      expect(frame.gateDimmer).toBe(extractor.gateDimmer);
+    }
+    time += dt;
+    expect(extractor.update(jitteredBands(rand, -80, 3), time).gateDimmer).toBe(1);
+  });
 });

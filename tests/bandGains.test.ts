@@ -240,4 +240,10 @@ describe("applyBandGains", () => {
     expect(out.bpm).toBe(f.bpm);
     expect(out.onsetPhase).toBe(f.onsetPhase);
   });
+
+  it("keeps the input frame's gateDimmer, and leaves it undefined when the input has none", () => {
+    const out = applyBandGains({ ...frame(0.3), gateDimmer: 0.4 }, withFader(3, 2));
+    expect(out.gateDimmer).toBe(0.4);
+    expect(applyBandGains(frame(0.3), withFader(3, 2)).gateDimmer).toBeUndefined();
+  });
 });

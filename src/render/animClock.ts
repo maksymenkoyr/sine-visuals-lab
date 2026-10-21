@@ -234,7 +234,8 @@ export interface AnimClock {
    *  stop (0 -> Infinity) makes sectionIntensity/profile land exactly on the
    *  `raw` counterparts already exposed below — see the meters panel's RAW
    *  chip (src/ui/audioMeters.ts). `gate` (src/audio/silenceGate.ts), when
-   *  given, is turned into this tick's dimmer from `frame.level` right here
+   *  given, is turned into this tick's dimmer from `frame.level` right here,
+   *  unless the frame carries its own FeatureFrame.gateDimmer, which wins,
    *  and threaded into bandEnergy's own advance() — animClock stays
    *  param-driven and never reads the store itself, so only the real
    *  app.ts/tv.ts entry points pass marks; omitted by every preview/
@@ -376,7 +377,7 @@ export function createAnimClock(): AnimClock {
       // reasoning audioMeters.ts's own former peak-hold relied on.
       const inst = hit?.wavePeak;
       wavePeak = inst == null ? 0 : Math.max(inst, wavePeak - WAVE_PEAK_FALL_PER_SEC * rateScale * dtSec);
-      const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
+      const dimmer = frame.gateDimmer ?? (gate ? silenceGateDimmer(frame.level, gate) : 1);
       const flowPhase = flow.advance(dtSec, frame.energy);
       // bandEnergy runs before beat, not after — see the hitWeight comment
       // above: beat.advance() below needs *this* tick's lowDiag.ratio to

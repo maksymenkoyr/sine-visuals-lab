@@ -264,6 +264,12 @@ describe("applySensitivity", () => {
     // own output.
     expect(out.level).toBe(f.level);
   });
+
+  it("keeps the input frame's gateDimmer, and leaves it undefined when the input has none", () => {
+    const out = applySensitivity({ ...frame([0.3], 0.3), gateDimmer: 0.4 }, 2, EXPANSION_DEFAULT);
+    expect(out.gateDimmer).toBe(0.4);
+    expect(applySensitivity(frame([0.3], 0.3), 2, EXPANSION_DEFAULT).gateDimmer).toBeUndefined();
+  });
 });
 
 describe("expansion store migration from the legacy vibe.dynamics key", () => {
