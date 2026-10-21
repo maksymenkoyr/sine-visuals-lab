@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deviceClass, isBotUserAgent, parseUsageEvent, usageDataPoint } from "../server/usage.ts";
+import { deviceClass, isBotUserAgent, parseUsageEvent, usageDataPoint, visitFrom } from "../server/usage.ts";
 
 describe("parseUsageEvent", () => {
   it("accepts a well-formed event", () => {
@@ -40,5 +40,35 @@ describe("user agents", () => {
 
 it("keeps the blob order tools/usage.mjs queries by", () => {
   const point = usageDataPoint({ e: "start", s: "mesh", src: "display", me: 1 }, "PT", "Mozilla/5.0 (Windows NT 10.0)");
-  expect(point.blobs).toEqual(["start", "mesh", "display", "me", "PT", "desktop"]);
+  expect(point.blobs).toEqual(["start", "mesh", "display", "me", "PT", "desktop", ""]);
+  const tagged = usageDataPoint({ e: "start", s: "mesh", src: "mic", me: 0, from: "ai" }, "PT", "Mozilla/5.0 (Windows NT 10.0)");
+  expect(tagged.blobs[6]).toBe("ai");
+});
+
+describe("where a visit came from", () => {
+  it("accepts only the listed words, and none from a tab loaded before the field", () => {
+    expect(parseUsageEvent({ e: "start", s: "mesh", src: "mic", me: 0, from: "search" })).toEqual({ e: "start", s: "mesh", src: "mic", me: 0, from: "search" });
+    expect(parseUsageEvent({ e: "start", s: "mesh", src: "mic", me: 0 })).not.toHaveProperty("from");
+    expect(parseUsageEvent({ e: "start", s: "mesh", src: "mic", me: 0, from: "https://www.google.com/" })).toBeNull();
+  });
+
+  it("buckets referrers by host", () => {
+    expect(visitFrom("", null)).toBe("direct");
+    expect(visitFrom("https://www.google.com/", null)).toBe("search");
+    expect(visitFrom("https://www.google.co.uk/", null)).toBe("search");
+    expect(visitFrom("https://gemini.google.com/", null)).toBe("ai");
+    expect(visitFrom("https://www.perplexity.ai/", null)).toBe("ai");
+    expect(visitFrom("https://l.instagram.com/", null)).toBe("social");
+    expect(visitFrom("https://www.sinevisualslab.com/scenes/caustics/", null)).toBe("site");
+    expect(visitFrom("https://news.ycombinator.com/", null)).toBe("other");
+    expect(visitFrom("not a url", null)).toBe("other");
+  });
+
+  it("lets a utm_source tag win, as a host or a bare name", () => {
+    expect(visitFrom("", "chatgpt.com")).toBe("ai");
+    expect(visitFrom("https://www.google.com/", "chatgpt")).toBe("ai");
+    expect(visitFrom("", "perplexity")).toBe("ai");
+    expect(visitFrom("", "instagram")).toBe("social");
+    expect(visitFrom("", "newsletter")).toBe("other");
+  });
 });

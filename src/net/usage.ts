@@ -12,8 +12,11 @@
  * flag here, `?me=0` clears it, and events from a marked browser still go
  * out tagged `me`, so the owner can see the counter working and
  * tools/usage.mjs leaves them out of the visitor numbers.
+ *
+ * Each event also carries where this page load came from, as one coarse
+ * word (server/usage.ts's `visitFrom`); the referrer itself stays here.
  */
-import type { UsageEvent, UsageSource } from "../../server/usage.ts";
+import { type UsageEvent, type UsageSource, visitFrom } from "../../server/usage.ts";
 import { isLocalHost } from "./config.ts";
 
 const ME_KEY = "svl.usageMe";
@@ -30,13 +33,15 @@ try {
   // Storage blocked (private mode, sandboxed frame): counts as a visitor.
 }
 
+const from = visitFrom(document.referrer, new URLSearchParams(location.search).get("utm_source"));
+
 let lastSceneId: string | null = null;
 
 /** A scene is on screen and live audio (or the phone's stream) is feeding it.
  *  Safe to call repeatedly — only a change of scene sends anything. */
 export function reportSceneRunning(sceneId: string, src: UsageSource): void {
   if (!enabled || sceneId === lastSceneId) return;
-  const event: UsageEvent = { e: lastSceneId === null ? "start" : "scene", s: sceneId, src, me: isMe ? 1 : 0 };
+  const event: UsageEvent = { e: lastSceneId === null ? "start" : "scene", s: sceneId, src, me: isMe ? 1 : 0, from };
   lastSceneId = sceneId;
   try {
     navigator.sendBeacon("/api/usage", new Blob([JSON.stringify(event)], { type: "application/json" }));

@@ -82,7 +82,11 @@ not something this app adds.
 
 **One anonymous usage count.** When a scene starts running on live audio,
 the app sends a single message saying so: which scene, whether the audio is
-the microphone, a shared tab or a paired phone, and nothing else. The server
+the microphone, a shared tab or a paired phone, and one word for where
+your visit came from: a search engine, an AI chat, a social site, one of
+this site's own pages, another site, or nowhere (typed or bookmarked). That
+word is worked out in your browser; the address of the page you came from
+is never sent. Nothing else is in the message. The server
 adds your country and whether you're on a phone or a computer, both taken
 from the request, and records that as a count in Cloudflare's analytics
 store. It records no IP address, device id or browser details, and nothing
