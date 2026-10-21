@@ -185,6 +185,7 @@ import {
   removeStoredPad,
   renameStoredPad,
   setAutopilot,
+  type AutopilotConfig,
 } from "./render/sceneSet.ts";
 import {
   AUTOPILOT_FALLBACK_SEC_PER_BAR,
@@ -744,6 +745,14 @@ function applyDesk(): void {
     deskLoading = true;
     void import("./ui/desk/desk.ts").then(({ createDesk, DESK_STRIPS_MAX, PADS_ROW_MAX }) => {
       deskPadsRowMax = PADS_ROW_MAX;
+      const deskBpmText = (): string => (lastAnim?.metronomeOn ? `${Math.round(lastAnim.metronomeBpm)} BPM` : "-- BPM");
+      const deskExpansion = {
+        get: getSceneExpansion,
+        set: setSceneExpansion,
+        live: () => deskLiveValue(SCENE_EXPANSION_KEY, SCENE_EXPANSION_DEFAULT),
+        min: SCENE_EXPANSION_MIN,
+        max: SCENE_EXPANSION_MAX,
+      };
       desk = createDesk({
         openPanel: () => {
           if (deviceMenu && !deviceMenu.isOpen()) deviceMenu.toggle();
@@ -752,7 +761,7 @@ function applyDesk(): void {
         closePanel: () => {
           if (deviceMenu?.isOpen()) deviceMenu.close();
         },
-        bpmText: () => (lastAnim?.metronomeOn ? `${Math.round(lastAnim.metronomeBpm)} BPM` : "-- BPM"),
+        bpmText: deskBpmText,
         playList: {
           looks: () => outputBridge?.looks?.() ?? { next: null, live: null },
           send: (state, glideMs) => {
@@ -817,13 +826,7 @@ function applyDesk(): void {
             min: SCENE_MASTER_MIN,
             max: SCENE_MASTER_MAX,
           },
-          expansion: {
-            get: getSceneExpansion,
-            set: setSceneExpansion,
-            live: () => deskLiveValue(SCENE_EXPANSION_KEY, SCENE_EXPANSION_DEFAULT),
-            min: SCENE_EXPANSION_MIN,
-            max: SCENE_EXPANSION_MAX,
-          },
+          expansion: deskExpansion,
           committed: () => deviceMenu?.sceneChanged(),
         },
         pads: {
@@ -845,10 +848,7 @@ function applyDesk(): void {
           tap: deskTapPad,
           addPad: addPadFromScreen,
           autopilot: getAutopilot,
-          setAutopilot: (change) => {
-            setAutopilot(change);
-            restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
-          },
+          setAutopilot: setDeskAutopilot,
           skipPick: () => skipAutopilotPick(setAutopilotState, getAutopilot(), listPads().map((p) => p.id)),
           load: (id) => firePad(id),
         },
@@ -870,6 +870,20 @@ function applyDesk(): void {
           follow: () => mapFollow,
           setFollow: (on) => {
             mapFollow = on;
+          },
+        },
+        sidecar: {
+          liveName: () => listPads().find((p) => p.id === setLivePadId)?.name ?? scene.name,
+          prev: () => stepDeskPad(-1),
+          next: () => stepDeskPad(1),
+          holdEffect: (id, on) => effectControls?.hold(id, on),
+          effectsOn: () => effectControls?.engaged() ?? NO_EFFECTS,
+          autopilot: getAutopilot,
+          setAutopilot: setDeskAutopilot,
+          expansion: deskExpansion,
+          health: () => {
+            const status = outputBridge?.outputStatus();
+            return { inputOk: lastVis !== null, bpm: deskBpmText(), fps: status ? `${Math.round(status.fps)}` : "--" };
           },
         },
       });
@@ -1279,6 +1293,22 @@ function mapBlend(aId: string, bId: string, share: number): void {
 /** The beat count pad launches wait on: the metronome's, or seconds at Autopilot's fallback bar length with no tempo. */
 function deskBeats(): number {
   return lastAnim?.metronomeOn ? lastAnim.metronomeBeats : (performance.now() / 1000) * (METRONOME_BEATS_PER_BAR / AUTOPILOT_FALLBACK_SEC_PER_BAR);
+}
+
+/** Autopilot's setting from the desk (the pads and the Sidecar): a change restarts its bar count on the pad that is on NEXT. */
+function setDeskAutopilot(change: Partial<AutopilotConfig>): void {
+  setAutopilot(change);
+  restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
+}
+
+/** The Sidecar's PREV (-1) and NEXT (1): the pad before or after LIVE's in the Set, wrapping, or the pad on NEXT when none is live. It lands on the next beat. */
+function stepDeskPad(dir: 1 | -1): void {
+  const pads = listPads();
+  if (pads.length === 0) return;
+  const liveAt = pads.findIndex((p) => p.id === setLivePadId);
+  const base = liveAt >= 0 ? liveAt : pads.findIndex((p) => p.id === currentPadId());
+  const at = base < 0 ? (dir > 0 ? 0 : pads.length - 1) : (base + dir + pads.length) % pads.length;
+  launchQueue = queueLaunch(launchQueue, pads[at]!.id, launchBeat(deskBeats(), "beat"));
 }
 
 /** A pad pressed on the desk: Shift loads NEXT only; otherwise it lands on the next launch line, on NEXT and LIVE together. */

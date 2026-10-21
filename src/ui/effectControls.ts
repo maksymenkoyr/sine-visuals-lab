@@ -45,6 +45,8 @@ export interface EffectControls {
   /** Lets every effect go, a running flash included (leaving the scene). */
   releaseAll(): void;
   engaged(): HeldEffects;
+  /** A third holder beside the keys and the pointer: the desk's Sidecar (sidecar.ts) holds an effect for its own pads. A `flash` effect fires on `on` and ignores the release. */
+  hold(id: EffectId, on: boolean): void;
 }
 
 /** The `data-key` an effect's button carries — the id of its keys-card entry (ui/keyHints.ts). */
@@ -56,6 +58,7 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
   const { bar } = opts;
   const byKey: Record<EffectId, boolean> = { ...NO_EFFECTS };
   const byPointer: Record<EffectId, boolean> = { ...NO_EFFECTS };
+  const byRemote: Record<EffectId, boolean> = { ...NO_EFFECTS };
   const flashing: Record<EffectId, boolean> = { ...NO_EFFECTS };
   const flashTimers = new Map<EffectId, ReturnType<typeof setTimeout>>();
   const buttons = new Map<EffectId, HTMLButtonElement>();
@@ -63,7 +66,7 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
 
   function recompute(): void {
     const next = { ...NO_EFFECTS };
-    for (const d of EFFECTS) next[d.id] = d.flash ? flashing[d.id] : byKey[d.id] || byPointer[d.id];
+    for (const d of EFFECTS) next[d.id] = d.flash ? flashing[d.id] : byKey[d.id] || byPointer[d.id] || byRemote[d.id];
     if (sameEffects(next, current)) return;
     current = next;
     for (const d of EFFECTS) {
@@ -76,7 +79,9 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     opts.onChange({ ...next });
   }
 
-  /** Lets go of everything a key or pointer holds; a flash runs out by itself. */
+  /** Lets go of everything a key or pointer holds; a flash runs out by itself.
+   *  Not the Sidecar's holds: pressing in that window is what blurs this one,
+   *  and the Sidecar lets go of its own on its blur and close. */
   function releaseHeld(): void {
     for (const d of EFFECTS) {
       byKey[d.id] = false;
@@ -88,7 +93,10 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
   function releaseAll(): void {
     for (const t of flashTimers.values()) clearTimeout(t);
     flashTimers.clear();
-    for (const d of EFFECTS) flashing[d.id] = false;
+    for (const d of EFFECTS) {
+      flashing[d.id] = false;
+      byRemote[d.id] = false;
+    }
     releaseHeld();
   }
 
@@ -104,6 +112,16 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
         recompute();
       }, STROBE_FLASH_MS),
     );
+  }
+
+  function hold(id: EffectId, on: boolean): void {
+    if (EFFECTS.find((d) => d.id === id)?.flash) {
+      if (!on) return;
+      fire(id);
+    } else {
+      byRemote[id] = on;
+    }
+    recompute();
   }
 
   function releaseKeys(): void {
@@ -182,5 +200,6 @@ export function createEffectControls(opts: EffectControlsOptions): EffectControl
     },
     releaseAll,
     engaged: () => ({ ...current }),
+    hold,
   };
 }

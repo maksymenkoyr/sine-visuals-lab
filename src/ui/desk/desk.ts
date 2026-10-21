@@ -22,6 +22,7 @@ import { createLiveMonitor, type LiveMonitorDeps } from "./liveMonitor.ts";
 import { createOrchestrateMini, createOrchestrateView, type OrchestrateDeps } from "./orchestrate.ts";
 import { createPadsRow, createPadsView, type PadsDeps } from "./pads.ts";
 import { createPlayList, type PlayListDeps } from "./playList.ts";
+import { createSidecar, type SidecarDeps } from "./sidecar.ts";
 import { createStrips, type StripsDeps } from "./strips.ts";
 import { ensureDeskStyles } from "./deskTheme.ts";
 
@@ -45,6 +46,8 @@ export interface DeskDeps {
   /** load(id) puts a pad on NEXT (the ✎ button and the view's "edit" use it). */
   pads: Omit<PadsDeps, "openAll" | "edit"> & { load(padId: string): void };
   orchestrate: Omit<OrchestrateDeps, keyof PadsDeps>;
+  /** The SIDECAR button's window; the desk supplies its LIVE canvas. */
+  sidecar: Omit<SidecarDeps, "liveCanvas">;
 }
 
 type DeskView = "main" | "pads" | "orchestrate" | "nodes";
@@ -125,7 +128,9 @@ export function createDesk(deps: DeskDeps): Desk {
     b.addEventListener("click", () => setView(view));
     return { view, el: b };
   });
-  bar.append(...viewBtns.map((v) => v.el), bpm);
+  const sidecarBtn = el("button", "desk-view-btn", "SIDECAR");
+  sidecarBtn.type = "button";
+  bar.append(...viewBtns.map((v) => v.el), sidecarBtn, bpm);
 
   const nextTag = el("span", "desk-tag desk-tag-next", "NEXT");
 
@@ -215,6 +220,8 @@ export function createDesk(deps: DeskDeps): Desk {
 
   const playList = createPlayList({ ...deps.playList, listEl, countEl, onHover: (key) => strips.highlight(key) });
   const liveMonitor = createLiveMonitor({ ...deps.live, slot: liveSlot });
+  const sidecar = createSidecar({ ...deps.sidecar, liveCanvas: () => liveSlot.querySelector<HTMLCanvasElement>("canvas.desk-live") });
+  sidecarBtn.addEventListener("click", () => void sidecar.open());
 
   let active = false;
   let nextRefreshMs = 0;
@@ -280,6 +287,7 @@ export function createDesk(deps: DeskDeps): Desk {
       document.documentElement.classList.remove("vc-desk");
       if (!panelWasOpen) deps.closePanel();
     }
+    if (!on) sidecar.close();
   }
 
   function tick(nowMs: number): void {
@@ -290,10 +298,12 @@ export function createDesk(deps: DeskDeps): Desk {
     if (view === "pads") padsView.tick(nowMs);
     orchMini.tick(nowMs);
     if (view === "orchestrate") orchView.tick(nowMs);
+    sidecar.tick(nowMs);
     if (nowMs < nextRefreshMs) return;
     nextRefreshMs = nowMs + REFRESH_MS;
     const text = deps.bpmText();
     if (bpm.textContent !== text) bpm.textContent = text;
+    sidecarBtn.classList.toggle("on", sidecar.isOpen());
     refreshChips();
   }
 
