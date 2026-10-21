@@ -3,7 +3,7 @@
 Saturated blue cloud on near-black: soft blobs with fine curling threads
 through their edges, boiling in place, with no pan, zoom, spin or cut. With
 no music it keeps churning at its resting pace. Music speeds the churn, kicks
-light the whole cloud, and hits flash the threads. Draft, not yet on main.
+light the whole cloud, and hits flash the threads. In development, not yet on main.
 
 ## Where the code is
 
@@ -142,4 +142,5 @@ frame median blue 0.58 vs 0.48 in silence.
 
 ## History
 
-- #653 (2026-10-21): first draft, built from `/ref` on `bo8_Igv-Lyg`.
+- #653 (2026-10-21): first version, built from `/ref` on `bo8_Igv-Lyg`;
+  moved from Draft to In development on the owner's ask (2026-10-22).
