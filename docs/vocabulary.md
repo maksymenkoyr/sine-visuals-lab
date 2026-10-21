@@ -16,7 +16,7 @@ on its way to an animation node.
 
 | Say | Means | Don't say | In code |
 |---|---|---|---|
-| **input node** | A live value measured from the sound or the tempo tracker: Bass hits, Treble level, Tempo lock, Beat wave. Its panel label comes from `driveSourceLabel` (`src/ui/driveSources.ts`). | signal, meter, source, input | `SignalId`, `DriveSourceChoice` |
+| **input node** | A live value measured from the sound or the tempo tracker: Bass hit, Treble level, Tempo lock, Beat wave. Its panel label comes from `driveSourceLabel` (`src/ui/driveSources.ts`); one input, one name, the same on its row, its wire and its pill. | signal, meter, source, input | `SignalId`, `DriveSourceChoice` |
 | **jack** | The ring on an input node's row, in the meters. An input node goes *out* of its jack. | output, socket | `src/ui/jack.ts` |
 | **animation node** | A scene setting that can follow input nodes. Shorten to **setting** once the sentence has said which one. | reactive setting, driver, drive row, patched setting, destination | a `SceneSetting` with a `drive` |
 | **port** | The ring at the left of an animation node's row. Wires end here; clicking it pins the setting. | input port, jack | the row's `port` button (`buildDriveRow`) |
@@ -70,7 +70,7 @@ on its way to an animation node.
 ## Writing new copy
 
 - Name the input node by its panel label, the setting by its row label: "Plug
-  Bass hits into Beat Expand", "Unplug Bass hits".
+  Bass hit into Beat Expand", "Unplug Bass hit".
 - Prefer the concrete noun to the abstract one: "this wire", not "this
   source" or "this input".
 - The code names in the right-hand column are not wrong and don't need

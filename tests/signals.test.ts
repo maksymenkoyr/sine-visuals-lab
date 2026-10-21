@@ -92,7 +92,7 @@ describe("signals registry", () => {
     const idsOf = links.map((l) => (typeof l === "string" ? l : l.signal));
     expect(idsOf.sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
 
-    // Bass hits (CUT_MODE.BASS) switches which signal is "active"; the two
+    // Bass hit (CUT_MODE.BASS) switches which signal is "active"; the two
     // links must disagree at every mode, not just report both as live.
     for (const mode of [CUT_MODE.BEAT, CUT_MODE.BASS, CUT_MODE.BARS]) {
       const get = (key: string) => (key === "cutMode" ? mode : 0);

@@ -46,7 +46,7 @@ import { MAX_HZ_CAP } from "./bandScale.ts";
  * or guitar attack counts as drums for an instant and a long cymbal wash
  * leaks into the held part. A Kick level was tried the same way and left
  * out: in the low range a bass note's attack looks like a kick to this
- * split, and today's Bass hits (src/render/bandEnergy.ts) told the two apart
+ * split, and today's Bass hit (src/render/bandEnergy.ts) told the two apart
  * better.
  *
  * The ranges come from the caller each tick (app.ts hands in the Mid and

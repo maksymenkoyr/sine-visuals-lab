@@ -123,7 +123,7 @@ bpm, 13 beats):
 - Cut on (`cutMode`) has three positions: Every beat and Bars both read the
   broadband beat edge (Bars only cuts once a bar once tempo lock holds,
   otherwise it falls back to the raw beat — see `beatListener.ts`'s
-  `sourceEdge`); Bass hits reads the low band instead, for a track whose
+  `sourceEdge`); Bass hit reads the low band instead, for a track whose
   broadband onset is too busy. The reference matches Every beat.
   `CUT_LISTENER`'s hold is a beat-fraction hold once `lockMin` is cleared,
   falling back to a flat seconds-based hold otherwise, floored by
@@ -192,3 +192,4 @@ The reference media for these bundles (video, frames, audio, the images built fr
   the shared trigger+hold+refractory module; migrates Shards' cut onto it
   (`CUT_LISTENER`, `cutSource`), removing the free-run fallback so the scene
   stops cutting in silence; adds Cut-on signal pills.
+- 2026-10-22 — Labels only (#656): the Cut on option reads "Bass hit", the same name as its input; the setting stores the position, so saved looks keep it.

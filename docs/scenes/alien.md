@@ -130,7 +130,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   body (the reference's face is denser than its torso), the hands finer
   still. A uniform fine grid filled the body with wire at mid-distance, so
   the wire also dims as on-screen triangles shrink.
-- Play: Level, not All level. All level is auto-gained and reads mic hiss
+- Play: Input level, not Level. Level is auto-gained and reads mic hiss
   as mid-range (#368), so the alien would keep dancing in silence.
 - 2026-10-05, the user: "expose more info on this part that makes alien
   move". Asked whether that meant an explanation or the panel, they picked a
@@ -148,7 +148,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Same day: **Bounce** added — "simplest shrinking it vertically (but mb u
   can find something better)". Done as squash and stretch about the floor
   under the alien (a damped spring: squash on the hit, overshoot into a
-  stretch, settle), wired to Bass hits by default (my pick, not asked).
+  stretch, settle), wired to Bass hit by default (my pick, not asked).
 - Same day: "don't make loops change automatically… loop should be looping
   until there was a trigger". Cut's default wire moved from Bass level
   (a cut every few seconds) to Drop, so a loop repeats until the music

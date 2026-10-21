@@ -270,7 +270,7 @@ function edgeDecayPerSec(id: SignalId): number {
  *  group's level" (drives.ts's header): the group's own slewed level for a
  *  band onset, sectionIntensity's trend for Drop (its own composite
  *  "loudness" — Drop has no group level of its own to read), and the
- *  sensitivity-applied broadband level (`driveEnergy`, matching Loudness · All
+ *  sensitivity-applied broadband level (`driveEnergy`, matching Level
  *  exactly) for Any hit and the metronome (Metronome/Metronome bar), since
  *  none of those is band-specific. */
 function edgeLoudLevel(id: SignalId, anim: AnimFrame, driveEnergy: number): number {

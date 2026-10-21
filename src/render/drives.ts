@@ -137,7 +137,7 @@ import { createShapingBank, getShapingNode, type ShapingState } from "./shapingN
  *     broadband level for Any hit/beat-grid, src/render/sectionIntensity.ts's
  *     own trend for Drop), decaying the same way. "This hit is exactly as
  *     tall as the room was loud when it landed" — a hit gate on a sustained
- *     reading, useful under `max`/`gate` against a Loudness source.
+ *     reading, useful under `max`/`gate` against a Level source.
  *
  *   Fixed/Loud decay at *that source's own* existing pulse-decay rate —
  *   src/render/animClock.ts's BEAT_PULSE_DECAY_PER_SEC for Any hit/beat-grid,
@@ -303,10 +303,10 @@ import { createShapingBank, getShapingNode, type ShapingState } from "./shapingN
  * scene's own `uEnergy` sees this tick; app.ts's displayFrame is where that
  * shaping happens, computed once per tick just for this rather than only at
  * render time, since accumulate() itself needs it on every tick, both for
- * the "All level" catalogue source and as Loud height's own level for Any
+ * the "Level" catalogue source and as Loud height's own level for Any
  * hit/beat-grid) separately, because they're deliberately different frames —
  * see sceneCommon.ts's `uploadCommonUniforms` and app.ts's `loop()` for the
- * exact pipeline each one matches. The "Level" source reads `gainedFrame`'s
+ * exact pipeline each one matches. The "Input level" source reads `gainedFrame`'s
  * own `level`, which neither frame's gain or sensitivity ever shapes.
  *
  * **Reading.** `forScene(sceneId, settings, anim)` returns a `SceneDrives`

@@ -82,7 +82,7 @@ import {
 // one stronger ring instead of changing the shape at all) — see
 // rippleEmitter.ts's own `RingStyle` section; the emission and profile-building logic live in the `extraUniforms`
 // closure below. uFlash is a brightness punch, and uLevelGlow is how far the
-// whole pool brightens with its source (All level by default). It used to be
+// whole pool brightens with its source (Level by default). It used to be
 // a fixed brightening on uEnergy that no setting could turn off (#449).
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly).
@@ -472,7 +472,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "flash",
     label: "Beat flash",
-    description: "Overall brightness punch on each beat — pick All level instead of Beat for a long loud stretch to stay lit rather than flashing once",
+    description: "Overall brightness punch on each beat — pick Level instead of Any hit for a long loud stretch to stay lit rather than flashing once",
     group: "Look",
     min: 0,
     max: 1,
@@ -482,21 +482,21 @@ const SETTINGS: SceneSetting[] = [
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
     // uBeatPulse directly — a plain Beat default. Used to be a continuous
     // blend toward uEnergy via a separate "Flash from level" dial; that's
-    // now a discrete alternative source (All level) on this same picker
+    // now a discrete alternative source (Level) on this same picker
     // instead of a second setting.
     drive: { default: "feature.onset" },
   },
   {
     key: "levelGlow",
     label: "Level glow",
-    description: "The whole pool brightens with whatever is wired in, All level by default; 0 = loudness no longer brightens it",
+    description: "The whole pool brightens with whatever is wired in, Level by default; 0 = loudness no longer brightens it",
     group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5, // 0.5 on this dial was the scene's old fixed level brightening (LEVEL_GLOW_GAIN)
     // The brightness that used to ride uEnergy with no setting at all (#449).
-    // A plain All level default reads exactly what uEnergy did (signals.ts
+    // A plain Level default reads exactly what uEnergy did (signals.ts
     // header), so existing looks are unchanged. A multiply, not a lift: this
     // brightening exists only with music, so an unplugged jack reads 0 and
     // the glow goes, like Beat flash. No auto table, because this is taste.
@@ -886,7 +886,7 @@ export function causticDensityScale(density: number): number {
 }
 
 // Level glow (the "levelGlow" setting, #449): how far the whole pool's
-// brightness rises with its source, All level by default. The default
+// brightness rises with its source, Level by default. The default
 // reproduces the coefficient this scene used to hard-code on uEnergy (with
 // LEVEL_GLOW_GAIN). LEVEL_GLOW_EXP keeps that old curve: quiet passages
 // barely lift, loud ones lift a lot.

@@ -148,7 +148,7 @@ and `ours-chaikin/cells-ours.json`):
   (ln r, θ) so cell size grows with r for free, a per-row phase against
   spokes, a birth front that closes on the centre, rounded corners, lines
   only between real neighbours, a white core where cells get too small; the
-  four reactions as real wires (Speed ← All level, Births ← Bass hit,
+  four reactions as real wires (Speed ← Level, Births ← Bass hit,
   Relaunch ← Drop, Lines ← Treble level).
 - 2026-10-06: rounded corners first as a smooth minimum over all bisectors;
   on the many-sided central cell it eroded the whole outline into a thick
@@ -185,7 +185,7 @@ and `ours-chaikin/cells-ours.json`):
   Ocean swell ("great") and Fireflies ("amazing"), as layers that can run
   together, each with its own amount, both on by default.
 - 2026-10-06, from the prototype's measurements: the swell's height first
-  ignored the music (flat through the song), so it now rides All level; the
+  ignored the music (flat through the song), so it now rides Level; the
   fireflies first locked fully in every section, so the pull went from
   linear in the level to its square and the Beat lock default came down —
   scattered in a quiet intro, in step after the drop. Pull reads its drive
@@ -205,7 +205,7 @@ and `ours-chaikin/cells-ours.json`):
   with Births 0 to see it.
 - Relaunch: synthetic audio rarely makes a drop; to see it, wire Relaunch to
   a two-bar beat grid (`scripts/shot.mjs --drives`, its header has the JSON).
-- Speed rides All level over a floor, so a quiet passage still drifts.
+- Speed rides Level over a floor, so a quiet passage still drifts.
 - Cells changes the lattice itself, so moving it reshuffles the pattern
   rather than resizing it.
 - Swell and Fireflies: compare against both at 0 to see what they add, and
