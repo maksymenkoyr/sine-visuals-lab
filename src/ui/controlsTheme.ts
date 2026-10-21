@@ -203,6 +203,22 @@ const stylesheet = `
 }
 .vc-shape-col > * { flex-shrink: 0; }
 .vc-root.vc-meters-hidden .vc-shape-col { display: none; }
+/* The Setup view (audioMeters.ts's setupEl) takes the shaping column's spot, so
+ * that column steps aside while Setup is open (wide layout only: stacked, nothing is shared). */
+.vc-setup {
+  position: fixed; top: 60px; z-index: 30;
+  --vc-shape-gap: calc(100vw - 409px - 346px);
+  width: min(300px, var(--vc-shape-gap));
+  left: calc(409px + (var(--vc-shape-gap) - min(300px, var(--vc-shape-gap))) / 2);
+  max-height: calc(var(--vc-vh) - 150px); overflow-y: auto;
+  display: none;
+}
+.vc-root.vc-setup-open .vc-setup { display: flex; flex-direction: column; gap: 4px; }
+.vc-setup > * { flex-shrink: 0; }
+.vc-root.vc-meters-hidden .vc-setup { display: none; }
+@media (min-width: ${STACK_BELOW_PX + 1}px) {
+  .vc-root.vc-setup-open .vc-shape-col { display: none; }
+}
 .vc-shape-inport {
   display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
   border: 2px solid var(--c); border-radius: 3px; box-sizing: border-box; background: transparent;
@@ -289,7 +305,7 @@ const stylesheet = `
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
-  .vc-shape-col { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
+  .vc-shape-col, .vc-setup { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
   /* The triangle-collapse only makes sense beside other columns: dissolve the
    * wrapper and undo vc-cols-folded's hiding. Wins by coming later at equal
    * specificity. */
