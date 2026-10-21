@@ -443,6 +443,9 @@ let previewActive = false;
  *  out of the recorder's reach, so for the take this window draws what the
  *  output would (quality, energy saving, buffer size). */
 let recordAsOutput = false;
+/** The control desk (ui/desk/desk.ts) while an output is open; loaded on first use. */
+let desk: import("./ui/desk/desk.ts").Desk | null = null;
+let deskLoading = false;
 /** A phone/iPad controller is a screen of the room unless the Room view turned
  *  it off; before the roster lists it, it counts as a screen. */
 function fillsScreen(): boolean {
@@ -634,10 +637,32 @@ function applyRenderQuality(remount = false): void {
 }
 
 /** On while an output is open and the size isn't Full. A phone controller keeps
- *  the whole screen: a half-size picture on a phone is no preview. */
+ *  the whole screen: a half-size picture on a phone is no preview. The desk
+ *  (applyDesk) lays the canvas out itself, so this stays off under it. */
 function applyPreviewBox(): void {
-  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full" && !isController);
+  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full" && !isController && !(desk?.active() ?? false));
   document.body.style.setProperty("--preview-frac", String(PREVIEW_SIZE_FRACTION[previewSize]));
+}
+
+/** The control desk while a pop-out output is open (ui/desk/desk.ts), loaded on first use so it costs the first paint nothing. Never on a phone controller. */
+function applyDesk(): void {
+  const want = previewActive && !isController && !!outputBridge?.status().open;
+  if (want && !desk && !deskLoading) {
+    deskLoading = true;
+    void import("./ui/desk/desk.ts").then(({ createDesk }) => {
+      desk = createDesk({
+        openPanel: () => {
+          if (deviceMenu && !deviceMenu.isOpen()) deviceMenu.toggle();
+        },
+        bpmText: () => (lastAnim?.metronomeOn ? `${Math.round(lastAnim.metronomeBpm)} BPM` : "-- BPM"),
+      });
+      desk.setActive(previewActive && !isController && !!outputBridge?.status().open);
+      applyPreviewBox();
+    });
+  }
+  desk?.setActive(want);
+  // The desk changes whether the preview box applies, so refresh its class here.
+  applyPreviewBox();
 }
 
 function activeConn(): AnyConn | null {
@@ -3198,6 +3223,7 @@ function tick(): void {
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   outputBridge?.update(nowRafMs);
   roomBridge?.update(nowRafMs);
+  desk?.tick(nowRafMs);
   // Outside the bridge check: a controller has no pop-out yet still previews
   // whenever a scene is showing, unless it is a phone that is a screen of the room.
   const nextActive = isController ? inViz && !fillsScreen() : inViz && !!outputBridge && outputBridge.status().open;
@@ -3213,6 +3239,7 @@ function tick(): void {
     previewActive = nextActive;
     applyRenderQuality(true);
     applyPreviewBox();
+    applyDesk();
   }
   // Before this tick draws, so a take's first frame has the output's size. While
   // a take holds, the two calls also follow an Output Quality or Energy saving
@@ -3402,7 +3429,7 @@ function syncGlass(sceneDraws: boolean, scenePlays: boolean): void {
     scenePlays &&
     (deviceMenu?.isOpen() ?? false) &&
     !(clipRecorder?.recording() ?? false);
-  setGlassDrawn(drawn);
+  setGlassDrawn(drawn && !(desk?.active() ?? false));
   glassPaneCount = drawn && sceneDraws ? readGlassPanes(canvas, glassPanes, glassCanvasBox) : 0;
 }
 
