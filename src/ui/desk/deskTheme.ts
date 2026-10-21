@@ -171,11 +171,24 @@ body.desk .vc-cable-layer { clip-path: inset(var(--desk-top) 0 0 0); }
 .desk-count.some {
   color: #160c00; background: #f59e0b; padding: 0 6px; border-radius: 8px;
 }
-#deskLower {
+#deskLower, #deskView {
   position: fixed; left: 0; right: 0; top: var(--desk-top); bottom: 0;
   overflow-y: auto; padding: 0 16px 72px;
   display: flex; flex-direction: column; gap: 14px;
 }
+#deskView { display: none; }
+#desk.view-pads #deskView { display: flex; }
+#desk.view-pads #deskLower { display: none; }
+#deskLower.desk-nodes .desk-jump,
+#deskLower.desk-nodes .desk-mixer,
+#deskLower.desk-nodes .desk-sec-pads,
+#deskLower.desk-nodes .desk-sec-orch { display: none; }
+.desk-view-btn {
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: transparent; padding: 3px 9px;
+  font: 11px ${FONT_MONO}; letter-spacing: 0.08em; color: #a7b0aa; cursor: pointer;
+}
+.desk-view-btn.on { color: #070908; background: #e9eee9; border-color: #e9eee9; }
 /* Above the panel's cards, which otherwise paint over the bar when they scroll under it. */
 .desk-jump {
   position: sticky; top: 0; z-index: 40;
@@ -187,7 +200,8 @@ body.desk .vc-cable-layer { clip-path: inset(var(--desk-top) 0 0 0); }
   background: #0b0f0d; padding: 3px 9px;
   font: 11px ${FONT_MONO}; letter-spacing: 0.08em; color: #a7b0aa; cursor: pointer;
 }
-.desk-page-section { display: flex; flex-direction: column; gap: 8px; }
+/* Jump targets clear the sticky jump bar above them. */
+.desk-page-section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 44px; }
 .desk-mixer {
   display: grid; grid-template-columns: minmax(0, 1fr) 300px;
   gap: 14px; align-items: start;
@@ -263,6 +277,68 @@ body.desk #fxBar {
 body.desk .fxKey { height: 64px; -webkit-backdrop-filter: none; backdrop-filter: none; background: #0f1412; }
 body.desk .fxKey.on { background: #fff; }
 body.desk.chrome-idle #fxBar { opacity: 1; pointer-events: auto; }
+.desk-pads-row { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.desk-pads-tiles { display: grid; gap: 8px; flex: 1 1 auto; min-width: 0; align-items: start; }
+.desk-pads-tiles-row { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.desk-pads-tiles-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.desk-pads-tools { display: flex; flex-direction: column; gap: 6px; flex: none; width: 150px; }
+.desk-pads-btn {
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: #0e1311; padding: 4px 9px;
+  font: 11px ${FONT_MONO}; letter-spacing: 0.06em; color: #a7b0aa; cursor: pointer;
+}
+.desk-pads-btn:disabled { opacity: 0.35; cursor: default; }
+.desk-pads-note { min-height: 12px; font: 10.5px ${FONT_MONO}; color: #f59e0b; }
+.desk-pad {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 6px; background: #0b0f0d;
+}
+.desk-pad.queued { border-color: #22c55e; background: rgba(34, 197, 94, 0.06); }
+.desk-pads-tiles.beat-on .desk-pad.queued { background: rgba(34, 197, 94, 0.28); }
+.desk-pad.auto-next { border: 2px dashed #59bbfb; }
+.desk-pad.live { border-color: #ef4444; box-shadow: 0 0 0 1px #ef4444; }
+.desk-pad.editing { box-shadow: inset 0 0 0 1px #c3a5f9; }
+.desk-pad.live.editing { box-shadow: 0 0 0 1px #ef4444, inset 0 0 0 1px #c3a5f9; }
+.desk-pad-main {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  padding: 5px; border: 0; background: transparent; color: inherit; text-align: left;
+  font: inherit; cursor: pointer;
+}
+.desk-pad-pic { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 4px; overflow: hidden; }
+.desk-pad-pic canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.desk-pad-pic canvas[hidden] { display: none; }
+.desk-pad-key, .desk-pad-status {
+  position: absolute; top: 4px; padding: 1px 5px; border-radius: 2px;
+  font: 10px ${FONT_MONO}; letter-spacing: 0.06em; color: #e9eee9; background: rgba(0, 0, 0, 0.62);
+}
+.desk-pad-key { left: 4px; }
+.desk-pad-status { right: 4px; }
+.desk-pad-status:empty { display: none; }
+/* The pill takes the colour of the word it shows (queued over AUTO over LIVE), so the rules run in that order. */
+.desk-pad.live .desk-pad-status { background: #ef4444; color: #fff; }
+.desk-pad.auto-next .desk-pad-status { background: #59bbfb; color: #041018; }
+.desk-pad.queued .desk-pad-status { background: #22c55e; color: #04140a; }
+.desk-pad-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-pad-scene {
+  font: 10.5px ${FONT_MONO}; color: #a7b0aa;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.desk-pad-edit {
+  align-self: flex-end; margin: 0 5px 5px;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px; background: #0e1311;
+  padding: 0 7px; font-size: 12px; line-height: 20px; color: #c3a5f9; cursor: pointer;
+}
+.desk-pads-view { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.desk-pads-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.desk-pads-label {
+  font: 11px ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: #a7b0aa;
+}
+.desk-pads-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.desk-pads-side {
+  display: flex; flex-direction: column; gap: 10px; padding: 10px;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 4px; background: #0b0f0d;
+}
+.desk-pads-upnext { font-size: 13px; color: #e9eee9; }
 `;
 
 /** Injects the desk's stylesheet once. */

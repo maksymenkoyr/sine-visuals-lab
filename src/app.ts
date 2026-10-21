@@ -184,7 +184,17 @@ import {
   renameStoredPad,
   setAutopilot,
 } from "./render/sceneSet.ts";
-import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
+import {
+  AUTOPILOT_FALLBACK_SEC_PER_BAR,
+  AUTOPILOT_MIN_PADS,
+  createAutopilot,
+  peekAutopilot,
+  restartAutopilot,
+  skipAutopilotPick,
+  stepAutopilot,
+} from "./render/setAutopilot.ts";
+import { getLaunchOn, launchBeat, queueLaunch, takeDue, type QueuedLaunch } from "./render/launchQueue.ts";
+import { METRONOME_BEATS_PER_BAR } from "./render/metronome.ts";
 import { funnyLookName } from "./render/lookNames.ts";
 import {
   clearCustomValue,
@@ -459,6 +469,8 @@ let recordAsOutput = false;
 /** The control desk (ui/desk/desk.ts) while an output is open; loaded on first use. */
 let desk: import("./ui/desk/desk.ts").Desk | null = null;
 let deskLoading = false;
+/** How many digit keys the desk's pads row answers to (desk.ts PADS_ROW_MAX); set when the desk loads. */
+let deskPadsRowMax = 0;
 /** A phone/iPad controller is a screen of the room unless the Room view turned
  *  it off; before the roster lists it, it counts as a screen. */
 function fillsScreen(): boolean {
@@ -592,6 +604,9 @@ let setPreviewPadId: string | null = null;
 let setLivePadId: string | null = null;
 let setPopOutWasOpen = false;
 const setAutopilotState = createAutopilot();
+/** Pad launches the desk has queued for a launch line (launchQueue.ts), run by the tick. */
+let launchQueue: QueuedLaunch[] = [];
+let launchQueueTempo = false;
 let effectControls: EffectControls | null = null;
 let compositor: Compositor | null = null;
 let clipRecorder: ClipRecorder | null = null;
@@ -713,7 +728,8 @@ function applyDesk(): void {
   const want = previewActive && !isController && !!outputBridge?.status().open;
   if (want && !desk && !deskLoading) {
     deskLoading = true;
-    void import("./ui/desk/desk.ts").then(({ createDesk, DESK_STRIPS_MAX }) => {
+    void import("./ui/desk/desk.ts").then(({ createDesk, DESK_STRIPS_MAX, PADS_ROW_MAX }) => {
+      deskPadsRowMax = PADS_ROW_MAX;
       desk = createDesk({
         openPanel: () => {
           if (deviceMenu && !deviceMenu.isOpen()) deviceMenu.toggle();
@@ -795,6 +811,32 @@ function applyDesk(): void {
             max: SCENE_EXPANSION_MAX,
           },
           committed: () => deviceMenu?.sceneChanged(),
+        },
+        pads: {
+          list: listPads,
+          sceneName: (sceneId) => getScene(sceneId)?.name ?? sceneId,
+          livePadId: () => setLivePadId,
+          nextPadId: currentPadId,
+          queue: () => launchQueue,
+          nowBeats: deskBeats,
+          pick: () => {
+            if (!inViz || !setAutopilotRuns()) return null;
+            return peekAutopilot(
+              setAutopilotState,
+              { timeSec: performance.now() / 1000, beats: lastAnim?.metronomeBeats ?? 0, tempo: lastAnim?.metronomeOn ?? false },
+              getAutopilot(),
+              listPads().map((p) => p.id),
+            );
+          },
+          tap: deskTapPad,
+          addPad: addPadFromScreen,
+          autopilot: getAutopilot,
+          setAutopilot: (change) => {
+            setAutopilot(change);
+            restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
+          },
+          skipPick: () => skipAutopilotPick(setAutopilotState, getAutopilot(), listPads().map((p) => p.id)),
+          load: (id) => firePad(id),
         },
       });
       desk.setActive(previewActive && !isController && !!outputBridge?.status().open);
@@ -1150,6 +1192,26 @@ function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
     config.on ? listPads().map((p) => p.id) : NO_PADS,
   );
   if (id) firePad(id, true);
+}
+
+/** The beat count pad launches wait on: the metronome's, or seconds at Autopilot's fallback bar length with no tempo. */
+function deskBeats(): number {
+  return lastAnim?.metronomeOn ? lastAnim.metronomeBeats : (performance.now() / 1000) * (METRONOME_BEATS_PER_BAR / AUTOPILOT_FALLBACK_SEC_PER_BAR);
+}
+
+/** A pad pressed on the desk: Shift loads NEXT only; otherwise it lands on the next launch line, on NEXT and LIVE together. */
+function deskTapPad(id: string, shift: boolean): void {
+  if (shift) {
+    firePad(id);
+    return;
+  }
+  const on = getLaunchOn();
+  if (on === "now") {
+    firePad(id);
+    outputControls?.go();
+    return;
+  }
+  launchQueue = queueLaunch(launchQueue, id, launchBeat(deskBeats(), on));
 }
 
 function fatalError(message: string): void {
@@ -2889,11 +2951,17 @@ async function boot(): Promise<void> {
       if (inViz && !bypassGallery) navigate({ kind: "gallery" }, "push");
     }
     // The Set: 1-9 fire pads 1-9, panel open or closed (Shift+digit is the
-    // panel's block jump, deviceMenu.ts). Not on auto-repeat: a held key would
-    // reload the same pad.
-    if (inViz && !typing && !e.shiftKey && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
-      const pad = listPads()[Number(e.code.slice(5)) - 1];
-      if (pad) {
+    // panel's block jump, deviceMenu.ts). With the desk up, the first row's keys
+    // tap the desk's pads instead (Shift loads NEXT only). Not on auto-repeat: a
+    // held key would reload the same pad.
+    if (inViz && !typing && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
+      const index = Number(e.code.slice(5)) - 1;
+      const pad = listPads()[index];
+      if (pad && desk?.active() && index < deskPadsRowMax) {
+        e.preventDefault();
+        noteKeyUse("pad");
+        deskTapPad(pad.id, e.shiftKey);
+      } else if (pad && !e.shiftKey) {
         e.preventDefault();
         noteKeyUse("pad");
         firePad(pad.id);
@@ -3348,6 +3416,20 @@ function tick(): void {
   // Autopilot off last tick's clock, before this tick's frame: a pad it fires
   // switches scene here, so nothing below is computed for the scene it just left.
   if (lastAnim) stepSetAutopilot(lastAnim, nowRafMs);
+  // A launch is a beat count on one clock; the metronome starting or stopping
+  // switches clocks, and a count from the other one would land at random.
+  const launchClockTempo = lastAnim?.metronomeOn ?? false;
+  if (launchClockTempo !== launchQueueTempo) launchQueue = [];
+  launchQueueTempo = launchClockTempo;
+  if (!inViz) launchQueue = [];
+  else if (launchQueue.length > 0) {
+    const { due, rest } = takeDue(launchQueue, deskBeats());
+    launchQueue = rest;
+    if (due) {
+      firePad(due.padId);
+      outputControls?.go();
+    }
+  }
 
   // Resolved once per tick and reused below (extractor, anim clock, meters).
   const smoothing = resolveSmoothing(scene.id);
