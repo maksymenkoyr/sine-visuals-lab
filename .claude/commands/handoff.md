@@ -1,18 +1,17 @@
 ---
-description: Hand work on to whoever builds it next — write it down as GitHub issues for later sessions, pick an issue up and build its next part, or write a haiku-coder agent's prompt
+description: Hand work on to whoever builds it next — write it down as GitHub issues for later sessions, pick an issue up and build its next part, or lay out a part for a builder agent
 argument-hint: [topic | #issue]
 ---
 
 One hand-off with two kinds of receiver: a later session, which gets GitHub
-issues, and a `haiku-coder` agent, which gets one part of the work as its
+issues, and a `builder` agent, which gets one part of the work as its
 prompt. Both start knowing only CLAUDE.md and what they're handed, so the
 same rules and the same layout serve both.
 
 **Which end:** `/handoff #<n>` picks issue `n` up and builds its next part.
 `/handoff [topic]` writes: it turns what this session worked out into
-issues, `topic` naming them. Handing a change to `haiku-coder` (CLAUDE.md
-says when) writes one part's layout into the agent's prompt, under the same
-rules.
+issues, `topic` naming them. `/plan-build` writes one part's layout into
+a `builder` agent's prompt, under the same rules.
 
 **Where:** issues on this repo are public. Paid-scene work, and anything the
 user says isn't public, goes in issues on the private scenes repo instead
@@ -23,22 +22,27 @@ private one.
 
 ## Rules for the writer
 
-1. **Hand on only what's settled.** The user's calls are decisions, in their
-   words where they chose, each with why or what it beat. A guess of yours
-   is an open question, never a decision.
+1. **Hand on only what's settled as settled.** The user's calls are
+   decisions, in their words where they chose, each with why or what it
+   beat. A guess of yours is an open question, never a decision. Work still
+   being found out is handed on as a research part, not turned into steps.
 2. **Write for a stranger.** Anything the receiver needs is in the issue, or
-   named by path. `haiku-coder` can't open artifacts or the web, so copy in
+   named by path. `builder` can't open artifacts or the web, so copy in
    what decides the build; link the artifact too, its URL on its own line.
 3. **Every step names the file, the edit and the check** that proves it. A
    step you can't write that way isn't ready: it's an open question, or the
-   part needs research first.
+   part is a research part.
 4. **Say where things stand:** branch, PR, worktree; what's done and
    checked, what isn't.
 5. **Name what to read first** (the headers CLAUDE.md lists, scene records),
    the traps found, and what was rejected so it isn't tried again.
 6. **"Done when"** is what the user can see, plus the checks.
 7. **One part is one session and one PR**, ordered so each leaves `main`
-   working. A `haiku-coder` prompt is one part, or a slice of one.
+   working. A `builder` prompt is one part, or a slice of one, and never
+   a research part.
+8. **Research stays research.** When the user hands on unfinished research,
+   write what was found with its evidence, the leads still open and what's
+   ruled out; don't close it into a plan or guess the build parts after it.
 
 ## Rules for the receiver
 
@@ -60,7 +64,8 @@ private one.
    shared, and one sub-issue per part, in the layouts below.
 3. **Labels:** each issue gets its difficulty and `human` as
    `docs/issue-labels.md` says (a hook refuses one without difficulty), a
-   part whose steps are written gets `plan`, and a parent with sub-issues
+   part whose steps are written gets `plan`, a research part `research`,
+   and a parent with sub-issues
    gets a topic label that all of them share (`gh label create` if new).
 4. **Link each part to its parent:**
 
@@ -83,9 +88,13 @@ private one.
    `read`), then CLAUDE.md's `origin/main` and open-PR check for the part.
 3. **Say which part you're building, in one line.** If an open question
    blocks it, ask now and wait.
-4. **Build it.** For a `haiku-coder` share, its prompt is this part's
-   layout plus the worktree path and branch.
-5. **Finish with `/ship`**, the PR body saying `Closes #<part>`, and the
+4. **Build it**, yourself or with `/plan-build`, which hands the part to a
+   `builder` agent.
+5. **A research part** ends when its Done when is answered, or the leads
+   run out: post the findings on the issue and bring the user what they
+   decide. Write the build parts only from their calls, then close it. Any
+   code or tool it leaves goes through `/ship` like a build part.
+6. **Finish with `/ship`**, the PR body saying `Closes #<part>`, and the
    parent's on the last part. Then comment on the parent what the next part
    needs to know, and answer any open question the part settled there.
 
@@ -121,7 +130,7 @@ A parent, or a single-part issue (which also carries a part's sections):
 1. #<part> <what the user can see when it's done>
 ```
 
-A part (a sub-issue, or a `haiku-coder` prompt without the first line):
+A part (a sub-issue, or a `builder` prompt without the first line):
 
 ```markdown
 Part of #<parent>.
@@ -143,6 +152,34 @@ Part of #<parent>.
 ## Done when
 
 - <the observable result, and its checks>
+```
+
+A research part (a sub-issue, or a single issue):
+
+```markdown
+Part of #<parent>.
+
+<The question, and what the answer will let the user decide.>
+
+## Read first
+
+- `<header, record, doc, artifact>`
+
+## Found so far
+
+- <Finding> — <evidence: measurement, command, file, link>
+
+## Ruled out
+
+- <Idea or lead> — <why>
+
+## Leads
+
+- <What to try next, and why it looks promising>
+
+## Done when
+
+- <What answers the question, or the point to stop and report>
 ```
 
 Leave out a section with nothing in it.
