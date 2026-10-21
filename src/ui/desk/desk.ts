@@ -38,6 +38,8 @@ export interface DeskDeps {
   panelOpen(): boolean;
   /** Closes the controls panel (the desk does so on leaving only if it opened it). */
   closePanel(): void;
+  /** The CLASSIC button: back to today's layout with the output still open (ui/deskPref.ts). */
+  leave(): void;
   /** "128 BPM", or "-- BPM" with no tempo. */
   bpmText(): string;
   playList: Omit<PlayListDeps, "listEl" | "countEl">;
@@ -130,7 +132,11 @@ export function createDesk(deps: DeskDeps): Desk {
   });
   const sidecarBtn = el("button", "desk-view-btn", "SIDECAR");
   sidecarBtn.type = "button";
-  bar.append(...viewBtns.map((v) => v.el), sidecarBtn, bpm);
+  const classicBtn = el("button", "desk-view-btn", "CLASSIC");
+  classicBtn.type = "button";
+  classicBtn.title = "Back to the usual layout; DESK under Cue/Play brings this back";
+  classicBtn.addEventListener("click", () => deps.leave());
+  bar.append(...viewBtns.map((v) => v.el), sidecarBtn, classicBtn, bpm);
 
   const nextTag = el("span", "desk-tag desk-tag-next", "NEXT");
 

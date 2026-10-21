@@ -101,6 +101,7 @@ const CLASSIFIED: Record<string, boolean> = {
   // A library, not the look on screen; and the panel's own chrome.
   "vibe.looks": false,
   "vibe.panelBlur": false,
+  "vibe.deskOn": false,
   "vibe.gateFormula": false, // dev-only Smoothness formula pick (render/gateFormulas.ts)
 };
 

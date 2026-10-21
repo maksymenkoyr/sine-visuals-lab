@@ -160,6 +160,7 @@ import { createPictureReadback, type PictureReadback } from "./render/pictureRea
 import { createGlassBackdrop, type GlassBackdrop, type GlassPane } from "./render/glassBackdrop.ts";
 import { readGlassPanes } from "./ui/glassPanes.ts";
 import { GLASS_LOOK, getGlassMode, setGlassDrawn } from "./ui/glassPref.ts";
+import { getDeskOn, setDeskOn } from "./ui/deskPref.ts";
 import {
   applyLook,
   captureLook,
@@ -359,6 +360,8 @@ const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
 const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
 const outStateEl = document.getElementById("outState") as HTMLSpanElement;
 const takeBtn = document.getElementById("takeBtn") as HTMLButtonElement;
+const deskBtn = document.getElementById("deskBtn") as HTMLButtonElement;
+deskBtn.addEventListener("click", () => setDeskShown(true));
 const outBarEl = document.getElementById("outBar") as HTMLElement;
 const fxBarEl = document.getElementById("fxBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
@@ -738,9 +741,11 @@ function deskInput(sceneId: string, spec: SceneSetting): { name: string; color: 
   return { name: on.length > 1 ? `${name} +${on.length - 1}` : name, color: driveSourceColor(first.choice) };
 }
 
-/** The control desk while a pop-out output is open (ui/desk/desk.ts), loaded on first use so it costs the first paint nothing. Never on a phone controller. */
+/** The control desk while a pop-out output is open (ui/desk/desk.ts), loaded on first use so it costs the first paint nothing. Never on a phone controller; off while deskPref.ts says the classic layout. */
 function applyDesk(): void {
-  const want = previewActive && !isController && !!outputBridge?.status().open;
+  const canDesk = previewActive && !isController && !!outputBridge?.status().open;
+  const want = canDesk && getDeskOn();
+  deskBtn.style.display = canDesk && !want ? "block" : "none";
   if (want && !desk && !deskLoading) {
     deskLoading = true;
     void import("./ui/desk/desk.ts").then(({ createDesk, DESK_STRIPS_MAX, PADS_ROW_MAX }) => {
@@ -761,6 +766,7 @@ function applyDesk(): void {
         closePanel: () => {
           if (deviceMenu?.isOpen()) deviceMenu.close();
         },
+        leave: () => setDeskShown(false),
         bpmText: deskBpmText,
         playList: {
           looks: () => outputBridge?.looks?.() ?? { next: null, live: null },
@@ -887,13 +893,18 @@ function applyDesk(): void {
           },
         },
       });
-      desk.setActive(previewActive && !isController && !!outputBridge?.status().open);
+      desk.setActive(previewActive && !isController && !!outputBridge?.status().open && getDeskOn());
       applyPreviewBox();
     });
   }
   desk?.setActive(want);
   // The desk changes whether the preview box applies, so refresh its class here.
   applyPreviewBox();
+}
+
+function setDeskShown(on: boolean): void {
+  setDeskOn(on);
+  applyDesk();
 }
 
 function activeConn(): AnyConn | null {

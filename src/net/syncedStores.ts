@@ -51,6 +51,8 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.midiMap",
   // When a pad launches is this machine's own choice; the output never needs it.
   "vibe.launchOn",
+  // Desk or classic layout (ui/deskPref.ts): only the main window has a desk.
+  "vibe.deskOn",
   "vibe.recordAspect",
   "vibe.quality",
   "vibe.powerMode",
