@@ -7,6 +7,10 @@
 // Needs tools/mic-gap-signal.py's signal.json first: it holds where the
 // song sits in the take and how far the mic trails the tab.
 //
+// Each of tab and mic also runs a second time with the app's default Auto on
+// (evaluate()'s `auto`: auto-gain amount from the band span, gate marks from
+// the tracked room floor), and the summary carries what Auto resolved to.
+//
 //   node tools/mic-gap-analyze.ts <session dir> [--noise-from <session dir>]
 //
 // Writes <session dir>/detect.json and prints a summary.
@@ -44,7 +48,7 @@ interface LegFrames {
   bpm: number[];
 }
 
-function runLeg(name: string, mono: Float32Array, s: SongSignal, delaySec: number) {
+function runLeg(name: string, mono: Float32Array, s: SongSignal, delaySec: number, auto = false) {
   const dur = mono.length / SR;
   const grid: number[] = [];
   for (let b = s.phi; b - s.songTimeAtTab0 + delaySec < dur; b += s.period) {
@@ -53,10 +57,17 @@ function runLeg(name: string, mono: Float32Array, s: SongSignal, delaySec: numbe
   }
   const track: Track = { name, mono, tempo: [{ from: 0, to: dur, bpm: s.bpm }], beats: grid, gridBeats: grid };
   const f: LegFrames = { times: [], onsets: [], bands: [], level: [], energy: [], bpm: [] };
+  const gain: number[] = [];
+  const closed: number[] = [];
+  const open: number[] = [];
   const metrics: EvalMetrics = evaluate(track, 60, {
     analyzer: true,
     gate: true,
-    onFrame: (time, frame) => {
+    auto,
+    onFrame: (time, frame, _anim, resolved) => {
+      gain.push(resolved.autoGain);
+      closed.push(resolved.gate?.closed ?? NaN);
+      open.push(resolved.gate?.open ?? NaN);
       f.times.push(time);
       if (frame.onset) f.onsets.push(time);
       f.bands.push(Float32Array.from(frame.bands));
@@ -83,6 +94,7 @@ function runLeg(name: string, mono: Float32Array, s: SongSignal, delaySec: numbe
     onsetOffsetMs: median(offs) * 1000,
     hitGrid: hitGrid(mono, s.bpm),
     room: roomStats(mono),
+    resolved: { autoGainMedian: median(gain), autoGainEnd: gain[gain.length - 1]!, closedEnd: closed[closed.length - 1]!, openEnd: open[open.length - 1]! },
   };
 }
 
@@ -153,10 +165,13 @@ function bandAgreement(ref: LegFrames, other: LegFrames, delaySec: number) {
 function runNoise(mono: Float32Array) {
   const levels: number[] = [];
   let onsets = 0;
+  let marks: { closed: number; open: number } | undefined;
   evaluate({ name: "noise", mono, tempo: [], beats: [], gridBeats: [] }, 60, {
     analyzer: true,
     gate: true,
-    onFrame: (time, frame) => {
+    auto: true,
+    onFrame: (time, frame, _anim, resolved) => {
+      marks = resolved.gate;
       if (time < SKIP_SEC) return;
       levels.push(frame.level);
       if (frame.onset) onsets++;
@@ -164,13 +179,15 @@ function runNoise(mono: Float32Array) {
   });
   const s = [...levels].sort((a, b) => a - b);
   const pct = (p: number) => s[Math.floor(p * (s.length - 1))]!;
-  return { levelP10: pct(0.1), levelMedian: pct(0.5), levelP90: pct(0.9), onsetsPerMin: (onsets / (levels.length / 60)) * 60 };
+  return { levelP10: pct(0.1), levelMedian: pct(0.5), levelP90: pct(0.9), autoMarksEnd: marks, onsetsPerMin: (onsets / (levels.length / 60)) * 60 };
 }
 
 const dir = process.argv[2]!;
 const noiseDir = process.argv.includes("--noise-from") ? process.argv[process.argv.indexOf("--noise-from") + 1]! : dir;
 const noise = runNoise(readWav(join(noiseDir, "noise.mic.wav")));
-console.log(`noise: level p10 ${noise.levelP10.toFixed(3)} median ${noise.levelMedian.toFixed(3)} p90 ${noise.levelP90.toFixed(3)}, ${noise.onsetsPerMin.toFixed(1)} hits/min`);
+console.log(
+  `noise: level p10 ${noise.levelP10.toFixed(3)} median ${noise.levelMedian.toFixed(3)} p90 ${noise.levelP90.toFixed(3)}, ${noise.onsetsPerMin.toFixed(1)} hits/min, auto gate ${noise.autoMarksEnd?.closed.toFixed(3)}/${noise.autoMarksEnd?.open.toFixed(3)}`,
+);
 const signal = JSON.parse(readFileSync(join(dir, "signal.json"), "utf8")) as { songs: SongSignal[] };
 const out = [];
 for (const s of signal.songs) {
@@ -181,6 +198,8 @@ for (const s of signal.songs) {
     tab: runLeg(`${s.name} tab`, tab, s, 0),
     mic: runLeg(`${s.name} mic`, mic, s, delay),
     sim: runLeg(`${s.name} sim`, micChain(tab, SR), s, 0),
+    tabAuto: runLeg(`${s.name} tab auto`, tab, s, 0, true),
+    micAuto: runLeg(`${s.name} mic auto`, mic, s, delay, true),
   };
   const summary = (k: keyof typeof legs) => {
     const l = legs[k];
@@ -197,6 +216,7 @@ for (const s of signal.songs) {
       onsetOffsetMs: l.onsetOffsetMs,
       hitGrid: l.hitGrid,
       room: l.room,
+      resolved: l.resolved,
     };
   };
   const row = {
@@ -207,19 +227,22 @@ for (const s of signal.songs) {
     tab: summary("tab"),
     mic: summary("mic"),
     sim: summary("sim"),
+    tabAuto: summary("tabAuto"),
+    micAuto: summary("micAuto"),
     micVsTab: { onsets: agreement(legs.tab.frames.onsets, legs.mic.frames.onsets, delay), ...bandAgreement(legs.tab.frames, legs.mic.frames, delay) },
     simVsTab: { onsets: agreement(legs.tab.frames.onsets, legs.sim.frames.onsets, 0), ...bandAgreement(legs.tab.frames, legs.sim.frames, 0) },
+    micAutoVsTabAuto: { onsets: agreement(legs.tabAuto.frames.onsets, legs.micAuto.frames.onsets, delay), ...bandAgreement(legs.tabAuto.frames, legs.micAuto.frames, delay) },
   };
   out.push(row);
   const f = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "  - ");
   console.log(`${s.name} (${s.bpm.toFixed(0)} BPM, lag ${s.lagMs.toFixed(1)} ms)`);
-  for (const k of ["tab", "mic", "sim"] as const) {
+  for (const k of ["tab", "mic", "sim", "tabAuto", "micAuto"] as const) {
     const m = row[k];
     console.log(
-      `  ${k}: tempoOk ${f(m.tempoOk)} steady ${f(m.tempoOkSteady)} lock ${f(m.timeToLockSec, 1)}s ticks30 ${f(m.ticksOn30ms)} tickOff ${f(m.medianOffsetMs, 0)}ms end ${f(m.endBpm, 1)} | onsets/beat ${f(m.onsetsPerBeat)} onBeat ${f(m.onBeatShare)} off ${f(m.onsetOffsetMs, 0)}ms | grid on/off ${f(m.hitGrid.onPerBar, 1)}/${f(m.hitGrid.offPerBar, 1)} | room lvl ${f(m.room.levelDb, 1)} floor ${f(m.room.floorDb, 1)} fade ${f(m.room.fadeDb, 1)} bass ${f(m.room.bassDb, 1)}`,
+      `  ${k}: tempoOk ${f(m.tempoOk)} steady ${f(m.tempoOkSteady)} lock ${f(m.timeToLockSec, 1)}s ticks30 ${f(m.ticksOn30ms)} tickOff ${f(m.medianOffsetMs, 0)}ms end ${f(m.endBpm, 1)} | onsets/beat ${f(m.onsetsPerBeat)} onBeat ${f(m.onBeatShare)} off ${f(m.onsetOffsetMs, 0)}ms | grid on/off ${f(m.hitGrid.onPerBar, 1)}/${f(m.hitGrid.offPerBar, 1)} | room lvl ${f(m.room.levelDb, 1)} floor ${f(m.room.floorDb, 1)} fade ${f(m.room.fadeDb, 1)} bass ${f(m.room.bassDb, 1)} | auto-gain med ${f(m.resolved.autoGainMedian)} end ${f(m.resolved.autoGainEnd)} gate ${f(m.resolved.closedEnd, 3)}/${f(m.resolved.openEnd, 3)}`,
     );
   }
-  for (const k of ["micVsTab", "simVsTab"] as const) {
+  for (const k of ["micVsTab", "simVsTab", "micAutoVsTabAuto"] as const) {
     const a = row[k];
     console.log(`  ${k}: onset recall ${f(a.onsets.recall)} precision ${f(a.onsets.precision)} energyCorr ${f(a.energyCorr)} level ${f(a.levelRef)}→${f(a.levelOther)} bandCorr ${a.corrs.map((c) => f(c, 1)).join(" ")}`);
   }
