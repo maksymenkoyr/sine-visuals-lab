@@ -54,6 +54,9 @@ export const OUTPUT_OPEN_GRACE_MS = 5000;
 
 /** How often the look (scene, palette, synced stores) is re-read to spot a change. */
 const LOOK_POLL_MS = 120;
+/** How often a wanted `thumbs` request is repeated: well inside
+ *  THUMBS_TIMEOUT_MS, so one lost message does not stop the thumbnails. */
+const THUMBS_RESEND_MS = 1000;
 
 /** The dev `?quality=`/`?tier=` pin, if this window has one, to hand on to the
  *  output (render/quality.ts's parseQualityPreset) so both render alike. */
@@ -132,6 +135,11 @@ export interface OutputBridge {
   /** Drop this device's unplayed edits and show what Main shows now (the room
    *  bridge's answer to `changedBy`). The pop-out has nothing to take. */
   take?(): void;
+  /** Asks the output for its thumbnails (ToOutput `thumbs`) while `on`; the
+   *  request is repeated while wanted and lapses without one. No-op while closed. */
+  setThumbs?(on: boolean): void;
+  /** Each thumbnail the output sends (ToMain `thumb`). The listener owns the bitmap. */
+  onThumb?(cb: (bmp: ImageBitmap) => void): void;
 }
 
 /** The parts of an OutputStatus a listener cares about, as one comparable
@@ -178,6 +186,9 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   let lastPollMs = -Infinity;
   let lastStatusKey = "";
   let lastStatus: OutputRenderStatus | null = null;
+  let thumbsWanted = false;
+  let lastThumbsPostMs = -Infinity;
+  const thumbListeners: Array<(bmp: ImageBitmap) => void> = [];
 
   function closed(): void {
     presence.bye();
@@ -193,6 +204,10 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   }
 
   transport.onMessage((m) => {
+    if (m.t === "thumb") {
+      for (const cb of thumbListeners) cb(m.bmp);
+      return;
+    }
     if (m.t === "bye") {
       closed();
       return;
@@ -267,8 +282,20 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
         lastPollMs = nowMs;
         preview();
       }
+      if (outputOpen && thumbsWanted && nowMs - lastThumbsPostMs >= THUMBS_RESEND_MS) {
+        lastThumbsPostMs = nowMs;
+        transport.post({ t: "thumbs", on: true });
+      }
       emitIfChanged();
     },
+    setThumbs(on) {
+      if (on === thumbsWanted) return;
+      thumbsWanted = on;
+      if (!outputOpen) return;
+      lastThumbsPostMs = now();
+      transport.post({ t: "thumbs", on });
+    },
+    onThumb: (cb) => void thumbListeners.push(cb),
     sendPower() {
       if (outputOpen) transport.post({ t: "power", power: opts.power() });
     },

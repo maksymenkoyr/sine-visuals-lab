@@ -306,3 +306,32 @@ describe("outputBridge keeps to one output window", () => {
     }
   });
 });
+
+describe("outputBridge thumbnails", () => {
+  it("asks for thumbnails once, repeats the request while wanted, and passes each thumb to its listener", () => {
+    const t = fakeTransport();
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene: "spectrum", palette: "neon" }),
+      storage,
+      power: () => POWER,
+      now: () => 10_000,
+    });
+    t.receive({ t: "status", s: status });
+    const thumbs = () => t.posted.filter((m) => m.t === "thumbs");
+    const seen: unknown[] = [];
+    bridge.onThumb?.((bmp) => seen.push(bmp));
+    bridge.setThumbs?.(true);
+    expect(thumbs()).toEqual([{ t: "thumbs", on: true }]);
+    bridge.setThumbs?.(true);
+    bridge.update(10_000);
+    expect(thumbs()).toHaveLength(1);
+    bridge.update(11_000);
+    expect(thumbs()).toEqual([{ t: "thumbs", on: true }, { t: "thumbs", on: true }]);
+    const bmp = { close() {} } as unknown as ImageBitmap;
+    t.receive({ t: "thumb", bmp });
+    expect(seen).toEqual([bmp]);
+    bridge.setThumbs?.(false);
+    expect(thumbs().at(-1)).toEqual({ t: "thumbs", on: false });
+  });
+});

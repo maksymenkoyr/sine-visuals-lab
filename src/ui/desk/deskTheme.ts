@@ -140,6 +140,32 @@ body.desk .vc-shape-col {
 :root.vc-desk .vc-glass-pane {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
+.desk-live {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+}
+.desk-row {
+  display: grid; grid-template-columns: 1fr auto auto; column-gap: 4px;
+  padding: 4px 6px; border-radius: 3px;
+  background: rgba(245, 158, 11, 0.09); border: 1px solid rgba(245, 158, 11, 0.28);
+}
+.desk-row-name { grid-column: 1; font-size: 12.5px; }
+.desk-row-vals {
+  grid-column: 1; grid-row: 2;
+  font: 11px ${FONT_MONO}; color: #a7b0aa;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.desk-row-vals s { color: #8a958e; }
+.desk-row-vals b { color: #e9eee9; font-weight: 400; }
+.desk-row-one, .desk-row-x {
+  grid-row: 1 / span 2; width: 24px; height: 24px; align-self: center;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: #0e1311; font-size: 13px; line-height: 1; cursor: pointer;
+}
+.desk-row-one { color: #22c55e; }
+.desk-row-x { color: #a7b0aa; }
+.desk-count.some {
+  color: #160c00; background: #f59e0b; padding: 0 6px; border-radius: 8px;
+}
 `;
 
 /** Injects the desk's stylesheet once. */

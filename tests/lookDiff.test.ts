@@ -182,3 +182,9 @@ describe("dropRowText", () => {
     expect(dropRowText(n, l, row)).toBeNull();
   });
 });
+
+describe("diffLooks, an empty object against an absent key", () => {
+  it("is no difference", () => {
+    expect(diffLooks(look({ "vibe.sceneAuto": "{}" }), look({}))).toEqual([]);
+  });
+});

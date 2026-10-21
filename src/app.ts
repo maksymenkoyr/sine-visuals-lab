@@ -264,7 +264,9 @@ import { earsChange, listensOwn } from "./net/ears.ts";
 import { recordsFromRoster } from "./net/roomMessages.ts";
 import { applyDeviceSet, followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
 import { realStorage } from "./net/realStorage.ts";
-import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
+import { captureRoomStorage, applyRoomStorage, applySyncedStorage, reloadSyncedStores } from "./net/syncedStores.ts";
+import { isLookKey } from "./net/lookDiff.ts";
+import { describeRow, type RowNames } from "./ui/desk/rowWords.ts";
 import { createMainPlay, type MainPlay } from "./net/mainPlay.ts";
 import { planBoot } from "./net/bootPlan.ts";
 import { tvRedirectTarget } from "./net/tvRedirect.ts";
@@ -644,6 +646,13 @@ function applyPreviewBox(): void {
   document.body.style.setProperty("--preview-frac", String(PREVIEW_SIZE_FRACTION[previewSize]));
 }
 
+/** Names the desk's Play list rows use (ui/desk/rowWords.ts). */
+const deskRowNames: RowNames = {
+  scene: (id) => getScene(id)?.name ?? id,
+  palette: (id) => getPalette(id).name,
+  setting: (scope, key) => getScene(scope.split("@")[0])?.settings?.find((s) => s.key === key)?.label ?? null,
+};
+
 /** The control desk while a pop-out output is open (ui/desk/desk.ts), loaded on first use so it costs the first paint nothing. Never on a phone controller. */
 function applyDesk(): void {
   const want = previewActive && !isController && !!outputBridge?.status().open;
@@ -654,7 +663,56 @@ function applyDesk(): void {
         openPanel: () => {
           if (deviceMenu && !deviceMenu.isOpen()) deviceMenu.toggle();
         },
+        panelOpen: () => deviceMenu?.isOpen() ?? false,
+        closePanel: () => {
+          if (deviceMenu?.isOpen()) deviceMenu.close();
+        },
         bpmText: () => (lastAnim?.metronomeOn ? `${Math.round(lastAnim.metronomeBpm)} BPM` : "-- BPM"),
+        playList: {
+          looks: () => outputBridge?.looks?.() ?? { next: null, live: null },
+          send: (state, glideMs) => {
+            outputBridge?.sendState?.(state, glideMs);
+          },
+          landMs: () => {
+            const t = getSceneTransition();
+            if (t.style === "cut") return 0;
+            const bpm = lastAnim?.metronomeOn ? lastAnim.metronomeBpm : 120;
+            return t.bars * 4 * (60000 / bpm);
+          },
+          describe: (row) => describeRow(row, deskRowNames),
+          dropStorage: (key, text) => {
+            try {
+              if (text === null) localStorage.removeItem(key);
+              else localStorage.setItem(key, text);
+            } catch {
+              // Storage blocked or full: NEXT keeps its value.
+            }
+            reloadSyncedStores();
+            deviceMenu?.sceneChanged();
+          },
+          dropPalette: (id) => applyCarriedPalette(id),
+          dropScene: (live) => {
+            // Only the look's own keys: the shelves (saved Looks, the Set) are
+            // this window's and LIVE holds an older copy of them.
+            applySyncedStorage(live.storage, localStorage, isLookKey);
+            applyCarriedPalette(live.palette);
+            const next = getScene(live.scene);
+            if (next && next.id !== scene.id) {
+              if (presetAllows(next, effectivePreset())) applyScene(next);
+              else showHud("scene unavailable on this device", true);
+            }
+            deviceMenu?.sceneChanged();
+          },
+        },
+        live: {
+          source: canvas,
+          following: () => {
+            const s = outputBridge?.status();
+            return !s?.open || s.cue || !s.differs;
+          },
+          setThumbs: (on) => outputBridge?.setThumbs?.(on),
+          onThumb: (cb) => outputBridge?.onThumb?.(cb),
+        },
       });
       desk.setActive(previewActive && !isController && !!outputBridge?.status().open);
       applyPreviewBox();
@@ -3405,6 +3463,9 @@ function drawScene(
   // Drawn after the compositor so the overlay sits over crossfade and held
   // effects, staying visible over Freeze and Blackout.
   overlayLayer?.draw();
+  // The desk's LIVE monitor copies #gl here, while the frame is still in the
+  // drawing buffer (liveMonitor.ts).
+  desk?.afterDraw(nowRafMs);
   // Last: the browser's blur sees the overlay too, and nothing after this
   // reads the frame.
   if (glassPaneCount > 0) drawGlass();

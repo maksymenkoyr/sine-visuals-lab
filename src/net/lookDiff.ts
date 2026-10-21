@@ -42,7 +42,8 @@ export function diffLooks(next: OutputState, live: OutputState): LookRow[] {
     }
     const from = rawOf(live.storage, key);
     const to = rawOf(next.storage, key);
-    if (from !== to) keys.push({ id: `k:${key}`, kind: "key", storageKey: key, from, to });
+    // A store that writes "{}" on first touch draws exactly what an absent key draws.
+    if ((from ?? "{}") !== (to ?? "{}")) keys.push({ id: `k:${key}`, kind: "key", storageKey: key, from, to });
   }
   rows.push(...entries.sort(byId), ...keys.sort(byId));
   return rows;
@@ -80,11 +81,18 @@ export function dropRowText(next: OutputState, live: OutputState, row: LookRow):
 
 const byId = (a: LookRow, b: LookRow): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
+/** Whether a storage key is part of the look (what stateKey compares). Shelves
+ *  and keys the main window rewrites itself are not: applying a look must
+ *  leave those alone. */
+export function isLookKey(key: string): boolean {
+  return !SHELF_KEYS.has(key) && !VOLATILE_PREFIXES.some((p) => key.startsWith(p));
+}
+
 /** Storage keys that the list compares: the union of both looks', less what
  *  stateKey leaves out. */
 function comparedKeys(a: OutputState, b: OutputState): string[] {
   const all = new Set([...Object.keys(a.storage), ...Object.keys(b.storage)]);
-  return [...all].filter((k) => !SHELF_KEYS.has(k) && !VOLATILE_PREFIXES.some((p) => k.startsWith(p)));
+  return [...all].filter(isLookKey);
 }
 
 function entryRows(storageKey: string, live: OutputState, next: OutputState): LookRow[] {
