@@ -38,7 +38,10 @@ Finish the change on this branch:
 7. **Push and open a draft PR**, or update the open one: push, then rewrite
    its body so it describes the whole branch as it now stands, not just what
    the first push carried — `/release` writes the release notes from PR
-   bodies. Keep the screenshots that still hold.
+   bodies. Keep the screenshots that still hold. Search open issues again
+   (`gh issue list --search`) with the finished change's words: the work may
+   have drifted from the issue found before starting, or one was filed since.
+   The body says `Closes #<n>` or `Refs #<n>` for each related one.
    `gh api -X PATCH 'repos/{owner}/{repo}/pulls/<n>' -F body=@<file>` (REST,
    as in step 6).
 
