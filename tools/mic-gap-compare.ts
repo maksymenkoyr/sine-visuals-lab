@@ -7,9 +7,8 @@
 // synesthesia-audio is a LOCAL-ONLY, OPTIONAL dependency. It is not bundled,
 // not in package.json, not in THIRD-PARTY-NOTICES.md, and none of its code is
 // copied here: it is loaded at run time from a sibling checkout (or
-// SYNESTHESIA_AUDIO_DIR). The library derives from a commercial app's
-// binaries, so keep it out of this AGPL repo. The tool exits with a message
-// when that directory is missing.
+// SYNESTHESIA_AUDIO_DIR). Keep it out of this repo and its bundle. The tool
+// exits with a message when that directory is missing.
 //
 //   node tools/mic-gap-compare.ts <session dir> [--noise-from <dir>] [--out <file>]
 //
