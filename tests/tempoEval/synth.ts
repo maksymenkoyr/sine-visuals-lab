@@ -135,7 +135,7 @@ const KICK_CLICK_HP_HZ = 2500;
 const KICK_CLICK_GAIN = 0.08;
 const KICK_RENDER_TAIL_SEC = 0.5; // comfortably past the -80dB point (see envelope())
 
-function kick(out: Float32Array, sr: number, t: number, v: number, rand: () => number): void {
+export function kick(out: Float32Array, sr: number, t: number, v: number, rand: () => number): void {
   const startSample = Math.round(t * sr);
   const toneLen = Math.round((KICK_ATTACK_SEC + KICK_RENDER_TAIL_SEC) * sr);
   const tone = new Float32Array(toneLen);
@@ -165,7 +165,7 @@ const SNARE_TONE_GAIN = 0.3;
 const SNARE_TONE_DECAY_SEC = 0.09;
 const SNARE_RENDER_TAIL_SEC = 0.35;
 
-function snare(out: Float32Array, sr: number, t: number, v: number, rand: () => number): void {
+export function snare(out: Float32Array, sr: number, t: number, v: number, rand: () => number): void {
   const startSample = Math.round(t * sr);
   const len = Math.round(SNARE_RENDER_TAIL_SEC * sr);
 
@@ -194,7 +194,7 @@ const CLAP_LONG_DECAY_SEC = 0.16;
 const CLAP_LONG_GAIN = 0.4;
 const CLAP_RENDER_TAIL_SEC = 0.3;
 
-function clap(out: Float32Array, sr: number, t: number, v: number, rand: () => number): void {
+export function clap(out: Float32Array, sr: number, t: number, v: number, rand: () => number): void {
   for (let burst = 0; burst < CLAP_OFFSETS_SEC.length; burst++) {
     const isLast = burst === CLAP_OFFSETS_SEC.length - 1;
     const decaySec = isLast ? CLAP_LONG_DECAY_SEC : CLAP_SHORT_DECAY_SEC;
@@ -214,7 +214,7 @@ const HAT_OPEN_GAIN = 0.14;
 const HAT_OPEN_DECAY_SEC = 0.2;
 const HAT_RENDER_TAIL_SEC = 0.35;
 
-function hat(out: Float32Array, sr: number, t: number, v: number, rand: () => number, open: boolean): void {
+export function hat(out: Float32Array, sr: number, t: number, v: number, rand: () => number, open: boolean): void {
   const decaySec = open ? HAT_OPEN_DECAY_SEC : HAT_CLOSED_DECAY_SEC;
   const gain = open ? HAT_OPEN_GAIN : HAT_CLOSED_GAIN;
   const startSample = Math.round(t * sr);
@@ -230,7 +230,7 @@ const BASS_GAIN = 0.22;
 const BASS_ATTACK_SEC = 0.006;
 const BASS_RENDER_TAIL_SEC = 0.15; // past dur's own decay tail
 
-function bass(out: Float32Array, sr: number, t: number, freq: number, dur: number, v: number): void {
+export function bass(out: Float32Array, sr: number, t: number, freq: number, dur: number, v: number): void {
   const startSample = Math.round(t * sr);
   const len = Math.round((dur + BASS_RENDER_TAIL_SEC) * sr);
   const raw = new Float32Array(len);
@@ -258,7 +258,7 @@ const PAD_ATTACK_SEC = 0.35;
 const PAD_RELEASE_SEC = 0.25;
 const PAD_VOICE_GAIN = 0.035;
 
-function pad(out: Float32Array, sr: number, t: number, freqs: number[], dur: number, v: number): void {
+export function pad(out: Float32Array, sr: number, t: number, freqs: number[], dur: number, v: number): void {
   const startSample = Math.round(t * sr);
   const len = Math.round(dur * sr);
   const raw = new Float32Array(len);
@@ -279,8 +279,8 @@ function pad(out: Float32Array, sr: number, t: number, freqs: number[], dur: num
 
 // ---- Tracks -----------------------------------------------------------
 
-const ROOT = [55, 43.65, 65.41, 49];
-const CHORDS = [
+export const ROOT = [55, 43.65, 65.41, 49];
+export const CHORDS = [
   [220, 261.63, 329.63],
   [174.61, 220, 261.63],
   [196, 261.63, 329.63],
@@ -297,7 +297,7 @@ function allocBuffer(durationSec: number): Float32Array {
   return new Float32Array(Math.round(durationSec * SR));
 }
 
-function finish(buf: Float32Array): Float32Array {
+export function finish(buf: Float32Array): Float32Array {
   for (let i = 0; i < buf.length; i++) buf[i] = Math.tanh(buf[i] * 0.6);
   return buf;
 }

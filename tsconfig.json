@@ -26,6 +26,8 @@
   // limiter, and the room core the tests drive with fake sockets). They're
   // plain TS with no Workers or DOM types, so both projects can compile them;
   // "files" entries aren't subject to "exclude".
-  "files": ["server/usage.ts", "server/lookDoc.ts", "server/roomRules.ts", "server/rateLimit.ts", "server/roomCore.ts", "server/roomDevices.ts"],
+  // tools/mic-gap-synth.ts is listed too: tests/micGapSynth.test.ts imports it,
+  // and a file a test imports has to be in a project.
+  "files": ["server/usage.ts", "server/lookDoc.ts", "server/roomRules.ts", "server/rateLimit.ts", "server/roomCore.ts", "server/roomDevices.ts", "tools/mic-gap-synth.ts"],
   "exclude": ["server"]
 }
