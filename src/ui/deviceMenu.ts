@@ -210,7 +210,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * src/render/drives.ts) is the patch bay: its row grows an input port (a
  * small ring at the row's left edge, in its first source's colour —
  * src/ui/driveSources.ts owns every source's colour and label), a source
- * summary under the label ("Treble hits + Treble level"), and a live
+ * summary under the label ("Treble hit + Treble level"), and a live
  * sparkline under the slider (drawn from `drives.valueOf(key)` at ~30 Hz in
  * update(), skipped while the panel is closed or the row is out of
  * view). None of the three is a fork
@@ -325,8 +325,8 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * its own bottom edge; cableGroupFor marks each condition cable `cond`,
  * which cableLayer.ts/controlsTheme.ts draw with a longer dash than a
  * scene-mix cable's own `soft` one. driveSummaryText's own gate branch names
- * the plays sources then every condition ("Treble hits + Bass hits, only
- * when Song intensity and Loudness are high").
+ * the plays sources then every condition ("Treble hit + Bass hit, only
+ * when Section and Level are high").
  *
  * A source line's own mute switch (buildMuteSwitch, `deps.onSetSourceMuted`)
  * turns it off without unplugging it — drives.ts's `DriveSource.off`, its
@@ -6048,7 +6048,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     zeroAtMin: true,
     ...percentReadout,
     description:
-      "Quieter than this on the Dynamics card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
+      "Quieter than this on Input level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
     auto: {
       isEnabled: () => deps.isSilenceGateAuto(),
       toggle: (on) => {

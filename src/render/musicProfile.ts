@@ -59,11 +59,11 @@ export const DIAL_LABELS: Readonly<Record<MusicDial, { label: string; descriptio
     description: "How steadily the beat is hitting. These dials are what Auto listens to.",
   },
   tempo: {
-    label: "Tempo",
+    label: "Pace",
     description: "Slow to fast on a dance-music scale — the middle is house tempo.",
   },
   brightness: {
-    label: "Brightness",
+    label: "Tone",
     description: "Dark and bassy to bright and airy.",
   },
   density: {

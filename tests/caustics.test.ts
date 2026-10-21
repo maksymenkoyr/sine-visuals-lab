@@ -583,7 +583,7 @@ describe("caustics level glow (brightnessGain, #449)", () => {
     );
   });
 
-  it("the drive defaults to All level, the number uEnergy carries", () => {
+  it("the drive defaults to Level, the number uEnergy carries", () => {
     expect(levelGlowSpec().drive?.default).toBe("anim.energy");
   });
 

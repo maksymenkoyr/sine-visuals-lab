@@ -221,7 +221,7 @@ describe("zoom out sand", () => {
 
 describe("zoom out setting", () => {
   const spec = chladniScene.settings!.find((x) => x.key === "zoomOut")!;
-  it("is off by default, manual, and driven by the All level", () => {
+  it("is off by default, manual, and driven by the Level", () => {
     expect(spec.default).toBe(0);
     expect(spec.auto).toBeUndefined();
     expect(spec.drive?.default).toBe("anim.energy");

@@ -955,3 +955,4 @@ reference-measurement workflow used by later scenes.
 - #508 (draft, 2026-10-13) — Treble sparkle as an Effect and a Shape, with a preview in the Scene card (see Decisions)
 - #538 (2026-10-15) — Sparkle preview draws only while on screen (see Decisions)
 - 2026-10-15 — Colour: Shades, Shades + accent (default) and Rainbow; the palette's ramp replaces the cosine curve by default (see Decisions)
+- 2026-10-22 — Labels only (#656): the Beat flash and Level glow hints name the inputs as the panel now does (Level, Any hit); no setting, default or wire changed

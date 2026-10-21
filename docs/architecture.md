@@ -70,7 +70,7 @@ a viewer with no local mic doesn't get that row at all. The same card's
 History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
 `FeatureFrame` field — its own Gate row right after it reads
-that same extractor's `gateDimmer` diagnostic the same way. Its Loudness row
+that same extractor's `gateDimmer` diagnostic the same way. Its LUFS row
 is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer. (The Waveform row

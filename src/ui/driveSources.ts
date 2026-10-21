@@ -11,24 +11,21 @@ import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, ST
  * an expanded patch. Phase 2b's jacks (src/ui/deviceMenu.ts's own plan)
  * reuse this same map rather than re-deriving colours per meter row.
  *
- * Labels deliberately diverge from src/render/signals.ts's own SIGNALS
- * labels where the panel's meter-row wording ("Bass hit", singular — this
- * *is* the signal) reads wrong as a patch source ("Bass hits", "this
- * setting is fed by bass hits", plural) — see each entry below. A grid
+ * Labels match src/render/signals.ts's own SIGNALS labels (one input, one
+ * name, on its meter row, its wire and a setting's pill), except the dial
+ * wires, which take a "Song" or "Room" prefix (DIAL_SOURCE_LABEL). A grid
  * source's label always carries its division ("Beat grid · Bar") since,
  * unlike a catalogue id, its identity isn't fixed; the patch panel's own
  * division chips show just the division on its own.
  */
 
-/** The Character card's dials (signals.ts's DIAL_SIGNALS) as wires: "Song"
- *  in front, the way Song intensity already reads, so a slow dial can't be
- *  mistaken for the live signal its row name would otherwise collide with
- *  (Tempo, Loudness). Loudness is "Room" instead — it follows the input
- *  level, not anything about the track (musicProfile.ts's header). */
+/** The dials (signals.ts's DIAL_SIGNALS) as wires: "Song" in front, so a slow
+ *  dial reads apart from a live input. Loudness is "Room" instead — it follows
+ *  the input level, not anything about the track (musicProfile.ts's header). */
 const DIAL_SOURCE_LABEL: Record<DialSignalId, string> = {
   "dial.pulse": "Song pulse",
-  "dial.tempo": "Song tempo",
-  "dial.brightness": "Song brightness",
+  "dial.tempo": "Song pace",
+  "dial.brightness": "Song tone",
   "dial.density": "Song density",
   "dial.dynamics": "Song dynamics",
   "dial.attack": "Song attack",
@@ -38,19 +35,19 @@ const DIAL_SOURCE_LABEL: Record<DialSignalId, string> = {
 const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "feature.onset": "Any hit",
   "feature.flux": "Onset surge",
-  "feature.level": "Level",
-  "anim.lowOnset": "Bass hits",
+  "feature.level": "Input level",
+  "anim.lowOnset": "Bass hit",
   "anim.kickBand": "Kick band",
-  "anim.midOnset": "Mid hits",
-  "anim.highOnset": "Treble hits",
+  "anim.midOnset": "Mid hit",
+  "anim.highOnset": "Treble hit",
   "anim.dropOnset": "Drop",
   "anim.low": "Bass level",
   "anim.mid": "Mid level",
   "anim.high": "Treble level",
   "anim.hats": "Hats",
   "anim.lead": "Lead",
-  "anim.energy": "Loudness",
-  "anim.sectionIntensity": "Song intensity",
+  "anim.energy": "Level",
+  "anim.sectionIntensity": "Section",
   "anim.centroid": "Centroid",
   "anim.wavePeak": "Waveform",
   "anim.beatWave": "Beat wave",
@@ -74,7 +71,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
 const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "feature.onset": "any sudden jump across the whole spectrum.",
   "feature.flux": "how sharply the sound is changing right now, compared with the hit threshold.",
-  "feature.level": "how loud the room is on a fixed scale, before auto-gain: silence reads 0 — the Dynamics card's Level.",
+  "feature.level": "how loud the room is on a fixed scale, before auto-gain: silence reads 0.",
   "anim.lowOnset": "kicks and bass notes landing.",
   "anim.kickBand": "the one bass band that pulses most clearly right now, picked by itself and re-picked when the song changes.",
   "anim.midOnset": "snares, claps and vocal attacks.",
@@ -88,12 +85,12 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
-  "anim.wavePeak": "the peak of the raw sound wave — the same % the Dynamics card's Waveform shows.",
+  "anim.wavePeak": "the peak of the raw sound wave — the same % the Waveform row shows.",
   "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
-  "anim.tempo": "how fast the Tempo card's own BPM is, from slow to fast.",
+  "anim.tempo": "how fast the BPM is, from slow to fast.",
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
-  "anim.metronome": "a tick on every beat at the Tempo card's own BPM — the same pulse every beat, silent while it reads '--'.",
+  "anim.metronome": "a tick on every beat at the BPM — the same pulse every beat, silent while it reads '--'.",
   "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
   "dial.pulse": "how steadily the beat keeps hitting, judged over several seconds.",
   "dial.tempo": "slow to fast on a dance-music scale, settling over many seconds; it rests in the middle (house tempo) until a tempo locks.",
@@ -277,7 +274,7 @@ const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
       "anim.centroid",
     ],
   },
-  // Room loudness sits by Loudness under Levels, not here: it follows the
+  // Room loudness sits by Level under Levels, not here: it follows the
   // input level, not the track.
   { label: "Song", choices: ["anim.sectionIntensity", ...DIAL_SIGNALS.filter((id) => id !== "dial.loudness")] },
   {
@@ -298,7 +295,7 @@ const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
 /** The Fixed/Loud/Graded height choices a hit-kind wire takes (a setting's
  *  wire, and a shaping node's Height row in shapingColumn.ts). */
 export const HEIGHT_OPTIONS: readonly { h: HitHeight; label: string; hint: string }[] = [
-  { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
+  { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by the Shape sliders." },
   { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
   { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
 ];

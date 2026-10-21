@@ -93,7 +93,7 @@ const SETTINGS: SceneSetting[] = [
     key: "cutMode",
     label: "Cut on",
     description:
-      "What triggers a hard cut to a new arrangement. Every beat and Bars both listen to the broadband beat (Bars cuts once a bar instead of every beat, once the tempo is locked); Bass hits listens to the low band instead, for songs whose broadband beat is too busy",
+      "What triggers a hard cut to a new arrangement. Every beat and Bars both listen to the broadband beat (Bars cuts once a bar instead of every beat, once the tempo is locked); Bass hit listens to the low band instead, for songs whose broadband beat is too busy",
     group: "Motion",
     type: "enum",
     options: CUT_MODE_NAMES,

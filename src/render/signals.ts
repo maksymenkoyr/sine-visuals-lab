@@ -69,18 +69,18 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * *value* uploads (u<Key>Drive, drives.value()) go through this same
  * envelope read — only its edge-latched `fired()` needs the raw boolean.
  *
- * "All level" (`anim.energy`) and "Level" (`feature.level`) are the two
+ * "Level" (`anim.energy`) and "Input level" (`feature.level`) are the two
  * entries whose `read()` actually uses its `frame` argument (`frame.energy`
  * and `frame.level`, not anything off `anim`) — every other entry ignores
  * `frame` entirely. drives.ts feeds them the sensitivity-applied frame
  * (matching what a scene's own `uEnergy` sees — see that file's header), so
- * a setting driven by "All level" and a scene's plain `uEnergy` uniform read
+ * a setting driven by "Level" and a scene's plain `uEnergy` uniform read
  * the identical number. Called elsewhere (a setting row's live pill) with
  * the plain band-gained frame instead, so that pill can read very slightly
  * ahead of Sensitivity/Expansion — an accepted cosmetic gap, not a claim
  * this file makes about the render path. `level` comes through both frames
  * raw (src/audio/sensitivity.ts's applySensitivity never shapes it), which
- * is why Level, unlike All level, reads 0 in a silent room.
+ * is why Input level, unlike Level, reads 0 in a silent room.
  *
  * The `dial.*` entries (DIAL_SIGNALS) are generated from MUSIC_DIALS, one
  * per dial, so a new dial gets a jack by construction. Each reads the eased
@@ -97,24 +97,24 @@ export type MeterCardId = "signal" | "hits" | "tempo" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
- *  Tempo card's BPM-digits/beat-dot block (audioMeters.ts's own
+ *  BPM-digits/beat-dot block (audioMeters.ts's own
  *  createTempoBlock) — the anchor for both `anim.metronome` and
- *  `anim.tempo`, whose jacks mount there (the card *is* the metronome's
+ *  `anim.tempo`, whose jacks mount there (the block *is* the metronome's
  *  number, ticking; see metronome.ts's own header). "wave"/"lock" are the
  *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
- *  instead; "timing" is the Tempo card's own Timing strip
+ *  instead; "timing" is the Timing strip
  *  (createTimingStrip), the anchor for `anim.metronomeBar`. "waveform" is
- *  the Dynamics card's own Waveform row, first in its body (audioMeters.ts's
+ *  the Waveform row, first in its body (audioMeters.ts's
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
  *  "wave" above (the beat/bar swing trace, a different row entirely).
- *  "centroid" is the Character card's Brightness row (dialRows' own
+ *  "centroid" is the Tone row (dialRows' own
  *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
  *  draws directly under that dial's bar rather than a row of its own. Each
  *  dial's own cell is its DialSignalId, "dial.brightness" naming the same
- *  Brightness row as "centroid". */
+ *  Tone row as "centroid". */
 export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform" | DialSignalId;
 
-/** One Character-card dial as a signal — see this file's header. */
+/** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
 
 export function dialSignalId(dial: MusicDial): DialSignalId {
@@ -195,7 +195,7 @@ function clamp01(x: number): number {
 
 /** "Onset surge" is the broadband flux ratio (1 = the detector's bare
  *  trigger) rescaled so SURGE_RATIO_FLOOR reads 0 and SURGE_RATIO_CEIL
- *  reads 1. Exported so the Hits card's Surge lane can mark where Beat
+ *  reads 1. Exported so the Surge lane can mark where Any hit
  *  fires on that same scale (surgeAtThreshold) instead of copying the
  *  numbers. */
 const SURGE_RATIO_FLOOR = 0.6;
@@ -227,9 +227,9 @@ export type SignalLink =
 export const SIGNALS: Record<SignalId, SignalSpec> = {
   "feature.onset": signal({
     id: "feature.onset",
-    label: "Beat",
+    label: "Any hit",
     description:
-      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts). The Hits card's Beat lane marks every one it fired.",
+      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts). The Any lane of the hits history marks every one it fired.",
     kind: "edge",
     read: (_frame, anim) => anim.beatPulse,
     edge: (anim) => anim.onset,
@@ -332,7 +332,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
   }),
   "anim.energy": signal({
     id: "anim.energy",
-    label: "All level",
+    label: "Level",
     description:
       "The plain mean of every band (FeatureFrame.energy) — see this file's header for why this is the one entry whose read() actually uses its `frame` argument.",
     kind: "level",
@@ -341,9 +341,9 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
   }),
   "feature.level": signal({
     id: "feature.level",
-    label: "Level",
+    label: "Input level",
     description:
-      "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), the Dynamics card's Level row — never auto-gained, so a silent room reads 0 where All level's auto-gain lifts mic hiss back to mid-range.",
+      "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), the Input level row — never auto-gained, so a silent room reads 0 where Level's auto-gain lifts mic hiss back to mid-range.",
     kind: "level",
     read: (frame) => frame.level,
     bandRange: "all",
@@ -370,7 +370,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.centroid",
     label: "Centroid",
     description:
-      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Brightness dial, traced directly under its bar on the Character card.",
+      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Tone dial, traced directly under its bar.",
     kind: "level",
     read: (_frame, anim) => anim.centroid,
     monitor: { card: "character", row: "centroid" },
@@ -379,7 +379,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Dynamics card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
+      "The Waveform row's own reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the row shows as a percentage; raw amplitude before auto-gain, so unlike Level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
     monitor: { card: "signal", row: "waveform" },
@@ -406,7 +406,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.tempo",
     label: "Tempo",
     description:
-      "Where the Tempo card's own BPM (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the card reads '--'.",
+      "Where the BPM (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the BPM reads '--'.",
     kind: "level",
     read: (_frame, anim) =>
       anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
@@ -416,7 +416,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.tempoLock",
     label: "Tempo lock",
     description:
-      "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the Tempo card's tempo dot brightens with.",
+      "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the tempo dot brightens with.",
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
     monitor: { card: "tempo", row: "lock" },
@@ -425,7 +425,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.metronome",
     label: "Metronome",
     description:
-      "A tick on every beat at the Tempo card's own BPM (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. The same flat pulse every beat; silent while the card reads '--'.",
+      "A tick on every beat at the BPM (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. The same flat pulse every beat; silent while the BPM reads '--'.",
     kind: "edge",
     read: (_frame, anim) => anim.metronomePulse,
     edge: (anim) => anim.metronomeBeat,
@@ -450,7 +450,7 @@ function dialSignals(): Record<DialSignalId, SignalSpec> {
     out[id] = signal({
       id,
       label: DIAL_LABELS[dial].label,
-      description: `The ${DIAL_LABELS[dial].label} dial (AnimFrame.profile.${dial}, musicProfile.ts) — the eased track description Auto resolves against and its Character-card cell shows (under RAW the cell shows the pre-ease target; the wire still reads the eased one), so it moves over seconds rather than per hit.`,
+      description: `The ${DIAL_LABELS[dial].label} dial (AnimFrame.profile.${dial}, musicProfile.ts) — the eased track description Auto resolves against and its dial cell shows (under RAW the cell shows the pre-ease target; the wire still reads the eased one), so it moves over seconds rather than per hit.`,
       kind: "level",
       read: (_frame, anim) => anim.profile[dial],
       monitor: { card: "character", row: id },

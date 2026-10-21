@@ -277,7 +277,7 @@ export interface AnimClock {
 }
 
 // Exported so src/render/drives.ts's Fixed/Loud hit heights can decay a
-// broadband ("Beat") source at exactly this same rate rather than
+// broadband ("Any hit") source at exactly this same rate rather than
 // hand-duplicating it (its own header explains why: "read it from
 // animClock/bandEnergy; don't invent one").
 export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay

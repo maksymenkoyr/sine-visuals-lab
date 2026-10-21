@@ -120,7 +120,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    neither (a synthetic feed) the row hides itself. (No stereo
  *    width/balance: a phone or laptop mic is mono, so they'd read "mono"
  *    nearly always.) Then Level: FeatureFrame.level (pre-AGC, absolute).
- *    Loudness next — the broadcast measurement, BS.1770 / EBU R128 LUFS
+ *    LUFS next — the broadcast measurement, BS.1770 / EBU R128 LUFS
  *    from lufsAnalyser.ts (math in lufs.ts): Momentary on the bar with the
  *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
  *    with a Reset chip in the card's own header. Local-only like Waveform,
@@ -146,8 +146,8 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    above — a device with no FeatureExtractor of its own (a renderer, the
  *    synthetic feed) reads Gate idle too, same as the Hits card's own Beat
  *    lane.
- *  - Hits: one lane each for Beat (the broadband detector) and
- *    bandEnergy.ts's Low/Mid/High (createHitsHistory), tracing each one's
+ *  - Hits: one lane each for Any hit (the broadband detector) and
+ *    bandEnergy.ts's Bass/Mid/Treble (createHitsHistory), tracing each one's
  *    ratio against its firing threshold plus a tick for every
  *    fired/gated/blocked reading (onsetDiag.ts's OnsetVerdict) — a history,
  *    not just an instant reading, so a tuning session can see *why* a hit
@@ -415,7 +415,7 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 //
 // It hosts the anim.metronome/anim.tempo jacks (mountJack), absolutely
 // positioned: a jack row would grow the block and, through weldedRowStyle's
-// align-items: stretch, the Lock row. The same style welds the Loudness bar
+// align-items: stretch, the Lock row. The same style welds the LUFS bar
 // beside its LUFS block.
 const weldedRowStyle = `display: flex; gap: 12px; align-items: stretch;`;
 const tempoBlockStyle = (accent: string) => `
@@ -439,7 +439,7 @@ const tempoDotStyle = `
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-// Loudness row: the bar spans LUFS_SCALE_MIN..MAX with the two targets people
+// LUFS row: the bar spans LUFS_SCALE_MIN..MAX with the two targets people
 // aim at marked (EBU R128 broadcast; what streaming services normalise to).
 // Past the streaming one the bar and digits go hot, since a louder mix gets
 // turned down on delivery. The block is Tempo's, wider for a signed decimal.
@@ -882,12 +882,12 @@ function createTempoBlock(accent: string) {
   };
 }
 
-// The Hits card's history: lanes for Beat and Low/Mid/High, one canvas, one
+// The Hits card's history: lanes for Any hit and Bass/Mid/Treble, one canvas, one
 // column per CSS pixel over the card's span. A trace-only Surge lane (signals.ts's
 // "feature.flux") sits under them; it's not part of HITS_LANES, having no hits
 // of its own.
 const HITS_LANE_HEIGHT_PX = 16;
-const HITS_LANE_COUNT = 5; // Beat, Low, Mid, High, Surge
+const HITS_LANE_COUNT = 5; // Any, Bass, Mid, Treble, Surge
 const HITS_HEIGHT_PX = HITS_LANE_HEIGHT_PX * HITS_LANE_COUNT;
 // 1 (the firing line) sits inside the track with headroom above it.
 const HITS_RATIO_MAX = ONSET_METER_MAX;
@@ -902,10 +902,10 @@ interface HitsLane {
   color: string;
 }
 const HITS_LANES: readonly HitsLane[] = [
-  { label: "Beat", color: BEAT_COLOR },
-  { label: "Low", color: STRIP_LOW },
+  { label: "Any", color: BEAT_COLOR },
+  { label: "Bass", color: STRIP_LOW },
   { label: "Mid", color: STRIP_MID },
-  { label: "High", color: STRIP_HIGH },
+  { label: "Treble", color: STRIP_HIGH },
 ];
 // Same order as HITS_LANES: each lane's jack source. Surge has its own
 // (SURGE_CHOICE).
@@ -953,11 +953,11 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
     "Full tick: fired.",
     "Dim tick: cleared the line but too soon after the last one (refractory).",
     "Faint tick on shaded ground: cleared it while the room was quiet.",
-    `Beat: flux over ${FLUX_THRESHOLD_MULT}× the recent average + ${FLUX_THRESHOLD_MARGIN}, ≥${ms(ONSET_REFRACTORY_SEC)} apart.`,
-    group("Low", GROUP_TUNING.low),
+    `Any hit: flux over ${FLUX_THRESHOLD_MULT}× the recent average + ${FLUX_THRESHOLD_MARGIN}, ≥${ms(ONSET_REFRACTORY_SEC)} apart.`,
+    group("Bass", GROUP_TUNING.low),
     group("Mid", GROUP_TUNING.mid),
-    group("High", GROUP_TUNING.high),
-    "Surge: how close Beat is to firing, as a setting fed by Onset surge sees it; the line is where Beat fires.",
+    group("Treble", GROUP_TUNING.high),
+    "Surge: how close Any hit is to firing, as a setting fed by Onset surge sees it; the line is where Any hit fires.",
     gate,
   ].join(" ");
 }
@@ -980,7 +980,7 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
 
 /** The Hits card's history row. Beat reads `frame.onset` and `beatDiag`
  *  (device-local only: a null diag still lets fired/miss through, with no
- *  ratio trace and no gated/blocked). Low/Mid/High read `anim` (bandEnergy.ts
+ *  ratio trace and no gated/blocked). Bass/Mid/Treble read `anim` (bandEnergy.ts
  *  runs everywhere). Ground shading is `1 - anim.gateDimmer`, the Gate row's
  *  dimmer. */
 function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: MountJack, span: TraceSpan) {
@@ -1092,7 +1092,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
       ctx.fillRect(x === len ? w - 1 : x, 0, 1, HITS_HEIGHT_PX);
     }
 
-    // Divider between the Beat lane and the per-band ones, and above Surge.
+    // Divider between the Any lane and the per-band ones, and above Surge.
     ctx.fillStyle = "rgba(255,255,255,0.12)";
     ctx.fillRect(0, HITS_LANE_HEIGHT_PX - 0.5, w, 1);
     ctx.fillRect(0, HITS_SURGE_LANE * HITS_LANE_HEIGHT_PX - 0.5, w, 1);
@@ -1126,7 +1126,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
       ctx.stroke();
     }
 
-    // 3b. Surge lane: a filled trace (already 0..1) with a hairline where Beat
+    // 3b. Surge lane: a filled trace (already 0..1) with a hairline where Any hit
     // fires on that scale.
     ctx.fillStyle = "rgba(255,255,255,0.18)";
     ctx.fillRect(0, Math.round(laneYFrac(HITS_SURGE_LANE, surgeAtThreshold)) - 0.5, w, 1);
@@ -1494,10 +1494,10 @@ function laneFadeMs(lane: HitLane, tail: number): number {
 }
 const TAIL_ROW_TAIL = "Right: longer, still fading when the next hit lands. Left: a short flick.";
 const TAIL_ROW_HINTS: Readonly<Record<HitLane, string>> = {
-  beat: `How long a Beat pulse takes to fade — also the metronome's and a beat grid's pulses, and Beat wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
-  low: `How long a Low pulse takes to fade, and Bass hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+  beat: `How long an Any hit pulse takes to fade — also the metronome's and a beat grid's pulses, and Any hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+  low: `How long a Bass pulse takes to fade, and Bass hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
   mid: `How long a Mid pulse takes to fade, and Mid hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
-  high: `How long a High pulse takes to fade, and Treble hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
+  high: `How long a Treble pulse takes to fade, and Treble hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
 };
 
 // Whether the Length rows move together: a drag habit, not a look, so it stays
@@ -1668,7 +1668,7 @@ function createHitCurve() {
   };
 }
 
-/** The Loudness welded block: Short-term as the big reading (toFixed's ASCII
+/** The LUFS welded block: Short-term as the big reading (toFixed's ASCII
  *  minus renders in DSEG7), "LUFS" under it, Integrated beneath. Digits go hot
  *  past LUFS_HOT. */
 function createLufsBlock(accent: string) {
@@ -1710,7 +1710,7 @@ const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
 /** Shows or hides a row that only exists with a local mic. Restores the
  *  element's own inline display rather than blanking it: a `display: flex` row
- *  (the welded Loudness row) would fall back to block and stack its LUFS block
+ *  (the welded LUFS row) would fall back to block and stack its LUFS block
  *  under the bar. */
 const shownDisplay = new WeakMap<HTMLElement, string>();
 function setShown(el: HTMLElement, on: boolean): void {
@@ -1854,7 +1854,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const tempoSpan = cardSpan("tempo");
   const characterSpan = cardSpan("character");
 
-  // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
+  // ---- Signal: Waveform, Input level, LUFS, Level, History, Gate ----
   // The trace takes the meter's place under the head, like History/Gate.
   const waveform = createMeterRow({
     label: "Waveform",
@@ -1877,7 +1877,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const waveformSpacer = spacer();
 
   const level = createMeterRow({
-    label: "Level",
+    label: "Input level",
     accent: INPUT_GREEN,
     unit: "%",
     description:
@@ -1885,14 +1885,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   mountJack("feature.level", level.right, level.el);
 
-  // Loudness (lufsAnalyser.ts, math in lufs.ts): the bar and row readout are
+  // LUFS (lufsAnalyser.ts, math in lufs.ts): the bar and row readout are
   // Momentary (400 ms); the welded block is Short-term (3 s) over Integrated
   // (gated average since Reset, via the header's Reset chip).
   const lufsRow = createMeterRow({
-    label: "Loudness",
+    label: "LUFS",
     accent: NEUTRAL_ACCENT,
     description:
-      "Loudness the way broadcast meters measure it (BS.1770, K-weighted). The bar and this number are the last 400 ms; the big number the last 3 s; I the gated average since Reset. −23 is the EBU R128 broadcast target; streaming services normalise to about −14, and the bar goes red above it.",
+      "LUFS: loudness the way broadcast meters measure it (BS.1770, K-weighted). The bar and this number are the last 400 ms; the big number the last 3 s; I the gated average since Reset. −23 is the EBU R128 broadcast target; streaming services normalise to about −14, and the bar goes red above it.",
     ticks: [
       { at: lufsFrac(LUFS_TARGET_EBU), label: String(LUFS_TARGET_EBU) },
       { at: lufsFrac(LUFS_TARGET_STREAMING), label: String(LUFS_TARGET_STREAMING) },
@@ -1914,7 +1914,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   );
 
   const energy = createMeterRow({
-    label: "Energy",
+    label: "Level",
     accent: INPUT_GREEN,
     unit: "%",
     description:
@@ -1926,7 +1926,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: INPUT_GREEN,
     unit: "s",
     description:
-      "The last few seconds of Level and Energy. The gap between Energy and No auto-gain is what the Auto-gain slider is adding.",
+      "The last few seconds of Input level and Level. The gap between Level and No auto-gain is what the Auto-gain slider is adding.",
   });
   // The trace takes the meter's place under the head. Series order is paint
   // order: level lands on top.
@@ -1937,13 +1937,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: HISTORY_LEVEL_COLOR, width: 1 },
     ],
     HISTORY_HEIGHT_CSS_PX,
-    { label: "History of Level and Energy", span: signalSpan },
+    { label: "History of Input level and Level", span: signalSpan },
   );
   history.el.children[1].replaceWith(historyStrip.canvas);
   history.setReadout(String(signalSpan.sec()));
   const histLegend = createTraceLegend([
-    { color: HISTORY_LEVEL_COLOR, label: "Level" },
-    { color: HISTORY_ENERGY_COLOR, label: "Energy" },
+    { color: HISTORY_LEVEL_COLOR, label: "Input level" },
+    { color: HISTORY_ENERGY_COLOR, label: "Level" },
     { color: HISTORY_FIXED_COLOR, label: "No auto-gain" },
   ]);
   historyStrip.canvas.after(histLegend.el);
@@ -1955,7 +1955,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: INPUT_GREEN,
     unit: "%",
     description:
-      "How much of a hit's strength the silence gate is currently letting through — full: beats are detected exactly as before; empty: the room is silent and nothing can fire. Below, Level against the two Input-card marks (dashed, zoomed so the upper one sits mid-height) and the Dimmer itself over time. Hits the gate actually stops show up as faint ticks on the Hits card instead of a series here.",
+      "How much of a hit's strength the silence gate is currently letting through — full: beats are detected exactly as before; empty: the room is silent and nothing can fire. Below, Input level against the two Input-card marks (dashed, zoomed so the upper one sits mid-height) and the Dimmer itself over time. Hits the gate actually stops show up as faint ticks on the Hits card instead of a series here.",
   });
   // Paint order: Dimmer, then Level on top.
   const gateHistoryStrip = createTraceStrip(
@@ -1979,7 +1979,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   );
   gateRow.el.insertBefore(gateHistoryStrip.canvas, gateRow.el.children[2]);
   const gateLegend = createTraceLegend([
-    { color: HISTORY_LEVEL_COLOR, label: "Level" },
+    { color: HISTORY_LEVEL_COLOR, label: "Input level" },
     { color: GATE_DIMMER_COLOR, label: "Dimmer" },
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
@@ -2692,8 +2692,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
-      // Level is already raw; Energy's raw counterpart is rawBands (local-only
+      // ---- Signal: Waveform, Input level, LUFS, Level, History, Gate ----
+      // Input level is already raw; Level's raw counterpart is rawBands (local-only
       // like mono). Gate has no RAW branch: no pre-smoothing counterpart in
       // AnimFrame.
       if (!signalCard.fold?.isFolded() && signalOnScreen()) {
@@ -2742,7 +2742,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           histLegend.setEntryEnabled(2, fixedEnergy !== null);
         }
 
-        // Loudness: hidden (with its spacer and the header's Reset chip) with no
+        // LUFS: hidden (with its spacer and the header's Reset chip) with no
         // local lufsAnalyser.
         const showLufs = lufs !== null;
         if (showLufs !== lufsShown) {
