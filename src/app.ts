@@ -132,10 +132,20 @@ import {
   getSceneMaster,
   getSceneSetting,
   resetSceneSettings,
+  SCENE_EXPANSION_DEFAULT,
+  SCENE_EXPANSION_KEY,
+  SCENE_EXPANSION_MAX,
+  SCENE_EXPANSION_MIN,
+  SCENE_MASTER_DEFAULT,
+  SCENE_MASTER_KEY,
+  SCENE_MASTER_MAX,
+  SCENE_MASTER_MIN,
+  SCENE_SETTINGS_KEY,
   setSceneExpansion,
   setSceneMaster,
   setSceneSetting,
   settingDefault,
+  settingScope,
   type SceneSetting,
 } from "./render/sceneSettings.ts";
 import {
@@ -265,8 +275,9 @@ import { recordsFromRoster } from "./net/roomMessages.ts";
 import { applyDeviceSet, followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { captureRoomStorage, applyRoomStorage, applySyncedStorage, reloadSyncedStores } from "./net/syncedStores.ts";
-import { isLookKey } from "./net/lookDiff.ts";
+import { isLookKey, takeRow, type LookRow } from "./net/lookDiff.ts";
 import { describeRow, type RowNames } from "./ui/desk/rowWords.ts";
+import { driveSourceColor, driveSourceLabel } from "./ui/driveSources.ts";
 import { createMainPlay, type MainPlay } from "./net/mainPlay.ts";
 import { planBoot } from "./net/bootPlan.ts";
 import { tvRedirectTarget } from "./net/tvRedirect.ts";
@@ -653,12 +664,56 @@ const deskRowNames: RowNames = {
   setting: (scope, key) => getScene(scope.split("@")[0])?.settings?.find((s) => s.key === key)?.label ?? null,
 };
 
+/** How long a sent change takes to land on the output: the PLAY LANDS bars at the current tempo, 0 for Cut. */
+function deskLandMs(): number {
+  const t = getSceneTransition();
+  if (t.style === "cut") return 0;
+  const bpm = lastAnim?.metronomeOn ? lastAnim.metronomeBpm : 120;
+  return t.bars * 4 * (60000 / bpm);
+}
+
+/** LIVE's storage for the desk's strips, which read it every frame; re-read at most this often. Null while no output is open. */
+const DESK_LIVE_READ_MS = 200;
+let deskLiveRead: { at: number; storage: Record<string, string> | null } = { at: -Infinity, storage: null };
+function deskLiveStorage(): Record<string, string> | null {
+  const now = performance.now();
+  if (now - deskLiveRead.at >= DESK_LIVE_READ_MS) deskLiveRead = { at: now, storage: outputBridge?.looks?.().live?.storage ?? null };
+  return deskLiveRead.storage;
+}
+
+/** What LIVE holds for a dial (`storageKey` alone) or a setting (`scope` and `sub` into a two-level store): LIVE's stored number, else `fallback`. Null while no output is open. */
+function deskLiveValue(storageKey: string, fallback: number, scope?: string, sub?: string): number | null {
+  const storage = deskLiveStorage();
+  if (!storage) return null;
+  const text = storage[storageKey];
+  let v: unknown;
+  try {
+    if (text === undefined) v = undefined;
+    else if (scope === undefined) v = text === "" ? undefined : Number(text);
+    else v = (JSON.parse(text) as Record<string, Record<string, unknown> | undefined>)[scope]?.[sub ?? ""];
+  } catch {
+    v = undefined;
+  }
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/** The input a setting is wired to, as its strip names it: its first source that is on, and how many more. */
+function deskInput(sceneId: string, spec: SceneSetting): { name: string; color: string } {
+  const setting = getDriveSetting(sceneId, spec);
+  if (setting === "scene") return { name: spec.drive?.sceneLabel ?? "Scene mix", color: "#8a92a3" };
+  const on = setting.sources.filter((src) => !src.off);
+  const first = on[0];
+  if (!first) return { name: "Nothing", color: "#8a92a3" };
+  const name = driveSourceLabel(first.choice);
+  return { name: on.length > 1 ? `${name} +${on.length - 1}` : name, color: driveSourceColor(first.choice) };
+}
+
 /** The control desk while a pop-out output is open (ui/desk/desk.ts), loaded on first use so it costs the first paint nothing. Never on a phone controller. */
 function applyDesk(): void {
   const want = previewActive && !isController && !!outputBridge?.status().open;
   if (want && !desk && !deskLoading) {
     deskLoading = true;
-    void import("./ui/desk/desk.ts").then(({ createDesk }) => {
+    void import("./ui/desk/desk.ts").then(({ createDesk, DESK_STRIPS_MAX }) => {
       desk = createDesk({
         openPanel: () => {
           if (deviceMenu && !deviceMenu.isOpen()) deviceMenu.toggle();
@@ -673,12 +728,7 @@ function applyDesk(): void {
           send: (state, glideMs) => {
             outputBridge?.sendState?.(state, glideMs);
           },
-          landMs: () => {
-            const t = getSceneTransition();
-            if (t.style === "cut") return 0;
-            const bpm = lastAnim?.metronomeOn ? lastAnim.metronomeBpm : 120;
-            return t.bars * 4 * (60000 / bpm);
-          },
+          landMs: deskLandMs,
           describe: (row) => describeRow(row, deskRowNames),
           dropStorage: (key, text) => {
             try {
@@ -712,6 +762,39 @@ function applyDesk(): void {
           },
           setThumbs: (on) => outputBridge?.setThumbs?.(on),
           onThumb: (cb) => outputBridge?.onThumb?.(cb),
+        },
+        strips: {
+          sceneId: () => scene.id,
+          settings: () => (scene.settings ?? []).filter((s) => s.drive && !s.advanced).slice(0, DESK_STRIPS_MAX),
+          value: (spec) => getSceneSetting(scene.id, spec),
+          setValue: (spec, v) => setSceneSetting(scene.id, spec, v),
+          liveValue: (spec) => deskLiveValue(SCENE_SETTINGS_KEY, settingDefault(scene.id, spec), settingScope(scene.id, spec.key), spec.key),
+          reading: (spec) => (lastAnim ? driveEngine.forScene(scene.id, scene.settings ?? [], lastAnim).valueOf(spec.key) : null),
+          inputName: (spec) => deskInput(scene.id, spec).name,
+          inputColor: (spec) => deskInput(scene.id, spec).color,
+          sendOne: (spec, glideMs) => {
+            const l = outputBridge?.looks?.();
+            if (!l?.next || !l.live) return;
+            const scope = settingScope(scene.id, spec.key);
+            const row: LookRow = { id: `e:${SCENE_SETTINGS_KEY}|${scope}|${spec.key}`, kind: "entry", storageKey: SCENE_SETTINGS_KEY, scope, key: spec.key, from: undefined, to: undefined };
+            outputBridge?.sendState?.(takeRow(l.live, l.next, row), glideMs);
+          },
+          landMs: deskLandMs,
+          master: {
+            get: getSceneMaster,
+            set: setSceneMaster,
+            live: () => deskLiveValue(SCENE_MASTER_KEY, SCENE_MASTER_DEFAULT),
+            min: SCENE_MASTER_MIN,
+            max: SCENE_MASTER_MAX,
+          },
+          expansion: {
+            get: getSceneExpansion,
+            set: setSceneExpansion,
+            live: () => deskLiveValue(SCENE_EXPANSION_KEY, SCENE_EXPANSION_DEFAULT),
+            min: SCENE_EXPANSION_MIN,
+            max: SCENE_EXPANSION_MAX,
+          },
+          committed: () => deviceMenu?.sceneChanged(),
         },
       });
       desk.setActive(previewActive && !isController && !!outputBridge?.status().open);

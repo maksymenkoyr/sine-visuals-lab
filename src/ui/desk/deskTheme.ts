@@ -118,21 +118,26 @@ body.desk #outBar {
   gap: 4px;
 }
 body.desk.chrome-idle #outBar { opacity: 1; pointer-events: auto; }
+/* The panel sits in the scrolling page (#deskLower, #627): its columns lay out
+ * in the page's flow, in the order the page reads. */
 body.desk .vc-root {
-  top: var(--desk-top);
-  max-height: calc(var(--vc-vh) - var(--desk-top) - 16px);
+  position: relative; top: auto; right: auto; z-index: auto;
+  max-height: none; width: 100%;
+  justify-content: space-between; align-items: flex-start;
+  pointer-events: auto;
 }
-body.desk .vc-power-col, body.desk .vc-controls-col {
-  max-height: calc(var(--vc-vh) - var(--desk-top) - 16px);
-}
-body.desk .vc-spectrum-col {
-  top: var(--desk-top);
-  max-height: calc(var(--vc-vh) - var(--desk-top) - 16px);
-}
+body.desk .vc-cols-wrap { display: contents; }
+body.desk .vc-spectrum-col { position: static; order: 1; max-height: none; }
+body.desk .vc-spectrum-col > .vc-meters { max-height: none; overflow: visible; }
 body.desk .vc-shape-col {
-  top: var(--desk-top) !important;
-  max-height: calc(var(--vc-vh) - var(--desk-top) - 16px) !important;
+  position: static !important; order: 2;
+  left: auto !important; top: auto !important; width: 300px !important;
+  max-height: none !important; overflow: visible;
 }
+body.desk .vc-power-col { order: 3; max-height: none; }
+body.desk .vc-controls-col { order: 4; max-height: none; overflow: visible; }
+/* Cables start at the panel's jacks, which now sit below the monitors; none may cross them. */
+body.desk .vc-cable-layer { clip-path: inset(var(--desk-top) 0 0 0); }
 :root.vc-desk, :root.vc-desk.vc-glass-blur {
   --vc-glass-bg: #0b0f0d;
   --vc-glass-filter: none;
@@ -166,6 +171,98 @@ body.desk .vc-shape-col {
 .desk-count.some {
   color: #160c00; background: #f59e0b; padding: 0 6px; border-radius: 8px;
 }
+#deskLower {
+  position: fixed; left: 0; right: 0; top: var(--desk-top); bottom: 0;
+  overflow-y: auto; padding: 0 16px 72px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+/* Above the panel's cards, which otherwise paint over the bar when they scroll under it. */
+.desk-jump {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; gap: 6px; padding: 4px 0;
+  background: #070908;
+}
+.desk-jump-btn {
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: #0b0f0d; padding: 3px 9px;
+  font: 11px ${FONT_MONO}; letter-spacing: 0.08em; color: #a7b0aa; cursor: pointer;
+}
+.desk-page-section { display: flex; flex-direction: column; gap: 8px; }
+.desk-mixer {
+  display: grid; grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px; align-items: start;
+}
+.desk-mixer-row { display: flex; gap: 14px; align-items: flex-start; min-width: 0; }
+.desk-strips { display: flex; gap: 8px; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.desk-strip {
+  width: 96px; flex: none; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 5px; padding: 6px;
+  border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 4px; background: #0b0f0d;
+}
+.desk-strip.differs { border-color: #f59e0b; }
+.desk-strip.is-live { border-color: #ef4444; }
+.desk-strip.hl { outline: 2px solid #f59e0b; outline-offset: 1px; }
+.desk-strip-head { display: flex; gap: 5px; align-items: baseline; min-width: 0; }
+.desk-strip-num { font: 11px ${FONT_MONO}; color: #8a958e; }
+.desk-strip-name {
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.desk-strip-tag {
+  min-height: 12px; font: 10px ${FONT_MONO}; letter-spacing: 0.1em; color: #f59e0b;
+}
+.desk-strip.is-live .desk-strip-tag { color: #ef4444; }
+.desk-strip-input {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+  font: 10.5px ${FONT_MONO}; color: #a7b0aa; white-space: nowrap; overflow: hidden;
+}
+.desk-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #8a92a3; }
+.desk-strip-body { display: flex; gap: 12px; justify-content: center; align-items: stretch; height: 170px; }
+.desk-track {
+  position: relative; flex: none; width: 6px; height: 170px;
+  border-radius: 3px; background: rgba(232, 238, 234, 0.14); cursor: ns-resize; touch-action: none;
+}
+.desk-track:focus-visible { outline: 1px solid #e9eee9; outline-offset: 4px; }
+.desk-thumb {
+  position: absolute; left: -14px; width: 34px; height: 16px; box-sizing: border-box;
+  border-radius: 3px; background: #d9e0db; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  transform: translateY(50%); pointer-events: none;
+}
+.desk-live-mark {
+  position: absolute; left: -10px; width: 26px; height: 3px;
+  background: #ef4444; transform: translateY(50%); pointer-events: none;
+}
+.desk-meter {
+  position: relative; flex: none; width: 8px; height: 170px; overflow: hidden;
+  border-radius: 2px; background: rgba(232, 238, 234, 0.08);
+}
+.desk-meter-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #c3a5f9; }
+.desk-chips { display: flex; flex-direction: column; justify-content: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.desk-opt {
+  height: 24px; border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: transparent; font: 11px ${FONT_MONO}; color: #a7b0aa; cursor: pointer;
+}
+.desk-opt.on { color: #070908; background: #e9eee9; border-color: #e9eee9; }
+.desk-opt.live { box-shadow: inset 0 -3px 0 #ef4444; }
+.desk-strip-val { font: 11px ${FONT_MONO}; color: #e9eee9; text-align: center; min-height: 14px; }
+.desk-strip-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.desk-strip-btn {
+  height: 24px; border: 1px solid rgba(232, 238, 234, 0.14); border-radius: 3px;
+  background: #0e1311; font: 11.5px ${FONT_MONO}; color: #a7b0aa; cursor: pointer;
+}
+.desk-strip-btn.on { color: #070908; background: #e9eee9; border-color: #e9eee9; }
+.desk-strip-btn:disabled { opacity: 0.35; cursor: default; }
+.desk-master { display: flex; gap: 10px; flex: none; }
+.desk-dial { width: 70px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.desk-dial-name { font: 11px ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: #a7b0aa; }
+.desk-fx { min-width: 0; }
+body.desk #fxBar {
+  position: static; transform: none; display: grid !important;
+  grid-template-columns: 1fr 1fr; gap: 8px; max-width: none;
+  opacity: 1; pointer-events: auto;
+}
+body.desk .fxKey { height: 64px; -webkit-backdrop-filter: none; backdrop-filter: none; background: #0f1412; }
+body.desk .fxKey.on { background: #fff; }
+body.desk.chrome-idle #fxBar { opacity: 1; pointer-events: auto; }
 `;
 
 /** Injects the desk's stylesheet once. */

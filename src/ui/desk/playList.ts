@@ -9,6 +9,7 @@
  */
 import { diffLooks, dropRowText, takeRow, type LookRow } from "../../net/lookDiff.ts";
 import type { OutputState } from "../../net/outputSync.ts";
+import { SCENE_SETTINGS_KEY } from "../../render/sceneSettings.ts";
 
 export interface PlayListDeps {
   listEl: HTMLElement;
@@ -26,6 +27,8 @@ export interface PlayListDeps {
   dropPalette(paletteId: string): void;
   /** A scene row: NEXT takes LIVE's whole look. */
   dropScene(live: OutputState): void;
+  /** A setting row under the pointer (null when it leaves): the desk lights that setting's strip. */
+  onHover?(key: string | null): void;
 }
 
 /** How often the two looks are read while the desk is shown. */
@@ -67,6 +70,12 @@ export function createPlayList(deps: PlayListDeps): { tick(nowMs: number): void;
 
   function rowEl(row: LookRow): HTMLElement {
     const li = el("li", "desk-row");
+    if (row.kind === "entry" && row.storageKey === SCENE_SETTINGS_KEY && deps.onHover) {
+      const hover = deps.onHover;
+      const key = row.key;
+      li.addEventListener("mouseenter", () => hover(key));
+      li.addEventListener("mouseleave", () => hover(null));
+    }
     const words = deps.describe(row);
     li.appendChild(el("span", "desk-row-name", words.name));
     const vals = el("span", "desk-row-vals");

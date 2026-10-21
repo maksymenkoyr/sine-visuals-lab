@@ -10,10 +10,15 @@
  * its column and back, and adds its own #desk element; everything else it
  * shows is either the canvas itself or one of the panel's cards.
  */
+import { clearDriveMutes } from "../../render/driveMute.ts";
 import { getSceneTransition, setSceneTransition, type SceneTransition } from "../../render/sceneTransition.ts";
 import { createLiveMonitor, type LiveMonitorDeps } from "./liveMonitor.ts";
 import { createPlayList, type PlayListDeps } from "./playList.ts";
+import { createStrips, type StripsDeps } from "./strips.ts";
 import { ensureDeskStyles } from "./deskTheme.ts";
+
+/** Re-exported so app.ts can read the strip count from the desk module it loads lazily, without loading strips.ts first. */
+export { DESK_STRIPS_MAX } from "./strips.ts";
 
 export interface DeskDeps {
   /** Opens the controls panel if it is shut (deviceMenu.toggle when !isOpen). */
@@ -26,6 +31,7 @@ export interface DeskDeps {
   bpmText(): string;
   playList: Omit<PlayListDeps, "listEl" | "countEl">;
   live: Omit<LiveMonitorDeps, "slot">;
+  strips: StripsDeps;
 }
 
 export interface Desk {
@@ -41,6 +47,10 @@ export interface Desk {
   countEl: HTMLElement;
   /** The LIVE slot (liveMonitor.ts). */
   liveSlot: HTMLElement;
+  /** The Pads section of the scrolling page; a later part fills it. */
+  padsSlot: HTMLElement;
+  /** The Orchestrate section of the scrolling page; a later part fills it. */
+  orchSlot: HTMLElement;
 }
 
 /** Refresh cadence for the BPM readout and the fade chips' lit state; the
@@ -67,11 +77,20 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return node;
 }
 
+/** A section of the scrolling page: a small heading, then whatever goes in it. */
+function pageSection(title: string): HTMLElement {
+  const section = el("section", "desk-page-section");
+  section.appendChild(el("div", "desk-mid-head", title));
+  return section;
+}
+
 export function createDesk(deps: DeskDeps): Desk {
   ensureDeskStyles();
 
   const root = el("div");
   root.id = "desk";
+
+  const strips = createStrips(deps.strips);
 
   const bar = el("div", "desk-bar");
   const bpm = el("span", "desk-bpm");
@@ -115,12 +134,40 @@ export function createDesk(deps: DeskDeps): Desk {
   top.append(nextMon, mid, liveMon);
   root.append(bar, nextTag, top);
 
-  const playList = createPlayList({ ...deps.playList, listEl, countEl });
+  // The scrolling page under the top row (#627): the jump bar, the mixer (#622), two placeholder sections, then today's panel.
+  const lower = el("div");
+  lower.id = "deskLower";
+  const jump = el("nav", "desk-jump");
+  const mixer = el("section", "desk-mixer");
+  const fxSlot = el("div", "desk-fx");
+  mixer.append(strips.el, fxSlot);
+  const padsSlot = pageSection("PADS");
+  const orchSlot = pageSection("ORCHESTRATE");
+  const panelSlot = pageSection("PANEL");
+  for (const [label, target] of [
+    ["Mixer", mixer],
+    ["Pads", padsSlot],
+    ["Orchestrate", orchSlot],
+    ["Panel", panelSlot],
+  ] as const) {
+    const b = el("button", "desk-jump-btn", label);
+    b.type = "button";
+    b.addEventListener("click", () => target.scrollIntoView({ block: "start", behavior: "smooth" }));
+    jump.appendChild(b);
+  }
+  lower.append(jump, mixer, padsSlot, orchSlot, panelSlot);
+  // The panel lays its cables out from its own scroll events (deviceMenu.ts), so the page's scroll is passed on to it.
+  lower.addEventListener("scroll", () => document.querySelector(".vc-root")?.dispatchEvent(new Event("scroll")), { passive: true });
+  root.appendChild(lower);
+
+  const playList = createPlayList({ ...deps.playList, listEl, countEl, onHover: (key) => strips.highlight(key) });
   const liveMonitor = createLiveMonitor({ ...deps.live, slot: liveSlot });
 
   let active = false;
   let nextRefreshMs = 0;
   let outBarHome: { parent: Node; next: Node | null } | null = null;
+  let fxHome: { parent: Node; next: Node | null } | null = null;
+  let panelHome: { parent: Node; next: Node | null } | null = null;
   let panelWasOpen = false;
 
   function refreshChips(): void {
@@ -139,11 +186,30 @@ export function createDesk(deps: DeskDeps): Desk {
         outBarHome = { parent: outBar.parentNode, next: outBar.nextSibling };
         keys.appendChild(outBar);
       }
+      const fxBar = document.getElementById("fxBar");
+      if (fxBar?.parentNode) {
+        fxHome = { parent: fxBar.parentNode, next: fxBar.nextSibling };
+        fxSlot.appendChild(fxBar);
+      }
+      const panelRoot = document.querySelector<HTMLElement>(".vc-root");
+      if (panelRoot?.parentNode) {
+        panelHome = { parent: panelRoot.parentNode, next: panelRoot.nextSibling };
+        panelSlot.appendChild(panelRoot);
+      }
       document.body.classList.add("desk");
       document.documentElement.classList.add("vc-desk");
       panelWasOpen = deps.panelOpen();
       deps.openPanel();
     } else {
+      // A mute only means "NEXT apart from LIVE"; with no output there is nothing to be apart from.
+      clearDriveMutes();
+      // Reverse of the order they were moved in, so each home's next sibling is back in place first.
+      const panelRoot = document.querySelector<HTMLElement>(".vc-root");
+      if (panelRoot && panelHome) panelHome.parent.insertBefore(panelRoot, panelHome.next);
+      panelHome = null;
+      const fxBar = document.getElementById("fxBar");
+      if (fxBar && fxHome) fxHome.parent.insertBefore(fxBar, fxHome.next);
+      fxHome = null;
       if (outBar && outBarHome) outBarHome.parent.insertBefore(outBar, outBarHome.next);
       outBarHome = null;
       document.body.classList.remove("desk");
@@ -155,6 +221,7 @@ export function createDesk(deps: DeskDeps): Desk {
   function tick(nowMs: number): void {
     if (!active) return;
     playList.tick(nowMs);
+    strips.tick(nowMs);
     if (nowMs < nextRefreshMs) return;
     nextRefreshMs = nowMs + REFRESH_MS;
     const text = deps.bpmText();
@@ -174,5 +241,7 @@ export function createDesk(deps: DeskDeps): Desk {
     listEl,
     countEl,
     liveSlot,
+    padsSlot,
+    orchSlot,
   };
 }
