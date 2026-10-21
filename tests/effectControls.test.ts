@@ -140,4 +140,26 @@ describe("effect controls", () => {
     expect(now().strobe).toBe(false);
     vi.useRealTimers();
   });
+
+  it("a remote hold (the Sidecar) keeps an effect on with the key and pointer apart, and a flash fires on hold", async () => {
+    vi.useFakeTimers();
+    const { controls, key, now } = await build();
+    controls.hold("blackout", true);
+    expect(now().blackout).toBe(true);
+    key("keydown", "KeyQ");
+    key("keyup", "KeyQ");
+    expect(now().blackout).toBe(true);
+    controls.hold("blackout", false);
+    expect(now().blackout).toBe(false);
+    controls.hold("strobe", false);
+    expect(now().strobe).toBe(false);
+    controls.hold("strobe", true);
+    expect(now().strobe).toBe(true);
+    vi.advanceTimersByTime(STROBE_FLASH_MS);
+    expect(now().strobe).toBe(false);
+    controls.hold("freeze", true);
+    controls.releaseAll();
+    expect(now().freeze).toBe(false);
+    vi.useRealTimers();
+  });
 });

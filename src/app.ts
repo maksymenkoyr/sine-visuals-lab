@@ -132,22 +132,35 @@ import {
   getSceneMaster,
   getSceneSetting,
   resetSceneSettings,
+  SCENE_EXPANSION_DEFAULT,
+  SCENE_EXPANSION_KEY,
+  SCENE_EXPANSION_MAX,
+  SCENE_EXPANSION_MIN,
+  SCENE_MASTER_DEFAULT,
+  SCENE_MASTER_KEY,
+  SCENE_MASTER_MAX,
+  SCENE_MASTER_MIN,
+  SCENE_SETTINGS_KEY,
   setSceneExpansion,
   setSceneMaster,
   setSceneSetting,
   settingDefault,
+  settingScope,
   type SceneSetting,
 } from "./render/sceneSettings.ts";
 import {
   createPictureMeter,
   createPictureAverager,
+  displayLevel,
   PICTURE_GAP_RESET_MS,
+  PICTURE_MEASURES,
   PICTURE_SAMPLE_INTERVAL_MS,
 } from "./render/pictureMeter.ts";
 import { createPictureReadback, type PictureReadback } from "./render/pictureReadback.ts";
 import { createGlassBackdrop, type GlassBackdrop, type GlassPane } from "./render/glassBackdrop.ts";
 import { readGlassPanes } from "./ui/glassPanes.ts";
 import { GLASS_LOOK, getGlassMode, setGlassDrawn } from "./ui/glassPref.ts";
+import { getDeskOn, setDeskOn } from "./ui/deskPref.ts";
 import {
   applyLook,
   captureLook,
@@ -173,8 +186,21 @@ import {
   removeStoredPad,
   renameStoredPad,
   setAutopilot,
+  type AutopilotConfig,
 } from "./render/sceneSet.ts";
-import { AUTOPILOT_MIN_PADS, createAutopilot, restartAutopilot, stepAutopilot } from "./render/setAutopilot.ts";
+import {
+  AUTOPILOT_FALLBACK_SEC_PER_BAR,
+  AUTOPILOT_MIN_PADS,
+  createAutopilot,
+  peekAutopilot,
+  restartAutopilot,
+  skipAutopilotPick,
+  stepAutopilot,
+} from "./render/setAutopilot.ts";
+import { cancelLaunch, getLaunchOn, launchBeat, queueLaunch, takeDue, type QueuedLaunch } from "./render/launchQueue.ts";
+import { NO_EFFECTS } from "./render/heldEffects.ts";
+import { blendValues } from "./render/lookMap.ts";
+import { METRONOME_BEATS_PER_BAR } from "./render/metronome.ts";
 import { funnyLookName } from "./render/lookNames.ts";
 import {
   clearCustomValue,
@@ -264,7 +290,10 @@ import { earsChange, listensOwn } from "./net/ears.ts";
 import { recordsFromRoster } from "./net/roomMessages.ts";
 import { applyDeviceSet, followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
 import { realStorage } from "./net/realStorage.ts";
-import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
+import { captureRoomStorage, applyRoomStorage, applySyncedStorage, reloadSyncedStores } from "./net/syncedStores.ts";
+import { isLookKey, takeRow, type LookRow } from "./net/lookDiff.ts";
+import { describeRow, type RowNames } from "./ui/desk/rowWords.ts";
+import { driveSourceColor, driveSourceLabel } from "./ui/driveSources.ts";
 import { createMainPlay, type MainPlay } from "./net/mainPlay.ts";
 import { planBoot } from "./net/bootPlan.ts";
 import { tvRedirectTarget } from "./net/tvRedirect.ts";
@@ -331,6 +360,8 @@ const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
 const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
 const outStateEl = document.getElementById("outState") as HTMLSpanElement;
 const takeBtn = document.getElementById("takeBtn") as HTMLButtonElement;
+const deskBtn = document.getElementById("deskBtn") as HTMLButtonElement;
+deskBtn.addEventListener("click", () => setDeskShown(true));
 const outBarEl = document.getElementById("outBar") as HTMLElement;
 const fxBarEl = document.getElementById("fxBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
@@ -443,6 +474,11 @@ let previewActive = false;
  *  out of the recorder's reach, so for the take this window draws what the
  *  output would (quality, energy saving, buffer size). */
 let recordAsOutput = false;
+/** The control desk (ui/desk/desk.ts) while an output is open; loaded on first use. */
+let desk: import("./ui/desk/desk.ts").Desk | null = null;
+let deskLoading = false;
+/** How many digit keys the desk's pads row answers to (desk.ts PADS_ROW_MAX); set when the desk loads. */
+let deskPadsRowMax = 0;
 /** A phone/iPad controller is a screen of the room unless the Room view turned
  *  it off; before the roster lists it, it counts as a screen. */
 function fillsScreen(): boolean {
@@ -576,6 +612,19 @@ let setPreviewPadId: string | null = null;
 let setLivePadId: string | null = null;
 let setPopOutWasOpen = false;
 const setAutopilotState = createAutopilot();
+/** Pad launches the desk has queued for a launch line (launchQueue.ts), run by the tick. */
+let launchQueue: QueuedLaunch[] = [];
+let launchQueueTempo = false;
+/** How often each pad's measured picture is eased in, and how far one reading moves the stored value. */
+const PAD_READING_MS = 500;
+const PAD_READING_EASE = 0.3;
+/** A Map blend is a short glide: short enough to follow a drag, long enough not to step. */
+const MAP_GLIDE_MS = 200;
+/** The pads' measured pictures (orchestrate.ts's Map), kept while a pad is on NEXT. */
+const padReadings = new Map<string, { busy: number; bright: number }>();
+let padReadingsAtMs = -Infinity;
+let mapFollow = false;
+let mapSceneChangedAtMs = -Infinity;
 let effectControls: EffectControls | null = null;
 let compositor: Compositor | null = null;
 let clipRecorder: ClipRecorder | null = null;
@@ -634,10 +683,228 @@ function applyRenderQuality(remount = false): void {
 }
 
 /** On while an output is open and the size isn't Full. A phone controller keeps
- *  the whole screen: a half-size picture on a phone is no preview. */
+ *  the whole screen: a half-size picture on a phone is no preview. The desk
+ *  (applyDesk) lays the canvas out itself, so this stays off under it. */
 function applyPreviewBox(): void {
-  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full" && !isController);
+  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full" && !isController && !(desk?.active() ?? false));
   document.body.style.setProperty("--preview-frac", String(PREVIEW_SIZE_FRACTION[previewSize]));
+}
+
+/** Names the desk's Play list rows use (ui/desk/rowWords.ts). */
+const deskRowNames: RowNames = {
+  scene: (id) => getScene(id)?.name ?? id,
+  palette: (id) => getPalette(id).name,
+  setting: (scope, key) => getScene(scope.split("@")[0])?.settings?.find((s) => s.key === key)?.label ?? null,
+};
+
+/** How long a sent change takes to land on the output: the PLAY LANDS bars at the current tempo, 0 for Cut. */
+function deskLandMs(): number {
+  const t = getSceneTransition();
+  if (t.style === "cut") return 0;
+  const bpm = lastAnim?.metronomeOn ? lastAnim.metronomeBpm : 120;
+  return t.bars * 4 * (60000 / bpm);
+}
+
+/** LIVE's storage for the desk's strips, which read it every frame; re-read at most this often. Null while no output is open. */
+const DESK_LIVE_READ_MS = 200;
+let deskLiveRead: { at: number; storage: Record<string, string> | null } = { at: -Infinity, storage: null };
+function deskLiveStorage(): Record<string, string> | null {
+  const now = performance.now();
+  if (now - deskLiveRead.at >= DESK_LIVE_READ_MS) deskLiveRead = { at: now, storage: outputBridge?.looks?.().live?.storage ?? null };
+  return deskLiveRead.storage;
+}
+
+/** What LIVE holds for a dial (`storageKey` alone) or a setting (`scope` and `sub` into a two-level store): LIVE's stored number, else `fallback`. Null while no output is open. */
+function deskLiveValue(storageKey: string, fallback: number, scope?: string, sub?: string): number | null {
+  const storage = deskLiveStorage();
+  if (!storage) return null;
+  const text = storage[storageKey];
+  let v: unknown;
+  try {
+    if (text === undefined) v = undefined;
+    else if (scope === undefined) v = text === "" ? undefined : Number(text);
+    else v = (JSON.parse(text) as Record<string, Record<string, unknown> | undefined>)[scope]?.[sub ?? ""];
+  } catch {
+    v = undefined;
+  }
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/** The input a setting is wired to, as its strip names it: its first source that is on, and how many more. */
+function deskInput(sceneId: string, spec: SceneSetting): { name: string; color: string } {
+  const setting = getDriveSetting(sceneId, spec);
+  if (setting === "scene") return { name: spec.drive?.sceneLabel ?? "Scene mix", color: "#8a92a3" };
+  const on = setting.sources.filter((src) => !src.off);
+  const first = on[0];
+  if (!first) return { name: "Nothing", color: "#8a92a3" };
+  const name = driveSourceLabel(first.choice);
+  return { name: on.length > 1 ? `${name} +${on.length - 1}` : name, color: driveSourceColor(first.choice) };
+}
+
+/** The control desk while a pop-out output is open (ui/desk/desk.ts), loaded on first use so it costs the first paint nothing. Never on a phone controller; off while deskPref.ts says the classic layout. */
+function applyDesk(): void {
+  const canDesk = previewActive && !isController && !!outputBridge?.status().open;
+  const want = canDesk && getDeskOn();
+  deskBtn.style.display = canDesk && !want ? "block" : "none";
+  if (want && !desk && !deskLoading) {
+    deskLoading = true;
+    void import("./ui/desk/desk.ts").then(({ createDesk, DESK_STRIPS_MAX, PADS_ROW_MAX }) => {
+      deskPadsRowMax = PADS_ROW_MAX;
+      const deskBpmText = (): string => (lastAnim?.metronomeOn ? `${Math.round(lastAnim.metronomeBpm)} BPM` : "-- BPM");
+      const deskExpansion = {
+        get: getSceneExpansion,
+        set: setSceneExpansion,
+        live: () => deskLiveValue(SCENE_EXPANSION_KEY, SCENE_EXPANSION_DEFAULT),
+        min: SCENE_EXPANSION_MIN,
+        max: SCENE_EXPANSION_MAX,
+      };
+      desk = createDesk({
+        openPanel: () => {
+          if (deviceMenu && !deviceMenu.isOpen()) deviceMenu.toggle();
+        },
+        panelOpen: () => deviceMenu?.isOpen() ?? false,
+        closePanel: () => {
+          if (deviceMenu?.isOpen()) deviceMenu.close();
+        },
+        leave: () => setDeskShown(false),
+        bpmText: deskBpmText,
+        playList: {
+          looks: () => outputBridge?.looks?.() ?? { next: null, live: null },
+          send: (state, glideMs) => {
+            outputBridge?.sendState?.(state, glideMs);
+          },
+          landMs: deskLandMs,
+          describe: (row) => describeRow(row, deskRowNames),
+          dropStorage: (key, text) => {
+            try {
+              if (text === null) localStorage.removeItem(key);
+              else localStorage.setItem(key, text);
+            } catch {
+              // Storage blocked or full: NEXT keeps its value.
+            }
+            reloadSyncedStores();
+            deviceMenu?.sceneChanged();
+          },
+          dropPalette: (id) => applyCarriedPalette(id),
+          dropScene: (live) => {
+            // Only the look's own keys: the shelves (saved Looks, the Set) are
+            // this window's and LIVE holds an older copy of them.
+            applySyncedStorage(live.storage, localStorage, isLookKey);
+            applyCarriedPalette(live.palette);
+            const next = getScene(live.scene);
+            if (next && next.id !== scene.id) {
+              if (presetAllows(next, effectivePreset())) applyScene(next);
+              else showHud("scene unavailable on this device", true);
+            }
+            deviceMenu?.sceneChanged();
+          },
+        },
+        live: {
+          source: canvas,
+          following: () => {
+            const s = outputBridge?.status();
+            return !s?.open || s.cue || !s.differs;
+          },
+          setThumbs: (on) => outputBridge?.setThumbs?.(on),
+          onThumb: (cb) => outputBridge?.onThumb?.(cb),
+        },
+        strips: {
+          sceneId: () => scene.id,
+          settings: () => (scene.settings ?? []).filter((s) => s.drive && !s.advanced).slice(0, DESK_STRIPS_MAX),
+          value: (spec) => getSceneSetting(scene.id, spec),
+          setValue: (spec, v) => setSceneSetting(scene.id, spec, v),
+          liveValue: (spec) => deskLiveValue(SCENE_SETTINGS_KEY, settingDefault(scene.id, spec), settingScope(scene.id, spec.key), spec.key),
+          reading: (spec) => (lastAnim ? driveEngine.forScene(scene.id, scene.settings ?? [], lastAnim).valueOf(spec.key) : null),
+          inputName: (spec) => deskInput(scene.id, spec).name,
+          inputColor: (spec) => deskInput(scene.id, spec).color,
+          sendOne: (spec, glideMs) => {
+            const l = outputBridge?.looks?.();
+            if (!l?.next || !l.live) return;
+            const scope = settingScope(scene.id, spec.key);
+            const row: LookRow = { id: `e:${SCENE_SETTINGS_KEY}|${scope}|${spec.key}`, kind: "entry", storageKey: SCENE_SETTINGS_KEY, scope, key: spec.key, from: undefined, to: undefined };
+            outputBridge?.sendState?.(takeRow(l.live, l.next, row), glideMs);
+          },
+          landMs: deskLandMs,
+          master: {
+            get: getSceneMaster,
+            set: setSceneMaster,
+            live: () => deskLiveValue(SCENE_MASTER_KEY, SCENE_MASTER_DEFAULT),
+            min: SCENE_MASTER_MIN,
+            max: SCENE_MASTER_MAX,
+          },
+          expansion: deskExpansion,
+          committed: () => deviceMenu?.sceneChanged(),
+        },
+        pads: {
+          list: listPads,
+          sceneName: (sceneId) => getScene(sceneId)?.name ?? sceneId,
+          livePadId: () => setLivePadId,
+          nextPadId: currentPadId,
+          queue: () => launchQueue,
+          nowBeats: deskBeats,
+          pick: () => {
+            if (!inViz || !setAutopilotRuns()) return null;
+            return peekAutopilot(
+              setAutopilotState,
+              { timeSec: performance.now() / 1000, beats: lastAnim?.metronomeBeats ?? 0, tempo: lastAnim?.metronomeOn ?? false },
+              getAutopilot(),
+              listPads().map((p) => p.id),
+            );
+          },
+          tap: deskTapPad,
+          addPad: addPadFromScreen,
+          autopilot: getAutopilot,
+          setAutopilot: setDeskAutopilot,
+          skipPick: () => skipAutopilotPick(setAutopilotState, getAutopilot(), listPads().map((p) => p.id)),
+          load: (id) => firePad(id),
+        },
+        orchestrate: {
+          energy: () => lastAnim?.sectionIntensity ?? 0,
+          effects: () => effectControls?.engaged() ?? NO_EFFECTS,
+          queueAt: (id, at) => {
+            launchQueue = queueLaunch(launchQueue, id, at);
+          },
+          cancelAt: (at) => {
+            launchQueue = cancelLaunch(launchQueue, at);
+          },
+          reading: (id) => padReadings.get(id) ?? null,
+          blend: mapBlend,
+          launchNow: (id) => {
+            firePad(id);
+            outputControls?.go();
+          },
+          follow: () => mapFollow,
+          setFollow: (on) => {
+            mapFollow = on;
+          },
+        },
+        sidecar: {
+          liveName: () => listPads().find((p) => p.id === setLivePadId)?.name ?? scene.name,
+          prev: () => stepDeskPad(-1),
+          next: () => stepDeskPad(1),
+          holdEffect: (id, on) => effectControls?.hold(id, on),
+          effectsOn: () => effectControls?.engaged() ?? NO_EFFECTS,
+          autopilot: getAutopilot,
+          setAutopilot: setDeskAutopilot,
+          expansion: deskExpansion,
+          health: () => {
+            const status = outputBridge?.outputStatus();
+            return { inputOk: lastVis !== null, bpm: deskBpmText(), fps: status ? `${Math.round(status.fps)}` : "--" };
+          },
+        },
+      });
+      desk.setActive(previewActive && !isController && !!outputBridge?.status().open && getDeskOn());
+      applyPreviewBox();
+    });
+  }
+  desk?.setActive(want);
+  // The desk changes whether the preview box applies, so refresh its class here.
+  applyPreviewBox();
+}
+
+function setDeskShown(on: boolean): void {
+  setDeskOn(on);
+  applyDesk();
 }
 
 function activeConn(): AnyConn | null {
@@ -984,6 +1251,90 @@ function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
     config.on ? listPads().map((p) => p.id) : NO_PADS,
   );
   if (id) firePad(id, true);
+}
+
+/** The latest picture reading, or null when the meter has gone stale (see the panel's getPictureReading). */
+function freshPictureReading(): ReturnType<typeof pictureMeter.latest> {
+  return performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS + (pictureReadback?.holdMs() ?? 0) ? pictureMeter.latest() : null;
+}
+
+/** Eases the picture of the pad on NEXT into its stored reading. Only the Map reads these; they stay null until the pad has been on NEXT with a reading. */
+function updatePadReadings(): void {
+  const id = currentPadId();
+  const r = freshPictureReading();
+  if (id === null || !r) return;
+  const level = (key: "brightness" | "motion" | "detail"): number | null => {
+    const m = PICTURE_MEASURES.find((x) => x.key === key);
+    return m ? displayLevel(m, r[key]) : null;
+  };
+  const bright = level("brightness");
+  const parts = [level("motion"), level("detail")].filter((v): v is number => v !== null);
+  if (bright === null || parts.length === 0) return;
+  const busy = parts.reduce((sum, v) => sum + v, 0) / parts.length;
+  const prev = padReadings.get(id);
+  padReadings.set(
+    id,
+    prev
+      ? { busy: prev.busy + (busy - prev.busy) * PAD_READING_EASE, bright: prev.bright + (bright - prev.bright) * PAD_READING_EASE }
+      : { busy, bright },
+  );
+}
+
+/** The Map's blend: two looks of one scene at `share`. NEXT takes it (the pad a is loaded first if it is another scene's) and plays to LIVE with a short glide. */
+function mapBlend(aId: string, bId: string, share: number): void {
+  const pads = listPads();
+  const a = pads.find((p) => p.id === aId);
+  const b = pads.find((p) => p.id === bId);
+  if (!a || !b || a.look.sceneId !== b.look.sceneId) return;
+  if (a.look.sceneId !== scene.id) firePad(a.id);
+  const specs = scene.settings ?? [];
+  for (const [key, value] of Object.entries(blendValues(a.look.manual, b.look.manual, share))) {
+    const spec = specs.find((s) => s.key === key);
+    if (!spec || spec.type !== undefined) continue;
+    setSceneSetting(scene.id, spec, value);
+  }
+  outputControls?.go(MAP_GLIDE_MS);
+  const now = performance.now();
+  if (now - mapSceneChangedAtMs >= PAD_READING_MS) {
+    mapSceneChangedAtMs = now;
+    deviceMenu?.sceneChanged();
+  }
+}
+
+/** The beat count pad launches wait on: the metronome's, or seconds at Autopilot's fallback bar length with no tempo. */
+function deskBeats(): number {
+  return lastAnim?.metronomeOn ? lastAnim.metronomeBeats : (performance.now() / 1000) * (METRONOME_BEATS_PER_BAR / AUTOPILOT_FALLBACK_SEC_PER_BAR);
+}
+
+/** Autopilot's setting from the desk (the pads and the Sidecar): a change restarts its bar count on the pad that is on NEXT. */
+function setDeskAutopilot(change: Partial<AutopilotConfig>): void {
+  setAutopilot(change);
+  restartAutopilot(setAutopilotState, currentPadId() ?? setAutopilotState.cursor);
+}
+
+/** The Sidecar's PREV (-1) and NEXT (1): the pad before or after LIVE's in the Set, wrapping, or the pad on NEXT when none is live. It lands on the next beat. */
+function stepDeskPad(dir: 1 | -1): void {
+  const pads = listPads();
+  if (pads.length === 0) return;
+  const liveAt = pads.findIndex((p) => p.id === setLivePadId);
+  const base = liveAt >= 0 ? liveAt : pads.findIndex((p) => p.id === currentPadId());
+  const at = base < 0 ? (dir > 0 ? 0 : pads.length - 1) : (base + dir + pads.length) % pads.length;
+  launchQueue = queueLaunch(launchQueue, pads[at]!.id, launchBeat(deskBeats(), "beat"));
+}
+
+/** A pad pressed on the desk: Shift loads NEXT only; otherwise it lands on the next launch line, on NEXT and LIVE together. */
+function deskTapPad(id: string, shift: boolean): void {
+  if (shift) {
+    firePad(id);
+    return;
+  }
+  const on = getLaunchOn();
+  if (on === "now") {
+    firePad(id);
+    outputControls?.go();
+    return;
+  }
+  launchQueue = queueLaunch(launchQueue, id, launchBeat(deskBeats(), on));
 }
 
 function fatalError(message: string): void {
@@ -1765,8 +2116,7 @@ function wireDeviceMenu(): void {
     // Null when the meter has gone stale (the panel was just opened, or sampling
     // gapped past PICTURE_GAP_RESET_MS plus however long the readback holds
     // thumbnails back to batch reads), not a frozen last reading.
-    getPictureReading: () =>
-      performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS + (pictureReadback?.holdMs() ?? 0) ? pictureMeter.latest() : null,
+    getPictureReading: () => freshPictureReading(),
     getAutoGain: () => getAutoGain(),
     onAutoGainChange: (value) => {
       setAutoGainAuto(false);
@@ -2727,11 +3077,17 @@ async function boot(): Promise<void> {
       if (inViz && !bypassGallery) navigate({ kind: "gallery" }, "push");
     }
     // The Set: 1-9 fire pads 1-9, panel open or closed (Shift+digit is the
-    // panel's block jump, deviceMenu.ts). Not on auto-repeat: a held key would
-    // reload the same pad.
-    if (inViz && !typing && !e.shiftKey && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
-      const pad = listPads()[Number(e.code.slice(5)) - 1];
-      if (pad) {
+    // panel's block jump, deviceMenu.ts). With the desk up, the first row's keys
+    // tap the desk's pads instead (Shift loads NEXT only). Not on auto-repeat: a
+    // held key would reload the same pad.
+    if (inViz && !typing && !e.repeat && /^Digit[1-9]$/.test(e.code)) {
+      const index = Number(e.code.slice(5)) - 1;
+      const pad = listPads()[index];
+      if (pad && desk?.active() && index < deskPadsRowMax) {
+        e.preventDefault();
+        noteKeyUse("pad");
+        deskTapPad(pad.id, e.shiftKey);
+      } else if (pad && !e.shiftKey) {
         e.preventDefault();
         noteKeyUse("pad");
         firePad(pad.id);
@@ -3186,6 +3542,24 @@ function tick(): void {
   // Autopilot off last tick's clock, before this tick's frame: a pad it fires
   // switches scene here, so nothing below is computed for the scene it just left.
   if (lastAnim) stepSetAutopilot(lastAnim, nowRafMs);
+  // A launch is a beat count on one clock; the metronome starting or stopping
+  // switches clocks, and a count from the other one would land at random.
+  const launchClockTempo = lastAnim?.metronomeOn ?? false;
+  if (launchClockTempo !== launchQueueTempo) launchQueue = [];
+  launchQueueTempo = launchClockTempo;
+  if (!inViz) launchQueue = [];
+  else if (launchQueue.length > 0) {
+    const { due, rest } = takeDue(launchQueue, deskBeats());
+    launchQueue = rest;
+    if (due) {
+      firePad(due.padId);
+      outputControls?.go();
+    }
+  }
+  if (nowRafMs - padReadingsAtMs >= PAD_READING_MS) {
+    padReadingsAtMs = nowRafMs;
+    updatePadReadings();
+  }
 
   // Resolved once per tick and reused below (extractor, anim clock, meters).
   const smoothing = resolveSmoothing(scene.id);
@@ -3202,6 +3576,7 @@ function tick(): void {
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   outputBridge?.update(nowRafMs);
   roomBridge?.update(nowRafMs);
+  desk?.tick(nowRafMs);
   // Outside the bridge check: a controller has no pop-out yet still previews
   // whenever a scene is showing, unless it is a phone that is a screen of the room.
   const nextActive = isController ? inViz && !fillsScreen() : inViz && !!outputBridge && outputBridge.status().open;
@@ -3217,6 +3592,7 @@ function tick(): void {
     previewActive = nextActive;
     applyRenderQuality(true);
     applyPreviewBox();
+    applyDesk();
   }
   // Before this tick draws, so a take's first frame has the output's size. While
   // a take holds, the two calls also follow an Output Quality or Energy saving
@@ -3382,6 +3758,9 @@ function drawScene(
   // Drawn after the compositor so the overlay sits over crossfade and held
   // effects, staying visible over Freeze and Blackout.
   overlayLayer?.draw();
+  // The desk's LIVE monitor copies #gl here, while the frame is still in the
+  // drawing buffer (liveMonitor.ts).
+  desk?.afterDraw(nowRafMs);
   // Last: the browser's blur sees the overlay too, and nothing after this
   // reads the frame.
   if (glassPaneCount > 0) drawGlass();
@@ -3406,7 +3785,7 @@ function syncGlass(sceneDraws: boolean, scenePlays: boolean): void {
     scenePlays &&
     (deviceMenu?.isOpen() ?? false) &&
     !(clipRecorder?.recording() ?? false);
-  setGlassDrawn(drawn);
+  setGlassDrawn(drawn && !(desk?.active() ?? false));
   glassPaneCount = drawn && sceneDraws ? readGlassPanes(canvas, glassPanes, glassCanvasBox) : 0;
 }
 
@@ -3436,7 +3815,15 @@ function sizeCanvas(): boolean {
  *  blur on a heavy scene, 2026-10-04), or a headless driver forcing it
  *  (picture.force). */
 function pictureWanted(): boolean {
-  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false);
+  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false) || deskWantsPadReading();
+}
+
+/** The desk's Map places a pad by its picture: sample while the pad on NEXT has
+ *  none yet, and only then, since every sample is a GPU readback. */
+function deskWantsPadReading(): boolean {
+  if (!(desk?.active() ?? false)) return false;
+  const id = currentPadId();
+  return id !== null && !padReadings.has(id);
 }
 
 function ensurePictureReadback(): PictureReadback {

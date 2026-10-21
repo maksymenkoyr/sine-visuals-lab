@@ -49,6 +49,10 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   // Which controller knob or pad does what: a controller is plugged into one
   // machine (ui/midiInput.ts).
   "vibe.midiMap",
+  // When a pad launches is this machine's own choice; the output never needs it.
+  "vibe.launchOn",
+  // Desk or classic layout (ui/deskPref.ts): only the main window has a desk.
+  "vibe.deskOn",
   "vibe.recordAspect",
   "vibe.quality",
   "vibe.powerMode",
@@ -178,6 +182,11 @@ export function applySyncedStorage(
   for (const k of Object.keys(values)) {
     if (!scope || scope(k)) storage.setItem(k, values[k]);
   }
+  reloadSyncedStores();
+}
+
+/** Re-seeds every registered store from storage, each on its own (a store that throws keeps what it had). */
+export function reloadSyncedStores(): void {
   for (const reload of hooks) {
     try {
       reload();

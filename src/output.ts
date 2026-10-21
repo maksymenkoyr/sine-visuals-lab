@@ -25,7 +25,17 @@ import { applySensitivity } from "./audio/sensitivity.ts";
 import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
 import { createGlide, createPaletteFade, type Glide, type PaletteFade } from "./net/outputGlide.ts";
-import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
+import {
+  createFrameInbox,
+  THUMB_FPS,
+  THUMB_HEIGHT,
+  THUMB_WIDTH,
+  THUMBS_TIMEOUT_MS,
+  type OutputPower,
+  type OutputState,
+  type ToMain,
+  type ToOutput,
+} from "./net/outputSync.ts";
 import { CAST_BUFFER_HEIGHT, CAST_FPS, CAST_SOFT_BLUR_PX, clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
@@ -155,6 +165,11 @@ const frameMisses = createFrameMisses();
 // A hidden window draws nothing: the gap across it is not frames coming late.
 document.addEventListener("visibilitychange", () => frameMisses.restart());
 let blank = false;
+// Thumbnails for the desk's LIVE monitor (outputSync.ts `thumbs`). One bitmap at a
+// time: a frame that comes while one is still being made is simply not sent.
+let thumbsUntilMs = -Infinity;
+let lastThumbMs = -Infinity;
+let thumbBusy = false;
 /** The look the output is showing right now (a glide's half-way step
  *  included) — what the next glide starts from. */
 let current: OutputState | null = null;
@@ -290,6 +305,8 @@ transport.onMessage((m) => {
   } else if (m.t === "effects") {
     heldEffects = parseEffects(m.effects);
     compositor?.setEffects(heldEffects);
+  } else if (m.t === "thumbs") {
+    thumbsUntilMs = m.on ? performance.now() + THUMBS_TIMEOUT_MS : -Infinity;
   } else if (m.t === "raise") {
     // POP OUT pressed while this window is open (net/outputSync.ts's `raise`).
     window.focus();
@@ -434,6 +451,21 @@ async function main(): Promise<void> {
       nowMs,
     });
     overlay.draw();
+    // The drawing buffer is only readable in the task that drew it, so the
+    // thumbnail is taken here and not later in a separate tick.
+    if (nowMs < thumbsUntilMs && !thumbBusy && nowMs - lastThumbMs >= 1000 / THUMB_FPS) {
+      lastThumbMs = nowMs;
+      thumbBusy = true;
+      createImageBitmap(canvas, { resizeWidth: THUMB_WIDTH, resizeHeight: THUMB_HEIGHT, resizeQuality: "low" })
+        .then((bmp) => {
+          transport.post({ t: "thumb", bmp });
+          bmp.close();
+        })
+        .catch(() => {})
+        .finally(() => {
+          thumbBusy = false;
+        });
+    }
     // Two scenes at once (a crossfade) or none (Freeze) say nothing about what one costs.
     if (outcome.governable) governor?.recordFrame(nowMs);
     frameMisses.frame(nowMs, interval, document.hidden);

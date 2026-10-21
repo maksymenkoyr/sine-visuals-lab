@@ -77,6 +77,22 @@ describe("createCueController", () => {
     expect(sent).toEqual(["a", "b", "a"]);
   });
 
+  it("goState sends one given state as the program, and a released Cue returns to it", () => {
+    const sent: string[] = [];
+    const c = createCueController((s) => void sent.push(s.scene));
+    c.preview(state("a"));
+    c.preview(state("b"));
+    c.goState(state("c"));
+    expect(sent).toEqual(["a", "c"]);
+    expect(c.held()?.scene).toBe("c");
+    expect(c.current()?.scene).toBe("b");
+    c.setCue(true);
+    expect(sent).toEqual(["a", "c", "b"]);
+    c.setCue(false);
+    expect(sent).toEqual(["a", "c", "b", "c"]);
+    expect(c.held()?.scene).toBe("c");
+  });
+
   it("a Cue with nothing apart sends nothing either way", () => {
     const sent: string[] = [];
     const c = createCueController((s) => void sent.push(s.scene));

@@ -85,6 +85,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.audioSource": false,
   "vibe.audioInputDevice": false,
   "vibe.midiMap": false,
+  "vibe.launchOn": false, // when a pad launches (render/launchQueue.ts): this machine's own choice
   "vibe.recordAspect": false,
   "vibe.quality": false,
   "vibe.powerMode": false,
@@ -100,6 +101,7 @@ const CLASSIFIED: Record<string, boolean> = {
   // A library, not the look on screen; and the panel's own chrome.
   "vibe.looks": false,
   "vibe.panelBlur": false,
+  "vibe.deskOn": false,
   "vibe.gateFormula": false, // dev-only Smoothness formula pick (render/gateFormulas.ts)
 };
 
