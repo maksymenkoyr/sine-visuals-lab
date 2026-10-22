@@ -759,7 +759,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
       if (!isShapedChoice(choice)) return null;
       const st = states.get(choice.id);
       if (!st) return null;
-      const span = getHistorySpan("signal");
+      const span = getHistorySpan("sound");
       return heatText(st.heat.read(span, performance.now() / 1000), span);
     },
 
@@ -786,7 +786,7 @@ export function createShapingColumn(deps: ShapingColumnDeps): ShapingColumn {
 
       const heatDue = nowMs - lastHeatMs >= HEAT_REFRESH_MS;
       if (heatDue) lastHeatMs = nowMs;
-      const span = getHistorySpan("signal");
+      const span = getHistorySpan("sound");
       for (const v of views.values()) {
         const folded = v.fold ? v.fold.isFolded() : false;
         if (folded) continue;
