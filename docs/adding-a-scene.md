@@ -67,7 +67,9 @@ this repo. `src/render/scenes/privateScenes.ts` has the contract.
    example).
 3. Make it a scene module: `src/render/scenes/<unit>.ts` or
    `src/render/scenes/<unit>/index.ts`, exporting the scene and
-   `export const gallery = { stage: "draft", added: "<today>" } as const;` —
+   `export const gallery = { stage: "development", added: "<today>" } as const;` —
+   a new scene starts In development, where it shows as a tile, not folded
+   away with the drafts; put it in `"draft"` only when asked.
    `src/render/scenes/sceneModules.ts`'s header owns the contract and the
    ordering (each gallery section lists the newest first).
    `src/render/scenes/index.ts` finds it on its own; nothing shared is
@@ -99,8 +101,8 @@ templates it leaves alone).
 
 Once it renders, keep `npm run dev` running and give whoever is reviewing a
 direct link to the scene rather than the gallery root — the dev server prints
-one per scene at startup, and a scene registered first among the drafts is the
-first draft link in that list. Any query goes before the hash: one placed
+one per scene at startup, and a new scene, the newest in its section, is the
+first `(development)` link in that list. Any query goes before the hash: one placed
 after it lands on the gallery.
 
 ## The invariant you can't get from typecheck
