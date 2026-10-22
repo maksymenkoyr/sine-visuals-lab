@@ -129,11 +129,6 @@ body.desk .vc-root {
 body.desk .vc-cols-wrap { display: contents; }
 body.desk .vc-spectrum-col { position: static; order: 1; max-height: none; }
 body.desk .vc-spectrum-col > .vc-meters { max-height: none; overflow: visible; }
-body.desk .vc-shape-col {
-  position: static !important; order: 2;
-  left: auto !important; top: auto !important; width: 300px !important;
-  max-height: none !important; overflow: visible;
-}
 body.desk .vc-power-col { order: 3; max-height: none; }
 body.desk .vc-controls-col { order: 4; max-height: none; overflow: visible; }
 /* Cables start at the panel's jacks, which now sit below the monitors; none may cross them. */

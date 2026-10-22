@@ -8,15 +8,13 @@ import {
   hasLiveSource,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
-  remapShapedSources,
   sameDriveChoice,
   sameDriveSetting,
   setPatchMix,
+  setSourceMod,
   setSourceMuted,
   setSourceRole,
-  shapeSource,
   smoothstep,
-  sourceKey,
   specMapFor,
   togglePatchSource,
   type DriveChoice,
@@ -26,7 +24,7 @@ import {
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
 import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
 import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
-import { addShapingNode, removeShapingNode } from "../src/render/shapingNodes.ts";
+import { createWireModState, freshWireMod, stepWireMod, type WireMod } from "../src/render/wireMod.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -37,7 +35,7 @@ import { listScenes } from "../src/render/scene.ts";
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
-import { GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
+import { GATE_FORMULA_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
 
 const DT = 1 / 60;
 
@@ -1981,79 +1979,129 @@ describe("Only this (driveSolo)", () => {
 });
 
 
-describe("drives: shaping nodes (shapingNodes.ts)", () => {
-  it("a setting wired to a node reads the node output after accumulate", () => {
-    const node = addShapingNode("anim.low", { windowOn: false })!;
-    const sceneId = "shaped-read";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: node.id }, weight: 1 }] });
+describe("drives: wire modifiers (wireMod.ts)", () => {
+  const mod = (over: Partial<WireMod> = {}): WireMod => ({ ...freshWireMod(), ...over });
+  const levels = [0.1, 0.2, 0.8, 0.9, 0.4, 0.05, 0.7, 0.6, 0.95, 0.3];
+
+  it("a wire with no modifier, or a fresh one, reads exactly the plain catalogue value", () => {
+    const sceneId = "wiremod-plain";
+    const plain = patchSetting(sceneId, "a", { mix: "add", sources: [{ choice: "feature.level", weight: 1 }] });
+    const fresh = patchSetting(sceneId, "b", { mix: "add", sources: [{ choice: "feature.level", weight: 1, mod: freshWireMod() }] });
     const engine = createDriveEngine();
-    const f = frame({ bands: new Float32Array(NUM_BANDS).fill(0.6) });
+    const clock = createAnimClock();
+    for (const level of levels) {
+      const f = frame({ level });
+      const anim = clock.advance(DT, f);
+      engine.accumulate(DT, f, 0.5, anim, sceneId, [plain, fresh]);
+      const drives = engine.forScene(sceneId, [plain, fresh], anim);
+      const expected = SIGNALS["feature.level"].read(f, anim);
+      expect(drives.value("a", -1)).toBe(expected);
+      expect(drives.value("b", -1)).toBe(expected);
+    }
+  });
+
+  it("Window on: the wire reads stepWireMod's output on its plain reading, times its weight", () => {
+    const sceneId = "wiremod-window";
+    const m = mod({ windowOn: true, min: 0.3, max: 0.9, smoothOn: true, smoothness: 0.5 });
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.level", weight: 0.5, mod: m }] });
+    const engine = createDriveEngine();
+    const clock = createAnimClock();
+    const ref = createWireModState();
+    for (let i = 0; i < 3; i++) {
+      for (const level of levels) {
+        const f = frame({ level });
+        const anim = clock.advance(DT, f);
+        engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+        const expected = stepWireMod(ref, m, DT, SIGNALS["feature.level"].read(f, anim), GATE_FORMULA_DEFAULT);
+        expect(engine.forScene(sceneId, [spec], anim).value("k", -1)).toBeCloseTo(0.5 * expected, 12);
+      }
+    }
+  });
+
+  it("Length on: after a rise to 1 the wire falls in a straight line", () => {
+    const sceneId = "wiremod-length";
+    const length = 0.5;
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.level", weight: 1, mod: mod({ length }) }] });
+    const engine = createDriveEngine();
+    const clock = createAnimClock();
+    const up = frame({ level: 1 });
+    engine.accumulate(DT, up, 0.5, clock.advance(DT, up), sceneId, [spec]);
+    for (let k = 1; k <= 20; k++) {
+      const f = frame({ level: 0 });
+      const anim = clock.advance(DT, f);
+      engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
+      expect(engine.forScene(sceneId, [spec], anim).value("k", -1)).toBeCloseTo(Math.max(0, 1 - (k * DT) / length), 9);
+    }
+  });
+
+  it("a modified hit wire fires on the hit's own edge only while its output is up", () => {
+    const sceneId = "wiremod-edge";
+    // Loud height: each hit is as tall as the room. A loud hit teaches the
+    // window its peak, so a later quiet hit lands under Min and reads 0.
+    const plain = patchSetting(sceneId, "plain", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    const shut = patchSetting(sceneId, "shut", {
+      mix: "add",
+      sources: [{ choice: "feature.onset", weight: 1, height: "loud", mod: mod({ windowOn: true, min: 0.9, max: 1, smoothOn: false }) }],
+    });
+    const specs = [plain, shut];
+    const engine = createDriveEngine();
+    const clock = createAnimClock();
+    const step = (f: FeatureFrame, energy: number) => {
+      const anim = clock.advance(DT, f);
+      engine.accumulate(DT, f, energy, anim, sceneId, specs);
+      return engine.forScene(sceneId, specs, anim);
+    };
+    const loud = step(frame({ onset: true }), 1);
+    expect(loud.fired("shut", false)).toBe(true);
+    for (let i = 0; i < 30; i++) step(frame(), 0);
+    const quiet = step(frame({ onset: true }), 0.1);
+    expect(quiet.fired("plain", false)).toBe(true);
+    expect(quiet.value("shut", -1)).toBe(0);
+    expect(quiet.fired("shut", false)).toBe(false);
+  });
+
+  it("wire() is null before the wire accumulated, then carries its input and output", () => {
+    const sceneId = "wiremod-reading";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.level", weight: 1 }] });
+    const engine = createDriveEngine();
+    expect(engine.wire(sceneId, "k", "feature.level")).toBeNull();
+    const f = frame({ level: 0.4 });
     const anim = createAnimClock().advance(DT, f);
     engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
-    const out = engine.shaped(node.id)!.output;
-    expect(out).toBeGreaterThan(0);
-    expect(engine.forScene(sceneId, [spec], anim).value("k", -999)).toBeCloseTo(out, 9);
-    removeShapingNode(node.id);
+    const r = engine.wire(sceneId, "k", "feature.level")!;
+    expect(r.input).toBe(SIGNALS["feature.level"].read(f, anim));
+    expect(r.output).toBeCloseTo(Math.min(1, r.input), 12);
   });
 
-  it("a dangling id reads 0 and does not throw in value, fired or sourceValues", () => {
-    const sceneId = "shaped-dangling";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "shaped", id: "n999999" }, weight: 1 }] });
-    const engine = createDriveEngine();
-    const f = frame();
-    const anim = createAnimClock().advance(DT, f);
-    engine.accumulate(DT, f, 0.5, anim, sceneId, [spec]);
-    const drives = engine.forScene(sceneId, [spec], anim);
-    expect(drives.value("k", -999)).toBe(0);
-    expect(typeof drives.fired("k", false)).toBe("boolean");
-    expect(drives.sourceValues("k")).not.toBeNull();
-    expect(engine.shaped("n999999")).toBeNull();
+  it("normalizeDriveSetting drops a fresh modifier, one on a non-catalogue wire, and clamps the rest", () => {
+    const out = normalizeDriveSetting({
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 1, mod: freshWireMod() },
+        { choice: { source: "line" }, weight: 1, mod: mod({ windowOn: true }) },
+        { choice: "anim.high", weight: 1, mod: mod({ min: 0.8, max: 0.2, length: 9 }) },
+      ],
+    }) as DrivePatch;
+    expect(out.sources[0]!.mod).toBeUndefined();
+    expect(out.sources[1]!.mod).toBeUndefined();
+    expect(out.sources[2]!.mod).toEqual(mod({ min: 0.8, max: 0.8, length: 1.5 }));
   });
 
-  it("sourceKey and sameDriveChoice tell shaped ids apart", () => {
-    expect(sourceKey({ source: "shaped", id: "n3" })).toBe("shaped:n3");
-    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n1" })).toBe(true);
-    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "shaped", id: "n2" })).toBe(false);
-    expect(sameDriveChoice({ source: "shaped", id: "n1" }, { source: "line" })).toBe(false);
+  it("sameDriveSetting compares modifiers, absent equal to fresh", () => {
+    const a: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 1 }] };
+    const b: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 1, mod: freshWireMod() }] };
+    const c: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 1, mod: mod({ windowOn: true }) }] };
+    expect(sameDriveSetting(a, b)).toBe(true);
+    expect(sameDriveSetting(a, c)).toBe(false);
   });
 
-  it("normalizeDriveSetting dedupes one shaped id, and keeps two different ones", () => {
-    const same = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n1" }, weight: 0.5 }] });
-    expect(same).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
-    const two = normalizeDriveSetting({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }] });
-    expect((two as DrivePatch).sources.length).toBe(2);
-  });
-
-  it("remapShapedSources rewrites mapped ids only", () => {
-    const setting: DrivePatch = { mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] };
-    const out = remapShapedSources(setting, new Map([["n1", "n7"]]));
-    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n7" }, weight: 1 }, { choice: { source: "shaped", id: "n2" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
-    expect(remapShapedSources("scene", new Map([["n1", "n7"]]))).toBe("scene");
-  });
-});
-
-describe("drives: shapeSource (a wire's Shape button)", () => {
-  it("re-points the matching source and keeps its weight, when and off", () => {
-    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] };
-    const out = shapeSource(setting, "anim.low", "n3");
-    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n3" }, weight: 0.7, when: true, off: true }, { choice: "anim.high", weight: 0.4 }] });
-  });
-
-  it("drops height and every from the re-pointed source", () => {
-    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, height: "fixed", every: 4 }] };
-    const out = shapeSource(setting, "anim.beatWave", "n1");
-    expect(out).toEqual({ mix: "add", sources: [{ choice: { source: "shaped", id: "n1" }, weight: 1 }] });
-  });
-
-  it("leaves other sources untouched and in order", () => {
-    const setting: DrivePatch = { mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: "anim.high", weight: 0.5, height: "fixed" }, { choice: { source: "line" }, weight: 1 }] };
-    const out = shapeSource(setting, "anim.high", "n2");
-    expect(out).toEqual({ mix: "max", sources: [{ choice: "anim.low", weight: 1, height: "loud" }, { choice: { source: "shaped", id: "n2" }, weight: 0.5 }, { choice: { source: "line" }, weight: 1 }] });
-  });
-
-  it("returns a scene setting, or a patch with no such source, unchanged", () => {
-    expect(shapeSource("scene", "anim.low", "n1")).toBe("scene");
-    const setting: DrivePatch = { mix: "add", sources: [{ choice: "anim.high", weight: 1 }] };
-    expect(shapeSource(setting, "anim.low", "n1")).toEqual(setting);
+  it("setSourceMod sets and clears one catalogue wire's modifier and leaves the rest", () => {
+    const setting: DrivePatch = { mix: "max", sources: [{ choice: "anim.low", weight: 0.7, when: true }, { choice: "anim.high", weight: 0.4 }] };
+    const on = setSourceMod(setting, "anim.low", mod({ windowOn: true })) as DrivePatch;
+    expect(on.sources[0]).toEqual({ choice: "anim.low", weight: 0.7, when: true, mod: mod({ windowOn: true }) });
+    expect(on.sources[1]).toEqual(setting.sources[1]);
+    expect(setSourceMod(on, "anim.low", null)).toEqual(setting);
+    expect(setSourceMod("scene", "anim.low", mod())).toBe("scene");
+    expect(setSourceMod(setting, { source: "line" }, mod({ windowOn: true }))).toBe(setting);
   });
 });

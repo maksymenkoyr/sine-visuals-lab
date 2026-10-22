@@ -1,7 +1,6 @@
 import type { StemLevels, StemRanges, StemSplitter } from "../audio/stemSplit.ts";
 import { getDriveSetting } from "./driveStore.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
-import { listShapingNodes } from "./shapingNodes.ts";
 import type { SignalId } from "./signals.ts";
 
 /**
@@ -15,9 +14,6 @@ import type { SignalId } from "./signals.ts";
  *    muted (`wiresReadStems` below). A setting left on its built-in reaction
  *    counts when its `drive.sceneSources` names one, so a scene whose own code
  *    reads AnimFrame.hats or .lead must list them there.
- *  - a shaping node (shapingNodes.ts) takes one as its input. Nodes are
- *    device-wide and step every tick, wired or not, so any such node counts,
- *    and a setting wired through one is covered by it.
  *  - a crossfade is running: the outgoing scene still reads its own wires
  *    (compositor.ts's `drivesFor`) until the blend ends.
  *  - the panel's Stems row (deviceMenu.ts's Bands card) is on screen.
@@ -49,10 +45,8 @@ export function isStemSignal(id: SignalId): boolean {
 }
 
 /** Whether a wire reads Hats or Lead: an unmuted source on a setting of this
- *  scene, a built-in reaction's `sceneSources`, or any shaping node's input
- *  (see the header). */
+ *  scene, or a built-in reaction's `sceneSources` (see the header). */
 export function wiresReadStems(sceneId: string, settings: readonly SceneSetting[]): boolean {
-  for (const node of listShapingNodes()) if (STEM_SIGNALS.has(node.src)) return true;
   for (const spec of settings) {
     if (!spec.drive) continue;
     const setting = getDriveSetting(sceneId, spec);

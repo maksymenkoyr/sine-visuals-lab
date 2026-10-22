@@ -8,13 +8,13 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { advanceGateTracker, createGateTracker, stepHeightEnv, windowReading, type GateTrackerState } from "./gateWindow.ts";
 import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
-import { getGateFormula, getNodeGateFormula } from "./gateFormulas.ts";
+import { getGateFormula, getWireGateFormula } from "./gateFormulas.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
 import { publishSettingMarks } from "./settingMarks.ts";
 import { getDriveSolo } from "./driveSolo.ts";
 import { isDriveMuted } from "./driveMute.ts";
-import { createShapingBank, getShapingNode, type ShapingState } from "./shapingNodes.ts";
+import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMod, wireModIsIdle, type WireMod, type WireModState } from "./wireMod.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -144,18 +144,18 @@ import { createShapingBank, getShapingNode, type ShapingState } from "./shapingN
  *   src/render/bandEnergy.ts's own GROUP_TUNING for a band onset — reused
  *   directly (never re-typed by hand) so a Fixed pulse decays exactly as
  *   fast as the Graded pulse it replaces, just with a different height. The
- *   envelope itself is stepHeightEnv in gateWindow.ts, shared with shaping
- *   nodes.
+ *   envelope itself is stepHeightEnv in gateWindow.ts.
  *
- * **Shaping nodes.** A `{source:"shaped", id}` source reads a shaping node's
- * output (src/render/shapingNodes.ts). It is a level-kind reading, like a
- * level catalogue entry: no height. For `fired()`, a node on a hit input
- * passes that input's own edge whenever the node's output is above 0 (so a
- * scene's default hit wire fires on the same hits through a modifier,
- * src/render/wireModifiers.ts); a node on a level input takes a Schmitt
- * trigger, like a level entry. The
- * bank of node states advances once per tick at the top of `accumulate()`,
- * so every setting reads the same value that tick. An id with no node reads 0.
+ * **Wire modifiers.** A catalogue source can carry a modifier
+ * (`DriveSource.mod`, src/render/wireMod.ts): Window, Smoothness and Length
+ * on that one wire, after its Height. `accumulate()` steps every catalogue
+ * wire's modifier state each tick, with or without a modifier, so the
+ * panel can draw any wire's input before its Window is switched on; the
+ * wire reads the modifier's output only while its Window or Length is on.
+ * For `fired()`, a modified hit wire passes the hit's own edge whenever the
+ * modifier's output is above 0, so its window decides which hits get
+ * through; a modified level wire takes a Schmitt trigger, like any level
+ * entry.
  *
  * **Inspection, for the panel.** `sourceValues(key)` returns each source's
  * own `weight·value` this tick, in patch order — un-gained, so the panel can
@@ -358,7 +358,7 @@ import { createShapingBank, getShapingNode, type ShapingState } from "./shapingN
  */
 
 /** One source inside a patch; never `"scene"`. */
-export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex } | { source: "line" } | { source: "shaped"; id: string };
+export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex } | { source: "line" };
 
 /** What a drive setting can be on: `"scene"` (the scene's own coupling) or a
  *  patch. */
@@ -390,6 +390,9 @@ export interface DriveSource {
    *  elsewhere. Absent or 1 is the plain reading; `sourceRawImpl` branches only
    *  above 1. */
   every?: DriveEvery;
+  /** Catalogue sources only: this wire's own Window, Smoothness and Length
+   *  (wireMod.ts). Absent reads as `freshWireMod()`, the plain wire. */
+  mod?: WireMod;
 }
 
 /** How a patch's sources combine; formulas in the header. */
@@ -622,15 +625,10 @@ function isLineChoice(choice: DriveSourceChoice): choice is { source: "line" } {
   return typeof choice === "object" && choice.source === "line";
 }
 
-export function isShapedChoice(choice: DriveSourceChoice): choice is { source: "shaped"; id: string } {
-  return typeof choice === "object" && choice.source === "shaped";
-}
-
-/** Plain id, `grid:<i>`, `shaped:<id>` or `line`: unique within a patch, and
- *  keys per-source engine state. */
+/** Plain id, `grid:<i>` or `line`: unique within a patch, and keys per-source
+ *  engine state. */
 export function sourceKey(choice: DriveSourceChoice): string {
   if (typeof choice === "string") return choice;
-  if (choice.source === "shaped") return `shaped:${choice.id}`;
   return choice.source === "beat" ? `grid:${choice.grid}` : "line";
 }
 
@@ -646,7 +644,6 @@ export function sameDriveChoice(a: DriveChoice, b: DriveChoice): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object") return false;
   if (a.source !== b.source) return false;
-  if (a.source === "shaped" && b.source === "shaped") return a.id === b.id;
   return a.source === "beat" && b.source === "beat" ? a.grid === b.grid : true;
 }
 
@@ -663,6 +660,7 @@ export function sameDriveSetting(a: DriveSetting, b: DriveSetting): boolean {
     if (!!sa.when !== !!sb.when) return false;
     if (!!sa.off !== !!sb.off) return false;
     if ((sa.every ?? 1) !== (sb.every ?? 1)) return false;
+    if (!sameWireMod(sa.mod, sb.mod)) return false;
   }
   return true;
 }
@@ -714,6 +712,11 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     if (src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1 && (DRIVE_EVERY_VALUES as readonly number[]).includes(src.every)) {
       source.every = src.every;
     }
+    // Only a catalogue wire, and only one that differs from the plain wire.
+    if (src.mod !== undefined && typeof src.choice === "string") {
+      const mod = clampWireMod(src.mod);
+      if (!sameWireMod(mod, undefined)) source.mod = mod;
+    }
     sources.push(source);
   }
   if (sources.length === 0) return { mix: setting.mix, sources: [] };
@@ -729,18 +732,6 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
   }
 
   return { mix: setting.mix, sources };
-}
-
-/** Re-points shaped sources whose id is a key of `map`: a Look's node ids are
- *  per device (shapingNodes.ts's adoptShapingNodes). */
-export function remapShapedSources(setting: DriveSetting, map: ReadonlyMap<string, string>): DriveSetting {
-  if (setting === "scene") return "scene";
-  const sources = setting.sources.map((src) => {
-    if (!isShapedChoice(src.choice)) return src;
-    const next = map.get(src.choice.id);
-    return next === undefined ? src : { ...src, choice: { source: "shaped" as const, id: next } };
-  });
-  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
 // ---- Pure patch-editing helpers ----
@@ -775,17 +766,17 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
-/** Re-points the source whose choice is `from` at shaping node `nodeId`. Keeps
- *  weight, role and mute; drops Height and Every, since the node now owns how
- *  it reads. */
-export function shapeSource(setting: DriveSetting, from: DriveSourceChoice, nodeId: string): DriveSetting {
-  if (setting === "scene") return setting;
-  const key = sourceKey(from);
-  const sources = setting.sources.map((s): DriveSource =>
-    sourceKey(s.choice) === key
-      ? { choice: { source: "shaped", id: nodeId }, weight: s.weight, ...(s.when ? { when: true as const } : {}), ...(s.off ? { off: true as const } : {}) }
-      : s,
-  );
+/** Sets the modifier on the catalogue wire `choice` (`null`: back to the
+ *  plain wire). No-op on any other wire. */
+export function setSourceMod(setting: DriveSetting, choice: DriveSourceChoice, mod: WireMod | null): DriveSetting {
+  if (setting === "scene" || typeof choice !== "string") return setting;
+  const sources = setting.sources.map((s): DriveSource => {
+    if (s.choice !== choice) return s;
+    const next: DriveSource = { ...s };
+    if (mod) next.mod = mod;
+    else delete next.mod;
+    return next;
+  });
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
@@ -859,6 +850,8 @@ interface SourceState {
   /** Schmitt state for a level-kind or line source's `fired()` edge
    *  (valueTrigger.ts). */
   valueTrigger: ValueTrigger;
+  /** A catalogue wire's modifier (wireMod.ts), stepped every tick; null for any other source. */
+  mod: WireModState | null;
 }
 
 function createSourceState(): SourceState {
@@ -870,6 +863,7 @@ function createSourceState(): SourceState {
     lineExcess: new Float32Array(NUM_BANDS),
     heightEnv: 0,
     valueTrigger: createValueTrigger(),
+    mod: null,
   };
 }
 
@@ -967,8 +961,8 @@ export interface DriveEngine {
   /** A read-only view for `anim`; render and panel hand in different AnimFrames
    *  (header, "Reading"). */
   forScene(sceneId: string, settings: readonly SceneSetting[], anim: AnimFrame): SceneDrives;
-  /** A shaping node's live input/output this tick (shapingNodes.ts), for the panel; null for an unknown id. */
-  shaped(id: string): Readonly<ShapingState> | null;
+  /** A catalogue wire's modifier state this tick (wireMod.ts: its input, output and window lines), for the panel; null before the wire was accumulated. */
+  wire(sceneId: string, key: string, choice: SignalId): Readonly<WireModState> | null;
 }
 
 export function createDriveEngine(): DriveEngine {
@@ -981,7 +975,7 @@ export function createDriveEngine(): DriveEngine {
   // `normal`/`usual`.
   const expansionTrackers = new Map<string, ExpansionTracker>();
   const hitDetectors = new Map<string, HitDetector>();
-  const shaping = createShapingBank(getNodeGateFormula);
+  const freshMod = freshWireMod();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -1010,9 +1004,20 @@ export function createDriveEngine(): DriveEngine {
     return tr;
   }
 
+  // Whether a wire reads its modifier's output rather than its plain reading.
+  function modOn(src: DriveSource): boolean {
+    return typeof src.choice === "string" && !wireModIsIdle(src.mod);
+  }
+
   // Raw (un-weighted, un-gained) reading for one source. Shared by accumulate()
   // and forScene(), each for its own AnimFrame.
   function sourceRawImpl(sceneId: string, key: string, src: DriveSource, anim: AnimFrame): number {
+    if (modOn(src)) return stateFor(sceneId, key, sourceKey(src.choice)).mod?.output ?? 0;
+    return plainRawImpl(sceneId, key, src, anim);
+  }
+
+  // A source's reading before its modifier.
+  function plainRawImpl(sceneId: string, key: string, src: DriveSource, anim: AnimFrame): number {
     const choice = src.choice;
     const wantsHeight = src.height === "fixed" || src.height === "loud";
     if (isGridChoice(choice)) {
@@ -1020,7 +1025,6 @@ export function createDriveEngine(): DriveEngine {
       return wantsHeight ? st.heightEnv : st.gridPulse;
     }
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
-    if (isShapedChoice(choice)) return shaping.output(choice.id);
     // Beat wave every-N-beats. every=1 falls through to the catalogue read
     // below, kept bit-identical rather than routed through this formula
     // (metronomePhase is the fractional part of metronomeBeats, animClock.ts).
@@ -1057,8 +1061,6 @@ export function createDriveEngine(): DriveEngine {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
       driveFrameScratch.level = gainedFrame.level;
-      // Every node steps every tick, used by a setting or not: the panel's node monitors read it too.
-      shaping.advance(dtSec, driveFrameScratch, anim);
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();
       for (const spec of settings) {
@@ -1089,13 +1091,16 @@ export function createDriveEngine(): DriveEngine {
             st.linePulse *= Math.exp(-dtSec * LINE_DRIVE_RELEASE_PER_SEC);
             if (result.drive > st.linePulse) st.linePulse = result.drive;
             st.lineExcess.set(result.excess);
-          } else if (isShapedChoice(choice)) {
-            // level-kind: the bank already advanced it above; height ignored
-          } else if (SIGNALS[choice].kind === "edge" && wantsHeight) {
-            st.heightEnv = stepHeightEnv(st.heightEnv, choice, src.height as "fixed" | "loud", dtSec, anim, driveEnergy);
+          } else {
+            if (SIGNALS[choice].kind === "edge" && wantsHeight) {
+              st.heightEnv = stepHeightEnv(st.heightEnv, choice, src.height as "fixed" | "loud", dtSec, anim, driveEnergy);
+            }
+            // Every catalogue wire's modifier steps, switched on or not: the
+            // panel draws a wire's input before its Window is on.
+            st.mod ??= createWireModState();
+            const formula = getWireGateFormula(sceneId, spec.key, choice);
+            stepWireMod(st.mod, src.mod ?? freshMod, dtSec, plainRawImpl(sceneId, spec.key, src, anim), formula);
           }
-          // Graded catalogue sources have no per-tick state; forScene() reads
-          // them off anim/driveFrameScratch.
         }
 
         if (!hasLiveSource(setting)) continue;
@@ -1198,12 +1203,11 @@ export function createDriveEngine(): DriveEngine {
           st.gridFiredPending = false;
           return fired;
         }
-        if (!isLineChoice(choice) && !isShapedChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
-        // A modifier on a hit input passes the hit's own edge, while its
-        // output is up: its window decides which hits get through.
-        if (isShapedChoice(choice)) {
-          const node = getShapingNode(choice.id);
-          if (node && SIGNALS[node.src].kind === "edge") return SIGNALS[node.src].edge!(anim) && shaping.output(choice.id) > 0;
+        if (!isLineChoice(choice) && SIGNALS[choice].kind === "edge") {
+          // A modified hit wire passes the hit's own edge while its output is
+          // up: its window decides which hits get through.
+          const edge = SIGNALS[choice].edge!(anim);
+          return modOn(src) ? edge && sourceRaw(key, src) > 0 : edge;
         }
         const st = stateFor(sceneId, key, sourceKey(choice));
         const raw = clampWeight(src.weight) * sourceRaw(key, src);
@@ -1417,8 +1421,8 @@ export function createDriveEngine(): DriveEngine {
       };
     },
 
-    shaped(id) {
-      return shaping.reading(id);
+    wire(sceneId, key, choice) {
+      return states.get(`${settingScope(sceneId, key)}:${key}:${sourceKey(choice)}`)?.mod ?? null;
     },
   };
 }

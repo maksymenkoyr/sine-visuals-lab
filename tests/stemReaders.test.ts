@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { StemRanges, StemSplitter } from "../src/audio/stemSplit.ts";
 import { driveSettingFromChoice, type DriveSetting } from "../src/render/drives.ts";
 import { setDriveSetting, setSourceMuted } from "../src/render/driveStore.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
-import { addShapingNode, listShapingNodes, removeShapingNode } from "../src/render/shapingNodes.ts";
 import type { SignalId } from "../src/render/signals.ts";
 import { createStemGate, wiresReadStems } from "../src/render/stemReaders.ts";
 
@@ -31,10 +30,6 @@ function builtIn(sceneSources: readonly SignalId[]): SceneSetting {
   };
 }
 
-afterEach(() => {
-  for (const n of [...listShapingNodes()]) removeShapingNode(n.id);
-});
-
 describe("wiresReadStems", () => {
   it("is false for a scene wired to other signals", () => {
     expect(wiresReadStems("stems-none", [GLOW])).toBe(false);
@@ -57,14 +52,6 @@ describe("wiresReadStems", () => {
   it("counts a built-in reaction that lists Lead in its sceneSources", () => {
     expect(wiresReadStems("stems-builtin", [builtIn(["anim.lead"])])).toBe(true);
     expect(wiresReadStems("stems-builtin-mid", [builtIn(["anim.mid"])])).toBe(false);
-  });
-
-  it("counts any shaping node fed by Hats, wired or not", () => {
-    const node = addShapingNode("anim.hats");
-    expect(node).not.toBeNull();
-    expect(wiresReadStems("stems-node", [GLOW])).toBe(true);
-    removeShapingNode(node!.id);
-    expect(wiresReadStems("stems-node", [GLOW])).toBe(false);
   });
 });
 

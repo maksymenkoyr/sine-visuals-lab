@@ -26,8 +26,8 @@ import {
   getDriveLineStrength,
   setDriveLineStrength,
   resetDriveLineStrength,
-  removeShapedSource,
 } from "../src/render/driveStore.ts";
+import { freshWireMod, type LegacyNode } from "../src/render/wireMod.ts";
 import { normalizeDriveSetting } from "../src/render/drives.ts";
 import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
@@ -607,47 +607,55 @@ describe("driveStore with a stubbed localStorage", () => {
     const line = fresh.getDriveLine("garbage-scene-2", FLASH);
     for (let b = 0; b < NUM_BANDS; b++) expect(line[b]).toBe(LINE_HEIGHT_DEFAULT);
   });
-});
 
-describe("shaped sources in the drive store", () => {
-  const SHAPED_SPEC: SceneSetting = { key: "shp", label: "Shp", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } };
+  it("at load, stored wires naming retired nodes are rewritten onto their inputs", async () => {
+    const SPEC: SceneSetting = { key: "glow", label: "Glow", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } };
+    const fake = makeFakeLocalStorage();
+    fake.setItem(
+      "vibe.shapingNodes",
+      JSON.stringify({ next: 4, nodes: [{ id: "n3", src: "anim.low", windowOn: false, min: 0.25, max: 1, smoothOn: true, smoothness: 0.02, height: "graded", length: 0 }] }),
+    );
+    fake.setItem("vibe.drives", JSON.stringify({ "mig-scene": { glow: { patch: { source: "shaped", id: "n3" } } } }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/render/driveStore.ts");
+    // A neutral modifier is the plain wire.
+    expect(fresh.getDriveSetting("mig-scene", SPEC)).toEqual(driveSettingFromChoice("anim.low"));
+    expect(fake.getItem("vibe.drives")).not.toContain("shaped");
+  });});
 
-  it("sanitizeDriveSetting accepts a shaped wire, bare and inside a patch", () => {
-    expect(sanitizeDriveSetting({ source: "shaped", id: "n3" })).toEqual(driveSettingFromChoice({ source: "shaped", id: "n3" }));
-    expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id: "n3" } }] })).toEqual({
-      mix: "add",
-      sources: [{ choice: { source: "shaped", id: "n3" }, weight: 1 }],
-    });
+describe("wire modifiers in the drive store", () => {
+  const MOD = { ...freshWireMod(), windowOn: true, min: 0.3, max: 0.8, length: 0.4 };
+  const NODE: LegacyNode = { src: "anim.low", height: "fixed", mod: MOD };
+
+  it("encode then sanitize round-trips a modifier, and a one-wire patch with one is not written as a bare choice", () => {
+    const one = normalizeDriveSetting({ mix: "add", sources: [{ choice: "anim.low", weight: 1, mod: MOD }] });
+    const stored = encodeDriveSetting(one);
+    expect(typeof stored).toBe("object");
+    expect(sanitizeDriveSetting(stored)).toEqual(one);
+    const two = normalizeDriveSetting({ mix: "gate", sources: [{ choice: "anim.low", weight: 0.5, when: true, mod: MOD }, { choice: "anim.high", weight: 1, off: true }] });
+    expect(sanitizeDriveSetting(encodeDriveSetting(two))).toEqual(two);
   });
 
-  it("sanitizeDriveSetting rejects a malformed shaped id", () => {
-    for (const id of ["x", "n0", "__proto__", 3]) {
-      expect(sanitizeDriveSetting({ source: "shaped", id }), String(id)).toBeNull();
-      expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id } }] }), String(id)).toBeNull();
+  it("sanitizeDriveSetting rejects a malformed modifier", () => {
+    for (const x of [[1, 0.3], "x", [2, 0, 1, 1, 0, 0], [1, 0, 1, 1, 0, Number.NaN]]) {
+      expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.low", x }] }), JSON.stringify(x)).toBeNull();
     }
   });
 
-  it("encode then sanitize round-trips a multi-source patch with a shaped wire", () => {
-    const setting = normalizeDriveSetting({
-      mix: "gate",
-      sources: [
-        { choice: { source: "shaped", id: "n12" }, weight: 0.5, when: true },
-        { choice: "anim.low", weight: 1, off: true },
-      ],
-    });
-    expect(sanitizeDriveSetting(encodeDriveSetting(setting))).toEqual(setting);
+  it("a retired modifier wire becomes the plain wire on its node's input, with the node's Height and modifier", () => {
+    const nodes = new Map([["n3", NODE]]);
+    const expected = { mix: "add", sources: [{ choice: "anim.low", weight: 1, height: "fixed", mod: MOD }] };
+    expect(sanitizeDriveSetting({ source: "shaped", id: "n3" }, nodes)).toEqual(expected);
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id: "n3" } }] }, nodes)).toEqual(expected);
   });
 
-  it("removeShapedSource unplugs that wire in every scene and leaves other wires alone", () => {
-    const a = "shaped-remove-a";
-    const b = "shaped-remove-b";
-    const c = "shaped-remove-c";
-    setDriveSetting(a, SHAPED_SPEC, { mix: "add", sources: [{ choice: { source: "shaped", id: "n5" }, weight: 1 }, { choice: "anim.low", weight: 1 }] });
-    setDriveSetting(b, SHAPED_SPEC, { mix: "add", sources: [{ choice: "anim.high", weight: 1 }, { choice: { source: "shaped", id: "n5" }, weight: 1 }] });
-    setDriveSetting(c, SHAPED_SPEC, { mix: "add", sources: [{ choice: { source: "shaped", id: "n6" }, weight: 1 }] });
-    removeShapedSource("n5");
-    expect(getDriveSetting(a, SHAPED_SPEC)).toEqual(driveSettingFromChoice("anim.low"));
-    expect(getDriveSetting(b, SHAPED_SPEC)).toEqual(driveSettingFromChoice("anim.high"));
-    expect(getDriveSetting(c, SHAPED_SPEC)).toEqual(driveSettingFromChoice({ source: "shaped", id: "n6" }));
+  it("a retired wire naming a node that is gone is dropped, as it read 0", () => {
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id: "n9" } }, { c: "anim.high", w: 0.5 }] }, new Map())).toEqual({
+      mix: "add",
+      sources: [{ choice: "anim.high", weight: 0.5 }],
+    });
   });
+
+
 });

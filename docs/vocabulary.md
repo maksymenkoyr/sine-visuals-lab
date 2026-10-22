@@ -5,12 +5,12 @@ user-facing string about this — labels, hints, tooltips, aria text, summaries 
 uses these words and only these. The code keeps its own older names (the
 right-hand column), so this note is the translation table between the two.
 
-The model in one line: **an input node's jack → (a modifier →) a wire → an animation node's port.** A wire's **+ Modifier** button puts a modifier on that wire.
+The model in one line: **an input node's jack → a wire (with its modifier) → an animation node's port.**
 
-The panel reads in three columns: **input nodes** on the left (the meters hold
-them), **animation nodes** on the right (a scene's reactive settings), and in
-the middle the **modifiers**, the stage that reshapes an input node's value
-on its way to an animation node.
+The panel reads in two columns: **input nodes** on the left (the meters hold
+them) and **animation nodes** on the right (a scene's reactive settings). The
+wires run between them, and each wire carries its own **modifier**, the stage
+that reshapes an input node's value on its way to that one setting.
 
 ## Nouns
 
@@ -22,7 +22,7 @@ on its way to an animation node.
 | **port** | The ring at the left of an animation node's row. Wires end here; clicking it pins the setting. | input port, jack | the row's `port` button (`buildDriveRow`) |
 | **wire** | One connection from an input node's jack to a setting's port. In the wire panel each wire is one line, named after its input node. | cable, source, patch, link | one `DriveSource` in a `DrivePatch`'s `sources`; drawn by `src/ui/cableLayer.ts` |
 | **wire panel** | Opens under a pinned setting. Lists its wires, how they mix, and its graph. Headed **Wires**. | patch panel, Receives | `buildPatchPanel` |
-| **modifier** | A card in the middle column that takes one input node and sends a changed copy out of its own jack (Window, Smoothness, Length, and Height for a hit). It knows nothing about the scene: any setting wires to it like an input node. Its label is its input node's plus "modifier". Named after the word other tools use (Notch's modifiers, Bitwig's modulators); the code still calls it a shaping node. | shaping node, filter, effect, processor, sound-transforming node | `ShapingNode` (`src/render/shapingNodes.ts`), the `{ source: "shaped" }` choice, `src/ui/shapingColumn.ts` |
+| **modifier** | A wire's own Window, Smoothness and Length, shown under the wire's line in the wire panel, after its Height. It belongs to that one wire: two settings on the same input node each have their own, and unplugging the wire drops it. A wire's modifier starts off and reads exactly what the plain wire reads. Named after the word other tools use (Notch's modifiers, Bitwig's modulators). | shaping node, filter, effect, processor, sound-transforming node | `DriveSource.mod`, `WireMod` (`src/render/wireMod.ts`), `src/ui/wireModControls.ts` |
 | **heat** | How hot an animation node, a wire or an input node runs: how much of its range it swung over the meter span, hotter on loud music and colder on quiet music. Shown as a thin strip under a setting's graph and under an input node's monitor, in the Heat history card, as a dot after a wire's name, and as a glow under the **heat lens** (L, or the HEAT chip); colder = barely moves, hotter = big moves on loud music. | activity, temperature | `src/ui/heat.ts` |
 | **built-in** | What a scene does with a setting before anything is wired: its own reaction, written by the scene. Summaries read "Built-in: …". | scene mix, scene default (for the reaction itself) | the `"scene"` `DriveSetting`; text from `drive.sceneLabel` |
 | **mix** | How a setting's wires combine — one of `MIX_OPTIONS` (`src/ui/deviceMenu.ts`). Reserved for this; never reuse it for the built-in reaction. | combine, blend mode | `DriveMix` |
@@ -36,7 +36,7 @@ on its way to an animation node.
 
 | Say | For |
 |---|---|
-| **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). A modifier can be pinned too (click its monitor row or input port): its chain stays lit, and a click on an input jack makes it read that input. |
+| **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). |
 | **lock** / **let go** | Chladni's Mode ladder: holding the plate on one figure whatever the music does. Not **pin**, which opens a wire panel. |
 | **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, or drag it onto a setting's row, a "+ Add by name" chip, or Unplug. |
 | **switch off** / **switch on** | Muting a wire without unplugging it; its weight, height and role are kept. |
@@ -47,7 +47,7 @@ on its way to an animation node.
 ## Why these words
 
 - **Nodes, not signals and settings.** The panel is a patch bay: something
-  goes in on the left, gets shaped in the middle, and moves a picture on the
+  goes in on the left, gets shaped on its wire, and moves a picture on the
   right. Calling the two ends by the same kind of word (input node, animation
   node) makes that read at a glance. "Signal" is still the right word for the
   audio itself (a "cleaner signal" from a line input), so it stays out of the

@@ -41,7 +41,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.sceneExpansion": true,
   "vibe.sceneExpansionShape": true,
   "vibe.drives": true,
-  "vibe.shapingNodes": true, // shaping nodes (render/shapingNodes.ts) — part of the look a TV draws
+  "vibe.shapingNodes": true, // retired; each window reads it once at load to convert old wires (render/wireMod.ts)
   "vibe.sensitivity": true,
   "vibe.expansion": true,
   "vibe.smoothing": true,

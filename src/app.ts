@@ -100,6 +100,7 @@ import {
   setSourceEvery,
   setSourceGrid,
   setSourceHeight,
+  setSourceMod,
   setSourceMuted,
   setSourceRole,
   setSourceWeight,
@@ -176,7 +177,6 @@ import {
   takeUndo,
   type SceneLook,
 } from "./render/sceneLooks.ts";
-import { wireFromInput, wiresThroughModifiers } from "./render/wireModifiers.ts";
 import {
   AUTOPILOT_EVERY_BARS,
   SET_MAX_PADS,
@@ -1109,14 +1109,6 @@ function updateSceneVersionLabel(next: Scene): void {
   bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
 }
 
-/** Plain input wires go through shared modifiers (render/wireModifiers.ts),
- *  in the window the user edits in. A `?room=` renderer only draws: its look
- *  comes from the room, and the pop-out and a TV are other pages that get the
- *  result through the synced stores. */
-function wiresThroughModifiersHere(sceneId: string, specs: readonly SceneSetting[]): void {
-  if (!bypassGallery) wiresThroughModifiers(sceneId, specs);
-}
-
 /** Mounts `next`; if its init() throws (a shader this GPU won't compile, a
  *  missing float target), says so and goes back to the gallery, or to `prev`
  *  when there is none. Returns whether `next` runs; on false `scene` has been
@@ -1135,7 +1127,6 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   try {
     host.mount(next);
     if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
-    wiresThroughModifiersHere(next.id, next.settings ?? []);
     return true;
   } catch (err) {
     console.error(`"${next.name}" failed to start:`, err);
@@ -1184,7 +1175,6 @@ function applyCarriedPalette(id: string | undefined): void {
 function applyLookAndPalette(look: SceneLook): void {
   const specs = getScene(look.sceneId)?.settings ?? [];
   applyLook(look, specs);
-  wiresThroughModifiersHere(look.sceneId, specs);
   applyCarriedPalette(look.paletteId);
 }
 
@@ -1215,7 +1205,6 @@ function firePad(id: string, byAutopilot = false): void {
     return;
   }
   applyLook(pad.look, next.settings ?? []);
-  wiresThroughModifiersHere(next.id, next.settings ?? []);
   applyCarriedPalette(pad.paletteId);
   if (next.id !== scene.id) applyScene(next);
   setPreviewPadId = pad.id;
@@ -1971,13 +1960,10 @@ function wireDeviceMenu(): void {
     onSceneSettingChange: (sceneId, spec, value) => {
       setAutoEnabled(sceneId, spec.key, false);
       setSceneSetting(sceneId, spec, value);
-      // Each variant option keeps its own wires.
-      if (spec.variant) wiresThroughModifiersHere(sceneId, getScene(sceneId)?.settings ?? []);
     },
     onSceneSettingsReset: (sceneId) => {
       const specs = getScene(sceneId)?.settings ?? [];
       resetSceneSettings(sceneId, specs);
-      wiresThroughModifiersHere(sceneId, specs);
     },
     listLooks,
     onSaveLook: (sceneId) => {
@@ -2037,30 +2023,14 @@ function wireDeviceMenu(): void {
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     getDriveSetting: (sceneId, spec) => getDriveSetting(sceneId, spec),
-    getShapingReading: (id) => driveEngine.shaped(id),
-    onSetDriveSetting: (sceneId, spec, setting) => {
-      setDriveSetting(sceneId, spec, setting);
-      wiresThroughModifiersHere(sceneId, [spec]);
-    },
-    onResetDriveSetting: (sceneId, spec) => {
-      resetDriveSetting(sceneId, spec);
-      wiresThroughModifiersHere(sceneId, [spec]);
-    },
+    getWireReading: (sceneId, key, choice) => driveEngine.wire(sceneId, key, choice),
+    onSetDriveSetting: (sceneId, spec, setting) => setDriveSetting(sceneId, spec, setting),
+    onResetDriveSetting: (sceneId, spec) => resetDriveSetting(sceneId, spec),
     onUnplugAll: (sceneId, spec) => setDriveSetting(sceneId, spec, { mix: "add", sources: [] }),
-    onTogglePatchSource: (sceneId, spec, choice) => {
-      // An input's jack unplugs that input's wire even when it runs through a
-      // modifier; otherwise it plugs the input in, through its modifier.
-      const setting = getDriveSetting(sceneId, spec);
-      const at = typeof choice === "string" ? wireFromInput(setting, choice) : -1;
-      if (at >= 0 && setting !== "scene") {
-        setDriveSetting(sceneId, spec, { mix: setting.mix, sources: setting.sources.filter((_, i) => i !== at) });
-        return;
-      }
-      togglePatchSource(sceneId, spec, choice);
-      wiresThroughModifiersHere(sceneId, [spec]);
-    },
+    onTogglePatchSource: (sceneId, spec, choice) => togglePatchSource(sceneId, spec, choice),
     onSetSourceWeight: (sceneId, spec, choice, weight) => setSourceWeight(sceneId, spec, choice, weight),
     onSetSourceHeight: (sceneId, spec, choice, height) => setSourceHeight(sceneId, spec, choice, height),
+    onSetSourceMod: (sceneId, spec, choice, mod) => setSourceMod(sceneId, spec, choice, mod),
     onSetSourceEvery: (sceneId, spec, choice, every) => setSourceEvery(sceneId, spec, choice, every),
     onSetSourceGrid: (sceneId, spec, grid) => setSourceGrid(sceneId, spec, grid),
     onSetPatchMix: (sceneId, spec, mix) => setPatchMix(sceneId, spec, mix),
@@ -2374,10 +2344,6 @@ function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
     capture: look.io.read,
     apply(doc, glideMs) {
       look.io.write(doc);
-      // Main's wires replace ours, and a Main saved with plain wires stays
-      // plain unless its scene mounts here; before the pop-out copies us and
-      // before mainPlay.ts reads back what we show (its on-air anchor).
-      if (inViz) wiresThroughModifiersHere(scene.id, scene.settings ?? []);
       markMainShown();
       // The pop-out is one more Main screen of the laptop: it follows too and
       // walks the glide this window can't.

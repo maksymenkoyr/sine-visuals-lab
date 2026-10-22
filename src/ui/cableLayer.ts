@@ -55,9 +55,7 @@
  *
  * Resting the pointer on a pressable cable — still, for REVEAL_REST_MS —
  * scrolls its two ends into view (revealEnds): the signal's jack in the
- * meters column (or a shaping node's jack in the shaping column, which
- * also takes a cable from a meter jack and sends one on to a setting) and
- * the setting's port in the settings column, each only
+ * meters column and the setting's port in the settings column, each only
  * if it's out of its column's visible band (where endpointFor clamps it).
  * The pointer is never moved; a move of more than REVEAL_STILL_PX restarts
  * the wait, and one rest reveals once. The wait lives in the layer, not on
@@ -219,7 +217,7 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *     the jack or its header) — the cable ends at the footer's Setup button
  *     that opens it, when that has a box;
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
- *     `.vc-shape-col`/`.vc-setup`/`.vc-controls-col`) — the cable ends at the column's
+ *     `.vc-setup`/`.vc-controls-col`) — the cable ends at the column's
  *     visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
@@ -239,7 +237,7 @@ function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   }
   const r = el.getBoundingClientRect();
   let y = r.top + r.height / 2;
-  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-setup, .vc-controls-col");
+  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-setup, .vc-controls-col");
   if (scroller) {
     const sr = scroller.getBoundingClientRect();
     if (y < sr.top) y = sr.top + 2;
@@ -317,7 +315,7 @@ function revealEnd(el: HTMLElement): void {
     target = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head") ?? null;
     if (!target || target.getClientRects().length === 0) return;
   }
-  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-setup, .vc-controls-col");
+  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-setup, .vc-controls-col");
   if (!scroller) return;
   const r = target.getBoundingClientRect();
   const sr = scroller.getBoundingClientRect();
