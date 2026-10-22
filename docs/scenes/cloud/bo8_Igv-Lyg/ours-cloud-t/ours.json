@@ -1,0 +1,1092 @@
+{
+ "scene": "cloud",
+ "bundle": "bo8_Igv-Lyg",
+ "settings": null,
+ "offsets": [
+  -80,
+  0,
+  160
+ ],
+ "shots": [
+  {
+   "beat": 3,
+   "rank": 1,
+   "t": 1.5,
+   "offsetMs": -80,
+   "file": "b003_r01_-080.png",
+   "lagMs": 33,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 3,
+   "rank": 1,
+   "t": 1.5,
+   "offsetMs": 0,
+   "file": "b003_r01_+000.png",
+   "lagMs": 84,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 3,
+   "rank": 1,
+   "t": 1.5,
+   "offsetMs": 160,
+   "file": "b003_r01_+160.png",
+   "lagMs": 47,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": -80,
+   "file": "b004_r04_-080.png",
+   "lagMs": 30,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": 0,
+   "file": "b004_r04_+000.png",
+   "lagMs": 74,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": 160,
+   "file": "b004_r04_+160.png",
+   "lagMs": 38,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 5,
+   "rank": 1,
+   "t": 2.5,
+   "offsetMs": -80,
+   "file": "b005_r01_-080.png",
+   "lagMs": 33,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 5,
+   "rank": 1,
+   "t": 2.5,
+   "offsetMs": 0,
+   "file": "b005_r01_+000.png",
+   "lagMs": 84,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 5,
+   "rank": 1,
+   "t": 2.5,
+   "offsetMs": 160,
+   "file": "b005_r01_+160.png",
+   "lagMs": 52,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 6,
+   "rank": 2,
+   "t": 3,
+   "offsetMs": -80,
+   "file": "b006_r02_-080.png",
+   "lagMs": 37,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 6,
+   "rank": 2,
+   "t": 3,
+   "offsetMs": 0,
+   "file": "b006_r02_+000.png",
+   "lagMs": 88,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 6,
+   "rank": 2,
+   "t": 3,
+   "offsetMs": 160,
+   "file": "b006_r02_+160.png",
+   "lagMs": 51,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 7,
+   "rank": 1,
+   "t": 3.5,
+   "offsetMs": -80,
+   "file": "b007_r01_-080.png",
+   "lagMs": 30,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 7,
+   "rank": 1,
+   "t": 3.5,
+   "offsetMs": 0,
+   "file": "b007_r01_+000.png",
+   "lagMs": 73,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 7,
+   "rank": 1,
+   "t": 3.5,
+   "offsetMs": 160,
+   "file": "b007_r01_+160.png",
+   "lagMs": 37,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": -80,
+   "file": "b008_r08_-080.png",
+   "lagMs": 28,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": 0,
+   "file": "b008_r08_+000.png",
+   "lagMs": 70,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": 160,
+   "file": "b008_r08_+160.png",
+   "lagMs": 30,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 9,
+   "rank": 1,
+   "t": 4.5,
+   "offsetMs": -80,
+   "file": "b009_r01_-080.png",
+   "lagMs": 35,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 9,
+   "rank": 1,
+   "t": 4.5,
+   "offsetMs": 0,
+   "file": "b009_r01_+000.png",
+   "lagMs": 83,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 9,
+   "rank": 1,
+   "t": 4.5,
+   "offsetMs": 160,
+   "file": "b009_r01_+160.png",
+   "lagMs": 47,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 10,
+   "rank": 2,
+   "t": 5,
+   "offsetMs": -80,
+   "file": "b010_r02_-080.png",
+   "lagMs": 32,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 10,
+   "rank": 2,
+   "t": 5,
+   "offsetMs": 0,
+   "file": "b010_r02_+000.png",
+   "lagMs": 81,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 10,
+   "rank": 2,
+   "t": 5,
+   "offsetMs": 160,
+   "file": "b010_r02_+160.png",
+   "lagMs": 47,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 11,
+   "rank": 1,
+   "t": 5.5,
+   "offsetMs": -80,
+   "file": "b011_r01_-080.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 11,
+   "rank": 1,
+   "t": 5.5,
+   "offsetMs": 0,
+   "file": "b011_r01_+000.png",
+   "lagMs": 73,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 11,
+   "rank": 1,
+   "t": 5.5,
+   "offsetMs": 160,
+   "file": "b011_r01_+160.png",
+   "lagMs": 37,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": -80,
+   "file": "b012_r04_-080.png",
+   "lagMs": 28,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": 0,
+   "file": "b012_r04_+000.png",
+   "lagMs": 69,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": 160,
+   "file": "b012_r04_+160.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 13,
+   "rank": 1,
+   "t": 6.5,
+   "offsetMs": -80,
+   "file": "b013_r01_-080.png",
+   "lagMs": 22,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 13,
+   "rank": 1,
+   "t": 6.5,
+   "offsetMs": 0,
+   "file": "b013_r01_+000.png",
+   "lagMs": 66,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 13,
+   "rank": 1,
+   "t": 6.5,
+   "offsetMs": 160,
+   "file": "b013_r01_+160.png",
+   "lagMs": 31,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 14,
+   "rank": 2,
+   "t": 7,
+   "offsetMs": -80,
+   "file": "b014_r02_-080.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 14,
+   "rank": 2,
+   "t": 7,
+   "offsetMs": 0,
+   "file": "b014_r02_+000.png",
+   "lagMs": 76,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 14,
+   "rank": 2,
+   "t": 7,
+   "offsetMs": 160,
+   "file": "b014_r02_+160.png",
+   "lagMs": 45,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 15,
+   "rank": 1,
+   "t": 7.5,
+   "offsetMs": -80,
+   "file": "b015_r01_-080.png",
+   "lagMs": 36,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 15,
+   "rank": 1,
+   "t": 7.5,
+   "offsetMs": 0,
+   "file": "b015_r01_+000.png",
+   "lagMs": 87,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 15,
+   "rank": 1,
+   "t": 7.5,
+   "offsetMs": 160,
+   "file": "b015_r01_+160.png",
+   "lagMs": 56,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": -80,
+   "file": "b016_r16_-080.png",
+   "lagMs": 31,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 0,
+   "file": "b016_r16_+000.png",
+   "lagMs": 78,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 160,
+   "file": "b016_r16_+160.png",
+   "lagMs": 39,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 17,
+   "rank": 1,
+   "t": 8.5,
+   "offsetMs": -80,
+   "file": "b017_r01_-080.png",
+   "lagMs": 20,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 17,
+   "rank": 1,
+   "t": 8.5,
+   "offsetMs": 0,
+   "file": "b017_r01_+000.png",
+   "lagMs": 57,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 17,
+   "rank": 1,
+   "t": 8.5,
+   "offsetMs": 160,
+   "file": "b017_r01_+160.png",
+   "lagMs": 19,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 18,
+   "rank": 2,
+   "t": 9,
+   "offsetMs": -80,
+   "file": "b018_r02_-080.png",
+   "lagMs": 28,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 18,
+   "rank": 2,
+   "t": 9,
+   "offsetMs": 0,
+   "file": "b018_r02_+000.png",
+   "lagMs": 67,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 18,
+   "rank": 2,
+   "t": 9,
+   "offsetMs": 160,
+   "file": "b018_r02_+160.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 19,
+   "rank": 1,
+   "t": 9.5,
+   "offsetMs": -80,
+   "file": "b019_r01_-080.png",
+   "lagMs": 28,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 19,
+   "rank": 1,
+   "t": 9.5,
+   "offsetMs": 0,
+   "file": "b019_r01_+000.png",
+   "lagMs": 69,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 19,
+   "rank": 1,
+   "t": 9.5,
+   "offsetMs": 160,
+   "file": "b019_r01_+160.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": -80,
+   "file": "b020_r04_-080.png",
+   "lagMs": 21,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": 0,
+   "file": "b020_r04_+000.png",
+   "lagMs": 62,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": 160,
+   "file": "b020_r04_+160.png",
+   "lagMs": 23,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 21,
+   "rank": 1,
+   "t": 10.5,
+   "offsetMs": -80,
+   "file": "b021_r01_-080.png",
+   "lagMs": 32,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 21,
+   "rank": 1,
+   "t": 10.5,
+   "offsetMs": 0,
+   "file": "b021_r01_+000.png",
+   "lagMs": 87,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 21,
+   "rank": 1,
+   "t": 10.5,
+   "offsetMs": 160,
+   "file": "b021_r01_+160.png",
+   "lagMs": 63,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 22,
+   "rank": 2,
+   "t": 11,
+   "offsetMs": -80,
+   "file": "b022_r02_-080.png",
+   "lagMs": 22,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 22,
+   "rank": 2,
+   "t": 11,
+   "offsetMs": 0,
+   "file": "b022_r02_+000.png",
+   "lagMs": 72,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 22,
+   "rank": 2,
+   "t": 11,
+   "offsetMs": 160,
+   "file": "b022_r02_+160.png",
+   "lagMs": 44,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 23,
+   "rank": 1,
+   "t": 11.5,
+   "offsetMs": -80,
+   "file": "b023_r01_-080.png",
+   "lagMs": 100,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 23,
+   "rank": 1,
+   "t": 11.5,
+   "offsetMs": 0,
+   "file": "b023_r01_+000.png",
+   "lagMs": 236,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 23,
+   "rank": 1,
+   "t": 11.5,
+   "offsetMs": 160,
+   "file": "b023_r01_+160.png",
+   "lagMs": 329,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": -80,
+   "file": "b024_r08_-080.png",
+   "lagMs": 411,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": 0,
+   "file": "b024_r08_+000.png",
+   "lagMs": 553,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": 160,
+   "file": "b024_r08_+160.png",
+   "lagMs": 536,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 25,
+   "rank": 1,
+   "t": 12.5,
+   "offsetMs": -80,
+   "file": "b025_r01_-080.png",
+   "lagMs": 400,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 25,
+   "rank": 1,
+   "t": 12.5,
+   "offsetMs": 0,
+   "file": "b025_r01_+000.png",
+   "lagMs": 445,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 25,
+   "rank": 1,
+   "t": 12.5,
+   "offsetMs": 160,
+   "file": "b025_r01_+160.png",
+   "lagMs": 411,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 26,
+   "rank": 2,
+   "t": 13,
+   "offsetMs": -80,
+   "file": "b026_r02_-080.png",
+   "lagMs": 281,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 26,
+   "rank": 2,
+   "t": 13,
+   "offsetMs": 0,
+   "file": "b026_r02_+000.png",
+   "lagMs": 332,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  },
+  {
+   "beat": 26,
+   "rank": 2,
+   "t": 13,
+   "offsetMs": 160,
+   "file": "b026_r02_+160.png",
+   "lagMs": 306,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "cloud"
+   },
+   "heard": null
+  }
+ ]
+}

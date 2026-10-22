@@ -1,0 +1,297 @@
+[
+ {
+  "size": [
+   1280,
+   720
+  ],
+  "thr": 0.18,
+  "litShare": 0.0,
+  "n": 0,
+  "classes": {},
+  "hollowShare": 0.0,
+  "nestedShare": 0.0,
+  "sizeFit": null,
+  "sizeEnvelope": {
+   "r0.1-0.3": null,
+   "r0.3-0.6": null,
+   "r0.6-1.0": null,
+   "r>1": null
+  },
+  "rings": [],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": null,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": null,
+   "outerElong": null,
+   "radialShare": 0.0
+  },
+  "hues": [],
+  "glow": {
+   "ground": 0.0376,
+   "core": 1.0,
+   "profile": [
+    0.0376,
+    0.0376,
+    0.0376,
+    0.0376,
+    0.0376,
+    0.0376
+   ],
+   "efoldPx": null,
+   "haloRatio": 0.0
+  },
+  "ground": {
+   "hex": "#000082",
+   "vignette": 1.1
+  },
+  "objects": [],
+  "regime": 1,
+  "t": 3.73,
+  "share": 0.34,
+  "flow": null,
+  "frame": "frames/look_1.jpg",
+  "overlay": "frames/look_1_overlay.png"
+ },
+ {
+  "size": [
+   1280,
+   720
+  ],
+  "thr": 0.18,
+  "litShare": 0.0,
+  "n": 0,
+  "classes": {},
+  "hollowShare": 0.0,
+  "nestedShare": 0.0,
+  "sizeFit": null,
+  "sizeEnvelope": {
+   "r0.1-0.3": null,
+   "r0.3-0.6": null,
+   "r0.6-1.0": null,
+   "r>1": null
+  },
+  "rings": [],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": null,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": null,
+   "outerElong": null,
+   "radialShare": 0.0
+  },
+  "hues": [],
+  "glow": {
+   "ground": 0.0367,
+   "core": 1.0,
+   "profile": [
+    0.0367,
+    0.0367,
+    0.0367,
+    0.0367,
+    0.0367,
+    0.0367
+   ],
+   "efoldPx": null,
+   "haloRatio": 0.0
+  },
+  "ground": {
+   "hex": "#00007f",
+   "vignette": 0.75
+  },
+  "objects": [],
+  "regime": 2,
+  "t": 31.07,
+  "share": 0.25,
+  "flow": null,
+  "frame": "frames/look_2.jpg",
+  "overlay": "frames/look_2_overlay.png"
+ },
+ {
+  "size": [
+   1280,
+   720
+  ],
+  "thr": 0.18,
+  "litShare": 0.0,
+  "n": 0,
+  "classes": {},
+  "hollowShare": 0.0,
+  "nestedShare": 0.0,
+  "sizeFit": null,
+  "sizeEnvelope": {
+   "r0.1-0.3": null,
+   "r0.3-0.6": null,
+   "r0.6-1.0": null,
+   "r>1": null
+  },
+  "rings": [],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": null,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": null,
+   "outerElong": null,
+   "radialShare": 0.0
+  },
+  "hues": [],
+  "glow": {
+   "ground": 0.0368,
+   "core": 1.0,
+   "profile": [
+    0.0368,
+    0.0368,
+    0.0368,
+    0.0368,
+    0.0368,
+    0.0368
+   ],
+   "efoldPx": null,
+   "haloRatio": 0.0
+  },
+  "ground": {
+   "hex": "#000080",
+   "vignette": 0.99
+  },
+  "objects": [],
+  "regime": 3,
+  "t": 34.53,
+  "share": 0.24,
+  "flow": null,
+  "frame": "frames/look_3.jpg",
+  "overlay": "frames/look_3_overlay.png"
+ },
+ {
+  "size": [
+   1280,
+   720
+  ],
+  "thr": 0.18,
+  "litShare": 0.0,
+  "n": 0,
+  "classes": {},
+  "hollowShare": 0.0,
+  "nestedShare": 0.0,
+  "sizeFit": null,
+  "sizeEnvelope": {
+   "r0.1-0.3": null,
+   "r0.3-0.6": null,
+   "r0.6-1.0": null,
+   "r>1": null
+  },
+  "rings": [],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": null,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": null,
+   "outerElong": null,
+   "radialShare": 0.0
+  },
+  "hues": [],
+  "glow": {
+   "ground": 0.0362,
+   "core": 1.0,
+   "profile": [
+    0.0362,
+    0.0362,
+    0.0362,
+    0.0362,
+    0.0362,
+    0.0362
+   ],
+   "efoldPx": null,
+   "haloRatio": 0.0
+  },
+  "ground": {
+   "hex": "#00007d",
+   "vignette": 0.75
+  },
+  "objects": [],
+  "regime": 4,
+  "t": 7.4,
+  "share": 0.15,
+  "flow": null,
+  "frame": "frames/look_4.jpg",
+  "overlay": "frames/look_4_overlay.png"
+ },
+ {
+  "size": [
+   1280,
+   720
+  ],
+  "thr": 0.18,
+  "litShare": 0.0,
+  "n": 0,
+  "classes": {},
+  "hollowShare": 0.0,
+  "nestedShare": 0.0,
+  "sizeFit": null,
+  "sizeEnvelope": {
+   "r0.1-0.3": null,
+   "r0.3-0.6": null,
+   "r0.6-1.0": null,
+   "r>1": null
+  },
+  "rings": [],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": null,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": null,
+   "outerElong": null,
+   "radialShare": 0.0
+  },
+  "hues": [],
+  "glow": {
+   "ground": 0.037,
+   "core": 1.0,
+   "profile": [
+    0.037,
+    0.037,
+    0.037,
+    0.037,
+    0.037,
+    0.037
+   ],
+   "efoldPx": null,
+   "haloRatio": 0.0
+  },
+  "ground": {
+   "hex": "#000081",
+   "vignette": 0.91
+  },
+  "objects": [],
+  "regime": 5,
+  "t": 14.0,
+  "share": 0.01,
+  "flow": null,
+  "frame": "frames/look_5.jpg",
+  "overlay": "frames/look_5_overlay.png"
+ }
+]
