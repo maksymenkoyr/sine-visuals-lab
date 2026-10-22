@@ -143,4 +143,6 @@ frame median blue 0.58 vs 0.48 in silence.
 ## History
 
 - #653 (2026-10-21): first version, built from `/ref` on `bo8_Igv-Lyg`;
-  moved from Draft to In development on the owner's ask (2026-10-22).
+  closed unmerged and replaced by #666 after a rebase.
+- #666 (2026-10-22): the same scene, moved from Draft to In development on
+  the owner's ask.
