@@ -1,7 +1,7 @@
 /**
  * The generic gate window, and the Fixed/Loud height envelope for a catalogue
  * hit. Two users share this one copy: a setting's own generic gate (drives.ts
- * accumulate() and forScene()) and a shaping node (shapingNodes.ts). It holds
+ * accumulate() and forScene()) and a wire's modifier (wireMod.ts). It holds
  * the gate tracker (a peak that jumps up and eases back down toward a floor
  * that follows the input's resting level), the window's math
  * (windowReading: Min and Max each run from 0 to that peak, so a window open
@@ -12,10 +12,9 @@
  * Fixed/Loud envelope a hit-kind catalogue entry gets, with the lane and decay
  * rate each entry borrows from its own pulse.
  *
- * It is its own module because shapingNodes.ts is read at load by its store,
- * and drives.ts imports shapingNodes.ts: if shapingNodes.ts imported a value
- * from drives.ts, the two would form a runtime cycle. Both import this file
- * instead. This file imports nothing from drives.ts or shapingNodes.ts.
+ * It is its own module because driveStore.ts and wireMod.ts read it at load,
+ * and drives.ts imports both: importing a value from drives.ts here would
+ * form a runtime cycle. This file imports nothing from drives.ts.
  */
 import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
@@ -96,8 +95,8 @@ function clamp01(x: number): number {
 /** One gate tracker (drives.ts's header's threshold paragraph) — drives.ts's
  *  `accumulate()` advances it once per tick, from the setting's own
  *  combined-and-gained value; `forScene()` only ever reads `line`/`floor`/
- *  `peak` back, never advances them itself. A shaping node owns one too,
- *  advanced by stepShapingNode. */
+ *  `peak` back, never advances them itself. A wire's modifier owns one too,
+ *  advanced by wireMod.ts's stepWireMod. */
 export interface GateTrackerState {
   init: boolean;
   /** Where the peak eases back to: it follows the input's resting level. */

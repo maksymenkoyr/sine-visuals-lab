@@ -3,19 +3,19 @@ import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
-import { SHAPING_NODE_ID_RE } from "./shapingNodes.ts";
+import { decodeWireMod, encodeWireMod, LEGACY_NODE_ID_RE, readLegacyNodes, type LegacyNode, type StoredWireMod, type WireMod } from "./wireMod.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import type { HitReadout } from "./standout.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
   DRIVE_EVERY_VALUES,
-  isShapedChoice,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
   setSourceEvery as pureSetSourceEvery,
   setSourceGrid as pureSetSourceGrid,
   setSourceHeight as pureSetSourceHeight,
+  setSourceMod as pureSetSourceMod,
   setSourceMuted as pureSetSourceMuted,
   setSourceRole as pureSetSourceRole,
   setSourceWeight as pureSetSourceWeight,
@@ -70,6 +70,13 @@ import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_M
  * other than plain Beat never had a global grid apply to it in the first
  * place, so it's left alone. Read once at module load — the legacy store is
  * retired, not kept live alongside this one.
+ *
+ * Migration: a wire saved while modifiers were cards of their own names one
+ * (`{source:"shaped", id}`) in the retired `vibe.shapingNodes` store. At load,
+ * and again whenever the synced store reseeds, every such wire becomes the
+ * plain wire on that node's input, carrying the node's Height and modifier
+ * (wireMod.ts), and the store is written back when anything changed. A wire
+ * naming a node that no longer exists read 0, so it is dropped.
  */
 
 interface DriveEntry {
@@ -127,6 +134,7 @@ registerSyncedStore(STORAGE_KEY, () => {
   const next = readStore();
   for (const k of Object.keys(cache)) delete cache[k];
   Object.assign(cache, next);
+  migrateLegacyNodeWires();
 });
 
 function persist(): void {
@@ -135,6 +143,24 @@ function persist(): void {
   } catch {
     // Not fatal — drive settings/lines just won't persist across reloads.
   }
+}
+
+/** This file's header, Migration: rewrites every stored patch that still
+ *  names a retired modifier node. */
+function migrateLegacyNodeWires(): void {
+  let changed = false;
+  for (const bucket of Object.values(cache)) {
+    if (!bucket || typeof bucket !== "object") continue;
+    for (const entry of Object.values(bucket)) {
+      if (!entry || typeof entry !== "object" || entry.patch === undefined) continue;
+      if (!JSON.stringify(entry.patch).includes('"shaped"')) continue;
+      const setting = sanitizeDriveSetting(entry.patch);
+      if (setting === null) continue;
+      entry.patch = encodeDriveSetting(setting);
+      changed = true;
+    }
+  }
+  if (changed) persist();
 }
 
 function entryFor(scope: string, key: string): DriveEntry {
@@ -179,8 +205,8 @@ function isValidGridIndex(n: unknown): n is number {
  *  than re-validating the same shape a second way). Accepts `"scene"` for
  *  the legacy top-level `choice` field/Look `d` entries; sanitizeSourceChoice
  *  below is the same check with `"scene"` rejected, for a patch source. The
- *  object shapes are `{source:"line"}`, `{source:"beat", grid}` and
- *  `{source:"shaped", id}` (an id matching SHAPING_NODE_ID_RE). */
+ *  object shapes are `{source:"line"}` and `{source:"beat", grid}`; the
+ *  retired `{source:"shaped", id}` is legacyNodeId's. */
 function sanitizeChoice(raw: unknown): DriveChoice | null {
   if (raw === "scene") return "scene";
   // Own-property check, not `in`: SIGNALS is a plain object, so `in` would
@@ -195,13 +221,20 @@ function sanitizeChoice(raw: unknown): DriveChoice | null {
       const grid = (raw as { grid?: unknown }).grid;
       return isValidGridIndex(grid) ? { source: "beat", grid } : null;
     }
-    if (source === "shaped") {
-      const id = (raw as { id?: unknown }).id;
-      return typeof id === "string" && SHAPING_NODE_ID_RE.test(id) ? { source: "shaped", id } : null;
-    }
   }
   return null;
 }
+
+/** The node id of a retired `{source:"shaped", id}` choice (this file's
+ *  header, Migration), else null. */
+function legacyNodeId(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || (raw as { source?: unknown }).source !== "shaped") return null;
+  const id = (raw as { id?: unknown }).id;
+  return typeof id === "string" && LEGACY_NODE_ID_RE.test(id) ? id : null;
+}
+
+/** The modifiers saved in the retired node store, read once at load. */
+const legacyNodes: ReadonlyMap<string, LegacyNode> = readLegacyNodes();
 
 /** `sanitizeChoice`, with `"scene"` rejected — what one `DriveSource.choice`
  *  inside a patch must sanitize to. */
@@ -220,7 +253,8 @@ const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
  *  round-trips through this form, both in localStorage and in a Look's `d`
  *  — see sceneLooks.ts's own header) or a compact patch
  *  `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight, g?: 1,
- *  o?: 1, e?: number}, …]}`. A source's own `g`/`o` (present only when
+ *  o?: 1, e?: number, x?: StoredWireMod}, …]}`. `x` is a catalogue wire's
+ *  modifier (wireMod.ts's encodeWireMod). A source's own `g`/`o` (present only when
  *  `true`) are `DriveSource.when`/`.off` — drives.ts's header covers what
  *  each does; `g` for "gate condition", `o` for "off", one letter each to
  *  match `c`/`w`/`h`. `e` is `DriveSource.every`, Beat wave's own every-N-
@@ -248,10 +282,17 @@ const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
  *  read as exactly that: no condition, so the gate acts as add (drives.ts's
  *  header). It must not invent one: "every condition switched back to
  *  plays" is a real state the panel writes, and guessing a condition here
- *  would change the setting's behaviour on the next reload. */
-export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
+ *  would change the setting's behaviour on the next reload.
+ *
+ *  **Retired modifier wires.** A `c` (or a bare choice) of
+ *  `{source:"shaped", id}` resolves through `nodes` (the local retired
+ *  store, or a Look's own `h`) into the plain wire on that node's input with
+ *  its Height and modifier; one `nodes` lacks is dropped, as it read 0. */
+export function sanitizeDriveSetting(raw: unknown, nodes: ReadonlyMap<string, LegacyNode> = legacyNodes): DriveSetting | null {
   const asChoice = sanitizeChoice(raw);
   if (asChoice !== null) return driveSettingFromChoice(asChoice);
+  const bareNode = legacyNodeId(raw);
+  if (bareNode !== null) return sanitizeDriveSetting({ m: "add", s: [{ c: raw }] }, nodes);
   if (!raw || typeof raw !== "object" || !("s" in raw)) return null;
 
   const mix = (raw as { m?: unknown }).m;
@@ -263,7 +304,11 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
   const sources: DriveSource[] = [];
   for (const item of rawSources) {
     if (!item || typeof item !== "object") return null;
-    const choice = sanitizeSourceChoice((item as { c?: unknown }).c);
+    const rawChoice = (item as { c?: unknown }).c;
+    const nodeId = legacyNodeId(rawChoice);
+    const node = nodeId === null ? undefined : nodes.get(nodeId);
+    if (nodeId !== null && !node) continue;
+    const choice = node ? node.src : sanitizeSourceChoice(rawChoice);
     if (choice === null) return null;
 
     const rawWeight = (item as { w?: unknown }).w;
@@ -281,7 +326,13 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
     }
 
     const source: DriveSource = { choice, weight };
-    if (height !== undefined) source.height = height;
+    if (node) {
+      // A node owned its input's Height; the wire through it had none.
+      if (node.height !== "graded") source.height = node.height;
+      source.mod = node.mod;
+    } else if (height !== undefined) {
+      source.height = height;
+    }
 
     const rawGate = (item as { g?: unknown }).g;
     if (rawGate !== undefined) {
@@ -297,6 +348,12 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
     if (rawEvery !== undefined) {
       if (typeof rawEvery !== "number" || !(DRIVE_EVERY_VALUES as readonly number[]).includes(rawEvery)) return null;
       source.every = rawEvery as DriveSource["every"];
+    }
+    const rawMod = (item as { x?: unknown }).x;
+    if (rawMod !== undefined) {
+      const mod = decodeWireMod(rawMod);
+      if (mod === null) return null;
+      source.mod = mod;
     }
     sources.push(source);
   }
@@ -318,7 +375,8 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
  *  function. Both `DriveEntry.patch` (localStorage) and a Look's `d` entry
  *  (sceneLooks.ts) are one of these, never a bare `DriveSetting` — see this
  *  file's header for why one canonical shape serves both boundaries. */
-export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number }[] };
+export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: StoredDriveSource[] };
+type StoredDriveSource = { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number; x?: StoredWireMod };
 
 /** `setting` written the way `sanitizeDriveSetting` reads it back: a
  *  one-source, weight-1, Graded, unconditioned, unmuted, every-1 `add` patch
@@ -340,7 +398,8 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
       (only.height === undefined || only.height === "graded") &&
       !only.when &&
       !only.off &&
-      (only.every === undefined || only.every === 1)
+      (only.every === undefined || only.every === 1) &&
+      only.mod === undefined
     ) {
       return only.choice;
     }
@@ -348,12 +407,13 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
   return {
     m: setting.mix,
     s: setting.sources.map((src) => {
-      const entry: { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number } = { c: src.choice };
+      const entry: StoredDriveSource = { c: src.choice };
       if (src.weight !== 1) entry.w = src.weight;
       if (src.height !== undefined && src.height !== "graded") entry.h = src.height;
       if (src.when) entry.g = 1;
       if (src.off) entry.o = 1;
       if (src.every !== undefined && src.every !== 1) entry.e = src.every;
+      if (src.mod) entry.x = encodeWireMod(src.mod);
       return entry;
     }),
   };
@@ -424,33 +484,6 @@ export function setDriveSetting(sceneId: string, spec: SceneSetting, setting: Dr
   persist();
 }
 
-/** Removing a shaping node unplugs its wires in every scene: each setting
- *  whose patch holds `{source:"shaped", id}` loses that source. A setting
- *  left with no wire reads its rest, as after any unplug. */
-export function removeShapedSource(id: string): void {
-  let changed = false;
-  for (const bucket of Object.values(cache)) {
-    for (const entry of Object.values(bucket)) {
-      const setting =
-        entry.patch !== undefined
-          ? sanitizeDriveSetting(entry.patch)
-          : entry.choice !== undefined
-            ? (() => {
-                const choice = sanitizeChoice(entry.choice);
-                return choice === null ? null : driveSettingFromChoice(choice);
-              })()
-            : null;
-      if (!setting || setting === "scene") continue;
-      if (!setting.sources.some((s) => isShapedChoice(s.choice) && s.choice.id === id)) continue;
-      const sources = setting.sources.filter((s) => !(isShapedChoice(s.choice) && s.choice.id === id));
-      entry.patch = encodeDriveSetting(normalizeDriveSetting({ mix: setting.mix, sources }));
-      delete entry.choice;
-      changed = true;
-    }
-  }
-  if (changed) persist();
-}
-
 /** Back to `spec.drive.default` — a row's reset affordance. */
 export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
@@ -491,6 +524,12 @@ export function setSourceWeight(sceneId: string, spec: SceneSetting, choice: Dri
 
 export function setSourceHeight(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight): void {
   setDriveSetting(sceneId, spec, pureSetSourceHeight(getDriveSetting(sceneId, spec), choice, height));
+}
+
+/** A catalogue wire's modifier (wireMod.ts); null puts the plain wire back —
+ *  drives.ts's setSourceMod. */
+export function setSourceMod(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, mod: WireMod | null): void {
+  setDriveSetting(sceneId, spec, pureSetSourceMod(getDriveSetting(sceneId, spec), choice, mod));
 }
 
 /** Beat wave's own every-N-beats divider (deviceMenu.ts's Every seg) —
@@ -675,3 +714,6 @@ export function setDriveReadout(sceneId: string, spec: SceneSetting, readout: Hi
   entryFor(settingScope(sceneId, spec.key), spec.key).readout = readout;
   persist();
 }
+
+// Last, so every helper the sanitizer reads is initialised (header, Migration).
+migrateLegacyNodeWires();

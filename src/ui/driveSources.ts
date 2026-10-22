@@ -1,7 +1,6 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { isShapedChoice, sourceSlot, type DriveSourceChoice, type HitHeight } from "../render/drives.ts";
+import { sourceSlot, type DriveSourceChoice, type HitHeight } from "../render/drives.ts";
 import { DIAL_SIGNALS, type DialSignalId, type SignalId } from "../render/signals.ts";
-import { getShapingNode, listShapingNodes } from "../render/shapingNodes.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
 /**
@@ -186,21 +185,9 @@ export function jackKey(choice: DriveSourceChoice): string {
   return sourceSlot(choice);
 }
 
-/** A shaping node's panel label (the panel calls it a modifier, docs/vocabulary.md): its input node's label plus "modifier" (the
- *  second one on the same input says "modifier 2", and so on). A node that is
- *  gone reads as removed, which is what its dangling wire reads as. */
-export function shapingNodeLabel(id: string): string {
-  const node = getShapingNode(id);
-  if (!node) return "Removed modifier";
-  const base = driveSourceLabel(node.src);
-  const n = 1 + listShapingNodes().filter((x) => x.src === node.src).findIndex((x) => x.id === id);
-  return n === 1 ? `${base} modifier` : `${base} modifier ${n}`;
-}
-
 /** The full display label — a row's source summary, a patch source line's
  *  name, a sparkline's tooltip. */
 export function driveSourceLabel(choice: DriveSourceChoice): string {
-  if (isShapedChoice(choice)) return shapingNodeLabel(choice.id);
   if (typeof choice === "object") {
     return choice.source === "beat" ? `Beat grid · ${driveGridDivisionLabel(choice.grid)}` : "Drawn line";
   }
@@ -208,10 +195,6 @@ export function driveSourceLabel(choice: DriveSourceChoice): string {
 }
 
 export function driveSourceColor(choice: DriveSourceChoice): string {
-  if (isShapedChoice(choice)) {
-    const node = getShapingNode(choice.id);
-    return node ? driveSourceColor(node.src) : "#8a92a3";
-  }
   if (typeof choice === "object") return choice.source === "beat" ? DRIVE_WHITE : BANDS_AMBER;
   return SIGNAL_SOURCE_COLOR[choice];
 }
@@ -219,29 +202,8 @@ export function driveSourceColor(choice: DriveSourceChoice): string {
 /** The plain-language description below a source's own label — a jack's
  *  instant tooltip's first line, and an add-by-name chip's hint. */
 export function driveSourceDescription(choice: DriveSourceChoice): string {
-  if (isShapedChoice(choice)) {
-    const node = getShapingNode(choice.id);
-    return node
-      ? `${driveSourceLabel(node.src)}, through its modifier: Window, Smoothness, Length and Height.`
-      : "A modifier that was removed — this wire reads nothing.";
-  }
   if (typeof choice === "object") return choice.source === "beat" ? GRID_SOURCE_DESCRIPTION : LINE_SOURCE_DESCRIPTION;
   return SIGNAL_SOURCE_DESCRIPTION[choice];
-}
-
-/** Every "+ Add by name" group: DRIVE_ADD_GROUPS, then a "Modifiers" group with
- *  one choice per existing shaping node, only while any node exists. */
-export function driveAddGroups(): readonly DriveAddGroup[] {
-  const nodes = listShapingNodes();
-  if (nodes.length === 0) return DRIVE_ADD_GROUPS;
-  return [...DRIVE_ADD_GROUPS, { label: "Modifiers", choices: nodes.map((n) => ({ source: "shaped" as const, id: n.id })) }];
-}
-
-/** The shaping column's "+ New modifier" chips: the input choices of
- *  DRIVE_ADD_GROUPS only (plain signals), groups left empty dropped, so there
- *  is no Line group and no beat grid. */
-export function shapingInputGroups(): readonly { label: string; choices: SignalId[] }[] {
-  return DRIVE_ADD_GROUPS.map((g) => ({ label: g.label, choices: g.choices.filter((c): c is SignalId => typeof c === "string") })).filter((g) => g.choices.length > 0);
 }
 
 /** One "+ Add by name" group (src/ui/deviceMenu.ts's patch panel). Tempo
@@ -256,7 +218,8 @@ export interface DriveAddGroup {
   choices: DriveSourceChoice[];
 }
 
-const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
+/** Every "+ Add by name" group, in the order the patch panel lists them. */
+export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
   { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.kickBand", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
@@ -292,8 +255,7 @@ const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
   { label: "Line", choices: [{ source: "line" }] },
 ];
 
-/** The Fixed/Loud/Graded height choices a hit-kind wire takes (a setting's
- *  wire, and a shaping node's Height row in shapingColumn.ts). */
+/** The Fixed/Loud/Graded height choices a hit-kind wire takes. */
 export const HEIGHT_OPTIONS: readonly { h: HitHeight; label: string; hint: string }[] = [
   { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by the Shape sliders." },
   { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },

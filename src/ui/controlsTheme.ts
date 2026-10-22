@@ -189,40 +189,21 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
-/* The shaping column (shapingColumn.ts) is centred in the gap between the meters
- * and settings columns so cables have room on both sides. deviceMenu.ts's
- * placeShapingColumn overwrites left/top/width/max-height inline on every
- * recompute; left and width here are only the fallback before the first one. */
-.vc-shape-col {
-  position: fixed; top: 60px; z-index: 30;
-  --vc-shape-gap: calc(100vw - 409px - 346px);
-  width: min(300px, var(--vc-shape-gap));
-  left: calc(409px + (var(--vc-shape-gap) - min(300px, var(--vc-shape-gap))) / 2);
-  max-height: calc(var(--vc-vh) - 150px); overflow-y: auto;
-  display: flex; flex-direction: column; gap: 4px;
-}
-.vc-shape-col > * { flex-shrink: 0; }
-.vc-root.vc-meters-hidden .vc-shape-col { display: none; }
-/* The Setup view (audioMeters.ts's setupEl) takes the shaping column's spot, so
- * that column steps aside while Setup is open (wide layout only: stacked, nothing is shared). */
+/* The Setup view (audioMeters.ts's setupEl) sits in the gap between the meters
+ * and settings columns. deviceMenu.ts's placeSetupColumn overwrites
+ * left/top/width/max-height inline on every recompute; left and width here are
+ * only the fallback before the first one. */
 .vc-setup {
   position: fixed; top: 60px; z-index: 30;
-  --vc-shape-gap: calc(100vw - 409px - 346px);
-  width: min(300px, var(--vc-shape-gap));
-  left: calc(409px + (var(--vc-shape-gap) - min(300px, var(--vc-shape-gap))) / 2);
+  --vc-setup-gap: calc(100vw - 409px - 346px);
+  width: min(300px, var(--vc-setup-gap));
+  left: calc(409px + (var(--vc-setup-gap) - min(300px, var(--vc-setup-gap))) / 2);
   max-height: calc(var(--vc-vh) - 150px); overflow-y: auto;
   display: none;
 }
 .vc-root.vc-setup-open .vc-setup { display: flex; flex-direction: column; gap: 4px; }
 .vc-setup > * { flex-shrink: 0; }
 .vc-root.vc-meters-hidden .vc-setup { display: none; }
-@media (min-width: ${STACK_BELOW_PX + 1}px) {
-  .vc-root.vc-setup-open .vc-shape-col { display: none; }
-}
-.vc-shape-inport {
-  display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
-  border: 2px solid var(--c); border-radius: 3px; box-sizing: border-box; background: transparent;
-}
 /* Patch focus (refreshChain, patchChain.ts): while a chain is lit, the items on it glow.
  * Nothing off it dims: a faded row read as switched off. */
 .vc-root.vc-chain-on .vc-chain-lit:not(:hover):not(:focus-within) {
@@ -230,12 +211,6 @@ const stylesheet = `
     0 0 0 1px color-mix(in srgb, var(--vc-accent, #fff) 35%, transparent),
     0 0 18px color-mix(in srgb, var(--vc-accent, #fff) 28%, transparent);
 }
-.vc-root.vc-chain-on .vc-shape-node.vc-chain-lit:not(:hover):not(:focus-within) {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-node-c, #fff) 45%, transparent), 0 0 16px -6px var(--vc-node-c, #fff);
-}
-.vc-shape-node.vc-chain-focus { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 18px -6px var(--vc-node-c, #fff); }
-.vc-shape-node.vc-shape-pinned { box-shadow: 0 0 0 1px var(--vc-node-c, #fff), 0 0 22px -4px var(--vc-node-c, #fff); }
-.vc-shape-inport.vc-shape-inport-on { background: var(--c); }
 /* Power folds to a small square, wide layout only (powerCard.ts's header says why:
  * the card's content stays laid out at full width so it is clipped, never reflowed). */
 @media (min-width: ${STACK_BELOW_PX + 1}px) {
@@ -305,7 +280,7 @@ const stylesheet = `
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
-  .vc-shape-col, .vc-setup { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
+  .vc-setup { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
   /* The triangle-collapse only makes sense beside other columns: dissolve the
    * wrapper and undo vc-cols-folded's hiding. Wins by coming later at equal
    * specificity. */
@@ -812,7 +787,6 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
 .vc-cable-drag { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 6; opacity: 0.95; }
 .vc-root.vc-dragging .vc-drive-port { box-shadow: 0 0 0 4px rgba(195,165,249,0.28); }
-.vc-root.vc-dragging .vc-shape-col { outline: 1px dashed rgba(249,185,108,0.6); outline-offset: 2px; }
 .vc-root.vc-dragging .vc-drop-target { box-shadow: 0 0 0 1px rgba(255,255,255,0.7), 0 0 14px -4px #fff; }
 @media (min-width: ${STACK_BELOW_PX + 1}px) { .vc-jack { cursor: grab; } }
 .vc-root.vc-dragging, .vc-root.vc-dragging * { cursor: grabbing !important; }

@@ -454,7 +454,7 @@ export const rowResetStyle = `
 
 // Palette chips.
 export const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
-export const paletteChipStyle = `
+const paletteChipStyle = `
   font: 400 10.5px/1.2 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.7);
   background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
   padding: 4px 8px; cursor: pointer;

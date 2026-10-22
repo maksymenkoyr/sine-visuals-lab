@@ -2,7 +2,7 @@
  * The dev-only Smoothness formula picker (render/gateFormulas.ts's header): a
  * plain select listing gateWindow.ts's GATE_FORMULAS, shown under a
  * Smoothness slider on a setting's own window (deviceMenu.ts) and on a
- * modifier's card (shapingColumn.ts). Temporary, like the store behind it.
+ * wire's modifier (wireModControls.ts). Temporary, like the store behind it.
  */
 import { GATE_FORMULAS, type GateFormula } from "../render/gateWindow.ts";
 

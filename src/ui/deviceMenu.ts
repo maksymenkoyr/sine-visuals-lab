@@ -63,9 +63,7 @@ import {
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
   isEngineHitDriver,
-  isShapedChoice,
   sameDriveSetting,
-  shapeSource,
   smoothstep,
   sourceKey,
   type DriveMix,
@@ -77,12 +75,11 @@ import {
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
-import { isDefaultDriveSetting } from "../render/wireModifiers.ts";
 import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
-  driveAddGroups,
+  DRIVE_ADD_GROUPS,
   DRIVE_WHITE,
   driveGridDivisionLabel,
   driveSourceColor,
@@ -92,9 +89,9 @@ import {
   isGridSourceChoice,
   isLineSourceChoice,
   jackKey,
-  shapingNodeLabel,
 } from "./driveSources.ts";
-import { addShapingNode, getShapingNode, listShapingNodes, updateShapingNode } from "../render/shapingNodes.ts";
+import { freshWireMod, type WireMod, type WireModState } from "../render/wireMod.ts";
+import { createWireModControls, type WireModControls } from "./wireModControls.ts";
 import { installRowHints } from "./rowHints.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
@@ -102,7 +99,6 @@ import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading, type AudioMetersDeps } from "./audioMeters.ts";
-import { createShapingColumn } from "./shapingColumn.ts";
 import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
 import {
@@ -191,7 +187,7 @@ import {
   unitStyle,
 } from "./controlsKit.ts";
 import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render/gateWindow.ts";
-import { getGateFormula, setGateFormula } from "../render/gateFormulas.ts";
+import { getGateFormula, getWireGateFormula, setGateFormula, setWireGateFormula } from "../render/gateFormulas.ts";
 import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
 
 /**
@@ -241,11 +237,10 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * (that only writes the store and a readout) and never from the panel's
  * periodic refresh, matching the click-loss lesson in this file's carried
  * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
- * line per source (colour dot, name, weight 0–2×, a "+ Modifier" button on a
- * catalogue wire that puts a modifier (shaping node) on it, a hit source's Height
- * Graded/Fixed/Loud only while it still carries an old one, a grid source's
- * division chips, the line source's
- * Strength + Clear reusing lineEditor.strengthRow), a 4 s output graph off
+ * line per source (colour dot, name, weight 0–2×, a hit source's Height
+ * Graded/Fixed/Loud, a grid source's division chips, the line source's
+ * Strength + Clear reusing lineEditor.strengthRow, and under a catalogue
+ * wire its modifier: Window, Smoothness and Length, wireModControls.ts), a 4 s output graph off
  * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
@@ -266,8 +261,8 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * patch (onJackClick); with nothing pinned, it pins whichever setting was
  * last previewed (`lastPreview`, since `preview` itself goes back to null
  * the moment the pointer leaves) and plugs in in the same click, or shows a
- * toast if nothing ever was. A jack can also be dragged onto a setting, a
- * shaping node, or the middle column. Hovering a jack highlights every scene
+ * toast if nothing ever was. A jack can also be dragged onto a setting.
+ * Hovering a jack highlights every scene
  * row it already feeds (onJackHover, independent of the shown-setting highlight).
  * While a setting is shown, `refreshPatchHighlight` — called from every
  * place `pinned`/`preview`/a patch actually changes, never per frame —
@@ -571,8 +566,8 @@ export interface DeviceMenuDeps {
   onBandGainsReset: (sceneId: string) => void;
   /** A drive setting's whole patch plus the store-level editing helpers below, mirroring driveStore.ts's exports. Keyed per (scene, setting): two settings on one scene keep independent patches and drawn lines. */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
-  /** A shaping node's live input/output, panel open or closed. */
-  getShapingReading(id: string): { input: number; output: number; line: number; top: number } | null;
+  /** A catalogue wire's live modifier state (DriveEngine.wire): its input, output and window lines. */
+  getWireReading(sceneId: string, key: string, choice: SignalId): Readonly<WireModState> | null;
   /** Writes a whole DriveSetting (driveStore.ts's setDriveSetting), the primitive the narrower onSetXxx wrap. appendSettingRow's multi-item bridge uses it to copy a row's patch onto its `linked` siblings verbatim; right even for a "scene" choice, since items' scene defaults can differ. */
   onSetDriveSetting: (sceneId: string, spec: SceneSetting, setting: DriveSetting) => void;
   onResetDriveSetting: (sceneId: string, spec: SceneSetting) => void;
@@ -581,6 +576,8 @@ export interface DeviceMenuDeps {
   onTogglePatchSource: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice) => void;
   onSetSourceWeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number) => void;
   onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
+  /** A catalogue wire's modifier (src/render/wireMod.ts); null puts the plain wire back. */
+  onSetSourceMod: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, mod: WireMod | null) => void;
   /** Only on a plain Beat wave source line (drives.ts's setSourceEvery). */
   onSetSourceEvery: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number) => void;
   onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
@@ -2039,8 +2036,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const spectrumStrip = bandFaders.strip;
   // The functions referenced below are hoisted declarations further down this
   // closure (patch-bay section); none is called until createDeviceMenu() has
-  // finished, so referencing them early is safe. One bundle, shared by the
-  // meters and the shaping column (shapingColumn.ts).
+  // finished, so referencing them early is safe.
   // The real choice each jack element carries: its jackKey collapses beat-grid
   // divisions, and a drag needs the choice (registerJack, mountBandsJack).
   const jackChoices = new WeakMap<HTMLElement, DriveSourceChoice>();
@@ -2070,14 +2066,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       set: (partial) => deps.setHitShape(partial),
     },
     patch: jackPatch,
-  });
-  const shapingCol = createShapingColumn({
-    patch: jackPatch,
-    getReading: deps.getShapingReading,
-    onStructureChanged: shapingStructureChanged,
-    onLayout: scheduleCableRecompute,
-    onNodePress: toggleNodePin,
-    isNodePinned: (id) => pinnedNode === id,
   });
 
   const spectrumCol = document.createElement("div");
@@ -2169,9 +2157,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  One at a time; written only by togglePin(), Escape (onKeyDown), or a scene
    *  switch (renderSceneSettings's tail). */
   let pinned: { sceneId: string; spec: SceneSetting } | null = null;
-  /** A pinned shaping node (shapingColumn.ts): its chain stays lit, and a click on an input jack makes it read that input. Never set together with `pinned`. */
-  let pinnedNode: string | null = null;
-  let hoverNode: string | null = null;
   // Solo's on/off (setSolo/applySolo); declared here because togglePin and
   // every pinned panel's Solo chip read it.
   let soloOn = false;
@@ -3301,48 +3286,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return btn;
   }
 
-  /** "+ Modifier": puts a new shaping node (shapingNodes.ts) on this catalogue
-   *  wire and re-points the wire at it, so the picture doesn't change until the
-   *  node is edited. The node takes the wire's Height, and the setting's window
-   *  too when this is its only wire and the gate is on (the setting's own window
-   *  then goes off). */
-  function buildShapeButton(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
-    const choice = src.choice as SignalId;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.style.cssText = driveResetLinkStyle;
-    btn.textContent = "+ Modifier";
-    btn.setAttribute("aria-label", `Put a modifier on ${driveSourceLabel(src.choice)}`);
-    setHint(btn, "Put a modifier on this wire: it reads the same until you change the modifier.");
-    btn.addEventListener("click", () => {
-      const setting = deps.getDriveSetting(sceneId, spec);
-      if (setting === "scene") return;
-      const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
-      const gate = deps.getDriveThresholdState(sceneId, spec);
-      // The setting's own window moves into the node only when this is its only wire.
-      const carryGate = generic && gate.on && setting.sources.length === 1;
-      const node = addShapingNode(choice, {
-        height: src.height ?? "graded",
-        windowOn: carryGate,
-        ...(carryGate
-          ? {
-              min: gate.value,
-              max: deps.getDriveWindowMax(sceneId, spec),
-              smoothOn: deps.getDriveSmoothnessOn(sceneId, spec),
-              smoothness: deps.getDriveSmoothness(sceneId, spec),
-            }
-          : {}),
-      });
-      if (!node) {
-        showToast("No room for another modifier");
-        return;
-      }
-      deps.onSetDriveSetting(sceneId, spec, shapeSource(setting, src.choice, node.id));
-      if (carryGate) deps.onSetDriveThresholdOn(sceneId, spec, false);
-      patchChanged(sceneId, spec);
-      showToast(`This wire now runs through ${shapingNodeLabel(node.id)}`);
+  /** A catalogue wire's modifier controls (wireModControls.ts). Live-write,
+   *  no rebuild, as buildWeightSlider. */
+  function buildWireMod(sceneId: string, spec: SceneSetting, src: DriveSource & { choice: SignalId }, onLiveEdit: () => void): WireModControls {
+    const choice = src.choice;
+    return createWireModControls({
+      label: driveSourceLabel(choice),
+      accent: driveSourceColor(choice),
+      mod: src.mod ?? freshWireMod(),
+      onChange: (mod) => {
+        deps.onSetSourceMod(sceneId, spec, choice, mod);
+        if (samePair(pinned, { sceneId, spec })) lastPinnedSetting = deps.getDriveSetting(sceneId, spec);
+        syncLinkedDriveSetting(sceneId, spec);
+        onLiveEdit();
+      },
+      // Dev only, while PR #544 picks Smoothness's formula (gateFormulas.ts's header).
+      formula: import.meta.env.DEV
+        ? { current: getWireGateFormula(sceneId, spec.key, choice), onPick: (f) => setWireGateFormula(sceneId, spec.key, choice, f) }
+        : undefined,
     });
-    return btn;
   }
 
   function buildSourceLine(
@@ -3352,6 +3314,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     src: DriveSource,
     i: number,
     onLiveEdit: () => void,
+    wireMods: { choice: SignalId; controls: WireModControls }[],
   ): HTMLElement {
     const isGate = patch.mix === "gate" && patch.sources.length > 1;
     const isCondition = isGate && !!src.when;
@@ -3396,9 +3359,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Fixed/Loud height only mean something for a hit-kind source: an
     // edge-kind catalogue entry or a beat grid (drives.ts's header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
-    // Only a wire still carrying an old Fixed/Loud shows Height; nodes own it
-    // now (the engine still honours it).
-    if (isHitKind && src.height !== undefined && src.height !== "graded") ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
     // Every-N-beats only means something for a plain Beat wave (DriveSource.every).
     if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
@@ -3410,12 +3371,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       drawHint.textContent = "Draw on the spectrum.";
       ctrls.appendChild(drawHint);
     } else {
-      // A catalogue wire can take a node, except a Beat wave on an every-N
-      // divider: shapeSource would drop that divider (DriveSource.every).
-      if (typeof src.choice === "string" && !(src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1)) {
-        ctrls.appendChild(buildShapeButton(sceneId, spec, src));
-      }
       ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
+    }
+    if (typeof src.choice === "string") {
+      const controls = buildWireMod(sceneId, spec, src as DriveSource & { choice: SignalId }, onLiveEdit);
+      wireMods.push({ choice: src.choice, controls });
+      ctrls.appendChild(controls.el);
     }
 
     line.append(gutter, muteBtn, dot, name, removeBtn, ctrls);
@@ -3450,7 +3411,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     } else {
       groupsHost.style.cssText = driveAddGroupsStyle;
     }
-    for (const group of driveAddGroups()) {
+    for (const group of DRIVE_ADD_GROUPS) {
       const row = document.createElement("div");
       row.style.cssText = driveAddGroupRowStyle;
       const label = document.createElement("b");
@@ -3800,9 +3761,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     spec: SceneSetting,
   ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives, slots: number) => void) | null } {
     wireHeatPips = [];
+    const wireMods: { choice: SignalId; controls: WireModControls }[] = [];
     const setting = deps.getDriveSetting(sceneId, spec);
     const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
-    // Legacy window rows: a saved Look from before shaping nodes (buildThresholdRow).
+    // Legacy window rows: a saved Look from before wire modifiers (buildThresholdRow).
     const generic = spec.drive?.threshold === undefined && !isEngineHitDriver(spec);
     const legacyWindow = generic && deps.getDriveThresholdState(sceneId, spec).on;
 
@@ -3831,7 +3793,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const hit = spec.drive?.hit;
       const readoutMoved = !!hit && hit.flatOnly === undefined && deps.getDriveReadout(sceneId, spec) !== (hit.readout ?? "flat");
       resetBtn.hidden =
-        !thresholdMoved && !smoothnessMoved && !readoutMoved && isDefaultDriveSetting(spec, deps.getDriveSetting(sceneId, spec));
+        !thresholdMoved && !smoothnessMoved && !readoutMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
@@ -3889,14 +3851,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
-      list.appendChild(buildSourceLine(sceneId, spec, patch, src, i, refreshResetVisibility));
+      list.appendChild(buildSourceLine(sceneId, spec, patch, src, i, refreshResetVisibility, wireMods));
     });
-    if (generic && patch.sources.some((s) => !isShapedChoice(s.choice))) {
-      const shapeNote = document.createElement("div");
-      shapeNote.style.cssText = driveEmptySrcStyle;
-      shapeNote.textContent = "Window, Smoothness, Length and Height live on modifiers now. Press + Modifier on a wire to give it one.";
-      list.appendChild(shapeNote);
-    }
     panel.appendChild(list);
     panel.appendChild(buildAddChips(sceneId, spec, patch));
 
@@ -3906,17 +3862,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const graph = buildOutputGraph(sceneId, spec, patch);
       panel.appendChild(graph.el);
       outputCanvas = graph.canvas;
-      tick = graph.tick;
+      tick = (drives, slots) => {
+        graph.tick(drives, slots);
+        for (const w of wireMods) w.controls.update(deps.getWireReading(sceneId, spec.key, w.choice), true);
+      };
     }
     if (!generic || legacyWindow) {
       if (legacyWindow) {
         const legacyNote = document.createElement("div");
         legacyNote.style.cssText = driveEmptySrcStyle;
-        // Shape carries the window into the node only from a setting's only wire (buildShapeButton).
-        legacyNote.textContent =
-          patch.sources.length === 1
-            ? "This setting's own window, from before modifiers. Press + Modifier on its wire to move it into a modifier."
-            : "This setting's own window, from before modifiers. To move it, give its wires modifiers, set each one's window, then switch this Off.";
+        legacyNote.textContent = "This setting's own window, from before wires had their own. It acts after the wires mix; each wire's Window acts before.";
         panel.appendChild(legacyNote);
       }
       panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
@@ -4269,7 +4224,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  setting equal to the scene default is a reset, so Back after a Random
    *  leaves a lane on its default rather than a stored copy of it. */
   function setDriveFromWidget(sceneId: string, spec: SceneSetting, setting: DriveSetting): void {
-    if (isDefaultDriveSetting(spec, setting)) deps.onResetDriveSetting(sceneId, spec);
+    if (sameDriveSetting(setting, defaultDriveSetting(spec))) deps.onResetDriveSetting(sceneId, spec);
     else deps.onSetDriveSetting(sceneId, spec, setting);
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
     h?.refreshMeta();
@@ -4285,7 +4240,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cancelPendingPreview();
     const next = { sceneId, spec };
     pinned = samePair(pinned, next) ? null : next;
-    if (pinned) pinnedNode = null;
     preview = null;
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
@@ -4365,22 +4319,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return n;
   }
 
-  /** The pinned shaping node's input jack, when a node is pinned and no setting is — the node's input lights as the one it reads. */
-  function pinnedNodeInput(choice: DriveSourceChoice): boolean {
-    if (!pinnedNode) return false;
-    const node = getShapingNode(pinnedNode);
-    return !!node && jackKey(node.src) === jackKey(choice);
-  }
-
   function jackIsShown(choice: DriveSourceChoice): boolean {
     const sel = shownSelection();
-    if (!sel) return pinnedNodeInput(choice);
+    if (!sel) return false;
     const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
   function jackIsPinned(choice: DriveSourceChoice): boolean {
-    if (!pinned) return pinnedNodeInput(choice);
+    if (!pinned) return false;
     const setting = deps.getDriveSetting(pinned.sceneId, pinned.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
@@ -4404,7 +4351,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** `jackIsPinned`, but false for a muted source: its jack stays filled
    *  (still plugged in) while its row stops lighting (header's Muting). */
   function jackIsPinnedActive(choice: DriveSourceChoice): boolean {
-    if (!pinned) return pinnedNodeInput(choice);
+    if (!pinned) return false;
     const src = sourceForChoice(deps.getDriveSetting(pinned.sceneId, pinned.spec), choice);
     return !!src && !src.off;
   }
@@ -4448,10 +4395,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
     const name = driveSourceLabel(choice);
-    if (pinnedNode && getShapingNode(pinnedNode)) {
-      const aria = typeof choice === "string" ? `Make ${shapingNodeLabel(pinnedNode)} read ${name}` : `${name} — a modifier reads one input node`;
-      return { aria, title: name };
-    }
     const target = jackTarget();
     if (!target) return { aria: `${name} — pick a setting first`, title: name };
     const already = jackFeeds(target, choice);
@@ -4464,12 +4407,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  click does now. */
   function jackTooltipLines(choice: DriveSourceChoice): string[] {
     const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
-    const heat = audioMeters.jackHeatText(choice) ?? shapingCol.jackHeatText(choice);
+    const heat = audioMeters.jackHeatText(choice);
     const tail = heat ? [heat] : [];
-    if (pinnedNode && getShapingNode(pinnedNode)) {
-      const line2 = typeof choice === "string" ? `Click to make ${shapingNodeLabel(pinnedNode)} read this` : "A modifier reads one input node";
-      return [line1, line2, ...tail];
-    }
     const target = jackTarget();
     if (!target) return [line1, "Pin a setting first", ...tail];
     const line2 = jackFeeds(target, choice) ? `Click to unplug from ${target.spec.label}` : `Click to plug into ${target.spec.label}`;
@@ -4483,20 +4422,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function onJackClick(choice: DriveSourceChoice): void {
     if (jackDragJustEnded) return;
-    if (pinnedNode) {
-      const node = getShapingNode(pinnedNode);
-      if (node) {
-        if (typeof choice !== "string") {
-          showToast("A modifier reads one input node");
-          return;
-        }
-        if (node.src !== choice) {
-          updateShapingNode(node.id, { src: choice });
-          showToast(`${shapingNodeLabel(node.id)} now reads ${driveSourceLabel(choice)}`);
-        }
-        return;
-      }
-    }
     const target = jackTarget();
     if (!target) {
       showToast("Pick a setting first");
@@ -4518,56 +4443,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let dropTargetEl: HTMLElement | null = null;
   const DRAG_START_PX = 5;
 
-  type DropTarget =
-    | { kind: "setting"; el: HTMLElement; sceneId: string; spec: SceneSetting }
-    | { kind: "node"; el: HTMLElement; id: string }
-    | { kind: "column"; el: HTMLElement };
+  type DropTarget = { el: HTMLElement; sceneId: string; spec: SceneSetting };
 
-  /** What a jack dropped at (x, y) lands on. A node's own jack (a shaped choice) only lands on a setting. */
-  function dropTargetAt(x: number, y: number, choice: DriveSourceChoice): DropTarget | null {
+  /** The drive setting a jack dropped at (x, y) lands on. */
+  function dropTargetAt(x: number, y: number): DropTarget | null {
     const under = document.elementFromPoint(x, y);
     if (!under) return null;
     const sceneId = deps.currentSceneId();
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.drive && r.rowEl.contains(under));
-    if (h) return { kind: "setting", el: h.rowEl, sceneId, spec: h.spec };
-    if (typeof choice !== "string") return null;
-    const nodeEl = under.closest<HTMLElement>(".vc-shape-node");
-    if (nodeEl?.dataset.nodeId) return { kind: "node", el: nodeEl, id: nodeEl.dataset.nodeId };
-    if (under.closest(".vc-shape-col")) return { kind: "column", el: shapingCol.el };
-    return null;
+    return h ? { el: h.rowEl, sceneId, spec: h.spec } : null;
   }
 
   /** Plugging never unplugs: dropping a wire that is already there just pins its setting. */
   function dropJack(choice: DriveSourceChoice, t: DropTarget): void {
-    if (t.kind === "setting") {
-      pinSetting(t.sceneId, t.spec);
-      if (!jackFeeds({ sceneId: t.sceneId, spec: t.spec }, choice)) {
-        justAddedKey = jackKey(choice);
-        deps.onTogglePatchSource(t.sceneId, t.spec, choice);
-        patchChanged(t.sceneId, t.spec);
-        showToast(`${driveSourceLabel(choice)} → ${t.spec.label}`);
-      }
-      return;
+    pinSetting(t.sceneId, t.spec);
+    if (!jackFeeds({ sceneId: t.sceneId, spec: t.spec }, choice)) {
+      justAddedKey = jackKey(choice);
+      deps.onTogglePatchSource(t.sceneId, t.spec, choice);
+      patchChanged(t.sceneId, t.spec);
+      showToast(`${driveSourceLabel(choice)} → ${t.spec.label}`);
     }
-    if (typeof choice !== "string") return;
-    if (t.kind === "node") {
-      const node = getShapingNode(t.id);
-      if (!node) return;
-      if (node.src !== choice) {
-        updateShapingNode(node.id, { src: choice });
-        showToast(`${shapingNodeLabel(node.id)} now reads ${driveSourceLabel(choice)}`);
-      }
-      if (pinnedNode !== node.id) toggleNodePin(node.id);
-      return;
-    }
-    const node = addShapingNode(choice);
-    if (!node) {
-      showToast("No room for another modifier");
-      return;
-    }
-    showToast(`New modifier: ${shapingNodeLabel(node.id)}. Drag its jack onto a setting.`);
-    // Pinned after the add: the column rebuilds itself from the store.
-    toggleNodePin(node.id);
   }
 
   function setDropTarget(el: HTMLElement | null): void {
@@ -4601,7 +4496,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       hideTooltip();
     }
     cableLayer.setDrag({ from: d.el, x: e.clientX, y: e.clientY, color: driveSourceColor(d.choice) });
-    setDropTarget(dropTargetAt(e.clientX, e.clientY, d.choice)?.el ?? null);
+    setDropTarget(dropTargetAt(e.clientX, e.clientY)?.el ?? null);
   });
   window.addEventListener("pointerup", (e) => {
     const d = jackDrag;
@@ -4612,7 +4507,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     setTimeout(() => {
       jackDragJustEnded = false;
     }, 0);
-    const t = dropTargetAt(e.clientX, e.clientY, d.choice);
+    const t = dropTargetAt(e.clientX, e.clientY);
     if (t) dropJack(d.choice, t);
   });
   window.addEventListener("pointercancel", (e) => {
@@ -4724,21 +4619,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let lastCableTickMs = performance.now();
   const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
 
-  /** A shaping node was added or removed (shapingColumn.ts). */
-  function shapingStructureChanged(): void {
-    if (pinnedNode && !getShapingNode(pinnedNode)) pinnedNode = null;
-    if (hoverNode && !getShapingNode(hoverNode)) hoverNode = null;
-    for (const h of driveRowHandles) {
-      h.refreshMeta();
-      h.rebuildIfPinned();
-    }
-    refreshLineMode();
-    refreshPatchHighlight();
-  }
-
   function combinedJackElements(): ReadonlyMap<string, HTMLElement> {
     const merged = new Map(audioMeters.jackElements());
-    for (const [k, v] of shapingCol.jackElements()) merged.set(k, v);
     for (const [k, v] of bandsJackEls) merged.set(k, v);
     return merged;
   }
@@ -4819,11 +4701,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cableRecomputeQueued = true;
     requestAnimationFrame(() => {
       cableRecomputeQueued = false;
-      placeShapingColumn();
+      placeSetupColumn();
       positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
-      cableLayer.recompute(pinnedGroup, previewGroup, [...shapingCol.feedGroups(combinedJackElements()), ...litSignalFan()]);
+      cableLayer.recompute(pinnedGroup, previewGroup, litSignalFan());
     });
   }
 
@@ -4854,13 +4736,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   root.addEventListener("pointerover", (e) => {
     if (e.pointerType === "touch") return;
     setLitJackRows(jackRowOf(e.target), focusJackRow);
-    const card = e.target instanceof Element ? e.target.closest<HTMLElement>(".vc-shape-node") : null;
-    setHoverNode(card?.dataset.nodeId ?? null);
   });
-  root.addEventListener("pointerleave", () => {
-    setLitJackRows(null, focusJackRow);
-    setHoverNode(null);
-  });
+  root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
 
@@ -4981,7 +4858,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  scheduleCableRecompute() does the measuring. */
   function refreshPatchHighlight(): void {
     audioMeters.refreshPatchView();
-    shapingCol.refreshPatchView();
     refreshBandsJacks();
     refreshSpectrumDriveHighlight();
     spectrumCol.classList.toggle("vc-patching", isAnythingShown());
@@ -4989,33 +4865,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     scheduleCableRecompute();
   }
 
-  // ---- Patch focus across the three columns (patchChain.ts) ----
+  // ---- Patch focus across the panel's columns (patchChain.ts) ----
   // chainGraph() reads the patch as plain keys; refreshChain() paints it. Runs
   // only on focus and patch changes, never per frame.
 
-  /** A pinned shaping node's pin toggle (shapingColumn.ts onNodePress). Pinning one unpins any setting. */
-  function toggleNodePin(id: string): void {
-    const next = pinnedNode === id ? null : id;
-    if (next && pinned) togglePin(pinned.sceneId, pinned.spec);
-    pinnedNode = next;
-    refreshPatchHighlight();
-    scheduleCableRecompute();
-  }
-
-  function setHoverNode(id: string | null): void {
-    if (id === hoverNode) return;
-    hoverNode = id;
-    refreshChain();
-    scheduleCableRecompute();
-  }
-
-  /** What the panel's chain light follows (patchChain.ts): a hovered node card, a hovered or keyboard-focused input row, a previewed setting, a pinned node, a pinned setting — in that order. */
+  /** What the panel's chain light follows (patchChain.ts): a hovered or keyboard-focused input row, a previewed setting, a pinned setting — in that order. */
   function shownChainFocus(): ChainFocus | null {
-    if (hoverNode) return { kind: "node", id: hoverNode };
     const row = hoverJackRow ?? focusJackRow;
     if (row) {
-      const card = row.closest<HTMLElement>(".vc-shape-node");
-      if (card?.dataset.nodeId) return { kind: "node", id: card.dataset.nodeId };
       const keyOfEl = new Map<HTMLElement, string>();
       for (const [key, el] of combinedJackElements()) keyOfEl.set(el, key);
       const keys: string[] = [];
@@ -5027,14 +4884,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     const ap = activePreview();
     if (ap) return { kind: "setting", key: ap.spec.key };
-    if (pinnedNode) return { kind: "node", id: pinnedNode };
     if (pinned?.spec.drive) return { kind: "setting", key: pinned.spec.key };
     return null;
   }
 
-  /** The patch as plain keys (patchChain.ts's ChainGraph): every shaping node with its own jack key and its input's, and every wired setting in the active scene with its wires' jack keys. */
+  /** The patch as plain keys (patchChain.ts's ChainGraph): every wired setting in the active scene with its wires' jack keys. */
   function chainGraph(): ChainGraph {
-    const nodes = listShapingNodes().map((n) => ({ id: n.id, key: jackKey({ source: "shaped", id: n.id }), inputKey: jackKey(n.src) }));
     const sceneId = deps.currentSceneId();
     const settings: ChainGraph["settings"][number][] = [];
     for (const h of driveRowHandles) {
@@ -5042,23 +4897,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const setting = deps.getDriveSetting(h.sceneId, h.spec);
       settings.push({ key: h.spec.key, wireKeys: setting === "scene" ? [] : setting.sources.map((s) => jackKey(s.choice)) });
     }
-    return { nodes, settings };
+    return { settings };
   }
 
-  /** Paints the chain of shownChainFocus(): glows the settings, shaping nodes and input rows on it, marks the focused node, and root's vc-chain-on switches the glow on. */
+  /** Paints the chain of shownChainFocus(): glows the settings and input rows on it, and root's vc-chain-on switches the glow on. */
   function refreshChain(): void {
     const focus = shownChainFocus();
     const chain = focus ? chainOf(chainGraph(), focus) : null;
     root.classList.toggle("vc-chain-on", chain !== null);
     for (const h of driveRowHandles) h.rowEl.classList.toggle("vc-chain-lit", !!chain && chain.settings.has(h.spec.key));
-    shapingCol.setChain(chain ? chain.nodes : null, focus?.kind === "node" ? focus.id : null);
-    // Input rows: only for an input or node focus — a setting's focus already marks the meters through .vc-patching.
-    const litInputs = focus !== null && focus.kind !== "setting";
+    // Input rows: only for an input focus — a setting's focus already marks the meters through .vc-patching.
+    const litInputs = focus?.kind === "input";
     const rowLit = new Map<HTMLElement, boolean>();
     // The Bands card's level and stem jacks sit beside rows of their own (mountBandsJack's feedEl), not inside a .vc-row.
     const bandsFeed = new Map<HTMLElement, HTMLElement>(bandsJacks.map((b) => [b.jack.el, b.feedEl]));
     for (const [key, el] of combinedJackElements()) {
-      if (shapingCol.el.contains(el)) continue;
       const row = bandsFeed.get(el) ?? el.closest<HTMLElement>(".vc-row");
       if (!row) continue;
       rowLit.set(row, (rowLit.get(row) ?? false) || (!!chain && chain.inputs.has(key)));
@@ -5066,17 +4919,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-lit", litInputs && lit);
   }
 
-  // The middle column's place in the open gap, shared by the Setup column,
-  // which takes the same spot (controlsTheme.ts's .vc-shape-col and .vc-setup
+  // The Setup column's place in the open gap (controlsTheme.ts's .vc-setup
   // rules are only the fallback before the first placement).
-  const SHAPE_COL_MIN_PX = 240;
-  const SHAPE_COL_MAX_PX = 300;
-  const SHAPE_COL_GAP_PX = 16;
-  /** Matches .vc-shape-col's CSS top (controlsTheme.ts). */
-  const SHAPE_COL_TOP_PX = 60;
-  /** What .vc-shape-col's max-height leaves below its top (the CSS fallback's own subtraction). */
-  const SHAPE_COL_BELOW_PX = 90;
-  const SHAPE_COL_CLEAR = { left: "", top: "", width: "", maxHeight: "" };
+  const SETUP_COL_MIN_PX = 240;
+  const SETUP_COL_MAX_PX = 300;
+  const SETUP_COL_GAP_PX = 16;
+  /** Matches .vc-setup's CSS top (controlsTheme.ts). */
+  const SETUP_COL_TOP_PX = 60;
+  /** What .vc-setup's max-height leaves below its top (the CSS fallback's own subtraction). */
+  const SETUP_COL_BELOW_PX = 90;
+  const SETUP_COL_CLEAR = { left: "", top: "", width: "", maxHeight: "" };
 
   /** Writes each inline value only when it differs, since this runs on every scroll's recompute. */
   function setPlacement(el: HTMLElement, p: { left: string; top: string; width: string; maxHeight: string }): void {
@@ -5087,34 +4939,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
   }
 
-  /** Places the shaping column, and the Setup column in the same spot, in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col and .vc-setup set the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. */
-  function placeShapingColumn(): void {
+  /** Places the Setup column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-setup sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SETUP_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. */
+  function placeSetupColumn(): void {
     if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
-      setPlacement(shapingCol.el, SHAPE_COL_CLEAR);
-      setPlacement(audioMeters.setupEl, SHAPE_COL_CLEAR);
+      setPlacement(audioMeters.setupEl, SETUP_COL_CLEAR);
       return;
     }
     const meters = spectrumCol.getBoundingClientRect();
     const settings = controlsCol.getBoundingClientRect();
     const powerRect = powerCol.querySelector<HTMLElement>(".vc-power-card")?.getBoundingClientRect();
     const power = powerRect && powerRect.width > 0 ? powerRect : null;
-    const left0 = meters.right + SHAPE_COL_GAP_PX;
-    let right0 = (power ? power.left : settings.left) - SHAPE_COL_GAP_PX;
-    let top = SHAPE_COL_TOP_PX;
-    if (right0 - left0 < SHAPE_COL_MIN_PX && power) {
-      right0 = settings.left - SHAPE_COL_GAP_PX;
-      top = Math.max(SHAPE_COL_TOP_PX, power.bottom + 8);
+    const left0 = meters.right + SETUP_COL_GAP_PX;
+    let right0 = (power ? power.left : settings.left) - SETUP_COL_GAP_PX;
+    let top = SETUP_COL_TOP_PX;
+    if (right0 - left0 < SETUP_COL_MIN_PX && power) {
+      right0 = settings.left - SETUP_COL_GAP_PX;
+      top = Math.max(SETUP_COL_TOP_PX, power.bottom + 8);
     }
-    const width = Math.max(0, Math.min(SHAPE_COL_MAX_PX, right0 - left0));
+    const width = Math.max(0, Math.min(SETUP_COL_MAX_PX, right0 - left0));
     const left = left0 + (right0 - left0 - width) / 2;
-    const placement = {
+    setPlacement(audioMeters.setupEl, {
       left: `${Math.round(left)}px`,
       top: `${Math.round(top)}px`,
       width: `${Math.round(width)}px`,
-      maxHeight: `calc(var(--vc-vh) - ${Math.round(top + SHAPE_COL_BELOW_PX)}px)`,
-    };
-    setPlacement(shapingCol.el, placement);
-    setPlacement(audioMeters.setupEl, placement);
+      maxHeight: `calc(var(--vc-vh) - ${Math.round(top + SETUP_COL_BELOW_PX)}px)`,
+    });
   }
 
   // A hover-scheduled preview change not yet committed (wireHoverFocus's
@@ -5210,8 +5059,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   controlsCol.className = "vc-controls-col vc-scroll";
   cableColumnsRO.observe(controlsCol);
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
-  cableColumnsRO.observe(shapingCol.el);
-  shapingCol.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
   cableColumnsRO.observe(audioMeters.setupEl);
   audioMeters.setupEl.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
@@ -6977,7 +6824,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     root.classList.toggle("vc-setup-open", open);
     audioMeters.setSetupOpen(open);
     setupBtn.style.color = open ? "#fff" : "inherit";
-    placeShapingColumn();
+    placeSetupColumn();
     scheduleCableRecompute();
   }
   setSetupShown(!isFolded(SETUP_COLUMN, true));
@@ -7130,7 +6977,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     : null;
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
-  root.append(columnsWrap, controlsCol, shapingCol.el, audioMeters.setupEl);
+  root.append(columnsWrap, controlsCol, audioMeters.setupEl);
   // Every card is built once and lives for the panel's lifetime: one pass covers them (cableColumnsRO).
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
   document.body.appendChild(root);
@@ -7227,13 +7074,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (isTypingTarget(e.target)) return;
     if (e.key === "Escape" && jackDrag?.moved) {
       clearJackDrag();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === "Escape" && pinnedNode) {
-      pinnedNode = null;
-      refreshPatchHighlight();
-      scheduleCableRecompute();
       e.preventDefault();
       return;
     }
@@ -7420,7 +7260,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (!isOpen || !draw) {
         audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
-        shapingCol.update(frame?.level ?? null, false);
         return;
       }
       // A scene switch leaves `pinned` on a setting of another scene; checked
@@ -7428,7 +7267,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // however the switch happened. Cheap when nothing changed.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
-      shapingCol.update(frame?.level ?? null, true);
       // Unthrottled: the live row's meter should track frame.level like any
       // other live meter, not the structural-refresh cadence.
       sourceRow.updateMeters(frame?.level ?? null);

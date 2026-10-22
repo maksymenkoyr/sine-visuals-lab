@@ -3,10 +3,9 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
 import { fitCustom, getCustomValue, resetCustomValue, setCustomValue, stretchSlider } from "./customValues.ts";
-import { isShapedChoice, remapShapedSources, type DriveSetting } from "./drives.ts";
-import { isDefaultDriveSetting } from "./wireModifiers.ts";
+import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
 import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
-import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingNodeDef, shapingNodeDef, type ShapingNodeDef } from "./shapingNodes.ts";
+import { LEGACY_NODE_ID_RE, legacyNodeFrom, type LegacyNode } from "./wireMod.ts";
 
 /**
  * Named, shareable snapshots of one scene's own settings — the sliders in the
@@ -65,9 +64,11 @@ import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingN
  * link built by this app for a setting nobody has multi-sourced still
  * decodes on that older app. Anything else (more than one source, a non-
  * `add` mix, a non-1 weight, a non-Graded height, a marked condition, or a
- * muted source) encodes as the compact patch `{m: DriveMix, s: [{c:
- * DriveChoice, w?: number, h?: HitHeight, g?: 1, o?: 1}, …]}` — a source's
- * own `g`/`o` are `DriveSource.when`/`.off` (drives.ts's own header covers
+ * muted source, a wire modifier) encodes as the compact patch `{m: DriveMix,
+ * s: [{c: DriveChoice, w?: number, h?: HitHeight, g?: 1, o?: 1, x?: …}, …]}`
+ * — a source's own `g`/`o` are `DriveSource.when`/`.off`, `x` its modifier
+ * (wireMod.ts), and an old app ignores an `x` it does not know, reading
+ * that wire plain (drives.ts's own header covers
  * what each does) — an old app ignores a `d` entry it can't parse as a plain
  * choice the same way it ignores `d` itself (ignore the unknown shape, fall
  * back to the setting's own default). This is the exact same
@@ -77,13 +78,12 @@ import { adoptShapingNodes, getShapingNode, SHAPING_NODE_ID_RE, sanitizeShapingN
  * existed — so `encodeDriveSetting`/`sanitizeDriveSetting` (driveStore.ts)
  * are reused here rather than re-derived.
  *
- * The `h` field carries the shaping nodes a Look's wires use (shapingNodes.ts),
- * because node ids are per device: each id in `d` is a key of `h`, with the
- * node's definition as its value. Applying the Look reuses an identical local
- * node or creates one (adoptShapingNodes) and rewires to it. An app from
- * before shaping nodes rejects a code whose `d` wires to one, since its
- * sanitizeDriveSetting does not know the shape, so that whole code does not
- * open there.
+ * The `h` field is read, never written: while modifiers were cards of their
+ * own, a code's wires named them (`{source:"shaped", id}` in `d`) and `h`
+ * carried each one's definition by that id. Decoding turns each such wire
+ * into the plain wire carrying that modifier (driveStore.ts's
+ * sanitizeDriveSetting), and a saved Look of that age is converted the same
+ * way when the store loads (migrateLegacyLook).
  */
 export interface SceneLook {
   name: string;
@@ -97,8 +97,7 @@ export interface SceneLook {
   /** Each drive setting's captured `DriveSetting` (src/render/drives.ts),
    *  only for a setting whose setting isn't already its own `drive.default`
    *  — same "only what a plain apply wouldn't already reproduce" rule as
-   *  `manual`, compared with `isDefaultDriveSetting` (a wire through a
-   *  neutral modifier counts as the plain default wire, wireModifiers.ts). Omitted entirely when every
+   *  `manual`. Omitted entirely when every
    *  drive setting was already at its default, and always on a Look
    *  captured before this field existed; applyLook treats a key absent here
    *  the same way it treats one absent from `manual` — back to default,
@@ -107,9 +106,6 @@ export interface SceneLook {
   /** The palette (palette.ts id) showing when the look was saved; absent on
    *  a look saved before looks carried one. */
   paletteId?: string;
-  /** The definitions of every shaping node `drives` wires to, keyed by the
-   *  id used in `drives` (shapingNodes.ts). Omitted when no wire reaches one. */
-  shapingNodes?: Record<string, ShapingNodeDef>;
 }
 
 const STORAGE_KEY = "vibe.looks";
@@ -134,7 +130,55 @@ function loadInitial(): Store {
   }
 }
 
+/** `h`'s entries (this file's header) by id, or null when any is malformed. */
+function legacyNodesOf(raw: unknown): Map<string, LegacyNode> | null {
+  const out = new Map<string, LegacyNode>();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  for (const [id, value] of Object.entries(raw)) {
+    if (!LEGACY_NODE_ID_RE.test(id)) return null;
+    const node = legacyNodeFrom(value);
+    if (node === null) return null;
+    out.set(id, node);
+  }
+  return out;
+}
+
+/** A Look saved while modifiers were cards of their own: its `shapingNodes`
+ *  folded into its wires (this file's header). Returns whether it changed. */
+function migrateLegacyLook(look: SceneLook & { shapingNodes?: unknown }): boolean {
+  if (look.shapingNodes === undefined) return false;
+  const nodes = legacyNodesOf(look.shapingNodes) ?? new Map<string, LegacyNode>();
+  delete look.shapingNodes;
+  if (!look.drives) return true;
+  for (const [key, setting] of Object.entries(look.drives)) {
+    const raw = setting === "scene" ? "scene" : { m: setting.mix, s: setting.sources.map((src) => ({ ...encodeSource(src), c: src.choice })) };
+    const next = sanitizeDriveSetting(raw, nodes);
+    if (next === null) delete look.drives[key];
+    else look.drives[key] = next;
+  }
+  return true;
+}
+
+/** One stored source's fields besides its choice (driveStore.ts's compact form). */
+function encodeSource(src: { weight: number; height?: string; when?: true; off?: true; every?: number }): Record<string, unknown> {
+  return {
+    w: src.weight,
+    ...(src.height !== undefined ? { h: src.height } : {}),
+    ...(src.when ? { g: 1 } : {}),
+    ...(src.off ? { o: 1 } : {}),
+    ...(src.every !== undefined ? { e: src.every } : {}),
+  };
+}
+
 const cache: Store = loadInitial();
+{
+  let changed = false;
+  for (const list of Object.values(cache)) {
+    if (!Array.isArray(list)) continue;
+    for (const look of list) if (look && typeof look === "object" && migrateLegacyLook(look)) changed = true;
+  }
+  if (changed) persist();
+}
 
 function persist(): void {
   try {
@@ -199,7 +243,6 @@ export function deleteLook(sceneId: string, name: string): void {
 export function captureLook(name: string, sceneId: string, specs: readonly SceneSetting[]): SceneLook {
   const manual: Record<string, number> = {};
   let drives: Record<string, DriveSetting> | undefined;
-  let shapingNodes: Record<string, ShapingNodeDef> | undefined;
   for (const spec of specs) {
     // The variant (SceneSetting.variant) is always carried, auto or not:
     // every other key is stored per variant option, so a Look that left it
@@ -211,20 +254,11 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
     }
     if (spec.drive) {
       const setting = getDriveSetting(sceneId, spec);
-      // A default through neutral modifiers is still the default: left out,
-      // so applying the Look resets it (src/render/wireModifiers.ts).
-      if (isDefaultDriveSetting(spec, setting)) continue;
+      if (sameDriveSetting(setting, defaultDriveSetting(spec))) continue;
       (drives ??= {})[spec.key] = setting;
-      for (const src of setting === "scene" ? [] : setting.sources) {
-        if (!isShapedChoice(src.choice)) continue;
-        const node = getShapingNode(src.choice.id);
-        if (node) {
-          (shapingNodes ??= {})[node.id] = shapingNodeDef(node);
-        }
-      }
     }
   }
-  return { name, sceneId, manual, drives, shapingNodes };
+  return { name, sceneId, manual, drives };
 }
 
 /** Sets every spec in the scene — pins the keys the Look lists, and returns
@@ -233,8 +267,6 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
  *  `SceneSetting.drive` spec's setting: listed in `look.drives` -> set to
  *  that setting, absent -> back to `spec.drive.default`. */
 export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void {
-  // The look's node ids are per device: reuse or add local nodes, then rewire.
-  const idMap = adoptShapingNodes(look.shapingNodes ?? {});
   // The variant goes first (sceneSettings.ts's variantFirst): every other
   // key is stored per variant option, so it has to be switched before they
   // are written or the Look would land in the profile being left.
@@ -261,7 +293,7 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
     }
     if (spec.drive) {
       const setting = look.drives?.[spec.key];
-      if (setting !== undefined) setDriveSetting(look.sceneId, spec, remapShapedSources(setting, idMap));
+      if (setting !== undefined) setDriveSetting(look.sceneId, spec, setting);
       else resetDriveSetting(look.sceneId, spec);
     }
   }
@@ -302,7 +334,6 @@ export function encodeLook(look: SceneLook): string {
     m: Record<string, number>;
     d?: Record<string, StoredDriveSetting>;
     p?: string;
-    h?: Record<string, ShapingNodeDef>;
   } = {
     v: CODE_VERSION,
     n: look.name,
@@ -317,7 +348,6 @@ export function encodeLook(look: SceneLook): string {
     for (const [key, setting] of Object.entries(look.drives)) payload.d[key] = encodeDriveSetting(setting);
   }
   if (look.paletteId) payload.p = look.paletteId;
-  if (look.shapingNodes && Object.keys(look.shapingNodes).length > 0) payload.h = look.shapingNodes;
   const bytes = strToU8(JSON.stringify(payload));
   const plain = bytesToBase64Url(bytes);
   const packed = COMPRESSED_PREFIX + bytesToBase64Url(deflateSync(bytes, { level: 9 }));
@@ -335,29 +365,21 @@ export function decodeLook(code: string): SceneLook | null {
       if (typeof value !== "number" || !Number.isFinite(value)) return null;
       manual[key] = value;
     }
+    // `h`: the modifiers a code from before wire modifiers named (header).
+    const nodes = parsed.h === undefined ? new Map<string, LegacyNode>() : legacyNodesOf(parsed.h);
+    if (nodes === null) return null;
     let drives: Record<string, DriveSetting> | undefined;
     if (parsed.d !== undefined) {
       if (!parsed.d || typeof parsed.d !== "object") return null;
       drives = {};
       for (const [key, value] of Object.entries(parsed.d)) {
-        const setting = sanitizeDriveSetting(value);
+        const setting = sanitizeDriveSetting(value, nodes);
         if (setting === null) return null;
         drives[key] = setting;
       }
     }
     const paletteId = typeof parsed.p === "string" && parsed.p ? parsed.p : undefined;
-    let shapingNodes: Record<string, ShapingNodeDef> | undefined;
-    if (parsed.h !== undefined) {
-      if (!parsed.h || typeof parsed.h !== "object" || Array.isArray(parsed.h)) return null;
-      shapingNodes = {};
-      for (const [id, value] of Object.entries(parsed.h)) {
-        if (!SHAPING_NODE_ID_RE.test(id)) return null;
-        const def = sanitizeShapingNodeDef(value);
-        if (def === null) return null;
-        shapingNodes[id] = def;
-      }
-    }
-    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives, paletteId, shapingNodes };
+    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives, paletteId };
   } catch {
     return null;
   }

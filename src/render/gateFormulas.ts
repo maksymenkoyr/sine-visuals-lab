@@ -2,8 +2,8 @@
  * A dev build's per-setting pick of Smoothness's formula (gateWindow.ts's
  * GATE_FORMULAS). Temporary: while PR #544 picks which formula Smoothness
  * keeps, a dev build shows a picker under a Smoothness slider (ui/
- * gateFormulaPicker.ts), on a setting's own window and on a modifier's card,
- * and keeps the choice here, per setting and per modifier. A production
+ * gateFormulaPicker.ts), on a setting's own window and on a wire's modifier,
+ * and keeps the choice here, per setting and per wire. A production
  * build always runs GATE_FORMULA_DEFAULT. Once a formula is picked, this
  * file and the picker go.
  */
@@ -40,13 +40,13 @@ export function setGateFormula(sceneId: string, key: string, f: GateFormula): vo
   write(`${settingScope(sceneId, key)}:${key}`, f);
 }
 
-/** The formula a modifier's (shaping node's) window runs: its dev pick, or GATE_FORMULA_DEFAULT. */
-export function getNodeGateFormula(id: string): GateFormula {
-  return read(`node:${id}`);
+/** The formula a wire's modifier runs (wireMod.ts): its dev pick, or GATE_FORMULA_DEFAULT. */
+export function getWireGateFormula(sceneId: string, key: string, choice: string): GateFormula {
+  return read(`${settingScope(sceneId, key)}:${key}:${choice}`);
 }
 
-export function setNodeGateFormula(id: string, f: GateFormula): void {
-  write(`node:${id}`, f);
+export function setWireGateFormula(sceneId: string, key: string, choice: string, f: GateFormula): void {
+  write(`${settingScope(sceneId, key)}:${key}:${choice}`, f);
 }
 
 function read(k: string): GateFormula {
