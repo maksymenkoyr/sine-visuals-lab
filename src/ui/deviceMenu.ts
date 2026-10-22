@@ -131,7 +131,7 @@ import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./c
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import type { CastMode, PreviewSize } from "../render/outputPower.ts";
 import type { OutputRenderStatus } from "../net/outputSync.ts";
-import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
+import { isFolded, setFolded, METERS_COLUMN, SETUP_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
@@ -2059,6 +2059,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     registerJack: (el, choice) => jackChoices.set(el, choice),
   };
   const audioMeters = createAudioMeters({
+    openSetup: () => setSetupShown(true),
     heatSettings: heatSettingRows,
     onLufsReset: deps.onLufsReset,
     onTap: deps.onTap,
@@ -5065,8 +5066,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-lit", litInputs && lit);
   }
 
-  // The middle column's place in the open gap (controlsTheme.ts's
-  // .vc-shape-col rules are only the fallback before the first placement).
+  // The middle column's place in the open gap, shared by the Setup column,
+  // which takes the same spot (controlsTheme.ts's .vc-shape-col and .vc-setup
+  // rules are only the fallback before the first placement).
   const SHAPE_COL_MIN_PX = 240;
   const SHAPE_COL_MAX_PX = 300;
   const SHAPE_COL_GAP_PX = 16;
@@ -5077,18 +5079,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const SHAPE_COL_CLEAR = { left: "", top: "", width: "", maxHeight: "" };
 
   /** Writes each inline value only when it differs, since this runs on every scroll's recompute. */
-  function setShapePlacement(p: { left: string; top: string; width: string; maxHeight: string }): void {
-    const style = shapingCol.el.style;
+  function setPlacement(el: HTMLElement, p: { left: string; top: string; width: string; maxHeight: string }): void {
+    const style = el.style;
     if (style.left !== p.left) style.left = p.left;
     if (style.top !== p.top) style.top = p.top;
     if (style.width !== p.width) style.width = p.width;
     if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
   }
 
-  /** Places the shaping column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. */
+  /** Places the shaping column, and the Setup column in the same spot, in the open gap between the meters and the settings side (controlsTheme.ts's .vc-shape-col and .vc-setup set the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SHAPE_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. */
   function placeShapingColumn(): void {
     if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
-      setShapePlacement(SHAPE_COL_CLEAR);
+      setPlacement(shapingCol.el, SHAPE_COL_CLEAR);
+      setPlacement(audioMeters.setupEl, SHAPE_COL_CLEAR);
       return;
     }
     const meters = spectrumCol.getBoundingClientRect();
@@ -5104,12 +5107,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     const width = Math.max(0, Math.min(SHAPE_COL_MAX_PX, right0 - left0));
     const left = left0 + (right0 - left0 - width) / 2;
-    setShapePlacement({
+    const placement = {
       left: `${Math.round(left)}px`,
       top: `${Math.round(top)}px`,
       width: `${Math.round(width)}px`,
       maxHeight: `calc(var(--vc-vh) - ${Math.round(top + SHAPE_COL_BELOW_PX)}px)`,
-    });
+    };
+    setPlacement(shapingCol.el, placement);
+    setPlacement(audioMeters.setupEl, placement);
   }
 
   // A hover-scheduled preview change not yet committed (wireHoverFocus's
@@ -5207,6 +5212,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
   cableColumnsRO.observe(shapingCol.el);
   shapingCol.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+  cableColumnsRO.observe(audioMeters.setupEl);
+  audioMeters.setupEl.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
   // Global "Auto" master switch: toggles every auto-capable row (app.ts's
   // isSceneAuto). Overlaps the Input card's Auto button (micAuto.ts header) on
@@ -6864,7 +6871,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const hideBtn = makeFooterBtn("hide", "H", () => close());
   hideBtn.textContent = "Hide UI  H";
   hideBtn.title = "Close the panel (H)";
-  footer.append(keysBtn, soloBtn, metersBtn, hideBtn);
+  // No shortcut yet (keyHints.ts): a key for Setup is the owner's call.
+  const setupBtn = document.createElement("button");
+  setupBtn.type = "button";
+  setupBtn.style.cssText = footerBtnStyle;
+  setupBtn.className = "vc-setup-btn";
+  setupBtn.textContent = "Setup";
+  setupBtn.title = "Check the input: waveform, input level, loudness, gate, hit shape and heat history";
+  setupBtn.addEventListener("click", () => {
+    const open = !root.classList.contains("vc-setup-open");
+    // Setup hides with the left column (vc-meters-hidden), so opening it brings that back.
+    if (open && isFolded(METERS_COLUMN)) setMetersHidden(false);
+    setSetupShown(open);
+  });
+  footer.append(setupBtn, keysBtn, soloBtn, metersBtn, hideBtn);
 
   // The keys list behind "Keys": one row per keyHints.ts SHORTCUTS entry,
   // built here since a row is also this file's hover/click target. Hover
@@ -6951,6 +6971,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshColumnsFold();
   }
   setMetersHidden(isFolded(METERS_COLUMN));
+
+  function setSetupShown(open: boolean): void {
+    setFolded(SETUP_COLUMN, !open, true);
+    root.classList.toggle("vc-setup-open", open);
+    audioMeters.setSetupOpen(open);
+    setupBtn.style.color = open ? "#fff" : "inherit";
+    placeShapingColumn();
+    scheduleCableRecompute();
+  }
+  setSetupShown(!isFolded(SETUP_COLUMN, true));
 
   // ---- solo ----
   /** The heat lens on or off (HEAT chip and L). Session-only view state, like Solo. */
@@ -7100,7 +7130,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     : null;
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
-  root.append(columnsWrap, controlsCol, shapingCol.el);
+  root.append(columnsWrap, controlsCol, shapingCol.el, audioMeters.setupEl);
   // Every card is built once and lives for the panel's lifetime: one pass covers them (cableColumnsRO).
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
   document.body.appendChild(root);

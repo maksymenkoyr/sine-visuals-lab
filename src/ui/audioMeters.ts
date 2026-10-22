@@ -63,7 +63,6 @@ import {
 import {
   chipBtnLitStyle,
   chipBtnStyle,
-  createAdvancedSection,
   createCard,
   createChipButton,
   createTraceLegend,
@@ -110,7 +109,11 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * runs, Beat is everything about *when*, Song is the slow trend over a whole
  * track.
  *
- *  - Signal (first): everything this device's own mic measures, before any
+ *  - Setup view (setupEl, opened from the panel footer): the rows checked
+ *    once per set, in three cards: Input check, Hit shape and the Heat
+ *    history card. The Dynamics card (foldId "signal", first in the meters
+ *    column) keeps only Level and History.
+ *  - Input check: everything this device's own mic measures, before any
  *    beat/tempo logic runs — Waveform leads it off: a rolling picture of the
  *    last few seconds with a clip warning, read straight off this device's
  *    mic by waveformAnalyser.ts. A phone or iPad following another device
@@ -119,13 +122,24 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    two-sample `mono`, so each column shows the frame covering it. With
  *    neither (a synthetic feed) the row hides itself. (No stereo
  *    width/balance: a phone or laptop mic is mono, so they'd read "mono"
- *    nearly always.) Then Level: FeatureFrame.level (pre-AGC, absolute).
+ *    nearly always.) Then Input level: FeatureFrame.level (pre-AGC, absolute).
  *    LUFS next — the broadcast measurement, BS.1770 / EBU R128 LUFS
  *    from lufsAnalyser.ts (math in lufs.ts): Momentary on the bar with the
  *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
  *    with a Reset chip in the card's own header. Local-only like Waveform,
  *    since it needs this device's own samples; hidden on a mic-less
- *    renderer, the header's Reset chip along with it. Energy is Level's
+ *    renderer, the header's Reset chip along with it. Last, a Gate row: the
+ *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
+ *    much of a hit's strength the gate is currently letting through — with
+ *    a trace beneath it, inserted the way the Character card's Brightness
+ *    row inserts its own Centroid trace, of Input level against the Input
+ *    card's two marks (dashed guides, zoomed so the upper one sits
+ *    mid-height); hits the gate actually stops show up as faint ticks on
+ *    the Hits card rather than a series of their own here. Local-only like
+ *    fixedEnergy below — a device with no FeatureExtractor of its own (a
+ *    renderer, the synthetic feed) reads Gate idle too, same as the Hits
+ *    card's own Beat lane.
+ *  - Dynamics: Level is Input level's
  *    post-AGC sibling — the only way to see features.ts's adaptive
  *    floor/peak doing its job, since its whole point is to make that
  *    invisible downstream — and under it a History trace of both Level and
@@ -135,17 +149,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    what the Input card's Auto-gain amount is adding; sliding it down
  *    closes the gap. (No raw low/mid/high energy — the spectrum strip
  *    already shows that. Their post-bandEnergy pulses live in the Hits
- *    card's own hits history instead — see below.) Last, a Gate row: the
- *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
- *    much of a hit's strength the gate is currently letting through — with
- *    a trace beneath it, inserted the way the Character card's Brightness
- *    row inserts its own Centroid trace, of Level against the Input card's
- *    two marks (dashed guides, zoomed so the upper one sits mid-height);
- *    hits the gate actually stops show up as faint ticks on the Hits card
- *    rather than a series of their own here. Local-only like fixedEnergy
- *    above — a device with no FeatureExtractor of its own (a renderer, the
- *    synthetic feed) reads Gate idle too, same as the Hits card's own Beat
- *    lane.
+ *    card's own hits history instead — see below.)
  *  - Hits: one lane each for Any hit (the broadband detector) and
  *    bandEnergy.ts's Bass/Mid/Treble (createHitsHistory), tracing each one's
  *    ratio against its firing threshold plus a tick for every
@@ -155,16 +159,16 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    at the time. A fired tick's height is that hit's graded strength
  *    (src/audio/hitStrength.ts's HitParts) — exactly full height at
  *    Dimension 0, so nothing on screen changes until that slider actually
- *    moves. A "Show shape" disclosure (createAdvancedSection, closed by
- *    default) folds away two groups. Height: the sliders that shape a hit's
+ *    moves. The Hit shape card in the Setup view (folded by default) holds
+ *    two groups. Height: the sliders that shape a hit's
  *    strength (Dimension/Knee/Loudness mix/Floor) plus a Curve
  *    (hitStandout(ratio, knee) plotted live, a dot per lane at that lane's
  *    own last-hit ratio). Length: one row per lane for how long its pulse
  *    rings out (hitStrength.ts's `shape.tail`, shown as the ms it takes to
  *    fade), Linked by default so one drag moves every lane, under an
  *    Envelope monitor (createTailEnvelope) of each lane's fall over four
- *    beats, with Smoothing's stretch as its readout. While Shape is open,
- *    the hits history also marks each fired column's stand-out and
+ *    beats, with Smoothing's stretch as its readout. While Hit shape is
+ *    open, the hits history also marks each fired column's stand-out and
  *    loudness parts as two small dots, draws a dashed Floor guide, and
  *    shades each lane's own pulse under its ticks (its tail), so dragging
  *    any of those sliders shows exactly what it did to a real hit rather
@@ -266,7 +270,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * signal has no monitor. Each monitor row also carries its own heat strips,
  * one per signal jack on it, led by a dot in the signal's colour, on the same
  * span and refresh as the jack. The Heat history card (its own span chip,
- * folded by default) draws one strip per wired setting, from
+ * folded by default, in the Setup view) draws one strip per wired setting, from
  * deps.heatSettings, and one per signal jack. The Bands card's level jacks
  * (deviceMenu.ts) join all of this through addHeatJack.
  *
@@ -284,6 +288,10 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
 
 export interface AudioMeters {
   el: HTMLElement;
+  /** The Setup view's column (Input check, Hit shape, Heat history); deviceMenu.ts places it. */
+  setupEl: HTMLElement;
+  /** Tells the meters whether the Setup view is open; a closed one skips its draws and jack writes. */
+  setSetupOpen(open: boolean): void;
   /** Fed every frame, panel open or closed. `onScreen` false only records the
    *  traces: no draws or DOM writes, and peak fall, text cadence and flashes
    *  count from the last drawn tick. `frame`/`anim` null = audio not up yet.
@@ -333,6 +341,8 @@ export interface AudioMeters {
 }
 
 export interface AudioMetersDeps {
+  /** Opens the Setup view, for revealRow. */
+  openSetup(): void;
   /** Wired settings and their heat tracks, for the Heat history card. */
   heatSettings(): readonly { label: string; track: HeatTrack }[];
   /** Reset chip: start the integrated loudness reading over. */
@@ -345,7 +355,7 @@ export interface AudioMetersDeps {
   /** The Input card's two gate marks, read fresh every draw/text tick so a drag
    *  moves the Gate guides and the hits hint live. */
   getSilenceGate: () => SilenceGateMarks;
-  /** The Hits card's Shape sliders (formula in src/audio/hitStrength.ts).
+  /** The Hit shape card's sliders (formula in src/audio/hitStrength.ts).
    *  Global per device, not per scene: it's a taste about detection, not one
    *  scene's look. */
   hitShape: { get: () => HitShape; set: (partial: HitShapePatch) => void };
@@ -1468,14 +1478,14 @@ function createTimingStrip(mountJack: MountJack, span: TraceSpan) {
   };
 }
 
-// ---- The Hits card's Shape disclosure: the Curve monitor ---------------
+// ---- The Hit shape card: the Curve monitor ---------------
 
 const HIT_CURVE_HEIGHT_CSS_PX = 56;
 
 /** The knee curve, hitStandout(ratio, knee) for ratio in 1..ONSET_METER_MAX,
  *  plus a dot per lane at its last-hit ratio. A function plot redrawn from
  *  scratch each tick; cheap. */
-// ---- The Shape section's Length group ----
+// ---- The Hit shape card's Length group ----
 
 // A row's ms is the time to fall to e^-3 (about 5%) of its height, 3 / rate:
 // round at the base rates, about where a pulse stops reading.
@@ -1853,8 +1863,15 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const hitsSpan = cardSpan("hits");
   const tempoSpan = cardSpan("tempo");
   const characterSpan = cardSpan("character");
+  const setupInputSpan = cardSpan("setup-input");
 
-  // ---- Signal: Waveform, Input level, LUFS, Level, History, Gate ----
+  // The Setup view (deviceMenu.ts's footer button): the rows checked once per
+  // set, in cards of their own beside the meters column.
+  const setupEl = document.createElement("div");
+  setupEl.className = "vc-setup vc-scroll";
+  let setupOpen = false;
+
+  // ---- Input check (Setup view): Waveform, Input level, LUFS, Gate ----
   // The trace takes the meter's place under the head, like History/Gate.
   const waveform = createMeterRow({
     label: "Waveform",
@@ -1867,8 +1884,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     3,
     WAVE_HEIGHT_CSS_PX,
     "Waveform of the incoming sound, with clipping marked",
-    signalSpan.sec,
-    signalSpan.max,
+    setupInputSpan.sec,
+    setupInputSpan.max,
   );
   waveform.el.children[1].replaceWith(waveRing.canvas);
   const waveCtx = waveRing.ctx;
@@ -1913,6 +1930,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     deps.onLufsReset,
   );
 
+  // ---- Dynamics: Level, History ----
   const energy = createMeterRow({
     label: "Level",
     accent: INPUT_GREEN,
@@ -1947,9 +1965,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: HISTORY_FIXED_COLOR, label: "No auto-gain" },
   ]);
   historyStrip.canvas.after(histLegend.el);
-  // The silence gate's reading (src/audio/silenceGate.ts), spliced in like the
-  // Character card's Centroid trace: the meter (Dimmer) stays, a canvas goes
-  // under it before the hint.
+  // Input check's Gate row: the silence gate's reading (src/audio/silenceGate.ts),
+  // spliced in like the Character card's Centroid trace: the meter (Dimmer)
+  // stays, a canvas goes under it before the hint.
   const gateRow = createMeterRow({
     label: "Gate",
     accent: INPUT_GREEN,
@@ -1974,7 +1992,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           { at: marks.open / top, color: GATE_GUIDE_COLOR },
         ];
       },
-      span: signalSpan,
+      span: setupInputSpan,
     },
   );
   gateRow.el.insertBefore(gateHistoryStrip.canvas, gateRow.el.children[2]);
@@ -1983,31 +2001,31 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: GATE_DIMMER_COLOR, label: "Dimmer" },
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
-  const signalRight = document.createElement("div");
-  signalRight.style.cssText = tapRightStyle;
-  signalRight.append(
-    lufsResetChip,
-    createSpanChip("signal", () => history.setReadout(String(signalSpan.sec()))),
-  );
-  const signalCard = createCard({
-    title: "Dynamics",
+  const inputCheckRight = document.createElement("div");
+  inputCheckRight.style.cssText = tapRightStyle;
+  inputCheckRight.append(lufsResetChip, createSpanChip("setup-input", () => {}));
+  const inputCheckCard = createCard({
+    title: "Input check",
     accent: INPUT_GREEN,
-    foldId: "signal",
-    right: signalRight,
+    foldId: "setup-input",
+    right: inputCheckRight,
   });
-  signalCard.body.append(
+  inputCheckCard.body.append(
     waveform.el,
     waveformSpacer,
     level.el,
     spacer(),
     lufsWelded,
     loudnessSpacer,
-    energy.el,
-    spacer(),
-    history.el,
-    spacer(),
     gateRow.el,
   );
+  const signalCard = createCard({
+    title: "Dynamics",
+    accent: INPUT_GREEN,
+    foldId: "signal",
+    right: createSpanChip("signal", () => history.setReadout(String(signalSpan.sec()))),
+  });
+  signalCard.body.append(energy.el, spacer(), history.el);
   // Row visibility is toggled in update(). null until the first unfolded tick
   // applies the real state: rows are built visible, so a mic-less device must
   // still get its first setShown(false) rather than compare false !== false.
@@ -2016,11 +2034,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   // ---- Hits ----
   const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack, hitsSpan);
-  // Shape: sliders that turn a fired tick's fixed height into a graded strength
-  // (hitStrength.ts), closed by default (see createAdvancedSection's header).
-  // Their effect shows in the history's dashed Floor line and dots, and the
-  // Curve.
-  const hitsShape = createAdvancedSection("hitsShape", "shape");
+  // Hit shape (Setup view): sliders that turn a fired tick's fixed height into
+  // a graded strength (hitStrength.ts), folded by default. Their effect shows
+  // in the Hits history's dashed Floor line and dots, and the Curve.
+  const hitShapeCard = createCard({ title: "Hit shape", accent: NEUTRAL_ACCENT, foldId: "setup-shape", defaultFolded: true });
   const hitAmountRow = createControlRow({
     label: "Dimension",
     accent: NEUTRAL_ACCENT,
@@ -2158,7 +2175,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     syncTailRows();
   }
 
-  hitsShape.body.append(
+  hitShapeCard.body.append(
     groupHeading("Height", true),
     hitAmountRow.el,
     spacer(),
@@ -2188,7 +2205,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     foldId: "hits",
     right: createSpanChip("hits", () => hitsHistory.refreshSpan()),
   });
-  hitsCard.body.append(hitsHistory.el, spacer(), hitsShape.el);
+  hitsCard.body.append(hitsHistory.el);
 
   // ---- Tempo ----
   const tempo = createTempoBlock(NEUTRAL_ACCENT);
@@ -2377,11 +2394,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const heatSignalStrips: { idx: number; el: HTMLElement; bg: string }[] = [];
   const heatCardTitles: Record<MeterCardId, string> = {
     signal: signalCard.title.textContent ?? "",
+    "setup-input": inputCheckCard.title.textContent ?? "",
     hits: hitsCard.title.textContent ?? "",
     tempo: tempoCard.title.textContent ?? "",
     character: characterCard.title.textContent ?? "",
   };
-  for (const cardId of ["signal", "hits", "tempo", "character"] as const) {
+  for (const cardId of ["signal", "setup-input", "hits", "tempo", "character"] as const) {
     const seen = new Set<SignalId>();
     const jacks = heatJacks.filter((j) => {
       if (j.card !== cardId || seen.has(j.id)) return false;
@@ -2474,9 +2492,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     tempoCard.el,
     meterGroupHeading("Song"),
     characterCard.el,
-    meterGroupHeading("Heat"),
-    heatHistoryCard.el,
   );
+  setupEl.append(inputCheckCard.el, hitShapeCard.el, heatHistoryCard.el);
 
   function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
     const { min, max } = downsampleForDisplay(mono, 1);
@@ -2532,6 +2549,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // highlights only that half.
   const cardElements: Record<MeterCardId, HTMLElement> = {
     signal: signalCard.el,
+    "setup-input": inputCheckCard.el,
     hits: hitsCard.el,
     tempo: tempoCard.el,
     character: characterCard.el,
@@ -2547,11 +2565,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["lock", lock.el],
     ["timing", timingStrip.el],
     ["waveform", waveform.el],
+    ["level", level.el],
   ]);
 
   // Each card's fold, for update()'s heat block.
   const meterCards: Record<MeterCardId, { fold?: { isFolded(): boolean } }> = {
     signal: signalCard,
+    // A closed Setup view counts as a folded card, so its jacks and strips skip their writes.
+    "setup-input": { fold: { isFolded: () => !setupOpen || (inputCheckCard.fold?.isFolded() ?? false) } },
     hits: hitsCard,
     tempo: tempoCard,
     character: characterCard,
@@ -2560,12 +2581,18 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // or under a closed panel skips draws and DOM writes like a folded one; its
   // traces keep recording.
   const signalOnScreen = watchOnScreen(signalCard.el);
+  const inputCheckOnScreen = watchOnScreen(inputCheckCard.el);
+  const hitShapeOnScreen = watchOnScreen(hitShapeCard.el);
   const hitsOnScreen = watchOnScreen(hitsCard.el);
   const tempoOnScreen = watchOnScreen(tempoCard.el);
   const characterOnScreen = watchOnScreen(characterCard.el);
 
   return {
     el: root,
+    setupEl,
+    setSetupOpen(open): void {
+      setupOpen = open;
+    },
     update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, onScreen): void {
       const nowMs = performance.now();
       const raw = showRaw;
@@ -2672,7 +2699,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           if (s.folded()) continue;
           paintHeatStrip(s, heatTracks[s.idx]!, getHistorySpan(s.card), heatSec);
         }
-        if (!heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);
+        if (setupOpen && !heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);
       }
       if (heatLensOn) {
         for (const row of heatRows) row.brightest = -1;
@@ -2692,11 +2719,33 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Signal: Waveform, Input level, LUFS, Level, History, Gate ----
-      // Input level is already raw; Level's raw counterpart is rawBands (local-only
-      // like mono). Gate has no RAW branch: no pre-smoothing counterpart in
-      // AnimFrame.
+      // ---- Dynamics: Level, History ----
+      // Level's raw counterpart is rawBands (local-only like mono).
       if (!signalCard.fold?.isFolded() && signalOnScreen()) {
+        const energyVal = raw
+          ? rawBands
+            ? meanOf(rawBands)
+            : null
+          : frame
+            ? frame.energy
+            : null;
+        energy.setValue(energyVal, dtSec);
+        if (text) {
+          energy.setReadout(
+            energyVal === null ? "--" : pct(energyVal),
+            energyVal === null ? IDLE : {},
+          );
+        }
+        if (frame) {
+          historyStrip.draw();
+          histLegend.setEntryEnabled(2, fixedEnergy !== null);
+        }
+      }
+
+      // ---- Input check (Setup view): Waveform, Input level, LUFS, Gate ----
+      // Input level is already raw. Gate has no RAW branch: no pre-smoothing
+      // counterpart in AnimFrame.
+      if (setupOpen && !inputCheckCard.fold?.isFolded() && inputCheckOnScreen()) {
         // Waveform: hidden (with its spacer) with no samples.
         const showWaveform = mono !== null;
         if (showWaveform !== waveformShown) {
@@ -2721,26 +2770,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           }
         }
 
-        const energyVal = raw
-          ? rawBands
-            ? meanOf(rawBands)
-            : null
-          : frame
-            ? frame.energy
-            : null;
         level.setValue(frame ? frame.level : null, dtSec);
-        energy.setValue(energyVal, dtSec);
-        if (text) {
-          level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
-          energy.setReadout(
-            energyVal === null ? "--" : pct(energyVal),
-            energyVal === null ? IDLE : {},
-          );
-        }
-        if (frame) {
-          historyStrip.draw();
-          histLegend.setEntryEnabled(2, fixedEnergy !== null);
-        }
+        if (text) level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
 
         // LUFS: hidden (with its spacer and the header's Reset chip) with no
         // local lufsAnalyser.
@@ -2768,25 +2799,25 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
 
       // ---- Hits ----
+      const shapeOpen = setupOpen && !(hitShapeCard.fold?.isFolded() ?? false);
       if (!hitsCard.fold?.isFolded() && hitsOnScreen()) {
-        const shapeOpen = hitsShape.isOpen();
-        // Read fresh every draw, so a slider drag moves the Floor line and the
-        // Curve at once.
+        // Read fresh every draw, so a slider drag moves the Floor line at once.
+        hitsHistory.render(frame, anim, beatDiag, nowMs, text, shapeOpen, deps.hitShape.get().floor);
+      }
+      // ---- Hit shape (Setup view): Curve and Envelope ----
+      // They aren't on the hits history's canvas, so draw them only while the
+      // card is open.
+      if (shapeOpen && hitShapeOnScreen()) {
         const shape = deps.hitShape.get();
-        hitsHistory.render(frame, anim, beatDiag, nowMs, text, shapeOpen, shape.floor);
-        // The Curve and Envelope aren't on the hits history's canvas, so draw
-        // them only while Shape is open.
-        if (shapeOpen) {
-          hitCurve.draw(shape.knee, lastHitRatio);
-          for (let li = 0; li < lastHitMs.length; li++) {
-            const at = lastHitMs[li];
-            sinceHitSec[li] = at === null ? null : (nowMs - at) / 1000;
-          }
-          tailEnvelope.draw(shape.tail, rateScale, anim ? anim.metronomeBpm : 0, sinceHitSec);
-          if (text) {
-            if (Number.isFinite(rateScale)) tailEnvelopeRow.setReadout((1 / rateScale).toFixed(2));
-            else tailEnvelopeRow.setReadout("Off", { textual: true, unit: "" });
-          }
+        hitCurve.draw(shape.knee, lastHitRatio);
+        for (let li = 0; li < lastHitMs.length; li++) {
+          const at = lastHitMs[li];
+          sinceHitSec[li] = at === null ? null : (nowMs - at) / 1000;
+        }
+        tailEnvelope.draw(shape.tail, rateScale, anim ? anim.metronomeBpm : 0, sinceHitSec);
+        if (text) {
+          if (Number.isFinite(rateScale)) tailEnvelopeRow.setReadout((1 / rateScale).toFixed(2));
+          else tailEnvelopeRow.setReadout("Off", { textual: true, unit: "" });
         }
       }
 
@@ -2859,6 +2890,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     },
     revealRow(card, row): void {
       const cardEl = cardElements[card];
+      if (!setupOpen && setupEl.contains(cardEl)) deps.openSetup();
       if (cardEl.classList.contains("vc-folded")) cardEl.querySelector<HTMLButtonElement>(".vc-fold")?.click();
       const rowEl = rowElements.get(row);
       if (!rowEl) return;

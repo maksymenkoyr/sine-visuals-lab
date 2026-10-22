@@ -215,8 +215,11 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *     ringElements() (deviceMenu.ts) already uses — so the cable ends at
  *     that card's own header instead (and, if the header has no box either
  *     — the column itself is hidden — there is no endpoint and no cable);
+ *   - a jack in the Setup view while it is closed (`.vc-setup`, no box for
+ *     the jack or its header) — the cable ends at the footer's Setup button
+ *     that opens it, when that has a box;
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
- *     `.vc-shape-col`/`.vc-controls-col`) — the cable ends at the column's
+ *     `.vc-shape-col`/`.vc-setup`/`.vc-controls-col`) — the cable ends at the column's
  *     visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
@@ -225,13 +228,18 @@ function endpointFor(el: HTMLElement): { x: number; y: number } | null {
     // The header has no box either when the whole column is hidden (M, or
     // every card folded away) — its rect would be all zeros and the cable
     // would run to the viewport's top-left corner, so draw nothing instead.
-    if (!header || header.getClientRects().length === 0) return null;
+    if (!header || header.getClientRects().length === 0) {
+      const setupBtn = el.closest(".vc-setup") ? document.querySelector<HTMLElement>(".vc-setup-btn") : null;
+      if (!setupBtn || setupBtn.getClientRects().length === 0) return null;
+      const b = setupBtn.getBoundingClientRect();
+      return { x: b.right, y: b.top + b.height / 2 };
+    }
     const r = header.getBoundingClientRect();
     return { x: r.right - 8, y: r.top + r.height / 2 };
   }
   const r = el.getBoundingClientRect();
   let y = r.top + r.height / 2;
-  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-controls-col");
+  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-setup, .vc-controls-col");
   if (scroller) {
     const sr = scroller.getBoundingClientRect();
     if (y < sr.top) y = sr.top + 2;
@@ -309,7 +317,7 @@ function revealEnd(el: HTMLElement): void {
     target = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head") ?? null;
     if (!target || target.getClientRects().length === 0) return;
   }
-  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-controls-col");
+  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-shape-col, .vc-setup, .vc-controls-col");
   if (!scroller) return;
   const r = target.getBoundingClientRect();
   const sr = scroller.getBoundingClientRect();

@@ -92,8 +92,9 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. */
-export type MeterCardId = "signal" | "hits" | "tempo" | "character";
+ *  actually points at that card. "setup-input" is the Setup view's Input
+ *  check card, not the Dynamics card ("signal"). */
+export type MeterCardId = "signal" | "setup-input" | "hits" | "tempo" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -104,15 +105,16 @@ export type MeterCardId = "signal" | "hits" | "tempo" | "character";
  *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
  *  instead; "timing" is the Timing strip
  *  (createTimingStrip), the anchor for `anim.metronomeBar`. "waveform" is
- *  the Waveform row, first in its body (audioMeters.ts's
+ *  the Waveform row, first in the Input check card's body (audioMeters.ts's
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
  *  "wave" above (the beat/bar swing trace, a different row entirely).
+ *  "level" is the Input level row beneath it — `feature.level`'s anchor.
  *  "centroid" is the Tone row (dialRows' own
  *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
  *  draws directly under that dial's bar rather than a row of its own. Each
  *  dial's own cell is its DialSignalId, "dial.brightness" naming the same
  *  Tone row as "centroid". */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform" | DialSignalId;
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform" | "level" | DialSignalId;
 
 /** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
@@ -346,6 +348,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), the Input level row — never auto-gained, so a silent room reads 0 where Level's auto-gain lifts mic hiss back to mid-range.",
     kind: "level",
     read: (frame) => frame.level,
+    monitor: { card: "setup-input", row: "level" },
     bandRange: "all",
   }),
   "anim.sectionIntensity": signal({
@@ -382,7 +385,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The Waveform row's own reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the row shows as a percentage; raw amplitude before auto-gain, so unlike Level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
-    monitor: { card: "signal", row: "waveform" },
+    monitor: { card: "setup-input", row: "waveform" },
     bandRange: "all",
   }),
   "anim.beatWave": signal({

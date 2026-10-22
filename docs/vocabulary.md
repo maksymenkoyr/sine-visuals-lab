@@ -29,6 +29,7 @@ on its way to an animation node.
 | **reaction** | What a setting that acts once per hit does on each hit: a burst, a jump, a cut. Its graph draws a dot per reaction. The **Reaction** row under the graph picks **Flat** (every reaction full size) or **Sized** (as big as its hit stood out); a setting whose reaction has no size shows Sized greyed out. | trigger, event, fire | `SceneSetting.drive.hit`, `HitReadout` (`src/render/standout.ts`) |
 | **condition** | Under the gate mix ("Only when"), a wire whose input node opens the gate rather than moving the setting. The others **play**. | gate source, trigger | `DriveSource.when` |
 | **meters** | The left column of cards that *show* the sound. A meter is a display; the input nodes in it are what you wire. | — | `METERS_COLUMN`, `src/ui/audioMeters.ts` |
+| **Setup** | The view for checking the input, opened from the panel footer's Setup button. A column of its own, holding the Input check, Hit shape and Heat history cards. Its input nodes keep their jacks. | — | `SETUP_COLUMN`, `setupEl` in `src/ui/audioMeters.ts` |
 | **sound source** | The microphone, line input or shared tab the sound comes from. The only thing in the panel called a source. | — | `AudioSource` |
 
 ## Verbs
@@ -63,9 +64,10 @@ on its way to an animation node.
 - **Built-in, not scene mix.** "Mix" is the control right next to it; two different things can't share the word.
 - **Dynamics card, not Signal card.** With every wireable value an input
   node, a card called Signal read as "the card with the input nodes" — but
-  every meter card has them. The card shows level, loudness and the gate,
-  which is what dynamics means in audio. Its fold id (`"signal"`) is unchanged
-  so a folded card stays folded.
+  every meter card has them. The card shows Level and its History, which is
+  what dynamics means in audio; the input-check rows (waveform, input level,
+  loudness, the gate) sit in the Setup view. Its fold id (`"signal"`) is
+  unchanged so a folded card stays folded.
 
 ## Writing new copy
 
