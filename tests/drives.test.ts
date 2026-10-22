@@ -921,7 +921,7 @@ describe("drives: a source's own role/mute travel with it through togglePatchSou
 
 describe("drives: a patch holds one grid source, whatever its division (sourceSlot)", () => {
   it("toggling the Beat jack's default division unplugs a grid re-gridded to Bar, instead of adding a second grid", () => {
-    // The Timing strip's Grid jack always carries { grid: 2 }; the patch's
+    // The Beat grid add chip always carries { grid: 2 }; the patch's
     // own grid was moved to Bar (3) by its division chips.
     const patch: DrivePatch = {
       mix: "add",

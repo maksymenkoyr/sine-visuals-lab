@@ -71,7 +71,7 @@ export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 export const POWER_SQUARE_PX = 26;
 /** A folded card's title-bar height; the Auto master bar (deviceMenu.ts) matches it. */
 export const FOLDED_BAR_PX = 32;
-/** Right-edge room the Hits and Timing strips (audioMeters.ts) keep free for
+/** Right-edge room the Hits strip (audioMeters.ts) keeps free for
  *  lane jacks, so no trace runs under a jack or its usage dots. */
 export const LANE_JACK_GUTTER_PX = 20;
 

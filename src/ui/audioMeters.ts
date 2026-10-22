@@ -18,6 +18,8 @@ import {
   type HeatTrack,
 } from "./heat.ts";
 import { flashTo } from "./flashAnim.ts";
+import { bandCenterHz, formatHz } from "../audio/bandScale.ts";
+import { METRONOME_BEATS_PER_BAR } from "../render/metronome.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
@@ -172,20 +174,17 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    loudness parts as two small dots, draws a dashed Floor guide, and
  *    shades each lane's own pulse under its ticks (its tail), so dragging
  *    any of those sliders shows exactly what it did to a real hit rather
- *    than just a number moving.
- *  - Tempo: a welded row, Lock (how sure the tracker is of the tempo)
+ *    than just a number moving. The Bass lane also carries the Kick band's
+ *    own jack and its Hz in the legend.
+ *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
  *    follows beatClock's tempoLock, so an unlocked guess reads as
  *    unconfident rather than as a confident wrong number, and the BPM
- *    digits dim the same way. Beneath that, a Timing strip
- *    (createTimingStrip): Grid (the tracker's own predicted beat, a tick
- *    as tall as the lock on every beatPhase wrap), Metronome (metronome.ts's
- *    own steady tick, bright on the bar its jack sends, faint on the beats
- *    between) and Heard (every raw detected
- *    beat) share one time axis, so a detection landing under a grid tick
- *    reads as locked, one between ticks reads as a double, and a tick with
- *    nothing under it reads as a miss. Last, Wave: beatWave/barWave's own
- *    smooth swing, for a setting that wants to sway in time rather than
+ *    digits dim the same way. Beneath that, the bar ruler (createBarRuler):
+ *    one cell per beat of the metronome's bar, the current one lit and the
+ *    downbeat in its own colour, with the Metronome (every beat) and
+ *    Metronome bar (once a bar) jacks on it. Last, Wave: beatWave/barWave's
+ *    own smooth swing, for a setting that wants to sway in time rather than
  *    pulse on a hit. The header carries tap tempo's Tap chip and how many
  *    taps it still needs (tapStatusStyle's comment).
  *  - Character: first, Section — sectionIntensity with a drop flash, the
@@ -202,7 +201,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
  * can't read faster anyway). Only the waveform is a canvas. Flashes (a bar's
- * flash(), the Tempo dot on each beat, revealRow's ring) run as Web Animations
+ * flash(), the BPM dot on each beat, revealRow's ring) run as Web Animations
  * through flashAnim.ts rather than as style writes, so they never force a
  * layout.
  *
@@ -215,7 +214,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * drawing and DOM writes — folding buys back the per-frame cost, not just
  * the screen space.
  *
- * Every time-axis trace (Waveform, History, Gate, Hits, Timing, Wave,
+ * Every time-axis trace (Waveform, History, Gate, Hits, Wave,
  * Centroid) records into a time store (createColumnRing) on every tick,
  * folded card or closed panel alike, so opening a card shows what it
  * missed. A span chip in each card's header (historySpan.ts) picks how
@@ -247,10 +246,11 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * drive source can feed — Waveform and Energy (Signal), Section's own
  * Song+Drop pair, one per dial cell and the Brightness row's own
  * dial+Centroid pair (Character — signals.ts's DIAL_SIGNALS), the BPM
- * block's own Metronome+Tempo pair, Lock, the Timing strip's own
- * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
- * (Tempo), and one per hits-history lane plus one for the Surge lane
- * under them, Onset surge's own (createHitsHistory's own laneMounts, Hits)
+ * block's own Tempo jack, Lock, the bar ruler's own Metronome+Metronome
+ * bar pair (createBarRuler) and Wave's Beat/Bar pair (Beat), and one per
+ * hits-history lane, the Kick band's on the Bass lane, plus one for the
+ * Surge lane under them, Onset surge's own (createHitsHistory's own
+ * laneMounts, Hits)
  * — plus the Bands card's own level rows (BAND_LEVELS/STEM_LEVELS, deviceMenu.ts)
  * and its Frequencies corner, built directly
  * in deviceMenu.ts. Every jack's click/hover/fill/usage state is
@@ -355,6 +355,9 @@ export interface AudioMetersDeps {
   /** The Input card's two gate marks, read fresh every draw/text tick so a drag
    *  moves the Gate guides and the hits hint live. */
   getSilenceGate: () => SilenceGateMarks;
+  /** The band ladder in Hz (src/audio/bandScale.ts), for the Kick band's Hz on
+   *  the Hits card's Bass lane. */
+  getBandEdgesHz: () => ArrayLike<number>;
   /** The Hit shape card's sliders (formula in src/audio/hitStrength.ts).
    *  Global per device, not per scene: it's a taste about detection, not one
    *  scene's look. */
@@ -423,7 +426,7 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 // margin reaches 8px into the card padding like a .vc-row's ring, so card edge
 // -> ring, ring -> block and block -> card edge are all 4px.
 //
-// It hosts the anim.metronome/anim.tempo jacks (mountJack), absolutely
+// It hosts the anim.tempo jack (mountJack), absolutely
 // positioned: a jack row would grow the block and, through weldedRowStyle's
 // align-items: stretch, the Lock row. The same style welds the LUFS bar
 // beside its LUFS block.
@@ -489,7 +492,7 @@ const HISTORY_ENERGY_COLOR = INPUT_GREEN;
 // auto system's colour (AUTO_SKY).
 const HISTORY_FIXED_COLOR = withAlpha(AUTO_SKY, 0.75);
 const BEAT_TRACE_HEIGHT_CSS_PX = 28;
-// Predicted-grid colour (Timing's Grid lane, Wave's bar wave). Blue against
+// Predicted-grid colour (Wave's bar wave, the bar ruler's downbeat). Blue against
 // BEAT_COLOR's red keeps "predicted" and "detected" apart.
 const BEAT_GRID_COLOR = AUTO_SKY;
 // The Gate trace sits under a meter like Centroid does, so it gets more
@@ -848,7 +851,7 @@ function createTempoBlock(accent: string) {
 
   return {
     el,
-    /** The anim.metronome/anim.tempo jacks mount here (see tempoBlockStyle). */
+    /** The anim.tempo jack mounts here (see tempoBlockStyle). */
     jackHost,
     /** Per frame. `lock` (0..1) sets the resting tint; `beat` is
      *  anim.metronomeBeat, not a raw hit. */
@@ -895,7 +898,7 @@ function createTempoBlock(accent: string) {
 // The Hits card's history: lanes for Any hit and Bass/Mid/Treble, one canvas, one
 // column per CSS pixel over the card's span. A trace-only Surge lane (signals.ts's
 // "feature.flux") sits under them; it's not part of HITS_LANES, having no hits
-// of its own.
+// of its own. The Bass lane also carries the Kick band's jack and Hz.
 const HITS_LANE_HEIGHT_PX = 16;
 const HITS_LANE_COUNT = 5; // Any, Bass, Mid, Treble, Surge
 const HITS_HEIGHT_PX = HITS_LANE_HEIGHT_PX * HITS_LANE_COUNT;
@@ -921,6 +924,10 @@ const HITS_LANES: readonly HitsLane[] = [
 // (SURGE_CHOICE).
 const HITS_LANE_CHOICES: readonly DriveSourceChoice[] = ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"];
 const SURGE_CHOICE: DriveSourceChoice = "feature.flux";
+// The Kick band's jack sits beside the Bass lane's own, one jack further in.
+const KICK_CHOICE: DriveSourceChoice = "anim.kickBand";
+const KICK_LANE = 1; // the Bass lane in HITS_LANES
+const KICK_JACK_STEP_PX = 15; // a 13px jack plus a 2px gap
 const HITS_FIELDS_PER_LANE = 6; // ratio, code, strength, standout, loudness, pulse
 
 /** Where lane `li`'s fields sit in the ring's per-column series. */
@@ -965,6 +972,7 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
     "Faint tick on shaded ground: cleared it while the room was quiet.",
     `Any hit: flux over ${FLUX_THRESHOLD_MULT}× the recent average + ${FLUX_THRESHOLD_MARGIN}, ≥${ms(ONSET_REFRACTORY_SEC)} apart.`,
     group("Bass", GROUP_TUNING.low),
+    "Kick band: the one bass band that pulses most clearly right now; its Hz leads the Bass note, and the inner jack on that lane sends it.",
     group("Mid", GROUP_TUNING.mid),
     group("Treble", GROUP_TUNING.high),
     "Surge: how close Any hit is to firing, as a setting fed by Onset surge sees it; the line is where Any hit fires.",
@@ -992,8 +1000,13 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
  *  (device-local only: a null diag still lets fired/miss through, with no
  *  ratio trace and no gated/blocked). Bass/Mid/Treble read `anim` (bandEnergy.ts
  *  runs everywhere). Ground shading is `1 - anim.gateDimmer`, the Gate row's
- *  dimmer. */
-function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: MountJack, span: TraceSpan) {
+ *  dimmer. The Bass lane also carries the Kick band's jack and Hz. */
+function createHitsHistory(
+  getSilenceGate: () => SilenceGateMarks,
+  getBandEdgesHz: () => ArrayLike<number>,
+  mountJack: MountJack,
+  span: TraceSpan,
+) {
   const row = createMeterRow({
     label: "Hits",
     accent: NEUTRAL_ACCENT,
@@ -1010,7 +1023,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   // canvas's. Its right padding (LANE_JACK_GUTTER_PX) ends the canvas short of
   // the jacks, so no trace runs on under one.
   const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
+  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX + KICK_JACK_STEP_PX}px;`;
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
@@ -1052,6 +1065,12 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   surgeGlow.style.setProperty("--c", surgeColor);
   vizWrap.appendChild(surgeGlow);
   laneMounts.push({ choice: SURGE_CHOICE, glowEl: surgeGlow });
+  // Inner jack on the Bass lane; the two share that lane's glow.
+  const kickJack = mountJack(KICK_CHOICE, vizWrap, row.el);
+  kickJack.el.style.position = "absolute";
+  kickJack.el.style.right = `${2 + KICK_JACK_STEP_PX}px`;
+  kickJack.el.style.top = `${KICK_LANE * HITS_LANE_HEIGHT_PX + (HITS_LANE_HEIGHT_PX - 13) / 2}px`;
+  laneMounts.push({ choice: KICK_CHOICE, glowEl: laneMounts[KICK_LANE]!.glowEl });
 
   // Fire times per lane for the legend's count: kept for span.max, counted over
   // the shown span. Pruned on logging too: the only reader (the legend) is
@@ -1315,17 +1334,18 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
           HITS_SURGE_LANE,
           anim && frame && beatDiag ? `${Math.round(SIGNALS["feature.flux"].read(frame, anim) * 100)}%` : "--",
         );
+        const kickHz = anim ? `${formatHz(bandCenterHz(getBandEdgesHz(), anim.kickBandIndex))} · ` : "";
         if (shapeOpen) {
           const parts = anim
             ? [anim.hitStrength.beat, anim.hitStrength.low, anim.hitStrength.mid, anim.hitStrength.high]
             : null;
           for (let li = 0; li < HITS_LANES.length; li++) {
-            legend.setNote(li, hitStrengthNote(parts ? parts[li] : null));
+            legend.setNote(li, (li === KICK_LANE ? kickHz : "") + hitStrengthNote(parts ? parts[li] : null));
           }
         } else {
           const sec = span.sec();
           legend.setNote(0, laneNote(beatDiag ? beatDiag.ratio : null, firesInSpan(0, nowMs), sec));
-          legend.setNote(1, laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
+          legend.setNote(1, kickHz + laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
           legend.setNote(2, laneNote(anim ? anim.hits.mid.ratio : null, firesInSpan(2, nowMs), sec));
           legend.setNote(3, laneNote(anim ? anim.hits.high.ratio : null, firesInSpan(3, nowMs), sec));
         }
@@ -1344,136 +1364,61 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   };
 }
 
-// The Tempo card's Timing strip: Grid/Metronome/Heard on one time axis, to
-// compare what the tracker predicts, what rang the metronome and what the
-// detector heard.
-// A jack is 13px tall (createHitsHistory's lane-centring math); a shorter
-// lane would make the Grid and Metronome jacks touch.
-const TIMING_LANE_HEIGHT_PX = 14;
-const TIMING_LANE_COUNT = 3; // Grid, Metronome, Heard
-const TIMING_HEIGHT_PX = TIMING_LANE_HEIGHT_PX * TIMING_LANE_COUNT;
-// Distinct from BEAT_GRID_COLOR so Grid and Metronome don't read as one line;
-// lighter, not more transparent: a dimmed AUTO_SKY was too faint to tell a
-// beat tick from a bar tick.
-const TIMING_METRO_COLOR = "#cfe8ff";
-// The Metronome jack sends metronomeBar, one pulse per bar, so the bar tick is
-// full height and colour; the beats between are short, faint context for
-// lining Heard up, so they don't read as pulses the jack sends too.
-const TIMING_METRO_BEAT_COLOR = withAlpha(TIMING_METRO_COLOR, 0.35);
-const TIMING_METRO_BEAT_HEIGHT = 0.45;
-const TIMING_METRO_LANE = 1;
-interface TimingLane {
-  label: string;
-  color: string;
-}
-const TIMING_LANES: readonly TimingLane[] = [
-  { label: "Grid", color: BEAT_GRID_COLOR },
-  { label: "Metronome", color: TIMING_METRO_COLOR },
-  { label: "Heard", color: BEAT_COLOR },
-];
+// The Beat card's bar ruler: one cell per beat of the metronome's bar, the
+// current one lit and fading over its beat, the downbeat in the Wave row's
+// bar colour (both metronome jacks are white), and a playhead at the exact
+// bar position. It has no history, so it
+// records nothing between draws.
+const BAR_RULER_HEIGHT_CSS_PX = 16;
+const BAR_RULER_UNLIT = "rgba(255,255,255,0.08)";
 
-/** The Tempo card's Timing strip. Grid: a tick as tall as tempoLock on each
- *  beatPhase wrap (an unconfident tracker draws short). Metro: full on the bar
- *  (what the jack sends), short and faint on other beats. Heard:
- *  `frame.onset`, the Hits Beat lane's fired edge. */
-function createTimingStrip(mountJack: MountJack, span: TraceSpan) {
+function createBarRuler() {
   const row = createMeterRow({
-    label: "Timing",
+    label: "Bar",
     accent: NEUTRAL_ACCENT,
-    unit: "s",
     description:
-      "Grid (blue) is the tracker's predicted beat, tall when it's sure; Metronome ticks steadily at the BPM above: faint on each beat, bright on the bar, and only the bar goes out its jack; Heard (red) is every beat the detector caught. Red under blue is on the beat; red alone is a double; blue with nothing under it is a miss.",
-    hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
+      "Where the metronome is in the bar: one cell per beat, the current beat lit, the first beat of the bar in its own colour, and the thin line is the exact spot. Plug Metronome (every beat) or Metronome bar (once a bar) into a setting to pulse it in time.",
   });
-  // The lane names come from TIMING_LANES, so the label can't drift from the lanes.
-  const timingLabel = `Beat timing history: ${TIMING_LANES.map((l) => l.label).join(", ")}`;
-  const ring = createColumnRing(TIMING_LANES.length, TIMING_HEIGHT_PX, timingLabel, span.sec, span.max);
-  const ctx = ring.ctx;
-  // Padded on the right like createHitsHistory's vizWrap, so jacks sit past the trace.
-  const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
-  ring.canvas.style.marginTop = "0";
-  vizWrap.appendChild(ring.canvas);
-  row.el.children[1].replaceWith(vizWrap);
-  row.setReadout(String(span.sec()));
-
-  const legend = createTraceLegend(TIMING_LANES.map((l) => ({ color: l.color, label: l.label })));
-  vizWrap.after(legend.el);
-
-  // Grid's jack and Metronome's (anim.metronomeBar), each on its own lane. No
-  // lane glow: neither lane shares a jack, so the row-level glow is enough.
-  const gridJack = mountJack({ source: "beat", grid: 2 }, vizWrap, row.el);
-  gridJack.el.style.position = "absolute";
-  gridJack.el.style.right = "2px";
-  gridJack.el.style.top = `${(TIMING_LANE_HEIGHT_PX - 13) / 2}px`;
-  const metroJack = mountJack("anim.metronomeBar", vizWrap, row.el);
-  metroJack.el.style.position = "absolute";
-  metroJack.el.style.right = "2px";
-  metroJack.el.style.top = `${TIMING_LANE_HEIGHT_PX + (TIMING_LANE_HEIGHT_PX - 13) / 2}px`;
-
-  let prevBeatPhase: number | null = null;
-
-  function draw(): void {
-    if (!ring.prepare()) return;
-    const w = ring.width;
-    const len = ring.length;
-    ctx.clearRect(0, 0, w, TIMING_HEIGHT_PX);
-
-    // A full-height guide at each Grid tick, so a Heard double or miss reads
-    // against the predicted column.
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    for (let x = 0; x <= len; x++) {
-      const g = x === len ? ring.live(0) : ring.at(x, 0);
-      if (!(g > 0)) continue;
-      ctx.fillRect(x === len ? w - 1 : x, 0, 1, TIMING_HEIGHT_PX);
-    }
-
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    for (let li = 1; li < TIMING_LANES.length; li++) {
-      ctx.fillRect(0, li * TIMING_LANE_HEIGHT_PX - 0.5, w, 1);
-    }
-
-    // Ticks bottom-up per lane, height = the column's value; NaN or 0 draws
-    // nothing. A Metronome value under the bar's 1 is the faint beat tick.
-    for (let x = 0; x <= len; x++) {
-      const px = x === len ? w - 1 : x;
-      for (let li = 0; li < TIMING_LANES.length; li++) {
-        const raw = x === len ? ring.live(li) : ring.at(x, li);
-        if (!(raw > 0)) continue;
-        const metroBeat = li === TIMING_METRO_LANE && raw < 1;
-        const v = metroBeat ? TIMING_METRO_BEAT_HEIGHT : raw;
-        const top = li * TIMING_LANE_HEIGHT_PX;
-        const h = Math.max(1, v * (TIMING_LANE_HEIGHT_PX - 1));
-        ctx.fillStyle = metroBeat ? TIMING_METRO_BEAT_COLOR : TIMING_LANES[li].color;
-        ctx.fillRect(px, top + (TIMING_LANE_HEIGHT_PX - h), 1, h);
-      }
-    }
-  }
+  const canvas = document.createElement("canvas");
+  nameGraph(canvas, "Where the metronome is in the bar, one cell per beat");
+  canvas.style.cssText = `display: block; width: 100%; height: ${BAR_RULER_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+  const ctx = canvas.getContext("2d")!;
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: BAR_RULER_HEIGHT_CSS_PX });
+  row.el.children[1].replaceWith(canvas);
+  const beatColor = driveSourceColor("anim.metronome");
+  const barColor = BEAT_GRID_COLOR;
 
   return {
     el: row.el,
-    /** Every tick, on screen or not, so a wrap is never read across an
-     *  unwatched stretch. */
-    record(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
-      if (anim) {
-        const wrapped = prevBeatPhase !== null && anim.beatPhase < prevBeatPhase;
-        prevBeatPhase = anim.beatPhase;
-        ring.push(
-          [
-            wrapped ? anim.tempoLock : 0,
-            anim.metronomeBar ? 1 : anim.metronomeBeat ? 0.6 : 0,
-            frame?.onset ? 1 : 0,
-          ],
-          nowMs,
-        );
-      } else {
-        prevBeatPhase = null;
-        ring.push([null, null, null], nowMs);
+    /** The anim.metronome/anim.metronomeBar jacks mount here. */
+    right: row.right,
+    /** Only while on screen. */
+    draw(anim: AnimFrame | null, text: boolean): void {
+      const on = !!anim && anim.metronomeOn;
+      const beat = on ? Math.min(METRONOME_BEATS_PER_BAR - 1, Math.floor(anim.metronomeBarPhase * METRONOME_BEATS_PER_BAR)) : -1;
+      if (text) row.setReadout(on ? String(beat + 1) : "--", on ? {} : IDLE);
+      if (!sizer.ensure()) return;
+      const w = sizer.width;
+      const h = BAR_RULER_HEIGHT_CSS_PX;
+      ctx.clearRect(0, 0, w, h);
+      const cw = w / METRONOME_BEATS_PER_BAR;
+      for (let i = 0; i < METRONOME_BEATS_PER_BAR; i++) {
+        const x0 = Math.round(i * cw) + 1;
+        const x1 = Math.round((i + 1) * cw) - 1;
+        if (i === beat && anim) {
+          ctx.globalAlpha = 0.35 + 0.65 * (1 - anim.metronomePhase);
+          ctx.fillStyle = i === 0 ? barColor : beatColor;
+        } else {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = BAR_RULER_UNLIT;
+        }
+        ctx.fillRect(x0, 2, x1 - x0, h - 4);
       }
-    },
-    draw,
-    refreshSpan(): void {
-      row.setReadout(String(span.sec()));
+      ctx.globalAlpha = 1;
+      if (on) {
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fillRect(Math.min(w - 1, Math.round(anim.metronomeBarPhase * w)), 0, 1, h);
+      }
     },
   };
 }
@@ -1861,7 +1806,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   }
   const signalSpan = cardSpan("signal");
   const hitsSpan = cardSpan("hits");
-  const tempoSpan = cardSpan("tempo");
+  const beatSpan = cardSpan("beat");
   const characterSpan = cardSpan("character");
   const setupInputSpan = cardSpan("setup-input");
 
@@ -2033,7 +1978,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   let lufsShown: boolean | null = null;
 
   // ---- Hits ----
-  const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack, hitsSpan);
+  const hitsHistory = createHitsHistory(deps.getSilenceGate, deps.getBandEdgesHz, mountJack, hitsSpan);
   // Hit shape (Setup view): sliders that turn a fired tick's fixed height into
   // a graded strength (hitStrength.ts), folded by default. Their effect shows
   // in the Hits history's dashed Floor line and dots, and the Curve.
@@ -2207,11 +2152,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   hitsCard.body.append(hitsHistory.el);
 
-  // ---- Tempo ----
+  // ---- Beat ----
   const tempo = createTempoBlock(NEUTRAL_ACCENT);
-  // Both mount here, not on a row of their own: the BPM is the metronome's
-  // number (signals.ts's MeterRowId).
-  mountJack("anim.metronome", tempo.jackHost, tempo.el);
+  // Mounts here, not on a row of its own: the BPM is anim.tempo's number
+  // (signals.ts's MeterRowId).
   mountJack("anim.tempo", tempo.jackHost, tempo.el);
   const lock = createMeterRow({
     label: "Lock",
@@ -2227,7 +2171,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   tempoWelded.style.cssText = weldedRowStyle;
   tempoWelded.append(lock.el, tempo.el);
 
-  const timingStrip = createTimingStrip(mountJack, tempoSpan);
+  const barRuler = createBarRuler();
+  mountJack("anim.metronome", barRuler.right, barRuler.el);
+  mountJack("anim.metronomeBar", barRuler.right, barRuler.el);
 
   // The two beat-shape drives off the metronome (a smooth swing, not a hit),
   // on one shared row like the Hits lanes.
@@ -2245,10 +2191,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       { color: BEAT_GRID_COLOR, width: 1.5 },
     ],
     BEAT_TRACE_HEIGHT_CSS_PX,
-    { label: "History of the beat wave and the bar wave", span: tempoSpan },
+    { label: "History of the beat wave and the bar wave", span: beatSpan },
   );
   wave.el.children[1].replaceWith(waveTrace.canvas);
-  wave.setReadout(String(tempoSpan.sec()));
+  wave.setReadout(String(beatSpan.sec()));
   mountJack("anim.beatWave", wave.right, wave.el);
   mountJack("anim.barWave", wave.right, wave.el);
 
@@ -2273,14 +2219,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   tapRight.append(
     tapStatus,
     tapChip,
-    createSpanChip("tempo", () => {
-      timingStrip.refreshSpan();
-      wave.setReadout(String(tempoSpan.sec()));
-    }),
+    createSpanChip("beat", () => wave.setReadout(String(beatSpan.sec()))),
   );
   let shownTapStatus = "";
-  const tempoCard = createCard({ title: "Tempo", accent: NEUTRAL_ACCENT, foldId: "tempo", right: tapRight });
-  tempoCard.body.append(tempoWelded, spacer(), timingStrip.el, spacer(), wave.el);
+  const beatCard = createCard({ title: "Beat", accent: NEUTRAL_ACCENT, foldId: "beat", right: tapRight });
+  beatCard.body.append(tempoWelded, spacer(), barRuler.el, spacer(), wave.el);
 
   // ---- Character ----
   const section = createMeterRow({
@@ -2396,10 +2339,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     signal: signalCard.title.textContent ?? "",
     "setup-input": inputCheckCard.title.textContent ?? "",
     hits: hitsCard.title.textContent ?? "",
-    tempo: tempoCard.title.textContent ?? "",
+    beat: beatCard.title.textContent ?? "",
     character: characterCard.title.textContent ?? "",
   };
-  for (const cardId of ["signal", "setup-input", "hits", "tempo", "character"] as const) {
+  for (const cardId of ["signal", "setup-input", "hits", "beat", "character"] as const) {
     const seen = new Set<SignalId>();
     const jacks = heatJacks.filter((j) => {
       if (j.card !== cardId || seen.has(j.id)) return false;
@@ -2489,7 +2432,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     signalCard.el,
     meterGroupHeading("Beat"),
     hitsCard.el,
-    tempoCard.el,
+    beatCard.el,
     meterGroupHeading("Song"),
     characterCard.el,
   );
@@ -2551,7 +2494,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     signal: signalCard.el,
     "setup-input": inputCheckCard.el,
     hits: hitsCard.el,
-    tempo: tempoCard.el,
+    beat: beatCard.el,
     character: characterCard.el,
   };
   const rowElements = new Map<MeterRowId, HTMLElement>([
@@ -2563,7 +2506,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ...dialRows.map(({ dial, row }): [MeterRowId, HTMLElement] => [dialSignalId(dial), row.el]),
     ["wave", wave.el],
     ["lock", lock.el],
-    ["timing", timingStrip.el],
+    ["bar", barRuler.el],
     ["waveform", waveform.el],
     ["level", level.el],
   ]);
@@ -2574,7 +2517,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     // A closed Setup view counts as a folded card, so its jacks and strips skip their writes.
     "setup-input": { fold: { isFolded: () => !setupOpen || (inputCheckCard.fold?.isFolded() ?? false) } },
     hits: hitsCard,
-    tempo: tempoCard,
+    beat: beatCard,
     character: characterCard,
   };
   // Whether each card is in view (onScreen.ts): one scrolled out of its column
@@ -2584,7 +2527,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const inputCheckOnScreen = watchOnScreen(inputCheckCard.el);
   const hitShapeOnScreen = watchOnScreen(hitShapeCard.el);
   const hitsOnScreen = watchOnScreen(hitsCard.el);
-  const tempoOnScreen = watchOnScreen(tempoCard.el);
+  const beatOnScreen = watchOnScreen(beatCard.el);
   const characterOnScreen = watchOnScreen(characterCard.el);
 
   return {
@@ -2631,7 +2574,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         if (anim.midOnset) lastHitMs[2] = nowMs;
         if (anim.highOnset) lastHitMs[3] = nowMs;
       }
-      timingStrip.record(frame, anim, nowMs);
       // Via SIGNALS[id].read(), not a copied formula, so this trace and a
       // setting driven by the signal agree.
       waveTrace.push(
@@ -2821,7 +2763,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Tempo ----
+      // ---- Beat ----
       // The Tap chip's count sits in the header, so it updates folded too.
       if (text) {
         const run = getTapRun(nowMs);
@@ -2831,7 +2773,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           tapStatus.textContent = status;
         }
       }
-      if (!tempoCard.fold?.isFolded() && tempoOnScreen()) {
+      if (!beatCard.fold?.isFolded() && beatOnScreen()) {
         // The dot flashes on the metronome's tick, not a raw hit; dot and digits
         // share tempoSettle.ts's reading.
         tempo.update(anim?.tempoLock ?? 0, beat);
@@ -2849,7 +2791,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         if (text) {
           lock.setReadout(anim ? pct(anim.tempoLock) : "--", anim ? {} : IDLE);
         }
-        timingStrip.draw();
+        barRuler.draw(anim, text);
         waveTrace.draw();
       }
 

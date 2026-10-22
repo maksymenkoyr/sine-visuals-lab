@@ -9,7 +9,7 @@ import type { AutopilotConfig } from "./sceneSet.ts";
  *
  * When. Every `everyBars` bars from the last restart, then on the next bar
  * boundary of the metronome's beat count (AnimFrame.metronomeBeats — the
- * steady clock under the Tempo card's BPM, see metronome.ts), the same
+ * steady clock under the Beat card's BPM, see metronome.ts), the same
  * phrase-aligned change longplay's tour makes (crossedBeatMultiple). So the
  * first change after a manual press comes between N and N+1 bars later, and
  * every one after an Autopilot change lands exactly N bars on: it re-anchors

@@ -542,7 +542,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   const readout = document.createElement("span");
   readout.style.cssText = `${digitsTextStyle} color: #fff;`;
   // A dim note after the readout for state the host wants to show beside
-  // the choice (the Tempo card's "waiting for tempo"); empty by default.
+  // the choice (the Beat card's "waiting for tempo"); empty by default.
   const status = document.createElement("span");
   status.style.cssText = pickerStatusStyle;
   const resetBtn = document.createElement("button");

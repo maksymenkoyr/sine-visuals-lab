@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nominalBandEdgesHz, bandEdgesHz, formatHz, MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
+import { nominalBandEdgesHz, bandEdgesHz, bandCenterHz, formatHz, MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 
 describe("band scale", () => {
@@ -21,6 +21,14 @@ describe("band scale", () => {
     const edges = bandEdgesHz(8000);
     expect(edges[0]).toBeCloseTo(MIN_HZ);
     expect(edges[NUM_BANDS]).toBeCloseTo(8000);
+  });
+
+  it("bandCenterHz is the geometric midpoint of its band's edges", () => {
+    const edges = nominalBandEdgesHz();
+    const center = bandCenterHz(edges, 0);
+    expect(center).toBeGreaterThan(edges[0]);
+    expect(center).toBeLessThan(edges[1]);
+    expect(center).toBeCloseTo(Math.sqrt(edges[0] * edges[1]));
   });
 
   it("formatHz stays in Hz below 1000 and switches to kHz at/above it", () => {
