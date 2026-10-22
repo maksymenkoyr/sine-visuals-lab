@@ -104,7 +104,7 @@ export interface CardSpec {
   right?: HTMLElement;
   /** Opts this card into a persisted collapse toggle (panelFolds.ts): a
    *  chevron in the header, and a click anywhere on the header outside
-   *  `right`. Unique per mounted card ("bands", "signal", "hits", …). */
+   *  `right`. Unique per mounted card ("bands", "sound", "hits", …). */
   foldId?: string;
   /** Starts folded until the user first opens it (panelFolds.ts's
    *  defaultFolded) — the Power card, whose readouts most people never need. */
