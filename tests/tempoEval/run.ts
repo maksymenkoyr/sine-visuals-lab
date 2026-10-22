@@ -7,6 +7,7 @@ import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
 import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
 import {
   feedSilenceGateMeasurement,
+  feedSilenceGateRoom,
   resolveSilenceGate,
   setSilenceGateAuto,
   SILENCE_GATE_CLOSED_DEFAULT,
@@ -281,6 +282,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
       // Same order as app.ts: the readings feed the next tick.
       feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
       feedSilenceGateMeasurement(frame.level, extractor.dtSec);
+      feedSilenceGateRoom(extractor.roomDb, extractor.dtSec);
     }
 
     let tempoHits: TempoHit[] | undefined;

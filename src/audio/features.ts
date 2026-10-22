@@ -128,6 +128,17 @@ function sanitizeDb(db: number): number {
 const LEVEL_DB_FLOOR = -70; // effectively silence for a typical mic
 const LEVEL_DB_CEIL = -15; // a loud room
 
+// silenceGate.ts's room path reads this: the input's level in dB, power-
+// averaged over ROOM_LEVEL_TAU_SEC (the short average #603 measured rooms
+// with), with no floor of its own, unlike `level`. NaN until
+// ROOM_SETTLE_SEC of input has passed since the last digital silence: an
+// analyser starts on zeros, and the average's climb out of them would seed
+// the room floor tens of dB too low (measured: every room then read as sound).
+const ROOM_LEVEL_TAU_SEC = 0.3;
+const ROOM_SETTLE_SEC = 1;
+// Every band at DB_FLOOR (sanitizeDb): no samples at all, not a quiet room.
+const DIGITAL_SILENCE_DB = DB_FLOOR + 1;
+
 function clamp01(x: number): number {
   if (!Number.isFinite(x)) return 0;
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -203,11 +214,19 @@ export class FeatureExtractor {
   /** How much of this frame's flux the silence gate let through before the
    *  firing comparison — see silenceGate.ts's silenceGateDimmer. 1 with no
    *  `gate` argument (or whenever the gate is off), down toward 0 the
-   *  quieter the room reads. A local diagnostic like fluxRatio above, never
-   *  part of FeatureFrame — the Dynamics card's Gate row and its trace
-   *  (audioMeters.ts) are the one reader. */
+   *  quieter the room reads. The same value rides on the frame as
+   *  FeatureFrame.gateDimmer; the Dynamics card's Gate row and its trace
+   *  (audioMeters.ts) read it here. */
   get gateDimmer(): number {
     return this.lastGateDimmer;
+  }
+
+  /** This tick's room reading for silenceGate.ts's room path (see
+   *  ROOM_LEVEL_TAU_SEC); NaN while there's nothing to read yet. app.ts feeds
+   *  it to feedSilenceGateRoom, as it feeds bandSpanDb to
+   *  feedAutoGainMeasurement. */
+  get roomDb(): number {
+    return this.lastRoomDb;
   }
 
   /** True on the tick a hit's flux cleared its threshold but the gate's
@@ -240,6 +259,11 @@ export class FeatureExtractor {
   // close it came) — the Hits card's hits history in audioMeters.ts.
   private lastFluxRatio = 0;
   private lastGateDimmer = 1;
+  // The room reading (see ROOM_LEVEL_TAU_SEC): power average, < 0 before
+  // anything was heard; seconds of input since the last digital silence.
+  private roomPow = -1;
+  private liveSec = 0;
+  private lastRoomDb = Number.NaN;
   private lastSuppressed = false;
   // Separate from lastOnsetTime — a suppressed hit must never set that one
   // (see update()) — so `suppressed` gets its own one-shot spacing instead
@@ -286,7 +310,8 @@ export class FeatureExtractor {
    *   measurement, not display smoothing, and the meters panel's RAW chip
    *   already shows their output untouched.
    * @param gate Silence-gate marks (src/audio/silenceGate.ts) to weight
-   *   `onset`'s firing comparison by this tick's `level` — see
+   *   `onset`'s firing comparison by this tick's `level` (and, with room
+   *   marks, its roomDb) — see
    *   silenceGateDimmer for exactly what it multiplies (only the comparison,
    *   never the baseline/ratio/refractory) and why. Never reaches
    *   `pulseOnset` — see FeatureFrame.pulseOnset's own doc for why tempo
@@ -371,7 +396,16 @@ export class FeatureExtractor {
     // above and lastFluxRatio's score are both computed on raw, ungated flux,
     // and stay that way (see silenceGate.ts's header for why gating the
     // baseline too would defeat the gate entirely).
-    const dimmer = gate ? silenceGateDimmer(level, gate) : 1;
+    if (meanRawDb < DIGITAL_SILENCE_DB) {
+      this.roomPow = -1;
+      this.liveSec = 0;
+    } else {
+      const pow = rawPowSum / NUM_BANDS;
+      this.roomPow = this.roomPow < 0 ? pow : this.roomPow + (pow - this.roomPow) * expBlend(1 / ROOM_LEVEL_TAU_SEC, dt);
+      this.liveSec += dt;
+    }
+    this.lastRoomDb = this.liveSec >= ROOM_SETTLE_SEC ? 10 * Math.log10(this.roomPow) : Number.NaN;
+    const dimmer = gate ? silenceGateDimmer(level, gate, this.lastRoomDb) : 1;
     this.lastGateDimmer = dimmer;
     const sinceOnsetSec = time - this.lastOnsetTime;
     const canFire = sinceOnsetSec > ONSET_REFRACTORY_SEC;
@@ -449,7 +483,7 @@ export class FeatureExtractor {
     // hats/lead need the analyser's full FFT bins, which this extractor never
     // sees (only the bands), so app.ts writes them in from stemSplit.ts before
     // the frame leaves currentVisual(), the same way it overwrites bpm.
-    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level, hats: 0, lead: 0 };
+    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level, hats: 0, lead: 0, gateDimmer: dimmer };
   }
 
   /** @param strength flux over the firing threshold — 1 is a bare trigger. */

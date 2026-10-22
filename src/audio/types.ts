@@ -50,6 +50,13 @@ export interface FeatureFrame {
    *  songs through a simulated mic, against solo mode's ~94%, because their
    *  only feed was the gated `onset`). */
   pulseOnset: boolean;
+  /** The silence-gate dimmer (src/audio/silenceGate.ts) this frame's own
+   *  FeatureExtractor weighed `onset` with, room path included, so the band
+   *  detectors on the same device (render/animClock.ts) use the same
+   *  decision. Absent on a frame that didn't come straight from an extractor
+   *  here (decoded off the wire, the synthetic feed); animClock then works
+   *  it out from `level` and its `gate` marks. */
+  gateDimmer?: number;
   /** Estimated tempo in BPM — 0 until locked, and again once
    *  TEMPO_DECAY_SEC (tempoComb.ts) has passed with no onset registering.
    *  Two possible sources, both on the same decay rule: features.ts's own

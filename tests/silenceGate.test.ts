@@ -9,12 +9,15 @@ import {
   setSilenceGateAuto,
   resolveSilenceGate,
   feedSilenceGateMeasurement,
+  feedSilenceGateRoom,
   silenceGateMarksForFloor,
   SILENCE_GATE_MIN,
   SILENCE_GATE_MAX,
   SILENCE_GATE_MIN_WIDTH,
   SILENCE_GATE_CLOSED_DEFAULT,
   SILENCE_GATE_OPEN_DEFAULT,
+  SILENCE_GATE_ROOM_CLOSED_DB,
+  SILENCE_GATE_ROOM_OPEN_DB,
 } from "../src/audio/silenceGate.ts";
 import { createSyntheticFeed } from "../src/audio/synthetic.ts";
 
@@ -338,6 +341,81 @@ describe("silence gate auto mode", () => {
     feedSilenceGateMeasurement(0.02, Number.NaN);
     feedSilenceGateMeasurement(Number.POSITIVE_INFINITY, 1);
     expect(resolveSilenceGate()).toEqual(before);
+  });
+});
+
+describe("silence gate room path", () => {
+  beforeEach(() => {
+    setSilenceGateAuto(false);
+    resetSilenceGate();
+    setSilenceGateAuto(true);
+  });
+
+  it("carries no room marks before a usable reading", () => {
+    expect(resolveSilenceGate().roomClosedDb).toBeUndefined();
+    feedSilenceGateRoom(Number.NaN, 1);
+    expect(resolveSilenceGate().roomClosedDb).toBeUndefined();
+    feedSilenceGateRoom(-90, Number.NaN);
+    expect(resolveSilenceGate().roomClosedDb).toBeUndefined();
+  });
+
+  it("learns a quiet room and places both room marks over its floor", () => {
+    for (let i = 0; i < 100; i++) feedSilenceGateRoom(-90, 0.1);
+    const marks = resolveSilenceGate();
+    expect(marks.roomClosedDb).toBeCloseTo(-90 + SILENCE_GATE_ROOM_CLOSED_DB, 1);
+    expect(marks.roomOpenDb).toBeCloseTo(-90 + SILENCE_GATE_ROOM_OPEN_DB, 1);
+    expect(Number.isFinite(marks.closed)).toBe(true);
+    expect(Number.isFinite(marks.open)).toBe(true);
+  });
+
+  it("music standing clear of the room does not move the floor", () => {
+    for (let i = 0; i < 100; i++) feedSilenceGateRoom(-90, 0.1);
+    for (let i = 0; i < 1200; i++) feedSilenceGateRoom(i % 2 === 0 ? -62 : -72, 0.1);
+    expect(resolveSilenceGate().roomClosedDb).toBeCloseTo(-90 + SILENCE_GATE_ROOM_CLOSED_DB, 1);
+  });
+
+  it("learns a slightly louder room, creeping up and never past it", () => {
+    for (let i = 0; i < 100; i++) feedSilenceGateRoom(-90, 0.1);
+    for (let i = 0; i < 600; i++) feedSilenceGateRoom(-84, 0.1);
+    const closed = resolveSilenceGate().roomClosedDb ?? Number.NaN;
+    expect(closed).toBeCloseTo(-84 + SILENCE_GATE_ROOM_CLOSED_DB, 0);
+    expect(closed).toBeLessThanOrEqual(-84 + SILENCE_GATE_ROOM_CLOSED_DB + 1e-9);
+  });
+
+  it("follows a quieter reading down", () => {
+    for (let i = 0; i < 100; i++) feedSilenceGateRoom(-90, 0.1);
+    for (let i = 0; i < 50; i++) feedSilenceGateRoom(-96, 0.1);
+    const closed = resolveSilenceGate().roomClosedDb ?? Number.NaN;
+    expect(closed - SILENCE_GATE_ROOM_CLOSED_DB).toBeLessThan(-93);
+  });
+
+  it("holds no room marks while auto is off, and a new auto session starts without them", () => {
+    setSilenceGateAuto(false);
+    feedSilenceGateRoom(-90, 0.1);
+    expect(resolveSilenceGate()).toEqual(getSilenceGate());
+    expect(resolveSilenceGate().roomClosedDb).toBeUndefined();
+    setSilenceGateAuto(true);
+    expect(resolveSilenceGate().roomClosedDb).toBeUndefined();
+    feedSilenceGateRoom(-90, 0.1);
+    expect(resolveSilenceGate().roomClosedDb).toBeCloseTo(-90 + SILENCE_GATE_ROOM_CLOSED_DB, 1);
+  });
+
+  it("silenceGateDimmer opens on the room path and takes the wider of the two paths", () => {
+    const marks = { closed: 0.05, open: 0.15, roomClosedDb: -80, roomOpenDb: -70 };
+    expect(silenceGateDimmer(0, marks, -85)).toBe(0);
+    expect(silenceGateDimmer(0, marks, -65)).toBe(1);
+    const mid = silenceGateDimmer(0, marks, -75);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+    expect(silenceGateDimmer(0, marks, Number.NaN)).toBe(0);
+    expect(silenceGateDimmer(0, marks)).toBe(0);
+  });
+
+  it("the room path is off for manual marks and for marks without room values", () => {
+    expect(silenceGateDimmer(0, { closed: 0, open: 0.15, roomClosedDb: -80, roomOpenDb: -70 }, -85)).toBe(1);
+    const levelOnly = { closed: 0.05, open: 0.15 };
+    expect(silenceGateDimmer(0.2, levelOnly)).toBe(1);
+    expect(silenceGateDimmer(0, levelOnly, -10)).toBe(0);
   });
 });
 

@@ -47,6 +47,14 @@ describe("createAnimClock", () => {
     expect(anim.gateDimmer).toBeLessThan(1);
   });
 
+  it("uses the frame's own gateDimmer over the marks when the frame carries one", () => {
+    const marks: SilenceGateMarks = { closed: 0.05, open: 0.15 };
+    const withOwn = createAnimClock().advance(DT, frame({ level: 0, gateDimmer: 1 }), undefined, marks);
+    expect(withOwn.gateDimmer).toBe(1);
+    const fromMarks = createAnimClock().advance(DT, frame({ level: 0 }), undefined, marks);
+    expect(fromMarks.gateDimmer).toBe(0);
+  });
+
   it("hats and lead ease up to the frame's values when no gate is given", () => {
     const clock = createAnimClock();
     let anim = clock.advance(DT, frame({ hats: 1, lead: 1 }));

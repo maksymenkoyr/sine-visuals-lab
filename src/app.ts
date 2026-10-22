@@ -225,6 +225,7 @@ import {
   setSilenceGateOpen,
   resolveSilenceGate,
   feedSilenceGateMeasurement,
+  feedSilenceGateRoom,
   isSilenceGateAuto,
   setSilenceGateAuto,
   type SilenceGateReading,
@@ -3394,8 +3395,9 @@ function readLocalCapture(
   lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
   // Feeds next tick's resolveAutoGain(); the one-tick lag is fine (see feedAutoGainMeasurement).
   feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-  // Same one-tick lag (see feedSilenceGateMeasurement).
+  // Same one-tick lag for both of the gate's trackers (see feedSilenceGateMeasurement).
   feedSilenceGateMeasurement(f.level, extractor.dtSec);
+  feedSilenceGateRoom(extractor.roomDb, extractor.dtSec);
   return { f, now };
 }
 

@@ -325,6 +325,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           bands: frame.bands,
           energy: frame.energy,
           level: frame.level,
+          gateDimmer: frame.gateDimmer,
           hats: frame.hats,
           lead: frame.lead,
           onset: frame.onset,

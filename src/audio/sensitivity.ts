@@ -279,6 +279,7 @@ export function applySensitivity(frame: FeatureFrame, sensitivity: number, expan
     bpm: frame.bpm,
     onsetPhase: frame.onsetPhase,
     level: frame.level,
+    gateDimmer: frame.gateDimmer,
     hats: frame.hats,
     lead: frame.lead,
   };
