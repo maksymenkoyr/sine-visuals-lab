@@ -137,15 +137,17 @@ Darker means more important.
     - ●○○ **Input card** — Source, device, Sensitivity, Expansion,
       Smoothing, the silence gate, and one Auto for the whole mic ·
       `src/ui/deviceMenu.ts`, `src/audio/silenceGate.ts`
-    - ●○○ **Bands card** — the live spectrum, a fader per band, and a line
-      you draw across it · `src/ui/spectrumStrip.ts`,
+    - ●○○ **Bands card** — in the Setup view: the live spectrum, a fader per
+      band, and a line you draw across it · `src/ui/spectrumStrip.ts`,
       `src/ui/bandFaders.ts`, `src/ui/bandLineEditor.ts`
-    - ○○○ **Meters: Dynamics, Hits, Tempo, Character** — live readouts of
-      what the analysis hears; each row's jack is a signal you can wire ·
+    - ○○○ **Meters: Sound, Hits, Tempo, Character** — live readouts of
+      what the analysis hears; each row's jack is a signal you can wire.
+      Sound is a thin spectrum over Level, Bass, Mid + Lead and Treble +
+      Hats ·
       `src/ui/audioMeters.ts`, the dials are `MUSIC_DIALS`
     - ○○○ **Setup view** — the panel footer's Setup button opens a column of
       the rows you check once per set: Input check (waveform, input level,
-      loudness, the gate), Hit shape (the sliders and curves that grade a
+      loudness, the gate), the Bands card, Hit shape (the sliders and curves that grade a
       hit) and Heat history; each row keeps its jack · `src/ui/audioMeters.ts`
       - ●○○ **Tap tempo** — tap Ctrl or the Tempo card's Tap to set the
         tracker's BPM. For DJs · `src/render/tapTempo.ts`

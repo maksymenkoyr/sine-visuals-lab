@@ -18,7 +18,7 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [41]     wave max, Int8
  * = 42 bytes when the sender has a waveform: the min and max of its mic's
  * raw samples since the frame before, which a following phone or iPad draws
- * as the Dynamics card's Waveform row (src/ui/audioMeters.ts). A sender with
+ * as the Input check card's Waveform row (src/ui/audioMeters.ts). A sender with
  * no mic samples (the synthetic feed) leaves the tail off, and the follower
  * hides that row as it would with no waveform at all. The tail sits after
  * roomTimeMs so the 40 bytes before it are exactly the layout without it.

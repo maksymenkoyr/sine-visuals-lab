@@ -62,12 +62,11 @@ on its way to an animation node.
   audio cable (the line-input and USB hints), and "source" for the sound
   source. A wire is the one thing drawn between a jack and a port.
 - **Built-in, not scene mix.** "Mix" is the control right next to it; two different things can't share the word.
-- **Dynamics card, not Signal card.** With every wireable value an input
-  node, a card called Signal read as "the card with the input nodes" — but
-  every meter card has them. The card shows Level and its History, which is
-  what dynamics means in audio; the input-check rows (waveform, input level,
-  loudness, the gate) sit in the Setup view. Its fold id (`"signal"`) is
-  unchanged so a folded card stays folded.
+- **Sound card.** The first meter: what you hear before any beat logic. A thin
+  live spectrum over Level, Bass, Mid + Lead and Treble + Hats. The
+  input-check rows (waveform, input level, loudness, the gate) sit in the Setup
+  view. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
+  over.
 
 ## Writing new copy
 
