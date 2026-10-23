@@ -12,6 +12,7 @@ severity: error
 message: This runs every frame, so it must not allocate. Make the array, map or typed array once (in init() or at module level) and reuse it.
 files:
   - src/**/*.ts
+  - audio-subsystem/src/**/*.ts
 rule:
   all:
     - any:

@@ -152,7 +152,7 @@ export function sceneNameFromSource(source) {
   return m ? m[1] : null;
 }
 
-const SOUND_RE = /^src\/audio\/|^src\/render\/[^/]*(drive|beat|tempo|metronome|musicProfile|autoTune|onset|silence)[^/]*$/i;
+const SOUND_RE = /^(?:src\/audio|audio-subsystem)\/|^src\/render\/[^/]*(drive|beat|tempo|metronome|musicProfile|autoTune|onset|silence)[^/]*$/i;
 const OUTPUT_RE = /^src\/net\/|^server\/|^src\/tv\.ts$|^tv\.html$|^wrangler\.toml$|^src\/ui\/output/i;
 const SCENE_RE = /^src\/render\/scenes\/|^docs\/scenes\//;
 const APP_RE = /^src\/|^index\.html$|^public\//;
@@ -168,7 +168,7 @@ const PREFIX_AREAS = [
 /** One file's product area, or "other" (docs, tools, CI, config), or null
  *  for a test — which says nothing about what a PR changed for a visitor. */
 export function areaOfFile(path) {
-  if (/^tests\//.test(path)) return null;
+  if (/^(tests|audio-subsystem\/tests)\//.test(path)) return null;
   if (SCENE_RE.test(path)) return "scenes";
   if (SOUND_RE.test(path)) return "sound";
   if (OUTPUT_RE.test(path)) return "output";

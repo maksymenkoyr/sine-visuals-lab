@@ -10,11 +10,12 @@
     // Loaded by tools/alien-bake/index.html from the site root, which knip can't resolve.
     "src/render/scenes/alien/bakePage.ts",
     "tools/**/*.{mjs,js,ts}",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "audio-subsystem/tests/**/*.ts"
   ],
   // The root vite-*-plugin.ts files are vite.config.ts's own imports; listed
   // so what they take from src/ (the product name, the channel) counts as used.
-  "project": ["src/**/*.ts", "vite-*-plugin.ts", "server/**/*.ts", "tools/**/*.{mjs,js,ts}", "tests/**/*.ts"],
+  "project": ["src/**/*.ts", "audio-subsystem/**/*.ts", "vite-*-plugin.ts", "server/**/*.ts", "tools/**/*.{mjs,js,ts}", "tests/**/*.ts"],
   // Run by tools/check.mjs through npx, which knip can't see. jscpd is
   // reached by its launcher's path under node_modules (tools/dupesLib.mjs).
   "ignoreDependencies": ["@ast-grep/cli", "@biomejs/biome", "cloudflare", "jscpd"],

@@ -61,7 +61,7 @@ export interface VisualSample {
    *  — tempo tracking (the beat clock's phase comb, render/animClock.ts)
    *  must read this, never onsetFired, so a host/renderer/TV's own
    *  Metronome isn't starved by whatever silenced onsetFired for visuals.
-   *  See src/audio/types.ts's FeatureFrame.pulseOnset for the full story. */
+   *  See audio-subsystem/src/types.ts's FeatureFrame.pulseOnset for the full story. */
   pulseFired: boolean;
   /** Room-clock time, wrapped to stay small — safe to feed straight into a `uTime` uniform. */
   timeSec: number;

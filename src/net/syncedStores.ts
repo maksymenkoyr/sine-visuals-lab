@@ -28,8 +28,13 @@
  * storage until that store's next write, so a reload of that window falls
  * back to the defaults.
  *
- * Kept import-free on purpose: stores in render/ and audio/ both import it.
+ * Its one import is the audio subsystem's storeReload.ts, itself import-free,
+ * so stores in src/render/ still import this without a cycle. The audio stores
+ * register their reloads there (onAudioStoreReload), and reloadSyncedStores
+ * runs those too.
  */
+
+import { parseStoredNumber, parseStoredObject, reloadAudioStores } from "../../audio-subsystem/src/storeReload.ts";
 
 /** Keys that belong to one window or one person's chrome, never mirrored:
  *  the room identity, panel/tip/toast state, which audio source this
@@ -120,24 +125,12 @@ export function registerSyncedStore(_key: string, reload: () => void): void {
   if (!hooks.includes(reload)) hooks.push(reload);
 }
 
-/** A mirrored key's JSON object. Null when the key is absent (or empty): the
- *  store resets to its defaults. Throws on text that is not a plain object,
- *  so a reload hook that calls it before touching its cache keeps what it
- *  had (see applySyncedStorage). */
-export function parseSyncedObject(raw: string | null): Record<string, unknown> | null {
-  if (raw === null || raw === "") return null;
-  const parsed: unknown = JSON.parse(raw); // throws on bad JSON
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
-  return parsed as Record<string, unknown>;
-}
-
-/** The same for a stored number: null when absent, throws when not finite. */
-export function parseSyncedNumber(raw: string | null): number | null {
-  if (raw === null) return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) throw new Error("not a number");
-  return n;
-}
+/** A mirrored key's JSON object, or its number: one parse rule for every
+ *  store, the audio subsystem's (audio-subsystem/src/storeReload.ts). Null
+ *  when the key is absent; throws on unreadable text, so a reload hook that
+ *  calls it before touching its cache keeps what it had (see
+ *  applySyncedStorage). */
+export { parseStoredObject as parseSyncedObject, parseStoredNumber as parseSyncedNumber };
 
 type Keyed = Pick<Storage, "getItem" | "key" | "length">;
 
@@ -185,7 +178,7 @@ export function applySyncedStorage(
   reloadSyncedStores();
 }
 
-/** Re-seeds every registered store from storage, each on its own (a store that throws keeps what it had). */
+/** Re-seeds every registered store from storage, the audio subsystem's too, each on its own (a store that throws keeps what it had). */
 export function reloadSyncedStores(): void {
   for (const reload of hooks) {
     try {
@@ -194,6 +187,7 @@ export function reloadSyncedStores(): void {
       // A store that cannot re-read keeps what it had.
     }
   }
+  reloadAudioStores();
 }
 
 /** The room look's storage: every `isRoomKey` key's current text. */

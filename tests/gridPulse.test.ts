@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createGridPulse, GRID_LOCK_OFF, GRID_LOCK_ON } from "../src/render/gridPulse.ts";
-import { BEAT_GRIDS, beatGridBeats, beatGridLabel } from "../src/audio/beatGrid.ts";
+import { BEAT_GRIDS, beatGridBeats, beatGridLabel } from "../audio-subsystem/src/beatGrid.ts";
 
 const DT = 1 / 60;
 const BPM = 120;

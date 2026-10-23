@@ -94,7 +94,7 @@ layers never overlapped so nothing stacked toward white.
   `AnimFrame`, and this clip's tempo never locked when measured) and any
   section-boundary response (the one section boundary produced no
   measurable picture change). Both are named in `index.ts`'s header as
-  `beatClock.ts`/`src/audio/` to-dos, not scene bugs.
+  `beatClock.ts`/`audio-subsystem/src/` to-dos, not scene bugs.
 - **PR #100 (merged 2026-09-18).** Shipped the scene and, in the same PR,
   graduated it out of `DRAFT_SCENE_IDS` — first among the scenes so listed —
   rather than landing it as a draft.
@@ -146,7 +146,7 @@ bloom itself is skipped entirely (no offscreen chain at all) once
   perspective read (off-centre vanishing point, right-edge curl) is weaker
   than the reference's.
 - Phrase-start reshuffle and any section-boundary response are open
-  `beatClock.ts`/`src/audio/` to-dos (no phrase counter on `AnimFrame`; this
+  `beatClock.ts`/`audio-subsystem/src/` to-dos (no phrase counter on `AnimFrame`; this
   reference's own tempo never locked when measured), deliberately not
   faked in this scene.
 - PR #130 (open, stacked on #127, also open) would move `slats`'s reactive

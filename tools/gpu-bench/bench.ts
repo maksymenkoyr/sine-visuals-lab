@@ -2,7 +2,7 @@
 // modules into a fixed-size canvas on a deterministic synthetic feed and
 // publishes the result on window.__bench. Query: scenes=<id,id>, w, h,
 // frames, and dump=<frame,frame> to return raw RGBA frames instead of times.
-import { NUM_BANDS, type FeatureFrame } from "../../src/audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import { createAnimClock } from "../../src/render/animClock.ts";
 import { qualitySettings } from "../../src/render/quality.ts";
 import { PALETTES } from "../../src/render/palette.ts";

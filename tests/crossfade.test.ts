@@ -7,7 +7,7 @@ import {
   CROSSFADE_MAX_WAIT_MS,
   CROSSFADE_MIN_MS,
 } from "../src/render/crossfade.ts";
-import { METRONOME_BEATS_PER_BAR } from "../src/render/metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../audio-subsystem/src/metronome.ts";
 
 const TEMPO = { tempoOn: true, bpm: 120, beat: false };
 const NO_TEMPO = { tempoOn: false, bpm: 0, beat: false };

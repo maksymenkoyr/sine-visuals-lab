@@ -1,7 +1,7 @@
-import { NUM_BANDS } from "../audio/types.ts";
-import { formatHz } from "../audio/bandScale.ts";
-import type { BandSplit } from "../audio/bandSplit.ts";
-import { BAND_FADER_COUNT, BAND_GAIN_MIN, FADER_CENTER_POS, faderWeights, gainToFaderPos } from "../audio/bandGains.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
+import { formatHz } from "../../audio-subsystem/src/bandScale.ts";
+import type { BandSplit } from "../../audio-subsystem/src/bandSplit.ts";
+import { BAND_FADER_COUNT, BAND_GAIN_MIN, FADER_CENTER_POS, faderWeights, gainToFaderPos } from "../../audio-subsystem/src/bandGains.ts";
 import { bandIndexCentroid } from "../render/spectralCentroid.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
 import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STRIP_MID, withAlpha } from "./controlsTheme.ts";
@@ -10,10 +10,10 @@ import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STR
  * Live spectrum analyser strip for the controls panel, with the band faders
  * drawn over it — the "can I see what I'm about to tune" view and the
  * tuning itself on the same pixels. Draws the log-spaced bands the audio
- * pipeline already computes (src/audio/types.ts's FeatureFrame.bands),
+ * pipeline already computes (audio-subsystem/src/types.ts's FeatureFrame.bands),
  * tinted by which low/mid/high group each band currently falls under, and
  * on top of them one fader per entry of the gain bank in
- * src/audio/bandGains.ts: a rail, a knob, and a filled travel from the 1×
+ * audio-subsystem/src/bandGains.ts: a rail, a knob, and a filled travel from the 1×
  * centre line to wherever the knob sits.
  *
  * Drawing only — the faders' pointer/keyboard handling and readouts live in

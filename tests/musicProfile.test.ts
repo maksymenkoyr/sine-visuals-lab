@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio-subsystem/src/types.ts";
 import { createMusicProfile, NEUTRAL, type ProfileInputs } from "../src/render/musicProfile.ts";
-import { createSyntheticFeed } from "../src/audio/synthetic.ts";
+import { createSyntheticFeed } from "../audio-subsystem/src/synthetic.ts";
 
 const DT = 1 / 60;
 const NEUTRAL_INPUTS: ProfileInputs = { tempoLock: 0, sectionIntensity: 0.5 };

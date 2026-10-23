@@ -36,7 +36,7 @@ and shown through a small WebGL2 pass. That pass also does the impact frame.
 ## Do not touch
 
 - Every other scene; the app core (`src/render/*.ts` outside `scenes/toonrave/`) except
-  the 4 registry edits in step 5; `src/audio/`; the private-scenes folder.
+  the 4 registry edits in step 5; `audio-subsystem/src/`; the private-scenes folder.
 - The art: the drawing must stay identical to the prototype. No redesign, no new colours.
 - **Build target:** es2017 syntax. Use `document.createElement("canvas")`, not
   `OffscreenCanvas`, and no `ctx.roundRect`.

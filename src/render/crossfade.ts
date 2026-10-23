@@ -1,4 +1,4 @@
-import { METRONOME_BEATS_PER_BAR } from "./metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../../audio-subsystem/src/metronome.ts";
 
 /**
  * The timing of one scene-to-scene crossfade, as a pure state machine: no GL,

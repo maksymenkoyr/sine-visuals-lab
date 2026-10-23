@@ -40,7 +40,7 @@ https://claude.ai/artifact/5qcGsBrmY6ZytbfuSeM78B
   settings were tested on the picture instead.
 - An autocorrelation tempo estimator — tried in #143: it locked onto half
   time on drum & bass and recovered slowly from tempo steps (the
-  `src/audio/tempoAnalyzer.ts` header).
+  `audio-subsystem/src/tempoAnalyzer.ts` header).
 - Tuning against the simulated room alone — its echo is crude (four
   feedback combs with a long tail). It wrecks the sparse synthetic tracks,
   while the 6 real songs barely move through it.
@@ -74,7 +74,7 @@ Each phase is one build session and one PR.
     `tests/tempoEval/` gains a path that scores those files like the
     tempo-tracks set.
   - Read first: the `tests/tempoEval.test.ts` header,
-    the `tests/tempoEval/micChain.ts` header, the `src/audio/tempoAnalyzer.ts`
+    the `tests/tempoEval/micChain.ts` header, the `audio-subsystem/src/tempoAnalyzer.ts`
     header, this plan's "Learned while building".
   - Done when: a table prints for each recording (% right, time to the
     right BPM, hits per bar on and off the beat grid); the report gives each
@@ -83,10 +83,10 @@ Each phase is one build session and one PR.
     those defaults if the real room differs. The ffmpeg recipe that works
     here: imageio-ffmpeg via `uv` (Homebrew ffmpeg is broken on this machine).
 - [ ] **2. Tempo reads the same from a near or a far mic** — draft PR #403 (with the echo half of phase 3; the user accepted its costs 2026-10-06)
-  - Touches: `src/audio/tempoAnalyzer.ts` (`analyseHop`, `pickOnset`),
-    the render-tick path in `src/audio/features.ts` if it shares the flaw;
+  - Touches: `audio-subsystem/src/tempoAnalyzer.ts` (`analyseHop`, `pickOnset`),
+    the render-tick path in `audio-subsystem/src/features.ts` if it shares the flaw;
     a level-sweep table in `tests/tempoEval.test.ts`.
-  - Read first: the `tempoAnalyzer.ts` and `src/audio/tempoComb.ts` headers.
+  - Read first: the `tempoAnalyzer.ts` and `audio-subsystem/src/tempoComb.ts` headers.
     Run `npm run eval:tempo` before and after.
   - Done when: the level sweep (see "Learned while building") stays flat
     across every level from 40 dB down to 10 dB up on every synthetic track, no
@@ -105,13 +105,13 @@ Each phase is one build session and one PR.
     `src/render/autoTune.ts`; the `loudness` dial in
     `src/render/musicProfile.ts`.
   - Read first: the `autoTune.ts`, `musicProfile.ts`,
-    `src/audio/sensitivity.ts` and `src/audio/micAuto.ts` headers; the
+    `audio-subsystem/src/sensitivity.ts` and `audio-subsystem/src/micAuto.ts` headers; the
     settings test in "Learned while building".
   - Done when: on the party set and the noisy simulation, hits under Auto
     stand out at least as much as under the user's manual settings, and
     crowd noise alone sits below the music's between-hit level.
 - [ ] **5. A new tempo tracker runs side by side with today's and is scored, with nothing swapped yet**
-  - Touches: a new DOM-free module under `src/audio/` (it must run in the
+  - Touches: a new DOM-free module under `audio-subsystem/src/` (it must run in the
     AudioWorklet, like `tempoAnalyzer.ts`); a `run.ts` option to score it.
   - The idea: track tempo and beat position together as odds that update
     every hop, fed by separate kick, snare and hat streams (the snare's
@@ -120,13 +120,13 @@ Each phase is one build session and one PR.
     when the music is genuinely ambiguous. Write it independently: don't
     port a research library's code or models (CLAUDE.md, `CONTRIBUTING.md`).
   - Read first: the `tempoComb.ts`, `tempoAnalyzer.ts`,
-    `src/render/beatClock.ts` and `src/render/tempoSettle.ts` headers; the BPM lab.
+    `audio-subsystem/src/beatClock.ts` and `audio-subsystem/src/tempoSettle.ts` headers; the BPM lab.
   - Done when: a table compares old and new on every set (time to the right
     BPM, % right, beat placement), and the user decides whether to swap.
 - [ ] **6. The BPM card shows the right tempo sooner**
   - Touches: `tempoSettle.ts` (a commit-by-confidence rule instead of a fixed
-    `TEMPO_SETTLE_SEC` window), `src/render/metronome.ts`,
-    `src/audio/tempoWorklet.ts` / `tempoSource.ts`, `beatClock.ts`; DJ-set
+    `TEMPO_SETTLE_SEC` window), `audio-subsystem/src/metronome.ts`,
+    `audio-subsystem/src/tempoWorklet.ts` / `tempoSource.ts`, `beatClock.ts`; DJ-set
     tempo carry-over if the open question says yes.
   - Read first: as phase 5, plus the `src/render/tapTempo.ts` header (a tap
     seeds the same settle).
@@ -162,7 +162,7 @@ Each phase is one build session and one PR.
   Levitating often reads 137 (4:3 of 103); Seven Nation Army reads 122–123
   against 124, possibly the band drifting rather than a tracker error.
 - 2026-10-06, research, volume: the tempo worklet hears the raw mic —
-  `src/audio/capture.ts` turns the browser's `autoGainControl` off, and the
+  `audio-subsystem/src/capture.ts` turns the browser's `autoGainControl` off, and the
   app's auto-gain never reaches `tempoSource.ts`. The detector is
   level-dependent: `Math.log1p(LOG_C * mag)` is nearly linear for quiet
   input, and `pickOnset` adds a fixed constant to its threshold. Level sweep
@@ -224,7 +224,7 @@ Each phase is one build session and one PR.
 - 2026-10-06, phase 2: `REFRACTORY_SEC` was 100 ms, longer than a
   sixteenth at 174 BPM, so drum & bass lost its snare whenever the kick
   before it was heard and read 116. The render-tick path in
-  `src/audio/features.ts` still has the same lockout
+  `audio-subsystem/src/features.ts` still has the same lockout
   (`ONSET_REFRACTORY_SEC`) and still swings with level (dnb 5% right at
   +10 dB, hip-hop 38% at −40 dB). Its onsets also drive visual hits.
 - 2026-10-06, method: single runs of the synthetic tracks flip on

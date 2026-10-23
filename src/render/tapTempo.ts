@@ -1,6 +1,6 @@
-import { BPM_MAX, BPM_MIN } from "../audio/tempoComb.ts";
+import { BPM_MAX, BPM_MIN } from "../../audio-subsystem/src/tempoComb.ts";
 import { resetBeatTrim } from "./beatTrim.ts";
-import { RESYNC_RATIO } from "./metronome.ts";
+import { RESYNC_RATIO } from "../../audio-subsystem/src/metronome.ts";
 
 /**
  * Tap tempo: tap Ctrl (src/app.ts) or the Tempo card's Tap button

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createRenderLatch } from "../src/render/renderLatch.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
-import type { OnsetDiag } from "../src/audio/onsetDiag.ts";
-import { UNIT_TAILS, type HitParts } from "../src/audio/hitStrength.ts";
+import type { OnsetDiag } from "../audio-subsystem/src/onsetDiag.ts";
+import { UNIT_TAILS, type HitParts } from "../audio-subsystem/src/hitStrength.ts";
 
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
 const NULL_HIT: HitParts = { standout: 0, loudness: 0, strength: 0 };

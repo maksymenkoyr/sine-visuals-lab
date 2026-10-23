@@ -2,7 +2,7 @@ import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts
 import { getTapRun } from "../render/tapTempo.ts";
 import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId, type SignalId } from "../render/signals.ts";
 import { isStemSignal } from "../render/stemReaders.ts";
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, driveSourceLabel, jackKey } from "./driveSources.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
@@ -18,12 +18,12 @@ import {
   type HeatTrack,
 } from "./heat.ts";
 import { flashTo } from "./flashAnim.ts";
-import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
-import type { LufsReading } from "../audio/lufs.ts";
-import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
+import { downsampleForDisplay, isClipping, peak } from "../../audio-subsystem/src/waveform.ts";
+import type { LufsReading } from "../../audio-subsystem/src/lufs.ts";
+import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../../audio-subsystem/src/silenceGate.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
-import { FLUX_THRESHOLD_MARGIN, FLUX_THRESHOLD_MULT, ONSET_REFRACTORY_SEC } from "../audio/features.ts";
+import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../../audio-subsystem/src/onsetDiag.ts";
+import { FLUX_THRESHOLD_MARGIN, FLUX_THRESHOLD_MULT, ONSET_REFRACTORY_SEC } from "../../audio-subsystem/src/features.ts";
 import { GROUP_TUNING } from "../render/bandEnergy.ts";
 import {
   hitStandout,
@@ -48,7 +48,7 @@ import {
   type HitShape,
   type HitShapePatch,
   type HitTails,
-} from "../audio/hitStrength.ts";
+} from "../../audio-subsystem/src/hitStrength.ts";
 import {
   AUTO_SKY,
   FONT_MONO,
@@ -129,7 +129,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    with a Reset chip in the card's own header. Local-only like Waveform,
  *    since it needs this device's own samples; hidden on a mic-less
  *    renderer, the header's Reset chip along with it. Last, a Gate row: the
- *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
+ *    silence gate's (audio-subsystem/src/silenceGate.ts) own Dimmer reading — how
  *    much of a hit's strength the gate is currently letting through — with
  *    a trace beneath it, inserted the way the Character card's Brightness
  *    row inserts its own Centroid trace, of Input level against the Input
@@ -157,7 +157,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    not just an instant reading, so a tuning session can see *why* a hit
  *    did or didn't count, ground-shaded by how closed the silence gate was
  *    at the time. A fired tick's height is that hit's graded strength
- *    (src/audio/hitStrength.ts's HitParts) — exactly full height at
+ *    (audio-subsystem/src/hitStrength.ts's HitParts) — exactly full height at
  *    Dimension 0, so nothing on screen changes until that slider actually
  *    moves. The Hit shape card in the Setup view (folded by default) holds
  *    two groups. Height: the sliders that shape a hit's
@@ -355,7 +355,7 @@ export interface AudioMetersDeps {
   /** The Input card's two gate marks, read fresh every draw/text tick so a drag
    *  moves the Gate guides and the hits hint live. */
   getSilenceGate: () => SilenceGateMarks;
-  /** The Hit shape card's sliders (formula in src/audio/hitStrength.ts).
+  /** The Hit shape card's sliders (formula in audio-subsystem/src/hitStrength.ts).
    *  Global per device, not per scene: it's a taste about detection, not one
    *  scene's look. */
   hitShape: { get: () => HitShape; set: (partial: HitShapePatch) => void };
@@ -1965,7 +1965,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: HISTORY_FIXED_COLOR, label: "No auto-gain" },
   ]);
   historyStrip.canvas.after(histLegend.el);
-  // Input check's Gate row: the silence gate's reading (src/audio/silenceGate.ts),
+  // Input check's Gate row: the silence gate's reading (audio-subsystem/src/silenceGate.ts),
   // spliced in like the Character card's Centroid trace: the meter (Dimmer)
   // stays, a canvas goes under it before the hint.
   const gateRow = createMeterRow({

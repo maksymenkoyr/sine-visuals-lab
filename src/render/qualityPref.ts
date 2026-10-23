@@ -2,8 +2,8 @@ import { isQualityPreset, type QualityPreset } from "./quality.ts";
 
 /**
  * User override for which quality preset drives rendering, global per device
- * (like src/render/powerMode.ts, src/audio/autoGain.ts, and
- * src/audio/bandSplit.ts, not per scene).
+ * (like src/render/powerMode.ts, audio-subsystem/src/autoGain.ts, and
+ * audio-subsystem/src/bandSplit.ts, not per scene).
  *
  * - "auto": follows detectQuality()'s boot-time GPU benchmark — what every
  *   device used before this setting existed. The choice for a device that

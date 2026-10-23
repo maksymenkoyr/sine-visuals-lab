@@ -1,5 +1,5 @@
-import type { SilenceGateMarks } from "../audio/silenceGate.ts";
-import type { FeatureFrame } from "../audio/types.ts";
+import type { SilenceGateMarks } from "../../audio-subsystem/src/silenceGate.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import { NO_EFFECTS, type HeldEffects } from "../render/heldEffects.ts";
 import {
   createCueController,

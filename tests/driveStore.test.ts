@@ -30,8 +30,8 @@ import {
 import { freshWireMod, type LegacyNode } from "../src/render/wireMod.ts";
 import { normalizeDriveSetting } from "../src/render/drives.ts";
 import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
-import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../audio-subsystem/src/bandLine.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "../src/render/gateWindow.ts";
 
@@ -456,8 +456,8 @@ describe("driveStore with a stubbed localStorage", () => {
   // The legacy-grid snapshot and this store's own cache are both seeded once
   // at module load — so exercising "what's in storage at first import" means
   // installing a fake localStorage *before* a fresh import of the module,
-  // via vi.resetModules(), same recipe as tests/bandLine.test.ts's old
-  // stubbed-localStorage block (and tests/sensitivity.test.ts's legacy-key
+  // via vi.resetModules(), same recipe as audio-subsystem/tests/bandLine.test.ts's old
+  // stubbed-localStorage block (and audio-subsystem/tests/sensitivity.test.ts's legacy-key
   // migration tests).
   function makeFakeLocalStorage() {
     const store = new Map<string, string>();
@@ -478,7 +478,7 @@ describe("driveStore with a stubbed localStorage", () => {
 
   it("migrates a scene's legacy non-Hits beat grid onto a Beat-default drive setting, once, persisting it", async () => {
     const fake = makeFakeLocalStorage();
-    // Index 3 = "1 bar" (src/audio/beatGrid.ts's BEAT_GRIDS) — a real user
+    // Index 3 = "1 bar" (audio-subsystem/src/beatGrid.ts's BEAT_GRIDS) — a real user
     // had picked something other than Hits for this scene's old, single,
     // per-scene grid.
     fake.setItem("vibe.beatGrid", JSON.stringify({ caustics: 3 }));

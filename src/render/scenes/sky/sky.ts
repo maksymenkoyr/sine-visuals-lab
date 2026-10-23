@@ -3,7 +3,7 @@ import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { FLOAT_HASH_GLSL, NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../../noiseHash.ts";
 import { createBeatListener, type HoldBeats } from "../../beatListener.ts";

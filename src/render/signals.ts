@@ -1,6 +1,6 @@
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { AnimFrame } from "./animClock.ts";
-import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
+import { BPM_MIN, BPM_MAX } from "../../audio-subsystem/src/features.ts";
 import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /**
@@ -79,7 +79,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * the plain band-gained frame instead, so that pill can read very slightly
  * ahead of Sensitivity/Expansion — an accepted cosmetic gap, not a claim
  * this file makes about the render path. `level` comes through both frames
- * raw (src/audio/sensitivity.ts's applySensitivity never shapes it), which
+ * raw (audio-subsystem/src/sensitivity.ts's applySensitivity never shapes it), which
  * is why Input level, unlike Level, reads 0 in a silent room.
  *
  * The `dial.*` entries (DIAL_SIGNALS) are generated from MUSIC_DIALS, one
@@ -318,7 +318,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.hats",
     label: "Hats",
     description:
-      "The drum part of the treble range (AnimFrame.hats, src/audio/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
+      "The drum part of the treble range (AnimFrame.hats, audio-subsystem/src/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
     kind: "level",
     read: (_frame, anim) => anim.hats,
     bandRange: "high",
@@ -327,7 +327,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.lead",
     label: "Lead",
     description:
-      "The held part of the mid range (AnimFrame.lead, src/audio/stemSplit.ts) — vocals, synths and guitar with the drums taken out, so it doesn't jump on a snare the way Mid level does.",
+      "The held part of the mid range (AnimFrame.lead, audio-subsystem/src/stemSplit.ts) — vocals, synths and guitar with the drums taken out, so it doesn't jump on a snare the way Mid level does.",
     kind: "level",
     read: (_frame, anim) => anim.lead,
     bandRange: "mid",

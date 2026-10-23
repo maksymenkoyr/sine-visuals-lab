@@ -1,10 +1,10 @@
-import { FeatureExtractor } from "../../src/audio/features.ts";
+import { FeatureExtractor } from "../../audio-subsystem/src/features.ts";
 import { createAnimClock, type AnimFrame } from "../../src/render/animClock.ts";
-import type { FeatureFrame } from "../../src/audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import { releaseTapTempo, tapTempoAt } from "../../src/render/tapTempo.ts";
-import { getHitShape } from "../../src/audio/hitStrength.ts";
-import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
-import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
+import { getHitShape } from "../../audio-subsystem/src/hitStrength.ts";
+import { TempoAnalyzer } from "../../audio-subsystem/src/tempoAnalyzer.ts";
+import { PHASE_BASS, type TempoHit } from "../../audio-subsystem/src/beatClock.ts";
 import {
   feedSilenceGateMeasurement,
   resolveSilenceGate,
@@ -12,8 +12,8 @@ import {
   SILENCE_GATE_CLOSED_DEFAULT,
   SILENCE_GATE_OPEN_DEFAULT,
   type SilenceGateMarks,
-} from "../../src/audio/silenceGate.ts";
-import { feedAutoGainMeasurement, resolveAutoGain, setAutoGainAuto } from "../../src/audio/autoGain.ts";
+} from "../../audio-subsystem/src/silenceGate.ts";
+import { feedAutoGainMeasurement, resolveAutoGain, setAutoGainAuto } from "../../audio-subsystem/src/autoGain.ts";
 import { readBandsDb } from "./bands.ts";
 import { micChain } from "./micChain.ts";
 import { SR, type Track, type TempoSegment } from "./synth.ts";

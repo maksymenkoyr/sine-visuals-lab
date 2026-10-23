@@ -22,7 +22,7 @@ import {
   SMOOTHING_AUTO_MAX,
   SMOOTHING_DEFAULT,
   SMOOTHING_MIN,
-} from "../audio/sensitivity.ts";
+} from "../../audio-subsystem/src/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
 import { getOverride, isAutoPinned } from "../tuning/overrides.ts";
 import { getCustomValue } from "./customValues.ts";
@@ -37,12 +37,12 @@ import { getCustomValue } from "./customValues.ts";
  * "the params currently on auto." A scene's own settings (caustics' focus,
  * mesh grid's density, …) default to manual, same as always. The Input
  * card's Sensitivity/Expansion/Smoothing pseudo-params (DEFAULT_AUTO_KEYS
- * below — see src/audio/micAuto.ts for why those three specifically) default
+ * below — see audio-subsystem/src/micAuto.ts for why those three specifically) default
  * to auto instead. A key absent from the store — including every key on a
  * scene added after this feature shipped, and every key on a fresh profile —
  * resolves to whichever of those two defaults its own key has, until someone
  * explicitly switches it the other way (per-row chip, the scene's master
- * Auto button, or the Input card's own Auto button — src/audio/micAuto.ts).
+ * Auto button, or the Input card's own Auto button — audio-subsystem/src/micAuto.ts).
  *
  * This module flipped once already, from an exceptions-store ("absent means
  * auto") design to "absent means manual"; old persisted data only ever
@@ -89,7 +89,7 @@ import { getCustomValue } from "./customValues.ts";
 export type AutoWeights = Partial<Record<MusicDial, number>>;
 
 // Expansion applied to each dial before weighting — see the comment above.
-// Uses shapeExpansion (audio/sensitivity.ts) because it's already exactly
+// Uses shapeExpansion (audio-subsystem/src/sensitivity.ts) because it's already exactly
 // the right shape for this: an S-curve fixed at 0/0.5/1 with a finite (not
 // infinite) slope through the pivot, so shapeExpansion(0.5, k) === 0.5
 // always holds — preserving the "all dials neutral -> spec.default exactly"
@@ -105,7 +105,7 @@ export const SENSITIVITY_AUTO_KEY = "@sensitivity";
 export const EXPANSION_AUTO_KEY = "@expansion";
 export const SMOOTHING_AUTO_KEY = "@smoothing";
 
-// The Input card's "whole mic" pseudo-params (see src/audio/micAuto.ts) —
+// The Input card's "whole mic" pseudo-params (see audio-subsystem/src/micAuto.ts) —
 // auto by default. Every real SceneSetting key stays manual by default; see
 // isAutoEnabled/setAutoEnabled below for how the store encodes that
 // per-key-different default as deviations only.
@@ -113,7 +113,7 @@ const DEFAULT_AUTO_KEYS: ReadonlySet<string> = new Set([SENSITIVITY_AUTO_KEY, EX
 
 // The auto keys from this control's previous names — see the migration in
 // loadAutoStore() below, and the parallel legacyKeys migration for the
-// manual-value store in audio/sensitivity.ts.
+// manual-value store in audio-subsystem/src/sensitivity.ts.
 const LEGACY_EXPANSION_AUTO_KEYS = ["@acceleration", "@contrast"] as const;
 
 const SENSITIVITY_SPEC: SceneSetting = {
@@ -521,7 +521,7 @@ export function resolveSceneSettingUnscaled(sceneId: string, spec: SceneSetting)
 setVariantResolver(resolveSceneSetting);
 
 /** Same idea for the Sensitivity/Expansion/Smoothing pseudo-params, which
- *  live in their own store (audio/sensitivity.ts) rather than
+ *  live in their own store (audio-subsystem/src/sensitivity.ts) rather than
  *  sceneSettings.ts. */
 export function resolveSensitivity(sceneId: string): number {
   return resolve(sceneId, SENSITIVITY_SPEC, getSensitivity(sceneId));

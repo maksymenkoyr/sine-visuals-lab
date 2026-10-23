@@ -264,7 +264,7 @@ main.
   palette option or its own Pro view.
 - Ocean is a little more lavender than the reference's 240° blue.
 - No phrase phase in the runtime (`beatClock.ts`), and the tempo tracker
-  slips to ×4/3 on some tracks (`src/audio/`) — both shift when phrase
+  slips to ×4/3 on some tracks (`audio-subsystem/src/`) — both shift when phrase
   reactions land.
 - Picking the same View chip again while Auto change has moved on does
   nothing (the pick didn't change); pick another and back.

@@ -30,8 +30,8 @@
  *     frac(bars × multiple), a pure function of the beat clock. A change of step
  *     crossfades over half a beat; "stop" holds where the last step left off.
  */
-import { createBeatClock } from "../../beatClock.ts";
-import { estimateTempo, BPM_MIN, BPM_MAX, type TempoOnsetVote } from "../../../audio/tempoComb.ts";
+import { createBeatClock } from "../../../../audio-subsystem/src/beatClock.ts";
+import { estimateTempo, BPM_MIN, BPM_MAX, type TempoOnsetVote } from "../../../../audio-subsystem/src/tempoComb.ts";
 
 /** Slots in the learned one-bar move. */
 export const MOVE_BINS = 64;

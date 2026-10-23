@@ -1,5 +1,5 @@
-import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
-import { warmRate } from "../audio/warmStart.ts";
+import { NUM_BANDS, type FeatureFrame } from "../../audio-subsystem/src/types.ts";
+import { warmRate } from "../../audio-subsystem/src/warmStart.ts";
 
 /**
  * Describes *the track*, not the current instant — the continuous [0,1]
@@ -26,7 +26,7 @@ import { warmRate } from "../audio/warmStart.ts";
  *
  * Every dial ease below, plus the DYNAMICS_MEAN_RATE/DYNAMICS_MAD_RATE
  * trackers dynamics rides on, runs its steady-state rate through
- * src/audio/warmStart.ts's warmRate() first, keyed off `signalSec` — seconds
+ * audio-subsystem/src/warmStart.ts's warmRate() first, keyed off `signalSec` — seconds
  * of actual signal this profile has seen (see hasSignal/the increment at the
  * end of advance()), not wall-clock time, so a stretch of silence never
  * "uses up" the warm-up. This doesn't change what a dial does through

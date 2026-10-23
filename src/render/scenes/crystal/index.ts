@@ -5,7 +5,7 @@ import { resolveSceneSetting } from "../../autoTune.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { MARCH_FRAG_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
 import { advanceCrystal, createCrystalState, type CrystalState } from "./driver.ts";
 

@@ -32,7 +32,7 @@ import {
 } from "../../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { createBeatListener, type BeatListener } from "../../beatListener.ts";
 import type { SignalLink } from "../../signals.ts";
 import {

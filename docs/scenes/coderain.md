@@ -58,7 +58,7 @@ hear run but ~106.7 on the ref-shoot run.
 
 - No `auto` weight tables yet (every setting manual).
 - The reference's ghosts carry image colour; ours is pale green — ask whether a colour option is wanted.
-- Tempo tracker held ×3/2 on one run of this clip (`src/audio/tempoAnalyzer.ts` to-do).
+- Tempo tracker held ×3/2 on one run of this clip (`audio-subsystem/src/tempoAnalyzer.ts` to-do).
 - Not done yet: `ref-keep.py matrix-rain coderain` and `ref-archive.py matrix-rain` — both left for the user to run.
 
 ## Materials

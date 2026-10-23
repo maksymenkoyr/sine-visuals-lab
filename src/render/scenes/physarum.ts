@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../../audio/types.ts";
+import { NUM_BANDS } from "../../../audio-subsystem/src/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";

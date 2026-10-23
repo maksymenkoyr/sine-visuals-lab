@@ -1,0 +1,20 @@
+# audio-subsystem/ is the app's audio code as one folder that lifts out whole
+# (docs/audio-subsystem.md): the app imports it, it imports nothing back.
+# What it needs from its host comes in as an argument or through
+# storeReload.ts. Its src/ and tests/ sit one level down, so a path that
+# climbs two levels has left the folder.
+id: audio-subsystem-self-contained
+language: TypeScript
+severity: error
+message: The audio subsystem imports nothing outside audio-subsystem/. Take what it needs from the host as an argument; docs/audio-subsystem.md says how.
+files:
+  - audio-subsystem/**/*.ts
+rule:
+  kind: string_fragment
+  regex: ^\.\./\.\./
+  inside:
+    stopBy: end
+    any:
+      - kind: import_statement
+      - kind: export_statement
+      - pattern: import($$$)

@@ -9,13 +9,13 @@
 // which is what the reference's within-view changes favour; our runtime has
 // no downbeat, so "phrase start" here is the next multiple of PHRASE_BEATS
 // on the beat clock's own count — right length, arbitrary phase. A real
-// phrase phase is a to-do for src/render/beatClock.ts, not this file.
+// phrase phase is a to-do for audio-subsystem/src/beatClock.ts, not this file.
 //
 // Picking a view by hand mixes to it at once. A view that becomes locked
 // (Pro, src/render/pro.ts) is never toured to, and the tour walks the views
 // in order, skipping locked ones.
 
-import { crossedBeatMultiple } from "../../metronome.ts";
+import { crossedBeatMultiple } from "../../../../audio-subsystem/src/metronome.ts";
 
 export const PHRASE_BEATS = 16;
 /** The mix's length in beats — two bars. */

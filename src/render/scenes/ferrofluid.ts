@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../../audio/types.ts";
+import { NUM_BANDS } from "../../../audio-subsystem/src/types.ts";
 import { createFullscreenScene } from "../fullscreenScene.ts";
 
 // A raymarched black-chrome blob that grows spikes toward one fixed

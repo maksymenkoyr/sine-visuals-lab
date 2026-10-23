@@ -95,16 +95,16 @@ Darker means more important.
     draft toggle. Measured: more than half of all scene views land on drafts
     or scenes in development · `DRAFT_SCENE_IDS`
   - ●○○ **Source picker** — Mic or Screen, chosen before a scene opens ·
-    `src/audio/sourcePref.ts`
+    `audio-subsystem/src/sourcePref.ts`
   - ○○○ **Version label and channel badge** — Stable or Insiders, links to the
     version history · `src/version.ts`
 
 ### Scene view
 
 - ●●● **Start: mic or screen audio** — the start prompt opens the mic, or on a
-  desktop a shared tab's or screen's audio · `src/audio/capture.ts`
+  desktop a shared tab's or screen's audio · `audio-subsystem/src/capture.ts`
   - ●○○ **Input device** — which input "mic" means, e.g. a USB interface fed
-    from a DJ mixer · `src/audio/inputDevice.ts`
+    from a DJ mixer · `audio-subsystem/src/inputDevice.ts`
 - ●●● **The picture** — the scene itself, drawn on live audio ·
   `src/render/sceneHost.ts`
   - ●●○ **Crossfades** — a scene change blends old into new, or cuts, starting
@@ -136,7 +136,7 @@ Darker means more important.
   - ●○○ **Sound in**
     - ●○○ **Input card** — Source, device, Sensitivity, Expansion,
       Smoothing, the silence gate, and one Auto for the whole mic ·
-      `src/ui/deviceMenu.ts`, `src/audio/silenceGate.ts`
+      `src/ui/deviceMenu.ts`, `audio-subsystem/src/silenceGate.ts`
     - ●○○ **Bands card** — the live spectrum, a fader per band, and a line
       you draw across it · `src/ui/spectrumStrip.ts`,
       `src/ui/bandFaders.ts`, `src/ui/bandLineEditor.ts`
@@ -216,10 +216,10 @@ Darker means more important.
 Nothing here has a button, but the Core features stand on it.
 
 - ●●● **Audio analysis** — bands, levels, hits, all normalised to the room's
-  own loudness · `src/audio/features.ts`
+  own loudness · `audio-subsystem/src/features.ts`
 - ●●● **Tempo and beat** — the tracker, beat clock and metronome that put
-  motion on the beat · `src/audio/tempoAnalyzer.ts`,
-  `src/render/beatClock.ts`
+  motion on the beat · `audio-subsystem/src/tempoAnalyzer.ts`,
+  `audio-subsystem/src/beatClock.ts`
 - ●●● **Auto** — every setting resolves from the music unless someone pinned
   it. This is what makes "just turn it on" true · `src/render/autoTune.ts`,
   `src/render/musicProfile.ts`

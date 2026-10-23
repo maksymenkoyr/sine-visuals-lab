@@ -42,7 +42,7 @@
 // DEV only: `command("freeze", {c})` (and `window.__toonrave.freeze(c | null)`)
 // pins the cycle position so a test can screenshot an exact frame; freezing also
 // neutralises the audio modulation so the picture is repeatable.
-import type { FeatureFrame } from "../../../audio/types.ts";
+import type { FeatureFrame } from "../../../../audio-subsystem/src/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";

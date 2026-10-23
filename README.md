@@ -56,7 +56,7 @@ Worker (URL posted as a comment on the PR).
 
 ## Architecture
 
-- `src/audio/` — mic capture, FFT band extraction, sensitivity/contrast shaping.
+- `audio-subsystem/src/` — mic capture, FFT band extraction, sensitivity/contrast shaping.
 - `src/render/` — the WebGL2 scenes, auto-tune engine, and shared render pipeline.
 - `src/net/` — clock sync, jitter buffering, and the room protocol for an
   experimental mode that pairs a phone with a second screen over a WebSocket link.

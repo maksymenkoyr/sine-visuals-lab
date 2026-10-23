@@ -92,7 +92,7 @@ export function chromeInitScript({ hideToasts, folds = null }) {
   }
   // "Screen" in a shot: a real getDisplayMedia on the Mac is heavy and would
   // film the desktop's own picker; hand back a silent audio track and a 16 px
-  // video track instead (the app keeps only the audio — src/audio/capture.ts).
+  // video track instead (the app keeps only the audio — audio-subsystem/src/capture.ts).
   if (md) {
     md.getDisplayMedia = async () => {
       const ac = new AudioContext();

@@ -4,7 +4,7 @@
 // and samples window.__viz.probe() every animation frame for the clip's
 // length, writing <bundle>/hears.json. tools/ref-scan.py --hear joins it to
 // the reference's beat grid so every finding in report.md can say whether
-// the runtime (src/audio/features.ts + render/beatClock.ts) actually sees
+// the runtime (audio-subsystem/src/features.ts + audio-subsystem/src/beatClock.ts) actually sees
 // the trigger the reference reacts to.
 //
 //   node tools/ref-hear.mjs tools/.cache/refs/<name> [--port 5173] [--scene spectrum] [--quality high]

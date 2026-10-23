@@ -1,8 +1,8 @@
-import { NUM_BANDS } from "../../src/audio/types.ts";
-import { MAX_HZ_CAP, bandEdgesHz } from "../../src/audio/bandScale.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
+import { MAX_HZ_CAP, bandEdgesHz } from "../../audio-subsystem/src/bandScale.ts";
 
 /**
- * Offline mirror of src/audio/analyser.ts's readBandsDb() for a plain
+ * Offline mirror of audio-subsystem/src/analyser.ts's readBandsDb() for a plain
  * Float32Array buffer instead of a live AnalyserNode — same Blackman window,
  * same radix-2 FFT magnitude-to-dB mapping, same band-edge rounding (via the
  * shared bandEdgesHz()/MAX_HZ_CAP), so tests/tempoEval/run.ts feeds the real

@@ -48,13 +48,13 @@
 // silhouette) both default to the beat grid rather than raw hits, since the
 // reference's own breathing/reset cadence reads as periodic, not onset-
 // triggered; New shape's own cadence is a grid tick further divided in JS
-// (NEW_SHAPE_GRID_DIVISOR below) since src/audio/beatGrid.ts's coarsest
+// (NEW_SHAPE_GRID_DIVISOR below) since audio-subsystem/src/beatGrid.ts's coarsest
 // stop is two bars, short of the reference's own measured reset spacing.
 // Spin (global rotation) rides the treble level by default. Twist and
 // Stripes are plain scales (how wound the coil is, how many bands fit one
 // span) with nothing to react to; Colours blends toward the app's own
 // palette the way Silk's own "App palette" tint does (silk/index.ts).
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
@@ -88,7 +88,7 @@ const BREATHE_DROP_PER_UNIT = Math.log(1.6 / 0.45); // Breathe = 1 falls back fr
 const SPIN_BASE_DEG_PER_SEC = 10; // matches the ref's measured global rotation at Spin = 1, no drive
 const SPIN_DRIVE_DEG_PER_SEC = 10; // extra at a full-strength drive reading
 
-// src/audio/beatGrid.ts's coarsest stop is two bars (BEAT_GRIDS' own
+// audio-subsystem/src/beatGrid.ts's coarsest stop is two bars (BEAT_GRIDS' own
 // "twoBars"); New shape's own reference cadence is close to four times
 // that, so this file counts grid pulses itself rather than adding a scene-
 // only grid stop nothing else could reuse. This is the count at New shape's

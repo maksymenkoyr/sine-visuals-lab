@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { judge, runJscpd, topClones } from "./dupesLib.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SCAN_PATHS = ["src", "server", "tools"];
+const SCAN_PATHS = ["src", "audio-subsystem/src", "server", "tools"];
 const IGNORE = ["**/scenes/private/**"];
 const MIN_TOKENS = 50;
 const MAX_SIZE = "10mb";

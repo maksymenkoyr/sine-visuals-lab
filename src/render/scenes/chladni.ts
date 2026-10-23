@@ -1,5 +1,5 @@
-import { NUM_BANDS } from "../../audio/types.ts";
-import { MIN_HZ, MAX_HZ_CAP } from "../../audio/bandScale.ts";
+import { NUM_BANDS } from "../../../audio-subsystem/src/types.ts";
+import { MIN_HZ, MAX_HZ_CAP } from "../../../audio-subsystem/src/bandScale.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting, resolveSceneSettingUnscaled } from "../autoTune.ts";
@@ -128,7 +128,7 @@ export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladni
 // SURPRISE_SHARE): at 0 the plate answers each band's level as it arrives,
 // so the loudest part wins; at 1 only the part above the average counts, so
 // a steady sound stops scoring at all. The bands arrive already evened out
-// by the analyser's per-band auto-gain (audio/features.ts), so Loud doesn't
+// by the analyser's per-band auto-gain (audio-subsystem/src/features.ts), so Loud doesn't
 // simply mean bass: on the tempo-eval tracks it mostly made the figure
 // change less (docs/scenes/chladni.md, Measurements).
 // The strongest few modes by response are summed in the shader, weighted

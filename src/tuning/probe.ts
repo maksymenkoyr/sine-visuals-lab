@@ -4,7 +4,7 @@
  * logic over data app.ts already has each tick; app.ts supplies it via
  * ProbeInput rather than this module reaching into app.ts's internals.
  */
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneExpansion, getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
@@ -72,7 +72,7 @@ export interface ProbeSnapshot {
    *  header) — but a run with it ≠ 1 reacts differently, so it's reported. */
   masterExpansion: number;
   bands: { low: number; mid: number; high: number; energy: number };
-  /** AnimFrame.hats/lead (src/audio/stemSplit.ts), eased and gated. */
+  /** AnimFrame.hats/lead (audio-subsystem/src/stemSplit.ts), eased and gated. */
   stems: { hats: number; lead: number };
   /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
    *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a

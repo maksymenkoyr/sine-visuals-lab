@@ -1,6 +1,6 @@
-import { NUM_BANDS } from "../../src/audio/types.ts";
-import { MAX_HZ_CAP, bandEdgesHz } from "../../src/audio/bandScale.ts";
-import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
+import { MAX_HZ_CAP, bandEdgesHz } from "../../audio-subsystem/src/bandScale.ts";
+import { TempoAnalyzer } from "../../audio-subsystem/src/tempoAnalyzer.ts";
 import { readBandsDb } from "./bands.ts";
 import { SR } from "./synth.ts";
 

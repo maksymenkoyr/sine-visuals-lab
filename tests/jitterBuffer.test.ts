@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { JitterBuffer } from "../src/net/jitterBuffer.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 
 function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy, pulseOnset = onset) {
   return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, pulseOnset, bpm, level, hats: 0, lead: 0, roomTimeMs };

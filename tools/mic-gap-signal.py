@@ -1,6 +1,6 @@
 # Signal-level half of the mic-vs-direct comparison: reads a
 # tools/mic-gap.mjs session and measures, per segment and per app band
-# (bandEdgesHz in src/audio/bandScale.ts, passed in with --edges), how the mic
+# (bandEdgesHz in audio-subsystem/src/bandScale.ts, passed in with --edges), how the mic
 # leg differs from the tab-share leg — delay and its drift, gain, the room's
 # noise floor, signal-to-noise, coherence (how much of the mic is the music
 # at all), envelope agreement and how much dynamic range survives. The app's

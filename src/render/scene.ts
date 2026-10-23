@@ -1,4 +1,4 @@
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { QualitySettings } from "./quality.ts";
 import type { Palette } from "./palette.ts";
 import { registerVariant, type SceneSetting } from "./sceneSettings.ts";

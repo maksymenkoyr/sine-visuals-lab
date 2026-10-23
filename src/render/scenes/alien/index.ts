@@ -39,7 +39,7 @@
  * reel, the last wire readings and the videos for a headless run.
  */
 import type { PanelSection, Scene, SceneContext, Viewport } from "../../scene.ts";
-import type { FeatureFrame } from "../../../audio/types.ts";
+import type { FeatureFrame } from "../../../../audio-subsystem/src/types.ts";
 import type { Palette } from "../../palette.ts";
 import type { AnimFrame } from "../../animClock.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";

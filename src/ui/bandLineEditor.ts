@@ -1,8 +1,8 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
 import { STRIP_PLOT_HEIGHT_PX } from "./spectrumStrip.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
 import { BANDS_AMBER, withAlpha } from "./controlsTheme.ts";
-import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, LINE_HEIGHT_DEFAULT } from "../audio/bandLine.ts";
+import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, LINE_HEIGHT_DEFAULT } from "../../audio-subsystem/src/bandLine.ts";
 // Circular with deviceMenu.ts (it imports createBandLineEditor below) — same
 // established pattern as audioMeters.ts importing createControlRow from
 // there; safe because neither side calls the other at module-eval time,
@@ -16,7 +16,7 @@ import { createControlRow } from "./deviceMenu.ts";
  * owns that strip and swaps its faders for this overlay while a setting is
  * parked on Frequencies; there is no second strip here any more, unlike this
  * file's first version). The overlay paints the sensitivity line itself
- * (src/audio/bandLine.ts): a stepped polyline at each band's `1 - line[b]`
+ * (audio-subsystem/src/bandLine.ts): a stepped polyline at each band's `1 - line[b]`
  * height, a faint fill below it down to the bottom ("ignored"), and — fed
  * live every tick via update() — a translucent amber fill above it wherever
  * the current bars clear it (a drive engine's excess(), src/render/drives.ts),
@@ -106,7 +106,7 @@ export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
 
     // Excess: wherever the live bars currently clear the line, filled from
     // the line up to how far they clear it — exactly what's driving
-    // bandLineDrive() this tick (src/audio/bandLine.ts).
+    // bandLineDrive() this tick (audio-subsystem/src/bandLine.ts).
     if (excess) {
       ctx.fillStyle = withAlpha(BANDS_AMBER, EXCESS_FILL_ALPHA);
       for (let b = 0; b < NUM_BANDS; b++) {

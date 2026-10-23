@@ -22,7 +22,7 @@ import {
   type LaunchOn,
   type QueuedLaunch,
 } from "../../render/launchQueue.ts";
-import { METRONOME_BEATS_PER_BAR } from "../../render/metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../../../audio-subsystem/src/metronome.ts";
 import { AUTOPILOT_EVERY_BARS, AUTOPILOT_ORDERS, type AutopilotConfig, type AutopilotOrder, type SetPad } from "../../render/sceneSet.ts";
 import { padStill, padStillAt } from "./padStills.ts";
 

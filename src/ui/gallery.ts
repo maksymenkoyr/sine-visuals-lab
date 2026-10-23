@@ -1,7 +1,7 @@
 import type { Scene } from "../render/scene.ts";
 import type { QualityPreset, QualitySettings } from "../render/quality.ts";
-import type { FeatureFrame } from "../audio/types.ts";
-import { createSyntheticFeed } from "../audio/synthetic.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
+import { createSyntheticFeed } from "../../audio-subsystem/src/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
@@ -9,7 +9,7 @@ import { INSTAGRAM_URL, SOURCE_URL } from "../brand.ts";
 import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
 import { sceneVersionOf } from "../render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./tooltip.ts";
-import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../../audio-subsystem/src/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
 import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, createRenderGate, targetFrameIntervalMs } from "../render/framePace.ts";
@@ -42,7 +42,7 @@ export interface GalleryDeps {
   onPick: (sceneId: string) => void;
   onDisabledPick: (sceneId: string, reason: string) => void;
   /** Whether this device can offer the Screen source at all — see
-   *  src/audio/sourcePref.ts's displayCaptureSupported. Where it can't, the
+   *  audio-subsystem/src/sourcePref.ts's displayCaptureSupported. Where it can't, the
    *  masthead's sound-source picker shows the microphone alone, so it
    *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
@@ -51,7 +51,7 @@ export interface GalleryDeps {
    *  Input card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
   sourceState: () => SourceState;
   /** "Mic"/"Line in"/"Loopback" for the currently CHOSEN input
-   *  (src/audio/inputDevice.ts's inputKind over getInputDevicePref) — names
+   *  (audio-subsystem/src/inputDevice.ts's inputKind over getInputDevicePref) — names
    *  the Mic button's own name (not its hint line), the same word the Input
    *  card's Source row and the start prompt use for it (src/app.ts's
    *  inputChoiceLabel). */
@@ -474,7 +474,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // Tapping the live one disconnects it (src/app.ts's onSourceChoice).
       if (canChoose) entry.btn.title = uiState === "live" ? "Listening — tap to disconnect" : entry.title;
       // The Mic button's own name is the CHOSEN input's kind ("Mic"/"Line
-      // in"/"Loopback" — src/audio/inputDevice.ts), not a fixed "Microphone":
+      // in"/"Loopback" — audio-subsystem/src/inputDevice.ts), not a fixed "Microphone":
       // a picked USB interface or loopback driver should read as what it is
       // here too, the same word the Input card's Source row and the start
       // prompt use (see deps.micLabel's own doc comment).

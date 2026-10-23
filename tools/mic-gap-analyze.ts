@@ -21,7 +21,7 @@ import { readWav } from "../tests/tempoEval/recordings.ts";
 import { micChain } from "../tests/tempoEval/micChain.ts";
 import { hitGrid, roomStats } from "../tests/tempoEval/room.ts";
 import { SR, type Track } from "../tests/tempoEval/synth.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 
 interface SongSignal {
   name: string;

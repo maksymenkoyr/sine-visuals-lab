@@ -27,9 +27,9 @@ async function fresh(init: Record<string, string> = {}) {
   const fake = makeFakeLocalStorage(init);
   (globalThis as { localStorage?: unknown }).localStorage = fake;
   vi.resetModules();
-  const sens = await import("../src/audio/sensitivity.ts");
-  const gains = await import("../src/audio/bandGains.ts");
-  const split = await import("../src/audio/bandSplit.ts");
+  const sens = await import("../audio-subsystem/src/sensitivity.ts");
+  const gains = await import("../audio-subsystem/src/bandGains.ts");
+  const split = await import("../audio-subsystem/src/bandSplit.ts");
   const synced = await import("../src/net/syncedStores.ts");
   return { fake, sens, gains, split, synced };
 }

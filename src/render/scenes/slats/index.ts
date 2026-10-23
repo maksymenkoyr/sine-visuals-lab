@@ -69,7 +69,7 @@
  * zero bloom passes the scene skips the offscreen chain entirely and draws
  * straight to the default framebuffer.
  */
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, createTargetList, type GLProgram } from "../../gl.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { uploadCommonUniforms } from "../../sceneCommon.ts";

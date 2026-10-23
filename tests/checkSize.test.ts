@@ -23,7 +23,7 @@ describe("the size step", () => {
 
   it("finds the pinned files in the build: ?url through the manifest, a worker by its name", () => {
     const sources = [
-      pin("src/audio/tempoSource.ts", "./tempoWorklet.ts?worker&url"),
+      pin("audio-subsystem/src/tempoSource.ts", "./tempoWorklet.ts?worker&url"),
       pin("src/render/scenes/dancers/index.ts", "./clips.bin?url"),
       pin("src/render/scenes/coderain/index.ts", "../dancers/clips.bin?url"),
       pin("src/tiny.ts", "./tiny.bin?url"), // inlined: not in the manifest, no fetch
@@ -35,8 +35,8 @@ describe("the size step", () => {
   });
 
   it("reports a pinned import it can't place: a package, or a worker missing or not told apart", () => {
-    const worker = [pin("src/audio/tempoSource.ts", "./tempoWorklet.ts?worker&url")];
-    expect(pinnedFiles(worker, manifest, []).problems).toEqual(["can't find the built worker of src/audio/tempoWorklet.ts"]);
+    const worker = [pin("audio-subsystem/src/tempoSource.ts", "./tempoWorklet.ts?worker&url")];
+    expect(pinnedFiles(worker, manifest, []).problems).toEqual(["can't find the built worker of audio-subsystem/src/tempoWorklet.ts"]);
     expect(pinnedFiles(worker, manifest, ["assets/tempoWorklet-a.js", "assets/tempoWorklet-b.js"]).problems).toHaveLength(1);
     expect(pinnedFiles([pin("src/a.ts", "pkg/x.wasm?url")], manifest, []).problems).toEqual(["can't place the package import pkg/x.wasm?url (src/a.ts)"]);
   });

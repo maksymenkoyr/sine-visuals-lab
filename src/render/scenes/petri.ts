@@ -13,7 +13,7 @@ import {
 } from "../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import type { QualityPreset } from "../quality.ts";
-import { NUM_BANDS } from "../../audio/types.ts";
+import { NUM_BANDS } from "../../../audio-subsystem/src/types.ts";
 
 // Gray-Scott reaction-diffusion, built from six reference videos the user
 // found under that name (tools/.cache/refs/{2s28LbNqmOM,48H_Fre00AY,

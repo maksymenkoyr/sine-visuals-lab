@@ -59,8 +59,8 @@ import { PALETTES, getPalette } from "../src/render/palette.ts";
 import { hexToRgb, oklabDistance, oklabLightness, rgbToHex } from "../src/render/oklab.ts";
 import { clampZoneEdges, zoneDrive, FREEZE_REF, SNAP_REF, ZONE_MIN_GAP } from "../src/render/scenes/chladniSand.ts";
 import { qualitySettings } from "../src/render/quality.ts";
-import { MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { MIN_HZ, MAX_HZ_CAP } from "../audio-subsystem/src/bandScale.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 
 describe("chladni mode table", () => {
   it("only holds n < m pairs (n == m is identically zero for the antisymmetric family)", () => {

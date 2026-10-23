@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { StemRanges, StemSplitter } from "../src/audio/stemSplit.ts";
+import type { StemRanges, StemSplitter } from "../audio-subsystem/src/stemSplit.ts";
 import { driveSettingFromChoice, type DriveSetting } from "../src/render/drives.ts";
 import { setDriveSetting, setSourceMuted } from "../src/render/driveStore.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";

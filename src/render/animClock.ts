@@ -1,8 +1,8 @@
-import { type FeatureFrame } from "../audio/types.ts";
-import type { OnsetDiag } from "../audio/onsetDiag.ts";
+import { type FeatureFrame } from "../../audio-subsystem/src/types.ts";
+import type { OnsetDiag } from "../../audio-subsystem/src/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
-import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./beatClock.ts";
-import { createMetronome, type Metronome } from "./metronome.ts";
+import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "../../audio-subsystem/src/beatClock.ts";
+import { createMetronome, type Metronome } from "../../audio-subsystem/src/metronome.ts";
 import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
 import { createTapGuide, type TapGuide } from "./tapTempo.ts";
 import { createBandEnergy, slewLevel, type BandEnergy } from "./bandEnergy.ts";
@@ -10,10 +10,10 @@ import { createSectionIntensity, type SectionIntensity } from "./sectionIntensit
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
 import { createBandPick, type BandPick } from "./bandPick.ts";
-import { getBandSplit } from "../audio/bandSplit.ts";
-import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
-import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
-import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../audio/hitStrength.ts";
+import { getBandSplit } from "../../audio-subsystem/src/bandSplit.ts";
+import { SMOOTHING_DEFAULT, smoothingRateScale } from "../../audio-subsystem/src/sensitivity.ts";
+import { silenceGateDimmer, type SilenceGateMarks } from "../../audio-subsystem/src/silenceGate.ts";
+import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../../audio-subsystem/src/hitStrength.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
@@ -102,7 +102,7 @@ export interface AnimFrame {
   lowPulse: number;
   midPulse: number;
   highPulse: number;
-  /** FeatureFrame.hats/lead (src/audio/stemSplit.ts), eased with the same
+  /** FeatureFrame.hats/lead (audio-subsystem/src/stemSplit.ts), eased with the same
    *  slew as `low`/`mid`/`high` and multiplied by the silence gate's dimmer
    *  (`gateDimmer`), so a quiet room's hiss never reads as hats or a melody:
    *  the split's own scale is relative and has no idea what silence is. */
@@ -195,7 +195,7 @@ export interface AnimFrame {
    *  drives.ts's Fixed/Loud heights and grid pulses can fall at the same
    *  stretched rate as the pulses they stand in for. */
   hitTail: HitTails;
-  /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
+  /** This tick's silence-gate dimmer (audio-subsystem/src/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
    *  a fully open room, down toward 0 the quieter the room reads. The Hits
@@ -233,13 +233,13 @@ export interface AnimClock {
    *  musicProfile's eases alike, so `smoothing` at the Smoothing row's Off
    *  stop (0 -> Infinity) makes sectionIntensity/profile land exactly on the
    *  `raw` counterparts already exposed below — see the meters panel's RAW
-   *  chip (src/ui/audioMeters.ts). `gate` (src/audio/silenceGate.ts), when
+   *  chip (src/ui/audioMeters.ts). `gate` (audio-subsystem/src/silenceGate.ts), when
    *  given, is turned into this tick's dimmer from `frame.level` right here
    *  and threaded into bandEnergy's own advance() — animClock stays
    *  param-driven and never reads the store itself, so only the real
    *  app.ts/tv.ts entry points pass marks; omitted by every preview/
    *  gallery/probe caller, which is what leaves those ungated. `hit`
-   *  (src/audio/hitStrength.ts), same rule: when given, its `shape` is
+   *  (audio-subsystem/src/hitStrength.ts), same rule: when given, its `shape` is
    *  threaded into bandEnergy's own advance() and grades the broadband
    *  beatPulse below too; omitted, every pulse in this frame stays a flat 1
    *  on its onset, exactly as before that module existed. `hit.beatRatio` is
@@ -253,13 +253,13 @@ export interface AnimClock {
    *  not something animClock does once for the whole scene; `onset`/
    *  `beatPulse` are the raw, ungridded hits and `beats` is the raw unwrapped
    *  count a `{ source: "beat", grid }` drive grids on its own. `hit.tempoHits`
-   *  (src/audio/tempoSource.ts's drained onsets, app.ts's solo mode only —
+   *  (audio-subsystem/src/tempoSource.ts's drained onsets, app.ts's solo mode only —
    *  see beatClock.ts's own file header for why host/renderer/TV never pass
    *  this) switches beatClock.ts's phase comb onto that fixed-hop feed for
    *  this tick instead of the render-tick `frame.onset`/beatRatio pair;
    *  omitted (every other caller), today's render-tick-only behavior.
    *  `hit.wavePeak` is this tick's instantaneous waveform peak
-   *  (src/audio/waveform.ts's `peak()` over app.ts's lastMono) — solo/host
+   *  (audio-subsystem/src/waveform.ts's `peak()` over app.ts's lastMono) — solo/host
    *  only, feeding AnimFrame.wavePeak's own peak-hold. `tapNowMs` is this
    *  tick's performance.now(): given, this clock follows the tap-tempo
    *  store (tapTempo.ts — a tap seeds beatClock and the metronome, and the

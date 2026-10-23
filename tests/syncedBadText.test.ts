@@ -67,7 +67,7 @@ describe("scene settings (vibe.sceneSettings)", () => {
       [SCENE_SETTINGS_KEY]: JSON.stringify({ "scene-a": { focus: 0.4 }, "scene-b": { focus: 0.15 } }),
     });
     const { getSceneSetting } = await import("../src/render/sceneSettings.ts");
-    const { getSensitivity } = await import("../src/audio/sensitivity.ts");
+    const { getSensitivity } = await import("../audio-subsystem/src/sensitivity.ts");
     expect(getSceneSetting("scene-a", FOCUS)).toBe(0.4);
 
     for (const junk of ["{not json", "[0.4]", "null", "42", '"x"', '{"scene-a":']) {
@@ -142,7 +142,7 @@ describe("drive line strength (vibe.drives)", () => {
       "vibe.drives": JSON.stringify({ "scene-a": { sparkle: { lineStrength: 0.37 } } }),
     });
     const { getDriveLineStrength } = await import("../src/render/driveStore.ts");
-    const { LINE_STRENGTH_DEFAULT } = await import("../src/audio/bandLine.ts");
+    const { LINE_STRENGTH_DEFAULT } = await import("../audio-subsystem/src/bandLine.ts");
     expect(getDriveLineStrength("scene-a", SPARKLE)).toBe(0.37);
 
     for (const junk of ["[]", "{x"]) {
@@ -176,7 +176,7 @@ describe("band split (vibe.bandSplit)", () => {
   it("keeps the split and the version on unreadable text, and bumps the version once on a readable one", async () => {
     const { fake, synced } = await fresh({ "vibe.bandSplit": JSON.stringify({ lowMid: 4, midHigh: 20 }) });
     const { getBandSplit, bandSplitVersion, LOW_MID_DEFAULT, MID_HIGH_DEFAULT } = await import(
-      "../src/audio/bandSplit.ts"
+      "../audio-subsystem/src/bandSplit.ts"
     );
     expect(getBandSplit()).toEqual({ lowMid: 4, midHigh: 20 });
     const before = bandSplitVersion();
@@ -200,7 +200,7 @@ describe("hit shape (vibe.hitKnee, vibe.hitTailLow, …)", () => {
   // the whole reload on any bad field leaves tail.low at 0.5.
   it("keeps only the field that cannot be read, and applies the rest of the snapshot", async () => {
     const { fake, synced } = await fresh({ "vibe.hitKnee": "2.5", "vibe.hitTailLow": "0.5" });
-    const { getHitShape } = await import("../src/audio/hitStrength.ts");
+    const { getHitShape } = await import("../audio-subsystem/src/hitStrength.ts");
     expect(getHitShape().knee).toBe(2.5);
     expect(getHitShape().tail.low).toBe(0.5);
 
@@ -215,7 +215,7 @@ describe("silence gate marks (vibe.silenceGateClosed, vibe.silenceGateOpen)", ()
   // Break: the old reload gives closed = SILENCE_GATE_CLOSED_DEFAULT on "nan?".
   it("keeps an unreadable mark and applies the other one", async () => {
     const { fake, synced } = await fresh({ "vibe.silenceGateClosed": "0.2", "vibe.silenceGateOpen": "0.4" });
-    const { getSilenceGate } = await import("../src/audio/silenceGate.ts");
+    const { getSilenceGate } = await import("../audio-subsystem/src/silenceGate.ts");
     expect(getSilenceGate()).toEqual({ closed: 0.2, open: 0.4 });
 
     synced.applySyncedStorage({ "vibe.silenceGateClosed": "nan?", "vibe.silenceGateOpen": "0.5" }, fake);

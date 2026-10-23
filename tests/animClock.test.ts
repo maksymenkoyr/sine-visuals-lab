@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createAnimClock, WAVE_PEAK_FALL_PER_SEC } from "../src/render/animClock.ts";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
-import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
-import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
-import { smoothingRateScale, SMOOTHING_DEFAULT } from "../src/audio/sensitivity.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio-subsystem/src/types.ts";
+import type { SilenceGateMarks } from "../audio-subsystem/src/silenceGate.ts";
+import { UNIT_TAILS, type HitShape } from "../audio-subsystem/src/hitStrength.ts";
+import { smoothingRateScale, SMOOTHING_DEFAULT } from "../audio-subsystem/src/sensitivity.ts";
 
 // Reused wherever a test needs to pass `hit` just to reach `wavePeak` —
 // its own fields don't matter when no onset fires this tick.
@@ -85,7 +85,7 @@ describe("createAnimClock", () => {
     expect(first.hits.low.ratio).toBe(firstRatio);
   });
 
-  // Graded pulse height (src/audio/hitStrength.ts), threaded through
+  // Graded pulse height (audio-subsystem/src/hitStrength.ts), threaded through
   // advance()'s optional `hit` — see animClock's own doc comment for why an
   // omitted `hit` must reproduce today's flat-1 beatPulse exactly.
   it("omitted `hit` -> beatPulse snaps to exactly 1 on onset (today's behavior)", () => {
@@ -148,7 +148,7 @@ describe("createAnimClock", () => {
   });
 
   // Regression for the silence-gate-starves-tempo bug (see
-  // src/audio/types.ts's FeatureFrame.pulseOnset and this file's own
+  // audio-subsystem/src/types.ts's FeatureFrame.pulseOnset and this file's own
   // beat.advance() call for the fix): on the render-tick path (no
   // hit.tempoHits), the beat clock's phase comb must follow
   // frame.pulseOnset, never the gated frame.onset — feeding it one without

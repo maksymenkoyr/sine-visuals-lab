@@ -25,7 +25,7 @@ import { GRID_LOCK_ON } from "../src/render/gridPulse.ts";
 // path (tempoAnalyzer.ts, run.ts's `{ analyzer: true }` — the
 // `metricsA60`/`metricsA30`/`metricsA15` tables). The render-tick path is
 // the fallback when no AudioWorklet tempo source is live (see
-// src/audio/tempoSource.ts), so every existing assertion on it stays —
+// audio-subsystem/src/tempoSource.ts), so every existing assertion on it stays —
 // the fixed-hop path additionally gets a 15fps table, which is the whole
 // point of it: a render-tick tracker degrades as the frame rate drops (see
 // this file's own git history/the PR that added the fixed-hop path for

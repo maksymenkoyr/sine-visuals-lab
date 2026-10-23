@@ -1,4 +1,4 @@
-import { METRONOME_BEATS_PER_BAR } from "./metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../../audio-subsystem/src/metronome.ts";
 
 /**
  * Beat trim: a pure correction layer between the tempo clocks

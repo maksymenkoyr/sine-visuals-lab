@@ -3,7 +3,7 @@ import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { SHARP_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
 import { advanceSilk, createSilkState, fillEchoFlows, ECHO_FLOW_STRIDE, ECHO_MAX, type SilkState } from "./driver.ts";
 
@@ -52,7 +52,7 @@ import { advanceSilk, createSilkState, fillEchoFlows, ECHO_FLOW_STRIDE, ECHO_MAX
 //     section boundaries (report: "ours: `section` shows no rise near any
 //     of them"). The `hold` setting is this scene's own bar-counted timer,
 //     not audio-derived — a sectionIntensity gap for this kind of track is
-//     a to-do in src/audio/, not something to fake here.
+//     a to-do in audio-subsystem/src/, not something to fake here.
 //  6. Off-beat transitions with no onset underneath (5.53s, 9.00s, 13.60s)
 //     are the generator's own clock, not audio-driven — nothing to sync.
 //  7. The report's one "strobe" (12.07s) shows no flash in its every-frame

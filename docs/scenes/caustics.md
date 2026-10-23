@@ -49,7 +49,7 @@ riding on top. Ships from the initial commit and is on main
   `reads` (`src/render/signals.ts`), since that coupling lives in the shader's own
   hue phase rather than in a drive value.
 - The onset edges this scene reads (`anim.onset`, `anim.lowOnset`, `anim.dropOnset`)
-  are gated upstream by `src/audio/silenceGate.ts`; no code in this file implements
+  are gated upstream by `audio-subsystem/src/silenceGate.ts`; no code in this file implements
   the gate itself.
 
 ## References

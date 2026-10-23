@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
 
 /**
  * Wire format for a feature frame, little-endian:
@@ -25,7 +25,7 @@ import { NUM_BANDS } from "../audio/types.ts";
  * The DO relay never parses this — it's a client-only concern.
  *   [42]     hats, Uint8 (0..1 -> 0..255)
  *   [43]     lead, Uint8
- * = 44 bytes: the two stem levels (src/audio/stemSplit.ts), which only the
+ * = 44 bytes: the two stem levels (audio-subsystem/src/stemSplit.ts), which only the
  * device hearing the sound can measure, so they travel here instead of being
  * worked out from the bands. They ride only with the wave tail: both come
  * from a real capture, which always has a waveform too, and a sender with no

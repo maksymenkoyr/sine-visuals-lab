@@ -1,4 +1,4 @@
-import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { GLProgram } from "./gl.ts";
 import { PALETTE_ROLES_GLSL, paletteVecs, type Palette } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";

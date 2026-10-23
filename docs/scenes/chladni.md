@@ -364,7 +364,7 @@ hexagon and decagon.
   maxing the settings doesn't help". Cause: `createPlateResponse` picked
   modes by absolute band energy, and the bands carry a constant bass-heavy
   tilt that doesn't come from the music. Through a mic, auto-gain goes fully
-  adaptive (`autoGainForSpan` in `src/audio/autoGain.ts`), and that per-band
+  adaptive (`autoGainForSpan` in `audio-subsystem/src/autoGain.ts`), and that per-band
   normalization (`FeatureExtractor.update`) reads steady mic hiss high in the
   one-FFT-bin bass bands and low in the wide treble ones. That's because a
   one-bin band's dB reading jitters far more on noise, so its window opens
@@ -856,7 +856,7 @@ hexagon and decagon.
 - Under a room mic with full auto-gain, the shared bands still read steady
   noise as bass-heavy (see the 2026-10-02 decision). This scene now cancels
   that, but every other scene that reads `bands` still sees it. The fix
-  belongs in `src/audio/features.ts` and needs `npm run eval:tempo` before
+  belongs in `audio-subsystem/src/features.ts` and needs `npm run eval:tempo` before
   and after.
 
 - Mode ladder: on broadband music the plate blends four figures nearly

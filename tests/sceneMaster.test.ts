@@ -22,7 +22,7 @@ import {
   setAutoEnabled,
   SENSITIVITY_AUTO_KEY,
 } from "../src/render/autoTune.ts";
-import { setSensitivity } from "../src/audio/sensitivity.ts";
+import { setSensitivity } from "../audio-subsystem/src/sensitivity.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { clearAllCustomValues, setCustomValue } from "../src/render/customValues.ts";
 

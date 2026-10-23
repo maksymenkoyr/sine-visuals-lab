@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
 import { RoomCore, type Attachment, type CoreHost, type CoreSocket } from "../server/roomCore.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 import { decodeFeatureFrame, encodeFeatureFrame } from "../src/net/protocol.ts";
 
 // The relay never parses a feature frame, but it drops one longer than

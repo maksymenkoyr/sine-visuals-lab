@@ -27,7 +27,7 @@ import {
  * The clip shows this window's look, which is the output's except while edits
  * wait for Play (net/outputSync.ts's Cue and Play).
  *
- * Sound: the MediaStream audio/capture.ts opened (a mic, a line input or a
+ * Sound: the MediaStream audio-subsystem/src/capture.ts opened (a mic, a line input or a
  * tab/screen share), the same signal the analysers hear. Synthetic and idle
  * audio have no stream, so those clips are video only.
  *

@@ -53,7 +53,7 @@ const WAIT_MS = 3000; // for a message that should arrive
 const QUIET_MS = 300; // for a message that should not
 
 // The wire frame (src/net/protocol.ts header): type byte, one byte per band
-// (src/audio/types.ts NUM_BANDS), energy, flags, onset phase (u16), bpm * 10
+// (audio-subsystem/src/types.ts NUM_BANDS), energy, flags, onset phase (u16), bpm * 10
 // (u16), level, and the room time as a float64, all little-endian; then the
 // optional wave tail, the waveform's min and max as Int8 on a square-root
 // curve, which a following page draws as its Waveform row.

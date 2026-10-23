@@ -7,8 +7,8 @@ import {
   faderCenterHz,
   faderPosToGain,
   gainToFaderPos,
-} from "../audio/bandGains.ts";
-import { formatHz } from "../audio/bandScale.ts";
+} from "../../audio-subsystem/src/bandGains.ts";
+import { formatHz } from "../../audio-subsystem/src/bandScale.ts";
 import { createSpectrumStrip, STRIP_PLOT_HEIGHT_PX, type SpectrumStrip } from "./spectrumStrip.ts";
 import { BANDS_AMBER, FADER_OFF, FONT_MONO } from "./controlsTheme.ts";
 

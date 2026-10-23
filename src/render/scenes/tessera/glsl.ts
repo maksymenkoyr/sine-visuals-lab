@@ -49,7 +49,7 @@ import {
   WALL_SHADE_MERIDIAN,
 } from "./lattice.ts";
 import { PALETTE_GLSL } from "../../palette.ts";
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 
 export { BOX_VERTS };
 

@@ -23,7 +23,7 @@
 // a late frame is a known late frame. Expect ±1 frame at 60 fps; good enough
 // to compare what happens *on* a bar, not enough to compare sub-frame attack.
 //
-// The scene hears the track through the real analyser (src/audio/features.ts),
+// The scene hears the track through the real analyser (audio-subsystem/src/features.ts),
 // so ours.json also records the probe's bpm/energy at each shot — the first
 // thing to check when our scene doesn't move on the beats the reference
 // does is whether our beat clock locked to the tempo the scan found.

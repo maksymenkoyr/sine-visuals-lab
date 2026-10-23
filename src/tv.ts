@@ -22,11 +22,11 @@ import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
-import { getSilenceGate } from "./audio/silenceGate.ts";
-import { getHitShape } from "./audio/hitStrength.ts";
-import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
-import { applySensitivity } from "./audio/sensitivity.ts";
-import type { FeatureFrame } from "./audio/types.ts";
+import { getSilenceGate } from "../audio-subsystem/src/silenceGate.ts";
+import { getHitShape } from "../audio-subsystem/src/hitStrength.ts";
+import { applyBandGains, getBandGains } from "../audio-subsystem/src/bandGains.ts";
+import { applySensitivity } from "../audio-subsystem/src/sensitivity.ts";
+import type { FeatureFrame } from "../audio-subsystem/src/types.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
 import { realStorage } from "./net/realStorage.ts";
@@ -885,7 +885,7 @@ async function main(): Promise<void> {
     // The silence gate's marks are this device's own (volatile, not in the
     // look), and there is no `beatRatio` — a paired TV never runs a local
     // broadband FeatureExtractor — so a graded broadband beatPulse falls back
-    // to the loudest of this device's own band ratios (src/audio/hitStrength.ts
+    // to the loudest of this device's own band ratios (audio-subsystem/src/hitStrength.ts
     // has the story), and no `wavePeak` either. Beat grid and a setting's own
     // drawn line are drive choices (src/render/drives.ts), carried by the look.
     const gained = applyBandGains(frame, getBandGains(scene.id));

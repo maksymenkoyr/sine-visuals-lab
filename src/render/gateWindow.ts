@@ -18,7 +18,7 @@
  */
 import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
-import type { HitLane } from "../audio/hitStrength.ts";
+import type { HitLane } from "../../audio-subsystem/src/hitStrength.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 
 /** The generic engine gate's own threshold default (drives.ts's header's

@@ -1,10 +1,10 @@
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { HeldEffects } from "../render/heldEffects.ts";
 import type { CastMode } from "../render/outputPower.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
-import type { SilenceGateMarks } from "../audio/silenceGate.ts";
+import type { SilenceGateMarks } from "../../audio-subsystem/src/silenceGate.ts";
 import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
 
 /**
@@ -115,7 +115,7 @@ export interface WireFrame extends FeatureFrame {
   wavePeak: number | null;
   /** See the header; absent while the output shows its own look, not the preview. */
   p?: OutputParams;
-  /** The main window's resolved silence-gate marks (audio/silenceGate.ts's
+  /** The main window's resolved silence-gate marks (audio-subsystem/src/silenceGate.ts's
    *  resolveSilenceGate), for the output's own band-onset detectors; see the
    *  header. Optional only for an older main window that doesn't send it. */
   gate?: SilenceGateMarks;

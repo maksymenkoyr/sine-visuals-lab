@@ -1,4 +1,4 @@
-import { UNIT_TAILS } from "../src/audio/hitStrength.ts";
+import { UNIT_TAILS } from "../audio-subsystem/src/hitStrength.ts";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   createDriveEngine,
@@ -25,10 +25,10 @@ import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClo
 import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
 import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
 import { createWireModState, freshWireMod, stepWireMod, type WireMod } from "../src/render/wireMod.ts";
-import { bandLineDrive } from "../src/audio/bandLine.ts";
+import { bandLineDrive } from "../audio-subsystem/src/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio-subsystem/src/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
@@ -302,7 +302,7 @@ describe("drives: nothing plugged in — rest instead of an honest 0", () => {
 });
 
 describe("drives: beat-grid choice", () => {
-  const GRID_QUARTER = 2; // BEAT_GRIDS index for "1/4" — see src/audio/beatGrid.ts
+  const GRID_QUARTER = 2; // BEAT_GRIDS index for "1/4" — see audio-subsystem/src/beatGrid.ts
 
   it("latches its fired edge across ticks accumulate() sees but forScene().fired() doesn't consume until asked, then clears it", () => {
     const engine = createDriveEngine();

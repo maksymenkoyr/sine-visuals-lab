@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createStemSplitter, STEM_SETTLE_SEC, type StemRanges } from "../src/audio/stemSplit.ts";
+import { createStemSplitter, STEM_SETTLE_SEC, type StemRanges } from "../audio-subsystem/src/stemSplit.ts";
 import { driveSettingFromChoice } from "../src/render/drives.ts";
 import { setDriveSetting } from "../src/render/driveStore.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { createStemGate, wiresReadStems } from "../src/render/stemReaders.ts";
-import { MAX_HZ_CAP, bandEdgesHz } from "../src/audio/bandScale.ts";
-import { LOW_MID_DEFAULT, MID_HIGH_DEFAULT } from "../src/audio/bandSplit.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { MAX_HZ_CAP, bandEdgesHz } from "../audio-subsystem/src/bandScale.ts";
+import { LOW_MID_DEFAULT, MID_HIGH_DEFAULT } from "../audio-subsystem/src/bandSplit.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 import { readBinsDb } from "./tempoEval/bands.ts";
 import { SR } from "./tempoEval/synth.ts";
 

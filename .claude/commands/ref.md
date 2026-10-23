@@ -59,7 +59,7 @@ names, not the set.
    the audio sections and the picture regimes disagree, the set that lands
    on the chapters is the one to believe. A
    trigger ours can't see (no section signal, tempo at ×½) is a to-do in
-   `src/audio/` or `src/render/beatClock.ts`, not something to fake in the
+   `audio-subsystem/src/` or `audio-subsystem/src/beatClock.ts`, not something to fake in the
    scene. A transition off the beat with no onset is a timer — say so.
 5. **Build or tune** against those hypotheses — `/new-scene` or `/tune`,
    with a direct scene link handed over (`https://localhost:<port>/#/v/$2`,

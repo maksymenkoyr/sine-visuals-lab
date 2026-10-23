@@ -1,4 +1,4 @@
-import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
+import { BEAT_GRIDS, type BeatGridIndex } from "../../audio-subsystem/src/beatGrid.ts";
 import { sourceSlot, type DriveSourceChoice, type HitHeight } from "../render/drives.ts";
 import { DIAL_SIGNALS, type DialSignalId, type SignalId } from "../render/signals.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";

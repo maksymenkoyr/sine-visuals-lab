@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../../audio/types.ts";
+import { NUM_BANDS } from "../../../audio-subsystem/src/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
@@ -1496,7 +1496,7 @@ export const meshGridScene: Scene = (() => {
       // What a row is: each band's *change* against its own recent average
       // (Wave Memory), soft-clipped by Wave Gain and stored about 0.5 so a
       // band going quiet is a trough and one coming in a crest. The bands
-      // arrive per-band AGC-normalized (see audio/types.ts), so their
+      // arrive per-band AGC-normalized (see audio-subsystem/src/types.ts), so their
       // standing shape — bass always tall — is the same every frame and
       // would make every row look alike; the change is where the music is:
       // a kick pushes the bass side of a ring, a hat the treble side, a pad

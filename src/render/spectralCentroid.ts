@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
 
 /**
  * A fast, per-frame counterpart to musicProfile.ts's `brightness` dial: the

@@ -11,7 +11,7 @@ import {
   SMOOTHING_MIN,
   shapeExpansion,
   shapeLevel,
-} from "../audio/sensitivity.ts";
+} from "../../audio-subsystem/src/sensitivity.ts";
 import {
   SCENE_EXPANSION_DEFAULT,
   SCENE_EXPANSION_MAX,
@@ -39,9 +39,9 @@ import { getWidget, type LinkedSetting, type WidgetCtx } from "./widgets/registr
 import { formatMixedSummary } from "./widgets/itemSelection.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
-import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
-import { type BandSplit } from "../audio/bandSplit.ts";
-import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
+import { NUM_BANDS, type FeatureFrame } from "../../audio-subsystem/src/types.ts";
+import { type BandSplit } from "../../audio-subsystem/src/bandSplit.ts";
+import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../../audio-subsystem/src/autoGain.ts";
 import {
   SILENCE_GATE_CLOSED_DEFAULT,
   SILENCE_GATE_MAX,
@@ -49,12 +49,12 @@ import {
   SILENCE_GATE_OPEN_DEFAULT,
   type SilenceGateMarks,
   type SilenceGateReading,
-} from "../audio/silenceGate.ts";
-import type { HitShape, HitShapePatch } from "../audio/hitStrength.ts";
-import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import type { LufsReading } from "../audio/lufs.ts";
-import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
-import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
+} from "../../audio-subsystem/src/silenceGate.ts";
+import type { HitShape, HitShapePatch } from "../../audio-subsystem/src/hitStrength.ts";
+import type { OnsetDiag } from "../../audio-subsystem/src/onsetDiag.ts";
+import type { LufsReading } from "../../audio-subsystem/src/lufs.ts";
+import { BAND_FADER_COUNT } from "../../audio-subsystem/src/bandGains.ts";
+import { LINE_STRENGTH_DEFAULT } from "../../audio-subsystem/src/bandLine.ts";
 import {
   defaultDriveSetting,
   DRIVE_WEIGHT_MAX,
@@ -77,7 +77,7 @@ import {
 import type { DriveThresholdState } from "../render/driveStore.ts";
 import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
-import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
+import { BEAT_GRIDS, type BeatGridIndex } from "../../audio-subsystem/src/beatGrid.ts";
 import {
   DRIVE_ADD_GROUPS,
   DRIVE_WHITE,
@@ -130,9 +130,9 @@ import type { OutputRenderStatus } from "../net/outputSync.ts";
 import { isFolded, setFolded, METERS_COLUMN, SETUP_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
-import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
-import { inputKind, isInputHidden, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../audio/inputDevice.ts";
-import type { InputHealthReading } from "../audio/inputHealth.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../../audio-subsystem/src/sourcePref.ts";
+import { inputKind, isInputHidden, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../../audio-subsystem/src/inputDevice.ts";
+import type { InputHealthReading } from "../../audio-subsystem/src/inputHealth.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import { createLeashGauge } from "./leashGauge.ts";
 import { watchOnScreen } from "./onScreen.ts";
@@ -201,7 +201,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * controls column anchored top-right alongside Power, whose cards run the
  * Auto master bar → Input
  * (its own header carries a second Auto button, next to Reset — see
- * src/audio/micAuto.ts for how it differs from the master block) → Scene →
+ * audio-subsystem/src/micAuto.ts for how it differs from the master block) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
  * src/render/drives.ts) is the patch bay: its row grows an input port (a
  * small ring at the row's left edge, in its first source's colour —
@@ -359,7 +359,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * over them (src/ui/bandFaders.ts) — its knobs, *except* while the pinned
  * setting's patch has a source on Frequencies, when the strip swaps to that
  * line's drawing overlay (src/ui/bandLineEditor.ts, backed by
- * src/audio/bandLine.ts; refreshLineMode derives this from the pinned
+ * audio-subsystem/src/bandLine.ts; refreshLineMode derives this from the pinned
  * patch, not from focus). Its readouts (bandFaders.ts's own `readouts`,
  * plus the fader hint) live in `eqLayer` under the strip, hover/focus/drag-
  * revealed rather than always on (refreshEqLayer below), so the card no
@@ -507,7 +507,7 @@ export interface DeviceMenuDeps {
   stemsMeasured: () => boolean;
   onPickPalette: (id: string) => void;
   getAudioStatus: () => AudioStatus;
-  /** Mic-vs-screen state (src/audio/sourcePref.ts). Null on a renderer or the synthetic feed, which hides the Source row. */
+  /** Mic-vs-screen state (audio-subsystem/src/sourcePref.ts). Null on a renderer or the synthetic feed, which hides the Source row. */
   getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
   onStopAudio: () => void;
@@ -557,7 +557,7 @@ export interface DeviceMenuDeps {
   /** See src/ui/setCard.ts. */
   set: Omit<SetCardDeps, "sceneName">;
   overlay: OverlayCardDeps;
-  /** Per device, not per scene; only colours the strip's bars by pulse group, unrelated to the faders (src/audio/bandSplit.ts). */
+  /** Per device, not per scene; only colours the strip's bars by pulse group, unrelated to the faders (audio-subsystem/src/bandSplit.ts). */
   getBandSplit: () => BandSplit;
   /** Real Hz edges once the analyser exists, the nominal ladder before mic access. Also labels the faders. */
   getBandEdgesHz: () => Float32Array;
@@ -642,14 +642,14 @@ export interface DeviceMenuDeps {
     stretchTo(sceneId: string, key: string, to: number): void;
     reset(sceneId: string, key: string): void;
   };
-  /** Global per-band adaptive normalization (src/audio/autoGain.ts). AUTO_GAIN_MIN is the fixed mapping against the analyser's dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is fully adaptive. */
+  /** Global per-band adaptive normalization (audio-subsystem/src/autoGain.ts). AUTO_GAIN_MIN is the fixed mapping against the analyser's dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is fully adaptive. */
   getAutoGain: () => number;
   onAutoGainChange: (value: number) => void;
   /** The row's own A chip: resolves from the room's measured span, not MUSIC_DIALS (autoGain.ts's header). Independent of the master Auto button, which is scoped to isSceneAuto's per-scene store. */
   isAutoGainAuto: () => boolean;
   onAutoGainAutoToggle: (on: boolean) => void;
   resolveAutoGain: () => number;
-  /** The two silence-gate marks (src/audio/silenceGate.ts), device-wide: how quiet the room is describes the input, not one scene. Setting one can push the other (open >= closed + SILENCE_GATE_MIN_WIDTH), so both rows re-sync from getSilenceGate() after either change. */
+  /** The two silence-gate marks (audio-subsystem/src/silenceGate.ts), device-wide: how quiet the room is describes the input, not one scene. Setting one can push the other (open >= closed + SILENCE_GATE_MIN_WIDTH), so both rows re-sync from getSilenceGate() after either change. */
   getSilenceGate: () => SilenceGateMarks;
   onSilenceGateClosedChange: (value: number) => void;
   onSilenceGateOpenChange: (value: number) => void;
@@ -657,10 +657,10 @@ export interface DeviceMenuDeps {
   isSilenceGateAuto: () => boolean;
   onSilenceGateAutoToggle: (on: boolean) => void;
   resolveSilenceGate: () => SilenceGateMarks;
-  /** Global per device, not per scene: how a hit's stand-out and loudness blend into pulse height is a taste about detection (src/audio/hitStrength.ts). */
+  /** Global per device, not per scene: how a hit's stand-out and loudness blend into pulse height is a taste about detection (audio-subsystem/src/hitStrength.ts). */
   getHitShape: () => HitShape;
   setHitShape: (partial: HitShapePatch) => void;
-  /** Whether every member of "the whole mic" is auto for this scene (src/audio/micAuto.ts's header); overlaps isSceneAuto. */
+  /** Whether every member of "the whole mic" is auto for this scene (audio-subsystem/src/micAuto.ts's header); overlaps isSceneAuto. */
   isMicAuto: (sceneId: string) => boolean;
   onMicAutoToggle: (sceneId: string, on: boolean) => void;
   /** Device-wide (src/render/powerMode.ts). */
@@ -2338,7 +2338,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     { choice: "anim.mid", read: (a) => a.mid },
     { choice: "anim.high", read: (a) => a.high },
   ];
-  // Lead and Hats (src/audio/stemSplit.ts) sit under the Mid and Treble rows
+  // Lead and Hats (audio-subsystem/src/stemSplit.ts) sit under the Mid and Treble rows
   // they cover; Bass stays empty.
   const STEM_LEVELS: readonly (LevelCell | null)[] = [
     null,
@@ -5325,7 +5325,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // One of the whole-mic Auto button's members (micAuto.ts header); also
       // refreshes the Auto master bar.
       onAutoToggled: refreshMicAutoAndMaster,
-      // Dev only: these rows keep their own store (audio/sensitivity.ts), which
+      // Dev only: these rows keep their own store (audio-subsystem/src/sensitivity.ts), which
       // doesn't drop a custom value on a write the way setSceneSetting does, so
       // the public build clamps them. A custom value is one past the slider's
       // own range, not the Auto spec's (Smoothing's slider reaches past
@@ -5569,7 +5569,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   /** The Source row's status line for a non-"ok" getInputHealth() reading
-   *  (src/audio/inputHealth.ts header explains the kinds); null for "ok". Red
+   *  (audio-subsystem/src/inputHealth.ts header explains the kinds); null for "ok". Red
    *  only for clipping, the one kind with an obvious fix; the rest are amber
    *  nudges. */
   function inputHealthText(

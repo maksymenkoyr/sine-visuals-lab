@@ -1,11 +1,11 @@
-import type { StemLevels, StemRanges, StemSplitter } from "../audio/stemSplit.ts";
+import type { StemLevels, StemRanges, StemSplitter } from "../../audio-subsystem/src/stemSplit.ts";
 import { getDriveSetting } from "./driveStore.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 import type { SignalId } from "./signals.ts";
 
 /**
  * Who reads Hats and Lead, so app.ts runs the stem split
- * (src/audio/stemSplit.ts) only on ticks where something does. The split is
+ * (audio-subsystem/src/stemSplit.ts) only on ticks where something does. The split is
  * the largest piece of JavaScript in a scene with the panel closed (#553), and
  * most of the time nothing reads its two levels.
  *

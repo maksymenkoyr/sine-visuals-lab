@@ -17,7 +17,7 @@
 // tools/.cache/promo-songs; the recorder tab calls getDisplayMedia, which
 // --auto-select-tab-capture-source-by-title answers with the player tab, and
 // getUserMedia for the mic with the same three processing flags off that
-// src/audio/capture.ts uses. Both streams go into ONE AudioContext and one
+// audio-subsystem/src/capture.ts uses. Both streams go into ONE AudioContext and one
 // AudioWorklet, so tab and mic samples share a clock and the measured delay
 // between them is exact to a sample. --use-fake-ui-for-media-stream is NOT
 // passed: with it Chrome skips the share picker and grabs the whole screen,

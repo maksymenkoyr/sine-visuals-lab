@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutopilotConfig } from "../src/render/sceneSet.ts";
-import { crossedBeatMultiple, METRONOME_BEATS_PER_BAR } from "../src/render/metronome.ts";
+import { crossedBeatMultiple, METRONOME_BEATS_PER_BAR } from "../audio-subsystem/src/metronome.ts";
 import {
   AUTOPILOT_FALLBACK_SEC_PER_BAR,
   createAutopilot,

@@ -1,12 +1,12 @@
 import type { SignalId, SignalLink } from "./signals.ts";
-import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
+import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../../audio-subsystem/src/sensitivity.ts";
 import { parseSyncedNumber, parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { proUnlocked } from "./pro.ts";
 import { clearCustomValue, resetCustomValue } from "./customValues.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
- * u<Key>` (see fullscreenScene.ts). Mirrors src/audio/sensitivity.ts: an
+ * u<Key>` (see fullscreenScene.ts). Mirrors audio-subsystem/src/sensitivity.ts: an
  * in-memory cache seeded once from localStorage, so get/set stay correct
  * even where localStorage is unavailable (node test env, Safari private
  * mode) — only cross-reload persistence depends on it.
@@ -15,7 +15,7 @@ import { clearCustomValue, resetCustomValue } from "./customValues.ts";
  * below): the Master card's Scale dial over every numeric scene param and
  * its Expansion dial over every drive reading, each stored as a scalar rather
  * than per scene because it describes this room's taste, not one scene's —
- * the same class of preference as audio/sensitivity.ts's gain stages, so like
+ * the same class of preference as audio-subsystem/src/sensitivity.ts's gain stages, so like
  * them it stays out of Looks/share codes. Their keys do ride in a room's look
  * (net/syncedStores.ts's `isRoomKey`), so a paired TV draws with the phone's
  * master dials. Storage lives here; Scale happens at the single resolve
@@ -135,8 +135,8 @@ export interface SceneSetting {
    *  until someone changes it — a plain src/render/signals.ts SignalId
    *  (reused as the drive catalogue, not a parallel enum — see that file's
    *  header), `{ source: "beat", grid }` for a beat-grid tick
-   *  (src/audio/beatGrid.ts), `{ source: "line" }` for this setting's own
-   *  drawn frequency line (src/audio/bandLine.ts), a `DrivePatch` for a
+   *  (audio-subsystem/src/beatGrid.ts), `{ source: "line" }` for this setting's own
+   *  drawn frequency line (audio-subsystem/src/bandLine.ts), a `DrivePatch` for a
    *  coupling that sums several catalogue signals (one weighted source per
    *  term, `add` — real wires from the start, so nothing is drawn as a
    *  ghost), or `"scene"` for a coupling that mixes more than one signal and

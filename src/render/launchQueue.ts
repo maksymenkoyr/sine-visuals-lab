@@ -1,4 +1,4 @@
-import { METRONOME_BEATS_PER_BAR } from "./metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../../audio-subsystem/src/metronome.ts";
 
 /**
  * The one queue of pad launches shared by the desk's Pads row, the full Pads

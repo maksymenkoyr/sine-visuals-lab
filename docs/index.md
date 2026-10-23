@@ -8,6 +8,8 @@ rules before adding a note here; this file doesn't restate them.
 
 - [Architecture](architecture.md) — the cross-file map: how a sound in the room
   becomes a pixel on screen, and how that pixel reaches a second device.
+- [Audio subsystem](audio-subsystem.md) — `audio-subsystem/`, the sound-to-numbers code as one
+  folder that lifts out whole: its boundary, and the two things it takes from the app.
 - [Feature map](feature-map.md) — every feature a visitor can meet, as a tree
   by where they meet it, each marked by how much it matters, with what the
   usage counts measured.

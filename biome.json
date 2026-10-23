@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["src/**/*.ts", "server/**/*.ts", "tools/**/*.mjs", "tools/**/*.ts", "tests/**/*.ts", "!src/render/scenes/private"]
+    "includes": ["src/**/*.ts", "audio-subsystem/**/*.ts", "server/**/*.ts", "tools/**/*.mjs", "tools/**/*.ts", "tests/**/*.ts", "!src/render/scenes/private"]
   },
   "formatter": { "enabled": false },
   "assist": { "enabled": false },

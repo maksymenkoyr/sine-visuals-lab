@@ -3,7 +3,7 @@ import { createDriveEngine, type DriveChoice, type DrivePatch } from "../src/ren
 import { createAnimClock } from "../src/render/animClock.ts";
 import { getDriveSetting, setDriveSetting } from "../src/render/driveStore.ts";
 import { clearDriveMutes, isDriveMuted, onDriveMuteChange, toggleDriveMute } from "../src/render/driveMute.ts";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio-subsystem/src/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 
 const DT = 1 / 60;

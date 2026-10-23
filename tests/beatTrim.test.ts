@@ -6,9 +6,9 @@ import {
   type BeatTrimSettings,
   type TempoMultiplier,
 } from "../src/render/beatTrim.ts";
-import { createMetronome, type Metronome } from "../src/render/metronome.ts";
-import { TEMPO_SETTLE_SEC } from "../src/render/tempoSettle.ts";
-import { METRONOME_BEATS_PER_BAR } from "../src/render/metronome.ts";
+import { createMetronome, type Metronome } from "../audio-subsystem/src/metronome.ts";
+import { TEMPO_SETTLE_SEC } from "../audio-subsystem/src/tempoSettle.ts";
+import { METRONOME_BEATS_PER_BAR } from "../audio-subsystem/src/metronome.ts";
 
 const DT = 1 / 60;
 const IDENTITY: BeatTrimSettings = { multiplier: 1, offsetMs: 0, resyncSeq: 0 };

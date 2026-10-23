@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../../audio/types.ts";
+import { NUM_BANDS } from "../../../audio-subsystem/src/types.ts";
 import { createFullscreenScene } from "../fullscreenScene.ts";
 
 // Chladni-style standing waves. Each audio band (NUM_BANDS of them) is treated

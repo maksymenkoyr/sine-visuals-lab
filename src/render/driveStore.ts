@@ -1,7 +1,7 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
 import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
-import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
-import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
+import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../../audio-subsystem/src/bandLine.ts";
+import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../../audio-subsystem/src/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
 import { decodeWireMod, encodeWireMod, LEGACY_NODE_ID_RE, readLegacyNodes, type LegacyNode, type StoredWireMod, type WireMod } from "./wireMod.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
@@ -42,7 +42,7 @@ import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_M
  * stays correct even where localStorage is unavailable (node test env,
  * Safari private mode).
  *
- * The line lives here rather than in src/audio/bandLine.ts because it's
+ * The line lives here rather than in audio-subsystem/src/bandLine.ts because it's
  * keyed one level deeper than that module's old per-scene store: two drive
  * settings on the same scene each draw their own line (bandLine.ts's own
  * header covers why bandLineDrive() itself — the pure math — stayed put).

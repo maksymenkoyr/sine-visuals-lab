@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { encodeFeatureFrame, decodeFeatureFrame } from "../src/net/protocol.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
-import { isClipping } from "../src/audio/waveform.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
+import { isClipping } from "../audio-subsystem/src/waveform.ts";
 
 describe("protocol", () => {
   it("round-trips every field within quantization tolerance", () => {

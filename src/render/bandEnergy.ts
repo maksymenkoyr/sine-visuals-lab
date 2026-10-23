@@ -1,7 +1,7 @@
-import { NUM_BANDS } from "../audio/types.ts";
-import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
-import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitParts } from "../audio/hitStrength.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
+import { getBandSplit, bandSplitVersion } from "../../audio-subsystem/src/bandSplit.ts";
+import type { OnsetDiag } from "../../audio-subsystem/src/onsetDiag.ts";
+import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitParts } from "../../audio-subsystem/src/hitStrength.ts";
 
 // Splits the 24 log-spaced bands into low/mid/high groups and derives, per
 // group: a slewed continuous level (safe to drive geometry with — it can't
@@ -10,12 +10,12 @@ import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitPart
 // scoped to a frequency range) so a kick and a hat can drive visibly
 // different things instead of both hiding inside one broadband uEnergy.
 //
-// A group's pulse *height* is graded by src/audio/hitStrength.ts when a
+// A group's pulse *height* is graded by audio-subsystem/src/hitStrength.ts when a
 // `shape` is given to advance() below: on the tick a group's onset fires,
 // hitStrength() blends how far this hit's flux ratio cleared its trigger
 // (stand-out) against how loud the group's own band mean actually is this
 // frame (loudness — a fixed-window dB reading with auto-gain off, the
-// default; see src/audio/bandGains.ts's header) into a 0..1 strength, and
+// default; see audio-subsystem/src/bandGains.ts's header) into a 0..1 strength, and
 // `state.pulse` takes the larger of its own decaying tail and that strength
 // rather than snapping to it outright, so a weak hit landing on a strong
 // one's decay can't cut the pulse down. Omit `shape` (every existing caller)
@@ -26,7 +26,7 @@ import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitPart
 // pulse would have read.
 //
 // The low/mid boundary and mid/high boundary are user-tunable (config panel
-// Bands box, src/audio/bandSplit.ts) rather than hardcoded, so "how low does
+// Bands box, audio-subsystem/src/bandSplit.ts) rather than hardcoded, so "how low does
 // a kick have to be" is something a user can place against the actual music.
 //
 // The onset trigger is rate-of-rise (spectral flux), not absolute level —
@@ -42,7 +42,7 @@ import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitPart
 // rise, so it can't mask the kicks on top of it.
 //
 // advance()'s optional `dimmer` is the same silence gate features.ts's own
-// broadband onset reads (src/audio/silenceGate.ts) — scoped per group here
+// broadband onset reads (audio-subsystem/src/silenceGate.ts) — scoped per group here
 // rather than applied once for the whole spectrum, since a kick and a hat
 // are each free to fire on nothing but mic hiss even while the broadband
 // detector alone is gated. Same rule as there: it multiplies only the
@@ -259,11 +259,11 @@ export interface BandEnergy {
    *  not reach the flux baseline or refractory, which are measurement, not
    *  display smoothing (see advanceGroup). Defaults to 1 (today's behavior)
    *  so existing callers don't need to change. `dimmer` is the silence
-   *  gate's multiplier (src/audio/silenceGate.ts) on each group's own firing
+   *  gate's multiplier (audio-subsystem/src/silenceGate.ts) on each group's own firing
    *  comparison only — see the file header for why it's scoped per group
    *  rather than applied once broadband. Defaults to 1 (no gating), same as
    *  rateScale, so a caller with no marks (a preview/gallery/probe tile) is
-   *  unaffected. `shape` (src/audio/hitStrength.ts) grades each group's own
+   *  unaffected. `shape` (audio-subsystem/src/hitStrength.ts) grades each group's own
    *  pulse height on its onset — omitted (every existing caller) keeps a
    *  group's pulse snapping to a flat 1, exactly as before that module
    *  existed; only src/render/animClock.ts's own `hit` param ever supplies

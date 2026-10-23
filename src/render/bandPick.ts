@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
 
 /**
  * "Kick band": one low band, picked by itself, read as a single level.
@@ -11,7 +11,7 @@ import { NUM_BANDS } from "../audio/types.ts";
  * the music without anyone looking at a spectrum.
  *
  * Candidates are only the bands below the Bands split (`lowMid` from
- * getBandSplit() in src/audio/bandSplit.ts), never mid or high bands.
+ * getBandSplit() in audio-subsystem/src/bandSplit.ts), never mid or high bands.
  *
  * The score for each candidate is its standard deviation over roughly
  * PICK_TAU_SEC, computed from an exponential mean of v and of v² per band.

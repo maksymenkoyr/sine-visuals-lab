@@ -1,6 +1,6 @@
 import type { Scene, SceneContext, Viewport } from "../../scene.ts";
-import type { FeatureFrame } from "../../../audio/types.ts";
-import { NUM_BANDS } from "../../../audio/types.ts";
+import type { FeatureFrame } from "../../../../audio-subsystem/src/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import type { Palette } from "../../palette.ts";
 import type { AnimFrame } from "../../animClock.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";

@@ -1,4 +1,4 @@
-import { crossedBeatMultiple, METRONOME_BEATS_PER_BAR } from "./metronome.ts";
+import { crossedBeatMultiple, METRONOME_BEATS_PER_BAR } from "../../audio-subsystem/src/metronome.ts";
 import type { AutopilotConfig } from "./sceneSet.ts";
 
 /**

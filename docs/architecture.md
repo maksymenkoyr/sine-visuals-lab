@@ -7,26 +7,26 @@ module's header — this doc doesn't restate it.
 
 ## Mic to pixel, on one device
 
-`src/audio/capture.ts` opens the mic or, on a desktop host, a shared screen/tab's
-audio — a user choice persisted by `src/audio/sourcePref.ts`, surfaced in the start
-prompt and the Input card's Source row, where `src/audio/inputDevice.ts` also picks
+`audio-subsystem/src/capture.ts` opens the mic or, on a desktop host, a shared screen/tab's
+audio — a user choice persisted by `audio-subsystem/src/sourcePref.ts`, surfaced in the start
+prompt and the Input card's Source row, where `audio-subsystem/src/inputDevice.ts` also picks
 which input device the mic means (e.g. a USB interface fed from a DJ mixer) — and
 hands back a raw stream.
-`src/audio/analyser.ts` runs the FFT and splits it into bands
-(`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
+`audio-subsystem/src/analyser.ts` runs the FFT and splits it into bands
+(`audio-subsystem/src/bandSplit.ts` / `bandScale.ts` decide the band edges). `audio-subsystem/src/
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
-the room's own loudness. That same adaptive shape is why `src/audio/
+the room's own loudness. That same adaptive shape is why `audio-subsystem/src/
 silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset,
 and (via `src/render/animClock.ts`) `src/render/bandEnergy.ts`'s per-band onsets,
 against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
 so a quiet room's own hiss can't fire on its own. Both marks can also be handed
 to an auto mode (on by default) that tracks the room's own quiet level instead
 of a manual drag, fed each tick by `feedSilenceGateMeasurement` — mirroring
-`src/audio/autoGain.ts`'s own auto flag rather than resolving through
-`musicProfile.ts`'s dials. `src/audio/sensitivity.ts` applies the user's
+`audio-subsystem/src/autoGain.ts`'s own auto flag rather than resolving through
+`musicProfile.ts`'s dials. `audio-subsystem/src/sensitivity.ts` applies the user's
 Sensitivity/Expansion/Smoothing controls on top of that. Beside the bands,
-`src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
+`audio-subsystem/src/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
 would level held sound away), and splits them into a drum part and a held part
 for the Hats and Lead signals; `app.ts` writes both into the frame, so a TV gets
 them over the wire rather than working them out itself. The split runs only on
@@ -34,8 +34,8 @@ ticks where something reads them; `src/render/stemReaders.ts` says who does.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
-clock (`src/render/beatClock.ts`), the always-evenly-spaced metronome built on
-top of it (`src/render/metronome.ts`), per-band energy and onset pulses, section
+clock (`audio-subsystem/src/beatClock.ts`), the always-evenly-spaced metronome built on
+top of it (`audio-subsystem/src/metronome.ts`), per-band energy and onset pulses, section
 intensity, spectral centroid (`src/render/spectralCentroid.ts`). Scenes never read
 `FeatureFrame` fields directly for anything animated; they read `AnimFrame`,
 because it's already shaped for motion (see the field comments in `animClock.ts`
@@ -62,17 +62,17 @@ scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 
 The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
 in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-their Dynamics card's Waveform row is fed by `src/audio/waveformAnalyser.ts`
+their Dynamics card's Waveform row is fed by `audio-subsystem/src/waveformAnalyser.ts`
 (math in `waveform.ts`), which reads time-domain samples straight off this
 device's own mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV" below —
 a viewer with no local mic doesn't get that row at all. The same card's
 History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
-diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
+diagnostic off this device's own extractor (see `audio-subsystem/src/features.ts`), not a
 `FeatureFrame` field — its own Gate row right after it reads
 that same extractor's `gateDimmer` diagnostic the same way. Its LUFS row
 is the same kind of read: BS.1770 LUFS
-from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
+from `audio-subsystem/src/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer. (The Waveform row
 is not: there it draws the followed device's waveform, off the frame's wave
 tail in `src/net/protocol.ts`.)

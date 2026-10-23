@@ -1,6 +1,6 @@
 // Turns the beat clock's free-running beat count into the one-shot beat
 // edge a scene sees (AnimFrame.onset / beatPulse), on the grid the Beat grid
-// row picked (src/audio/beatGrid.ts). Sits inside animClock.advance()
+// row picked (audio-subsystem/src/beatGrid.ts). Sits inside animClock.advance()
 // between beatClock and the AnimFrame it returns, so every scene reading
 // anim.onset gets the grid for free and none has to know it exists.
 //

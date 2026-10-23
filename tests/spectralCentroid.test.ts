@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 import { bandIndexCentroid, createSpectralCentroid } from "../src/render/spectralCentroid.ts";
 
 const DT = 1 / 60;

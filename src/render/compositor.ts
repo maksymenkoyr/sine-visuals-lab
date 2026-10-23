@@ -1,4 +1,4 @@
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { AnimFrame } from "./animClock.ts";
 import { createCrossfade, type Crossfade, type CrossfadeOptions, type CrossfadeView } from "./crossfade.ts";
 import type { SceneDrives } from "./drives.ts";

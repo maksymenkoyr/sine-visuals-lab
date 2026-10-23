@@ -11,12 +11,12 @@ import {
   TAP_MIN_TAPS,
 } from "../src/render/tapTempo.ts";
 import { getBeatTrim, nudgeBeatOffset, resetBeatTrim, stepTempoMultiplier } from "../src/render/beatTrim.ts";
-import { BPM_MAX, BPM_MIN } from "../src/audio/tempoComb.ts";
+import { BPM_MAX, BPM_MIN } from "../audio-subsystem/src/tempoComb.ts";
 import { createAnimClock, type AnimFrame } from "../src/render/animClock.ts";
-import { createBeatClock } from "../src/render/beatClock.ts";
-import { createMetronome, RESYNC_RATIO } from "../src/render/metronome.ts";
-import { createTempoSettle, RETUNE_UNSURE_SEC, TEMPO_SETTLE_SEC } from "../src/render/tempoSettle.ts";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { createBeatClock } from "../audio-subsystem/src/beatClock.ts";
+import { createMetronome, RESYNC_RATIO } from "../audio-subsystem/src/metronome.ts";
+import { createTempoSettle, RETUNE_UNSURE_SEC, TEMPO_SETTLE_SEC } from "../audio-subsystem/src/tempoSettle.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio-subsystem/src/types.ts";
 
 const DT = 1 / 60;
 

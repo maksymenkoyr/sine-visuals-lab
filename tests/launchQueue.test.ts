@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { METRONOME_BEATS_PER_BAR } from "../src/render/metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../audio-subsystem/src/metronome.ts";
 import {
   LAUNCH_ON,
   LAUNCH_ON_DEFAULT,

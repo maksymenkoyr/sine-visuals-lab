@@ -64,7 +64,7 @@ describe("areaOfFile", () => {
   it("sorts files into product areas", () => {
     expect(areaOfFile("src/render/scenes/caustics.ts")).toBe("scenes");
     expect(areaOfFile("docs/scenes/coil.md")).toBe("scenes");
-    expect(areaOfFile("src/audio/features.ts")).toBe("sound");
+    expect(areaOfFile("audio-subsystem/src/features.ts")).toBe("sound");
     expect(areaOfFile("src/render/drives.ts")).toBe("sound");
     expect(areaOfFile("src/net/outputSync.ts")).toBe("output");
     expect(areaOfFile("server/room.ts")).toBe("output");

@@ -9,8 +9,8 @@ import {
 import { CUT_LISTENER } from "../src/render/scenes/shards/layout.ts";
 import { SIGNALS } from "../src/render/signals.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
-import type { OnsetDiag } from "../src/audio/onsetDiag.ts";
-import { UNIT_TAILS, type HitParts } from "../src/audio/hitStrength.ts";
+import type { OnsetDiag } from "../audio-subsystem/src/onsetDiag.ts";
+import { UNIT_TAILS, type HitParts } from "../audio-subsystem/src/hitStrength.ts";
 
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
 const NULL_HIT: HitParts = { standout: 0, loudness: 0, strength: 0 };

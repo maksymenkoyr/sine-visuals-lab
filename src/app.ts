@@ -3,7 +3,7 @@
 // header of net/controllerStorageBoot.ts. A no-op for every other page.
 import "./net/controllerStorageBoot.ts";
 import { PAID_SCENE_IDS, sceneStage } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
-import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
+import { captureMic, captureDisplayAudio, listAudioInputDevices } from "../audio-subsystem/src/capture.ts";
 import {
   getInputDevicePref,
   setInputDevicePref,
@@ -19,20 +19,21 @@ import {
   INPUT_KIND_TEXT,
   type InputDevicePref,
   type InputDeviceOption,
-} from "./audio/inputDevice.ts";
-import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
-import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
-import { createStemSplitter, type StemRanges } from "./audio/stemSplit.ts";
+} from "../audio-subsystem/src/inputDevice.ts";
+import { inputPreviewSupported, createInputPreview, type InputPreview } from "../audio-subsystem/src/inputPreview.ts";
+import { createBandAnalyser, type BandAnalyser } from "../audio-subsystem/src/analyser.ts";
+import { createStemSplitter, type StemRanges } from "../audio-subsystem/src/stemSplit.ts";
 import { createStemGate, wiresReadStems, type StemGate } from "./render/stemReaders.ts";
-import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { minMax, peak, rms } from "./audio/waveform.ts";
-import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
-import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
-import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
-import type { LufsReading } from "./audio/lufs.ts";
-import { FeatureExtractor } from "./audio/features.ts";
-import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
-import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "./audio/types.ts";
+import { createWaveformAnalyser, type WaveformAnalyser } from "../audio-subsystem/src/waveformAnalyser.ts";
+import { minMax, peak, rms } from "../audio-subsystem/src/waveform.ts";
+import { createLufsAnalyser, type LufsAnalyser } from "../audio-subsystem/src/lufsAnalyser.ts";
+import { createInputHealthTap, type InputHealthTap } from "../audio-subsystem/src/inputHealthTap.ts";
+import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "../audio-subsystem/src/inputHealth.ts";
+import type { LufsReading } from "../audio-subsystem/src/lufs.ts";
+import { FeatureExtractor } from "../audio-subsystem/src/features.ts";
+import { createTempoSource, type TempoSource } from "../audio-subsystem/src/tempoSource.ts";
+import tempoWorkletUrl from "../audio-subsystem/src/tempoWorklet.ts?worker&url";
+import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "../audio-subsystem/src/types.ts";
 import {
   getAudioSourceChoice as getStoredAudioSource,
   setAudioSourceChoice,
@@ -43,7 +44,7 @@ import {
   type AudioSourceChoice,
   type MicPermission,
   type SourceState,
-} from "./audio/sourcePref.ts";
+} from "../audio-subsystem/src/sourcePref.ts";
 import { createGL, refreshCssSize, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import {
   detectQuality,
@@ -68,9 +69,9 @@ import {
   setSensitivity,
   setSmoothing,
   smoothingRateScale,
-} from "./audio/sensitivity.ts";
+} from "../audio-subsystem/src/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
-import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
+import { PHASE_BASS, type TempoHit } from "../audio-subsystem/src/beatClock.ts";
 import { getBeatTrim, requestBarResync, resetBeatTrim, stepTempoMultiplier, nudgeBeatOffset } from "./render/beatTrim.ts";
 import { releaseTapTempo, tapTempoAt } from "./render/tapTempo.ts";
 import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
@@ -106,7 +107,7 @@ import {
   setSourceWeight,
   togglePatchSource,
 } from "./render/driveStore.ts";
-import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
+import { createSyntheticFeed, type SyntheticFeed } from "../audio-subsystem/src/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
@@ -200,7 +201,7 @@ import {
 import { cancelLaunch, getLaunchOn, launchBeat, queueLaunch, takeDue, type QueuedLaunch } from "./render/launchQueue.ts";
 import { NO_EFFECTS } from "./render/heldEffects.ts";
 import { blendValues } from "./render/lookMap.ts";
-import { METRONOME_BEATS_PER_BAR } from "./render/metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../audio-subsystem/src/metronome.ts";
 import { funnyLookName } from "./render/lookNames.ts";
 import {
   clearCustomValue,
@@ -210,7 +211,7 @@ import {
   setCustomValue,
   stretchSlider,
 } from "./render/customValues.ts";
-import { getBandSplit } from "./audio/bandSplit.ts";
+import { getBandSplit } from "../audio-subsystem/src/bandSplit.ts";
 import {
   getAutoGain,
   setAutoGain,
@@ -218,7 +219,7 @@ import {
   feedAutoGainMeasurement,
   isAutoGainAuto,
   setAutoGainAuto,
-} from "./audio/autoGain.ts";
+} from "../audio-subsystem/src/autoGain.ts";
 import {
   getSilenceGate,
   setSilenceGateClosed,
@@ -228,10 +229,10 @@ import {
   isSilenceGateAuto,
   setSilenceGateAuto,
   type SilenceGateReading,
-} from "./audio/silenceGate.ts";
-import { getHitShape, setHitShape } from "./audio/hitStrength.ts";
-import { isMicAuto, setMicAuto } from "./audio/micAuto.ts";
-import type { OnsetDiag } from "./audio/onsetDiag.ts";
+} from "../audio-subsystem/src/silenceGate.ts";
+import { getHitShape, setHitShape } from "../audio-subsystem/src/hitStrength.ts";
+import { isMicAuto, setMicAuto } from "../audio-subsystem/src/micAuto.ts";
+import type { OnsetDiag } from "../audio-subsystem/src/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import {
@@ -252,7 +253,7 @@ import {
   setPreviewSize,
   type PreviewSize,
 } from "./render/outputPower.ts";
-import { nominalBandEdgesHz } from "./audio/bandScale.ts";
+import { nominalBandEdgesHz } from "../audio-subsystem/src/bandScale.ts";
 import {
   applyBandGains,
   getBandGain,
@@ -260,7 +261,7 @@ import {
   pinnedBands,
   resetBandGains,
   setBandGain,
-} from "./audio/bandGains.ts";
+} from "../audio-subsystem/src/bandGains.ts";
 import {
   advanceAutoTune,
   tickAutoTune,
@@ -334,7 +335,7 @@ import {
   spaceIsCue,
 } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
-import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
+import { pinAsset, pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./ui/tooltip.ts";
@@ -414,6 +415,15 @@ const inputHealth = createInputHealth();
 /** DEV-only deep (32768-sample) analyser for tools/audio-latency.mjs:
  *  waveformAnalyser's 2048 samples are too shallow to find a test click. */
 let measureAnalyser: WaveformAnalyser | null = null;
+// The tempo worklet's module, pinned (src/pinnedAssets.ts): addModule() runs
+// the first time the mic starts, which can be long after a deploy has
+// replaced dist/ out from under a tab that's been open the whole time.
+// `?worker&url`, not the `?worker` constructor import: AudioWorkletNode is
+// created from a URL (`audioWorklet.addModule(url)`), never a `Worker`, and
+// the worklet still builds as its own asset (vite.config.ts's `target:`
+// comment says why it shares the app's one baseline).
+const tempoWorklet = pinAsset(tempoWorkletUrl);
+
 /** AudioWorklet fixed-hop tempo tracker; null until createTempoSource() resolves,
  *  and permanently null where unsupported (extractor's own bpm is the fallback). */
 let tempoSource: TempoSource | null = null;
@@ -1371,7 +1381,7 @@ function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
   return choice === "display" ? captureDisplayAudio() : startMic();
 }
 
-/** The chosen input (src/audio/inputDevice.ts) or the system default. A chosen
+/** The chosen input (audio-subsystem/src/inputDevice.ts) or the system default. A chosen
  *  device that isn't plugged in falls back to the default with a HUD note rather
  *  than leaving the scene deaf; onInputDevicesChanged moves back when it
  *  returns. */
@@ -1426,7 +1436,7 @@ async function refreshInputDevices(): Promise<MediaDeviceInfo[]> {
   return devices;
 }
 
-/** The Source row's idle signal-preview meters (audio/inputPreview.ts). Runs only
+/** The Source row's idle signal-preview meters (audio-subsystem/src/inputPreview.ts). Runs only
  *  where inputPreviewSupported() and a pickable option exists, and is re-synced
  *  wherever what it previews can change. Hidden inputs and ones a preview would
  *  disturb (Bluetooth headsets, an iPhone's mic; previewWouldDisturb) are never
@@ -1524,7 +1534,7 @@ function attachCapture(handle: CaptureHandle): void {
   // resolves (or null where unsupported), currentVisual() reads extractor's own
   // bpm.
   tempoSource = null;
-  void createTempoSource(handle.context, handle.sourceNode).then((source) => {
+  void createTempoSource(handle.context, handle.sourceNode, () => tempoWorklet.url("text/javascript")).then((source) => {
     if (capture !== handle) {
       source?.dispose();
       return;

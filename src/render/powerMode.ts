@@ -1,6 +1,6 @@
 /**
  * Global on/off/override for the quality governor (src/render/governor.ts).
- * Global per device (like src/audio/autoGain.ts and src/audio/bandSplit.ts,
+ * Global per device (like audio-subsystem/src/autoGain.ts and audio-subsystem/src/bandSplit.ts,
  * not per scene) — whether this device wants to trade picture quality for
  * battery describes the device, not one scene's look.
  *

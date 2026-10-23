@@ -1,11 +1,11 @@
-import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneExpansion, getSceneExpansionShape, SCENE_EXPANSION_DEFAULT, settingScope, type ExpansionShape } from "./sceneSettings.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
-import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { bandLineDrive } from "../audio/bandLine.ts";
+import { beatGridBeats, type BeatGridIndex } from "../../audio-subsystem/src/beatGrid.ts";
+import { bandLineDrive } from "../../audio-subsystem/src/bandLine.ts";
 import { advanceGateTracker, createGateTracker, stepHeightEnv, windowReading, type GateTrackerState } from "./gateWindow.ts";
 import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
 import { getGateFormula, getWireGateFormula } from "./gateFormulas.ts";
@@ -127,7 +127,7 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  *
  *   - **Graded** (the default, and the only height that existed before
  *     patches) — exactly today's reading: the catalogue's own decaying
- *     pulse (already shaped by src/audio/hitStrength.ts when a device has
+ *     pulse (already shaped by audio-subsystem/src/hitStrength.ts when a device has
  *     Dimension raised — see that module's header), or the grid's own pulse.
  *   - **Fixed** — a flat 1 on the source's own edge, decaying at that same
  *     source's own rate. "This hit is binary: it either lands or it

@@ -13,8 +13,8 @@
  * page is already resident in memory, nothing re-fetches it. But a handful of
  * files are fetched separately from the module graph, on their own schedule:
  * the tempo AudioWorklet module (only loaded once the mic starts, well after
- * load — src/audio/tempoSource.ts) and every font: a `@font-face` file is
- * only requested the first time text
+ * load — audio-subsystem/src/tempoSource.ts, pinned in src/app.ts) and every
+ * font: a `@font-face` file is only requested the first time text
  * in that face is drawn — the @fontsource faces controlsTheme.ts and
  * brandMark.ts import are declared at load but mostly first drawn by the
  * settings panel, and DSEG7's `@font-face` isn't even declared until
@@ -56,7 +56,7 @@
  * **The rule for new code:** any `?url` or `?worker&url` import — anything
  * Vite resolves to a hashed URL string rather than inlining or bundling —
  * must be wrapped in `pinAsset()` at module scope, right next to the import,
- * the same way tempoSource.ts does it. Fonts loaded
+ * the same way src/app.ts does for the tempo worklet. Fonts loaded
  * through `@font-face` (declared in a `<style>` this app injects, as
  * controlsTheme.ts does for DSEG7) don't need this: `pinEverything()` sweeps
  * every face already registered in `document.fonts` regardless of how its

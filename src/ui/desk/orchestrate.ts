@@ -16,7 +16,7 @@ import { EFFECTS, type EffectId, type HeldEffects } from "../../render/heldEffec
 import { getLaunchOn, PHRASE_BARS, type LaunchOn, type QueuedLaunch } from "../../render/launchQueue.ts";
 import { getPalette } from "../../render/palette.ts";
 import { type MapItem, type MapPoint, nearestTwo, placeLooks } from "../../render/lookMap.ts";
-import { METRONOME_BEATS_PER_BAR } from "../../render/metronome.ts";
+import { METRONOME_BEATS_PER_BAR } from "../../../audio-subsystem/src/metronome.ts";
 import type { SetPad } from "../../render/sceneSet.ts";
 import { FONT_MONO } from "../controlsTheme.ts";
 import { padStill, padStillAt } from "./padStills.ts";

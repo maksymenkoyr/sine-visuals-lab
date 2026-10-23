@@ -1,4 +1,4 @@
-import { biquad, type BiquadCoefficients } from "../../src/audio/lufs.ts";
+import { biquad, type BiquadCoefficients } from "../../audio-subsystem/src/lufs.ts";
 
 /**
  * Offline, dependency-free music synthesis for the tempo-tracker eval
@@ -40,7 +40,7 @@ export interface Track {
   gridBeats: number[];
 }
 
-// ---- seeded RNG (same small LCG shape tests/features.test.ts already uses) ----
+// ---- seeded RNG (same small LCG shape audio-subsystem/tests/features.test.ts already uses) ----
 export function makeRng(seed: number): () => number {
   let s = seed >>> 0;
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Measures real-microphone-to-onset-flag latency: the delay from a sound
-// physically entering the mic to src/audio/features.ts flagging
+// physically entering the mic to audio-subsystem/src/features.ts flagging
 // FeatureFrame.onset — the one link in the chain that was previously only
-// estimated from reading src/audio/analyser.ts's/features.ts's constants,
+// estimated from reading audio-subsystem/src/analyser.ts's/features.ts's constants,
 // never actually clocked. Complements the render-cap delay (already
 // measured separately, ~5-10ms — see renderLatch.ts) rather than
 // re-measuring it: this tool stops at the onset flag.
@@ -72,7 +72,7 @@ const outPath = resolve(opt("--out", `tools/.cache/audio-latency/${scene}.json`)
 
 // ---------------------------------------------------------------------
 // Seeded RNG (mulberry32) — deterministic so a click track is reproducible
-// across runs, same idiom as tests/features.test.ts's seeded onset tests.
+// across runs, same idiom as audio-subsystem/tests/features.test.ts's seeded onset tests.
 function mulberry32(a) {
   return function () {
     a |= 0;
@@ -114,7 +114,7 @@ function writeWavPCM16(path, floatSamples, sampleRate) {
 
 // ---------------------------------------------------------------------
 // The click track. Every constant here exists to defeat a specific failure
-// mode of src/audio/features.ts's detector — see this tool's header list in
+// mode of audio-subsystem/src/features.ts's detector — see this tool's header list in
 // the plan this came from; restated at each constant so the file is
 // self-contained.
 const SAMPLE_RATE = 48000; // tools/ref-scan.py's format — what Chromium's fake-audio-capture reads
@@ -355,7 +355,7 @@ async function main() {
   // A single click reliably fires more than one onset: the detector's own
   // adaptive peak/floor trackers relax over the following ~100-300ms and
   // can re-cross threshold on their own decay, with no new audio — the
-  // exact "second onset from its tail" behavior tests/features.test.ts
+  // exact "second onset from its tail" behavior audio-subsystem/tests/features.test.ts
   // already documents for a plain click track. The deep buffer being 682ms
   // wide means a matched-filter match on a LATER re-trigger still finds the
   // same click sitting further back in the buffer, with perfectly good

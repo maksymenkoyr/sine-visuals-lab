@@ -1,0 +1,19 @@
+id: audio-subsystem-self-contained
+valid:
+  - |
+    import { NUM_BANDS } from "./types.ts";
+  - |
+    import { FeatureExtractor } from "../src/features.ts";
+  - |
+    import { describe, it } from "vitest";
+  - |
+    const note = "see ../../src/app.ts";
+invalid:
+  - |
+    import { pinAsset } from "../../src/pinnedAssets.ts";
+  - |
+    import type { SceneSetting } from "../../src/render/sceneSettings.ts";
+  - |
+    export { isRoomKey } from "../../src/net/syncedStores.ts";
+  - |
+    const m = await import("../../src/app.ts");

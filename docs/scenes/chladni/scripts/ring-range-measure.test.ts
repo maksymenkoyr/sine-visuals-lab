@@ -12,7 +12,7 @@
 //   node node_modules/vitest/vitest.mjs run tests/ring-range-measure.test.ts
 import { it } from "vitest";
 import { createPlateResponse } from "../src/render/scenes/chladni.ts";
-import { FeatureExtractor } from "../src/audio/features.ts";
+import { FeatureExtractor } from "../audio-subsystem/src/features.ts";
 import { readBandsDb } from "./tempoEval/bands.ts";
 import { micChain } from "./tempoEval/micChain.ts";
 import { buildTracks, SR } from "./tempoEval/synth.ts";

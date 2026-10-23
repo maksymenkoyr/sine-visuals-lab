@@ -36,7 +36,7 @@
 // the reference: a hit sends a bright ring down the fan (the display pass
 // finds each pixel's place in the fan from its freshness), Mirror folds the
 // flow so the fan is symmetric, Age tint colours echoes by that same place.
-import { NUM_BANDS } from "../../../audio/types.ts";
+import { NUM_BANDS } from "../../../../audio-subsystem/src/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";

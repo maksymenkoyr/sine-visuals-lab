@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { NUM_BANDS } from "../../audio-subsystem/src/types.ts";
 import type { WaveEnvelope } from "./protocol.ts";
 
 export interface TimedFrame {

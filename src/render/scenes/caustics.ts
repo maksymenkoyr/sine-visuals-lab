@@ -95,8 +95,8 @@ import {
 // against its own slow-contracting extremes — not frame.energy: energy is
 // AGC-normalized per band, and that AGC "re-adapts in ~1.25s and erases
 // quiet-vs-loud by design" (see FeatureFrame.energy's own doc comment in
-// audio/types.ts), which is exactly the dynamic range this dial exists to
-// show. level survives that AGC (audio/types.ts and autoTune.ts both call it
+// audio-subsystem/src/types.ts), which is exactly the dynamic range this dial exists to
+// show. level survives that AGC (audio-subsystem/src/types.ts and autoTune.ts both call it
 // "the one field that survives it"), but its resting point is
 // playback/mic-gain dependent, which is what advanceLoudSwell's own
 // calibration is for — see that function's comment for why this isn't

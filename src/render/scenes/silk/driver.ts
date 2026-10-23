@@ -269,7 +269,7 @@ export interface SilkInputs {
   /** frame.level — absolute mic loudness, NOT auto-gained. Saturation
    *  rides this rather than anim.mid/low so it fades out with the song
    *  instead of being re-normalised back up by the AGC (see
-   *  src/audio/types.ts's FeatureFrame.level doc). */
+   *  audio-subsystem/src/types.ts's FeatureFrame.level doc). */
   level: number;
 }
 

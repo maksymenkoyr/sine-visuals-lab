@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createDriveEngine, expandReading } from "../src/render/drives.ts";
 import { createAnimClock } from "../src/render/animClock.ts";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio-subsystem/src/types.ts";
 import { SCENE_EXPANSION_DEFAULT, setSceneExpansion, setSceneExpansionShape, type SceneSetting } from "../src/render/sceneSettings.ts";
 
 // The Master card's Expansion acting on drive readings — drives.ts's

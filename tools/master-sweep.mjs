@@ -27,7 +27,7 @@
 // at all, the same rule CLAUDE.md states for its code and screenshots.
 //
 // One fresh browser context per (scene, value), not one page reused across
-// values: synthetic audio (src/audio/synthetic.ts) is deterministic in wall-
+// values: synthetic audio (audio-subsystem/src/synthetic.ts) is deterministic in wall-
 // clock time from the moment it starts, so every value has to start it fresh
 // to be measured over the exact same stretch of the exact same track: reusing
 // a page would either replay a stateful scene's own build-up (its trail,

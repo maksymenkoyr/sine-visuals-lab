@@ -16,7 +16,7 @@ import {
   setSensitivity,
   setExpansion,
   setSmoothing,
-} from "../src/audio/sensitivity.ts";
+} from "../audio-subsystem/src/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
 import {
   computeAutoTarget,

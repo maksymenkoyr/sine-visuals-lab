@@ -2,7 +2,7 @@ import { createGL, watchContextLoss } from "./gl.ts";
 import { createSceneHost, type SceneHost } from "./sceneHost.ts";
 import { FULL_VIEWPORT, type Scene } from "./scene.ts";
 import type { Palette } from "./palette.ts";
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame } from "../../audio-subsystem/src/types.ts";
 import type { QualitySettings } from "./quality.ts";
 import type { AnimFrame } from "./animClock.ts";
 

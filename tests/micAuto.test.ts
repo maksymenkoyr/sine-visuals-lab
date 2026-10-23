@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { isMicAuto, setMicAuto, type MicAutoMembers } from "../src/audio/micAuto.ts";
-import { isAutoGainAuto, setAutoGainAuto } from "../src/audio/autoGain.ts";
-import { isSilenceGateAuto, setSilenceGateAuto } from "../src/audio/silenceGate.ts";
+import { isMicAuto, setMicAuto, type MicAutoMembers } from "../audio-subsystem/src/micAuto.ts";
+import { isAutoGainAuto, setAutoGainAuto } from "../audio-subsystem/src/autoGain.ts";
+import { isSilenceGateAuto, setSilenceGateAuto } from "../audio-subsystem/src/silenceGate.ts";
 import {
   isAutoEnabled,
   setAutoEnabled,

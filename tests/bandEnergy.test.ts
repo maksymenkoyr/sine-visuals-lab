@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createBandEnergy } from "../src/render/bandEnergy.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
-import { setBandSplit, resetBandSplit } from "../src/audio/bandSplit.ts";
-import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
+import { setBandSplit, resetBandSplit } from "../audio-subsystem/src/bandSplit.ts";
+import { UNIT_TAILS, type HitShape } from "../audio-subsystem/src/hitStrength.ts";
 
 const DT = 1 / 60;
 
@@ -253,7 +253,7 @@ describe("band energy", () => {
     expect(Math.abs(at60 - at120)).toBeLessThanOrEqual(2);
   });
 
-  // The silence gate (src/audio/silenceGate.ts) folded into advance()'s own
+  // The silence gate (audio-subsystem/src/silenceGate.ts) folded into advance()'s own
   // firing comparison — see bandEnergy.ts's file header for why it's scoped
   // per group rather than once broadband.
   it("an input that fires lowOnset with the default dimmer fires none with dimmer = 0", () => {
@@ -333,7 +333,7 @@ describe("band energy", () => {
     expect(open.lowOnset).toBe(true);
   });
 
-  // Graded pulse height (src/audio/hitStrength.ts), threaded through
+  // Graded pulse height (audio-subsystem/src/hitStrength.ts), threaded through
   // advance()'s optional `shape` — see this file's own header for why an
   // omitted shape must reproduce today's flat-1 pulse exactly.
   it("with no shape, an onset's pulse still snaps to exactly 1 (today's behavior)", () => {

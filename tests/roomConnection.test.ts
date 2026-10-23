@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeFeatureFrame } from "../src/net/protocol.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { NUM_BANDS } from "../audio-subsystem/src/types.ts";
 import { PROBE_TIMEOUT_MS, RECONNECT_MAX_MS, SILENCE_LIMIT_MS } from "../src/net/reconnect.ts";
 
 // src/net/room.ts reads `location` (config.ts), `window`, `document`, `WebSocket`
