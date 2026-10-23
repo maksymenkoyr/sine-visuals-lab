@@ -94,17 +94,15 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  *  Populated on demand: add an id here only once some SignalSpec below
  *  actually points at that card. "setup-input" is the Setup view's Input
  *  check card, not the Dynamics card ("signal"). */
-export type MeterCardId = "signal" | "setup-input" | "hits" | "tempo" | "character";
+export type MeterCardId = "signal" | "setup-input" | "hits" | "beat" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
- *  BPM-digits/beat-dot block (audioMeters.ts's own
- *  createTempoBlock) — the anchor for both `anim.metronome` and
- *  `anim.tempo`, whose jacks mount there (the block *is* the metronome's
- *  number, ticking; see metronome.ts's own header). "wave"/"lock" are the
- *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
- *  instead; "timing" is the Timing strip
- *  (createTimingStrip), the anchor for `anim.metronomeBar`. "waveform" is
+ *  BPM-digits/beat-dot block (audioMeters.ts's own createTempoBlock), the
+ *  anchor for `anim.tempo`, whose jack mounts there. "bar" is the Beat card's
+ *  bar ruler (audioMeters.ts's createBarRuler), the anchor for `anim.metronome`
+ *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
+ *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead. "waveform" is
  *  the Waveform row, first in the Input check card's body (audioMeters.ts's
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
  *  "wave" above (the beat/bar swing trace, a different row entirely).
@@ -114,7 +112,7 @@ export type MeterCardId = "signal" | "setup-input" | "hits" | "tempo" | "charact
  *  draws directly under that dial's bar rather than a row of its own. Each
  *  dial's own cell is its DialSignalId, "dial.brightness" naming the same
  *  Tone row as "centroid". */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform" | "level" | DialSignalId;
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "waveform" | "level" | DialSignalId;
 
 /** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
@@ -266,6 +264,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The level of the single low band (below the Bands split) that has gone up and down the most over the last few seconds (AnimFrame.kickBand, bandPick.ts) — one narrow band, re-picked by itself when the music changes, unlike Bass level's average over the whole low group.",
     kind: "level",
     read: (_frame, anim) => anim.kickBand,
+    monitor: { card: "hits", row: "hits" },
     bandRange: "low",
   }),
   "anim.midOnset": signal({
@@ -395,7 +394,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "A smooth swing at the metronome's own tempo, once per beat (AnimFrame.metronomeLevel times a cosine over AnimFrame.metronomePhase) — 1 on every metronome beat, 0 halfway between, fading out on its own once the metronome stops (metronome.ts) rather than needing a separate gate.",
     kind: "level",
     read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomePhase)),
-    monitor: { card: "tempo", row: "wave" },
+    monitor: { card: "beat", row: "wave" },
   }),
   "anim.barWave": signal({
     id: "anim.barWave",
@@ -403,7 +402,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.metronomeBarPhase).",
     kind: "level",
     read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomeBarPhase)),
-    monitor: { card: "tempo", row: "wave" },
+    monitor: { card: "beat", row: "wave" },
   }),
   "anim.tempo": signal({
     id: "anim.tempo",
@@ -413,7 +412,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) =>
       anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
-    monitor: { card: "tempo", row: "tempo" },
+    monitor: { card: "beat", row: "tempo" },
   }),
   "anim.tempoLock": signal({
     id: "anim.tempoLock",
@@ -422,7 +421,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the tempo dot brightens with.",
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
-    monitor: { card: "tempo", row: "lock" },
+    monitor: { card: "beat", row: "lock" },
   }),
   "anim.metronome": signal({
     id: "anim.metronome",
@@ -432,7 +431,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.metronomePulse,
     edge: (anim) => anim.metronomeBeat,
-    monitor: { card: "tempo", row: "tempo" },
+    monitor: { card: "beat", row: "bar" },
   }),
   "anim.metronomeBar": signal({
     id: "anim.metronomeBar",
@@ -441,7 +440,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.metronomeBarPulse,
     edge: (anim) => anim.metronomeBar,
-    monitor: { card: "tempo", row: "timing" },
+    monitor: { card: "beat", row: "bar" },
   }),
   ...dialSignals(),
 };

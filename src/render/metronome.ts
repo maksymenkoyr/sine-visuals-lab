@@ -1,7 +1,7 @@
 import { createTempoSettle } from "./tempoSettle.ts";
 
-// The metronome *is* the Tempo card's BPM, ticking: evenly spaced at
-// exactly the tempo audioMeters.ts's Tempo card shows, silent whenever that
+// The metronome *is* the Beat card's BPM, ticking: evenly spaced at
+// exactly the tempo audioMeters.ts's Beat card shows, silent whenever that
 // BPM reads "--". The user asked for this directly — looking at the old
 // Rhythm card: "we already have bpm. can we pull metronome from it" — after
 // the old confidence-gated start (tempoLock held above a line for a while
@@ -53,7 +53,7 @@ export interface MetronomeClockInput {
 }
 
 export interface Metronome {
-  /** False whenever tempoSettle's own held value is 0 (the Tempo card's BPM
+  /** False whenever tempoSettle's own held value is 0 (the Beat card's BPM
    *  reads "--") — never gated on tempoLock; see this file's own header. */
   readonly running: boolean;
   /** The tempo it's actually ticking at — exactly tempoSettle's held value
@@ -81,7 +81,7 @@ export interface Metronome {
   /** Advances by dtSec. `clock` is beatClock's own reading this tick;
    *  `rawBpm` is the tracker's *unsmoothed* bpm (FeatureFrame.bpm passed
    *  through — AnimFrame.bpm) — the same number tempoSettle.ts settles for
-   *  the Tempo card's BPM, pushed here every tick so the two can never
+   *  the Beat card's BPM, pushed here every tick so the two can never
    *  disagree.
    *  Call once per render tick, same placement as beatClock's own
    *  advance(). */
@@ -137,9 +137,8 @@ export const PHASE_FOLLOW_MAX_RATE = 0.25; // beats/s
 // past ticks right then, so the interval shortens but no tick is lost);
 // ahead of it, `beats` holds still for the difference (one longer interval)
 // rather than stepping back, so `beats` stays monotonic and no beat can tick
-// twice. An earlier version always jumped forward, which from "ahead" meant
-// most of a beat and drew a near-double tick in the panel's Timing strip's
-// Metronome lane.
+// twice. Always jumping forward would, from "ahead", skip most of a beat and
+// tick twice in quick succession.
 export const PHASE_SNAP_BEATS = 0.15;
 // Tempo follow while confident: only actually pulls `bpm` toward clock.bpm
 // while the two are already close (within RESYNC_RATIO) — see the next

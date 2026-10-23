@@ -25,6 +25,12 @@ export function nominalBandEdgesHz(): Float32Array {
   return bandEdgesHz(MAX_HZ_CAP);
 }
 
+/** Band `band`'s geometric centre on an edge table from bandEdgesHz — the
+ *  ladder is log-spaced, so the midpoint in log-frequency. */
+export function bandCenterHz(edgesHz: ArrayLike<number>, band: number): number {
+  return Math.sqrt(edgesHz[band] * edgesHz[band + 1]);
+}
+
 /** "179 Hz" / "2.2 kHz" — for slider readouts and strip axis labels. */
 export function formatHz(hz: number): string {
   if (hz >= 1000) return `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)} kHz`;

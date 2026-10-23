@@ -634,7 +634,7 @@ export function sourceKey(choice: DriveSourceChoice): string {
 
 /** Like `sourceKey`, but every beat-grid division shares the slot `"grid"` (one
  *  grid source per patch, re-gridded in place). driveSources.ts's jackKey is it
- *  too, so the Timing strip's Grid jack can unplug a patch re-gridded to Bar. */
+ *  too, so the Beat grid add chip can unplug a patch re-gridded to Bar. */
 export function sourceSlot(choice: DriveSourceChoice): string {
   return isGridChoice(choice) ? "grid" : sourceKey(choice);
 }

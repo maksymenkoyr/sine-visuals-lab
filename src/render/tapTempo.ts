@@ -3,7 +3,7 @@ import { resetBeatTrim } from "./beatTrim.ts";
 import { RESYNC_RATIO } from "./metronome.ts";
 
 /**
- * Tap tempo: tap Ctrl (src/app.ts) or the Tempo card's Tap button
+ * Tap tempo: tap Ctrl (src/app.ts) or the Beat card's Tap button
  * (src/ui/audioMeters.ts) on every beat, and the tracker takes the tapped
  * tempo and beat — as a correction it then keeps refining, not a clock that
  * replaces it. The sibling of beatTrim.ts's beat keys (B, [ ], , .): the
@@ -48,11 +48,11 @@ import { RESYNC_RATIO } from "./metronome.ts";
  * tracker is three layers: the raw estimate (tempoComb.ts, in the audio
  * worklet or features.ts), which picks the octave; beatClock.ts, a smoothed
  * tempo and a phase comb over the hits; and metronome.ts over
- * tempoSettle.ts, the Tempo card's number and the steady tick. The
+ * tempoSettle.ts, the Beat card's number and the steady tick. The
  * narrowest place to steer all three is where the raw reading enters the
  * render side, in animClock.ts, as a seed and a hint:
  *  - the seed: beatClock.seed() and metronome.seed() take the tapped tempo
- *    and beat on the next tick (the Tempo card shows the metronome's
+ *    and beat on the next tick (the Beat card shows the metronome's
  *    tempo, so it reads the tap at once), and tempoSettle.hold() holds it
  *    as a tempo the tracker is sure of;
  *  - the hint, fold(): while guided, a raw reading that sits at one of the
@@ -290,7 +290,7 @@ export function tapTempoAt(timeMs: number): TapResult {
   return { taps: run.length, more: 0, bpm: est.bpm };
 }
 
-/** The run being tapped right now, for the Tempo card's feedback: null once
+/** The run being tapped right now, for the Beat card's feedback: null once
  *  its last tap is older than TAP_GAP_SEC (the next tap starts over). */
 export function getTapRun(nowMs: number): { taps: number; more: number } | null {
   if (run.length === 0 || nowMs - run[run.length - 1]! > TAP_GAP_SEC * 1000) return null;

@@ -2060,6 +2060,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onLufsReset: deps.onLufsReset,
     onTap: deps.onTap,
     getSilenceGate: () => deps.getSilenceGate(),
+    getBandEdgesHz: () => deps.getBandEdgesHz(),
     stemsMeasured: () => deps.stemsMeasured(),
     hitShape: {
       get: () => deps.getHitShape(),
