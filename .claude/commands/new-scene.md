@@ -19,7 +19,8 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    for a mix no patch can write; the panel shows it as dimmed ghost wires.
 3. Register it by making it a scene module: `src/render/scenes/<unit>.ts` or
    `src/render/scenes/<unit>/index.ts`, exporting the scene and
-   `export const gallery = { stage: "draft", added: "<today, YYYY-MM-DD>" } as const;`
+   `export const gallery = { stage: "development", added: "<today, YYYY-MM-DD>" } as const;`
+   — a new scene starts In development unless the user says otherwise
    (`src/render/scenes/sceneModules.ts` has the contract). Don't edit
    `src/render/scenes/index.ts`: it finds the scene on its own.
 4. Set `minQuality` if the scene should degrade or disable below some hardware
