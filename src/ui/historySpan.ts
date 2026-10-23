@@ -8,14 +8,19 @@
  * pattern as panelFolds.ts, so it keeps working where localStorage is
  * unavailable.
  *
- * Absent key = the first entry in HISTORY_SPANS.
+ * Absent key = the card's CARD_SPAN_DEFAULTS entry, else the first entry in HISTORY_SPANS.
  */
 
-/** Seconds, shortest first. The first is every card's default; the last is
- *  how much history a meter trace keeps (createColumnRing's own capacity). */
+/** Seconds, shortest first. The first is the default for a card not in
+ *  CARD_SPAN_DEFAULTS; the last is how much history a meter trace keeps
+ *  (createColumnRing's own capacity). */
 export const HISTORY_SPANS: readonly number[] = [10, 30, 60, 300];
 export const HISTORY_SPAN_DEFAULT = HISTORY_SPANS[0];
 export const HISTORY_SPAN_MAX = HISTORY_SPANS[HISTORY_SPANS.length - 1];
+
+/** Cards that open on a longer span than the first: Song's Section is a
+ *  phrase-level trend, which the shortest span cuts to a single phrase. */
+const CARD_SPAN_DEFAULTS: Readonly<Record<string, number>> = { song: 60 };
 
 const STORAGE_KEY = "vibe.historySpans";
 
@@ -38,7 +43,7 @@ function loadInitial(): Record<string, number> {
 let cache: Record<string, number> = loadInitial();
 
 export function getHistorySpan(cardId: string): number {
-  return cache[cardId] ?? HISTORY_SPAN_DEFAULT;
+  return cache[cardId] ?? CARD_SPAN_DEFAULTS[cardId] ?? HISTORY_SPAN_DEFAULT;
 }
 
 /** Advances `cardId` to the next entry in HISTORY_SPANS, wrapping to the

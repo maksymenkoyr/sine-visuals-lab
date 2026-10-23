@@ -25,7 +25,7 @@ describe("signals registry", () => {
     // small sets signals.ts's own MeterCardId/MeterRowId comments describe,
     // and fails loudly if they ever drift — the two are meant to change
     // together, rarely, both by hand.
-    const knownCards = new Set(["signal", "setup-input", "hits", "beat", "character"]);
+    const knownCards = new Set(["signal", "setup-input", "hits", "beat", "song"]);
     const knownRows = new Set(["section", "tempo", "hits", "centroid", "wave", "lock", "bar", "waveform", "level", ...DIAL_SIGNALS]);
     for (const spec of Object.values(SIGNALS)) {
       if (!spec.monitor) continue;
@@ -39,7 +39,7 @@ describe("signals registry", () => {
     for (const [i, dial] of MUSIC_DIALS.entries()) {
       const spec = SIGNALS[dialSignalId(dial)];
       expect(spec.kind).toBe("level");
-      expect(spec.monitor).toEqual({ card: "character", row: dialSignalId(dial) });
+      expect(spec.monitor).toEqual({ card: "song", row: dialSignalId(dial) });
       const profile = Object.fromEntries(MUSIC_DIALS.map((d, j) => [d, j / 10]));
       const anim = { profile } as unknown as AnimFrame;
       expect(spec.read({} as never, anim)).toBe(i / 10);

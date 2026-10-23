@@ -140,12 +140,12 @@ Darker means more important.
     - ●○○ **Bands card** — the live spectrum, a fader per band, and a line
       you draw across it · `src/ui/spectrumStrip.ts`,
       `src/ui/bandFaders.ts`, `src/ui/bandLineEditor.ts`
-    - ○○○ **Meters: Dynamics, Hits, Beat, Character** — live readouts of
+    - ○○○ **Meters: Dynamics, Hits, Beat, Song** — live readouts of
       what the analysis hears; each row's jack is a signal you can wire ·
       `src/ui/audioMeters.ts`, the dials are `MUSIC_DIALS`
     - ○○○ **Setup view** — the panel footer's Setup button opens a column of
       the rows you check once per set: Input check (waveform, input level,
-      loudness, the gate), Hit shape (the sliders and curves that grade a
+      loudness, the gate, centroid), Hit shape (the sliders and curves that grade a
       hit) and Heat history; each row keeps its jack · `src/ui/audioMeters.ts`
       - ●○○ **Tap tempo** — tap Ctrl or the Beat card's Tap to set the
         tracker's BPM. For DJs · `src/render/tapTempo.ts`
