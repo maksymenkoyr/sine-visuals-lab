@@ -307,6 +307,8 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { createLoadChip } from "./ui/loadChip.ts";
+import type { PowerStatus } from "./ui/powerCard.ts";
 import { browserMidiEnv, createMidiController } from "./ui/midiInput.ts";
 import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery, type GallerySceneEntry } from "./ui/gallery.ts";
@@ -353,6 +355,7 @@ const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const sceneTag = document.getElementById("sceneTag") as HTMLDivElement;
 const sceneBtn = document.getElementById("sceneBtn") as HTMLButtonElement;
+const loadChipBtn = document.getElementById("loadChip") as HTMLButtonElement;
 const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const recBtn = document.getElementById("recBtn") as HTMLButtonElement;
 const recAspectBtn = document.getElementById("recAspectBtn") as HTMLButtonElement;
@@ -530,6 +533,7 @@ const glassCanvasBox = { w: 0, h: 0 };
 
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
+let loadChip: { update(nowMs: number): void } | null = null;
 let immersive: ImmersiveMode | null = null;
 let scenePicker: ScenePicker | null = null;
 let inViz = false;
@@ -1877,6 +1881,23 @@ const micAutoMembers = {
   onSettingAutoToggle,
 };
 
+function powerStatus(): PowerStatus {
+  return {
+    mode: powerMode,
+    choice: previewActive ? previewChoice : qualityChoice,
+    recommended: detectedPreset,
+    fps: fpsMeter.read(),
+    level: governor?.level ?? null,
+    maxLevel: governor?.maxLevel ?? 0,
+    fraction: governor?.fraction ?? 1,
+    standingDown: governor?.standingDown ?? false,
+    bufferWidth: canvas.width,
+    bufferHeight: canvas.height,
+    ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
+    ...frameMisses.read(performance.now()),
+  };
+}
+
 function wireDeviceMenu(): void {
   // Made before any key handler registered later in boot: learning takes keyboard
   // presses in the capture phase and must come first (ui/midiInput.ts). Asks for
@@ -2173,20 +2194,7 @@ function wireDeviceMenu(): void {
       outputPower = { ...outputPower, cast };
       outputBridge?.sendPower();
     },
-    getPowerStatus: () => ({
-      mode: powerMode,
-      choice: previewActive ? previewChoice : qualityChoice,
-      recommended: detectedPreset,
-      fps: fpsMeter.read(),
-      level: governor?.level ?? null,
-      maxLevel: governor?.maxLevel ?? 0,
-      fraction: governor?.fraction ?? 1,
-      standingDown: governor?.standingDown ?? false,
-      bufferWidth: canvas.width,
-      bufferHeight: canvas.height,
-      ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
-      ...frameMisses.read(performance.now()),
-    }),
+    getPowerStatus: powerStatus,
     customValues: {
       get: getCustomValue,
       set: setCustomValue,
@@ -2198,6 +2206,11 @@ function wireDeviceMenu(): void {
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
+  loadChip = createLoadChip(loadChipBtn, {
+    getPowerStatus: powerStatus,
+    intervalMs: renderIntervalMs,
+    onOpen: () => deviceMenu?.openPower(),
+  });
 }
 
 /** Any device can open the room's view, not just the host (changing who may Play
@@ -2609,6 +2622,7 @@ async function enterViz(next: Scene): Promise<void> {
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
+  loadChipBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) {
     backBtn.style.display = "block";
@@ -2633,6 +2647,7 @@ function exitToGallery(): void {
   // gallery. Every exit (Escape, back button, browser Back) funnels through here.
   deviceMenu?.close();
   menuBtn.style.display = "none";
+  loadChipBtn.style.display = "none";
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
@@ -3657,6 +3672,7 @@ function tick(): void {
   syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
   // Fed even when null (mic pending) so the strip shows its "waiting for audio" idle state.
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
+  loadChip?.update(nowRafMs);
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);

@@ -126,6 +126,8 @@ Darker means more important.
     `src/ui/scenePicker.ts`
   - ●○○ **Back to gallery, Stop, Room badge** — the top-left row ·
     `src/app.ts`
+  - ○○○ **Load chip** — the top-left row's frame rate and a load colour; a
+    click opens Power in the panel's Setup view · `src/ui/loadChip.ts`
   - ○○○ **Wake lock** — keeps the screen on while a scene plays ·
     `src/ui/wakeLock.ts`
 - ●○○ **Controls panel** — the left column, opened with the gear or S ·
@@ -181,8 +183,9 @@ Darker means more important.
       who own a controller · `src/ui/midiCard.ts`, `src/ui/midiInput.ts`
   - ○○○ **Machine**
     - ○○○ **Power card** — Quality, Energy saving, Panel blur, and live load
-      readouts. Titled Preview while an output window is open ·
-      `src/ui/powerCard.ts`
+      readouts. It lives in the Setup view, opened from the load chip in the
+      top-left bar (fps and a load colour). Titled Preview while an output
+      window is open · `src/ui/powerCard.ts`, `src/ui/loadChip.ts`
     - ○○○ **Output card** — the pop-out window's own Quality and Resolution ·
       `src/render/outputPower.ts`
   - ●○○ **Keys list, keycaps and tooltips** — every shortcut, from
