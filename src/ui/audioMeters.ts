@@ -23,7 +23,7 @@ import { METRONOME_BEATS_PER_BAR } from "../render/metronome.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
-import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
+import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL, type MusicDial } from "../render/musicProfile.ts";
 import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
 import { FLUX_THRESHOLD_MARGIN, FLUX_THRESHOLD_MULT, ONSET_REFRACTORY_SEC } from "../audio/features.ts";
 import { GROUP_TUNING } from "../render/bandEnergy.ts";
@@ -104,12 +104,9 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * (see deviceMenu.ts / controlsKit.ts) — label, seven-segment readout, a
  * meter where a slider would be, and a hint shown beside the panel on hover
  * or tap (rowHints.ts) so
- * every reading explains itself. Grouped under plain divider headings (Sound/
- * Beat/Song — this file's own meterGroupHeadingStyle, modelled on controlsKit.ts's
- * groupHeadingFirstStyle) so a card's place in the pipeline reads at a
- * glance: Sound is what this device measures before any beat/tempo logic
- * runs, Beat is everything about *when*, Song is the slow trend over a whole
- * track.
+ * every reading explains itself. The cards run in pipeline order: Sound is
+ * what this device measures before any beat/tempo logic runs, Beat is
+ * everything about *when*, Song is the slow trend over a whole track.
  *
  *  - Setup view (setupEl, opened from the panel footer): the rows checked
  *    once per set, in three cards: Input check, Hit shape and the Heat
@@ -133,14 +130,15 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    renderer, the header's Reset chip along with it. Last, a Gate row: the
  *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
  *    much of a hit's strength the gate is currently letting through — with
- *    a trace beneath it, inserted the way the Character card's Brightness
- *    row inserts its own Centroid trace, of Input level against the Input
+ *    a trace beneath it, of Input level against the Input
  *    card's two marks (dashed guides, zoomed so the upper one sits
  *    mid-height); hits the gate actually stops show up as faint ticks on
  *    the Hits card rather than a series of their own here. Local-only like
  *    fixedEnergy below — a device with no FeatureExtractor of its own (a
  *    renderer, the synthetic feed) reads Gate idle too, same as the Hits
- *    card's own Beat lane.
+ *    card's own Beat lane. Last, Centroid: spectralCentroid.ts's fast,
+ *    range-adapted reading traced over the card's span, the live signal the
+ *    Song card's Tone dial summarises.
  *  - Dynamics: Level is Input level's
  *    post-AGC sibling — the only way to see features.ts's adaptive
  *    floor/peak doing its job, since its whole point is to make that
@@ -187,16 +185,13 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    own smooth swing, for a setting that wants to sway in time rather than
  *    pulse on a hit. The header carries tap tempo's Tap chip and how many
  *    taps it still needs (tapStatusStyle's comment).
- *  - Character: first, Section — sectionIntensity with a drop flash, the
- *    phrase-level trend. Then a 2-column grid of every entry in MUSIC_DIALS except
- *    brightness (never a hardcoded list — filtered, so a new dial can't
- *    ship without a cell here), each marking NEUTRAL with a tick — what
- *    autoTune.ts resolves every "A" chip against, otherwise invisible. Copy
- *    comes from DIAL_LABELS. Last, a full-width Brightness row: the dial's
- *    own meter, with spectralCentroid.ts's fast, range-adapted Centroid
- *    traced directly under its bar (not a MUSIC_DIALS entry of its own —
- *    it's the live signal Brightness is the track-level summary of) and a
- *    small legend naming the trace.
+ *  - Song: first, Section: sectionIntensity traced over the card's span
+ *    (createSectionTrace), with a red mark and DROP where a drop fired, the
+ *    phrase-level trend. Then one strip of every entry in MUSIC_DIALS (never a
+ *    hardcoded list, so a new dial can't ship without a cell), each a small
+ *    vertical bar marking NEUTRAL with a tick (what autoTune.ts resolves every
+ *    "A" chip against, otherwise invisible), its label from DIAL_LABELS, and
+ *    its jack (createDialCell).
  *
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
@@ -215,7 +210,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * the screen space.
  *
  * Every time-axis trace (Waveform, History, Gate, Hits, Wave,
- * Centroid) records into a time store (createColumnRing) on every tick,
+ * Centroid, Section) records into a time store (createColumnRing) on every tick,
  * folded card or closed panel alike, so opening a card shows what it
  * missed. A span chip in each card's header (historySpan.ts) picks how
  * much of that the card's traces squeeze into its width, from
@@ -226,8 +221,9 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  * and the spectrum strip's own raw mode together) flips every row that has
  * a pre-smoothing counterpart to it, for diagnosing "is this a bad
  * measurement or just a slow ease": Section reads sectionIntensity's
- * un-slewed target (anim.raw.sectionIntensity), the Character dials read
- * musicProfile's pre-ease targets (anim.raw.profile), BPM shows the
+ * un-slewed target (anim.raw.sectionIntensity), the Song dials read
+ * musicProfile's pre-ease targets (anim.raw.profile), Centroid reads its raw
+ * reading (anim.centroidRaw), BPM shows the
  * estimator's raw candidate instead of tempoSettle.ts's settled reading,
  * and the waveform's readout shows this buffer's instant peak instead of
  * AnimFrame.wavePeak's held one (animClock.ts). Level and the beat dot are
@@ -244,8 +240,8 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
  * drive source can feed — Waveform and Energy (Signal), Section's own
- * Song+Drop pair, one per dial cell and the Brightness row's own
- * dial+Centroid pair (Character — signals.ts's DIAL_SIGNALS), the BPM
+ * Section+Drop pair and one per dial cell (Song, signals.ts's DIAL_SIGNALS),
+ * the Centroid row's own (Input check), the BPM
  * block's own Tempo jack, Lock, the bar ruler's own Metronome+Metronome
  * bar pair (createBarRuler) and Wave's Beat/Bar pair (Beat), and one per
  * hits-history lane, the Kick band's on the Bass lane, plus one for the
@@ -486,6 +482,13 @@ const tapRightStyle = `display: flex; align-items: center; gap: 8px;`;
 // createTraceStrip.
 const HISTORY_HEIGHT_CSS_PX = 48;
 const CENTROID_TRACE_HEIGHT_CSS_PX = 28;
+const SECTION_TRACE_HEIGHT_CSS_PX = 34;
+const DROP_MARK_COLOR = HOT_RED;
+const DROP_LABEL_FONT = `9px ${FONT_MONO}`;
+// Room the DROP label needs before the right edge, so a drop at "now" stays readable.
+const DROP_LABEL_PX = 24;
+const DIAL_BAR_HEIGHT_CSS_PX = 44;
+const DIAL_BAR_WIDTH_CSS_PX = 10;
 const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
 const HISTORY_ENERGY_COLOR = INPUT_GREEN;
 // A different hue from Energy's green so the two read apart; blue is the
@@ -1423,6 +1426,121 @@ function createBarRuler() {
   };
 }
 
+// The Song card's Section row: sectionIntensity traced over the card's span,
+// with a red mark and DROP where anim.dropOnset fired. The drop is its own
+// series, recorded as 1 on the tick it fires: the column store's max-hold
+// keeps a one-tick edge visible at any span.
+function createSectionTrace(span: TraceSpan) {
+  const row = createMeterRow({
+    label: "Section",
+    accent: driveSourceColor("anim.sectionIntensity"),
+    unit: "%",
+    description: "How intense this part of the track is against the last while, traced over the card's span. A red mark with DROP is where a drop landed.",
+    hintColors: { red: DROP_MARK_COLOR },
+  });
+  const h = SECTION_TRACE_HEIGHT_CSS_PX;
+  const ring = createColumnRing(2, h, "History of Section, with a mark at each drop", span.sec, span.max);
+  row.el.children[1].replaceWith(ring.canvas);
+  const { ctx } = ring;
+  const color = driveSourceColor("anim.sectionIntensity");
+  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
+
+  return {
+    el: row.el,
+    /** The anim.sectionIntensity and anim.dropOnset jacks mount here. */
+    right: row.right,
+    setReadout: row.setReadout,
+    /** [Section, 1 on a drop tick else 0]; null for no reading. */
+    push: ring.push,
+    /** Only while on screen. */
+    draw(): void {
+      if (!ring.prepare()) return;
+      const w = ring.width;
+      const len = ring.length;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fillRect(0, h - 1, w, 1);
+      ctx.fillStyle = DROP_MARK_COLOR;
+      ctx.font = DROP_LABEL_FONT;
+      ctx.textBaseline = "top";
+      let prevDrop = false;
+      for (let x = 0; x <= len; x++) {
+        const isDrop = (x === len ? ring.live(1) : ring.at(x, 1)) >= 1;
+        if (isDrop) {
+          const px = x === len ? w - 1 : x;
+          ctx.fillRect(px - 1, 0, 2, h);
+          if (!prevDrop) ctx.fillText("DROP", Math.min(px + 3, w - DROP_LABEL_PX), 1);
+        }
+        prevDrop = isDrop;
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      let pen = false;
+      for (let x = 0; x <= len; x++) {
+        const v = x === len ? ring.live(0) : ring.at(x, 0);
+        if (Number.isNaN(v)) {
+          pen = false;
+          continue;
+        }
+        const px = x === len ? w - 1 : x;
+        if (pen) ctx.lineTo(px, yOf(v));
+        else ctx.moveTo(px, yOf(v));
+        pen = true;
+      }
+      ctx.stroke();
+    },
+  };
+}
+
+// One cell of the Song card's dial strip: a vertical bar with the dial's
+// NEUTRAL tick, its label, then its jack. Each cell is its own .vc-row so its
+// hint, fed glow, heat strip (mountJack) and revealRow flash work as on a meter row.
+function createDialCell(dial: MusicDial) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.tabIndex = 0;
+  el.style.cssText = dialCellStyle;
+  el.style.setProperty("--vc-accent", AUTO_SKY);
+
+  const track = document.createElement("div");
+  track.style.cssText = dialTrackStyle;
+  const fill = document.createElement("div");
+  fill.style.cssText = dialFillStyle;
+  const tick = document.createElement("div");
+  tick.style.cssText = dialTickStyle;
+  tick.style.bottom = `${NEUTRAL[dial] * 100}%`;
+  track.append(fill, tick);
+
+  const label = document.createElement("div");
+  label.className = "vc-label";
+  label.style.cssText = dialLabelStyle;
+  label.textContent = DIAL_LABELS[dial].label;
+
+  const right = document.createElement("div");
+  right.style.cssText = "display: flex; justify-content: center;";
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  setHintText(hint, DIAL_LABELS[dial].description);
+
+  el.append(track, label, right, hint);
+
+  let shown = -1;
+  return {
+    el,
+    /** The dial's own jack mounts here. */
+    right,
+    /** A reading in 0..1; null empties the bar. Writes only when the shown percent moves. */
+    setValue(v: number | null): void {
+      const pct = v === null ? 0 : Math.round(clamp(v, 0, 1) * 1000) / 10;
+      if (pct === shown) return;
+      shown = pct;
+      fill.style.height = `${pct}%`;
+    },
+  };
+}
+
 // ---- The Hit shape card: the Curve monitor ---------------
 
 const HIT_CURVE_HEIGHT_CSS_PX = 56;
@@ -1694,10 +1812,15 @@ export function meterGroupHeading(text: string): HTMLElement {
   return el;
 }
 
-// The Character card's dial grid (MUSIC_DIALS minus brightness, which has a
-// full-width row below): two columns, since stacked one-line rows made
-// Character the tallest card.
-const characterGridStyle = `display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px;`;
+// The Song card's dial strip: one cell per MUSIC_DIALS entry.
+const dialStripStyle = `display: grid; grid-template-columns: repeat(${MUSIC_DIALS.length}, minmax(0, 1fr)); gap: 4px;`;
+// margin 0 overrides .vc-row's negative margin, which would overlap the next cell.
+// The cell keeps align-items: stretch so the heat strip mountJack inserts gets its full width.
+const dialCellStyle = `display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; padding: 4px 2px;`;
+const dialTrackStyle = `position: relative; width: ${DIAL_BAR_WIDTH_CSS_PX}px; height: ${DIAL_BAR_HEIGHT_CSS_PX}px; margin: 0 auto; border-radius: 2px; background: rgba(255,255,255,0.08);`;
+const dialFillStyle = `position: absolute; left: 0; right: 0; bottom: 0; height: 0; border-radius: 2px; background: ${AUTO_SKY}; opacity: 0.85;`;
+const dialTickStyle = `position: absolute; left: -3px; right: -3px; height: 1px; background: #fff;`;
+const dialLabelStyle = `font: 400 9px/1 ${FONT_MONO}; text-transform: uppercase; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
 
 export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const root = document.createElement("div");
@@ -1807,7 +1930,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const signalSpan = cardSpan("signal");
   const hitsSpan = cardSpan("hits");
   const beatSpan = cardSpan("beat");
-  const characterSpan = cardSpan("character");
+  const songSpan = cardSpan("song");
   const setupInputSpan = cardSpan("setup-input");
 
   // The Setup view (deviceMenu.ts's footer button): the rows checked once per
@@ -1910,9 +2033,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: HISTORY_FIXED_COLOR, label: "No auto-gain" },
   ]);
   historyStrip.canvas.after(histLegend.el);
-  // Input check's Gate row: the silence gate's reading (src/audio/silenceGate.ts),
-  // spliced in like the Character card's Centroid trace: the meter (Dimmer)
-  // stays, a canvas goes under it before the hint.
+  // Input check's Gate row: the silence gate's reading (src/audio/silenceGate.ts).
+  // The meter (Dimmer) stays; a canvas goes under it before the hint.
   const gateRow = createMeterRow({
     label: "Gate",
     accent: INPUT_GREEN,
@@ -1946,6 +2068,21 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: GATE_DIMMER_COLOR, label: "Dimmer" },
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
+  // Centroid: spectralCentroid.ts's fast, range-adapted reading, the live
+  // signal the Song card's Tone dial summarises.
+  const centroidRow = createMeterRow({
+    label: "Centroid",
+    accent: AUTO_SKY,
+    unit: "%",
+    description: "Where the sound's energy sits right now, from dark and low to bright and high, traced over the card's span. The Song card's Tone dial is its slow summary.",
+  });
+  // RAW briefly mixes raw and processed samples in this trace after a toggle until the span rolls them out; harmless.
+  const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX, {
+    label: "History of the live Centroid",
+    span: setupInputSpan,
+  });
+  centroidRow.el.children[1].replaceWith(centroidTrace.canvas);
+  mountJack("anim.centroid", centroidRow.right, centroidRow.el);
   const inputCheckRight = document.createElement("div");
   inputCheckRight.style.cssText = tapRightStyle;
   inputCheckRight.append(lufsResetChip, createSpanChip("setup-input", () => {}));
@@ -1963,6 +2100,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     lufsWelded,
     loudnessSpacer,
     gateRow.el,
+    spacer(),
+    centroidRow.el,
   );
   const signalCard = createCard({
     title: "Dynamics",
@@ -2225,67 +2364,26 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const beatCard = createCard({ title: "Beat", accent: NEUTRAL_ACCENT, foldId: "beat", right: tapRight });
   beatCard.body.append(tempoWelded, spacer(), barRuler.el, spacer(), wave.el);
 
-  // ---- Character ----
-  const section = createMeterRow({
-    label: "Section",
-    accent: NEUTRAL_ACCENT,
-    unit: "%",
-    description:
-      "How intense this part of the track is against the last while. Flashes red on a drop.",
-  });
-  mountJack("anim.sectionIntensity", section.right, section.el, "character");
+  // ---- Song ----
+  const section = createSectionTrace(songSpan);
+  mountJack("anim.sectionIntensity", section.right, section.el);
   mountJack("anim.dropOnset", section.right, section.el);
-  // MUSIC_DIALS minus brightness (its own full-width row below), filtered so a
-  // new dial lands in the grid by construction.
-  const dialRows = MUSIC_DIALS.filter((dial) => dial !== "brightness").map((dial) => ({
-    dial,
-    row: createMeterRow({
-      label: DIAL_LABELS[dial].label,
-      accent: AUTO_SKY,
-      description: DIAL_LABELS[dial].description,
-      ticks: [{ at: NEUTRAL[dial] }],
-    }),
-  }));
-  const dialGrid = document.createElement("div");
-  dialGrid.style.cssText = characterGridStyle;
-  dialRows.forEach(({ dial, row }) => {
-    mountJack(dialSignalId(dial), row.right, row.el);
-    dialGrid.appendChild(row.el);
-  });
-
-  // Brightness: the dial's meter row, with spectralCentroid.ts's fast Centroid
-  // traced under its bar (the live signal Brightness summarises, not a
-  // MUSIC_DIALS entry).
-  const brightnessRow = createMeterRow({
-    label: DIAL_LABELS.brightness.label,
+  // Every MUSIC_DIALS entry, so a new dial gets a cell by construction.
+  const dialCells = MUSIC_DIALS.map((dial) => ({ dial, cell: createDialCell(dial) }));
+  const dialStrip = document.createElement("div");
+  dialStrip.style.cssText = dialStripStyle;
+  for (const { dial, cell } of dialCells) {
+    mountJack(dialSignalId(dial), cell.right, cell.el);
+    dialStrip.appendChild(cell.el);
+  }
+  // No row reads out its span, so the chip is the only label.
+  const songCard = createCard({
+    title: "Song",
     accent: AUTO_SKY,
-    description: DIAL_LABELS.brightness.description,
-    ticks: [{ at: NEUTRAL.brightness }],
+    foldId: "song",
+    right: createSpanChip("song", () => {}),
   });
-  // Two jacks, bar first: the slow dial, then the live Centroid the trace
-  // shows (as Section's pair).
-  mountJack(dialSignalId("brightness"), brightnessRow.right, brightnessRow.el);
-  mountJack("anim.centroid", brightnessRow.right, brightnessRow.el);
-  // Inserted before the hint, under the meter. RAW briefly mixes raw and
-  // processed samples in this trace after a toggle until the span rolls them
-  // out; harmless.
-  const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX, {
-    label: "History of the live Centroid",
-    span: characterSpan,
-  });
-  brightnessRow.el.insertBefore(centroidTrace.canvas, brightnessRow.el.children[2]);
-  const centroidLegend = createTraceLegend([{ color: AUTO_SKY, label: "Centroid (live)" }]);
-  centroidTrace.canvas.after(centroidLegend.el);
-
-  // No row here reads out its span (Brightness's readout is the dial), so the
-  // chip is the only label.
-  const characterCard = createCard({
-    title: "Character",
-    accent: AUTO_SKY,
-    foldId: "character",
-    right: createSpanChip("character", () => {}),
-  });
-  characterCard.body.append(section.el, spacer(), dialGrid, spacer(), brightnessRow.el);
+  songCard.body.append(section.el, spacer(), dialStrip);
 
   // The Heat history card (heat.ts): a strip per wired setting and per signal
   // jack, one cell per second over this card's span. Folded by default.
@@ -2340,9 +2438,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     "setup-input": inputCheckCard.title.textContent ?? "",
     hits: hitsCard.title.textContent ?? "",
     beat: beatCard.title.textContent ?? "",
-    character: characterCard.title.textContent ?? "",
+    song: songCard.title.textContent ?? "",
   };
-  for (const cardId of ["signal", "setup-input", "hits", "beat", "character"] as const) {
+  for (const cardId of ["signal", "setup-input", "hits", "beat", "song"] as const) {
     const seen = new Set<SignalId>();
     const jacks = heatJacks.filter((j) => {
       if (j.card !== cardId || seen.has(j.id)) return false;
@@ -2426,16 +2524,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     for (const s of heatSignalStrips) paintHeatStrip(s, heatTracks[s.idx]!, span, nowSec);
   }
 
-  // Sound/Beat/Song, per the file header. Signal leads: it's the raw picture of
+  // Sound, Beat, Song, per the file header. Dynamics leads: it's the raw picture of
   // the sound, the first thing to check when the visuals seem off.
-  root.append(
-    signalCard.el,
-    meterGroupHeading("Beat"),
-    hitsCard.el,
-    beatCard.el,
-    meterGroupHeading("Song"),
-    characterCard.el,
-  );
+  root.append(signalCard.el, hitsCard.el, beatCard.el, songCard.el);
   setupEl.append(inputCheckCard.el, hitShapeCard.el, heatHistoryCard.el);
 
   function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
@@ -2481,10 +2572,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // The last drawn tick (update() with onScreen true).
   let lastMs: number | null = null;
   let lastTextMs = 0;
-  // When anim.metronomeBeat and anim.dropOnset last fired: recorded on every
-  // tick, flashed on the next drawn one (update()).
+  // When anim.metronomeBeat last fired: recorded on every tick, flashed on the
+  // next drawn one (update()).
   let beatAtMs = -Infinity;
-  let dropAtMs = -Infinity;
 
   // signals.ts's monitor anchors, populated on demand as a SignalSpec points at
   // a card/row (see MeterCardId/MeterRowId). section.el, tempo.el and lock.el
@@ -2495,15 +2585,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     "setup-input": inputCheckCard.el,
     hits: hitsCard.el,
     beat: beatCard.el,
-    character: characterCard.el,
+    song: songCard.el,
   };
   const rowElements = new Map<MeterRowId, HTMLElement>([
     ["section", section.el],
     ["tempo", tempo.el],
     ["hits", hitsHistory.el],
-    ["centroid", brightnessRow.el],
-    [dialSignalId("brightness"), brightnessRow.el],
-    ...dialRows.map(({ dial, row }): [MeterRowId, HTMLElement] => [dialSignalId(dial), row.el]),
+    ["centroid", centroidRow.el],
+    ...dialCells.map(({ dial, cell }): [MeterRowId, HTMLElement] => [dialSignalId(dial), cell.el]),
     ["wave", wave.el],
     ["lock", lock.el],
     ["bar", barRuler.el],
@@ -2518,7 +2607,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     "setup-input": { fold: { isFolded: () => !setupOpen || (inputCheckCard.fold?.isFolded() ?? false) } },
     hits: hitsCard,
     beat: beatCard,
-    character: characterCard,
+    song: songCard,
   };
   // Whether each card is in view (onScreen.ts): one scrolled out of its column
   // or under a closed panel skips draws and DOM writes like a folded one; its
@@ -2528,7 +2617,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const hitShapeOnScreen = watchOnScreen(hitShapeCard.el);
   const hitsOnScreen = watchOnScreen(hitsCard.el);
   const beatOnScreen = watchOnScreen(beatCard.el);
-  const characterOnScreen = watchOnScreen(characterCard.el);
+  const songOnScreen = watchOnScreen(songCard.el);
 
   return {
     el: root,
@@ -2583,6 +2672,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         nowMs,
       );
       centroidTrace.push([anim ? (raw ? anim.centroidRaw : anim.centroid) : null], nowMs);
+      section.push(anim ? [raw ? anim.raw.sectionIntensity : anim.sectionIntensity, anim.dropOnset ? 1 : 0] : [null, null], nowMs);
       if (frame && anim) {
         const recordSec = nowMs / 1000;
         const stemsOff = !deps.stemsMeasured();
@@ -2594,20 +2684,17 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
       if (anim?.metronomeBeat) beatAtMs = nowMs;
-      if (anim?.dropOnset) dropAtMs = nowMs;
       if (!onScreen) return;
 
       // ---- Drawn ticks only from here ----
       // onScreen false ticks aren't drawn, so peak fall and text cadence count
-      // from the last drawn tick, and a beat or drop on a tick between still
-      // flashes now. An edge older than CARRY_MS (panel closed, rAF paused) is
-      // stale.
+      // from the last drawn tick, and a beat on a tick between still flashes
+      // now. An edge older than CARRY_MS (panel closed, rAF paused) is stale.
       const sinceDrawMs = lastMs === null ? 1000 / 60 : nowMs - lastMs;
       lastMs = nowMs;
       const dtSec = Math.max(1e-4, sinceDrawMs / 1000);
       const edgeWindowMs = Math.min(sinceDrawMs, CARRY_MS);
       const beat = nowMs - beatAtMs < edgeWindowMs;
-      const drop = nowMs - dropAtMs < edgeWindowMs;
       const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
       if (text) lastTextMs = nowMs;
 
@@ -2684,7 +2771,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Input check (Setup view): Waveform, Input level, LUFS, Gate ----
+      // ---- Input check (Setup view): Waveform, Input level, LUFS, Gate, Centroid ----
       // Input level is already raw. Gate has no RAW branch: no pre-smoothing
       // counterpart in AnimFrame.
       if (setupOpen && !inputCheckCard.fold?.isFolded() && inputCheckOnScreen()) {
@@ -2738,6 +2825,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         gateRow.setValue(gate ? gate.dimmer : null, dtSec);
         if (text) gateRow.setReadout(gate ? pct(gate.dimmer) : "--", gate ? {} : IDLE);
         if (frame || gate) gateHistoryStrip.draw();
+        centroidTrace.draw();
+        if (text) centroidRow.setReadout(anim ? pct(raw ? anim.centroidRaw : anim.centroid) : "--", anim ? {} : IDLE);
       }
 
       // ---- Hits ----
@@ -2795,36 +2884,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         waveTrace.draw();
       }
 
-      // ---- Character ----
-      if (!characterCard.fold?.isFolded() && characterOnScreen()) {
-        const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
-        section.setValue(sectionVal, dtSec);
-        if (drop) section.flash(HOT_RED);
+      // ---- Song ----
+      if (!songCard.fold?.isFolded() && songOnScreen()) {
         if (text) {
-          section.setReadout(
-            sectionVal === null ? "--" : pct(sectionVal),
-            sectionVal === null ? IDLE : {},
-          );
+          const v = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
+          section.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
         }
-        for (const { dial, row } of dialRows) {
-          const v = anim ? (raw ? anim.raw.profile[dial] : anim.profile[dial]) : null;
-          row.setValue(v, dtSec);
-          if (text)
-            row.setReadout(
-              v === null ? "--" : v.toFixed(2),
-              v === null ? IDLE : {},
-            );
-        }
-        // Brightness: the dial's value on the bar and readout; the trace under
-        // it is the live Centroid.
-        const brightnessVal = anim ? (raw ? anim.raw.profile.brightness : anim.profile.brightness) : null;
-        brightnessRow.setValue(brightnessVal, dtSec);
-        if (text)
-          brightnessRow.setReadout(
-            brightnessVal === null ? "--" : brightnessVal.toFixed(2),
-            brightnessVal === null ? IDLE : {},
-          );
-        centroidTrace.draw();
+        section.draw();
+        for (const { dial, cell } of dialCells) cell.setValue(anim ? (raw ? anim.raw.profile[dial] : anim.profile[dial]) : null);
       }
     },
     setRaw(on): void {

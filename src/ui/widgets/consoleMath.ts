@@ -104,7 +104,7 @@ export function valuesMatch(values: readonly number[], target: readonly number[]
 
 /** The signals the console's Random wires a lane to: every catalogue signal
  *  but the ones that hardly move while a song plays (Tempo, Tempo lock and
- *  the slow Character dials in DIAL_SIGNALS) — wired in, they would only
+ *  the slow Song dials in DIAL_SIGNALS) — wired in, they would only
  *  hold a setting off its slider. */
 export const RANDOM_WIRE_SIGNALS: readonly SignalId[] = (Object.keys(SIGNALS) as SignalId[]).filter(
   (id) => id !== "anim.tempo" && id !== "anim.tempoLock" && !(DIAL_SIGNALS as readonly SignalId[]).includes(id),

@@ -2124,7 +2124,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
   // Explains the sky-blue centroid marker spectrumStrip.ts's drawCentroidMarker
   // draws (same AUTO_SKY, so the swatch can't drift); same signal as the
-  // Character card's Brightness trace (audioMeters.ts).
+  // Setup view's Centroid trace (audioMeters.ts).
   const spectrumLegend = createTraceLegend([
     { color: AUTO_SKY, label: "Centroid", note: "where the spectrum's energy balances" },
   ]);

@@ -94,7 +94,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  *  Populated on demand: add an id here only once some SignalSpec below
  *  actually points at that card. "setup-input" is the Setup view's Input
  *  check card, not the Dynamics card ("signal"). */
-export type MeterCardId = "signal" | "setup-input" | "hits" | "beat" | "character";
+export type MeterCardId = "signal" | "setup-input" | "hits" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -107,11 +107,9 @@ export type MeterCardId = "signal" | "setup-input" | "hits" | "beat" | "characte
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
  *  "wave" above (the beat/bar swing trace, a different row entirely).
  *  "level" is the Input level row beneath it — `feature.level`'s anchor.
- *  "centroid" is the Tone row (dialRows' own
- *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
- *  draws directly under that dial's bar rather than a row of its own. Each
- *  dial's own cell is its DialSignalId, "dial.brightness" naming the same
- *  Tone row as "centroid". */
+ *  "centroid" is the Centroid row in the Setup view's Input check card,
+ *  `anim.centroid`'s anchor. Each dial's own cell in the Song card's strip is
+ *  its DialSignalId. */
 export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "waveform" | "level" | DialSignalId;
 
 /** One dial as a signal — see this file's header. */
@@ -357,6 +355,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The phrase-level loudness trend (AnimFrame.sectionIntensity, sectionIntensity.ts) — a slow climb into a chorus/drop, not a per-hit pulse.",
     kind: "level",
     read: (_frame, anim) => anim.sectionIntensity,
+    monitor: { card: "song", row: "section" },
   }),
   "anim.dropOnset": signal({
     id: "anim.dropOnset",
@@ -366,16 +365,16 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.dropPulse,
     edge: (anim) => anim.dropOnset,
-    monitor: { card: "character", row: "section" },
+    monitor: { card: "song", row: "section" },
   }),
   "anim.centroid": signal({
     id: "anim.centroid",
     label: "Centroid",
     description:
-      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Tone dial, traced directly under its bar.",
+      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Tone dial, traced in the Setup view's Input check card.",
     kind: "level",
     read: (_frame, anim) => anim.centroid,
-    monitor: { card: "character", row: "centroid" },
+    monitor: { card: "setup-input", row: "centroid" },
   }),
   "anim.wavePeak": signal({
     id: "anim.wavePeak",
@@ -455,7 +454,7 @@ function dialSignals(): Record<DialSignalId, SignalSpec> {
       description: `The ${DIAL_LABELS[dial].label} dial (AnimFrame.profile.${dial}, musicProfile.ts) — the eased track description Auto resolves against and its dial cell shows (under RAW the cell shows the pre-ease target; the wire still reads the eased one), so it moves over seconds rather than per hit.`,
       kind: "level",
       read: (_frame, anim) => anim.profile[dial],
-      monitor: { card: "character", row: id },
+      monitor: { card: "song", row: id },
     });
   }
   return out;
