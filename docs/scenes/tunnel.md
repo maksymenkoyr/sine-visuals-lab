@@ -9,7 +9,10 @@ least the low-quality step budget to look right.
 
 ## Where the code is
 
-- `src/render/scenes/tunnel.ts` — one fragment shader body (`FRAG`) passed
+- `src/render/scenes/tunnel.card.ts` — the card, loaded with the page: id,
+  name, `minQuality` and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/tunnel.ts` — the body (the scene module), loaded after
+  first paint: one fragment shader body (`FRAG`) passed
   to `createFullscreenScene()` with `{ minQuality: "low" }`. No `settings`,
   no `extraUniforms`, no per-scene helper module.
 - The march loop is capped at `MAX_STEPS` (a `const int` in the shader) but
@@ -40,6 +43,7 @@ None — original design.
   (`advanceTunnelCamera`, passed as `uTunnelZ`) with the speed easing toward
   the tempo's, so a tempo change only changes how fast the camera goes. At a
   steady BPM the motion is the same as before.
+- 2026-10-24 — Id, name, minQuality and gallery record moved to `src/render/scenes/tunnel.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

@@ -7,7 +7,10 @@ bands changes. A draft on main (in `DRAFT_SCENE_IDS`); `moire` is the newer Moir
 
 ## Where the code is
 
-`src/render/scenes/moire2.ts` exports `moire2Scene`, built on
+- `src/render/scenes/moire2.card.ts` — the card, loaded with the page: id,
+  name and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/moire2.ts` — the body (the scene module), loaded after
+  first paint, exporting `moire2Scene`, built on
 `createFullscreenScene` with no extra settings, uniforms or JS-side state —
 the whole scene is one fragment shader. `grating()` draws a single hard-edged
 band field from an angle and frequency; `bandAvg()` samples `sampleBands`
@@ -28,6 +31,7 @@ was.
   reference (see `moire`'s own record) and took the `moire` id; this file
   was renamed to `moire2.ts` / "Moiré 2" and kept unchanged otherwise (PR
   #104).
+- 2026-10-24: Id, name and gallery record moved to `src/render/scenes/moire2.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

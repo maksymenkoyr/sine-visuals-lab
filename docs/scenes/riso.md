@@ -9,7 +9,10 @@ scene; a draft (in `DRAFT_SCENE_IDS`), on `main` since the initial commit.
 
 ## Where the code is
 
-- `src/render/scenes/riso.ts` — one fragment shader body (`FRAG`) passed to
+- `src/render/scenes/riso.card.ts` — the card, loaded with the page: id,
+  name and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/riso.ts` — the body (the scene module), loaded after
+  first paint: one fragment shader body (`FRAG`) passed to
   `createFullscreenScene()`. No `settings`, no `extraUniforms`, no
   per-scene helper module.
 - `shapeField(p)` unions a fixed small set of band-sized blobs into one
@@ -53,6 +56,7 @@ None — original design (a simulated print process, not a studied video).
   distinct (`tests/palette.test.ts`), so the overprint stays bright. Under
   Neon the picture changes from a magenta-over-green overprint to pink over
   blue.
+- 2026-10-24 — Id, name and gallery record moved to `src/render/scenes/riso.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

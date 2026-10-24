@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./particles.card.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 const FRAG = `
@@ -48,7 +49,4 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-export const particlesScene = createFullscreenScene("particles", "Particles", FRAG);
+export const particlesScene = createFullscreenScene(card.id, card.name, FRAG);
