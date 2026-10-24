@@ -83,7 +83,7 @@ export const groupHeadingStyle = `
   color: rgba(255,255,255,0.45); margin: 14px 0 8px; padding-top: 10px;
   border-top: 1px solid rgba(255,255,255,0.1);
 `;
-export const groupHeadingFirstStyle = `
+const groupHeadingFirstStyle = `
   font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
   color: rgba(255,255,255,0.45); margin: 2px 0 8px;
 `;
@@ -104,7 +104,7 @@ export interface CardSpec {
   right?: HTMLElement;
   /** Opts this card into a persisted collapse toggle (panelFolds.ts): a
    *  chevron in the header, and a click anywhere on the header outside
-   *  `right`. Unique per mounted card ("bands", "signal", "hits", …). */
+   *  `right`. Unique per mounted card ("bands", "sound", "hits", …). */
   foldId?: string;
   /** Starts folded until the user first opens it (panelFolds.ts's
    *  defaultFolded) — the Power card, whose readouts most people never need. */

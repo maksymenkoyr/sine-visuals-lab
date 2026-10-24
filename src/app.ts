@@ -409,7 +409,7 @@ let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Hats and Lead off the full FFT bins, computed only on ticks where stemsRead() says something reads them. */
 let stemGate: StemGate | null = null;
-/** Display-only waveform for the Dynamics card; never feeds FeatureExtractor or
+/** Display-only waveform for the Setup view's Input check card; never feeds FeatureExtractor or
  *  the wire frame (see waveformAnalyser.ts header). */
 let waveformAnalyser: WaveformAnalyser | null = null;
 let lufsAnalyser: LufsAnalyser | null = null;
@@ -560,9 +560,6 @@ function waveSamples(): Float32Array | null {
 }
 /** DEV only, off measureAnalyser. Same buffer every read: copy before crossing a page.evaluate boundary. */
 let lastDeepMono: Float32Array | null = null;
-// fixedEnergy off this device's own extractor: the Signal card's "auto-gain
-// fully off" reference. Null where no local extractor ran (renderer, synthetic).
-let lastFixedEnergy: number | null = null;
 // The Any hit lane's diag off this device's own engine reading, for the Hits
 // card's history. Read the same tick it's set (deviceMenu.update()), before the
 // next currentVisual() mutates it in place.
@@ -3308,7 +3305,6 @@ function clearLocalReadings(): void {
   lastMono = null;
   lastDeepMono = null;
   lastLufs = null;
-  lastFixedEnergy = null;
   lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
@@ -3376,7 +3372,6 @@ function readLocalCapture(
       f.lead = stems.lead;
     }
   }
-  lastFixedEnergy = extractor.fixedEnergy;
   beatDiag.ratio = engine ? engine.surge : 0;
   beatDiag.gated = suppressed;
   beatDiag.blocked = engine ? engine.blocked : false;
@@ -3660,7 +3655,7 @@ function tick(): void {
   if (panelDraws) lastPanelDrawMs = nowRafMs;
   syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
   // Fed even when null (mic pending) so the strip shows its "waiting for audio" idle state.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
   loadChip?.update(nowRafMs);
 
   if (!lastVis || !anim) {

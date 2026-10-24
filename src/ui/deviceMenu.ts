@@ -98,7 +98,7 @@ import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters, createMeterRow, createTraceStrip, meterGroupHeading, type AudioMetersDeps } from "./audioMeters.ts";
+import { createAudioMeters, createTraceStrip, type AudioMetersDeps } from "./audioMeters.ts";
 import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
 import {
@@ -251,9 +251,9 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * file's own names (patch, source, cable) stay code-side.
  *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
- * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Dynamics/
- * Character) plus this file's own Bands level rows (BAND_LEVELS/STEM_LEVELS) and
- * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
+ * Every reactive meter row/lane — audioMeters.ts's own (Sound/Hits/Beat/
+ * Song) plus this file's own Bands card's Frequencies corner
+ * (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
  * pinned) setting, with tiny usage dots around the ring for how many of
  * this scene's settings use it. While a signal's row is lit (hover or
@@ -356,22 +356,21 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * `driveSourceDescription` map (the one place a source's plain-language
  * description lives, next to its colour/label).
  *
- * The Bands card is plain again: the live bars with the band faders drawn
+ * The Bands card lives in the Setup view (audioMeters.ts's addSetupCard places
+ * it): the live bars with the band faders drawn
  * over them (src/ui/bandFaders.ts) — its knobs, *except* while the pinned
  * setting's patch has a source on Frequencies, when the strip swaps to that
  * line's drawing overlay (src/ui/bandLineEditor.ts, backed by
  * src/audio/bandLine.ts; refreshLineMode derives this from the pinned
  * patch, not from focus). Its readouts (bandFaders.ts's own `readouts`,
  * plus the fader hint) live in `eqLayer` under the strip, hover/focus/drag-
- * revealed rather than always on (refreshEqLayer below), so the card no
- * longer grows by default just to show them. Scene name and audio source
- * moved out of the card entirely, into one column head above it — a live
- * dot, a status text, and the column's single RAW chip (see that chip's own
- * comment for what it drives) — sitting together with the "Sound" heading
- * in `vc-bands-block`, a wrapper that carries the stacked layout's
- * `.vc-spectrum-card` class (controlsTheme.ts) so head+heading+card travel
- * as one unit there. Under the Bands card, the read-only meters
- * (audioMeters.ts) scroll in their own strip. Below the breakpoint in
+ * revealed rather than always on (refreshEqLayer below), so the card never
+ * grows by default just to show them. Scene name and audio source live in one
+ * column head above the meters — a live dot, a status text, and the column's
+ * single RAW chip (see that chip's own comment for what it drives) — in
+ * `vc-bands-block`, a wrapper that carries the stacked layout's
+ * `.vc-spectrum-card` class (controlsTheme.ts). Under it, the read-only
+ * meters (audioMeters.ts, the Sound card first) scroll in their own strip. Below the breakpoint in
  * controlsTheme.ts everything stacks into one scrolling column with the
  * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
  * the whole point is to watch the scene react while you tune it, so it also
@@ -700,7 +699,7 @@ export interface DeviceMenu {
   close(): void;
   /** Fed every frame while in a viz. Any may be null (frame/ungained/anim before audio is up; rawBands on a mic-less renderer, mono there too unless the feed sends its waveform).
    *  `frame` has the band faders applied, `ungained` is the same before them (the ghost bars).
-   *  `fixedEnergy`, `lufs`, `beatDiag`, `gate` and `drives` are null wherever this device runs no extractor of its own (renderer, synthetic feed).
+   *  `lufs`, `beatDiag`, `gate` and `drives` are null wherever this device runs no extractor of its own (renderer, synthetic feed).
    *  `rateScale` is app.ts's already-resolved smoothingRateScale; not re-resolved here because resolveSmoothing() slews its auto value and this runs every rAF tick.
    *  `drives` comes off the same un-latched AnimFrame as `anim`: row pills read uniformPair() and the Frequencies overlay reads excess(); neither calls fired(), so polling can't steal a grid setting's pending edge from the scene.
    *  `draw` is false on ticks the panel skips (a display faster than the render cap): only the meters' traces, the heat and the drive graphs' peaks record, with no draw or DOM write. */
@@ -712,7 +711,6 @@ export interface DeviceMenu {
     anim: AnimFrame | null,
     mono: Float32Array | null,
     rateScale: number,
-    fixedEnergy: number | null,
     lufs: LufsReading | null,
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
@@ -786,8 +784,7 @@ const micAutoLitStyle = `${micAutoBaseStyle} background: linear-gradient(${withA
 // createCard's `right` slot takes one element, not a list.
 const inputCardHeaderRightStyle = `display: flex; align-items: center; gap: 6px;`;
 
-// Column head above the Bands card, no card of its own; audioMeters.ts's
-// meterGroupHeadingStyle sizes its top margin to sit flush under it.
+// Column head above the meters, no card of its own.
 const columnHeadStyle = `display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px;`;
 const spectrumStatusStyle = `display: flex; align-items: center; gap: 6px; flex-shrink: 0;`;
 const liveDotStyle = (on: boolean) =>
@@ -799,15 +796,6 @@ const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em;
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
   "Drag a knob up to boost a band, down to cut it. Pin an animation node to plug input nodes into it.";
-
-const levelsRowStyle = `display: flex; flex-direction: column; gap: 4px; margin-top: 10px;`;
-const levelsLabelStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.45);`;
-const levelsGridStyle = `display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;`;
-// Cells are narrow, so the row label wants a smaller font. Padding/margin
-// cancel a `.vc-row` hover glow (controlsTheme.ts), which reaches past its
-// content, back to the cell's edge.
-const levelsCellStyle = `padding: 2px 8px; margin: -2px -8px;`;
-const levelsCellLabelStyle = `font-size: 11.5px;`;
 
 // See the build site near spectrumCol for why one chip drives two raw modes.
 const RAW_CHIP_TITLE =
@@ -2314,12 +2302,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     window.addEventListener("pointercancel", stopDrag);
   });
 
-  // ---- The Bands card's own jacks: the Frequencies corner plus the Levels and
-  // Stems rows below eqLayer. Built here, not via audioMeters.ts's mountJack,
-  // because the Bands card lives in this file; they share the hoisted
-  // onJackClick/onJackHover/jackIsShown with the meters' `patch` deps, so every
-  // jack answers to identical logic. bandsJackEls is this card's half of the
-  // cable layer's source-endpoint lookup (combinedJackElements).
+  // ---- The Bands card's own jack: the Frequencies corner. Built here, not via
+  // audioMeters.ts's mountJack, because the Bands card lives in this file; it
+  // shares the hoisted onJackClick/onJackHover/jackIsShown with the meters'
+  // `patch` deps, so every jack answers to identical logic. bandsJackEls is
+  // this card's half of the cable layer's source-endpoint lookup
+  // (combinedJackElements).
   const bandsJackEls = new Map<string, HTMLElement>();
   function mountBandsJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
     const jack = createJack(
@@ -2338,57 +2326,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const lineJack = mountBandsJack({ source: "line" }, fadersRow, fadersRow);
   lineJack.el.style.cssText += "position: absolute; top: 4px; right: 4px; z-index: 2;";
 
-  interface LevelCell {
-    choice: SignalId;
-    read: (anim: AnimFrame) => number;
-  }
-  const BAND_LEVELS: readonly LevelCell[] = [
-    { choice: "anim.low", read: (a) => a.low },
-    { choice: "anim.mid", read: (a) => a.mid },
-    { choice: "anim.high", read: (a) => a.high },
-  ];
-  // Lead and Hats (src/audio/stemSplit.ts) sit under the Mid and Treble rows
-  // they cover; Bass stays empty.
-  const STEM_LEVELS: readonly (LevelCell | null)[] = [
-    null,
-    { choice: "anim.lead", read: (a) => a.lead },
-    { choice: "anim.hats", read: (a) => a.hats },
-  ];
-  const bandLevelRows: (LevelCell & { row: ReturnType<typeof createMeterRow> })[] = [];
-  // Labels drop driveSourceLabel's " level" suffix (needed elsewhere to tell it
-  // from a hit); the Levels caption already says it.
-  function levelsGridRow(caption: string, cells: readonly (LevelCell | null)[]): HTMLElement {
-    const label = document.createElement("div");
-    label.textContent = caption;
-    label.style.cssText = levelsLabelStyle;
-    const grid = document.createElement("div");
-    grid.style.cssText = levelsGridStyle;
-    for (const cell of cells) {
-      if (!cell) {
-        grid.appendChild(document.createElement("div"));
-        continue;
-      }
-      const row = createMeterRow({
-        label: driveSourceLabel(cell.choice).replace(/ level$/, ""),
-        accent: driveSourceColor(cell.choice),
-      });
-      row.el.style.cssText += levelsCellStyle;
-      row.el.querySelector<HTMLElement>(".vc-label")!.style.cssText += levelsCellLabelStyle;
-      const jack = mountBandsJack(cell.choice, row.right, row.el);
-      // Heat (heat.ts), as for a meter card's signal jack.
-      audioMeters.addHeatJack(cell.choice, jack.el, row.el, bandsCard.title.textContent ?? "", () => bandsCard.fold?.isFolded() ?? false);
-      grid.appendChild(row.el);
-      bandLevelRows.push({ ...cell, row });
-    }
-    const el = document.createElement("div");
-    el.style.cssText = levelsRowStyle;
-    el.append(label, grid);
-    return el;
-  }
-
-  const stemsRow = levelsGridRow("Stems", STEM_LEVELS);
-  const stemsOnScreen = watchOnScreen(stemsRow);
-  bandsCard.body.append(fadersRow, eqLayer, levelsGridRow("Levels", BAND_LEVELS), stemsRow);
+  bandsCard.body.append(fadersRow, eqLayer);
+  audioMeters.addSetupCard(bandsCard.el);
 
   // One at a time: set by buildPatchPanel() when the pinned row builds an
   // output graph, cleared by togglePin()/patchChanged() when there's nothing to
@@ -2424,9 +2363,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // Heat (heat.ts) for the current scene's wired settings and each wire (keyed
   // by jackKey), recorded every tick by recordHeat, panel open or closed, and
-  // cleared on a scene change. All read the Dynamics card's span chip: the
+  // cleared on a scene change. All read the Sound card's span chip: the
   // Scene card has none of its own.
-  const HEAT_SPAN_CARD = "signal";
+  const HEAT_SPAN_CARD = "sound";
   let heatSceneId: string | null = null;
   const settingHeat = new Map<string, HeatTrack>();
   const wireHeat = new Map<string, Map<string, HeatTrack>>();
@@ -4584,6 +4523,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
+  /** Dims every band outside `range` on both spectra (the Bands card's and the Sound card's thin one); null clears. */
+  function setSpectrumHighlight(range: { lo: number; hi: number } | null): void {
+    spectrumStrip.setHighlight(range);
+    spectrumStrip.redraw();
+    audioMeters.soundSpectrum.setHighlight(range);
+    audioMeters.soundSpectrum.redraw();
+  }
+
   /** Dims the unheard bands on the spectrum strip for the shown setting:
    *  patch sources, or `sceneSources` for a "scene" one (a grid/line source has
    *  no band range). Recomputed with the other selection refreshes, never per
@@ -4591,8 +4538,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function refreshSpectrumDriveHighlight(): void {
     const sel = shownSelection();
     if (!sel) {
-      spectrumStrip.setHighlight(null);
-      spectrumStrip.redraw();
+      setSpectrumHighlight(null);
       return;
     }
     const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
@@ -4616,15 +4562,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       hi = Math.max(hi, r.hi);
       any = true;
     }
-    spectrumStrip.setHighlight(any ? { lo, hi } : null);
-    spectrumStrip.redraw();
+    setSpectrumHighlight(any ? { lo, hi } : null);
   }
 
   // ---- Cables ----
   const cableLayer = createCableLayer();
   document.body.appendChild(cableLayer.el);
-  // Also drives bandLevelRows (setValue's dtSec is only a peak-hold decay
-  // rate, so a rough per-tick delta is enough).
   let lastCableTickMs = performance.now();
   const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
 
@@ -4918,7 +4861,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Input rows: only for an input focus — a setting's focus already marks the meters through .vc-patching.
     const litInputs = focus?.kind === "input";
     const rowLit = new Map<HTMLElement, boolean>();
-    // The Bands card's level and stem jacks sit beside rows of their own (mountBandsJack's feedEl), not inside a .vc-row.
+    // The Bands card's Frequencies jack sits in a row of its own (mountBandsJack's feedEl), not inside a .vc-row.
     const bandsFeed = new Map<HTMLElement, HTMLElement>(bandsJacks.map((b) => [b.jack.el, b.feedEl]));
     for (const [key, el] of combinedJackElements()) {
       const row = bandsFeed.get(el) ?? el.closest<HTMLElement>(".vc-row");
@@ -4987,14 +4930,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // The column head, "Sound" heading (audioMeters.ts's meterGroupHeading,
-  // shared so group headings can't drift) and Bands card travel as one unit,
-  // vc-bands-block, so the stacked layout (controlsTheme.ts) keeps them
-  // together.
+  // The column head sits in vc-bands-block, so the stacked layout
+  // (controlsTheme.ts) treats it as the spectrum column's lead unit.
   const bandsBlock = document.createElement("div");
   bandsBlock.className = "vc-bands-block vc-spectrum-card";
   bandsBlock.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
-  bandsBlock.append(columnHead, meterGroupHeading("Sound"), bandsCard.el);
+  bandsBlock.append(columnHead);
 
   spectrumCol.append(bandsBlock, audioMeters.el);
 
@@ -5061,6 +5002,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function refreshBandsSplit(): void {
     bandFaders.setEdgesHz(deps.getBandEdgesHz());
     spectrumStrip.setSplit(deps.getBandSplit());
+    audioMeters.soundSpectrum.setSplit(deps.getBandSplit());
   }
 
   // ---- controls column ----
@@ -5868,8 +5810,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // card's Reset chip (per-scene taste). Its "A" chip resolves from the room's
   // measured span (FeatureExtractor.bandSpanDb), not MUSIC_DIALS, which has no
   // dial for how much of the analyser's window the room uses, and eases slowly
-  // (autoGain.ts's EASE_RATE) so the Dynamics history trace reads as room
-  // drift.
+  // (autoGain.ts's EASE_RATE) so the fixed-mapping gap (features.ts's
+  // fixedEnergy) follows the room, not the music.
   const autoGainRow = createControlRow({
     label: "Auto-gain",
     accent: INPUT_GREEN,
@@ -6143,12 +6085,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         hi = Math.max(hi, range.hi);
         any = true;
       }
-      spectrumStrip.setHighlight(any ? { lo, hi } : null);
-      spectrumStrip.redraw();
+      setSpectrumHighlight(any ? { lo, hi } : null);
     }
     function hide(): void {
-      spectrumStrip.setHighlight(null);
-      spectrumStrip.redraw();
+      setSpectrumHighlight(null);
     }
 
     el.addEventListener("pointerenter", show);
@@ -6820,8 +6760,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     root.classList.toggle("vc-meters-hidden", hidden);
     metersBtn.textContent = hidden ? "Show left  M" : "Hide left  M";
     metersBtn.title = hidden
-      ? "Bring back the Bands card and the meters (M)"
-      : "Hide the Bands card and the meters, keep the controls (M)";
+      ? "Bring back the meters (M)"
+      : "Hide the meters, keep the controls (M)";
     // Hiding/showing the column changes which cards have a layout box without
     // touching any vc-folded class, so the observer never fires: recompute.
     refreshColumnsFold();
@@ -7249,7 +7189,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     applyMidiCc: (target, cc) => midiCard?.applyCc(target, cc),
     isPictureOnScreen: () => isOpen && pictureOnScreen(),
-    isStemsRowOnScreen: () => isOpen && stemsOnScreen(),
+    isStemsRowOnScreen: () => isOpen && audioMeters.stemRowsOnScreen(),
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,
@@ -7258,7 +7198,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       anim: AnimFrame | null,
       mono: Float32Array | null,
       rateScale: number,
-      fixedEnergy: number | null,
       lufs: LufsReading | null,
       beatDiag: OnsetDiag | null,
       gate: SilenceGateReading | null,
@@ -7276,7 +7215,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // tick. Open but not `draw`, it also records the drive graphs' peak-hold
       // (notePeaks) so a one-tick hit reaches the next drawn sparkline.
       if (!isOpen || !draw) {
-        audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, false);
+        audioMeters.update(frame, anim, mono, rawBands, rateScale, lufs, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
         return;
       }
@@ -7284,21 +7223,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // here, not at each scene-change call site, since this runs every tick
       // however the switch happened. Cheap when nothing changed.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate, true);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, lufs, beatDiag, gate, true);
       // Unthrottled: the live row's meter should track frame.level like any
       // other live meter, not the structural-refresh cadence.
       sourceRow.updateMeters(frame?.level ?? null);
       // The cable layer's per-tick flow (dashoffset only, no reads;
-      // cableLayer.ts header) and the Bands level rows need a live dtSec.
+      // cableLayer.ts header) needs a live dtSec.
       lastDrives = drives;
       lastFrame = frame;
       lastAnim = anim;
       const cableNowMs = performance.now();
       const cableDtSec = Math.min(1 / 15, Math.max(1e-4, (cableNowMs - lastCableTickMs) / 1000));
       lastCableTickMs = cableNowMs;
-      if (!bandsCard.fold?.isFolded()) {
-        for (const r of bandLevelRows) r.row.setValue(anim ? r.read(anim) : null, cableDtSec);
-      }
       if (!narrowMQ.matches) cableLayer.tick(cableDtSec);
       // Unthrottled, like audioMeters' fills (createControlRow's
       // updateSignalPills). Free for rows without `reads`.
@@ -7337,16 +7273,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // applySensitivity returns one shared scratch buffer on its fast path, so
       // the ghost must be copied into the strip before the second call
       // overwrites it.
-      spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
-      spectrumStrip.setPinned(pinnedBands);
-      const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
-      spectrumStrip.update(rawBands, processedBands);
+      const bandsShown = setupShown && !bandsCard.fold?.isFolded();
+      const soundShown = audioMeters.soundSpectrumShown();
+      if (bandsShown) {
+        spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
+        spectrumStrip.setPinned(pinnedBands);
+      }
+      if (bandsShown || soundShown) {
+        const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
+        if (bandsShown) spectrumStrip.update(rawBands, processedBands);
+        if (soundShown) audioMeters.soundSpectrum.update(rawBands, processedBands);
+      }
       // The Frequencies overlay draws on this strip's own canvas
       // (bandLineEditor.ts header) from this tick's live excess, unthrottled
       // like the strip. Skipped without lineMode or with the Bands card
-      // folded.
+      // folded or the Setup view closed.
       const nowMs = performance.now();
-      if (lineMode && !bandsCard.fold?.isFolded()) {
+      if (lineMode && bandsShown) {
         lineEditor.update(drives?.excess(lineMode.spec.key) ?? null);
       }
       // Sparklines: every drive row's valueOf() plus the pinned row's output

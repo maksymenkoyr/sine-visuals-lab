@@ -2,9 +2,9 @@
  * The patch bay's jack (src/ui/deviceMenu.ts's own plan doc): a small round
  * button mounted beside a meter row or a hits lane that a live signal can
  * feed into a pinned setting. One module because the identical button
- * mounts wherever a reactive row/lane lives — the Bands card's own level
- * rows and its Frequencies corner (deviceMenu.ts), and every meter row
- * audioMeters.ts owns (Dynamics/Hits/Beat/Song) — and every one of them
+ * mounts wherever a reactive row/lane lives — the Bands card's Frequencies
+ * corner (deviceMenu.ts), and every meter row audioMeters.ts owns
+ * (Sound/Hits/Beat/Song) — and every one of them
  * needs to look and behave the same way.
  *
  * This file only ever draws visual state; it never touches a DriveSetting.

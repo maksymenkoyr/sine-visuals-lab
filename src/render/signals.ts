@@ -92,9 +92,9 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. "setup-input" is the Setup view's Input
- *  check card, not the Dynamics card ("signal"). */
-export type MeterCardId = "signal" | "setup-input" | "hits" | "beat" | "song";
+ *  actually points at that card. "sound" is the first meter, the Sound card;
+ *  "setup-input" is the Setup view's Input check card. */
+export type MeterCardId = "sound" | "setup-input" | "hits" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -107,10 +107,12 @@ export type MeterCardId = "signal" | "setup-input" | "hits" | "beat" | "song";
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
  *  "wave" above (the beat/bar swing trace, a different row entirely).
  *  "level" is the Input level row beneath it — `feature.level`'s anchor.
+ *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
+ *  Treble rows; Lead and Hats point at the Mid and Treble rows they draw in.
  *  "centroid" is the Centroid row in the Setup view's Input check card,
  *  `anim.centroid`'s anchor. Each dial's own cell in the Song card's strip is
  *  its DialSignalId. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "waveform" | "level" | DialSignalId;
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "waveform" | "level" | "energy" | "low" | "mid" | "high" | DialSignalId;
 
 /** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
@@ -293,6 +295,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description: "The slewed low-band level (AnimFrame.low) — sustained, unlike Bass hit's onset-only pulse.",
     kind: "level",
     read: (_frame, anim) => anim.low,
+    monitor: { card: "sound", row: "low" },
     bandRange: "low",
   }),
   "anim.mid": signal({
@@ -301,6 +304,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description: "The slewed mid-band level (AnimFrame.mid) — sustained, unlike Mid hit's onset-only pulse.",
     kind: "level",
     read: (_frame, anim) => anim.mid,
+    monitor: { card: "sound", row: "mid" },
     bandRange: "mid",
   }),
   "anim.high": signal({
@@ -309,6 +313,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description: "The slewed high-band level (AnimFrame.high) — sustained, unlike Treble hit's onset-only pulse.",
     kind: "level",
     read: (_frame, anim) => anim.high,
+    monitor: { card: "sound", row: "high" },
     bandRange: "high",
   }),
   "anim.hats": signal({
@@ -318,6 +323,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The drum part of the treble range (AnimFrame.hats, src/audio/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
     kind: "level",
     read: (_frame, anim) => anim.hats,
+    monitor: { card: "sound", row: "high" },
     bandRange: "high",
   }),
   "anim.lead": signal({
@@ -327,6 +333,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The held part of the mid range (AnimFrame.lead, src/audio/stemSplit.ts) — vocals, synths and guitar with the drums taken out, so it doesn't jump on a snare the way Mid level does.",
     kind: "level",
     read: (_frame, anim) => anim.lead,
+    monitor: { card: "sound", row: "mid" },
     bandRange: "mid",
   }),
   "anim.energy": signal({
@@ -336,6 +343,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The plain mean of every band (FeatureFrame.energy) — see this file's header for why this is the one entry whose read() actually uses its `frame` argument.",
     kind: "level",
     read: (frame) => frame.energy,
+    monitor: { card: "sound", row: "energy" },
     bandRange: "all",
   }),
   "feature.level": signal({
