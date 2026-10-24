@@ -46,7 +46,7 @@ export const SET_MAX_PADS = 9;
 /** Most stored text a Set may take; half the room's per-value limit. */
 export const SET_MAX_CHARS = Math.floor(LOOK_LIMITS.maxValueBytes / 2);
 /** The longest pad name the card accepts. */
-export const PAD_NAME_MAX = 40;
+const PAD_NAME_MAX = 40;
 
 /** What "Every" can be set to, in bars. */
 export const AUTOPILOT_EVERY_BARS: readonly number[] = [4, 8, 16, 32, 64];
@@ -81,7 +81,7 @@ export interface SetDoc {
   autopilot: AutopilotConfig;
 }
 
-export const AUTOPILOT_DEFAULT: AutopilotConfig = { on: false, everyBars: AUTOPILOT_EVERY_DEFAULT, order: "inOrder" };
+const AUTOPILOT_DEFAULT: AutopilotConfig = { on: false, everyBars: AUTOPILOT_EVERY_DEFAULT, order: "inOrder" };
 
 export function emptySet(): SetDoc {
   return { pads: [], next: 1, autopilot: { ...AUTOPILOT_DEFAULT } };

@@ -17,7 +17,7 @@ import { FRAME_W, FRAME_H, type Camera, type ShotId } from "./motion.ts";
 /** Art-unit focus points. The DJ and the button share one focus; the others
  *  look at the face they cut to. Missing = follow the shot's centre. */
 const DJ_FOCUS: [number, number] = [445, 470];
-export const SHOT_FOCUS: Partial<Record<ShotId, [number, number]>> = {
+const SHOT_FOCUS: Partial<Record<ShotId, [number, number]>> = {
   wide: DJ_FOCUS,
   dj: DJ_FOCUS,
   djUp: DJ_FOCUS,

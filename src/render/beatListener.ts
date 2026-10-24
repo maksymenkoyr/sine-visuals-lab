@@ -31,7 +31,7 @@ export type BeatSource = "beat" | "bass" | "mid" | "high" | "bar" | "drop";
 
 /** Default `pulse` decay — animClock.ts's BEAT_PULSE_DECAY_PER_SEC, kept in
  *  step by hand (that constant is module-private there). */
-export const PULSE_DECAY_DEFAULT = 6;
+const PULSE_DECAY_DEFAULT = 6;
 
 /** A hold sized in beats once the tempo tracker is confident (tempoLock >=
  *  lockMin, its default a rough "trust this" line),
@@ -63,7 +63,7 @@ export interface BeatListenerSpec {
 
 /** Why this tick's edge (if any) didn't fire, or "quiet" for no edge at
  *  all. Mutually exclusive with `fired` — see ListenResult. */
-export type ListenReason = "fired" | "held" | "refractory" | "quiet";
+type ListenReason = "fired" | "held" | "refractory" | "quiet";
 
 export interface ListenResult {
   /** True only on the tick a trigger actually cleared hold + refractory —

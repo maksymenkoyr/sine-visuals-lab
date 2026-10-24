@@ -51,29 +51,29 @@ export const BOLT_VERT_FLOATS = 8;
 // further than about twice this off the straight line. Branches kink harder
 // for their length than the channel they came off, which is what keeps a
 // short branch from reading as a straight whisker.
-export const BOLT_JITTER = 0.22;
-export const BOLT_BRANCH_JITTER = 0.34;
+const BOLT_JITTER = 0.22;
+const BOLT_BRANCH_JITTER = 0.34;
 // How many primary branches leave the main channel, and how likely each of
 // them is to fork once more while a branch slot is left.
-export const BOLT_BRANCH_MIN = 3;
-export const BOLT_BRANCH_MAX = 4;
-export const BOLT_SUB_CHANCE = 0.65;
+const BOLT_BRANCH_MIN = 3;
+const BOLT_BRANCH_MAX = 4;
+const BOLT_SUB_CHANCE = 0.65;
 // A branch's length as a fraction of its parent's, and how far off the
 // parent's own direction it leaves, in radians. Both ends of the angle range
 // stay well short of a right angle: a branch that leaves sideways reads as a
 // separate bolt rather than as part of this one.
-export const BOLT_BRANCH_LEN_MIN = 0.22;
-export const BOLT_BRANCH_LEN_MAX = 0.5;
-export const BOLT_BRANCH_ANGLE_MIN = 0.35;
-export const BOLT_BRANCH_ANGLE_MAX = 0.95;
+const BOLT_BRANCH_LEN_MIN = 0.22;
+const BOLT_BRANCH_LEN_MAX = 0.5;
+const BOLT_BRANCH_ANGLE_MIN = 0.35;
+const BOLT_BRANCH_ANGLE_MAX = 0.95;
 // A branch's peak width as a fraction of its parent's width where it leaves.
-export const BOLT_BRANCH_WIDTH = 0.62;
+const BOLT_BRANCH_WIDTH = 0.62;
 // The width profile along a polyline: sin(pi * t) raised to this, so a
 // channel is 0 wide at both tips (which is what lets one triangle strip run
 // through every polyline in the tree — the joins between them collapse) and
 // broad across its middle rather than a lens. Below 1 it plateaus; the lower
 // it goes the more of the channel is at full width.
-export const BOLT_TAPER_POW = 0.35;
+const BOLT_TAPER_POW = 0.35;
 
 /** mulberry32: a small deterministic PRNG so a bolt's shape (and tests) are
  *  reproducible for a given seed. Returns values in [0, 1). */
@@ -169,7 +169,7 @@ export function jagPolyline(
  *  BOLT_TAPER_POW). Zero tips are load-bearing — they are what lets one
  *  triangle strip run through the whole tree, since the quads that join one
  *  polyline's end to the next one's start collapse to nothing. */
-export function boltWidthAt(t: number): number {
+function boltWidthAt(t: number): number {
   // The ends are returned rather than computed: sin(pi) is a hair off zero in
   // floating point, and raising that to a fractional power lifts it back into
   // a width, which would leave the "collapsed" joins as slivers.
@@ -183,7 +183,7 @@ export function boltWidthAt(t: number): number {
  *  along, so it has to exist at every vertex; a polyline that doubled back on
  *  itself exactly would get the fallback, which is only ever a cosmetic
  *  wobble of one quad. */
-export function polylineTangent(pts: Float32Array, i: number, out: number[]): void {
+function polylineTangent(pts: Float32Array, i: number, out: number[]): void {
   const n = pts.length / 3;
   const lo = Math.max(0, i - 1) * 3;
   const hi = Math.min(n - 1, i + 1) * 3;

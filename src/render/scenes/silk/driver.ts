@@ -64,7 +64,6 @@ const FLOW_ROT_COS = 0.8;
 const FLOW_ROT_SIN = 0.6;
 /** Flat length of the per-echo flow-offset uniform array. */
 export const ECHO_FLOW_STRIDE = FIELD_OCTAVES * 2;
-export const ECHO_FLOW_LEN = ECHO_MAX * ECHO_FLOW_STRIDE;
 
 /** A bar wrap can't be told from a tempo lock; without one, every fourth
  *  onset stands in for the bar — crystal/driver.ts's own constant, copied. */
@@ -95,7 +94,7 @@ const SWELL_KR = 1 / SWELL_RELEASE_SEC;
 /** Peak of one un-stacked difference-of-exponentials impulse — divides the
  *  raw (rel - att) so `swellAmplitude(push, false)` reaches exactly `push`
  *  at its peak, same normalisation as crystal/kaleido's beat swell. */
-export const SWELL_PEAK = (() => {
+const SWELL_PEAK = (() => {
   const tPeak = Math.log(SWELL_KA / SWELL_KR) / (SWELL_KA - SWELL_KR);
   return Math.exp(-SWELL_KR * tPeak) - Math.exp(-SWELL_KA * tPeak);
 })();
@@ -153,7 +152,7 @@ export function swellAmplitude(push: number, isPhrase: boolean): number {
  *  direction forward rather than an in-between fraction, so the field
  *  driving `zoomRate`'s own easing never has to interpret a fractional
  *  "direction"). */
-export interface RegimeTarget {
+interface RegimeTarget {
   /** 0 = fold 8, 1 = fold 6 — blended in the shader as
    *  mix(foldPoint(p,8), foldPoint(p,6), foldMix), which stays continuous
    *  through the middle even though it isn't a physical fold there. */

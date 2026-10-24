@@ -24,7 +24,7 @@ export const MIX_BEATS = 8;
  *  phrase start before mixing anyway, and how long a mix takes at the
  *  least: two bars at 120 bpm. */
 export const PHRASE_WAIT_SEC = 8;
-export const MIX_MIN_SEC = 4;
+const MIX_MIN_SEC = 4;
 
 export interface TourState {
   /** The view on screen (the one being mixed *from* during a mix). */

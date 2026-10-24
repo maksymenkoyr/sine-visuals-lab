@@ -41,7 +41,7 @@ import {
   type ZoomLayer,
 } from "./chladniZoom.ts";
 
-export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladniPlates.ts";
+export { MODE_TABLE, buildModeTable, type PlateMode } from "./chladniPlates.ts";
 
 // A Chladni plate, simulated rather than painted: a plate whose resonant
 // modes are each driven by the music's energy at that mode's own resonant
@@ -333,7 +333,7 @@ export interface PlateResponseInputs {
   lock?: number;
 }
 
-export interface ActiveMode extends PlateMode {
+interface ActiveMode extends PlateMode {
   /** Where this mode sits in the plate's table. */
   index: number;
   /** This mode's share of the plate's motion; the active set sums to 1. */
@@ -507,7 +507,7 @@ export const MAX_BED_COVERAGE = 0.55;
 export const WEIGHT_REF = 0.7;
 /** Drawn size doubles every 1/SIZE_PER_WEIGHT of weight: dust is about a
  *  third the size of the heaviest grit. */
-export const SIZE_PER_WEIGHT = 1.6;
+const SIZE_PER_WEIGHT = 1.6;
 /** Size mix's default: about the ±25% size scatter grains had before they
  *  had a weight. */
 export const SIZE_MIX_DEFAULT = 0.45;
@@ -549,7 +549,7 @@ const SIDE_EDGE = 0.04;
 const SIDE_GLOW_INK = 0.6;
 /** Embers: the heat a fully thrown grain gains per second (heat runs 0..1);
  *  Ember fade sets how fast rest cools it. */
-export const EMBER_HEAT_RATE = 4;
+const EMBER_HEAT_RATE = 4;
 /** Embers at 1: a cold grain keeps this share of its brightness. */
 const EMBER_COLD = 0.05;
 /** Embers: how a grain's heat turns into glow — a square root, so sand
@@ -577,7 +577,7 @@ export const SPEC_SPEED = 0.8;
  *  SPEC_PEAK_SEC, never below SPEC_PEAK_FLOOR), as a spectrogram's colour
  *  scale adapts: the music is always loudest in the bass, and absolute
  *  levels left the treble side of the plate dark. */
-export const SPEC_PEAK_SEC = 4;
+const SPEC_PEAK_SEC = 4;
 const SPEC_PEAK_FLOOR = 0.05;
 /** A ring's brightness over that share: stretched from SPEC_QUIET (dark) to
  *  SPEC_LOUD (full), so a band's rise and fall reads as a ring rather than a
@@ -697,7 +697,7 @@ export const TOSS_ARM_SEC = 2;
 /** A grain's flight time at full Toss, for the mean grain; each grain's own
  *  is spread by TOSS_TIME_SPREAD around it, and a weaker toss is shorter
  *  (tossLaunch). */
-export const TOSS_FLIGHT_SEC = 0.9;
+const TOSS_FLIGHT_SEC = 0.9;
 /** Spread of the grains' flight times, as a fraction of the mean: narrow,
  *  so the bed rises and lands as one shape. */
 const TOSS_TIME_SPREAD = 0.06;

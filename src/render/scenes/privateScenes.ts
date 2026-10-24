@@ -28,7 +28,8 @@ import type { Scene } from "../scene.ts";
  * private checkout can't take the app down.
  */
 
-/** What a paid scene's `index.ts` exports. */
+/** What a paid scene's `index.ts` exports.
+ *  @public The contract for code in the private scenes repo, which knip can't see. */
 export interface PrivateSceneModule {
   scene: Scene;
   draft?: boolean;

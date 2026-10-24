@@ -50,17 +50,17 @@ export const TEX_H = MAX_ROWS * 2;
 /** The first local row filled: a row below it has no seed past U = 0. */
 export const ROW_LO = -1;
 
-export const BIRTH_BAND_ROWS = 2;
+const BIRTH_BAND_ROWS = 2;
 /** Weight scale at birth, times the squared lattice scale: enough to crush
  *  a newborn's cell against the central cell as well as its neighbours. */
-export const BIRTH_KAPPA = 0.25;
-export const CHILD_KAPPA = 0.02;
+const BIRTH_KAPPA = 0.25;
+const CHILD_KAPPA = 0.02;
 /** The band a kick stamps, r 0.03 to 0.35 half-heights, in U. */
 export const CHILD_BAND_LO = latticeU(0.03);
 export const CHILD_BAND_HI = latticeU(0.35);
 export const CHILD_BAND_SOFT = 0.3;
 export const CHILD_RISE = 0.1;
-export const CHILD_HOLD = 0.2;
+const CHILD_HOLD = 0.2;
 
 /** Soft caps on a seed's move: cells of offset and cell areas of weight. */
 export const MAX_SHIFT = 0.6;
@@ -78,7 +78,7 @@ export interface SeedMove {
 /** Fills `out` (zeroed by the caller) for the seed at lattice U `u`, angle
  *  `th`, global row `g`, local row `t` (0 = ROW_LO; a child gets its row's
  *  `t`) and column `c`. */
-export type MoveSeed = (u: number, th: number, g: number, t: number, c: number, out: SeedMove) => void;
+type MoveSeed = (u: number, th: number, g: number, t: number, c: number, out: SeedMove) => void;
 
 const softCap = (x: number, m: number): number => m * Math.tanh(x / m);
 
@@ -114,7 +114,7 @@ export interface Kicks {
 
 /** How alive a child seed at U `u` is: the strongest live kick whose band
  *  it was in when the kick landed, and whose strength beats its gate. */
-export function childAlive(u: number, gate: number, kicks: Kicks): number {
+function childAlive(u: number, gate: number, kicks: Kicks): number {
   let a = 0;
   for (let k = 0; k < KICK_SLOTS; k++) {
     const amp = kicks.amp[k];

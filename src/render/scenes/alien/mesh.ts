@@ -38,7 +38,7 @@ import { BONE_COUNT, createPose, createRigWorld, forwardKinematics, tPose, type 
 import { PARTS, compileSet, setBounds, type CompiledSet, type PartSet } from "./body.ts";
 
 /** Grid cell per set, in metres — about the triangle edge the wire draws there. */
-export const SET_CELLS: Readonly<Record<PartSet, number>> = {
+const SET_CELLS: Readonly<Record<PartSet, number>> = {
   body: 0.024,
   head: 0.014,
   handL: 0.0063,
@@ -53,7 +53,7 @@ const CULL_SLACK = 1.35;
 const RELAX_ITERS = 3;
 const RELAX_STEP = 0.5;
 /** Metres over which a vertex's weight falls off from its nearest bone. */
-export const SKIN_SOFTNESS = 0.018;
+const SKIN_SOFTNESS = 0.018;
 export const MAX_INFLUENCES = 4;
 /** Weights below this share of the heaviest are dropped before normalising. */
 const MIN_WEIGHT_SHARE = 0.02;
@@ -274,7 +274,7 @@ function skinWeights(set: CompiledSet, x: number, y: number, z: number, bones: U
 }
 
 /** The bind pose: rig.ts's T-pose, solved, root at its rest height. */
-export function bindPose(): RigWorld {
+function bindPose(): RigWorld {
   const world = createRigWorld();
   forwardKinematics(tPose(createPose()), world);
   return world;

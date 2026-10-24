@@ -132,8 +132,8 @@ export const FOLLOW_LOCK = 0.75;
 // BPM_MIN/60 (~1.17 beats/s) so adding/subtracting it from the tempo's own
 // beats/s advance can never make `beats` run backward — see the interface
 // doc's monotonic note and tests/metronome.test.ts's own assertion.
-export const PHASE_FOLLOW_RATE = 2;
-export const PHASE_FOLLOW_MAX_RATE = 0.25; // beats/s
+const PHASE_FOLLOW_RATE = 2;
+const PHASE_FOLLOW_MAX_RATE = 0.25; // beats/s
 // A beat-line error bigger than this (in beats), the first time the clock is
 // confident after the metronome started or retuned, is corrected at once
 // instead of slewed; every later correction only slews, so a clock whose
@@ -152,7 +152,7 @@ export const PHASE_SNAP_BEATS = 0.15;
 // Tempo follow while confident: only actually pulls `bpm` toward clock.bpm
 // while the two are already close (within RESYNC_RATIO) — see the next
 // constant's own doc for what happens when they're not.
-export const TEMPO_FOLLOW_RATE = 1;
+const TEMPO_FOLLOW_RATE = 1;
 // How far clock.bpm can drift from the metronome's own held bpm (as a
 // fraction of that held bpm) before the phase slew and tempo follow both
 // stop entirely for this tick — below this, they quietly tighten the
@@ -163,8 +163,8 @@ export const TEMPO_FOLLOW_RATE = 1;
 export const RESYNC_RATIO = 0.06;
 
 // ---- Level ------------------------------------------------------------
-export const LEVEL_RISE_RATE = 2; // 1/s, while running
-export const LEVEL_FALL_RATE = 3; // 1/s, while idle
+const LEVEL_RISE_RATE = 2; // 1/s, while running
+const LEVEL_FALL_RATE = 3; // 1/s, while idle
 
 /** Wraps into [-0.5, 0.5) — the signed distance to the nearest whole beat.
  *  Same shape as the engine clock's own (unexported) wrapHalf. */

@@ -45,7 +45,7 @@ export interface DiveTarget {
 /** The depth every target dives to at Dive depth's default, e-folds. */
 export const TARGET_DEPTH = 45;
 
-export function deepTarget(reHi: number, reLo: number, imHi: number, imLo: number, itersPerEfold: number): DiveTarget {
+function deepTarget(reHi: number, reLo: number, imHi: number, imLo: number, itersPerEfold: number): DiveTarget {
   return { reHi, reLo, imHi, imLo, itersPerEfold, depth: TARGET_DEPTH };
 }
 
@@ -109,9 +109,9 @@ export const EASE_FLOOR = 0.15;
 /** Seconds the dive holds at the bottom before cutting back. */
 export const HOLD_SEC = 3;
 
-export const STEP_EASE_SEC = 0.09;
-export const FOLD_EASE_SEC = 0.35;
-export const INVERT_EASE_SEC = 0.12;
+const STEP_EASE_SEC = 0.09;
+const FOLD_EASE_SEC = 0.35;
+const INVERT_EASE_SEC = 0.12;
 /** The longest frame step that still counts as motion: a hidden tab or a
  *  swapped clock must not fling the camera through a whole dive. */
 export const MAX_STEP_SEC = 0.25;

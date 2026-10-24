@@ -247,7 +247,7 @@ const STAMP_JITTER = 0.1; // uv radius of that candidate ring
 // overwritten, and the shader retires any wave older than SWEEP_SEC on its
 // own, so nothing needs expiring here. ---
 export const MAX_SWEEPS = 3;
-export const SWEEP_SEC = 0.7; // quick: a ripple, not a slow wipe
+const SWEEP_SEC = 0.7; // quick: a ripple, not a slow wipe
 // At most one event per beat — the hold both scene listeners share: the
 // light sweep and the floater brush stamp land on the same beat under Scene
 // (render() advances the one listener once and hands the edge to both).
@@ -528,7 +528,7 @@ export function pickSwarmCenter(
  *  setting at the moment it fired, so moving the slider never stretches or
  *  cuts short a streak already on screen). Same stateless-pool idiom as
  *  powder.ts's createChunkPool — see this file's header. */
-export interface WaveBurst {
+interface WaveBurst {
   t0: number;
   strength: number;
   seed: number;

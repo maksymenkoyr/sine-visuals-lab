@@ -79,7 +79,7 @@ export function dj() {
   return rig('dj', s);
 }
 // A closed, happy eye (for blinks): skin over the eye, the black ring, a lid curve.
-export function closedEye([cx, cy, rx, ry, rot]: Tup5, skin: string) {
+function closedEye([cx, cy, rx, ry, rot]: Tup5, skin: string) {
   return `<path d="${E(cx, cy, rx, ry, rot)}" fill="${skin}"/><path d="${E(cx, cy, rx, ry, rot)}" fill="none" stroke="${INK}" stroke-width="${ART.LW * 1.05}"/>`
     + line(`M${f1(cx - rx * 0.72)},${f1(cy + ry * 0.2)} Q${f1(cx)},${f1(cy - ry * 0.55)} ${f1(cx + rx * 0.72)},${f1(cy + ry * 0.2)}`, ART.LW * 0.9);
 }
@@ -108,8 +108,8 @@ export function slamFx() {
 // The pompadour raver: tall ridged-rectangle head (ridged shape, thick line). His pompadour flies off.
 // Rigs: guy (root; the still tilts him 22° back), guyHead (pivot at the neck), pomp (the hairpiece,
 // in world space, since it travels between heads). Cels: guyLegs, guyTorso, guyEyes, guyBrows, guyMouth.
-export const GUY = { hx: 1146, hy: 360, neck: [1146, 470], feet: [1140, 650] };
-export function guyM(p: Opts = {}) {
+const GUY = { hx: 1146, hy: 360, neck: [1146, 470], feet: [1140, 650] };
+function guyM(p: Opts = {}) {
   // the still: translate(0,-10) translate(1150,640) scale(0.9) translate(-1150,-640) rotate(22,1150,560)
   return MX.chain(MX.T(p.x || 0, -10 + (p.y || 0)), MX.about(1150, 640, MX.S(0.9)), MX.about(1150, 560, MX.R(p.r ?? 22)), MX.about(1140, 650, MX.S(p.sx ?? 1, p.sy ?? 1)));
 }
@@ -166,8 +166,8 @@ export function pompadour() {
 
 // The round raver, foreground right. Rig: raver (root). Cels: raverTorso (arm), raverEyes,
 // raverMouth, raverHair. Her glowstick is its own rig (stick) in world space.
-export const RAVER = { hx: 1380, hy: 690, shoulder: [1310, 840] };
-export function raverM(p: Opts = {}) {
+const RAVER = { hx: 1380, hy: 690, shoulder: [1310, 840] };
+function raverM(p: Opts = {}) {
   // the still: translate(1240,760) scale(0.74) translate(-1380,-690) rotate(8,1380,690)
   return MX.chain(MX.T(1240 + (p.x || 0), 760 + (p.y || 0)), MX.S(0.74), MX.T(-1380, -690), MX.about(1380, 690, MX.mul(MX.R(p.r ?? 8), MX.S(p.sx ?? 1, p.sy ?? 1))));
 }
@@ -237,7 +237,6 @@ export function glowstick() {
 
 // A small raver at the rail. Hero: clinging on, blown out flat like a flag. In the groove he dances
 // standing on the rail. Rig: kid (root). Cels: kid hero|flap|standA|standB|crouch (whole drawings).
-export const KID = { root: [140, -4], feet: [820, 540] };
 export function flagRaver() {
   ART.LW = 4.5;
   const skin = '#ffd9b8';

@@ -33,7 +33,7 @@ export const FIGURE_CAPSULES = DRAWN.length;
 /** The silhouette's top, in rig metres, with room for the raised arms. */
 export const FIGURE_HEIGHT = 2.1;
 
-export interface FigureFrame {
+interface FigureFrame {
   /** FIGURE_CAPSULES vec4s: (ax, ay, bx, by) per capsule. */
   caps: Float32Array;
   /** FIGURE_CAPSULES radii. */

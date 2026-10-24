@@ -77,13 +77,13 @@ import { RESYNC_RATIO } from "./metronome.ts";
 export const TAP_MIN_TAPS = 4;
 /** Only the latest taps of a run are fitted, so a long run keeps up with a
  *  tempo the tapper changes. */
-export const TAP_MAX_TAPS = 16;
+const TAP_MAX_TAPS = 16;
 /** A gap longer than this starts a new run. A skipped beat at BPM_MIN or
  *  slower is longer than this, so a run with one starts over. */
 export const TAP_GAP_SEC = 2;
 /** How far off the beat grid (as a share of a beat) a tap may land and
  *  still count; further than this it is a stray. */
-export const TAP_TOLERANCE = 0.25;
+const TAP_TOLERANCE = 0.25;
 /** The ratios a tracker's reading may sit at against the tapped tempo and
  *  still be the tapped tempo, heard in another octave or ratio. */
 const TAP_FAMILY: readonly number[] = [1, 2, 0.5, 1.5, 2 / 3];
@@ -304,7 +304,7 @@ export function releaseTapTempo(): void {
 
 // ---- The guide (see the file header's "where it meets the tracker") ----
 
-export interface TapSeed {
+interface TapSeed {
   bpm: number;
   /** [0,1) beat phase at the instant poll() was given. */
   beatPhase: number;

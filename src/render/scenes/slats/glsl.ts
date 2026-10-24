@@ -19,7 +19,7 @@ import type { SceneSetting } from "../../sceneSettings.ts";
  * into are, not the slat's own thickness.
  */
 
-export const OPACITY_DEFAULT = 0.3;
+const OPACITY_DEFAULT = 0.3;
 
 export const SETTINGS: SceneSetting[] = [
   {
@@ -206,8 +206,8 @@ export const SETTINGS: SceneSetting[] = [
   },
 ];
 
-export const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
-export const driveUniformsGlsl = DRIVE_GLSL(SETTINGS);
+const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const driveUniformsGlsl = DRIVE_GLSL(SETTINGS);
 
 // Camera/geometry constants. See index.ts's header for the reasoning behind
 // a near-flat size law (a large BASE_DEPTH relative to LAYER_GAP/CURVE_DEPTH)

@@ -81,7 +81,7 @@ export interface PlateMode {
 
 /** Highest mode order the square table reaches. (8, 9) is already a fine
  *  lattice at TV distance; past that the nodal cells fall below grain size. */
-export const MAX_ORDER = 9;
+const MAX_ORDER = 9;
 /** n^2 + m^2 of the square's fundamental (1, 2) mode. */
 export const FUNDAMENTAL_ORDER = 5;
 
@@ -312,7 +312,7 @@ const jScratch = new Float64Array(ROUND_ORDER_CAP + 3);
  *  ((laplacian W)' - (1 - nu) n^2 (W' - W)). Returns their determinant over
  *  C (scaled by e^-k to stay tame; it is 0 at a mode) and the C that zeroes
  *  the moment. */
-export function freeEdgeDeterminant(n: number, k: number): { det: number; c: number } {
+function freeEdgeDeterminant(n: number, k: number): { det: number; c: number } {
   besselJOrders(n + 1, k, jScratch);
   const j = jScratch[n];
   const jp = n === 0 ? -jScratch[1] : (jScratch[n - 1] - jScratch[n + 1]) / 2;

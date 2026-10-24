@@ -8,20 +8,15 @@
 // call buildSceneSvg() before reading it. Pure: no DOM, no wall time.
 import { ART, DEFS, _ellCache, _glowCache } from "./lib";
 import { ANCHORS, CONFETTI, HERO, dj, flagRaver, glowstick, pompadour, roundRaver, slamFx, debris } from "./cast";
-import { LAMPS, LASERS, LEDS, backCrowd, blast, booth, button, buttonGlow, floor, lasers, room } from "./room";
+import { LAMPS, LEDS, backCrowd, blast, booth, button, buttonGlow, floor, lasers, room } from "./room";
 
-export { ANCHORS, CONFETTI, HERO, LAMPS, LASERS, LEDS };
-export { BX, BY, railY } from "./room";
-export { GUY, KID, RAVER } from "./cast";
 
 /** The impact frame filters' matrix and table values (the prototype's `two()` in app.js). */
 export const IMPACT_MATRIX = [0.3, 0.59, 0.11, 0, 0, 0.3, 0.59, 0.11, 0, 0, 0.3, 0.59, 0.11, 0, 0, 0, 0, 0, 0, 1] as const;
 export const IMPACT_A = { lo: [0.06, 0.01, 0.05], hi: [1, 0.18, 0.64] } as const;
 export const IMPACT_B = { lo: [1, 0.93, 0.97], hi: [0.06, 0.01, 0.05] } as const;
-/** The tilted world group's transform, and the art's size. */
-export const WORLD_TRANSFORM = "rotate(-7,800,450) translate(800,450) scale(1.1) translate(-800,-450)";
-export const ART_W = 1600;
-export const ART_H = 900;
+/** The tilted world group's transform. */
+const WORLD_TRANSFORM = "rotate(-7,800,450) translate(800,450) scale(1.1) translate(-800,-450)";
 
 function resetArtState(): void {
   ART.LW = 7;

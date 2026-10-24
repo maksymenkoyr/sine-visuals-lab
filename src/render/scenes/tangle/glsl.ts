@@ -28,7 +28,7 @@ import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
 
 /** Positions stay inside the unit sphere: every step is a blend of sphere
  *  points, so the packing range is exactly the sphere's radius. */
-export const POS_RANGE = 1.0;
+const POS_RANGE = 1.0;
 
 const PACK_GLSL = `
 float unpackAxis(vec2 c) {
