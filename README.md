@@ -22,7 +22,7 @@ Press **F** for fullscreen and **S** for settings.
   control can be taken over by hand.
 
 The gallery has three sections, and each scene picks its own in the `gallery`
-record its module exports (`src/render/scenes/sceneModules.ts`): `released`
+record its card exports (`src/render/scenes/sceneModules.ts`): `released`
 scenes are featured, `development` ones show below them, and `draft` ones sit
 greyed out behind the gallery's draft toggle. Each section lists the newest
 first.

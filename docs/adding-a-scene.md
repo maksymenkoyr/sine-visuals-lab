@@ -65,19 +65,26 @@ this repo. `src/render/scenes/privateScenes.ts` has the contract.
    `src/ui/widgets/registry.ts` to show the group as boxes/rows instead of
    the plain per-setting loop (Physarum 2's Strains card is the worked
    example).
-3. Make it a scene module: `src/render/scenes/<unit>.ts` or
-   `src/render/scenes/<unit>/index.ts`, exporting the scene and
-   `export const gallery = { stage: "development", added: "<today>" } as const;` —
-   a new scene starts In development, where it shows as a tile, not folded
-   away with the drafts; put it in `"draft"` only when asked.
+3. Make the scene two files: a card, `src/render/scenes/<unit>.card.ts` or
+   `src/render/scenes/<unit>/card.ts`, exporting `card` (a `SceneCard`: id,
+   name, settings, and `minQuality`/`panel` if any), `loadBody` (a dynamic
+   `import()` of the body) and
+   `export const gallery = { stage: "development", added: "<today>" } as const;`;
+   and the body, `src/render/scenes/<unit>.ts` or `src/render/scenes/<unit>/index.ts`,
+   exporting the scene built from `...card`. A card imports only types and light
+   modules, never a body or GLSL, so the page's first paint doesn't wait for the
+   scene's code; `tests/sceneCards.test.ts` checks it, and
+   `src/render/scenes/storm.card.ts` is a worked example. A new scene starts
+   In development, where it shows as a tile, not folded away with the drafts;
+   put it in `"draft"` only when asked.
    `src/render/scenes/sceneModules.ts`'s header owns the contract and the
    ordering (each gallery section lists the newest first).
    `src/render/scenes/index.ts` finds it on its own; nothing shared is
-   edited, so parallel branches adding scenes don't conflict. Once it's a
-   scene module, it gets its own MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
+   edited, so parallel branches adding scenes don't conflict. Once it has a
+   card, it gets its own MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
    how it's counted and how to raise its major by hand.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
-   on the `Scene` object — see `src/render/quality.ts` for what each preset means.
+   on the card — see `src/render/quality.ts` for what each preset means.
 5. If the scene needs data it can't compute (the dancers' captured moves are
    the precedent — `src/render/scenes/dancers/clipFormat.ts` and the library
    its `CLIP_LIBRARY_URL` names), generate it with a script under `tools/` and
