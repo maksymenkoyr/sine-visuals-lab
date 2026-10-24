@@ -20,7 +20,7 @@
 
 /** About 60 Hz — the rate the output's frames arrive at while the tab is
  *  visible, so a hidden controller feeds the projector at the same pace. */
-export const BACKGROUND_TICK_MS = 16;
+const BACKGROUND_TICK_MS = 16;
 
 export interface BackgroundTick {
   /** Stop the clock and free the worker. */
