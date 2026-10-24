@@ -7,7 +7,10 @@ fall; a drop swings the camera to a new heading. In development, in the gallery'
 
 ## Where the code is
 
-- `src/render/scenes/coderain/index.ts` — settings, drives, camera, fall
+- `src/render/scenes/coderain/card.ts` — the scene's card, loaded with the page: id, name,
+  `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card, so the
+  registered settings are the body's own objects.
+- `src/render/scenes/coderain/index.ts` — the body, loaded after first paint: drives, camera, fall
   clock, the hit-burst ring (`BURST_SLOTS`), the draws.
 - `glyphs.ts` — the hand-drawn stroke glyph set and `buildGlyphAtlas`.
 - `figure.ts` — the dancer: the Dancers scene's choreographer and rig, flattened to 2D capsules.
@@ -53,6 +56,7 @@ hear run but ~106.7 on the ref-shoot run.
   height above the top.
 - 2026-10-08 — Downpour and Turn became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the burst share and the camera swing by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/coderain/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Known issues and next steps
 

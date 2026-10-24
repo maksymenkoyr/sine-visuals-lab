@@ -11,8 +11,11 @@ Draft scene (`stage: "draft"` in its `gallery` record), shipped on
 
 ## Where the code is
 
-- `src/render/scenes/crystal/index.ts` — the `Scene` implementation
-  (`createCrystalSceneImpl`), the `SETTINGS` array, and the three hand-rolled
+- `src/render/scenes/crystal/card.ts` — the scene's card, loaded with the page: id, name,
+  `minQuality`, `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card,
+  so the registered settings are the body's own objects.
+- `src/render/scenes/crystal/index.ts` — the body, loaded after first paint: the `Scene`
+  implementation (`createCrystalSceneImpl`) and the three hand-rolled
   GL programs (march / blur / composite) it builds and runs each frame, since
   a multi-pass scene can't go through `fullscreenScene.ts`'s single-pass
   helper. Re-exports the driver's pure functions/types so
@@ -178,6 +181,7 @@ are one measurement run each, not standing specs):
   that were written and never used.
 - 2026-10-08 — Beat pulse became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the zoom surge and swell impulses it starts (CrystalInputs.pulseSize) by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/crystal/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

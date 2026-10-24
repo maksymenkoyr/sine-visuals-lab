@@ -29,6 +29,8 @@
 // (the grid's offset in cells, the fold's place on its ping-pong) are wrapped
 // together with their targets so they never grow.
 
+import { MAX_DEPTH, TARGET_DEPTH } from "./card.ts";
+
 export interface DiveTarget {
   /** The target as double-double pairs: re = reHi + reLo, im = imHi + imLo. */
   reHi: number;
@@ -41,9 +43,6 @@ export interface DiveTarget {
    *  whole set. */
   depth: number;
 }
-
-/** The depth every target dives to at Dive depth's default, e-folds. */
-export const TARGET_DEPTH = 45;
 
 export function deepTarget(reHi: number, reLo: number, imHi: number, imLo: number, itersPerEfold: number): DiveTarget {
   return { reHi, reLo, imHi, imLo, itersPerEfold, depth: TARGET_DEPTH };
@@ -77,12 +76,6 @@ export const DIVE_TARGETS: readonly DiveTarget[] = [
   // elephant valley, outer four arms: M(5,4), |λ| 13.23, turns 19.6° per e-fold
   deepTarget(0.37363256928102, -5.852786361674973e-18, 0.08504535015303125, 4.116095671150155e-18, 1.549),
 ];
-
-/** The deepest any dive may go, e-folds. Two limits meet here: the GPU's
- *  32-bit offsets from the reference reach their smallest normal value a
- *  little past this, and the double-double reference orbit has to stay a
- *  few thousand times finer than a pixel. */
-export const MAX_DEPTH = 55;
 
 /** The current target's dive depth, scaled by Dive depth relative to its
  *  default (`depthScale`). */

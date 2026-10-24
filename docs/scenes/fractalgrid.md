@@ -17,15 +17,19 @@ beat and a drop inverts the picture for a few bars. Draft scene.
   (the eased ends), `diveIterations` (iterations grow with depth),
   `foldPosition` (the fold's ping-pong over `FOLD_SPAN`), `DIVE_TARGETS`
   (Misiurewicz points as double-double pairs via `deepTarget`, each with
-  its iterations per e-fold), `TARGET_DEPTH`/`targetDepth`/`MAX_DEPTH`, and
+  its iterations per e-fold), `targetDepth` (its limits are in `card.ts`), and
   the whole-set framing `HOME_X`/`HOME_HALF_W`/`HOME_HALF_H`.
 - `src/render/scenes/fractalgrid/deep.ts` — the high-precision half:
   double-double arithmetic (`ddAdd`, `ddMul`) and `referenceOrbit`, the
   target's orbit the GPU perturbs around, `MAX_REF_LEN` long at most.
-- `src/render/scenes/fractalgrid/index.ts` — the `Scene`:
+- `src/render/scenes/fractalgrid/card.ts` — the scene's card, loaded with the page: id, name,
+  `SETTINGS`, `ITER_CAP`, the dive depth limits `TARGET_DEPTH` and `MAX_DEPTH` (which
+  `motion.ts` imports), the `gallery` record and `loadBody`. The body takes its id, name
+  and settings from the card, so the registered settings are the body's own objects.
+- `src/render/scenes/fractalgrid/index.ts` — the body, loaded after first paint: the `Scene`:
   `createFullscreenScene` wrapped by `withReferenceTexture` (the orbit as an
   RG32F texture, uploaded by `uploadOrbit` when the target changes, cached
-  per target), `SETTINGS`, `FRAG` (camera, perturbation with rebasing and
+  per target), `FRAG` (camera, perturbation with rebasing and
   dz/dc in screen units, `lineCover`'s box-filtered lines, the escaped
   points' edge line, invert and Colours), and `extraUniforms`, which
   resolves settings and drives into `stepDive`'s inputs once a frame.
@@ -133,6 +137,7 @@ beat and a drop inverts the picture for a few bars. Draft scene.
   checking every 8th step was slower still (26.7 ms against 14.5 ms). The
   plain loop already sits in the app's range, so it was dropped.
 - 2026-10-08 — Step, Fold and Invert became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the grid jump, the fold amount and how far the drop inversion goes (DiveInputs.invertSize) by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/fractalgrid/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
