@@ -1,10 +1,11 @@
-// Ember's swell and kick lift (src/render/scenes/ember/motion.ts's header):
-// the swell follows the measured shape and never jumps, its period is whole
-// bars at the held tempo, and a kick's lift arrives over its attack and falls
-// back to rest.
+// Ember's swell, kick lift and splats (src/render/scenes/ember/motion.ts's
+// header): the swell follows the measured shape and never jumps, its period
+// is whole bars at the held tempo, a kick's lift arrives over its attack and
+// falls back to rest, and the burners and stirrers stay where the sim can use
+// them.
 
 import { describe, it, expect } from "vitest";
-import { REST_BPM, SWELL_SHAPE, advanceLift, createLiftState, swellAt, swellRate } from "../src/render/scenes/ember/motion.ts";
+import { BURNERS, REST_BPM, STIRRERS, SWELL_SHAPE, advanceLift, burnerAt, createLiftState, stirrerAt, swellAt, swellRate } from "../src/render/scenes/ember/motion.ts";
 
 describe("Ember swell", () => {
   it("passes through every measured step and wraps without a jump", () => {
@@ -40,5 +41,35 @@ describe("Ember kick lift", () => {
     const s = createLiftState();
     for (let i = 0; i < 100; i++) advanceLift(s, 1 / 60, 0);
     expect(s.level).toBe(0);
+  });
+});
+
+describe("Ember burners and stirrers", () => {
+  it("keeps every burner on screen, in its own place along the bottom", () => {
+    for (let t = 0; t < 600; t += 0.7) {
+      let prev = -Infinity;
+      for (let i = 0; i < BURNERS; i++) {
+        const b = burnerAt(i, t);
+        expect(b.x).toBeGreaterThan(0);
+        expect(b.x).toBeLessThan(1);
+        expect(b.x).toBeGreaterThan(prev);
+        expect(b.flare).toBeGreaterThanOrEqual(0.4);
+        expect(Math.abs(b.sway)).toBeLessThanOrEqual(1);
+        prev = b.x;
+      }
+    }
+  });
+
+  it("keeps every stirrer inside the frame with a unit push", () => {
+    for (let t = 0; t < 600; t += 0.7) {
+      for (let i = 0; i < STIRRERS; i++) {
+        const s = stirrerAt(i, t);
+        expect(s.x).toBeGreaterThan(0);
+        expect(s.x).toBeLessThan(1);
+        expect(s.y).toBeGreaterThan(0);
+        expect(s.y).toBeLessThan(1);
+        expect(Math.hypot(s.dx, s.dy)).toBeCloseTo(1, 9);
+      }
+    }
   });
 });

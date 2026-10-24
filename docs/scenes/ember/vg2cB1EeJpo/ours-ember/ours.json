@@ -14,7 +14,7 @@
    "t": 4,
    "offsetMs": -80,
    "file": "b008_r08_-080.png",
-   "lagMs": 1,
+   "lagMs": 13,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -29,7 +29,7 @@
    "t": 4,
    "offsetMs": 0,
    "file": "b008_r08_+000.png",
-   "lagMs": -9,
+   "lagMs": 8,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -44,7 +44,7 @@
    "t": 4,
    "offsetMs": 160,
    "file": "b008_r08_+160.png",
-   "lagMs": -3,
+   "lagMs": -7,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -59,7 +59,7 @@
    "t": 8,
    "offsetMs": -80,
    "file": "b016_r16_-080.png",
-   "lagMs": 0,
+   "lagMs": 2,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -74,7 +74,7 @@
    "t": 8,
    "offsetMs": 0,
    "file": "b016_r16_+000.png",
-   "lagMs": -10,
+   "lagMs": -4,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -89,7 +89,7 @@
    "t": 8,
    "offsetMs": 160,
    "file": "b016_r16_+160.png",
-   "lagMs": -5,
+   "lagMs": -4,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -104,7 +104,7 @@
    "t": 12,
    "offsetMs": -80,
    "file": "b024_r08_-080.png",
-   "lagMs": 0,
+   "lagMs": 9,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -119,7 +119,7 @@
    "t": 12,
    "offsetMs": 0,
    "file": "b024_r08_+000.png",
-   "lagMs": -7,
+   "lagMs": 7,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -134,7 +134,7 @@
    "t": 12,
    "offsetMs": 160,
    "file": "b024_r08_+160.png",
-   "lagMs": -2,
+   "lagMs": 3,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -149,7 +149,7 @@
    "t": 16,
    "offsetMs": -80,
    "file": "b032_r16_-080.png",
-   "lagMs": 0,
+   "lagMs": 7,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -164,7 +164,7 @@
    "t": 16,
    "offsetMs": 0,
    "file": "b032_r16_+000.png",
-   "lagMs": 4,
+   "lagMs": 10,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -179,7 +179,7 @@
    "t": 16,
    "offsetMs": 160,
    "file": "b032_r16_+160.png",
-   "lagMs": 0,
+   "lagMs": 9,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -194,7 +194,7 @@
    "t": 20,
    "offsetMs": -80,
    "file": "b040_r08_-080.png",
-   "lagMs": 2,
+   "lagMs": 13,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -209,7 +209,7 @@
    "t": 20,
    "offsetMs": 0,
    "file": "b040_r08_+000.png",
-   "lagMs": -5,
+   "lagMs": 23,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -224,7 +224,7 @@
    "t": 20,
    "offsetMs": 160,
    "file": "b040_r08_+160.png",
-   "lagMs": -1,
+   "lagMs": -2,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -239,7 +239,7 @@
    "t": 24,
    "offsetMs": -80,
    "file": "b048_r16_-080.png",
-   "lagMs": -1,
+   "lagMs": 25,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -254,7 +254,7 @@
    "t": 24,
    "offsetMs": 0,
    "file": "b048_r16_+000.png",
-   "lagMs": -4,
+   "lagMs": 46,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -269,7 +269,7 @@
    "t": 24,
    "offsetMs": 160,
    "file": "b048_r16_+160.png",
-   "lagMs": -4,
+   "lagMs": 7,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -284,7 +284,7 @@
    "t": 28,
    "offsetMs": -80,
    "file": "b056_r08_-080.png",
-   "lagMs": 1,
+   "lagMs": 41,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -299,7 +299,7 @@
    "t": 28,
    "offsetMs": 0,
    "file": "b056_r08_+000.png",
-   "lagMs": -5,
+   "lagMs": 95,
    "probe": {
     "bpm": 0,
     "phase": 0,
@@ -314,7 +314,7 @@
    "t": 28,
    "offsetMs": 160,
    "file": "b056_r08_+160.png",
-   "lagMs": 1,
+   "lagMs": 48,
    "probe": {
     "bpm": 0,
     "phase": 0,

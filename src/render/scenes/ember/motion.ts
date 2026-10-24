@@ -1,7 +1,8 @@
 /**
- * Ember's clocks, kept out of the shader so they can be tested: the swell
- * that takes the fire from bare crest lines to a full glowing body and back,
- * and the kick lift that throws the fronts upward.
+ * Ember's clocks and burners, kept out of the GL code so they can be
+ * tested: the swell that takes the fire from a low glow to a full screen and
+ * back, the kick lift that throws it upward, and the row of burners along
+ * the bottom that feed the fluid sim its dye and its upward push.
  *
  * The swell's shape is measured, not designed: `SWELL_SHAPE` is the
  * reference loop's mean frame brightness in even steps across its period
@@ -60,4 +61,57 @@ export function advanceLift(s: LiftState, dtSec: number, size: number): number {
   s.target = Math.max(s.target * Math.exp(-dt / LIFT_FALL_SEC), size);
   s.level += (s.target - s.level) * (1 - Math.exp(-dt / LIFT_ATTACK_SEC));
   return s.level;
+}
+
+/** How many burners sit along the bottom edge — one fluid-sim splat each. */
+export const BURNERS = 8;
+
+export interface Burner {
+  /** Sim uv, 0..1 across and up. */
+  x: number;
+  y: number;
+  /** -1..1: how hard this burner pushes right now, before any scaling. */
+  sway: number;
+  /** 0.4..1: this burner's share of the push and the dye. */
+  flare: number;
+}
+
+/** Burner `i` at time `t`: an even row along the bottom, each one wandering
+ *  less than half its spacing so neighbours never cross, flaring and swaying
+ *  on its own slow, unrelated periods, so the plumes never rise in step. */
+export function burnerAt(i: number, t: number): Burner {
+  const k = i + 1;
+  const spacing = 1 / BURNERS;
+  const wander = 0.4 * spacing * Math.sin(t * (0.11 + 0.023 * k) + 2.1 * k);
+  return {
+    x: (i + 0.5) * spacing + wander,
+    y: 0.02,
+    sway: Math.sin(t * (0.19 + 0.031 * k) + 1.3 * k),
+    flare: 0.7 + 0.3 * Math.sin(t * (0.27 + 0.041 * k) + 0.7 * k),
+  };
+}
+
+/** How many stirrers wander through the body: force-only splats, no dye. */
+export const STIRRERS = 3;
+
+export interface Stirrer {
+  x: number;
+  y: number;
+  /** Unit direction of the push. */
+  dx: number;
+  dy: number;
+}
+
+/** Stirrer `i` at time `t`: drifting through the middle of the fire on its
+ *  own slow loop, its push turning steadily, so the body keeps folding over
+ *  even where no plume has reached yet. */
+export function stirrerAt(i: number, t: number): Stirrer {
+  const k = i + 1;
+  const a = t * (0.23 + 0.05 * k) + 2.4 * k;
+  return {
+    x: 0.5 + 0.38 * Math.sin(t * (0.07 + 0.017 * k) + 1.9 * k),
+    y: 0.38 + 0.16 * Math.sin(t * (0.09 + 0.021 * k) + 0.8 * k),
+    dx: Math.cos(a),
+    dy: Math.sin(a),
+  };
 }
