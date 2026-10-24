@@ -2,7 +2,7 @@
 import type { Scene, SceneCard } from "../scene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { FREEZE_REF, SNAP_REF, ZONE_AXIS_MAX } from "./chladniSand.ts";
-import { MODE_TABLE, PLATE_SHAPES, SQUARE } from "./chladniPlates.ts";
+import { MODE_TABLE, PLATE_SHAPES, SQUARE } from "./chladniModeTable.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "released", added: "2026-08-30" } as const;
