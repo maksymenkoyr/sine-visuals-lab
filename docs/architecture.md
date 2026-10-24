@@ -72,12 +72,9 @@ the Setup view's Waveform row (Input check card) is fed by `src/audio/waveformAn
 (math in `waveform.ts`), which reads time-domain samples straight off this
 device's own mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV" below —
-a viewer with no local mic doesn't get that row at all. The same card's
-History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
-diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field — its own Gate row right after it reads
-`AnimFrame.gateDimmer`. Its LUFS row
-is the same kind of read: BS.1770 LUFS
+a viewer with no local mic doesn't get that row at all. The same card's Gate
+row reads `AnimFrame.gateDimmer`. Its LUFS row
+is the same kind of read as Waveform: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer. (The Waveform row
 is not: there it draws the followed device's waveform, off the frame's wave

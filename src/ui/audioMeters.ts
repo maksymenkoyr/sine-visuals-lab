@@ -71,7 +71,6 @@ import {
   digitsStyle,
   digitsTextStyle,
   groupHeading,
-  groupHeadingFirstStyle,
   groupHeadingStyle,
   percentReadout,
   readoutStyle,
@@ -110,10 +109,10 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * everything about *when*, Song is the slow trend over a whole track.
  *
  *  - Setup view (setupEl, opened from the panel footer): the rows checked
- *    once per set, in cards of their own: Input check, the Bands card
- *    (deviceMenu.ts builds it, addSetupCard places it), Hit shape and the
- *    Heat history card. The Sound card (foldId "sound") is first in the
- *    meters column.
+ *    once per set, in cards of their own: Input check, Hit shape, the Bands
+ *    card (deviceMenu.ts builds it, addSetupCard places it) and the Heat
+ *    history card; deviceMenu.ts appends the Power card last. The Sound card
+ *    (foldId "sound") is first in the meters column.
  *  - Input check: everything this device's own mic measures, before any
  *    beat/tempo logic runs — Waveform leads it off: a rolling picture of the
  *    last few seconds with a clip warning, read straight off this device's
@@ -291,7 +290,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
 
 export interface AudioMeters {
   el: HTMLElement;
-  /** The Setup view's column (Input check, Hit shape, Heat history, and the Bands card via addSetupCard); deviceMenu.ts places it. */
+  /** The Setup view's column (Input check, Hit shape, the Bands card via addSetupCard, Heat history); deviceMenu.ts places it. */
   setupEl: HTMLElement;
   /** Tells the meters whether the Setup view is open; a closed one skips its draws and jack writes. */
   setSetupOpen(open: boolean): void;
@@ -720,7 +719,7 @@ function flashRow(el: HTMLElement): void {
   if (anim) rowFlashes.set(el, anim);
 }
 
-export interface MeterRowSpec {
+interface MeterRowSpec {
   label: string;
   accent: string;
   /** Mono suffix after the digits ("%", "bpm"). */
@@ -744,7 +743,7 @@ interface ReadoutOpts {
   unit?: string;
 }
 
-export function createMeterRow(spec: MeterRowSpec) {
+function createMeterRow(spec: MeterRowSpec) {
   const el = document.createElement("div");
   el.className = "vc-row";
   if (spec.description) el.tabIndex = 0;
@@ -1889,21 +1888,6 @@ const meanOf = (v: Float32Array) => {
   for (let i = 0; i < v.length; i++) sum += v[i];
   return v.length > 0 ? sum / v.length : 0;
 };
-
-// The Beat/Song dividers between cards: plain divs in `root`. Modelled
-// on groupHeadingFirstStyle, not the bordered groupHeadingStyle: a border would
-// read as a second card edge under the real one. The extra top margin is what
-// separates a heading from the card above.
-const meterGroupHeadingStyle = `${groupHeadingFirstStyle} margin: 18px 0 8px;`;
-
-/** Exported so shapingColumn.ts builds its "Modifiers" heading with the same
- *  look as "Beat"/"Song" here: one owner for the style. */
-export function meterGroupHeading(text: string): HTMLElement {
-  const el = document.createElement("div");
-  el.textContent = text;
-  el.style.cssText = meterGroupHeadingStyle;
-  return el;
-}
 
 // The Song card's dial strip: one cell per MUSIC_DIALS entry.
 const dialStripStyle = `display: grid; grid-template-columns: repeat(${MUSIC_DIALS.length}, minmax(0, 1fr)); gap: 4px;`;

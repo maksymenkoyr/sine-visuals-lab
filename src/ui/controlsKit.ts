@@ -83,7 +83,7 @@ export const groupHeadingStyle = `
   color: rgba(255,255,255,0.45); margin: 14px 0 8px; padding-top: 10px;
   border-top: 1px solid rgba(255,255,255,0.1);
 `;
-export const groupHeadingFirstStyle = `
+const groupHeadingFirstStyle = `
   font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
   color: rgba(255,255,255,0.45); margin: 2px 0 8px;
 `;

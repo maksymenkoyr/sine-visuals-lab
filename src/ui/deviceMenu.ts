@@ -251,8 +251,8 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * file's own names (patch, source, cable) stay code-side.
  *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
- * Every reactive meter row/lane — audioMeters.ts's own (Sound/Hits/Tempo/
- * Character) plus this file's own Bands card's Frequencies corner
+ * Every reactive meter row/lane — audioMeters.ts's own (Sound/Hits/Beat/
+ * Song) plus this file's own Bands card's Frequencies corner
  * (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
  * pinned) setting, with tiny usage dots around the ring for how many of
@@ -6760,8 +6760,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     root.classList.toggle("vc-meters-hidden", hidden);
     metersBtn.textContent = hidden ? "Show left  M" : "Hide left  M";
     metersBtn.title = hidden
-      ? "Bring back the Bands card and the meters (M)"
-      : "Hide the Bands card and the meters, keep the controls (M)";
+      ? "Bring back the meters (M)"
+      : "Hide the meters, keep the controls (M)";
     // Hiding/showing the column changes which cards have a layout box without
     // touching any vc-folded class, so the observer never fires: recompute.
     refreshColumnsFold();
