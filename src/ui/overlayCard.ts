@@ -33,7 +33,7 @@ import { createControlRow } from "./deviceMenu.ts";
  * because a TV will not show it.
  */
 
-export interface OverlayCardState {
+interface OverlayCardState {
   text: string;
   position: OverlayPosition;
   size: number;

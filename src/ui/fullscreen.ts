@@ -23,7 +23,7 @@ interface PrefixedFullscreenEl extends HTMLElement {
   webkitRequestFullscreen?: () => Promise<void> | void;
 }
 
-export function fullscreenSupported(): boolean {
+function fullscreenSupported(): boolean {
   const d = document as PrefixedFullscreenDoc;
   return !!(d.fullscreenEnabled ?? d.webkitFullscreenEnabled);
 }

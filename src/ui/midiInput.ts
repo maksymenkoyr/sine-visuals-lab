@@ -72,7 +72,7 @@ export interface MidiEnv {
   keyTarget?: Pick<Window, "addEventListener">;
 }
 
-export interface MidiSnapshot {
+interface MidiSnapshot {
   supported: boolean;
   connected: boolean;
   connecting: boolean;
