@@ -10,7 +10,10 @@ raymarched scene of its own), gated to `minQuality: "mid"`.
 
 ## Where the code is
 
-- `src/render/scenes/ferrofluid.ts` — one fragment shader body (`FRAG`)
+- `src/render/scenes/ferrofluid.card.ts` — the card, loaded with the page: id,
+  name, `minQuality` and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/ferrofluid.ts` — the body (the scene module), loaded after
+  first paint: one fragment shader body (`FRAG`)
   passed to `createFullscreenScene()` with `{ minQuality: "mid" }`. No
   `settings`, no `extraUniforms`, no per-scene helper module.
 - `modeDir(i)` places each band's direction (one per `NUM_BANDS`) on a sphere
@@ -49,6 +52,7 @@ None — original design.
   step are gone. `pow` itself is kept, so the picture is bit-identical.
   A tetrahedral `calcNormal` would be cheaper still but changes the shading,
   so it was left alone.
+- 2026-10-24 — Id, name, minQuality and gallery record moved to `src/render/scenes/ferrofluid.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

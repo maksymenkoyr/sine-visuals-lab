@@ -1,5 +1,6 @@
 import { NUM_BANDS } from "../../audio/types.ts";
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./ferrofluid.card.ts";
 
 // A raymarched black-chrome blob that grows spikes toward one fixed
 // direction per band (spread evenly via the golden angle), each spike's
@@ -80,10 +81,4 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-// The heaviest of the small raymarch scenes (see comment above) — worse than tunnel.ts, which
-// itself is gated to minQuality "low". uMaxSteps alone isn't enough protection:
-// gate the gallery/scene picker too, or a floor-quality device can select it.
-export const ferrofluidScene = createFullscreenScene("ferrofluid", "Ferrofluid", FRAG, { minQuality: "mid" });
+export const ferrofluidScene = createFullscreenScene(card.id, card.name, FRAG, { minQuality: card.minQuality });

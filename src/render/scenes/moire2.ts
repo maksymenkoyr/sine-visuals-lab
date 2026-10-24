@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./moire2.card.ts";
 
 // Kept under its own id after src/render/scenes/moire.ts was rebuilt
 // (2026-09-11) from a measured reference — see that file's header. This is
@@ -55,7 +56,4 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-export const moire2Scene = createFullscreenScene("moire2", "Moiré 2", FRAG);
+export const moire2Scene = createFullscreenScene(card.id, card.name, FRAG);

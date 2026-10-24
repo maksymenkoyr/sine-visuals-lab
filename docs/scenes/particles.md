@@ -7,7 +7,10 @@ and drifting on a small flow field. Small, original scene; a draft (in
 
 ## Where the code is
 
-- `src/render/scenes/particles.ts` — the whole scene is one fragment shader
+- `src/render/scenes/particles.card.ts` — the card, loaded with the page: id,
+  name and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/particles.ts` — the body (the scene module), loaded after
+  first paint: the whole scene is one fragment shader
   body (`FRAG`) passed to `createFullscreenScene()`
   (`src/render/fullscreenScene.ts`). No `settings`, no `extraUniforms`, no
   per-scene helper module.
@@ -31,6 +34,7 @@ None — original design.
 - 2026-08-29 (`4b8d342`, #31) — mechanical rename only: `uQuality` →
   `uDetail` as part of the repo-wide quality/tier renaming; no visual
   change.
+- 2026-10-24 — Id, name and gallery record moved to `src/render/scenes/particles.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

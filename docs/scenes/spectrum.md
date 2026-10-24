@@ -6,7 +6,10 @@ grid. One of the launch scenes; a draft on main (in `DRAFT_SCENE_IDS`), not iter
 
 ## Where the code is
 
-- `src/render/scenes/spectrum.ts` — the entire scene is a single fragment
+- `src/render/scenes/spectrum.card.ts` — the card, loaded with the page: id,
+  name and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/spectrum.ts` — the body (the scene module), loaded after
+  first paint: the entire scene is a single fragment
   shader body passed to `createFullscreenScene` (`src/render/fullscreenScene.ts`),
   the shared helper that wires up the common uniforms, palette, and
   `roomUv`/`sampleBands` GLSL for any scene that's just a fullscreen shader
@@ -30,6 +33,7 @@ None — original design.
 - 2026-08-29 (`#31`, `4b8d342`) — mechanical only: the quality proxy was
   renamed `uQuality` → `uDetail` project-wide; not scene-specific to
   Spectrum (this scene doesn't reference it directly).
+- 2026-10-24 — Id, name and gallery record moved to `src/render/scenes/spectrum.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
