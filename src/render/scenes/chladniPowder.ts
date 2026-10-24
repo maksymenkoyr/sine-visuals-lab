@@ -49,11 +49,11 @@ export const POWDER_MIN_DISTANCE = 0.1;
 export const POWDER_L_MIN = 0.55;
 /** About the brightness gain POINT_VERT gives a grain at the default Grain
  *  brightness: what the "lit" comparison in distanceFromGrit assumes. */
-export const POWDER_LIT_GAIN = 1.8;
+const POWDER_LIT_GAIN = 1.8;
 /** The made colour when no ink or accent qualifies: see the header. */
-export const POWDER_HUE_TURN = Math.PI;
-export const POWDER_FALLBACK_L = 0.62;
-export const POWDER_FALLBACK_C = 0.16;
+const POWDER_HUE_TURN = Math.PI;
+const POWDER_FALLBACK_L = 0.62;
+const POWDER_FALLBACK_C = 0.16;
 
 /** palRamp(t) as the shader reads it: linear between the baked stops. */
 function rampAt(ramp: Float32Array, t: number): Rgb {
@@ -66,7 +66,7 @@ function rampAt(ramp: Float32Array, t: number): Rgb {
 
 /** A grit grain's colour under `p` at `motion` (0 settled .. 1 fully thrown),
  *  before brightness. Mirrors the grit colour in POINT_VERT. */
-export function gritColour(p: Palette, motion: number): Rgb {
+function gritColour(p: Palette, motion: number): Rgb {
   const m = Math.min(1, Math.max(0, motion));
   const c = rampAt(paletteVecs(p).ramp, GRIT_RAMP_LO + GRIT_RAMP_SPAN * m);
   const grey = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];

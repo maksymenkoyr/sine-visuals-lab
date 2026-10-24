@@ -79,7 +79,7 @@ export function room() {
 }
 
 // A ribbed tube: base + shadow side + rim + rib rings.
-export function tube(pts: number[][], w: number, base: string, shade: string, rim: string) {
+function tube(pts: number[][], w: number, base: string, shade: string, rim: string) {
   let s = shape(tubeD(pts, pts.map(() => w), 40), base, 1.4, PLUM);
   const S = crSample(pts, 40);
   const sh = tubeD(pts.map((p) => [p[0] + w * 0.22, p[1]]), pts.map(() => w * 0.45), 40);
@@ -97,7 +97,7 @@ export function tube(pts: number[][], w: number, base: string, shade: string, ri
 // The back crowd: rows of small heads behind a curved balcony rail, angular mass.
 // Each row is a rig (it bounces); each head carries three eye cels switched per row by class:
 // e0 = the still's pinpoint squint, e1 = grooving (big pupils toward the DJ), e2 = wide-eyed.
-export const railY = (x: number) => 560 - (x - 600) * 0.03 + Math.pow((x - 1100) / 700, 2) * 20;
+const railY = (x: number) => 560 - (x - 600) * 0.03 + Math.pow((x - 1100) / 700, 2) * 20;
 export function backCrowd() {
   ART.seed = 5;
   let s = '';
@@ -157,7 +157,7 @@ export function floor() {
 
 // Two laser beams from the ceiling (new; hidden at the hero frame). Each beam points along +x from
 // its source and motion.js rotates it.
-export const LASERS: [number, number, string][] = [[150, 70, '#8cff3a'], [1470, 60, '#ff4fd8']];
+const LASERS: [number, number, string][] = [[150, 70, '#8cff3a'], [1470, 60, '#ff4fd8']];
 export function lasers() {
   return LASERS.map(([_x, _y, c], i) => rig('laser' + i,
     `<path d="M0,-3 L1900,-22 L1900,22 L0,3Z" fill="${c}" opacity="0.4"/><path d="M0,-1.4 L1900,-7 L1900,7 L0,1.4Z" fill="#f4ffe8" opacity="0.55"/>${glowCircle(0, 0, 12, 8, c)}<circle r="6" fill="#fff"/>`,

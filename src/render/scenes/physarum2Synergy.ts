@@ -49,11 +49,11 @@ const PERMS: number[][] = [];
 
 /** A different harmony, or the same one with the strains in different places,
  *  must fit this much better (cost ratio) to replace the current choice. */
-export const HARMONY_STICK = 1.6;
+const HARMONY_STICK = 1.6;
 
 /** Time constant, seconds, of the glide the shown hues take to a new target
  *  (a knob drag, a switch of harmony or of places). */
-export const SETTLE_SECONDS = 0.12;
+const SETTLE_SECONDS = 0.12;
 
 /** The shortest signed distance between two hues, in turns: [-0.5, 0.5)
  *  (Math.round rounds a half up, so exactly half a turn comes out as -0.5). */
@@ -107,7 +107,7 @@ export function nearestHarmony(
   return kept && kept.cost <= best!.cost * HARMONY_STICK + 1e-5 ? kept : best!;
 }
 
-export interface SynergyResult {
+interface SynergyResult {
   /** Each strain's stain shift as shown, in turns: the set shift pulled toward
    *  the harmony. Exactly the set shift at synergy 0. */
   shift: number[];

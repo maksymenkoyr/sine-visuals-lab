@@ -488,8 +488,6 @@ export {
   layerEnvelope,
   ZOOM_MID,
   ZOOM_AMP,
-  type CrystalState,
   type CrystalInputs,
   type CrystalOpts,
-  type CrystalOut,
 } from "./driver.ts";

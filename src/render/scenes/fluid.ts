@@ -139,19 +139,19 @@ export const EMIT_SIGMA = 0.07;
  *  filament as the flow carries it outward, instead of a blob's soft plume. */
 export const EMIT_RING = 0.25;
 export const EMIT_RING_SIGMA = 0.012;
-export const EMIT_FORCE_BASE = 15;
-export const EMIT_FORCE_ENERGY = 25;
-export const EMIT_KICK_LOW = 50;
-export const EMIT_KICK_BEAT = 25;
+const EMIT_FORCE_BASE = 15;
+const EMIT_FORCE_ENERGY = 25;
+const EMIT_KICK_LOW = 50;
+const EMIT_KICK_BEAT = 25;
 export const EMIT_SWAY = 0.6;
-export const EMIT_SWAY_RATE = 0.35;
+const EMIT_SWAY_RATE = 0.35;
 /** Extra emitter force from a beat puff / a drop, gated by beatKick. */
-export const PUFF_FORCE = 200;
-export const DROP_FORCE = 300;
+const PUFF_FORCE = 200;
+const DROP_FORCE = 300;
 /** Continuous (always-on) and puff-driven dye injection at the emitter. */
-export const DYE_BASE_CONT = 0.05;
-export const DYE_ENERGY_CONT = 0.04;
-export const PUFF_DYE = 4;
+const DYE_BASE_CONT = 0.05;
+const DYE_ENERGY_CONT = 0.04;
+const PUFF_DYE = 4;
 
 /** Beat puff clock: fires an emitter/splat spike on a bass or broadband
  *  onset (or, once tempo-locked, on the beat-phase wrap), with a
@@ -160,17 +160,17 @@ export const PUFF_DYE = 4;
  *  exponential-decay ring shape caustics' own ring emitter uses
  *  (src/render/scenes/rippleEmitter.ts's rippleEnvelope): a short attack so
  *  a puff reads as a ring, not a step, then an exponential decay. */
-export const PUFF_ATTACK = 0.03;
-export const PUFF_DECAY = 6;
+const PUFF_ATTACK = 0.03;
+const PUFF_DECAY = 6;
 export const PUFF_FALLBACK_AFTER = 1.5;
 export const PUFF_FALLBACK_RATE = 1.6;
 /** Which live signal fires a puff when not falling back to silence: an
  *  onset edge, or (once tempo-locked) the beat-phase wrap. A constant, not a
  *  setting — for sweeping from the screenshot script, not the device menu. */
-export const PUFF_TRIGGER: "onset" | "beatPhase" = "onset";
+const PUFF_TRIGGER: "onset" | "beatPhase" = "onset";
 /** Puffs closer together than this are dropped: on real music the onset
  *  stream can fire several times a second, and every puff is a full ring. */
-export const PUFF_MIN_GAP = 0.25;
+const PUFF_MIN_GAP = 0.25;
 
 export function puffEnv(ageSec: number): number {
   if (ageSec < 0) return 0;
@@ -238,25 +238,25 @@ export function advancePuff(
 /** Per-slot delay between the centre emitter's puff and each secondary
  *  splat's own puff-driven spike — a beat's ripple visibly reaching each
  *  splat point in turn rather than every slot firing at once. */
-export const SPLAT_DELAY = 0.08;
+const SPLAT_DELAY = 0.08;
 /** How much of the old free-running sawtooth (splatEnvelope) still blends
  *  under the puff-driven envelope, so secondary splats keep stirring the
  *  plume in silence rather than going fully dark between puffs. */
-export const SPLAT_FALLBACK_MIX = 0.35;
+const SPLAT_FALLBACK_MIX = 0.35;
 
 /** Secondary periodic splats: rate of the [0,1] envelope cycle per second of
  *  flowPhase, its exponential decay shape, and per-slot force/dye/sigma. */
 export const SPLAT_RATE = 0.18;
-export const SPLAT_DECAY = 0.12;
-export const SPLAT_FORCE = 60;
-export const SPLAT_DYE = 0.4;
+const SPLAT_DECAY = 0.12;
+const SPLAT_FORCE = 60;
+const SPLAT_DYE = 0.4;
 export const SPLAT_SIGMA = 0.12;
 
 export const SIM_DT_MAX = 1 / 30;
 export const SIM_DT_DEFAULT = 1 / 60;
 /** warpedDt's clamp floor/gain — see its own comment below. */
 export const WARP_MIN = 0.85;
-export const WARP_GAIN = 0.3;
+const WARP_GAIN = 0.3;
 
 /** Tempo warp: scales the sim's own timestep by loudness and the `warp`
  *  setting, so louder passages visibly speed the whole flow up (clamped to
@@ -313,14 +313,14 @@ export function emitterPosition(mirror: MirrorMode): [number, number] {
  *  (the reference video's geometry), about three times the distance the
  *  quadrant's jet covers before it meets a wall — with the quadrant's push it
  *  rolls into a tight ball at the emitter, so it gets a stronger push. */
-export const TB_PUSH_SCALE = 3.0;
+const TB_PUSH_SCALE = 3.0;
 /** Top-bottom's emitter sits this far off the seam (sim uv, seam at 0, edge
  *  at 1) — as in the reference video, where the source ball is at about a
  *  third of the height, so the jet is a free jet next to the seam rather
  *  than a wall jet riding it (a wall jet drags a bright dye streak along the
  *  seam and rolls into a ball at the wall). */
 export const TB_EMIT_Y = 0.4;
-export function emitterPushScale(mirror: MirrorMode): number {
+function emitterPushScale(mirror: MirrorMode): number {
   return mirror === MIRROR_TB ? TB_PUSH_SCALE : 1;
 }
 
@@ -339,7 +339,7 @@ export const BOLT_THROUGH_SPREAD = 0.3;
 /** Half-range, in radians, of a bolt's swing off the vertical: bolts come
  *  down through the screen rather than lying across it — the hand-drawn
  *  read — but never all at the same angle. */
-export const BOLT_ANGLE_SWING = 0.7;
+const BOLT_ANGLE_SWING = 0.7;
 /** The bolt layer is drawn at this fraction of the display's size: a ribbon
  *  a dozen texels wide there is a bold stroke on screen, and the layer's
  *  fill and mip rebuild stay cheap. */
@@ -522,10 +522,10 @@ export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL
 export const FOLD_FADE_SEC = 2.5;
 export const FOLD_HOLD_MIN = 10;
 export const FOLD_HOLD_MAX = 25;
-export const FOLD_ROT_BASE = 0.06;
-export const FOLD_ROT_ENERGY = 0.015;
+const FOLD_ROT_BASE = 0.06;
+const FOLD_ROT_ENERGY = 0.015;
 export const FOLD_ZOOM_AMP = 0.12;
-export const FOLD_ZOOM_RATE = 0.07;
+const FOLD_ZOOM_RATE = 0.07;
 
 /** Auto symmetry's drift state: warps from modeA to modeB over FOLD_FADE_SEC
  *  seconds (see foldMixEased for the eased ramp uploaded as uFoldMix), picks
@@ -1004,7 +1004,7 @@ export const SHOCK_SLOTS = 4;
 export const SHOCK_LIFE = 3;
 /** Ring expansion speed, screen heights per second — see the shockR/radius
  *  math in the display shader's main(). */
-export const SHOCK_SPEED = 0.9;
+const SHOCK_SPEED = 0.9;
 
 export interface ShockState {
   age: Float32Array;

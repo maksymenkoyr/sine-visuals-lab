@@ -40,11 +40,11 @@
  */
 
 export const TEMPO_SETTLE_SEC = 1.5;
-export const TEMPO_SETTLE_TOL = 0.03;
-export const TEMPO_SETTLE_SHARE = 0.6;
+const TEMPO_SETTLE_TOL = 0.03;
+const TEMPO_SETTLE_SHARE = 0.6;
 export const TEMPO_HOLD_BPM = 2;
 export const RETUNE_LOCK = 0.6;
-export const RETUNE_SURE_SEC = 1;
+const RETUNE_SURE_SEC = 1;
 export const RETUNE_UNSURE_SEC = 5;
 
 export interface TempoSettle {

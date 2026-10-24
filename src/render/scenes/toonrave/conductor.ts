@@ -39,7 +39,7 @@ export interface ConductorInput {
   paused?: boolean;
 }
 
-export interface ConductorOut {
+interface ConductorOut {
   /** Cycle position in beats, 0..cycleBeats, drop at 0. */
   c: number;
   bpm: number;
@@ -51,10 +51,10 @@ export interface Conductor {
   reset(): void;
 }
 
-export const DEFAULT_BPM = 120;
-export const BEATS_PER_BAR = 4;
+const DEFAULT_BPM = 120;
+const BEATS_PER_BAR = 4;
 /** A dropFired closer than this to the last drop is ignored (8 bars). */
-export const MIN_DROP_GAP_BEATS = 8 * BEATS_PER_BAR;
+const MIN_DROP_GAP_BEATS = 8 * BEATS_PER_BAR;
 /** Longest frame step trusted when free-running (a hidden tab, a stall). */
 const MAX_DT_SEC = 0.5;
 /** Share of a frame's beats the slew may add or remove per frame. */

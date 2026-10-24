@@ -65,7 +65,7 @@ export const RELAUNCH_SEC = 0.6;
 export const KICK_SLOTS = 8;
 /** Shortest gap between two kick stamps — a bass roll mustn't fill every
  *  slot in one beat. */
-export const KICK_MIN_GAP_SEC = 0.15;
+const KICK_MIN_GAP_SEC = 0.15;
 /** A kick's children are gone this long after it lands. */
 export const KICK_LIFE_SEC = 1.2;
 /** Lattice rows wrap at this period for the hash (a power of two — seeds.ts

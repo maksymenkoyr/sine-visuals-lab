@@ -161,7 +161,7 @@ const BURST_ACCEL = 24;
 /** How much of the impulse a grain sideways-on to the plume axis gets. Small:
  *  the difference between a directed plume and an expanding sphere shell. */
 const BURST_SIDE = 0.08;
-export const BURST_PUSH_SEC = 0.35;
+const BURST_PUSH_SEC = 0.35;
 /** The mushroom roll: a swirl about the plume axis that outlives the push. */
 const VORTEX = 0.45;
 const VORTEX_SEC = 1.0;
@@ -236,7 +236,7 @@ export const CHUNK_DEAD_T0 = -1e9;
 // section plus a strong pulse is the primary route and the level-vs-baseline
 // test stays as a second one, for a track whose sections never resolve.
 /** Time constant of the slow bass baseline the second route compares against. */
-export const BIG_HIT_BASE_TAU = 2.0;
+const BIG_HIT_BASE_TAU = 2.0;
 /** Minimum gap between two bass-triggered bursts. Long: in a loud section
  *  the cubes should fly on roughly every other bar, not every beat — and a
  *  bar is about 1.7 s at the tempo this was checked against, so anything
@@ -248,8 +248,8 @@ export const BIG_HIT_PULSE_MIN = 0.55;
 export const BIG_HIT_SECTION_MIN = 0.75;
 /** Second route: how far clear of its own slow baseline the bass level has
  *  to reach for a hit to count as big without a loud section behind it. */
-export const BIG_HIT_MARGIN = 1.25;
-export const BIG_HIT_FLOOR = 0.06;
+const BIG_HIT_MARGIN = 1.25;
+const BIG_HIT_FLOOR = 0.06;
 
 /** The palette breathes around the reference's blue/red pair; it never walks
  *  away from it. An accumulating offset reads as generic hue cycling and, on
@@ -263,7 +263,7 @@ export const HUE_DROP_EXCURSION = 0.05;
 export const HUE_RELAX_TAU = 6.0;
 /** Fraction of the shift the cubes take, so they stay recognisably coral
  *  while the powder swings further. */
-export const CHUNK_HUE_FRACTION = 0.4;
+const CHUNK_HUE_FRACTION = 0.4;
 
 /** Per-grain additive brightness scale. Additive blending over a couple of
  *  hundred thousand overlapping points blows out fast, so this is the one
@@ -393,7 +393,7 @@ function hash01(n: number): number {
 /** One live powder plume: where it starts, which way it throws, how hard,
  *  when it fired, and whether this is the first frame it has been uploaded
  *  on (the sim re-emits grains from the source on exactly that frame). */
-export interface Burst {
+interface Burst {
   originX: number;
   originY: number;
   originZ: number;
@@ -582,7 +582,7 @@ export function createBigHitDetector(): BigHitDetector {
 /** One live cube burst: when it started, how hard, the hash seed that decides
  *  its cubes' spread, and the powder plume's own origin and axis so the cubes
  *  fly out of the same place in the same direction. */
-export interface ChunkBurst {
+interface ChunkBurst {
   t0: number;
   strength: number;
   seed: number;

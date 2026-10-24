@@ -242,7 +242,7 @@ export type RGB = readonly [number, number, number];
  *  pair-culture value (`affinity-studio.html`'s `ensurePairCultures`:
  *  `makeCulture(72, 72, 1600, [a, b], 0.004)`), higher than the single-strain
  *  `RESPAWN_PER_STEP` since a two-strain dish this small coarsens faster. */
-export const PAIR_RESPAWN_PER_STEP = 0.004;
+const PAIR_RESPAWN_PER_STEP = 0.004;
 
 export interface PairCultureInputs {
   motion: readonly [StrainPreviewMotion, StrainPreviewMotion];

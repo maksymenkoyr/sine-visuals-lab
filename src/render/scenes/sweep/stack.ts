@@ -73,7 +73,7 @@ export const ROOM_PALETTE = PALETTES.length;
 
 /** Palette step between a Pair's two stacks (Pool's blue/purple sit one
  *  stop apart; Ember's red/navy one stop the other way round). */
-export const PAIR_PALETTE_STEP = 0.2;
+const PAIR_PALETTE_STEP = 0.2;
 
 /** Every shape fits inside this of its centre at scale 1 and Stretch 1
  *  (glsl.ts's shapeSdf) — the copy reject and the bounding boxes. */
@@ -88,9 +88,9 @@ export const MAX_STACKS = 2;
 export const SHAPE_BLEND_SLOPE = 1.5;
 
 /** Steps' band height at Steps = 1, half-heights. */
-export const STEP_MAX = 0.09;
+const STEP_MAX = 0.09;
 
-export type Vec2 = readonly [number, number];
+type Vec2 = readonly [number, number];
 
 /** Effective knob values (settings with their drives applied). */
 export interface Knobs {
@@ -129,7 +129,7 @@ export interface Knobs {
 // ---------------------------------------------------------------- rng
 
 /** mulberry32: small, seedable, good enough for picking a path. */
-export function createRng(seed: number): () => number {
+function createRng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -219,7 +219,7 @@ export function bezier(p: StackGeom["p"], s: number): [number, number] {
 
 /** The path parameter a stack starts from: both ends of its span begin
  *  here, and Shape drift counts from here. */
-export function spanOrigin(spread: number): number {
+function spanOrigin(spread: number): number {
   return 0.5 * Math.min(1, Math.max(0, spread));
 }
 
@@ -240,7 +240,7 @@ export function endScales(size: number, taper: number): [number, number] {
 }
 
 /** Shape drift as SHAPES steps per unit of the path parameter. */
-export function driftRate(shapeDrift: number): number {
+function driftRate(shapeDrift: number): number {
   return shapeDrift * SHAPES.length;
 }
 
@@ -248,7 +248,7 @@ export function driftRate(shapeDrift: number): number {
 
 /** How fast the eased head approaches the end of its path per unit of
  *  progress. */
-export const HEAD_EASE = 1.6;
+const HEAD_EASE = 1.6;
 
 /** Where a fresh path's head starts — the reel's pieces open with the
  *  shape already there, not a bare ground. */
@@ -271,7 +271,7 @@ export function newPathDivisor(amount: number, defaultAmount: number, base: numb
 
 // ---------------------------------------------------------------- packing
 
-export function hexToRgb(hex: string): [number, number, number] {
+function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
@@ -304,12 +304,12 @@ export interface FrameState {
   morph: number;
 }
 
-export function copiesFor(copies: number): number {
+function copiesFor(copies: number): number {
   return Math.max(2, Math.min(MAX_COPIES, Math.round(copies)));
 }
 
 /** Box (minX, minY, maxX, maxY) holding every copy of a stack on [s0, s1]. */
-export function stackBounds(g: StackGeom, s0: number, s1: number, k: Knobs): [number, number, number, number] {
+function stackBounds(g: StackGeom, s0: number, s1: number, k: Knobs): [number, number, number, number] {
   const [tailScale, headScale] = endScales(k.size, k.taper);
   const reach = SHAPE_REACH * Math.max(1, k.stretch);
   const pad = 2 * k.blur + k.outline * 1.6 + k.steps * STEP_MAX;

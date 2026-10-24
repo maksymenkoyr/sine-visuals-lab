@@ -18,12 +18,12 @@
 
 import { MAX_SHARDS, PALETTE } from "./layout.ts";
 
-export const FOCAL = 1 / Math.tan((60 * Math.PI) / 180 / 2);
-export const NEAR = 0.08;
-export const FAR = 80;
+const FOCAL = 1 / Math.tan((60 * Math.PI) / 180 / 2);
+const NEAR = 0.08;
+const FAR = 80;
 /** Bloom weight at Bloom = 1 — the measured halo sits near 0.2 of the core
  *  a few pixels out, so the blurred layer is added quietly. */
-export const BLOOM_WEIGHT = 0.7;
+const BLOOM_WEIGHT = 0.7;
 /** Only what is brighter than this feeds the halo: rims and the lit faces,
  *  not the whole plate. */
 export const BLOOM_THRESHOLD = 0.6;

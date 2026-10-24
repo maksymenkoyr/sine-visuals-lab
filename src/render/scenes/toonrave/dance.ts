@@ -58,7 +58,7 @@ const FLAT_RANGE = 0.04;
 /** No fire for this many beats: the beat is "holding" (kept, not confirmed). */
 const HOLD_BEATS = 3;
 
-export type DanceStatus = "none" | "finding" | "locked" | "holding";
+type DanceStatus = "none" | "finding" | "locked" | "holding";
 
 export interface Dance {
   /** Advance by dtSec with this frame's fire and the signal's value (0..1). */
@@ -176,7 +176,7 @@ const PUMP_KICK = 0.2;
 /** How fast energy rises to a floor above it, per second. */
 const RISE_PER_SEC = 8;
 
-export interface EnergyInputs {
+interface EnergyInputs {
   /** The Energy slider: where energy settles with no signal. */
   base: number;
   /** The Energy boost slider, and its signal's level (0..1). */

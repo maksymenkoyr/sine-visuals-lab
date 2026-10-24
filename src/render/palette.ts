@@ -51,7 +51,7 @@ export type PaletteGroup = "Classic" | "Contrast" | "Night" | "Heat" | "Neon" | 
 export const PALETTE_GROUPS: readonly PaletteGroup[] = ["Classic", "Contrast", "Night", "Heat", "Neon", "Film", "Mineral", "Mono"];
 
 /** `#rrggbb` colours, by job — see the header. */
-export interface PaletteRoles {
+interface PaletteRoles {
   ground: string;
   /** Darkest first; lightness strictly rising. */
   ramp: readonly string[];
@@ -304,11 +304,6 @@ export const PALETTES: Palette[] = [
 
 export function getPalette(id: string): Palette {
   return PALETTES.find((p) => p.id === id) ?? PALETTES[0];
-}
-
-export function randomPalette(excludeId?: string): Palette {
-  const options = excludeId ? PALETTES.filter((p) => p.id !== excludeId) : PALETTES;
-  return options[Math.floor(Math.random() * options.length)];
 }
 
 /** The ramp baked to `n` evenly spaced `#rrggbb` stops, for drawing a

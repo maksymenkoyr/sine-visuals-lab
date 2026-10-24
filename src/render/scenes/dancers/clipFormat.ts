@@ -54,7 +54,7 @@ export interface ClipLibrary {
   byName: ReadonlyMap<string, Clip>;
 }
 
-export const CLIP_MAGIC = 0x314e4344; // "DCN1"
+const CLIP_MAGIC = 0x314e4344; // "DCN1"
 const ROOT_SCALE = 1000; // metres → mm in int16
 const QUAT_SCALE = 32767;
 const HEADER_BYTES = 12;

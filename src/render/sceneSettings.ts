@@ -495,7 +495,7 @@ export const setSceneExpansion = expansionDial.set;
 export const EXPANSION_SHAPES = ["even", "softTop", "bigMoves", "upOnly", "downOnly"] as const;
 export type ExpansionShape = (typeof EXPANSION_SHAPES)[number];
 export const EXPANSION_SHAPE_DEFAULT: ExpansionShape = "even";
-export const SCENE_EXPANSION_SHAPE_KEY = "vibe.sceneExpansionShape";
+const SCENE_EXPANSION_SHAPE_KEY = "vibe.sceneExpansionShape";
 
 const shapeDial = createDeviceDial(SCENE_EXPANSION_SHAPE_KEY, 0, EXPANSION_SHAPES.length - 1, 0);
 export function getSceneExpansionShape(): ExpansionShape {

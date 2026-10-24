@@ -50,14 +50,14 @@ const wrapPi = (a: number): number => a - TAU * Math.round(a / TAU);
  *  Arms, `k` scales the wavenumber, `n` scales Travel, `a` is the share of
  *  the height. No two share a direction or a speed, so their sum never
  *  settles into one plain pattern. */
-export const SWELL_WAVES = [
+const SWELL_WAVES = [
   { sign: 1, m: 0, k: 1, n: 1, a: 1 },
   { sign: -1, m: -2, k: 1 / 0.62, n: 2, a: 0.45 },
   { sign: 0, m: 0, k: 1 / 1.7, n: -1, a: 0.35 },
 ] as const;
 /** Offset and weight change per unit of height, in cells and cell areas. */
-export const SWELL_SHIFT = 0.5;
-export const SWELL_WEIGHT = 0.35;
+const SWELL_SHIFT = 0.5;
+const SWELL_WEIGHT = 0.35;
 /** The height follows the Swell drive as FLOOR + GAIN · drive. */
 export const SWELL_FLOOR = 0.3;
 export const SWELL_GAIN = 0.9;
@@ -66,7 +66,7 @@ export const SWELL_GAIN = 0.9;
 export const SWELL_REST = (1 - SWELL_FLOOR) / SWELL_GAIN;
 const SWELL_SALT = 301;
 
-export function easeOutBack(x: number): number {
+function easeOutBack(x: number): number {
   const c1 = 1.70158;
   const c3 = c1 + 1;
   return 1 + c3 * (x - 1) ** 3 + c1 * (x - 1) ** 2;
@@ -95,7 +95,7 @@ export interface SwellInput {
   delta: number;
 }
 
-export interface SwellWave {
+interface SwellWave {
   ku: number;
   m: number;
   phase: number;
@@ -147,25 +147,25 @@ export function addSwell(s: Swell, u: number, th: number, g: number, c: number, 
 // ---- Fireflies ----
 
 /** Pull and Beat lock at 1, in radians per second. */
-export const PULL_GAIN = 20;
-export const LOCK_GAIN = 6;
+const PULL_GAIN = 20;
+const LOCK_GAIN = 6;
 /** Spread at 1: each seed's own tempo lies within this share either side of
  *  the beat's. */
-export const SPREAD_RANGE = 0.4;
+const SPREAD_RANGE = 0.4;
 /** The longest integration step, seconds; a longer frame is split. */
-export const MAX_SUBSTEP = 1 / 90;
+const MAX_SUBSTEP = 1 / 90;
 /** Tempo when the beat clock has none yet. */
-export const FALLBACK_BPM = 120;
+const FALLBACK_BPM = 120;
 /** How sharp a pop is: pop = max(0, cos φ)^POP_SHARPNESS. */
-export const POP_SHARPNESS = 6;
+const POP_SHARPNESS = 6;
 /** The mean of that pop over a turn, taken off the weight so the field's
  *  average weight stays where the births and the centre seed expect it. */
-export const POP_MEAN = 5 / 32;
+const POP_MEAN = 5 / 32;
 /** Weight change and outward step at the top of a pop, at Fireflies 1. */
-export const POP_WEIGHT = 1.2;
-export const POP_PUSH = 0.45;
+const POP_WEIGHT = 1.2;
+const POP_PUSH = 0.45;
 /** Rows of phase kept, a power of two above the rows a frame can fill. */
-export const FLY_RING = 128;
+const FLY_RING = 128;
 const PHASE_SALT = 411;
 const RATE_SALT = 413;
 
