@@ -741,6 +741,20 @@ hexagon and decagon.
   (Measurements, 2026-10-20). Not changed: where the grit sits on the ramp,
   `GRIT_CHALK`, the glint halos' tint toward white, and `THROWN_REACH`, which
   now leads Toward white instead of keeping pace with it.
+- 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
+  audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
+  scene changed. Since #677 they had fired only on the hits the engine named
+  kicks and hats: on Billie Jean about half the old lanes' Bass hits and a
+  fifteenth of their Treble hits. `tools/tune-real.mjs chladni` on Billie Jean,
+  30 s from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before #677 | 11.97 | 15.68 | 3.08 | 3.80 |
+  | #683 | 11.59 | 15.88 | 2.79 | 3.44 |
+  | #682 | 13.49 | 17.07 | 2.07 | 2.57 |
+
+  A little livelier than either older build. The silence rows are the scene's own motion: no hit fires on silence in any build. No hit fired on silence.
 
 ## Tuning notes
 
@@ -989,3 +1003,4 @@ hexagon and decagon.
   Round, Hexagon, Triangle, Decagon and Clamped plates with Zoom, and Zoom out,
   an endless pull-back on the square plate. Then sand colour: Thrown colour
   and Thrown to, Two sides, Embers, Spectrum rings, Beat waves and Glitter.
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)

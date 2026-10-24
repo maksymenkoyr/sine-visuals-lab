@@ -789,6 +789,30 @@ reference-measurement workflow used by later scenes.
   drop on the same frame as a beat makes two rings where Center makes one merged
   ring. Not yet looked at live by the user; `RIPPLE_SPOTS` and `SPOT_REACH` are
   first guesses.
+- 2026-10-24 (#682) — Treble sparkle came back on real songs. After the audio
+  engine took over the lanes (#677), Treble carried only the hits the engine
+  named hats, a few a minute in a mix, and the sparkles nearly stopped on
+  Billie Jean. The Bass and Treble lanes now also fire on a jump in the engine's
+  band level (`src/render/bandEnergy.ts`). No code in this file changed.
+  `tools/tune-real.mjs caustics`, 30 s from 4 s, on `main` before #677 (the
+  old lanes), at #683 and with the change:
+
+  | song | build | change med | change p95 | hits/min | Bass | Mid | Treble |
+  |---|---|---:|---:|---:|---:|---:|---:|
+  | Billie Jean | before #677 | 15.59 | 32.63 | 300 | 196 | 202 | 222 |
+  | Billie Jean | #683 | 18.62 | 39.70 | 186 | 94 | 78 | 14 |
+  | Billie Jean | #682 | 18.03 | 35.45 | 412 | 194 | 76 | 212 |
+  | Around the World | before #677 | 17.61 | 33.50 | 282 | 118 | 262 | 248 |
+  | Around the World | #683 | 18.96 | 31.36 | 258 | 86 | 134 | 38 |
+  | Around the World | #682 | 18.88 | 32.80 | 404 | 154 | 134 | 242 |
+  | silence | each run | 1.64–1.65 | 1.93–1.95 | 0 | 0 | 0 | 0 |
+
+  Bass and Treble are back near the old lanes; Mid stays the engine's snares.
+  Any hit is higher than before, since the old lanes' Mid also fired on kicks
+  and hats. Beat ripple folds the extra hits into rings already in flight, so
+  the picture's p95 change stayed between the two older builds. How much sparkle
+  looks right is the owner's call, from stills at the same moments of Billie
+  Jean before #677, at #683 and with this change (#682's PR).
 
 ## Tuning notes
 
@@ -989,3 +1013,4 @@ reference-measurement workflow used by later scenes.
 - 2026-10-15 — Colour: Shades, Shades + accent (default) and Rainbow; the palette's ramp replaces the cosine curve by default (see Decisions)
 - 2026-10-20 — Beat ripple: Rings start, Center or Random spot (see Decisions)
 - 2026-10-22 — Labels only (#656): the Beat flash and Level glow hints name the inputs as the panel now does (Level, Any hit); no setting, default or wire changed
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; sparkles return on real songs (see Decisions)
