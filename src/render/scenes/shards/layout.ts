@@ -41,7 +41,7 @@ export function createRng(seed: number): Rng {
 }
 
 export const KIND = { PANEL: 0, BLADE: 1, FRAGMENT: 2, BACKDROP: 3 } as const;
-export type ShardKind = (typeof KIND)[keyof typeof KIND];
+type ShardKind = (typeof KIND)[keyof typeof KIND];
 
 /** Face colours, from the reference's lit-area hues: yellow dominates,
  *  rose/violet next, then blue and green; thin spikes are mostly pale.
@@ -55,7 +55,7 @@ export const PALETTE: readonly [number, number, number][] = [
   [0.36, 0.3, 0.78], // violet  #5c4dc7
   [0.3, 0.05, 0.14], // backdrop magenta, darker than #500d23 so bloom can lift it
 ];
-export const COLOUR = { YELLOW: 0, ROSE: 1, BLUE: 2, GREEN: 3, PALE: 4, VIOLET: 5, BACKDROP: 6 } as const;
+const COLOUR = { YELLOW: 0, ROSE: 1, BLUE: 2, GREEN: 3, PALE: 4, VIOLET: 5, BACKDROP: 6 } as const;
 
 /** Colour weights per kind (index = PALETTE index, backdrop excluded). */
 const COLOUR_WEIGHTS: Record<number, number[]> = {
@@ -354,7 +354,7 @@ export const CUT_MODE = { BEAT: 0, BASS: 1, BARS: 2 } as const;
 
 /** Two cuts inside this window are one cut: the reference's only
  *  consecutive-frame "cut" was a recolour ramp, not two arrangements. */
-export const CUT_REFRACTORY_SEC = 0.1;
+const CUT_REFRACTORY_SEC = 0.1;
 
 /** index.ts's beatListener.ts spec: cuts on the broadband beat edge, with
  *  the reference's own cadence as the hold — see the pre-listener

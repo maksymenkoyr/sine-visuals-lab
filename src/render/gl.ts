@@ -86,7 +86,7 @@ export function watchContextLoss(
   canvas.addEventListener("webglcontextrestored", () => onRestored());
 }
 
-export const FULLSCREEN_VERT = `#version 300 es
+const FULLSCREEN_VERT = `#version 300 es
 layout(location = 0) in vec2 aPos;
 out vec2 vUv;
 void main() {

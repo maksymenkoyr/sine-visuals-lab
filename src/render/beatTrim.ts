@@ -118,7 +118,7 @@ function wrap01(x: number): number {
   return w < 0 ? w + 1 : w;
 }
 
-export interface TrimmedBeats {
+interface TrimmedBeats {
   beats: number;
   beatPhase: number;
   barPhase: number;

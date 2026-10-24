@@ -114,7 +114,7 @@ export const BARS_PER_PHRASE = 4;
 /** Bar length while there is no tempo lock (a 120 bpm bar). */
 export const FREE_BAR_SEC = 2.0;
 /** How many bars a morph takes, start to settled. */
-export const MORPH_BARS = 1;
+const MORPH_BARS = 1;
 /** Clamp on the bar-phase fraction advanced in one frame, so a tempo
  *  re-lock or a phase jump can't skip a morph past done in a single frame. */
 const MAX_BAR_STEP = 0.25;
@@ -221,7 +221,7 @@ function pickLook(prev: number, rng: () => number): number {
  *  pattern (src/render/scenes/shards/index.ts). "High"/"Bar" have no
  *  registered SignalId (beatListener.ts's SOURCE_SIGNAL), so arcSource's own
  *  `reads` below only covers Beat/Bass — no chip for the other two. */
-export const ARC_SOURCE_NAMES = ["Beat", "Bass", "High", "Bar"] as const;
+const ARC_SOURCE_NAMES = ["Beat", "Bass", "High", "Bar"] as const;
 export const ARC_SOURCE = { BEAT: 0, BASS: 1, HIGH: 2, BAR: 3 } as const;
 
 const ARC_SOURCE_BY_INDEX: readonly BeatSource[] = ["beat", "bass", "high", "bar"];

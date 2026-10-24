@@ -37,7 +37,7 @@ import { peak } from "./waveform.ts";
 const TAP_FFT_SIZE = 2048;
 const GLITCH_POLL_SEC = 1;
 
-export interface InputHealthTapRead {
+interface InputHealthTapRead {
   peakL: number;
   peakR: number | null;
   glitchFrames: number | null;

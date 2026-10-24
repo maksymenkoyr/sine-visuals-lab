@@ -218,8 +218,8 @@ export function sameSimSize(a: SimSize, b: SimSize): boolean {
 
 /** Reference row count `Splat` forces/dye rates are specified at; forces are
  *  rescaled by velH / FORCE_REF_ROWS so the look doesn't change with tier. */
-export const FORCE_REF_ROWS = 192;
-export const VEL_DAMP_PER_SEC = 0.15;
+const FORCE_REF_ROWS = 192;
+const VEL_DAMP_PER_SEC = 0.15;
 /** Viscosity (E2): VISCOSITY_BODY is a 5-tap blur run viscosityPasses(v).full
  *  times at k = VISC_K, plus one more pass at k = VISC_K * frac when a
  *  fractional pass remains, so the `viscosity` SimStepInputs setting is
@@ -227,42 +227,42 @@ export const VEL_DAMP_PER_SEC = 0.15;
  *  viscosityPasses and step()). This replaced the ad-hoc uSmooth blend that
  *  used to live inside ADVECT_VEL_BODY. */
 export const VISC_MAX_PASSES = 4;
-export const VISC_K = 0.05;
+const VISC_K = 0.05;
 /** MacCormack dye advection (E1): see the file header and ADVECT_DYE_BODY.
  *  false restores the original plain semi-Lagrangian dye step. */
-export const DYE_MACCORMACK = true;
+const DYE_MACCORMACK = true;
 /** Fraction of the 4-neighbour mean blended into dye every advection step —
  *  dye's own diffusion knob, independent of the velocity viscosity pass
  *  above. Zero by default: MacCormack advection is sharp enough on its own;
  *  the uniform (uSmooth — shared with VISCOSITY_BODY, which passes a
  *  different value per pass) and this blend stay wired so it can be swept
  *  back up if a look ever wants softer dye again. */
-export const DYE_SMOOTH = 0;
-export const DYE_FADE_MIN = 0.05;
-export const DYE_FADE_MAX = 1.2;
-export const DYE_MAX = 4;
-export const CURL_EPS_BASE = 1.5;
-export const CURL_EPS_ENERGY = 0.8;
+const DYE_SMOOTH = 0;
+const DYE_FADE_MIN = 0.05;
+const DYE_FADE_MAX = 1.2;
+const DYE_MAX = 4;
+const CURL_EPS_BASE = 1.5;
+const CURL_EPS_ENERGY = 0.8;
 /** Integer texel offset the curl (CURL_BODY) and confinement-gradient
  *  (FORCE_BODY) stencils sample at — emitted into the GLSL as a const int so
  *  it can be swept (e.g. to reach past texel-scale noise onto larger
  *  vortices) without editing shader text. */
-export const CURL_STENCIL = 1;
+const CURL_STENCIL = 1;
 /** The emitter tag (dye.g) fades this many times faster than density, so the
  *  purple only ever shows near the emitter and the plume beyond it takes the
  *  screen-position colour. */
-export const TAG_FADE_MULT = 5;
-export const EDGE_GAIN = 12;
+const TAG_FADE_MULT = 5;
+const EDGE_GAIN = 12;
 /** Soft threshold on the normalised edge magnitude (see EDGE_BODY). */
-export const EDGE_LO = 0.1;
-export const EDGE_HI = 0.7;
+const EDGE_LO = 0.1;
+const EDGE_HI = 0.7;
 /** Byte-mode codec ranges: the full-scale magnitude one 8-bit channel spans.
  *  Kept as tight as the flow allows — with 8 bits, a range of 600 would
  *  quantise typical velocities of tens of texels/s to a handful of steps
  *  and stall the flow. */
-export const BYTE_VEL_RANGE = 200;
-export const BYTE_SCALAR_RANGE = 50;
-export const BYTE_DYE_RANGE = 4;
+const BYTE_VEL_RANGE = 200;
+const BYTE_SCALAR_RANGE = 50;
+const BYTE_DYE_RANGE = 4;
 
 /** Neon Fluid's splat-slot count: slot 0 is always the centre emitter;
  *  slots 1..SPLAT_SLOTS-1 are the periodic accent splats. It is the default
@@ -303,7 +303,7 @@ export interface Splat {
   ring: number;
 }
 
-export interface SimStepInputs {
+interface SimStepInputs {
   dt: number;
   /** Swirl setting, 0..1 — scales vorticity-confinement strength. */
   curl: number;

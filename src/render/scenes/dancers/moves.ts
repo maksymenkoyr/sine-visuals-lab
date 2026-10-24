@@ -74,23 +74,23 @@ export function kneeFlex(pose: Pose, side: Side, amount: number): void {
 }
 /** Lean the torso forward, twist it about the spine, and bend it sideways
  *  toward +X — spread across the spine and chest so it reads as a curve. */
-export function torso(pose: Pose, lean: number, twist: number, sideBend: number): void {
+function torso(pose: Pose, lean: number, twist: number, sideBend: number): void {
   add(pose, B.spine, lean * 0.5, twist * 0.4, sideBend * 0.5);
   add(pose, B.chest, lean * 0.5, twist * 0.6, sideBend * 0.5);
 }
 /** Tilt the pelvis (the hips) sideways toward +X and twist it. */
-export function hips(pose: Pose, sideTilt: number, twist: number): void {
+function hips(pose: Pose, sideTilt: number, twist: number): void {
   add(pose, B.pelvis, 0, twist, sideTilt);
 }
 /** Nod the head forward, turn it toward +X, and tilt it sideways. */
-export function head(pose: Pose, nod: number, turn: number, tilt: number): void {
+function head(pose: Pose, nod: number, turn: number, tilt: number): void {
   add(pose, B.neck, nod * 0.4, turn * 0.3, tilt * 0.4);
   add(pose, B.head, nod * 0.6, turn * 0.7, tilt * 0.6);
 }
-export function jawOpen(pose: Pose, amount: number): void {
+function jawOpen(pose: Pose, amount: number): void {
   add(pose, B.jaw, amount, 0, 0);
 }
-export function rootShift(pose: Pose, x: number, z: number): void {
+function rootShift(pose: Pose, x: number, z: number): void {
   pose[CH_ROOT_X] += x;
   pose[CH_ROOT_Z] += z;
 }
@@ -157,7 +157,7 @@ export const GROOVE_BIAS = 0.5;
 export const BEAT_FLOOR = 0.4;
 /** How far the pulse dial moves that floor either way — a beat that hits
  *  hard and steadily asks for bigger moves, a barely-there one lets it go. */
-export const PULSE_GAIN = 0.4;
+const PULSE_GAIN = 0.4;
 
 /** Effective intensity — what the clip picker matches clip energy against.
  *

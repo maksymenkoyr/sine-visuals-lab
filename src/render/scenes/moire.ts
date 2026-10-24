@@ -110,7 +110,7 @@ const CURTAIN_EDGE_WOBBLE = 0.03; // small fbm-driven waviness on the reveal edg
 // tests/moire.test.ts can bind to the exact bounds instead of guessing them
 // (CLAUDE.md's "name the symbol" rule) — the rest of this file's constants
 // stay unexported because their tests only assert relative behaviour.
-export const WANDER_TAU_SEC = 6; // exponential time constant at Wander=0.5 (its default) — a swing takes tens of seconds, matching the reference
+const WANDER_TAU_SEC = 6; // exponential time constant at Wander=0.5 (its default) — a swing takes tens of seconds, matching the reference
 export const WANDER_BARS = 4; // bar wraps between re-picks while tempo-locked — a handful of bars lands near WANDER_FALLBACK_SEC's own cadence at a typical tempo
 export const WANDER_FALLBACK_SEC = 8; // seconds between re-picks while unlocked (no bar clock to count wraps on)
 const WANDER_LOCK_THRESHOLD = 0.5; // anim.tempoLock above this counts as "locked" for re-pick purposes — same cut as HueDrift's own bar-boundary reads
@@ -119,7 +119,7 @@ export const TILT_MAX_RAD = (1.5 * Math.PI) / 180; // +/- line tilt target, matc
 export const DETAIL_MIN = 0.15; // low end of the fbm second-octave weight's wander range
 export const DETAIL_MAX = 0.5; // high end — the streaky regime carries more fine structure than round 1's fixed weight
 const DETAIL_REST = 0.3; // round 1's fixed second-octave weight — the resting value before the first wander re-pick, and FRAG's own comment on uDetailMix
-export const STRETCH_CENTROID_LOW = 0.75; // stretch target multiplier at centroid=0 (mix(0.75, 1.35, centroid))
+const STRETCH_CENTROID_LOW = 0.75; // stretch target multiplier at centroid=0 (mix(0.75, 1.35, centroid))
 export const STRETCH_CENTROID_HIGH = 1.35; // ...and at centroid=1 — a brighter spectrum reads streakier
 const ANGLE_DROP_RATE_BOOST = 3; // extra multiple on the angle's ease rate at dropPulse=1 — a drop's turn should land within the hit, not tens of seconds later
 

@@ -160,7 +160,7 @@ export type PairLayer = "smell" | "touch";
 /** One band-word landmark on an axis — `at` is the value it's centred on
  *  (the tick a pad draws, and the value a keyboard Home/End-adjacent word
  *  reads closest to). Five per layer, ascending `at`. */
-export interface PairBand {
+interface PairBand {
   word: string;
   at: number;
 }
@@ -171,7 +171,7 @@ export interface PairBand {
  *  `after` is a second word that goes after the second strain ("follows B
  *  closely", "leaves B alone"); `ofTrail` adds the ui `trailSuffix` after the
  *  strain ("eats B's trail"). */
-export interface PairVerb {
+interface PairVerb {
   upTo: number;
   verb: string;
   after?: string;
@@ -453,7 +453,7 @@ export function fmtSigned(v: number): string {
  *  relation flips sign (the user, 2026-09-28: crossing it should be "much
  *  smoother") and steeper toward the edges, which still reach
  *  AFFINITY_MIN/MAX. 1 would be the old straight line. */
-export const PAD_CURVE = 2;
+const PAD_CURVE = 2;
 
 /** A value's position across a pad square, as a percentage (0..100, centred
  *  on 50 at v=0) — the prototype's own `pc`, bent by PAD_CURVE. 42, not 50,
@@ -612,7 +612,7 @@ const CHASE_SMELL: readonly (readonly number[])[] = [
  *  prototype's own value, so a rolled Touch table still reads mostly as a
  *  Smell-only network with a few real bites/feeds rather than a wall of
  *  noise where every strain touches every other. */
-export const TOUCH_ZERO_SHARE = 0.35;
+const TOUCH_ZERO_SHARE = 0.35;
 /** Nudge's per-cell jitter range, each direction — small next to
  *  AFFINITY_MIN/MAX's own ±1.5 span, so repeated Nudges explore around the
  *  table that's already there instead of replacing it (Random does that). */

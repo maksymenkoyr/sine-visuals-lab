@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getAutoGain,
   setAutoGain,
-  AUTO_GAIN_DEFAULT,
   AUTO_GAIN_MIN,
   AUTO_GAIN_MAX,
   isAutoGainAuto,
@@ -18,13 +17,12 @@ import {
 // the module-level cache).
 describe("auto-gain persistence", () => {
   beforeEach(() => {
-    setAutoGain(AUTO_GAIN_DEFAULT);
+    setAutoGain(AUTO_GAIN_MIN);
   });
 
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
   // localStorage global at all here — this also proves the module tolerates that.
   it("defaults to the fixed mapping (the bottom of the range)", () => {
-    expect(AUTO_GAIN_DEFAULT).toBe(AUTO_GAIN_MIN);
     expect(getAutoGain()).toBe(AUTO_GAIN_MIN);
   });
 
@@ -41,7 +39,7 @@ describe("auto-gain persistence", () => {
     setAutoGain(-2);
     expect(getAutoGain()).toBe(AUTO_GAIN_MIN);
     setAutoGain(Number.NaN);
-    expect(getAutoGain()).toBe(AUTO_GAIN_DEFAULT);
+    expect(getAutoGain()).toBe(AUTO_GAIN_MIN);
   });
 });
 
@@ -56,7 +54,7 @@ describe("autoGainForSpan", () => {
   it("asks for none at or above the full-span knee — agreeing with the shipped default", () => {
     expect(autoGainForSpan(45)).toBe(AUTO_GAIN_MIN);
     expect(autoGainForSpan(90)).toBe(AUTO_GAIN_MIN);
-    expect(autoGainForSpan(90)).toBe(AUTO_GAIN_DEFAULT);
+    expect(autoGainForSpan(90)).toBe(AUTO_GAIN_MIN);
   });
 
   it("is monotonically non-increasing as span widens", () => {
@@ -69,7 +67,7 @@ describe("autoGainForSpan", () => {
   });
 
   it("falls back to the default on a non-finite reading — no trackers primed yet", () => {
-    expect(autoGainForSpan(Number.NaN)).toBe(AUTO_GAIN_DEFAULT);
+    expect(autoGainForSpan(Number.NaN)).toBe(AUTO_GAIN_MIN);
   });
 });
 
@@ -78,7 +76,7 @@ describe("auto-gain auto mode", () => {
     // Auto must be off before resetting the manual value, or setAutoGain
     // wouldn't be the thing driving resolveAutoGain() during the reset itself.
     setAutoGainAuto(false);
-    setAutoGain(AUTO_GAIN_DEFAULT);
+    setAutoGain(AUTO_GAIN_MIN);
   });
 
   it("resolves to the manual value while off", () => {

@@ -74,7 +74,7 @@ const NAME = "Chaikin Curves";
  *  clamped so it can't fling the zoom. */
 const MAX_STEP_SEC = 0.5;
 
-export const CHAIKIN_SETTINGS: SceneSetting[] = [
+const CHAIKIN_SETTINGS: SceneSetting[] = [
   // Form
   {
     key: "cells",

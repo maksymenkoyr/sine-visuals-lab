@@ -58,7 +58,7 @@ export interface OutputControlElements {
 }
 
 /** What a Play did: `sent` = at once, `glide` = arriving over the asked time. */
-export type PlayResult = "sent" | "glide" | null;
+type PlayResult = "sent" | "glide" | null;
 
 export interface OutputControls {
   /** Show the row only while a scene is on screen. */

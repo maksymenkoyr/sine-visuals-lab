@@ -30,8 +30,8 @@ const f = (v: number): string => v.toFixed(4);
 const v3 = (c: readonly number[]): string => `vec3(${c.map(f).join(", ")})`;
 
 /** Near and far clip planes, metres from the camera. */
-export const NEAR = 0.05;
-export const FAR = 12;
+const NEAR = 0.05;
+const FAR = 12;
 /** Half the drawn width of a wire, in pixels. */
 const LINE_HALF_PX = 0.8;
 /** Where the silhouette band starts and is full, in 1 − (normal · view). */

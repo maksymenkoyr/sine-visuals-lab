@@ -8,7 +8,6 @@ export const ART = { LW: 7, id: 0, seed: 7 };
 export const uid = (p: string) => `${p}${++ART.id}`;
 export const f1 = (n: number) => Math.round(n * 10) / 10;
 export const rnd = () => { ART.seed = (ART.seed * 16807) % 2147483647; return (ART.seed - 1) / 2147483646; };
-export const xf = (x: number, y: number, rot = 0, s = 1, flip = false) => `translate(${x},${y}) rotate(${rot}) scale(${flip ? -s : s},${s})`;
 
 // Parts with ONE outline around their union: all strokes first, then all fills, then inner.
 export type Pt = [number, number];
@@ -157,12 +156,8 @@ export function eyeInner(cx: number, cy: number, rx: number, ry: number, rot: nu
   return s;
 }
 
-export function radial(id: string, stops: Stop[], cx = '50%', cy = '50%', r = '50%', fx?: string, fy?: string, units = '') {
+function radial(id: string, stops: Stop[], cx = '50%', cy = '50%', r = '50%', fx?: string, fy?: string, units = '') {
   DEFS.push(`<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}"${fx ? ` fx="${fx}" fy="${fy}"` : ''}${units ? ` gradientUnits="${units}"` : ''}>${stops.map(s => `<stop offset="${s[0]}" stop-color="${s[1]}" stop-opacity="${s[2] ?? 1}"/>`).join('')}</radialGradient>`);
-  return `url(#${id})`;
-}
-export function linear(id: string, stops: Stop[], x1 = 0, y1 = 0, x2 = 0, y2 = 1, units = '') {
-  DEFS.push(`<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${units ? ` gradientUnits="${units}"` : ''}>${stops.map(s => `<stop offset="${s[0]}" stop-color="${s[1]}" stop-opacity="${s[2] ?? 1}"/>`).join('')}</linearGradient>`);
   return `url(#${id})`;
 }
 
@@ -188,7 +183,7 @@ export function rimLit(d: string, base: string, rim: string, dx: number, dy: num
 // Baked glow. The still used feGaussianBlur on a few flat discs; an animated SVG must not carry
 // filters, so each glow is a radial gradient whose alpha profile is the exact blur of a disc:
 // I(r) = ∫0..R (ρ/σ²) e^(-(r-ρ)²/2σ²) i0e(rρ/σ²) dρ, with i0e(x) = e^-x I0(x).
-export function i0e(x: number) {
+function i0e(x: number) {
   if (x < 3.75) {
     const t = (x / 3.75) ** 2;
     return Math.exp(-x) * (1 + t * (3.5156229 + t * (3.0899424 + t * (1.2067492 + t * (0.2659732 + t * (0.0360768 + t * 0.0045813))))));
@@ -196,7 +191,7 @@ export function i0e(x: number) {
   const t = 3.75 / x;
   return (0.39894228 + t * (0.01328592 + t * (0.00225319 + t * (-0.00157565 + t * (0.00916281 + t * (-0.02057706 + t * (0.02635537 + t * (-0.01647633 + t * 0.00392377)))))))) / Math.sqrt(x);
 }
-export function blurDisc(r: number, R: number, s: number) {
+function blurDisc(r: number, R: number, s: number) {
   const n = 160; let sum = 0;
   for (let i = 0; i < n; i++) {
     const p = (i + 0.5) / n * R;
@@ -206,7 +201,7 @@ export function blurDisc(r: number, R: number, s: number) {
 }
 // A gradient (objectBoundingBox) for a blurred disc of radius R, sigma s, drawn on a circle of radius R+3s.
 export const _glowCache: Record<string, any> = {};
-export function glowGrad(R: number, s: number, color: string) {
+function glowGrad(R: number, s: number, color: string) {
   const key = `${R}_${s}_${color}`;
   if (_glowCache[key]) return _glowCache[key];
   const out = R + 3 * s, stops: Stop[] = [];
@@ -267,10 +262,6 @@ export const MX = {
   },
   str(M: Mat) { return `matrix(${M.map((v) => Math.round(v * 1e6) / 1e6).join(' ')})`; },
 };
-// A pose about a pivot: translate (x,y), rotate r degrees, scale (sx,sy), all around (px,py).
-export function poseM(px: number, py: number, p: Opts = {}) {
-  return MX.chain(MX.T(p.x || 0, p.y || 0), MX.about(px, py, MX.mul(MX.R(p.r || 0), MX.S(p.sx ?? 1, p.sy ?? 1))));
-}
 
 // ---------------------------------------------------------------------------------------------
 // Scene registry markup. A cel is one drawing of a part; only one cel of a part shows at a time

@@ -38,9 +38,9 @@
 /** Half the reference frame's height, in world units. */
 export const WORLD_HALF_HEIGHT = 360;
 /** Half-height of the scattered start box, in world units. */
-export const SPAWN_HALF_H = 280;
+const SPAWN_HALF_H = 280;
 /** The prototype's start box half-width; the scene passes a wider one. */
-export const DEFAULT_SPAWN_HALF_W = 355;
+const DEFAULT_SPAWN_HALF_W = 355;
 
 export interface SwarmParams {
   /** Rim: all-pairs repulsion strength, force = -repulsion / max(r, repulsionFloor). */
@@ -128,7 +128,7 @@ export function createRng(seed: number): () => number {
 }
 
 /** One standard normal draw (Box-Muller) from `rng`. */
-export function gauss(rng: () => number): number {
+function gauss(rng: () => number): number {
   const u = 1 - rng(); // (0, 1]
   const v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
@@ -355,16 +355,16 @@ export const EDGE_STRIDE = 7;
  *  were NEIGHBOUR_REF_REACH (counts scale with both), so the Particles and
  *  Reach settings don't repaint it. At those, the settled core counts well
  *  over a hundred and the rim around a dozen. */
-export const DENSE_NEIGHBOURS = 50;
-export const SPARSE_NEIGHBOURS = 0;
-export const NEIGHBOUR_REF_COUNT = 256;
-export const NEIGHBOUR_REF_REACH = 90;
+const DENSE_NEIGHBOURS = 50;
+const SPARSE_NEIGHBOURS = 0;
+const NEIGHBOUR_REF_COUNT = 256;
+const NEIGHBOUR_REF_REACH = 90;
 
 /** How much an edge dims for each end that is more crowded than
  *  DENSE_NEIGHBOURS: (DENSE / count)^this per end. Without it the packed core
  *  piles up into flat white; the reference's core stays white but shows its
  *  lines. */
-export const CROWD_DIMMING = 0.6;
+const CROWD_DIMMING = 0.6;
 
 /** Writes every pair closer than `reach` into `out` (EDGE_STRIDE floats each;
  *  endpoints, each end's colour coordinate -- 0 crowded, 1 nearly alone, from

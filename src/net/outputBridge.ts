@@ -33,12 +33,12 @@ import { captureSyncedStorage } from "./syncedStores.ts";
  * look-change poll), `pushFrame()` whenever a feature frame exists.
  */
 
-export const OUTPUT_CHANNEL = "svl-output-v1";
+const OUTPUT_CHANNEL = "svl-output-v1";
 /** The output page, and the name its window is given. The name no longer finds
  *  an open output (a `noopener` window is out of this window's reach), which
  *  is why open() counts outputs itself. */
-export const OUTPUT_URL = "/output.html";
-export const OUTPUT_WINDOW_NAME = "svl-output";
+const OUTPUT_URL = "/output.html";
+const OUTPUT_WINDOW_NAME = "svl-output";
 /** `noopener` puts the output in a browsing context group of its own, so the
  *  browser can run it in its own renderer process: this window's main-thread
  *  work (the panel, a scene's shader compile) no longer drops the output's

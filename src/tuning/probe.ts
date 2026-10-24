@@ -42,7 +42,7 @@ export interface ProbeInput {
   fluxRatio: number | null;
 }
 
-export interface ProbeSettingValue {
+interface ProbeSettingValue {
   base: number;
   resolved: number;
   /** "override" (pinned by the tuning bus, incl. auto-pin), "pin" (typed

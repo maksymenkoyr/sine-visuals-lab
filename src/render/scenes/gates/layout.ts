@@ -389,7 +389,7 @@ export function segmentOf(
  *  that, once the duplicate ring edges and pillars are presence-0 (see
  *  shapePresence), what's left is exactly the frame's own 4-corner
  *  rectangle. ROD and PANEL collapse every vertex to the tunnel axis. */
-export function ringVertex(shape: ShapeId, k: number, sx: number, sy: number): [number, number] {
+function ringVertex(shape: ShapeId, k: number, sx: number, sy: number): [number, number] {
   const kk = ((k % 6) + 6) % 6;
   if (shape === SHAPE.PRISM) {
     const a = Math.PI / 2 + (Math.PI / 3) * kk;
@@ -409,7 +409,7 @@ export function ringVertex(shape: ShapeId, k: number, sx: number, sy: number): [
  *  on the same SEG_MAX topology. Sums to 18 real slots for PRISM, 12 for
  *  FRAME, 1 for ROD/PANEL — the edge-count test below checks this against
  *  segmentOf's own (independently written) count. */
-export function shapePresence(shape: ShapeId, i: number): 0 | 1 {
+function shapePresence(shape: ShapeId, i: number): 0 | 1 {
   if (shape === SHAPE.PRISM) return 1;
   if (shape === SHAPE.FRAME) {
     const k = i < 6 ? i : i < 12 ? i - 6 : i - 12;

@@ -40,7 +40,7 @@ export function packSkin(bindPos: Float32Array, bindRot: Float32Array, pos: Floa
 }
 
 /** A loop camera's view basis: forward, right and up, unit length. */
-export function cameraBasis(cam: LoopCamera): { fwd: number[]; right: number[]; up: number[]; dist: number } {
+function cameraBasis(cam: LoopCamera): { fwd: number[]; right: number[]; up: number[]; dist: number } {
   const fx = cam.target[0] - cam.eye[0], fy = cam.target[1] - cam.eye[1], fz = cam.target[2] - cam.eye[2];
   const dist = Math.hypot(fx, fy, fz);
   const fwd = [fx / dist, fy / dist, fz / dist];

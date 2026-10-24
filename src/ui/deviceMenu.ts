@@ -41,7 +41,7 @@ import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
-import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
+import { AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
 import {
   SILENCE_GATE_CLOSED_DEFAULT,
   SILENCE_GATE_MAX,
@@ -472,26 +472,26 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * panel never imports a store.
  */
 
-export interface MenuItem {
+interface MenuItem {
   id: string;
   name: string;
 }
 
 export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
 
-export interface InputDevicesState {
+interface InputDevicesState {
   /** Empty until the mic permission's first grant (the row shows one "Microphone" placeholder meanwhile). */
   options: InputDeviceOption[];
   defaultLabel: string | null;
   missing: InputDevicePref | null;
   liveLabel: string | null;
 }
-export interface AudioStatus {
+interface AudioStatus {
   source: AudioSource;
   sampleRate: number | null;
 }
 
-export interface PaletteMenuItem extends MenuItem {
+interface PaletteMenuItem extends MenuItem {
   /** Groups in order of first appearance. */
   group: string;
   /** Ramp, darkest first. */
@@ -5875,7 +5875,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     accent: INPUT_GREEN,
     min: AUTO_GAIN_MIN,
     max: AUTO_GAIN_MAX,
-    defaultValue: AUTO_GAIN_DEFAULT,
+    defaultValue: AUTO_GAIN_MIN,
     mapping: "linear",
     ...percentReadout,
     description:

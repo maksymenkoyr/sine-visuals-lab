@@ -50,7 +50,7 @@ import type { Scene, SceneContext, Viewport } from "./scene.ts";
  * arranges, so nothing here tries to rebuild.
  */
 
-export interface CompositorFrame {
+interface CompositorFrame {
   ctx: SceneContext;
   /** The scene that should be on screen now (the incoming one during a crossfade). */
   scene: Scene;
@@ -66,7 +66,7 @@ export interface CompositorFrame {
   nowMs: number;
 }
 
-export interface RenderOutcome {
+interface RenderOutcome {
   /** False for a frame the quality governor must not count: two scenes drawn,
    *  or none (frozen). */
   governable: boolean;

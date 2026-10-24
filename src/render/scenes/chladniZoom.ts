@@ -40,12 +40,12 @@ export const ZOOM_OCTAVES_PER_MIN = 3;
  *  and the sum read as a busy lattice, and a milder peak still left two sizes
  *  summed for about a third of every octave, where the sand settled on
  *  neither. This one leaves a short morph around each handover. */
-export const ZOOM_BELL_POWER = 6;
+const ZOOM_BELL_POWER = 6;
 
 /** Bell values under this count as nothing: subtracted from every layer's
  *  bell (so the weights stay continuous), which drops the layers on the
  *  bell's tails from the shader's sum. Mostly one or two layers then pay. */
-export const ZOOM_WEIGHT_FLOOR = 0.05;
+const ZOOM_WEIGHT_FLOOR = 0.05;
 
 /** The scale where the bell peaks: the layer carrying the plate at mid
  *  handover. Coarser than the plate's own scale (1), because the zoom shows

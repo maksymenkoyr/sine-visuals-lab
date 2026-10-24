@@ -50,7 +50,7 @@ export function decodeMidi(data: ArrayLike<number>): MidiMessage | null {
 }
 
 /** The largest value a CC carries. */
-export const CC_MAX = 127;
+const CC_MAX = 127;
 
 /** A controller value across [min, max] (a slider's own range), snapped to
  *  `step` counted from min, and clamped back inside. No step (or a step that
@@ -160,7 +160,7 @@ export function parseMappings(text: string | null): Mapping[] {
 }
 
 /** Two mappings listen to the same control: same kind, number and channel. */
-export function sameSource(a: Mapping, b: Mapping): boolean {
+function sameSource(a: Mapping, b: Mapping): boolean {
   if (a.kind !== b.kind || a.ch !== b.ch) return false;
   return a.kind === "cc" ? a.cc === (b as typeof a).cc : a.note === (b as typeof a).note;
 }

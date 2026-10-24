@@ -11,7 +11,7 @@
 // lines reaches exactly the soft curve an accumulation buffer would give: the
 // dense core goes white, a lone line stays a line.
 
-export const TONE = 1.6;
+const TONE = 1.6;
 
 /** The crowd ramp: o = 0 (packed, in the core) white, then magenta, rose,
  *  orange-red and yellow-green at o = 1 (nearly alone, the rim's loosest
@@ -19,7 +19,7 @@ export const TONE = 1.6;
  *  deg), the rim's inner row the bluer magenta, its outer row orange-red.
  *  `uColours` fades it toward white. (Named phaseRamp for the shaders that
  *  call it; colour stopped following phase once it followed crowding.) */
-export const RAMP_GLSL = `
+const RAMP_GLSL = `
 uniform float uColours;
 vec3 phaseRamp(float o) {
   vec3 white = vec3(1.0);

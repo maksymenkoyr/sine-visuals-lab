@@ -26,7 +26,7 @@
 import { cameraMatrix, type FrameState, type Mat } from "./motion";
 
 // --- pure helpers ----------------------------------------------------------------------------
-export const IDENTITY: Mat = [1, 0, 0, 1, 0, 0];
+const IDENTITY: Mat = [1, 0, 0, 1, 0, 0];
 
 /** A*B for SVG-order matrices: apply B first, then A. */
 export function mulMat(A: Mat, B: Mat): Mat {
@@ -238,7 +238,7 @@ interface DrawNode {
 }
 
 /** What the impact filters do, read from the markup's defs. */
-export interface ImpactFilters {
+interface ImpactFilters {
   matrix: number[];
   a: { lo: number[]; hi: number[] };
   b: { lo: number[]; hi: number[] };
@@ -562,7 +562,7 @@ export interface View {
 }
 
 /** What a context currently has set, so repeated sets can be skipped. */
-export interface Pen {
+interface Pen {
   lw: number;
   join: string;
   cap: string;

@@ -55,12 +55,12 @@ export const BS1770_HIGHPASS_48K: BiquadCoefficients = {
   a: [1, -1.99004745483398, 0.99007225036621],
 };
 
-export const LUFS_OFFSET = -0.691;
+const LUFS_OFFSET = -0.691;
 export const BLOCK_MS = 100;
-export const MOMENTARY_BLOCKS = 4; // 400 ms
-export const SHORT_TERM_BLOCKS = 30; // 3 s
+const MOMENTARY_BLOCKS = 4; // 400 ms
+const SHORT_TERM_BLOCKS = 30; // 3 s
 export const ABSOLUTE_GATE_LUFS = -70;
-export const RELATIVE_GATE_LU = -10;
+const RELATIVE_GATE_LU = -10;
 
 // Gating-block histogram: from the absolute gate up to a ceiling a full-scale
 // K-weighted square wave can't quite reach; anything above clamps to the top

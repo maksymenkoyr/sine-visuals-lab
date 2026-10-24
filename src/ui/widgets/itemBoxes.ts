@@ -78,7 +78,7 @@ import { setLiveText } from "../liveText.ts";
  * live, so nothing here keeps the base colour past the first paint.
  */
 
-export interface ItemBoxesOptions {
+interface ItemBoxesOptions {
   /** Per-item display code/name, in index order. */
   labels: readonly string[];
   /** Per-item CSS colour, same order as `labels` — the colour until a preview

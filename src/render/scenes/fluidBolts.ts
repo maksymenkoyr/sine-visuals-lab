@@ -57,7 +57,7 @@ export const BOLT_CUTOFF = 0.12;
  *  the width is non-zero — below about a texel and a half the hard-edged core
  *  aliases into a dotted line. Exactly-zero widths (the taper tips that let
  *  one strip run through the whole tree) stay zero. */
-export const BOLT_MIN_HALF_PX = 1.5;
+const BOLT_MIN_HALF_PX = 1.5;
 
 /** The JS-only strike pool: endpoints, amplitude, age and each slot's drawn
  *  bolt tree, kept in flat arrays shaped for a GL upload but usable (and

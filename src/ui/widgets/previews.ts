@@ -51,7 +51,7 @@ export interface PreviewSource {
 
 const sources = new Map<string, PreviewSource>();
 
-export function registerPreviewSource(id: string, source: PreviewSource): void {
+function registerPreviewSource(id: string, source: PreviewSource): void {
   sources.set(id, source);
 }
 

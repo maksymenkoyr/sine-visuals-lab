@@ -70,7 +70,7 @@ import { SETTING_GROUPS, type SceneSetting, type SettingGroup } from "./sceneSet
  *  `readonly SignalId[]`), a bare array can't be told apart from "one array
  *  shared by every index" vs "one array per index" without extra shape
  *  info; a function has no such ambiguity for any `T`. */
-export type ItemFieldValue<T> = T | ((index: number) => T);
+type ItemFieldValue<T> = T | ((index: number) => T);
 
 function resolveItemField<T>(value: ItemFieldValue<T> | undefined, index: number): T | undefined {
   if (value === undefined) return undefined;
@@ -79,7 +79,7 @@ function resolveItemField<T>(value: ItemFieldValue<T> | undefined, index: number
 
 /** `SceneSetting.drive`, with every field optionally per-index — see
  *  `ItemFieldValue`. */
-export interface ItemDriveParam {
+interface ItemDriveParam {
   default: ItemFieldValue<DriveChoice>;
   sceneLabel?: ItemFieldValue<string>;
   gain?: ItemFieldValue<number>;

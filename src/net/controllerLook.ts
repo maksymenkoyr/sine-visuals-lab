@@ -21,7 +21,7 @@
 import type { LookDoc } from "../../server/lookDoc.ts";
 
 /** A device's look: what it reads off itself, and how it shows another. */
-export interface LookIO {
+interface LookIO {
   /** The device's current look: its scene and palette ids and its room-scope storage. */
   read(): LookDoc;
   /** Makes the device show this look (writes the stores, switches scene/palette). */

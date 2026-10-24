@@ -46,7 +46,7 @@
  */
 
 export const VALUE_TRIGGER_UPPER_DEFAULT = 0.6;
-export const VALUE_TRIGGER_LOWER_RATIO = 0.65; // lower mark = upper * this
+const VALUE_TRIGGER_LOWER_RATIO = 0.65; // lower mark = upper * this
 export const HELD_REFIRE_FALLBACK_SEC = 0.5; // re-fire period while held and tempo isn't locked
 
 const VALUE_TRIGGER_UPPER_MIN = 0.05;

@@ -60,7 +60,7 @@ export const FONT_DIGITS = `'DSEG7-Classic', ${FONT_MONO}`;
 /** Minimum gap between the docked meters column and the docked Power+settings
  *  side, for the patch bay's cables (cableLayer.ts) to sweep through. Not a CSS
  *  margin; it only sizes STACK_BELOW_PX. */
-export const CABLE_GUTTER_PX = 56;
+const CABLE_GUTTER_PX = 56;
 
 /** Below this viewport width the panel's columns stack into one: Power + Bands
  *  + controls side by side (~899px plus gaps) plus CABLE_GUTTER_PX. */
