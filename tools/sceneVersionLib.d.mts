@@ -15,7 +15,8 @@ export interface SceneReleaseEntry {
   major: number;
 }
 
-/** One scene module: its unit and its repo-relative entry file. */
+/** One scene module: its unit and its repo-relative entry file (the card of a
+ *  split scene). */
 export interface SceneEntry {
   unit: string;
   file: string;
@@ -23,11 +24,13 @@ export interface SceneEntry {
 
 export interface FileClosureOptions {
   stopAt?: ReadonlySet<string>;
+  /** Follow static imports only, skipping `import("…")`. */
+  staticOnly?: boolean;
 }
 
 export const SCENES_DIR: string;
 
-export function parseImportSpecifiers(source: string): string[];
+export function parseImportSpecifiers(source: string, opts?: { staticOnly?: boolean }): string[];
 export function sceneEntries(
   names: Iterable<string>,
   readFile: (path: string) => string | null,

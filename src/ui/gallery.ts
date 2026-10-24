@@ -1,4 +1,5 @@
 import type { Scene } from "../render/scene.ts";
+import { loadScene, sceneReady } from "../render/lazyScene.ts";
 import type { QualityPreset, QualitySettings } from "../render/quality.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { createSyntheticFeed } from "../audio/synthetic.ts";
@@ -687,6 +688,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // rebuild: entries for discarded elements just become unreachable.
   const tileByCanvas = new WeakMap<Element, Tile>();
   const tileByButton = new WeakMap<Element, Tile>();
+  // Tiles whose scene code the gallery has asked for, so a pending load is
+  // awaited once rather than once per tick.
+  const loadsAsked = new WeakSet<Tile>();
 
   const observer = new IntersectionObserver(
     (entries) => {
@@ -1061,6 +1065,18 @@ export function createGallery(deps: GalleryDeps): Gallery {
       for (const idx of dueIndices) {
         const t = eligible[idx];
         if (!preview.host.isMounted(t.scene)) {
+          if (!sceneReady(t.scene)) {
+            // Drawn once its code is here: a body landing never compiles
+            // outside the one-mount-per-tick pacing below.
+            if (!loadsAsked.has(t)) {
+              loadsAsked.add(t);
+              loadScene(t.scene).catch((err) => {
+                console.error(`Gallery preview of "${t.scene.name}" can't load:`, err);
+                t.sink = null;
+              });
+            }
+            continue;
+          }
           if (mountedThisTick) continue;
           mountedThisTick = true;
           try {
