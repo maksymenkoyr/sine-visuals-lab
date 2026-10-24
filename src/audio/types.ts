@@ -1,4 +1,45 @@
+import type { HitKind } from "./engine/onsets.ts";
+
 export const NUM_BANDS = 24;
+
+/**
+ * What the audio engine (src/audio/engine/engine.ts) heard over the audio
+ * since the frame before. Made by the device that hears the sound and carried
+ * with its frames to the pop-out and over the wire, so every device's anim
+ * clock (src/render/animClock.ts) builds the same levels, hits and beat from
+ * it.
+ */
+export interface EngineReading {
+  /** Auto-ranged band levels [0,1] (engine/bands.ts). */
+  low: number;
+  mid: number;
+  high: number;
+  /** The strongest hit of each kind since the frame before: from 1 (at the
+   *  threshold) up to engine/onsets.ts's HIT_STRENGTH_MAX; 0 = none. Before
+   *  any silence gate. */
+  kick: number;
+  snare: number;
+  hat: number;
+  /** The largest rise over the hit threshold since the frame before (1 = at
+   *  it), and the kind that rise was nearest. */
+  surge: number;
+  surgeKind: HitKind;
+  /** A rise peaked over the threshold inside the hit refractory since the
+   *  frame before: a hit blocked rather than missed. */
+  blocked: boolean;
+  /** A steady pulse is playing (engine/tempo.ts). */
+  music: boolean;
+  /** How periodic the recent onsets are, [0,1]. */
+  confidence: number;
+  /** The tracker's latest beat and bar start on its fitted grid, on this
+   *  frame's own clock (FeatureFrame.time). */
+  beatTime: number;
+  downbeatTime: number;
+  /** How clearly one beat of the bar carries more bass than the others, [0,1]. */
+  downbeatConfidence: number;
+  /** Changes whenever the tracker refreshes its estimate. */
+  updates: number;
+}
 
 /**
  * The single interface every renderer consumes, regardless of whether the
