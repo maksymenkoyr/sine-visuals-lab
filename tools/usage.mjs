@@ -23,7 +23,8 @@
 // under load, and the interval re-weights each surviving row.
 //
 // Column names follow the blob order in usageDataPoint() — blob1 kind,
-// blob2 scene, blob3 source, blob4 me|visitor, blob5 country, blob6 device.
+// blob2 scene, blob3 source, blob4 me|visitor, blob5 country, blob6 device,
+// blob7 where the visit came from ("" before that field existed).
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -107,6 +108,12 @@ table(
   "Per scene",
   await sql(`SELECT blob2 AS scene, SUM(_sample_interval) AS views, SUM(IF(blob1 = 'start', _sample_interval, 0)) AS opened_with
     FROM ${DATASET} WHERE ${where} GROUP BY scene ORDER BY views DESC LIMIT 50`),
+);
+
+table(
+  "Where visits came from",
+  await sql(`SELECT IF(blob7 = '', '(not recorded)', blob7) AS came_from, SUM(IF(blob1 = 'start', _sample_interval, 0)) AS sessions
+    FROM ${DATASET} WHERE ${where} GROUP BY came_from ORDER BY sessions DESC`),
 );
 
 table(
