@@ -34,7 +34,7 @@ export type BeatSource = "beat" | "bass" | "mid" | "high" | "bar" | "drop";
 export const PULSE_DECAY_DEFAULT = 6;
 
 /** A hold sized in beats once the tempo tracker is confident (tempoLock >=
- *  lockMin, default 0.35 — beatClock.ts's own rough "trust this" line),
+ *  lockMin, its default a rough "trust this" line),
  *  falling back to a fixed `fallbackSec` otherwise — the shape shards'
  *  pre-listener minHoldSec used to reproduce the beat spacing of a locked
  *  track without needing a lock. See resolveHold. */
@@ -100,7 +100,7 @@ export interface BeatListener {
 /** Whether `source` has a fresh edge this tick. "bar" is its own thing: a
  *  bar wrap (this tick's AnimFrame.barPhase less than `prevBarPhase`, the
  *  value from the tick before) while the tempo tracker is confident
- *  (tempoLock > 0.5 — beatClock.ts's own "trust the grid" line); below that
+ *  (tempoLock above a "trust the grid" line); below that
  *  a bar boundary isn't known yet, so it falls back to the plain beat edge.
  *  Every other source reads its matching AnimFrame one-shot directly. */
 export function sourceEdge(source: BeatSource, anim: AnimFrame, prevBarPhase: number | null): boolean {

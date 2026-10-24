@@ -95,10 +95,8 @@ export class JitterBuffer {
   private lastOnsetRoomTimeMs = -Infinity;
   private lastFiredOnsetRoomTimeMs = -Infinity;
   // Same one-shot-due-tracking pair as onset above, but for the ungated
-  // pulse onset (see FeatureFrame.pulseOnset) — tempo tracking on a
-  // host/renderer/TV must read this, never lastOnsetRoomTimeMs, or the
-  // silence gate that already dimmed `onset` before it reached the wire
-  // would also starve the beat clock on the other end.
+  // pulse onset (see FeatureFrame.pulseOnset), which a follower from before
+  // the engine reading tracks tempo on: the gated `onset` would starve it.
   private lastPulseRoomTimeMs = -Infinity;
   private lastFiredPulseRoomTimeMs = -Infinity;
   private bpm = 0;

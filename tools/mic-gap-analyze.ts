@@ -1,6 +1,6 @@
 // Detector half of the mic-vs-direct comparison: runs each song take of a
-// tools/mic-gap.mjs session through the app's own FeatureExtractor and
-// TempoAnalyzer (tests/tempoEval/run.ts's evaluate(), silence gate on, the
+// tools/mic-gap.mjs session through the app's own FeatureExtractor and audio
+// engine (tests/tempoEval/run.ts's evaluate(), silence gate on, the
 // way app.ts runs solo) three times — the tab share, the real mic, and the
 // tab share through tests/tempoEval/micChain.ts's simulated room — and
 // scores each against the song's own beat grid (song.json's phi/period).
@@ -61,7 +61,6 @@ function runLeg(name: string, mono: Float32Array, s: SongSignal, delaySec: numbe
   const closed: number[] = [];
   const open: number[] = [];
   const metrics: EvalMetrics = evaluate(track, 60, {
-    analyzer: true,
     gate: true,
     auto,
     onFrame: (time, frame, _anim, resolved) => {
@@ -167,7 +166,6 @@ function runNoise(mono: Float32Array) {
   let onsets = 0;
   let marks: { closed: number; open: number } | undefined;
   evaluate({ name: "noise", mono, tempo: [], beats: [], gridBeats: [] }, 60, {
-    analyzer: true,
     gate: true,
     auto: true,
     onFrame: (time, frame, _anim, resolved) => {

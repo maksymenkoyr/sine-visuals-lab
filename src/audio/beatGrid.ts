@@ -1,20 +1,20 @@
 /**
  * Beat grid: which pulses a `{ source: "beat", grid }` drive
  * (src/render/drives.ts, one setting's `SceneSetting.drive` choice) fires
- * on. "Hits" is the raw broadband onset detector (features.ts) — every
- * kick, snare, hat or fill that clears its threshold, which on a busy mix
- * reads as chaos. The grid stops instead fire from beatClock.ts's
- * phase-locked clock, one pulse per note value, so a setting's beat surge
- * lands like a metronome on the tempo the tracker has locked to, and only
- * then — until it locks, a grid stop falls back to hits (see
- * src/render/gridPulse.ts).
+ * on. "Hits" is the raw broadband onset detector
+ * (src/audio/engine/onsets.ts) — every kick, snare, hat or fill that clears
+ * its threshold, which on a busy mix reads as chaos. The grid stops instead
+ * fire from the engine's phase-locked beat clock (src/audio/engine/clock.ts),
+ * one pulse per note value, so a setting's beat surge lands like a metronome
+ * on the tempo the tracker has locked to, and only then — until it locks, a
+ * grid stop falls back to hits (see src/render/gridPulse.ts).
  *
  * Note values name the pulse's length in a 4/4 bar the way a DAW's
  * quantise menu does: 1/4 is one beat, 1/8 half a beat, 1/2 two beats, 1
- * bar four, 2 bars eight. The tracker has no downbeat detector, so a bar
- * starts on whichever beat it happened to lock on — steady, not
- * necessarily musically "on the one" — unless the operator sets it by
- * hand with the B key (src/render/beatTrim.ts).
+ * bar four, 2 bars eight. A bar starts on the tracker's downbeat only once
+ * it is confident of it, else on whichever beat the clock happened to lock
+ * on — steady, not necessarily musically "on the one" — unless the operator
+ * sets it by hand with the B key (src/render/beatTrim.ts).
  *
  * This module only owns the note-value vocabulary now — the choice itself
  * is stored per setting, variant-scoped, in src/render/driveStore.ts (one

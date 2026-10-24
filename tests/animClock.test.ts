@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { createAnimClock, WAVE_PEAK_FALL_PER_SEC } from "../src/render/animClock.ts";
+import { createAnimClock, WAVE_PEAK_FALL_PER_SEC, type AnimClock, type AnimFrame } from "../src/render/animClock.ts";
+import { LOCK_MEANINGS } from "../src/render/lockMeaning.ts";
+import { FOLLOW_LOCK } from "../src/render/metronome.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
@@ -14,6 +16,11 @@ const HIT = (kinds: { kick?: number; snare?: number; hat?: number }) => engineRe
 const NEUTRAL_SHAPE: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: UNIT_TAILS };
 
 const DT = 1 / 60;
+
+/** The signed distance to the nearest whole number. */
+function wrapHalf(x: number): number {
+  return x - Math.floor(x + 0.5);
+}
 
 function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
   return {
@@ -163,48 +170,72 @@ describe("createAnimClock", () => {
     expect(anim.hitStrength.low.strength).toBeLessThanOrEqual(1);
     expect(anim.hitStrength.low.strength).toBe(anim.lowPulse);
   });
+});
 
-  it("beats is beatClock's own free-running unwrapped count, straight through", () => {
+/** Runs `clock` for `sec` on frames timed from `t0` (the frame clock, offset by
+ *  `clockOffset`), the engine hearing `bpm` with beats on whole multiples of
+ *  its period and refreshing every UPDATE_FRAMES ticks. Returns the last frame. */
+const UPDATE_FRAMES = 10;
+function hear(clock: AnimClock, t0: number, sec: number, bpm: number, music = true, clockOffset = 0): AnimFrame {
+  const period = 60 / bpm;
+  let anim: AnimFrame | null = null;
+  const steps = Math.round(sec / DT);
+  for (let i = 1; i <= steps; i++) {
+    const t = t0 + i * DT;
+    const updates = Math.floor((t0 / DT + i) / UPDATE_FRAMES);
+    const beatTime = Math.floor(t / period) * period + clockOffset;
+    const engine = engineReading({ music, confidence: music ? 0.9 : 0, beatTime, downbeatTime: beatTime, updates });
+    anim = clock.advance(DT, frame({ time: t + clockOffset, bpm: music ? bpm : 0, engine }));
+  }
+  return anim!;
+}
+
+describe("the beat clock on the engine's reading", () => {
+  it("follows the engine's tempo and beat, and Lock climbs past the metronome's follow line", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ bpm: 120, onset: true }));
-    expect(anim.beats).toBeGreaterThanOrEqual(0);
-    expect(Number.isFinite(anim.beats)).toBe(true);
+    const anim = hear(clock, 0, 8, 120);
+    expect(anim.tempoBpm).toBeCloseTo(120, 6);
+    expect(Math.abs(wrapHalf(anim.beatPhase - (8 * 120) / 60))).toBeLessThan(0.02);
+    expect(anim.tempoLock).toBeGreaterThan(FOLLOW_LOCK);
   });
 
-  // Regression for the silence-gate-starves-tempo bug (see
-  // src/audio/types.ts's FeatureFrame.pulseOnset and this file's own
-  // beat.advance() call for the fix): on the render-tick path (no
-  // hit.tempoHits), the beat clock's phase comb must follow
-  // frame.pulseOnset, never the gated frame.onset — feeding it one without
-  // the other must produce opposite outcomes, not just "both work".
-  it("render-tick path: the phase comb locks on pulseOnset hits even while onset never fires", () => {
+  it("with no music: no tempo, the beat holds still, and Lock falls to 0", () => {
     const clock = createAnimClock();
-    const bpm = 120; // one beat every 0.5s
-    const periodSec = 60 / bpm;
-    let t = 0;
-    let lastAnim = clock.advance(DT, frame({ bpm, time: t }));
-    for (let i = 0; i < 600; i++) {
-      t += DT;
-      const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
-      lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: false, pulseOnset: dueBeat }));
-      // No engine hit in this scenario, so beatPulse must stay exactly 0.
-      expect(lastAnim.beatPulse).toBe(0);
-    }
-    expect(lastAnim.tempoLock).toBeGreaterThan(0.5);
+    hear(clock, 0, 8, 120);
+    hear(clock, 8, 4, 120, false);
+    const still = hear(clock, 12, 0.5, 120, false);
+    const later = hear(clock, 12.5, 1, 120, false);
+    expect(later.tempoBpm).toBe(0);
+    expect(later.beats).toBe(still.beats);
+    expect(later.tempoLock).toBeLessThan(0.01);
   });
 
-  it("render-tick path: onset-only hits (no pulseOnset) never lock the phase comb", () => {
+  it("a frame without a reading leaves the clock still at 0", () => {
     const clock = createAnimClock();
-    const bpm = 120;
-    const periodSec = 60 / bpm;
-    let t = 0;
-    let lastAnim = clock.advance(DT, frame({ bpm, time: t }));
-    for (let i = 0; i < 600; i++) {
-      t += DT;
-      const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
-      lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: dueBeat, pulseOnset: false }));
+    let anim: AnimFrame | null = null;
+    for (let i = 0; i < 120; i++) anim = clock.advance(DT, frame({ time: i * DT, bpm: 0 }));
+    expect(anim!.beats).toBe(0);
+    expect(anim!.tempoBpm).toBe(0);
+    expect(anim!.tempoLock).toBe(0);
+  });
+
+  // A TV's frames are on room time, a solo capture's on its AudioContext's;
+  // the reading's beat times only count against the frame's own time.
+  it("reads beat times against the frame's own clock, wherever that clock starts", () => {
+    const solo = hear(createAnimClock(), 0, 6, 128);
+    const tv = hear(createAnimClock(), 0, 6, 128, true, 1234.567);
+    expect(Math.abs(wrapHalf(tv.beatPhase - solo.beatPhase))).toBeLessThan(1e-6);
+  });
+
+  it("tempoLock is the meaning the clock was made with; lockReadings has every meaning", () => {
+    for (const lockMeaning of LOCK_MEANINGS) {
+      const clock = createAnimClock({ lockMeaning });
+      const anim = hear(clock, 0, 3, 120);
+      expect(anim.tempoLock, lockMeaning).toBe(clock.lockReadings()[lockMeaning]);
     }
-    expect(lastAnim.tempoLock).toBeLessThan(0.1);
+    const clock = createAnimClock();
+    const anim = hear(clock, 0, 3, 120);
+    expect(anim.tempoLock).toBe(clock.lockReadings().stability);
   });
 });
 

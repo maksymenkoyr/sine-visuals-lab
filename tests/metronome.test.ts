@@ -309,6 +309,34 @@ describe("metronome", () => {
     expect(sawMismatch).toBe(false);
   });
 
+  it("takes the clock's bar when it moves by a beat: forward, once, with no tick for the jump", () => {
+    const m = createMetronome();
+    let clockBeats = 0;
+    let lastT = 0;
+    const clockAt = (t: number) => {
+      clockBeats += ((t - lastT) * 120) / 60;
+      lastT = t;
+      return { bpm: 120, beats: clockBeats, tempoLock: 1 };
+    };
+    run(m, TEMPO_SETTLE_SEC * 2, clockAt, () => 120);
+    expect(m.running).toBe(true);
+    const barOf = (b: number) => Math.round(b) % METRONOME_BEATS_PER_BAR;
+    expect(barOf(m.beats)).toBe(barOf(clockBeats));
+
+    clockBeats += 1;
+    const before = m.beats;
+    m.advance(DT, { bpm: 120, beats: clockBeats + DT * 2, tempoLock: 1 }, 120);
+    clockBeats += DT * 2;
+    expect(m.barMoved).toBe(true);
+    expect(m.beatTick).toBe(false);
+    expect(m.barTick).toBe(false);
+    expect(m.beats - before).toBeCloseTo(1 + DT * 2, 2);
+    expect(barOf(m.beats)).toBe(barOf(clockBeats));
+
+    m.advance(DT, { bpm: 120, beats: clockBeats + DT * 2, tempoLock: 1 }, 120);
+    expect(m.barMoved).toBe(false);
+  });
+
   it("does not react to clock noise before ever starting — only rawBpm/tempoSettle matter", () => {
     const m = createMetronome();
     run(m, 1, () => ({ bpm: 999, beats: 12345, tempoLock: 1 }), () => 0);

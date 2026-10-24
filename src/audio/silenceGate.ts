@@ -55,12 +55,11 @@
  * device that draws gates the engine reading's hits itself (bandEnergy.ts,
  * run by src/render/animClock.ts), off the frame's `level` and its own marks;
  * src/app.ts also sets FeatureFrame.onset by the same rule for followers that
- * predate the reading. FeatureFrame.pulseOnset is any engine hit ungated, and
- * that is what the beat clock votes on: a gated vote starved tempo tracking
- * in a room the gate read as quiet (through a mic, the Metronome never
- * started), while hiss hits that slip through ungated are aperiodic and the
- * beat clock's confidence already rejects them (tests/tempoEval.test.ts's
- * "through a mic" block).
+ * predate the reading. The tempo tracker (src/audio/engine/tempo.ts) hears
+ * the audio before any gate, and the beat clock follows it: a gated tracker
+ * starved tempo tracking in a room the gate read as quiet (through a mic, the
+ * Metronome never started), while hiss is aperiodic and the tracker's music
+ * test already rejects it (tests/tempoEval.test.ts's "through a mic" block).
  *
  * The marks are not part of a room's look: their keys are
  * net/syncedStores.ts's VOLATILE_PREFIXES, which the pop-out still mirrors

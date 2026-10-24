@@ -17,8 +17,8 @@ hands back a raw stream.
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
 the room's own loudness. That same adaptive shape is why `src/audio/
-silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset,
-and (via `src/render/animClock.ts`) `src/render/bandEnergy.ts`'s per-band onsets,
+silenceGate.ts` exists: its two marks weight the audio engine's hits
+(`src/audio/engine/`, gated in `src/render/bandEnergy.ts` via `src/render/animClock.ts`)
 against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
 so a quiet room's own hiss can't fire on its own. Both marks can also be handed
 to an auto mode (on by default) that tracks the room's own quiet level instead
@@ -33,8 +33,9 @@ them over the wire rather than working them out itself. The split runs only on
 ticks where something reads them; `src/render/stemReaders.ts` says who does.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
-`FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
-clock (`src/render/beatClock.ts`), the always-evenly-spaced metronome built on
+`FeatureFrame` and produces one `AnimFrame` — flow phase, the audio engine's
+beat/bar clock (`src/audio/engine/clock.ts`, run off the frame's engine reading,
+its Lock from `src/render/lockMeaning.ts`), the always-evenly-spaced metronome built on
 top of it (`src/render/metronome.ts`), per-band energy and onset pulses, section
 intensity, spectral centroid (`src/render/spectralCentroid.ts`). Scenes never read
 `FeatureFrame` fields directly for anything animated; they read `AnimFrame`,
@@ -70,7 +71,7 @@ a viewer with no local mic doesn't get that row at all. The same card's
 History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
 `FeatureFrame` field — its own Gate row right after it reads
-that same extractor's `gateDimmer` diagnostic the same way. Its LUFS row
+`AnimFrame.gateDimmer`. Its LUFS row
 is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer. (The Waveform row

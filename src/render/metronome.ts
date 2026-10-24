@@ -18,16 +18,22 @@ import { createTempoSettle } from "./tempoSettle.ts";
 //
 // Once it has a tempo, this is still a flywheel: `beats` advances on its
 // own every tick at whatever `bpm` currently is, and only ever nudges
-// toward beatClock's own phase/tempo while beatClock is sure (tempoLock at
-// or above FOLLOW_LOCK) *and* beatClock's own bpm still agrees with this
+// toward the beat clock's own phase/tempo while it is sure (tempoLock at
+// or above FOLLOW_LOCK) *and* the clock's own bpm still agrees with this
 // module's (within RESYNC_RATIO) — the instant either condition fails, the
 // correction stops and this free-runs at its last bpm rather than drifting
-// or stalling with the clock (beatClock.ts's own beatPhase) or falling back
+// or stalling with the clock (the engine clock's own beatPhase) or falling back
 // to raw hits (gridPulse.ts's behaviour below GRID_LOCK_ON). A tempo change
 // big enough to move tempoSettle's own held value (once it has confirmed
 // it — see RETUNE_SURE_SEC there) retunes this the same tick —
 // phase stays continuous across that retune, only the beats/sec rate
 // changes.
+//
+// While it follows, it also takes the clock's bar starts (the engine's
+// downbeats, src/audio/engine/clock.ts): a whole-beat difference between its
+// bar position and the clock's moves its count forwards onto the clock's,
+// never back, without a tick for the jump (`barMoved`). A manual bar resync
+// (beatTrim.ts) sits on top of the count, so it still wins.
 //
 // A tap tempo (src/render/tapTempo.ts) reaches this through seed(): the
 // tapped tempo is held in tempoSettle.ts as one the tracker is sure of, and
@@ -43,7 +49,7 @@ import { createTempoSettle } from "./tempoSettle.ts";
 // steady tick that never wavers" — a source for scenes that want to *keep
 // time*. Neither replaces the other; src/render/signals.ts exposes both.
 
-/** What this reads off beatClock.ts each tick — its smoothed bpm, its own
+/** What this reads off the beat clock each tick — its bpm, its own
  *  unwrapped beat count, and tempoLock, the confidence the metronome gates
  *  every correction on. */
 export interface MetronomeClockInput {
@@ -60,7 +66,7 @@ export interface Metronome {
    *  while running (unrounded), 0 while idle. Not the same object as
    *  `clock.bpm`, which keeps moving under it. */
   readonly bpm: number;
-  /** Unwrapped beat count, free-running like beatClock's own `beats` —
+  /** Unwrapped beat count, free-running like the clock's own `beats` —
    *  advances only while running, frozen while idle. */
   readonly beats: number;
   /** [0,1) position within the current beat. */
@@ -78,25 +84,28 @@ export interface Metronome {
   /** One-shot, same rule as beatTick, on a METRONOME_BEATS_PER_BAR-beat
    *  boundary. */
   readonly barTick: boolean;
-  /** Advances by dtSec. `clock` is beatClock's own reading this tick;
+  /** One-shot: true on the advance() call that moved `beats` forward onto
+   *  the clock's bar (see the file header). No tick fires for that jump; a
+   *  trimmer on top of `beats` must be rearmed the same tick. */
+  readonly barMoved: boolean;
+  /** Advances by dtSec. `clock` is the beat clock's own reading this tick;
    *  `rawBpm` is the tracker's *unsmoothed* bpm (FeatureFrame.bpm passed
    *  through — AnimFrame.bpm) — the same number tempoSettle.ts settles for
    *  the Beat card's BPM, pushed here every tick so the two can never
    *  disagree.
-   *  Call once per render tick, same placement as beatClock's own
-   *  advance(). */
+   *  Call once per render tick, right after the beat clock's tick(). */
   advance(dtSec: number, clock: MetronomeClockInput, rawBpm: number): void;
   /** Tap tempo's seed (see the file header): ticks at `bpm` from now on,
    *  held in tempoSettle.ts as a tempo the tracker is sure of, with `beats`
    *  moved the short way onto `beatPhase` — forward at once, or held still
    *  for the difference, never backward. Starts the metronome if it was
-   *  idle, from `clockBeats` (beatClock's own count, already seeded to the
+   *  idle, from `clockBeats` (the clock's own count, already seeded to the
    *  same phase) the way a normal start adopts the clock's count. Call
    *  before this tick's advance(). */
   seed(bpm: number, beatPhase: number, clockBeats: number): void;
 }
 
-/** How many beats make a bar, for barPhase/barTick — matches beatClock.ts's
+/** How many beats make a bar, for barPhase/barTick — matches the engine clock's
  *  own (unexported) BEATS_PER_BAR. */
 export const METRONOME_BEATS_PER_BAR = 4;
 
@@ -158,7 +167,7 @@ export const LEVEL_RISE_RATE = 2; // 1/s, while running
 export const LEVEL_FALL_RATE = 3; // 1/s, while idle
 
 /** Wraps into [-0.5, 0.5) — the signed distance to the nearest whole beat.
- *  Same shape as beatClock.ts's own (unexported) wrapHalf. */
+ *  Same shape as the engine clock's own (unexported) wrapHalf. */
 function wrapHalf(x: number): number {
   const w = (((x + 0.5) % 1) + 1) % 1;
   return w - 0.5;
@@ -208,11 +217,13 @@ export function createMetronome(): Metronome {
     level: 0,
     beatTick: false,
     barTick: false,
+    barMoved: false,
     advance(dtSec: number, clock: MetronomeClockInput, rawBpm: number): void {
       settle.push(rawBpm, dtSec, clock.tempoLock);
       const target = settle.bpm;
       let beatTick = false;
       let barTick = false;
+      let barMoved = false;
 
       if (!running) {
         if (target > 0) {
@@ -252,6 +263,19 @@ export function createMetronome(): Metronome {
             beats += Math.max(-cap, Math.min(cap, rawStep));
           }
           bpm += (clock.bpm - bpm) * Math.min(1, TEMPO_FOLLOW_RATE * dtSec);
+          // Only once the beats agree, so the whole-beat count can't flip
+          // between two values while the phase is still half a beat out.
+          const rest = clock.beats - beats;
+          const sub = wrapHalf(rest);
+          if (Math.abs(sub) <= PHASE_SNAP_BEATS) {
+            const per = METRONOME_BEATS_PER_BAR;
+            const forward = ((Math.round(rest - sub) % per) + per) % per;
+            if (forward !== 0) {
+              beats += forward;
+              barMoved = true;
+              armTickDetection();
+            }
+          }
         }
 
         const beatFloor = Math.floor(beats);
@@ -274,6 +298,7 @@ export function createMetronome(): Metronome {
       (metronome as { level: number }).level = level;
       (metronome as { beatTick: boolean }).beatTick = beatTick;
       (metronome as { barTick: boolean }).barTick = barTick;
+      (metronome as { barMoved: boolean }).barMoved = barMoved;
     },
     seed(nextBpm: number, beatPhase: number, clockBeats: number): void {
       settle.hold(nextBpm);

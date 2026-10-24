@@ -3,7 +3,7 @@ import { buildTracks, makeRng, SR, type Track } from "./tempoEval/synth.ts";
 import { evaluate, type EvalOptions } from "./tempoEval/run.ts";
 
 // Tap tempo (src/render/tapTempo.ts) through the same offline harness as
-// tests/tempoEval.test.ts — the real extractor, the fixed-hop analyzer and
+// tests/tempoEval.test.ts — the real extractor, the audio engine and
 // the anim clock, solo mode at FPS — with taps scripted on the track's
 // own clock. A separate file so `npm run eval:tempo`, which must print the
 // same table before and after any tap work, is untouched. The numbers each
@@ -14,7 +14,7 @@ import { evaluate, type EvalOptions } from "./tempoEval/run.ts";
 
 const tracks = new Map(buildTracks().map((t) => [t.name, t] as const));
 const FPS = 60;
-const SOLO: EvalOptions = { analyzer: true };
+const SOLO: EvalOptions = { path: "solo" };
 
 /** The end of a track's last tempo segment — where its music stops. */
 function musicEnd(track: Track): number {
@@ -92,7 +92,10 @@ function play(track: Track, tapTimes: number[]): Run {
     taps: tapTimes,
     onFrame: (t, _frame, anim) => {
       rows.push({ t, bpm: anim.metronomeBpm, guided: anim.tapGuided, lock: anim.tempoLock });
-      if (prevOn && anim.metronomeOn && anim.metronomeBeats > prevBeats) {
+      // A move onto the beat clock's bar (metronome.ts's barMoved) crosses
+      // whole beats with no tick; only the ticks the metronome fires count.
+      const moved = !anim.metronomeBeat && Math.floor(anim.metronomeBeats) > Math.floor(prevBeats);
+      if (prevOn && anim.metronomeOn && !moved && anim.metronomeBeats > prevBeats) {
         for (let b = Math.floor(prevBeats) + 1; b <= Math.floor(anim.metronomeBeats); b++) {
           ticks.push(prevT + ((b - prevBeats) / (anim.metronomeBeats - prevBeats)) * (t - prevT));
         }
@@ -146,7 +149,10 @@ const steady = play(hiphopTwice, steadyTaps);
 // The same run with one stray tap between the second and third beats.
 const strayTaps = [...steadyTaps.slice(0, 2), steadyTaps[1]! + 0.4 * (60 / 90), ...steadyTaps.slice(2)];
 const stray = play(hiphopTwice, strayTaps);
-// dnb's tracker reads dnb's own tempo; the taps say half of it.
+// Taps at half of dnb's 174. The audio engine already reads dnb at its half
+// (86.9, see tests/tempoEval.test.ts), so these taps sit on the tracker's own
+// tempo; the clock's half-tempo judging (setDivision(2)) is held by
+// tests/audioEngine.test.ts instead.
 const halfTaps = taps(dnbThrice, 87, 6, 8, 15, 12);
 const half = play(dnbThrice, halfTaps);
 // hiphop's tracker reads hiphop's own tempo; the taps say twice that (every eighth note).
@@ -218,7 +224,7 @@ describe("tap tempo through the tracker", () => {
     expect(holdBeat(stray, hiphopTwice.beats).share).toBeGreaterThanOrEqual(0.85);
   });
 
-  it("taps at half the tracker's tempo resolve the octave to the tap, and stay there", () => {
+  it("taps at half of dnb's tempo show at once and hold there, on the beat", () => {
     expect(half.shownLag).toBeLessThanOrEqual(1 / FPS + 1e-9);
     expect(Math.abs(half.shownBpm - 87)).toBeLessThan(1.5);
     const hold = afterHold(half);

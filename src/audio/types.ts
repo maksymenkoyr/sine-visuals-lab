@@ -6,6 +6,11 @@ export type HitKind = "kick" | "snare" | "hat";
 export const HIT_KINDS: readonly HitKind[] = ["kick", "snare", "hat"];
 /** A hit's strength is how far its peak cleared the threshold: 1 at the threshold, at most this. */
 export const HIT_STRENGTH_MAX = 4;
+// The tempo range engine/tempo.ts searches. Here for the same reason: the
+// Tempo signal (render/signals.ts) and tap tempo (render/tapTempo.ts) read it
+// on pages that never run the tracker.
+export const MIN_BPM = 55;
+export const MAX_BPM = 215;
 
 /**
  * What the audio engine (src/audio/engine/engine.ts) heard over the audio

@@ -17,9 +17,9 @@ uniform vec4 uViewport; // x,y,w,h slice of the shared room-space canvas
 uniform float uBands[${NUM_BANDS}];
 uniform float uEnergy;
 uniform float uBeatPulse;
-uniform float uBeatPhase; // phase-locked beat clock — see beatClock.ts, never restarts mid-beat
+uniform float uBeatPhase; // phase-locked beat clock (animClock.ts), never restarts mid-beat
 uniform float uBarPhase;  // uBeatPhase over a 4-beat bar
-uniform float uTempoLock; // 0..1, ramps in while a tempo is held, ramps out with no beat
+uniform float uTempoLock; // 0..1, how sure the beat clock is (lockMeaning.ts); 0 with no music
 uniform float uBpm;
 uniform float uLow;       // slewed low/mid/high band levels — see bandEnergy.ts
 uniform float uMid;

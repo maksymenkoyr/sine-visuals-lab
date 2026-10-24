@@ -175,6 +175,17 @@ describe("audio engine: beat clock seed and division", () => {
     expect(later.beats - c.beats).toBeCloseTo(1, 9);
   });
 
+  it("follow() returns the phase error it measured: none on the snap, a repeat or no music", () => {
+    const clock = new BeatClock();
+    expect(clock.follow(locked, 0)).toBeNull();
+    clock.tick(0, 1 / 60);
+    expect(clock.follow(locked, 0.01)).toBeNull();
+    // The clock reads a tenth of a beat past whole at the tracker's beat.
+    const error = clock.follow({ ...locked, beatTime: 0.55, updates: 2 }, 0.6);
+    expect(error).toBeCloseTo(0.1, 9);
+    expect(clock.follow({ ...locked, music: false, updates: 3 }, 0.7)).toBeNull();
+  });
+
   it("at division 2 a tracker beat on the clock's half beat isn't pulled onto the whole beat", () => {
     const pulled = (division: 1 | 2) => {
       const clock = new BeatClock();

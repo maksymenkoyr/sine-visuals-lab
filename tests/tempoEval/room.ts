@@ -1,6 +1,6 @@
 import { NUM_BANDS } from "../../src/audio/types.ts";
 import { MAX_HZ_CAP, bandEdgesHz } from "../../src/audio/bandScale.ts";
-import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
+import { OnsetDetector } from "../../src/audio/engine/onsets.ts";
 import { readBandsDb } from "./bands.ts";
 import { SR } from "./synth.ts";
 
@@ -8,7 +8,7 @@ import { SR } from "./synth.ts";
  * What a room does to the sound, measured the same way on any audio, so a
  * real recording can be set next to micChain.ts's simulation of one and the
  * clean original: roomStats() reads the same per-band levels the app sees
- * (bands.ts) every FRAME_SEC. And hitGrid() counts the fixed-hop detector's
+ * (bands.ts) every FRAME_SEC. And hitGrid() counts the audio engine's
  * hits on and off a known tempo's beat grid.
  *
  * - levelDb: the loud end of the broadband level (LEVEL_PCT), dBFS.
@@ -91,15 +91,17 @@ export function roomStats(mono: Float32Array): RoomStats {
   };
 }
 
-/** The fixed-hop detector's hits per bar (4 beats of `bpm`) on the beat
- *  grid and off it, the grid's phase fitted to the hits themselves. */
+/** The audio engine's hits (engine/onsets.ts, every kind) per bar (4 beats
+ *  of `bpm`) on the beat grid and off it, the grid's phase fitted to the
+ *  hits themselves. */
 export function hitGrid(mono: Float32Array, bpm: number): { onPerBar: number; offPerBar: number } {
-  const an = new TempoAnalyzer(SR);
   const times: number[] = [];
-  for (let i = 0; i < mono.length; i += 128) {
-    an.push(mono.subarray(i, Math.min(mono.length, i + 128)), i / SR);
-    for (const o of an.drainOnsets()) times.push(o.time);
-  }
+  const detector = new OnsetDetector(SR, {
+    envelope: () => {},
+    hit: (time) => times.push(time),
+    rise: () => {},
+  });
+  for (let i = 0; i < mono.length; i += 128) detector.push(mono.subarray(i, Math.min(mono.length, i + 128)), i / SR);
   const period = 60 / bpm;
   const near = (t: number, phase: number) => {
     const d = (((t - phase) % period) + period) % period;

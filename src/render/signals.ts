@@ -1,6 +1,6 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "./animClock.ts";
-import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
+import { MIN_BPM as BPM_MIN, MAX_BPM as BPM_MAX } from "../audio/types.ts";
 import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /**
@@ -407,7 +407,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.tempo",
     label: "Tempo",
     description:
-      "Where the BPM (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the BPM reads '--'.",
+      "Where the BPM (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (MIN_BPM..MAX_BPM in audio/types.ts, engine/tempo.ts's range), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the BPM reads '--'.",
     kind: "level",
     read: (_frame, anim) =>
       anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
@@ -417,7 +417,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.tempoLock",
     label: "Tempo lock",
     description:
-      "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the tempo dot brightens with.",
+      "How confidently the beat clock has locked onto the tempo — the same number the tempo dot brightens with.",
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
     monitor: { card: "beat", row: "lock" },

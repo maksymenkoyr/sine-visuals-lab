@@ -1,13 +1,13 @@
 // Turns the beat clock's free-running beat count into the one-shot beat
 // edge a scene sees (AnimFrame.onset / beatPulse), on the grid the Beat grid
 // row picked (src/audio/beatGrid.ts). Sits inside animClock.advance()
-// between beatClock and the AnimFrame it returns, so every scene reading
+// between the beat clock and the AnimFrame it returns, so every scene reading
 // anim.onset gets the grid for free and none has to know it exists.
 //
-// A grid stop only makes sense once the tracker has a tempo: beatClock's
-// phase stalls at bpm 0 and drifts while it's still converging, so below
-// GRID_LOCK_ON the pulse falls back to the raw onsets — the same picture as
-// Hits — and only switches to the grid once tempoLock has climbed past it.
+// A grid stop only makes sense once the tracker has a tempo: the beat clock's
+// tempo coasts to 0 with no music and its phase is still being pulled onto
+// the beats while the tracker converges, so below GRID_LOCK_ON the pulse
+// falls back to the raw onsets — the same picture as Hits — and only switches to the grid once tempoLock has climbed past it.
 // The two thresholds are a hysteresis pair so a lock hovering at the line
 // doesn't flip the source every few frames. The handover itself is silent:
 // crossing the line never fires a pulse of its own, and neither does
@@ -39,7 +39,7 @@ export interface GridPulse {
    *  for the grid to be driving — false on Hits or while falling back. */
   readonly onGrid: boolean;
   /** Advances one tick and returns whether a beat edge fires this tick.
-   *  `beats` is beatClock's unwrapped beat count, `gridBeats` the beats per
+   *  `beats` is the beat clock's unwrapped beat count, `gridBeats` the beats per
    *  pulse (null = Hits), `rawOnset` this tick's detector edge. */
   advance(beats: number, tempoLock: number, gridBeats: number | null, rawOnset: boolean): boolean;
 }
@@ -64,7 +64,7 @@ export function createGridPulse(): GridPulse {
       // Arm silently on entry or after a grid change — no pulse for the
       // boundary we happen to already be past.
       const armed = lastIndex !== null && lastGridBeats === gridBeats;
-      // Only a boundary past the high-water mark fires. beatClock's phase
+      // Only a boundary past the high-water mark fires. The beat clock's phase
       // never runs backwards, but the beat trim on top of it can (a "later"
       // nudge, a trim reset, a multiplier change with an offset set), and a
       // rewound count crossing the same boundary again must not pulse twice.

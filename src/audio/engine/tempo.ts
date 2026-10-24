@@ -7,10 +7,9 @@
 // pulse stays periodic, so talking, knocks and room noise produce no beats
 // and no tempo. Each update's working arrays are made once and reused.
 
+import { MAX_BPM, MIN_BPM } from "../types.ts";
 import { Fft, nextPowerOfTwo } from "./fft.ts";
 
-const MIN_BPM = 55;
-const MAX_BPM = 215;
 /** Candidate tempos are this ratio apart. */
 const STATE_RATIO = 1.01;
 const WINDOW_S = 8;

@@ -98,7 +98,7 @@ export const NEUTRAL: Readonly<DialValues> = {
  *  rather than recomputed — animClock.ts already derives both from the
  *  same frame this advance() call receives. */
 export interface ProfileInputs {
-  /** beatClock's tempoLock: ramps in while a tempo is held, out with no beat. */
+  /** tempoLock (lockMeaning.ts): 0 with no music. */
   tempoLock: number;
   /** sectionIntensity's phrase-level loudness trend. */
   sectionIntensity: number;
@@ -154,8 +154,9 @@ const LOUDNESS_EASE_RATE = 0.3; // ~3s — faster than the others on purpose: a
 
 // pulse: blends how often onsets are firing with how confidently they've
 // locked to a steady tempo. tempoLock already *is* a regularity signal — it
-// only ramps up while beatClock keeps re-confirming the same interval —
-// so this doesn't need its own IOI-variance calculation.
+// under its default meaning it only rises while the beat clock's phase
+// corrections stay small — so this doesn't need its own IOI-variance
+// calculation.
 const ONSET_RATE_DECAY = 2.5; // per second, leaky onset-density tracker
 const ONSET_RATE_REF = 1.0; // steady-state value for a beat holding around ~150bpm
 
@@ -189,11 +190,10 @@ const DYNAMICS_MEAN_RATE = 0.1; // ~10s
 const DYNAMICS_MAD_RATE = 0.04; // ~25s
 const DYNAMICS_MAD_REF = 0.16; // MAD at/above this reads as "fully dynamic"
 
-// attack: fast/slow envelope pair over summed positive band-to-band flux —
-// the same flux features.ts computes for onset detection, recomputed here
-// from FeatureFrame.bands rather than threaded through the wire frame (see
-// file header). A transient-heavy track keeps flashing fast above its own
-// slow floor; a sustained one doesn't.
+// attack: fast/slow envelope pair over summed positive band-to-band flux,
+// computed here from FeatureFrame.bands so every device gets it without a
+// wire field (see file header). A transient-heavy track keeps flashing fast
+// above its own slow floor; a sustained one doesn't.
 const FLUX_FAST_RATE = 6; // ~0.17s, tracks the moment
 const FLUX_SLOW_RATE = 0.5; // ~2s, tracks the sustained floor
 const ATTACK_REF = 1.4; // fastFlux/slowFlux ratio that reads as "fully percussive"

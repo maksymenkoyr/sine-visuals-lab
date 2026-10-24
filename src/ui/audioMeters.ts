@@ -176,7 +176,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    own jack and its Hz in the legend.
  *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
- *    follows beatClock's tempoLock, so an unlocked guess reads as
+ *    follows tempoLock, so an unlocked guess reads as
  *    unconfident rather than as a confident wrong number, and the BPM
  *    digits dim the same way. Beneath that, the bar ruler (createBarRuler):
  *    one cell per beat of the metronome's bar, the current one lit and the

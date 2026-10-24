@@ -1,4 +1,4 @@
-import { BPM_MAX, BPM_MIN } from "../audio/tempoComb.ts";
+import { MAX_BPM as BPM_MAX, MIN_BPM as BPM_MIN } from "../audio/types.ts";
 import { resetBeatTrim } from "./beatTrim.ts";
 import { RESYNC_RATIO } from "./metronome.ts";
 
@@ -45,13 +45,13 @@ import { RESYNC_RATIO } from "./metronome.ts";
  * back to the tracker.
  *
  * WHERE IT MEETS THE TRACKER (createTapGuide, run by animClock.ts). The
- * tracker is three layers: the raw estimate (tempoComb.ts, in the audio
- * worklet or features.ts), which picks the octave; beatClock.ts, a smoothed
- * tempo and a phase comb over the hits; and metronome.ts over
- * tempoSettle.ts, the Beat card's number and the steady tick. The
- * narrowest place to steer all three is where the raw reading enters the
- * render side, in animClock.ts, as a seed and a hint:
- *  - the seed: beatClock.seed() and metronome.seed() take the tapped tempo
+ * tracker is three layers: the engine's raw estimate (src/audio/engine/
+ * tempo.ts), which picks the octave; the engine's beat clock (src/audio/
+ * engine/clock.ts), which follows that tempo and pulls its phase toward
+ * the beats; and metronome.ts over tempoSettle.ts, the Beat card's number
+ * and the steady tick. The narrowest place to steer all three is where the
+ * raw reading enters the render side, in animClock.ts, as a seed and a hint:
+ *  - the seed: the clock's seed() and metronome.seed() take the tapped tempo
  *    and beat on the next tick (the Beat card shows the metronome's
  *    tempo, so it reads the tap at once), and tempoSettle.hold() holds it
  *    as a tempo the tracker is sure of;
@@ -59,17 +59,15 @@ import { RESYNC_RATIO } from "./metronome.ts";
  *    ratios in TAP_FAMILY of the guided tempo — within metronome.ts's
  *    RESYNC_RATIO, its own line for "the same tempo" — is divided back onto
  *    it. The tracker's octave or ratio choice lands on the tap's, while
- *    everything finer still comes from the music: the clock eases to the
- *    reading's exact tempo, the comb corrects the phase, the metronome
+ *    everything finer still comes from the music: the clock follows the
+ *    reading's exact tempo and pulls its phase onto the beats, the metronome
  *    follows both, and the guided tempo follows the metronome as it drifts.
- *    When the reading sits at twice the tap, the comb is also told to judge
- *    the hits against every half beat (beatClock.setDivision — see that
- *    file's header for the measured reason), so the music's faster pulse
- *    still corrects the timing but the tap alone says which pulse is the
- *    beat.
- * Not inside the estimator itself: it runs on the audio thread, and its
- * reading rides the wire to every paired device, which the beat keys never
- * touch. Guidance ends (follow()) when the metronome stops — the tracker
+ *    When the reading sits at twice the tap, the clock is also told to judge
+ *    the beats against every half beat (the clock's setDivision()), so the
+ *    music's faster pulse still corrects the timing but the tap alone says
+ *    which pulse is the beat.
+ * Not inside the estimator itself: its reading rides the wire to every
+ * paired device, which the beat keys never touch. Guidance ends (follow()) when the metronome stops — the tracker
  * hears no tempo at all — or retunes to a tempo outside the family, so the
  * existing retune rule (tempoSettle.ts's RETUNE_SURE_SEC/RETUNE_UNSURE_SEC)
  * decides when the music has really moved on; there is no timer of its own.
@@ -80,8 +78,8 @@ export const TAP_MIN_TAPS = 4;
 /** Only the latest taps of a run are fitted, so a long run keeps up with a
  *  tempo the tapper changes. */
 export const TAP_MAX_TAPS = 16;
-/** A gap longer than this starts a new run. Long enough to skip a beat at
- *  BPM_MIN. */
+/** A gap longer than this starts a new run. A skipped beat at BPM_MIN or
+ *  slower is longer than this, so a run with one starts over. */
 export const TAP_GAP_SEC = 2;
 /** How far off the beat grid (as a share of a beat) a tap may land and
  *  still count; further than this it is a stray. */
@@ -316,7 +314,7 @@ export interface TapGuide {
   /** True from a tap taking effect until the tracker moves on (or Shift+B). */
   readonly guided: boolean;
   /** 2 while the last fold() found the reading at twice the guided tempo,
-   *  else 1 — beatClock.setDivision's argument (see the file header). */
+   *  else 1 — the clock's setDivision() argument (see the file header). */
   readonly division: 1 | 2;
   /** Reads the store once per tick. A tap tempo that took effect since the
    *  last call comes back as the tempo and the beat phase at `atMs` (on

@@ -14,7 +14,7 @@ import { SR, type Track } from "./tempoEval/synth.ts";
 // `npm run eval:tempo:real`.
 //
 // Two tables print, win or lose:
-// - Tempo, on the fixed-hop path (solo mode): % right, time to the right
+// - Tempo, solo (the audio engine): % right, time to the right
 //   tempo, and the detector's hits per bar on and off the beat grid
 //   (room.ts's hitGrid).
 // - The room (room.ts's roomStats): level, the floor between hits, how fast
@@ -35,7 +35,7 @@ const roomTable: Record<string, Record<string, string>> = {};
 const fmt = (v: number, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "--");
 for (const { set, track } of rows) {
   const key = `${set}: ${track.name}`;
-  const m = evaluate(track, 60, { analyzer: true });
+  const m = evaluate(track, 60);
   tempo[key] = m;
   const grid = hitGrid(track.mono, track.tempo[0]!.bpm);
   tempoTable[key] = {
@@ -55,7 +55,7 @@ for (const { set, track } of rows) {
 }
 if (rows.length) {
   // eslint-disable-next-line no-console
-  console.log("Tempo on real audio (fixed-hop path, 60 fps)");
+  console.log("Tempo on real audio (solo, 60 fps)");
   // eslint-disable-next-line no-console
   console.table(tempoTable);
   // eslint-disable-next-line no-console
