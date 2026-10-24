@@ -34,11 +34,8 @@ import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
 import { createBeatListener, type BeatListener } from "../../beatListener.ts";
-import type { SignalLink } from "../../signals.ts";
 import {
   CUT_LISTENER,
-  CUT_MODE,
-  CUT_MODE_NAMES,
   MAX_SHARDS,
   PRISM_VERTS,
   advanceShards,
@@ -51,158 +48,11 @@ import {
   type ShardState,
 } from "./layout.ts";
 import { BLOOM_THRESHOLD, BLUR_FRAG, BLUR_STRIDE_X, BLUR_STRIDE_Y, bgFrag, compositeFrag, prismFrag, prismVert } from "./glsl.ts";
+import { card, SETTINGS } from "./card.ts";
 
-const ID = "shards";
+const ID = card.id;
 /** Fixed so a headless shot of the same beats is the same cluster. */
 const SEED = 0x5ca1ab1e;
-
-const SETTINGS: SceneSetting[] = [
-  {
-    key: "density",
-    label: "Density",
-    description: "How many plates and spikes each arrangement gets",
-    group: "Form",
-    min: 0.3,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    auto: { density: 0.3 },
-    glide: false,
-  },
-  {
-    key: "spread",
-    label: "Spread",
-    description: "How far the cluster reaches from its centre — tight knot low, scattered high",
-    group: "Form",
-    min: 0.4,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "blades",
-    label: "Blades",
-    description: "Share of thin spikes among the small pieces, against chunky fragments",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.55,
-  },
-  {
-    key: "cutMode",
-    label: "Cut on",
-    description:
-      "What triggers a hard cut to a new arrangement. Every beat and Bars both listen to the broadband beat (Bars cuts once a bar instead of every beat, once the tempo is locked); Bass hit listens to the low band instead, for songs whose broadband beat is too busy",
-    group: "Motion",
-    type: "enum",
-    options: CUT_MODE_NAMES,
-    min: 0,
-    max: CUT_MODE_NAMES.length - 1,
-    step: 1,
-    default: 0,
-    reads: [
-      { signal: "feature.onset", activeWhen: (get) => get("cutMode") !== CUT_MODE.BASS },
-      { signal: "anim.lowOnset", activeWhen: (get) => get("cutMode") === CUT_MODE.BASS },
-    ] satisfies readonly SignalLink[],
-  },
-  {
-    key: "extend",
-    label: "Extend",
-    description: "How fast the plates grow along their own length between cuts — bass pushes it",
-    group: "Motion",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    auto: { pulse: 0.25, loudness: 0.2 },
-    // anim.low directly (advanceShards' growth rate, layout.ts) — a plain
-    // Bass level default.
-    drive: { default: "anim.low" },
-  },
-  {
-    key: "spin",
-    label: "Spin",
-    description: "How fast the whole view rolls between cuts",
-    group: "Motion",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-    auto: { tempo: 0.2 },
-  },
-  {
-    key: "recolour",
-    label: "Recolour",
-    description: "How often a beat swaps a big plate's colour instead of the whole arrangement",
-    group: "Motion",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "rim",
-    label: "Rim",
-    description: "Width of the bright line along every edge, in pixels",
-    group: "Look",
-    min: 0,
-    max: 4,
-    step: 0.1,
-    default: 2,
-  },
-  {
-    key: "edge",
-    label: "Thickness",
-    description: "How thick the plates are — the dark extruded side you see on the big ones",
-    group: "Look",
-    min: 0.3,
-    max: 2.5,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "stars",
-    label: "Stars",
-    description: "How many stars in the ground behind the cluster",
-    group: "Look",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "distance",
-    label: "Distance",
-    description: "How close the camera sits — the cluster fills the frame low, breathes high",
-    group: "Camera",
-    min: 0.6,
-    max: 1.6,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "dolly",
-    label: "Dolly",
-    description: "How much the camera drifts back between cuts, so each new arrangement lands close and then recedes",
-    group: "Camera",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "bloom",
-    label: "Bloom",
-    description: "The soft halo around the bright plates and rims",
-    group: "Post",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 0.8,
-    auto: { brightness: 0.2 },
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const spec = SETTINGS.find((s) => s.key === key);
@@ -216,9 +66,6 @@ const BG_FRAG = bgFrag(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl, ROOM_UV_GLSL)
 const PRISM_VERT = prismVert(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl);
 const PRISM_FRAG = prismFrag(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl);
 const COMPOSITE_FRAG = compositeFrag(COMMON_UNIFORMS_GLSL, settingsUniformsGlsl);
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "development", added: "2026-09-12" } as const;
 
 export const shardsScene: Scene = (() => {
   let bgProg: GLProgram | null = null;
@@ -320,9 +167,7 @@ export const shardsScene: Scene = (() => {
   }
 
   return {
-    id: ID,
-    name: "Shards",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
