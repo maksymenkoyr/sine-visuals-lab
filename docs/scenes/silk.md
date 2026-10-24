@@ -7,8 +7,11 @@ slow morph and zoom — never a hard cut. Draft scene, merged on main.
 
 ## Where the code is
 
-- `src/render/scenes/silk/index.ts` — the `Scene` (id `"silk"`, name
-  "Silk"), `SETTINGS`, the sharp/blur/composite render targets, and
+- `src/render/scenes/silk/card.ts` — the scene's card, loaded with the page: id, name,
+  `minQuality`, `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card,
+  so the registered settings are the body's own objects.
+- `src/render/scenes/silk/index.ts` — the body: the rest of the scene, loaded after first
+  paint. The `Scene`, the sharp/blur/composite render targets, and
   `render()`, which feeds `driver.ts`'s state into `glsl.ts`'s
   `SHARP_BODY`/`BLUR_FRAG`/`COMPOSITE_BODY`.
 - `src/render/scenes/silk/driver.ts` — pure sequencer: `createSilkState`/
@@ -137,6 +140,7 @@ bpm, 59 beats, 3539 probe samples / 185 reference onsets):
   `REGIME_TRAVEL_SEC` instead of waiting for the next regime change,
   which in silence never came.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/silk/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

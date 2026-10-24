@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./spectrum.card.ts";
 
 const FRAG = `
 void main() {
@@ -26,7 +27,4 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-export const spectrumScene = createFullscreenScene("spectrum", "Spectrum", FRAG);
+export const spectrumScene = createFullscreenScene(card.id, card.name, FRAG);

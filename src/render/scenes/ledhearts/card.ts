@@ -1,0 +1,132 @@
+// LED Hearts' card: what every page needs before the scene's code loads (src/render/lazyScene.ts).
+import type { Scene, SceneCard } from "../../scene.ts";
+import type { SceneSetting } from "../../sceneSettings.ts";
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-10-21" } as const;
+
+const SETTINGS: SceneSetting[] = [
+  {
+    key: "hearts",
+    label: "Hearts",
+    group: "Form",
+    min: 0.1,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    description: "How many hearts fill the wall.",
+  },
+  {
+    key: "zoom",
+    label: "Zoom speed",
+    group: "Motion",
+    min: 0,
+    max: 3,
+    step: 0.05,
+    default: 1,
+    description: "How fast the hearts fly out from the centre when the music is quiet.",
+  },
+  {
+    key: "rush",
+    label: "Level rush",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 0.6,
+    description: "How much faster the hearts fly as the music gets louder.",
+    drive: { default: "anim.energy" },
+  },
+  {
+    key: "push",
+    label: "Kick push",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    description: "How far each kick throws the hearts outward.",
+    drive: { default: "anim.lowOnset", hit: { reactionLabel: "push" } },
+  },
+  {
+    key: "spin",
+    label: "Spin",
+    group: "Motion",
+    min: 0,
+    max: 3,
+    step: 0.05,
+    default: 1,
+    description: "How fast the hearts turn on their own.",
+  },
+  {
+    key: "flip",
+    label: "Hit spin",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    description: "How hard each hit sets the hearts spinning.",
+    drive: { default: "anim.midOnset", hit: { reactionLabel: "spin" } },
+  },
+  {
+    key: "wave",
+    label: "Drop wave",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    description: "How bright the wave of light is that runs out from the centre on a drop.",
+    drive: { default: "anim.dropOnset", hit: { reactionLabel: "wave" } },
+  },
+  {
+    key: "glow",
+    label: "Level glow",
+    group: "Look",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    description: "How much brighter the LEDs burn as the music gets louder.",
+    drive: { default: "anim.energy" },
+  },
+  {
+    key: "ledRows",
+    label: "LED rows",
+    group: "Look",
+    min: 40,
+    max: 200,
+    step: 2,
+    default: 108,
+    description: "How many rows of LEDs fill the height. Fewer rows, bigger dots.",
+  },
+  {
+    key: "haze",
+    label: "Haze",
+    group: "Look",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    description: "How much light spills between the LEDs and past each heart.",
+  },
+  {
+    key: "hue",
+    label: "Hue",
+    group: "Look",
+    min: -180,
+    max: 180,
+    step: 1,
+    default: 0,
+    description: "Turns every colour around the colour wheel. 0 is magenta.",
+  },
+];
+
+export const card: SceneCard = {
+  id: "ledhearts",
+  name: "LED Hearts",
+  settings: SETTINGS,
+};
+
+export const loadBody = (): Promise<Scene> => import("./index.ts").then((m) => m.ledheartsScene);

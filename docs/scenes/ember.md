@@ -10,9 +10,13 @@ on main.
 
 ## Where the code is
 
-- `src/render/scenes/ember/index.ts` — a hand-rolled `Scene` (not
+- `src/render/scenes/ember/card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS` (exported for the body), the `gallery` record and `loadBody`.
+  The body spreads the card, so the registered settings are the body's own objects.
+- `src/render/scenes/ember/index.ts` — the body, loaded after first paint: a
+  hand-rolled `Scene` (not
   `createFullscreenScene`: the display samples the sim's own texture, as
-  Sky's does). Owns `SETTINGS`, the sim (`createFluidSim` in `MIRROR_OFF`,
+  Sky's does). Owns the sim (`createFluidSim` in `MIRROR_OFF`,
   edge pass off), the splats it feeds each frame (burners, stirrers, the
   bed), the warm start (`WARM_SEC`, `WARM_STEPS`), and the constants that
   set force, dye and timing (`BURN_*`, `STIR_*`, `BED_*`, `LIFT_*`,
@@ -110,6 +114,7 @@ both.
 - 2026-10-24 — On a four-on-the-floor song the first lift settings filled
   the whole frame with flat red; the lift's extra push and dye were cut, and
   the glow now flares with each kick so it reads before the fluid answers.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/ember/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

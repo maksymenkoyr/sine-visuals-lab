@@ -32,7 +32,6 @@ import {
   createStrikePool,
   CELL_DECAY_TAU,
   GAS_RECIPES,
-  GAS_TYPES,
   insideCloud,
   particleCountForQuality,
   sampleStrikeSegment,
@@ -41,6 +40,7 @@ import {
   strikeEnvelope,
   type Lobe,
 } from "../src/render/scenes/storm.ts";
+import { GAS_TYPES } from "../src/render/scenes/storm.card.ts";
 import { buildBoltTree as sharedBuildBoltTree, createRng as sharedCreateRng, strikeEnvelope as sharedStrikeEnvelope } from "../src/render/bolt.ts";
 
 describe("storm strike envelope", () => {

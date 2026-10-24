@@ -8,7 +8,11 @@ stretch into wandering streaks. Draft, on main.
 
 ## Where the code is
 
-`src/render/scenes/moire.ts` exports `moireScene`, built on
+- `src/render/scenes/moire.card.ts` — the scene's card, loaded with the page: id, name,
+  `settings` (the `SETTINGS` array), the `gallery` record and `loadBody`. The body
+  takes its id, name and settings from the card.
+
+`src/render/scenes/moire.ts`, the body (loaded after first paint), exports `moireScene`, built on
 `createFullscreenScene`. All simulation state lives in JS, advanced by pure
 functions the shader only samples as uniforms:
 
@@ -126,6 +130,7 @@ worked around in this scene.
 - 2026-10-08 — Blackout chance became a hit driver (the Reaction row;
   drives.ts's header, "Hit drivers"). It is flat-only: a flip either happens
   or it doesn't, so it can't be sized.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/moire.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

@@ -17,14 +17,18 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    or, when it sums several, to an `add` patch with one weighted source per
    signal, so it starts on real wires. Keep `"scene"` with a `sceneLabel`
    for a mix no patch can write; the panel shows it as dimmed ghost wires.
-3. Register it by making it a scene module: `src/render/scenes/<unit>.ts` or
-   `src/render/scenes/<unit>/index.ts`, exporting the scene and
-   `export const gallery = { stage: "development", added: "<today, YYYY-MM-DD>" } as const;`
-   — a new scene starts In development unless the user says otherwise
-   (`src/render/scenes/sceneModules.ts` has the contract). Don't edit
+3. Register it as two files (`src/render/scenes/sceneModules.ts` has the
+   contract): a card, `src/render/scenes/<unit>.card.ts` or
+   `src/render/scenes/<unit>/card.ts`, exporting `card` (a `SceneCard`: id,
+   name, settings), `loadBody` (a dynamic `import()` of the body) and
+   `export const gallery = { stage: "development", added: "<today, YYYY-MM-DD>" } as const;`;
+   and the body, `<unit>.ts` or `<unit>/index.ts`, exporting the scene built
+   from `...card`. The card imports no body or GLSL (`tests/sceneCards.test.ts`
+   checks it; `src/render/scenes/storm.card.ts` is an example). A new scene
+   starts In development unless the user says otherwise. Don't edit
    `src/render/scenes/index.ts`: it finds the scene on its own.
-4. Set `minQuality` if the scene should degrade or disable below some hardware
-   quality preset (`src/render/quality.ts`).
+4. Set `minQuality` on the card if the scene should degrade or disable below
+   some hardware quality preset (`src/render/quality.ts`).
 5. **Check the invariant before calling it done** — see `docs/adding-a-scene.md`
    for the full statement: every setting with an `auto` weight table must
    reproduce its plain `default` when all dials sit at `NEUTRAL`

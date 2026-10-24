@@ -44,8 +44,12 @@ the level and by the drop. In development, on main.
   Rounded corners are a tangent circle; the white core is two fades
   (`CORE_PX0`/`CORE_PX1` by pixel size, `CORE_FADE_IN`/`CORE_FADE_OUT` by a
   cell's seed radius).
-- `src/render/scenes/chaikin/index.ts` — the `Scene` (`chaikinScene`),
-  `CHAIKIN_SETTINGS`, `step` (settings and drives into `stepLaunch`),
+- `src/render/scenes/chaikin/card.ts` — the scene's card, loaded with the page: id,
+  name, `CHAIKIN_SETTINGS` (exported for the body), the `gallery` record and
+  `loadBody`. The body passes the card's id, name and settings to
+  `createFullscreenScene`, so the registered settings are the body's own objects.
+- `src/render/scenes/chaikin/index.ts` — the body, loaded after first paint: the
+  `Scene` (`chaikinScene`), `step` (settings and drives into `stepLaunch`),
   `kidSpan` (where the shader should look for children), and the seed
   texture (`ensureTexture`, `beforeDraw` uploads it once a frame). `step`
   also reads the motion settings and drives; `beforeDraw` steps the
@@ -195,6 +199,7 @@ and `ours-chaikin/cells-ours.json`):
   waves would tear at the angle's seam and stop repeating on the bar.
 - 2026-10-08 — Births, Relaunch and Drop sync became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the birth kick, the relaunch amount and the snap amount by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/chaikin/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

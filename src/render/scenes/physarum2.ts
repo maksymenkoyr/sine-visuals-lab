@@ -2,27 +2,56 @@ import { NUM_BANDS } from "../../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import type { Scene, SceneContext, PanelSection, Viewport } from "../scene.ts";
+import type { Scene, SceneContext, Viewport } from "../scene.ts";
 import { FULL_VIEWPORT } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
-import { grainTextureSide } from "./chladni.ts";
+import { grainTextureSide } from "./grainTexture.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
-import { composeSettings, defineItemPairs, defineItems } from "../sceneItems.ts";
-import { packUnit, SEED_RISE_REFRACTORY_SEC } from "./physarum.ts";
+import { packUnit, SEED_RISE_REFRACTORY_SEC } from "./physarumPack.ts";
 import {
   createStandoutTrigger,
-  STANDOUT_THRESHOLD_DEFAULT,
   standoutLine,
   standoutThreshold,
   stepStandoutHit,
   type StandoutTrigger,
 } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
-import { AFFINITY_PRESETS, ATTRACT_ROWS, PAIR_WORDS, packTouch, smellWeight } from "./physarum2Affinity.ts";
+import { ATTRACT_ROWS, packTouch, smellWeight } from "./physarum2Affinity.ts";
 import { createSynergyTracker, wrapTurn } from "./physarum2Synergy.ts";
 import { createAgentSorter } from "./physarum2Sort.ts";
+import {
+  angleSettings,
+  attSettings,
+  card,
+  exciteSettings,
+  lifeSettings,
+  MOTION_JACK_GAIN,
+  nutrientSettings,
+  SEED_SPREAD_MAX,
+  SEED_SPREAD_MIN,
+  sensorSettings,
+  SETTINGS,
+  SPECIES_COUNT,
+  STAIN_JACK_GAIN,
+  stainSettings,
+  strideSettings,
+  touchSettings,
+  turnSettings,
+} from "./physarum2.card.ts";
+import {
+  clamp01,
+  DEPOSIT,
+  hueRotateRGB,
+  lerp,
+  NUTRIENT_REST,
+  resolveStrainEffective,
+  rgbToHsl,
+  STRAINS,
+  type StrainDriveValues,
+  type StrainRawValues,
+} from "./physarum2Strains.ts";
 export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
@@ -267,39 +296,9 @@ export { ATTRACT_ROWS };
 //   message, so a closed panel or a lost pointer can never leave the dish
 //   dimmed. Phone-local like every command: the pop-out output and a TV never
 //   get it (src/net/outputSync.ts carries settings and stores, not commands).
-const ID = "physarum2";
+const ID = card.id;
 
 const TWO_PI = Math.PI * 2;
-const DEG = Math.PI / 180;
-
-/** A strain's fixed identity — code, base render colour, and the sensor
- *  *layout* angle (how far apart its left/right sensors sit) it was hand-
- *  picked with. Everything about a strain's *motion* (sensor range, turn
- *  angle, speed) and *reactivity* (nutrient, excitability, stain) is a
- *  generated per-strain setting instead — see the file header. */
-interface StrainConfig {
-  readonly code: string;
-  readonly color: readonly [number, number, number];
-  readonly sensorAngleRad: number;
-}
-
-/** Codes are lab-isolate style, not nicknames — every strain is labelled
- *  this way everywhere (boxes, Affinity rows, the web, resets). Colours are
- *  additive-on-black and spread across hue so overlapping strains stay
- *  visually distinct rather than averaging toward white — our own choice,
- *  not Fogleman's palette. */
-export const STRAINS: readonly StrainConfig[] = [
-  { code: "PP-A1", color: [1.0, 0.3, 0.28], sensorAngleRad: 22 * DEG }, // long flowing highways
-  { code: "PP-B2", color: [1.0, 0.72, 0.1], sensorAngleRad: 60 * DEG }, // reticulated mesh
-  { code: "PP-C3", color: [0.05, 0.78, 0.7], sensorAngleRad: 95 * DEG }, // coarse cells / spots
-  { code: "PP-D4", color: [0.5, 0.36, 1.0], sensorAngleRad: 35 * DEG }, // fine fuzz / labyrinth
-];
-
-/** How many independent strains/trail channels this scene runs — see the
- *  file header. Everything else here (packing, uniform array sizes, the
- *  attraction table's shape) is keyed to this rather than a repeated
- *  literal. */
-export const SPECIES_COUNT = STRAINS.length;
 
 /** Cap on the square trail map's side, and the floor physarum2TrailSide
  *  clamps to for a degenerate agent count. */
@@ -440,22 +439,8 @@ export function easeSpot(cur: number, target: number, dtMs: number): number {
   return cur + (target - cur) * k;
 }
 
-// --- "Spread"'s linear map onto the reseed/inject disc's radius (unit-
-// square units) — see the file header for why this scene clusters a reseed
-// instead of scattering it field-wide like physarum.ts's own beat seeding.
-// Replaces the old fixed SEED_CLUSTER_RADIUS so the pipette (Phase 3) and
-// the automatic beat reseed can share one live control. ---
-const SEED_SPREAD_MIN = 0.02;
-const SEED_SPREAD_MAX = 0.3;
-/** The old fixed disc radius, before "seedSpread" existed — kept only to
- *  derive that setting's default (radiusToSeedSpreadSlider), so the shipped
- *  radius is unchanged. */
-const LEGACY_SEED_CLUSTER_RADIUS = 0.12;
 export function seedSpreadSliderToRadius(v: number): number {
   return lerp(SEED_SPREAD_MIN, SEED_SPREAD_MAX, v);
-}
-export function radiusToSeedSpreadSlider(r: number): number {
-  return (r - SEED_SPREAD_MIN) / (SEED_SPREAD_MAX - SEED_SPREAD_MIN);
 }
 
 // --- Sensor/step geometry across the Network scale slider — multiplies
@@ -463,32 +448,6 @@ export function radiusToSeedSpreadSlider(r: number): number {
 // sensorAngleRad. ---
 const SCALE_MIN = 0.5;
 const SCALE_MAX = 1.8;
-
-// --- Sensor range/Turn angle/Speed sliders' linear maps, in the same
-// reference-texel/degree units SIM_FRAG already worked in — see the file
-// header's "Uniform budget" note. ---
-const SENSOR_DIST_MIN = 2;
-const SENSOR_DIST_MAX = 64;
-const TURN_DEG_MAX = 120; // min is 0
-const STRIDE_MIN = 0.2;
-const STRIDE_MAX = 2;
-
-// Sensor angle is a plain slider in degrees (right = a wider fan of sensors);
-// its default per strain is that strain's own STRAINS.sensorAngleRad, so the
-// shipped look is unchanged.
-export const ANGLE_MIN_DEG = 5;
-export const ANGLE_MAX_DEG = 120;
-// Trail life: slider 0..1, right = the trail lasts longer. It scales the
-// global Trail decay for this strain's channel by 2^(±LIFE_OCTAVES) across the
-// slider, exactly 1 at the middle (LIFE_DEFAULT) so the default reproduces the
-// shared decay.
-const LIFE_OCTAVES = 1.5;
-export const LIFE_DEFAULT = 0.5;
-/** The multiplier on a strain's evaporation rate for a Trail life slider
- *  value — 1 at LIFE_DEFAULT, below 1 (slower evaporation) to the right. */
-export function lifeToDecayMul(life: number): number {
-  return Math.pow(2, (LIFE_DEFAULT - clamp01(life)) * 2 * LIFE_OCTAVES);
-}
 
 // Headcount: the split of agents between strains is a result, not a setting.
 // Each step an agent, with probability SWITCH_MAX * Switching, compares the
@@ -501,7 +460,6 @@ export function lifeToDecayMul(life: number): number {
 // 88% (docs/scenes/physarum2/scripts/recruit.mjs is the headless check of this
 // rule). The shares come from a GPU count (POP_FRAG, read back a few times a
 // second) — not tracked in JS, since a strain can now change under any agent.
-export const SWITCHING_DEFAULT = 0.4;
 const SWITCH_MAX = 0.05;
 const SWITCH_MARGIN = 1.5;
 export const SWITCH_FLOOR = 0.04;
@@ -513,76 +471,6 @@ const SWITCH_MIN_INK = 0.03;
 // split settle on roughly the square root of each strain's ink density instead.
 const SWITCH_PRESSURE = 2;
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
-export function sensorSliderToDist(v: number): number {
-  return lerp(SENSOR_DIST_MIN, SENSOR_DIST_MAX, v);
-}
-export function distToSensorSlider(d: number): number {
-  return (d - SENSOR_DIST_MIN) / (SENSOR_DIST_MAX - SENSOR_DIST_MIN);
-}
-export function turnSliderToDeg(v: number): number {
-  return v * TURN_DEG_MAX;
-}
-export function degToTurnSlider(deg: number): number {
-  return deg / TURN_DEG_MAX;
-}
-export function strideSliderToDist(v: number): number {
-  return lerp(STRIDE_MIN, STRIDE_MAX, v);
-}
-export function distToStrideSlider(d: number): number {
-  return (d - STRIDE_MIN) / (STRIDE_MAX - STRIDE_MIN);
-}
-
-/** This scene's motion before per-strain sliders existed — kept only to
- *  derive the Sensor range/Turn angle/Speed settings' defaults below (via
- *  distToSensorSlider/degToTurnSlider/distToStrideSlider), so the shipped
- *  default motion is the same as it always was
- *  (tests/physarum2.test.ts's own round-trip check). Not itself a source of
- *  truth for anything at render time. */
-const LEGACY_MOTION: readonly { sensorDist: number; turnDeg: number; strideDist: number }[] = [
-  { sensorDist: 30, turnDeg: 40, strideDist: 1.4 },
-  { sensorDist: 12, turnDeg: 35, strideDist: 0.9 },
-  { sensorDist: 45, turnDeg: 100, strideDist: 1.8 },
-  { sensorDist: 5, turnDeg: 20, strideDist: 0.45 },
-];
-
-// --- How much harder a beat lengthens each strain's step — Excitability's
-// own gain, same magnitude the old shared "Surge" setting used (the scene
-// record has that history). ---
-const SURGE_GAIN = 6.0;
-
-// --- The Sensor range/Turn angle/Speed/Stain drive formula (see the file
-// header): each strain's own band (STRAIN_BAND_SIGNALS below, same as its
-// own Nutrient) nudges it toward 1 by default now, rather than sitting
-// inert until patched — caustics.ts's own `breathe` pattern, read in JS
-// instead of GLSL. Identity at drive 0 either way (eff === v), so an
-// unplugged jack (or a muted source) still leaves a strain's own look
-// exactly where its slider puts it. ---
-const PUSH_GAIN = 0.7;
-// Per-item gain (SceneSetting.drive.gain) for the Sensor range/Turn
-// angle/Speed and Stain jacks' own per-strain band default: tames a
-// sustained band level (anim.low/mid/high/energy can sit near 1 through a
-// whole loud passage) before it reaches pushToward1/the stain shift below,
-// so the default reads as a nudge rather than pinning every strain toward 1
-// (or rotating a strain off its own identity colour) for as long as the
-// band stays loud. Tuned from side-by-side frames against the pre-jack look —
-// the scene's record has the rejected values and what they did.
-const MOTION_JACK_GAIN = 0.15; // Sensor range/Turn angle/Speed
-const STAIN_JACK_GAIN = 0.2; // Stain
-/** Stain's own drive gain — a patched source shifts hue by up to this many
- *  turns on top of the stored shift. */
-const STAIN_DRIVE_GAIN = 0.18;
-
-function pushToward1(v: number, drive: number): number {
-  return v + (1 - v) * PUSH_GAIN * drive;
-}
-
 // --- Trail decay, per *step* (see the file header) — the Trail decay
 // setting's range, and the small per-step floor that keeps 8-bit evaporation
 // monotone (physarum.ts's file header covers why a bare multiply stalls). ---
@@ -591,28 +479,6 @@ const DECAY_MAX = 0.25;
 const EVAP_FLOOR = 0.6 / 255;
 /** Dither amplitude on the trail write, in quantisation steps. */
 const EVAP_DITHER = 1.0;
-
-// --- Deposit, per step (not per second — see the file header): a fixed
-// amount every agent lays down, times how much its own strain's Nutrient
-// setting scales it. Sized so a texel a trail keeps reinforcing settles well
-// below saturation before the exposure curve below, the same budget
-// reasoning as physarum.ts's DEPOSIT_FLOOR_RATE/DEPOSIT_GAIN_RATE. ---
-/** Exported for physarum2Preview.ts's callers: a preview computes its own
- *  absolute per-step deposit as `DEPOSIT * StrainEffective.feed`, the same
- *  product DEPOSIT_FRAG bakes in as a GLSL constant times `strainFeedFor(k)`. */
-export const DEPOSIT = 0.03;
-const FEED_BASE = 0.35;
-const FEED_GAIN = 1.65;
-/** Nutrient's own rest — passed as `drives.value`/`ctx.driveValue`'s third
- *  argument everywhere Nutrient's drive is read (resolveStrains below,
- *  src/ui/widgets/previews.ts's own Strains preview), so an unplugged jack
- *  (or every source muted) reads as exactly this instead of drives.ts's
- *  plain rest of 0: `feed = lerp(1, FEED_BASE + FEED_GAIN * NUTRIENT_REST,
- *  raw.nutrient) === 1` for every raw.nutrient (solving FEED_BASE +
- *  FEED_GAIN * x = 1 for x). Rest 0 made `feed` run backwards — a raised
- *  slider laid down LESS trail (feed sliding toward FEED_BASE, not staying
- *  at 1) the moment its jack was unplugged. */
-export const NUTRIENT_REST = (1 - FEED_BASE) / FEED_GAIN;
 
 // --- Composite exposure and gamma — Fogleman's own render step (file
 // header), our own numbers. ---
@@ -642,8 +508,6 @@ export const LEVEL_GAIN_MAX = 3;
  *  lands every LEVEL_INTERVAL_MS, and the picture shouldn't step with it. */
 const LEVEL_TAU = 0.8;
 const LEVEL_INTERVAL_MS = 250;
-/** The `level` setting's default. */
-export const LEVEL_DEFAULT = 0.5;
 
 /** Per strain, the block peak (0..1) that `topShare` of LEVEL_FRAG's blocks
  *  reach or exceed — a histogram walk over the RGBA8 buffer, no sort. Pure
@@ -690,8 +554,6 @@ export function levelGain(full: number, level: number): number {
 // startInk 1, in trail units (the record's Measurements has where a busy
 // road's level peak sits). ---
 const START_INK_MAX = 0.25;
-/** The `startInk` setting's default. */
-export const START_INK_DEFAULT = 0.15;
 
 /** Fills an RGBA8 trail buffer with a fresh dish's ink: each live channel an
  *  independent uniform roll over [0, startInk * START_INK_MAX). All zero at
@@ -724,152 +586,6 @@ export function fillStartInk(out: Uint8Array, count: number, startInk: number, s
  *  a sharp single texel when this reads it). Sums to one. */
 const SMOOTH_CENTER = 0.44;
 const SMOOTH_SIDE = 0.14;
-
-// ---------------------------------------------------------------------
-// Colour: an HSL hue rotation over a strain's fixed base colour, for the
-// Stain setting. See hueRotateRGB's own doc comment for why shift===0 is a
-// hard identity rather than a round trip through HSL.
-// ---------------------------------------------------------------------
-
-function rgbToHsl([r, g, b]: readonly [number, number, number]): [number, number, number] {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h: number;
-  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-  else if (max === g) h = ((b - r) / d + 2) / 6;
-  else h = ((r - g) / d + 4) / 6;
-  return [h, s, l];
-}
-
-function hue2rgb(p: number, q: number, t: number): number {
-  let tt = t;
-  if (tt < 0) tt += 1;
-  if (tt > 1) tt -= 1;
-  if (tt < 1 / 6) return p + (q - p) * 6 * tt;
-  if (tt < 1 / 2) return q;
-  if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
-  return p;
-}
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  if (s === 0) return [l, l, l];
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)];
-}
-
-/** Rotates `rgb`'s hue by `shift` (turns, wrapping) — the Stain setting's
- *  live colour shift over a strain's base colour. `shift === 0` returns
- *  `rgb` completely unchanged, without any HSL round trip — the identity an
- *  unplugged or silent Stain (raw 0, drive 0) still needs to hold exactly,
- *  rather than whatever precision an RGB->HSL->RGB conversion happens to
- *  leave (tests/physarum2.test.ts checks this identity). */
-export function hueRotateRGB(rgb: readonly [number, number, number], shift: number): [number, number, number] {
-  if (shift === 0) return [rgb[0], rgb[1], rgb[2]];
-  const [h, s, l] = rgbToHsl(rgb);
-  const hh = (((h + shift) % 1) + 1) % 1;
-  return hslToRgb(hh, s, l);
-}
-
-function cssColor([r, g, b]: readonly [number, number, number]): string {
-  return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-}
-
-// ---------------------------------------------------------------------
-// The one strain-motion mapping — see the file header's "Uniform budget".
-// Called by resolveStrains (this file's GPU packing) and by the specimen
-// boxes' live pure-culture previews (src/ui/widgets/previews.ts), so a box
-// can never show a strain behaving differently than it does in the main
-// dish. Every distance here is in reference-texel units — the same
-// resolution-independent space SIM_FRAG's uSpecies/uStrainFeed already work
-// in (a caller converts to its own field's cell size with one documented
-// constant — physarum2Preview.ts's REF_TEXELS_PER_PREVIEW_CELL). Doesn't
-// touch the Network scale setting (a global multiplier only the GPU shader
-// applies) or the attraction table (a pure culture has no rival trail to
-// sense).
-// ---------------------------------------------------------------------
-
-/** A strain's stored setting amounts for one frame — resolveSceneSetting's
- *  reading, before any drive is applied. */
-export interface StrainRawValues {
-  nutrient: number;
-  excite: number;
-  sensor: number;
-  turn: number;
-  stride: number;
-  stain: number;
-  /** Sensor angle in degrees. */
-  angle: number;
-  /** Trail life slider, 0..1. */
-  life: number;
-}
-
-/** A strain's live drive reading for each of the same controls — the GPU
- *  path reads `drives.value(key, sceneDefault, rest?)` (a per-strain band
- *  for every control but Excitability — STRAIN_BAND_SIGNALS —
- *  `anim.beatPulse` for Excitability; Nutrient alone passes NUTRIENT_REST as
- *  its own `rest`, since an unplugged jack there must read as exactly 1, not
- *  0 — see that constant's own doc); the preview reads
- *  `WidgetCtx.driveValue(spec, rest?)` the same way — see
- *  src/ui/widgets/registry.ts's header. */
-export interface StrainDriveValues {
-  nutrient: number;
-  excite: number;
-  sensor: number;
-  turn: number;
-  stride: number;
-  stain: number;
-  angle: number;
-  life: number;
-}
-
-export interface StrainEffective {
-  /** Radians — SIM_FRAG's `cfg.x`. */
-  sensorAngleRad: number;
-  /** Multiplier on the global Trail decay for this strain's channel —
-   *  DIFFUSE_FRAG's `uLifeMul`. */
-  decayMul: number;
-  /** The Stain shift in turns (stored value plus drive), before Synergy —
-   *  `color` below is the base colour rotated by exactly this. */
-  stainShift: number;
-  /** Reference-texel units — SIM_FRAG's `cfg.y`. */
-  sensorDist: number;
-  rotationRad: number;
-  /** Reference-texel units per step, Excitability's surge multiplier already
-   *  applied — SIM_FRAG's `cfg.w`. */
-  stepDist: number;
-  /** Deposit multiplier — SIM_FRAG's `strainFeedFor(k)`; a caller multiplies
-   *  by DEPOSIT itself for an absolute per-step amount (the preview does; the
-   *  GPU deposit shader bakes DEPOSIT in as a GLSL constant instead). */
-  feed: number;
-  /** Stain-shifted colour over STRAINS[k]'s own base colour. */
-  color: readonly [number, number, number];
-}
-
-export function resolveStrainEffective(k: number, raw: StrainRawValues, drive: StrainDriveValues): StrainEffective {
-  const strain = STRAINS[k]!;
-  const feed = lerp(1, FEED_BASE + FEED_GAIN * drive.nutrient, raw.nutrient);
-  const surge = 1 + raw.excite * drive.excite * SURGE_GAIN;
-  const sensorEff = clamp01(pushToward1(raw.sensor, drive.sensor));
-  const sensorDist = sensorSliderToDist(sensorEff);
-  const turnEff = clamp01(pushToward1(raw.turn, drive.turn));
-  const rotationRad = turnSliderToDeg(turnEff) * DEG;
-  const strideEff = clamp01(pushToward1(raw.stride, drive.stride));
-  const stepDist = strideSliderToDist(strideEff) * surge;
-  const stainShift = raw.stain + drive.stain * STAIN_DRIVE_GAIN;
-  const color = hueRotateRGB(strain.color, stainShift);
-  // Sensor angle is in degrees: pushed toward the widest angle the same way
-  // the 0..1 controls are pushed toward 1, so drive 0 is the slider exactly.
-  const angleSet = Math.max(ANGLE_MIN_DEG, Math.min(ANGLE_MAX_DEG, raw.angle));
-  const angleUnit = pushToward1((angleSet - ANGLE_MIN_DEG) / (ANGLE_MAX_DEG - ANGLE_MIN_DEG), drive.angle);
-  const sensorAngleRad = (ANGLE_MIN_DEG + clamp01(angleUnit) * (ANGLE_MAX_DEG - ANGLE_MIN_DEG)) * DEG;
-  const decayMul = lifeToDecayMul(clamp01(pushToward1(clamp01(raw.life), drive.life)));
-  return { sensorAngleRad, decayMul, stainShift, sensorDist, rotationRad, stepDist, feed, color };
-}
 
 // ---------------------------------------------------------------------
 // Population bookkeeping (Phase 3): tracked analytically in JS, no GPU
@@ -978,168 +694,9 @@ export function screenToFieldUv(uv: { x: number; y: number }, viewport: Viewport
   return coverUvJs(roomUvJs(uv, viewport), roomAspectJs(resW, resH, viewport));
 }
 
-// ---------------------------------------------------------------------
-// Settings: per-strain items (sceneItems.ts) + the remaining global rows.
-// ---------------------------------------------------------------------
-
-const BAND_LABELS = ["low", "mid", "high", "overall"] as const;
-/** Each strain's own band, in strain order — reused for the Sensor
- *  range/Turn angle/Speed/Stain jacks' own default below (a strain's own
- *  band drives its own motion the same as it already drives its own
- *  Nutrient) and for Nutrient's own `sceneSources` (its Scene composite is
- *  honestly this same per-strain band). */
-export const STRAIN_BAND_SIGNALS = ["anim.low", "anim.mid", "anim.high", "anim.energy"] as const;
-
-const nutrientSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "nutrient",
-  label: "Nutrient",
-  description: "How much trail this strain lays down",
-  group: "Form",
-  min: 0,
-  max: 1,
-  step: 0.05,
-  default: 0.6, // the old shared "Band feed" default
-  drive: {
-    default: "scene",
-    sceneLabel: (k) => `Scene: ${BAND_LABELS[k]} level`,
-    sceneSources: (k) => [STRAIN_BAND_SIGNALS[k]!],
-  },
-});
-
-const exciteSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "excite",
-  label: "Excitability",
-  description: "How hard a hit lengthens this strain's step, throwing new branches",
-  group: "Form",
-  min: 0,
-  max: 1,
-  step: 0.01,
-  default: 0.1, // the old shared "Surge" default
-  // uBeatPulse directly, same as the old shared Surge setting — a plain
-  // Beat default, but each strain's own patch can pick any source.
-  drive: { default: "feature.onset" },
-});
-
-const sensorSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "sensor",
-  label: "Sensor range",
-  description: "How far ahead this strain smells — longer range grows bigger, smoother networks",
-  group: "Form",
-  min: 0,
-  max: 1,
-  step: 0.02,
-  default: (k) => distToSensorSlider(LEGACY_MOTION[k]!.sensorDist),
-  // This strain's own band by default (STRAIN_BAND_SIGNALS, same signal as
-  // its own Nutrient) — a loud band nudges the range out a little further;
-  // pushToward1 is identity at drive 0, so an unplugged jack (or every
-  // source muted) leaves the slider's own range exactly where it sits.
-  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
-});
-
-const turnSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "turn",
-  label: "Turn angle",
-  description: "How sharply this strain turns toward a scent",
-  group: "Form",
-  min: 0,
-  max: 1,
-  step: 0.02,
-  default: (k) => degToTurnSlider(LEGACY_MOTION[k]!.turnDeg),
-  // This strain's own band by default — a loud band nudges the turn a
-  // little sharper; identity at drive 0, same reasoning as Sensor range.
-  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
-});
-
-const strideSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "stride",
-  label: "Speed",
-  description: "How far this strain moves each step, on top of the global Crawl speed",
-  group: "Form",
-  min: 0,
-  max: 1,
-  step: 0.02,
-  default: (k) => distToStrideSlider(LEGACY_MOTION[k]!.strideDist),
-  // This strain's own band by default — a loud band nudges the speed a
-  // little further; identity at drive 0, same reasoning as Sensor range.
-  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
-});
-
-const stainSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "stain",
-  label: "Stain",
-  description: "Colour shift over this strain's own base colour",
-  group: "Form",
-  min: -0.5,
-  max: 0.5,
-  step: 0.01,
-  default: 0,
-  // This strain's own band by default — a loud band shifts the hue a little
-  // further. The additive `drive.stain*STAIN_DRIVE_GAIN` term
-  // (resolveStrainEffective) is already 0 at drive 0, so an unplugged jack
-  // leaves the slider's own shift alone.
-  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: STAIN_JACK_GAIN },
-});
-
-// Sensor angle and Trail life got their jacks on 2026-10-04 (every lane in
-// the Strain settings card has a port): this strain's own band by default,
-// like Sensor range — a loud band widens the angle and lengthens the trail a
-// little; identity at drive 0, same reasoning as Sensor range.
-const angleSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "angle",
-  label: "Sensor angle",
-  description: "How wide apart this strain's left and right sensors look, in degrees — with Turn angle it decides the pattern it grows",
-  group: "Form",
-  min: ANGLE_MIN_DEG,
-  max: ANGLE_MAX_DEG,
-  step: 1,
-  default: (k) => Math.round(STRAINS[k]!.sensorAngleRad / DEG),
-  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
-});
-
-const lifeSettings = defineItems("strain", SPECIES_COUNT, {
-  key: "life",
-  label: "Trail life",
-  description: "How long this strain's trail lasts before it evaporates — more keeps its roads longer",
-  group: "Form",
-  min: 0,
-  max: 1,
-  step: 0.02,
-  default: LIFE_DEFAULT, // the shared Trail decay, unchanged
-  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
-});
-
-const attSettings = defineItemPairs("strain", SPECIES_COUNT, {
-  key: "att",
-  label: (i, j) => (i === j ? `${STRAINS[i]!.code} → own trail` : `${STRAINS[i]!.code} → ${STRAINS[j]!.code}`),
-  description: "How strongly this strain is drawn to, or repelled by, each trail",
-  group: "Form",
-  min: -1.5,
-  max: 1.5,
-  step: 0.05,
-  default: ATTRACT_ROWS,
-  masterScale: false,
-});
-
 function attSpecAt(i: number, j: number): SceneSetting {
   return attSettings[i * SPECIES_COUNT + j]!;
 }
-
-// Off-diagonal only (diagonal: false) — a strain doesn't feed or eat its own
-// trail through Touch, so `touchii` would otherwise sit as a permanently
-// dead key in Looks, resets and share codes. See physarum2Affinity.ts's
-// header and file header's "Touch" paragraph for what this feeds into.
-const touchSettings = defineItemPairs("strain", SPECIES_COUNT, {
-  key: "touch",
-  label: (i, j) => `${STRAINS[i]!.code} touch ${STRAINS[j]!.code}`,
-  description: "What this strain's steps do to that strain's trail — right feeds it, left eats it",
-  group: "Form",
-  min: -1.5,
-  max: 1.5,
-  step: 0.05,
-  default: 0,
-  diagonal: false,
-  masterScale: false,
-});
 
 // Unlike attSpecAt, this can't be a flat `i*n+j` index — defineItemPairs
 // skips the diagonal, so the list is 12 long, not 16, and the gaps aren't
@@ -1152,261 +709,6 @@ function touchSpecAt(i: number, j: number): SceneSetting | undefined {
   return touchSpecGrid[i * SPECIES_COUNT + j];
 }
 
-const STRAIN_ITEM_SETTINGS: readonly SceneSetting[] = [
-  ...nutrientSettings,
-  ...exciteSettings,
-  ...sensorSettings,
-  ...turnSettings,
-  ...strideSettings,
-  ...stainSettings,
-  ...angleSettings,
-  ...lifeSettings,
-  ...attSettings,
-  ...touchSettings,
-];
-
-const GLOBAL_SETTINGS: SceneSetting[] = [
-  // --- Form ---
-  {
-    key: "scale",
-    label: "Network scale",
-    description: "Sensor distance and step length together — how coarse or fine every strain's network grows",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    // A busy mix reads better on a finer network — physarum.ts's own scale.
-    auto: { density: -0.25 },
-  },
-  {
-    key: "decay",
-    label: "Trail decay",
-    description: "How fast an unused route evaporates for every strain at once",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-    auto: { density: 0.2, tempo: 0.15 },
-  },
-  {
-    key: "rivalry",
-    label: "Cross-smell",
-    description: "How strongly each strain reacts to the others' trails, whichever way its Smell pads point — 0 ignores them, 1 doubles them",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { dynamics: 0.15 },
-  },
-  {
-    key: "wander",
-    label: "Wander",
-    description:
-      "How often an agent picks its turn by chance — weighted toward whichever way smells stronger — instead of always taking the strongest; more grows looser, softer networks",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    // 0 is the old rule exactly: SIM_FRAG's weighted branch is never taken.
-    default: 0,
-  },
-  {
-    key: "startInk",
-    label: "Start ink",
-    description:
-      "How much random ink a fresh dish starts with, so the networks condense out of it at once instead of growing from black — used when the scene opens and on Fresh dish",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: START_INK_DEFAULT,
-  },
-  // --- Motion ---
-  {
-    key: "speed",
-    label: "Crawl speed",
-    description: "The base pace: how many simulation steps run per second before Speed boost and Speed pump add to it",
-    group: "Motion",
-    family: "Crawl speed",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { tempo: 0.3, pulse: 0.15 },
-  },
-  {
-    key: "speedBoost",
-    label: "Speed boost",
-    description: "The sim runs faster the louder the music is right now, and drops straight back to Crawl speed when it quietens",
-    group: "Motion",
-    family: "Crawl speed",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { dynamics: 0.3, density: -0.15 },
-    // Loudness by default; an unplugged jack adds nothing (rest 0), since
-    // this only ever adds on top of Crawl speed.
-    drive: { default: "anim.energy" },
-  },
-  {
-    key: "speedPump",
-    label: "Speed pump",
-    description: "Each push accelerates the crawl like a gas pedal; the extra speed then coasts back down to Crawl speed",
-    group: "Motion",
-    family: "Crawl speed",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.35,
-    // Only reads as a pump on music with real hits to push against.
-    auto: { pulse: 0.35, attack: 0.2 },
-    // A kick is the natural pedal to push against; rewire it in the picker.
-    drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "seed",
-    label: "Dose",
-    description: "Share of agents relocated into a fresh cluster — by a beat, or by the pipette in the Strains panel above",
-    group: "Motion",
-    // A finer step than this scene's usual 0.05: the reseed disc's area is
-    // only a few percent of the trail map ("Spread", below), so this setting
-    // is far more sensitive per unit than physarum.ts's own field-wide seed.
-    step: 0.01,
-    min: 0,
-    max: 1,
-    // Reseeded agents concentrate into one small disc rather than scattering
-    // field-wide the way physarum.ts's own reseed does, so a much smaller
-    // share already reads as a strong burst — this default is deliberately
-    // far below physarum.ts's own 0.3 (measured against screenshots: 0.15
-    // packed the disc dense enough to saturate solid white, and 0.03 in a
-    // radius-0.06 disc still read as a white blob).
-    default: 0.01,
-    auto: { attack: 0.25, dynamics: 0.15 },
-    // The trigger is a *climb* in the decaying beat pulse that stands out from
-    // the everyday ones (standout.ts's StandoutTrigger, the same filter
-    // Caustics' Beat ripple uses), so a busy passage reseeds only on its
-    // clear hits instead of on every tick. Scene-handled threshold: the scene
-    // owns the idea (drive.threshold, read back with drives.threshold), so the
-    // engine's own generic gate stays out of it. command("inject") (the
-    // pipette, Phase 3) reads this setting's plain stored amount too, with no
-    // drive involved — the drive only ever gates the *automatic* trigger,
-    // never the pipette's own one-shot command. See the file header.
-    drive: {
-      default: "scene",
-      sceneLabel: "Scene: a beat hit that stands out",
-      sceneSources: ["feature.onset"],
-      // Flat or Sized (the Reaction row): Sized moves a share of agents
-      // as big as the hit stood out, Dose times its size.
-      hit: { ownDetector: true },
-      threshold: {
-        default: STANDOUT_THRESHOLD_DEFAULT,
-        label: "Dose threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to start a new colony. Left: more colonies, even from quiet sounds. Right: only clear standouts.",
-      },
-    },
-  },
-  {
-    key: "switching",
-    label: "Switching",
-    description:
-      "How readily an agent joins the strain whose ink outweighs its own where it stands, so the headcount follows the settings — 0 keeps every agent in its strain",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: SWITCHING_DEFAULT,
-  },
-  {
-    key: "seedSpread",
-    label: "Spread",
-    description: "Radius of the disc a beat's reseed, or the pipette's injection, lands agents in",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.02,
-    // Reproduces the scene's old fixed disc radius (LEGACY_SEED_CLUSTER_RADIUS)
-    // so the shipped look is unchanged.
-    default: radiusToSeedSpreadSlider(LEGACY_SEED_CLUSTER_RADIUS),
-  },
-  {
-    key: "seedFrom",
-    label: "Auto-inject from",
-    description: "Which strains the automatic beat trigger may move agents from — it never converts species (only the pipette does)",
-    group: "Motion",
-    type: "enum",
-    options: ["All strains", ...STRAINS.map((s) => s.code)],
-    min: 0,
-    max: SPECIES_COUNT,
-    step: 1,
-    default: 0,
-  },
-  // --- Look ---
-  {
-    key: "glow",
-    label: "Exposure",
-    description: "Brightness of the four networks before the gamma curve",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { loudness: 0.2 },
-  },
-  {
-    key: "level",
-    label: "Auto level",
-    description:
-      "Brings every strain's brightest roads to the same brightness, so a sparse or short-lived strain isn't drowned out by a dense one — 0 lights them all by Exposure alone",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: LEVEL_DEFAULT,
-  },
-  {
-    key: "synergy",
-    label: "Synergy",
-    description:
-      "Pulls the four stains toward the nearest colour harmony — 0 shows them as set, 1 snaps them onto it (the stains you set are kept)",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-  },
-  {
-    key: "paletteMix",
-    label: "Palette tint",
-    description: "0 keeps each strain's own colour; 1 recolours all of them with the app palette",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-    advanced: true,
-  },
-  // --- Post ---
-  {
-    key: "flash",
-    label: "Beat flash",
-    description: "Brightness punch on each beat",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-    auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
-    // uBeatPulse directly (COMPOSITE_FRAG) — a plain Beat default.
-    drive: { default: "feature.onset" },
-  },
-];
-
-const SETTINGS: SceneSetting[] = composeSettings(STRAIN_ITEM_SETTINGS, GLOBAL_SETTINGS);
-
 /** Every non-`item` setting — the only ones with a GLSL uniform of their
  *  own (see the file header's "Uniform budget"). */
 const NON_ITEM_SETTINGS = SETTINGS.filter((s) => !s.item);
@@ -1416,145 +718,6 @@ function settingFor(key: string): SceneSetting {
   if (!s) throw new Error(`physarum2: unknown setting ${key}`);
   return s;
 }
-
-// ---------------------------------------------------------------------
-// Motion presets (2026-10-02): the Strain Console's preset pills — each sets
-// every strain's MOTION_PARAMS at once, like a saved species config in
-// Fogleman's viewer. Our own sets, picked from a headless random search over
-// these same sliders (the scene record's Decisions entry); "Lab" is the
-// shipped default motion.
-// ---------------------------------------------------------------------
-
-/** The per-strain params a motion preset (and the console's Random) sets. */
-export const MOTION_PARAMS = ["sensor", "angle", "turn", "stride"] as const;
-
-export interface MotionPreset {
-  name: string;
-  hint: string;
-  /** Slider values, one per strain, for each of MOTION_PARAMS. */
-  values: Readonly<Record<(typeof MOTION_PARAMS)[number], readonly number[]>>;
-}
-
-export const MOTION_PRESETS: readonly MotionPreset[] = [
-  {
-    name: "Lab",
-    hint: "The shipped motion: highways, a mesh, coarse cells and a fine fuzz.",
-    values: {
-      sensor: LEGACY_MOTION.map((m) => distToSensorSlider(m.sensorDist)),
-      angle: STRAINS.map((s) => Math.round(s.sensorAngleRad / DEG)),
-      turn: LEGACY_MOTION.map((m) => degToTurnSlider(m.turnDeg)),
-      stride: LEGACY_MOTION.map((m) => distToStrideSlider(m.strideDist)),
-    },
-  },
-  {
-    name: "Cells",
-    hint: "Round cells, each walled in by another strain's thin roads.",
-    values: {
-      sensor: [0.8, 0.16, 0.98, 0.38],
-      angle: [17, 62, 84, 61],
-      turn: [0.56, 0.4, 0.3, 0.94],
-      stride: [0.12, 0.94, 0.22, 0.46],
-    },
-  },
-  {
-    name: "Coral",
-    hint: "One strain grows thick branching worms through a dense ground.",
-    values: {
-      sensor: [0.38, 0.96, 0.52, 0.28],
-      angle: [98, 15, 95, 107],
-      turn: [0.56, 0.12, 0.68, 0.1],
-      stride: [0.92, 0.64, 0.1, 0.04],
-    },
-  },
-  {
-    name: "Weave",
-    hint: "Fine crossing fibres over soft pools of colour.",
-    values: {
-      sensor: [0.44, 0.18, 0.66, 0.44],
-      angle: [17, 11, 64, 114],
-      turn: [0.5, 0.06, 0.3, 0.6],
-      stride: [0.92, 0.32, 1, 0.38],
-    },
-  },
-  {
-    name: "Islands",
-    hint: "Big blotchy islands with a lacy sea between.",
-    values: {
-      sensor: [0.7, 0.72, 0.54, 0.84],
-      angle: [79, 6, 82, 35],
-      turn: [0.22, 0.9, 0.26, 0.02],
-      stride: [0.06, 0.48, 0.68, 0.2],
-    },
-  },
-  {
-    name: "Grains",
-    hint: "Short scattered grains, like seeds, on a soft ground.",
-    values: {
-      sensor: [0.02, 0.68, 0.46, 0.2],
-      angle: [19, 30, 85, 119],
-      turn: [0.02, 0.2, 0.28, 0.56],
-      stride: [0.22, 0.62, 0.26, 0.72],
-    },
-  },
-];
-
-// ---------------------------------------------------------------------
-// The panel: one Strains group (specimen boxes + the selected strain's
-// rows + the Pairs pads) — see src/ui/widgets/itemBoxes.ts and, for the
-// pads themselves, src/ui/widgets/pairPads.ts. `options` is typed `unknown`
-// by PanelSection (scene.ts) precisely so this file, under src/render/,
-// never has to import anything under src/ui/ — see sceneItems.ts's header
-// for why that boundary matters. The Pairs block's words (`PAIR_WORDS`) and
-// presets (`AFFINITY_PRESETS`, which replaces this scene's old, Smell-only
-// `EXPERIMENT_PRESETS`) live in physarum2Affinity.ts instead of here, next
-// to the pure pad logic that reads them.
-// ---------------------------------------------------------------------
-
-const PANEL: readonly PanelSection[] = [
-  {
-    widget: "itemBoxes",
-    title: "Strains",
-    items: "strain",
-    // Switching and Synergy are drawn by the widget itself (under the
-    // headcount bar and under the Strain Console's stains), so the Scene
-    // card's flat list leaves them out.
-    settings: ["switching", "synergy"],
-    options: {
-      labels: STRAINS.map((s) => s.code),
-      colours: STRAINS.map((s) => cssColor(s.color)),
-      headcountSetting: "switching",
-      // The Strain Console card: every per-strain setting for all the strains
-      // at once, a row of lanes each, with Stain Synergy under them — see
-      // src/ui/widgets/strainConsole.ts. The order is the row order.
-      console: {
-        title: "Strain settings",
-        params: ["nutrient", "excite", "sensor", "angle", "turn", "stride", "life", "stain"],
-        formats: { angle: "degrees", stain: "turns" },
-        // A Stain is a hue shift over the strain's own base colour, so each
-        // lane's rail and the Synergy wheel need the base hue (turns).
-        hue: { param: "stain", baseHues: STRAINS.map((s) => rgbToHsl(s.color)[0]) },
-        synergy: { key: "synergy" },
-        // Random rolls MOTION_PARAMS over their whole ranges, and
-        // the pills are MOTION_PRESETS; Shuffle/New palette rewrite the
-        // stains (strainConsole.ts's header).
-        mix: { random: MOTION_PARAMS, presets: MOTION_PRESETS },
-        colourActions: true,
-      },
-      // Phase 3's live pure-culture preview — src/ui/widgets/previews.ts's
-      // registry id. itemBoxes.ts falls back to the old empty placeholder
-      // swatch when a widget's options carry no preview id at all, so this
-      // doesn't disturb any other itemBoxes-based scene.
-      preview: "physarum2",
-      relations: {
-        title: "Affinity",
-        tables: { smell: "att", touch: "touch" },
-        shortLabels: STRAINS.map((s) => s.code.replace(/^PP-/, "")),
-        words: PAIR_WORDS,
-        presets: AFFINITY_PRESETS,
-      },
-    },
-  },
-];
 
 const SETTINGS_UNIFORMS_GLSL = NON_ITEM_SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
 const DRIVE_UNIFORMS_GLSL = DRIVE_GLSL(NON_ITEM_SETTINGS);
@@ -2779,10 +1942,7 @@ function createPhysarum2Scene(): Scene {
   }
 
   return {
-    id: ID,
-    name: "Physarum 2",
-    settings: SETTINGS,
-    panel: PANEL,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
@@ -3228,8 +2388,5 @@ function createPhysarum2Scene(): Scene {
     },
   };
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "released", added: "2026-09-27" } as const;
 
 export const physarum2Scene = createPhysarum2Scene();

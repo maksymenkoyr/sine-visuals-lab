@@ -10,7 +10,11 @@ point cloud). Draft scene, on main.
 
 ## Where the code is
 
-- `src/render/scenes/storm.ts` — the whole scene (~3800 lines). The file
+- `src/render/scenes/storm.card.ts` — the scene's card, loaded with the page: id, name,
+  `minQuality`, `SETTINGS` (with the option lists they use: `MODES`, `GAS_TYPES`, the
+  mode and spectrum-map indices), the `gallery` record and `loadBody`. The body spreads
+  the card, so the registered settings are the body's own objects.
+- `src/render/scenes/storm.ts` — the body: the rest of the scene, loaded after first paint. The file
   header is the primary source: cloud density model (baked lobe silhouettes
   eroded by tileable perlin-worley 3D noise), the strike pool and the
   bolt-tree geometry (the shared generator is `src/render/bolt.ts`), the
@@ -177,6 +181,7 @@ Studied, not copied, across two look references:
   passed to `pool.trigger` by how far the hit stood out; Flat, the default,
   is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/storm.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

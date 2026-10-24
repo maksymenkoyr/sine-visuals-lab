@@ -8,7 +8,10 @@ Draft.
 
 ## Where the code is
 
-- `src/render/scenes/chrome.ts`: one fragment shader on
+- `src/render/scenes/chrome.card.ts` — the scene's card, loaded with the page: id, name,
+  `settings` (the `SETTINGS` array), the `gallery` record and `loadBody`. The body
+  takes its id, name and settings from the card.
+- `src/render/scenes/chrome.ts` — the body, loaded after first paint: one fragment shader on
   `createFullscreenScene`. Its header says how the picture is built.
   `cellField` is the height field (a smoothed distance to orbiting cell
   points, warped by two `fbm` sites), `bandProfile` turns it into rounded
@@ -78,6 +81,7 @@ The silence row's change is the boil the scene has by design.
 - 2026-10-21: the first real-song run showed the Shine flash barely above
   the boil (p95 14.6 vs median 13.2), so a hit now also widens the glints
   (`flash` in FRAG). After that, p95 rose to 19.7 against a median of 16.7.
+- 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/chrome.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

@@ -33,7 +33,7 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 // in [0,1]^2 — one quadrant when the scene's mirror mode is Kaleidoscope or
 // MIRROR_RADIAL (the Radial mode folds the screen into wedges at display
 // time — its wedge count is a display-only parameter, see FOLD_WEDGES_MIN/
-// MAX below and fluid.ts's foldCount setting — and reuses the same quadrant
+// MAX in fluid.card.ts and fluid.ts's foldCount setting — and reuses the same quadrant
 // the sim already has), a half when Left-right or Top-bottom (Top-bottom is
 // a half of full width), the whole screen when Off (the mode only changes
 // the domain's aspect, via simResolutionFor, and where fluid.ts puts the
@@ -77,8 +77,8 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 // restores the plain semi-Lagrangian step.
 
 export type SimFormat = "half" | "byte";
-/** Matches the Mirror enum setting's index — see MIRROR_OPTIONS for the
- *  ordered list of modes. */
+/** Matches the Mirror enum setting's index — see MIRROR_OPTIONS in
+ *  fluid.card.ts for the ordered list of modes. */
 export type MirrorMode = 0 | 1 | 2 | 3 | 4;
 
 // Left untyped (not `: MirrorMode`) on purpose: keeping each constant's
@@ -90,30 +90,12 @@ export const MIRROR_TB = 2;
 export const MIRROR_KALEIDO = 3;
 export const MIRROR_RADIAL = 4;
 
-/** Mirror enum setting's options, index-matched to MirrorMode — fluid.ts's
- *  `mirror` SETTINGS entry uses this array directly so the device menu's
- *  labels and the enum's range can't drift apart. */
-export const MIRROR_OPTIONS: readonly string[] = [
-  "Off",
-  "Left-right",
-  "Top-bottom",
-  "Kaleidoscope",
-  "Radial",
-];
-
-/** How many mirrored wedges a Radial fold can have — a display-time
- *  parameter (fluid.ts's `foldCount` setting, authoritative in every mode
- *  including Auto), not part of the sim domain, so it plays no role in
- *  mirrorDomain below. */
-export const FOLD_WEDGES_MIN = 2;
-export const FOLD_WEDGES_MAX = 16;
-
 /** What a mirror mode folds: `foldX`/`foldY` say whether the sim only ever
  *  covers half of that screen axis (the display pass mirrors the rest back
  *  in), `radial` is true only for MIRROR_RADIAL. MIRROR_RADIAL folds both
  *  axes like Kaleidoscope — it simulates the same quadrant and only differs
  *  in how the display pass folds it (see simUv in fluid.ts); its wedge count
- *  lives outside this domain description (see FOLD_WEDGES_MIN/MAX above). */
+ *  lives outside this domain description (see FOLD_WEDGES_MIN/MAX in fluid.card.ts). */
 export function mirrorDomain(m: MirrorMode): { foldX: boolean; foldY: boolean; radial: boolean } {
   switch (m) {
     case MIRROR_OFF:
