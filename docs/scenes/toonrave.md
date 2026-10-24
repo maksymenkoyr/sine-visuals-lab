@@ -41,8 +41,13 @@ on the app's bar lines. A draft, on main.
   Canvas2D every frame (vector, so crisp at any zoom).
 - `src/render/scenes/toonrave/glsl.ts` — `buildPostFrag`, the one GL pass: shows
   the canvas as a texture and applies the impact frame.
-- `src/render/scenes/toonrave/index.ts` — the `Scene` (id `"toonrave"`),
-  `SETTINGS`, `PANEL` (the Dance card), `probe()`, `shapeState` (applies Lights and Shake after `frameAt`,
+- `src/render/scenes/toonrave/card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS`, `PANEL` (the Dance card's rows), `MAX_ENERGY` (the top of Energy,
+  read by `dance.ts`), `CLOCK_RUN_MARK` (Clock on input node's default line), the
+  `gallery` record and `loadBody`. The body spreads the card, so the registered
+  settings are the body's own objects.
+- `src/render/scenes/toonrave/index.ts` — the body, loaded after first paint: the
+  `Scene` (id `"toonrave"`, with its settings and panel from `card.ts`), `probe()`, `shapeState` (applies Lights and Shake after `frameAt`,
   so the prototype's numbers stay untouched at the defaults), `HERO_C`,
   `CAST_RIGS`, `DROP_CYCLE_BEATS` and the DEV `freeze` command.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
@@ -167,6 +172,7 @@ and are not recorded here yet.
   and the cast slows through 1x, ½x and ¼x and holds one pose about 13 s
   later (Energy drop's drain at its default).
 - 2026-10-08 — Drop hits, Dance and Energy pump became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the energy pump's kick (EnergyInputs.pumpSize) by how far the hit stood out; Flat, the default, is unchanged. Drop hits is flat-only: a drop either starts or it doesn't. Dance is flat-only: the dance only uses when each hit lands, not how big it was.
+- 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/toonrave/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

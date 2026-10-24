@@ -10,7 +10,6 @@ import {
   arcSource,
   arcSpeedFor,
   arcTrailFor,
-  ARC_SOURCE,
   BARS_PER_PHRASE,
   createGateState,
   FREE_BAR_SEC,
@@ -23,6 +22,7 @@ import {
   type GateOpts,
   type GateState,
 } from "../src/render/scenes/gates/index.ts";
+import { ARC_SOURCE } from "../src/render/scenes/gates/card.ts";
 import {
   arcLitSpan,
   ARC_ENV_MIN,
