@@ -608,7 +608,19 @@ describe("driveStore with a stubbed localStorage", () => {
     for (let b = 0; b < NUM_BANDS; b++) expect(line[b]).toBe(LINE_HEIGHT_DEFAULT);
   });
 
-  it("at load, stored wires naming retired nodes are rewritten onto their inputs", async () => {
+  it("loading drives.ts first with a retired-node wire stored does not throw", async () => {
+    const SPEC: SceneSetting = { key: "glow", label: "Glow", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } };
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.drives", JSON.stringify({ "mig-scene": { glow: { patch: { m: "add", s: [{ c: { source: "shaped", id: "n9" } }, { c: "anim.high" }] } } } }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    await import("../src/render/drives.ts");
+    const fresh = await import("../src/render/driveStore.ts");
+    expect(fresh.getDriveSetting("mig-scene", SPEC)).toEqual(driveSettingFromChoice("anim.high"));
+    expect(fake.getItem("vibe.drives")).not.toContain("shaped");
+  });
+
+  it("on first read, stored wires naming retired nodes are rewritten onto their inputs", async () => {
     const SPEC: SceneSetting = { key: "glow", label: "Glow", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } };
     const fake = makeFakeLocalStorage();
     fake.setItem(

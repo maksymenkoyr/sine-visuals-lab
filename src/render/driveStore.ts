@@ -72,10 +72,10 @@ import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_M
  * retired, not kept live alongside this one.
  *
  * Migration: a wire saved while modifiers were cards of their own names one
- * (`{source:"shaped", id}`) in the retired `vibe.shapingNodes` store. At load,
- * and again whenever the synced store reseeds, every such wire becomes the
- * plain wire on that node's input, carrying the node's Height and modifier
- * (wireMod.ts), and the store is written back when anything changed. A wire
+ * (`{source:"shaped", id}`) in the retired `vibe.shapingNodes` store. On the
+ * first getDriveSetting(), and again whenever the synced store reseeds, every
+ * such wire becomes the plain wire on that node's input, carrying the node's
+ * Height and modifier (wireMod.ts), and the store is written back when anything changed. A wire
  * naming a node that no longer exists read 0, so it is dropped.
  */
 
@@ -145,9 +145,15 @@ function persist(): void {
   }
 }
 
+// Not run at module load: drives.ts and this file import each other, so when
+// drives.ts loads first this body runs before drives.ts's constants exist and
+// the sanitizer throws a TDZ ReferenceError (a blank page on Insiders).
+let nodeWiresMigrated = false;
+
 /** This file's header, Migration: rewrites every stored patch that still
  *  names a retired modifier node. */
 function migrateLegacyNodeWires(): void {
+  nodeWiresMigrated = true;
   let changed = false;
   for (const bucket of Object.values(cache)) {
     if (!bucket || typeof bucket !== "object") continue;
@@ -454,6 +460,7 @@ function defaultFor(spec: SceneSetting): DriveSetting {
  *  this for a setting the panel has already shown a source picker on. The
  *  result is shared between calls: never mutate it. */
 export function getDriveSetting(sceneId: string, spec: SceneSetting): DriveSetting {
+  if (!nodeWiresMigrated) migrateLegacyNodeWires();
   const scope = settingScope(sceneId, spec.key);
   const entry = cache[scope]?.[spec.key];
 
@@ -714,6 +721,3 @@ export function setDriveReadout(sceneId: string, spec: SceneSetting, readout: Hi
   entryFor(settingScope(sceneId, spec.key), spec.key).readout = readout;
   persist();
 }
-
-// Last, so every helper the sanitizer reads is initialised (header, Migration).
-migrateLegacyNodeWires();
