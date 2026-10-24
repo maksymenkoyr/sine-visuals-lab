@@ -53,6 +53,14 @@
  * it (src/app.ts; a TV once it joins a room, src/tv.ts), so a venue's wifi
  * dropping mid-set can't cost a scene its media.
  *
+ * **Gallery stills** are the one unpinned `?url` exception: the glob in
+ * src/ui/galleryStills.ts resolves a small WebP per free scene to a hashed
+ * URL and nothing pins it. A tile whose still 404s after a deploy simply
+ * drops it and plays its live preview (src/ui/gallery.ts), so the failure is
+ * harmless, and pinning every still would put their bytes on every page load
+ * for a picture most visitors scroll past. tests/pinnedAssets.test.ts names
+ * that file in `UNPINNED_URL_GLOBS`.
+ *
  * **The rule for new code:** any `?url` or `?worker&url` import — anything
  * Vite resolves to a hashed URL string rather than inlining or bundling —
  * must be wrapped in `pinAsset()` at module scope, right next to the import,
