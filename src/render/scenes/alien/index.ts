@@ -38,20 +38,20 @@
  * DEV: `?loop=<n>` pins one loop (no cuts), and `window.__alien` exposes the
  * reel, the last wire readings and the videos for a headless run.
  */
-import type { PanelSection, Scene, SceneContext, Viewport } from "../../scene.ts";
+import type { Scene, SceneContext, Viewport } from "../../scene.ts";
 import type { FeatureFrame } from "../../../audio/types.ts";
 import type { Palette } from "../../palette.ts";
 import type { AnimFrame } from "../../animClock.ts";
-import type { SceneSetting } from "../../sceneSettings.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "../../drives.ts";
 import { publishSettingMarks } from "../../settingMarks.ts";
-import { STANDOUT_THRESHOLD_DEFAULT, standoutLine, standoutMarks, standoutThreshold } from "../../standout.ts";
+import { standoutLine, standoutMarks, standoutThreshold } from "../../standout.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import { sceneMedia } from "../../../pinnedAssets.ts";
 import { BAKED } from "./loops/manifest.ts";
 import { BOUNCE_MAX, BOUNCE_WIDEN, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
 import { PLAYER_FRAG } from "./glsl.ts";
+import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 
 // Scene media (src/pinnedAssets.ts's header): stable files under
 // public/media/, named in BAKED, fetched the first time a host mounts the
@@ -60,11 +60,8 @@ import { PLAYER_FRAG } from "./glsl.ts";
 // than needed.
 const VIDEOS = BAKED.loops.map((loop) => sceneMedia(loop.file));
 
-export const ALIEN_ID = "alien";
+export const ALIEN_ID = card.id;
 
-/** Scales Level (Move's default wire) so a loud song reads about 1 — the
- *  dance at its captured speed with Move at its default. */
-export const MOVE_GAIN = 2;
 /** Browsers won't play slower than about this; below it the loop pauses. */
 const MIN_RATE = 0.07;
 const MAX_RATE = 4;
@@ -77,79 +74,7 @@ const SQUASH_LIMIT = 0.35;
 const VIDEO_HOLDER_STYLE =
   "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0.01;pointer-events:none";
 
-const SETTINGS: SceneSetting[] = [
-  {
-    key: "move",
-    label: "Move",
-    description:
-      "The music pays for every frame of the dance: the wired input node times this sets how fast the loop plays, " +
-      "gliding rather than jumping. At 1 a loud song plays it as it was danced; silence buys no frames, so the alien holds still",
-    group: "Motion",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-    drive: { default: "feature.level", gain: MOVE_GAIN },
-  },
-  {
-    key: "bounce",
-    label: "Bounce",
-    description: "How deep the alien squashes toward the floor and springs back each time the wired input node hits, on top of the dance",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "bounceSmooth",
-    label: "Bounce smoothness",
-    description:
-      "How Bounce moves. Left: a quick snap down and a springy wobble back. Right: a slow ease down and a glide back to rest. " +
-      "A single hit squashes as deep either way; on fast kicks a smooth bounce doesn't fully come back up between hits",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-  },
-  {
-    key: "cut",
-    label: "Cut",
-    description:
-      "On: the loop repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
-      "then cuts to another of the three angles (never twice within a couple of seconds). Off: the loop on screen repeats",
-    group: "Camera",
-    type: "boolean",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 1,
-    drive: {
-      default: "anim.dropOnset",
-      // A cut has no size, so its Reaction row stays on Flat.
-      hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
-      // Scene-handled: the same standout as Physarum 2's Dose threshold
-      // (standout.ts's header has how one is wired).
-      threshold: {
-        default: STANDOUT_THRESHOLD_DEFAULT,
-        label: "Cut threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another angle. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
-      },
-    },
-  },
-];
-
 const SETTING_BY_KEY = new Map(SETTINGS.map((s) => [s.key, s]));
-
-/** The Motion group as one section: the Move row with a live readout under
- *  it (speed, frames bought per second, the loop's playhead), then Bounce
- *  and its smoothness. */
-const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth"] }];
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "development", added: "2026-10-05" } as const;
 
 export const alienScene: Scene = (() => {
   const get = (key: string): number => resolveSceneSetting(ALIEN_ID, SETTING_BY_KEY.get(key)!);
@@ -288,10 +213,7 @@ export const alienScene: Scene = (() => {
   }
 
   return {
-    id: ALIEN_ID,
-    name: "Alien",
-    settings: SETTINGS,
-    panel: PANEL,
+    ...card,
 
     // For the Move readout (src/ui/widgets/alienPlay.ts): the loop on screen,
     // where its video is, and what the music is buying right now.

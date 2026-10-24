@@ -20,7 +20,18 @@ No two runs grow the same way. Put it on a big screen and let it run through a w
 
 ## Where the code is
 
-`src/render/scenes/physarum2.ts` — the header comment is the primary source
+`src/render/scenes/physarum2.card.ts` is the scene's card, loaded with the page:
+id, name, `SETTINGS` (the per-strain item settings, the global rows and the
+constants they use, `STRAIN_BAND_SIGNALS`, the motion presets), `PANEL`, the
+`gallery` record and `loadBody`. The body spreads the card, so the registered
+settings are the body's own objects. `src/render/scenes/physarum2Strains.ts`
+holds what the body, the card and the panel's widgets
+(`src/ui/widgets/previews.ts`) all share (`STRAINS`, the slider-to-motion
+maps, `hueRotateRGB`, `resolveStrainEffective`, `DEPOSIT`, `NUTRIENT_REST`),
+with no GLSL and no GL, so none of them pulls in the body.
+
+`src/render/scenes/physarum2.ts` — the body, loaded after first paint; its
+header comment is the primary source
 for the whole simulation design (strain/attraction-table packing, the
 per-step fixed-rate stepper, the RGBA=strain trail, evaporation precision,
 the composite's exposure/gamma, and — since 2026-09-27 — the per-strain
@@ -46,9 +57,9 @@ header is the source: key pass, bitonic network, gather), called from
 `render()` just ahead of the step loop; its pure twins are tested in
 `tests/physarum2Sort.test.ts`.
 
-Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
-packing round trip and the same beat-rise detector with its own refractory),
-and `grainTextureSide` from `chladni.ts` for the agent-state texture sizing.
+Reuses `packUnit` and `SEED_RISE_REFRACTORY_SEC` from `physarumPack.ts` (the same 16-bit
+packing round trip and the same beat-rise refractory, shared with Physarum),
+and `grainTextureSide` from `grainTexture.ts` for the agent-state texture sizing.
 The GLSL packing/hash/room-mapping helpers are copied into this file's own
 `PHYSARUM2_GLSL` shared block rather than exported from `physarum.ts`, so
 that file's behaviour is untouched. Exported pure helpers —
@@ -1101,6 +1112,7 @@ configs are used.
   its visible readout shows, so a screen reader no longer hears only the
   bare number. Attribute only: no change to the sim, the stored values or the
   look.
+- 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/physarum2.card.ts`, so the scene's code loads after the page's first paint. The strain math the panel's widgets share moved to `src/render/scenes/physarum2Strains.ts`. Nothing visible changed. (#536)
 
 ## Tuning notes
 

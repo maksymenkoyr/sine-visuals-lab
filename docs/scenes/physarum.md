@@ -10,13 +10,21 @@ itself over seconds rather than an instant. Draft, on main (featured until
 
 ## Where the code is
 
-`src/render/scenes/physarum.ts` — the header comment is the primary source
+`src/render/scenes/physarum.card.ts` is the scene's card, loaded with the page:
+id, name, `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the
+card, so the registered settings are the body's own objects.
+
+`src/render/scenes/physarum.ts` — the body, loaded after first paint; its header
+comment is the primary source
 for the whole simulation design (packing, passes, evaporation precision,
 dt handling, composite). Exported as `physarumScene`, which
 `src/render/scenes/index.ts` registers on its own (`scenes/sceneModules.ts`).
 
-Reuses `grainTextureSide` from `chladni.ts` for its agent-state texture
-sizing, and shares that file's hash family and its reasoning for RGBA8
+`src/render/scenes/physarumPack.ts` holds `packUnit` and
+`SEED_RISE_REFRACTORY_SEC`, which this scene and Physarum 2 share.
+
+Reuses `grainTextureSide` from `grainTexture.ts` for its agent-state texture
+sizing, and shares Chladni's hash family and its reasoning for RGBA8
 ping-pong state (no reliance on `EXT_color_buffer_float`) and for using
 `frame.time` deltas rather than `anim.dtSec`. Exported pure helpers —
 `trailSide`, `createBeatSeeder`, `attractorPositions`, `packUnit`/
@@ -63,6 +71,7 @@ follows). No video or visual reference was studied for this scene.
   relocated (`uSeedFresh` multiplies `uSeed` in the sim shader) by how far the
   hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/physarum.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

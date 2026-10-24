@@ -7,7 +7,7 @@ import { card, SETTINGS } from "./powder.card.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
-import { grainTextureSide, REFERENCE_GRAINS } from "./chladni.ts";
+import { grainTextureSide, REFERENCE_GRAINS } from "./grainTexture.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // Coloured powder thrown into a dark room: a GPU particle sim with real
