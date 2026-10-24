@@ -54,7 +54,7 @@ export interface TuningDeps {
 /** Cheap, side-effect-free onset readout for a headless driver polling every
  *  rAF tick — see audioProbe's own comment on api below for why this is a
  *  separate method from probe(). */
-export interface AudioProbeSnapshot {
+interface AudioProbeSnapshot {
   onset: boolean;
   time: number;
   fluxRatio: number | null;
@@ -64,7 +64,7 @@ export interface AudioProbeSnapshot {
  *  call so the (relatively costly, 32768-element) copy across the
  *  page.evaluate boundary only happens when a caller actually detected an
  *  onset edge on this tick — see audioBuffer's own comment on api below. */
-export interface AudioBufferSnapshot {
+interface AudioBufferSnapshot {
   mono: number[] | null;
   sampleRate: number | null;
 }
