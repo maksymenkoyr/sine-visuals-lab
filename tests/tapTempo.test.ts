@@ -11,9 +11,8 @@ import {
   TAP_MIN_TAPS,
 } from "../src/render/tapTempo.ts";
 import { getBeatTrim, nudgeBeatOffset, resetBeatTrim, stepTempoMultiplier } from "../src/render/beatTrim.ts";
-import { BPM_MAX, BPM_MIN } from "../src/audio/tempoComb.ts";
+import { MAX_BPM as BPM_MAX, MIN_BPM as BPM_MIN } from "../src/audio/types.ts";
 import { createAnimClock, type AnimFrame } from "../src/render/animClock.ts";
-import { createBeatClock } from "../src/render/beatClock.ts";
 import { createMetronome, RESYNC_RATIO } from "../src/render/metronome.ts";
 import { createTempoSettle, RETUNE_UNSURE_SEC, TEMPO_SETTLE_SEC } from "../src/render/tempoSettle.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
@@ -218,16 +217,6 @@ describe("the seeds", () => {
     // Unsure the whole time (lock 0): the window refills, then the unsure retune.
     expect(moved).toBeGreaterThanOrEqual(RETUNE_UNSURE_SEC);
     expect(settle.bpm).toBeCloseTo(100, 6);
-  });
-
-  it("beatClock.seed takes the tempo and moves the phase the short way", () => {
-    const clock = createBeatClock();
-    for (let i = 0; i < 100; i++) clock.advance(DT, 120, false);
-    const before = clock.beats;
-    clock.seed(90, 0.5);
-    expect(clock.bpm).toBe(90);
-    expect(clock.beatPhase).toBeCloseTo(0.5, 9);
-    expect(Math.abs(clock.beats - before)).toBeLessThanOrEqual(0.5);
   });
 
   it("metronome.seed never runs the count backward: forward at once, or hold still", () => {

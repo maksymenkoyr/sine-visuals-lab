@@ -8,6 +8,7 @@ import {
   type WireFrame,
 } from "../src/net/outputSync.ts";
 import { applySyncedStorage, captureSyncedStorage, registerSyncedStore } from "../src/net/syncedStores.ts";
+import { engineReading } from "./engineReading.ts";
 
 const params = { sens: 1, exp: 1, smoothing: 1 };
 const state = (scene: string, storage: Record<string, string> = {}, palette = "neon"): OutputState => ({
@@ -264,7 +265,6 @@ const frame = (over: Partial<WireFrame> = {}): WireFrame => ({
   bpm: 0,
   onsetPhase: 0,
   engine: null,
-  beatRatio: null,
   wavePeak: null,
   ...over,
 });
@@ -285,6 +285,18 @@ describe("createFrameInbox", () => {
     expect(first.pulseOnset).toBe(true);
     expect(first.energy).toBe(0.5); // but the newest values
     expect(i.take()!.onset).toBe(false); // consumed
+  });
+
+  it("keeps the level a latched hit came in with", () => {
+    const i = createFrameInbox();
+    i.push(frame({ level: 0.6, engine: engineReading({ snare: 3 }) }), 0);
+    i.push(frame({ level: 0.05, engine: engineReading() }), 5);
+    const out = i.take()!;
+    expect(out.engine!.snare).toBe(3);
+    expect(out.level).toBe(0.05);
+    expect(out.engine!.hitLevel).toBe(0.6);
+    i.push(frame({ level: 0.05, engine: engineReading() }), 10);
+    expect(i.take()!.engine!.hitLevel).toBeUndefined();
   });
 
   it("holds the last params across frames that omit them", () => {

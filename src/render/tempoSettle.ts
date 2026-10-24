@@ -15,7 +15,7 @@
  * Moving a held tempo the tracker has been sure of to a *different* one
  * has to be confirmed first: the new value must stay the window's agreed
  * reading for RETUNE_SURE_SEC while the beat tracker is sure (the `lock`
- * push() is given, beatClock's tempoLock, at or above RETUNE_LOCK), or for
+ * push() is given, tempoLock, at or above RETUNE_LOCK), or for
  * RETUNE_UNSURE_SEC however unsure it is. "Sure of" means the tracker's lock
  * reached RETUNE_LOCK at least once while the window agreed with the held
  * value; a held value it never was sure of is only a guess, and moves the
@@ -56,7 +56,7 @@ export interface TempoSettle {
    *  with the real elapsed time since the last push — this module's own
    *  window is measured in accumulated `dtSec`, not wall time, so it settles
    *  the same way at any render rate or Smoothing setting. `lock` is the
-   *  beat tracker's confidence (beatClock's tempoLock, 0..1) — it only
+   *  beat tracker's confidence (tempoLock, 0..1) — it only
    *  decides how soon a held tempo may move to a different one (see
    *  RETUNE_SURE_SEC above); omitted, it counts as sure. */
   push(rawBpm: number, dtSec: number, lock?: number): void;

@@ -108,8 +108,6 @@ export interface OutputState {
 }
 
 export interface WireFrame extends FeatureFrame {
-  /** features.ts's broadband ratio (animClock.advance's `beatRatio`), null off a local mic. */
-  beatRatio: number | null;
   /** Waveform peak for AnimFrame.wavePeak: the local mic's, or a followed
    *  feed's (app.ts's waveSamples); null with neither. */
   wavePeak: number | null;
@@ -325,7 +323,8 @@ export function createCueController(
  *  one-shot edges (onset, pulseOnset, and the engine reading's hits, surge
  *  and blocked flag, as their strongest) are latched until a render consumes
  *  them — a hit between two output ticks isn't lost, and one isn't fired
- *  twice when the output ticks faster than the main window. */
+ *  twice when the output ticks faster than the main window. A latched hit
+ *  keeps the level of the frame it came in (EngineReading.hitLevel). */
 export interface FrameInbox {
   push(f: WireFrame, nowMs: number): void;
   /** Latest frame with pending one-shots delivered (and cleared), or null if none yet. */
@@ -342,10 +341,11 @@ export function createFrameInbox(): FrameInbox {
   let lastMs = -Infinity;
   let onset = false;
   let pulse = false;
-  const hits: Pick<EngineReading, "kick" | "snare" | "hat" | "surge" | "surgeKind" | "blocked"> = {
+  const hits: Pick<EngineReading, "kick" | "snare" | "hat" | "hitLevel" | "surge" | "surgeKind" | "blocked"> = {
     kick: 0,
     snare: 0,
     hat: 0,
+    hitLevel: undefined,
     surge: 0,
     surgeKind: "kick",
     blocked: false,
@@ -362,6 +362,7 @@ export function createFrameInbox(): FrameInbox {
         hits.kick = Math.max(hits.kick, e.kick);
         hits.snare = Math.max(hits.snare, e.snare);
         hits.hat = Math.max(hits.hat, e.hat);
+        if (e.kick > 0 || e.snare > 0 || e.hat > 0) hits.hitLevel = Math.max(hits.hitLevel ?? 0, f.level);
         if (e.surge > hits.surge) {
           hits.surge = e.surge;
           hits.surgeKind = e.surgeKind;
@@ -378,6 +379,7 @@ export function createFrameInbox(): FrameInbox {
       onset = false;
       pulse = false;
       hits.kick = hits.snare = hits.hat = hits.surge = 0;
+      hits.hitLevel = undefined;
       hits.blocked = false;
       return out;
     },

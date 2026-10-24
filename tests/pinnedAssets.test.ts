@@ -33,7 +33,7 @@ describe("every ?url / ?worker&url import is pinned", () => {
   // A canary for the scanner itself: if this ever stops finding the known
   // worklet import, the regex above has drifted from how imports are written.
   it("actually found the known worklet import", () => {
-    const text = readFileSync("src/audio/tempoSource.ts", "utf8");
+    const text = readFileSync("src/audio/engineSource.ts", "utf8");
     expect([...text.matchAll(IMPORT_RE)].length).toBeGreaterThan(0);
   });
 });

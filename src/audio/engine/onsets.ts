@@ -68,7 +68,7 @@ export interface HitOptions {
   min: number;
 }
 
-const HIT_DEFAULTS: HitOptions = { k: 2, min: 4 };
+export const HIT_DEFAULTS: HitOptions = { k: 2, min: 4 };
 
 /** Where each kind's cluster centre starts and the range it may wander in, in Hz. */
 const CLUSTERS: Record<HitKind, { start: number; range: readonly [number, number] }> = {
@@ -81,7 +81,7 @@ const CLUSTER_RATE = 0.05;
 /** Seconds the hit threshold's running mean and deviation cover. */
 const HIT_STATS_S = 1;
 /** Shorter than a 16th at 180 BPM: drum & bass puts a kick and a snare that close. */
-const REFRACTORY_S = 0.06;
+export const REFRACTORY_S = 0.06;
 
 /** Peak picking on the summed rise: a local maximum over a running threshold. */
 class Picker {

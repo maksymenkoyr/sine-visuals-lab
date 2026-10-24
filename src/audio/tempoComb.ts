@@ -1,17 +1,17 @@
 /**
- * The pair-comb tempo estimator — shared by features.ts's render-tick onset
- * pipeline (registerOnset, recency 0: every onset in the window votes
- * equally regardless of age) and tempoAnalyzer.ts's fixed-hop pipeline
- * (recencySec > 0, so a stale pairing fades out as a tempo changes). Given a
+ * The pair-comb tempo estimator toonrave's dance.ts finds a beat in a scene
+ * signal's fires with (the app's own tempo is the audio engine's,
+ * src/audio/engine/tempo.ts). recencySec 0 lets every onset in the window
+ * vote equally regardless of age; recencySec > 0 fades a stale pairing out as
+ * a tempo changes. Given a
  * rolling set of timestamped, weighted onsets, this scores every candidate
  * tempo period by how many *pairwise onset gaps* land on a whole number of
- * its beats, rather than by the mode of adjacent gaps (see features.ts's own
- * history for why: a decaying percussion tail's extra onset makes adjacent
- * gaps alternate short/long, and neither reading is the true tempo) or an
- * autocorrelation of the flux envelope (tried and rejected for
- * tempoAnalyzer.ts — it locks onto half/double time under a busy pattern
- * more readily than a comb over exact onset times does, and can't recover
- * from a tempo step as fast as recency weighting here lets it).
+ * its beats, rather than by the mode of adjacent gaps (a decaying percussion
+ * tail's extra onset makes adjacent gaps alternate short/long, and neither
+ * reading is the true tempo) or an autocorrelation of the flux envelope (it
+ * locks onto half/double time under a busy pattern more readily than a comb
+ * over exact onset times does, and can't recover from a tempo step as fast
+ * as recency weighting here lets it).
  *
  * A pair's vote is worth the *weaker* of its two onsets (a real hit paired
  * with a noise blip is still a noise gap), optionally decayed by how long
@@ -27,15 +27,6 @@
 
 export const BPM_MIN = 70;
 export const BPM_MAX = 180;
-
-// How long a caller should hold its own bpm/onset history after the last
-// onset before letting it decay back to 0 — shared by features.ts's
-// registerOnset and tempoAnalyzer.ts's analyseHop so a locked tempo doesn't
-// stick around forever once the onsets sustaining it actually stop (see
-// features.ts's own header comment on why: without this, beatClock.ts's
-// tempoLock had nothing to ease back down toward). Not itself read by
-// estimateTempo below — each caller applies it to its own state.
-export const TEMPO_DECAY_SEC = 3;
 
 const TEMPO_PRIOR_BPM = 120;
 const TEMPO_PRIOR_OCTAVES = 1;
@@ -98,8 +89,8 @@ export function estimateTempo(onsets: TempoOnsetVote[], now: number, currentBpm:
   if (n < 3) return null;
 
   // Pair gaps and weights go into module-level scratch (this runs on the
-  // audio thread once per picked onset in tempoAnalyzer.ts, so it must not
-  // allocate a pair of growing arrays every call).
+  // once per fire, so it must not allocate a pair of growing arrays every
+  // call).
   const pairCap = (n * (n - 1)) / 2;
   if (gaps.length < pairCap) {
     gaps = new Float64Array(pairCap);

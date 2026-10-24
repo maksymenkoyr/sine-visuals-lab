@@ -33,9 +33,9 @@ export interface Sample {
   wave: WaveEnvelope | null;
   /** The engine reading at this instant: levels interpolated like the bands,
    *  each kind's hits one-shot (the strongest that came due since the last
-   *  sample), and the tracker's state from the latest frame at or before the
-   *  instant, its beat ages measured to the instant itself. null when the
-   *  feed sends none. */
+   *  sample, with `hitLevel` the level of the frame it came in), and the
+   *  tracker's state from the latest frame at or before the instant, its beat
+   *  ages measured to the instant itself. null when the feed sends none. */
   engine: WireEngine | null;
 }
 
@@ -47,12 +47,16 @@ const PENDING_HITS = 8;
 class HitQueue {
   private readonly times = new Float64Array(PENDING_HITS);
   private readonly strengths = new Float64Array(PENDING_HITS);
+  private readonly levels = new Float64Array(PENDING_HITS);
   private count = 0;
+  /** The level of the frame the last take()'s hit came with; 0 when it took none. */
+  takenLevel = 0;
 
-  add(timeMs: number, strength: number): void {
+  add(timeMs: number, strength: number, level: number): void {
     if (this.count === PENDING_HITS) {
       this.times.copyWithin(0, 1);
       this.strengths.copyWithin(0, 1);
+      this.levels.copyWithin(0, 1);
       this.count--;
     }
     let i = this.count;
@@ -60,10 +64,12 @@ class HitQueue {
     while (i > 0 && this.times[i - 1] > timeMs) {
       this.times[i] = this.times[i - 1];
       this.strengths[i] = this.strengths[i - 1];
+      this.levels[i] = this.levels[i - 1];
       i--;
     }
     this.times[i] = timeMs;
     this.strengths[i] = strength;
+    this.levels[i] = level;
     this.count++;
   }
 
@@ -71,12 +77,21 @@ class HitQueue {
   take(targetMs: number): number {
     let n = 0;
     let strongest = 0;
-    while (n < this.count && this.times[n] <= targetMs) strongest = Math.max(strongest, this.strengths[n++]);
+    let level = 0;
+    while (n < this.count && this.times[n] <= targetMs) {
+      if (this.strengths[n] > strongest) {
+        strongest = this.strengths[n];
+        level = this.levels[n];
+      }
+      n++;
+    }
     if (n > 0) {
       this.times.copyWithin(0, n, this.count);
       this.strengths.copyWithin(0, n, this.count);
+      this.levels.copyWithin(0, n, this.count);
       this.count -= n;
     }
+    this.takenLevel = level;
     return strongest;
   }
 }
@@ -95,10 +110,8 @@ export class JitterBuffer {
   private lastOnsetRoomTimeMs = -Infinity;
   private lastFiredOnsetRoomTimeMs = -Infinity;
   // Same one-shot-due-tracking pair as onset above, but for the ungated
-  // pulse onset (see FeatureFrame.pulseOnset) — tempo tracking on a
-  // host/renderer/TV must read this, never lastOnsetRoomTimeMs, or the
-  // silence gate that already dimmed `onset` before it reached the wire
-  // would also starve the beat clock on the other end.
+  // pulse onset (see FeatureFrame.pulseOnset), which a follower from before
+  // the engine reading tracks tempo on: the gated `onset` would starve it.
   private lastPulseRoomTimeMs = -Infinity;
   private lastFiredPulseRoomTimeMs = -Infinity;
   private bpm = 0;
@@ -143,7 +156,7 @@ export class JitterBuffer {
     if (frame.pulseOnset) this.lastPulseRoomTimeMs = frame.roomTimeMs;
     if (frame.bpm > 0) this.bpm = frame.bpm;
     const e = frame.engine;
-    if (e) for (const kind of HIT_KINDS) if (e[kind] > 0) this.hits[kind].add(frame.roomTimeMs, e[kind]);
+    if (e) for (const kind of HIT_KINDS) if (e[kind] > 0) this.hits[kind].add(frame.roomTimeMs, e[kind], frame.level);
   }
 
   sampleAt(targetMs: number): Sample | null {
@@ -206,6 +219,8 @@ export class JitterBuffer {
     out.kick = this.hits.kick.take(targetMs);
     out.snare = this.hits.snare.take(targetMs);
     out.hat = this.hits.hat.take(targetMs);
+    const hitLevel = Math.max(this.hits.kick.takenLevel, this.hits.snare.takenLevel, this.hits.hat.takenLevel);
+    out.hitLevel = out.kick > 0 || out.snare > 0 || out.hat > 0 ? hitLevel : undefined;
     out.surge = state.surge;
     out.surgeKind = state.surgeKind;
     out.blocked = state.blocked;

@@ -1,3 +1,8 @@
+// The one reader left is toonrave's dance.ts, which finds a beat in a scene
+// signal's fires with it; the app's beat clock is the audio engine's
+// (src/audio/engine/clock.ts, run by animClock.ts). What follows describes
+// the clock as it was built for the app, with its old feeds.
+//
 // A phase-locked beat/bar clock — the tempo analog of flowClock.ts's phase
 // accumulator. This clock has two feeds into its phase comb: the
 // render-tick path (features.ts's onsets, one per tick, back-dated by
@@ -106,8 +111,7 @@ const PHASE_MAX_RATE = 0.35;
 // stability's own easing: how much a freshly-computed |pending| moves the
 // leaky average that becomes `confidence` below. Tuned against
 // tests/tempoEval.test.ts: STABILITY_ALPHA raised from an initial 0.2 to 0.4
-// (faster to both build and shed confidence — see PHASE_BASS's own doc
-// below for the other half of that same tuning pass); STABILITY_START
+// (faster to both build and shed confidence); STABILITY_START
 // tried lower (0.1) with no measurable effect (it only matters for the
 // first comb run after a fresh bpm>0, not the sustained-but-wrong-tempo
 // stretches an eval track like `ramp` actually exercises) and was left at
@@ -126,16 +130,6 @@ const LOCK_RISE_RATE = 0.5;
 const LOCK_DIP_RATE = 1;
 const LOCK_FALL_RATE = 3;
 
-// How much more a bass-weighted hit counts toward the phase comb's vote —
-// see src/render/animClock.ts's own hitWeight computation, which reads this.
-// Exported from here (not animClock.ts) since it's a property of what the
-// comb does with a hit's weight, not of how animClock derives one. Raised
-// from an initial 2 to 4 against tests/tempoEval.test.ts (a kick's own vote
-// needs to clearly outweigh a busy hat pattern's); animClock.ts's own
-// BASS_WEIGHT_FLOOR/BASS_WEIGHT_SPAN mapping was tried both looser and
-// tighter and made every track's own lockInTempo worse either way, so it
-// stayed at its original values.
-export const PHASE_BASS = 4;
 // A hit is only noticed on the first render tick after its sound starts
 // (features.ts's flux compares whole frames), so every fired beat is late by
 // part of a frame — a lag that grows as the frame rate drops, and that the
@@ -171,7 +165,7 @@ interface Hit {
 /** One fixed-hop onset, already an exact audio-clock time relative to "now"
  *  — see advance()'s own doc for how this differs from the render-tick
  *  path's single `beatFired`/`hitWeight` pair. */
-export interface TempoHit {
+interface TempoHit {
   /** Seconds ago (from this tick's clockSec) the onset actually fired. */
   agoSec: number;
   weight: number;

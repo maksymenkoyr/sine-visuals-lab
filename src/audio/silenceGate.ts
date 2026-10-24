@@ -3,30 +3,25 @@
  * units (see features.ts's LEVEL_DB_FLOOR/LEVEL_DB_CEIL — level is the one
  * absolute loudness reading the pipeline has). silenceGateDimmer() maps a
  * frame's level to a 0..1 multiplier — 0 at/below `closed`, 1 at/above
- * `open`, smoothstepped between — that features.ts's onset detector and
- * bandEnergy.ts's per-group detectors both fold into their firing
- * comparison. It exists because those detectors are purely relative: a
- * broadband/per-band flux baseline that adapts to whatever is currently
- * "loud", on a room-adaptive window that only ever floors out at
- * features.ts's MIN_RANGE_DB. In a near-silent room that baseline is just
- * mic hiss chasing mic hiss — there's no genuine quiet reference, so any
- * wobble above the hiss average clears the threshold and fires an onset.
- * `level` is the only signal in the pipeline that still knows "quiet" from
- * "loud" in absolute terms after the adaptive stages have re-normalized
- * everything else away, which is exactly what a silence gate needs to read.
+ * `open`, smoothstepped between — and hitPasses() lets an engine hit through
+ * only while its strength times that dimmer is over 1. It exists because the
+ * engine's hit detector (src/audio/engine/onsets.ts) is relative: it reads
+ * the input against its own level and noise floor and fires on peaks over a
+ * running threshold, so a near-silent room's hiss still makes peaks that
+ * clear it. `level` is the one reading that still knows "quiet" from "loud"
+ * in absolute terms, which is exactly what a silence gate needs to read.
  *
- * The dimmer multiplies ONLY the firing comparison — `flux * dimmer >
- * threshold` in features.ts, `rise * dimmer > threshold` per group in
- * bandEnergy.ts. Everything that scores or times a hit is computed on the
- * raw, ungated signal: the flux/rise baseline keeps adapting to the
- * genuine, ungated value (if the gate shrank the signal before the baseline
- * ever saw it, both sides of the comparison would shrink together and hiss
- * would go right on beating hiss — the gate would do nothing), the reported
- * ratio (features.ts's fluxRatio) stays the true unclamped score, and the
- * refractory/tempo-comb logic is untouched. Level is read on the same frame
- * as the candidate hit, not a smoothed lag of it, so a genuinely loud sound
- * in an otherwise silent room — a clap, a single loud beat — opens its own
- * gate that same tick and fires normally.
+ * A hit's strength is how far its peak cleared the engine's threshold
+ * (EngineReading in src/audio/types.ts), so it is over 1 by construction: an
+ * open gate passes every hit, a half-open one only the hits that cleared
+ * twice the threshold, a shut one none. The gate scales only that
+ * comparison. The engine's threshold, refractory, hit naming and tempo
+ * tracking never see it (if the gate shrank the signal before the threshold
+ * did, both would shrink together and hiss would go on beating hiss), and the
+ * strength a lane reports stays the ungated one. Level is read on the same
+ * frame as the hit, not a smoothed lag of it, so a genuinely loud sound in an
+ * otherwise silent room — a clap, a single loud beat — opens its own gate
+ * that same tick and fires normally.
  *
  * Two marks, not one. A single on/off threshold is a switch, and a switch
  * chatters: with the firing comparison an all-or-nothing step function, a
@@ -56,30 +51,23 @@
  * by the shipped default (tests/silenceGate.test.ts pins this against the
  * real synthetic feed rather than trusting the arithmetic by eye).
  *
- * The gate governs what a scene *reacts to* (FeatureFrame.onset, and
- * bandEnergy.ts's band onsets), never tempo tracking. features.ts also
- * reports FeatureFrame.pulseOnset — the same firing comparison without the
- * dimmer, on its own refractory — and that is what the tempo vote and the
- * beat clock read, on the host and (over the wire's pulse bit) on a paired
- * TV. It used to be the gated onset, and in a room the gate read as quiet
- * that starved tempo tracking of every hit: through a mic, the host/TV path
- * and the no-worklet fallback never started the Metronome at all while the
- * tempo reading itself was fine. Hiss hits that slip through ungated are
- * aperiodic, and the tempo comb and the beat clock's confidence already
- * reject aperiodic hits (tests/tempoEval.test.ts's "through a mic" block
- * guards both halves).
+ * The gate governs what a scene *reacts to*, never tempo tracking. Every
+ * device that draws gates the engine reading's hits itself (bandEnergy.ts,
+ * run by src/render/animClock.ts) with its own marks, off the `level` of the
+ * frame the hits came in (on a follower, EngineReading.hitLevel: it draws a
+ * hit a tick or more later, when a short sound's level has already fallen);
+ * src/app.ts also sets FeatureFrame.onset by the same rule for followers that
+ * predate the reading. The tempo tracker (src/audio/engine/tempo.ts) hears
+ * the audio before any gate, and the beat clock follows it: a gated tracker
+ * starved tempo tracking in a room the gate read as quiet (through a mic, the
+ * Metronome never started), while hiss is aperiodic and the tracker's music
+ * test already rejects it (tests/tempoEval.test.ts's "through a mic" block).
  *
- * TV limitation: only the broadband onset flag (FeatureFrame.onset) is
- * computed by a FeatureExtractor and travels pre-gated to a paired TV over
- * src/net/protocol.ts's wire frame. bandEnergy.ts's per-band low/mid/high
- * detectors run independently on every device that draws (the host, a
- * phone's preview, the TV), each off its own decoded `level` byte and its own
- * locally-stored SilenceGateMarks. The marks are not part of a room's look:
- * their keys are net/syncedStores.ts's VOLATILE_PREFIXES, which the pop-out
- * still mirrors but `isRoomKey` refuses — unlike bandSplit.ts's low/mid
- * crossovers, which do ride in the look. So a phone's Silence gate setting
- * doesn't gate what a paired TV's own bandEnergy onsets treat as silence;
- * only the TV's own copy of this setting does that.
+ * The marks are not part of a room's look: their keys are
+ * net/syncedStores.ts's VOLATILE_PREFIXES, which the pop-out still mirrors
+ * but `isRoomKey` refuses — unlike bandSplit.ts's crossovers, which do ride
+ * in the look. So a phone's Silence gate setting doesn't decide what a
+ * paired TV treats as silence; only the TV's own copy of this setting does.
  *
  * Auto mode: a room-floor tracker (feedSilenceGateMeasurement, gated by
  * STORAGE_KEY_AUTO) that can drive both marks instead of a manual drag. It
@@ -97,8 +85,8 @@
  * seeded from whatever the manual marks already were (see `floor`'s own
  * init below), so a fresh profile starts from the shipped marks and only
  * moves once this room has actually been heard holding still. Only src/app.ts's own extractor loop
- * ever calls feedSilenceGateMeasurement — a paired TV (which, per the
- * limitation above, keeps its own entirely local copy of this module) and
+ * ever calls feedSilenceGateMeasurement — a paired TV (which keeps its own
+ * entirely local copy of this module) and
  * the synthetic feed never do, so on either path the auto marks simply hold
  * at the seed (= the manual marks), same as if a manual drag had left them
  * there — this is what keeps every headless screenshot undimmed by default.
@@ -124,10 +112,10 @@ export interface SilenceGateMarks {
   open: number;
 }
 
-/** One tick's gate reading, off one device's own FeatureExtractor — not the
- *  stored marks above (SilenceGateMarks), but what the gate actually did
- *  this tick. `dimmer` is FeatureExtractor.gateDimmer, `fired` is that same
- *  tick's FeatureFrame.onset, `suppressed` is FeatureExtractor.suppressed.
+/** One tick's gate reading, off one device's own capture — not the stored
+ *  marks above (SilenceGateMarks), but what the gate actually did this tick.
+ *  `dimmer` is silenceGateDimmer() on that tick's level, `fired` is that same
+ *  tick's FeatureFrame.onset, `suppressed` is an engine hit hitPasses() stopped.
  *  One definition, shared by app.ts's `lastGate`, deviceMenu.ts's
  *  DeviceMenu.update(), and audioMeters.ts's AudioMeters.update() and
  *  Dynamics card's Gate row, so none of them can drift into an incompatible
@@ -465,4 +453,10 @@ export function silenceGateDimmer(level: number, marks: SilenceGateMarks): numbe
   if (span <= 0) return 1; // degenerate marks shouldn't reach here via the exported setters — fail open
   const t = clamp01((level - marks.closed) / span);
   return t * t * (3 - 2 * t);
+}
+
+/** Whether an engine hit of this strength gets through a gate at this dimmer
+ *  (see this file's header). A strength of 0 (no hit) never passes. */
+export function hitPasses(strength: number, dimmer: number): boolean {
+  return strength * dimmer > 1;
 }

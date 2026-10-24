@@ -1,47 +1,57 @@
 import { FeatureExtractor } from "../../src/audio/features.ts";
+import { AudioEngine } from "../../src/audio/engine/engine.ts";
 import { createAnimClock, type AnimFrame } from "../../src/render/animClock.ts";
-import type { FeatureFrame } from "../../src/audio/types.ts";
+import type { EngineReading, FeatureFrame } from "../../src/audio/types.ts";
+import { LOCK_MEANINGS, type LockMeaning } from "../../src/render/lockMeaning.ts";
 import { releaseTapTempo, tapTempoAt } from "../../src/render/tapTempo.ts";
 import { getHitShape } from "../../src/audio/hitStrength.ts";
-import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
-import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
 import {
   feedSilenceGateMeasurement,
+  hitPasses,
   resolveSilenceGate,
   setSilenceGateAuto,
+  silenceGateDimmer,
   SILENCE_GATE_CLOSED_DEFAULT,
   SILENCE_GATE_OPEN_DEFAULT,
   type SilenceGateMarks,
 } from "../../src/audio/silenceGate.ts";
 import { feedAutoGainMeasurement, resolveAutoGain, setAutoGainAuto } from "../../src/audio/autoGain.ts";
+import { decodeFeatureFrame, encodeFeatureFrame, type WireEngine } from "../../src/net/protocol.ts";
+import { JitterBuffer } from "../../src/net/jitterBuffer.ts";
+import { RENDER_DELAY_MS } from "../../server/roomDevices.ts";
 import { readBandsDb } from "./bands.ts";
 import { micChain } from "./micChain.ts";
 import { SR, type Track, type TempoSegment } from "./synth.ts";
 
 /**
- * Renders a synthesized Track (synth.ts) through the real FeatureExtractor +
- * AnimClock, exactly the way src/app.ts drives them in solo mode (see its
- * currentVisual()/loop() — extractor.update() then animClock.advance() with
- * this device's own HitShape and the same tick's fluxRatio as the broadband
- * hit weight), and scores the result against the track's own ground truth.
- * The permanent, dependency-free scoreboard tests/tempoEval.test.ts asserts
- * targets against (see that file, and the plan/PR that added this harness
- * for what each metric is meant to guard).
+ * Renders a synthesized Track (synth.ts) the way the app hears and draws it,
+ * and scores the result against the track's own ground truth. The permanent,
+ * dependency-free scoreboard tests/tempoEval.test.ts asserts targets against.
  *
- * `{ analyzer: true }` swaps the render-tick FeatureExtractor.bpm for the
- * fixed-hop TempoAnalyzer's own — see tempoAnalyzer.ts's header for why its
- * numbers are better. It's fed the track's samples in the same 128-sample
- * blocks (with their own exact start times) app.ts's real AudioWorklet
- * would, incrementally, up to each render tick's own `time` — never more,
- * so a track's own future samples can't leak into an earlier tick's
- * estimate the way it would if the whole buffer were pushed up front. Its
- * drained onsets become that tick's animClock.advance() tempoHits, exactly
- * the shape app.ts's currentVisual()/loop() build (agoSec against this same
- * tick's `time`, weight graded by PHASE_BASS-weighted bass). Every other
- * metric computed below is unchanged between the two modes — same
- * FeatureExtractor, same AnimFrame, same ground truth comparison — so the
- * two tables in tests/tempoEval.test.ts are directly comparable.
+ * The device that hears the sound runs as src/app.ts's readLocalCapture()
+ * does: FeatureExtractor for the bands and level, the audio engine
+ * (src/audio/engine/engine.ts) fed the track's samples in AudioWorklet-sized
+ * blocks up to each frame's own time (never further, so a frame can't hear
+ * its own future), its reading and tempo set on the frame, and the frame's
+ * hit flags from the engine's hits and the silence gate.
+ *
+ * Two paths draw it (EvalOptions.path):
+ * - solo: that frame straight into this device's anim clock.
+ * - host: what a TV draws. Every frame goes through encodeFeatureFrame and
+ *   decodeFeatureFrame (no WireDecimator: its parameter properties would stop
+ *   `node tools/mic-gap-analyze.ts`, which imports this file, from loading)
+ *   into a JitterBuffer, and the follower samples it RENDER_DELAY_MS behind,
+ *   building its frame the way room.ts's sample() and src/tv.ts do. Each of
+ *   its frames is scored at the instant it shows.
  */
+
+/** Mean Lock in one meaning over the frames each lock metric of EvalMetrics masks. */
+export interface LockStats {
+  whenRight: number;
+  whenWrong: number;
+  noTempo: number;
+  end: number;
+}
 
 export interface EvalMetrics {
   /** Share of frames inside a tempo segment where the tracker's own bpm is
@@ -121,6 +131,9 @@ export interface EvalMetrics {
    *  should track each other closely (tempoSettle.ts's window is the only
    *  thing between them). */
   bpmPresentShare: number;
+  /** lockWhenRight/lockWhenWrong/lockNoTempo/endLock for every Lock meaning
+   *  (lockMeaning.ts), whichever one this run's anim clock hands on. */
+  lockBy: Record<LockMeaning, LockStats>;
 }
 
 function currentSegment(segments: TempoSegment[], segPtr: { i: number }, t: number): TempoSegment | null {
@@ -157,50 +170,77 @@ const LOCK_MIN_SEC = 6;
 const TICKS_TOLERANCE_SEC = 0.03;
 const WARMUP_SEC = 3;
 const LOCK_HOLD_SEC = 2;
-// Matches app.ts's tempoWorklet.ts real AudioWorklet render-quantum feed —
-// see tempoAnalyzer.ts's own hop derivation for why the exact block size
-// doesn't matter to its own hop timing (it's independent of the push()
-// chunking), only to how often this harness calls push().
-const ANALYZER_PUSH_BLOCK = 128;
+// The AudioWorklet's render quantum, the block size engineWorklet.ts posts.
+const ENGINE_PUSH_BLOCK = 128;
+
+export type EvalPath = "solo" | "host";
 
 export interface EvalOptions {
-  /** Swap the render-tick FeatureExtractor.bpm for the fixed-hop
-   *  TempoAnalyzer's — see this file's own header. */
-  analyzer?: boolean;
-  /** With `analyzer`: take only its bpm, and leave the beat clock on the
-   *  render-tick onset feed — what a paired host/TV actually runs (app.ts's
-   *  currentVisual(): the wire carries the fixed-hop bpm, but those devices'
-   *  own timeline is the jitter buffer's room time, so they never get the
-   *  exact onsets). */
-  hostFeed?: boolean;
+  /** Which device draws the track: solo (default), or a TV following the
+   *  device that hears it — see this file's header. */
+  path?: EvalPath;
+  /** Lock's meaning for this run's anim clock (lockMeaning.ts); stability by
+   *  default. EvalMetrics.lockBy scores every meaning either way. */
+  lockMeaning?: LockMeaning;
   /** Run the track's audio through micChain.ts before anything reads it —
    *  the conditions the app actually hears through a mic, rather than the
    *  track's own clean synthesized master. */
   mic?: boolean;
   /** Pass { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT }
-   *  as extractor.update's gate argument and animClock.advance's gate
-   *  argument — exactly like app.ts does in solo mode (see silenceGate.ts's
-   *  header for what the gate does and why it must not starve tempo
-   *  tracking; that's exactly what this option, combined with `mic`, is
-   *  here to measure). */
+   *  as the silence gate on the frame's hit flags and on the anim clock,
+   *  exactly like app.ts does (see silenceGate.ts's header for what the gate
+   *  does and why it must not starve tempo tracking; that's exactly what this
+   *  option, combined with `mic`, is here to measure). */
   gate?: boolean;
   /** With `gate`: run the room trackers the way app.ts does by default — the
    *  auto-gain amount from the measured band span (autoGain.ts) and the gate
    *  marks from the tracked room floor (silenceGate.ts), both re-seeded at
    *  the start of the run, instead of a fixed 1 and the shipped marks. */
   auto?: boolean;
-  /** Tap tempo (src/render/tapTempo.ts): tap times in seconds on the
-   *  track's own clock. Each is tapped just before the first frame at or
+  /** Tap tempo (src/render/tapTempo.ts), solo only: tap times in seconds on
+   *  the track's own clock. Each is tapped just before the first frame at or
    *  after it, the way a keydown lands between two render ticks, and the
    *  anim clock is handed each frame's time as its `tapNowMs`. The store is
    *  released first, so nothing from an earlier evaluate() carries over.
    *  Omitted, the tap path is never reached and every metric is exactly
    *  what it was before taps existed. */
   taps?: readonly number[];
-  /** Called after every frame with its time, the extractor's frame (raw
-   *  bpm) and the AnimFrame — for a test scoring something EvalMetrics
+  /** Called after every frame with the instant it shows, the frame drawn
+   *  (raw bpm) and the AnimFrame — for a test scoring something EvalMetrics
    *  doesn't (tests/tapTempoEval.test.ts). */
   onFrame?: (time: number, frame: FeatureFrame, anim: AnimFrame, resolved: { autoGain: number; gate: SilenceGateMarks | undefined }) => void;
+}
+
+/** A follower's frame from a jitter-buffer sample, as room.ts's sample() and src/tv.ts build it. */
+function followerFrame(buffer: JitterBuffer, targetMs: number, scratch: EngineReading): FeatureFrame | null {
+  const s = buffer.sampleAt(targetMs);
+  if (!s) return null;
+  const timeSec = targetMs / 1000;
+  let engine: EngineReading | null = null;
+  const w: WireEngine | null = s.engine;
+  if (w) {
+    engine = Object.assign(scratch, w, {
+      beatTime: timeSec - w.beatAgoMs / 1000,
+      downbeatTime: timeSec - w.downbeatAgoMs / 1000,
+    });
+  }
+  return {
+    time: timeSec,
+    bands: s.bands,
+    energy: s.energy,
+    onset: buffer.consumeOnsetIfDue(targetMs),
+    pulseOnset: buffer.consumePulseIfDue(targetMs),
+    bpm: s.bpm,
+    onsetPhase: buffer.beatPhaseAt(targetMs),
+    level: s.level,
+    hats: s.hats,
+    lead: s.lead,
+    engine,
+  };
+}
+
+function emptyLock(): LockStats {
+  return { whenRight: NaN, whenWrong: NaN, noTempo: NaN, end: NaN };
 }
 
 export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
@@ -218,13 +258,16 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   const totalDurationSec = mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);
   const finalSilenceStart = track.tempo.length > 0 ? Math.max(...track.tempo.map((s) => s.to)) : Infinity;
+  const host = opts.path === "host";
 
   const extractor = new FeatureExtractor();
-  const animClock = createAnimClock();
+  const engine = new AudioEngine(SR);
+  let samplesPushed = 0;
+  const animClock = createAnimClock({ lockMeaning: opts.lockMeaning });
   const shape = getHitShape();
-  const analyzer = opts.analyzer ? new TempoAnalyzer(SR) : null;
-  let analyzerSamplesPushed = 0;
-  const taps = opts.taps;
+  const buffer = new JitterBuffer();
+  const followerEngine: EngineReading = { ...engine.read(0) };
+  const taps = host ? undefined : opts.taps;
   let tapNext = 0;
   if (taps) releaseTapTempo();
 
@@ -235,12 +278,11 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   let steadyOk = 0;
   let runStart: number | null = null;
   let lockTime: number | null = null;
-  let rightSum = 0;
-  let rightCount = 0;
-  let wrongSum = 0;
-  let wrongCount = 0;
-  let lockNoSum = 0;
-  let lockNoCount = 0;
+  // Per Lock meaning, then the anim clock's own tempoLock under "used".
+  type LockSums = { right: number; rightN: number; wrong: number; wrongN: number; none: number; noneN: number; last: number };
+  const sums = (): LockSums => ({ right: 0, rightN: 0, wrong: 0, wrongN: 0, none: 0, noneN: 0, last: 0 });
+  const used = sums();
+  const byMeaning = Object.fromEntries(LOCK_MEANINGS.map((m) => [m, sums()])) as Record<LockMeaning, LockSums>;
   const trackedBeats: number[] = [];
   const metroTicks: number[] = [];
 
@@ -263,42 +305,55 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   let framesRunningAfterLockMin = 0;
   let framesBpmPresentAfterLockMin = 0;
 
+  let scored = 0;
   let prevBeatsVal = 0;
   let prevMetroBeatsVal = 0;
   let prevMetronomeOn = false;
   let prevTime = 0;
   let lastBpm = 0;
-  let lastLock = 0;
   let lastMetronomeOn = false;
 
   for (let i = 0; i < nFrames; i++) {
-    const time = i * dt;
-    const bands = readBandsDb(mono, time, SR);
+    const heardAt = i * dt;
+    const bands = readBandsDb(mono, heardAt, SR);
     const autoGain = auto ? resolveAutoGain() : 1;
     if (auto) gate = resolveSilenceGate();
-    const frame = extractor.update(bands, time, autoGain, 1, gate);
+    const heard = extractor.update(bands, heardAt, autoGain, 1);
     if (auto) {
       // Same order as app.ts: the readings feed the next tick.
       feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-      feedSilenceGateMeasurement(frame.level, extractor.dtSec);
+      feedSilenceGateMeasurement(heard.level, extractor.dtSec);
     }
+    const upToSample = Math.min(mono.length, Math.round(heardAt * SR));
+    while (samplesPushed < upToSample) {
+      const end = Math.min(upToSample, samplesPushed + ENGINE_PUSH_BLOCK);
+      engine.push(mono.subarray(samplesPushed, end), samplesPushed / SR);
+      samplesPushed = end;
+    }
+    const reading = engine.read(dt);
+    heard.engine = reading;
+    heard.bpm = engine.bpm;
+    const strongest = Math.max(reading.kick, reading.snare, reading.hat);
+    heard.onset = hitPasses(strongest, gate ? silenceGateDimmer(heard.level, gate) : 1);
+    heard.pulseOnset = strongest > 0;
 
-    let tempoHits: TempoHit[] | undefined;
-    if (analyzer) {
-      const upToSample = Math.min(mono.length, Math.round(time * SR));
-      while (analyzerSamplesPushed < upToSample) {
-        const end = Math.min(upToSample, analyzerSamplesPushed + ANALYZER_PUSH_BLOCK);
-        analyzer.push(mono.subarray(analyzerSamplesPushed, end), analyzerSamplesPushed / SR);
-        analyzerSamplesPushed = end;
-      }
-      frame.bpm = analyzer.bpm;
-      const onsets = analyzer.drainOnsets();
-      if (!opts.hostFeed) tempoHits = onsets.map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
+    let frame: FeatureFrame = heard;
+    let time = heardAt;
+    if (host) {
+      const roomMs = heardAt * 1000;
+      const decoded = decodeFeatureFrame(encodeFeatureFrame(heard, roomMs));
+      if (decoded) buffer.push(decoded);
+      const targetMs = roomMs - RENDER_DELAY_MS;
+      const shown = followerFrame(buffer, targetMs, followerEngine);
+      if (!shown) continue;
+      frame = shown;
+      time = targetMs / 1000;
     }
 
     if (taps) while (tapNext < taps.length && taps[tapNext]! <= time) tapTempoAt(taps[tapNext++]! * 1000);
-    const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits }, taps ? time * 1000 : undefined);
+    const anim = animClock.advance(dt, frame, undefined, gate, { shape }, taps ? time * 1000 : undefined);
     opts.onFrame?.(time, frame, anim, { autoGain, gate });
+    const readings = animClock.lockReadings();
 
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {
@@ -314,19 +369,22 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
         if (lockTime === null && time - runStart >= LOCK_HOLD_SEC) lockTime = runStart;
       } else runStart = null;
     }
-    if (time > LOCK_MIN_SEC) {
-      if (seg) {
-        if (Math.abs(frame.bpm - seg.bpm) < 2) {
-          rightSum += anim.tempoLock;
-          rightCount++;
-        } else {
-          wrongSum += anim.tempoLock;
-          wrongCount++;
+    for (const [s, lock] of [[used, anim.tempoLock], ...LOCK_MEANINGS.map((m) => [byMeaning[m], readings[m]] as const)] as const) {
+      if (time > LOCK_MIN_SEC) {
+        if (seg) {
+          if (Math.abs(frame.bpm - seg.bpm) < 2) {
+            s.right += lock;
+            s.rightN++;
+          } else {
+            s.wrong += lock;
+            s.wrongN++;
+          }
+        } else if (time < finalSilenceStart) {
+          s.none += lock;
+          s.noneN++;
         }
-      } else if (time < finalSilenceStart) {
-        lockNoSum += anim.tempoLock;
-        lockNoCount++;
       }
+      s.last = lock;
     }
 
     if (breakdownFrom !== null && breakdownTo !== null && time >= breakdownFrom && time < breakdownTo) {
@@ -339,30 +397,38 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
       if (frame.bpm > 0) framesBpmPresentAfterLockMin++;
     }
 
-    if (i > 0) {
-      let targetFloor = Math.floor(prevBeatsVal) + 1;
+    if (scored > 0) {
+      // A bar move (engine/clock.ts's alignBars) adds whole beats to the
+      // count at once, and the clock flags no beat for them; take them off
+      // before interpolating, so only the beats it actually flags count.
+      const moved = Math.max(0, Math.round(anim.beats - prevBeatsVal - (anim.tempoBpm * (time - prevTime)) / 60));
+      const fromBeats = prevBeatsVal + moved;
+      let targetFloor = Math.floor(fromBeats) + 1;
       const curFloor = Math.floor(anim.beats);
       const confident = frame.bpm > 0 || anim.tempoLock > 0.02;
       while (targetFloor <= curFloor) {
-        if (confident && anim.beats !== prevBeatsVal) {
-          const frac = (targetFloor - prevBeatsVal) / (anim.beats - prevBeatsVal);
+        if (confident && anim.beats !== fromBeats) {
+          const frac = (targetFloor - fromBeats) / (anim.beats - fromBeats);
           trackedBeats.push(prevTime + frac * (time - prevTime));
         }
         targetFloor++;
       }
 
       // Metronome ticks — same interpolation, off metronome.ts's own
-      // metronomeBeats instead of beatClock's. Only while it was *already*
+      // metronomeBeats instead of the beat clock's. Only while it was *already*
       // running last tick and still is this tick: `metronomeBeats` jumps
       // discontinuously the instant it adopts a fresh tempo (by design — it
       // sits straight on the clock's own beat count, not wherever its own
       // frozen count last stood), and that jump itself is never a real tick
       // (metronome.ts's own advance() arms it silently) — counting a floor
-      // crossing across that jump would fabricate a burst of fake ticks.
+      // crossing across that jump would fabricate a burst of fake ticks. The
+      // same goes for a jump onto the clock's bar (AnimFrame.metronomeBeat
+      // stays false for it).
       if (prevMetronomeOn && anim.metronomeOn) {
         let mTargetFloor = Math.floor(prevMetroBeatsVal) + 1;
         const mCurFloor = Math.floor(anim.metronomeBeats);
-        while (mTargetFloor <= mCurFloor) {
+        const jumped = !anim.metronomeBeat && mCurFloor > Math.floor(prevMetroBeatsVal);
+        while (!jumped && mTargetFloor <= mCurFloor) {
           if (anim.metronomeBeats !== prevMetroBeatsVal) {
             const frac = (mTargetFloor - prevMetroBeatsVal) / (anim.metronomeBeats - prevMetroBeatsVal);
             metroTicks.push(prevTime + frac * (time - prevTime));
@@ -371,14 +437,23 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
         }
       }
     }
+    scored++;
     prevBeatsVal = anim.beats;
     prevMetroBeatsVal = anim.metronomeBeats;
     prevMetronomeOn = anim.metronomeOn;
     prevTime = time;
     lastBpm = frame.bpm;
-    lastLock = anim.tempoLock;
     lastMetronomeOn = anim.metronomeOn;
   }
+
+  const lockStats = (s: LockSums): LockStats => ({
+    whenRight: s.rightN > 0 ? s.right / s.rightN : NaN,
+    whenWrong: s.wrongN > 0 ? s.wrong / s.wrongN : NaN,
+    noTempo: s.noneN > 0 ? s.none / s.noneN : NaN,
+    end: scored > 0 ? s.last : NaN,
+  });
+  const usedLock = lockStats(used);
+  const lockBy = Object.fromEntries(LOCK_MEANINGS.map((m) => [m, scored > 0 ? lockStats(byMeaning[m]) : emptyLock()])) as Record<LockMeaning, LockStats>;
 
   // ticksOn30ms / medianOffsetMs — a second pass over the tracked beats
   // collected above, scoped to t > TICKS_MIN_SEC and inside a tempo segment.
@@ -466,11 +541,11 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     medianOffsetMs: median(offsetsMs),
     tempoOkSteady: steadyFrames > 0 ? steadyOk / steadyFrames : NaN,
     timeToLockSec: lockTime ?? NaN,
-    lockWhenRight: rightCount > 0 ? rightSum / rightCount : NaN,
-    lockWhenWrong: wrongCount > 0 ? wrongSum / wrongCount : NaN,
-    lockNoTempo: lockNoCount > 0 ? lockNoSum / lockNoCount : NaN,
+    lockWhenRight: usedLock.whenRight,
+    lockWhenWrong: usedLock.whenWrong,
+    lockNoTempo: usedLock.noTempo,
     endBpm: lastBpm,
-    endLock: lastLock,
+    endLock: usedLock.end,
     metroOn30ms: metroQualifying > 0 ? metroWithin / metroQualifying : NaN,
     metroCoverage: coverageQualifying > 0 ? coverageWithin / coverageQualifying : NaN,
     metroIntervalCv,
@@ -480,5 +555,6 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     metroEndRunning: lastMetronomeOn,
     metroRunShare: framesAfterLockMin > 0 ? framesRunningAfterLockMin / framesAfterLockMin : NaN,
     bpmPresentShare: framesAfterLockMin > 0 ? framesBpmPresentAfterLockMin / framesAfterLockMin : NaN,
+    lockBy,
   };
 }

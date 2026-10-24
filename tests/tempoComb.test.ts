@@ -165,7 +165,7 @@ describe("estimateTempo", () => {
       return total > 0 ? 60 / (sum / total) : null;
     }
 
-    // features.ts's option set and tempoAnalyzer.ts's — the two real callers.
+    // The option sets of the two app trackers it was built for (features.ts's and tempoAnalyzer.ts's).
     const RENDER_TICK = OPTS;
     const FIXED_HOP = { ...OPTS, tolSec: 0.03, refineTolSec: 0.015, recencySec: 3 };
 

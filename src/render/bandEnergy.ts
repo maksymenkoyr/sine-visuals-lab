@@ -1,165 +1,103 @@
+import type { EngineReading, FeatureFrame, HitKind } from "../audio/types.ts";
 import { NUM_BANDS } from "../audio/types.ts";
-import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
+import { getBandSplit } from "../audio/bandSplit.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import { hitStrength, pulseDecayScale, type HitLane, type HitShape, type HitParts } from "../audio/hitStrength.ts";
+import { hitPasses } from "../audio/silenceGate.ts";
+import { hitStrength, pulseDecayScale, type HitShape, type HitParts } from "../audio/hitStrength.ts";
 
-// Splits the 24 log-spaced bands into low/mid/high groups and derives, per
-// group: a slewed continuous level (safe to drive geometry with — it can't
-// strobe) and a decaying onset pulse plus one-shot edge (the same
-// beatPulse/onset shape already used for the whole spectrum in app.ts, just
-// scoped to a frequency range) so a kick and a hat can drive visibly
-// different things instead of both hiding inside one broadband uEnergy.
+// Bass, Mid and Treble: three lanes built from the audio engine's reading
+// (FeatureFrame.engine, src/audio/engine/engine.ts), lane low/mid/high on the
+// engine's kick/snare/hat. Per lane: a continuous level (the engine's own
+// band level, safe to drive geometry with), a decaying pulse, and a one-shot
+// onset edge, so a kick and a hat can drive visibly different things. Every
+// device that draws runs this off the reading its frames carry, so the
+// laptop, the pop-out and a TV build the same lanes.
 //
-// A group's pulse *height* is graded by src/audio/hitStrength.ts when a
-// `shape` is given to advance() below: on the tick a group's onset fires,
-// hitStrength() blends how far this hit's flux ratio cleared its trigger
-// (stand-out) against how loud the group's own band mean actually is this
-// frame (loudness — a fixed-window dB reading with auto-gain off, the
-// default; see src/audio/bandGains.ts's header) into a 0..1 strength, and
-// `state.pulse` takes the larger of its own decaying tail and that strength
-// rather than snapping to it outright, so a weak hit landing on a strong
-// one's decay can't cut the pulse down. Omit `shape` (every existing caller)
-// and a group's pulse still snaps to a flat 1 on its onset, exactly as
-// before hitStrength.ts existed. The one-shot edges below (lowOnset etc.)
-// are untouched either way — only pulse *height* is graded, so a scene that
-// cuts on the boolean still fires on every hit regardless of how tall its
-// pulse would have read.
+// The engine already detects, names and spaces the hits (its refractory);
+// this file only decides which of them a scene reacts to: a lane's onset is
+// its hit passing the silence gate (silenceGate.ts's hitPasses, `dimmer`
+// below), on every device with its own marks. A pulse's height is graded by
+// src/audio/hitStrength.ts when advance() is given a `shape`, from the hit's
+// strength and how loud the lane's own range of `frame.bands` is (an
+// absolute reading with auto-gain off, the default; src/audio/bandGains.ts's
+// header). The pulse takes the larger of its own decaying tail and that
+// grade, so a weak hit landing on a strong one's decay can't cut it down.
+// With no `shape` a pulse snaps to a flat 1. The onset edges are never
+// graded: a scene that cuts on the boolean fires on every hit.
 //
-// The low/mid boundary and mid/high boundary are user-tunable (config panel
-// Bands box, src/audio/bandSplit.ts) rather than hardcoded, so "how low does
-// a kick have to be" is something a user can place against the actual music.
-//
-// The onset trigger is rate-of-rise (spectral flux), not absolute level —
-// the same shape features.ts's broadband FLUX_* onset uses, scoped to a
-// group's bands. A level-vs-adaptive-baseline trigger was tried first and
-// had a fatal dead zone: features.ts's clamp01 caps every band at 1, so a
-// threshold of the form baseline*mult+margin becomes unreachable once
-// baseline climbs past (1-margin)/mult — around 0.6 for these groups. Loud,
-// busy bass (a sustained sub note, a bassline that doesn't fully decay
-// between kicks) drives baseline into that dead zone, silencing the
-// detector exactly when there's the most bass to catch. Rate-of-rise
-// doesn't have this problem: a sustained note has high level but ~zero
-// rise, so it can't mask the kicks on top of it.
-//
-// advance()'s optional `dimmer` is the same silence gate features.ts's own
-// broadband onset reads (src/audio/silenceGate.ts) — scoped per group here
-// rather than applied once for the whole spectrum, since a kick and a hat
-// are each free to fire on nothing but mic hiss even while the broadband
-// detector alone is gated. Same rule as there: it multiplies only the
-// firing comparison in advanceGroup below, never fluxBaseline (which keeps
-// adapting to the raw, ungated rise) or the refractory. Defaults to 1 so
-// every existing caller — including animClock.ts's own default when it has
-// no marks to pass — keeps today's ungated behavior.
+// The band split (src/audio/bandSplit.ts) picks which of `frame.bands` the
+// loudness reads; the engine's own crossovers follow the same split
+// (src/audio/engineSource.ts's engineBandsFor). A null reading (no capture, a
+// sender from before the engine) is nothing heard: levels ease out and
+// nothing fires.
 
-// Split attack/release, same shape as features.ts's own ATTACK_PER_SEC/
-// RELEASE_PER_SEC on bands[] — a single symmetric rate here (the old
-// LEVEL_SLEW_PER_SEC = 10) measured out to a ~270ms/~400ms 95%/99% rise
-// time on a hard step, which read as a visible build-up before a swell/
-// churn/Sparkle-sustain term reached its full response. Release keeps that
-// same rate (a fall still eases out smoothly, no strobing on the way down —
-// the thing LEVEL_SLEW_PER_SEC existed to prevent); only the rise is faster.
-const LEVEL_ATTACK_PER_SEC = 24; // ~125ms/~190ms 95%/99% rise on a hard step
-const LEVEL_RELEASE_PER_SEC = 10; // unchanged from the old single rate
+// The level slew slewLevel() eases Hats and Lead with (animClock.ts), and
+// whose periods set the extra level smoothing below Smoothing's default.
+const LEVEL_ATTACK_PER_SEC = 24;
+const LEVEL_RELEASE_PER_SEC = 10;
 
 // A zero or non-finite dtSec (a stalled clock, a test) would otherwise turn
-// a real rise into an infinite rate (division below) or, at the Smoothing
-// row's Off stop, feed Infinity*0 into the level slew's Math.min and yield
-// NaN. advanceGroup clamps it once, at the top, and every use of the step in
-// that group (level slew, rise, onset timing, pulse decay) reads the clamped
-// value.
+// the slews' rates into Infinity*0 = NaN at the Smoothing row's Off stop.
 const MIN_DT_SEC = 1e-4;
 
-interface GroupSpec {
-  lo: number; // inclusive band index
-  hi: number; // exclusive band index
-  fluxAdaptRate: number;
-  pulseDecayRate: number;
-  triggerMult: number;
-  triggerMargin: number;
-  refractorySec: number;
-}
-
-// Tuning differs per group on purpose, tied to the group's *role* rather
-// than its band indices (so it doesn't change when the crossovers move):
-//
-// - fluxAdaptRate: how fast each group's flux baseline chases the rise it's
-//   measuring. Kept low for bass (a kick has body — its own rise shouldn't
-//   drag the baseline up fast enough to blunt itself) and higher for treble
-//   (a hat is a click; the baseline should track a busy hi-hat pattern so a
-//   new hit still has to stand out from recent ones).
-// - triggerMult carries the actual discrimination; triggerMargin is only a
-//   floor against near-silent noise. This split is structural, not just
-//   caution: the group mean's absolute scale depends on how many bands the
-//   user's crossovers put in it, so an absolute margin alone can't tell a
-//   real hit from noise across every possible split — only a multiple of
-//   the group's own recent flux can.
-// - refractorySec is a hard minimum spacing, independent of the trigger,
-//   because a kick physically cannot repeat as fast as a hat. Low's matches
-//   features.ts's broadband ONSET_REFRACTORY_SEC; the others scale down
-//   with how fast that group's transients can legitimately repeat.
-// Exported so the meters panel's hit-history hint (audioMeters.ts's
-// hitsRuleHint) can spell out the exact per-group rule from these numbers
-// instead of a hand-typed copy that can drift from them.
-export const GROUP_TUNING: Record<"low" | "mid" | "high", Omit<GroupSpec, "lo" | "hi">> = {
-  low: { fluxAdaptRate: 3, pulseDecayRate: 3.5, triggerMult: 1.6, triggerMargin: 1.5, refractorySec: 0.1 },
-  mid: { fluxAdaptRate: 4, pulseDecayRate: 6, triggerMult: 1.6, triggerMargin: 1.5, refractorySec: 0.07 },
-  high: { fluxAdaptRate: 6, pulseDecayRate: 10, triggerMult: 1.8, triggerMargin: 1.2, refractorySec: 0.05 },
+// Each lane's pulse fall rate, tied to the lane's role: a kick's pulse rings
+// longest, a hat's is a flick. Exported because scenes (alien, sweep),
+// gateWindow.ts, drives.ts's Fixed/Loud heights and the meters time things
+// against exactly these falls.
+export const GROUP_TUNING: Record<"low" | "mid" | "high", { pulseDecayRate: number }> = {
+  low: { pulseDecayRate: 3.5 },
+  mid: { pulseDecayRate: 6 },
+  high: { pulseDecayRate: 10 },
 };
 
-function groupSpecsFromSplit(): Record<"low" | "mid" | "high", GroupSpec> {
-  const { lowMid, midHigh } = getBandSplit();
-  return {
-    low: { ...GROUP_TUNING.low, lo: 0, hi: lowMid },
-    mid: { ...GROUP_TUNING.mid, lo: lowMid, hi: midHigh },
-    high: { ...GROUP_TUNING.high, lo: midHigh, hi: NUM_BANDS },
-  };
+const KIND_OF_LANE: Record<"low" | "mid" | "high", HitKind> = { low: "kick", mid: "snare", high: "hat" };
+
+function clampDt(dtSec: number): number {
+  return Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
 }
 
-/** One tick of a group's level slew: rises at LEVEL_ATTACK_PER_SEC, falls at
+/** One tick of a level slew: rises at LEVEL_ATTACK_PER_SEC, falls at
  *  LEVEL_RELEASE_PER_SEC, both times rateScale (the Smoothing row). Exported
  *  so animClock.ts eases its Hats and Lead levels the same way. */
 export function slewLevel(level: number, raw: number, dtSec: number, rateScale: number): number {
-  const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
+  const dt = clampDt(dtSec);
   const rate = raw > level ? LEVEL_ATTACK_PER_SEC : LEVEL_RELEASE_PER_SEC;
   return level + (raw - level) * Math.min(1, rate * rateScale * dt);
 }
 
+/** The engine already eases its levels down, and its latency is the point,
+ *  so at or above Smoothing's default this adds nothing. Slower settings add
+ *  a slew whose time constants grow from zero there by the old level slew's
+ *  periods. */
+function smoothEngineLevel(level: number, raw: number, dt: number, rateScale: number): number {
+  if (!(rateScale < 1)) return raw;
+  const stretch = 1 / rateScale - 1;
+  const tau = stretch / (raw > level ? LEVEL_ATTACK_PER_SEC : LEVEL_RELEASE_PER_SEC);
+  return level + (raw - level) * (1 - Math.exp(-dt / tau));
+}
+
 function meanRange(bands: Float32Array, lo: number, hi: number): number {
+  if (hi <= lo) return 0;
   let sum = 0;
   for (let i = lo; i < hi; i++) sum += bands[i];
   return sum / (hi - lo);
 }
 
-interface GroupState {
+interface LaneState {
   level: number;
-  /** Previous raw() reading, for the rise below. Null until the first
-   *  advance so construction (or a fresh instance) can't fire an onset off
-   *  an assumed-zero starting point. */
-  prevRaw: number | null;
-  /** Leaky average of the recent rate-of-rise (band-mean per second), the
-   *  reference a new rise has to clear — see triggerMult/triggerMargin. */
-  fluxBaseline: number;
-  /** Seconds since the last onset; compared against refractorySec. Starts
-   *  at Infinity so nothing blocks the very first onset. */
+  /** Seconds since this lane's last onset. Starts at Infinity: no hit yet. */
   sinceOnsetSec: number;
   pulse: number;
   onset: boolean;
-  /** This group's onset diagnostic — see onsetDiag.ts's OnsetDiag. Mutated
-   *  in place every advance() (see BandEnergy's own lowDiag/midDiag/
-   *  highDiag doc), never replaced. */
+  /** Mutated in place every advance(), never replaced (BandEnergy's lowDiag). */
   diag: OnsetDiag;
-  /** This group's last graded hit — see onsetDiag.ts-style: mutated in
-   *  place on every onset (see BandEnergy's own lowHit/midHit/highHit doc),
-   *  holding the previous hit's numbers between onsets rather than
-   *  resetting. Only written when advance() is given a `shape`. */
+  /** The last graded hit, mutated in place on an onset (BandEnergy's lowHit). */
   hit: HitParts;
 }
 
-function makeGroupState(): GroupState {
+function makeLaneState(): LaneState {
   return {
     level: 0,
-    prevRaw: null,
-    fluxBaseline: 0,
     sinceOnsetSec: Infinity,
     pulse: 0,
     onset: false,
@@ -168,56 +106,34 @@ function makeGroupState(): GroupState {
   };
 }
 
-function advanceGroup(
-  state: GroupState,
-  spec: GroupSpec,
-  dtSec: number,
-  bands: Float32Array,
+function advanceLane(
+  state: LaneState,
+  lane: "low" | "mid" | "high",
+  dt: number,
+  engine: EngineReading | null,
+  loudness: number,
   rateScale: number,
   dimmer: number,
   shape: HitShape | undefined,
-  lane: HitLane,
 ): void {
-  const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
-  const raw = meanRange(bands, spec.lo, spec.hi);
-  state.level = slewLevel(state.level, raw, dt, rateScale);
+  const kind = KIND_OF_LANE[lane];
+  const strength = engine ? engine[kind] : 0;
+  state.level = engine ? smoothEngineLevel(state.level, engine[lane], dt, rateScale) : slewLevel(state.level, 0, dt, rateScale);
 
-  // Rate of rise, in band-mean per second — normalized by dt (not a raw
-  // per-frame delta) so the trigger reads the same at 60Hz and 120Hz. A
-  // faster clock takes smaller steps but samples more often; dividing by dt
-  // turns both into the same physical rate. See the file header for why
-  // this replaces a level-vs-baseline comparison. Detected on raw, not the
-  // slewed level: level is display smoothing and is rateScale-dependent, so
-  // triggering off it would leak the Smoothing dial into detection.
-  const rise = state.prevRaw === null ? 0 : Math.max(0, (raw - state.prevRaw) / dt);
-  state.prevRaw = raw;
-
-  // Deliberately NOT scaled by rateScale, unlike the level slew and pulse
-  // decay below: this is measurement feeding onset timing, not display
-  // smoothing (same reasoning as features.ts's smoothingScale). It also has
-  // to stay this way — rateScale is Infinity at the Smoothing row's Off
-  // stop, which would make the baseline snap to equal the rise every tick
-  // (Math.min(1, ...) saturates at 1) and permanently block every onset.
-  state.fluxBaseline += (rise - state.fluxBaseline) * Math.min(1, spec.fluxAdaptRate * dt);
-
+  const passes = hitPasses(strength, dimmer);
+  state.onset = passes;
   state.sinceOnsetSec += dt;
-  const threshold = state.fluxBaseline * spec.triggerMult + spec.triggerMargin;
-  // Only the comparison reads `dimmer` — threshold/fluxBaseline above stay on
-  // the raw rise, same reasoning as features.ts's own gated comparison.
-  const cleared = rise > threshold;
-  const passes = rise * dimmer > threshold;
-  const canFire = state.sinceOnsetSec > spec.refractorySec;
-  state.onset = passes && canFire;
-  state.diag.ratio = rise / threshold;
-  state.diag.gated = cleared && !passes;
-  state.diag.blocked = passes && !canFire;
+  const surge = engine && engine.surgeKind === kind;
+  state.diag.ratio = strength > 0 ? strength : surge ? engine.surge : 0;
+  state.diag.gated = !passes && hitPasses(strength, 1);
+  state.diag.blocked = !!surge && engine.blocked;
   state.diag.sinceOnsetSec = state.sinceOnsetSec;
-  if (state.onset) state.sinceOnsetSec = 0;
+  if (passes) state.sinceOnsetSec = 0;
 
-  state.pulse *= Math.exp(-dt * spec.pulseDecayRate * rateScale * pulseDecayScale(shape, lane));
-  if (state.onset) {
+  state.pulse *= Math.exp(-dt * GROUP_TUNING[lane].pulseDecayRate * rateScale * pulseDecayScale(shape, lane));
+  if (passes) {
     if (shape) {
-      const hit = hitStrength(state.diag.ratio, raw, shape, state.hit);
+      const hit = hitStrength(strength, loudness, shape, state.hit);
       state.pulse = Math.max(state.pulse, hit.strength);
     } else {
       state.pulse = 1;
@@ -232,55 +148,34 @@ export interface BandEnergy {
   lowPulse: number;
   midPulse: number;
   highPulse: number;
-  /** One-shot edges (like FeatureFrame.onset, but per group) — true only on
-   *  the exact tick that group's rate-of-rise cleared its adaptive flux
-   *  threshold with that group's refractory elapsed and the silence gate
-   *  (below) didn't stop it. */
+  /** One-shot edges, true only on the tick that lane's engine hit passed the
+   *  silence gate. */
   lowOnset: boolean;
   midOnset: boolean;
   highOnset: boolean;
-  /** Per-group onset diagnostics — see onsetDiag.ts's OnsetDiag. Aliases of
-   *  the mutated GroupState.diag objects above, so reading these costs
-   *  nothing extra and never allocates per frame; read them before the next
-   *  advance() call. */
+  /** Per-lane onset diagnostics (onsetDiag.ts's OnsetDiag). Aliases of state
+   *  mutated every advance(), so reading them never allocates; read them
+   *  before the next advance(). */
   lowDiag: OnsetDiag;
   midDiag: OnsetDiag;
   highDiag: OnsetDiag;
-  /** Per-group graded hit — see hitStrength.ts's HitParts and this file's
-   *  header. Aliases of the mutated GroupState.hit objects above, same
-   *  reasoning as lowDiag/midDiag/highDiag: free to read, holds the last
-   *  onset's numbers until the next one (never written at all while
-   *  advance() is called with no `shape`). */
+  /** Per-lane last graded hit (hitStrength.ts's HitParts), aliased the same
+   *  way; only written while advance() is given a `shape`. */
   lowHit: HitParts;
   midHit: HitParts;
   highHit: HitParts;
-  /** rateScale multiplies the level slew and pulse decay rates — see
-   *  sensitivity.ts's smoothingRateScale. Stops there deliberately: it does
-   *  not reach the flux baseline or refractory, which are measurement, not
-   *  display smoothing (see advanceGroup). Defaults to 1 (today's behavior)
-   *  so existing callers don't need to change. `dimmer` is the silence
-   *  gate's multiplier (src/audio/silenceGate.ts) on each group's own firing
-   *  comparison only — see the file header for why it's scoped per group
-   *  rather than applied once broadband. Defaults to 1 (no gating), same as
-   *  rateScale, so a caller with no marks (a preview/gallery/probe tile) is
-   *  unaffected. `shape` (src/audio/hitStrength.ts) grades each group's own
-   *  pulse height on its onset — omitted (every existing caller) keeps a
-   *  group's pulse snapping to a flat 1, exactly as before that module
-   *  existed; only src/render/animClock.ts's own `hit` param ever supplies
-   *  one, threaded down from src/app.ts/src/tv.ts. */
-  advance(dtSec: number, bands: Float32Array, rateScale?: number, dimmer?: number, shape?: HitShape): void;
+  /** `rateScale` (sensitivity.ts's smoothingRateScale) scales the level
+   *  smoothing and pulse falls, never which hits fire. `dimmer` is the
+   *  silence gate's (silenceGate.ts), 1 = ungated, so a caller with no marks
+   *  (a preview, gallery or probe tile) is unaffected. `shape` grades pulse
+   *  heights; only animClock.ts's real entry points pass one. */
+  advance(dtSec: number, frame: FeatureFrame, rateScale?: number, dimmer?: number, shape?: HitShape): void;
 }
 
 export function createBandEnergy(): BandEnergy {
-  const low = makeGroupState();
-  const mid = makeGroupState();
-  const high = makeGroupState();
-
-  // Rebuilt lazily whenever the persisted split changes (dragging the Bands
-  // sliders), rather than read fresh every frame — cheap version check, no
-  // per-frame allocation in the steady state.
-  let specs = groupSpecsFromSplit();
-  let seenVersion = bandSplitVersion();
+  const low = makeLaneState();
+  const mid = makeLaneState();
+  const high = makeLaneState();
 
   const result: BandEnergy = {
     low: 0,
@@ -298,16 +193,14 @@ export function createBandEnergy(): BandEnergy {
     lowHit: low.hit,
     midHit: mid.hit,
     highHit: high.hit,
-    advance(dtSec: number, bands: Float32Array, rateScale = 1, dimmer = 1, shape?: HitShape): void {
-      const currentVersion = bandSplitVersion();
-      if (currentVersion !== seenVersion) {
-        specs = groupSpecsFromSplit();
-        seenVersion = currentVersion;
-      }
-
-      advanceGroup(low, specs.low, dtSec, bands, rateScale, dimmer, shape, "low");
-      advanceGroup(mid, specs.mid, dtSec, bands, rateScale, dimmer, shape, "mid");
-      advanceGroup(high, specs.high, dtSec, bands, rateScale, dimmer, shape, "high");
+    advance(dtSec: number, frame: FeatureFrame, rateScale = 1, dimmer = 1, shape?: HitShape): void {
+      const dt = clampDt(dtSec);
+      const engine = frame.engine;
+      const { lowMid, midHigh } = getBandSplit();
+      const bands = frame.bands;
+      advanceLane(low, "low", dt, engine, meanRange(bands, 0, lowMid), rateScale, dimmer, shape);
+      advanceLane(mid, "mid", dt, engine, meanRange(bands, lowMid, midHigh), rateScale, dimmer, shape);
+      advanceLane(high, "high", dt, engine, meanRange(bands, midHigh, NUM_BANDS), rateScale, dimmer, shape);
 
       result.low = low.level;
       result.mid = mid.level;
@@ -323,7 +216,3 @@ export function createBandEnergy(): BandEnergy {
 
   return result;
 }
-
-// Re-exported for tests that want to synthesize a bands array without
-// hardcoding NUM_BANDS everywhere.
-export { NUM_BANDS };

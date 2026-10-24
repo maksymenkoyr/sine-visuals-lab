@@ -219,10 +219,10 @@ Darker means more important.
 Nothing here has a button, but the Core features stand on it.
 
 - ●●● **Audio analysis** — bands, levels, hits, all normalised to the room's
-  own loudness · `src/audio/features.ts`
+  own loudness · `src/audio/features.ts`, `src/audio/engine/`
 - ●●● **Tempo and beat** — the tracker, beat clock and metronome that put
-  motion on the beat · `src/audio/tempoAnalyzer.ts`,
-  `src/render/beatClock.ts`
+  motion on the beat · `src/audio/engine/tempo.ts`,
+  `src/audio/engine/clock.ts`, `src/render/metronome.ts`
 - ●●● **Auto** — every setting resolves from the music unless someone pinned
   it. This is what makes "just turn it on" true · `src/render/autoTune.ts`,
   `src/render/musicProfile.ts`

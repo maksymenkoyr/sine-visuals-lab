@@ -18,6 +18,8 @@
 //   beat, so the tracker's faster pulse corrects the timing but the tap says
 //   which pulse is the beat. Bars aren't moved while it does: the tracker's
 //   bar is in its own beats.
+// - follow() returns the phase error it measured, which Lock's Stability
+//   meaning (src/render/lockMeaning.ts) averages.
 
 export interface ClockInput {
   /** The tracker's tempo; 0 or `music` false unlocks the clock. */
@@ -83,18 +85,24 @@ export class BeatClock {
     return this.anchorBeats + ((t - this.anchorTime) * this.bpm) / 60;
   }
 
-  /** Follows a tracker reading; call whenever it may have changed. */
-  follow(s: ClockInput, now: number): void {
-    if (s.updates === this.lastUpdate) return;
+  /**
+   * Follows a tracker reading; call whenever it may have changed. Returns the
+   * phase error it measured, in beats, signed; null when it measured none: the
+   * same update seen again, no music, or the first-lock snap (which measures a
+   * free-running clock, not the tracker).
+   */
+  follow(s: ClockInput, now: number): number | null {
+    if (s.updates === this.lastUpdate) return null;
     this.lastUpdate = s.updates;
     if (!s.music || s.bpm <= 0) {
       this.locked = false;
-      return;
+      return null;
     }
     this.setTempo(s.bpm, now);
     const d = this.division;
     const error = wrapHalf(this.beatsAt(s.beatTime) * d) / d;
-    if (!this.locked) {
+    const snapped = !this.locked;
+    if (snapped) {
       this.anchorBeats += error > 0 ? 1 / d - error : -error;
       this.locked = true;
       // A beat the snap jumped over is in the past; flag from the next one.
@@ -104,6 +112,7 @@ export class BeatClock {
       this.anchorBeats -= error * PHASE_PULL;
     }
     if (d === 1) this.alignBars(s);
+    return snapped ? null : error;
   }
 
   /** Runs at `bpm` from `now` on, with the position moved the short way onto `beatPhase`. */

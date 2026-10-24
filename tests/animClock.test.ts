@@ -1,15 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { createAnimClock, WAVE_PEAK_FALL_PER_SEC } from "../src/render/animClock.ts";
+import { createAnimClock, WAVE_PEAK_FALL_PER_SEC, type AnimClock, type AnimFrame } from "../src/render/animClock.ts";
+import { LOCK_MEANINGS } from "../src/render/lockMeaning.ts";
+import { FOLLOW_LOCK } from "../src/render/metronome.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
 import { smoothingRateScale, SMOOTHING_DEFAULT } from "../src/audio/sensitivity.ts";
+import { engineReading } from "./engineReading.ts";
+
+/** One engine hit of each kind given, with no other reading. */
+const HIT = (kinds: { kick?: number; snare?: number; hat?: number }) => engineReading(kinds);
 
 // Reused wherever a test needs to pass `hit` just to reach `wavePeak` —
 // its own fields don't matter when no onset fires this tick.
 const NEUTRAL_SHAPE: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: UNIT_TAILS };
 
 const DT = 1 / 60;
+
+/** The signed distance to the nearest whole number. */
+function wrapHalf(x: number): number {
+  return x - Math.floor(x + 0.5);
+}
 
 function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
   return {
@@ -65,25 +76,53 @@ describe("createAnimClock", () => {
     expect(anim.lead).toBe(0);
   });
 
-  it("hits.low/mid/high mirror bandEnergy's own per-group diagnostics", () => {
+  it("hits.low/mid/high mirror bandEnergy's own per-lane diagnostics", () => {
     const clock = createAnimClock();
-    const quietBands = new Float32Array(NUM_BANDS).fill(0.1);
-    for (let i = 0; i < 30; i++) clock.advance(DT, frame({ bands: quietBands, level: 1 }));
-    const loudBands = new Float32Array(NUM_BANDS).fill(0.6);
-    const anim = clock.advance(DT, frame({ bands: loudBands, level: 1 }));
-    expect(anim.hits.low.ratio).toBeGreaterThan(0);
-    expect(anim.hits.mid.ratio).toBeGreaterThan(0);
-    expect(anim.hits.high.ratio).toBeGreaterThan(0);
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2, snare: 1.5, hat: 1.2 }) }));
+    expect(anim.hits.low.ratio).toBe(2);
+    expect(anim.hits.mid.ratio).toBe(1.5);
+    expect(anim.hits.high.ratio).toBe(1.2);
   });
 
   it("hits.low is a snapshot copy, not a live alias — an old AnimFrame doesn't change under a later tick", () => {
     const clock = createAnimClock();
-    const bands = new Float32Array(NUM_BANDS).fill(0.1);
-    const first = clock.advance(DT, frame({ bands, level: 1 }));
-    const firstRatio = first.hits.low.ratio;
-    const loudBands = new Float32Array(NUM_BANDS).fill(0.9);
-    clock.advance(DT, frame({ bands: loudBands, level: 1 }));
-    expect(first.hits.low.ratio).toBe(firstRatio);
+    const first = clock.advance(DT, frame({ engine: HIT({ kick: 2 }) }));
+    clock.advance(DT, frame({ engine: HIT({ kick: 3 }) }));
+    expect(first.hits.low.ratio).toBe(2);
+  });
+
+  it("Bass/Mid/Treble levels are the engine reading's", () => {
+    const anim = createAnimClock().advance(DT, frame({ engine: engineReading({ low: 0.6, mid: 0.3, high: 0.2 }) }));
+    expect([anim.low, anim.mid, anim.high]).toEqual([0.6, 0.3, 0.2]);
+  });
+
+  it("onset is any lane's engine hit that passed the gate, whatever frame.onset says", () => {
+    const clock = createAnimClock();
+    expect(clock.advance(DT, frame({ onset: true })).onset).toBe(false);
+    expect(clock.advance(DT, frame({ engine: HIT({ hat: 1.3 }) })).onset).toBe(true);
+    const shut: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    expect(clock.advance(DT, frame({ engine: HIT({ kick: 4 }), level: 0 }), undefined, shut).onset).toBe(false);
+  });
+
+  it("gates a follower's hit on the level it came in with, not the frame's", () => {
+    const marks: SilenceGateMarks = { closed: 0.1, open: 0.3 };
+    const follower = frame({ level: 0.05, engine: { ...HIT({ snare: 3 }), hitLevel: 0.6 } });
+    expect(createAnimClock().advance(DT, follower, undefined, marks).midOnset).toBe(true);
+    expect(createAnimClock().advance(DT, frame({ level: 0.05, engine: HIT({ snare: 3 }) }), undefined, marks).midOnset).toBe(false);
+  });
+
+  it("beatRatio is the engine's surge, 0 without a reading", () => {
+    const clock = createAnimClock();
+    expect(clock.advance(DT, frame({ engine: engineReading({ surge: 0.7 }) })).beatRatio).toBe(0.7);
+    expect(clock.advance(DT, frame()).beatRatio).toBe(0);
+  });
+
+  it("a graded beatPulse takes the strongest lane hit that passed", () => {
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: UNIT_TAILS };
+    const both = createAnimClock().advance(DT, frame({ engine: HIT({ kick: 1.2, hat: 3 }) }), undefined, undefined, { shape });
+    const hatOnly = createAnimClock().advance(DT, frame({ engine: HIT({ hat: 3 }) }), undefined, undefined, { shape });
+    expect(both.beatPulse).toBe(hatOnly.beatPulse);
+    expect(both.hitStrength.beat.standout).toBeCloseTo(1 - Math.exp(-2), 9);
   });
 
   // Graded pulse height (src/audio/hitStrength.ts), threaded through
@@ -91,14 +130,14 @@ describe("createAnimClock", () => {
   // omitted `hit` must reproduce today's flat-1 beatPulse exactly.
   it("omitted `hit` -> beatPulse snaps to exactly 1 on onset (today's behavior)", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ onset: true }));
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2 }) }));
     expect(anim.beatPulse).toBe(1);
   });
 
   it("with a shape at amount 1 and loudness 1, beatPulse on onset lands on frame.level", () => {
     const clock = createAnimClock();
     const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: UNIT_TAILS };
-    const anim = clock.advance(DT, frame({ onset: true, level: 0.37 }), undefined, undefined, { shape });
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2 }), level: 0.37 }), undefined, undefined, { shape });
     expect(anim.beatPulse).toBeCloseTo(0.37, 5);
   });
 
@@ -106,7 +145,7 @@ describe("createAnimClock", () => {
     const decayAfter = (beat: number, low = 1): { pulse: number; hitTail: HitShape["tail"] } => {
       const clock = createAnimClock();
       const shape: HitShape = { ...NEUTRAL_SHAPE, amount: 0, tail: { ...UNIT_TAILS, beat, low } };
-      clock.advance(DT, frame({ onset: true }), undefined, undefined, { shape });
+      clock.advance(DT, frame({ engine: HIT({ snare: 2 }) }), undefined, undefined, { shape });
       let anim = clock.advance(DT, frame(), undefined, undefined, { shape });
       for (let i = 0; i < 9; i++) anim = clock.advance(DT, frame(), undefined, undefined, { shape });
       return { pulse: anim.beatPulse, hitTail: anim.hitTail };
@@ -133,56 +172,77 @@ describe("createAnimClock", () => {
   it("hitStrength.low mirrors bandEnergy's own graded hit when a shape is given", () => {
     const clock = createAnimClock();
     const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: UNIT_TAILS };
-    const quietBands = new Float32Array(NUM_BANDS).fill(0.1);
-    for (let i = 0; i < 30; i++) clock.advance(DT, frame({ bands: quietBands, level: 1 }), undefined, undefined, { shape });
-    const loudBands = new Float32Array(NUM_BANDS).fill(0.6);
-    const anim = clock.advance(DT, frame({ bands: loudBands, level: 1 }), undefined, undefined, { shape });
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2 }) }), undefined, undefined, { shape });
     expect(anim.hitStrength.low.strength).toBeGreaterThan(0);
     expect(anim.hitStrength.low.strength).toBeLessThanOrEqual(1);
+    expect(anim.hitStrength.low.strength).toBe(anim.lowPulse);
+  });
+});
+
+/** Runs `clock` for `sec` on frames timed from `t0` (the frame clock, offset by
+ *  `clockOffset`), the engine hearing `bpm` with beats on whole multiples of
+ *  its period and refreshing every UPDATE_FRAMES ticks. Returns the last frame. */
+const UPDATE_FRAMES = 10;
+function hear(clock: AnimClock, t0: number, sec: number, bpm: number, music = true, clockOffset = 0): AnimFrame {
+  const period = 60 / bpm;
+  let anim: AnimFrame | null = null;
+  const steps = Math.round(sec / DT);
+  for (let i = 1; i <= steps; i++) {
+    const t = t0 + i * DT;
+    const updates = Math.floor((t0 / DT + i) / UPDATE_FRAMES);
+    const beatTime = Math.floor(t / period) * period + clockOffset;
+    const engine = engineReading({ music, confidence: music ? 0.9 : 0, beatTime, downbeatTime: beatTime, updates });
+    anim = clock.advance(DT, frame({ time: t + clockOffset, bpm: music ? bpm : 0, engine }));
+  }
+  return anim!;
+}
+
+describe("the beat clock on the engine's reading", () => {
+  it("follows the engine's tempo and beat, and Lock climbs past the metronome's follow line", () => {
+    const clock = createAnimClock();
+    const anim = hear(clock, 0, 8, 120);
+    expect(anim.tempoBpm).toBeCloseTo(120, 6);
+    expect(Math.abs(wrapHalf(anim.beatPhase - (8 * 120) / 60))).toBeLessThan(0.02);
+    expect(anim.tempoLock).toBeGreaterThan(FOLLOW_LOCK);
   });
 
-  it("beats is beatClock's own free-running unwrapped count, straight through", () => {
+  it("with no music: no tempo, the beat holds still, and Lock falls to 0", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ bpm: 120, onset: true }));
-    expect(anim.beats).toBeGreaterThanOrEqual(0);
-    expect(Number.isFinite(anim.beats)).toBe(true);
+    hear(clock, 0, 8, 120);
+    hear(clock, 8, 4, 120, false);
+    const still = hear(clock, 12, 0.5, 120, false);
+    const later = hear(clock, 12.5, 1, 120, false);
+    expect(later.tempoBpm).toBe(0);
+    expect(later.beats).toBe(still.beats);
+    expect(later.tempoLock).toBeLessThan(0.01);
   });
 
-  // Regression for the silence-gate-starves-tempo bug (see
-  // src/audio/types.ts's FeatureFrame.pulseOnset and this file's own
-  // beat.advance() call for the fix): on the render-tick path (no
-  // hit.tempoHits), the beat clock's phase comb must follow
-  // frame.pulseOnset, never the gated frame.onset — feeding it one without
-  // the other must produce opposite outcomes, not just "both work".
-  it("render-tick path: the phase comb locks on pulseOnset hits even while onset never fires", () => {
+  it("a frame without a reading leaves the clock still at 0", () => {
     const clock = createAnimClock();
-    const bpm = 120; // one beat every 0.5s
-    const periodSec = 60 / bpm;
-    let t = 0;
-    let lastAnim = clock.advance(DT, frame({ bpm, time: t }));
-    for (let i = 0; i < 600; i++) {
-      t += DT;
-      const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
-      lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: false, pulseOnset: dueBeat }));
-      // The gated visual hit never fires in this scenario, so beatPulse
-      // (raw frame.onset passthrough) must stay exactly 0 throughout.
-      expect(lastAnim.beatPulse).toBe(0);
+    let anim: AnimFrame | null = null;
+    for (let i = 0; i < 120; i++) anim = clock.advance(DT, frame({ time: i * DT, bpm: 0 }));
+    expect(anim!.beats).toBe(0);
+    expect(anim!.tempoBpm).toBe(0);
+    expect(anim!.tempoLock).toBe(0);
+  });
+
+  // A TV's frames are on room time, a solo capture's on its AudioContext's;
+  // the reading's beat times only count against the frame's own time.
+  it("reads beat times against the frame's own clock, wherever that clock starts", () => {
+    const solo = hear(createAnimClock(), 0, 6, 128);
+    const tv = hear(createAnimClock(), 0, 6, 128, true, 1234.567);
+    expect(Math.abs(wrapHalf(tv.beatPhase - solo.beatPhase))).toBeLessThan(1e-6);
+  });
+
+  it("tempoLock is the meaning the clock was made with; lockReadings has every meaning", () => {
+    for (const lockMeaning of LOCK_MEANINGS) {
+      const clock = createAnimClock({ lockMeaning });
+      const anim = hear(clock, 0, 3, 120);
+      expect(anim.tempoLock, lockMeaning).toBe(clock.lockReadings()[lockMeaning]);
     }
-    expect(lastAnim.tempoLock).toBeGreaterThan(0.5);
-  });
-
-  it("render-tick path: onset-only hits (no pulseOnset) never lock the phase comb", () => {
     const clock = createAnimClock();
-    const bpm = 120;
-    const periodSec = 60 / bpm;
-    let t = 0;
-    let lastAnim = clock.advance(DT, frame({ bpm, time: t }));
-    for (let i = 0; i < 600; i++) {
-      t += DT;
-      const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
-      lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: dueBeat, pulseOnset: false }));
-    }
-    expect(lastAnim.tempoLock).toBeLessThan(0.1);
+    const anim = hear(clock, 0, 3, 120);
+    expect(anim.tempoLock).toBe(clock.lockReadings().stability);
   });
 });
 

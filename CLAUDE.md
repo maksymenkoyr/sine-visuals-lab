@@ -73,7 +73,7 @@ Before touching one of these, read what is listed:
 - The saved-look share-code format → `src/render/sceneLooks.ts` header — links in the wild outlive the schema
 - The build target (`es2017`) → `vite.config.ts`, the comment at `target:`
 - A scene that hashes a noise lattice, or grows a phase on a noise coordinate → `src/render/noiseHash.ts` header
-- The tempo tracker (`src/audio/features.ts`, `src/audio/tempoAnalyzer.ts`, `src/render/beatClock.ts`, `src/render/tempoSettle.ts`, `src/render/metronome.ts`) → `tests/tempoEval.test.ts` header — run `npm run eval:tempo` before and after
+- The audio engine or the tempo tracker (`src/audio/engine/`, `src/render/animClock.ts`, `src/render/metronome.ts`, `src/render/tempoSettle.ts`) → `tests/tempoEval.test.ts` header — run `npm run eval:tempo` before and after; don't change detection in `src/audio/engine/{bands,onsets,tempo}.ts` without rerunning the audio-subsystem bench
 - The version label, the Stable/Insiders channels, or releasing → `src/version.ts` header
 - A scene's own version → `tools/sceneVersionLib.mjs` header
 - A `?url` import, or any file the page fetches from its own origin after load → `src/pinnedAssets.ts` header

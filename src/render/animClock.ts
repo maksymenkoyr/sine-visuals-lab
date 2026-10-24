@@ -1,7 +1,8 @@
 import { type FeatureFrame } from "../audio/types.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
-import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./beatClock.ts";
+import { BeatClock } from "../audio/engine/clock.ts";
+import { LockMeter, type LockMeaning } from "./lockMeaning.ts";
 import { createMetronome, type Metronome } from "./metronome.ts";
 import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
 import { createTapGuide, type TapGuide } from "./tapTempo.ts";
@@ -17,13 +18,17 @@ import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
-// argument list. See flowClock.ts, beatClock.ts, metronome.ts, bandEnergy.ts
-// and sectionIntensity.ts for what each field means and why it's derived
-// rather than read straight off FeatureFrame. metronome.ts sits on top of
-// beatClock.ts here — advanced right after it, off its own bpm/beats/
-// tempoLock — rather than being its own top-level AnimClock the way
-// flowClock/beatClock are, since it has nothing to contribute but that one
-// derived reading.
+// argument list. See flowClock.ts, metronome.ts, bandEnergy.ts and
+// sectionIntensity.ts for what each field means and why it's derived rather
+// than read straight off FeatureFrame.
+//
+// The beat clock is the engine's (src/audio/engine/clock.ts), run here on
+// every device off the reading each frame carries (FeatureFrame.engine), on
+// this clock's own timeline (`clockSec`): the reading's beat times are turned
+// into ages against the frame's time, so a TV's jitter-buffered frames and a
+// solo capture's AudioContext times both work. Lock (`tempoLock`) is one of
+// lockMeaning.ts's meanings, picked per clock. metronome.ts sits on top of the
+// beat clock, advanced right after it off its bpm/beats and Lock.
 export interface AnimFrame {
   dtSec: number;
   timeSec: number;
@@ -34,8 +39,8 @@ export interface AnimFrame {
    *  per-setting drive choice now, not something animClock does for every
    *  scene at once). */
   beatPulse: number;
-  /** One-shot broadband beat edge — FeatureFrame.onset, true only on the
-   *  tick it fired. JS-side only, same family as lowOnset/midOnset/
+  /** One-shot "Any hit" edge — any of lowOnset/midOnset/highOnset, true
+   *  only on the tick it fired. JS-side only, same family as lowOnset/midOnset/
    *  highOnset/dropOnset below: a scene wanting a discrete trigger (not
    *  beatPulse's continuous decay) reads this instead of FeatureFrame.onset
    *  directly, so every scene goes through the render loop's edge latch
@@ -46,13 +51,11 @@ export interface AnimFrame {
    *  old single per-scene Beat grid row worked no longer exists as one
    *  switch — each drive setting picks its own grid now. */
   onset: boolean;
-  /** This tick's live broadband flux/threshold ratio — `hit.beatRatio` passed
-   *  straight through (0 when omitted: the TV, a renderer, or any caller with
-   *  no local FeatureExtractor — see advance()'s own doc). Unlike `onset`,
-   *  this never gates on refractory/threshold — it's the raw "how close is
-   *  the detector to firing right now" reading (features.ts's fluxRatio: 0 at
-   *  a silent baseline, 1 at a bare trigger, above 1 the harder a hit
-   *  cleared). src/render/drives.ts's `feature.flux` catalogue source
+  /** The engine's largest rise over its hit threshold since the frame before
+   *  (EngineReading.surge; 0 with no reading). Unlike `onset`, this never
+   *  gates on refractory/threshold — it's the raw "how close is the detector
+   *  to firing right now" reading (1 at a bare trigger, above 1 the harder a
+   *  hit cleared). src/render/drives.ts's `feature.flux` catalogue source
    *  ("Onset surge") reads this so a scene can lean into a build-up before
    *  the beat actually lands, not just react after. */
   beatRatio: number;
@@ -67,30 +70,27 @@ export interface AnimFrame {
    *  device following another one's input, the capture is that device's, off
    *  the frame's wave tail (src/net/protocol.ts; app.ts's waveSamples). 0
    *  whenever `hit.wavePeak` is omitted/null (no mic and no wave from the
-   *  feed, previews), same as `beatRatio` above. */
+   *  feed, previews). */
   wavePeak: number;
-  /** Phase-locked beat/bar clock — see beatClock.ts — corrected by
+  /** The engine's beat/bar clock (src/audio/engine/clock.ts), corrected by
    *  beatTrim.ts (a bar resync, a ×2/÷2 tracking-error fix, a small
    *  earlier/later nudge; see that file for why and the math). Never
    *  restarts mid-beat the way FeatureFrame.onsetPhase can (that field has
    *  no reader today — this superseded it). */
   beatPhase: number;
   barPhase: number;
-  /** How confidently the phase comb's own chosen correction has settled —
-   *  see beatClock.ts's header for what that means today (the *stability*
-   *  of the comb's picked offset, not merely "a bpm exists"). Scenes/UI
-   *  read this, not beatClock.ts's own `confidence` (the raw, un-eased
-   *  target this ramps toward). */
+  /** Lock: how sure the beat clock is of its beat, 0..1, in the meaning
+   *  this clock was created with (lockMeaning.ts). 0 with no music. */
   tempoLock: number;
-  /** beatClock.ts's own unwrapped beat count, corrected by beatTrim.ts (see
+  /** The beat clock's unwrapped beat count, corrected by beatTrim.ts (see
    *  beatPhase above) — free-running, never resets. JS-side only, like
    *  `raw`/`hits` below: src/render/drives.ts's `{ source: "beat", grid }`
    *  choice is what actually turns this into a gridded pulse per setting
    *  (src/render/gridPulse.ts), off this same field. No scene reads it
    *  directly. */
   beats: number;
-  /** beatClock.ts's own smoothed tempo — the bpm its phase is actually
-   *  running at (BPM_TRACK_RATE-eased) — × beatTrim.ts's own multiplier
+  /** The beat clock's tempo — the bpm its phase is actually running at,
+   *  coasting to 0 with no music — × beatTrim.ts's own multiplier
    *  (1 by default), as opposed to `bpm` below (the raw FeatureFrame/wire
    *  passthrough, also × that multiplier — see its own doc).
    *  src/render/signals.ts's "Tempo" signal reads this. */
@@ -157,7 +157,7 @@ export interface AnimFrame {
    *  wiring and beatTrim.ts's header) — see metronome.ts's file header for
    *  why this exists alongside beatPhase/beats/tempoBpm above: those follow
    *  the tracker live (gridPulse.ts falls back to raw hits when unsure, and
-   *  beatClock's own phase wavers/stalls with the estimate); these are
+   *  the beat clock's phase wavers/stalls with the estimate); these are
    *  "always evenly spaced, always at the song's tempo" once adopted, and
    *  free-run through an unsure patch rather than reacting to it.
    *  `metronomeOn` is metronome.ts's own `running`. */
@@ -240,29 +240,19 @@ export interface AnimClock {
    *  app.ts/tv.ts entry points pass marks; omitted by every preview/
    *  gallery/probe caller, which is what leaves those ungated. `hit`
    *  (src/audio/hitStrength.ts), same rule: when given, its `shape` is
-   *  threaded into bandEnergy's own advance() and grades the broadband
-   *  beatPulse below too; omitted, every pulse in this frame stays a flat 1
-   *  on its onset, exactly as before that module existed. `hit.beatRatio` is
-   *  the broadband detector's own OnsetDiag.ratio for *this* tick
-   *  (features.ts's FeatureExtractor.fluxRatio, kept outside this module
-   *  since animClock never reads a FeatureExtractor directly) — omitted or
-   *  null (a device with no local extractor), the broadband grade falls
-   *  back to the loudest of this same tick's three band ratios. No `line`/
+   *  threaded into bandEnergy's own advance() and grades the "Any hit"
+   *  beatPulse below too, from the strongest lane hit that passed; omitted,
+   *  every pulse in this frame stays a flat 1 on its onset. No `line`/
    *  `beatGrid` params any more — gridding a beat and drawing a frequency
    *  line are both per-setting drive choices now (src/render/drives.ts),
    *  not something animClock does once for the whole scene; `onset`/
    *  `beatPulse` are the raw, ungridded hits and `beats` is the raw unwrapped
-   *  count a `{ source: "beat", grid }` drive grids on its own. `hit.tempoHits`
-   *  (src/audio/tempoSource.ts's drained onsets, app.ts's solo mode only —
-   *  see beatClock.ts's own file header for why host/renderer/TV never pass
-   *  this) switches beatClock.ts's phase comb onto that fixed-hop feed for
-   *  this tick instead of the render-tick `frame.onset`/beatRatio pair;
-   *  omitted (every other caller), today's render-tick-only behavior.
+   *  count a `{ source: "beat", grid }` drive grids on its own.
    *  `hit.wavePeak` is this tick's instantaneous waveform peak
    *  (src/audio/waveform.ts's `peak()` over app.ts's lastMono) — solo/host
    *  only, feeding AnimFrame.wavePeak's own peak-hold. `tapNowMs` is this
    *  tick's performance.now(): given, this clock follows the tap-tempo
-   *  store (tapTempo.ts — a tap seeds beatClock and the metronome, and the
+   *  store (tapTempo.ts — a tap seeds the beat clock and the metronome, and the
    *  raw bpm folds onto the tapped tempo while it guides); omitted, taps
    *  are ignored entirely. Only app.ts's live clock passes it — the beat
    *  keys' own reach, see tapTempo.ts's header. */
@@ -271,9 +261,11 @@ export interface AnimClock {
     frame: FeatureFrame,
     smoothing?: number,
     gate?: SilenceGateMarks,
-    hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
+    hit?: { shape: HitShape; wavePeak?: number | null },
     tapNowMs?: number,
   ): AnimFrame;
+  /** Every Lock meaning's reading this tick, whichever one `tempoLock` hands on (for tests/tempoEval/run.ts). */
+  lockReadings(): Readonly<Record<LockMeaning, number>>;
 }
 
 // Exported so src/render/drives.ts's Fixed/Loud hit heights can decay a
@@ -288,32 +280,26 @@ export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts 
 // doesn't change how the Dynamics card's Waveform readout looks or feels.
 export const WAVE_PEAK_FALL_PER_SEC = 1.2;
 
-// The phase comb's own hit weight (beatClock.ts's advance()) — how much this
-// tick's beat vote counts, so a big, obvious hit corrects the clock harder
-// than a borderline one. Two ingredients: `strength`, this tick's own
-// broadband stand-out (hit.beatRatio, capped the same way
-// features.ts's registerOnset caps an onset's own weight — HIT_WEIGHT_CAP
-// mirrors its ONSET_WEIGHT_CAP), and `bass`, how much low end this tick or
-// the previous one carried (bandEnergy.lowDiag.ratio — checked over both
-// ticks since a kick's own broadband onset can register a tick before or
-// after the low-band detector's own, and either is real bass behind this
-// hit). A bass-heavy hit (a kick) is weighted PHASE_BASS times harder than a
-// bass-free one (a hat/clap on the same beat) — kicks are what people
-// actually tap along to. Tuned against tests/tempoEval.test.ts: PHASE_BASS
-// (beatClock.ts) went from an initial 2 to 4; BASS_WEIGHT_FLOOR/
-// BASS_WEIGHT_SPAN below were tried both looser and tighter and made every
-// track's own lockInTempo worse either way, so they stayed at these values.
-const HIT_WEIGHT_CAP = 4;
-const BASS_WEIGHT_FLOOR = 0.5;
-const BASS_WEIGHT_SPAN = 1.5;
-
-function clamp01(x: number): number {
-  return x < 0 ? 0 : x > 1 ? 1 : x;
+/** The strongest lane hit that passed this tick: each passing lane's diag
+ *  ratio is its hit's strength (bandEnergy.ts). */
+function strongestPassed(b: BandEnergy): number {
+  let s = 0;
+  if (b.lowOnset) s = Math.max(s, b.lowDiag.ratio);
+  if (b.midOnset) s = Math.max(s, b.midDiag.ratio);
+  if (b.highOnset) s = Math.max(s, b.highDiag.ratio);
+  return s;
 }
 
-export function createAnimClock(): AnimClock {
+export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimClock {
+  const lockMeaning = opts.lockMeaning ?? "stability";
   const flow: FlowClock = createFlowClock();
-  const beat: BeatClock = createBeatClock();
+  const clock = new BeatClock();
+  const lockMeter = new LockMeter();
+  // The beat clock's own timeline; see the file header.
+  let clockSec = 0;
+  let lastUpdates = -1;
+  // The beat clock's count at the previous tick, where a tap's seed lands.
+  let lastClockBeats = 0;
   const metronome: Metronome = createMetronome();
   // beatTrim.ts's correction layer — one trimmer per clock (see that
   // file's header for why two, and its exact wiring below). `wasRunning`
@@ -324,7 +310,8 @@ export function createAnimClock(): AnimClock {
   const metroTrim: BeatTrimmer = createBeatTrimmer();
   let wasRunning = false;
   // tapTempo.ts's guide — see that file's header for why a tap meets the
-  // tracker here: a seed into beatClock/metronome and a fold of the raw bpm.
+  // tracker here: a seed into the beat clock and metronome and a fold of the
+  // raw bpm.
   const tapGuide: TapGuide = createTapGuide();
   const bandEnergy: BandEnergy = createBandEnergy();
   const kickBand: BandPick = createBandPick();
@@ -341,12 +328,9 @@ export function createAnimClock(): AnimClock {
   let metronomeBarPulse = 0;
   // AnimFrame.wavePeak's own held state — see that field's own doc comment.
   let wavePeak = 0;
-  // Last tick's own low-band onset ratio — see the hitWeight comment above
-  // for why this tick's bass weight checks both.
-  let prevLowRatio = 0;
-  // The broadband detector's own last graded hit — mutated in place by
-  // hitStrength() below, same reasoning as bandEnergy.ts's own per-group
-  // GroupState.hit: holds the previous hit's numbers between onsets rather
+  // The "Any hit" lane's last graded hit — mutated in place by
+  // hitStrength() below, same reasoning as bandEnergy.ts's own per-lane
+  // LaneState.hit: holds the previous hit's numbers between onsets rather
   // than resetting, and is only ever written while `hit` is given.
   const beatHit: HitParts = { standout: 0, loudness: 0, strength: 0 };
 
@@ -356,7 +340,7 @@ export function createAnimClock(): AnimClock {
       frame: FeatureFrame,
       smoothing = SMOOTHING_DEFAULT,
       gate?: SilenceGateMarks,
-      hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
+      hit?: { shape: HitShape; wavePeak?: number | null },
       tapNowMs?: number,
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
@@ -369,7 +353,7 @@ export function createAnimClock(): AnimClock {
       const hitTail = tailScales;
       // AnimFrame.wavePeak's own peak-hold — see that field's own doc
       // comment. `hit.wavePeak` omitted/null (no mic, no feed wave) holds nothing:
-      // it snaps straight to 0, the same as `beatRatio` above. Otherwise a
+      // it snaps straight to 0. Otherwise a
       // finite `inst` minus a non-finite Infinity rateScale (Smoothing's Off
       // stop) is exactly -Infinity (IEEE754), so Math.max against that lands
       // on `inst` exactly — no separate smoothingOff branch needed, the same
@@ -377,54 +361,55 @@ export function createAnimClock(): AnimClock {
       const inst = hit?.wavePeak;
       wavePeak = inst == null ? 0 : Math.max(inst, wavePeak - WAVE_PEAK_FALL_PER_SEC * rateScale * dtSec);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
+      // A follower's hits carry the level of the frame they came in (EngineReading.hitLevel).
+      const hitLevel = frame.engine?.hitLevel;
+      const hitDimmer = gate && hitLevel !== undefined ? silenceGateDimmer(hitLevel, gate) : dimmer;
       const flowPhase = flow.advance(dtSec, frame.energy);
-      // bandEnergy runs before beat, not after — see the hitWeight comment
-      // above: beat.advance() below needs *this* tick's lowDiag.ratio to
-      // weigh this tick's own beat vote.
-      bandEnergy.advance(dtSec, frame.bands, rateScale, dimmer, hit?.shape);
+      bandEnergy.advance(dtSec, frame, rateScale, hitDimmer, hit?.shape);
       kickBand.advance(dtSec, frame.bands, getBandSplit().lowMid);
       hats = slewLevel(hats, frame.hats * dimmer, dtSec, rateScale);
       lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);
-      const lowRatioNow = bandEnergy.lowDiag.ratio;
-      const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
-      const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
-      const hitWeight = strength * (1 + PHASE_BASS * bass);
+      const beatRatio = frame.engine?.surge ?? 0;
       // Tap tempo (tapTempo.ts's header). The seed lands before either
       // clock advances, so its phase is the tapped beat's at the previous
-      // tick: this tick's advance() carries both clocks on to now, and a
-      // tapped beat falling inside it ticks like any other. `bpmIn` is
-      // frame.bpm itself, and the comb judges whole beats, unless a tap
-      // guides the tracker.
+      // tick: this tick carries both clocks on to now, and a tapped beat
+      // falling inside it ticks like any other. `bpmIn` is frame.bpm itself,
+      // and the clock judges whole beats, unless a tap guides the tracker.
       const tap = tapNowMs !== undefined ? tapGuide.poll(tapNowMs - dtSec * 1000) : null;
       if (tap) {
-        beat.seed(tap.bpm, tap.beatPhase);
-        metronome.seed(tap.bpm, tap.beatPhase, beat.beats);
+        clock.seed(tap.bpm, tap.beatPhase, clockSec);
+        metronome.seed(tap.bpm, tap.beatPhase, lastClockBeats);
       }
       const bpmIn = tapGuide.fold(frame.bpm);
-      beat.setDivision(tapGuide.division);
-      // See beatClock.ts's own file header and its advance()'s doc: the
-      // fixed-hop feed (app.ts's solo mode, when a tempo source is live)
-      // replaces the render-tick beatFired/hitWeight pair entirely rather
-      // than combining with it.
-      if (hit?.tempoHits !== undefined) {
-        beat.advance(dtSec, bpmIn, false, 1, hit.tempoHits);
-      } else {
-        // frame.pulseOnset, not frame.onset — the phase comb is tempo
-        // tracking, not a visual hit, and must not be starved by the
-        // silence gate (FeatureFrame.pulseOnset's own doc has the measured
-        // failure this replaces: host/TV and this render-tick fallback path
-        // ran the Metronome only ~21-26% of the time on real songs through
-        // a mic, against solo mode's ~94%, because their only feed here was
-        // the gated `onset`).
-        beat.advance(dtSec, bpmIn, frame.pulseOnset, hitWeight);
+      clock.setDivision(tapGuide.division);
+      clockSec += dtSec;
+      const engine = frame.engine;
+      let phaseError: number | null = null;
+      if (engine && engine.updates !== lastUpdates) {
+        lastUpdates = engine.updates;
+        phaseError = clock.follow(
+          {
+            bpm: bpmIn,
+            music: engine.music,
+            beatTime: clockSec - (frame.time - engine.beatTime),
+            downbeatTime: clockSec - (frame.time - engine.downbeatTime),
+            downbeatConfidence: engine.downbeatConfidence,
+            updates: engine.updates,
+          },
+          clockSec,
+        );
       }
-      metronome.advance(dtSec, { bpm: beat.bpm, beats: beat.beats, tempoLock: beat.tempoLock }, bpmIn);
+      const c = clock.tick(clockSec, dtSec);
+      lastClockBeats = c.beats;
+      lockMeter.update(dtSec, c, phaseError, engine);
+      const tempoLock = lockMeter.values[lockMeaning];
+      metronome.advance(dtSec, { bpm: c.bpm, beats: c.beats, tempoLock }, bpmIn);
       tapGuide.follow(metronome.running, metronome.bpm);
       // beatTrim.ts's correction layer, one trimmer per clock — see that
       // file's header and this module's own AnimFrame field docs. Both
       // trimmers read the same settings snapshot this tick.
       const trim = getBeatTrim();
-      const c = clockTrim.advance(beat.beats, beat.bpm, trim);
+      const trimmed = clockTrim.advance(c.beats, c.bpm, trim);
       if (metronome.running && !wasRunning) {
         // The raw metronome itself just adopted clock.beats this same
         // tick (metronome.ts's own `beats = clock.beats`) — mirror that on
@@ -432,21 +417,21 @@ export function createAnimClock(): AnimClock {
         // that adoption jump isn't mistaken for beats actually crossed.
         metroTrim.adoptFrom(clockTrim);
         metroTrim.rearm();
+      } else if (metronome.barMoved) {
+        metroTrim.rearm();
       }
       const mt = metroTrim.advance(metronome.beats, metronome.bpm, trim);
       wasRunning = metronome.running;
-      prevLowRatio = lowRatioNow;
       section.advance(dtSec, frame.energy, rateScale);
-      profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
+      profile.advance(dtSec, frame, { tempoLock, sectionIntensity: section.intensity }, rateScale);
       centroid.advance(dtSec, frame.bands, rateScale);
 
       // Raw hits — no grid. See AnimFrame.onset's own doc comment.
-      const onset = frame.onset;
+      const onset = bandEnergy.lowOnset || bandEnergy.midOnset || bandEnergy.highOnset;
       beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale * hitTail.beat);
       if (onset) {
         if (hit) {
-          const ratio = hit.beatRatio ?? Math.max(1, bandEnergy.lowDiag.ratio, bandEnergy.midDiag.ratio, bandEnergy.highDiag.ratio);
-          const graded = hitStrength(ratio, frame.level, hit.shape, beatHit);
+          const graded = hitStrength(strongestPassed(bandEnergy), frame.level, hit.shape, beatHit);
           beatPulse = Math.max(beatPulse, graded.strength);
         } else {
           beatPulse = 1;
@@ -463,13 +448,13 @@ export function createAnimClock(): AnimClock {
         flowPhase,
         beatPulse,
         onset,
-        beatRatio: hit?.beatRatio ?? 0,
+        beatRatio,
         wavePeak,
-        beatPhase: c.beatPhase,
-        barPhase: c.barPhase,
-        tempoLock: beat.tempoLock,
-        beats: c.beats,
-        tempoBpm: c.bpm,
+        beatPhase: trimmed.beatPhase,
+        barPhase: trimmed.barPhase,
+        tempoLock,
+        beats: trimmed.beats,
+        tempoBpm: trimmed.bpm,
         low: bandEnergy.low,
         mid: bandEnergy.mid,
         high: bandEnergy.high,
@@ -527,6 +512,9 @@ export function createAnimClock(): AnimClock {
           high: { ...bandEnergy.highHit },
         },
       };
+    },
+    lockReadings() {
+      return lockMeter.values;
     },
   };
 }

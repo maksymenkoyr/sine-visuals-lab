@@ -25,7 +25,7 @@ import type { LufsReading } from "../audio/lufs.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL, type MusicDial } from "../render/musicProfile.ts";
 import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
-import { FLUX_THRESHOLD_MARGIN, FLUX_THRESHOLD_MULT, ONSET_REFRACTORY_SEC } from "../audio/features.ts";
+import { HIT_DEFAULTS, REFRACTORY_S } from "../audio/engine/onsets.ts";
 import { GROUP_TUNING } from "../render/bandEnergy.ts";
 import {
   hitStandout,
@@ -176,7 +176,7 @@ import { CARRY_MS, createColumnStore } from "./columnStore.ts";
  *    own jack and its Hz in the legend.
  *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
- *    follows beatClock's tempoLock, so an unlocked guess reads as
+ *    follows tempoLock, so an unlocked guess reads as
  *    unconfident rather than as a confident wrong number, and the BPM
  *    digits dim the same way. Beneath that, the bar ruler (createBarRuler):
  *    one cell per beat of the metronome's bar, the current one lit and the
@@ -956,29 +956,25 @@ const HITS_GROUND_ALPHA_MAX = 0.07;
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
 const CODE_OF_VERDICT: Record<OnsetVerdict, number> = { fired: 3, blocked: 2, gated: 1, miss: 0 };
 
-/** The exact hit rule, built from the live constants (features.ts,
- *  GROUP_TUNING, the silence-gate marks) so it can't drift from what decides a
- *  tick. Recomputed at the text tick, so a drag of the Input card's gate rows
- *  shows up. */
+/** The exact hit rule, built from the live constants (the engine's onsets.ts,
+ *  the silence-gate marks) so it can't drift from what decides a tick.
+ *  Recomputed at the text tick, so a drag of the Input card's gate rows shows
+ *  up. */
 function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
   const ms = (sec: number) => `${Math.round(sec * 1000)}ms`;
-  const group = (label: string, g: (typeof GROUP_TUNING)["low"]) =>
-    `${label}: rise over ${g.triggerMult}× its recent average + ${g.triggerMargin}, ≥${ms(g.refractorySec)} apart.`;
   const marks = getSilenceGate();
   const gate =
     marks.closed <= SILENCE_GATE_MIN
       ? "Silence gate is off."
-      : `Quieter than ${pct(marks.closed)}% input level nothing counts; between ${pct(marks.closed)}% and ${pct(marks.open)}% a hit has to stand out more (Silence below / Sound above, Input card).`;
+      : `Quieter than ${pct(marks.closed)}% input level nothing counts; between ${pct(marks.closed)}% and ${pct(marks.open)}% a hit has to clear its line by more the quieter it is (Silence below / Sound above, Input card).`;
   return [
     "Full tick: fired.",
     "Dim tick: cleared the line but too soon after the last one (refractory).",
     "Faint tick on shaded ground: cleared it while the room was quiet.",
-    `Any hit: flux over ${FLUX_THRESHOLD_MULT}× the recent average + ${FLUX_THRESHOLD_MARGIN}, ≥${ms(ONSET_REFRACTORY_SEC)} apart.`,
-    group("Bass", GROUP_TUNING.low),
+    `A hit: a peak in how fast the sound rises across all frequencies, over its last second's average + ${HIT_DEFAULTS.k}× its spread and at least ${HIT_DEFAULTS.min}, ≥${ms(REFRACTORY_S)} after the last one.`,
+    "Each hit is a kick (Bass), snare (Mid) or hat (Treble) by where its rising sound sits; Any hit is any of the three.",
     "Kick band: the one bass band that pulses most clearly right now; its Hz leads the Bass note, and the inner jack on that lane sends it.",
-    group("Mid", GROUP_TUNING.mid),
-    group("Treble", GROUP_TUNING.high),
-    "Surge: how close Any hit is to firing, as a setting fed by Onset surge sees it; the line is where Any hit fires.",
+    "Surge: how close a hit is to firing, as a setting fed by Onset surge sees it; the line is where one fires.",
     gate,
   ].join(" ");
 }

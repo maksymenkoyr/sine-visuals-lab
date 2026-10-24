@@ -7,13 +7,13 @@
  *
  * Every deploy replaces dist/ wholesale — Cloudflare's `[assets]` binding
  * (wrangler.toml) only ever serves the latest deploy's files, under their
- * content-hashed names (`assets/tempoWorklet-<hash>.js`, and so on). A tab
+ * content-hashed names (`assets/engineWorklet-<hash>.js`, and so on). A tab
  * that's been open since before a deploy still holds the *old* hashes in its
  * loaded JS, and most of those are fine — the module graph that renders the
  * page is already resident in memory, nothing re-fetches it. But a handful of
  * files are fetched separately from the module graph, on their own schedule:
- * the tempo AudioWorklet module (only loaded once the mic starts, well after
- * load — src/audio/tempoSource.ts) and every font: a `@font-face` file is
+ * the audio engine's AudioWorklet module (only loaded once the mic starts,
+ * well after load — src/audio/engineSource.ts) and every font: a `@font-face` file is
  * only requested the first time text
  * in that face is drawn — the @fontsource faces controlsTheme.ts and
  * brandMark.ts import are declared at load but mostly first drawn by the
@@ -22,8 +22,8 @@
  * src/app.ts calls that at boot.
  * If a deploy has landed in between a late one of these and the load that
  * kicked it off, that fetch 404s — a visitor who loaded the gallery before a
- * release and starts the mic after it gets a tempo tracker that silently
- * falls back to the render-tick path, or a panel in the system fallback
+ * release and starts the mic after it gets an audio engine that silently
+ * falls back to the ScriptProcessor tap, its beats a little late, or a panel in the system fallback
  * font. None of that is a crash, which is exactly why it would otherwise go
  * unnoticed.
  *
@@ -56,7 +56,7 @@
  * **The rule for new code:** any `?url` or `?worker&url` import — anything
  * Vite resolves to a hashed URL string rather than inlining or bundling —
  * must be wrapped in `pinAsset()` at module scope, right next to the import,
- * the same way tempoSource.ts does it. Fonts loaded
+ * the same way engineSource.ts does it. Fonts loaded
  * through `@font-face` (declared in a `<style>` this app injects, as
  * controlsTheme.ts does for DSEG7) don't need this: `pinEverything()` sweeps
  * every face already registered in `document.fonts` regardless of how its

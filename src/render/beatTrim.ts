@@ -1,27 +1,27 @@
 import { METRONOME_BEATS_PER_BAR } from "./metronome.ts";
 
 /**
- * Beat trim: a pure correction layer between the tempo clocks
- * (beatClock.ts/metronome.ts) and AnimFrame — a bar resync ("this beat is
- * the 1"), a ×2/÷2 tracking-error fix, and a small earlier/later nudge, the
+ * Beat trim: a pure correction layer between the tempo clocks (the engine's
+ * beat clock, src/audio/engine/clock.ts, and metronome.ts) and AnimFrame — a
+ * bar resync ("this beat is the 1"), a ×2/÷2 tracking-error fix, and a small earlier/later nudge, the
  * three controls every VJ tool gives the operator because a tempo tracker
  * can't infer them on its own.
  *
- * Why: both clocks put bar beat 1 at floor(beats / METRONOME_BEATS_PER_BAR)
- * — an arbitrary beat (see beatClock.ts's own header and beatGrid.ts's "no
- * downbeat detector" note). metronome.ts only ever corrects *sub-beat*
- * phase toward beatClock, so a whole-beat bar error is never fixed on its
- * own — every bar-timed thing (Bar wave, Metronome bar, bar/multi-bar beat
- * grids, uBarPhase, a scene's one-bar morphs) lands on beat 2/3/4 three
- * times in four. A tracker can also lock onto half or double the actual
+ * Why: the bar's beat 1 is the engine's downbeat guess, and it stays an
+ * arbitrary beat while that guess is unconfident or wrong (see
+ * beatGrid.ts's note on bars). metronome.ts only takes the clock's bar, so
+ * nothing else fixes a whole-beat bar error — every bar-timed thing (Bar
+ * wave, Metronome bar, bar/multi-bar beat grids, uBarPhase, a scene's
+ * one-bar morphs) then lands on beat 2/3/4. A tracker can also lock onto
+ * half or double the actual
  * tempo, and a hurried/rushed reading always benefits from a small
  * earlier/later nudge. This module owns none of the tracking itself — it
- * only reshapes whatever beatClock.ts/metronome.ts already produced, so
+ * only reshapes whatever the clock and metronome.ts already produced, so
  * it's a pure function of (their output, this module's own settings), safe
  * to bypass entirely by construction (see IDENTITY below).
  *
  * Two independent instances: animClock.ts runs one BeatTrimmer on top of
- * beatClock.ts's own beats ("clockTrim") and a second on top of
+ * the beat clock's own beats ("clockTrim") and a second on top of
  * metronome.ts's own beats ("metroTrim") — see that file for the wiring.
  * Only the metronome's trimmer's ticks (beatTick/barTick) are actually read
  * anywhere; the clock's own trimmer only ever contributes its continuous
@@ -111,11 +111,8 @@ export function resetBeatTrim(): void {
   offsetMs = 0;
 }
 
-/** Same shape as beatClock.ts's own (unexported) wrap01 — duplicated, not
- *  imported, the way metronome.ts already duplicates its own wrap01/
- *  wrapHalf: a tiny pure helper, and identity here depends on this
- *  producing bit-exactly what beatClock.ts's own wrap01 would for the same
- *  input. */
+/** Duplicated, not imported, the way metronome.ts duplicates its own wrap01/
+ *  wrapHalf: a tiny pure helper. */
 function wrap01(x: number): number {
   const w = x % 1;
   return w < 0 ? w + 1 : w;
