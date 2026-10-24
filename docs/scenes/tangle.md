@@ -9,7 +9,10 @@ development, on main.
 
 ## Where the code is
 
-- `src/render/scenes/tangle/index.ts` is the scene: `SETTINGS`, the drive
+- `src/render/scenes/tangle/card.ts` — the scene's card, loaded with the page: id, name,
+  `SETTINGS` (the `settings` array), the `gallery` record and `loadBody`. The body
+  takes its id, name and settings from the card.
+- `src/render/scenes/tangle/index.ts` — the body, loaded after first paint: the drive
   reads (`drives.fired`/`drives.value` for Re-inflate and Reset on drop,
   `drives.value` for Drift), the fixed-step warp loop (`STEP_DT`,
   `MAX_STEPS_PER_FRAME`), the crinkle envelope (`CRINKLE_TAU`,
@@ -120,6 +123,7 @@ the reference's sparse still state while the music plays, by design.
   it pulled the whole structure into one corner and shrank it.
 - **Detail** went 6 → 8 → 10 → 14 to reach the reference's vertex count.
 - 2026-10-08 — Re-inflate and Reset on drop became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the pull home and the reset amount by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/tangle/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
