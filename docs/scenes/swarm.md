@@ -20,7 +20,11 @@ lines flash. In development, on main.
   `swarmMetrics`. Its header says the model; `DEFAULT_SWARM_PARAMS` holds the
   tuned constants, `SCATTER_MAX_SHARE`, `DENSE_NEIGHBOURS` and
   `CROWD_DIMMING` the hit and colour rules.
-- `src/render/scenes/swarm/index.ts` is the scene: `SETTINGS`, the drive reads
+- `src/render/scenes/swarm/card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS` (exported for the body), the `gallery` record and `loadBody`.
+  The body spreads the card, so the registered settings are the body's own objects.
+- `src/render/scenes/swarm/index.ts` is the body, loaded after first paint: the
+  scene, the drive reads
   (`drives.value` for Breath, Heat, Thump and Beat flash, `drives.fired`
   for Scatter and Re-collapse), the Scene breath wave, the drawn hit
   reactions (`THUMP_SCALE`, `FLASH_GAIN`), the fixed-step loop, framing
@@ -176,6 +180,7 @@ onsets (106 in the window, ≈6.6/s):
   `scatterPhases` knocks out of step by how far the hit stood out; Flat, the
   default, is unchanged. Re-collapse is flat-only: a re-collapse either
   starts or it doesn't.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/swarm/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
