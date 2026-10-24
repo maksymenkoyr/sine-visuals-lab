@@ -159,7 +159,7 @@ function scheduleIdle(run: () => void): void {
 /** Runs `run` after the page has fully loaded, at browser idle time: nothing
  *  fetched here should compete with the page's own first paint or the audio
  *  graph spinning up. */
-function afterLoadAtIdle(run: () => void): void {
+export function afterLoadAtIdle(run: () => void): void {
   if (document.readyState === "complete") scheduleIdle(run);
   else window.addEventListener("load", () => scheduleIdle(run), { once: true });
 }

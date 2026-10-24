@@ -7,6 +7,7 @@ import { createAnimClock } from "../../src/render/animClock.ts";
 import { qualitySettings } from "../../src/render/quality.ts";
 import { PALETTES } from "../../src/render/palette.ts";
 import { FULL_VIEWPORT, listScenes } from "../../src/render/scene.ts";
+import { loadScene } from "../../src/render/lazyScene.ts";
 import "../../src/render/scenes/index.ts"; // side effect: registers every scene
 
 const params = new URLSearchParams(location.search);
@@ -35,6 +36,7 @@ const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
 async function bench(id: string) {
   const scene = scenes.find((s) => s.id === id);
   if (!scene) throw new Error(`no scene "${id}" — have ${scenes.map((s) => s.id).join(", ")}`);
+  await loadScene(scene);
   scene.init(ctx);
   const clock = createAnimClock();
   const bands = new Float32Array(NUM_BANDS);

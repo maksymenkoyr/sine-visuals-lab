@@ -53,7 +53,10 @@ export interface PanelSection {
   options?: unknown;
 }
 
-export interface Scene {
+/** What every page needs of a scene before its code has loaded: the gallery,
+ *  the settings panel and the Auto tables read these without running the
+ *  scene. src/render/lazyScene.ts has the card/body split. */
+export interface SceneCard {
   id: string;
   name: string;
   /** Lowest quality preset this scene is willing to run on; omitted = runs everywhere. */
@@ -64,6 +67,9 @@ export interface Scene {
    *  plain per-setting rows — see PanelSection above. Omit for a scene with
    *  nothing custom to show (every setting renders as an ordinary row). */
   panel?: readonly PanelSection[];
+}
+
+export interface Scene extends SceneCard {
   /** Optional read-only snapshot of live scene-internal state for the device
    *  menu's own widgets (Physarum 2's specimen-box POP/TERR readouts —
    *  src/ui/widgets/registry.ts's `WidgetCtx.probe`) — phone-local only, the

@@ -20,11 +20,15 @@ import type { Plugin, ViteDevServer } from "vite";
  *
  * Files are mapped to scenes through Vite's SSR module graph, not by filename:
  * `src/render/scenes/index.ts` is loaded, each module it imports is matched to
- * the registered scene object it exports (a helper exports none), and every
- * module reachable from that entry is that scene's territory. A file two scenes
- * share belongs to neither, so editing a helper doesn't nominate every scene
- * that uses it. This can't drift from the registry — a scene that isn't
- * registered isn't in the gallery, and won't be printed either.
+ * the registered scene object it exports (a helper exports none) — or, for a
+ * scene split into a card and a body (src/render/lazyScene.ts), to the card
+ * object its card module exports — and every module reachable from that entry
+ * is that scene's territory. A card reaches its body only through a dynamic
+ * `import()`, which the graph doesn't follow, so the body is loaded too and
+ * walked as part of the same scene. A file two scenes share belongs to
+ * neither, so editing a helper doesn't nominate every scene that uses it.
+ * This can't drift from the registry — a scene that isn't registered isn't in
+ * the gallery, and won't be printed either.
  *
  * `scenesInFlight` is the pure core (tested in `tests/sceneLinks.test.ts`);
  * the git and module-graph plumbing around it is best-effort. A scene module
@@ -111,8 +115,8 @@ async function printSceneLinks(server: ViteDevServer): Promise<void> {
 }
 
 /** Scene id → absolute paths of every module reachable from that scene's
- *  entry (its scene module, src/render/scenes/sceneModules.ts), in registry
- *  order. */
+ *  entry (its scene module, or its card and body — src/render/scenes/sceneModules.ts),
+ *  in registry order. */
 async function sceneClosures(server: ViteDevServer): Promise<Map<string, Set<string>>> {
   const { listScenes } = (await server.ssrLoadModule("/src/render/scene.ts")) as {
     listScenes: () => { id: string }[];
@@ -123,10 +127,21 @@ async function sceneClosures(server: ViteDevServer): Promise<Map<string, Set<str
   const registry = [...(graph.getModulesByFile(registryFile) ?? [])][0];
   if (!registry) throw new Error(`${REGISTRY} is not in the SSR module graph`);
 
-  // Entry module → the registered scene object it exports. Matched by the
-  // object itself, so a helper that happens to export something with an
-  // `id` can't claim a scene.
-  const idOf = new Map<unknown, string>(listScenes().map((s) => [s, s.id]));
+  const { sceneCard } = (await server.ssrLoadModule("/src/render/lazyScene.ts")) as {
+    sceneCard: (scene: unknown) => unknown;
+  };
+  const { bodyPathOfCard } = (await server.ssrLoadModule(`/${SCENES_DIR}/sceneModules.ts`)) as {
+    bodyPathOfCard: (path: string) => string;
+  };
+  // Entry module → the registered scene object it exports, or the card behind a
+  // registered proxy. Matched by the object itself, so a helper that happens
+  // to export something with an `id` can't claim a scene.
+  const idOf = new Map<unknown, string>();
+  for (const s of listScenes()) {
+    idOf.set(s, s.id);
+    const card = sceneCard(s);
+    if (card) idOf.set(card, s.id);
+  }
   const entryOf = new Map<string, (typeof registry)>();
   for (const mod of registry.importedModules) {
     for (const value of Object.values(mod.ssrModule ?? {})) {
@@ -141,6 +156,12 @@ async function sceneClosures(server: ViteDevServer): Promise<Map<string, Set<str
     if (!entry) continue;
     const files = new Set<string>();
     const stack = [entry];
+    if (entry.file && /(\.card|\/card)\.ts$/.test(entry.file)) {
+      const rel = `/${path.relative(server.config.root, entry.file).split(path.sep).join("/")}`;
+      await server.ssrLoadModule(bodyPathOfCard(rel));
+      const body = [...(graph.getModulesByFile(bodyPathOfCard(entry.file)) ?? [])][0];
+      if (body) stack.push(body);
+    }
     const seen = new Set<typeof entry>();
     while (stack.length) {
       const mod = stack.pop()!;

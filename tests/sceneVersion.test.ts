@@ -40,6 +40,12 @@ describe("parseImportSpecifiers", () => {
     expect(parseImportSpecifiers(source).sort()).toEqual(["./data.json", "./lazy.ts"].sort());
   });
 
+  it("skips dynamic import() with staticOnly", () => {
+    const source = `import { a } from "./x.ts";\nexport const load = () => import("./body.ts");`;
+    expect(parseImportSpecifiers(source, { staticOnly: true })).toEqual(["./x.ts"]);
+    expect(parseImportSpecifiers(source).sort()).toEqual(["./body.ts", "./x.ts"]);
+  });
+
   it("drops bare (package) specifiers", () => {
     const source = `import { z } from "zod";\nimport "./local.ts";`;
     expect(parseImportSpecifiers(source)).toEqual(["./local.ts"]);
@@ -81,6 +87,28 @@ describe("sceneEntries", () => {
       { unit: "sky", file: "src/render/scenes/sky/index.ts" },
       { unit: "tessera", file: "src/render/scenes/tessera/index.ts" },
     ]);
+  });
+
+  it("finds a card file or a folder's card.ts, keyed by unit without .card", () => {
+    const cardSources: Record<string, string> = {
+      "src/render/scenes/storm.card.ts": GALLERY,
+      "src/render/scenes/storm.ts": `export const stormScene = {};\n`,
+      "src/render/scenes/tessera/card.ts": GALLERY,
+      "src/render/scenes/tessera/index.ts": `export const tesseraScene = {};\n`,
+      "src/render/scenes/sky/index.ts": `export { skyScene } from "./sky.ts";\n${GALLERY}`,
+      "src/render/scenes/private/index.ts": GALLERY,
+    };
+    const entries = sceneEntries(
+      ["index.ts", "storm.card.ts", "storm.ts", "tessera", "sky", "private"],
+      (p) => cardSources[p] ?? null,
+      (p) => p in cardSources,
+    );
+    expect(entries).toEqual([
+      { unit: "sky", file: "src/render/scenes/sky/index.ts" },
+      { unit: "storm", file: "src/render/scenes/storm.card.ts" },
+      { unit: "tessera", file: "src/render/scenes/tessera/card.ts" },
+    ]);
+    expect(entries.map((e) => e.unit)).not.toContain("storm.card");
   });
 
   it("skips the registry, helpers, a folder without index.ts, and private/", () => {
@@ -167,6 +195,28 @@ describe("fileClosure and ownedFiles: territory and shared-file exclusion", () =
     expect(territory.get("a")!.has("src/render/shared.ts")).toBe(false);
     expect(territory.get("b")!.has("src/render/shared.ts")).toBe(false);
     expect(territory.get("app")!.has("src/render/shared.ts")).toBe(false);
+  });
+});
+
+describe("fileClosure through a card", () => {
+  const sources: Record<string, string> = {
+    "src/render/scenes/storm.card.ts": `import type { SceneCard } from "../scene.ts";\nexport const loadBody = () => import("./storm.ts");`,
+    "src/render/scenes/storm.ts": `import { card } from "./storm.card.ts";\nimport { stormOnly } from "./stormOnly.ts";`,
+    "src/render/scenes/stormOnly.ts": ``,
+    "src/render/scene.ts": ``,
+  };
+  const exists = (p: string) => p in sources;
+  const readFile = (p: string) => sources[p] ?? null;
+
+  it("reaches the body through the card's import()", () => {
+    const closure = fileClosure(["src/render/scenes/storm.card.ts"], readFile, exists);
+    expect(closure.has("src/render/scenes/storm.ts")).toBe(true);
+    expect(closure.has("src/render/scenes/stormOnly.ts")).toBe(true);
+  });
+
+  it("stays out of the body with staticOnly", () => {
+    const closure = fileClosure(["src/render/scenes/storm.card.ts"], readFile, exists, { staticOnly: true });
+    expect(closure).toEqual(new Set(["src/render/scenes/storm.card.ts", "src/render/scene.ts"]));
   });
 });
 

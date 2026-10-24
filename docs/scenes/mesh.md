@@ -9,7 +9,11 @@ draft scene (listed in `DRAFT_SCENE_IDS`), on `main`.
 
 ## Where the code is
 
-`src/render/scenes/meshGrid.ts` (`meshGridScene`, id `mesh`) — its own header
+`src/render/scenes/meshGrid.card.ts` is the scene's card, loaded with the page: id, name,
+`SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card, so the
+registered settings are the body's own objects.
+
+`src/render/scenes/meshGrid.ts` (`meshGridScene`, id `mesh`), the body loaded after first paint — its own header
 comment is the up-to-date mechanism reference; read it before changing
 anything. Exported pure helpers, each covered by `tests/meshGrid.test.ts`:
 `gridDimsForQuality` (base vertex-grid resolution per quality tier),
@@ -149,6 +153,7 @@ None — original design.
   frames. A frame covering several rows
   eases from the last row to its own so 30 fps doesn't stair-step; at a steady
   60 fps the picture is pixel-identical (`tools/gpu-bench.mjs --compare`).
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/meshGrid.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
