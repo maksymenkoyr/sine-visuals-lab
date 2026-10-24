@@ -45,6 +45,10 @@ Put it on a big screen at a party or behind a DJ set and let it run: it keeps fo
   `uRippleSlope`; see its header for why (and for what it replaced: a fixed
   trigger-launched ring pool, then briefly a real 2D wave simulation).
   `tests/rippleEmitter.test.ts` pins the profile behaviour directly.
+- `src/render/scenes/causticsRippleSpots.ts` — Random spot mode of Rings start:
+  one `RippleEmitter` per spot, each spot's profile written as one row of an RG
+  data texture that FRAG samples and sums. `tests/causticsRippleSpots.test.ts`
+  pins it.
 - Imports `NOISE_HASH_GLSL`, `NOISE_MASK`, `NOISE_PERIOD`, `wrapFlow` from
   `src/render/noiseHash.ts` — the shared mobile-safe lattice hash (see Decisions
   below; this scene is the reason that module exists).
@@ -769,6 +773,22 @@ reference-measurement workflow used by later scenes.
   hue holds the low ramp and the opposite, lighter hue starts at its middle.
   A first draft put the second hue only at the top stops, and it barely
   showed, because most of the frame sits below the middle of the ramp.
+- 2026-10-20 — Beat ripple gets "Rings start": Center (the default, unchanged)
+  or Random spot. The user asked: "can we make ripple in differente places
+  simmilar how dose works in the physarum", and after hearing the options:
+  "keep both under switch". Random spot: each ring start, and each drop, takes
+  a spot at a new random place on the water, the way Physarum 2's Dose drops
+  each colony in a new place. Several spots can be live at once, each with its
+  own `RippleEmitter` (`causticsRippleSpots.ts`). A run of emission goes to the
+  spot it started in, so Merge only joins emissions within one spot's run. When
+  every spot is busy, the spot whose strongest ring is weakest is cleared and
+  reused. Auto-narrowing is off in this mode: the spots don't line up into a
+  train for it to separate. The per-spot profiles reach FRAG as rows of an RG16F
+  data texture, not uniform arrays, because one profile array per spot would
+  overrun the fragment-uniform budget. A drop always starts its own spot, so a
+  drop on the same frame as a beat makes two rings where Center makes one merged
+  ring. Not yet looked at live by the user; `RIPPLE_SPOTS` and `SPOT_REACH` are
+  first guesses.
 
 ## Tuning notes
 
@@ -852,6 +872,9 @@ reference-measurement workflow used by later scenes.
   brightness ceiling possibly not being enough for the most aggressive setting
   some material wants; it has only ever been checked on the synthetic feed
   (see below).
+- Random spot's `RIPPLE_SPOTS` and `SPOT_REACH` (`causticsRippleSpots.ts`) are
+  untuned first guesses, and its GPU cost hasn't been measured with
+  `tools/gpu-bench.mjs` yet.
 - Caustic density's glide (`DENSITY_GLIDE_SEC`) was picked for slider drags;
   nobody has yet watched a real source patched onto density with real music,
   so whether a hit source reads as too soft under the glide is still open.
@@ -905,9 +928,10 @@ reference-measurement workflow used by later scenes.
   calibration (`advanceLoudSwell`) invariants directly; Beat ripple's own
   profile invariants (`rippleEnvelope`, `createRippleEmitter`, `buildProfile`)
   are `tests/rippleEmitter.test.ts`'s job, and its emission
-  (`advanceStandoutAmount`) is `tests/standout.test.ts`'s — run all three
-  before touching any of the exported pure functions rather than eyeballing
-  the shader.
+  (`advanceStandoutAmount`) is `tests/standout.test.ts`'s, and Random spot's
+  spot placement, profile texture rows and spot reuse are
+  `tests/causticsRippleSpots.test.ts`'s — run them all before touching any of
+  the exported pure functions rather than eyeballing the shader.
 - A headless check that Speed boost stays rate-only (no aperture zoom): run
   `caustics/scripts/swell-shot.mjs` against base and against this branch with
   `causticDensity` frozen — base's frame-to-frame distance carries the
@@ -963,4 +987,5 @@ reference-measurement workflow used by later scenes.
 - #508 (draft, 2026-10-13) — Treble sparkle as an Effect and a Shape, with a preview in the Scene card (see Decisions)
 - #538 (2026-10-15) — Sparkle preview draws only while on screen (see Decisions)
 - 2026-10-15 — Colour: Shades, Shades + accent (default) and Rainbow; the palette's ramp replaces the cosine curve by default (see Decisions)
+- 2026-10-20 — Beat ripple: Rings start, Center or Random spot (see Decisions)
 - 2026-10-22 — Labels only (#656): the Beat flash and Level glow hints name the inputs as the panel now does (Level, Any hit); no setting, default or wire changed
