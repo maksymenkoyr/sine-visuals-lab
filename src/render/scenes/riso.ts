@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./riso.card.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // A printed poster, not a demo: flat geometric forms sized by band groups,
@@ -69,7 +70,4 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-export const risoScene = createFullscreenScene("riso", "Riso", FRAG);
+export const risoScene = createFullscreenScene(card.id, card.name, FRAG);

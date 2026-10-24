@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./tunnel.card.ts";
 
 /** Camera speed (units per second) with no tempo, and the extra per BPM. */
 const BASE_SPEED = 1.2;
@@ -88,11 +89,8 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-export const tunnelScene = createFullscreenScene("tunnel", "Tunnel", FRAG, {
-  minQuality: "low",
+export const tunnelScene = createFullscreenScene(card.id, card.name, FRAG, {
+  minQuality: card.minQuality,
   extraUniformDecls: "uniform float uTunnelZ;",
   extraUniforms: (() => {
     const camera = createTunnelCamera();

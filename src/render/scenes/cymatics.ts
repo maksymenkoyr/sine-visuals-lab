@@ -1,5 +1,6 @@
 import { NUM_BANDS } from "../../audio/types.ts";
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { card } from "./cymatics.card.ts";
 
 // Chladni-style standing waves. Each audio band (NUM_BANDS of them) is treated
 // as one circular plate mode (radial order m, angular order n derived from the
@@ -53,7 +54,4 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-27" } as const;
-
-export const cymaticsScene = createFullscreenScene("cymatics", "Cymatics", FRAG);
+export const cymaticsScene = createFullscreenScene(card.id, card.name, FRAG);
