@@ -64,7 +64,7 @@
 // setup's own review.
 
 /** Grade letters the review schema allows, best first, with their points. */
-export const GRADE_POINTS = {
+const GRADE_POINTS = {
   A: 4, "A-": 3.7, "B+": 3.3, B: 3, "B-": 2.7, "C+": 2.3, C: 2, "C-": 1.7, D: 1, F: 0,
 };
 
@@ -79,10 +79,10 @@ export const PRICES = {
     long: { above: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05 },
   },
 };
-export const CACHE_WRITE_MULT = 2;
+const CACHE_WRITE_MULT = 2;
 
 /** Every stage label the workflow uses, in run order. */
-export const STAGES = ["plan", "code", "solo", "review", "replan", "fix", "finish", "opusfix", "check", "grade"];
+const STAGES = ["plan", "code", "solo", "review", "replan", "fix", "finish", "opusfix", "check", "grade"];
 
 /** @param {unknown} text @returns {string | null} the grade letter it starts with */
 export function parseGrade(text) {

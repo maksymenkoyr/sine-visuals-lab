@@ -36,7 +36,7 @@
  */
 
 /** Page order. `key` is what `categorize` returns. */
-export const CATEGORIES = [
+const CATEGORIES = [
   { key: "newScene", title: "🆕 New scenes" },
   { key: "scenes", title: "🎨 Scenes" },
   { key: "sound", title: "🔊 Sound & beat" },
@@ -52,7 +52,7 @@ export function prNumberFromSubject(subject) {
 }
 
 /** The subject without its trailing `(#N)`. */
-export function stripPrSuffix(subject) {
+function stripPrSuffix(subject) {
   return subject.replace(/\s*\(#\d+\)\s*$/, "");
 }
 
