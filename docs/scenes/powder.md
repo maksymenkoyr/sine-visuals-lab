@@ -104,6 +104,20 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   plume strength and `chunkStrength` by how far the hit stood out; Flat, the
   default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
+  audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
+  scene changed. Since #677 they had fired only on the hits the engine named
+  kicks and hats: on Billie Jean about half the old lanes' Bass hits and a
+  fifteenth of their Treble hits. `tools/tune-real.mjs powder` on Billie Jean,
+  30 s from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before #677 | 3.02 | 4.17 | 0.00 | 0.00 |
+  | #683 | 2.25 | 3.81 | 0.00 | 0.01 |
+  | #682 | 3.11 | 4.41 | 0.00 | 0.01 |
+
+  Back to the old lanes' motion. No hit fired on silence.
 
 ## Tuning notes
 
@@ -161,3 +175,4 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   MRT architecture, shove+spring v1 then a velocity-field v2/v3 rewrite,
   stateless chunk cubes, per-scene bloom. Merged as a draft scene.
 - #462 (draft, 2026-10-09): Rendering: the bloom/blur targets now come from gl.ts's shared render-target helper (`createTargetList`); no change to the look.
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)

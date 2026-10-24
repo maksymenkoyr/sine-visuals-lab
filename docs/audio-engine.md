@@ -205,6 +205,18 @@ The engine's kick, snare and hat become the Bass, Mid and Treble lanes
 (`src/render/bandEnergy.ts`). The engine already detects, names and spaces the
 hits, so the app decides only which of them a scene reacts to.
 
+The engine gives each attack one name, so a hat that lands with a kick or a
+snare never reaches Treble, and through laptop speakers few kicks are named
+kicks. Bass and Treble also fire on a jump in the engine's own band level,
+while the engine hears music with a clear pulse (`RISE_WINDOW_S` and the
+dials beside it, `RISE_CONFIDENCE`). Presence alone let loud talking and
+knocks near the mic through, in the few seconds it held on without music. Each
+lane has a refractory (`GROUP_TUNING`'s `riseRefractorySec`), so a jump and the
+engine's hit for the same sound count once. Mid takes only the engine's snares:
+a jump in the mids fires on kicks and hats as well. Every device runs this off
+its own frames' levels. The jump is measured over a window, not from one frame
+to the next, so a TV's interpolated levels find nearly the same hits.
+
 The silence gate (`src/audio/silenceGate.ts`) does that per device.
 `hitPasses(strength, dimmer)` lets a hit through while its strength times the
 gate's dimmer is over 1. A hit's strength is how far its peak cleared the
@@ -305,9 +317,12 @@ dates and tracks. They are facts about this build, not promises.
   The tempo targets leave `dnb` out for this reason.
 - The first tempo takes about 4 s on a strong beat. Weaker pulses go through the
   slower presence path.
-- Soft hats under loud kicks and snares are rarely named as hats, so Treble hits
-  are sparse on such songs. Billie Jean gives about 6 a minute, against 217 for
-  the old lanes.
+- Soft hats under loud kicks and snares are rarely named as hats. Treble finds
+  them from its level's jumps instead ("Hits, per device"), which waits for a
+  clear pulse: for the first seconds of a song, and in music the tracker hears
+  only faintly, Treble fires on the engine's hats alone, which are few in a mix.
+  With the jumps, Caustics on Billie Jean gets 212 Treble hits a minute; the
+  engine's hats alone gave 14 and the old lanes 222.
 - Through the eval's crude mic chain (`tests/tempoEval/micChain.ts`), the engine
   keeps a tempo for the few seconds after a track ends (house: 123.6 at the last
   frame). The old trackers did the same there (124.3); on random hits the engine
@@ -318,7 +333,8 @@ dates and tracks. They are facts about this build, not promises.
 - Quiet music under louder talking or hum cannot be told apart from them. The
   bands show the louder sound.
 - Through a laptop speaker a synthetic sine kick is little more than its click,
-  so it is named a hat. Hits still fire; only the name is wrong.
+  so the engine names it a hat. Bass still fires on it from the low band's jump
+  while music is playing.
 - Through a phone-sized speaker there is nothing under the low band's crossover,
   and the low band stays near zero. Folding more of the range into it was tried: it
   moved with the chords and vocals, not the bass. Kick hits and beats still work.
@@ -399,9 +415,24 @@ in. The extended bench is kept beside the original, at
 - The silence gate leaves every category within 0.02. It cuts false hits with no
   music from 58 a minute to 10, and costs some quiet hits: snare recall in music
   fell from 0.61 to 0.53, and isolated hats from 0.96 to 0.66.
-- Hits by kind compares each lane's hits with the true hits of its kind (F-measure
-  at 50 ms, simulated music). The app scores kick 0.69, snare 0.54 and hat 0.02;
-  the app before scored 0.62, 0.42 and 0.52. The engine names few hits in a mix
-  as hats, which is the Treble limit above. Through laptop speakers its kicks are
-  rarely named kicks (0.02, against 0.55 before), since those speakers play
-  almost no bass.
+- Hits by kind compares each lane's hits with the true hits of its kind
+  (F-measure at 50 ms). With the engine's hits alone, the app found almost no
+  hats in simulated music and almost no kicks through laptop speakers, which
+  play almost no bass. The jumps on Bass and Treble (#682) fixed both. Rerun on
+  2026-10-24 at `main` before and after:
+
+  | lane, set | engine hits only | with the jumps | the app before the engine (v4) |
+  |---|---:|---:|---:|
+  | kick, simulated music | 0.69 | 0.71 | 0.62 |
+  | snare, simulated music | 0.54 | 0.54 | 0.42 |
+  | hat, simulated music | 0.02 | 0.46 | 0.52 |
+  | kick, isolated hits | 0.68 | 0.67 | 0.28 |
+  | snare, isolated hits | 0.82 | 0.82 | 0.37 |
+  | hat, isolated hits | 0.70 | 0.71 | 0.25 |
+  | kick, laptop speakers | 0.02 | 0.80 | 0.55 |
+  | snare, laptop speakers | 0.37 | 0.37 | 0.38 |
+  | hat, laptop speakers | 0.20 | 0.56 | 0.57 |
+
+  On a TV the jumps find nearly as many: hat 0.46 in simulated music, kick
+  0.76 through laptop speakers. The app's composites stayed 0.80, 0.85 and
+  0.81, and its false hits with no music went from 9.88 to 9.95 a minute.

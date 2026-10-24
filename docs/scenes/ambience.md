@@ -90,6 +90,20 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   Sized; drives.ts's header, "Hit drivers"). Sized scales the strength of the
   swell a hit spawns by how far the hit stood out; Flat, the default, is
   unchanged.
+- 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
+  audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
+  scene changed. Since #677 they had fired only on the hits the engine named
+  kicks and hats: on Billie Jean about half the old lanes' Bass hits and a
+  fifteenth of their Treble hits. `tools/tune-real.mjs ambience` on Billie Jean,
+  30 s from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before #677 | 9.04 | 13.09 | 2.39 | 6.72 |
+  | #683 | 8.21 | 14.08 | 2.44 | 5.71 |
+  | #682 | 9.28 | 12.33 | 3.28 | 9.07 |
+
+  Little changed. The silence rows are the scene's own drift: no hit fires on silence in any build, so their spread isn't this change. No hit fired on silence.
 
 ## Tuning notes
 
@@ -131,3 +145,4 @@ premultiplied-halo pattern is the one to start from.
 - `#80` (2026-09-04, merged) — Ambience added: a WMP-style dot-lattice sheet
   with formation journeys and 4D turns, built and tuned same-day through the
   comet-sunburst-then-removed sequence described above.
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)

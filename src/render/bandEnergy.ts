@@ -1,5 +1,5 @@
 import type { EngineReading, FeatureFrame, HitKind } from "../audio/types.ts";
-import { NUM_BANDS } from "../audio/types.ts";
+import { HIT_STRENGTH_MAX, NUM_BANDS } from "../audio/types.ts";
 import { getBandSplit } from "../audio/bandSplit.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { hitPasses } from "../audio/silenceGate.ts";
@@ -13,17 +13,17 @@ import { hitStrength, pulseDecayScale, type HitShape, type HitParts } from "../a
 // device that draws runs this off the reading its frames carry, so the
 // laptop, the pop-out and a TV build the same lanes.
 //
-// The engine already detects, names and spaces the hits (its refractory);
-// this file only decides which of them a scene reacts to: a lane's onset is
-// its hit passing the silence gate (silenceGate.ts's hitPasses, `dimmer`
-// below), on every device with its own marks. A pulse's height is graded by
-// src/audio/hitStrength.ts when advance() is given a `shape`, from the hit's
-// strength and how loud the lane's own range of `frame.bands` is (an
-// absolute reading with auto-gain off, the default; src/audio/bandGains.ts's
-// header). The pulse takes the larger of its own decaying tail and that
-// grade, so a weak hit landing on a strong one's decay can't cut it down.
-// With no `shape` a pulse snaps to a flat 1. The onset edges are never
-// graded: a scene that cuts on the boolean fires on every hit.
+// A lane's onset is its engine hit, or for Bass and Treble a rise in the
+// engine's band level (RISE_WINDOW_S below), passing the silence gate
+// (silenceGate.ts's hitPasses, `dimmer` below), on every device with its own
+// marks. A pulse's height is graded by src/audio/hitStrength.ts when advance()
+// is given a `shape`, from the hit's strength and how loud the lane's own
+// range of `frame.bands` is (an absolute reading with auto-gain off, the
+// default; src/audio/bandGains.ts's header). The pulse takes the larger of
+// its own decaying tail and that grade, so a weak hit landing on a strong
+// one's decay can't cut it down. With no `shape` a pulse snaps to a flat 1.
+// The onset edges are never graded: a scene that cuts on the boolean fires on
+// every hit.
 //
 // The band split (src/audio/bandSplit.ts) picks which of `frame.bands` the
 // loudness reads; the engine's own crossovers follow the same split
@@ -44,13 +44,42 @@ const MIN_DT_SEC = 1e-4;
 // longest, a hat's is a flick. Exported because scenes (alien, sweep),
 // gateWindow.ts, drives.ts's Fixed/Loud heights and the meters time things
 // against exactly these falls.
-export const GROUP_TUNING: Record<"low" | "mid" | "high", { pulseDecayRate: number }> = {
-  low: { pulseDecayRate: 3.5 },
-  mid: { pulseDecayRate: 6 },
-  high: { pulseDecayRate: 10 },
+// riseRefractorySec spaces a lane's rise hits after any of its hits, and an
+// engine hit after a rise hit, so the two count once; null = no rise hits.
+export const GROUP_TUNING: Record<"low" | "mid" | "high", { pulseDecayRate: number; riseRefractorySec: number | null }> = {
+  low: { pulseDecayRate: 3.5, riseRefractorySec: 0.1 },
+  mid: { pulseDecayRate: 6, riseRefractorySec: null },
+  high: { pulseDecayRate: 10, riseRefractorySec: 0.05 },
 };
 
 const KIND_OF_LANE: Record<"low" | "mid" | "high", HitKind> = { low: "kick", mid: "snare", high: "hat" };
+
+// Bass and Treble also fire on a jump in the engine's own band level, while
+// the engine hears music (RISE_CONFIDENCE): its rise over the level's
+// minimum across RISE_WINDOW_S, against a running mean plus RISE_K deviations
+// over RISE_STATS_S, never under RISE_MIN. The engine gives each attack one name,
+// so a hat landing with a kick or snare, and a kick through speakers with no
+// bass, never reached their lanes (#682; the bench's Hits by kind,
+// docs/audio-engine.md). The engine's level, not `frame.bands`: through laptop
+// speakers it found twice the kicks. A window rather than a frame-to-frame
+// step, because a TV's levels are interpolated from wire frames and a step
+// there is spread over two render ticks. Mid keeps the engine's snares alone:
+// a rise in the mids fired on kicks and hats and halved isolated-snare F.
+// Without music the room's own sound (talking, a fan) rose often enough to
+// fire over 200 hits a minute on the laptop recordings.
+export const RISE_WINDOW_S = 0.04;
+const RISE_STATS_S = 1;
+export const RISE_K = 2;
+const RISE_MIN = 0.05;
+// Loud talking or knocks near the mic can hold the engine's presence on with
+// no music, and rises then fire there too. Tuned on the bench's no-music
+// rooms (2026-10-24): at engine/tempo.ts's MUSIC_ON the hits a minute with no
+// music rose from 9.88 to 10.29, at this line to 9.95. Against MUSIC_ON it
+// cost a little of the music's hits (laptop kick F 0.83 to 0.80) and kept
+// rises off isolated hits (isolated hat F 0.62 to 0.71).
+const RISE_CONFIDENCE = 0.5;
+// Too few samples to span RISE_WINDOW_S at a fast frame rate only shortens the window.
+const RISE_RING = 16;
 
 function clampDt(dtSec: number): number {
   return Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
@@ -93,6 +122,15 @@ interface LaneState {
   diag: OnsetDiag;
   /** The last graded hit, mutated in place on an onset (BandEnergy's lowHit). */
   hit: HitParts;
+  /** Seconds this lane has advanced; stamps the rise window's samples. */
+  clock: number;
+  riseLevels: Float64Array;
+  riseTimes: Float64Array;
+  risePos: number;
+  riseMean: number;
+  riseDev: number;
+  /** The last onset was a rise, not an engine hit. */
+  lastWasRise: boolean;
 }
 
 function makeLaneState(): LaneState {
@@ -103,7 +141,32 @@ function makeLaneState(): LaneState {
     onset: false,
     diag: { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity },
     hit: { standout: 0, loudness: 0, strength: 0 },
+    clock: 0,
+    riseLevels: new Float64Array(RISE_RING),
+    riseTimes: new Float64Array(RISE_RING).fill(-Infinity),
+    risePos: 0,
+    riseMean: 0,
+    riseDev: 0,
+    lastWasRise: false,
   };
+}
+
+/** The level's rise this tick as a hit strength: 1 at the running threshold. */
+function laneRise(state: LaneState, level: number, dt: number): number {
+  state.clock += dt;
+  let base = level;
+  for (let j = 0; j < RISE_RING; j++) {
+    if (state.clock - state.riseTimes[j] <= RISE_WINDOW_S) base = Math.min(base, state.riseLevels[j]);
+  }
+  state.riseLevels[state.risePos] = level;
+  state.riseTimes[state.risePos] = state.clock;
+  state.risePos = (state.risePos + 1) % RISE_RING;
+  const rise = level - base;
+  const threshold = Math.max(RISE_MIN, state.riseMean + RISE_K * state.riseDev);
+  const a = Math.min(1, dt / RISE_STATS_S);
+  state.riseMean += (rise - state.riseMean) * a;
+  state.riseDev += (Math.abs(rise - state.riseMean) - state.riseDev) * a;
+  return Math.min(HIT_STRENGTH_MAX, rise / threshold);
 }
 
 function advanceLane(
@@ -117,18 +180,28 @@ function advanceLane(
   shape: HitShape | undefined,
 ): void {
   const kind = KIND_OF_LANE[lane];
-  const strength = engine ? engine[kind] : 0;
+  const engineStrength = engine ? engine[kind] : 0;
   state.level = engine ? smoothEngineLevel(state.level, engine[lane], dt, rateScale) : slewLevel(state.level, 0, dt, rateScale);
 
-  const passes = hitPasses(strength, dimmer);
-  state.onset = passes;
+  const refractory = GROUP_TUNING[lane].riseRefractorySec;
+  const riseStrength = refractory !== null && engine ? laneRise(state, engine[lane], dt) : 0;
   state.sinceOnsetSec += dt;
+  const settled = refractory === null || state.sinceOnsetSec >= refractory;
+  const engineFires = hitPasses(engineStrength, dimmer) && (settled || !state.lastWasRise);
+  const riseCounts = !engineFires && settled && !!engine?.music && engine.confidence >= RISE_CONFIDENCE;
+  const riseFires = riseCounts && hitPasses(riseStrength, dimmer);
+  const passes = engineFires || riseFires;
+  const strength = riseFires ? riseStrength : engineStrength;
+  state.onset = passes;
   const surge = engine && engine.surgeKind === kind;
   state.diag.ratio = strength > 0 ? strength : surge ? engine.surge : 0;
-  state.diag.gated = !passes && hitPasses(strength, 1);
+  state.diag.gated = !passes && (hitPasses(engineStrength, 1) || (riseCounts && hitPasses(riseStrength, 1)));
   state.diag.blocked = !!surge && engine.blocked;
   state.diag.sinceOnsetSec = state.sinceOnsetSec;
-  if (passes) state.sinceOnsetSec = 0;
+  if (passes) {
+    state.sinceOnsetSec = 0;
+    state.lastWasRise = riseFires;
+  }
 
   state.pulse *= Math.exp(-dt * GROUP_TUNING[lane].pulseDecayRate * rateScale * pulseDecayScale(shape, lane));
   if (passes) {
