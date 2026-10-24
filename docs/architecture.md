@@ -13,7 +13,12 @@ prompt and the Input card's Source row, where `src/audio/inputDevice.ts` also pi
 which input device the mic means (e.g. a USB interface fed from a DJ mixer) — and
 hands back a raw stream.
 `src/audio/analyser.ts` runs the FFT and splits it into bands
-(`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
+(`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). Beside it,
+`src/audio/engineSource.ts` taps the same capture and feeds the audio engine
+(`src/audio/engine/`), which makes everything rhythmic: the Bass, Mid and Treble
+levels, the kick, snare and hat hits, the tempo and whether music is playing.
+`app.ts` writes its reading into the frame. `docs/audio-engine.md` has how it
+works and how the reading reaches other devices. `src/audio/
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
 the room's own loudness. That same adaptive shape is why `src/audio/
@@ -99,6 +104,9 @@ look and has no panel or audio of its own.
 - `src/net/protocol.ts` encodes/decodes `FeatureFrame` to/from a fixed-size binary
   frame. Read its header comment before touching the wire format — it documents
   the current layout and a legacy-decode fallback with its own sunset condition.
+  The engine's reading rides in the frame, and `src/net/wireDecimator.ts` and
+  `src/net/jitterBuffer.ts` keep its one-frame hits from being lost on the way
+  (`docs/audio-engine.md`, "From mic to TV").
 - `server/room.ts` (the Durable Object, class `Room`, bound as `ROOM` per
   `wrangler.toml`) is only the Cloudflare adapter. What a room does is
   `server/roomCore.ts`, which the tests drive with fake sockets; who may join and
