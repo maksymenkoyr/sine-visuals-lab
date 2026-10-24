@@ -9,9 +9,13 @@ scene, merged to main across two PRs (#79, #83).
 
 ## Where the code is
 
-- `src/render/scenes/kaleido/index.ts` — the `Scene` (via
-  `createFullscreenScene("kaleidoscope", "Kaleidoscope", FRAG, …)`), the
-  `SETTINGS` table (`style` as the scene's `variant`; `symmetry`, `spread`/
+- `src/render/scenes/kaleido/card.ts` — the scene's card, loaded with the page: id, name,
+  `SETTINGS` (with `STYLE_NAMES`, the `style` options), the `gallery` record and `loadBody`.
+  The body hands the card's settings to `createFullscreenScene`, so the registered settings
+  are the body's own objects.
+- `src/render/scenes/kaleido/index.ts` — the body: the rest of the scene, loaded after first
+  paint. The `Scene` (via `createFullscreenScene(card.id, card.name, FRAG, …)`), the
+  `SETTINGS` table in the card (`style` as the scene's `variant`; `symmetry`, `spread`/
   `rings` (Nesting), `spectrum`, `bass`, `morph`, `flow`, `zoom`, `pulse`,
   `ease`, `spin`, `breathe`, `twist`, `ink`, `tint`), and the JS-side phase
   accumulators (flow/morph/spin/zoom, `advanceBeatSurge`). `main()`'s
@@ -27,8 +31,7 @@ scene, merged to main across two PRs (#79, #83).
   petal profile, value noise/fbm including the scale-cycling zoom noise
   (`zfbm`), and the posterised palette read shared by every style.
 - `src/render/scenes/kaleido/styles.ts` — one GLSL function per style
-  (`MANDALA_GLSL`, `PORTAL_GLSL`, `PRISM_GLSL`, `BURST_GLSL`,
-  `STYLE_NAMES`), each handed the same frame (cell coordinates, cell size,
+  (`MANDALA_GLSL`, `PORTAL_GLSL`, `PRISM_GLSL`, `BURST_GLSL`), each handed the same frame (cell coordinates, cell size,
   beat-swelled radius, raw angle, fold count, pixel size, palette base) and
   returning a colour. The tiling rule every style must respect: depend only
   on radius and a *folded* angle, and mask any rotation to zero before
@@ -159,6 +162,7 @@ and had to be re-fetched).
   Sized; drives.ts's header, "Hit drivers"). Sized scales the amount passed
   to `advanceBeatSurge` by how far the hit stood out; Flat, the default, is
   unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/kaleido/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

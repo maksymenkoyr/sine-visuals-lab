@@ -9,8 +9,11 @@ round the wheel over most of an hour. In development, not on main yet.
 
 ## Where the code is
 
-- `src/render/scenes/nebula/index.ts` — the scene: `SETTINGS`, the three
-  draws (gas, scale-up with glare, stars), `GAS_HEIGHT` per quality preset,
+- `src/render/scenes/nebula/card.ts` — the scene's card, loaded with the page: id, name,
+  `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card, so the
+  registered settings are the body's own objects.
+- `src/render/scenes/nebula/index.ts` — the body: the rest of the scene, loaded after first
+  paint. The three draws (gas, scale-up with glare, stars), `GAS_HEIGHT` per quality preset,
   and the flight constants (`BASE_SPEED`, `SURGE_GAIN`).
 - `src/render/scenes/nebula/volume.ts` — `bakeVolume`: the gas as a
   tileable 3D texture, baked on the GPU once per mount (gas, detail and two
@@ -164,6 +167,7 @@ vs ours.
 - 2026-10-24 — Colour drift is on by default at the reference's measured
   pace, starting from violet on every mount. My call, not yet confirmed by
   the owner.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/nebula/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

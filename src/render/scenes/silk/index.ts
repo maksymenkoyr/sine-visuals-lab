@@ -4,6 +4,7 @@ import { resolveSceneSetting } from "../../autoTune.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
+import { card, SETTINGS } from "./card.ts";
 import { SHARP_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
 import { advanceSilk, createSilkState, fillEchoFlows, ECHO_FLOW_STRIDE, ECHO_MAX, type SilkState } from "./driver.ts";
 
@@ -57,7 +58,7 @@ import { advanceSilk, createSilkState, fillEchoFlows, ECHO_FLOW_STRIDE, ECHO_MAX
 //     are the generator's own clock, not audio-driven — nothing to sync.
 //  7. The report's one "strobe" (12.07s) shows no flash in its every-frame
 //     burst — not real; ignored.
-const ID = "silk";
+const ID = card.id;
 
 /** Sharp pass target as a fraction of the drawing buffer — each echo pays
  *  for a domain-warped field + a 2-tap numeric gradient, so full res at
@@ -69,218 +70,6 @@ const BLUR_STRIDE = 2.2;
 /** Echoes actually drawn per quality preset — the loop in SHARP_BODY caps
  *  at ECHO_MAX regardless, so this only ever narrows it. */
 const ECHO_COUNT_BY_PRESET: Record<string, number> = { high: ECHO_MAX, mid: 6, low: 4, floor: 3 };
-
-const SETTINGS: SceneSetting[] = [
-  {
-    key: "strands",
-    label: "Strands",
-    description: "How many nested ribbon lines the field draws.",
-    group: "Form",
-    min: 1,
-    max: 8,
-    step: 1,
-    default: 5,
-  },
-  {
-    key: "density",
-    label: "Density",
-    description: "How much of the field actually lights — sparsity, not line count.",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.45,
-    auto: { density: 0.3 },
-  },
-  {
-    key: "hole",
-    label: "Hole",
-    description: "Base radius of the dark centre — regimes breathe it wider or tighter.",
-    group: "Form",
-    min: 0.05,
-    max: 0.6,
-    step: 0.01,
-    default: 0.3,
-  },
-  {
-    key: "fold",
-    label: "Fold",
-    description: "Mirror count: Auto lets the slow regime cycle choose (mostly 8, sometimes 6), or pin one.",
-    group: "Form",
-    min: 0,
-    max: 2,
-    step: 1,
-    default: 0,
-    type: "enum",
-    options: ["Auto", "8", "6"],
-  },
-  {
-    key: "threads",
-    label: "Threads",
-    description: "Fine parallel lines trailing each ribbon — the reference's feather/comb fan. 0 = a bare outline.",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-  },
-  {
-    key: "web",
-    label: "Web",
-    description: "Brightness of the faint geometric star/rosette line under the silk, reaching past its own ring into the corners.",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-  },
-  {
-    key: "flow",
-    label: "Flow",
-    description: "How fast the ribbon field morphs.",
-    group: "Motion",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1.0,
-    auto: { tempo: 0.2, dynamics: 0.15 },
-  },
-  {
-    key: "zoom",
-    label: "Zoom",
-    description: "How fast the echoes travel in or out — never a spin, only a breathing zoom.",
-    group: "Motion",
-    min: 0,
-    max: 1.2,
-    step: 0.05,
-    default: 0.41,
-    auto: { tempo: 0.2, loudness: 0.15 },
-  },
-  {
-    key: "hold",
-    label: "Regime hold",
-    description: "How many bars a fold/hole/zoom-direction regime lasts before the next one travels in.",
-    group: "Motion",
-    min: 4,
-    max: 16,
-    step: 1,
-    default: 8,
-    reads: ["anim.dropOnset"],
-  },
-  {
-    key: "push",
-    label: "Bar push",
-    description: "Colour/shape swell on each bar, stronger every 4th bar.",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { pulse: 0.25, attack: 0.15 },
-  },
-  {
-    key: "echo",
-    label: "Echo",
-    description: "How far the trailing echoes and the diffuse haze carry before they fade.",
-    group: "Look",
-    min: 0.7,
-    max: 0.95,
-    step: 0.01,
-    default: 0.86,
-  },
-  {
-    key: "width",
-    label: "Width",
-    description: "Stroke width of each ribbon line.",
-    group: "Look",
-    min: 0.5,
-    max: 2,
-    step: 0.05,
-    default: 1.0,
-  },
-  {
-    key: "haze",
-    label: "Haze",
-    description: "How much diffuse teal haze fills in behind the crisp lines.",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-  },
-  {
-    key: "accent",
-    label: "Accent",
-    description: "Amber tint on a bar's swell, brightest on phrase bars.",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4,
-  },
-  {
-    key: "satReact",
-    label: "Colour from loudness",
-    description: "How much saturation rises and falls with the room's own loudness.",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.7,
-    auto: { loudness: 0.2 },
-  },
-  {
-    key: "colors",
-    label: "Colours",
-    description: "How far strands, echoes and threads spread across the hue ramp instead of sharing one hue.",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-  },
-  {
-    key: "tint",
-    label: "App palette",
-    description: "Share of ribbons that take the app's own colour palette (device menu) instead of the measured reference hues.",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.35,
-  },
-  {
-    key: "size",
-    label: "Size",
-    description: "Overall scale of the flower.",
-    group: "Camera",
-    min: 0.6,
-    max: 1.6,
-    step: 0.05,
-    default: 1.0,
-  },
-  {
-    key: "glow",
-    label: "Glow",
-    description: "Strength of the soft bloom halo.",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { brightness: 0.2 },
-  },
-  {
-    key: "brightness",
-    label: "Brightness",
-    description: "Overall output gain.",
-    group: "Post",
-    min: 0.5,
-    max: 1.5,
-    step: 0.05,
-    default: 1.0,
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const s = SETTINGS.find((x) => x.key === key);
@@ -449,10 +238,7 @@ function createSilkSceneImpl(): Scene {
   }
 
   return {
-    id: ID,
-    name: "Silk",
-    minQuality: "low",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
@@ -589,8 +375,5 @@ function createSilkSceneImpl(): Scene {
     },
   };
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-09-23" } as const;
 
 export const silkScene: Scene = createSilkSceneImpl();

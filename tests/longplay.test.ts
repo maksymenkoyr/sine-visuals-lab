@@ -10,7 +10,8 @@ import {
   type TourInput,
   type TourState,
 } from "../src/render/scenes/longplay/tour.ts";
-import { LONGPLAY_SETTINGS, VIEWS } from "../src/render/scenes/longplay/index.ts";
+import { LONGPLAY_SETTINGS } from "../src/render/scenes/longplay/card.ts";
+import { VIEWS } from "../src/render/scenes/longplay/index.ts";
 import { getSceneSetting, isProLocked, setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 import { setProUnlocked } from "../src/render/pro.ts";
 
