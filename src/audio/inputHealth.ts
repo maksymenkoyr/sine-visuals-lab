@@ -41,7 +41,7 @@
 
 import { rms } from "./waveform.ts";
 
-export type InputHealthKind = "ok" | "clipping" | "skipping" | "silent" | "hum";
+type InputHealthKind = "ok" | "clipping" | "skipping" | "silent" | "hum";
 
 export interface InputHealthReading {
   kind: InputHealthKind;
@@ -98,7 +98,7 @@ export interface InputHealth {
  *  waveform.ts's CLIP_THRESHOLD is — a true digital clip rides the rail for
  *  several consecutive samples but rarely lands on the exact integer
  *  boundary on the way in. */
-export const CLIP_LEVEL = 0.99;
+const CLIP_LEVEL = 0.99;
 /** How long a "clipping" reading lingers after the last clipped sample. */
 export const CLIP_HOLD_SEC = 3;
 
@@ -133,11 +133,11 @@ export const HUM_CLEAR_SEC = 2;
 // ---- mainsHumHz's own thresholds --------------------------------------
 /** Normalized autocorrelation at or above this counts as "locked" — see
  *  mainsHumHz. */
-export const HUM_CORR = 0.9;
+const HUM_CORR = 0.9;
 /** Below this mono RMS, in dBFS, there's nothing periodic to find — same
  *  reasoning as SILENT_DB, just a stricter floor so a near-silent hum isn't
  *  mistaken for hum riding on genuine silence. */
-export const HUM_FLOOR_DB = -80;
+const HUM_FLOOR_DB = -80;
 /** Half-width, in seconds of lag, for mainsHumHz's local-maximum check — see
  *  that function for why HUM_CORR alone isn't enough. The mains grid holds
  *  50/60 Hz within about ±0.2 Hz — under 4 samples of lag drift at audio
@@ -148,7 +148,7 @@ export const HUM_FLOOR_DB = -80;
  *  span scaled to the sample rate (12 samples at 48 kHz, 11 at 44.1 kHz)
  *  comfortably covers the mains drift while staying well short of a real
  *  note's own peak. */
-export const HUM_PEAK_SPAN_SEC = 0.00025;
+const HUM_PEAK_SPAN_SEC = 0.00025;
 /** How far r(L) may sit below its neighbours and still count as "the" local
  *  peak — see mainsHumHz's own local-max check. A real hum's own margin
  *  there is tiny: even a bare, noiseless 50 Hz tone only leads its
@@ -158,7 +158,7 @@ export const HUM_PEAK_SPAN_SEC = 0.00025;
  *  false positive this check exists to reject. D3/B3 (mainsHumHz's own
  *  worked example) miss by 0.06 or more — over 6x this tolerance — so
  *  raising the bar this far still rejects them cleanly. */
-export const HUM_PEAK_TOL = 0.01;
+const HUM_PEAK_TOL = 0.01;
 
 /** Normalized autocorrelation of `x` against itself, shifted by `lag`
  *  samples, over the overlapping region — 1.0 for a perfectly periodic

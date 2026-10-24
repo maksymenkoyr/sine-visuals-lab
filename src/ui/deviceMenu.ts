@@ -41,7 +41,7 @@ import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
-import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
+import { AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
 import {
   SILENCE_GATE_CLOSED_DEFAULT,
   SILENCE_GATE_MAX,
@@ -5875,7 +5875,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     accent: INPUT_GREEN,
     min: AUTO_GAIN_MIN,
     max: AUTO_GAIN_MAX,
-    defaultValue: AUTO_GAIN_DEFAULT,
+    defaultValue: AUTO_GAIN_MIN,
     mapping: "linear",
     ...percentReadout,
     description:

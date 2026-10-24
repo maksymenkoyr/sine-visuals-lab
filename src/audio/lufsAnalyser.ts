@@ -38,7 +38,7 @@ export interface LufsAnalyser {
 // The Web Audio maximum. Time-domain reads never run the FFT, so the only
 // cost of a big buffer is the copy — and it has to cover the longest gap
 // between two copies (read() below), which at 48 kHz is ~680 ms here.
-export const LUFS_TAP_FFT_SIZE = 32768;
+const LUFS_TAP_FFT_SIZE = 32768;
 
 export function createLufsAnalyser(context: AudioContext, sourceNode: AudioNode): LufsAnalyser {
   const k = kWeightingCoefficients(context.sampleRate);
