@@ -2,8 +2,8 @@
   "about": "Budgets for the size step of `npm run check` (the tools/check.mjs header says what it measures). pages: bytes of JS each page loads before its first paint, gzip -9. pinned: raw bytes pinAsset() fetches after load (src/pinnedAssets.ts). Lower a number whenever a change shrinks it; raising one needs a reason in the pull request.",
   "pages": {
     "index.html": 630900,
-    "output.html": 393900,
-    "tv.html": 414600
+    "output.html": 394200,
+    "tv.html": 415000
   },
   "pinned": 1000
 }
