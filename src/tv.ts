@@ -13,6 +13,7 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { createSceneGuard } from "./render/sceneGuard.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createRenderGate, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
@@ -342,6 +343,18 @@ function switchScene(next: Scene, crossfade = false): void {
   }
   announce();
 }
+
+/** Cuts to the scene before a failed one (or Spectrum) on this TV only; the
+ *  room's look is left as it is (render/sceneGuard.ts). */
+const sceneGuard = createSceneGuard({
+  switchTo: (next) => {
+    switchScene(next);
+    return scene === next;
+  },
+  dropOutgoing: () => compositor?.cancel(),
+  builtIn: () => getScene("spectrum"),
+  canRun: (s) => presetAllows(s, quality.preset),
+});
 
 /** Boot mount: the current scene, else the first of availableScenes() whose
  *  init() succeeds (a shader this TV's GPU won't compile must not leave the
@@ -719,6 +732,7 @@ function applyDoc(doc: LookDoc): void {
     const next = doc.scene === "" ? undefined : getScene(doc.scene);
     if (next && next !== scene && presetAllows(next, quality.preset)) {
       // Only a picture that is up crossfades; a TV still waiting for its frames just switches.
+      sceneGuard.forgive(next.id);
       switchScene(next, phase === "live"); // announces the new palette with it
       return;
     }
@@ -907,17 +921,20 @@ async function main(): Promise<void> {
     const displayFrame = applySensitivity(gained, sensitivity, expansion);
     const latchedAnim = renderLatch.consume(anim, nowRafMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
-    const outcome = compositor!.render({
-      ctx: sceneCtx,
-      scene,
-      frame: displayFrame,
-      viewport,
-      palette: paletteFade?.paletteAt(nowRafMs) ?? palette,
-      anim: latchedAnim,
-      drives,
-      drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
-      nowMs: nowRafMs,
-    });
+    const outcome = sceneGuard.draw(scene, () =>
+      compositor!.render({
+        ctx: sceneCtx,
+        scene,
+        frame: displayFrame,
+        viewport,
+        palette: paletteFade?.paletteAt(nowRafMs) ?? palette,
+        anim: latchedAnim,
+        drives,
+        drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
+        nowMs: nowRafMs,
+      }),
+    );
+    if (!outcome) return;
     overlay?.draw();
     // Two scenes at once (a crossfade) say nothing about what one costs.
     if (outcome.governable) governor?.recordFrame(nowRafMs);

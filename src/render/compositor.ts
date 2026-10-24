@@ -6,6 +6,7 @@ import { createFullscreenQuad, createProgram, drawFullscreenQuad, type GLProgram
 import { effectLook, NO_EFFECTS, stepFade, type EffectLook, type HeldEffects } from "./heldEffects.ts";
 import type { Palette } from "./palette.ts";
 import type { Scene, SceneContext, Viewport } from "./scene.ts";
+import { SceneRenderError } from "./sceneGuard.ts";
 
 /**
  * "Draw this frame": the one place app.ts, output.ts and tv.ts call instead of
@@ -48,6 +49,9 @@ import type { Scene, SceneContext, Viewport } from "./scene.ts";
  * a crossfade becomes a cut, instead of throwing into the render loop.
  * A lost GL context is handled by the page reload gl.ts's watchContextLoss
  * arranges, so nothing here tries to rebuild.
+ *
+ * A throwing scene surfaces as `SceneRenderError`, so the caller can tell the
+ * outgoing scene from the incoming one (see sceneGuard.ts).
  */
 
 export interface CompositorFrame {
@@ -192,13 +196,36 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
     return makeTarget(gl, w, h);
   }
 
+  /** Puts the GL state back after a scene threw part-way: a binding it left
+   *  would be inherited by the next scene or by our own passes. */
+  function resetGlState(): void {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindVertexArray(null);
+    gl.useProgram(null);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.CULL_FACE);
+  }
+
+  /** `scene.render` for this frame; a throw comes out as the SceneRenderError that names `scene`. */
+  function renderOne(f: CompositorFrame, scene: Scene): void {
+    try {
+      scene.render(f.ctx, f.frame, f.viewport, f.palette, f.anim, scene === f.scene ? f.drives : f.drivesFor(scene));
+    } catch (err) {
+      resetGlState();
+      throw new SceneRenderError(scene, err);
+    }
+  }
+
   /** Renders `scene` onto a cleared canvas and blits what it drew into `into`. */
   function drawSceneInto(f: CompositorFrame, scene: Scene, into: Target): void {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    scene.render(f.ctx, f.frame, f.viewport, f.palette, f.anim, scene === f.scene ? f.drives : f.drivesFor(scene));
+    renderOne(f, scene);
     const w = gl.drawingBufferWidth;
     const h = gl.drawingBufferHeight;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
@@ -283,7 +310,7 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
       if (!needsPass) {
         // The outgoing scene alone while a blend waits for its beat, else the scene.
         const only = transition && view ? transition.outgoing : f.scene;
-        only.render(f.ctx, f.frame, f.viewport, f.palette, f.anim, only === f.scene ? f.drives : f.drivesFor(only));
+        renderOne(f, only);
         return { governable: true };
       }
 
@@ -315,10 +342,12 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
         pass(null, a, capB, mix, look);
         return { governable: !blend };
       } catch (err) {
+        // A scene's own throw is not a GPU failure: effects stay on for the next frame.
+        if (err instanceof SceneRenderError) throw err;
         fail(err);
         // Whatever the failure left half-drawn is replaced by a plain frame.
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        f.scene.render(f.ctx, f.frame, f.viewport, f.palette, f.anim, f.drives);
+        renderOne(f, f.scene);
         return { governable: false };
       }
     },
