@@ -8,6 +8,11 @@ camera makes the regimes. Draft scene, merged to main.
 
 ## Where the code is
 
+- `src/render/scenes/tessera/card.ts` — the scene's card, loaded with the page: id, name,
+  `minQuality`, `SETTINGS` (the `settings` array), the `gallery` record and `loadBody`.
+  The body takes its id, name and settings from the card.
+- `src/render/scenes/tessera/index.ts` — the body, loaded after first paint: the render
+  loop and the scene object.
 - `src/render/scenes/tessera/lattice.ts` — the pure math, mirrored in
   `glsl.ts`'s vertex shader and pinned by `tests/tessera.test.ts`:
   `latticeLayout` (constant-arc-length ring spacing so box count grows with
@@ -132,6 +137,7 @@ interpretation was revised:
   renderbuffer), and comments that cited plan files not in the repo now
   point at Round 2 above.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/tessera/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
