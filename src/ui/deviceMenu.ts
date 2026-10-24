@@ -198,7 +198,8 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * cables (src/ui/cableLayer.ts) showing through the open middle: the Bands
  * card (scene name, audio source, and the live bars with the band faders
  * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
- * controls column anchored top-right alongside Power, whose cards run the
+ * controls column anchored top-right alongside the Output power card (while an output is
+ * open), whose cards run the
  * Auto master bar → Input
  * (its own header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
@@ -380,7 +381,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * collapses to just its title bar (createCard's foldId, controlsKit.ts):
  * click the chevron or anywhere on the header outside a Reset-style chip.
  * The Bands+meters column can also go away at once — "Hide left" in the
- * footer strip, or M — which leaves Power and the controls where they are
+ * footer strip, or M — which leaves the controls where they are
  * rather than reflowing anything. Solo (O, the footer's "Solo", or the
  * Solo eye just outside a pinned setting's left edge) goes further: only the
  * pinned setting stays — or, with
@@ -393,7 +394,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * left/Solo/Fullscreen/Keys — performing) every control it names
  * (wireKeysRow). That same module also owns the hover tooltip on any
  * `data-key`-tagged control and the hold-Shift-to-reveal keycaps — see its
- * own header. Separately, once every card in Power and
+ * own header. Separately, once every card in the Output power card and
  * that column is folded, there's nothing left to show but a stack of title
  * bars, so the pair collapses horizontally too, down to one small triangle
  * (columnsWrap's vc-cols-folded below) that reopens everything — driven by
@@ -722,6 +723,8 @@ export interface DeviceMenu {
   applyMidiCc(target: string, cc: number): void;
   /** Lets immersive fullscreen (src/ui/fullscreen.ts) skip idle-hiding the gear under an open panel. */
   isOpen(): boolean;
+  /** Opens the panel's Setup view on the Power card (the load chip, loadChip.ts). */
+  openPower(): void;
   /** The scene or palette changed from outside (Set pad, key, Autopilot): rebuilds what follows the scene. No-op while closed (open() does it). */
   sceneChanged(): void;
   /** app.ts samples the frame for the Picture block only while it is on screen (onScreen.ts says why that sample isn't free). */
@@ -1967,22 +1970,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
-  // Leftmost; a compact card, so it isn't wired into the digit-block keyboard
-  // jump (renumberBlocks/markBlock). Its controls are chip buttons plus the
-  // Resolution slider, outside the Tab ring (ringElements() skips this column).
-  const powerCard = createPowerCard({
-    getPowerMode: deps.getPowerMode,
-    onPowerModeChange: deps.onPowerModeChange,
-    getQualityChoice: deps.getQualityChoice,
-    onQualityChoiceChange: deps.onQualityChoiceChange,
-    getPowerStatus: deps.getPowerStatus,
-    isPreview: deps.isPreview,
-    canResizePreview: deps.canResizePreview,
-    getPreviewSize: deps.getPreviewSize,
-    onPreviewSizeChange: deps.onPreviewSizeChange,
-    getResolution: deps.getPreviewResolution,
-    onResolutionChange: deps.onPreviewResolutionChange,
-  });
+  // Lives in the Setup view: appended to audioMeters.setupEl once that exists.
+  // A plain card (no folded square), so it isn't wired into the digit-block
+  // keyboard jump (renumberBlocks/markBlock). Its controls are chip buttons plus
+  // the Resolution slider, outside the Tab ring (ringElements() skips it).
+  const powerCard = createPowerCard(
+    {
+      getPowerMode: deps.getPowerMode,
+      onPowerModeChange: deps.onPowerModeChange,
+      getQualityChoice: deps.getQualityChoice,
+      onQualityChoiceChange: deps.onQualityChoiceChange,
+      getPowerStatus: deps.getPowerStatus,
+      isPreview: deps.isPreview,
+      canResizePreview: deps.canResizePreview,
+      getPreviewSize: deps.getPreviewSize,
+      onPreviewSizeChange: deps.onPreviewSizeChange,
+      getResolution: deps.getPreviewResolution,
+      onResolutionChange: deps.onPreviewResolutionChange,
+    },
+    { square: false },
+  );
   // The pop-out output's own Power card, shown only while an output window is
   // open; its status is what the output reports (net/outputSync.ts's
   // OutputRenderStatus).
@@ -2024,7 +2031,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let outputPowerShown = false;
   const powerCol = document.createElement("div");
   powerCol.className = "vc-power-col";
-  powerCol.append(powerCard.el, outputPowerCard.el);
+  powerCol.append(outputPowerCard.el);
 
   // One card for the live spectrum and the band gains: bandFaders.ts draws the
   // faders over the bars, so what you tune and what you watch are the same
@@ -2068,6 +2075,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     patch: jackPatch,
   });
+  audioMeters.setupEl.append(powerCard.el);
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -4940,7 +4948,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
   }
 
-  /** Places the Setup column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-setup sets the fallback). The gap's right end is the Power card's left edge while Power shows; if that leaves less than SETUP_COL_MIN_PX, the column drops below the Power card and runs to the settings column instead. */
+  /** Places the Setup column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-setup sets the fallback). The gap's right end is the Output power card's left edge while that card shows; if that leaves less than SETUP_COL_MIN_PX, the column drops below the Output power card and runs to the settings column instead. */
   function placeSetupColumn(): void {
     if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
       setPlacement(audioMeters.setupEl, SETUP_COL_CLEAR);
@@ -4990,7 +4998,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   spectrumCol.append(bandsBlock, audioMeters.el);
 
-  // Power travels with this column so the CSS (vc-cols-wrap, controlsTheme.ts)
+  // The Output power card travels with this column so the CSS (vc-cols-wrap, controlsTheme.ts)
   // can hide both when everything is folded. columnsToggle stays visible then;
   // clicking it unfolds every folded card via its chevron.
   const columnsToggle = document.createElement("button");
@@ -5011,7 +5019,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // "Hide left" active, Bands and the meter cards are excluded
   // (isFolded(METERS_COLUMN), not an offsetParent probe: that forced a
   // synchronous layout per class mutation and stalled the panel), and so is
-  // Power, whose folded square (powerCard.ts) needs no "▸".
+  // the Output card, whose folded square (powerCard.ts) needs no "▸".
   function refreshColumnsFold(): void {
     const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")].filter((c) => c.style.display !== "none");
     columnsWrap.classList.toggle(
@@ -6725,7 +6733,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   setupBtn.style.cssText = footerBtnStyle;
   setupBtn.className = "vc-setup-btn";
   setupBtn.textContent = "Setup";
-  setupBtn.title = "Check the input: waveform, input level, loudness, gate, hit shape and heat history";
+  setupBtn.title = "Check the input: waveform, input level, loudness, gate, hit shape, heat history and device load";
   setupBtn.addEventListener("click", () => {
     const open = !root.classList.contains("vc-setup-open");
     // Setup hides with the left column (vc-meters-hidden), so opening it brings that back.
@@ -6820,7 +6828,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   setMetersHidden(isFolded(METERS_COLUMN));
 
+  let setupShown = false;
   function setSetupShown(open: boolean): void {
+    setupShown = open;
     setFolded(SETUP_COLUMN, !open, true);
     root.classList.toggle("vc-setup-open", open);
     audioMeters.setSetupOpen(open);
@@ -7009,12 +7019,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // controls with a layout box: folded card bodies are display:none, an
   // unpinned setting's patch panel is display:none, and lineEditor.strengthRow
   // is detached outside line mode; such a control would sit in the ring and
-  // fail to focus. The Power column's Resolution slider is left out, as its
-  // chips are: a folded Power card is only visibility:hidden (it keeps its
+  // fail to focus. The Power cards' Resolution sliders are left out, as their
+  // chips are: a folded Output card is only visibility:hidden (it keeps its
   // layout box), so Tab would dead-end on a hidden control.
   function ringElements(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
-      (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col"),
+      (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col") && !powerCard.el.contains(el),
     );
   }
 
@@ -7227,6 +7237,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
+    openPower() {
+      if (!isOpen) open();
+      if (isFolded(METERS_COLUMN)) setMetersHidden(false);
+      setSetupShown(true);
+      powerCard.unfold();
+      powerCard.el.scrollIntoView({ block: "nearest" });
+    },
     sceneChanged() {
       if (isOpen) syncToScene();
     },
@@ -7412,7 +7429,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       refreshSpectrumHeader();
       powerCard.setTitle(deps.isPreview() ? "Preview" : "Power");
-      powerCard.refresh();
+      // Its readouts are only written while Setup shows the card open.
+      if (setupShown && !powerCard.isFolded()) powerCard.refresh();
       const outputShown = deps.getOutputPowerStatus() !== null;
       if (outputShown !== outputPowerShown) {
         outputPowerShown = outputShown;

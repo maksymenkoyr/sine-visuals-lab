@@ -309,6 +309,16 @@
         color: rgba(255, 255, 255, 0.8);
         white-space: nowrap;
       }
+      /* The load chip (src/ui/loadChip.ts): its dot takes the load step from
+       * data-load. The colours mirror controlsTheme.ts's POWER_TEAL, HOT_YELLOW
+       * and HOT_RED, kept in sync by hand like the other colours in this file. */
+      .lcDot {
+        display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+        margin-right: 7px; vertical-align: 1px; background: rgba(255, 255, 255, 0.35);
+      }
+      #loadChip[data-load="ok"] .lcDot { background: #4dd4c0; }
+      #loadChip[data-load="busy"] .lcDot { background: #eab308; }
+      #loadChip[data-load="over"] .lcDot { background: #ef4444; }
       /* Pop-out output controls (src/ui/outputControls.ts), top centre: a
        * CDJ's Cue and Play — round pads with a lit ring (.outFace), CUE orange,
        * PLAY green, each key's name printed under its pad. The state line
@@ -876,6 +886,7 @@
       <button id="panelBtn" class="iconBtn" title="This room's devices">&#9638; ROOM</button>
       <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
       <button id="sceneBtn" class="iconBtn" type="button"></button>
+      <button id="loadChip" class="iconBtn" type="button" style="display:none"></button>
       <span id="sceneVersion" tabindex="0"></span>
     </div>
     <!-- Output controls (src/ui/outputControls.ts), top centre: shown only

@@ -23,5 +23,5 @@
   {"name":"character-jacks","scene":"kaleidoscope","size":[1280,800],"panel":"Character","wait":2000,"clip":{"text":"Character","margin":12}},
   {"name":"master-expansion","scene":"kaleidoscope","panel":"Master","steps":[{"js":"document.querySelector('button[title^=\"Up only\"]').click()"},{"js":"document.querySelector('.vc-controls-col').scrollTop -= 30"}],"wait":2500,"clip":{"text":"Master","margin":12}},
   {"name":"gallery","path":"#/","css":".gal-section-name{scroll-margin-top:28px}","steps":[{"js":"[...document.querySelectorAll('.gal-section-name')].find(e=>e.textContent.trim()==='In development').scrollIntoView({block:'start'})"}],"wait":1500},
-  {"name":"power-card","scene":"kaleidoscope","panel":"Master","steps":[{"sel":".vc-power-square","wait":2500}],"wait":1000,"clip":{"box":[700,275,260,170]}}
+  {"name":"power-card","scene":"kaleidoscope","panel":"Master","steps":[{"sel":"#loadChip","wait":2500}],"wait":1000,"clip":{"text":"Power","margin":12}}
 ]

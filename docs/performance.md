@@ -66,9 +66,9 @@ For digging into one finding after a snapshot points at it:
   side, panel open, main-thread share and layout/paint counts interleaved
   round by round; `panelDrawProbe.mjs` counts how often the panel draws and
   what it draws while out of view.
-- The Power card in the panel — live FPS, Missed frames and Longest gap,
-  main thread, GPU and heap on a real device, including the ones the
-  snapshot can't reach.
+- The Power card (the load chip, top left, opens it in the panel's Setup
+  view) — live FPS, Missed frames and Longest gap, main thread, GPU and heap
+  on a real device, including the ones the snapshot can't reach.
 
 ## Standing decisions
 
