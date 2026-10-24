@@ -139,7 +139,7 @@ export interface RosterEntry {
  *  server/roomDevices.ts's `DeviceSetResult`; `shape` is a message that is not
  *  a valid one, `rate` is too many changes too quickly, `owner-only` is a
  *  change only the owner may make (`canPlay`) sent by someone else. */
-export type DeviceRejectReason = "unknown" | "no-mic" | "tv-off" | "bad-follow" | "shape" | "rate" | "owner-only";
+type DeviceRejectReason = "unknown" | "no-mic" | "tv-off" | "bad-follow" | "shape" | "rate" | "owner-only";
 
 export interface DeviceReject {
   type: "deviceReject";
