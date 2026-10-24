@@ -39,8 +39,9 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, type ClipLibrary } from "../dancer
 import { ATLAS_PX, buildGlyphAtlas } from "./glyphs.ts";
 import { createFigure, FIGURE_HEIGHT, type Figure } from "./figure.ts";
 import { BURST_SLOTS, FIGURE_FRAG, FIGURE_VERT, RAIN_FRAG, RAIN_VERT } from "./glsl.ts";
+import { card, SETTINGS } from "./card.ts";
 
-const ID = "coderain";
+const ID = card.id;
 
 // The Dancers scene's clip library (src/pinnedAssets.ts's header, "Scene
 // media"): sceneMedia keys by path, so this is the same copy Dancers holds.
@@ -117,159 +118,6 @@ const GREEN = {
   figure: [0.86, 1.0, 0.8],
 } as const;
 const SEED = 20261005;
-
-const SETTINGS: SceneSetting[] = [
-  // Form
-  {
-    key: "density",
-    label: "Density",
-    description: "How many columns fill the space — right is a thicker downpour",
-    group: "Form",
-    min: 0.1,
-    max: 1,
-    step: 0.05,
-    default: 0.32,
-  },
-  {
-    key: "glyphSize",
-    label: "Glyph size",
-    description: "How big the glyphs are",
-    group: "Form",
-    min: 0.5,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "trail",
-    label: "Trail length",
-    description: "How many glyphs stay lit behind each falling head",
-    group: "Form",
-    min: 0.3,
-    max: 2.5,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "figure",
-    label: "Figure",
-    description: "How bright the dancer made of glyphs is — 0 hides it",
-    group: "Form",
-    min: 0,
-    max: 1.5,
-    step: 0.05,
-    default: 0.8,
-  },
-  // Motion
-  {
-    key: "fall",
-    label: "Fall speed",
-    description: "How fast the heads fall down the columns",
-    group: "Motion",
-    min: 0.1,
-    max: 2.5,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "rush",
-    label: "Rush",
-    description: "How much the music speeds the rain up when it's loud and slows it when it's quiet",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    drive: { default: "anim.energy" },
-  },
-  {
-    key: "downpour",
-    label: "Downpour",
-    description: "How many columns a hit starts a fresh, bright head in, from the top of the view",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "downpour" } },
-  },
-  {
-    key: "flicker",
-    label: "Flicker",
-    description: "How often the glyphs change into other glyphs",
-    group: "Motion",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-  },
-  // Look
-  {
-    key: "brightness",
-    label: "Brightness",
-    description: "How bright the rain is",
-    group: "Look",
-    min: 0.3,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "hitGlow",
-    label: "Hit glow",
-    description: "How much the falling heads flare on a hit",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "colour",
-    label: "Colour",
-    description: "Green like the film, or the room's palette",
-    group: "Look",
-    type: "enum",
-    options: ["Green", "Palette"],
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 0,
-  },
-  // Camera
-  {
-    key: "glide",
-    label: "Glide",
-    description: "How fast the camera drifts forward through the columns",
-    group: "Camera",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "turn",
-    label: "Turn",
-    description: "How far the camera swings round to a new heading on a drop",
-    group: "Camera",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    drive: { default: "anim.dropOnset", hit: { reactionLabel: "turn" } },
-  },
-  {
-    key: "tilt",
-    label: "Tilt",
-    description: "Where the camera looks — left looks down, right looks up into the rain",
-    group: "Camera",
-    min: -0.5,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const s = SETTINGS.find((x) => x.key === key);
@@ -389,9 +237,7 @@ function createCodeRainScene(): Scene {
   }
 
   return {
-    id: ID,
-    name: "Code Rain",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
@@ -617,8 +463,5 @@ function createCodeRainScene(): Scene {
     },
   };
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "development", added: "2026-10-05" } as const;
 
 export const codeRainScene = createCodeRainScene();

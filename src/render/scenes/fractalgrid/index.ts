@@ -23,7 +23,7 @@
 // closer to 0 than its offset (|Z + δ| < |δ|), or the reference orbit runs
 // out, the pixel rebases: δ becomes its whole z and it carries on from the
 // orbit's start. That keeps every pixel right without a second reference, at
-// any depth down to motion.ts's MAX_DEPTH. Near the whole set the offsets
+// any depth down to card.ts's MAX_DEPTH. Near the whole set the offsets
 // are large and pixels rebase often, which is the plain iteration again.
 // dz/dc is carried in screen units (scaled by the view size), so it stays an
 // ordinary number however deep the view is.
@@ -54,18 +54,15 @@ import {
   HOME_HALF_H,
   HOME_HALF_W,
   HOME_X,
-  MAX_DEPTH,
-  TARGET_DEPTH,
   createDiveState,
   diveIterations,
   foldPosition,
   stepDive,
 } from "./motion.ts";
+import { card, ITER_CAP, SETTINGS } from "./card.ts";
 
-const ID = "fractalgrid";
+const ID = card.id;
 
-/** Iterations at uDetail = 1; the quality proxy scales it down. */
-const ITER_CAP = 1200;
 /** Extra iterations per e-fold, as a multiple of what escaping near the
  *  target costs (DiveTarget.itersPerEfold), for pixels slower than it. */
 const ITER_MARGIN = 2;
@@ -89,110 +86,6 @@ const WEIGHT_PULSE = 0.6;
 /** Bars a drop's inversion holds, and the seconds assumed with no tempo. */
 const INVERT_BARS = 4;
 const INVERT_FALLBACK_SEC = 8;
-
-const SETTINGS: SceneSetting[] = [
-  // Form
-  {
-    key: "density",
-    label: "Grid lines",
-    description: "How many grid lines cross each bulb — right packs them closer",
-    group: "Form",
-    min: 8,
-    max: 80,
-    step: 1,
-    default: 32,
-  },
-  {
-    key: "iterations",
-    label: "Iterations",
-    description:
-      "How many times the formula repeats before the grid is drawn — left leaves the grids warped and half-formed, right settles them and sharpens the edges",
-    group: "Form",
-    min: 12,
-    max: ITER_CAP,
-    step: 1,
-    default: 160,
-  },
-  // Motion
-  {
-    key: "step",
-    label: "Step",
-    description: "How far the grid lines jump on each hit, as a share of a cell",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "step" } },
-  },
-  {
-    key: "fold",
-    label: "Fold",
-    description:
-      "How far each tick moves every bulb's grid on to the next point of its cycle — 1 is one whole step, 0 turns folding off",
-    group: "Motion",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    drive: { default: { source: "beat", grid: 4 }, hit: { reactionLabel: "fold" } },
-  },
-  // Look
-  {
-    key: "weight",
-    label: "Line weight",
-    description: "How thick the lines are, as a share of a cell",
-    group: "Look",
-    min: 0.04,
-    max: 0.5,
-    step: 0.01,
-    default: 0.2,
-    drive: { default: "feature.onset" },
-  },
-  {
-    key: "invert",
-    label: "Invert",
-    description: "How far a drop swaps black and white, for a few bars — 0 never inverts",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 1,
-    drive: { default: "anim.dropOnset", hit: { reactionLabel: "invert" } },
-  },
-  {
-    key: "colours",
-    label: "Colours",
-    description: "How far black and white pull toward the app's colour palette",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-  },
-  // Camera
-  {
-    key: "dive",
-    label: "Dive speed",
-    description: "How fast the camera zooms into a bulb and back out to the whole set",
-    group: "Camera",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-    drive: { default: "anim.low" },
-  },
-  {
-    key: "depth",
-    label: "Dive depth",
-    description: "How far each dive zooms in before cutting back to the whole set — right goes deeper",
-    group: "Camera",
-    min: 0.25,
-    max: Math.floor((MAX_DEPTH / TARGET_DEPTH) * 20) / 20,
-    step: 0.05,
-    default: 1,
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const s = SETTINGS.find((x) => x.key === key);
@@ -342,8 +235,8 @@ function uploadOrbit(index: number, orbit: ReferenceOrbit): void {
   refFor = index;
 }
 
-const base = createFullscreenScene(ID, "Fractal Grid", FRAG, {
-  settings: SETTINGS,
+const base = createFullscreenScene(card.id, card.name, FRAG, {
+  settings: card.settings,
   extraUniformDecls: [
     "uniform highp sampler2D uRef;",
     "uniform float uRefLen;",
@@ -442,8 +335,5 @@ function withReferenceTexture(scene: Scene): Scene {
     },
   };
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-10-05" } as const;
 
 export const fractalGridScene = withReferenceTexture(base);

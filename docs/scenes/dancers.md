@@ -6,7 +6,12 @@ featured, registered at `minQuality: "floor"` so it also runs on TV presets.
 
 ## Where the code is
 
-- `src/render/scenes/dancers/index.ts` — the scene entry (`DANCERS_ID`,
+- `src/render/scenes/dancers/card.ts` — the scene's card, loaded with the page: id, name,
+  `minQuality`, `SETTINGS` (with the option lists they use: `STYLES`, `BLENDS`,
+  `RENDERERS`, `SKIN_NAMES`), the `gallery` record and `loadBody`. The body spreads the
+  card, so the registered settings are the body's own objects. The skin shaders stay in
+  the body, since the card may not import GLSL.
+- `src/render/scenes/dancers/index.ts` — the body, loaded after first paint: the scene entry (`DANCERS_ID`,
   `dancersScene`): owns the camera, the raymarch loop and the `renderer` /
   `style` / `blend` / `skin` settings; delegates shape and colour to whichever
   skin in `SKINS` is selected.
@@ -112,6 +117,7 @@ original work built around that data.
   instead of `Object.fromEntries`. It runs at module load, which the TV
   bundle evaluates too, and the older TV runtimes the es2017 build target
   exists for lack `fromEntries`. Same table, same indices — no visual change.
+- 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/dancers/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

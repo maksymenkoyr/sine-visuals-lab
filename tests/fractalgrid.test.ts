@@ -5,7 +5,6 @@ import {
   EASE_FLOOR,
   FOLD_SPAN,
   HOLD_SEC,
-  MAX_DEPTH,
   MAX_STEP_SEC,
   createDiveState,
   diveIterations,
@@ -16,6 +15,7 @@ import {
   type DiveInputs,
   type DiveState,
 } from "../src/render/scenes/fractalgrid/motion.ts";
+import { MAX_DEPTH } from "../src/render/scenes/fractalgrid/card.ts";
 import { ddAdd, ddMul, referenceOrbit } from "../src/render/scenes/fractalgrid/deep.ts";
 
 const DT = 1 / 60;
