@@ -32,6 +32,7 @@
  */
 import { createBeatClock } from "../../beatClock.ts";
 import { estimateTempo, BPM_MIN, BPM_MAX, type TempoOnsetVote } from "../../../audio/tempoComb.ts";
+import { MAX_ENERGY } from "./card.ts";
 
 /** Slots in the learned one-bar move. */
 export const MOVE_BINS = 64;
@@ -169,8 +170,6 @@ export function createDance(): Dance {
   return d;
 }
 
-/** The most energy there is (the speed steps sit below it). */
-export const MAX_ENERGY = 1.5;
 /** One pump hit at full Energy pump adds this much energy. */
 const PUMP_KICK = 0.2;
 /** How fast energy rises to a floor above it, per second. */
