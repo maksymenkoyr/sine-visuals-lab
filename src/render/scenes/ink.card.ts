@@ -1,0 +1,153 @@
+// Ink Synth's card: what every page needs before the scene's code loads (src/render/lazyScene.ts).
+import type { Scene, SceneCard } from "../scene.ts";
+import type { SceneSetting } from "../sceneSettings.ts";
+
+// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
+export const gallery = { stage: "draft", added: "2026-09-18" } as const;
+
+const SETTINGS: SceneSetting[] = [
+  {
+    key: "ink",
+    label: "Ink",
+    description: "How much ink is on the page — the size of the solid core and how far the arms reach.",
+    group: "Form",
+    min: 0.3,
+    max: 2.5,
+    step: 0.05,
+    default: 1.0,
+    auto: { loudness: 0.25, density: 0.15 },
+  },
+  {
+    key: "arms",
+    label: "Arm tightness",
+    description: "How tightly the ink hugs the two axes — higher is a thinner cross with emptier diagonals.",
+    group: "Form",
+    min: 0.3,
+    max: 3,
+    step: 0.05,
+    default: 1.0,
+    auto: { density: -0.2 },
+  },
+  {
+    key: "swirl",
+    label: "Swirl",
+    description: "How hard the lines curl into spirals along the arms.",
+    group: "Form",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1.0,
+    auto: { dynamics: 0.2, brightness: 0.15 },
+  },
+  {
+    key: "ribbon",
+    label: "Ribbon",
+    description: "Fine ruled lines at the left, broad liquid marbled strokes at the right — each bar rolls around this.",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.7,
+    auto: { loudness: 0.25, density: -0.15 },
+  },
+  {
+    key: "lineDensity",
+    label: "Line density",
+    description: "How finely the ink is ruled — more lines, thinner, closer together.",
+    group: "Form",
+    min: 0.3,
+    max: 2.5,
+    step: 0.05,
+    default: 1.0,
+    auto: { brightness: 0.3, density: 0.15 },
+  },
+  {
+    key: "flow",
+    label: "Flow",
+    description: "How fast the lines slide along the arms.",
+    group: "Motion",
+    min: 0,
+    max: 3,
+    step: 0.05,
+    default: 1.0,
+    auto: { tempo: 0.3, pulse: 0.15 },
+  },
+  {
+    key: "morph",
+    label: "Morph",
+    description: "How different each bar's picture is from the last — where the spirals sit, how tight they wind.",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1.0,
+    auto: { dynamics: 0.25, attack: 0.15 },
+  },
+  {
+    key: "stretch",
+    label: "Stretch",
+    description: "How far a hit smears the whole picture sideways before it relaxes.",
+    group: "Motion",
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    default: 0.6,
+    auto: { attack: 0.3, pulse: 0.15 },
+    // The trigger is anim.onset directly (advanceStretch's own decay
+    // math is unaffected by which edge resets it) — a plain Beat default.
+    drive: { default: "feature.onset", hit: { reactionLabel: "stretch" } },
+  },
+  {
+    key: "bassSwell",
+    label: "Bass swell",
+    description: "How much the bass grows the core and the arms.",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 0.8,
+    auto: { loudness: 0.2 },
+    // uLow directly (the core-radius term in FRAG) — a plain Bass level default.
+    drive: { default: "anim.low" },
+  },
+  {
+    key: "colorSplit",
+    label: "Colour split",
+    description: "How far the three colour channels disagree near the core — pure red, green or blue where they do.",
+    group: "Look",
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    default: 0.5,
+    auto: { brightness: 0.25, dynamics: 0.15 },
+  },
+  {
+    key: "paper",
+    label: "Paper",
+    description: "How bright the paper is.",
+    group: "Look",
+    min: 0.5,
+    max: 1.05,
+    step: 0.01,
+    default: 1.0,
+  },
+  {
+    key: "negative",
+    label: "Negative",
+    description: "White ink on black paper.",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 0,
+    type: "boolean",
+  },
+];
+
+export const card: SceneCard = {
+  id: "ink",
+  name: "Ink Synth",
+  settings: SETTINGS,
+};
+
+export const loadBody = (): Promise<Scene> => import("./ink.ts").then((m) => m.inkScene);
