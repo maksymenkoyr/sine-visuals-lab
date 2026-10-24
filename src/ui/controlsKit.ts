@@ -453,13 +453,13 @@ export const rowResetStyle = `
 `;
 
 // Palette chips.
-export const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
+const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
 const paletteChipStyle = `
   font: 400 10.5px/1.2 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.7);
   background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
   padding: 4px 8px; cursor: pointer;
 `;
-export const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
+const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
 // The Palette card: one row per palette group, each chip led by a strip of
 // that palette's ramp.
 export const paletteGroupsStyle = `display: grid; gap: 6px;`;

@@ -19,7 +19,7 @@
  * Absent key = open (a card starts expanded the first time it's ever seen).
  */
 
-export interface PanelFolds {
+interface PanelFolds {
   [cardId: string]: boolean;
 }
 

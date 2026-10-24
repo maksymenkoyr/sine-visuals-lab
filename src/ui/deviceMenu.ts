@@ -470,26 +470,26 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * panel never imports a store.
  */
 
-export interface MenuItem {
+interface MenuItem {
   id: string;
   name: string;
 }
 
 export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
 
-export interface InputDevicesState {
+interface InputDevicesState {
   /** Empty until the mic permission's first grant (the row shows one "Microphone" placeholder meanwhile). */
   options: InputDeviceOption[];
   defaultLabel: string | null;
   missing: InputDevicePref | null;
   liveLabel: string | null;
 }
-export interface AudioStatus {
+interface AudioStatus {
   source: AudioSource;
   sampleRate: number | null;
 }
 
-export interface PaletteMenuItem extends MenuItem {
+interface PaletteMenuItem extends MenuItem {
   /** Groups in order of first appearance. */
   group: string;
   /** Ramp, darkest first. */

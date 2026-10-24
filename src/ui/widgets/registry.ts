@@ -248,7 +248,3 @@ export function registerWidget(id: string, build: WidgetBuild): void {
 export function getWidget(id: string): WidgetBuild | undefined {
   return widgets.get(id);
 }
-
-export function listWidgetIds(): readonly string[] {
-  return [...widgets.keys()];
-}

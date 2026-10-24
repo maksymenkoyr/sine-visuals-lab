@@ -20,7 +20,7 @@
 
 import { setHintText } from "./hintSwatches.ts";
 
-export interface Tooltip {
+interface Tooltip {
   el: HTMLElement;
   /** Positions and fills the tooltip near `target`, in `color`'s left
    *  rule. `lines` are stacked as separate rows — a jack's own two-line
