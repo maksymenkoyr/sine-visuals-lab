@@ -9,11 +9,8 @@ import { NUM_BANDS } from "../../audio/types.ts";
 import {
   createFluidSim,
   detectSimFormat,
-  FOLD_WEDGES_MAX,
-  FOLD_WEDGES_MIN,
   MIRROR_KALEIDO,
   MIRROR_LR,
-  MIRROR_OPTIONS,
   MIRROR_RADIAL,
   MIRROR_TB,
   sameSimSize,
@@ -26,6 +23,7 @@ import {
   type Splat,
 } from "./fluidSim.ts";
 import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
+import { card, SETTINGS } from "./fluid.card.ts";
 
 // Neon Fluid: a 2D incompressible dye sim (Stam 1999 stable-fluids scheme;
 // vorticity confinement per Fedkiw et al. — textbook GPU Gems ch.38 math,
@@ -103,7 +101,7 @@ import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 // anim.dtSec — the anim clock advances every rAF tick while render() is
 // itself frame-pace-capped, so dtSec under-counts the wall time a rendered
 // frame actually covers, and a stable fluid sim needs the real one.
-const ID = "fluid";
+const ID = card.id;
 
 // ---------------------------------------------------------------------------
 // Emitter / splat schedule
@@ -493,11 +491,6 @@ export function emitterState(inp: EmitterInputs, out: Splat[]): Splat[] {
 // Symmetry / fold drift
 // ---------------------------------------------------------------------------
 
-/** `symmetry` setting's options: "Auto" (fold drift, see FoldState below)
- *  plus every manual fold name from MIRROR_OPTIONS, index-shifted by one —
- *  see symmetryToMirror. */
-export const SYMMETRY_OPTIONS: readonly string[] = ["Auto", ...MIRROR_OPTIONS];
-
 /** Maps a `symmetry` setting value to the MirrorMode it pins, or null for
  *  "Auto" (value 0, drifting — see FoldState/advanceFold). */
 export function symmetryToMirror(k: number): MirrorMode | null {
@@ -620,366 +613,6 @@ export function foldZoom(st: FoldState, breathe: number): number {
 export function foldMixEased(m: number): number {
   return m * m * (3 - 2 * m);
 }
-
-// ---------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------
-
-export const SETTINGS: SceneSetting[] = [
-  {
-    key: "symmetry",
-    label: "Symmetry",
-    description: "Auto drifts between the folded looks with the music; the rest fix one fold",
-    group: "Form",
-    min: 0,
-    max: SYMMETRY_OPTIONS.length - 1,
-    step: 1,
-    default: 0,
-    type: "enum",
-    options: [...SYMMETRY_OPTIONS],
-  },
-  {
-    key: "foldCount",
-    label: "Mirror count",
-    description: "Wedges of a Radial fold — applies in Auto too",
-    group: "Form",
-    min: FOLD_WEDGES_MIN,
-    max: FOLD_WEDGES_MAX,
-    step: 1,
-    default: 6,
-  },
-  {
-    key: "foldSpread",
-    label: "Wedge spread",
-    description: "The Radial fold: how much of the fluid each wedge squeezes in (0 = mirror a true slice)",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-  },
-  {
-    key: "foldSpin",
-    label: "Spin",
-    description: "Slow rotation of the fold, in every mode",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-    auto: { tempo: 0.2, loudness: 0.15 },
-  },
-  {
-    key: "foldBreathe",
-    label: "Zoom breathing",
-    description: "Slow in-and-out of the fold",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-  },
-  {
-    key: "foldDrift",
-    label: "Auto drift",
-    description: "How often Auto symmetry moves to its next fold (0 = never)",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    reads: ["anim.dropOnset"],
-  },
-  {
-    key: "emitStrength",
-    label: "Emitter push",
-    description: "Continuous push from the centre emitter (the beat puffs add to it)",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { loudness: 0.3, attack: 0.2 },
-  },
-  {
-    key: "beatKick",
-    label: "Beat puffs",
-    description: "Force and dye of the puff fired on each beat",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
-    reads: ["anim.lowOnset", "feature.onset", "anim.dropOnset"],
-  },
-  {
-    key: "curl",
-    label: "Swirl",
-    description: "Vorticity confinement — how curly the flow gets",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.45,
-    auto: { density: 0.25, tempo: 0.2 },
-  },
-  {
-    key: "viscosity",
-    label: "Viscosity",
-    description: "How syrupy the flow is — high values give big smooth rolls",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { tempo: -0.2, density: 0.15 },
-  },
-  {
-    key: "dissipation",
-    label: "Dye fade",
-    description: "How quickly dye fades as it drifts",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-    auto: { tempo: 0.3, density: 0.2 },
-  },
-  {
-    key: "dyeFlow",
-    label: "Dye flow",
-    description: "How much dye the emitter and splats inject",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { loudness: 0.2, dynamics: 0.15 },
-  },
-  {
-    key: "warp",
-    label: "Tempo warp",
-    description: "How much loud passages speed the whole flow up",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { dynamics: 0.25, loudness: 0.15 },
-  },
-  {
-    key: "edgeGlow",
-    label: "Neon glow",
-    description: "Brightness of the soft halo around each edge line",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { loudness: 0.25, brightness: 0.15 },
-  },
-  {
-    key: "hueShift",
-    label: "Hue shift",
-    description: "Rotates the screen-position colour ramp",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    default: 0,
-    reads: ["anim.centroid"],
-  },
-  {
-    key: "lineSoft",
-    label: "Line softness",
-    description: "Blurs the edge line's border a touch",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.2,
-  },
-  {
-    key: "neon",
-    label: "Neon saturation",
-    description: "Pushes colour saturation for a punchier neon look",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-  },
-  {
-    key: "hotWhite",
-    label: "White-hot cores",
-    description: "How much the densest dye shifts toward white",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { loudness: 0.25, dynamics: 0.15 },
-  },
-  {
-    key: "sparkle",
-    label: "Treble sparkle",
-    description: "How much treble fires the sparks",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { brightness: 0.35, attack: 0.15 },
-  },
-  {
-    key: "sparkleStyle",
-    label: "Style",
-    description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both. Lightning: branched bolts fired on treble hits",
-    group: "Look",
-    min: 0,
-    max: 4,
-    step: 1,
-    default: 4,
-    type: "enum",
-    options: ["Glow", "Currents", "Grain", "Currents + Glow", "Lightning"],
-  },
-  {
-    key: "sparkleTint",
-    label: "Spark colour",
-    description: "Negative: inverse of the local line colour. Complement: opposite hue. White. Palette: cycles the scene palette",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 3,
-    step: 1,
-    default: 0,
-    type: "enum",
-    options: ["Negative", "Complement", "White", "Palette"],
-  },
-  {
-    key: "sparkleNegative",
-    label: "Colour contrast",
-    description: "0 = same colour as the line, 1 = fully the spark colour",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.8,
-  },
-  {
-    key: "sparkleSize",
-    label: "Fineness",
-    description: "Thinner, denser threads at high values",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4,
-  },
-  {
-    key: "sparkleSoft",
-    label: "Softness",
-    description: "Edge softness of each spark",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-  },
-  {
-    key: "sparkleSpeed",
-    label: "Flicker",
-    description: "How fast the sparks shimmer and drift",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-  },
-  {
-    key: "sparkleSpread",
-    label: "Spill",
-    description: "How far sparks leave the line into the halo",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.2,
-  },
-  {
-    key: "currentDensity",
-    label: "Current threshold",
-    description: "How dense the dye must be before the Currents style lights it up",
-    group: "Look",
-    advanced: true,
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-  },
-  {
-    key: "dropFlash",
-    label: "Drop flash",
-    description: "Whole-screen brightness lift and line-to-white flash on a detected drop",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { dynamics: 0.25, pulse: 0.15 },
-    reads: ["anim.dropOnset"],
-  },
-  {
-    key: "shockwave",
-    label: "Bass shockwave",
-    description: "A ring that expands from the emitter on a bass hit or drop",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { attack: 0.3, pulse: 0.2 },
-    reads: ["anim.lowOnset", "anim.dropOnset"],
-  },
-  {
-    key: "buildGlow",
-    label: "Build-up glow",
-    description: "Extra halo brightness as a phrase builds toward its peak",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4,
-    auto: { dynamics: 0.2, loudness: 0.15 },
-  },
-  {
-    key: "beatFlash",
-    label: "Beat flash",
-    description: "Line-gain flash on every beat",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.15,
-    auto: { pulse: 0.3, attack: 0.15 },
-  },
-  {
-    key: "strobe",
-    label: "Strobe",
-    description: "Hard white / red / black frames cut in with each lightning strike (Lightning sparkle style only; photosensitivity: keep low on shared screens)",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const s = SETTINGS.find((x) => x.key === key);
@@ -1547,9 +1180,7 @@ function createFluidScene(): Scene {
   let strobe = createStrobeState();
 
   return {
-    id: ID,
-    name: "Neon Fluid",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
@@ -1810,8 +1441,5 @@ function createFluidScene(): Scene {
     },
   };
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-09-23" } as const;
 
 export const fluidScene: Scene = createFluidScene();

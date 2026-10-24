@@ -8,7 +8,9 @@ colour. A draft on main (in `DRAFT_SCENE_IDS`).
 
 ## Where the code is
 
-`src/render/scenes/petri.ts`. The simulation is a ping-pong pair of RGBA8
+- `src/render/scenes/petri.card.ts` — the scene's card, loaded with the page: id, name, `SETTINGS` and the `STYLE_NAMES` list they use, the `gallery` record and `loadBody`. The body spreads the card, so the registered settings are the body's own objects.
+
+`src/render/scenes/petri.ts` — the body, loaded after first paint. The simulation is a ping-pong pair of RGBA8
 textures (R=U, G=V) stepped by `SIM_FRAG`'s forward-Euler Gray-Scott update
 at the fixed `DU`/`DV` diffusion-rate pair — see the file's own comment on
 why this pair (not the textbook 1.0/0.5 ratio) keeps the scheme CFL-stable at
@@ -94,6 +96,7 @@ addition. `/ref` bundles:
   Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the
   stamp strength (Reseed) and the hole radius (Bass wipe) by how far the hit
   stood out; Flat, the default, is unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/petri.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
