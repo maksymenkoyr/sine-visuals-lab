@@ -11,8 +11,11 @@ ones (the dotted line on its graph). In development, on main since #374.
 
 ## Where the code is
 
-- `src/render/scenes/alien/index.ts`: the scene, a video player. It holds the
-  settings in `SETTINGS`, the Motion section in `PANEL`, one `<video>`
+- `src/render/scenes/alien/card.ts`: the scene's card, loaded with the page: id,
+  name, `SETTINGS`, the Motion section in `PANEL`, `MOVE_GAIN`, the `gallery`
+  record and `loadBody`. The body spreads the card, so the registered settings
+  are the body's own objects.
+- `src/render/scenes/alien/index.ts`: the body, loaded after first paint: a video player. It holds one `<video>`
   per loop (its bytes from `sceneMedia`, fetched on the first mount), the frame upload, the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, videos).
 - `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
@@ -192,6 +195,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `ownDetector`), flat-only: a cut either happens or it doesn't, so Sized is
   greyed out with that hint. The reel is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/alien/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

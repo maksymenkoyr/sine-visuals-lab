@@ -1,4 +1,4 @@
-import { STRAINS, DEPOSIT, LIFE_DEFAULT, NUTRIENT_REST, hueRotateRGB, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
+import { STRAINS, DEPOSIT, LIFE_DEFAULT, NUTRIENT_REST, hueRotateRGB, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2Strains.ts";
 import type { StrainPreviewMotion, PairCultureInputs } from "../../render/scenes/physarum2Preview.ts";
 import { smellWeight } from "../../render/scenes/physarum2Affinity.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
