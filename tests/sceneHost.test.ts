@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSceneHost } from "../src/render/sceneHost.ts";
 import { qualitySettings } from "../src/render/quality.ts";
 import type { Scene } from "../src/render/scene.ts";
+import { lazyScene } from "../src/render/lazyScene.ts";
 
 // sceneHost only passes the GL context through to the scene, so a stub does.
 const gl = {} as WebGL2RenderingContext;
@@ -85,5 +86,78 @@ describe("sceneHost", () => {
     expect(a.isMounted(s.scene)).toBe(false);
     expect(b.isMounted(s.scene)).toBe(true);
     expect(s.calls.dispose).toBe(1);
+  });
+});
+
+describe("sceneHost with a scene whose code hasn't arrived", () => {
+  function lazyFake(id: string, opts: { initThrows?: boolean; loadFails?: boolean } = {}) {
+    const inner = fakeScene(id, opts);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const scene = lazyScene({ id, name: id }, async () => {
+      await gate;
+      if (opts.loadFails) throw new Error(`${id}: offline`);
+      return inner.scene;
+    });
+    return { scene, calls: inner.calls, release, settle: () => new Promise<void>((r) => setTimeout(r, 0)) };
+  }
+  const errors: unknown[] = [];
+  const hostWithErrors = () => {
+    errors.length = 0;
+    return createSceneHost(gl, qualitySettings("mid"), { onLateMountError: (_s, e) => errors.push(e) });
+  };
+
+  it("mounts at once and runs init when the code lands", async () => {
+    const h = hostWithErrors();
+    const l = lazyFake("late-ok");
+    h.mount(l.scene);
+    expect(h.isMounted(l.scene)).toBe(true);
+    expect(l.calls.init).toBe(0);
+    l.release();
+    await l.settle();
+    expect(l.calls.init).toBe(1);
+    expect(h.isMounted(l.scene)).toBe(true);
+    expect(errors).toEqual([]);
+    h.unmount(l.scene);
+    expect(l.calls.dispose).toBe(1);
+  });
+
+  it("unmounting while pending never calls init or dispose", async () => {
+    const h = hostWithErrors();
+    const l = lazyFake("late-unmounted");
+    h.mount(l.scene);
+    h.unmount(l.scene);
+    expect(h.isMounted(l.scene)).toBe(false);
+    l.release();
+    await l.settle();
+    expect(l.calls.init).toBe(0);
+    expect(l.calls.dispose).toBe(0);
+    expect(h.isMounted(l.scene)).toBe(false);
+  });
+
+  it("a late init throw reports, disposes and leaves it unmounted", async () => {
+    const h = hostWithErrors();
+    const l = lazyFake("late-bad", { initThrows: true });
+    h.mount(l.scene);
+    l.release();
+    await l.settle();
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/shader compile error/);
+    expect(l.calls.dispose).toBe(1);
+    expect(h.isMounted(l.scene)).toBe(false);
+  });
+
+  it("a failed load reports and leaves it unmounted", async () => {
+    const h = hostWithErrors();
+    const l = lazyFake("late-offline", { loadFails: true });
+    h.mount(l.scene);
+    l.release();
+    await l.settle();
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/offline/);
+    expect(h.isMounted(l.scene)).toBe(false);
+    expect(l.calls.init).toBe(0);
   });
 });
