@@ -5,6 +5,14 @@ value noise sharpened into thin ridges, with a beat ripple and treble sparkle
 riding on top. Ships from the initial commit and is on main
 (not a draft).
 
+## Page
+
+The shifting lines of light on the floor of a sunlit pool, drawn live and moved by your music: free, in your browser, nothing to install.
+
+Each beat sends a ripple ring through the water that bends the light as it passes. High sounds, like hi-hats and cymbals, make the ridges sparkle, and the pool drifts faster as the music gets louder.
+
+Put it on a big screen at a party or behind a DJ set and let it run: it keeps following the music with nobody at the controls.
+
 ## Where the code is
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,

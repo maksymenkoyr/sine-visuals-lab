@@ -35,6 +35,9 @@ rules before adding a note here; this file doesn't restate them.
   is, what inspired it, what was measured, every decision and pivot, what's
   still off, and how to pick it back up. New ones start from
   [the template](scenes/_template.md).
+- Public scene pages, `/scenes/<id>/`: a record's `## Page` copy plus the
+  media `tools/scene-page-media.mjs` films become a static page in the build
+  and an entry in `sitemap.xml` (`tools/scenePagesLib.mjs` header).
 
 The session rituals that walk these notes live in `.claude/commands/` — run `/`
 in Claude Code to see them. Work handed on to later build sessions lives in

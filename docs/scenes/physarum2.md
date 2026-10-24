@@ -10,6 +10,14 @@ table, Touch (`touch<i><j>`), lets a strain feed or eat another's trail
 directly, on top of what smell alone can do. Featured, on main (a draft until
 2026-09-27).
 
+## Page
+
+Four strains of slime mould grow glowing networks of trails, each claiming its own colour and territory, live to your music in the browser.
+
+Each strain follows its own trail and steers clear of the others', so the screen splits into interlocking coloured territories. Beats seed new colonies, and the networks keep reshaping as the music moves.
+
+No two runs grow the same way. Put it on a big screen and let it run through a whole set.
+
 ## Where the code is
 
 `src/render/scenes/physarum2.ts` — the header comment is the primary source
