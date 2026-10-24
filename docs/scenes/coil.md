@@ -22,8 +22,11 @@ falls back, and when it resets to a new small shape. In development, on main.
   containing the pixel, `paletteRamp`), `buildSceneFrag` (coil on top of the
   tiled previous frame, faded by `FEEDBACK_FADE` toward `GROUND_RGB`),
   `BLIT_FRAG`, `BASE_PERIOD`.
-- `src/render/scenes/coil/index.ts` — the `Scene` (id `"coil"`), `SETTINGS`,
-  the ping-pong target pair (`makeTarget`/`ensureTargets`, sized by
+- `src/render/scenes/coil/card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS` (exported for the body), the `gallery` record and `loadBody`.
+  The body spreads the card, so the registered settings are the body's own objects.
+- `src/render/scenes/coil/index.ts` — the body, loaded after first paint: the
+  `Scene` (id, name and settings spread from the card), the ping-pong target pair (`makeTarget`/`ensureTargets`, sized by
   `TARGET_SCALE` per quality), and `render()`: resolve settings + drives into
   `stepCoil`'s inputs, draw the scene pass into the write target, mipmap it,
   blit it to the screen, swap. New shape divides its grid edge by
@@ -136,6 +139,7 @@ falls back, and when it resets to a new small shape. In development, on main.
   push jump (`pushJump`) and the fall-back depth (`breatheDrop`) by how far
   the hit stood out; Flat, the default, is unchanged. New shape is flat-only:
   a new shape either starts or it doesn't.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/coil/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
