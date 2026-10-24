@@ -13,7 +13,7 @@
 // exact error terms of a double addition (twoSum) and multiplication
 // (twoProd, Dekker's split). Plain numbers rather than BigInt, because the
 // build targets TV browsers that predate BigInt (vite.config.ts, `target`).
-// MAX_DEPTH in motion.ts is where that precision stops being enough.
+// MAX_DEPTH in card.ts is where that precision stops being enough.
 //
 // The orbit is stored up to and including its first escaped point (or
 // MAX_REF_LEN points): the shader rebases a pixel onto the start of the

@@ -23,7 +23,6 @@
  * raymarcher itself (FAST_MARCH_*) for when its look is wanted cheaper.
  */
 import { createFullscreenScene } from "../../fullscreenScene.ts";
-import type { SceneSetting } from "../../sceneSettings.ts";
 import {
   createBoneBuffer,
   createPose,
@@ -39,10 +38,11 @@ import { SDF_GLSL } from "./sdf.ts";
 import { createChoreographer } from "./choreo.ts";
 import type { MoveClocks } from "./moves.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type ClipLibrary } from "./clipFormat.ts";
-import { clipPhaseAt, createBarCounter, type BlendMode } from "./player.ts";
+import { clipPhaseAt, createBarCounter } from "./player.ts";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
 import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
 import { FAST_RENDERERS_GLSL } from "./fastRenderers.ts";
+import { card, BLENDS, RENDERERS, SKIN_NAMES, STYLES } from "./card.ts";
 import { sceneMedia } from "../../../pinnedAssets.ts";
 
 // Scene media (src/pinnedAssets.ts's header): a stable file under
@@ -55,7 +55,7 @@ const clips = sceneMedia(CLIP_LIBRARY_URL);
  *  (the library and the choreographer live there); onInit calls it. */
 let loadLibrary = (): void => {};
 
-export const DANCERS_ID = "dancers";
+export const DANCERS_ID = card.id;
 
 interface Skin {
   /** Shown in the device menu's picker. */
@@ -65,24 +65,13 @@ interface Skin {
   glsl: string;
 }
 
-/** Index order is the `skin` setting's value; the first entry is the default. */
-export const SKINS: readonly Skin[] = [
-  { name: "Skeleton", prefix: "skel", glsl: SKELETON_SKIN_GLSL },
-  { name: "Stick", prefix: "stick", glsl: STICK_SKIN_GLSL },
+/** Each skin's prefix and shader, at the index its name has in SKIN_NAMES (card.ts). */
+const SKIN_SHADERS: readonly Omit<Skin, "name">[] = [
+  { prefix: "skel", glsl: SKELETON_SKIN_GLSL },
+  { prefix: "stick", glsl: STICK_SKIN_GLSL },
 ];
+export const SKINS: readonly Skin[] = SKIN_NAMES.map((name, i) => ({ name, ...SKIN_SHADERS[i] }));
 
-/** The `style` setting's options, in value order: a clip family to dance
- *  (clipFormat.ts's ClipMeta.family), or null for the whole library. */
-const STYLES: readonly { name: string; family: string | null }[] = [
-  { name: "Mix", family: null },
-  { name: "Street", family: "street" },
-  { name: "Party", family: "party" },
-  { name: "Swing", family: "swing" },
-  { name: "Modern", family: "modern" },
-];
-
-/** The `renderer` setting's options, in value order — see fastRenderers.ts. */
-const RENDERERS: readonly string[] = ["Raymarch", "Capsules", "Flat"];
 const RENDERER_RAYMARCH = 0;
 const RENDERER_CAPSULES = 1;
 const RENDERER_FLAT = 2;
@@ -94,147 +83,6 @@ const RAYMARCH_MIN_DETAIL = 0.5;
 const FAST_MARCH_STEPS = 0.6;
 const FAST_MARCH_EPS = 1.6;
 const FAST_MARCH_DETAIL = 0.45;
-
-/** The `blend` setting's options, in value order — player.ts's BlendMode. */
-const BLENDS: readonly { name: string; mode: BlendMode }[] = [
-  { name: "Crossfade", mode: "crossfade" },
-  { name: "Inertial", mode: "inertial" },
-];
-
-const SETTINGS: SceneSetting[] = [
-  {
-    key: "style",
-    label: "Style",
-    description: "Which family of moves to dance, or a mix of everything.",
-    // Form, not Motion — picks a repertoire to dance from, the same kind of
-    // categorical choice as Skin below, not a movement in itself.
-    group: "Form",
-    type: "enum",
-    options: STYLES.map((s) => s.name),
-    min: 0,
-    max: STYLES.length - 1,
-    step: 1,
-    default: 0,
-  },
-  {
-    key: "motion",
-    label: "Move energy",
-    description: "How much of each move comes through — all the way up is as it was captured.",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { pulse: 0.25, loudness: 0.2, dynamics: 0.15 },
-  },
-  {
-    key: "groove",
-    label: "Groove",
-    description: "How eagerly the dancer reaches for the big moves as a track builds.",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { pulse: 0.3, attack: 0.15 },
-  },
-  {
-    key: "blend",
-    label: "Handover",
-    description: "How one move hands over to the next: slide between them, or stop dead and settle into the new one.",
-    group: "Motion",
-    type: "enum",
-    options: BLENDS.map((b) => b.name),
-    min: 0,
-    max: BLENDS.length - 1,
-    step: 1,
-    default: 0,
-    advanced: true,
-  },
-  {
-    key: "jaw",
-    label: "Jaw chatter",
-    description: "How far bass hits open the jaw.",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    advanced: true,
-    auto: { brightness: -0.25, attack: 0.2 },
-    // clocks.lowPulse directly (choreo.ts's mulBoneEuler jaw term) — a
-    // plain Bass hit default.
-    drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "skin",
-    label: "Skin",
-    description: "What the dancer is made of. Every skin dances the same moves.",
-    group: "Look",
-    type: "enum",
-    options: SKINS.map((s) => s.name),
-    min: 0,
-    max: SKINS.length - 1,
-    step: 1,
-    default: 0,
-  },
-  {
-    key: "renderer",
-    label: "Renderer",
-    description:
-      "Raymarch is the full look; Capsules and Flat draw the same dance for a fraction of the cost. Below the Mid quality preset, Raymarch hands over to Capsules.",
-    // Look, not Post — it picks which draw path renders the figure, not a
-    // filter applied to an already-drawn image.
-    group: "Look",
-    type: "enum",
-    options: RENDERERS,
-    min: 0,
-    max: RENDERERS.length - 1,
-    step: 1,
-    default: 0,
-  },
-  {
-    key: "fastMarch",
-    label: "Fast march",
-    description: "Trim the raymarcher: fewer steps, a looser surface, no ambient occlusion, coarser bone detail.",
-    group: "Look",
-    type: "boolean",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 0,
-    advanced: true,
-  },
-  {
-    key: "glow",
-    label: "Rim glow",
-    description: "Palette-coloured light catching the figure's edges.",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { brightness: 0.3 },
-  },
-  {
-    key: "bob",
-    label: "Camera bob",
-    description: "How much the camera nudges in on each beat.",
-    group: "Camera",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4,
-    auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
-    // Two different signals at two different sites — dolly/tilt read the
-    // beat, roll reads the bass — so the default is Scene.
-    drive: {
-      default: "scene",
-      sceneLabel: "Scene: beat (dolly/tilt) and bass hit (roll)",
-      sceneSources: ["feature.onset", "anim.lowOnset"],
-    },
-  },
-];
 
 const skinDispatch = (fn: "map" | "shade", args: string): string =>
   SKINS.map((s, i) => `${i > 0 ? "else " : ""}if (gSkin == ${i}) return ${s.prefix}_${fn}(${args});`).join("\n  ") +
@@ -370,14 +218,11 @@ void main() {
 }
 `;
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-08-30" } as const;
-
-export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
+export const dancersScene = createFullscreenScene(card.id, card.name, FRAG, {
   // The cheap renderers run anywhere; the raymarcher hands over to them
   // below Mid (RAYMARCH_MIN_DETAIL), so no preset is out of reach.
-  minQuality: "floor",
-  settings: SETTINGS,
+  minQuality: card.minQuality,
+  settings: card.settings,
   onInit: () => loadLibrary(),
   extraUniforms: (() => {
     const choreographer = createChoreographer();

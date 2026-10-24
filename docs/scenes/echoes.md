@@ -15,7 +15,10 @@ Draft, not yet on main.
 
 ## Where the code is
 
-- `src/render/scenes/echoes/index.ts` — the scene: `SETTINGS`, the ping-pong
+- `src/render/scenes/echoes/card.ts` — the scene's card, loaded with the page: id, name,
+  `SHAPES`, `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card,
+  so the registered settings are the body's own objects.
+- `src/render/scenes/echoes/index.ts` — the body, loaded after first paint: the ping-pong
   render-target pair (`ensureTargets`, sized by `TARGET_SCALE` and capped at
   `MAX_TARGET_DIM` like Coil's), and `render()`, which turns settings and
   drives into the step pass's uniforms. The header explains why this is a
@@ -218,6 +221,7 @@ Mirror, colour by age and a hit shockwave from a list of four:
   25 s, default settings): change median 1.92 / p95 3.24 on the song, 0.35 /
   0.61 on silence (5.3×), no hits on silence. Judged by eye on synthetic
   shots only for the new looks, not side by side with a reference.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/echoes/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
