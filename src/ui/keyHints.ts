@@ -236,7 +236,8 @@ export function noteKeyUse(id: string): void {
 /** Call when `id`'s tagged control was clicked with a mouse.
  *  installKeyHints wires this automatically off every `[data-key]` click
  *  (skipping touch) — exported for symmetry with noteKeyUse and for
- *  tests/keyHints.test.ts. */
+ *  tests/keyHints.test.ts.
+ *  @public tests/keyHints.test.ts reads it through a dynamic import, which knip can't see. */
 export function noteMouseUse(id: string): void {
   if (cache.used[id] || cache.tipped[id]) return;
   mouseUses[id] = (mouseUses[id] ?? 0) + 1;
