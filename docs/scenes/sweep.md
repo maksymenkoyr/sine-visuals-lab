@@ -23,10 +23,13 @@ piece of the reel. In development (draft PR #391).
 - `src/render/scenes/sweep/glsl.ts` — `SWEEP_FRAG_BODY`: `shapeSdf` and the
   per-copy blend between two neighbouring shapes, `cubeFace`, `pal5`/`roomPal`, the per-stack front-to-back copy loop with its
   skip, the outline styles, Steps, and the Multiply layer combine.
-- `src/render/scenes/sweep/index.ts` — `SETTINGS`, the `LIFT` coupling every
-  jack uses, the `EMPTY` jack default, `SPEED_GAIN`/`FLOW_GAIN`/`MORPH_GAIN`,
-  `NEW_PATH_GRID_DIVISOR`, the path seed plus local re-rolls, and
-  `Scene.panel`.
+- `src/render/scenes/sweep/card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS` (with the `EMPTY` jack default), `Scene.panel` (the Presets row
+  and the Path section), the `gallery` record and `loadBody`. The body spreads the
+  card, so the registered settings are the body's own objects.
+- `src/render/scenes/sweep/index.ts` — the body, loaded after first paint: the
+  `LIFT` coupling every jack uses, `SPEED_GAIN`/`FLOW_GAIN`/`MORPH_GAIN`,
+  `NEW_PATH_GRID_DIVISOR`, and the path seed plus local re-rolls.
 - `src/render/scenes/sweep/pieces.ts` — `PIECES`, the reel's pieces as knob
   values (each with its reel time, path seed and hint), and `presetValues`
   (everything a Presets pill writes: every setting but `KEPT_BY_PIECES` at
@@ -134,6 +137,7 @@ piece of the reel. In development (draft PR #391).
   Spread, Pair and Twist, Cube with 160 copies; Morph on) matched pixel for
   pixel at three frames each (`gpu-bench --dump`).
 - 2026-10-08 — New path became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). It is flat-only: a new path either starts or it doesn't.
+- 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/sweep/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

@@ -3,7 +3,6 @@ import {
   trailSide,
   createBeatSeeder,
   attractorPositions,
-  packUnit,
   unpackUnit,
   physarumScene,
   GROUP_COUNT,
@@ -11,6 +10,7 @@ import {
   TRAIL_SIDE_MIN,
   AGENTS_PER_TEXEL,
 } from "../src/render/scenes/physarum.ts";
+import { packUnit } from "../src/render/scenes/physarumPack.ts";
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { qualitySettings } from "../src/render/quality.ts";
