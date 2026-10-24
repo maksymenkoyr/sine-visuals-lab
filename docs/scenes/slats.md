@@ -11,12 +11,13 @@ boundary. Draft, on `main` (featured from the PR that added it until
 
 ## Where the code is
 
-`src/render/scenes/slats/index.ts` (the `Scene`, its glow/bloom chain and
-its instanced-buffer crossfade), `layout.ts` (pure, CPU-only slab/slat model:
+`src/render/scenes/slats/card.ts` is the scene's card, loaded with the page: id, name,
+`SETTINGS` (moved here from `glsl.ts`, which is GLSL-only) and the `gallery` record. The body,
+`src/render/scenes/slats/index.ts` (the `Scene`, its glow/bloom chain and its instanced-buffer
+crossfade), is loaded after first paint. `layout.ts` (pure, CPU-only slab/slat model:
 `partitionSlabs`, `layoutSlats`, `buildWall`, `packSlats`, `OnsetEnvelope`,
 `shouldReshuffle` — all covered by `tests/slats.test.ts`), and `glsl.ts`
-(the `SETTINGS` table and `SLAT_VERT`/`SLAT_FRAG`/`BLUR_FRAG`/
-`COMPOSITE_FRAG`). Read `index.ts`'s header first — it explains the sync
+(`SLAT_VERT`/`SLAT_FRAG`/`BLUR_FRAG`/`COMPOSITE_FRAG`). Read `index.ts`'s header first — it explains the sync
 reasoning end to end and links each behaviour back to what the reference
 measurement confirmed our analyser actually reproduces.
 
@@ -113,6 +114,7 @@ layers never overlapped so nothing stacked toward white.
   that is on screen into A first, so the new fade starts from it.
 - 2026-10-08 — Beat kick became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the peak of the onset envelope (advanceOnsetEnvelope now takes true, false or a 0..1 size) by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/slats/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

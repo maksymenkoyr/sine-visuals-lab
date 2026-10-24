@@ -10,9 +10,12 @@ main.
 
 ## Where the code is
 
-- `src/render/scenes/longplay/index.ts` — the scene: `VIEWS` (the view list,
-  in tour order, with each view's `pro` flag), `LONGPLAY_SETTINGS`, the
-  per-frame shared state (launch pool, phrase count, flicker mask, strobe),
+- `src/render/scenes/longplay/card.ts` — the scene's card, loaded with the page: id,
+  name, `VIEW_CHIPS` (the view list, in tour order, with each view's `pro` flag),
+  `LONGPLAY_SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card,
+  so the registered settings are the body's own objects.
+- `src/render/scenes/longplay/index.ts` — the body: the rest of the scene, loaded after
+  first paint. `VIEWS` (each card chip with its shader), the per-frame shared state (launch pool, phrase count, flicker mask, strobe),
   and the render that draws one child program per view and blends the next
   one over it during a mix. The header has the sync mapping.
 - `src/render/scenes/longplay/tour.ts` — which view shows and when it mixes:
@@ -226,6 +229,7 @@ main.
     some), a bracket and posts, and Flicker's layer 2 blacks out the whole
     picture.
 - 2026-10-08 — Launch became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the launched square or ring's brightness (launchAmp) by how far the hit stood out; Flat, the default, is unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/longplay/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 
