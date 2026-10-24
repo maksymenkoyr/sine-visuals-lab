@@ -18,9 +18,9 @@
  *   someone can see it. The costliest user: the Master card's Picture block,
  *   which asks app.ts for a GPU readback of the finished frame, a synchronous
  *   round trip in Chrome that waits behind whatever the GPU is still doing
- *   (the Panel blur's re-filtering included). The Bands card's Stems row is
- *   another: while it is on screen the stem split runs for it
- *   (src/render/stemReaders.ts).
+ *   (the Panel blur's re-filtering included). The Sound card's Mid and Treble
+ *   rows are another: while either is on screen the stem split runs for the
+ *   Lead and Hats lines they draw (src/render/stemReaders.ts).
  *   `disconnect()` stops watching, for an element a rebuild throws away (a
  *   Scene-card widget calls it from its dispose).
  * - `watchSize`: the element's CSS content size, rounded to whole pixels like

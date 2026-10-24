@@ -19,10 +19,11 @@ import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STR
  * Drawing only — the faders' pointer/keyboard handling and readouts live in
  * src/ui/bandFaders.ts, which owns this canvas and tells it what to draw
  * via setFaders/setFocused. This split keeps the canvas free of DOM
- * concerns and the interaction free of pixel math. There's only ever one
- * instance of this strip mounted (the Bands card's own, inside
- * bandFaders.el) — a drive setting parked on Frequencies
- * (src/render/drives.ts) puts *that same* strip into line-drawing mode via
+ * concerns and the interaction free of pixel math. Two instances are mounted:
+ * the Bands card's own (inside bandFaders.el, in the Setup view) and the
+ * Sound card's thin one (no faders, no axis; deviceMenu.ts feeds it beside
+ * the first). A drive setting parked on Frequencies (src/render/drives.ts)
+ * puts the Bands card's strip into line-drawing mode via
  * setShowFaders(false), with src/ui/bandLineEditor.ts's overlay canvas
  * appended on top of it taking the rail's place, rather than mounting a
  * second strip of its own.
@@ -125,13 +126,21 @@ function groupColor(index: number, split: BandSplit): string {
   return STRIP_HIGH;
 }
 
-// Height is fixed up front so the card is the right size before the first
-// draw (which only happens once update() starts being fed, inside a viz).
-const canvasStyle = `display: block; width: 100%; height: ${STRIP_PLOT_HEIGHT_PX + STRIP_AXIS_HEIGHT_PX}px;`;
+interface SpectrumStripOptions {
+  /** Plot height in CSS px (default `STRIP_PLOT_HEIGHT_PX`). */
+  plotHeightPx?: number;
+  /** Draw the Hz axis under the plot (default true). */
+  axis?: boolean;
+}
 
-export function createSpectrumStrip(): SpectrumStrip {
+export function createSpectrumStrip(opts: SpectrumStripOptions = {}): SpectrumStrip {
+  const plotHeight = opts.plotHeightPx ?? STRIP_PLOT_HEIGHT_PX;
+  const axis = opts.axis ?? true;
+  const axisHeight = axis ? STRIP_AXIS_HEIGHT_PX : 0;
   const canvas = document.createElement("canvas");
-  canvas.style.cssText = canvasStyle;
+  // Height is fixed up front so the card is the right size before the first
+  // draw (which only happens once update() starts being fed, inside a viz).
+  canvas.style.cssText = `display: block; width: 100%; height: ${plotHeight + axisHeight}px;`;
 
   const ctx = canvas.getContext("2d")!;
 
@@ -166,7 +175,7 @@ export function createSpectrumStrip(): SpectrumStrip {
   // while the canvas has no layout (the panel is closed, display: none) — a
   // draw then would size the backing store to a pixel and get stretched
   // across the card when it opens. See canvasSizer.ts.
-  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: STRIP_PLOT_HEIGHT_PX + STRIP_AXIS_HEIGHT_PX });
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: plotHeight + axisHeight });
 
   // Bands are drawn evenly spaced (not log-positioned by Hz) so every bar
   // gets a readable width — the log spacing is already baked into what each
@@ -367,14 +376,13 @@ export function createSpectrumStrip(): SpectrumStrip {
   function draw(nowMs: number): void {
     if (!sizer.ensure()) return;
     const width = sizer.width;
-    const plotHeight = STRIP_PLOT_HEIGHT_PX;
-    ctx.clearRect(0, 0, width, plotHeight + STRIP_AXIS_HEIGHT_PX);
+    ctx.clearRect(0, 0, width, plotHeight + axisHeight);
 
     const dtSec = lastDrawMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastDrawMs) / 1000);
     lastDrawMs = nowMs;
 
     drawBars(width, plotHeight, dtSec);
-    drawAxis(width, plotHeight);
+    if (axis) drawAxis(width, plotHeight);
     if (showFaders) drawFaders(width, plotHeight);
     drawCentroidMarker(width, plotHeight);
   }

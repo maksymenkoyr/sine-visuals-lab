@@ -81,8 +81,8 @@ export class FeatureExtractor {
   private env = new Float32Array(NUM_BANDS);
   // The same envelope over the fixed mapping alone, kept regardless of the
   // blend so `fixedEnergy` can always say what `energy` would read with
-  // auto-gain fully off — a local diagnostic (the Dynamics card's history
-  // trace in src/ui/audioMeters.ts), never part of the FeatureFrame itself.
+  // auto-gain fully off — a local diagnostic, never part of the FeatureFrame
+  // itself.
   private envFixed = new Float32Array(NUM_BANDS);
   private lastFixedEnergy = 0;
 
