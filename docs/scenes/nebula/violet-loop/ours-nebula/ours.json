@@ -1,0 +1,282 @@
+{
+ "scene": "nebula",
+ "bundle": "violet-loop",
+ "settings": null,
+ "offsets": [
+  -80,
+  0,
+  160
+ ],
+ "shots": [
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": -80,
+   "file": "b016_r16_-080.png",
+   "lagMs": 63,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 0,
+   "file": "b016_r16_+000.png",
+   "lagMs": 172,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 160,
+   "file": "b016_r16_+160.png",
+   "lagMs": 193,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 32,
+   "rank": 16,
+   "t": 16,
+   "offsetMs": -80,
+   "file": "b032_r16_-080.png",
+   "lagMs": 67,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 32,
+   "rank": 16,
+   "t": 16,
+   "offsetMs": 0,
+   "file": "b032_r16_+000.png",
+   "lagMs": 188,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 32,
+   "rank": 16,
+   "t": 16,
+   "offsetMs": 160,
+   "file": "b032_r16_+160.png",
+   "lagMs": 223,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 48,
+   "rank": 16,
+   "t": 24,
+   "offsetMs": -80,
+   "file": "b048_r16_-080.png",
+   "lagMs": 65,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 48,
+   "rank": 16,
+   "t": 24,
+   "offsetMs": 0,
+   "file": "b048_r16_+000.png",
+   "lagMs": 188,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 48,
+   "rank": 16,
+   "t": 24,
+   "offsetMs": 160,
+   "file": "b048_r16_+160.png",
+   "lagMs": 225,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 64,
+   "rank": 16,
+   "t": 32,
+   "offsetMs": -80,
+   "file": "b064_r16_-080.png",
+   "lagMs": 58,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 64,
+   "rank": 16,
+   "t": 32,
+   "offsetMs": 0,
+   "file": "b064_r16_+000.png",
+   "lagMs": 168,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 64,
+   "rank": 16,
+   "t": 32,
+   "offsetMs": 160,
+   "file": "b064_r16_+160.png",
+   "lagMs": 196,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 80,
+   "rank": 16,
+   "t": 40,
+   "offsetMs": -80,
+   "file": "b080_r16_-080.png",
+   "lagMs": 56,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 80,
+   "rank": 16,
+   "t": 40,
+   "offsetMs": 0,
+   "file": "b080_r16_+000.png",
+   "lagMs": 156,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 80,
+   "rank": 16,
+   "t": 40,
+   "offsetMs": 160,
+   "file": "b080_r16_+160.png",
+   "lagMs": 174,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 96,
+   "rank": 16,
+   "t": 48,
+   "offsetMs": -80,
+   "file": "b096_r16_-080.png",
+   "lagMs": 61,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 96,
+   "rank": 16,
+   "t": 48,
+   "offsetMs": 0,
+   "file": "b096_r16_+000.png",
+   "lagMs": 221,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  },
+  {
+   "beat": 96,
+   "rank": 16,
+   "t": 48,
+   "offsetMs": 160,
+   "file": "b096_r16_+160.png",
+   "lagMs": 309,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "nebula"
+   },
+   "heard": null
+  }
+ ]
+}
