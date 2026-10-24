@@ -45,7 +45,8 @@ Finish the change on this branch:
    `gh api -X PATCH 'repos/{owner}/{repo}/pulls/<n>' -F body=@<file>` (REST,
    as in step 6).
 
-8. **Record the difficulty** of each issue the PR closes, also when the label
-   held: `npm run difficulty -- record <issue> --actual … --human … --pr <pr>
-   --why "…"`. The correction loop in `docs/issue-labels.md` says how to
-   judge it. Skip this for a PR that closes no issue.
+8. **Record the difficulty and tokens** of each issue the PR closes, also when
+   the labels held: `npm run difficulty -- record <issue> --actual … --human …
+   --tokens session --pr <pr> --why "…"`, adding earlier sessions that worked
+   on the issue to `--tokens`. The correction loop in `docs/issue-labels.md`
+   says how to judge it. Skip this for a PR that closes no issue.

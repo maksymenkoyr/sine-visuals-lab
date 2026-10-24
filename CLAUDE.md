@@ -37,10 +37,11 @@ A browser-based, real-time WebGL2 audio visualizer.
   record, references, screenshots — goes into this repo, a public branch or a
   public PR.
 - Every issue you file gets a difficulty label (`high dif`, `mid dif`,
-  `low dif`) and, when a person is needed at some
-  point or likely (over 30%), `human`. `docs/issue-labels.md` has the rules;
-  a hook refuses a new issue without a difficulty label, and `/ship` records
-  the difficulty the work actually had.
+  `low dif`), a token label (`<100K tok` to `>10M tok`) and, when a person is
+  needed at some point or likely (over 30%), `human`.
+  `docs/issue-labels.md` has the rules; a hook refuses a new issue without a
+  difficulty and a token label, and `/ship` records the difficulty the work
+  actually had and the tokens it took.
 - An agent is one subagent this session starts and reads back, like
   `builder`. A workflow is a script in `.claude/workflows/` that runs
   several agents, like `/plan-code-review`. Start a workflow only when I type

@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
+  bucketOf,
   buildRecord,
   checkNewIssue,
   datasetRows,
+  formatTokens,
   labelEdits,
   labelsAfter,
   parseLevel,
   parseRecords,
+  parseTokens,
   readLabels,
   renderComment,
   summarize,
@@ -23,19 +26,31 @@ function comment(body: string, authorAssociation = "OWNER") {
 }
 
 describe("readLabels", () => {
-  it("reads the difficulty and human, hardest difficulty winning", () => {
-    expect(readLabels(["bug", "low dif"])).toEqual({ dif: "low", human: false });
-    expect(readLabels([{ name: "high dif" }, { name: "low dif" }, { name: "human" }])).toEqual({ dif: "high", human: true });
-    expect(readLabels(["bug"])).toEqual({ dif: null, human: false });
+  it("reads the difficulty, tokens and human, hardest and biggest winning", () => {
+    expect(readLabels(["bug", "low dif"])).toEqual({ dif: "low", tok: null, human: false });
+    expect(readLabels([{ name: "high dif" }, { name: "low dif" }, { name: "human" }, { name: "<1M tok" }, { name: ">10M tok" }])).toEqual({ dif: "high", tok: "10M+", human: true });
+    expect(readLabels(["bug"])).toEqual({ dif: null, tok: null, human: false });
   });
 });
 
 describe("checkNewIssue", () => {
-  it("refuses without a difficulty, reminds without human", () => {
+  it("refuses without a difficulty or tokens, reminds without human", () => {
     expect(checkNewIssue('gh issue create --title x --label bug')).toHaveProperty("refuse");
-    expect(checkNewIssue('gh issue create --title x --label "mid dif"')).toHaveProperty("remind");
-    expect(checkNewIssue(["mid dif", "human"])).toBeNull();
+    expect(checkNewIssue('gh issue create --title x --label "mid dif"')).toHaveProperty("refuse");
+    expect(checkNewIssue('gh issue create --title x --label "mid dif" --label "<1M tok"')).toHaveProperty("remind");
+    expect(checkNewIssue(["mid dif", "<10M tok", "human"])).toBeNull();
     expect(checkNewIssue([])).toHaveProperty("refuse");
+  });
+});
+
+describe("tokens", () => {
+  it("parse counts with K and M and fall in their bucket", () => {
+    expect(parseTokens("450K")).toBe(450_000);
+    expect(parseTokens("3.2M")).toBe(3_200_000);
+    expect(parseTokens("1200")).toBe(1200);
+    expect(() => parseTokens("lots")).toThrow();
+    expect([99_999, 100_000, 9_999_999, 10_000_000].map(bucketOf)).toEqual(["100K", "1M", "10M", "10M+"]);
+    expect(formatTokens(3_412_000)).toBe("3.4M");
   });
 });
 
@@ -63,6 +78,19 @@ describe("records", () => {
     expect(parseRecords(body)).toEqual([rec]);
   });
 
+  it("carry the token guess and the count", () => {
+    const rec = buildRecord({ issue: 5, predicted: { dif: "mid", tok: "1M", human: false }, actual: { dif: "mid", tokens: 3_400_000, human: false }, at: AT });
+    expect(rec.actual).toMatchObject({ tok: "10M", tokens: 3_400_000 });
+    expect(renderComment(rec)).toContain("tokens: 3.4M (filed as `<1M tok`)");
+    expect(parseRecords(renderComment(rec))).toEqual([rec]);
+  });
+
+  it("read an old record without token fields", () => {
+    const old = '<!-- difficulty-record {"v":1,"issue":3,"predicted":{"dif":"low","human":false},"actual":{"dif":"low","human":false},"pr":null,"why":"","at":"2026-10-01T00:00:00Z"} -->';
+    const rows = datasetRows([{ number: 3, title: "t", comments: [comment(old)] }]);
+    expect(rows[0]).toMatchObject({ predicted: { tok: null }, actual: { tok: null, tokens: null }, tokVerdict: null, verdict: "agree" });
+  });
+
   it("skip a malformed record", () => {
     expect(parseRecords("<!-- difficulty-record {not json} -->")).toEqual([]);
     expect(parseRecords('<!-- difficulty-record {"v":1,"actual":{"dif":"huge"}} -->')).toEqual([]);
@@ -76,8 +104,15 @@ describe("label edits", () => {
     expect(labelEdits({ dif: null, human: false }, { dif: "high", human: true })).toEqual({ add: ["high dif", "human"], remove: [] });
   });
 
+  it("swap the token label only when there is a count", () => {
+    expect(labelEdits({ dif: "mid", tok: "1M", human: false }, { dif: "mid", tok: "10M", human: false })).toEqual({ add: ["<10M tok"], remove: ["<1M tok"] });
+    expect(labelEdits({ dif: "mid", tok: "1M", human: false }, { dif: "mid", tok: null, human: false })).toEqual({ add: [], remove: [] });
+  });
+
   it("give the full list for a replacing write", () => {
     expect(labelsAfter(["bug", "low dif", "high dif"], { dif: "mid", human: true })).toEqual(["bug", "mid dif", "human"]);
+    expect(labelsAfter(["bug", "low dif", "<1M tok"], { dif: "low", tok: null, human: false })).toEqual(["bug", "<1M tok", "low dif"]);
+    expect(labelsAfter(["bug", "low dif", "<1M tok"], { dif: "low", tok: "100K", human: false })).toEqual(["bug", "low dif", "<100K tok"]);
   });
 });
 
@@ -109,5 +144,15 @@ describe("datasetRows", () => {
     expect(s).toMatchObject({ rows: 3, unlabeled: 1, agree: 1, under: 1, over: 0, humanMissed: 0, humanExtra: 1 });
     expect(s.matrix.low.mid).toBe(1);
     expect(s.matrix.mid.mid).toBe(1);
+  });
+
+  it("take the token outcome from the last record with a count", () => {
+    const counted = buildRecord({ issue: 4, predicted: { dif: "low", tok: "100K", human: false }, actual: { dif: "low", tokens: 600_000, human: false }, at: "2026-10-01T00:00:00Z" });
+    const later = buildRecord({ issue: 4, predicted: { dif: "low", tok: "1M", human: false }, actual: { dif: "mid", human: false }, at: "2026-10-05T00:00:00Z" });
+    const rows = datasetRows([{ number: 4, title: "t", comments: [comment(renderComment(counted)), comment(renderComment(later))] }]);
+    expect(rows[0]).toMatchObject({ predicted: { tok: "100K" }, actual: { dif: "mid", tok: "1M", tokens: 600_000 }, tokVerdict: "under" });
+    const s = summarize(rows);
+    expect(s.tokens).toMatchObject({ judged: 1, under: 1 });
+    expect(s.tokens.matrix["100K"]["1M"]).toBe(1);
   });
 });

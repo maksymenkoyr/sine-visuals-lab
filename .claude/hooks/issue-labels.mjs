@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Claude Code PreToolUse hook on Bash and the GitHub MCP's issue_write (wired
-// in .claude/settings.json): a new issue must carry one difficulty label, or
-// it is refused (exit 2) with the rules of docs/issue-labels.md.
+// in .claude/settings.json): a new issue must carry one difficulty label and
+// one token label, or it is refused (exit 2) with the rules of
+// docs/issue-labels.md.
 //   - The hook runs no model: the refusal tells the model that filed the issue
-//     to judge both the difficulty and `human` (it takes a read of the task).
+//     to judge the difficulty, the tokens and `human` (it takes a read of the
+//     task).
 //     An issue that passes without `human` gets a reminder of that rule.
 //   - For Bash only a command that runs `gh issue create` counts (at the start
 //     of a line or after `;`, `&`, `|` or `(`, so a script that merely quotes
