@@ -54,9 +54,10 @@ import { BLOOM_GLSL } from "./views/bloom.ts";
 import { WINGS_GLSL } from "./views/wings.ts";
 import { CIRCUIT_GLSL } from "./views/circuit.ts";
 import { CHIP_GLSL } from "./views/chip.ts";
+import { card, LONGPLAY_SETTINGS, VIEW_CHIPS } from "./card.ts";
 
-const ID = "longplay";
-const NAME = "Long Play";
+const ID = card.id;
+const NAME = card.name;
 
 interface ViewDef {
   name: string;
@@ -64,16 +65,18 @@ interface ViewDef {
   pro?: boolean;
 }
 
-/** The views, in tour order. A view's name is its chip in the View row. */
-export const VIEWS: readonly ViewDef[] = [
-  { name: "Tunnel", glsl: TUNNEL_GLSL },
-  { name: "Reactor", glsl: REACTOR_GLSL },
-  { name: "Ocean", glsl: OCEAN_GLSL },
-  { name: "Bloom", glsl: BLOOM_GLSL, pro: true },
-  { name: "Wings", glsl: WINGS_GLSL, pro: true },
-  { name: "Circuit", glsl: CIRCUIT_GLSL, pro: true },
-  { name: "Chip", glsl: CHIP_GLSL, pro: true },
-];
+const VIEW_GLSL: Readonly<Record<string, string>> = {
+  Tunnel: TUNNEL_GLSL,
+  Reactor: REACTOR_GLSL,
+  Ocean: OCEAN_GLSL,
+  Bloom: BLOOM_GLSL,
+  Wings: WINGS_GLSL,
+  Circuit: CIRCUIT_GLSL,
+  Chip: CHIP_GLSL,
+};
+
+/** Each card chip with its shader; the chips' order is the tour order. */
+export const VIEWS: readonly ViewDef[] = VIEW_CHIPS.map((chip) => ({ ...chip, glsl: VIEW_GLSL[chip.name] }));
 
 /** Shortest gap between two launches — a fast hi-hat run mustn't stack a
  *  square per sixteenth. */
@@ -85,110 +88,6 @@ const FLICK_HOLD_MAX_SEC = 0.333;
 /** Strobe stretch after a phrase start, in beats. */
 const STROBE_BEATS = 4;
 const PHRASE_DECAY_SEC = 0.9;
-
-export const LONGPLAY_SETTINGS: SceneSetting[] = [
-  // Form
-  {
-    key: "view",
-    label: "View",
-    description: "Which look is on screen — picking one mixes to it over two bars",
-    group: "Form",
-    type: "enum",
-    options: VIEWS.map((v) => v.name),
-    proOptions: VIEWS.filter((v) => v.pro).map((v) => v.name),
-    min: 0,
-    max: VIEWS.length - 1,
-    step: 1,
-    default: 0,
-  },
-  {
-    key: "auto",
-    label: "Auto change",
-    description: "Moves on to the next view by itself after Hold, mixing in on a phrase start",
-    group: "Form",
-    type: "boolean",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 1,
-  },
-  {
-    key: "hold",
-    label: "Hold",
-    description: "Minutes a view stays before Auto change mixes to the next — right holds longer",
-    group: "Form",
-    min: 0.5,
-    max: 10,
-    step: 0.5,
-    default: 3,
-  },
-  // Motion
-  {
-    key: "speed",
-    label: "Speed",
-    description: "How fast every view drifts, flies and grows",
-    group: "Motion",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "launch",
-    label: "Launch",
-    description: "How bright the square or ring a hit sends out from the centre is — 0 sends none",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.8,
-    drive: { default: "feature.onset", hit: { reactionLabel: "launch" } },
-  },
-  // Look
-  {
-    key: "flash",
-    label: "Flash",
-    description: "How much a hit brightens the picture (the calm views take less of it)",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    drive: { default: "feature.onset" },
-  },
-  {
-    key: "glow",
-    label: "Glow",
-    description: "How far the neon halo spreads around each stroke",
-    group: "Look",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "lift",
-    label: "Lift",
-    description: "How much the sound brightens the lines, on the views that react to it (Circuit's edges)",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    drive: { default: "anim.high" },
-  },
-  // Post
-  {
-    key: "flicker",
-    label: "Flicker",
-    description: "How much of the picture blinks off for a few frames at a time — the reference's glitch, on its own timer",
-    group: "Post",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const s = LONGPLAY_SETTINGS.find((x) => x.key === key);
@@ -308,7 +207,7 @@ const extraUniforms = () => ({
 
 const children: Scene[] = VIEWS.map((v) =>
   createFullscreenScene(ID, NAME, viewFragBody(v.glsl), {
-    settings: LONGPLAY_SETTINGS,
+    settings: card.settings,
     extraUniformDecls: LONGPLAY_UNIFORMS_GLSL,
     extraUniforms,
   }),
@@ -321,13 +220,8 @@ function ensure(ctx: SceneContext, i: number): void {
   ready.add(i);
 }
 
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "development", added: "2026-10-03" } as const;
-
 export const longPlayScene: Scene = {
-  id: ID,
-  name: NAME,
-  settings: LONGPLAY_SETTINGS,
+  ...card,
 
   probe: () => ({ view: tour.cur, next: tour.next, mix: tour.mixing ? tour.mix : 0 }),
 
