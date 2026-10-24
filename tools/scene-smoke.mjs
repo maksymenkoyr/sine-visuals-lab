@@ -32,8 +32,10 @@ import { createServer, preview } from "vite";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Tangle needs most of 20 s to reach a few dozen frames on software WebGL.
-const DEFAULT_CAP_MS = 45_000;
+// Measured on a GitHub runner (2026-10-24): Tangle, Sky and Physarum 2 took
+// 29–33 s each on software WebGL. The cap is only spent on a failing scene,
+// so it is set well clear of them to keep a slow runner from failing a deploy.
+const DEFAULT_CAP_MS = 90_000;
 const POLL_MS = 250;
 const BLANK_CHECK_MS = 750;
 const SETTLE_MS = 2_000;
