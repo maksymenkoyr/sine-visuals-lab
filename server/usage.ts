@@ -22,7 +22,7 @@
 
 /** A scene started running on live audio: `start` for the first one in a
  *  page load, `scene` for each different scene after it. */
-export type UsageEventKind = "start" | "scene";
+type UsageEventKind = "start" | "scene";
 export type UsageSource = "mic" | "display" | "remote";
 
 export interface UsageEvent {
