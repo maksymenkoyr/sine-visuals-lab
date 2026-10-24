@@ -19,7 +19,7 @@ import { fileClosure, SCENES_DIR, sceneEntries } from "../tools/sceneVersionLib.
 const DT = 1 / 60;
 
 function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
-  return { time: 0, bands: new Float32Array(NUM_BANDS), energy: 0, level: 1, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, ...overrides };
+  return { time: 0, bands: new Float32Array(NUM_BANDS), energy: 0, level: 1, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, engine: null, ...overrides };
 }
 
 /** A hit driver on a one-source Loud-height Beat patch: each hit's pulse is

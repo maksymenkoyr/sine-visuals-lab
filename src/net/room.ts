@@ -1,5 +1,6 @@
 import { WORKER_ORIGIN } from "./config.ts";
-import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame, type WaveEnvelope } from "./protocol.ts";
+import { encodeFeatureFrame, decodeFeatureFrame, toWireEngine, type EncodableFrame, type WaveEnvelope, type WireEngine } from "./protocol.ts";
+import type { EngineReading } from "../audio/types.ts";
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
@@ -73,6 +74,10 @@ export interface VisualSample {
   /** The feed's waveform envelope at this instant (JitterBuffer.sampleAt);
    *  null when the feed sends none. */
   wave: WaveEnvelope | null;
+  /** The feed's engine reading at this instant (JitterBuffer.sampleAt), its
+   *  beat times on `timeSec`'s timeline; null when the feed sends none.
+   *  Reused between calls, like the rest of the sample. */
+  engine: EngineReading | null;
 }
 
 /** The room's keys, as the laptop minted them. A host presents both; a phone
@@ -412,9 +417,10 @@ abstract class RoomConnectionBase {
    *  own panel reads the mic directly. */
   sendFrame(frame: EncodableFrame, wave: WaveEnvelope | null = null): void {
     const roomTimeMs = this.clock.roomNow();
-    this.pushFrame({ ...frame, roomTimeMs, wave: null });
+    const engine = frame.engine ?? null;
+    this.pushFrame({ ...frame, roomTimeMs, wave: null, engine: engine ? toWireEngine(engine, frame.time ?? 0) : null });
 
-    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave);
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave, engine);
     if (!d.send) return;
     // The latches are cleared even when nothing goes out (socket not open, no
     // follower), so a stale hit isn't replayed on reconnect or when a follower
@@ -422,7 +428,7 @@ abstract class RoomConnectionBase {
     const view = this.rosterView;
     if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
     if (!this.keyed && this.rosterHasRenderer === false) return;
-    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs, d.wave));
+    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset, engine: d.engine }, roomTimeMs, d.wave));
   }
 
   /** Forget every frame this device has buffered or is about to send, as if
@@ -497,6 +503,7 @@ abstract class RoomConnectionBase {
     const targetMs = this.clock.roomNow() - delayMs;
     const s = this.buffer.sampleAt(targetMs);
     if (!s) return null;
+    const timeSec = roomTimeToSeconds(targetMs);
     return {
       bands: s.bands,
       energy: s.energy,
@@ -504,12 +511,53 @@ abstract class RoomConnectionBase {
       beatPhase: this.buffer.beatPhaseAt(targetMs),
       onsetFired: this.buffer.consumeOnsetIfDue(targetMs),
       pulseFired: this.buffer.consumePulseIfDue(targetMs),
-      timeSec: roomTimeToSeconds(targetMs),
+      timeSec,
       level: s.level,
       hats: s.hats,
       lead: s.lead,
       wave: s.wave,
+      engine: s.engine ? this.sampleEngine(s.engine, timeSec) : null,
     };
+  }
+
+  private readonly engineScratch: EngineReading = {
+    low: 0,
+    mid: 0,
+    high: 0,
+    kick: 0,
+    snare: 0,
+    hat: 0,
+    surge: 0,
+    surgeKind: "kick",
+    blocked: false,
+    music: false,
+    confidence: 0,
+    beatTime: 0,
+    downbeatTime: 0,
+    downbeatConfidence: 0,
+    updates: 0,
+  };
+
+  /** The buffer's reading with its beat ages turned into times on the sample's
+   *  own timeline, so they never straddle roomTimeToSeconds's wrap. */
+  private sampleEngine(w: WireEngine, timeSec: number): EngineReading {
+    const e = this.engineScratch;
+    e.low = w.low;
+    e.mid = w.mid;
+    e.high = w.high;
+    e.kick = w.kick;
+    e.snare = w.snare;
+    e.hat = w.hat;
+    e.surge = w.surge;
+    e.surgeKind = w.surgeKind;
+    e.blocked = w.blocked;
+    e.music = w.music;
+    e.confidence = w.confidence;
+    e.downbeatConfidence = w.downbeatConfidence;
+    e.updates = w.updates;
+    e.beatTime = timeSec - w.beatAgoMs / 1000;
+    e.downbeatTime = timeSec - w.downbeatAgoMs / 1000;
+    return e;
   }
 
   private setState(s: ConnState): void {

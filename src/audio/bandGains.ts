@@ -1,5 +1,6 @@
-import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { NUM_BANDS, type EngineReading, type FeatureFrame } from "./types.ts";
 import { createPerSceneSetting } from "./sensitivity.ts";
+import { getBandSplit } from "./bandSplit.ts";
 
 /**
  * Per-scene band gain — a bank of BAND_FADER_COUNT faders across the band
@@ -155,20 +156,52 @@ export function pinnedBands(): Uint8Array {
   return pinned;
 }
 
+const scratchEngine: EngineReading = {
+  low: 0,
+  mid: 0,
+  high: 0,
+  kick: 0,
+  snare: 0,
+  hat: 0,
+  surge: 0,
+  surgeKind: "kick",
+  blocked: false,
+  music: false,
+  confidence: 0,
+  beatTime: 0,
+  downbeatTime: 0,
+  downbeatConfidence: 0,
+  updates: 0,
+};
+
+/** The mean of `weights` over bands [lo, hi). */
+function meanWeight(weights: Float32Array, lo: number, hi: number): number {
+  let sum = 0;
+  for (let b = lo; b < hi; b++) sum += weights[b];
+  return sum / (hi - lo);
+}
+
 /**
  * Scales each band by its fader weight (faderWeights) before anything
  * downstream reads the frame. Applied upstream of both animClock.advance
- * (bandEnergy.ts's group levels/pulses/onsets) and applySensitivity (the
- * uBands shader uniform), so one control governs both. Result is
- * re-clamped to [0,1] since features.ts's contract is that bands stay
- * normalized (see clamp01 there) and a >1x gain can otherwise punch
- * through that; the bands that hit the clamp are recorded in pinnedBands.
- * energy/level/hats/lead/onset/pulseOnset/bpm/onsetPhase pass through untouched —
- * this is a per-band control, not a broadband one (that's
- * Sensitivity/Contrast's job), and level in particular must stay the raw,
- * un-gained reading: it's auto mode's input signal (see types.ts), so
- * shaping it here would feed the gain stage its own output, same as
- * applySensitivity.
+ * and applySensitivity (the uBands shader uniform), so one control governs
+ * both. Result is re-clamped to [0,1] since features.ts's contract is that
+ * bands stay normalized (see clamp01 there) and a >1x gain can otherwise
+ * punch through that; the bands that hit the clamp are recorded in
+ * pinnedBands.
+ *
+ * The engine reading (types.ts's EngineReading) gets the same control per
+ * lane: each of its low, mid and high is scaled by the mean weight over the
+ * band split's range for it (bandSplit.ts, which also moves the engine's
+ * crossovers onto those ranges — engineSource.ts), and so is that lane's hit
+ * strength (kick, snare, hat) and a surge nearest it, so a fader at Off stops
+ * its range driving anything and a boost lets that range's hits through a
+ * half-closed silence gate. energy/level/hats/lead/onset/pulseOnset/bpm/
+ * onsetPhase pass through untouched — this is a per-band control, not a
+ * broadband one (that's Sensitivity/Contrast's job), and level in particular
+ * must stay the raw, un-gained reading: it's auto mode's input signal (see
+ * types.ts), so shaping it here would feed the gain stage its own output,
+ * same as applySensitivity.
  */
 export function applyBandGains(frame: FeatureFrame, gains: ArrayLike<number>): FeatureFrame {
   if (isDefaultGains(gains)) {
@@ -183,6 +216,24 @@ export function applyBandGains(frame: FeatureFrame, gains: ArrayLike<number>): F
     scratchBands[b] = v > 1 ? 1 : v;
   }
 
+  let engine: EngineReading | null = null;
+  if (frame.engine) {
+    const { lowMid, midHigh } = getBandSplit();
+    const lane = {
+      kick: meanWeight(scratchWeights, 0, lowMid),
+      snare: meanWeight(scratchWeights, lowMid, midHigh),
+      hat: meanWeight(scratchWeights, midHigh, NUM_BANDS),
+    };
+    engine = Object.assign(scratchEngine, frame.engine);
+    engine.low = Math.min(1, engine.low * lane.kick);
+    engine.mid = Math.min(1, engine.mid * lane.snare);
+    engine.high = Math.min(1, engine.high * lane.hat);
+    engine.kick *= lane.kick;
+    engine.snare *= lane.snare;
+    engine.hat *= lane.hat;
+    engine.surge *= lane[engine.surgeKind];
+  }
+
   return {
     time: frame.time,
     bands: scratchBands,
@@ -194,5 +245,6 @@ export function applyBandGains(frame: FeatureFrame, gains: ArrayLike<number>): F
     level: frame.level,
     hats: frame.hats,
     lead: frame.lead,
+    engine,
   };
 }

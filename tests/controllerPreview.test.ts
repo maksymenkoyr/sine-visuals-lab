@@ -17,6 +17,7 @@ function loud(): VisualSample {
     hats: 0,
     lead: 0,
     wave: { min: -0.6, max: 0.7 },
+    engine: null,
   };
 }
 
@@ -33,6 +34,7 @@ describe("silentSample", () => {
       pulseFired: false,
       timeSec: 12.5,
       wave: null,
+      engine: null,
     });
   });
 

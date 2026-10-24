@@ -32,6 +32,7 @@ import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasu
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
+import { createEngineSource, type EngineSource } from "./audio/engineSource.ts";
 import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "./audio/types.ts";
 import {
   getAudioSourceChoice as getStoredAudioSource,
@@ -420,6 +421,10 @@ let measureAnalyser: WaveformAnalyser | null = null;
 /** AudioWorklet fixed-hop tempo tracker; null until createTempoSource() resolves,
  *  and permanently null where unsupported (extractor's own bpm is the fallback). */
 let tempoSource: TempoSource | null = null;
+/** The audio engine's feed (src/audio/engineSource.ts); null until it resolves,
+ *  and where neither of its taps can be built. Its reading rides every local
+ *  frame (FeatureFrame.engine). */
+let engineSource: EngineSource | null = null;
 let extractor = new FeatureExtractor();
 /** Cached so re-entering a viz never re-prompts; cleared on failure or when the capture's track ends. */
 let audioPromise: Promise<void> | null = null;
@@ -1535,6 +1540,14 @@ function attachCapture(handle: CaptureHandle): void {
     }
     tempoSource = source;
   });
+  engineSource = null;
+  void createEngineSource(handle.context, handle.sourceNode).then((source) => {
+    if (capture !== handle) {
+      source?.dispose();
+      return;
+    }
+    engineSource = source;
+  });
   // stop() (a swap retiring this handle) fires no "ended" per spec, only an
   // external stop does, so this and a deliberate swap never race.
   const track = handle.stream.getAudioTracks()[0];
@@ -1577,6 +1590,8 @@ function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   inputHealth.reset();
   tempoSource?.dispose();
   tempoSource = null;
+  engineSource?.dispose();
+  engineSource = null;
   audioPromise = null;
   captureFailed = false;
   updateMicPrompt();
@@ -3357,6 +3372,7 @@ function readLocalCapture(
   lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
   lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+  f.engine = engineSource ? engineSource.read(now) : null;
   if (stemGate) {
     // readBandsDb() above just refilled binsDb. A skipped tick keeps the
     // frame's zeros.
@@ -3498,6 +3514,7 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     level: s.level,
     hats: s.hats,
     lead: s.lead,
+    engine: s.engine,
   };
 }
 

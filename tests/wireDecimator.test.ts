@@ -54,7 +54,7 @@ describe("WireDecimator", () => {
     const d = new WireDecimator(INTERVAL);
     d.offer(0, false, false);
     d.offer(16, false, false);
-    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null });
+    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null, engine: null });
   });
 
   it("after a long gap sends once, with no burst of catch-up sends", () => {

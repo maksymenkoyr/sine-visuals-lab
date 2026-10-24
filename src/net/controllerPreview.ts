@@ -18,7 +18,8 @@
 import type { ConnState, VisualSample } from "./room.ts";
 
 /** The sample with the audio taken out: no level, no bands, no waveform, no
- *  onsets and no tempo (a bpm of zero is "unknown" to the beat grid), time left running. */
+ *  onsets, no engine reading and no tempo (a bpm of zero is "unknown" to the
+ *  beat grid), time left running. */
 export function silentSample(s: VisualSample): VisualSample {
   return {
     bands: new Float32Array(s.bands.length),
@@ -32,6 +33,7 @@ export function silentSample(s: VisualSample): VisualSample {
     hats: 0,
     lead: 0,
     wave: null,
+    engine: null,
   };
 }
 

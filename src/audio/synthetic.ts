@@ -113,7 +113,8 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
       // just what FeatureFrame calls that same edge/phase pair. There's no
       // silence gate here to differ from it, so pulseOnset = onset.
-      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead };
+      // No engine reading yet: the anim clock still builds everything from the bands and onsets above.
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine: null };
     },
   };
 }

@@ -26,7 +26,7 @@ import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 
 function frame(fill: number): FeatureFrame {
   const bands = new Float32Array(NUM_BANDS).fill(fill);
-  return { time: 1.5, bands, energy: 0.5, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6, hats: 0, lead: 0 };
+  return { time: 1.5, bands, energy: 0.5, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6, hats: 0, lead: 0, engine: null };
 }
 
 function flat(): Float32Array {

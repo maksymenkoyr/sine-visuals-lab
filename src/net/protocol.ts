@@ -1,4 +1,4 @@
-import { NUM_BANDS } from "../audio/types.ts";
+import { type EngineReading, HIT_KINDS, HIT_STRENGTH_MAX, NUM_BANDS } from "../audio/types.ts";
 
 /**
  * Wire format for a feature frame, little-endian:
@@ -27,10 +27,31 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [43]     lead, Uint8
  * = 44 bytes: the two stem levels (src/audio/stemSplit.ts), which only the
  * device hearing the sound can measure, so they travel here instead of being
- * worked out from the bands. They ride only with the wave tail: both come
- * from a real capture, which always has a waveform too, and a sender with no
- * capture has no split to send. A frame without them decodes hats and lead
- * as 0.
+ * worked out from the bands. A frame without them decodes hats and lead as 0.
+ *   [44..46] engine low, mid, high, Uint8 (0..1 -> 0..255)
+ *   [47..49] kick, snare, hat hit strength, Uint8 (0..HIT_STRENGTH_MAX -> 0..255; 0 = no hit)
+ *   [50]     surge, Uint8 (0..HIT_STRENGTH_MAX -> 0..255)
+ *   [51]     engine flags: bit0 music, bits1-2 surge kind (HIT_KINDS index),
+ *            bit3 blocked, bit4 wave absent
+ *   [52]     confidence, Uint8
+ *   [53]     downbeat confidence, Uint8
+ *   [54..55] beat ago, Uint16 ms: how long before this frame the tracker's
+ *            latest beat fell
+ *   [56..57] downbeat ago, Uint16 ms
+ *   [58]     tracker updates, Uint8, wrapping
+ * = ENGINE_FRAME_BYTES: the audio engine's reading (src/audio/types.ts's
+ * EngineReading), which is what a follower builds its levels, hits and beat
+ * clock from. The beat times travel as an age against this frame's own time,
+ * so they come out on whatever timeline the follower reads frames on.
+ * Every frame with a reading carries the wave and stem tails before it, to
+ * keep the layout positional; a sender with a reading but no waveform sets
+ * bit4 and the follower drops the wave it wrote as a placeholder. A follower
+ * running a decoder from before the engine tail reads the prefix it knows and
+ * ignores the rest (it shows a flat Waveform row for such a sender). A frame
+ * without the tail decodes `engine` as null, which a follower's anim clock
+ * treats as nothing heard: no levels, no hits, no beat. That is a
+ * mixed-version pairing during a deploy, and lasts until the sender reloads;
+ * retire this paragraph with the legacy-decode fallback below.
  *
  * bit1 (pulseOnset) was added after bit0 shipped — decodeFeatureFrame ORs it
  * with `onset` on decode (`(flags & 2) !== 0 || onset`) so a sender that
@@ -46,10 +67,9 @@ import { NUM_BANDS } from "../audio/types.ts";
  * longer a concern.
  *
  * A page still on a decoder from before the wave tail takes only 39 or 40
- * bytes, so it drops a 42-byte frame and shows its "waiting" state until it
+ * bytes, so it drops a longer frame and shows its "waiting" state until it
  * reloads. decodeFeatureFrame reads the known prefix of anything longer than
- * FRAME_BYTES, so the stem tail after it costs a waveform-era decoder
- * nothing: it reads the first 42 bytes and ignores the rest.
+ * FRAME_BYTES, so each later tail costs an older waveform-era decoder nothing.
  *
  * decodeFeatureFrame also accepts the legacy 39-byte layout (no `level`
  * byte, roomTimeMs at [31..38]) and defaults `level` to 0.5 — so a renderer
@@ -79,11 +99,49 @@ const BASE_FRAME_BYTES = 1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8;
 const LEGACY_FRAME_BYTES = BASE_FRAME_BYTES - 1;
 const FRAME_BYTES = BASE_FRAME_BYTES + 2;
 const STEM_FRAME_BYTES = FRAME_BYTES + 2;
+const ENGINE_FRAME_BYTES = STEM_FRAME_BYTES + 15;
+
+const MUSIC_BIT = 1;
+const SURGE_KIND_SHIFT = 1;
+const BLOCKED_BIT = 8;
+const NO_WAVE_BIT = 16;
+const AGO_MAX_MS = 65535;
 
 /** The min and max of a stretch of raw mic samples, each in [-1,1]. */
 export interface WaveEnvelope {
   min: number;
   max: number;
+}
+
+/**
+ * EngineReading as it travels: the beat and bar start as ages before the
+ * frame's own time (`beatAgoMs`, `downbeatAgoMs`) instead of times on the
+ * sender's clock.
+ */
+export interface WireEngine extends Omit<EngineReading, "beatTime" | "downbeatTime"> {
+  beatAgoMs: number;
+  downbeatAgoMs: number;
+}
+
+/** `r` as it travels with a frame read at `frameTimeSec` (the clock `r`'s times are on). */
+export function toWireEngine(r: EngineReading, frameTimeSec: number): WireEngine {
+  return {
+    low: r.low,
+    mid: r.mid,
+    high: r.high,
+    kick: r.kick,
+    snare: r.snare,
+    hat: r.hat,
+    surge: r.surge,
+    surgeKind: r.surgeKind,
+    blocked: r.blocked,
+    music: r.music,
+    confidence: r.confidence,
+    downbeatConfidence: r.downbeatConfidence,
+    updates: r.updates,
+    beatAgoMs: Math.max(0, (frameTimeSec - r.beatTime) * 1000),
+    downbeatAgoMs: Math.max(0, (frameTimeSec - r.downbeatTime) * 1000),
+  };
 }
 
 // A square-root curve, not a linear one: the Waveform row zooms to the
@@ -104,7 +162,25 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
+function unit8(x: number): number {
+  return Math.round(clamp01(Number.isFinite(x) ? x : 0) * 255);
+}
+
+/** A hit strength's byte: 0 stays 0 (no hit), and a hit never rounds down onto
+ *  its threshold (strength 1), where the follower's gate would drop it. */
+function strength8(x: number): number {
+  if (!(x > 0)) return 0;
+  return Math.max(Math.ceil(255 / HIT_STRENGTH_MAX), Math.round((Math.min(x, HIT_STRENGTH_MAX) / HIT_STRENGTH_MAX) * 255));
+}
+
+function ago16(ms: number): number {
+  return Math.min(AGO_MAX_MS, Math.round(Math.max(0, Number.isFinite(ms) ? ms : AGO_MAX_MS)));
+}
+
 export interface EncodableFrame {
+  /** The frame's own time, on the clock its engine reading's times are on;
+   *  read only with a reading. */
+  time?: number;
   bands: Float32Array; // length NUM_BANDS, [0,1]
   energy: number;
   onset: boolean;
@@ -114,12 +190,16 @@ export interface EncodableFrame {
   level: number;
   hats: number;
   lead: number;
+  /** Absent or null sends no engine tail. */
+  engine?: EngineReading | null;
 }
 
 /** `wave`, when given, becomes the frame's tail, followed by the stem levels
- *  (see the header); null sends the 40-byte frame. */
+ *  and, when the frame has one, the engine reading (see the header); with
+ *  neither, the 40-byte frame. */
 export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number, wave: WaveEnvelope | null = null): ArrayBuffer {
-  const buf = new ArrayBuffer(wave ? STEM_FRAME_BYTES : BASE_FRAME_BYTES);
+  const engine = frame.engine ?? null;
+  const buf = new ArrayBuffer(engine ? ENGINE_FRAME_BYTES : wave ? STEM_FRAME_BYTES : BASE_FRAME_BYTES);
   const view = new DataView(buf);
   let o = 0;
   view.setUint8(o, MSG_FEATURE_FRAME);
@@ -139,11 +219,29 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number, wa
   o += 1;
   view.setFloat64(o, roomTimeMs, true);
   o += 8;
-  if (wave) {
-    view.setInt8(o, encodeWaveSample(wave.min));
-    view.setInt8(o + 1, encodeWaveSample(wave.max));
+  if (wave || engine) {
+    view.setInt8(o, wave ? encodeWaveSample(wave.min) : 0);
+    view.setInt8(o + 1, wave ? encodeWaveSample(wave.max) : 0);
     view.setUint8(o + 2, Math.round(clamp01(frame.hats) * 255));
     view.setUint8(o + 3, Math.round(clamp01(frame.lead) * 255));
+    o += 4;
+  }
+  if (engine) {
+    const w = toWireEngine(engine, frame.time ?? 0);
+    view.setUint8(o, unit8(w.low));
+    view.setUint8(o + 1, unit8(w.mid));
+    view.setUint8(o + 2, unit8(w.high));
+    view.setUint8(o + 3, strength8(w.kick));
+    view.setUint8(o + 4, strength8(w.snare));
+    view.setUint8(o + 5, strength8(w.hat));
+    view.setUint8(o + 6, unit8(w.surge / HIT_STRENGTH_MAX));
+    const kind = Math.max(0, HIT_KINDS.indexOf(w.surgeKind));
+    view.setUint8(o + 7, (w.music ? MUSIC_BIT : 0) | (kind << SURGE_KIND_SHIFT) | (w.blocked ? BLOCKED_BIT : 0) | (wave ? 0 : NO_WAVE_BIT));
+    view.setUint8(o + 8, unit8(w.confidence));
+    view.setUint8(o + 9, unit8(w.downbeatConfidence));
+    view.setUint16(o + 10, ago16(w.beatAgoMs), true);
+    view.setUint16(o + 12, ago16(w.downbeatAgoMs), true);
+    view.setUint8(o + 14, w.updates & 255);
   }
   return buf;
 }
@@ -162,6 +260,8 @@ export interface DecodedFrame {
   roomTimeMs: number;
   /** The sender's waveform since its previous frame; null when it sent none. */
   wave: WaveEnvelope | null;
+  /** The sender's engine reading; null when the frame carries none. */
+  engine: WireEngine | null;
 }
 
 export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
@@ -199,11 +299,35 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   // No honest sender writes one.
   if (!Number.isFinite(roomTimeMs)) return null;
   o += 8;
-  const wave =
-    buf.byteLength >= FRAME_BYTES ? { min: decodeWaveSample(view.getInt8(o)), max: decodeWaveSample(view.getInt8(o + 1)) } : null;
   const stems = buf.byteLength >= STEM_FRAME_BYTES;
   const hats = stems ? view.getUint8(o + 2) / 255 : 0;
   const lead = stems ? view.getUint8(o + 3) / 255 : 0;
+  let engine: WireEngine | null = null;
+  let waveAbsent = false;
+  if (buf.byteLength >= ENGINE_FRAME_BYTES) {
+    const e = o + 4;
+    const eflags = view.getUint8(e + 7);
+    waveAbsent = (eflags & NO_WAVE_BIT) !== 0;
+    engine = {
+      low: view.getUint8(e) / 255,
+      mid: view.getUint8(e + 1) / 255,
+      high: view.getUint8(e + 2) / 255,
+      kick: (view.getUint8(e + 3) / 255) * HIT_STRENGTH_MAX,
+      snare: (view.getUint8(e + 4) / 255) * HIT_STRENGTH_MAX,
+      hat: (view.getUint8(e + 5) / 255) * HIT_STRENGTH_MAX,
+      surge: (view.getUint8(e + 6) / 255) * HIT_STRENGTH_MAX,
+      surgeKind: HIT_KINDS[(eflags >> SURGE_KIND_SHIFT) & 3] ?? "kick",
+      blocked: (eflags & BLOCKED_BIT) !== 0,
+      music: (eflags & MUSIC_BIT) !== 0,
+      confidence: view.getUint8(e + 8) / 255,
+      downbeatConfidence: view.getUint8(e + 9) / 255,
+      beatAgoMs: view.getUint16(e + 10, true),
+      downbeatAgoMs: view.getUint16(e + 12, true),
+      updates: view.getUint8(e + 14),
+    };
+  }
+  const wave =
+    buf.byteLength >= FRAME_BYTES && !waveAbsent ? { min: decodeWaveSample(view.getInt8(o)), max: decodeWaveSample(view.getInt8(o + 1)) } : null;
 
-  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, hats, lead, roomTimeMs, wave };
+  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, hats, lead, roomTimeMs, wave, engine };
 }
