@@ -38,7 +38,7 @@ export interface DefaultEdit {
   to: number;
 }
 
-export interface BakeResult {
+interface BakeResult {
   key: string;
   status: string;
   found?: number;

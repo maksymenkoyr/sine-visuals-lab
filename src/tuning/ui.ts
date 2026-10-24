@@ -9,7 +9,7 @@
  * never imported in prod.
  */
 
-export interface NoticeHandle {
+interface NoticeHandle {
   close(): void;
 }
 
