@@ -418,7 +418,7 @@ abstract class RoomConnectionBase {
     const engine = frame.engine ?? null;
     this.pushFrame({ ...frame, roomTimeMs, wave: null, engine: engine ? toWireEngine(engine, frame.time ?? 0) : null });
 
-    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave, engine);
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave, engine, frame.level);
     if (!d.send) return;
     // The latches are cleared even when nothing goes out (socket not open, no
     // follower), so a stale hit isn't replayed on reconnect or when a follower
@@ -426,7 +426,7 @@ abstract class RoomConnectionBase {
     const view = this.rosterView;
     if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
     if (!this.keyed && this.rosterHasRenderer === false) return;
-    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset, engine: d.engine }, roomTimeMs, d.wave));
+    this.sendRaw(encodeFeatureFrame({ ...frame, level: Math.max(frame.level, d.hitLevel), onset: d.onset, pulseOnset: d.pulseOnset, engine: d.engine }, roomTimeMs, d.wave));
   }
 
   /** Forget every frame this device has buffered or is about to send, as if
@@ -546,6 +546,7 @@ abstract class RoomConnectionBase {
     e.kick = w.kick;
     e.snare = w.snare;
     e.hat = w.hat;
+    e.hitLevel = w.hitLevel;
     e.surge = w.surge;
     e.surgeKind = w.surgeKind;
     e.blocked = w.blocked;

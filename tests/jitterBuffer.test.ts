@@ -1,12 +1,31 @@
 import { describe, it, expect } from "vitest";
 import { JitterBuffer } from "../src/net/jitterBuffer.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
+import type { WireEngine } from "../src/net/protocol.ts";
+import { engineReading } from "./engineReading.ts";
 
 function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy, pulseOnset = onset) {
   return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, pulseOnset, bpm, level, hats: 0, lead: 0, roomTimeMs };
 }
 
+/** An engine reading as it travels, with the fields a test names. */
+function wire(over: Parameters<typeof engineReading>[0] = {}): WireEngine {
+  const { beatTime: _beat, downbeatTime: _downbeat, ...rest } = engineReading(over);
+  return { ...rest, beatAgoMs: 0, downbeatAgoMs: 0 };
+}
+
 describe("JitterBuffer", () => {
+  it("hands a hit out with the level of the frame it came in, not the level at the instant", () => {
+    const buf = new JitterBuffer();
+    buf.push({ ...frame(0, 0.2, false, 0, 0.6), engine: wire({ snare: 3 }) });
+    buf.push({ ...frame(33, 0.2, false, 0, 0.05), engine: wire() });
+    const s = buf.sampleAt(20)!;
+    expect(s.engine!.snare).toBe(3);
+    expect(s.level).toBeLessThan(0.6);
+    expect(s.engine!.hitLevel).toBe(0.6);
+    expect(buf.sampleAt(30)!.engine!.hitLevel).toBeUndefined();
+  });
+
   it("interpolates linearly between two bracketing frames", () => {
     const buf = new JitterBuffer();
     buf.push(frame(0, 0.0));

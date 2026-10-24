@@ -264,7 +264,10 @@ same levels, hits and beat from the reading its frames carry.
    lasts one render tick, so a plain "send every Nth tick" would drop most of
    them. The decimator latches the strongest hit of each kind, the largest surge
    with its kind, and any blocked hit across the skipped ticks, and hands them over
-   on the next send. The levels and the tracker's state are the sending tick's own.
+   on the next send. The levels and the tracker's state are the sending tick's own,
+   except that a frame carrying a hit goes out with at least the level that hit
+   was heard at: a short sound's level has often fallen by the next tick, and the
+   follower gates the hit on it.
 3. `src/net/protocol.ts` carries the reading in the frame's engine tail: the three
    levels, the three hit strengths, the surge, a flag byte, the confidences and
    an update counter. Beat and bar times travel as ages in milliseconds against
@@ -276,12 +279,17 @@ same levels, hits and beat from the reading its frames carry.
    tracker's state comes from the latest frame at or before it. Hits cannot be
    interpolated: a one-frame spike would be smeared, or skipped if two frames
    arrive in a burst. Each kind has its own queue (`HitQueue`) holding the hits
-   that have arrived but not yet come due, each stamped with its frame's time. A
-   sample takes the strongest hit due by the render instant and removes every one
-   that is. Network delivery can reorder, so the queue inserts in time order, and
-   it holds at most `PENDING_HITS` per kind, dropping the oldest.
+   that have arrived but not yet come due, each stamped with its frame's time and
+   level. A sample takes the strongest hit due by the render instant and removes
+   every one that is. Network delivery can reorder, so the queue inserts in time
+   order, and it holds at most `PENDING_HITS` per kind, dropping the oldest.
 5. The TV's `animClock` runs the same clock, silence gate and lanes off the
-   sampled reading with its own marks.
+   sampled reading with its own marks. It gates each hit on the level of the frame
+   the hit came in (`EngineReading.hitLevel`), not the level at the render
+   instant: a hit comes due a tick or more after its frame, and gating it on the
+   later level dropped most of hip-hop's snares on the TV in the tempo eval's
+   rooms. The pop-out's inbox (`src/net/outputSync.ts`) keeps the same level for
+   the hits it latches.
 
 The silence gate's marks are not part of a room's look. A phone's Silence gate
 setting does not decide what a paired TV treats as silence; the TV's own copy does.
@@ -372,4 +380,28 @@ The measurements behind individual choices, as the bench found them:
   much in quiet passages and in band following, because presence takes a few
   seconds to come on. The app's engine does not have the option.
 
-<!-- integrated-app bench: filled in from #679 -->
+### The app as integrated (2026-10-24)
+
+The same bench scored the app as it runs the engine. It used a snapshot at
+`49753e24`, wired as `tests/tempoEval/run.ts` wires it, with lane smoothing,
+the silence gate, the metronome over the clock, Lock and the band faders all
+in. The extended bench is kept beside the original, at
+`~/projects/audio-subsystem/bench-app`.
+
+| set | app | app on a TV | v5 | v4 (the app before) |
+|---|---:|---:|---:|---:|
+| synthetic tracks through 11 simulated rooms and mics | 0.80 | 0.80 | 0.80 | 0.64 |
+| six real drops through the same rooms | 0.85 | 0.85 | 0.85 | 0.69 |
+| real laptop speakers to laptop mic, recorded | 0.81 | not run | 0.81 | 0.61 |
+
+- No category is more than 0.01 below v5. A TV is scored at the instant its
+  content was heard; its picture trails the laptop's by the room's render delay.
+- The silence gate leaves every category within 0.02. It cuts false hits with no
+  music from 58 a minute to 10, and costs some quiet hits: snare recall in music
+  fell from 0.61 to 0.53, and isolated hats from 0.96 to 0.66.
+- Hits by kind compares each lane's hits with the true hits of its kind (F-measure
+  at 50 ms, simulated music). The app scores kick 0.69, snare 0.54 and hat 0.02;
+  the app before scored 0.62, 0.42 and 0.52. The engine names few hits in a mix
+  as hats, which is the Treble limit above. Through laptop speakers its kicks are
+  rarely named kicks (0.02, against 0.55 before), since those speakers play
+  almost no bass.

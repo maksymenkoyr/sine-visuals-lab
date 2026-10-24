@@ -361,8 +361,11 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
       const inst = hit?.wavePeak;
       wavePeak = inst == null ? 0 : Math.max(inst, wavePeak - WAVE_PEAK_FALL_PER_SEC * rateScale * dtSec);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
+      // A follower's hits carry the level of the frame they came in (EngineReading.hitLevel).
+      const hitLevel = frame.engine?.hitLevel;
+      const hitDimmer = gate && hitLevel !== undefined ? silenceGateDimmer(hitLevel, gate) : dimmer;
       const flowPhase = flow.advance(dtSec, frame.energy);
-      bandEnergy.advance(dtSec, frame, rateScale, dimmer, hit?.shape);
+      bandEnergy.advance(dtSec, frame, rateScale, hitDimmer, hit?.shape);
       kickBand.advance(dtSec, frame.bands, getBandSplit().lowMid);
       hats = slewLevel(hats, frame.hats * dimmer, dtSec, rateScale);
       lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);

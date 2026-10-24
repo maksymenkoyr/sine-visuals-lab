@@ -53,7 +53,9 @@
  *
  * The gate governs what a scene *reacts to*, never tempo tracking. Every
  * device that draws gates the engine reading's hits itself (bandEnergy.ts,
- * run by src/render/animClock.ts), off the frame's `level` and its own marks;
+ * run by src/render/animClock.ts) with its own marks, off the `level` of the
+ * frame the hits came in (on a follower, EngineReading.hitLevel: it draws a
+ * hit a tick or more later, when a short sound's level has already fallen);
  * src/app.ts also sets FeatureFrame.onset by the same rule for followers that
  * predate the reading. The tempo tracker (src/audio/engine/tempo.ts) hears
  * the audio before any gate, and the beat clock follows it: a gated tracker

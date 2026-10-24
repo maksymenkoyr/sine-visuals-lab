@@ -29,13 +29,18 @@ export const BROADCAST_INTERVAL_MS = 1000 / 30;
  * skipped tick still reaches a follower's Waveform row. So is the engine
  * reading's per-frame part: the strongest hit of each kind, the largest
  * surge (with its kind) and any blocked hit since the last send; the rest of
- * the reading (levels, the tracker's state) is the sending tick's own.
+ * the reading (levels, the tracker's state) is the sending tick's own. A
+ * follower gates hits on the level of the frame they came in
+ * (EngineReading.hitLevel), so the loudest level a carried hit was heard at
+ * goes out too (`hitLevel`): a short sound's level has often fallen by the
+ * next tick, and the follower would gate a hit the host let through.
  */
 export class WireDecimator {
   private lastSentMs = -Infinity;
   private pendingOnset = false;
   private pendingPulse = false;
   private pendingWave: WaveEnvelope | null = null;
+  private pendingHitLevel = 0;
   private readonly pendingHits: Pick<EngineReading, "kick" | "snare" | "hat" | "surge" | "surgeKind" | "blocked"> = {
     kick: 0,
     snare: 0,
@@ -54,14 +59,17 @@ export class WireDecimator {
    *  `pulseOnset`, `wave` and `engine` (latched since the last send, not the
    *  tick's own) on the wire. `wave` is this tick's envelope, null with no
    *  samples; the sent one is null only if no tick since the last send had
-   *  one. The sent `engine` is a copy, null when this tick has none. */
+   *  one. The sent `engine` is a copy, null when this tick has none.
+   *  `hitLevel` is the highest `level` a tick with a hit had since the last
+   *  send, 0 with no hit; the frame sent carries at least that level. */
   offer(
     nowMs: number,
     onset: boolean,
     pulseOnset: boolean,
     wave: WaveEnvelope | null = null,
     engine: EngineReading | null = null,
-  ): { send: boolean; onset: boolean; pulseOnset: boolean; wave: WaveEnvelope | null; engine: EngineReading | null } {
+    level = 0,
+  ): { send: boolean; onset: boolean; pulseOnset: boolean; wave: WaveEnvelope | null; engine: EngineReading | null; hitLevel: number } {
     this.pendingOnset = this.pendingOnset || onset;
     this.pendingPulse = this.pendingPulse || pulseOnset;
     if (wave) {
@@ -78,17 +86,19 @@ export class WireDecimator {
         h.surgeKind = engine.surgeKind;
       }
       h.blocked = h.blocked || engine.blocked;
+      if (engine.kick > 0 || engine.snare > 0 || engine.hat > 0) this.pendingHitLevel = Math.max(this.pendingHitLevel, level);
     }
     const since = nowMs - this.lastSentMs;
     // `since < 0`: the room clock was corrected backwards (a fresh offset
     // estimate) — restart the schedule rather than going quiet until it
     // catches up.
-    if (since >= 0 && since < this.intervalMs - this.toleranceMs) return { send: false, onset: false, pulseOnset: false, wave: null, engine: null };
+    if (since >= 0 && since < this.intervalMs - this.toleranceMs) return { send: false, onset: false, pulseOnset: false, wave: null, engine: null, hitLevel: 0 };
     const sent = engine ? { ...engine, kick: h.kick, snare: h.snare, hat: h.hat, surge: h.surge, surgeKind: h.surgeKind, blocked: h.blocked } : null;
-    const out = { send: true, onset: this.pendingOnset, pulseOnset: this.pendingPulse, wave: this.pendingWave, engine: sent };
+    const out = { send: true, onset: this.pendingOnset, pulseOnset: this.pendingPulse, wave: this.pendingWave, engine: sent, hitLevel: this.pendingHitLevel };
     this.pendingOnset = false;
     this.pendingPulse = false;
     this.pendingWave = null;
+    this.pendingHitLevel = 0;
     h.kick = h.snare = h.hat = h.surge = 0;
     h.blocked = false;
     this.lastSentMs = since < 0 || since > 2 * this.intervalMs ? nowMs : this.lastSentMs + this.intervalMs;

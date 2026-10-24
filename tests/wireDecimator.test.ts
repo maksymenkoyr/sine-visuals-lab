@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { WireDecimator } from "../src/net/wireDecimator.ts";
+import { engineReading } from "./engineReading.ts";
 
 const INTERVAL = 1000 / 30;
 
@@ -13,6 +14,18 @@ function ticks(seconds: number, start = 1_000_000): number[] {
 }
 
 describe("WireDecimator", () => {
+  it("sends the level a carried hit was heard at, then starts over", () => {
+    const d = new WireDecimator(INTERVAL);
+    d.offer(0, false, false);
+    expect(d.offer(16, false, false, null, engineReading({ snare: 3 }), 0.6).send).toBe(false);
+    const next = d.offer(33, false, false, null, engineReading(), 0.05);
+    expect(next.send).toBe(true);
+    expect(next.engine!.snare).toBe(3);
+    expect(next.hitLevel).toBe(0.6);
+    d.offer(50, false, false, null, engineReading(), 0.05);
+    expect(d.offer(66, false, false, null, engineReading(), 0.05).hitLevel).toBe(0);
+  });
+
   it("holds the wire rate at 30 Hz on integer-millisecond 60 Hz ticks", () => {
     const d = new WireDecimator(INTERVAL);
     let sends = 0;
@@ -54,7 +67,7 @@ describe("WireDecimator", () => {
     const d = new WireDecimator(INTERVAL);
     d.offer(0, false, false);
     d.offer(16, false, false);
-    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null, engine: null });
+    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null, engine: null, hitLevel: 0 });
   });
 
   it("after a long gap sends once, with no burst of catch-up sends", () => {

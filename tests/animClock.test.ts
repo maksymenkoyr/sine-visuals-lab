@@ -104,6 +104,13 @@ describe("createAnimClock", () => {
     expect(clock.advance(DT, frame({ engine: HIT({ kick: 4 }), level: 0 }), undefined, shut).onset).toBe(false);
   });
 
+  it("gates a follower's hit on the level it came in with, not the frame's", () => {
+    const marks: SilenceGateMarks = { closed: 0.1, open: 0.3 };
+    const follower = frame({ level: 0.05, engine: { ...HIT({ snare: 3 }), hitLevel: 0.6 } });
+    expect(createAnimClock().advance(DT, follower, undefined, marks).midOnset).toBe(true);
+    expect(createAnimClock().advance(DT, frame({ level: 0.05, engine: HIT({ snare: 3 }) }), undefined, marks).midOnset).toBe(false);
+  });
+
   it("beatRatio is the engine's surge, 0 without a reading", () => {
     const clock = createAnimClock();
     expect(clock.advance(DT, frame({ engine: engineReading({ surge: 0.7 }) })).beatRatio).toBe(0.7);
