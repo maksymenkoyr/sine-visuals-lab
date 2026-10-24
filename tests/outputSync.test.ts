@@ -263,6 +263,7 @@ const frame = (over: Partial<WireFrame> = {}): WireFrame => ({
   pulseOnset: false,
   bpm: 0,
   onsetPhase: 0,
+  engine: null,
   beatRatio: null,
   wavePeak: null,
   ...over,

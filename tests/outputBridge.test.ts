@@ -181,7 +181,7 @@ describe("outputBridge status and power", () => {
 });
 
 describe("outputBridge frames carry the controller's gate marks", () => {
-  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0 };
+  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, engine: null };
   const PARAMS = { sens: 1, exp: 1, smoothing: 1 };
   const GATE = { closed: 0.2, open: 0.3 };
   const frames = (posted: ToOutput[]) => posted.filter((m): m is Extract<ToOutput, { t: "frame" }> => m.t === "frame");

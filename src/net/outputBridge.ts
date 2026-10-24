@@ -331,6 +331,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           pulseOnset: frame.pulseOnset,
           bpm: frame.bpm,
           onsetPhase: frame.onsetPhase,
+          engine: frame.engine,
           beatRatio: extras.beatRatio,
           wavePeak: extras.wavePeak,
           gate: extras.gate,

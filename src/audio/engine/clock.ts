@@ -58,7 +58,7 @@ const MIN_BEAT_GAP = 0.5;
 const COAST_RATE = 2;
 const COAST_STOP_BPM = 1;
 
-export const BEATS_PER_BAR = 4;
+const BEATS_PER_BAR = 4;
 
 /** The signed distance to the nearest whole number, in [-0.5, 0.5). */
 function wrapHalf(x: number): number {

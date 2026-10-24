@@ -13,9 +13,9 @@
 // and the wire (src/net/protocol.ts). docs/audio-engine.md has where each
 // stage's ideas came from and what they measured.
 
-import type { EngineReading } from "../types.ts";
+import type { EngineReading, HitKind } from "../types.ts";
 import { BandMeter, type BandSpec, DEFAULT_BANDS } from "./bands.ts";
-import { type HitKind, OnsetDetector, type OnsetSink } from "./onsets.ts";
+import { OnsetDetector, type OnsetSink } from "./onsets.ts";
 import { TempoTracker } from "./tempo.ts";
 
 export class AudioEngine implements OnsetSink {

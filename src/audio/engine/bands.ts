@@ -53,7 +53,7 @@ export interface RangeOptions {
 // separated hits better but squeezed bands that are naturally quiet in a mix;
 // looser kept quiet passages livelier but let more leakage and talking
 // through.
-export const RANGE_DEFAULTS: RangeOptions = {
+const RANGE_DEFAULTS: RangeOptions = {
   attack: 0.15,
   releaseDbPerSec: 3,
   sustain: 0.5,

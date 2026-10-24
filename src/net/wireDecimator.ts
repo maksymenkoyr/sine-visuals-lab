@@ -1,3 +1,4 @@
+import type { EngineReading } from "../audio/types.ts";
 import type { WaveEnvelope } from "./protocol.ts";
 
 /** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
@@ -25,13 +26,24 @@ export const BROADCAST_INTERVAL_MS = 1000 / 30;
  *
  * The waveform envelope (protocol.ts's wave tail) is folded the same way: the
  * min and max of every tick's samples since the last send, so a peak on a
- * skipped tick still reaches a follower's Waveform row.
+ * skipped tick still reaches a follower's Waveform row. So is the engine
+ * reading's per-frame part: the strongest hit of each kind, the largest
+ * surge (with its kind) and any blocked hit since the last send; the rest of
+ * the reading (levels, the tracker's state) is the sending tick's own.
  */
 export class WireDecimator {
   private lastSentMs = -Infinity;
   private pendingOnset = false;
   private pendingPulse = false;
   private pendingWave: WaveEnvelope | null = null;
+  private readonly pendingHits: Pick<EngineReading, "kick" | "snare" | "hat" | "surge" | "surgeKind" | "blocked"> = {
+    kick: 0,
+    snare: 0,
+    hat: 0,
+    surge: 0,
+    surgeKind: "kick",
+    blocked: false,
+  };
 
   constructor(
     private readonly intervalMs: number,
@@ -39,30 +51,46 @@ export class WireDecimator {
   ) {}
 
   /** Call once per render tick. When `send` is true, put `onset`,
-   *  `pulseOnset` and `wave` (latched since the last send, not the tick's
-   *  own) on the wire. `wave` is this tick's envelope, null with no samples;
-   *  the sent one is null only if no tick since the last send had one. */
+   *  `pulseOnset`, `wave` and `engine` (latched since the last send, not the
+   *  tick's own) on the wire. `wave` is this tick's envelope, null with no
+   *  samples; the sent one is null only if no tick since the last send had
+   *  one. The sent `engine` is a copy, null when this tick has none. */
   offer(
     nowMs: number,
     onset: boolean,
     pulseOnset: boolean,
     wave: WaveEnvelope | null = null,
-  ): { send: boolean; onset: boolean; pulseOnset: boolean; wave: WaveEnvelope | null } {
+    engine: EngineReading | null = null,
+  ): { send: boolean; onset: boolean; pulseOnset: boolean; wave: WaveEnvelope | null; engine: EngineReading | null } {
     this.pendingOnset = this.pendingOnset || onset;
     this.pendingPulse = this.pendingPulse || pulseOnset;
     if (wave) {
       const p = this.pendingWave;
       this.pendingWave = p ? { min: Math.min(p.min, wave.min), max: Math.max(p.max, wave.max) } : { min: wave.min, max: wave.max };
     }
+    const h = this.pendingHits;
+    if (engine) {
+      h.kick = Math.max(h.kick, engine.kick);
+      h.snare = Math.max(h.snare, engine.snare);
+      h.hat = Math.max(h.hat, engine.hat);
+      if (engine.surge > h.surge) {
+        h.surge = engine.surge;
+        h.surgeKind = engine.surgeKind;
+      }
+      h.blocked = h.blocked || engine.blocked;
+    }
     const since = nowMs - this.lastSentMs;
     // `since < 0`: the room clock was corrected backwards (a fresh offset
     // estimate) — restart the schedule rather than going quiet until it
     // catches up.
-    if (since >= 0 && since < this.intervalMs - this.toleranceMs) return { send: false, onset: false, pulseOnset: false, wave: null };
-    const out = { send: true, onset: this.pendingOnset, pulseOnset: this.pendingPulse, wave: this.pendingWave };
+    if (since >= 0 && since < this.intervalMs - this.toleranceMs) return { send: false, onset: false, pulseOnset: false, wave: null, engine: null };
+    const sent = engine ? { ...engine, kick: h.kick, snare: h.snare, hat: h.hat, surge: h.surge, surgeKind: h.surgeKind, blocked: h.blocked } : null;
+    const out = { send: true, onset: this.pendingOnset, pulseOnset: this.pendingPulse, wave: this.pendingWave, engine: sent };
     this.pendingOnset = false;
     this.pendingPulse = false;
     this.pendingWave = null;
+    h.kick = h.snare = h.hat = h.surge = 0;
+    h.blocked = false;
     this.lastSentMs = since < 0 || since > 2 * this.intervalMs ? nowMs : this.lastSentMs + this.intervalMs;
     return out;
   }

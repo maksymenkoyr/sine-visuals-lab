@@ -15,16 +15,11 @@
 // is nearest — the naming rule without moving a cluster, since only a hit may
 // move one.
 
+import { HIT_KINDS, HIT_STRENGTH_MAX, type HitKind } from "../types.ts";
 import { Fft } from "./fft.ts";
 
-export const FRAME = 1024;
-export const HOP = 256;
-
-export type HitKind = "kick" | "snare" | "hat";
-export const HIT_KINDS: readonly HitKind[] = ["kick", "snare", "hat"];
-
-/** A hit's strength is how far its peak cleared the threshold: 1 at the threshold, at most this. */
-export const HIT_STRENGTH_MAX = 4;
+const FRAME = 1024;
+const HOP = 256;
 
 export interface OnsetSink {
   /** One envelope sample: total flux plus the lows' share of it, stamped on the audio clock. */
@@ -73,7 +68,7 @@ export interface HitOptions {
   min: number;
 }
 
-export const HIT_DEFAULTS: HitOptions = { k: 2, min: 4 };
+const HIT_DEFAULTS: HitOptions = { k: 2, min: 4 };
 
 /** Where each kind's cluster centre starts and the range it may wander in, in Hz. */
 const CLUSTERS: Record<HitKind, { start: number; range: readonly [number, number] }> = {
@@ -86,7 +81,7 @@ const CLUSTER_RATE = 0.05;
 /** Seconds the hit threshold's running mean and deviation cover. */
 const HIT_STATS_S = 1;
 /** Shorter than a 16th at 180 BPM: drum & bass puts a kick and a snare that close. */
-export const REFRACTORY_S = 0.06;
+const REFRACTORY_S = 0.06;
 
 /** Peak picking on the summed rise: a local maximum over a running threshold. */
 class Picker {

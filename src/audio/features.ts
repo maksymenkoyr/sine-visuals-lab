@@ -449,7 +449,8 @@ export class FeatureExtractor {
     // hats/lead need the analyser's full FFT bins, which this extractor never
     // sees (only the bands), so app.ts writes them in from stemSplit.ts before
     // the frame leaves currentVisual(), the same way it overwrites bpm.
-    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level, hats: 0, lead: 0 };
+    // `engine` is app.ts's to fill from src/audio/engineSource.ts, the same way.
+    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level, hats: 0, lead: 0, engine: null };
   }
 
   /** @param strength flux over the firing threshold — 1 is a bare trigger. */

@@ -876,6 +876,7 @@ async function main(): Promise<void> {
       level: s.level,
       hats: s.hats,
       lead: s.lead,
+      engine: s.engine,
     };
 
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what

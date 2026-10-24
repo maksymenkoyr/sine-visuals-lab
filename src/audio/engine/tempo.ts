@@ -9,8 +9,8 @@
 
 import { Fft, nextPowerOfTwo } from "./fft.ts";
 
-export const MIN_BPM = 55;
-export const MAX_BPM = 215;
+const MIN_BPM = 55;
+const MAX_BPM = 215;
 /** Candidate tempos are this ratio apart. */
 const STATE_RATIO = 1.01;
 const WINDOW_S = 8;
@@ -65,8 +65,8 @@ const OFFBEAT_S = 2;
 const CONFIDENCE_S = 1;
 // Rooms with talking and no music reach between MUSIC_OFF and MUSIC_ON; music
 // under the same talking mostly stays above MUSIC_ON.
-export const MUSIC_ON = 0.35;
-export const MUSIC_OFF = 0.22;
+const MUSIC_ON = 0.35;
+const MUSIC_OFF = 0.22;
 const MUSIC_ON_HOLD_S = 1;
 const MUSIC_OFF_HOLD_S = 2;
 /**

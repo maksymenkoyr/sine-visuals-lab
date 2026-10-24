@@ -1,4 +1,4 @@
-import type { FeatureFrame } from "../audio/types.ts";
+import type { EngineReading, FeatureFrame } from "../audio/types.ts";
 import type { HeldEffects } from "../render/heldEffects.ts";
 import type { CastMode } from "../render/outputPower.ts";
 import type { PowerMode } from "../render/powerMode.ts";
@@ -322,7 +322,8 @@ export function createCueController(
 
 /** The output's frame mailbox: frames arrive at the main window's tick rate,
  *  the output renders at its own, so the latest frame is kept and the
- *  one-shot edges (onset, pulseOnset) are OR-ed until a render consumes
+ *  one-shot edges (onset, pulseOnset, and the engine reading's hits, surge
+ *  and blocked flag, as their strongest) are latched until a render consumes
  *  them — a hit between two output ticks isn't lost, and one isn't fired
  *  twice when the output ticks faster than the main window. */
 export interface FrameInbox {
@@ -341,6 +342,14 @@ export function createFrameInbox(): FrameInbox {
   let lastMs = -Infinity;
   let onset = false;
   let pulse = false;
+  const hits: Pick<EngineReading, "kick" | "snare" | "hat" | "surge" | "surgeKind" | "blocked"> = {
+    kick: 0,
+    snare: 0,
+    hat: 0,
+    surge: 0,
+    surgeKind: "kick",
+    blocked: false,
+  };
   let params: OutputParams = DEFAULT_OUTPUT_PARAMS;
   return {
     push(f, nowMs) {
@@ -348,13 +357,28 @@ export function createFrameInbox(): FrameInbox {
       lastMs = nowMs;
       onset = onset || f.onset;
       pulse = pulse || f.pulseOnset;
+      const e = f.engine;
+      if (e) {
+        hits.kick = Math.max(hits.kick, e.kick);
+        hits.snare = Math.max(hits.snare, e.snare);
+        hits.hat = Math.max(hits.hat, e.hat);
+        if (e.surge > hits.surge) {
+          hits.surge = e.surge;
+          hits.surgeKind = e.surgeKind;
+        }
+        hits.blocked = hits.blocked || e.blocked;
+      }
       if (f.p) params = f.p;
     },
     take() {
       if (!latest) return null;
-      const out: WireFrame = { ...latest, onset, pulseOnset: pulse };
+      const e = latest.engine;
+      const engine = e ? { ...e, ...hits } : null;
+      const out: WireFrame = { ...latest, onset, pulseOnset: pulse, engine };
       onset = false;
       pulse = false;
+      hits.kick = hits.snare = hits.hat = hits.surge = 0;
+      hits.blocked = false;
       return out;
     },
     ageMs: (nowMs) => (lastMs === -Infinity ? Infinity : nowMs - lastMs),
