@@ -5,7 +5,7 @@
  *
  * A scene is two files. Its **card** is eager: id, name, minQuality, settings,
  * panel and the gallery record, which everything that lists, tunes or labels a
- * scene reads without running it. Its **body** (today's scene file: init,
+ * scene reads without running it. Its **body** (the scene file: init,
  * render, dispose, probe, command) is imported on demand. `lazyScene` turns a
  * card plus a body loader into a proxy `Scene` that the registry holds, so
  * every synchronous reader of `getScene`/`listScenes` stays unchanged. The

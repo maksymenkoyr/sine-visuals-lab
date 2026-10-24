@@ -1,6 +1,5 @@
 import type { Scene, SceneCard, SceneGallery } from "../scene.ts";
 import { lazyScene } from "../lazyScene.ts";
-import { isScene } from "./privateScenes.ts";
 
 /**
  * How a free scene gets into the app without anyone editing a shared list.
@@ -23,15 +22,14 @@ import { isScene } from "./privateScenes.ts";
  * sections edits only that scene's own card: parallel branches never meet in
  * a shared registry.
  *
- * While scenes move over, a module of the older shape — the scene and
- * `gallery` in one file, `<unit>.ts` or `<unit>/index.ts` — is still
- * collected, and registers the scene itself rather than a proxy.
- *
  * The build tools find scene modules the same way without running any code
- * (tools/sceneVersionLib.mjs's `sceneEntries`: a card file, or a file of the
- * older shape, whose source has a line starting `export const gallery`), so
- * write the record exactly that way. tests/sceneModules.test.ts checks the two
- * readings agree.
+ * (tools/sceneVersionLib.mjs's `sceneEntries`: a card file whose source has a
+ * line starting `export const gallery`), so write the record exactly that
+ * way. tests/sceneModules.test.ts checks the two readings agree.
+ *
+ * A scene in the older one-file shape (the scene and `gallery` in `<unit>.ts`
+ * or `<unit>/index.ts`) is no longer collected and would never show;
+ * `sceneEntries` still finds that shape, so tests/sceneModules.test.ts fails on one.
  *
  * `<unit>` (the file's basename without `.card`, or the folder's name) is the
  * key per-scene versions use (`sceneMajors.json`, tools/sceneVersionLib.mjs's
@@ -101,59 +99,31 @@ export function collectScenes(modules: Readonly<Record<string, unknown>>): Colle
   const found: CollectedScene[] = [];
   const errors: string[] = [];
   const taken = new Set<string>();
-  const cardUnits = new Set<string>();
-  for (const path of Object.keys(modules)) {
-    if (modules[path] && typeof modules[path] === "object" && "card" in (modules[path] as object)) {
-      cardUnits.add(unitOfPath(path));
-    }
-  }
   for (const path of Object.keys(modules).sort()) {
     const mod = (modules[path] ?? {}) as Record<string, unknown>;
-    if ("card" in mod) {
-      if (!("gallery" in mod) || !isGallery(mod.gallery)) {
-        errors.push(`${path}: \`gallery\` needs a stage (released, development or draft) and added (YYYY-MM-DD)`);
-        continue;
-      }
-      if (!isCard(mod.card)) {
-        errors.push(`${path}: \`card\` needs an id (non-empty string) and a name (string)`);
-        continue;
-      }
-      if (typeof mod.loadBody !== "function") {
-        errors.push(`${path}: exports a \`card\` but no \`loadBody\` function`);
-        continue;
-      }
-      if (taken.has(mod.card.id)) {
-        errors.push(`${path}: scene id "${mod.card.id}" is already registered`);
-        continue;
-      }
-      taken.add(mod.card.id);
-      found.push({
-        unit: unitOfPath(path),
-        scene: lazyScene(mod.card, mod.loadBody as () => Promise<Scene>),
-        gallery: mod.gallery,
-      });
-      continue;
-    }
-    const scenes = [...new Set(Object.values(mod).filter(isScene))];
-    if (!("gallery" in mod)) {
-      if (scenes.length > 0 && !cardUnits.has(unitOfPath(path))) errors.push(`${path}: exports a scene but no \`gallery\``);
-      continue;
-    }
-    if (!isGallery(mod.gallery)) {
+    if (!("card" in mod)) continue;
+    if (!("gallery" in mod) || !isGallery(mod.gallery)) {
       errors.push(`${path}: \`gallery\` needs a stage (released, development or draft) and added (YYYY-MM-DD)`);
       continue;
     }
-    if (scenes.length !== 1) {
-      errors.push(`${path}: exports ${scenes.length} scenes; a scene module exports exactly one`);
+    if (!isCard(mod.card)) {
+      errors.push(`${path}: \`card\` needs an id (non-empty string) and a name (string)`);
       continue;
     }
-    const scene = scenes[0];
-    if (taken.has(scene.id)) {
-      errors.push(`${path}: scene id "${scene.id}" is already registered`);
+    if (typeof mod.loadBody !== "function") {
+      errors.push(`${path}: exports a \`card\` but no \`loadBody\` function`);
       continue;
     }
-    taken.add(scene.id);
-    found.push({ unit: unitOfPath(path), scene, gallery: mod.gallery });
+    if (taken.has(mod.card.id)) {
+      errors.push(`${path}: scene id "${mod.card.id}" is already registered`);
+      continue;
+    }
+    taken.add(mod.card.id);
+    found.push({
+      unit: unitOfPath(path),
+      scene: lazyScene(mod.card, mod.loadBody as () => Promise<Scene>),
+      gallery: mod.gallery,
+    });
   }
   found.sort((a, b) => b.gallery.added.localeCompare(a.gallery.added) || a.scene.id.localeCompare(b.scene.id));
   return { scenes: found, errors };
