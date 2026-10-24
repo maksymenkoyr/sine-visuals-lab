@@ -39,7 +39,13 @@ reorder before any picture is taken.
   `npm run release-shots -- --notes <work>/notes.md <work>/stills/*.jpg` hosts the pictures on the
   Insiders pre-release and points the notes at them.
 
-## 4. The release pull request
+## 4. The gallery stills
+
+Run `npm run gallery-stills` (header of `tools/gallery-stills.mjs`). It shoots every free scene into
+`src/ui/stills/`; look at every image: the scene recognisable, no app chrome, nothing paid. Land
+them on main with `/ship` before step 5, so the Stable build ships them.
+
+## 5. The release pull request
 
 `npm run release -- --notes <work>/notes.md` opens the pull request into production, or rewrites the
 open one's title and body; re-run it after every change to the notes. Add `--print` to read the

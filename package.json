@@ -27,6 +27,7 @@
     "eval:tempo:real": "vitest run tests/tempoRecordings.test.ts",
     "usage": "node tools/usage.mjs",
     "perf": "node tools/perf.mjs",
+    "gallery-stills": "node tools/gallery-stills.mjs",
     "workflow-stats": "node tools/workflow-stats.mjs",
     "doc-check": "node tools/doc-check.mjs",
     "dupes": "node tools/dupes.mjs",
