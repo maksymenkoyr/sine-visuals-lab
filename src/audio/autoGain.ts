@@ -41,20 +41,19 @@ const STORAGE_KEY = "vibe.autoGain";
 const STORAGE_KEY_AUTO = "vibe.autoGainAuto";
 export const AUTO_GAIN_MIN = 0;
 export const AUTO_GAIN_MAX = 1;
-export const AUTO_GAIN_DEFAULT = AUTO_GAIN_MIN;
 
 function clamp(value: number): number {
-  if (!Number.isFinite(value)) return AUTO_GAIN_DEFAULT;
+  if (!Number.isFinite(value)) return AUTO_GAIN_MIN;
   return Math.min(AUTO_GAIN_MAX, Math.max(AUTO_GAIN_MIN, value));
 }
 
 function loadInitial(): number {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return AUTO_GAIN_DEFAULT;
+    if (raw === null) return AUTO_GAIN_MIN;
     return clamp(Number(raw));
   } catch {
-    return AUTO_GAIN_DEFAULT;
+    return AUTO_GAIN_MIN;
   }
 }
 
@@ -157,7 +156,7 @@ const EASE_RATE = 0.25;
  *  span calls for — wider room span needs less help, narrower needs more.
  *  Exported for tests; feedAutoGainMeasurement() is the only real caller. */
 export function autoGainForSpan(meanSpanDb: number): number {
-  if (!Number.isFinite(meanSpanDb)) return AUTO_GAIN_DEFAULT;
+  if (!Number.isFinite(meanSpanDb)) return AUTO_GAIN_MIN;
   if (meanSpanDb <= SPAN_CRUSHED_DB) return AUTO_GAIN_MAX;
   if (meanSpanDb >= SPAN_FULL_DB) return AUTO_GAIN_MIN;
   const t = (meanSpanDb - SPAN_CRUSHED_DB) / (SPAN_FULL_DB - SPAN_CRUSHED_DB);
