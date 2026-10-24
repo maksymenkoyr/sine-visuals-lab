@@ -19,7 +19,7 @@ import { join, relative } from "node:path";
  *  makes clone names absolute, so topClones can make them relative again.
  *  `--fail-on-empty` turns a scan that matches no files into a non-zero exit,
  *  so it can't read as a clean 0%. */
-export function jscpdArgs({ paths, ignore, minTokens, maxSize, outDir }) {
+function jscpdArgs({ paths, ignore, minTokens, maxSize, outDir }) {
   return [
     ...paths,
     "--format", "typescript,javascript",

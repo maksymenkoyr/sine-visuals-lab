@@ -3,7 +3,6 @@
 // inferred types of its own. Keep in sync with the JSDoc in scenePagesLib.mjs by hand.
 
 export const SITE: string;
-export const PRODUCT: string;
 export const DESCRIPTION_MAX: number;
 export const NEIGHBOURS: number;
 export const FONT_FILE: string;
@@ -28,7 +27,6 @@ export function collectScenePages(
   records: { file: string; text: string }[],
   mediaOf: (id: string) => string[],
 ): { pages: ScenePage[]; errors: string[] };
-export function scenePath(id: string): string;
 export function neighboursOf<T>(pages: T[], index: number): T[];
 export function renderScenePage(
   page: ScenePage,

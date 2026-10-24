@@ -19,7 +19,7 @@
 // "Open it" is the app's own scene link, /#/v/<id>.
 
 export const SITE = "https://www.sinevisualslab.com";
-export const PRODUCT = "Sine Visuals Lab";
+const PRODUCT = "Sine Visuals Lab";
 
 /** Search engines cut a snippet near here; the lead paragraph doubles as the
  *  meta description, so it has to fit. */
@@ -112,7 +112,7 @@ export function collectScenePages(records, mediaOf) {
 }
 
 /** @param {string} id */
-export function scenePath(id) {
+function scenePath(id) {
   return `/scenes/${id}/`;
 }
 

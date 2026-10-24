@@ -2,7 +2,6 @@
 // is typechecked (tsconfig.json) and a .mjs has no inferred types of its own.
 // Keep in sync with the JSDoc in workflowStatsLib.mjs by hand.
 
-export const GRADE_POINTS: Record<string, number>;
 export interface PriceCard {
   input: number;
   output: number;
@@ -10,8 +9,6 @@ export interface PriceCard {
 }
 
 export const PRICES: Record<string, PriceCard & { long?: PriceCard & { above: number } }>;
-export const CACHE_WRITE_MULT: number;
-export const STAGES: readonly string[];
 
 export type StageName = "plan" | "replan" | "code" | "solo" | "fix" | "review" | "finish" | "opusfix" | "check" | "grade";
 

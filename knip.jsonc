@@ -9,7 +9,49 @@
     "output.html",
     // Loaded by tools/alien-bake/index.html from the site root, which knip can't resolve.
     "src/render/scenes/alien/bakePage.ts",
-    "tools/**/*.{mjs,js,ts}",
+    // Run by hand from a doc or a .claude command, or spawned by path from a
+    // script or test, which knip can't see; what each imports counts as used.
+    "tools/alien-bake.mjs",
+    "tools/audio-latency.mjs",
+    "tools/clip-convert.mjs",
+    "tools/fix-conflicts-auto.mjs",
+    "tools/gpu-bench.mjs",
+    "tools/master-sweep.mjs",
+    "tools/ref-hear.mjs",
+    "tools/ref-shoot.mjs",
+    "tools/scene-page-media.mjs",
+    "tools/tune-ab.mjs",
+    "tools/tune-probe.mjs",
+    "tools/tune-real.mjs",
+    "tools/tune-sheet.mjs",
+    // Run by hand, though no doc or command names them.
+    "tools/make-icons.mjs",
+    "tools/make-og.mjs",
+    "tools/mic-gap.mjs",
+    "tools/mic-gap-analyze.ts",
+    "tools/promo/make-test-wav.mjs",
+    "tools/promo/measure-sync.mjs",
+    "tools/room-smoke.mjs",
+    "tools/scene-versions.mjs",
+    // Loaded by a page that perf.mjs or gpu-bench.mjs opens in the dev server.
+    "tools/gpu-bench/bench.ts",
+    "tools/perf/scenes.ts",
+    // The promo engine: promo.mjs spawns capture, cards and deliver, cards.mjs
+    // imports a card by name, and capture.mjs imports a shot named in takes.json.
+    "tools/promo/build-clean.mjs",
+    "tools/promo/capture.mjs",
+    "tools/promo/cards.mjs",
+    "tools/promo/cards/explainer.mjs",
+    "tools/promo/cards/hook.mjs",
+    "tools/promo/cards/release.mjs",
+    "tools/promo/deliver.mjs",
+    "tools/promo/promo.mjs",
+    "tools/promo/shots/scene-look.mjs",
+    "tools/promo/shots/seg4d.mjs",
+    "tools/promo/shots/stills.mjs",
+    "tools/promo/shots/take-scene.mjs",
+    "tools/promo/shots/take-two-screens.mjs",
+    "tools/promo/shots/take-ui.mjs",
     "tests/**/*.ts"
   ],
   // The root vite-*-plugin.ts files are vite.config.ts's own imports; listed

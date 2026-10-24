@@ -26,7 +26,7 @@
 import { costOf, transcriptStats } from "./workflowStatsLib.mjs";
 
 /** "claude-opus-5-5" → "opus-5-5"; a missing model reads "?". */
-export function shortModel(model) {
+function shortModel(model) {
   return (model ?? "?").replace(/^claude-/, "");
 }
 

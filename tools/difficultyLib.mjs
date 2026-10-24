@@ -18,16 +18,16 @@
 // as one with no token guess or count.
 
 /** Easiest to hardest; a level's index is how hard it is. */
-export const LEVELS = ["low", "mid", "high"];
-export const DIFFICULTY_LABELS = { low: "low dif", mid: "mid dif", high: "high dif" };
-export const HUMAN_LABEL = "human";
+const LEVELS = ["low", "mid", "high"];
+const DIFFICULTY_LABELS = { low: "low dif", mid: "mid dif", high: "high dif" };
+const HUMAN_LABEL = "human";
 
 /** Token buckets, smallest first; a bucket's index is how big it is. A
  *  count falls in the first bucket it is `below`. What counts is every token
  *  the work's sessions and their agents were billed for, cache reads
  *  included: over a week of this repo's sessions (2026-10-21) that spread
  *  across all four buckets, while without cache reads nearly none passed 1M. */
-export const TOKEN_BUCKETS = [
+const TOKEN_BUCKETS = [
   { tok: "100K", below: 1e5, label: "<100K tok" },
   { tok: "1M", below: 1e6, label: "<1M tok" },
   { tok: "10M", below: 1e7, label: "<10M tok" },
@@ -35,12 +35,12 @@ export const TOKEN_BUCKETS = [
 ];
 const TOKS = TOKEN_BUCKETS.map((b) => b.tok);
 const TOKEN_LABELS = TOKEN_BUCKETS.map((b) => b.label);
-export const RECORD_MARKER = "difficulty-record";
-export const RECORD_VERSION = 1;
+const RECORD_MARKER = "difficulty-record";
+const RECORD_VERSION = 1;
 
 /** Author associations whose records `export` trusts by default: anyone else
  *  can comment on a public issue, and a forged record would skew the data. */
-export const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
+const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
 
 function labelName(l) {
   return typeof l === "string" ? l : l.name;
@@ -116,7 +116,7 @@ export function parseLevel(text) {
 /** `under` when the task was harder (or bigger) than filed, `over` when
  *  easier, `agree` when the same, null when either side is missing. `order`
  *  is LEVELS for difficulty, the bucket names for tokens. */
-export function verdictOf(predicted, actual, order = LEVELS) {
+function verdictOf(predicted, actual, order = LEVELS) {
   if (!predicted || !actual) return null;
   const d = order.indexOf(actual) - order.indexOf(predicted);
   return d > 0 ? "under" : d < 0 ? "over" : "agree";

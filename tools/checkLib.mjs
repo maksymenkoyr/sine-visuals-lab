@@ -7,7 +7,7 @@ import { posix } from "node:path";
 
 /** SPDX ids a dependency may carry: CONTRIBUTING.md's "permissively
  *  licensed" list, spelled the way package.json license fields spell it. */
-export const PERMISSIVE = new Set([
+const PERMISSIVE = new Set([
   "MIT",
   "MIT-0",
   "ISC",
@@ -26,7 +26,7 @@ export const PERMISSIVE = new Set([
 
 /** Packages allowed despite a license outside PERMISSIVE, each with the
  *  reason a person accepted. A name ending in `*` matches by prefix. */
-export const LICENSE_EXCEPTIONS = [
+const LICENSE_EXCEPTIONS = [
   {
     name: "@img/sharp-*",
     reason:

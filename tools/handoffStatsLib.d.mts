@@ -4,8 +4,6 @@
 
 import type { Tokens } from "./workflowStatsLib.mjs";
 
-export function shortModel(model: string | null | undefined): string;
-
 export function setupTag(planner: { model: string | null; effort: string | null }, coder: { model: string | null; effort: string | null }): string;
 
 export function lastModelEffort(entries: any[]): { model: string | null; effort: string | null };
