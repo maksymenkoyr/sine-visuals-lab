@@ -228,6 +228,8 @@ import {
   feedSilenceGateMeasurement,
   isSilenceGateAuto,
   setSilenceGateAuto,
+  silenceGateDimmer,
+  hitPasses,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
 import { getHitShape, setHitShape } from "./audio/hitStrength.ts";
@@ -565,12 +567,18 @@ let lastDeepMono: Float32Array | null = null;
 // fixedEnergy off this device's own extractor: the Signal card's "auto-gain
 // fully off" reference. Null where no local extractor ran (renderer, synthetic).
 let lastFixedEnergy: number | null = null;
-// onsetDiag off this device's own extractor, for the Hits card's history. Read
-// the same tick it's set (deviceMenu.update()), before the next currentVisual()
-// mutates the diag in place.
+// The Any hit lane's diag off this device's own engine reading, for the Hits
+// card's history. Read the same tick it's set (deviceMenu.update()), before the
+// next currentVisual() mutates it in place.
 let lastBeatDiag: OnsetDiag | null = null;
-// fluxRatio off the local extractor, for tuning/debug.ts getInput() (tools/audio-latency.mjs).
+const beatDiag: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
+/** The capture clock's time of the last engine hit that passed the gate. */
+let lastEngineOnsetAt = -Infinity;
+// The engine reading's surge, for tuning/debug.ts getInput() (tools/audio-latency.mjs).
 let lastFluxRatio: number | null = null;
+// The local extractor's fluxRatio: the old beat clock's vote weight
+// (animClock.advance's hit.tempoVoteRatio) until the engine's clock replaces it.
+let lastTempoVoteRatio: number | null = null;
 /** This tick's fixed-hop tempo onsets, solo only, read by loop() for
  *  animClock.advance()'s `hit`. undefined when no tempo source is live (always
  *  so for host/renderer/TV; see beatClock.ts header). */
@@ -3326,6 +3334,7 @@ function clearLocalReadings(): void {
   lastFixedEnergy = null;
   lastBeatDiag = null;
   lastFluxRatio = null;
+  lastTempoVoteRatio = null;
   lastGate = null;
   lastInputHealth = null;
 }
@@ -3371,8 +3380,16 @@ function readLocalCapture(
       : null;
   lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
   lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-  const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
-  f.engine = engineSource ? engineSource.read(now) : null;
+  const gate = resolveSilenceGate();
+  const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, gate);
+  const engine = engineSource ? engineSource.read(now) : null;
+  f.engine = engine;
+  // Followers that predate the reading still react to these two flags.
+  const dimmer = silenceGateDimmer(f.level, gate);
+  const strongest = engine ? Math.max(engine.kick, engine.snare, engine.hat) : 0;
+  f.onset = hitPasses(strongest, dimmer);
+  f.pulseOnset = strongest > 0;
+  const suppressed = !f.onset && hitPasses(strongest, 1);
   if (stemGate) {
     // readBandsDb() above just refilled binsDb. A skipped tick keeps the
     // frame's zeros.
@@ -3383,12 +3400,18 @@ function readLocalCapture(
     }
   }
   lastFixedEnergy = extractor.fixedEnergy;
-  lastBeatDiag = extractor.onsetDiag;
-  lastFluxRatio = extractor.fluxRatio;
-  // `fired` is the local extractor's onset, not the jitter-buffered frame
+  beatDiag.ratio = engine ? engine.surge : 0;
+  beatDiag.gated = suppressed;
+  beatDiag.blocked = engine ? engine.blocked : false;
+  beatDiag.sinceOnsetSec = now - lastEngineOnsetAt;
+  if (f.onset) lastEngineOnsetAt = now;
+  lastBeatDiag = beatDiag;
+  lastFluxRatio = engine ? engine.surge : null;
+  lastTempoVoteRatio = extractor.fluxRatio;
+  // `fired` is this capture's onset, not the jitter-buffered frame
   // currentVisual() returns in host mode, so fired and suppressed describe the
   // same tick's decision.
-  lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
+  lastGate = { dimmer, fired: f.onset, suppressed };
   // Feeds next tick's resolveAutoGain(); the one-tick lag is fine (see feedAutoGainMeasurement).
   feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
   // Same one-tick lag (see feedSilenceGateMeasurement).
@@ -3606,7 +3629,7 @@ function tick(): void {
     applyRenderQuality(true);
     applyPowerMode(powerMode);
   }
-  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: wave ? peak(wave) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { wavePeak: wave ? peak(wave) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
@@ -3621,8 +3644,7 @@ function tick(): void {
   // The anim clock advances here, ahead of deviceMenu.update(): the listening
   // post's meters (audioMeters.ts) read this tick's AnimFrame. Feature extraction
   // and the anim clock run on every rAF tick regardless of the render-rate cap;
-  // only the GPU draw and panel drawing are capped (panelDraws). `lastFluxRatio`
-  // is the graded broadband pulse's ratio (null without a local extractor);
+  // only the GPU draw and panel drawing are capped (panelDraws).
   // `lastTempoHits` (solo only) switches beatClock.ts's phase comb onto the
   // fixed-hop feed. `wave`'s peak feeds AnimFrame.wavePeak (the Waveform readout
   // and its drive jack). `nowRafMs` makes this the one clock that follows a tap
@@ -3635,7 +3657,7 @@ function tick(): void {
         resolveSilenceGate(),
         {
           shape: getHitShape(),
-          beatRatio: lastFluxRatio,
+          tempoVoteRatio: lastTempoVoteRatio,
           tempoHits: lastTempoHits,
           wavePeak: wave ? peak(wave) : null,
         },
@@ -3868,8 +3890,8 @@ function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): 
   tickAutoTune(dtSec);
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
-  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
-  const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
+  outputBridge?.pushFrame(gained, { wavePeak: null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape() });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);
   const expansion = resolveExpansion(scene.id);

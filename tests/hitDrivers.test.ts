@@ -15,6 +15,7 @@ import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { isScene } from "../src/render/scenes/privateScenes.ts";
 import { fileClosure, SCENES_DIR, sceneEntries } from "../tools/sceneVersionLib.mjs";
+import { engineReading } from "./engineReading.ts";
 
 const DT = 1 / 60;
 
@@ -37,7 +38,7 @@ function rig(sceneId: string, spec: SceneSetting) {
   const clock = createAnimClock();
   const engine = createDriveEngine();
   return (onset: boolean, height: number) => {
-    const anim = clock.advance(DT, frame({ onset }));
+    const anim = clock.advance(DT, frame({ engine: engineReading({ kick: onset ? 2 : 0 }) }));
     engine.accumulate(DT, frame(), height, anim, sceneId, [spec]);
     const drives = engine.forScene(sceneId, [spec], anim);
     const fired = drives.fired("k", false);

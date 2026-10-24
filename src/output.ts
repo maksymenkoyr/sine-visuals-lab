@@ -414,7 +414,6 @@ async function main(): Promise<void> {
     // marks only stand in for a controller that doesn't send any.
     const anim = animClock.advance(dtSec, frame, p.smoothing, frame.gate ?? getSilenceGate(), {
       shape: getHitShape(),
-      beatRatio: frame.beatRatio,
       wavePeak: frame.wavePeak,
     });
     advanceAutoTune(dtSec, anim.profile);

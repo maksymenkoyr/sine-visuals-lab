@@ -116,7 +116,7 @@ export interface OutputBridge {
   update(nowMs: number): void;
   pushFrame(
     frame: FeatureFrame,
-    extras: { beatRatio: number | null; wavePeak: number | null; gate: SilenceGateMarks },
+    extras: { wavePeak: number | null; gate: SilenceGateMarks },
     params: OutputParams,
   ): void;
   /** Send the output its Quality / Energy saving now (it also gets them on
@@ -332,7 +332,6 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           bpm: frame.bpm,
           onsetPhase: frame.onsetPhase,
           engine: frame.engine,
-          beatRatio: extras.beatRatio,
           wavePeak: extras.wavePeak,
           gate: extras.gate,
           ...(cue.following() ? { p: params } : {}),

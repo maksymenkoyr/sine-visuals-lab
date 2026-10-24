@@ -4,6 +4,10 @@ import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
 import { smoothingRateScale, SMOOTHING_DEFAULT } from "../src/audio/sensitivity.ts";
+import { engineReading } from "./engineReading.ts";
+
+/** One engine hit of each kind given, with no other reading. */
+const HIT = (kinds: { kick?: number; snare?: number; hat?: number }) => engineReading(kinds);
 
 // Reused wherever a test needs to pass `hit` just to reach `wavePeak` —
 // its own fields don't matter when no onset fires this tick.
@@ -65,25 +69,46 @@ describe("createAnimClock", () => {
     expect(anim.lead).toBe(0);
   });
 
-  it("hits.low/mid/high mirror bandEnergy's own per-group diagnostics", () => {
+  it("hits.low/mid/high mirror bandEnergy's own per-lane diagnostics", () => {
     const clock = createAnimClock();
-    const quietBands = new Float32Array(NUM_BANDS).fill(0.1);
-    for (let i = 0; i < 30; i++) clock.advance(DT, frame({ bands: quietBands, level: 1 }));
-    const loudBands = new Float32Array(NUM_BANDS).fill(0.6);
-    const anim = clock.advance(DT, frame({ bands: loudBands, level: 1 }));
-    expect(anim.hits.low.ratio).toBeGreaterThan(0);
-    expect(anim.hits.mid.ratio).toBeGreaterThan(0);
-    expect(anim.hits.high.ratio).toBeGreaterThan(0);
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2, snare: 1.5, hat: 1.2 }) }));
+    expect(anim.hits.low.ratio).toBe(2);
+    expect(anim.hits.mid.ratio).toBe(1.5);
+    expect(anim.hits.high.ratio).toBe(1.2);
   });
 
   it("hits.low is a snapshot copy, not a live alias — an old AnimFrame doesn't change under a later tick", () => {
     const clock = createAnimClock();
-    const bands = new Float32Array(NUM_BANDS).fill(0.1);
-    const first = clock.advance(DT, frame({ bands, level: 1 }));
-    const firstRatio = first.hits.low.ratio;
-    const loudBands = new Float32Array(NUM_BANDS).fill(0.9);
-    clock.advance(DT, frame({ bands: loudBands, level: 1 }));
-    expect(first.hits.low.ratio).toBe(firstRatio);
+    const first = clock.advance(DT, frame({ engine: HIT({ kick: 2 }) }));
+    clock.advance(DT, frame({ engine: HIT({ kick: 3 }) }));
+    expect(first.hits.low.ratio).toBe(2);
+  });
+
+  it("Bass/Mid/Treble levels are the engine reading's", () => {
+    const anim = createAnimClock().advance(DT, frame({ engine: engineReading({ low: 0.6, mid: 0.3, high: 0.2 }) }));
+    expect([anim.low, anim.mid, anim.high]).toEqual([0.6, 0.3, 0.2]);
+  });
+
+  it("onset is any lane's engine hit that passed the gate, whatever frame.onset says", () => {
+    const clock = createAnimClock();
+    expect(clock.advance(DT, frame({ onset: true })).onset).toBe(false);
+    expect(clock.advance(DT, frame({ engine: HIT({ hat: 1.3 }) })).onset).toBe(true);
+    const shut: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    expect(clock.advance(DT, frame({ engine: HIT({ kick: 4 }), level: 0 }), undefined, shut).onset).toBe(false);
+  });
+
+  it("beatRatio is the engine's surge, 0 without a reading", () => {
+    const clock = createAnimClock();
+    expect(clock.advance(DT, frame({ engine: engineReading({ surge: 0.7 }) })).beatRatio).toBe(0.7);
+    expect(clock.advance(DT, frame()).beatRatio).toBe(0);
+  });
+
+  it("a graded beatPulse takes the strongest lane hit that passed", () => {
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: UNIT_TAILS };
+    const both = createAnimClock().advance(DT, frame({ engine: HIT({ kick: 1.2, hat: 3 }) }), undefined, undefined, { shape });
+    const hatOnly = createAnimClock().advance(DT, frame({ engine: HIT({ hat: 3 }) }), undefined, undefined, { shape });
+    expect(both.beatPulse).toBe(hatOnly.beatPulse);
+    expect(both.hitStrength.beat.standout).toBeCloseTo(1 - Math.exp(-2), 9);
   });
 
   // Graded pulse height (src/audio/hitStrength.ts), threaded through
@@ -91,14 +116,14 @@ describe("createAnimClock", () => {
   // omitted `hit` must reproduce today's flat-1 beatPulse exactly.
   it("omitted `hit` -> beatPulse snaps to exactly 1 on onset (today's behavior)", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ onset: true }));
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2 }) }));
     expect(anim.beatPulse).toBe(1);
   });
 
   it("with a shape at amount 1 and loudness 1, beatPulse on onset lands on frame.level", () => {
     const clock = createAnimClock();
     const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: UNIT_TAILS };
-    const anim = clock.advance(DT, frame({ onset: true, level: 0.37 }), undefined, undefined, { shape });
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2 }), level: 0.37 }), undefined, undefined, { shape });
     expect(anim.beatPulse).toBeCloseTo(0.37, 5);
   });
 
@@ -106,7 +131,7 @@ describe("createAnimClock", () => {
     const decayAfter = (beat: number, low = 1): { pulse: number; hitTail: HitShape["tail"] } => {
       const clock = createAnimClock();
       const shape: HitShape = { ...NEUTRAL_SHAPE, amount: 0, tail: { ...UNIT_TAILS, beat, low } };
-      clock.advance(DT, frame({ onset: true }), undefined, undefined, { shape });
+      clock.advance(DT, frame({ engine: HIT({ snare: 2 }) }), undefined, undefined, { shape });
       let anim = clock.advance(DT, frame(), undefined, undefined, { shape });
       for (let i = 0; i < 9; i++) anim = clock.advance(DT, frame(), undefined, undefined, { shape });
       return { pulse: anim.beatPulse, hitTail: anim.hitTail };
@@ -133,12 +158,10 @@ describe("createAnimClock", () => {
   it("hitStrength.low mirrors bandEnergy's own graded hit when a shape is given", () => {
     const clock = createAnimClock();
     const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: UNIT_TAILS };
-    const quietBands = new Float32Array(NUM_BANDS).fill(0.1);
-    for (let i = 0; i < 30; i++) clock.advance(DT, frame({ bands: quietBands, level: 1 }), undefined, undefined, { shape });
-    const loudBands = new Float32Array(NUM_BANDS).fill(0.6);
-    const anim = clock.advance(DT, frame({ bands: loudBands, level: 1 }), undefined, undefined, { shape });
+    const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2 }) }), undefined, undefined, { shape });
     expect(anim.hitStrength.low.strength).toBeGreaterThan(0);
     expect(anim.hitStrength.low.strength).toBeLessThanOrEqual(1);
+    expect(anim.hitStrength.low.strength).toBe(anim.lowPulse);
   });
 
   it("beats is beatClock's own free-running unwrapped count, straight through", () => {
@@ -164,8 +187,7 @@ describe("createAnimClock", () => {
       t += DT;
       const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
       lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: false, pulseOnset: dueBeat }));
-      // The gated visual hit never fires in this scenario, so beatPulse
-      // (raw frame.onset passthrough) must stay exactly 0 throughout.
+      // No engine hit in this scenario, so beatPulse must stay exactly 0.
       expect(lastAnim.beatPulse).toBe(0);
     }
     expect(lastAnim.tempoLock).toBeGreaterThan(0.5);

@@ -56,12 +56,9 @@ const RELEASE_PER_SEC = 6;
 // 0.05 at 60fps versus expBlend's 0.0488 — it never saturates at any
 // realistic frame rate, so there's no frame-rate bug here to fix.
 const FLUX_ADAPTIVE_RATE = 3; // how fast the local flux baseline adapts
-// Exported so the meters panel's hit-history hint (audioMeters.ts's
-// hitsRuleHint) can spell out the exact rule from these numbers instead of
-// a hand-typed copy that can drift from them.
-export const FLUX_THRESHOLD_MULT = 1.6;
-export const FLUX_THRESHOLD_MARGIN = 0.03;
-export const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
+const FLUX_THRESHOLD_MULT = 1.6;
+const FLUX_THRESHOLD_MARGIN = 0.03;
+const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 
 // BPM estimation — a comb over the gaps between every pair of recent onsets
 // (see registerOnset). Candidate periods step through the tempo window;

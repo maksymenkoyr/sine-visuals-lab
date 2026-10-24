@@ -28,7 +28,8 @@ import { createWireModState, freshWireMod, stepWireMod, type WireMod } from "../
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
-import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { NUM_BANDS, type EngineReading, type FeatureFrame } from "../src/audio/types.ts";
+import { engineReading } from "./engineReading.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
@@ -38,6 +39,13 @@ import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { GATE_FORMULA_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
 
 const DT = 1 / 60;
+
+/** The engine reading behind a frame whose every band reads `level`, with a
+ *  hit of each kind when `hit`. */
+function heard(level: number, hit: boolean): EngineReading {
+  const strength = hit ? 2 : 0;
+  return engineReading({ low: level, mid: level, high: level, kick: strength, snare: strength, hat: strength });
+}
 
 function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
   return {
@@ -77,8 +85,8 @@ describe("drives: catalogue identity", () => {
     const clock = createAnimClock();
     // A few ticks with a real onset so beatPulse/lowPulse aren't just 0.
     const bands = new Float32Array(NUM_BANDS).fill(0.6);
-    clock.advance(DT, frame({ bands, onset: true }));
-    const anim = clock.advance(DT, frame({ bands, onset: true }));
+    clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
+    const anim = clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
 
     const engine = createDriveEngine();
     // "anim.energy" and "feature.level" are the entries whose read() actually
@@ -102,7 +110,7 @@ describe("drives: catalogue identity", () => {
 
   it("kind: edge entries' fired() reads the paired render-latched boolean off anim", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ onset: true }));
+    const anim = clock.advance(DT, frame({ onset: true, engine: heard(0, true) }));
     const engine = createDriveEngine();
     const spec = settingWithDrive("beatTrigger", "feature.onset");
     const drives = engine.forScene("identity-scene-2", [spec], anim);
@@ -414,8 +422,8 @@ describe("drives: identity at defaults, across every registered scene", () => {
   it("every drive setting's default resolves to Scene (custom=0) or a real catalogue/grid/line reading (custom=1)", () => {
     const clock = createAnimClock();
     const bands = new Float32Array(NUM_BANDS).fill(0.5);
-    clock.advance(DT, frame({ bands, onset: true }));
-    const anim = clock.advance(DT, frame({ bands, onset: true }));
+    clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
+    const anim = clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
     const engine = createDriveEngine();
 
     let checked = 0;
@@ -444,8 +452,8 @@ describe("drives: identity at defaults, across every registered scene", () => {
   it("a patch default reads exactly its weighted sum of catalogue signals (the sum it replaced on Scene)", () => {
     const clock = createAnimClock();
     const bands = new Float32Array(NUM_BANDS).fill(0.5);
-    clock.advance(DT, frame({ bands, onset: true }));
-    const f = frame({ bands, onset: true });
+    clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
+    const f = frame({ bands, onset: true, engine: heard(bands[0], true) });
     const anim = clock.advance(DT, f);
     const engine = createDriveEngine();
 
@@ -500,11 +508,12 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
   const settings = causticsScene.settings!;
   const byKey = (key: string) => settings.find((s) => s.key === key)!;
 
-  function animWith(overrides: { bands?: Float32Array; onset?: boolean }) {
+  function animWith(overrides: { bands?: Float32Array; onset?: boolean; engine?: EngineReading }) {
     const clock = createAnimClock();
     const bands = overrides.bands ?? new Float32Array(NUM_BANDS).fill(0.55);
-    clock.advance(DT, frame({ bands, onset: overrides.onset ?? false }));
-    return clock.advance(DT, frame({ bands, onset: overrides.onset ?? false }));
+    const engine = overrides.engine ?? heard(bands[0], overrides.onset ?? false);
+    clock.advance(DT, frame({ bands, onset: overrides.onset ?? false, engine }));
+    return clock.advance(DT, frame({ bands, onset: overrides.onset ?? false, engine }));
   }
 
   it("flash and focus default to Beat, matching anim.beatPulse exactly", () => {
@@ -531,7 +540,7 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
   });
 
   it("driftPump defaults to Bass hit, matching anim.lowOnset exactly for fired()", () => {
-    const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false });
+    const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false, engine: engineReading({ low: 0.9, kick: 2 }) });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
     expect(drives.fired("driftPump", false)).toBe(anim.lowOnset);
@@ -564,7 +573,7 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
   it("ripple's Scene default reproduces today's exact trigger (bass hit OR beat hit, unconditionally)", () => {
     const engine = createDriveEngine();
     // Bass hit only.
-    const bassOnly = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false });
+    const bassOnly = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false, engine: engineReading({ low: 0.9, kick: 2 }) });
     const sceneDefaultBass = bassOnly.lowOnset || bassOnly.onset;
     expect(engine.forScene("caustics", settings, bassOnly).fired("ripple", sceneDefaultBass)).toBe(sceneDefaultBass);
     // Neither.
@@ -622,7 +631,7 @@ describe("drives: patch normalization — weight clamp, dedupe, empty -> scene",
 
   it("an empty patch listens to nothing: value 0, never fires, even when the scene's own trigger fires", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ onset: true }));
+    const anim = clock.advance(DT, frame({ onset: true, engine: heard(0, true) }));
     const engine = createDriveEngine();
     const spec = settingWithDrive("unplugged", "feature.onset");
     setDriveSetting("empty-patch-scene", spec, { mix: "add", sources: [] });
@@ -972,7 +981,7 @@ describe("drives: multi-source patch mixing (add/max/gate) and gain", () => {
   it("max takes the single largest weighted source, not their sum", () => {
     const clock = createAnimClock();
     const bands = new Float32Array(NUM_BANDS).fill(0.5);
-    const anim = clock.advance(DT, frame({ bands }));
+    const anim = clock.advance(DT, frame({ bands, engine: heard(0.5, false) }));
     const sceneId = "patch-max";
     const spec = patchSetting(sceneId, "k", {
       mix: "max",
@@ -1116,11 +1125,11 @@ function tickToOnset(
 ) {
   const quiet = new Float32Array(NUM_BANDS).fill(0.05);
   const spike = new Float32Array(NUM_BANDS).fill(0.9);
-  let anim = clock.advance(DT, frame({ bands: quiet, onset: false }));
+  let anim = clock.advance(DT, frame({ bands: quiet, onset: false, engine: heard(0.05, false) }));
   engine.accumulate(DT, frame({ bands: quiet }), 0.05, anim, sceneId, specs);
-  anim = clock.advance(DT, frame({ bands: quiet, onset: false }));
+  anim = clock.advance(DT, frame({ bands: quiet, onset: false, engine: heard(0.05, false) }));
   engine.accumulate(DT, frame({ bands: quiet }), 0.05, anim, sceneId, specs);
-  anim = clock.advance(DT, frame({ bands: spike, onset: true }));
+  anim = clock.advance(DT, frame({ bands: spike, onset: true, engine: heard(0.9, true) }));
   engine.accumulate(DT, frame({ bands: spike }), spikeDriveEnergy, anim, sceneId, specs);
   return anim;
 }
@@ -1149,7 +1158,7 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
     // low-group rate (GROUP_TUNING), the exact rate the Graded pulse it
     // stands in for decays at.
     const held = new Float32Array(NUM_BANDS).fill(0.9);
-    const anim2 = clock.advance(DT, frame({ bands: held, onset: false }));
+    const anim2 = clock.advance(DT, frame({ bands: held, onset: false, engine: heard(0.9, false) }));
     engine.accumulate(DT, frame({ bands: held }), 0.9, anim2, sceneId, [spec]);
     expect(anim2.lowOnset).toBe(false);
     const after = engine.forScene(sceneId, [spec], anim2).uniformPair("k").drive;
@@ -1186,7 +1195,7 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
     expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(1);
 
     const held = new Float32Array(NUM_BANDS).fill(0.9);
-    const anim2 = clock.advance(DT, frame({ bands: held, onset: false }));
+    const anim2 = clock.advance(DT, frame({ bands: held, onset: false, engine: heard(0.9, false) }));
     engine.accumulate(DT, frame({ bands: held }), 0.9, anim2, sceneId, [spec]);
     const after = engine.forScene(sceneId, [spec], anim2).uniformPair("k").drive;
     expect(after).toBeCloseTo(Math.exp(-DT * BEAT_PULSE_DECAY_PER_SEC), 6);
@@ -1200,7 +1209,7 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
       const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "fixed" }] });
       const shape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail: { ...UNIT_TAILS, beat, low } };
       const held = new Float32Array(NUM_BANDS).fill(0.9);
-      let anim = clock.advance(DT, frame({ bands: held, onset: true }), undefined, undefined, { shape });
+      let anim = clock.advance(DT, frame({ bands: held, onset: true, engine: heard(0.9, true) }), undefined, undefined, { shape });
       engine.accumulate(DT, frame({ bands: held, onset: true }), 0.9, anim, sceneId, [spec]);
       anim = clock.advance(DT, frame({ bands: held }), undefined, undefined, { shape });
       engine.accumulate(DT, frame({ bands: held }), 0.9, anim, sceneId, [spec]);
@@ -1530,7 +1539,7 @@ describe("drives: the generic engine gate — every drive setting without its ow
     const engine = createDriveEngine();
 
     function tick(onset: boolean, e: number) {
-      const anim = clock.advance(DT, frame({ onset }));
+      const anim = clock.advance(DT, frame({ onset, engine: heard(0, onset) }));
       engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
       return engine.forScene(sceneId, [spec], anim);
     }
@@ -1760,8 +1769,10 @@ describe("drives: per-frame allocation (#353)", () => {
   function allocFixture() {
     const clock = createAnimClock();
     const bands = new Float32Array(NUM_BANDS).fill(0.5);
-    clock.advance(DT, frame({ bands, onset: true }));
-    const f = frame({ bands, onset: true });
+    // Levels whose weighted terms don't land on float32 values, so rounding shows.
+    const engine = engineReading({ low: 0.37, mid: 0.61, high: 0.83, kick: 2, snare: 2, hat: 2 });
+    clock.advance(DT, frame({ bands, onset: true, engine }));
+    const f = frame({ bands, onset: true, engine });
     const anim = clock.advance(DT, f);
     return {
       anim,
@@ -2052,10 +2063,10 @@ describe("drives: wire modifiers (wireMod.ts)", () => {
       engine.accumulate(DT, f, energy, anim, sceneId, specs);
       return engine.forScene(sceneId, specs, anim);
     };
-    const loud = step(frame({ onset: true }), 1);
+    const loud = step(frame({ onset: true, engine: heard(0, true) }), 1);
     expect(loud.fired("shut", false)).toBe(true);
     for (let i = 0; i < 30; i++) step(frame(), 0);
-    const quiet = step(frame({ onset: true }), 0.1);
+    const quiet = step(frame({ onset: true, engine: heard(0, true) }), 0.1);
     expect(quiet.fired("plain", false)).toBe(true);
     expect(quiet.value("shut", -1)).toBe(0);
     expect(quiet.fired("shut", false)).toBe(false);

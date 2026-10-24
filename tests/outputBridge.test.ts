@@ -190,7 +190,7 @@ describe("outputBridge frames carry the controller's gate marks", () => {
     const { bridge, posted, receive } = setup();
     receive({ t: "hello", haveState: false });
     posted.length = 0;
-    bridge.pushFrame(FRAME, { beatRatio: null, wavePeak: null, gate: GATE }, PARAMS);
+    bridge.pushFrame(FRAME, { wavePeak: null, gate: GATE }, PARAMS);
     const [m] = frames(posted);
     expect(m.f.gate).toEqual(GATE);
     expect(m.f.p).toEqual(PARAMS);
@@ -210,7 +210,7 @@ describe("outputBridge frames carry the controller's gate marks", () => {
     bridge.update(1000);
     expect(bridge.status().differs).toBe(true);
     t.posted.length = 0;
-    bridge.pushFrame(FRAME, { beatRatio: null, wavePeak: null, gate: GATE }, PARAMS);
+    bridge.pushFrame(FRAME, { wavePeak: null, gate: GATE }, PARAMS);
     const [m] = frames(t.posted);
     expect(m.f.p).toBeUndefined();
     expect(m.f.gate).toEqual(GATE);

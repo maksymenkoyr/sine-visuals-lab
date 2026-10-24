@@ -85,8 +85,8 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
  * resolved dials above are the TV's own, so they are not part of that walk.
  * What does not travel:
  * the laptop's audio input and its own analysis marks (syncedStores.ts's
- * PRIVATE_KEYS and VOLATILE_PREFIXES), and the readings only a local extractor
- * has (`beatRatio`, `wavePeak`).
+ * PRIVATE_KEYS and VOLATILE_PREFIXES), and the reading only a local capture
+ * has (`wavePeak`).
  */
 
 /** No new frame this long -> the laptop is not sending: the "waiting" phase. */
@@ -884,10 +884,8 @@ async function main(): Promise<void> {
     // the Bands card's faders (part of the look) are applied here. Smoothing is
     // resolved once per tick, as app.ts's tick() does.
     // The silence gate's marks are this device's own (volatile, not in the
-    // look), and there is no `beatRatio` — a paired TV never runs a local
-    // broadband FeatureExtractor — so a graded broadband beatPulse falls back
-    // to the loudest of this device's own band ratios (src/audio/hitStrength.ts
-    // has the story), and no `wavePeak` either. Beat grid and a setting's own
+    // look); hits and Onset surge come from the engine reading on each frame,
+    // and there is no `wavePeak`. Beat grid and a setting's own
     // drawn line are drive choices (src/render/drives.ts), carried by the look.
     const gained = applyBandGains(frame, getBandGains(scene.id));
     const smoothing = resolveSmoothing(scene.id);

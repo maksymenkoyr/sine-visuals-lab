@@ -1,430 +1,206 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createBandEnergy } from "../src/render/bandEnergy.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { createBandEnergy, GROUP_TUNING } from "../src/render/bandEnergy.ts";
+import { NUM_BANDS, type EngineReading, type FeatureFrame } from "../src/audio/types.ts";
 import { setBandSplit, resetBandSplit } from "../src/audio/bandSplit.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
+import { engineReading } from "./engineReading.ts";
 
 const DT = 1 / 60;
 
-// bandSplit is a single global value (see bandSplit.test.ts), so every test
-// resets it first — the four tests below rely on today's default split
-// (lowMid=6, midHigh=16) being in effect, proving that split reproduces the
-// old hardcoded LOW/MID/HIGH_BANDS behavior exactly.
+// bandSplit is a single global value (see bandSplit.test.ts).
 beforeEach(() => {
   resetBandSplit();
 });
 
-function bandsWith(hot: number[], value = 0.9, floor = 0.02): Float32Array {
-  const bands = new Float32Array(NUM_BANDS).fill(floor);
-  for (const i of hot) bands[i] = value;
-  return bands;
+function frame(engine: Partial<EngineReading> | null, bands?: Float32Array): FeatureFrame {
+  return {
+    time: 0,
+    bands: bands ?? new Float32Array(NUM_BANDS),
+    energy: 0,
+    level: 0.5,
+    hats: 0,
+    lead: 0,
+    onset: false,
+    pulseOnset: false,
+    bpm: 0,
+    onsetPhase: 0,
+    engine: engine === null ? null : engineReading(engine),
+  };
 }
 
-// A moving bassline (a held note whose level steps every two 120bpm beats,
-// never dipping to silence) with a kick riding on top every beat. This is
-// exactly the case that broke the old level-vs-baseline trigger: the bed
-// alone was often loud enough to leave nothing below the threshold for a
-// kick to rise above. Written as a function of tSec, not the frame index,
-// so the same fixture can be sampled at any frame rate — see the
-// frame-rate-parity test below.
-const KICK_PERIOD_SEC = 0.5; // 120bpm
-function kickOverBedBands(tSec: number): Float32Array {
-  const bands = new Float32Array(NUM_BANDS).fill(0.02);
-  const bedIndex = Math.floor(tSec / 1);
-  const bed = 0.55 + 0.35 * (((bedIndex * 7919) % 10) / 10); // steps every 2 beats, never silent
-  const beatPos = (tSec / KICK_PERIOD_SEC) % 1;
-  const kick = 0.35 * (1 - Math.exp(-beatPos / 0.02)) * Math.exp(-beatPos / 0.09); // fast attack, decaying body
-  const value = Math.min(1, bed + kick);
-  for (const i of [0, 1, 2, 3]) bands[i] = value;
-  return bands;
-}
-
-/** Number of kickOverBedBands beats landing in (afterSec, totalSec). */
-function expectedKicks(afterSec: number, totalSec: number): number {
-  let n = 0;
-  for (let k = 0; k * KICK_PERIOD_SEC < totalSec; k++) {
-    if (k * KICK_PERIOD_SEC > afterSec) n++;
-  }
-  return n;
-}
-
-function countLowOnsets(fps: number, seconds: number, afterSec: number): number {
-  const dt = 1 / fps;
-  const energy = createBandEnergy();
-  let onsets = 0;
-  for (let i = 0; i < Math.round(seconds / dt); i++) {
-    const t = i * dt;
-    energy.advance(dt, kickOverBedBands(t));
-    if (energy.lowOnset && t > afterSec) onsets++;
-  }
-  return onsets;
-}
+const QUIET = frame({});
 
 describe("band energy", () => {
-  it("a bass-only signal raises low level and leaves high level flat", () => {
+  it("levels are the engine's own at Smoothing's default and above", () => {
     const energy = createBandEnergy();
-    const bassBands = [0, 1, 2, 3];
-    for (let i = 0; i < 120; i++) energy.advance(DT, bandsWith(bassBands));
-    expect(energy.low).toBeGreaterThan(0.3);
-    expect(energy.high).toBeLessThan(0.05);
+    energy.advance(DT, frame({ low: 0.7, mid: 0.4, high: 0.1 }));
+    expect(energy.low).toBe(0.7);
+    expect(energy.mid).toBe(0.4);
+    expect(energy.high).toBe(0.1);
+    energy.advance(DT, frame({ low: 0.2 }), Infinity);
+    expect(energy.low).toBe(0.2);
   });
 
-  it("a treble-only signal raises high level and leaves low level flat", () => {
-    const energy = createBandEnergy();
-    const trebleBands = [18, 19, 20, 21];
-    for (let i = 0; i < 120; i++) energy.advance(DT, bandsWith(trebleBands));
-    expect(energy.high).toBeGreaterThan(0.3);
-    expect(energy.low).toBeLessThan(0.05);
-  });
-
-  it("fires once on the jump to loud, then stays silent while it sustains", () => {
-    const energy = createBandEnergy();
-    const quiet = bandsWith([]);
-    for (let i = 0; i < 60; i++) energy.advance(DT, quiet);
-
-    // A constant loud level has zero rate-of-rise after the first tick, so
-    // it must not re-fire just for holding — that's the level-crossing
-    // behavior the old trigger had, and the bug this file fixes: a level
-    // that never dips can never re-arm a level-vs-baseline trigger, but a
-    // sustained level correctly reads as "no new rise" for a flux trigger.
-    const loud = bandsWith([0, 1, 2, 3]);
-    let onsets = 0;
-    for (let i = 0; i < 5; i++) {
-      energy.advance(DT, loud);
-      if (energy.lowOnset) onsets++;
-    }
-    expect(onsets).toBe(1);
-  });
-
-  it("never fires on the very first advance, however loud", () => {
-    // prevRaw starts null specifically so a fresh instance can't read its
-    // own construction as an onset.
-    const energy = createBandEnergy();
-    const loud = bandsWith([0, 1, 2, 3]);
-    energy.advance(DT, loud);
-    expect(energy.lowOnset).toBe(false);
-    energy.advance(DT, loud);
-    expect(energy.lowOnset).toBe(false);
-  });
-
-  it("pulse decays toward 0 with no further onsets", () => {
-    const energy = createBandEnergy();
-    for (let i = 0; i < 30; i++) energy.advance(DT, bandsWith([]));
-    energy.advance(DT, bandsWith([0, 1, 2, 3]));
-    expect(energy.lowPulse).toBeCloseTo(1, 1);
-    for (let i = 0; i < 60; i++) energy.advance(DT, bandsWith([]));
-    expect(energy.lowPulse).toBeLessThan(0.1);
-  });
-
-  it("rateScale slows the approach to a new level without changing the steady-state destination", () => {
-    const bass = bandsWith([0, 1, 2, 3]);
-
+  it("below Smoothing's default the level eases to the same destination", () => {
     const slow = createBandEnergy();
     const fast = createBandEnergy();
     for (let i = 0; i < 10; i++) {
-      slow.advance(DT, bass, 0.25);
-      fast.advance(DT, bass, 1);
+      slow.advance(DT, frame({ low: 0.8 }), 0.25);
+      fast.advance(DT, frame({ low: 0.8 }), 1);
     }
-    // Same input, fewer ticks in: the slower rateScale hasn't caught up yet.
     expect(slow.low).toBeLessThan(fast.low);
-
-    // Both keep converging toward the same steady state given enough ticks.
-    for (let i = 0; i < 600; i++) {
-      slow.advance(DT, bass, 0.25);
-      fast.advance(DT, bass, 1);
-    }
-    expect(slow.low).toBeCloseTo(fast.low, 2);
+    expect(slow.low).toBeGreaterThan(0);
+    for (let i = 0; i < 600; i++) slow.advance(DT, frame({ low: 0.8 }), 0.25);
+    expect(slow.low).toBeCloseTo(0.8, 3);
   });
 
-  it("level rises faster than it falls — a sound starting should read sooner than one trailing off", () => {
-    const bass = bandsWith([0, 1, 2, 3]);
-    const silence = bandsWith([]);
-
+  it("below Smoothing's default a level rises faster than it falls", () => {
     const energy = createBandEnergy();
-    for (let i = 0; i < 60; i++) energy.advance(DT, silence);
-    // Same number of ticks either direction: the rise should have covered
-    // more of its own distance to target than the fall has, since a rising
-    // level uses the faster of the two rates (see LEVEL_ATTACK_PER_SEC's
-    // own doc for why — a swell reading late is the thing this fixes).
-    for (let i = 0; i < 10; i++) energy.advance(DT, bass);
-    const risenFraction = energy.low; // target is ~1 for an all-in-range bass signal
-    for (let i = 0; i < 10; i++) energy.advance(DT, silence);
-    const fallenFraction = risenFraction - energy.low; // how much of the rise was undone
-    expect(fallenFraction).toBeLessThan(risenFraction);
+    for (let i = 0; i < 10; i++) energy.advance(DT, frame({ low: 1 }), 0.5);
+    const risen = energy.low;
+    for (let i = 0; i < 10; i++) energy.advance(DT, QUIET, 0.5);
+    expect(risen - energy.low).toBeLessThan(risen);
   });
 
-  it("raising the Kick top crossover moves previously-mid bands into low", () => {
-    // Bands 6-9 sit in the default mid range [6,16) — confirm that baseline first.
-    const midBands = [6, 7, 8, 9];
-    const before = createBandEnergy();
-    for (let i = 0; i < 120; i++) before.advance(DT, bandsWith(midBands));
-    expect(before.mid).toBeGreaterThan(0.3);
-    expect(before.low).toBeLessThan(0.05);
-
-    // Push the Kick top slider up past band 9: everything below index 10 is
-    // now "low" — this is exactly what dragging the config panel slider does.
-    setBandSplit({ lowMid: 10 });
-    const after = createBandEnergy();
-    for (let i = 0; i < 120; i++) after.advance(DT, bandsWith(midBands));
-    expect(after.low).toBeGreaterThan(0.3);
-    expect(after.mid).toBeLessThan(0.05);
-  });
-
-  it("fires on nearly every kick even over a loud, moving bassline (regression)", () => {
-    // The bug this file fixes: a level-vs-adaptive-baseline trigger goes
-    // structurally dead once the baseline climbs high enough that
-    // baseline*mult+margin exceeds 1 — the ceiling every band is clamped to
-    // in features.ts. A moving, never-silent bed drives exactly that. This
-    // fixture reproduced 4-9 detected kicks out of 34-40 (a ~75-90% miss
-    // rate) against the old trigger; the flux trigger should catch nearly
-    // all of them regardless of the bed underneath.
-    const seconds = 20;
-    const afterSec = 2.5; // let the flux baseline settle past startup first
-    const onsets = countLowOnsets(60, seconds, afterSec);
-    const kicks = expectedKicks(afterSec, seconds);
-    expect(onsets).toBeGreaterThanOrEqual(Math.round(kicks * 0.9));
-    expect(onsets).toBeLessThanOrEqual(kicks + 2);
-  });
-
-  it("stays silent on signals with no real bass transient", () => {
+  it("a null reading eases levels out and fires nothing", () => {
     const energy = createBandEnergy();
-    let onsets = 0;
-    for (let i = 0; i < 600; i++) {
-      const t = i * DT;
-      // A steady sub-bass drone: loud, but never rising.
-      const bands = bandsWith([0, 1, 2, 3], 0.5 + 0.001 * Math.sin(t)); // negligible drift, not a real rise
-      energy.advance(DT, bands);
-      if (t > 1 && energy.lowOnset) onsets++;
+    energy.advance(DT, frame({ low: 0.9, mid: 0.9, high: 0.9 }));
+    energy.advance(DT, frame(null));
+    expect(energy.low).toBeGreaterThan(0);
+    expect(energy.low).toBeLessThan(0.9);
+    for (let i = 0; i < 300; i++) {
+      energy.advance(DT, frame(null));
+      expect(energy.lowOnset || energy.midOnset || energy.highOnset).toBe(false);
     }
-    expect(onsets).toBe(0);
+    expect(energy.low).toBeLessThan(0.01);
   });
 
-  it("the refractory blocks re-firing faster than a group's minimum spacing", () => {
-    // A square wave toggling well faster than the low group's refractory
-    // (0.1s): every rising edge is a legitimate loud jump, but only some of
-    // them are far enough apart to count.
-    const periodSec = 0.03;
+  it("kick, snare and hat hits fire the Bass, Mid and Treble lanes", () => {
     const energy = createBandEnergy();
-    let onsets = 0;
-    let wasHigh = false;
-    let kicks = 0;
-    const seconds = 5;
-    for (let i = 0; i < Math.round(seconds / DT); i++) {
-      const t = i * DT;
-      const high = (t % periodSec) < periodSec / 2;
-      if (high && !wasHigh && t > 1) kicks++;
-      wasHigh = high;
-      energy.advance(DT, bandsWith([0, 1, 2, 3], high ? 0.9 : 0.02));
-      if (energy.lowOnset && t > 1) onsets++;
-    }
-    expect(onsets).toBeGreaterThan(0);
-    expect(onsets).toBeLessThan(kicks);
+    energy.advance(DT, frame({ kick: 2 }));
+    expect([energy.lowOnset, energy.midOnset, energy.highOnset]).toEqual([true, false, false]);
+    energy.advance(DT, frame({ snare: 1.5 }));
+    expect([energy.lowOnset, energy.midOnset, energy.highOnset]).toEqual([false, true, false]);
+    energy.advance(DT, frame({ hat: 1.2 }));
+    expect([energy.lowOnset, energy.midOnset, energy.highOnset]).toEqual([false, false, true]);
+    energy.advance(DT, QUIET);
+    expect([energy.lowOnset, energy.midOnset, energy.highOnset]).toEqual([false, false, false]);
   });
 
-  it("does not block a slower re-trigger once the refractory has elapsed", () => {
-    // Same shape as the refractory test above but spaced well past the low
-    // group's 0.1s minimum — every beat should still get its own onset.
-    const periodSec = 0.5;
+  it("the silence gate passes a hit only while strength × dimmer is over 1", () => {
     const energy = createBandEnergy();
-    let onsets = 0;
-    let wasHigh = false;
-    let kicks = 0;
-    const seconds = 5;
-    for (let i = 0; i < Math.round(seconds / DT); i++) {
-      const t = i * DT;
-      const high = (t % periodSec) < periodSec / 2;
-      if (high && !wasHigh && t > 1) kicks++;
-      wasHigh = high;
-      energy.advance(DT, bandsWith([0, 1, 2, 3], high ? 0.9 : 0.02));
-      if (energy.lowOnset && t > 1) onsets++;
-    }
-    expect(onsets).toBe(kicks);
-  });
-
-  it("detects roughly the same number of kicks whether sampled at 60Hz or 120Hz", () => {
-    // Guards specifically against a frame-*count* refractory (which would
-    // let a 120Hz clock double-fire relative to 60Hz) and against an
-    // un-normalized per-frame rise (which would make the trigger twice as
-    // strict at 120Hz) — both were live risks with this trigger shape.
-    const seconds = 20;
-    const afterSec = 2.5;
-    const at60 = countLowOnsets(60, seconds, afterSec);
-    const at120 = countLowOnsets(120, seconds, afterSec);
-    expect(Math.abs(at60 - at120)).toBeLessThanOrEqual(2);
-  });
-
-  // The silence gate (src/audio/silenceGate.ts) folded into advance()'s own
-  // firing comparison — see bandEnergy.ts's file header for why it's scoped
-  // per group rather than once broadband.
-  it("an input that fires lowOnset with the default dimmer fires none with dimmer = 0", () => {
-    const seconds = 20;
-    const afterSec = 2.5;
-    const gated = createBandEnergy();
-    let onsetsAtZero = 0;
-    for (let i = 0; i < Math.round(seconds / DT); i++) {
-      const t = i * DT;
-      gated.advance(DT, kickOverBedBands(t), 1, 0);
-      if (gated.lowOnset && t > afterSec) onsetsAtZero++;
-    }
-    expect(onsetsAtZero).toBe(0);
-    // Sanity: the identical fixture does fire once the dimmer is back up —
-    // see "fires on nearly every kick..." above, which already covers this
-    // exact case at the default (omitted) dimmer.
-    expect(countLowOnsets(60, seconds, afterSec)).toBeGreaterThan(0);
-  });
-
-  it("dimmer = 1 gives the same onset ticks as omitting the arg", () => {
-    const seconds = 20;
-    const withDefault = createBandEnergy();
-    const withExplicitOne = createBandEnergy();
-    const defaultTicks: boolean[] = [];
-    const explicitTicks: boolean[] = [];
-    for (let i = 0; i < Math.round(seconds / DT); i++) {
-      const t = i * DT;
-      const bands = kickOverBedBands(t);
-      withDefault.advance(DT, bands);
-      withExplicitOne.advance(DT, bands, 1, 1);
-      defaultTicks.push(withDefault.lowOnset);
-      explicitTicks.push(withExplicitOne.lowOnset);
-    }
-    expect(explicitTicks).toEqual(defaultTicks);
-  });
-
-  it("lowDiag.ratio is >= 1 on the firing tick", () => {
-    const energy = createBandEnergy();
-    const quiet = bandsWith([]);
-    for (let i = 0; i < 60; i++) energy.advance(DT, quiet);
-    energy.advance(DT, bandsWith([0, 1, 2, 3]));
+    energy.advance(DT, frame({ kick: 2 }), 1, 0);
+    expect(energy.lowOnset).toBe(false);
+    expect(energy.lowDiag.gated).toBe(true);
+    energy.advance(DT, frame({ kick: 2 }), 1, 0.6);
     expect(energy.lowOnset).toBe(true);
-    expect(energy.lowDiag.ratio).toBeGreaterThanOrEqual(1);
+    expect(energy.lowDiag.gated).toBe(false);
+    energy.advance(DT, frame({ kick: 1.5 }), 1, 0.6);
+    expect(energy.lowOnset).toBe(false);
+    expect(energy.lowDiag.gated).toBe(true);
   });
 
-  it("lowDiag.blocked is true on a rise the refractory suppressed", () => {
-    // Well inside the low group's 0.1s refractory — every rising edge
-    // clears the threshold, but only some are far enough apart to fire.
-    const periodSec = 0.03;
-    const energy = createBandEnergy();
-    let sawBlocked = false;
-    const seconds = 2;
-    for (let i = 0; i < Math.round(seconds / DT); i++) {
-      const t = i * DT;
-      const high = (t % periodSec) < periodSec / 2;
-      energy.advance(DT, bandsWith([0, 1, 2, 3], high ? 0.9 : 0.02));
-      if (t > 0.5 && !energy.lowOnset && energy.lowDiag.blocked) sawBlocked = true;
+  it("dimmer = 1 gives the same onsets as omitting it", () => {
+    const a = createBandEnergy();
+    const b = createBandEnergy();
+    for (const k of [0, 1.01, 3, 0, 2]) {
+      a.advance(DT, frame({ kick: k }));
+      b.advance(DT, frame({ kick: k }), 1, 1);
+      expect(b.lowOnset).toBe(a.lowOnset);
     }
-    expect(sawBlocked).toBe(true);
   });
 
-  it("dimmer = 0 fires no lowOnset and marks lowDiag.gated; dimmer = 1 fires normally", () => {
-    // Same shape as the two 20-second dimmer tests above, but on the
-    // simpler bandsWith fixture so the diagnostic fields are easy to
-    // assert on a single tick.
-    const gated = createBandEnergy();
-    const open = createBandEnergy();
-    const quiet = bandsWith([]);
-    for (let i = 0; i < 60; i++) {
-      gated.advance(DT, quiet, 1, 0);
-      open.advance(DT, quiet, 1, 1);
-    }
-    gated.advance(DT, bandsWith([0, 1, 2, 3]), 1, 0);
-    open.advance(DT, bandsWith([0, 1, 2, 3]), 1, 1);
-    expect(gated.lowOnset).toBe(false);
-    expect(gated.lowDiag.gated).toBe(true);
-    expect(open.lowOnset).toBe(true);
-  });
-
-  // Graded pulse height (src/audio/hitStrength.ts), threaded through
-  // advance()'s optional `shape` — see this file's own header for why an
-  // omitted shape must reproduce today's flat-1 pulse exactly.
-  it("with no shape, an onset's pulse still snaps to exactly 1 (today's behavior)", () => {
+  it("diag ratio is the hit's strength, else the surge on its own lane", () => {
     const energy = createBandEnergy();
-    const quiet = bandsWith([]);
-    for (let i = 0; i < 60; i++) energy.advance(DT, quiet);
-    energy.advance(DT, bandsWith([0, 1, 2, 3]));
-    expect(energy.lowOnset).toBe(true);
+    energy.advance(DT, frame({ kick: 2.5, surge: 2.7, surgeKind: "kick" }));
+    expect(energy.lowDiag.ratio).toBe(2.5);
+    energy.advance(DT, frame({ surge: 0.8, surgeKind: "hat" }));
+    expect(energy.highDiag.ratio).toBe(0.8);
+    expect(energy.lowDiag.ratio).toBe(0);
+    expect(energy.midDiag.ratio).toBe(0);
+  });
+
+  it("blocked marks the surge's lane only", () => {
+    const energy = createBandEnergy();
+    energy.advance(DT, frame({ surge: 1.4, surgeKind: "snare", blocked: true }));
+    expect(energy.midDiag.blocked).toBe(true);
+    expect(energy.lowDiag.blocked).toBe(false);
+    expect(energy.highDiag.blocked).toBe(false);
+  });
+
+  it("each lane counts its own time since its last onset", () => {
+    const energy = createBandEnergy();
+    energy.advance(DT, frame({ kick: 2 }));
+    energy.advance(DT, frame({ hat: 2 }));
+    energy.advance(DT, QUIET);
+    expect(energy.lowDiag.sinceOnsetSec).toBeCloseTo(2 * DT, 9);
+    expect(energy.highDiag.sinceOnsetSec).toBeCloseTo(DT, 9);
+    expect(energy.midDiag.sinceOnsetSec).toBe(Infinity);
+  });
+
+  it("with no shape an onset's pulse snaps to 1, then falls at the lane's own rate", () => {
+    const energy = createBandEnergy();
+    energy.advance(DT, frame({ kick: 2 }));
     expect(energy.lowPulse).toBe(1);
+    energy.advance(DT, QUIET);
+    expect(energy.lowPulse).toBeCloseTo(Math.exp(-DT * GROUP_TUNING.low.pulseDecayRate), 9);
+    for (let i = 0; i < 60; i++) energy.advance(DT, QUIET);
+    expect(energy.lowPulse).toBeLessThan(0.1);
   });
 
-  it("with a shape at amount 1, a bigger rise yields a bigger pulse", () => {
+  it("with a shape at amount 1, a stronger hit yields a taller pulse", () => {
     const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0, tail: UNIT_TAILS };
     const weak = createBandEnergy();
     const strong = createBandEnergy();
-    const quiet = bandsWith([]);
-    for (let i = 0; i < 60; i++) {
-      weak.advance(DT, quiet, 1, 1, shape);
-      strong.advance(DT, quiet, 1, 1, shape);
-    }
-    // Same shape, two different rises above the same firing line — the
-    // bigger one should read a taller, but still <=1, pulse. (Only 4 of the
-    // low group's 6 default bands go hot — see bandsWith — so the group
-    // mean that actually drives the rise is diluted well below these
-    // values; both are picked with enough headroom to clear the firing
-    // line comfortably regardless.)
-    weak.advance(DT, bandsWith([0, 1, 2, 3], 0.08), 1, 1, shape);
-    strong.advance(DT, bandsWith([0, 1, 2, 3], 0.2), 1, 1, shape);
-    expect(weak.lowOnset).toBe(true);
-    expect(strong.lowOnset).toBe(true);
+    weak.advance(DT, frame({ kick: 1.2 }), 1, 1, shape);
+    strong.advance(DT, frame({ kick: 3 }), 1, 1, shape);
+    expect(weak.lowOnset && strong.lowOnset).toBe(true);
     expect(strong.lowPulse).toBeGreaterThan(weak.lowPulse);
     expect(strong.lowPulse).toBeLessThanOrEqual(1);
+    expect(strong.lowHit.strength).toBe(strong.lowPulse);
+  });
+
+  it("loudness is the mean of the lane's own bands, which the band split picks", () => {
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: UNIT_TAILS };
+    const bands = new Float32Array(NUM_BANDS);
+    bands.fill(0.9, 6, 10);
+    const before = createBandEnergy();
+    before.advance(DT, frame({ kick: 2 }, bands), 1, 1, shape);
+    expect(before.lowHit.loudness).toBe(0);
+    setBandSplit({ lowMid: 10 });
+    const after = createBandEnergy();
+    after.advance(DT, frame({ kick: 2 }, bands), 1, 1, shape);
+    expect(after.lowHit.loudness).toBeCloseTo(0.36, 5);
   });
 
   it("a longer Low tail keeps the low pulse up longer; a shorter one drops it sooner", () => {
     const pulseAfterTenTicks = (low: number, mid = 1): number => {
       const shape: HitShape = { amount: 0, knee: 1, loudness: 0, floor: 0, tail: { ...UNIT_TAILS, low, mid } };
       const energy = createBandEnergy();
-      const quiet = bandsWith([]);
-      for (let i = 0; i < 60; i++) energy.advance(DT, quiet, 1, 1, shape);
-      energy.advance(DT, bandsWith([0, 1, 2, 3]), 1, 1, shape);
-      expect(energy.lowOnset).toBe(true);
-      for (let i = 0; i < 10; i++) energy.advance(DT, quiet, 1, 1, shape);
+      energy.advance(DT, frame({ kick: 2 }), 1, 1, shape);
+      for (let i = 0; i < 10; i++) energy.advance(DT, QUIET, 1, 1, shape);
       return energy.lowPulse;
     };
     const plain = pulseAfterTenTicks(1);
     expect(pulseAfterTenTicks(2)).toBeGreaterThan(plain);
     expect(pulseAfterTenTicks(0.5)).toBeLessThan(plain);
-    // Each group answers only to its own lane.
     expect(pulseAfterTenTicks(1, 4)).toBe(plain);
   });
 
-  it("a floor above a hit's own stand-out yields pulse 0 while onset is still true", () => {
+  it("a floor above a hit's stand-out yields pulse 0 while onset is still true", () => {
     const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.9, tail: UNIT_TAILS };
     const energy = createBandEnergy();
-    const quiet = bandsWith([]);
-    for (let i = 0; i < 60; i++) energy.advance(DT, quiet, 1, 1, shape);
-    // A small rise well clear of the firing line but nowhere near stand-out
-    // 0.9 — floor should zero the pulse without touching the onset edge.
-    energy.advance(DT, bandsWith([0, 1, 2, 3], 0.08), 1, 1, shape);
+    energy.advance(DT, frame({ kick: 1.1 }), 1, 1, shape);
     expect(energy.lowOnset).toBe(true);
     expect(energy.lowPulse).toBe(0);
   });
 
-  it("stays finite and keeps firing onsets with Smoothing at its Off stop (rateScale = Infinity)", () => {
-    // The flux baseline and refractory must not be scaled by rateScale: at
-    // the Smoothing row's Off stop rateScale is Infinity, and scaling the
-    // baseline by it would snap fluxBaseline to equal every rise, making
-    // the trigger permanently unreachable — this is the same dead-detector
-    // bug this file exists to fix, reappearing under a different setting.
-    const dt = 1 / 60;
-    const energy = createBandEnergy();
-    let onsets = 0;
-    for (let i = 0; i < Math.round(20 / dt); i++) {
-      const t = i * dt;
-      energy.advance(dt, kickOverBedBands(t), Infinity);
-      expect(Number.isFinite(energy.low)).toBe(true);
-      expect(Number.isFinite(energy.lowPulse)).toBe(true);
-      if (energy.lowOnset && t > 2.5) onsets++;
-    }
-    const kicks = expectedKicks(2.5, 20);
-    expect(onsets).toBeGreaterThanOrEqual(Math.round(kicks * 0.9));
-  });
-
   it("stays finite on a zero, NaN or negative step with Smoothing Off", () => {
-    // dtSec = 0 against rateScale = Infinity is Infinity * 0 = NaN in the
-    // level slew and the pulse decay unless the clamp reaches them too.
     for (const bad of [0, Number.NaN, -1]) {
       const energy = createBandEnergy();
       for (let i = 0; i < 5; i++) {
-        energy.advance(bad, bandsWith([0, 1, 2, 3, 8, 9, 20, 21]), Infinity);
+        energy.advance(bad, frame({ low: 0.5, mid: 0.5, high: 0.5, kick: 2, snare: 2, hat: 2 }), Infinity);
+        energy.advance(bad, frame(null), Infinity);
         for (const v of [energy.low, energy.mid, energy.high, energy.lowPulse, energy.midPulse, energy.highPulse]) {
           expect(Number.isFinite(v)).toBe(true);
         }

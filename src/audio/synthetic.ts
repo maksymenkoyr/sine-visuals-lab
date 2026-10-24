@@ -1,4 +1,4 @@
-import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { NUM_BANDS, type EngineReading, type FeatureFrame } from "./types.ts";
 
 export interface SyntheticOpts {
   /** Tempo of the synthetic groove. Different tiles should use different
@@ -45,6 +45,14 @@ const NOISE_FLOOR = 0.04;
 const SECTION_PERIOD_SEC = 26;
 const SECTION_DEPTH = 0.7; // 0 = no section dynamics, 1 = quiet section hits pure noise floor
 
+// The engine reading's hit strengths: both clear an open silence gate, and the
+// kick stands out more, as a real kick over a hat does.
+const KICK_STRENGTH = 2;
+const HAT_STRENGTH = 1.5;
+const BEATS_PER_BAR = 4;
+const SYNTHETIC_CONFIDENCE = 0.8;
+const SYNTHETIC_DOWNBEAT_CONFIDENCE = 0.5;
+
 /** Produces a plausible ~120bpm FeatureFrame with no real audio input, so
  *  gallery preview tiles — and an open scene, behind its start prompt (see
  *  idlePreview in app.ts) — look alive before the mic is ever granted. Once
@@ -57,6 +65,24 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
   const bands = new Float32Array(NUM_BANDS);
 
   let lastBeatIndex = -1;
+  let lastHalfIndex = -1;
+  const engine: EngineReading = {
+    low: 0,
+    mid: 0,
+    high: 0,
+    kick: 0,
+    snare: 0,
+    hat: 0,
+    surge: 0,
+    surgeKind: "kick",
+    blocked: false,
+    music: true,
+    confidence: SYNTHETIC_CONFIDENCE,
+    beatTime: 0,
+    downbeatTime: 0,
+    downbeatConfidence: SYNTHETIC_DOWNBEAT_CONFIDENCE,
+    updates: 0,
+  };
 
   return {
     frame(timeSec: number): FeatureFrame {
@@ -65,6 +91,9 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       const beatPhase = t / period - beatIndex;
       const beat = beatIndex > lastBeatIndex;
       if (beat) lastBeatIndex = beatIndex;
+      const halfIndex = Math.floor(t / (period / 2));
+      const offBeat = halfIndex > lastHalfIndex && halfIndex % 2 === 1;
+      if (halfIndex > lastHalfIndex) lastHalfIndex = halfIndex;
 
       const bar = beatIndex >> 2;
       const kickEnv = Math.exp(-beatPhase * 14);
@@ -113,8 +142,17 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
       // just what FeatureFrame calls that same edge/phase pair. There's no
       // silence gate here to differ from it, so pulseOnset = onset.
-      // No engine reading yet: the anim clock still builds everything from the bands and onsets above.
-      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine: null };
+      engine.low = clamp01(kickEnv * sectionGain);
+      engine.mid = clamp01(midEnv * sectionGain);
+      engine.high = clamp01(hatEnv * sectionGain);
+      engine.kick = beat ? KICK_STRENGTH : 0;
+      engine.hat = offBeat ? HAT_STRENGTH : 0;
+      engine.surge = Math.max(engine.kick, engine.hat);
+      engine.surgeKind = engine.hat > engine.kick ? "hat" : "kick";
+      engine.beatTime = beatIndex * period - phaseOffset;
+      engine.downbeatTime = bar * BEATS_PER_BAR * period - phaseOffset;
+      engine.updates = beatIndex;
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine };
     },
   };
 }

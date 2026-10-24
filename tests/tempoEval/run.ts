@@ -297,7 +297,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     }
 
     if (taps) while (tapNext < taps.length && taps[tapNext]! <= time) tapTempoAt(taps[tapNext++]! * 1000);
-    const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits }, taps ? time * 1000 : undefined);
+    const anim = animClock.advance(dt, frame, undefined, gate, { shape, tempoVoteRatio: extractor.fluxRatio, tempoHits }, taps ? time * 1000 : undefined);
     opts.onFrame?.(time, frame, anim, { autoGain, gate });
 
     const seg = currentSegment(track.tempo, segPtr, time);

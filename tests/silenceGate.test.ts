@@ -5,6 +5,7 @@ import {
   setSilenceGateOpen,
   resetSilenceGate,
   silenceGateDimmer,
+  hitPasses,
   isSilenceGateAuto,
   setSilenceGateAuto,
   resolveSilenceGate,
@@ -162,6 +163,41 @@ describe("silenceGateDimmer", () => {
       const frame = feed.frame(t);
       expect(silenceGateDimmer(frame.level, defaults)).toBe(1);
     }
+  });
+});
+
+// An engine hit's strength is over 1 by construction (EngineReading in
+// src/audio/types.ts), so an open gate must pass every hit and a shut one none.
+describe("hitPasses", () => {
+  it("passes every hit at an open gate and none at a shut one", () => {
+    for (const strength of [1.001, 1.5, 4]) {
+      expect(hitPasses(strength, 1)).toBe(true);
+      expect(hitPasses(strength, 0)).toBe(false);
+    }
+  });
+
+  it("a half-open gate passes only hits that cleared twice the threshold", () => {
+    expect(hitPasses(1.9, 0.5)).toBe(false);
+    expect(hitPasses(2.1, 0.5)).toBe(true);
+  });
+
+  it("no hit never passes", () => {
+    expect(hitPasses(0, 1)).toBe(false);
+  });
+
+  it("the synthetic feed's hits all pass its own undimmed gate", () => {
+    const defaults = { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT };
+    const feed = createSyntheticFeed();
+    let hits = 0;
+    for (let t = 0; t < 10; t += 1 / 60) {
+      const frame = feed.frame(t);
+      const e = frame.engine!;
+      const strongest = Math.max(e.kick, e.snare, e.hat);
+      if (strongest === 0) continue;
+      hits++;
+      expect(hitPasses(strongest, silenceGateDimmer(frame.level, defaults))).toBe(true);
+    }
+    expect(hits).toBeGreaterThan(30);
   });
 });
 
