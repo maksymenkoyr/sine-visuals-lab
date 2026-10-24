@@ -103,7 +103,7 @@ const EMIT = 3.2;
 /** How much light the gas inside the edge blocks per world unit. */
 const ABSORB = 0.6;
 /** Transmittance below which the gas hides the stars behind it. */
-const OCCLUDE = 0.3;
+export const OCCLUDE = 0.3;
 /** How many times brighter the white-hot core burns on a full hit at Flare 1. */
 const FLARE_GAIN = 1.6;
 /** How much brighter the whole cloud gets at full drive at Glow 1. */
