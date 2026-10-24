@@ -49,49 +49,40 @@ describe("bodyPathOfCard", () => {
 describe("collectScenes", () => {
   it("orders newest added first, ties by id", () => {
     const out = collectScenes({
-      "./old.ts": { oldScene: fakeScene("old"), gallery: gallery("released", "2026-08-27") },
-      "./b/index.ts": { bScene: fakeScene("b"), gallery: gallery("draft", "2026-10-05") },
-      "./a.ts": { aScene: fakeScene("a"), gallery: gallery("development", "2026-10-05") },
-      "./new/index.ts": { newScene: fakeScene("new"), gallery: gallery("draft", "2026-10-06") },
+      "./old.card.ts": fakeCardModule("old", "released", "2026-08-27"),
+      "./b/card.ts": fakeCardModule("b", "draft", "2026-10-05"),
+      "./a.card.ts": fakeCardModule("a", "development", "2026-10-05"),
+      "./new/card.ts": fakeCardModule("new", "draft", "2026-10-06"),
     });
     expect(out.scenes.map((s) => s.scene.id)).toEqual(["new", "a", "b", "old"]);
     expect(out.scenes.map((s) => s.unit)).toEqual(["new", "a", "b", "old"]);
     expect(out.errors).toEqual([]);
   });
 
-  it("passes over a helper that exports neither a scene nor gallery", () => {
-    const out = collectScenes({ "./fluidSim.ts": { step() {}, SIZE: 4 } });
+  it("passes over a module with no card, a helper or a body, with no error", () => {
+    const out = collectScenes({
+      "./fluidSim.ts": { step() {}, SIZE: 4 },
+      "./x.ts": { xScene: fakeScene("x") },
+    });
     expect(out).toEqual({ scenes: [], errors: [] });
   });
 
-  it("reports a module that breaks the contract and keeps the rest", () => {
-    const out = collectScenes({
-      "./nogallery.ts": { xScene: fakeScene("x") },
-      "./badstage.ts": { yScene: fakeScene("y"), gallery: gallery("featured", "2026-10-01") },
-      "./baddate.ts": { zScene: fakeScene("z"), gallery: gallery("draft", "Oct 1") },
-      "./two.ts": { p: fakeScene("p"), q: fakeScene("q"), gallery: gallery("draft", "2026-10-01") },
-      "./none.ts": { gallery: gallery("draft", "2026-10-01") },
-      "./ok.ts": { okScene: fakeScene("ok"), gallery: gallery("draft", "2026-10-01") },
-      "./zdup.ts": { dupScene: fakeScene("ok"), gallery: gallery("draft", "2026-10-02") },
-    });
-    expect(out.scenes.map((s) => s.scene.id)).toEqual(["ok"]);
-    expect(out.errors).toHaveLength(6);
-    expect(out.errors.join("\n")).toMatch(/nogallery\.ts: exports a scene but no `gallery`/);
-    expect(out.errors.join("\n")).toMatch(/zdup\.ts: scene id "ok" is already registered/);
+  it("registers a card as a proxy with its gallery record", () => {
+    const out = collectScenes({ "./split.card.ts": fakeCardModule("split", "development", "2026-10-05") });
+    expect(out.errors).toEqual([]);
+    expect(out.scenes).toHaveLength(1);
+    expect(sceneCard(out.scenes[0].scene)).toBeDefined();
+    expect(out.scenes[0].gallery).toEqual(gallery("development", "2026-10-05"));
   });
 
-  it("registers a card as a proxy, ordered with legacy modules", () => {
+  it("reports a duplicate id across two cards and keeps the first", () => {
     const out = collectScenes({
-      "./old.ts": { oldScene: fakeScene("old"), gallery: gallery("released", "2026-08-27") },
-      "./split.card.ts": fakeCardModule("split", "development", "2026-10-05"),
-      "./folder/card.ts": fakeCardModule("folder", "draft", "2026-10-06"),
+      "./a.card.ts": fakeCardModule("ok"),
+      "./b.card.ts": fakeCardModule("ok", "draft", "2026-10-02"),
     });
-    expect(out.errors).toEqual([]);
-    expect(out.scenes.map((s) => s.scene.id)).toEqual(["folder", "split", "old"]);
-    expect(out.scenes.map((s) => s.unit)).toEqual(["folder", "split", "old"]);
-    expect(sceneCard(out.scenes[0].scene)).toBeDefined();
-    expect(sceneCard(out.scenes[2].scene)).toBeUndefined();
-    expect(out.scenes[1].gallery).toEqual(gallery("development", "2026-10-05"));
+    expect(out.scenes.map((s) => s.scene.id)).toEqual(["ok"]);
+    expect(out.errors).toHaveLength(1);
+    expect(out.errors[0]).toMatch(/b\.card\.ts: scene id "ok" is already registered/);
   });
 
   it("reports a broken card with one line naming its path", () => {
@@ -112,42 +103,19 @@ describe("collectScenes", () => {
     expect(out.errors.join("\n")).toMatch(/noload\.card\.ts: .*loadBody/);
   });
 
-  it("skips a legacy body next to its card silently, but not a lone one", () => {
-    const out = collectScenes({
-      "./split.card.ts": fakeCardModule("split"),
-      "./split.ts": { splitScene: fakeScene("split") },
-      "./folder/card.ts": fakeCardModule("folder"),
-      "./folder/index.ts": { folderScene: fakeScene("folder") },
-      "./lone.ts": { loneScene: fakeScene("lone") },
-    });
-    expect(out.scenes.map((s) => s.scene.id).sort()).toEqual(["folder", "split"]);
-    expect(out.errors).toEqual(["./lone.ts: exports a scene but no `gallery`"]);
-  });
-
-  it("counts one scene exported under two names as one", () => {
-    const s = fakeScene("s");
-    const out = collectScenes({ "./s.ts": { sScene: s, default: s, gallery: gallery("draft", "2026-10-01") } });
-    expect(out.scenes.map((c) => c.scene.id)).toEqual(["s"]);
-    expect(out.errors).toEqual([]);
-  });
 });
 
 describe("the real scene modules", () => {
   it("all keep the contract", () => {
-    const modules = {
-      ...import.meta.glob(["../src/render/scenes/*.card.ts", "../src/render/scenes/*/card.ts"], { eager: true }),
-      ...import.meta.glob(
-        [
-          "../src/render/scenes/*.ts",
-          "../src/render/scenes/*/index.ts",
-          "!../src/render/scenes/index.ts",
-          "!../src/render/scenes/*.card.ts",
-          "!../src/render/scenes/*/card.ts",
-        ],
-        { eager: true },
-      ),
-    };
+    const modules = import.meta.glob(["../src/render/scenes/*.card.ts", "../src/render/scenes/*/card.ts"], { eager: true });
     expect(collectScenes(modules).errors).toEqual([]);
+  });
+
+  it("are all cards: no scene left in the one-file shape", () => {
+    const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+    for (const { file } of sceneEntries(readdirSync(SCENES_DIR), read, existsSync)) {
+      expect(/\.card\.ts$|\/card\.ts$/.test(file), `${file}: split it into a card and a body (src/render/scenes/sceneModules.ts's header)`).toBe(true);
+    }
   });
 
   it("have cards whose body is the scene its conventional module exports, sharing the card's settings and panel", async () => {

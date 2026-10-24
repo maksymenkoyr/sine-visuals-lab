@@ -25,13 +25,7 @@ import { collectScenes } from "./sceneModules.ts";
 // Every card, loaded eagerly. Their scenes' code is not: each card imports its
 // body on demand.
 const cards = import.meta.glob(["./*.card.ts", "./*/card.ts"], { eager: true });
-// Scenes not yet split into a card and a body; this glob goes once all are.
-// Helper files that match load too (their scenes import them anyway);
-// collectScenes passes over anything without a `gallery`.
-const unsplit = import.meta.glob(["./*.ts", "./*/index.ts", "!./index.ts", "!./*.card.ts", "!./*/card.ts"], {
-  eager: true,
-});
-const freeScenes = collectScenes({ ...cards, ...unsplit });
+const freeScenes = collectScenes(cards);
 for (const error of freeScenes.errors) console.warn(`[scenes] ${error}`);
 
 const stages = new Map<string, SceneStage>();
