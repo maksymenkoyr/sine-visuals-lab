@@ -65,12 +65,11 @@ export function createGL(
  * context at all, and every GL call after a loss is a silent no-op: the loop
  * keeps running and the picture just freezes or goes black.
  *
- * Scenes hold their programs, VAOs and framebuffers in closures, so the
- * restore handler's job is to rebuild everything, not just the context. The
- * three entry points (app.ts, output.ts, tv.ts) do that by reloading the
- * page: the route lives in the hash and the stores in localStorage, so a
- * reload lands back on the same scene. `onLost` runs first, for a message or
- * for pausing the loop while the context is down. Not for the gallery's
+ * The three entry points (app.ts, output.ts, tv.ts) rebuild in place through
+ * render/contextRecovery.ts: they free every GL object on the loss and mount
+ * the current scene again on the restore. Audio capture and every non-GL
+ * state keep running; a reload is the fallback only. `onLost` runs first, for
+ * a message or for pausing the loop while the context is down. Not for the gallery's
  * shared preview context (previewRenderer.ts remounts its own scenes in
  * place) or quality.ts's benchmark, which is meant to die.
  */

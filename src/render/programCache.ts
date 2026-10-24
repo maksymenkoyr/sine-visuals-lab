@@ -18,7 +18,8 @@
 // init() should create all its programs before it touches any of them
 // (fluidSim.ts looks its passes' uniforms up on their first draw for this
 // reason). Each context also gets KHR_parallel_shader_compile where the
-// browser has it.
+// browser has it, and asks again after a restore, since extensions do not
+// outlive the context.
 //
 // Kept for the next mount. Each GL context has its own pool of idle programs,
 // keyed by the two shader sources (all createProgram compiles from). A
@@ -89,6 +90,7 @@ function poolFor(gl: WebGL2RenderingContext): ContextPool {
     pool.idle = [];
     pool.generation++;
   });
+  gl.canvas?.addEventListener?.("webglcontextrestored", () => gl.getExtension?.("KHR_parallel_shader_compile"));
   return pool;
 }
 

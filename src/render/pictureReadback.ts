@@ -503,7 +503,9 @@ export function createPictureReadback(gl: WebGL2RenderingContext, sampleInterval
       gradientProgram?.dispose();
       gradientProgram = null;
       gradientVao = null;
-      gradientDisabled = true;
+      // A compile on a lost context fails for every program and says nothing
+      // about the driver.
+      if (!gl.isContextLost()) gradientDisabled = true;
       return false;
     }
   }

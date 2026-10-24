@@ -123,6 +123,14 @@ describe("acquireProgram", () => {
     expect(log.links).toBe(2);
   });
 
+  it("asks for KHR_parallel_shader_compile again after a restore", () => {
+    const { gl, log, canvas } = fakeGL();
+    acquireProgram(gl, VERT, FRAG);
+    canvas.dispatchEvent(new Event("webglcontextlost"));
+    canvas.dispatchEvent(new Event("webglcontextrestored"));
+    expect(log.extensions).toEqual(["KHR_parallel_shader_compile", "KHR_parallel_shader_compile"]);
+  });
+
   it("forgets its pool on a context loss and drops what is released after it", () => {
     const { gl, log, canvas } = fakeGL();
     const pooled = acquireProgram(gl, VERT, FRAG);

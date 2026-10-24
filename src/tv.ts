@@ -4,6 +4,7 @@ import "./net/tvStorageBoot.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import { deferProgramChecks } from "./render/programCache.ts";
+import { createContextRecovery } from "./render/contextRecovery.ts";
 import { detectQuality, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import type { QualityChoice } from "./render/qualityPref.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
@@ -205,8 +206,9 @@ let compositor: Compositor | null = null;
 let overlay: OverlayLayer | null = null;
 let join: JoinScreen;
 
-/** True from the canvas's `webglcontextlost` until the page reloads on the
- *  restore (main()'s watchContextLoss): the loop draws nothing meanwhile. */
+/** True from the canvas's `webglcontextlost` until contextRecovery.ts has
+ *  rebuilt in place (a fallback reload leaves it set): the loop draws nothing
+ *  meanwhile. */
 let glLost = false;
 const animClock = createAnimClock();
 // See renderLatch.ts / app.ts's own instance: turns anim.dtSec into wall
@@ -317,6 +319,13 @@ function onQualityChoice(choice: QualityChoice | undefined): void {
  *  change, so a TV takes the room's stored transition
  *  (render/sceneTransition.ts, a room key applied before the scene). */
 function switchScene(next: Scene, crossfade = false): void {
+  if (glLost) {
+    // The loss already disposed the old scene; the restore inits `scene`.
+    compositor?.cancel();
+    scene = next;
+    announce();
+    return;
+  }
   const prev = scene;
   // A crossfade still running ends here, its outgoing scene dropped at once.
   compositor?.cancel();
@@ -751,17 +760,42 @@ async function main(): Promise<void> {
     return;
   }
 
-  // See gl.ts's watchContextLoss(): a restored context means every scene's GL
-  // objects are dead, so the page reloads. A paired TV reads its saved room
-  // and key back (net/sessions.ts), a typed-code one still has `?room=` in the
-  // address, and an unpaired one gets a fresh QR; none needs the old code put
-  // back, so the phone stays connected.
+  // A GPU reset takes every GL object; contextRecovery.ts rebuilds in place, so
+  // the pairing carries on untouched. Its fallback, a reload, is also safe: a
+  // paired TV reads its saved room and key back (net/sessions.ts), a typed-code
+  // one still has `?room=` in the address, and an unpaired one gets a fresh QR.
+  const recovery = createContextRecovery({
+    ready: () => compositor !== null,
+    teardown: () => {
+      compositor?.cancel();
+      scene.dispose(sceneCtx);
+      compositor?.resetGL();
+      overlay?.dispose();
+    },
+    rebuild: () => {
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      try {
+        deferProgramChecks(() => scene.init(sceneCtx));
+      } catch (err) {
+        try {
+          scene.dispose(sceneCtx);
+        } catch {
+          // The init error is the one to report.
+        }
+        throw err;
+      }
+    },
+    reload: () => location.reload(),
+  });
   watchContextLoss(
     canvas,
     () => {
       glLost = true;
+      recovery.lost();
     },
-    () => location.reload(),
+    () => {
+      if (recovery.restored()) glLost = false;
+    },
   );
 
   detectedPreset = await detectQuality();
