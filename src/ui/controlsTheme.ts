@@ -438,10 +438,42 @@ body.vc-keys-reveal [data-keycap]::after {
  * below); above the cable layer, which it can sit over. */
 .vc-row-hint {
   position: fixed; z-index: 40; pointer-events: none; box-sizing: border-box;
-  background: rgba(8, 11, 10, 0.94); border-left: 2px solid var(--c, #fff); border-radius: 3px;
-  padding: 6px 9px 7px; font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.82);
+  background: rgba(8, 11, 10, 0.94); border-radius: 3px;
+  padding: 6px 9px 7px 11px; font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.82);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
+/* The accent rule is drawn, not a border, so it can grow on the way in. */
+.vc-row-hint::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  border-radius: 3px 0 0 3px; background: var(--c, #fff); transform-origin: 50% 0;
+}
+/* rowHints.ts sets --dx/--dy so the layer comes out of the row's column.
+ * Only the swap class glides top: a glide on every place() would lag the
+ * layer behind its row while the panel scrolls. */
+@media (prefers-reduced-motion: no-preference) {
+  .vc-row-hint-in { animation: vc-row-hint-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+  .vc-row-hint-in::before {
+    animation: vc-row-hint-rule 0.32s cubic-bezier(0.3, 0.8, 0.3, 1) both;
+  }
+  .vc-row-hint-swap { transition: top 0.16s cubic-bezier(0.25, 0.8, 0.3, 1); }
+  .vc-row-hint-swap .vc-row-hint-text { animation: vc-row-hint-text 0.18s ease-out both; }
+  .vc-row-hint-out { animation: vc-row-hint-out 0.12s ease-in both; }
+}
+@keyframes vc-row-hint-in {
+  from {
+    opacity: 0; filter: blur(3px);
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.97);
+  }
+  to { opacity: 1; filter: none; transform: none; }
+}
+@keyframes vc-row-hint-rule {
+  from { transform: scaleY(0); box-shadow: 0 0 0 transparent; }
+  60% { box-shadow: 0 0 10px var(--c, #fff); }
+  to { transform: scaleY(1); box-shadow: 0 0 0 transparent; }
+}
+@keyframes vc-row-hint-text { from { opacity: 0; transform: translateY(3px); } }
+.vc-row-hint-text { display: block; }
+@keyframes vc-row-hint-out { to { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)); } }
 /* Auto takeover line (AUTO_HOLDING_HINT): a second line in auto's colour while auto
  * holds the row, so the description above stays readable. */
 .vc-hint-auto { color: ${withAlpha(AUTO_SKY, 0.85)}; }

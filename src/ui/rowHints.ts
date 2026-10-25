@@ -35,6 +35,11 @@
  * itself on the pointer/focus event, then again only when the source hint
  * changes (a MutationObserver on that one element while it shows) or
  * something scrolls or resizes.
+ *
+ * Motion (controlsTheme.ts's `.vc-row-hint-*`): out of hiding it slides from
+ * the row's column; moving to a row in the same spot glides there and
+ * crossfades the text; going away it fades. A refill of the same hint (a
+ * slider's value line while it drags) stays still, or it would flicker.
  */
 
 /** Space between the column and the layer, and between the layer and any
@@ -48,6 +53,8 @@ const MAX_WIDTH_PX = 280;
 /** Between the row and the layer when it floats over the rows. */
 const OVER_GAP_PX = 2;
 const COLUMN_SELECTOR = ".vc-spectrum-col, .vc-power-col, .vc-controls-col";
+/** How far the layer travels on its way in or out. */
+const SLIDE_PX = 8;
 
 export interface Box {
   left: number;
@@ -166,16 +173,41 @@ function rowWithHint(row: HTMLElement | null): { row: HTMLElement; hint: HTMLEle
   return null;
 }
 
+const MOTION_CLASSES = ["vc-row-hint-in", "vc-row-hint-swap", "vc-row-hint-out"];
+
+/** Restarts one of the motion classes; place() has already forced the
+ *  layout a restart needs. */
+function play(el: HTMLElement, cls: string | null): void {
+  el.classList.remove(...MOTION_CLASSES);
+  if (!cls) return;
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
 function hide(): void {
   observer?.disconnect();
   shownHint = null;
   shownRow = null;
-  if (layerEl) layerEl.style.display = "none";
+  const el = layerEl;
+  if (!el || el.style.display === "none" || el.classList.contains("vc-row-hint-out")) return;
+  play(el, "vc-row-hint-out");
+  // Under reduced motion no animation runs, so nothing would end it.
+  const done = (): void => {
+    if (el.classList.contains("vc-row-hint-out")) {
+      el.classList.remove("vc-row-hint-out");
+      el.style.display = "none";
+    }
+  };
+  if (el.getAnimations?.().length) el.addEventListener("animationend", done, { once: true });
+  else done();
 }
 
 function fill(): void {
   const el = layer();
-  el.replaceChildren(...Array.from(shownHint!.childNodes, (n) => n.cloneNode(true)));
+  const text = document.createElement("span");
+  text.className = "vc-row-hint-text";
+  text.append(...Array.from(shownHint!.childNodes, (n) => n.cloneNode(true)));
+  el.replaceChildren(text);
   const accent = getComputedStyle(shownRow!).getPropertyValue("--vc-accent").trim();
   el.style.setProperty("--c", accent || "#fff");
 }
@@ -186,13 +218,17 @@ const hasBox = (el: Element): boolean => {
   return r.width > 0 && r.height > 0;
 };
 
-function place(): void {
+/** `entering`: the layer is coming out of hiding or onto another row, so it
+ *  moves (this file's header); otherwise it only follows its row. */
+function place(entering = false): void {
   const row = shownRow!;
   if (!row.isConnected || !hasBox(row)) {
     hide();
     return;
   }
   const el = layer();
+  const wasShown = el.style.display === "block";
+  const oldLeft = el.style.left;
   el.style.display = "block";
   const column = row.closest<HTMLElement>(COLUMN_SELECTOR);
   const others = Array.from(document.querySelectorAll<HTMLElement>(COLUMN_SELECTOR))
@@ -209,7 +245,16 @@ function place(): void {
     },
   );
   el.style.width = `${slot.width}px`;
-  el.style.left = `${slot.left}px`;
+  const left = `${slot.left}px`;
+  if (!entering) el.classList.remove("vc-row-hint-swap");
+  else if (wasShown && left === oldLeft) play(el, "vc-row-hint-swap");
+  else {
+    const fromRight = slot.beside && slot.left < row.getBoundingClientRect().left;
+    el.style.setProperty("--dx", slot.beside ? `${fromRight ? SLIDE_PX : -SLIDE_PX}px` : "0px");
+    el.style.setProperty("--dy", slot.beside ? "0px" : `${slot.top < row.getBoundingClientRect().top ? SLIDE_PX : -SLIDE_PX}px`);
+    play(el, "vc-row-hint-in");
+  }
+  el.style.left = left;
   el.style.top = `${slot.top}px`;
   el.classList.toggle("vc-row-hint-over", !slot.beside);
 }
@@ -221,22 +266,24 @@ function update(): void {
     hide();
     return;
   }
-  if (target.hint !== shownHint) {
-    shownHint = target.hint;
-    shownRow = target.row;
-    observer ??= new MutationObserver(() => {
-      if (!shownHint) return;
-      if (!rowWithHint(shownRow)) hide();
-      else {
-        fill();
-        place();
-      }
-    });
-    observer.disconnect();
-    observer.observe(target.hint, { subtree: true, childList: true, characterData: true, attributes: true });
-  }
+  // Hovering a row also focuses its control (deviceMenu.ts's
+  // wireHoverFocus), so the same hint arrives twice; a second place() would
+  // cut its glide short.
+  if (target.hint === shownHint) return;
+  shownHint = target.hint;
+  shownRow = target.row;
+  observer ??= new MutationObserver(() => {
+    if (!shownHint) return;
+    if (!rowWithHint(shownRow)) hide();
+    else {
+      fill();
+      place();
+    }
+  });
+  observer.disconnect();
+  observer.observe(target.hint, { subtree: true, childList: true, characterData: true, attributes: true });
   fill();
-  place();
+  place(true);
 }
 
 /** Starts the floating row hints for the whole page; later calls do
