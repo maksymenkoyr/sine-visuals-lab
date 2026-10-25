@@ -27,6 +27,11 @@
 # (tuning overrides, pins) are compiled out of a build, so a preview shows what
 # a real deploy would, not what `npm run dev` shows.
 #
+# Smoke test: after the build and before any deploy, tools/scene-smoke.mjs
+# opens every free, non-draft scene in headless Chromium against the built
+# dist/, so a shader typo or a scene that throws on its first frame stops the
+# Insiders deploy and the PR preview alike.
+#
 # Previews only run for PRs from branches in this repo: a PR from a fork has no
 # access to the Cloudflare secrets, so its deploy step is skipped by the `if`.
 name: CI & Deploy
@@ -42,8 +47,8 @@ permissions:
   contents: read
 
 env:
-  # playwright is only used by local dev tools under tools/ (never in CI), so
-  # skip its postinstall browser download.
+  # Skips playwright's postinstall browser download for `npm ci`; the one CI
+  # step that drives a browser (the scene smoke test) installs Chromium itself.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
@@ -118,6 +123,18 @@ jobs:
           # Empty on a pull request (the step above is skipped) — a preview
           # carries no version.
           SVL_VERSION: ${{ steps.version.outputs.version }}
+
+      # Opens every free, non-draft scene in headless Chromium against the built dist/
+      # (tools/scene-smoke.mjs header). GitHub runners have no GPU: Chromium's
+      # software WebGL (SwiftShader) renders it.
+      - name: Install Chromium for the scene smoke test
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "0"
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke-test every free scene
+        timeout-minutes: 15
+        run: node tools/scene-smoke.mjs --software
 
       # The version picture (tools/versionMapLib.mjs): one static page of how
       # the build numbers have moved, drawn from the release and build tags and

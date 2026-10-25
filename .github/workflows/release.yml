@@ -52,7 +52,7 @@ concurrency:
 env:
   # Same reasoning as deploy.yml's own copy of this: npm ci's postinstall
   # would otherwise try to download Playwright's browsers, which nothing in
-  # this workflow (or CI generally) runs.
+  # this workflow runs.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:

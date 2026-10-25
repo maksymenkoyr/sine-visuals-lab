@@ -66,3 +66,7 @@ see [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (PR checks
 and previews, plus the Insiders channel on every push to `main`) and
 [.github/workflows/release.yml](.github/workflows/release.yml) (the Stable
 channel, released deliberately rather than on every push).
+
+CI also opens every free, non-draft scene in headless Chromium against the
+built site before it deploys (`tools/scene-smoke.mjs`); run
+`npm run smoke:scenes` after a build to do the same locally.
