@@ -1,29 +1,15 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
-import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
- * Per-scene mic sensitivity, expansion, and smoothing: three visual gain
- * stages on top of FeatureExtractor's auto-normalized [0,1] output. The
- * extractor's leaky floor/peak tracker already adapts to a room's
- * quiet/loud levels, so none of these is a gain-staging fix — they're a
- * user preference ("react harder" / "calm down", "more punch" / "flatter",
- * "snappier" / "smoother") remembered per scene, since each scene's shader
- * weights uEnergy/uBands differently.
+ * Sensitivity, Expansion and Smoothing: three visual stages on top of
+ * FeatureExtractor's normalized [0,1] output ("react harder" / "calm down",
+ * "more punch" / "flatter", "snappier" / "smoother"). None is a setting:
+ * autoTune.ts's resolveSensitivity, resolveExpansion and resolveSmoothing
+ * pick each one per scene from the music, since each scene's shader weights
+ * uEnergy/uBands differently. This file holds their ranges and curves.
  *
  * Smoothing is a multiplier on the pipeline's own easing, not the easing
- * itself — SMOOTHING_DEFAULT (1x) means "the designed amount", not "none",
- * and nothing in [SMOOTHING_MIN, SMOOTHING_MAX] ever reaches zero (see
- * smoothingRateScale below). Only the Smoothing row's explicit Off stop
- * (zeroAtMin in deviceMenu.ts, stored as 0 — below SMOOTHING_MIN, which
- * stays the slider's log-curve floor) reaches genuinely unsmoothed: at 0,
- * smoothingRateScale returns Infinity, and every stage it reaches
- * (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
- * musicProfile.ts's eases, audioMeters.ts's BPM settle and waveform
- * peak-hold) snaps straight to its target that same tick. That's what makes
- * the meters panel's RAW chip a true no-op: RAW already shows each of those
- * targets, so at Smoothing Off (with band gains at 1x and auto-gain off —
- * Sensitivity/Expansion don't reach the meters at all, see app.ts) there
- * is nothing left for RAW to bypass.
+ * itself — SMOOTHING_DEFAULT (1x) means "the designed amount", not "none".
  */
 
 export const SENSITIVITY_MIN = 0.25;
@@ -35,153 +21,8 @@ export const EXPANSION_MAX = 4;
 export const EXPANSION_DEFAULT = 1;
 
 export const SMOOTHING_MIN = 0.25;
-export const SMOOTHING_MAX = 20;
-// Auto's own ceiling for Smoothing: autoTune.ts's SMOOTHING_SPEC.max.
-// computeAutoTarget scales Auto's swing by the spec's span, so it keeps
-// the span it was tuned on; only a manual drag reaches SMOOTHING_MAX.
-export const SMOOTHING_AUTO_MAX = 4;
+export const SMOOTHING_MAX = 4;
 export const SMOOTHING_DEFAULT = 1;
-
-// In-memory cache is the source of truth for get/set within a session, seeded
-// once from localStorage on module load. That keeps get/set correct even where
-// localStorage is unavailable (node test env, Safari private mode) — only
-// cross-reload persistence depends on it, not same-session behavior.
-//
-// legacyKeys: if the storageKey has nothing saved yet but an old key (from a
-// prior rename) does, migrate that data over once rather than losing it —
-// see the Expansion store below. Newest-first: the first key found wins,
-// and every listed key is removed so the migration can't repeat.
-//
-// Exported for src/audio/bandGains.ts, which uses the same per-scene
-// float-in-localStorage shape for each of its fader stores.
-//
-// Each store also registers a net/syncedStores.ts hook, so a snapshot applied
-// from outside (the pop-out's Cue, a room look arriving on a TV) re-seeds the
-// cache in place. That one registration is what makes Sensitivity, Expansion,
-// Smoothing and every band fader live on a second window or screen.
-export function createPerSceneSetting(
-  storageKey: string,
-  min: number,
-  max: number,
-  defaultValue: number,
-  legacyKeys: readonly string[] = [],
-) {
-  /** What localStorage holds under `storageKey`, as a plain record of finite
-   *  numbers. Null when nothing is saved there (or it is empty). Throws on
-   *  text that is not a JSON object, so the reload hook keeps its cache. */
-  function readStoredStrict(): Record<string, number> | null {
-    const parsed = parseSyncedObject(localStorage.getItem(storageKey));
-    if (parsed === null) return null;
-    const out: Record<string, number> = {};
-    for (const k of Object.keys(parsed)) {
-      const v = parsed[k];
-      if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
-    }
-    return out;
-  }
-
-  /** The load-time read: garbage reads as empty (and so never triggers the
-   *  legacy-key migration below). */
-  function readStored(): Record<string, number> | null {
-    try {
-      return readStoredStrict();
-    } catch {
-      return {};
-    }
-  }
-
-  function loadInitial(): Record<string, number> {
-    const stored = readStored();
-    if (stored !== null) return stored;
-    try {
-      let migrated: Record<string, number> | null = null;
-      for (const legacyKey of legacyKeys) {
-        const legacyRaw = localStorage.getItem(legacyKey);
-        if (legacyRaw && migrated === null) {
-          const legacyParsed = JSON.parse(legacyRaw);
-          migrated = legacyParsed && typeof legacyParsed === "object" ? legacyParsed : {};
-        }
-        localStorage.removeItem(legacyKey);
-      }
-      if (migrated === null) return {};
-      localStorage.setItem(storageKey, JSON.stringify(migrated));
-      return migrated;
-    } catch {
-      return {};
-    }
-  }
-
-  const cache: Record<string, number> = loadInitial();
-
-  // Replaces the cache's contents in place. Deliberately not loadInitial: a
-  // snapshot applied from outside must never run the legacy-key migration or
-  // delete anything from the storage it was applied to. It reads before it
-  // clears, so unreadable text throws out of here and leaves the cache alone.
-  registerSyncedStore(storageKey, () => {
-    const stored = readStoredStrict() ?? {};
-    for (const k of Object.keys(cache)) delete cache[k];
-    for (const k of Object.keys(stored)) cache[k] = stored[k];
-  });
-
-  function persist(): void {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(cache));
-    } catch {
-      // Not fatal — the setting just won't persist across reloads.
-    }
-  }
-
-  function clamp(value: number): number {
-    if (!Number.isFinite(value)) return defaultValue;
-    return Math.min(max, Math.max(min, value));
-  }
-
-  return {
-    get(sceneId: string): number {
-      const value = cache[sceneId];
-      return typeof value === "number" ? clamp(value) : defaultValue;
-    },
-    set(sceneId: string, value: number): void {
-      cache[sceneId] = clamp(value);
-      persist();
-    },
-  };
-}
-
-const sensitivityStore = createPerSceneSetting(
-  "vibe.sensitivity",
-  SENSITIVITY_MIN,
-  SENSITIVITY_MAX,
-  SENSITIVITY_DEFAULT,
-);
-export const getSensitivity = sensitivityStore.get;
-export const setSensitivity = sensitivityStore.set;
-
-// This control has been renamed more than once (Dynamics → Contrast →
-// Acceleration → Expansion — "expansion" being what audio engineering calls
-// widening the quiet-to-loud gap). Contrast never got its own key; the
-// other two did, and both are migrated via legacyKeys rather than frozen
-// in place, so scenes tuned under any earlier name keep their saved values.
-const expansionStore = createPerSceneSetting(
-  "vibe.expansion",
-  EXPANSION_MIN,
-  EXPANSION_MAX,
-  EXPANSION_DEFAULT,
-  ["vibe.acceleration", "vibe.dynamics"],
-);
-export const getExpansion = expansionStore.get;
-export const setExpansion = expansionStore.set;
-
-// Floor is 0, not SMOOTHING_MIN — the Smoothing row alone gets an explicit
-// Off stop (zeroAtMin in deviceMenu.ts), carved out below the slider's log
-// curve rather than extending it. SMOOTHING_MIN itself stays 0.25: it's
-// still the curve's own floor (posToValue/valueToPos need a nonzero base)
-// and autoTune.ts's SMOOTHING_SPEC.min, so auto-tune never resolves smoothing
-// to Off on its own — that's a deliberate manual gesture, not something an
-// estimator should silently pick.
-const smoothingStore = createPerSceneSetting("vibe.smoothing", 0, SMOOTHING_MAX, SMOOTHING_DEFAULT);
-export const getSmoothing = smoothingStore.get;
-export const setSmoothing = smoothingStore.set;
 
 /**
  * The sensitivity response curve applied to a single [0,1] level: out = in^(1/s).
@@ -242,10 +83,9 @@ export function shapeExpansion(level: number, expansion: number): number {
  * new value in one frame, so "snappier" gets a shorter leash than
  * "smoother". Continuous at 1x (both branches equal 1 there).
  *
- * At 0 (the Smoothing row's Off stop) this is 1/sqrt(0) = Infinity — every
- * stage it reaches is written to treat a non-finite scale as "assign the
- * target directly" rather than compute a coefficient, so Off means exactly
- * unsmoothed, not merely fast.
+ * At 0 this is 1/sqrt(0) = Infinity, and every stage it reaches treats a
+ * non-finite scale as "assign the target directly". Auto never resolves
+ * there (SMOOTHING_MIN); a DEV tuning override can.
  */
 export function smoothingRateScale(smoothing: number): number {
   return smoothing >= 1 ? 1 / smoothing : 1 / Math.sqrt(smoothing);

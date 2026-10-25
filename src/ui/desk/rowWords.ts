@@ -41,9 +41,6 @@ const KEY_NAMES: ReadonlyMap<string, string> = new Map([
   ["vibe.sceneMaster", "Master Scale"],
   ["vibe.sceneExpansion", "Master Expansion"],
   ["vibe.sceneExpansionShape", "Expansion shape"],
-  ["vibe.sensitivity", "Sensitivity"],
-  ["vibe.expansion", "Expansion"],
-  ["vibe.smoothing", "Smoothing"],
 ]);
 
 export function describeRow(row: LookRow, names: RowNames): RowWords {

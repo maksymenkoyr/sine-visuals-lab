@@ -24,7 +24,7 @@ import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { loadScene, sceneReady } from "./render/lazyScene.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
-import { getSilenceGate } from "./audio/silenceGate.ts";
+import { SILENCE_GATE_SEED } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
@@ -925,7 +925,7 @@ async function main(): Promise<void> {
     const smoothing = resolveSmoothing(scene.id);
     // Only the GPU draw is rate-capped — sampling and the anim clock's decay
     // stay on every rAF tick.
-    const anim = animClock.advance(dtSec, gained, smoothing, getSilenceGate(), { shape: getHitShape() });
+    const anim = animClock.advance(dtSec, gained, smoothing, SILENCE_GATE_SEED, { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
     const sensitivity = resolveSensitivity(scene.id);

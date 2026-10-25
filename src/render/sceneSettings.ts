@@ -6,7 +6,7 @@ import { clearCustomValue, resetCustomValue } from "./customValues.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
- * u<Key>` (see fullscreenScene.ts). Mirrors src/audio/sensitivity.ts: an
+ * u<Key>` (see fullscreenScene.ts). Mirrors src/audio/bandGains.ts's stores: an
  * in-memory cache seeded once from localStorage, so get/set stay correct
  * even where localStorage is unavailable (node test env, Safari private
  * mode) — only cross-reload persistence depends on it.

@@ -1,7 +1,6 @@
 /**
  * Global on/off/override for the quality governor (src/render/governor.ts).
- * Global per device (like src/audio/autoGain.ts and src/audio/bandSplit.ts,
- * not per scene) — whether this device wants to trade picture quality for
+ * Global per device, not per scene — whether this device wants to trade picture quality for
  * battery describes the device, not one scene's look.
  *
  * - "auto": the governor runs closed-loop, stepping quality down under
@@ -20,8 +19,7 @@
  *   Shipped as the default: dropped frames are preferable to any quality
  *   loss for a look that's meant to be judged at full detail.
  *
- * Same in-memory-cache-over-localStorage pattern as autoGain.ts: the cache
- * is the source of truth for get/set within a session, seeded once from
+ * The in-memory cache over localStorage is the source of truth for get/set within a session, seeded once from
  * localStorage, so behavior stays correct even where localStorage is
  * unavailable (node test env, Safari private mode).
  */

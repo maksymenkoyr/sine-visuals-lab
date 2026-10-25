@@ -136,9 +136,8 @@ Darker means more important.
     a scene setting can go past its slider, which stretches to fit, marked ⚠ ·
     `src/ui/typedValue.ts`, `src/render/customValues.ts`
   - ●○○ **Sound in**
-    - ●○○ **Input card** — Source, device, Sensitivity, Expansion,
-      Smoothing, the silence gate, and one Auto for the whole mic ·
-      `src/ui/deviceMenu.ts`, `src/audio/silenceGate.ts`
+    - ●○○ **Input card** — Source and device; nothing else about the sound
+      is a setting · `src/ui/deviceMenu.ts`
     - ●○○ **Bands card** — in the Setup view: the live spectrum, a fader per
       band, and a line you draw across it · `src/ui/spectrumStrip.ts`,
       `src/ui/bandFaders.ts`, `src/ui/bandLineEditor.ts`

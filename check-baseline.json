@@ -1,7 +1,6 @@
 {
   "about": "Findings that existed when their rule was added; only new ones fail `npm run check`. Should only shrink. See the tools/check.mjs header.",
   "findings": [
-    "knip | duplicates | src/audio/autoGain.ts | AUTO_GAIN_MIN | AUTO_GAIN_DEFAULT",
     "knip | exports | src/audio/features.ts | TEMPO_DECAY_SEC",
     "knip | exports | src/audio/inputHealth.ts | CLIP_LEVEL",
     "knip | exports | src/audio/inputHealth.ts | HUM_CORR",

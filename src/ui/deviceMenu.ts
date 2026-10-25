@@ -1,17 +1,4 @@
-import {
-  EXPANSION_DEFAULT,
-  EXPANSION_MAX,
-  EXPANSION_MIN,
-  applySensitivity,
-  SENSITIVITY_DEFAULT,
-  SENSITIVITY_MAX,
-  SENSITIVITY_MIN,
-  SMOOTHING_DEFAULT,
-  SMOOTHING_MAX,
-  SMOOTHING_MIN,
-  shapeExpansion,
-  shapeLevel,
-} from "../audio/sensitivity.ts";
+import { applySensitivity, shapeExpansion, shapeLevel } from "../audio/sensitivity.ts";
 import {
   SCENE_EXPANSION_DEFAULT,
   SCENE_EXPANSION_MAX,
@@ -40,16 +27,8 @@ import { formatMixedSummary } from "./widgets/itemSelection.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
-import { type BandSplit } from "../audio/bandSplit.ts";
-import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
-import {
-  SILENCE_GATE_CLOSED_DEFAULT,
-  SILENCE_GATE_MAX,
-  SILENCE_GATE_MIN,
-  SILENCE_GATE_OPEN_DEFAULT,
-  type SilenceGateMarks,
-  type SilenceGateReading,
-} from "../audio/silenceGate.ts";
+import { BAND_SPLIT } from "../audio/bandSplit.ts";
+import type { SilenceGateMarks, SilenceGateReading } from "../audio/silenceGate.ts";
 import type { HitShape, HitShapePatch } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
@@ -176,7 +155,6 @@ import {
   paletteSwatchChipLitStyle,
   paletteSwatchChipStyle,
   paletteSwatchStyle,
-  percentReadout,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -199,9 +177,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
  * controls column anchored top-right alongside the Output power card (while an output is
  * open), whose cards run the
- * Auto master bar → Input
- * (its own header carries a second Auto button, next to Reset — see
- * src/audio/micAuto.ts for how it differs from the master block) → Scene →
+ * Auto master bar → Input (the source picker) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
  * src/render/drives.ts) is the patch bay: its row grows an input port (a
  * small ring at the row's left edge, in its first source's colour —
@@ -524,12 +500,6 @@ export interface DeviceMenuDeps {
   setInputPreviewActive: (active: boolean) => void;
   /** By label (inputDevice.ts's hidden-inputs paragraph); app.ts stores it and re-syncs the idle preview, which skips hidden inputs. */
   onInputHiddenChange: (label: string, hide: boolean) => void;
-  getSensitivity: (sceneId: string) => number;
-  onSensitivityChange: (sceneId: string, value: number) => void;
-  getExpansion: (sceneId: string) => number;
-  onExpansionChange: (sceneId: string, value: number) => void;
-  getSmoothing: (sceneId: string) => number;
-  onSmoothingChange: (sceneId: string, value: number) => void;
   /** Empty: the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
   /** For its optional `panel` (src/render/scene.ts); nothing else here reaches into a Scene. */
@@ -556,8 +526,6 @@ export interface DeviceMenuDeps {
   /** See src/ui/setCard.ts. */
   set: Omit<SetCardDeps, "sceneName">;
   overlay: OverlayCardDeps;
-  /** Per device, not per scene; only colours the strip's bars by pulse group, unrelated to the faders (src/audio/bandSplit.ts). */
-  getBandSplit: () => BandSplit;
   /** Real Hz edges once the analyser exists, the nominal ladder before mic access. Also labels the faders. */
   getBandEdgesHz: () => Float32Array;
   getBandGain: (sceneId: string, fader: number) => number;
@@ -609,13 +577,9 @@ export interface DeviceMenuDeps {
   onTap: (timeStamp: number) => void;
   /** Live value for a row on auto (autoTune.ts). */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
+  /** Sensitivity and Expansion for the Input card's level wash (autoTune.ts's resolveSensitivity). */
   resolveSensitivityValue: (sceneId: string) => number;
   resolveExpansionValue: (sceneId: string) => number;
-  resolveSmoothingValue: (sceneId: string) => number;
-  /** Synthetic SceneSettings so these pseudo-params drive an auto chip through the same contract as a real row. */
-  getSensitivitySpec: () => SceneSetting;
-  getExpansionSpec: () => SceneSetting;
-  getSmoothingSpec: () => SceneSetting;
   isSettingAutoEnabled: (sceneId: string, key: string) => boolean;
   onSettingAutoToggle: (sceneId: string, spec: SceneSetting, on: boolean) => void;
   isSceneAuto: (sceneId: string) => boolean;
@@ -640,27 +604,11 @@ export interface DeviceMenuDeps {
     stretchTo(sceneId: string, key: string, to: number): void;
     reset(sceneId: string, key: string): void;
   };
-  /** Global per-band adaptive normalization (src/audio/autoGain.ts). AUTO_GAIN_MIN is the fixed mapping against the analyser's dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is fully adaptive. */
-  getAutoGain: () => number;
-  onAutoGainChange: (value: number) => void;
-  /** The row's own A chip: resolves from the room's measured span, not MUSIC_DIALS (autoGain.ts's header). Independent of the master Auto button, which is scoped to isSceneAuto's per-scene store. */
-  isAutoGainAuto: () => boolean;
-  onAutoGainAutoToggle: (on: boolean) => void;
-  resolveAutoGain: () => number;
-  /** The two silence-gate marks (src/audio/silenceGate.ts), device-wide: how quiet the room is describes the input, not one scene. Setting one can push the other (open >= closed + SILENCE_GATE_MIN_WIDTH), so both rows re-sync from getSilenceGate() after either change. */
-  getSilenceGate: () => SilenceGateMarks;
-  onSilenceGateClosedChange: (value: number) => void;
-  onSilenceGateOpenChange: (value: number) => void;
-  /** One flag for both marks; they resolve against steadiness, not MUSIC_DIALS (silenceGate.ts's "Auto mode" paragraph). Independent of the master Auto button. */
-  isSilenceGateAuto: () => boolean;
-  onSilenceGateAutoToggle: (on: boolean) => void;
+  /** This tick's silence-gate marks (src/audio/silenceGate.ts), for the meters. */
   resolveSilenceGate: () => SilenceGateMarks;
   /** Global per device, not per scene: how a hit's stand-out and loudness blend into pulse height is a taste about detection (src/audio/hitStrength.ts). */
   getHitShape: () => HitShape;
   setHitShape: (partial: HitShapePatch) => void;
-  /** Whether every member of "the whole mic" is auto for this scene (src/audio/micAuto.ts's header); overlaps isSceneAuto. */
-  isMicAuto: (sceneId: string) => boolean;
-  onMicAutoToggle: (sceneId: string, on: boolean) => void;
   /** Device-wide (src/render/powerMode.ts). */
   getPowerMode: () => PowerMode;
   onPowerModeChange: (mode: PowerMode) => void;
@@ -771,16 +719,6 @@ const autoMasterLabelStyle = (lit: boolean) =>
 const autoMasterSubStyle = (lit: boolean) =>
   `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: ${lit ? withAlpha("#8dccf9", 0.8) : "rgba(255,255,255,0.4)"};`;
 
-const micAutoBaseStyle = `
-  font: 500 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; padding: 2.5px 8px;
-  border-radius: 4px; cursor: pointer;
-  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
-`;
-const micAutoStyle = `${micAutoBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
-const micAutoLitStyle = `${micAutoBaseStyle} background: linear-gradient(${withAlpha(INPUT_GREEN, 0.28)}, ${withAlpha(INPUT_GREEN, 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
-// createCard's `right` slot takes one element, not a list.
-const inputCardHeaderRightStyle = `display: flex; align-items: center; gap: 6px;`;
-
 // Column head above the meters, no card of its own.
 const columnHeadStyle = `display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px;`;
 const spectrumStatusStyle = `display: flex; align-items: center; gap: 6px; flex-shrink: 0;`;
@@ -796,7 +734,7 @@ const FADER_HINT_TEXT =
 
 // See the build site near spectrumCol for why one chip drives two raw modes.
 const RAW_CHIP_TITLE =
-  "Raw: the spectrum before the adaptive envelope and Bands gain, and every meter reading below its pre-smoothing value. Drag Smoothing (Input card) to Off instead to close that second gap for good — at Off, every eased reading already lands on exactly what this shows.";
+  "Raw: the spectrum before the adaptive envelope and Bands gain, and every meter reading below its pre-smoothing value.";
 const HEAT_CHIP_TITLE =
   "Heat lens: every wired animation node and input node glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
 
@@ -1020,7 +958,7 @@ export interface ControlRowSpec {
     /** Read when the chip turns auto off: reveals what's stored, not what the slider showed. */
     getManual: () => number;
   };
-  /** After every chip click that flips `auto` and every commit() (a drag or reset hands the row back to manual through onChange). The one hook the Input card rows use for refreshMicAuto and the scene rows for refreshAutoMaster. */
+  /** After every chip click that flips `auto` and every commit() (a drag or reset hands the row back to manual through onChange). The scene rows use it for refreshAutoMaster. */
   onAutoToggled?: () => void;
   /** Lets a value typed past the slider's ends stand as a custom value (render/customValues.ts), shown with ⚠. Without it, typed values clamp. */
   custom?: {
@@ -2050,7 +1988,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     openSetup: () => setSetupShown(true),
     heatSettings: heatSettingRows,
     onTap: deps.onTap,
-    getSilenceGate: () => deps.getSilenceGate(),
+    getSilenceGate: () => deps.resolveSilenceGate(),
     getBandEdgesHz: () => deps.getBandEdgesHz(),
     stemsMeasured: () => deps.stemsMeasured(),
     hitShape: {
@@ -2090,10 +2028,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // not undone: they apply later, on the render path only (applySensitivity in
   // app.ts), after this strip is fed. The same click sets every meter row's raw
   // mode (audioMeters.ts's setRaw; its header says which rows change). The
-  // halves differ: the spectrum's always differs while Auto-gain is on (the two
-  // sides normalize against different windows, features.ts's autoGain doc); the
-  // meters' half is a no-op once Smoothing (Input card) is Off, since eased
-  // readings then equal raw.
+  // halves differ: the spectrum's differs while Auto-gain pulls the bands (the
+  // two sides normalize against different windows, features.ts's autoGain doc);
+  // the meters' half shows each reading before its easing.
   const rawChip = createChipButton("RAW", RAW_CHIP_TITLE, () => {
     const on = !spectrumStrip.showRaw();
     spectrumStrip.setShowRaw(on);
@@ -4542,7 +4479,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       setting === "scene"
         ? [...(sel.spec.drive?.sceneSources ?? [])]
         : setting.sources.map((s) => s.choice).filter((c): c is SignalId => typeof c === "string");
-    const split = deps.getBandSplit();
     let lo = NUM_BANDS;
     let hi = 0;
     let any = false;
@@ -4553,7 +4489,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         any = false;
         break; // whole spectrum: nothing to dim, same convention as wireBandHighlight
       }
-      const r = resolveBandRange(range, split);
+      const r = resolveBandRange(range);
       lo = Math.min(lo, r.lo);
       hi = Math.max(hi, r.hi);
       any = true;
@@ -4992,13 +4928,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
 
-  // The split is fixed (it only tints bars by pulse group), but the Hz edges
-  // depend on the analyser's sample rate, unknown until mic access is granted,
-  // so re-run on every open(). The Frequencies overlay needs neither.
-  function refreshBandsSplit(): void {
+  // The Hz edges depend on the analyser's sample rate, unknown until mic
+  // access is granted, so re-run on every open().
+  function refreshBandEdges(): void {
     bandFaders.setEdgesHz(deps.getBandEdgesHz());
-    spectrumStrip.setSplit(deps.getBandSplit());
-    audioMeters.soundSpectrum.setSplit(deps.getBandSplit());
   }
 
   // ---- controls column ----
@@ -5009,13 +4942,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   cableColumnsRO.observe(audioMeters.setupEl);
   audioMeters.setupEl.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
-  // Global "Auto" master switch: toggles every auto-capable row (app.ts's
-  // isSceneAuto). Overlaps the Input card's Auto button (micAuto.ts header) on
-  // Sensitivity/Expansion/Smoothing only, so toggling either refreshes the
-  // other's lit state (toggleAutoMaster/toggleMicAuto).
+  // Global "Auto" master switch: toggles every auto-capable scene row (app.ts's
+  // isSceneAuto).
   const autoMasterBtn = document.createElement("button");
   autoMasterBtn.className = GLASS_PANE_CLASS;
-  autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
+  autoMasterBtn.title = "Auto-tune every scene setting";
   const autoMasterLabel = document.createElement("div");
   autoMasterLabel.textContent = "Auto";
   const autoMasterSub = document.createElement("div");
@@ -5025,8 +4956,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoMasterBtn.appendChild(autoMasterInner);
 
   // Master: device-wide dials. Scale sets every numeric scene param's normal
-  // line (autoTune.ts's resolveSceneSetting; not drives, enums/booleans or the
-  // Input card's gain stages); Expansion sets how far and how long the music
+  // line (autoTune.ts's resolveSceneSetting; not drives, enums/booleans or
+  // Sensitivity/Expansion/Smoothing); Expansion sets how far and how long the music
   // pulls the picture from it (drives.ts header, "Master Expansion"). Its own
   // always-visible card, not part of the auto system, so it stays on scenes
   // with no settings. Violet like the Scene card because it scales that card.
@@ -5050,7 +4981,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "Scales every scene param at once — 1 is as dialed",
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
-  // Same range, log slider and readout as the Input card's Expansion row.
   const masterExpansionRow = createControlRow({
     label: "Expansion",
     accent: SCENE_VIOLET,
@@ -5220,9 +5150,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   masterCard.body.append(pictureHeading, pictureBlock);
   const pictureOnScreen = watchOnScreen(pictureBlock);
 
-  // Binds a row's typed entry to deps.customValues. The args are getters
-  // because the Input card's rows outlive scene switches (makeInputRow). A dev
-  // build lifts customReach's bound, for tuning.
+  // Binds a row's typed entry to deps.customValues. A dev build lifts
+  // customReach's bound, for tuning.
   function customConfig(sceneId: () => string, spec: () => SceneSetting, resolve: () => number): ControlRowSpec["custom"] {
     const store = deps.customValues;
     return {
@@ -5241,94 +5170,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
-  // Input: Sensitivity/Expansion/Smoothing share one array of rows (and so the
-  // auto-refresh call sites), so a fourth row can't ship half-wired to Auto.
-  function makeInputRow(
-    label: string,
-    range: { min: number; max: number; defaultValue: number; zeroAtMin?: boolean },
-    spec: () => SceneSetting,
-    getManual: () => number,
-    resolveLive: () => number,
-    onChange: (value: number) => void,
-    description: string,
-  ) {
-    const row = createControlRow({
-      label,
-      accent: INPUT_GREEN,
-      min: range.min,
-      max: range.max,
-      defaultValue: range.defaultValue,
-      mapping: "log",
-      zeroAtMin: range.zeroAtMin,
-      unit: "×",
-      format: formatGain,
-      description,
-      auto: {
-        isEnabled: () => deps.isSettingAutoEnabled(deps.currentSceneId(), spec().key),
-        toggle: (on) => deps.onSettingAutoToggle(deps.currentSceneId(), spec(), on),
-        resolveLive,
-        getManual,
-      },
-      // One of the whole-mic Auto button's members (micAuto.ts header); also
-      // refreshes the Auto master bar.
-      onAutoToggled: refreshMicAutoAndMaster,
-      // Dev only: these rows keep their own store (audio/sensitivity.ts), which
-      // doesn't drop a custom value on a write the way setSceneSetting does, so
-      // the public build clamps them. A custom value is one past the slider's
-      // own range, not the Auto spec's (Smoothing's slider reaches past
-      // SMOOTHING_SPEC.max, see SMOOTHING_AUTO_MAX).
-      custom: import.meta.env.DEV
-        ? customConfig(() => deps.currentSceneId(), () => ({ ...spec(), min: range.min, max: range.max }), resolveLive)
-        : undefined,
-    });
-    row.onChange(onChange);
-    return { row, getManual, defaultValue: range.defaultValue, onChange };
-  }
-  const inputRows = [
-    makeInputRow(
-      "Sensitivity",
-      { min: SENSITIVITY_MIN, max: SENSITIVITY_MAX, defaultValue: SENSITIVITY_DEFAULT },
-      deps.getSensitivitySpec,
-      () => deps.getSensitivity(deps.currentSceneId()),
-      () => deps.resolveSensitivityValue(deps.currentSceneId()),
-      (value) => deps.onSensitivityChange(deps.currentSceneId(), value),
-      "How hard the visuals react to the room",
-    ),
-    makeInputRow(
-      "Expansion",
-      { min: EXPANSION_MIN, max: EXPANSION_MAX, defaultValue: EXPANSION_DEFAULT },
-      deps.getExpansionSpec,
-      () => deps.getExpansion(deps.currentSceneId()),
-      () => deps.resolveExpansionValue(deps.currentSceneId()),
-      (value) => deps.onExpansionChange(deps.currentSceneId(), value),
-      "Distance between the quiet parts and the loud parts",
-    ),
-    // zeroAtMin: this slider's bottom is a carved-out Off stop, genuinely
-    // unsmoothed (sensitivity.ts header). Auto never lands there
-    // (SMOOTHING_SPEC.min in autoTune.ts stays SMOOTHING_MIN); only a
-    // deliberate drag or R-reset-then-drag does.
-    makeInputRow(
-      "Smoothing",
-      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT, zeroAtMin: true },
-      deps.getSmoothingSpec,
-      () => deps.getSmoothing(deps.currentSceneId()),
-      () => deps.resolveSmoothingValue(deps.currentSceneId()),
-      (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
-      "How much the picture lags and softens the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
-    ),
-  ];
-  function syncInputRows(): void {
-    for (const { row, getManual } of inputRows) row.sync(getManual);
-    // Not in inputRows (built separately) but need the same resync.
-    autoGainRow.sync(() => deps.getAutoGain());
-    syncSilenceGateRows();
-  }
-
   // Source: one list of every pickable input plus Screen (sourcePref.ts for
   // mic-vs-display, inputDevice.ts for which device Mic opens). Not built
-  // through createControlRow: a list of rows where a slider would sit. Left
-  // out of the card's Reset chip (that resets per-scene taste, not a
-  // device-wide choice) and out of inputRows (no Auto behavior).
+  // through createControlRow: a list of rows where a slider would sit.
   //
   // CRITICAL: refresh() runs on update()'s ~10Hz timer; rebuilding the row
   // list's DOM there breaks a click in progress (pointerdown lands on one
@@ -5798,156 +5642,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   const sourceRow = createSourceRow();
 
-  // Auto-gain: how much of features.ts's per-band adaptive normalization
-  // reaches the output. At the bottom the mic's real levels show (bass louder
-  // than treble); at the top mics and rooms converge toward one look at the
-  // cost of that balance, and a Bands boost clamps against a full band.
-  // Linear, not log: it's a mix amount. Global per device, so left out of this
-  // card's Reset chip (per-scene taste). Its "A" chip resolves from the room's
-  // measured span (FeatureExtractor.bandSpanDb), not MUSIC_DIALS, which has no
-  // dial for how much of the analyser's window the room uses, and eases slowly
-  // (autoGain.ts's EASE_RATE) so the fixed-mapping gap (features.ts's
-  // fixedEnergy) follows the room, not the music.
-  const autoGainRow = createControlRow({
-    label: "Auto-gain",
-    accent: INPUT_GREEN,
-    min: AUTO_GAIN_MIN,
-    max: AUTO_GAIN_MAX,
-    defaultValue: AUTO_GAIN_DEFAULT,
-    mapping: "linear",
-    ...percentReadout,
-    description:
-      "How much each band is rescaled to fill the display. 0 shows the mic's real levels; higher flattens bass-vs-treble balance but converges different mics and rooms toward the same look.",
-    auto: {
-      isEnabled: () => deps.isAutoGainAuto(),
-      toggle: (on) => deps.onAutoGainAutoToggle(on),
-      resolveLive: () => deps.resolveAutoGain(),
-      getManual: () => deps.getAutoGain(),
-    },
-    // One of the whole-mic Auto button's members (micAuto.ts header);
-    // refreshMicAuto keeps its lit state honest.
-    onAutoToggled: refreshMicAuto,
-  });
-  autoGainRow.onChange((value) => deps.onAutoGainChange(value));
-  autoGainRow.sync(() => deps.getAutoGain());
-
-  // Silence gate: two volume marks in FeatureFrame.level units (silenceGate.ts
-  // for the why: relative onset detection misfiring on mic hiss in a quiet
-  // room). Both rows share one `auto` block (isSilenceGateAuto /
-  // resolveSilenceGate), resolved from silenceGate.ts's room-floor tracker, not
-  // MUSIC_DIALS (nothing there describes how quiet a room is). One flag drives
-  // both marks, so each row's `toggle` also refreshes the other's chip.
-  // syncSilenceGateRows re-reads both manual marks after either drags, since
-  // moving one can push the other.
-  const silenceClosedRow = createControlRow({
-    label: "Silence below",
-    accent: INPUT_GREEN,
-    min: SILENCE_GATE_MIN,
-    max: SILENCE_GATE_MAX,
-    defaultValue: SILENCE_GATE_CLOSED_DEFAULT,
-    mapping: "linear",
-    zeroAtMin: true,
-    ...percentReadout,
-    description:
-      "Quieter than this on Input level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
-    auto: {
-      isEnabled: () => deps.isSilenceGateAuto(),
-      toggle: (on) => {
-        deps.onSilenceGateAutoToggle(on);
-        silenceOpenRow.refreshChip();
-      },
-      resolveLive: () => deps.resolveSilenceGate().closed,
-      getManual: () => deps.getSilenceGate().closed,
-    },
-    onAutoToggled: refreshMicAuto,
-  });
-  const silenceOpenRow = createControlRow({
-    label: "Sound above",
-    accent: INPUT_GREEN,
-    min: SILENCE_GATE_MIN,
-    max: SILENCE_GATE_MAX,
-    defaultValue: SILENCE_GATE_OPEN_DEFAULT,
-    mapping: "linear",
-    ...percentReadout,
-    description:
-      "Louder than this, beats are detected exactly as before. Between the two marks a hit has to stand out more the quieter the room is.",
-    auto: {
-      isEnabled: () => deps.isSilenceGateAuto(),
-      toggle: (on) => {
-        deps.onSilenceGateAutoToggle(on);
-        silenceClosedRow.refreshChip();
-      },
-      resolveLive: () => deps.resolveSilenceGate().open,
-      getManual: () => deps.getSilenceGate().open,
-    },
-    onAutoToggled: refreshMicAuto,
-  });
-  function syncSilenceGateRows(): void {
-    const marks = deps.getSilenceGate();
-    silenceClosedRow.sync(() => marks.closed);
-    silenceOpenRow.sync(() => marks.open);
-  }
-  silenceClosedRow.onChange((value) => {
-    deps.onSilenceGateClosedChange(value);
-    syncSilenceGateRows();
-  });
-  silenceOpenRow.onChange((value) => {
-    deps.onSilenceGateOpenChange(value);
-    syncSilenceGateRows();
-  });
-  syncSilenceGateRows();
-
-  // The Input card's Auto button: hands the whole mic to auto in one tap
-  // (micAuto.ts header). refreshMicAuto/toggleMicAuto live further down beside
-  // refreshAutoMaster, which they overlap; the button is built here as part of
-  // this card's header.
-  const micAutoBtn = document.createElement("button");
-  micAutoBtn.textContent = "Auto";
-  micAutoBtn.title = "Auto for the whole mic — gain, silence gate, sensitivity, expansion, smoothing";
-  micAutoBtn.style.cssText = micAutoStyle;
-  micAutoBtn.addEventListener("click", () => toggleMicAuto());
-
-  const inputCardHeaderRight = document.createElement("div");
-  inputCardHeaderRight.style.cssText = inputCardHeaderRightStyle;
-  inputCardHeaderRight.append(
-    micAutoBtn,
-    createChipButton("Reset", "Reset sensitivity, expansion and smoothing", () => {
-      for (const { row, defaultValue, onChange } of inputRows) {
-        onChange(defaultValue);
-        // Clear the T restore point first: setValue() renders a row muted
-        // while one is held.
-        row.clearOff();
-        row.setValue(defaultValue);
-        row.refreshChip();
-      }
-      // onChange took those rows back to manual without a row's commit(), so onAutoToggled never heard.
-      refreshMicAuto();
-      refreshAutoMaster();
-    }),
-  );
-
   const inputCard = createCard({
     title: "Input",
     accent: INPUT_GREEN,
-    right: inputCardHeaderRight,
   });
   markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
-  inputCard.body.append(
-    sourceRow.el,
-    spacer(),
-    autoGainRow.el,
-    spacer(),
-    silenceClosedRow.el,
-    spacer(),
-    silenceOpenRow.el,
-    spacer(),
-    inputRows[0].row.el,
-    spacer(),
-    inputRows[1].row.el,
-    spacer(),
-    inputRows[2].row.el,
-  );
+  inputCard.body.append(sourceRow.el);
+  // The card holds only the Source row, so it hides with it (following, or the synthetic feed).
+  function refreshInputCard(): void {
+    sourceRow.refresh();
+    inputCard.el.style.display = sourceRow.el.style.display;
+  }
 
   // Scene: per-scene look knobs; rebuilt on every open() since the rows depend on the active scene.
   const sceneCard = createCard({
@@ -6044,16 +5750,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // SignalSpec.bandRange (signals.ts) against the live split, since
-  // bandSplit.ts's crossover is user-configurable.
-  function resolveBandRange(kind: "all" | "low" | "mid" | "high", split: BandSplit): { lo: number; hi: number } {
+  function resolveBandRange(kind: "all" | "low" | "mid" | "high"): { lo: number; hi: number } {
     switch (kind) {
       case "low":
-        return { lo: 0, hi: split.lowMid };
+        return { lo: 0, hi: BAND_SPLIT.lowMid };
       case "mid":
-        return { lo: split.lowMid, hi: split.midHigh };
+        return { lo: BAND_SPLIT.lowMid, hi: BAND_SPLIT.midHigh };
       case "high":
-        return { lo: split.midHigh, hi: NUM_BANDS };
+        return { lo: BAND_SPLIT.midHigh, hi: NUM_BANDS };
       case "all":
         return { lo: 0, hi: NUM_BANDS };
     }
@@ -6070,13 +5774,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!withRange?.length) return;
 
     function show(): void {
-      const split = deps.getBandSplit();
       let lo = NUM_BANDS;
       let hi = 0;
       let any = false;
       for (const r of withRange!) {
         if (!r.active()) continue;
-        const range = resolveBandRange(r.signal.bandRange!, split);
+        const range = resolveBandRange(r.signal.bandRange!);
         lo = Math.min(lo, range.lo);
         hi = Math.max(hi, range.hi);
         any = true;
@@ -6430,10 +6133,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
     refreshAutoMaster();
-    // Not scene-specific, but the one place already re-syncing on every
-    // open()/scene-change/Look apply; mic-auto has per-scene and device-wide
-    // members (micAuto.ts header), so piggybacking avoids a stale button.
-    refreshMicAuto();
 
     let lastGroup: string | undefined;
     let first = true;
@@ -6864,7 +6563,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // What each button last painted: these also run on the slow tick and
   // re-assigning cssTexts is wasteful. null so the first paint writes.
   let autoMasterLitShown: boolean | null = null;
-  let micAutoLitShown: boolean | null = null;
 
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
@@ -6876,40 +6574,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     autoMasterSub.textContent = lit ? "ON" : "OFF";
   }
 
-  // Overlaps the Input card's Auto button (micAuto.ts) on
-  // Sensitivity/Expansion/Smoothing, so refresh it too: flipping every scene
-  // setting can flip it out from under mic-auto's lit state.
   function toggleAutoMaster(): void {
     const sceneId = deps.currentSceneId();
     deps.onSceneAutoToggle(sceneId, !deps.isSceneAuto(sceneId));
     renderSceneSettings();
-    syncInputRows();
-    refreshMicAuto();
   }
   autoMasterBtn.addEventListener("click", toggleAutoMaster);
-
-  // The Input card's Auto button (micAuto.ts header says which members "the
-  // whole mic" covers).
-  function refreshMicAuto(): void {
-    const lit = deps.isMicAuto(deps.currentSceneId());
-    if (lit === micAutoLitShown) return;
-    micAutoLitShown = lit;
-    micAutoBtn.style.cssText = lit ? micAutoLitStyle : micAutoStyle;
-  }
-  // The Input rows are members of both buttons (see toggleMicAuto below).
-  function refreshMicAutoAndMaster(): void {
-    refreshMicAuto();
-    refreshAutoMaster();
-  }
-  function toggleMicAuto(): void {
-    const sceneId = deps.currentSceneId();
-    deps.onMicAutoToggle(sceneId, !deps.isMicAuto(sceneId));
-    syncInputRows();
-    refreshMicAuto();
-    // Those members are shared with the scene master (toggleAutoMaster):
-    // refresh its lit state too.
-    refreshAutoMaster();
-  }
 
   // MIDI: a controller's knobs and pads (ui/midiCard.ts). Hidden where the
   // browser has no Web MIDI; absent entirely when app.ts wired no session.
@@ -7080,11 +6750,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // while the panel is open.
   function syncToScene(): void {
     renderPalettes();
-    syncInputRows();
     // The panel may have been closed on another scene: renderSceneSettings()'s
     // tail unpins if so and rebuilds the pinned patch panel.
     renderSceneSettings();
-    refreshBandsSplit();
+    refreshBandEdges();
     refreshBandFaders();
     masterRow.sync(() => deps.getSceneMaster());
     masterExpansionRow.sync(() => deps.getSceneExpansion());
@@ -7097,7 +6766,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function open() {
     welcomeOnce();
     refreshSpectrumHeader();
-    sourceRow.refresh();
+    refreshInputCard();
     overlayCard.refresh();
     syncToScene();
     root.classList.add("vc-open");
@@ -7241,12 +6910,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
       const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
       const sceneId = deps.currentSceneId();
-      const sensitivity = deps.isSettingAutoEnabled(sceneId, deps.getSensitivitySpec().key)
-        ? deps.resolveSensitivityValue(sceneId)
-        : deps.getSensitivity(sceneId);
-      const expansion = deps.isSettingAutoEnabled(sceneId, deps.getExpansionSpec().key)
-        ? deps.resolveExpansionValue(sceneId)
-        : deps.getExpansion(sceneId);
+      const sensitivity = deps.resolveSensitivityValue(sceneId);
+      const expansion = deps.resolveExpansionValue(sceneId);
       const shaped = Math.min(
         1,
         Math.max(0, shapeExpansion(shapeLevel(energy, sensitivity), expansion)),
@@ -7377,18 +7042,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         refreshColumnsFold();
       }
       if (outputShown) outputPowerCard.refresh();
-      sourceRow.refresh();
-      for (const { row } of inputRows) row.refreshAuto();
-      autoGainRow.refreshAuto();
-      // The gate rows ease continuously while their auto is on; without this
-      // they'd show the value from when last touched.
-      silenceClosedRow.refreshAuto();
-      silenceOpenRow.refreshAuto();
+      refreshInputCard();
       for (const row of sceneRowHandles) row.refreshAuto();
-      // The two Auto buttons follow their rows' auto flags, which an
-      // external change (a paired device, a drag elsewhere) can flip.
+      // The Auto button follows its rows' auto flags, which an external
+      // change (a paired device, a drag elsewhere) can flip.
       refreshAutoMaster();
-      refreshMicAuto();
       // The Set's markers move when Play or Autopilot acts, and a paired
       // device or the pop-out can change its pads; it redraws only on change.
       setCard.refresh();

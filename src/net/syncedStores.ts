@@ -71,9 +71,10 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "svl.pendingAdopt",
 ]);
 
-/** Key prefixes the main window rewrites continuously on its own (auto-
- *  tracked marks): mirrored, but ignored by outputSync.ts's stateKey so they
- *  never read as a difference between preview and output. */
+/** Key prefixes an older version stored for the silence gate and auto-gain,
+ *  which nothing reads now: mirrored, but kept out of a look and ignored by
+ *  outputSync.ts's stateKey, so the stale copies an old profile still holds
+ *  never ride to a TV or read as a difference between preview and output. */
 export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.autoGain"];
 
 /** Shelves: stores that list things to pick from (the saved Looks, the Set's

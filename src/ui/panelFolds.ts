@@ -4,10 +4,9 @@
  * their title bar — plus non-card ids for whole columns: METERS_COLUMN, whether
  * that column is hidden (deviceMenu.ts's footer toggle / M), and SETUP_COLUMN,
  * whether the Setup view is closed (the footer's Setup button). Global per
- * device, not per scene: like
- * src/audio/bandSplit.ts, this describes how you like to look at the panel,
+ * device, not per scene: this describes how you like to look at the panel,
  * not one scene's settings. Same in-memory-cache-over-localStorage pattern as
- * that module: the cache is the source of truth for get/set within a
+ * src/render/powerMode.ts: the cache is the source of truth for get/set within a
  * session, seeded once from localStorage, so behavior stays correct even
  * where localStorage is unavailable (node test env, Safari private mode).
  *

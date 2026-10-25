@@ -173,9 +173,8 @@ export interface SignalSpec {
   monitor?: { card: MeterCardId; row: MeterRowId };
   /** Which bands this signal actually watches, for the spectrum strip's
    *  hover highlight (spectrumStrip.ts's setHighlight, wired in
-   *  deviceMenu.ts) — resolved against the live band split (bandSplit.ts)
-   *  by the caller, not a fixed index range, since the split is
-   *  user-configurable. "all" for a broadband read (features.ts's flux
+   *  deviceMenu.ts) — resolved against bandSplit.ts's BAND_SPLIT by the
+   *  caller. "all" for a broadband read (features.ts's flux
    *  sums every band); "low"/"mid"/"high" for that group's own range
    *  (bandEnergy.ts). Omit for a signal that isn't a frequency read at all
    *  (anim.dropOnset is section loudness) — no highlight for those. */

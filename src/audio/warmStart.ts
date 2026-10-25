@@ -30,8 +30,8 @@
  * today's behavior — the steady constant, untouched — from then on.
  *
  * Callers pass their own elapsed-seconds counter, not a wall-clock time: a
- * tracker that gets re-seeded (autoGain.ts's setAutoGainAuto(true), turning
- * auto back on after it was off) should warm up again, and only silence-free
+ * tracker that gets re-seeded (autoGain.ts's resetAutoGain) should warm up
+ * again, and only silence-free
  * seconds should count toward warming up a tracker that free-runs through
  * silence unchanged (musicProfile.ts holds every dial at NEUTRAL while there
  * is nothing to measure — see that file's header for its own signalSec

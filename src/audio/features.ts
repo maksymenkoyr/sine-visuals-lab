@@ -129,7 +129,7 @@ export class FeatureExtractor {
    *   site that doesn't pass it keeps the original behavior.
    * @param smoothingScale Multiplies ATTACK_PER_SEC/RELEASE_PER_SEC below —
    *   sensitivity.ts's smoothingRateScale, defaulting to 1 (today's
-   *   behavior). Non-finite (the Smoothing row's Off stop) assigns `target`
+   *   behavior). Non-finite (Smoothing at 0) assigns `target`
    *   to the envelope directly rather than computing a coefficient, so
    *   `bands`/`energy` land exactly on the adaptive-or-fixed mapping above —
    *   the same one app.ts's captureRawBands computes — with none of

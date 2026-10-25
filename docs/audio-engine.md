@@ -237,14 +237,24 @@ and the Onset surge signal read it, so a scene can lean into a build-up before
 the hit lands. `blocked` marks a rise that peaked inside the refractory: a hit
 that was blocked rather than missed.
 
-### Crossovers follow the band split
+### Fixed crossovers
 
-`src/audio/bandSplit.ts` lets the user move where Bass ends and Treble begins.
-`engineBandsFor` in `src/audio/engineSource.ts` scales each edge in `DEFAULT_BANDS`
-by how far the split's edge sits from its default. The default split is exactly
-the crossovers the bench measured, and a moved split still moves the engine's
-Bass, Mid and Treble. When the split changes, `AudioEngine.retune` moves the
-filters without resetting the analysis.
+The engine's crossovers are always `DEFAULT_BANDS`, the ones the bench measured.
+`src/audio/bandSplit.ts`'s `BAND_SPLIT` names the band ladder's Bass, Mid and
+Treble ranges for everything that reads the ladder (the lanes' loudness, the
+strip's tints, Lead and Hats, the faders' lane weights), and it is fixed too:
+nothing in the app moves either.
+
+### No input settings
+
+Nothing between the mic and the engine is a setting. The engine taps the raw
+capture (`src/audio/capture.ts` turns off the browser's own echo cancelling,
+noise suppression and gain), and every stage the app adds after it adjusts
+itself: the silence gate tracks the room's floor (`src/audio/silenceGate.ts`),
+auto-gain follows the room's band span (`src/audio/autoGain.ts`), and
+Sensitivity, Expansion and Smoothing follow the music per scene
+(`src/render/autoTune.ts`'s `resolveSensitivity` and friends). None of them
+feeds back into the analysis.
 
 ### Band faders reach the lanes
 
@@ -303,8 +313,8 @@ same levels, hits and beat from the reading its frames carry.
    rooms. The pop-out's inbox (`src/net/outputSync.ts`) keeps the same level for
    the hits it latches.
 
-The silence gate's marks are not part of a room's look. A phone's Silence gate
-setting does not decide what a paired TV treats as silence; the TV's own copy does.
+The silence gate's marks are not part of a room's look. Only the device that
+hears the room moves them; a paired TV holds `SILENCE_GATE_SEED`.
 
 ## Known limits (2026-10-24)
 

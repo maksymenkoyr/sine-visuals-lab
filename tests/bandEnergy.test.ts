@@ -1,16 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createBandEnergy, GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import { NUM_BANDS, type EngineReading, type FeatureFrame } from "../src/audio/types.ts";
-import { setBandSplit, resetBandSplit } from "../src/audio/bandSplit.ts";
+import { BAND_SPLIT } from "../src/audio/bandSplit.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
 import { engineReading } from "./engineReading.ts";
 
 const DT = 1 / 60;
-
-// bandSplit is a single global value (see bandSplit.test.ts).
-beforeEach(() => {
-  resetBandSplit();
-});
 
 function frame(engine: Partial<EngineReading> | null, bands?: Float32Array): FeatureFrame {
   return {
@@ -162,15 +157,16 @@ describe("band energy", () => {
 
   it("loudness is the mean of the lane's own bands, which the band split picks", () => {
     const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0, tail: UNIT_TAILS };
-    const bands = new Float32Array(NUM_BANDS);
-    bands.fill(0.9, 6, 10);
-    const before = createBandEnergy();
-    before.advance(DT, frame({ kick: 2 }, bands), 1, 1, shape);
-    expect(before.lowHit.loudness).toBe(0);
-    setBandSplit({ lowMid: 10 });
-    const after = createBandEnergy();
-    after.advance(DT, frame({ kick: 2 }, bands), 1, 1, shape);
-    expect(after.lowHit.loudness).toBeCloseTo(0.36, 5);
+    const above = new Float32Array(NUM_BANDS);
+    above.fill(0.9, BAND_SPLIT.lowMid, BAND_SPLIT.midHigh);
+    const outside = createBandEnergy();
+    outside.advance(DT, frame({ kick: 2 }, above), 1, 1, shape);
+    expect(outside.lowHit.loudness).toBe(0);
+    const inside = new Float32Array(NUM_BANDS);
+    inside.fill(0.9, 0, BAND_SPLIT.lowMid / 2);
+    const half = createBandEnergy();
+    half.advance(DT, frame({ kick: 2 }, inside), 1, 1, shape);
+    expect(half.lowHit.loudness).toBeCloseTo(0.45, 5);
   });
 
   it("a longer Low tail keeps the low pulse up longer; a shorter one drops it sooner", () => {

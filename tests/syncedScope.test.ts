@@ -42,12 +42,6 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.sceneExpansionShape": true,
   "vibe.drives": true,
   "vibe.shapingNodes": true, // retired; each window reads it once at load to convert old wires (render/wireMod.ts)
-  "vibe.sensitivity": true,
-  "vibe.expansion": true,
-  "vibe.smoothing": true,
-  "vibe.acceleration": true, // legacy names of the Expansion store
-  "vibe.dynamics": true,
-  "vibe.bandSplit": true,
   "vibe.bandFader.": true, // prefix: one key per fader
   "vibe.beatGrid": true,
   "vibe.hitAmount": true,
@@ -67,13 +61,11 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.set": true,
   // Cut or Fade between scenes (render/sceneTransition.ts): a TV switches the same way.
   "vibe.transition": true,
-  // Rewritten by the laptop's own analysis (the extractor), so it stays there.
+  // Retired keys an older version stored for the silence gate and auto-gain
+  // (net/syncedStores.ts's VOLATILE_PREFIXES): kept out of a look.
   "vibe.silenceGate": false,
   "vibe.silenceGateClosed": false,
-  "vibe.silenceGateOpen": false,
-  "vibe.silenceGateAuto": false,
   "vibe.autoGain": false,
-  "vibe.autoGainAuto": false,
   // This device's own chrome and choices.
   "vibe.deviceId": false,
   "vibe.keyTips": false,

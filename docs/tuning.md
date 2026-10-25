@@ -55,7 +55,7 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    the slider's own range drops it but keeps the stretch; ↺, emptying the field
    or handing the row to auto drops both. The public build bounds it (that
    file's header says how far, and which settings take none); a dev build
-   lifts the bound, and lets the Input card's rows take one too.
+   lifts the bound.
 2. **Mark.** Alt+M (wired in `src/tuning/debug.ts`) captures one frame plus a
    probe snapshot and POSTs it to `/__tuning/mark`; the plugin writes
    `tuning/marks/<timestamp>.png` and `<timestamp>.json` (both gitignored — marks

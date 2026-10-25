@@ -5,7 +5,7 @@ import { setDriveSetting } from "../src/render/driveStore.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { createStemGate, wiresReadStems } from "../src/render/stemReaders.ts";
 import { MAX_HZ_CAP, bandEdgesHz } from "../src/audio/bandScale.ts";
-import { LOW_MID_DEFAULT, MID_HIGH_DEFAULT } from "../src/audio/bandSplit.ts";
+import { BAND_SPLIT } from "../src/audio/bandSplit.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { readBinsDb } from "./tempoEval/bands.ts";
 import { SR } from "./tempoEval/synth.ts";
@@ -17,8 +17,8 @@ const BIN_COUNT = 1024;
 const BIN_HZ = SR / 2 / BIN_COUNT;
 const EDGES = bandEdgesHz(Math.min(MAX_HZ_CAP, SR / 2 - BIN_HZ));
 const RANGES: StemRanges = {
-  lead: { lo: EDGES[LOW_MID_DEFAULT]!, hi: EDGES[MID_HIGH_DEFAULT]! },
-  hats: { lo: EDGES[MID_HIGH_DEFAULT]!, hi: EDGES[NUM_BANDS]! },
+  lead: { lo: EDGES[BAND_SPLIT.lowMid]!, hi: EDGES[BAND_SPLIT.midHigh]! },
+  hats: { lo: EDGES[BAND_SPLIT.midHigh]!, hi: EDGES[NUM_BANDS]! },
 };
 
 function rng(seed: number): () => number {

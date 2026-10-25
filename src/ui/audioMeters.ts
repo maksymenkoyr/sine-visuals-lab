@@ -266,7 +266,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * eternally chasing — none of it is a param a Reset chip can zero out.
  * `rateScale` (this file's update(), threaded from app.ts's
  * sensitivity.ts's smoothingRateScale) is what actually closes the gap: at
- * the Smoothing row's Off stop it's Infinity, and every stage upstream of
+ * Smoothing at 0 it's Infinity, and every stage upstream of
  * this file (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
  * musicProfile.ts's eases) plus this
  * file's own BPM settle snap straight to their targets — see sensitivity.ts's
@@ -1680,7 +1680,7 @@ function createTailEnvelope() {
 
   return {
     canvas,
-    /** `rateScale` is Smoothing's (non-finite at its Off stop: nothing
+    /** `rateScale` is Smoothing's (non-finite at 0: nothing
      *  plays, so only the as-set curves are drawn); `sinceHitSec[i]` is
      *  HIT_LANES[i]'s time since its last hit, null before one. */
     draw(tails: HitTails, rateScale: number, bpm: number, sinceHitSec: readonly (number | null)[]): void {
@@ -2554,7 +2554,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, onScreen): void {
       const nowMs = performance.now();
       const raw = showRaw;
-      // Smoothing's Off stop (smoothingRateScale is Infinity) bypasses the BPM
+      // Smoothing at 0 (smoothingRateScale is Infinity) bypasses the BPM
       // settle like `raw`, so RAW has nothing left to differ by (file header).
       const smoothingOff = !Number.isFinite(rateScale);
 

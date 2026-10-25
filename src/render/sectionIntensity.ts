@@ -43,7 +43,7 @@ export interface SectionIntensity {
    *  smoothingRateScale, defaulting to 1 (today's behavior). The fastLevel/
    *  floor/ceil trackers above stay at their own fixed rates regardless:
    *  they're the room/track measurement rawIntensity already exposes
-   *  unsmoothed, not display easing. Non-finite (Smoothing's Off stop)
+   *  unsmoothed, not display easing. Non-finite (Smoothing at 0)
    *  assigns `target` to `intensity` directly, so it lands exactly on
    *  rawIntensity with none of the blend's floating-point rounding at
    *  "coefficient 1" — see the meters panel's RAW chip (audioMeters.ts). */
