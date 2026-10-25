@@ -43,7 +43,7 @@ on the app's bar lines. A draft, on main.
   the canvas as a texture and applies the impact frame.
 - `src/render/scenes/toonrave/index.ts` — the `Scene` (id `"toonrave"`),
   `SETTINGS`, `PANEL` (the Dance card), `probe()`, `shapeState` (applies Lights and Shake after `frameAt`,
-  so the prototype's numbers stay untouched at the defaults), `HERO_C`,
+  so the prototype's numbers stay untouched at the defaults),
   `CAST_RIGS`, `DROP_CYCLE_BEATS` and the DEV `freeze` command.
 - Tests: `tests/toonrave.test.ts` (motion, conductor, drawing, settings) with
   the golden in `tests/toonraveMotion.golden.ts`.

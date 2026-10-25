@@ -55,7 +55,7 @@ const clips = sceneMedia(CLIP_LIBRARY_URL);
  *  (the library and the choreographer live there); onInit calls it. */
 let loadLibrary = (): void => {};
 
-export const DANCERS_ID = "dancers";
+const DANCERS_ID = "dancers";
 
 interface Skin {
   /** Shown in the device menu's picker. */
@@ -66,7 +66,7 @@ interface Skin {
 }
 
 /** Index order is the `skin` setting's value; the first entry is the default. */
-export const SKINS: readonly Skin[] = [
+const SKINS: readonly Skin[] = [
   { name: "Skeleton", prefix: "skel", glsl: SKELETON_SKIN_GLSL },
   { name: "Stick", prefix: "stick", glsl: STICK_SKIN_GLSL },
 ];

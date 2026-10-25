@@ -64,10 +64,10 @@ export type Mat = [number, number, number, number, number, number];
 /** The camera shots. */
 export type ShotId = "wide" | "dj" | "djUp" | "button" | "raver" | "pomp" | "crowd";
 
-export type Slot = "front" | "back";
+type Slot = "front" | "back";
 
 /** The crowd rows' eye classes (ev0 = hero eyes, ev1 = calm, ev2 = wide). */
-export type EyeClass = "ev0" | "ev1" | "ev2";
+type EyeClass = "ev0" | "ev1" | "ev2";
 
 export interface MotionOpts {
   /** Beats per cycle: 32, 64 or 128 beats (8, 16 or 32 bars). */
@@ -90,7 +90,7 @@ export interface MotionOpts {
   move?: GrooveMove;
 }
 
-export interface GrooveMove { b: number; lag: number; off: number }
+interface GrooveMove { b: number; lag: number; off: number }
 
 export interface Camera {
   shot: ShotId;
@@ -134,9 +134,9 @@ export interface FrameState {
 export const FRAME_W = 1600;
 export const FRAME_H = 900;
 /** The hero frame holds from the impact until here (beats). */
-export const HOLD = 0.5;
+const HOLD = 0.5;
 /** The impact frame lasts this long after the drop (beats; about 2 display frames). */
-export const IMPACT_BEATS = 0.07;
+const IMPACT_BEATS = 0.07;
 /** Where the groove starts, and where the aftermath's gags are over (beats from the drop). */
 export const GROOVE_AT = 16;
 /** The build is this many beats long, at the end of the cycle. */

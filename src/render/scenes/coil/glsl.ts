@@ -8,13 +8,13 @@ import type { SceneSetting } from "../../sceneSettings.ts";
  *  estimate from counting lines over r 0.3→0.02 (≈0.4) drew about half as
  *  many bands as the ref at the same size. The Stripes setting is
  *  `period = BASE_PERIOD / stripes`, so right = more stripes. */
-export const BASE_PERIOD = 0.22;
+const BASE_PERIOD = 0.22;
 
 /** Fixed loop bound the JS-uniform march count (uMaxSteps, quality's own
  *  raymarchSteps — reused rather than inventing a parallel N, same idea as
  *  every raymarched scene in this repo) can't exceed; quality.raymarchSteps
  *  tops out at 96 (quality.ts), so this only ever clips a future preset. */
-export const MAX_MARCH_STEPS = 128;
+const MAX_MARCH_STEPS = 128;
 const BISECT_STEPS = 5;
 
 /** The measured ground (index.ts clears the targets to it too). */
@@ -25,7 +25,7 @@ export const GROUND_RGB: readonly [number, number, number] = [170 / 255, 133 / 2
  *  reference (cur = ground + a·(tiled prev − ground)); see the record's
  *  Measurements. Without it the recursion never returns to plain ground
  *  after the coil has filled a frame. */
-export const FEEDBACK_FADE = 0.7;
+const FEEDBACK_FADE = 0.7;
 
 function glslVec3(c: readonly [number, number, number]): string {
   return `vec3(${c.map((x) => x.toFixed(3)).join(", ")})`;
@@ -35,11 +35,11 @@ function rampSpan(a: number, b: number): string {
   return (COIL_RAMP.stops[b] - COIL_RAMP.stops[a]).toFixed(4);
 }
 
-export function buildSettingUniformsGlsl(settings: readonly SceneSetting[]): string {
+function buildSettingUniformsGlsl(settings: readonly SceneSetting[]): string {
   return settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
 }
 
-export function buildDriveUniformsGlsl(settings: readonly SceneSetting[]): string {
+function buildDriveUniformsGlsl(settings: readonly SceneSetting[]): string {
   return DRIVE_GLSL(settings);
 }
 
@@ -52,7 +52,7 @@ export function buildDriveUniformsGlsl(settings: readonly SceneSetting[]): strin
  *  (uShape*, uF, uL, uSpinAngle — all JS-computed per frame state, never a
  *  SceneSetting, so they're declared here rather than via
  *  buildSettingUniformsGlsl). */
-export const COIL_MODEL_GLSL = `
+const COIL_MODEL_GLSL = `
 uniform float uF;
 uniform float uL;
 uniform float uSpinAngle;

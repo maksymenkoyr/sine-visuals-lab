@@ -42,7 +42,7 @@ interface PartBase {
 }
 
 /** An ellipsoid, optionally turned about the bone's Z by `roll` radians. */
-export interface EllipsoidPart extends PartBase {
+interface EllipsoidPart extends PartBase {
   kind: "ellipsoid";
   center: Vec3;
   radii: Vec3;
@@ -50,7 +50,7 @@ export interface EllipsoidPart extends PartBase {
 }
 
 /** A capsule from `a` to `b` whose radius runs from `ra` to `rb`. */
-export interface ConePart extends PartBase {
+interface ConePart extends PartBase {
   kind: "cone";
   a: Vec3;
   b: Vec3;
@@ -149,7 +149,7 @@ function sdCone(x: number, y: number, z: number, p: ConePart): number {
 
 // Polynomial smooth union; k is the blend width.
 // Inigo Quilez's polynomial smooth min (MIT) — see THIRD-PARTY-NOTICES.md
-export function smin(a: number, b: number, k: number): number {
+function smin(a: number, b: number, k: number): number {
   if (k <= 0) return Math.min(a, b);
   const h = Math.max(0, Math.min(1, 0.5 + (0.5 * (b - a)) / k));
   return b + (a - b) * h - k * h * (1 - h);

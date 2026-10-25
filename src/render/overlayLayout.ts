@@ -51,7 +51,7 @@ export const OVERLAY_SIZE_MAX = 3;
 export const OVERLAY_SIZE_DEFAULT = 1;
 export const OVERLAY_OPACITY_MIN = 0.1;
 export const OVERLAY_OPACITY_DEFAULT = 1;
-export const OVERLAY_POSITION_DEFAULT: OverlayPosition = "bottomLeft";
+const OVERLAY_POSITION_DEFAULT: OverlayPosition = "bottomLeft";
 
 export const OVERLAY_DEFAULTS: OverlaySettings = {
   text: "",
@@ -126,7 +126,7 @@ export function parseOverlaySettings(raw: string | null): Omit<OverlaySettings, 
 
 /** The share of a look document's byte cap a logo may use (the rest belongs to
  *  every other store in the look). */
-export const LOGO_ROOM_SHARE = 0.3;
+const LOGO_ROOM_SHARE = 0.3;
 export const LOGO_ROOM_MAX_CHARS = Math.floor(LOOK_LIMITS.maxDocBytes * LOGO_ROOM_SHARE);
 /** A logo kept on this device only: bigger, but still bounded, because the
  *  pop-out window gets a copy of every store whenever one changes. */
@@ -180,7 +180,7 @@ const SHADOW_BLUR_IN_FONTS = 0.3;
 const SHADOW_DY_IN_FONTS = 0.06;
 const FONT_PX_MIN = 6;
 
-export interface Rect {
+interface Rect {
   x: number;
   y: number;
   w: number;

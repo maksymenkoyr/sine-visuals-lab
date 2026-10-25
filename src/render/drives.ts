@@ -372,7 +372,7 @@ export type HitHeight = "graded" | "fixed" | "loud";
 /** Beats per swing for Beat wave's divider (DriveSource.every): multiples of a
  *  beat grid division. */
 export const DRIVE_EVERY_VALUES = [1, 2, 4, 8, 16] as const;
-export type DriveEvery = (typeof DRIVE_EVERY_VALUES)[number];
+type DriveEvery = (typeof DRIVE_EVERY_VALUES)[number];
 
 /** One tap into a patch; `weight` is clamped to 0..2 by `clampWeight`. */
 export interface DriveSource {
@@ -489,12 +489,12 @@ const LINE_DRIVE_RELEASE_PER_SEC = 6; // the line drive's release from the start
 
 export const DRIVE_WEIGHT_MIN = 0;
 export const DRIVE_WEIGHT_MAX = 2;
-export const DRIVE_WEIGHT_DEFAULT = 1;
+const DRIVE_WEIGHT_DEFAULT = 1;
 
 /** Source index marked the condition when a patch with no roles is first
  *  switched to gate; matches the old single-`when` default, so saved two-source
  *  patches keep their meaning. */
-export const DRIVE_GATE_WHEN_DEFAULT = 1;
+const DRIVE_GATE_WHEN_DEFAULT = 1;
 /** The gate's smoothstep window on a condition's weighted value;
  *  combine()/fired() and the panel's gate-open shading (deviceMenu.ts's
  *  buildOutputGraph) share it. */
@@ -524,8 +524,8 @@ function usesGenericGate(spec: SceneSetting): boolean {
 
 // Master Expansion dial mapping (header). At 1x it is the identity, which the
 // engine short-circuits.
-export const EXPANSION_NORMAL_TAU_SEC = 30;
-export function expansionUsualTauSec(expansion: number): number {
+const EXPANSION_NORMAL_TAU_SEC = 30;
+function expansionUsualTauSec(expansion: number): number {
   return EXPANSION_NORMAL_TAU_SEC * expansion * expansion * expansion;
 }
 export function expansionReach(expansion: number): number {

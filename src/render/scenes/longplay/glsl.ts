@@ -25,7 +25,7 @@ uniform float uFlickMask;               // 4-bit mask of layers blinked off this
 uniform float uStrobe;                  // 0..1 strobe flash, already scaled by Flicker
 `;
 
-export const LONGPLAY_COMMON_GLSL = `
+const LONGPLAY_COMMON_GLSL = `
 #define PI 3.14159265
 #define LAUNCH_SLOTS ${LAUNCH_SLOTS}
 float px; // one screen pixel in half-heights, set in main()

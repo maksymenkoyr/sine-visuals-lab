@@ -113,15 +113,7 @@ import { createProgram, type GLProgram } from "./gl.ts";
  *  final thumbnail happens to average away. See the file header. Upscales a
  *  canvas smaller than this (acceptable: nothing that small has fine texture
  *  left to lose). */
-export const DETAIL_LONG_SIDE = 640;
-
-/** Long side of the thumbnail Brightness/Colour/Motion/Flashes are measured
- *  from; the short side follows the canvas aspect ratio (floored at 1).
- *  Derived, not independently chosen: the gradient pass's own output goes
- *  through exactly two more halvings on its way here (ref -> half -> thumb,
- *  each an exact 2×2 box average — see the file header), so this is always
- *  DETAIL_LONG_SIDE / 4 and the two constants can't drift apart. */
-export const PICTURE_LONG_SIDE = DETAIL_LONG_SIDE / 4;
+const DETAIL_LONG_SIDE = 640;
 
 /** Most thumbnails one pack buffer holds, so one `getBufferSubData` call can
  *  carry that many frames — see the file header. */
@@ -151,7 +143,7 @@ export function nextReadCost(previousMs: number, measuredMs: number): number {
   return previousMs + (measuredMs - previousMs) * rate;
 }
 
-export interface PictureThumb {
+interface PictureThumb {
   px: Uint8Array;
   w: number;
   h: number;

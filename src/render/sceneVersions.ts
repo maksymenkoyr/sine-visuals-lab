@@ -33,7 +33,8 @@ const versions = new Map<string, string>();
 
 /** Replaces the whole map: each unit's version, keyed by its scene's `id`
  *  — see this file's header for who calls this and when. A unit with no
- *  version is left out. */
+ *  version is left out.
+ *  @public vite-scene-versions-plugin.ts calls it from an import it injects, which knip can't see. */
 export function setSceneVersions(
   units: ReadonlyMap<string, Scene>,
   byUnit: Readonly<Record<string, string>>,

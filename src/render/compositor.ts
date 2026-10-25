@@ -54,7 +54,7 @@ import { SceneRenderError } from "./sceneGuard.ts";
  * outgoing scene from the incoming one (see sceneGuard.ts).
  */
 
-export interface CompositorFrame {
+interface CompositorFrame {
   ctx: SceneContext;
   /** The scene that should be on screen now (the incoming one during a crossfade). */
   scene: Scene;

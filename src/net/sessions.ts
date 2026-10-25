@@ -37,7 +37,7 @@ export interface ControllerSession {
   ts: number;
 }
 
-export interface TvSession {
+interface TvSession {
   room: string;
   key: string;
   ts: number;
@@ -50,7 +50,7 @@ export interface HostRoomSession {
   ts: number;
 }
 
-export interface PendingAdopt {
+interface PendingAdopt {
   slot: string;
   nonce: string;
   ts: number;

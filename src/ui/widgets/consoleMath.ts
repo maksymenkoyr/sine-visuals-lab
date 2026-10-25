@@ -110,7 +110,7 @@ export const RANDOM_WIRE_SIGNALS: readonly SignalId[] = (Object.keys(SIGNALS) as
   (id) => id !== "anim.tempo" && id !== "anim.tempoLock" && !(DIAL_SIGNALS as readonly SignalId[]).includes(id),
 );
 /** How often Random gives a lane a second wire instead of one. */
-export const RANDOM_SECOND_WIRE = 0.4;
+const RANDOM_SECOND_WIRE = 0.4;
 /** A random wire's weight range, snapped to RANDOM_WEIGHT_STEP. */
 export const RANDOM_WEIGHT_MIN = 0.4;
 export const RANDOM_WEIGHT_MAX = 1.6;

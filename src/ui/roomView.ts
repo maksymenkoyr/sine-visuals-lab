@@ -175,8 +175,8 @@ export function layoutNodes(count: number, width: number, height: number, narrow
   return out;
 }
 
-export type ChipTone = "own" | "follow" | "none" | "main" | "own-screen" | "off" | "you" | "owner" | "offline";
-export interface Chip {
+type ChipTone = "own" | "follow" | "none" | "main" | "own-screen" | "off" | "you" | "owner" | "offline";
+interface Chip {
   label: string;
   tone: ChipTone;
 }

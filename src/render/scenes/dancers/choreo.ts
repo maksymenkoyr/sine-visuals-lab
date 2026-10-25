@@ -53,7 +53,7 @@ export interface ChoreoParams {
   blend: BlendMode;
 }
 
-export interface ChoreoFrame {
+interface ChoreoFrame {
   pose: Pose;
   /** Name of the clip being danced, or null while swaying. */
   clip: string | null;
@@ -71,7 +71,7 @@ export interface Choreographer {
   setLibrary(library: ClipLibrary | null): void;
 }
 
-export const POSE_SLEW_RATE = 14; // per second — a snap settles in a few frames, a beat still reads as a beat
+const POSE_SLEW_RATE = 14; // per second — a snap settles in a few frames, a beat still reads as a beat
 const CAM_SLEW_RATE = 30;
 const DOLLY_MAX = 0.14;
 const TILT_MAX = 0.035;

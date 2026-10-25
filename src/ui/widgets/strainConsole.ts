@@ -98,7 +98,7 @@ export interface ConsoleOptions {
   colourActions?: boolean;
 }
 
-export interface ConsolePreset {
+interface ConsolePreset {
   name: string;
   /** One line shown under the pills while this preset is pressed. */
   hint: string;

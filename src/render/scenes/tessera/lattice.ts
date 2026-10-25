@@ -191,7 +191,7 @@ export const SWIRL_SCALE = 11.76;
  *  by swirl so the petals (and the sectors they colour) spiral outward
  *  smoothly at any Pitch (round 2: was swirl * ringIndex, discontinuous the
  *  moment Pitch changed the ring spacing). */
-export function sectorArg(phi: number, theta: number, fold: number, swirl: number): number {
+function sectorArg(phi: number, theta: number, fold: number, swirl: number): number {
   return fold * phi + swirl * theta * SWIRL_SCALE;
 }
 
@@ -385,7 +385,7 @@ export const HUE_LOCK_THRESHOLD = 0.5;
  *  bar-wrap's +1 step (see advanceHueClock) reads as a quick sweep, not a
  *  cut, matching the measured continuous colour sweep rather than a hue
  *  jump on the beat. */
-export const HUE_SLEW_RATE = 1.2;
+const HUE_SLEW_RATE = 1.2;
 
 export interface HueClockState {
   /** Turns (not wrapped to [0,1) -- palette() is cyclic in its cosine, so a

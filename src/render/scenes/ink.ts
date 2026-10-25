@@ -161,7 +161,7 @@ const TWO_PI = Math.PI * 2;
 
 /** x reduced into [0, 2π), in float64; a value that would round up to a
  *  full turn in the fp32 upload is returned as 0 (the same angle). */
-export function wrapAngle(x: number): number {
+function wrapAngle(x: number): number {
   const w = x - Math.floor(x / TWO_PI) * TWO_PI;
   return Math.fround(w) >= TWO_PI ? 0 : w;
 }

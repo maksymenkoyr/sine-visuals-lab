@@ -433,7 +433,7 @@ export function createRoomCodeEntry(options: RoomCodeEntryOptions = {}): HTMLFor
 /** The line under the field after an Add screen. A code that finds no screen
  *  is most often the one in a paired TV's corner (its room's), so the answer
  *  is how to get the code that works. */
-export function addScreenText(outcome: AddScreenOutcome, code: string): string {
+function addScreenText(outcome: AddScreenOutcome, code: string): string {
   switch (outcome) {
     case "ok":
       return "Sent to the screen";

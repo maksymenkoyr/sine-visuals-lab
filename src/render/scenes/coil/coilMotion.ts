@@ -104,7 +104,7 @@ export const RESET_DURATION_SEC = 0.8;
 const L_EASE_PER_SEC = 3.2;
 /** e-folds/s the coil regrows at before the flow's own rate is added — the
  *  ref's |zoom| (report.md "Look, as statistics"). */
-export const GROW_BASE_PER_SEC = 0.5;
+const GROW_BASE_PER_SEC = 0.5;
 
 const TWO_PI = Math.PI * 2;
 

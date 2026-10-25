@@ -37,7 +37,7 @@ import { BONE_COUNT, boneChannel, createPose, lerpPose, quatConjugate, quatMul, 
 
 export type BlendMode = "crossfade" | "inertial";
 
-export const BEATS_PER_BAR = 4;
+const BEATS_PER_BAR = 4;
 /** bpm / nativeBpm above which the clip goes half-time. */
 export const HALF_TIME_RATIO = 1.35;
 /** bpm / nativeBpm below which the clip goes double-time. */

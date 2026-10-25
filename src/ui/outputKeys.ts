@@ -84,7 +84,7 @@ export function spaceIsCue(e: KeyLike, playHeldBy: string | null): boolean {
 /** Held shorter than this is a tap: an instant send. */
 export const PLAY_TAP_MAX_MS = 250;
 /** A hold of H ms glides over H * GLIDE_PER_HOLD (3 s held -> 6 s). */
-export const GLIDE_PER_HOLD = 2;
+const GLIDE_PER_HOLD = 2;
 
 /** The glide length a hold earns, or null for a tap (send at once). */
 export function glideMsForHold(holdMs: number): number | null {

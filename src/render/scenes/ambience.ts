@@ -419,14 +419,14 @@ export const OPENING_LEGS: readonly Leg[] = [
   { from: LINE, to: SHEET, stagger: ROWS, bars: 1 },
 ];
 
-export interface ChoreoOptions {
+interface ChoreoOptions {
   drift: number; // Camera drift setting
   range: number; // Camera range setting
   flip: number; // Flip setting
   transitions: number; // Transitions setting
 }
 
-export interface ChoreoEvents {
+interface ChoreoEvents {
   /** A section drop: start a journey now if nothing is running. */
   drop?: boolean;
 }

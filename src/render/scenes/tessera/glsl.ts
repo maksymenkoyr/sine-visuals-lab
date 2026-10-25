@@ -70,12 +70,12 @@ float sampleSmoothBands(float x) {
 }`;
 
 /** Rim weight at Rim=1 -- how far toward white the box edges push. */
-export const RIM_MIX = 0.22;
+const RIM_MIX = 0.22;
 /** Bucket rate (Hz) the per-frame length jitter re-rolls at -- fast enough
  *  that consecutive captured frames (even a headless screenshot pair well
  *  under 60fps) land in different buckets, which is the whole point of the
  *  motion-check screenshot (fringes at box ends only). */
-export const JITTER_RATE_HZ = 40.0;
+const JITTER_RATE_HZ = 40.0;
 export const BLOOM_THRESHOLD = 0.45;
 export const BLUR_STRIDE_X = 2.0;
 export const BLUR_STRIDE_Y = 1.0;

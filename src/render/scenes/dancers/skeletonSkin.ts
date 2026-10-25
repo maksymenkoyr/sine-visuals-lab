@@ -8,7 +8,7 @@
  * condyles, fingers and toes drop out and the long bones fatten so the
  * figure still reads at half resolution and a dozen march steps.
  */
-export const RIB_COUNT = 6;
+const RIB_COUNT = 6;
 const LOD_CUTOFF = 0.5;
 
 export const SKELETON_SKIN_GLSL = `

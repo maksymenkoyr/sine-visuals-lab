@@ -36,7 +36,7 @@ const GPU_EWMA_ALPHA = 0.15;
  *  this means the GPU is far behind and new queries would only pile up. */
 const MAX_PENDING = 4;
 
-export interface ResourceSnapshot {
+interface ResourceSnapshot {
   /** Main-thread busy time as a fraction of wall time, 0..1 (can briefly read
    *  a hair over 1 on a window that straddles a long task). Null until the
    *  first window completes or once it has gone stale. */

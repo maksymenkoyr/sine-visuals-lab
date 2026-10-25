@@ -70,7 +70,7 @@ export function clipSeconds(clip: { beats: number; nativeBpm: number }): number 
 }
 
 /** Seconds the speed takes to get most of the way to a new target. */
-export const SPEED_EASE_SEC = 0.4;
+const SPEED_EASE_SEC = 0.4;
 
 /** One tick of the speed easing toward `target` (exponential, frame-rate
  *  independent). */

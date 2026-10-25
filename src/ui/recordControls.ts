@@ -29,7 +29,7 @@ const STORAGE_KEY = "vibe.recordAspect";
 /** How often the elapsed time is redrawn while recording. */
 const TICK_MS = 250;
 
-export function loadRecordAspect(): RecordAspect {
+function loadRecordAspect(): RecordAspect {
   try {
     return parseRecordAspect(localStorage.getItem(STORAGE_KEY));
   } catch {

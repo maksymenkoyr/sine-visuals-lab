@@ -426,9 +426,9 @@ export function crawlStepRate(s: CrawlRateInputs): number {
 /** How long a spotlight outlives the last `command("spotlight")` message. The
  *  pairs widget re-sends every tick while a pad is active, so this only ever
  *  matters when messages stop (panel closed, pointer lost). */
-export const SPOT_HOLD_MS = 300;
+const SPOT_HOLD_MS = 300;
 /** What a strain outside the spotlit pair is multiplied by in the composite. */
-export const SPOT_DIM = 0.15;
+const SPOT_DIM = 0.15;
 /** Time constant of the dim/undim glide (exponential). */
 export const SPOT_EASE_MS = 120;
 
@@ -504,7 +504,7 @@ export function lifeToDecayMul(life: number): number {
 export const SWITCHING_DEFAULT = 0.4;
 const SWITCH_MAX = 0.05;
 const SWITCH_MARGIN = 1.5;
-export const SWITCH_FLOOR = 0.04;
+const SWITCH_FLOOR = 0.04;
 const SWITCH_MIN_INK = 0.03;
 // How hard a strain's size counts against its ink: ink is divided by
 // (share * strains)^SWITCH_PRESSURE. At 1 (the prototype's plain "ink per
@@ -629,10 +629,10 @@ const GAMMA_INV = 1 / 2.2;
 // levelGainsFull evens those peaks out around their geometric mean, so the
 // strains match each other while Exposure keeps setting how bright the dish
 // is overall. The setting blends from 1 (off) to that gain in log space. ---
-export const LEVEL_SIDE = 64;
+const LEVEL_SIDE = 64;
 /** Share of blocks whose peak sets a strain's level — its brightest roads,
  *  not one hot texel (a reseed burst, a crossing). */
-export const LEVEL_TOP_SHARE = 0.05;
+const LEVEL_TOP_SHARE = 0.05;
 /** A strain with almost no trail (extinct, or just reseeded) reads its peak
  *  as at least this, so its gain can't blow the dither floor up into grain. */
 export const LEVEL_PEAK_FLOOR = 0.08;

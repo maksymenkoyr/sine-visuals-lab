@@ -283,7 +283,7 @@ export function advanceRollPhase(phase: number, degPerSec: number, dt: number): 
 /** Time constant of the beat-triggered height/brightness kick (sync
  *  hypothesis 1) — short enough to read as a strike, the same family as
  *  caustics.ts's RIPPLE_ATTACK_SEC. */
-export const ONSET_ENV_TAU_SEC = 0.12;
+const ONSET_ENV_TAU_SEC = 0.12;
 
 export interface OnsetEnvelope {
   value: number;

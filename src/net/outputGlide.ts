@@ -54,7 +54,7 @@ export function glideSafe(spec: SceneSetting): boolean {
   );
 }
 
-export interface GlideStep {
+interface GlideStep {
   /** The look to show at this moment. */
   state: OutputState;
   /** True once the glide has arrived — `state` is then exactly the target. */

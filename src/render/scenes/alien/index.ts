@@ -60,11 +60,11 @@ import { PLAYER_FRAG } from "./glsl.ts";
 // than needed.
 const VIDEOS = BAKED.loops.map((loop) => sceneMedia(loop.file));
 
-export const ALIEN_ID = "alien";
+const ALIEN_ID = "alien";
 
 /** Scales Level (Move's default wire) so a loud song reads about 1 — the
  *  dance at its captured speed with Move at its default. */
-export const MOVE_GAIN = 2;
+const MOVE_GAIN = 2;
 /** Browsers won't play slower than about this; below it the loop pauses. */
 const MIN_RATE = 0.07;
 const MAX_RATE = 4;

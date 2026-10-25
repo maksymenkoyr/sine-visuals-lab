@@ -33,7 +33,7 @@ export const CROSSFADE_MAX_WAIT_MS = 2500;
 /** What the render loop knows about the beat clock on this frame: the settled
  *  metronome tempo (animClock's metronomeOn / metronomeBpm) and whether a beat
  *  edge landed since the last rendered frame (the latched metronomeBeat). */
-export interface CrossfadeClock {
+interface CrossfadeClock {
   tempoOn: boolean;
   bpm: number;
   beat: boolean;
@@ -46,7 +46,7 @@ export function barLengthMs(bpm: number): number {
   return Math.min(CROSSFADE_MAX_MS, Math.max(CROSSFADE_MIN_MS, ms));
 }
 
-export type CrossfadeStage = "wait" | "blend" | "done";
+type CrossfadeStage = "wait" | "blend" | "done";
 
 export interface CrossfadeView {
   stage: CrossfadeStage;

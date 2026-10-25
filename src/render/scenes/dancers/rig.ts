@@ -34,7 +34,7 @@
 
 export type Vec3 = readonly [number, number, number];
 /** x, y, z, w — the same layout uBones carries into GLSL. */
-export type Quat = readonly [number, number, number, number];
+type Quat = readonly [number, number, number, number];
 
 export interface BoneSpec {
   name: string;
@@ -55,7 +55,7 @@ export const FOOT_RADIUS = 0.045;
 
 const IDENTITY: Quat = [0, 0, 0, 1];
 
-export function quatFromAxisAngle(axis: Vec3, angle: number): Quat {
+function quatFromAxisAngle(axis: Vec3, angle: number): Quat {
   const h = angle * 0.5;
   const s = Math.sin(h);
   return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(h)];
@@ -278,7 +278,7 @@ export function quatRotate(q: ArrayLike<number>, qi: number, vx: number, vy: num
 
 /** Yaw · pitch · roll: roll (about Z) is applied to the bone first, then
  *  pitch (X), then yaw (Y) — so a limb spreads, then swings, then twists. */
-export function quatFromEuler(pitch: number, yaw: number, roll: number, out: Q, oi: number): void {
+function quatFromEuler(pitch: number, yaw: number, roll: number, out: Q, oi: number): void {
   const cx = Math.cos(pitch * 0.5), sx = Math.sin(pitch * 0.5);
   const cy = Math.cos(yaw * 0.5), sy = Math.sin(yaw * 0.5);
   const cz = Math.cos(roll * 0.5), sz = Math.sin(roll * 0.5);

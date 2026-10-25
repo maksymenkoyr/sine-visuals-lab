@@ -1392,7 +1392,7 @@ function meshDensityAt(lobes: Lobe[], noise: Uint8Array, x: number, y: number, z
  *  per silhouette. Baked once per resolution, because the lobe loop is far
  *  too expensive to run inside a re-mesh — with these in hand a re-mesh is a
  *  lerp between two of them. */
-export function meshDensityGrids(res: number, lobeSets: Lobe[][], noise: Uint8Array): Float32Array[] {
+function meshDensityGrids(res: number, lobeSets: Lobe[][], noise: Uint8Array): Float32Array[] {
   const n = res + 1;
   return lobeSets.map((lobes) => {
     const grid = new Float32Array(n * n * n);

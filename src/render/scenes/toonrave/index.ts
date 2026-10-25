@@ -68,10 +68,6 @@ export const DROP_CYCLE_BEATS: readonly (32 | 64 | 128)[] = [128, 64, 32];
  *  art, so a smaller canvas just means softer edges, never missing detail. */
 const MAX_CANVAS_WIDTH: Record<QualityPreset, number> = { high: 1920, mid: 1600, low: 1280, floor: 960 };
 
-/** The cycle position of the prototype's hero frame (two animation steps in at
- *  12 steps a beat). */
-export const HERO_C = 2 / 12;
-
 /** Where in the groove the cast stands while Dance plays them: a bar in, so the
  *  move's four beats walk through groove beats GROOVE_AT + this .. + 3, with the
  *  beat's own phase parked off every blink window. */
