@@ -70,7 +70,7 @@ interface CompositorFrame {
   nowMs: number;
 }
 
-interface RenderOutcome {
+export interface RenderOutcome {
   /** False for a frame the quality governor must not count: two scenes drawn,
    *  or none (frozen). */
   governable: boolean;
