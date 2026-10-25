@@ -1132,6 +1132,66 @@ function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
   });
 }
 
+// How soon and how near a second press must land to count as a double press;
+// the time is the usual OS double-click default.
+const GRAB_DOUBLE_PRESS_MS = 500;
+const GRAB_DOUBLE_PRESS_PX = 8;
+// Vertical travel for the whole track: one trackpad stroke covers it.
+const GRAB_TRAVEL_PX = 200;
+
+/** Double press and hold: until the press lifts, the slider follows vertical
+ *  motion (up raises) wherever the pointer goes, so a trackpad finger needn't
+ *  stay on the thin track. The first press's native jump is undone, so the
+ *  grab starts from the value the row had. preventDefault on the second
+ *  pointerdown suppresses its mousedown, which is what starts the native drag.
+ *  Not on touch: a vertical touch drag scrolls the column. Sets .value and
+ *  redispatches "input" like wireSliderQuickJump. */
+function wireSliderGrab(slider: HTMLInputElement): void {
+  let prev: { t: number; x: number; y: number; value: string } | null = null;
+  slider.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch" || e.button !== 0) return;
+    const first = prev;
+    prev = { t: e.timeStamp, x: e.clientX, y: e.clientY, value: slider.value };
+    if (
+      !first ||
+      e.timeStamp - first.t > GRAB_DOUBLE_PRESS_MS ||
+      Math.hypot(e.clientX - first.x, e.clientY - first.y) > GRAB_DOUBLE_PRESS_PX
+    ) {
+      return;
+    }
+    prev = null;
+    e.preventDefault();
+    const set = (value: number) => {
+      slider.value = String(value);
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const start = Number(first.value);
+    set(start);
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    const startY = e.clientY;
+    const id = e.pointerId;
+    slider.setPointerCapture(id);
+    slider.style.cursor = "ns-resize";
+    const move = (m: PointerEvent) => {
+      if (m.pointerId !== id) return;
+      set(Math.min(hi, Math.max(lo, start + ((startY - m.clientY) / GRAB_TRAVEL_PX) * (hi - lo))));
+    };
+    const end = (u: PointerEvent) => {
+      if (u.pointerId !== id) return;
+      slider.style.cursor = "";
+      slider.removeEventListener("pointermove", move);
+      slider.removeEventListener("pointerup", end);
+      slider.removeEventListener("pointercancel", end);
+      slider.removeEventListener("lostpointercapture", end);
+    };
+    slider.addEventListener("pointermove", move);
+    slider.addEventListener("pointerup", end);
+    slider.addEventListener("pointercancel", end);
+    slider.addEventListener("lostpointercapture", end);
+  });
+}
+
 /** Gain rows (log) and scene setting rows (linear) share one shape; the
  *  pos<->value mapping lives here. */
 export function createControlRow(spec: ControlRowSpec) {
@@ -1475,6 +1535,7 @@ export function createControlRow(spec: ControlRowSpec) {
   wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
   wireSliderQuickJump(el, slider);
+  wireSliderGrab(slider);
 
   // Log-mapped so the midpoint lands near defaultValue. With zeroAtMin,
   // position 0 is an explicit kill and the curve covers 1..100: a reserved
