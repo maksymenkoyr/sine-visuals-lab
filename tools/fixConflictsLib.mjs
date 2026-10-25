@@ -65,7 +65,7 @@ function endWithNewline(lines) {
 }
 
 /** The lines that replace a conflict, or null when it needs judgment. */
-export function settle({ ours, base, theirs }) {
+function settle({ ours, base, theirs }) {
   if (same(ours, theirs)) return ours;
   if (same(ours, base)) return theirs;
   if (same(theirs, base)) return ours;

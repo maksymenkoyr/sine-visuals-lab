@@ -3,8 +3,6 @@
 
 export type CategoryKey = "newScene" | "scenes" | "sound" | "output" | "app" | "other";
 
-export const CATEGORIES: ReadonlyArray<{ key: CategoryKey; title: string }>;
-
 export interface NoteEntry {
   subject: string;
   pr: number | null;
@@ -20,7 +18,6 @@ export interface SceneVersionNote {
 }
 
 export function prNumberFromSubject(subject: string): number | null;
-export function stripPrSuffix(subject: string): string;
 export function extractHighlights(body: string | null | undefined): string;
 export function newSceneUnits(before: readonly string[], after: readonly string[]): string[];
 export function sceneNameFromSource(source: string | null | undefined): string | null;

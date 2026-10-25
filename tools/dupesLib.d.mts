@@ -50,8 +50,6 @@ export interface ScanOptions {
   maxSize: string;
 }
 
-export function jscpdArgs(options: ScanOptions & { outDir: string }): string[];
-
 export function judge(report: JscpdReport, limit: number): DupesJudgment;
 
 export function topClones(report: JscpdReport, n: number, root: string): TopClone[];

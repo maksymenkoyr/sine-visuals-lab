@@ -12,7 +12,7 @@ export const BPM = Number(process.env.BPM || 124);   // the song's tempo; captur
 export const P = 60000 / BPM; // beat period, ms
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const OVERLAY_CSS = `
+const OVERLAY_CSS = `
 .pv-cur{position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;z-index:2147483500;
   pointer-events:none;background:rgba(255,255,255,.92);border:3px solid rgba(20,24,40,.85);
   box-shadow:0 0 0 2px rgba(255,255,255,.55),0 4px 14px rgba(0,0,0,.5);transition:transform .08s ease;transform:translate(-100px,-100px)}
@@ -69,7 +69,7 @@ export async function beatClock(page, leadMs = 1500, { at = null, late = false }
 }
 
 // ---- mouse helpers (paced so the drag is visible in the screencast) ----
-export const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 let mx = 960, my = 540;
 export async function moveTo(page, x, y, ms = 300) {
   const x0 = mx, y0 = my, t0 = Date.now();
