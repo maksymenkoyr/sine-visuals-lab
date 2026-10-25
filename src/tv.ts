@@ -310,8 +310,8 @@ function onQualityChoice(choice: QualityChoice | undefined): void {
   if (presetAllows(scene, quality.preset)) switchScene(scene);
 }
 
-/** The scene the latest switchScene asked for, so a slow load that lands after
- *  a newer request doesn't override it. */
+/** The scene a switchScene is waiting on for its code, so a slow load that
+ *  lands after a newer request doesn't override it. Null once a switch runs. */
 let wantedScene: Scene | null = null;
 
 /** Swaps the running scene for `next`. If `next`'s init() throws (a shader
@@ -323,8 +323,8 @@ let wantedScene: Scene | null = null;
  *  change, so a TV takes the room's stored transition
  *  (render/sceneTransition.ts, a room key applied before the scene). */
 function switchScene(next: Scene, crossfade = false): void {
-  wantedScene = next;
   if (!sceneReady(next)) {
+    wantedScene = next;
     // The scene it replaces keeps drawing until the new one's code is here.
     loadScene(next).then(
       () => {
@@ -334,6 +334,7 @@ function switchScene(next: Scene, crossfade = false): void {
     );
     return;
   }
+  wantedScene = null;
   const prev = scene;
   // A crossfade still running ends here, its outgoing scene dropped at once.
   compositor?.cancel();
@@ -366,7 +367,9 @@ function switchScene(next: Scene, crossfade = false): void {
 const sceneGuard = createSceneGuard({
   switchTo: (next) => {
     switchScene(next);
-    return scene === next;
+    // A switch waiting for the scene's code counts: it lands when the code
+    // arrives, and a false here would mark the scene bad for the page's life.
+    return scene === next || wantedScene === next;
   },
   dropOutgoing: () => compositor?.cancel(),
   builtIn: () => getScene("spectrum"),
