@@ -1,7 +1,7 @@
 // Must stay the first import: installs the output's private localStorage
 // before any store module seeds its cache (net/outputStorage.ts).
 import { outputStorage } from "./net/outputStorage.ts";
-import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
+import { preloadScenes } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import { detectQuality, parseQualityPreset, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import { getScene, FULL_VIEWPORT, type Scene, type SceneContext } from "./render/scene.ts";
@@ -123,7 +123,8 @@ window.addEventListener("pagehide", () => {
   if (!reloading) transport.post({ t: "bye" });
 });
 
-pinEverything();
+// The sweep waits for the scene bodies, which get the bandwidth first.
+void preloadScenes().then(pinEverything);
 // The pop-out is only ever opened for a show: pin every scene's media too
 // (src/pinnedAssets.ts's header, "Scene media").
 pinSceneMedia();
@@ -364,7 +365,12 @@ async function main(): Promise<void> {
   quality = qualitySettings(resolvePreset());
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   governor?.setEnabled(power.mode === "auto");
-  host = createSceneHost(gl, quality);
+  host = createSceneHost(gl, quality, {
+    onLateMountError(failed, err) {
+      console.error(`Output: "${failed.name}" failed to start:`, err);
+      if (failed === scene) scene = null;
+    },
+  });
   sceneCtx = host.ctx;
   compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   compositor.setEffects(heldEffects);

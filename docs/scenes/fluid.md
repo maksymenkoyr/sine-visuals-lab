@@ -21,18 +21,19 @@ blob scene with no connection to this sim):
   codec fallback (`detectSimFormat`). Exports `createFluidSim`,
   `simResolutionFor`, `sameSimSize`, `simIoGlsl`, the `SPLAT_SLOTS`/`Splat`
   type, `FluidSimOptions` (Sky's slot count, edge pass off), and the
-  `MIRROR_*`/`FOLD_WEDGES_*` constants the display shader folds against. Knows nothing about scenes or settings.
+  `MIRROR_*` constants the display shader folds against (the option list and the wedge range are in `fluid.card.ts`). Knows nothing about scenes or settings.
 - `src/render/scenes/fluidBolts.ts` — the lightning bolt layer
   (`createFluidBolts`), drawn in screen space (not sim space — see
   Decisions) with mirror copies fired explicitly via `boltMirrors`.
-- `src/render/scenes/fluid.ts` — the `Scene`: the emitter/splat schedule
+- `src/render/scenes/fluid.card.ts` — the scene's card, loaded with the page: id, name, `SETTINGS`, the option lists they use (`SYMMETRY_OPTIONS`, `MIRROR_OPTIONS`, `FOLD_WEDGES_MIN`/`MAX`), the `gallery` record and `loadBody`. The body spreads the card, so the registered settings are the body's own objects.
+- `src/render/scenes/fluid.ts` — the body, loaded after first paint: the `Scene`, the emitter/splat schedule
   (`EmitterInputs`, `splatEnvelope`, `emitterState`), the beat puff clock
   (`createPuffState`/`advancePuff`, envelope shaped like `caustics.ts`'s own
   ring emitter, `src/render/scenes/rippleEmitter.ts`), the fold-drift state for Auto symmetry
   (`createFoldState`/`advanceFold`, drifting across `FOLD_FAMILY` quadrant
   folds), the strobe state machine (`createStrobeState`/`triggerStrobe`/
-  `advanceStrobe`/`strobeFrame`, `STROBE_PATTERN`), all `SETTINGS`
-  (`symmetry`, `foldCount`, `foldSpread`, `foldSpin`, `foldBreathe`,
+  `advanceStrobe`/`strobeFrame`, `STROBE_PATTERN`), the settings in
+  `SETTINGS` (in the card: `symmetry`, `foldCount`, `foldSpread`, `foldSpin`, `foldBreathe`,
   `foldDrift`, `emitStrength`, `beatKick`, `curl`, `viscosity`,
   `dissipation`, `dyeFlow`, `warp`, `edgeGlow`, `hueShift`, `lineSoft`,
   `neon`, `hotWhite`, `sparkle`, `sparkleStyle`, `sparkleTint`,
@@ -155,6 +156,7 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   (`src/ui/flashWarning.ts`, in the gallery footer and on a TV's pairing
   screen), and `STROBE_PATTERN`'s comment describes the strobe cut plainly.
   No change to the picture.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/fluid.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
   audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
   scene changed. Since #677 they had fired only on the hits the engine named

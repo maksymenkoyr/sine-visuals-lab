@@ -64,8 +64,9 @@ import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import type { QualityPreset } from "../../quality.ts";
 import { buildSceneFrag, BLIT_FRAG, GROUND_RGB } from "./glsl.ts";
 import { createCoilState, stepCoil, coilTargetSize, newShapeDivisor, type CoilState } from "./coilMotion.ts";
+import { card, SETTINGS } from "./card.ts";
 
-const ID = "coil";
+const ID = card.id;
 
 // Offscreen render-target scale per quality preset -- the ping-pong pair is
 // sized off the canvas (capped here) rather than a fixed grid the way
@@ -95,98 +96,6 @@ const SPIN_DRIVE_DEG_PER_SEC = 10; // extra at a full-strength drive reading
 // default amount; coilMotion.ts's newShapeDivisor scales it with the slider
 // (right = more resets).
 const NEW_SHAPE_GRID_DIVISOR = 4;
-
-const SETTINGS: SceneSetting[] = [
-  // Form
-  {
-    key: "twist",
-    label: "Twist",
-    description: "How much each nested copy winds relative to the next — 0 leaves plain nested outlines, right winds them into a spiral",
-    group: "Form",
-    min: 0,
-    max: 1.5,
-    step: 0.05,
-    default: 1,
-  },
-  {
-    key: "stripes",
-    label: "Stripes",
-    description: "Band density — right packs more red/white/blue rings into the same span",
-    group: "Form",
-    min: 0.4,
-    max: 2.5,
-    step: 0.05,
-    default: 1,
-  },
-  // Motion
-  {
-    key: "flow",
-    label: "Flow",
-    description: "How fast the bands stream outward from the centre, like toothpaste being squeezed",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    drive: { default: "anim.low" },
-  },
-  {
-    key: "push",
-    label: "Push",
-    description: "How far a hit shoves the flow forward in one jump, on top of the steady stream",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    drive: { default: "feature.onset", hit: { reactionLabel: "push" } },
-  },
-  {
-    key: "breathe",
-    label: "Breathe",
-    description: "How far the coil falls back before regrowing on the edge below — 0 leaves it growing without a fall-back",
-    group: "Motion",
-    min: 0,
-    max: 1.5,
-    step: 0.05,
-    default: 1,
-    drive: { default: { source: "beat", grid: 5 }, hit: { reactionLabel: "breathe" } },
-  },
-  {
-    key: "newShape",
-    label: "New shape",
-    description: "Resets to a small fresh silhouette every few grid ticks, peeling and spinning down over under a second — right resets more often, 0 turns resets off",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.8,
-    drive: { default: { source: "beat", grid: 5 }, hit: { flatOnly: "A new shape either starts or it doesn't, so it can't be sized.", reactionLabel: "new shape" } },
-  },
-  // Look
-  {
-    key: "colours",
-    label: "Colours",
-    description: "How far the bands pull toward the app's own colour palette instead of the measured toothpaste red/white/blue",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-  },
-  // Camera
-  {
-    key: "spin",
-    label: "Spin",
-    description: "How fast the whole picture rotates",
-    group: "Camera",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    drive: { default: "anim.high" },
-  },
-];
 
 function settingFor(key: string): SceneSetting {
   const s = SETTINGS.find((x) => x.key === key);
@@ -279,9 +188,7 @@ function createCoilScene(): Scene {
   }
 
   return {
-    id: ID,
-    name: "Coil",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
@@ -419,8 +326,5 @@ function createCoilScene(): Scene {
     },
   };
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "development", added: "2026-10-02" } as const;
 
 export const coilScene = createCoilScene();

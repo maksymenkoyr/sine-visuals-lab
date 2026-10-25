@@ -12,7 +12,9 @@ development, on main.
 
 ## Where the code is
 
-`src/render/scenes/ambience.ts`. Discs are instanced quads drawn from an
+- `src/render/scenes/ambience.card.ts` — the scene's card, loaded with the page: id, name, `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card, so the registered settings are the body's own objects.
+
+`src/render/scenes/ambience.ts` — the body, loaded after first paint. Discs are instanced quads drawn from an
 empty VAO (`gl_VertexID` for the corner, `gl_InstanceID` for the lattice
 cell) — the first `drawArraysInstanced` in the repo — needed because swells
 push a disc well past what `gl.POINTS` guarantees for point size. Discs
@@ -90,6 +92,7 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   Sized; drives.ts's header, "Hit drivers"). Sized scales the strength of the
   swell a hit spawns by how far the hit stood out; Flat, the default, is
   unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/ambience.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
   audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
   scene changed. Since #677 they had fired only on the hits the engine named

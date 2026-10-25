@@ -13,12 +13,16 @@ import {
   MIRROR_TB,
   MIRROR_KALEIDO,
   MIRROR_RADIAL,
-  MIRROR_OPTIONS,
-  FOLD_WEDGES_MIN,
-  FOLD_WEDGES_MAX,
   type MirrorMode,
   type Splat,
 } from "../src/render/scenes/fluidSim.ts";
+import {
+  FOLD_WEDGES_MAX,
+  FOLD_WEDGES_MIN,
+  MIRROR_OPTIONS,
+  SETTINGS,
+  SYMMETRY_OPTIONS,
+} from "../src/render/scenes/fluid.card.ts";
 import {
   splatEnvelope,
   emitterState,
@@ -26,7 +30,6 @@ import {
   emitterDirection,
   emitterScreenPosition,
   TB_EMIT_Y,
-  SETTINGS,
   SPLAT_RATE,
   SPLAT_SIGMA,
   EMIT_SWAY,
@@ -42,7 +45,6 @@ import {
   SIM_DT_MAX,
   SIM_DT_DEFAULT,
   WARP_MIN,
-  SYMMETRY_OPTIONS,
   symmetryToMirror,
   FOLD_FAMILY,
   FOLD_FADE_SEC,

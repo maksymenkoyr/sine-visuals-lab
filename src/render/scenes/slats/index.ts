@@ -76,7 +76,8 @@ import { uploadCommonUniforms } from "../../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
-import { SETTINGS, SLAT_VERT, SLAT_FRAG, BLUR_FRAG, COMPOSITE_FRAG, BLUR_STRIDE } from "./glsl.ts";
+import { card, SETTINGS } from "./card.ts";
+import { SLAT_VERT, SLAT_FRAG, BLUR_FRAG, COMPOSITE_FRAG, BLUR_STRIDE } from "./glsl.ts";
 import {
   createRng,
   buildWall,
@@ -91,7 +92,7 @@ import {
   type PartitionOptions,
 } from "./layout.ts";
 
-const ID = "slats";
+const ID = card.id;
 
 const SETTINGS_BY_KEY = new Map<string, SceneSetting>(SETTINGS.map((s) => [s.key, s]));
 function settingFor(key: string): SceneSetting {
@@ -167,9 +168,6 @@ function clamp01(x: number): number {
 function smoothstep01(x: number): number {
   return x * x * (3 - 2 * x);
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-09-18" } as const;
 
 export const slatsScene: Scene = (() => {
   let slatProg: GLProgram | null = null;
@@ -250,9 +248,7 @@ export const slatsScene: Scene = (() => {
   }
 
   return {
-    id: ID,
-    name: "Slats",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;

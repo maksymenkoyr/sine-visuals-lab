@@ -11,13 +11,16 @@
  * **Territory** — which files are "a scene's own" — is a static import
  * closure from the scene's entry module, its scene module under
  * src/render/scenes/sceneModules.ts's contract (`sceneEntries` finds them
- * without running any code): `caustics.ts`, or `tessera/index.ts`, and every
- * relative import it reaches (recursing through `.ts` files; a non-`.ts`
- * file, e.g. a shader string or `clips.bin`, is a leaf) belongs to it too. A
- * **unit name** — the key everything here and
+ * without running any code): a scene's card, `storm.card.ts` or
+ * `tessera/card.ts` (or, for a scene not yet split, its one file, `caustics.ts`
+ * or `tessera/index.ts`), and every relative import it reaches (recursing
+ * through `.ts` files; a non-`.ts` file, e.g. a shader string or `clips.bin`,
+ * is a leaf) belongs to it too. A card names its body in a dynamic `import()`,
+ * which the closure follows, so the body and everything it imports are the
+ * scene's. A **unit name** — the key everything here and
  * `src/render/scenes/sceneMajors.json` uses — is the entry file's basename
- * (`caustics.ts` → `"caustics"`) or its folder (`tessera/index.ts` →
- * `"tessera"`). A file reachable from two or more scenes' closures
+ * without `.card` (`storm.card.ts` → `"storm"`, `caustics.ts` →
+ * `"caustics"`) or its folder (`tessera/card.ts` → `"tessera"`). A file reachable from two or more scenes' closures
  * is shared and belongs to no scene — the same rule
  * `vite-scene-links-plugin.ts`'s `scenesInFlight` uses for "which scene is a
  * changed file working on" — and so is a file the app's own core reaches
@@ -84,10 +87,11 @@ const DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
  *  (`import("x")`) — with any `?query` (`?raw`, `?url`, `?worker&url`, …)
  *  stripped. Bare (package) specifiers are dropped: this repo's own file
  *  graph is the point, not node_modules. Order isn't meaningful; each
- *  specifier appears once. */
-export function parseImportSpecifiers(source) {
+ *  specifier appears once. `opts.staticOnly` leaves out the dynamic ones
+ *  (a lazily loaded scene body is not part of a page's first-load JS). */
+export function parseImportSpecifiers(source, opts = {}) {
   const specs = new Set();
-  for (const re of [STATIC_IMPORT_RE, DYNAMIC_IMPORT_RE]) {
+  for (const re of opts.staticOnly ? [STATIC_IMPORT_RE] : [STATIC_IMPORT_RE, DYNAMIC_IMPORT_RE]) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(source))) {
@@ -106,25 +110,30 @@ export const SCENES_DIR = "src/render/scenes";
 const GALLERY_EXPORT_RE = /^export const gallery\b/m;
 
 /** The scene modules in `SCENES_DIR`, given that directory's top-level
- *  `names` (a listing of it): each `<unit>.ts` and `<unit>/index.ts` whose
- *  source has a line starting `export const gallery` —
+ *  `names` (a listing of it): each card (`<unit>.card.ts`, `<unit>/card.ts`)
+ *  and each not-yet-split `<unit>.ts` or `<unit>/index.ts` whose source has a
+ *  line starting `export const gallery` —
  *  src/render/scenes/sceneModules.ts's contract, read without running it.
- *  `private/` (paid scenes) never counts, so a paid scene never gets a
- *  public version. `{ unit, file }` pairs, `file` repo-relative, sorted by
- *  unit. */
+ *  A folder holding both a card and an index.ts yields its card. `private/`
+ *  (paid scenes) never counts, so a paid scene never gets a public version.
+ *  `{ unit, file }` pairs, `file` repo-relative, sorted by unit. */
 export function sceneEntries(names, readFile, exists) {
   const out = [];
   for (const name of [...names].sort()) {
     let unit;
     let file;
-    if (name.endsWith(".ts")) {
+    if (name.endsWith(".card.ts")) {
+      unit = name.slice(0, -".card.ts".length);
+      file = `${SCENES_DIR}/${name}`;
+    } else if (name.endsWith(".ts")) {
       if (name === "index.ts") continue;
       unit = name.slice(0, -".ts".length);
       file = `${SCENES_DIR}/${name}`;
     } else {
       if (name === "private") continue;
       unit = name;
-      file = `${SCENES_DIR}/${name}/index.ts`;
+      file = `${SCENES_DIR}/${name}/card.ts`;
+      if (!exists(file)) file = `${SCENES_DIR}/${name}/index.ts`;
       if (!exists(file)) continue;
     }
     if (GALLERY_EXPORT_RE.test(readFile(file) ?? "")) out.push({ unit, file });
@@ -160,7 +169,8 @@ export function resolveImport(fromFile, specifier, exists) {
  *  miss (shouldn't happen for a file `exists` just confirmed, but a git-show
  *  read can fail for other reasons) drops that file from the walk rather
  *  than throwing — a scene's territory should never crash a build over one
- *  unreadable file. */
+ *  unreadable file. `opts.staticOnly` follows static imports only, skipping
+ *  `import("…")` (tests/sceneCards.test.ts: what a page loads up front). */
 export function fileClosure(entryFiles, readFile, exists, opts = {}) {
   const stopAt = opts.stopAt ?? new Set();
   const files = new Set();
@@ -172,7 +182,7 @@ export function fileClosure(entryFiles, readFile, exists, opts = {}) {
     if (!file.endsWith(".ts") || stopAt.has(file)) continue;
     const source = readFile(file);
     if (source == null) continue;
-    for (const spec of parseImportSpecifiers(source)) {
+    for (const spec of parseImportSpecifiers(source, { staticOnly: opts.staticOnly })) {
       const resolved = resolveImport(file, spec, exists);
       if (resolved && !files.has(resolved)) stack.push(resolved);
     }

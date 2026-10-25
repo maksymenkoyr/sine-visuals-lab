@@ -513,5 +513,3 @@ vec3 styleBurst(vec2 c, float cell, float r, float a, float n, float pxSize, flo
   return beatLift(col, ${BURST_LIFT.toFixed(2)});
 }
 `;
-
-export const STYLE_NAMES = ["Mandala", "Portal", "Prism", "Burst"] as const;

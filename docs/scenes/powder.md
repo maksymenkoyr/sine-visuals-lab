@@ -9,7 +9,10 @@ scene (`DRAFT_SCENE_IDS`), on `origin/main`.
 
 ## Where the code is
 
-- `src/render/scenes/powder.ts` — the whole scene. Its header is the primary
+- `src/render/scenes/powder.card.ts` — the scene's card, loaded with the page: id, name,
+  `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card, so the
+  registered settings are the body's own objects.
+- `src/render/scenes/powder.ts` — the body: the rest of the scene, loaded after first paint. Its header is the primary
   source: the packing scheme across the four MRT RGBA8 attachments
   (`uPosXY`, `uPosZW`, `uVelXY`, `uVelZW`, via `packAxisR`/`unpackAxisR`),
   the stateless chunk-cube pool (a JS pool of `(t0, strength, seed, origin,
@@ -104,6 +107,7 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   plume strength and `chunkStrength` by how far the hit stood out; Flat, the
   default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/powder.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
   audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
   scene changed. Since #677 they had fired only on the hits the engine named

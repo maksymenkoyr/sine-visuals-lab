@@ -9,8 +9,11 @@ reaction. First pass, not on main yet: it sits in this PR.
 
 ## Where the code is
 
-- `src/render/scenes/portal/index.ts`: the scene module. `SETTINGS` holds the
-  dials, grouped Form / Motion / Look; `extraUniforms` runs the kick counter
+- `src/render/scenes/portal/card.ts`: the card, loaded with the page. `SETTINGS`
+  holds the dials, grouped Form / Motion / Look, and the `gallery` record;
+  `loadBody` imports the body.
+- `src/render/scenes/portal/index.ts`: the scene module, the body, loaded after
+  first paint. `extraUniforms` runs the kick counter
   and the local camera every frame, and `onInit` starts both over.
 - `src/render/scenes/portal/rotation.ts`: the pure turn-taking and envelopes.
   `advanceLooks` hands each kick to the next look, `lookLevel` and `lookAge`
@@ -61,6 +64,7 @@ about 0.38–0.42 s in its goal. The report's own figures are the ones above;
   shards read as chunks flying out against the flood. The blast washed the
   whole frame yellow-white; its share of the flood, its debris edges and its
   ring bloom were turned down.
+- 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/portal/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
   audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
   scene changed. Since #677 they had fired only on the hits the engine named

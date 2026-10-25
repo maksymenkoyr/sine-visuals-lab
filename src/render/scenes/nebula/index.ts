@@ -40,13 +40,13 @@ import {
   settingUniformName,
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
-import type { SceneSetting } from "../../sceneSettings.ts";
+import { card, SETTINGS } from "./card.ts";
 import { advanceFlight, cameraUniforms, createFlight, hueWander, pathUniforms, type Flight } from "./flight.ts";
 import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, T_MAX } from "./glsl.ts";
 import { buildStars, STAR_COUNT, STAR_FRAG, STAR_INSTANCES, STAR_STRIDE, starVert } from "./stars.ts";
 import { bakeVolume } from "./volume.ts";
 
-const ID = "nebula";
+const ID = card.id;
 /** World units per second at Flight speed 1, matched to the reference's frame-to-frame change (docs/scenes/nebula.md). */
 const BASE_SPEED = 0.22;
 /** How fast the gas churns on its own, in radians per second of its churn clock. */
@@ -57,102 +57,6 @@ const SURGE_GAIN = 2.5;
 const MAX_DT_SEC = 0.25;
 /** The gas target's height cap per quality preset, in pixels; its width follows the canvas's aspect. */
 const GAS_HEIGHT: Record<QualityPreset, number> = { high: 540, mid: 432, low: 324, floor: 270 };
-
-const SETTINGS: SceneSetting[] = [
-  {
-    key: "gas",
-    label: "Gas",
-    group: "Form",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    default: 0.5,
-    description: "How much of the view is cloud. Lower leaves more open space.",
-  },
-  {
-    key: "stars",
-    label: "Stars",
-    group: "Form",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    description: "How many stars shine between the clouds.",
-  },
-  {
-    key: "speed",
-    label: "Flight speed",
-    group: "Motion",
-    min: 0,
-    max: 4,
-    step: 0.05,
-    default: 1,
-    description: "How fast the camera flies through the cloud.",
-  },
-  {
-    key: "spin",
-    label: "Roll",
-    group: "Motion",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-    description: "How far the view rolls from side to side as it flies.",
-  },
-  {
-    key: "surge",
-    label: "Surge",
-    group: "Motion",
-    min: 0,
-    max: 1.5,
-    step: 0.05,
-    default: 1,
-    description: "How much faster the flight runs as the music builds.",
-    drive: { default: "anim.sectionIntensity" },
-  },
-  {
-    key: "glow",
-    label: "Glow",
-    group: "Look",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    description: "How bright the cloud glows. It glows brighter as the music gets louder.",
-    drive: { default: "anim.energy" },
-  },
-  {
-    key: "flare",
-    label: "Flare",
-    group: "Look",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    description: "How hard the cloud's edges flare white on each hit.",
-    drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "hue",
-    label: "Colour turn",
-    group: "Look",
-    min: -180,
-    max: 180,
-    step: 5,
-    default: 0,
-    description: "Turns every colour around the colour wheel. 0 is violet and magenta.",
-  },
-  {
-    key: "drift",
-    label: "Colour drift",
-    group: "Look",
-    min: 0,
-    max: 20,
-    step: 0.5,
-    default: 1,
-    description: "How fast the colours wander around the colour wheel on their own. At 1 they take most of an hour.",
-  },
-];
 
 const SETTINGS_BY_KEY = new Map(SETTINGS.map((s) => [s.key, s]));
 
@@ -175,9 +79,6 @@ ${ROOM_UV_GLSL}
 ${body}
 `;
 }
-
-// This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "development", added: "2026-10-21" } as const;
 
 function createNebulaScene(): Scene {
   let gasProg: GLProgram | null = null;
@@ -215,9 +116,7 @@ function createNebulaScene(): Scene {
   }
 
   return {
-    id: ID,
-    name: "Nebula",
-    settings: SETTINGS,
+    ...card,
 
     init(ctx: SceneContext) {
       const { gl } = ctx;

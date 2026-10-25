@@ -15,8 +15,12 @@ Put it on a big screen at a party or behind a DJ set and let it run: it keeps fo
 
 ## Where the code is
 
-- `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
-  `SETTINGS`, the `FRAG` template, and an `extraUniforms` closure that advances the
+- `src/render/scenes/caustics.card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS` (with the master `SPARKLE` setting they macro to), `PANEL` (the
+  Sparkle section), the `gallery` record and `loadBody`. The body passes the card's
+  settings and panel on, so the registered settings are the body's own objects.
+- `src/render/scenes/caustics.ts` — the body, loaded after first paint
+  (`createFullscreenScene`, the `FRAG` template, and an `extraUniforms` closure that advances the
   drift phase, Speed pump's own accumulator, loudness calibration for Speed
   boost's rate and Beat ripple's own emitter/profile every frame).
 - Its response math is factored into small pure functions exported specifically so
@@ -789,6 +793,7 @@ reference-measurement workflow used by later scenes.
   drop on the same frame as a beat makes two rings where Center makes one merged
   ring. Not yet looked at live by the user; `RIPPLE_SPOTS` and `SPOT_REACH` are
   first guesses.
+- 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/caustics.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-24 (#682) — Treble sparkle came back on real songs. After the audio
   engine took over the lanes (#677), Treble carried only the hits the engine
   named hats, a few a minute in a mix, and the sparkles nearly stopped on

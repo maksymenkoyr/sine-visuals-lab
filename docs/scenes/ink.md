@@ -7,7 +7,11 @@ channels disagree, near the core. Draft, on main.
 
 ## Where the code is
 
-`src/render/scenes/ink.ts`, built on `createFullscreenScene`. Its shape
+- `src/render/scenes/ink.card.ts` — the scene's card, loaded with the page: id, name,
+  `settings` (the `SETTINGS` array) and the `gallery` record, plus `loadBody`. The
+  body takes its id, name and settings from the card.
+
+`src/render/scenes/ink.ts`, the body (loaded after first paint), built on `createFullscreenScene`. Its shape
 mirrors the reference's own description (a random tree of (x,y)->(r,g,b)
 functions animated by interpolating parameter vectors): one fragment shader
 plus a single parameter vector `uParams`, laid out by `PARAM` (with
@@ -109,6 +113,7 @@ primary at a time; ground `#fafafa` vs. `#fafafa`.
   drives.ts's header, "Hit drivers"). `advanceStretch` now takes the hit's
   size (0 = no hit) and Sized lifts the envelope's peak to it; Flat, the
   default, is unchanged.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/ink.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

@@ -18,8 +18,12 @@ rolls slowly clockwise. On main, in the gallery's In development section.
   `gl_InstanceID` via `uShardA`–`uShardD`), flat per-face colour with a tip
   gradient, dark extrusion sides, a pixel-measured rim, the star-field
   ground, the bloom blur and composite.
-- `src/render/scenes/shards/index.ts` — the `Scene`: settings (`SETTINGS`),
-  the full-res sharp target with its own depth renderbuffer plus the
+- `src/render/scenes/shards/card.ts` — the scene's card, loaded with the page: id,
+  name, `SETTINGS` (exported for the body; its cut-mode options come from
+  `layout.ts`), the `gallery` record and `loadBody`. The body spreads the card,
+  so the registered settings are the body's own objects.
+- `src/render/scenes/shards/index.ts` — the body, loaded after first paint: the
+  `Scene`, the full-res sharp target with its own depth renderbuffer plus the
   half-res blur pair, `CUT_LISTENER` wiring, `options()` building an
   `AdvanceOptions` from resolved settings each frame.
 - Plugs into `src/render/beatListener.ts` for its cut trigger (`CUT_LISTENER`,
@@ -117,6 +121,7 @@ bpm, 13 beats):
   depth renderbuffer is 24-bit (it was 16-bit with a far plane of 80 —
   the same near-coplanar z-fight Tessera hit).
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/shards/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

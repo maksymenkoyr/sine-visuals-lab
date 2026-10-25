@@ -9,8 +9,11 @@ the centre. First pass, not on main yet: it sits in this PR.
 
 ## Where the code is
 
-- `src/render/scenes/ledhearts/index.ts`: the scene module. `SETTINGS` holds
-  the dials, grouped Form / Motion / Look; `extraUniforms` reads the three hit
+- `src/render/scenes/ledhearts/card.ts`: the card, loaded with the page.
+  `SETTINGS` holds the dials, grouped Form / Motion / Look, and the `gallery`
+  record; `loadBody` imports the body.
+- `src/render/scenes/ledhearts/index.ts`: the scene module, the body, loaded
+  after first paint. `extraUniforms` reads the three hit
   drivers and the Level rush value every frame, adds up the zoom (`zoomLog`)
   and the spin clock, and hands each layer's scale, seed and fades to the
   shader. `onInit` starts it all over on a mount.
@@ -106,6 +109,7 @@ has by design.
   many hearts, and every heart spinning (long violet streaks). Fixed by a
   darker ground, fewer hearts, softer edges with a brighter centre, and
   making most hearts rock while only a share (`SPIN_SHARE`) turn fully.
+- 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/ledhearts/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
   audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
   scene changed. Since #677 they had fired only on the hits the engine named

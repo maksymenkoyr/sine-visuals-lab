@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { settingUniformName } from "../src/render/sceneCommon.ts";
+import type { SceneCard } from "../src/render/scene.ts";
 import { isScene } from "../src/render/scenes/privateScenes.ts";
 import { fileClosure, SCENES_DIR, sceneEntries } from "../tools/sceneVersionLib.mjs";
 
@@ -51,7 +52,8 @@ describe("dead settings: every scene setting is read somewhere", () => {
         if (src) text += `\n${strip(src)}`;
       }
       const mod = (await import(path.join(root, entryFile))) as Record<string, unknown>;
-      const scene = Object.values(mod).find(isScene)!;
+      // A split scene's entry is its card, which holds the settings.
+      const scene = (mod.card ?? Object.values(mod).find(isScene)) as SceneCard;
       for (const spec of scene.settings ?? []) {
         if (spec.item) continue;
         const key = escapeRe(spec.key);

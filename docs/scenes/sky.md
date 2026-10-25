@@ -7,13 +7,17 @@ or split into a spectrum by Rainbow) that glints through them on each beat,
 Haidinger's brush turning over the centre of view and swelling on the beat,
 and blue-field sprites darting all over the sky, surging on each beat. The
 sky runs a 24-hour day with no night. Featured: `stage: "released"` in
-its `gallery` record (`sky/index.ts`).
+its `gallery` record (`sky/card.ts`).
 
 ## Where the code is
 
-- `src/render/scenes/sky/index.ts` — the scene module: re-exports the
-  scene and holds its `gallery` record (`scenes/sceneModules.ts`).
-- `src/render/scenes/sky/sky.ts` — the whole scene: `SETTINGS`, the display
+- `src/render/scenes/sky/card.ts` — the card, loaded with the page: id, name,
+  `SETTINGS` and the `gallery` record (`scenes/sceneModules.ts`); `loadBody`
+  imports `index.ts`.
+- `src/render/scenes/sky/index.ts` — the scene module, loaded after first paint:
+  re-exports the scene.
+- `src/render/scenes/sky/sky.ts` — the whole scene (the body): `SETTINGS` comes
+  from the card, the display
   shader (`buildDisplayFrag`), and the pure, tested helpers the render loop
   drives it with. The file header walks through every part.
   - Clouds: `DRIFTER_SEEDS` sources placed by `driftCenter`, gated on and
@@ -424,6 +428,7 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   real GPU at 1280×800, before and after side by side: the clouds are
   identical (they hash with `NOISE_HASH_GLSL`); only which spots the
   floaters and sprites land on moved.
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/sky/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

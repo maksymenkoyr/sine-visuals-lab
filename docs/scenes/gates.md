@@ -25,8 +25,12 @@ through the gate lines. On main, registered as a draft scene.
   object, mirror copy, segment, from `gl_InstanceID`), the lightning strike
   evaluated per fragment, the blur chain and the composite. Its header
   explains the stroke, haze and the sweep taps.
-- `src/render/scenes/gates/index.ts` — the `Scene`: `SETTINGS`, the
-  scheduler `advanceGates` (pure, exported: *when* a morph starts, the
+- `src/render/scenes/gates/card.ts` — the scene's card, loaded with the page: id,
+  name, `minQuality`, `SETTINGS` (with the `ARC_SOURCE` indices its Lightning on
+  setting uses), the `gallery` record and `loadBody`. The body spreads the card,
+  so the registered settings are the body's own objects.
+- `src/render/scenes/gates/index.ts` — the body, loaded after first paint: the
+  `Scene` (its id, name and settings come from `card.ts`), the scheduler `advanceGates` (pure, exported: *when* a morph starts, the
   one-bar morph clock `GateState.morph`, the beat clock behind the strike),
   the arc mapping functions (`arcSource`, `arc*For`, `pickArcColour`), and
   the render targets — a full-resolution RGBA8 sharp target plus two blur
@@ -115,6 +119,7 @@ From the bundle's `report.md` and PR #90's verification (2026-09-05/06 and
 - **2026-09-30 (#231):** the Gate density setting opted out of the Cue/Play
   glide (`glide: false`), since it changes the object count.
 - 2026-10-11 — Sampler units and the int uniforms (`uObjCount`, `uCopies`) now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
+- 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/gates/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

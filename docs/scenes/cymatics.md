@@ -10,7 +10,10 @@ scene; a draft (in `DRAFT_SCENE_IDS`), on `main` since the initial commit.
 
 ## Where the code is
 
-- `src/render/scenes/cymatics.ts` — one fragment shader body (`FRAG`)
+- `src/render/scenes/cymatics.card.ts` — the card, loaded with the page: id,
+  name and the `gallery` record; `loadBody` imports the body.
+- `src/render/scenes/cymatics.ts` — the body (the scene module), loaded after
+  first paint: one fragment shader body (`FRAG`)
   passed to `createFullscreenScene()`. No `settings`, no `extraUniforms`,
   no per-scene helper module.
 - `wavefield(p)` is the core: loops the band ladder (all of `uBands`),
@@ -39,6 +42,7 @@ modeling (Chladni plate modes) but no video or image was studied.
 - 2026-10-02 — review fix, no visual change: the wavefield loop bound was a
   literal band count; it is now `NUM_BANDS` (the `uBands` array was already
   sized from it), and the header no longer counts bands.
+- 2026-10-24 — Id, name and gallery record moved to `src/render/scenes/cymatics.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 
 ## Tuning notes
 

@@ -1,7 +1,7 @@
 // Must stay the first import: installs the TV's room-look storage overlay
 // before any store module seeds its cache from localStorage (net/roomStorage.ts).
 import "./net/tvStorageBoot.ts";
-import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
+import { preloadScenes } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import { deferProgramChecks } from "./render/programCache.ts";
 import { detectQuality, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
@@ -22,6 +22,7 @@ import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
+import { loadScene, sceneReady } from "./render/lazyScene.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -182,8 +183,9 @@ function showResetBtn(how: "big" | "corner" | "hidden"): void {
 // app.ts's own call warms) after load, at idle, so a TV left open across a
 // deploy doesn't 404 the first time something it's already holding onto
 // (the tempo worklet, a panel font) is needed. Scene media waits until the
-// TV joins a room (joinRoom).
-pinEverything();
+// TV joins a room (joinRoom). The sweep waits for the scene bodies, which get
+// the bandwidth first.
+void preloadScenes().then(pinEverything);
 
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
@@ -307,6 +309,10 @@ function onQualityChoice(choice: QualityChoice | undefined): void {
   if (presetAllows(scene, quality.preset)) switchScene(scene);
 }
 
+/** The scene a switchScene is waiting on for its code, so a slow load that
+ *  lands after a newer request doesn't override it. Null once a switch runs. */
+let wantedScene: Scene | null = null;
+
 /** Swaps the running scene for `next`. If `next`'s init() throws (a shader
  *  this TV's GPU won't compile) the scene it replaced is brought back, rather
  *  than leaving a half-built one whose render() throws every frame. With
@@ -316,6 +322,18 @@ function onQualityChoice(choice: QualityChoice | undefined): void {
  *  change, so a TV takes the room's stored transition
  *  (render/sceneTransition.ts, a room key applied before the scene). */
 function switchScene(next: Scene, crossfade = false): void {
+  if (!sceneReady(next)) {
+    wantedScene = next;
+    // The scene it replaces keeps drawing until the new one's code is here.
+    loadScene(next).then(
+      () => {
+        if (wantedScene === next) switchScene(next, crossfade);
+      },
+      (err) => console.error(`TV: "${next.name}" failed to load:`, err),
+    );
+    return;
+  }
+  wantedScene = null;
   const prev = scene;
   // A crossfade still running ends here, its outgoing scene dropped at once.
   compositor?.cancel();
@@ -348,7 +366,9 @@ function switchScene(next: Scene, crossfade = false): void {
 const sceneGuard = createSceneGuard({
   switchTo: (next) => {
     switchScene(next);
-    return scene === next;
+    // A switch waiting for the scene's code counts: it lands when the code
+    // arrives, and a false here would mark the scene bad for the page's life.
+    return scene === next || wantedScene === next;
   },
   dropOutgoing: () => compositor?.cancel(),
   builtIn: () => getScene("spectrum"),
@@ -358,10 +378,11 @@ const sceneGuard = createSceneGuard({
 /** Boot mount: the current scene, else the first of availableScenes() whose
  *  init() succeeds (a shader this TV's GPU won't compile must not leave the
  *  screen blank before the room badge ever appears). False if none mounts. */
-function mountFirstScene(): boolean {
+async function mountFirstScene(): Promise<boolean> {
   const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
   for (const next of candidates) {
     try {
+      await loadScene(next);
       deferProgramChecks(() => next.init(sceneCtx));
       scene = next;
       return true;
@@ -780,7 +801,7 @@ async function main(): Promise<void> {
       }
     },
   });
-  if (!mountFirstScene()) {
+  if (!(await mountFirstScene())) {
     badge.textContent = "No scene can run on this TV's GPU";
     badge.style.display = "block";
     return;

@@ -2,7 +2,7 @@
 // controller it puts the in-memory look overlay over localStorage — see the
 // header of net/controllerStorageBoot.ts. A no-op for every other page.
 import "./net/controllerStorageBoot.ts";
-import { PAID_SCENE_IDS, sceneStage } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
+import { PAID_SCENE_IDS, preloadScenes, sceneStage } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
 import {
   getInputDevicePref,
@@ -56,6 +56,7 @@ import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, createRenderGate, shouldRenderFra
 import { createFpsMeter } from "./render/fpsMeter.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
+import { sceneReady } from "./render/lazyScene.ts";
 import { getPalette, paletteRampHex, PALETTES, type Palette } from "./render/palette.ts";
 import {
   applySensitivity,
@@ -1118,6 +1119,7 @@ function updateSceneVersionLabel(next: Scene): void {
  *  stays mounted. */
 function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   const host = mainHost!;
+  const codeArrived = sceneReady(next);
   // Mounting compiles shaders: the gap across it is not frames coming late.
   frameMisses.restart();
   compositor?.cancel();
@@ -1128,23 +1130,44 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   if (!fade) host.unmountAll();
   try {
     host.mount(next);
+    if (!codeArrived) sceneBeforePending.set(next, prev);
     if (fade) compositor?.begin(prev, crossfadeOptions(getSceneTransition(), quality.preset === "floor"));
     return true;
   } catch (err) {
     console.error(`"${next.name}" failed to start:`, err);
   }
+  bailFromScene(next, prev);
+  return false;
+}
+
+/** What `scene` was when a mount went ahead before its code arrived, for the
+ *  fallback if that mount fails later (the host's onLateMountError). */
+const sceneBeforePending = new Map<Scene, Scene>();
+
+/** `next` can't run: says so, and goes back to the gallery, or to `prev` when
+ *  there is none. */
+function bailFromScene(next: Scene, prev: Scene): void {
   showHud(`${next.name} can't run on this device`, true);
   scene = prev;
   if (!bypassGallery) {
     navigate({ kind: "gallery" }, "replace");
   } else if (prev !== next) {
     try {
-      host.mount(prev);
+      mainHost!.mount(prev);
     } catch (err) {
       console.error(`"${prev.name}" failed to restart:`, err);
     }
   }
-  return false;
+}
+
+function onLateSceneMountError(failed: Scene, err: unknown): void {
+  console.error(`"${failed.name}" failed to start:`, err);
+  const prev = sceneBeforePending.get(failed);
+  sceneBeforePending.delete(failed);
+  if (failed !== scene || !prev) return;
+  // A crossfade toward the failed scene would otherwise end by unmounting `prev`.
+  compositor?.cancel();
+  bailFromScene(failed, prev);
 }
 
 /** Local picks and remote commands take this one path, so the roster reflects reality. */
@@ -2712,8 +2735,9 @@ async function boot(): Promise<void> {
   ensureControlsStyles();
   // Starts the at-idle sweep of every pinAsset() file and registered font
   // (pinnedAssets.ts header). Scene media waits for its scene or a show
-  // (pinMediaOncePaired, the pop-out's onStatus).
-  pinEverything();
+  // (pinMediaOncePaired, the pop-out's onStatus). The sweep waits for the
+  // scene bodies, which get the bandwidth first.
+  void preloadScenes().then(pinEverything);
 
   // Started first so it resolves alongside detectQuality()'s await; awaited
   // before routing, since a deep-linked scene's enterViz() makes the first
@@ -2820,7 +2844,7 @@ async function boot(): Promise<void> {
   pinned = devPin !== null;
   detectedPreset = devPin ?? (await detectQuality());
   quality = qualitySettings(renderPreset());
-  mainHost = createSceneHost(gl, quality);
+  mainHost = createSceneHost(gl, quality, { onLateMountError: onLateSceneMountError });
   const host = mainHost;
   compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   resourceMeter = createResourceMeter(gl);

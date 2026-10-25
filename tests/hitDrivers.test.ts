@@ -13,6 +13,7 @@ import { getDriveReadout, setDriveReadout, setDriveSetting, setDriveThreshold, s
 import { takeSettingMarks } from "../src/render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
+import type { SceneCard } from "../src/render/scene.ts";
 import { isScene } from "../src/render/scenes/privateScenes.ts";
 import { fileClosure, SCENES_DIR, sceneEntries } from "../tools/sceneVersionLib.mjs";
 import { engineReading } from "./engineReading.ts";
@@ -250,7 +251,8 @@ describe("hit drivers: every drives.fired() setting declares drive.hit", () => {
         for (const m of src.matchAll(/drives\.fired\(\s*"([^"]+)"/g)) keys.add(m[1]!);
       }
       const mod = (await import(path.join(root, entryFile))) as Record<string, unknown>;
-      const scene = Object.values(mod).find(isScene)!;
+      // A split scene's entry is its card, which holds the settings.
+      const scene = (mod.card ?? Object.values(mod).find(isScene)) as SceneCard;
       for (const key of keys) {
         const spec = scene.settings?.find((s) => s.key === key);
         if (!spec) continue;
