@@ -143,6 +143,20 @@ vs ours.
 - First paint JS: output.html and tv.html each grew about 1.7 kB gzipped,
   since every scene loads eagerly; their budgets went up 1 kB each.
 
+2026-10-25, a sharper scale-up (the owner: "a bit blurry").
+
+- `tools/gpu-bench.mjs` at 3024×1890 on the M1 Pro (high), median of three
+  interleaved rounds, by the gas target's height: 540 (high's) 9.3–10 ms,
+  720 16 ms, 900 24 ms, 1080 33 ms. The march's cost follows its pixel
+  count.
+- Sharpness as mean luma gradient over two fixed bench frames (90, 240):
+  bilinear at 540 1.53 / 1.65; Catmull-Rom at 540 1.61 / 1.73; bilinear at
+  720 1.61 / 1.74; Catmull-Rom with the glare off at 1080 1.86 / 2.00;
+  Catmull-Rom plus unsharp 0.5 at 540 1.82 / 1.96; unsharp 1.0 2.05 / 2.20
+  (grainy). Mean luma moved under 0.1%.
+- Cost of the chosen scale-up, same bench, interleaved: 9.27 → 9.89 ms;
+  Caustics 7.65 ms in both.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -203,6 +217,13 @@ vs ours.
   drawn on a stretched curve (`CORE_GAMMA`, `CORE_GAIN`), as astrophotos
   are, while halo and spikes stay linear.
 
+- 2026-10-25 — The owner found the cloud a bit blurry. The gas target was
+  stretched to the screen with bilinear filtering; raising its height buys
+  little sharpness for a lot of GPU, since most of the softness is in the
+  gas itself. Chosen: a Catmull-Rom scale-up plus an unsharp step against
+  the target's first mip (`SHARPEN`), for 0.6 ms. Turning the glare off
+  dimmed the picture more than it sharpened it, so it stays.
+
 ## Tuning notes
 
 - Judge the look at rest (ref-shoot on the silent bundle) against the
@@ -222,6 +243,9 @@ vs ours.
   streaky masses (p50 0.11–0.17 against 0.16–0.20).
 - The flight opens on the same stretch of gas on every mount.
 - No `auto` weight tables yet; every setting is manual.
+- The gas itself stays soft: a march at the screen's full height is only a
+  little crisper than the sharpened scale-up. Finer detail would have to
+  come from the volume (`VOLUME_SIZE`, the detail read), not the target.
 - 1.2× Caustics' GPU time at Retina size on high; lower presets shrink the
   gas target and the step count.
 
