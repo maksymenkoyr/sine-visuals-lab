@@ -26,7 +26,6 @@ import { loadScene, sceneReady } from "./render/lazyScene.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { SILENCE_GATE_SEED } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
-import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import type { FeatureFrame } from "./audio/types.ts";
 import { createDriveEngine } from "./render/drives.ts";
@@ -914,23 +913,21 @@ async function main(): Promise<void> {
     };
 
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what
-    // needs a local extractor or a panel. A feed sends ungained frames, so
-    // the Bands card's faders (part of the look) are applied here. Smoothing is
-    // resolved once per tick, as app.ts's tick() does.
+    // needs a local extractor or a panel. Smoothing is resolved once per
+    // tick, as app.ts's tick() does.
     // The silence gate's marks are this device's own (volatile, not in the
     // look); hits and Onset surge come from the engine reading on each frame.
     // Beat grid and a setting's own
     // drawn line are drive choices (src/render/drives.ts), carried by the look.
-    const gained = applyBandGains(frame, getBandGains(scene.id));
     const smoothing = resolveSmoothing(scene.id);
     // Only the GPU draw is rate-capped — sampling and the anim clock's decay
     // stay on every rAF tick.
-    const anim = animClock.advance(dtSec, gained, smoothing, SILENCE_GATE_SEED, { shape: getHitShape() });
+    const anim = animClock.advance(dtSec, frame, smoothing, SILENCE_GATE_SEED, { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
     const sensitivity = resolveSensitivity(scene.id);
     const expansion = resolveExpansion(scene.id);
-    driveEngine.accumulate(dtSec, gained, applySensitivity(gained, sensitivity, expansion).energy, anim, scene.id, scene.settings ?? []);
+    driveEngine.accumulate(dtSec, frame, applySensitivity(frame, sensitivity, expansion).energy, anim, scene.id, scene.settings ?? []);
 
     const intervalMs = targetFrameIntervalMs(quality.preset);
     if (!renderGate.pass(nowRafMs, intervalMs)) return;
@@ -938,7 +935,7 @@ async function main(): Promise<void> {
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
-    const displayFrame = applySensitivity(gained, sensitivity, expansion);
+    const displayFrame = applySensitivity(frame, sensitivity, expansion);
     const latchedAnim = renderLatch.consume(anim, nowRafMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
     const outcome = sceneGuard.draw(scene, () =>

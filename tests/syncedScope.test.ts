@@ -42,16 +42,7 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.sceneExpansionShape": true,
   "vibe.drives": true,
   "vibe.shapingNodes": true, // retired; each window reads it once at load to convert old wires (render/wireMod.ts)
-  "vibe.bandFader.": true, // prefix: one key per fader
   "vibe.beatGrid": true,
-  "vibe.hitAmount": true,
-  "vibe.hitKnee": true,
-  "vibe.hitLoudness": true,
-  "vibe.hitFloor": true,
-  "vibe.hitTailBeat": true,
-  "vibe.hitTailLow": true,
-  "vibe.hitTailMid": true,
-  "vibe.hitTailHigh": true,
   // The Overlay (render/overlayStore.ts): text/position/size/opacity and a
   // room-sized logo ride in the look; a logo too big for it stays on the device.
   "vibe.overlay": true,
@@ -71,7 +62,6 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.keyTips": false,
   "vibe.panelFolds": false,
   "vibe.historySpans": false,
-  "vibe.hitTailLinked": false,
   "vibe.hiddenInputs": false,
   "vibe.bakeToast": false,
   "vibe.audioSource": false,

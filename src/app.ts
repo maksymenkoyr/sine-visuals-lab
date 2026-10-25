@@ -210,7 +210,7 @@ import {
   hitPasses,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
-import { getHitShape, setHitShape } from "./audio/hitStrength.ts";
+import { getHitShape } from "./audio/hitStrength.ts";
 import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
@@ -233,14 +233,6 @@ import {
   type PreviewSize,
 } from "./render/outputPower.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
-import {
-  applyBandGains,
-  getBandGain,
-  getBandGains,
-  pinnedBands,
-  resetBandGains,
-  setBandGain,
-} from "./audio/bandGains.ts";
 import {
   advanceAutoTune,
   tickAutoTune,
@@ -284,8 +276,6 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
-import { createLoadChip } from "./ui/loadChip.ts";
-import type { PowerStatus } from "./ui/powerCard.ts";
 import { browserMidiEnv, createMidiController } from "./ui/midiInput.ts";
 import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery, type GallerySceneEntry } from "./ui/gallery.ts";
@@ -332,7 +322,6 @@ const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const sceneTag = document.getElementById("sceneTag") as HTMLDivElement;
 const sceneBtn = document.getElementById("sceneBtn") as HTMLButtonElement;
-const loadChipBtn = document.getElementById("loadChip") as HTMLButtonElement;
 const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const recBtn = document.getElementById("recBtn") as HTMLButtonElement;
 const recAspectBtn = document.getElementById("recAspectBtn") as HTMLButtonElement;
@@ -384,8 +373,8 @@ let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Hats and Lead off the full FFT bins, computed only on ticks where stemsRead() says something reads them. */
 let stemGate: StemGate | null = null;
-/** Display-only waveform for the Setup view's Input check card; never feeds FeatureExtractor or
- *  the wire frame (see waveformAnalyser.ts header). */
+/** Mic samples for the input-health tap and the wire frame's wave tail; never feeds FeatureExtractor
+ *  (see waveformAnalyser.ts header). */
 let waveformAnalyser: WaveformAnalyser | null = null;
 let inputHealthTap: InputHealthTap | null = null;
 /** One long-lived instance with `reset()`, not one per capture (see inputHealth.ts header). */
@@ -510,7 +499,6 @@ const glassCanvasBox = { w: 0, h: 0 };
 
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
-let loadChip: { update(nowMs: number): void } | null = null;
 let immersive: ImmersiveMode | null = null;
 let scenePicker: ScenePicker | null = null;
 let inViz = false;
@@ -524,14 +512,6 @@ let lastVis: FeatureFrame | null = null;
  *  renderer has no local mic). Reused in place every tick. */
 let lastRawBands: Float32Array | null = null;
 let lastMono: Float32Array | null = null;
-/** Following another device's input: the feed's waveform at this tick as
- *  [min, max] (protocol.ts wave tail). Null elsewhere or when the feed sends
- *  none; stands in for lastMono. */
-let lastFeedWave: Float32Array | null = null;
-const feedWaveScratch = new Float32Array(2);
-function waveSamples(): Float32Array | null {
-  return lastMono ?? lastFeedWave;
-}
 /** DEV only, off measureAnalyser. Same buffer every read: copy before crossing a page.evaluate boundary. */
 let lastDeepMono: Float32Array | null = null;
 // The Any hit lane's diag off this device's own engine reading, for the Hits
@@ -1864,22 +1844,6 @@ function onSettingAutoToggle(sceneId: string, spec: SceneSetting, on: boolean): 
   setAutoEnabled(sceneId, spec.key, on);
 }
 
-function powerStatus(): PowerStatus {
-  return {
-    mode: powerMode,
-    choice: previewActive ? previewChoice : qualityChoice,
-    recommended: detectedPreset,
-    fps: fpsMeter.read(),
-    level: governor?.level ?? null,
-    maxLevel: governor?.maxLevel ?? 0,
-    fraction: governor?.fraction ?? 1,
-    standingDown: governor?.standingDown ?? false,
-    bufferWidth: canvas.width,
-    bufferHeight: canvas.height,
-    ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
-    ...frameMisses.read(performance.now()),
-  };
-}
 
 function wireDeviceMenu(): void {
   // Made before any key handler registered later in boot: learning takes keyboard
@@ -2007,9 +1971,6 @@ function wireDeviceMenu(): void {
       onRemoveLogo: clearOverlayLogo,
     },
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
-    getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
-    onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
-    onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     getDriveSetting: (sceneId, spec) => getDriveSetting(sceneId, spec),
     getWireReading: (sceneId, key, choice) => driveEngine.wire(sceneId, key, choice),
     onSetDriveSetting: (sceneId, spec, setting) => setDriveSetting(sceneId, spec, setting),
@@ -2060,8 +2021,6 @@ function wireDeviceMenu(): void {
     // thumbnails back to batch reads), not a frozen last reading.
     getPictureReading: () => freshPictureReading(),
     resolveSilenceGate: () => resolveSilenceGate(),
-    getHitShape: () => getHitShape(),
-    setHitShape: (partial) => setHitShape(partial),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -2122,7 +2081,20 @@ function wireDeviceMenu(): void {
       outputPower = { ...outputPower, cast };
       outputBridge?.sendPower();
     },
-    getPowerStatus: powerStatus,
+    getPowerStatus: () => ({
+      mode: powerMode,
+      choice: previewActive ? previewChoice : qualityChoice,
+      recommended: detectedPreset,
+      fps: fpsMeter.read(),
+      level: governor?.level ?? null,
+      maxLevel: governor?.maxLevel ?? 0,
+      fraction: governor?.fraction ?? 1,
+      standingDown: governor?.standingDown ?? false,
+      bufferWidth: canvas.width,
+      bufferHeight: canvas.height,
+      ...(resourceMeter?.snapshot(performance.now()) ?? { cpuLoad: null, gpuMs: null, heapMb: null }),
+      ...frameMisses.read(performance.now()),
+    }),
     customValues: {
       get: getCustomValue,
       set: setCustomValue,
@@ -2134,11 +2106,6 @@ function wireDeviceMenu(): void {
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
-  loadChip = createLoadChip(loadChipBtn, {
-    getPowerStatus: powerStatus,
-    intervalMs: renderIntervalMs,
-    onOpen: () => deviceMenu?.openPower(),
-  });
 }
 
 /** Any device can open the room's view, not just the host (changing who may Play
@@ -2552,7 +2519,6 @@ async function enterViz(next: Scene): Promise<void> {
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
-  loadChipBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) {
     backBtn.style.display = "block";
@@ -2577,7 +2543,6 @@ function exitToGallery(): void {
   // gallery. Every exit (Escape, back button, browser Back) funnels through here.
   deviceMenu?.close();
   menuBtn.style.display = "none";
-  loadChipBtn.style.display = "none";
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
@@ -3328,7 +3293,6 @@ function readLocalCapture(
  *  envelope honors the same Smoothing, including 0. */
 function currentVisual(rateScale: number): FeatureFrame | null {
   // Reset every tick: only sampleToVisual, on a page following a feed, sets it.
-  lastFeedWave = null;
   const conn = activeConn();
 
   if (mode === "solo" || !conn) {
@@ -3401,11 +3365,6 @@ function currentVisual(rateScale: number): FeatureFrame | null {
 
 function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
   if (!s) return null;
-  if (s.wave) {
-    feedWaveScratch[0] = s.wave.min;
-    feedWaveScratch[1] = s.wave.max;
-    lastFeedWave = feedWaveScratch;
-  }
   return {
     time: s.timeSec,
     bands: s.bands,
@@ -3469,12 +3428,10 @@ function tick(): void {
   // Always sampled: in host mode this feeds hostConn.sendFrame, so a paired TV
   // keeps getting frames while this device sits on the gallery.
   lastVis = currentVisual(rateScale);
-  const wave = waveSamples();
 
   // The pop-out keeps streaming even while this window sits on the gallery (a
-  // stray Esc must never blank the projector), hence the band-gained frame is
+  // stray Esc must never blank the projector), hence the frame is
   // built before the inViz return.
-  const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   outputBridge?.update(nowRafMs);
   roomBridge?.update(nowRafMs);
   desk?.tick(nowRafMs);
@@ -3509,28 +3466,23 @@ function tick(): void {
     applyRenderQuality(true);
     applyPowerMode(powerMode);
   }
-  if (outputBridge && gained) outputBridge.pushFrame(gained, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && lastVis) outputBridge.pushFrame(lastVis, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
     return;
   }
 
-  // Applied once, upstream of every consumer below (deviceMenu's strip included),
-  // so the Bands card's faders show everywhere: the strip's "processed" feed is
-  // built from this frame (deviceMenu.ts update()). lastVis stays ungained: it
-  // feeds hostConn.sendFrame, which shouldn't hear a local gain tweak, and the
-  // strip draws it as the ghost behind a faded bar.
   // The anim clock advances here, ahead of deviceMenu.update(): the listening
   // post's meters (audioMeters.ts) read this tick's AnimFrame. Feature extraction
   // and the anim clock run on every rAF tick regardless of the render-rate cap;
   // only the GPU draw and panel drawing are capped (panelDraws).
   // `nowRafMs` makes this the one clock that follows a tap
   // tempo (tapTempo.ts); like the beat keys, a tap only reaches this window's clock.
-  const anim = gained
+  const anim = lastVis
     ? animClock.advance(
         dtSec,
-        gained,
+        lastVis,
         smoothing,
         resolveSilenceGate(),
         { shape: getHitShape() },
@@ -3557,8 +3509,8 @@ function tick(): void {
     // peak-hold need every rAF tick, not just render ticks. `driveEnergy` is the
     // sensitivity-applied energy a scene's uEnergy sees at render, so the "All
     // level" catalogue source never lags.
-    const driveEnergy = applySensitivity(gained!, sensitivity, expansion).energy;
-    driveEngine.accumulate(dtSec, gained!, driveEnergy, anim, scene.id, scene.settings ?? []);
+    const driveEnergy = applySensitivity(lastVis!, sensitivity, expansion).energy;
+    driveEngine.accumulate(dtSec, lastVis!, driveEnergy, anim, scene.id, scene.settings ?? []);
   }
 
   // Nobody is looking at this tab, so no meters or picture to update (the only
@@ -3583,8 +3535,7 @@ function tick(): void {
   if (panelDraws) lastPanelDrawMs = nowRafMs;
   syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
   // Fed even when null (mic pending) so the strip shows its "waiting for audio" idle state.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastBeatDiag, lastGate, liveDrives, panelDraws);
-  loadChip?.update(nowRafMs);
+  deviceMenu?.update(lastVis, lastRawBands, anim, rateScale, lastBeatDiag, lastGate, liveDrives, panelDraws);
 
   if (!lastVis || !anim) {
     if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
@@ -3594,13 +3545,13 @@ function tick(): void {
     return;
   }
 
-  drawScene(nowRafMs, gained!, sensitivity, expansion, anim, renderLatch, driveEngine);
+  drawScene(nowRafMs, lastVis!, sensitivity, expansion, anim, renderLatch, driveEngine);
 }
 
 /** The scene's render tail, shared by live audio and the idle preview (each passes its own latch and drive engine). */
 function drawScene(
   nowRafMs: number,
-  gained: FeatureFrame,
+  frame: FeatureFrame,
   sensitivity: number,
   expansion: number,
   anim: AnimFrame,
@@ -3615,7 +3566,7 @@ function drawScene(
   const resized = sizeCanvas();
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
-  const displayFrame = applySensitivity(gained, sensitivity, expansion);
+  const displayFrame = applySensitivity(frame, sensitivity, expansion);
   const latchedAnim = latch.consume(anim, nowRafMs);
   const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
   // Drain the previous capture *before* this frame's draws are queued: the
@@ -3770,15 +3721,14 @@ function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): 
   // Sensitivity/Expansion keep gliding instead of freezing.
   tickAutoTune(dtSec);
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
-  const gained = applyBandGains(frame, getBandGains(scene.id));
-  outputBridge?.pushFrame(gained, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
-  const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape() });
+  outputBridge?.pushFrame(frame, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  const anim = idlePreview.anim.advance(dtSec, frame, smoothing, resolveSilenceGate(), { shape: getHitShape() });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);
   const expansion = resolveExpansion(scene.id);
-  const driveEnergy = applySensitivity(gained, sensitivity, expansion).energy;
-  idlePreview.drives.accumulate(dtSec, gained, driveEnergy, anim, scene.id, scene.settings ?? []);
-  drawScene(nowRafMs, gained, sensitivity, expansion, anim, idlePreview.latch, idlePreview.drives);
+  const driveEnergy = applySensitivity(frame, sensitivity, expansion).energy;
+  idlePreview.drives.accumulate(dtSec, frame, driveEnergy, anim, scene.id, scene.settings ?? []);
+  drawScene(nowRafMs, frame, sensitivity, expansion, anim, idlePreview.latch, idlePreview.drives);
 }
 
 void boot();

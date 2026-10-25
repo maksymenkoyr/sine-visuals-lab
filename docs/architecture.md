@@ -67,14 +67,9 @@ its GL context's pool for the next mount that asks for the same shaders.
 scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 (`index.html`).
 
-The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
-in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-the Setup view's Input level row (Input check card) reads CLIP off
-`src/audio/waveformAnalyser.ts` (math in `waveform.ts`), time-domain samples
-straight off this device's own mic, separate from `FeatureFrame`/`AnimFrame`.
-A device following another one reads the followed device's clipping off the
-frame's wave tail in `src/net/protocol.ts` instead. The same card's Gate row
-reads `AnimFrame.gateDimmer`.
+The controls panel's meters (`src/ui/audioMeters.ts`, under the column head
+in `src/ui/deviceMenu.ts`) read `FeatureFrame`/`AnimFrame` and nothing else.
+The Sound card's shaded floor reads `AnimFrame.gateDimmer`.
 
 `src/render/signals.ts` is the seam between those meters and a scene's own
 `settings`: a scene can mark a `SceneSetting` with `reads`, naming which of

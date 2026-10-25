@@ -75,17 +75,16 @@
  * "inward" (from the jack's side) with no kink either way, rather than
  * assuming the common case always holds.
  *
- * The Output power card (.vc-power-col > .vc-power-card, shown only while a
- * pop-out output is open) sits fixed in the screen's own top-right corner,
+ * Power (.vc-power-col) sits fixed in the screen's own top-right corner,
  * right beside the settings column, while the settings column scrolls
  * independently underneath/past it — so a port can end up rendered at any
- * y a user scrolls it to, including right behind that card. Since the cable
- * layer paints above every card (its whole reason for living outside
- * .vc-root — see this file's header), a straight bezier into such a port
- * would visibly run across that card's glass rather than the open middle.
- * cablePathD detours a cable whose *port* end falls in that card's own
+ * y a user scrolls it to, including right behind Power's own card. Since
+ * the cable layer paints above every card (its whole reason for living
+ * outside .vc-root — see this file's header), a straight bezier into such
+ * a port would visibly run across Power's glass rather than the open
+ * middle. cablePathD detours a cable whose *port* end falls in Power's own
  * vertical band (with a small margin) down under its bottom edge first —
- * a jack's own end is never checked, since the card sits beside the settings
+ * a jack's own end is never checked, since Power sits beside the settings
  * column, nowhere near the meters side a jack lives on.
  *
  * Geometry (every `getBoundingClientRect` read) only happens in recompute(),
@@ -189,17 +188,17 @@ const REVEAL_STILL_PX = 3;
  *  port lands clear of the edge rather than flush against it. */
 const REVEAL_MARGIN_PX = 40;
 
-/** Extra clearance kept above/below the Output power card before a port counts
+/** Extra clearance kept above/below Power's own card before a port counts
  *  as "in its band" (cablePathD's own detour) — enough that the detoured
  *  cable's curve doesn't itself brush the card it's avoiding. */
 const CABLE_AVOID_MARGIN_PX = 14;
 
-/** The Output power card's current screen band, or null while it isn't
- *  rendered (no pop-out output open, or a folded panel) — read once per
- *  recompute() alongside every other endpoint, not per cable. See this
- *  file's header for why cablePathD needs it at all. */
+/** Power's own current screen band, or null while it isn't rendered (a
+ *  folded panel) — read once per recompute() alongside every other
+ *  endpoint, not per cable. See this file's header for why cablePathD
+ *  needs it at all. */
 function powerAvoidBand(): { top: number; bottom: number } | null {
-  const el = document.querySelector<HTMLElement>(".vc-power-col > .vc-power-card");
+  const el = document.querySelector<HTMLElement>(".vc-power-col");
   if (!el || el.getClientRects().length === 0) return null;
   const r = el.getBoundingClientRect();
   return { top: r.top - CABLE_AVOID_MARGIN_PX, bottom: r.bottom + CABLE_AVOID_MARGIN_PX };
@@ -214,11 +213,8 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *     ringElements() (deviceMenu.ts) already uses — so the cable ends at
  *     that card's own header instead (and, if the header has no box either
  *     — the column itself is hidden — there is no endpoint and no cable);
- *   - a jack in the Setup view while it is closed (`.vc-setup`, no box for
- *     the jack or its header) — the cable ends at the footer's Setup button
- *     that opens it, when that has a box;
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
- *     `.vc-setup`/`.vc-controls-col`) — the cable ends at the column's
+ *     `.vc-controls-col`) — the cable ends at the column's
  *     visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
@@ -228,17 +224,14 @@ function endpointFor(el: HTMLElement): { x: number; y: number } | null {
     // every card folded away) — its rect would be all zeros and the cable
     // would run to the viewport's top-left corner, so draw nothing instead.
     if (!header || header.getClientRects().length === 0) {
-      const setupBtn = el.closest(".vc-setup") ? document.querySelector<HTMLElement>(".vc-setup-btn") : null;
-      if (!setupBtn || setupBtn.getClientRects().length === 0) return null;
-      const b = setupBtn.getBoundingClientRect();
-      return { x: b.right, y: b.top + b.height / 2 };
+      return null;
     }
     const r = header.getBoundingClientRect();
     return { x: r.right - 8, y: r.top + r.height / 2 };
   }
   const r = el.getBoundingClientRect();
   let y = r.top + r.height / 2;
-  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-setup, .vc-controls-col");
+  const scroller = el.closest<HTMLElement>(".vc-meters, .vc-controls-col");
   if (scroller) {
     const sr = scroller.getBoundingClientRect();
     if (y < sr.top) y = sr.top + 2;
@@ -262,7 +255,7 @@ function cablePathD(
   const jackStubX = pt.x + dir * CABLE_STUB_PX;
   const portStubX = port.x - dir * CABLE_STUB_PX;
   if (avoidBand && port.y >= avoidBand.top && port.y <= avoidBand.bottom) {
-    // Two smooth cubics via a waypoint under the Output power card's bottom edge,
+    // Two smooth cubics via a waypoint under Power's own bottom edge,
     // rather than one straight bezier into the port — see this file's
     // header. Horizontal tangents at the waypoint (both control points
     // share its y) keep the dip-then-rise seamless, the same C1-continuity
@@ -316,7 +309,7 @@ function revealEnd(el: HTMLElement): void {
     target = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head") ?? null;
     if (!target || target.getClientRects().length === 0) return;
   }
-  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-setup, .vc-controls-col");
+  const scroller = target.closest<HTMLElement>(".vc-meters, .vc-controls-col");
   if (!scroller) return;
   const r = target.getBoundingClientRect();
   const sr = scroller.getBoundingClientRect();

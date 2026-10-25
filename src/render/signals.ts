@@ -92,9 +92,8 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. "sound" is the first meter, the Sound card;
- *  "setup-input" is the Setup view's Input check card. */
-export type MeterCardId = "sound" | "setup-input" | "hits" | "beat" | "song";
+ *  actually points at that card. "sound" is the first meter, the Sound card. */
+export type MeterCardId = "sound" | "hits" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -103,14 +102,11 @@ export type MeterCardId = "sound" | "setup-input" | "hits" | "beat" | "song";
  *  bar ruler (audioMeters.ts's createBarRuler), the anchor for `anim.metronome`
  *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
  *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
- *  "level" is the Input level row, first in the Input check card's body —
- *  `feature.level`'s anchor.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
  *  Treble rows; Lead and Hats point at the Mid and Treble rows they draw in.
- *  "centroid" is the Centroid row in the Setup view's Input check card,
- *  `anim.centroid`'s anchor. Each dial's own cell in the Song card's strip is
+ *  Each dial's own cell in the Song card's strip is
  *  its DialSignalId. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "level" | "energy" | "low" | "mid" | "high" | DialSignalId;
+export type MeterRowId = "section" | "tempo" | "hits" | "wave" | "lock" | "bar" | "energy" | "low" | "mid" | "high" | DialSignalId;
 
 /** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
@@ -346,10 +342,9 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "feature.level",
     label: "Input level",
     description:
-      "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), the Input level row — never auto-gained, so a silent room reads 0 where Level's auto-gain lifts mic hiss back to mid-range.",
+      "The input's absolute loudness on a fixed quiet-to-loud scale (FeatureFrame.level), never auto-gained, so a silent room reads 0 where Level's auto-gain lifts mic hiss back to mid-range.",
     kind: "level",
     read: (frame) => frame.level,
-    monitor: { card: "setup-input", row: "level" },
     bandRange: "all",
   }),
   "anim.sectionIntensity": signal({
@@ -375,10 +370,9 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.centroid",
     label: "Centroid",
     description:
-      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Tone dial, traced in the Setup view's Input check card.",
+      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Tone dial.",
     kind: "level",
     read: (_frame, anim) => anim.centroid,
-    monitor: { card: "setup-input", row: "centroid" },
   }),
   "anim.beatWave": signal({
     id: "anim.beatWave",

@@ -126,8 +126,6 @@ Darker means more important.
     `src/ui/scenePicker.ts`
   - ●○○ **Back to gallery, Stop, Room badge** — the top-left row ·
     `src/app.ts`
-  - ○○○ **Load chip** — the top-left row's frame rate and a load colour; a
-    click opens Power in the panel's Setup view · `src/ui/loadChip.ts`
   - ○○○ **Wake lock** — keeps the screen on while a scene plays ·
     `src/ui/wakeLock.ts`
 - ●○○ **Controls panel** — the left column, opened with the gear or S ·
@@ -138,18 +136,13 @@ Darker means more important.
   - ●○○ **Sound in**
     - ●○○ **Input card** — Source and device; nothing else about the sound
       is a setting · `src/ui/deviceMenu.ts`
-    - ●○○ **Bands card** — in the Setup view: the live spectrum, a fader per
-      band, and a line you draw across it · `src/ui/spectrumStrip.ts`,
-      `src/ui/bandFaders.ts`, `src/ui/bandLineEditor.ts`
     - ○○○ **Meters: Sound, Hits, Beat, Song** — live readouts of
       what the analysis hears; each row's jack is a signal you can wire.
       Sound is a thin spectrum over Level, Bass, Mid + Lead and Treble +
       Hats ·
       `src/ui/audioMeters.ts`, the dials are `MUSIC_DIALS`
-    - ○○○ **Setup view** — the panel footer's Setup button opens a column of
-      the rows you check once per set: Input check (waveform, input level,
-      loudness, the gate, centroid), Hit shape (the sliders and curves that grade a
-      hit), the Bands card and Heat history; each row keeps its jack · `src/ui/audioMeters.ts`
+    - ○○○ **Heat history** — the last meter card, folded by default: one
+      strip per wired setting and per signal, second by second · `src/ui/audioMeters.ts`
       - ●○○ **Tap tempo** — tap Ctrl or the Beat card's Tap to set the
         tracker's BPM. For DJs · `src/render/tapTempo.ts`
   - ●○○ **Look**
@@ -184,9 +177,8 @@ Darker means more important.
       who own a controller · `src/ui/midiCard.ts`, `src/ui/midiInput.ts`
   - ○○○ **Machine**
     - ○○○ **Power card** — Quality, Energy saving, Panel blur, and live load
-      readouts. It lives in the Setup view, opened from the load chip in the
-      top-left bar (fps and a load colour). Titled Preview while an output
-      window is open · `src/ui/powerCard.ts`, `src/ui/loadChip.ts`
+      readouts. Titled Preview while an output window is open ·
+      `src/ui/powerCard.ts`
     - ○○○ **Output card** — the pop-out window's own Quality and Resolution ·
       `src/render/outputPower.ts`
   - ●○○ **Keys list, keycaps and tooltips** — every shortcut, from

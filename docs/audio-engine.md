@@ -256,16 +256,6 @@ Sensitivity, Expansion and Smoothing follow the music per scene
 (`src/render/autoTune.ts`'s `resolveSensitivity` and friends). None of them
 feeds back into the analysis.
 
-### Band faders reach the lanes
-
-The per-scene band faders (`src/audio/bandGains.ts`) are a graphic-EQ bank over
-the band ladder. `applyBandGains` also scales the engine's lanes. Each lane takes
-the mean fader weight over the band split's range for it. The weight scales the
-lane's level, its hit strength and a surge nearest it. So a fader at Off stops its
-range driving anything, and a boost lets that range's hits through a half-closed
-silence gate. `level` is left alone: auto mode reads it, and shaping it would feed
-the gain stage its own output.
-
 ### What is gone
 
 The old fixed-hop tracker, its worklet and the feature extractor's onset and
@@ -411,7 +401,7 @@ The measurements behind individual choices, as the bench found them:
 The same bench scored the app as it runs the engine. It used a snapshot at
 `49753e24`, wired as `tests/tempoEval/run.ts` wires it, with lane smoothing,
 the silence gate, the metronome over the clock, Lock and the band faders all
-in. The extended bench is kept beside the original, at
+in (the faders have since been removed from the panel). The extended bench is kept beside the original, at
 `~/projects/audio-subsystem/bench-app`.
 
 | set | app | app on a TV | v5 | v4 (the app before) |

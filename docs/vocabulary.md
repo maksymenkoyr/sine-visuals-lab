@@ -29,7 +29,6 @@ that reshapes an input node's value on its way to that one setting.
 | **reaction** | What a setting that acts once per hit does on each hit: a burst, a jump, a cut. Its graph draws a dot per reaction. The **Reaction** row under the graph picks **Flat** (every reaction full size) or **Sized** (as big as its hit stood out); a setting whose reaction has no size shows Sized greyed out. | trigger, event, fire | `SceneSetting.drive.hit`, `HitReadout` (`src/render/standout.ts`) |
 | **condition** | Under the gate mix ("Only when"), a wire whose input node opens the gate rather than moving the setting. The others **play**. | gate source, trigger | `DriveSource.when` |
 | **meters** | The left column of cards that *show* the sound. A meter is a display; the input nodes in it are what you wire. | — | `METERS_COLUMN`, `src/ui/audioMeters.ts` |
-| **Setup** | The view for checking the input, opened from the panel footer's Setup button. A column of its own, holding the Input check, Hit shape and Heat history cards. Its input nodes keep their jacks. | — | `SETUP_COLUMN`, `setupEl` in `src/ui/audioMeters.ts` |
 | **sound source** | The microphone, line input or shared tab the sound comes from. The only thing in the panel called a source. | — | `AudioSource` |
 
 ## Verbs
@@ -63,9 +62,7 @@ that reshapes an input node's value on its way to that one setting.
   source. A wire is the one thing drawn between a jack and a port.
 - **Built-in, not scene mix.** "Mix" is the control right next to it; two different things can't share the word.
 - **Sound card.** The first meter: what you hear before any beat logic. A thin
-  live spectrum over Level, Bass, Mid + Lead and Treble + Hats. The
-  input-check rows (waveform, input level, loudness, the gate) sit in the Setup
-  view. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
+  live spectrum over Level, Bass, Mid + Lead and Treble + Hats. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
   over.
 
 ## Writing new copy
