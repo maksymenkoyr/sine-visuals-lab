@@ -7,8 +7,8 @@
  * Three draws: the march runs into an offscreen target no taller than
  * `GAS_HEIGHT` for the quality preset, a full-resolution pass scales it up
  * with its glare, and the stars go on top as points. The gas is soft enough
- * to scale up; the march at full Retina resolution measured 112 ms a frame
- * on an M1 Pro.
+ * to scale up, sharpened on the way (glsl.ts's OUT_BODY); the march at full
+ * Retina resolution measured 112 ms a frame on an M1 Pro.
  *
  * The look and the motion were measured from a silent Blender screensaver
  * (the `/ref` bundles `violet-filament` and `violet-loop`); nothing in it

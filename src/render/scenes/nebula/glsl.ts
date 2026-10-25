@@ -115,6 +115,10 @@ const EXPOSURE = 1.25;
 const BLOOM_LODS = [2, 3.5];
 const BLOOM_FLOOR = 0.18;
 const BLOOM_GAIN = 0.8;
+/** Unsharp amount against the gas target's first mip, after the cubic scale-up. Measured at Retina
+ *  size (docs/scenes/nebula.md): high's `GAS_HEIGHT` target came out about as crisp as a march at
+ *  the screen's full height, at a fraction of the cost; twice this turned the gas grainy. */
+const SHARPEN = 0.5;
 
 const f = (x: number, d = 4) => x.toFixed(d);
 
@@ -292,10 +296,30 @@ void main() {
 `;
 
 export const OUT_BODY = `
+// Catmull-Rom, not the hardware's bilinear: the target is stretched several times over on a Retina
+// screen, where bilinear smears every rim. The clamp drops the filter's overshoot past black and white.
+vec4 crWeights(float t) {
+  return 0.5 * vec4(t * (t * (2.0 - t) - 1.0), t * t * (3.0 * t - 5.0) + 2.0, t * (t * (4.0 - 3.0 * t) + 1.0), t * t * (t - 1.0));
+}
+vec3 gasCubic(vec2 uv) {
+  ivec2 size = textureSize(uGasTex, 0);
+  vec2 c = uv * vec2(size) - 0.5;
+  vec2 i = floor(c);
+  vec4 wx = crWeights(c.x - i.x), wy = crWeights(c.y - i.y);
+  vec3 sum = vec3(0.0);
+  for (int y = 0; y < 4; y++) {
+    for (int x = 0; x < 4; x++) {
+      sum += texelFetch(uGasTex, clamp(ivec2(i) + ivec2(x - 1, y - 1), ivec2(0), size - 1), 0).rgb * wx[x] * wy[y];
+    }
+  }
+  return clamp(sum, 0.0, 1.0);
+}
+
 void main() {
   vec2 p = roomUv(vUv) - 0.5;
   p.x *= uResolution.x / uResolution.y;
-  vec3 col = texture(uGasTex, vUv).rgb;
+  vec3 col = gasCubic(vUv);
+  col = clamp(col + ${f(SHARPEN)} * (col - textureLod(uGasTex, vUv, 1.0).rgb), 0.0, 1.0);
   // Glare from the gas target's mip chain (index.ts rebuilds it each frame): the reference's rims
   // and hot spots sit in a soft halo, glow e-fold about 10 px at 720p.
   vec3 glow = 0.5 * (textureLod(uGasTex, vUv, ${f(BLOOM_LODS[0], 1)}).rgb + textureLod(uGasTex, vUv, ${f(BLOOM_LODS[1], 1)}).rgb);
