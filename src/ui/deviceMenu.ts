@@ -72,7 +72,7 @@ import { installRowHints } from "./rowHints.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
-import { createAudioMeters, createTraceStrip, type AudioMetersDeps } from "./audioMeters.ts";
+import { createAudioMeters, type AudioMetersDeps } from "./audioMeters.ts";
 import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
 import {
@@ -89,13 +89,6 @@ import {
   type HeatTrack,
 } from "./heat.ts";
 import { getHistorySpan } from "./historySpan.ts";
-import {
-  PICTURE_MEASURES,
-  displayLevel,
-  overallLevel,
-  type PictureMeasureKey,
-  type PictureReading,
-} from "../render/pictureMeter.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import type { CastMode, PreviewSize } from "../render/outputPower.ts";
@@ -571,8 +564,6 @@ export interface DeviceMenuDeps {
   /** Index into sceneSettings.ts's EXPANSION_SHAPES. Device-local. */
   getSceneExpansionShape: () => number;
   onSceneExpansionShapeChange: (index: number) => void;
-  /** Null once the meter has gone stale (panel just opened, or nothing forced sampling while closed), never a frozen last value. See src/render/pictureMeter.ts. */
-  getPictureReading: () => PictureReading | null;
   /** A value typed past the slider's ends, and how far the slider stretches to fit it (render/customValues.ts). */
   customValues: {
     get(sceneId: string, key: string): number | undefined;
@@ -639,8 +630,6 @@ export interface DeviceMenu {
   isOpen(): boolean;
   /** The scene or palette changed from outside (Set pad, key, Autopilot): rebuilds what follows the scene. No-op while closed (open() does it). */
   sceneChanged(): void;
-  /** app.ts samples the frame for the Picture block only while it is on screen (onScreen.ts says why that sample isn't free). */
-  isPictureOnScreen(): boolean;
   /** The stem split runs only while this is true (src/render/stemReaders.ts). */
   isStemsRowOnScreen(): boolean;
 }
@@ -4601,10 +4590,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // pulls the picture from it (drives.ts header, "Master Expansion"). Its own
   // always-visible card, not part of the auto system, so it stays on scenes
   // with no settings. Violet like the Scene card because it scales that card.
-  //
-  // The Picture block measures the rendered frame itself, since a setting has
-  // no "more intense" direction (src/render/pictureMeter.ts;
-  // tools/master-sweep.mjs sweeps it).
   const masterCard = createCard({ title: "Master", accent: SCENE_VIOLET });
   markBlock(masterCard.title);
   const masterRow = createControlRow({
@@ -4675,120 +4660,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   leashRow.append(leashGauge.el);
   const leashOnScreen = watchOnScreen(leashRow);
   masterCard.body.append(masterRow.el, masterExpansionRow.el, masterShapeRow.el, leashRow);
-
-  // Picture block (see above): a plain .vc-row/.vc-hint block, not
-  // createMeterRow's bar shape, since there's no single amount to fill.
-  // Folded, one Overall row: every PICTURE_MEASURES trace in its PICTURE_COLORS
-  // colour plus overallLevel's line in violet. Unfolded, a row per measure
-  // (createTraceStrip). Rows record while folded, so they unfold with their
-  // last 10 s drawn. Captions follow powerCard.ts's readoutCaptionStyle (kept
-  // local).
-  const pictureHeading = groupHeading("Picture");
-  const pictureCaptionStyle = `
-    font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
-    color: rgba(255,255,255,0.5); white-space: nowrap;
-  `;
-  // DSEG7 (the face of the digits style) has no dashes, so "--" needs the
-  // text style (as createMeterRow's setReadout does).
-  const pictureReadoutDigitsStyle = `${digitsStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
-  const pictureReadoutTextStyle = `${digitsTextStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
-  // One colour per measure, for its row and its Overall overlay line; clear of
-  // SCENE_VIOLET (the Overall line). A Record so a new key can't ship without.
-  const PICTURE_COLORS: Record<PictureMeasureKey, string> = {
-    brightness: "#f4f4f4",
-    colour: "#f28bd0",
-    motion: "#59bbfb",
-    detail: "#8ce6a0",
-    flashes: "#eab308",
-  };
-  const pictureGridStyle = `display: grid; grid-template-columns: 76px minmax(0, 1fr) 26px; align-items: center; gap: 5px 8px;`;
-  const pictureBlock = document.createElement("div");
-  pictureBlock.className = "vc-row";
-  pictureBlock.tabIndex = 0;
-  pictureBlock.setAttribute("role", "button");
-  pictureBlock.style.cursor = "pointer";
-  pictureBlock.style.setProperty("--vc-accent", SCENE_VIOLET);
-
-  const pictureSummary = document.createElement("div");
-  pictureSummary.style.cssText = pictureGridStyle;
-  const pictureCaret = document.createElement("span");
-  const pictureSummaryCaption = document.createElement("div");
-  pictureSummaryCaption.style.cssText = `${pictureCaptionStyle} color: rgba(255,255,255,0.75);`;
-  pictureSummaryCaption.append(pictureCaret, "Overall");
-  const pictureSummaryStrip = createTraceStrip(
-    [
-      ...PICTURE_MEASURES.map((m) => ({ color: withAlpha(PICTURE_COLORS[m.key], 0.55), width: 1 })),
-      { color: SCENE_VIOLET, width: 2.5 },
-    ],
-    40,
-    { label: "History of the Overall picture reading" },
-  );
-  pictureSummaryStrip.canvas.style.marginTop = "0";
-  const pictureSummaryReadout = document.createElement("span");
-  pictureSummaryReadout.style.cssText = pictureReadoutTextStyle;
-  pictureSummaryReadout.textContent = "--";
-  pictureSummary.append(pictureSummaryCaption, pictureSummaryStrip.canvas, pictureSummaryReadout);
-  let pictureSummaryText = "--";
-
-  // Folded, a key naming the overlay's colours; hidden once the rows show.
-  const pictureLegend = document.createElement("div");
-  pictureLegend.style.cssText = `flex-wrap: wrap; gap: 2px 10px; margin: 5px 0 0 84px; font: 400 8.5px/1.2 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;`;
-  for (const m of PICTURE_MEASURES) {
-    const key = document.createElement("span");
-    key.textContent = m.label;
-    key.style.color = PICTURE_COLORS[m.key];
-    pictureLegend.appendChild(key);
-  }
-
-  const pictureGrid = document.createElement("div");
-  pictureGrid.style.cssText = `${pictureGridStyle} padding-top: 6px;`;
-  const pictureFold = document.createElement("div");
-  pictureFold.style.overflow = "hidden";
-  pictureFold.appendChild(pictureGrid);
-  const pictureHint = document.createElement("div");
-  pictureHint.className = "vc-hint";
-  setHintText(
-    pictureHint,
-    "Measured from the picture itself, 15 times a second, over the last 10 s. Overall is the average of them all. 100 is about as far as scenes go; a few go further and stay pinned at 100. Click to show or hide each one on its own.",
-  );
-  const pictureRows = PICTURE_MEASURES.map((measure) => {
-    const caption = document.createElement("div");
-    caption.textContent = measure.label;
-    caption.title = measure.description;
-    caption.style.cssText = `${pictureCaptionStyle} color: ${PICTURE_COLORS[measure.key]};`;
-    // The caption and the number beside the trace give the current reading;
-    // the trace adds its history.
-    const strip = createTraceStrip([{ color: PICTURE_COLORS[measure.key], width: 1.5 }], 18, {
-      label: `History of ${measure.label}`,
-    });
-    strip.canvas.style.marginTop = "0";
-    const readout = document.createElement("span");
-    readout.style.cssText = pictureReadoutTextStyle;
-    readout.textContent = "--";
-    pictureGrid.append(caption, strip.canvas, readout);
-    return { measure, strip, readout, lastText: "--" };
-  });
-
-  let pictureOpen = false;
-  function setPictureOpen(open: boolean): void {
-    pictureOpen = open;
-    pictureBlock.setAttribute("aria-expanded", String(open));
-    pictureCaret.textContent = open ? "▾ " : "▸ ";
-    pictureFold.style.height = open ? "" : "0";
-    pictureFold.inert = !open;
-    pictureLegend.style.display = open ? "none" : "flex";
-  }
-  setPictureOpen(false);
-  pictureBlock.addEventListener("click", () => setPictureOpen(!pictureOpen));
-  pictureBlock.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" && e.key !== " ") return;
-    e.preventDefault();
-    setPictureOpen(!pictureOpen);
-  });
-
-  pictureBlock.append(pictureSummary, pictureLegend, pictureFold, pictureHint);
-  masterCard.body.append(pictureHeading, pictureBlock);
-  const pictureOnScreen = watchOnScreen(pictureBlock);
 
   // Binds a row's typed entry to deps.customValues. A dev build lifts
   // customReach's bound, for tuning.
@@ -6441,12 +6312,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const SPARKLINE_REFRESH_MS = 1000 / 30;
   const SPARKLINE_MAX_SLOTS = 15;
   let lastSparklineMs = 0;
-  // The Picture block's readout text rides a slow cadence like
-  // AUTO_UI_REFRESH_MS, kept separate since the two blocks' DOM writes are
-  // independent (its traces redraw every tick, like the sparklines).
-  const PICTURE_TEXT_REFRESH_MS = 100;
-  let lastPictureTextMs = 0;
-
   return {
     toggle() {
       if (isOpen) close();
@@ -6458,7 +6323,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (isOpen) syncToScene();
     },
     applyMidiCc: (target, cc) => midiCard?.applyCc(target, cc),
-    isPictureOnScreen: () => isOpen && pictureOnScreen(),
     isStemsRowOnScreen: () => isOpen && audioMeters.stemRowsOnScreen(),
     update(
       frame: FeatureFrame | null,
@@ -6565,13 +6429,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const h of driveRowHandles) h.tickHeatGlow();
       }
 
-      // Picture: the Overall trace plus one per measure (pictureMeter.ts),
-      // drawn every tick (canvas draws are cheap; the DOM write is throttled).
-      // getPictureReading() is null once the meter goes stale: a gap in the
-      // trace and "--". While the column is scrolled past, traces record and
-      // skip the draw; app.ts stops sampling the frame (isPictureOnScreen), so
-      // they record gaps.
-      const pictureShown = pictureOnScreen();
       if (leashOnScreen()) {
         leashGauge.draw({
           normal: deps.getSceneMaster() / SCENE_MASTER_MAX,
@@ -6579,37 +6436,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           excursion: drives?.masterExcursion() ?? null,
         });
       }
-
-      const pictureReading = deps.getPictureReading();
-      const pictureTextDue = nowMs - lastPictureTextMs >= PICTURE_TEXT_REFRESH_MS;
-      if (pictureTextDue) lastPictureTextMs = nowMs;
-      const pictureLevels = pictureRows.map((row) =>
-        displayLevel(row.measure, pictureReading ? pictureReading[row.measure.key] : null),
-      );
-      const pictureOverall = overallLevel(pictureLevels);
-      pictureSummaryStrip.push([...pictureLevels, pictureOverall], nowMs);
-      if (pictureShown) pictureSummaryStrip.draw();
-      if (pictureTextDue) {
-        const text = pictureOverall === null ? "--" : String(Math.round(pictureOverall * 100));
-        if (text !== pictureSummaryText) {
-          pictureSummaryText = text;
-          setLiveText(pictureSummaryReadout, text); // inside the Picture block's press target
-          pictureSummaryReadout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
-        }
-      }
-      pictureRows.forEach((row, i) => {
-        const level = pictureLevels[i]!;
-        // Folded rows still record; they skip only the redraw and the readout.
-        row.strip.push([level], nowMs);
-        if (!pictureOpen || !pictureShown) return;
-        row.strip.draw();
-        if (!pictureTextDue) return;
-        const text = level === null ? "--" : String(Math.round(level * 100));
-        if (text === row.lastText) return;
-        row.lastText = text;
-        setLiveText(row.readout, text);
-        row.readout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
-      });
 
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
       lastAutoRefreshMs = nowMs;

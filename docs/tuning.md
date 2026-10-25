@@ -85,9 +85,8 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    headlessly with `tools/tune-probe.mjs`.
 
    The probe's settings are only ever what a scene *declares*; they carry no
-   sense of "more intense" a master dial could read. The Master card's own
-   Picture block answers that by measuring the rendered picture itself instead
-   — see `src/render/pictureMeter.ts` for what it measures and why.
+   sense of "more intense" a master dial could read. The picture meter answers
+   that by measuring the rendered picture itself instead — see `src/render/pictureMeter.ts` for what it measures and why.
    `tools/master-sweep.mjs` drives the same measurement headlessly across
    every scene and master value, and writes a report page: which scenes the
    dial barely moves, which measure it moves most, and where a scene clips.

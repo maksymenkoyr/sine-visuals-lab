@@ -147,8 +147,7 @@ Darker means more important.
         tracker's BPM. For DJs · `src/render/tapTempo.ts`
   - ●○○ **Look**
     - ●○○ **Master card** — Scale, Expansion and its shape for the whole
-      scene, the picture meter, and Auto for everything ·
-      `src/ui/leashGauge.ts`, `src/render/pictureMeter.ts`
+      scene, and Auto for everything · `src/ui/leashGauge.ts`
     - ●○○ **Scene card** — the scene's own settings, each with Auto and
       Reset, plus any custom widget the scene declares ·
       `src/render/sceneSettings.ts`, `src/ui/widgets/registry.ts`

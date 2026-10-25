@@ -3,7 +3,6 @@ import {
   frameStats,
   motionBetween,
   displayLevel,
-  overallLevel,
   createPictureMeter,
   createPictureAverager,
   PICTURE_MEASURES,
@@ -198,18 +197,6 @@ describe("displayLevel", () => {
 
   it("passes null through", () => {
     expect(displayLevel(measure, null)).toBeNull();
-  });
-});
-
-describe("overallLevel", () => {
-  it("is the mean of the levels that have a reading", () => {
-    expect(overallLevel([0.2, 0.4, null, 0.6])).toBeCloseTo(0.4, 5);
-  });
-
-  it("is null only when no level has a reading", () => {
-    expect(overallLevel([null, null])).toBeNull();
-    expect(overallLevel([])).toBeNull();
-    expect(overallLevel([0, null])).toBe(0);
   });
 });
 
