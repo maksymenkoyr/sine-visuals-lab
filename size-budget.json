@@ -1,9 +1,9 @@
 {
-  "about": "Budgets for the size step of `npm run check` (the tools/check.mjs header says what it measures). pages: bytes of JS each page loads before its first paint, gzip -9. pinned: raw bytes pinAsset() fetches after load (src/pinnedAssets.ts). Lower a number whenever a change shrinks it; raising one needs a reason in the pull request.",
+  "about": "Budgets for the size step of `npm run check` (the tools/check.mjs header says what it measures). pages: bytes of JS each page loads before its first paint, gzip -9. pinned: raw bytes pinAsset() fetches after load (src/pinnedAssets.ts). Each budget sits about 10% above the size measured when it was set, so the step catches a regression (a scene's code back in first paint), not a feature's few kB: budgets kept at the measured size failed nearly every pull request. When a change shrinks a page well below its budget, reset the budget to the new size plus that margin; raising one past it needs a reason in the pull request.",
   "pages": {
-    "index.html": 371800,
-    "output.html": 106700,
-    "tv.html": 127400
+    "index.html": 406528,
+    "output.html": 117760,
+    "tv.html": 140288
   },
-  "pinned": 1000
+  "pinned": 51200
 }

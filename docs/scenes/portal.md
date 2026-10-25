@@ -65,6 +65,20 @@ about 0.38–0.42 s in its goal. The report's own figures are the ones above;
   whole frame yellow-white; its share of the flood, its debris edges and its
   ring bloom were turned down.
 - 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/portal/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
+  audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
+  scene changed. Since #677 they had fired only on the hits the engine named
+  kicks and hats: on Billie Jean about half the old lanes' Bass hits and a
+  fifteenth of their Treble hits. `tools/tune-real.mjs portal` on Billie Jean,
+  30 s from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before #677 | 6.63 | 12.86 | 0.32 | 0.39 |
+  | #683 | 3.62 | 13.63 | 0.32 | 0.39 |
+  | #682 | 6.66 | 13.04 | 0.32 | 0.38 |
+
+  The steady motion fell by about half on #683 and is back to the old lanes'. No hit fired on silence.
 
 ## Tuning notes
 
@@ -104,3 +118,4 @@ about 0.38–0.42 s in its goal. The report's own figures are the ones above;
 ## History
 
 - this PR: first draft of the scene, its three files, the test and this record.
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)

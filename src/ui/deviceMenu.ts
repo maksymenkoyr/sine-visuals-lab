@@ -52,7 +52,6 @@ import {
 } from "../audio/silenceGate.ts";
 import type { HitShape, HitShapePatch } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
 import {
@@ -607,7 +606,6 @@ export interface DeviceMenuDeps {
   getDriveReadout: (sceneId: string, spec: SceneSetting) => HitReadout | undefined;
   onSetDriveReadout: (sceneId: string, spec: SceneSetting, readout: HitReadout) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
-  onLufsReset: () => void;
   onTap: (timeStamp: number) => void;
   /** Live value for a row on auto (autoTune.ts). */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
@@ -699,7 +697,7 @@ export interface DeviceMenu {
   close(): void;
   /** Fed every frame while in a viz. Any may be null (frame/ungained/anim before audio is up; rawBands on a mic-less renderer, mono there too unless the feed sends its waveform).
    *  `frame` has the band faders applied, `ungained` is the same before them (the ghost bars).
-   *  `lufs`, `beatDiag`, `gate` and `drives` are null wherever this device runs no extractor of its own (renderer, synthetic feed).
+   *  `beatDiag`, `gate` and `drives` are null wherever this device runs no extractor of its own (renderer, synthetic feed).
    *  `rateScale` is app.ts's already-resolved smoothingRateScale; not re-resolved here because resolveSmoothing() slews its auto value and this runs every rAF tick.
    *  `drives` comes off the same un-latched AnimFrame as `anim`: row pills read uniformPair() and the Frequencies overlay reads excess(); neither calls fired(), so polling can't steal a grid setting's pending edge from the scene.
    *  `draw` is false on ticks the panel skips (a display faster than the render cap): only the meters' traces, the heat and the drive graphs' peaks record, with no draw or DOM write. */
@@ -711,7 +709,6 @@ export interface DeviceMenu {
     anim: AnimFrame | null,
     mono: Float32Array | null,
     rateScale: number,
-    lufs: LufsReading | null,
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
     drives: SceneDrives | null,
@@ -2052,7 +2049,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const audioMeters = createAudioMeters({
     openSetup: () => setSetupShown(true),
     heatSettings: heatSettingRows,
-    onLufsReset: deps.onLufsReset,
     onTap: deps.onTap,
     getSilenceGate: () => deps.getSilenceGate(),
     getBandEdgesHz: () => deps.getBandEdgesHz(),
@@ -7198,7 +7194,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       anim: AnimFrame | null,
       mono: Float32Array | null,
       rateScale: number,
-      lufs: LufsReading | null,
       beatDiag: OnsetDiag | null,
       gate: SilenceGateReading | null,
       drives: SceneDrives | null,
@@ -7215,7 +7210,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // tick. Open but not `draw`, it also records the drive graphs' peak-hold
       // (notePeaks) so a one-tick hit reaches the next drawn sparkline.
       if (!isOpen || !draw) {
-        audioMeters.update(frame, anim, mono, rawBands, rateScale, lufs, beatDiag, gate, false);
+        audioMeters.update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
         return;
       }
@@ -7223,7 +7218,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // here, not at each scene-change call site, since this runs every tick
       // however the switch happened. Cheap when nothing changed.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, lufs, beatDiag, gate, true);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, true);
       // Unthrottled: the live row's meter should track frame.level like any
       // other live meter, not the structural-refresh cadence.
       sourceRow.updateMeters(frame?.level ?? null);

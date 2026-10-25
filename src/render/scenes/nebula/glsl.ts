@@ -81,6 +81,14 @@ const SHELL_W = 0.005;
 const WRINKLE = 0.03;
 const VEIN_W = 0.02;
 const VEIN_GAIN = 0.45;
+/** The march's erf inputs are clamped to ±ERF_CLAMP; past these e values (band widths from the edge)
+ *  every band or shell input sits on that clamp. VOID_E must stay below -1, where fill, absorption
+ *  and the veins are zero too, for skipping a void step to stay exact. */
+const ERF_CLAMP = 4;
+const VOID_E = Math.min(...BAND_C.map((c, k) => c - ERF_CLAMP * BAND_S[k]));
+const BAND_TOP_E = Math.max(...BAND_C.map((c, k) => c + ERF_CLAMP * BAND_S[k]));
+const SHELL_LOW_E = Math.min(...SHELL_OFF.map((o) => (o - ERF_CLAMP * SHELL_W) / BAND));
+const SHELL_TOP_E = Math.max(...SHELL_OFF.map((o) => (o + ERF_CLAMP * SHELL_W) / BAND));
 /** How much of the tone map keeps each colour's hue (the rest bleaches toward white per channel). */
 const KEEP_HUE = 0.85;
 /** How far the warp bends the gas, in world units. */
@@ -103,7 +111,7 @@ const EMIT = 3.2;
 /** How much light the gas inside the edge blocks per world unit. */
 const ABSORB = 0.6;
 /** Transmittance below which the gas hides the stars behind it. */
-const OCCLUDE = 0.3;
+export const OCCLUDE = 0.3;
 /** How many times brighter the white-hot core burns on a full hit at Flare 1. */
 const FLARE_GAIN = 1.6;
 /** How much brighter the whole cloud gets at full drive at Glow 1. */
@@ -115,6 +123,10 @@ const EXPOSURE = 1.25;
 const BLOOM_LODS = [2, 3.5];
 const BLOOM_FLOOR = 0.18;
 const BLOOM_GAIN = 0.8;
+/** Unsharp amount against the gas target's first mip, after the cubic scale-up. Measured at Retina
+ *  size (docs/scenes/nebula.md): high's `GAS_HEIGHT` target came out about as crisp as a march at
+ *  the screen's full height, at a fraction of the cost; twice this turned the gas grainy. */
+const SHARPEN = 0.5;
 
 const f = (x: number, d = 4) => x.toFixed(d);
 
@@ -174,9 +186,10 @@ ${pathGlsl("pathY", PATH_Y, ["uPath[0].z", "uPath[0].w"])}
 ${pathGlsl("pathR", PATH_R, ["uPath[1].x", "uPath[1].y"])}
 ${VIEW_RAY}
 
-// erf, near enough for a glow (tanh form, error under 1e-3); inputs are clamped to ±4.
-vec4 erfA(vec4 x) { return tanh(1.1283792 * x + 0.1009 * x * x * x); }
-float erfA(float x) { return tanh(1.1283792 * x + 0.1009 * x * x * x); }
+// erf, near enough for a glow (tanh form, error under 1e-3). tanh is spelled out through exp because
+// Metal's built-in tanh cost a quarter of the march (gpu-bench, docs/scenes/nebula.md).
+vec4 erfA(vec4 x) { return 1.0 - 2.0 / (exp(2.0 * (1.1283792 * x + 0.1009 * x * x * x)) + 1.0); }
+float erfA(float x) { return 1.0 - 2.0 / (exp(2.0 * (1.1283792 * x + 0.1009 * x * x * x)) + 1.0); }
 
 vec3 bodyColour(float w) {
   return mix(mix(BODY_BLUE, BODY_VIOLET, smoothstep(0.48, 0.54, w)), BODY_MAGENTA, smoothstep(0.57, 0.64, w));
@@ -212,6 +225,7 @@ void main() {
   vec4 erfSPrev = vec4(0.0);
   float fibPrev = 0.5;
   float erfVPrev = 0.0;
+  bool prevLive = false;
   float fillPrev = 0.0;
   float sigmaPrev = 0.0;
   int steps = min(int(uMaxSteps), ${MAX_STEPS});
@@ -233,16 +247,28 @@ void main() {
     dens -= carve * exp(-dot(rel.xy - axis, rel.xy - axis) / (rad * rad));
 
     float e = (dens - th) / ${f(BAND)};
-    vec4 x = clamp((e - BAND_C) / BAND_S, -4.0, 4.0);
-    vec4 erfX = erfA(x);
-    vec4 xs = clamp((e * ${f(BAND)} - SHELL_OFF) / ${f(SHELL_W)}, -4.0, 4.0);
-    vec4 erfS = erfA(xs);
-    float fill = smoothstep(0.5, 2.5, e);
+    // Most steps lie in empty space, where every erf below sits on its clamp; branching to the clamped
+    // value instead of evaluating it is exact and halves the march.
+    vec4 x = vec4(-4.0), xs = vec4(-4.0), erfX = vec4(-1.0), erfS = vec4(-1.0);
+    float fill = 0.0, sigma = 0.0;
+    if (e > ${f(VOID_E)}) {
+      x = clamp((e - BAND_C) / BAND_S, -4.0, 4.0);
+      erfX = e >= ${f(BAND_TOP_E)} ? vec4(1.0) : erfA(x);
+      xs = clamp((e * ${f(BAND)} - SHELL_OFF) / ${f(SHELL_W)}, -4.0, 4.0);
+      erfS = e <= ${f(SHELL_LOW_E)} ? vec4(-1.0) : (e >= ${f(SHELL_TOP_E)} ? vec4(1.0) : erfA(xs));
+      fill = smoothstep(0.5, 2.5, e);
+      sigma = ${f(ABSORB)} * smoothstep(-1.0, 1.5, e);
+    }
     float xv = clamp((fib - 0.5) / ${f(VEIN_W)}, -4.0, 4.0);
-    float erfV = erfA(xv);
-    float sigma = ${f(ABSORB)} * smoothstep(-1.0, 1.5, e);
+    // A step whose both ends are void adds no light and absorbs nothing, so it is skipped whole.
+    bool live = i > 0 && max(e, ePrev) > ${f(VOID_E)};
+    float erfV = 0.0;
+    if (live) {
+      erfV = erfA(xv);
+      if (!prevLive) erfVPrev = erfA(clamp((fibPrev - 0.5) / ${f(VEIN_W)}, -4.0, 4.0));
+    }
 
-    if (i > 0) {
+    if (live) {
       float de = e - ePrev;
       vec4 avg = abs(de) > 1e-3 ? 0.8862269 * BAND_S * (erfX - erfPrev) / de : exp(-x * x);
       float ds = de * ${f(BAND / SHELL_W)};
@@ -276,6 +302,7 @@ void main() {
     fillPrev = fill;
     sigmaPrev = sigma;
     tPrev = t;
+    prevLive = live;
     t += clamp(abs(dens - th) * ${f(STEP_K)}, ${f(DT_MIN)} * (1.0 + 0.2 * t), ${f(DT_MAX)});
   }
 
@@ -292,10 +319,30 @@ void main() {
 `;
 
 export const OUT_BODY = `
+// Catmull-Rom, not the hardware's bilinear: the target is stretched several times over on a Retina
+// screen, where bilinear smears every rim. The clamp drops the filter's overshoot past black and white.
+vec4 crWeights(float t) {
+  return 0.5 * vec4(t * (t * (2.0 - t) - 1.0), t * t * (3.0 * t - 5.0) + 2.0, t * (t * (4.0 - 3.0 * t) + 1.0), t * t * (t - 1.0));
+}
+vec3 gasCubic(vec2 uv) {
+  ivec2 size = textureSize(uGasTex, 0);
+  vec2 c = uv * vec2(size) - 0.5;
+  vec2 i = floor(c);
+  vec4 wx = crWeights(c.x - i.x), wy = crWeights(c.y - i.y);
+  vec3 sum = vec3(0.0);
+  for (int y = 0; y < 4; y++) {
+    for (int x = 0; x < 4; x++) {
+      sum += texelFetch(uGasTex, clamp(ivec2(i) + ivec2(x - 1, y - 1), ivec2(0), size - 1), 0).rgb * wx[x] * wy[y];
+    }
+  }
+  return clamp(sum, 0.0, 1.0);
+}
+
 void main() {
   vec2 p = roomUv(vUv) - 0.5;
   p.x *= uResolution.x / uResolution.y;
-  vec3 col = texture(uGasTex, vUv).rgb;
+  vec3 col = gasCubic(vUv);
+  col = clamp(col + ${f(SHARPEN)} * (col - textureLod(uGasTex, vUv, 1.0).rgb), 0.0, 1.0);
   // Glare from the gas target's mip chain (index.ts rebuilds it each frame): the reference's rims
   // and hot spots sit in a soft halo, glow e-fold about 10 px at 720p.
   vec3 glow = 0.5 * (textureLod(uGasTex, vUv, ${f(BLOOM_LODS[0], 1)}).rgb + textureLod(uGasTex, vUv, ${f(BLOOM_LODS[1], 1)}).rgb);

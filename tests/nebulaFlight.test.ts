@@ -12,7 +12,7 @@ import {
   PERIOD,
   PERIOD_Z,
 } from "../src/render/scenes/nebula/flight.ts";
-import { buildStars, STAR_COUNT } from "../src/render/scenes/nebula/stars.ts";
+import { buildStars, STAR_COUNT, STAR_STRIDE } from "../src/render/scenes/nebula/stars.ts";
 
 function camAt(travel: number, turn = 1) {
   const f = createFlight();
@@ -95,15 +95,18 @@ describe("Nebula stars", () => {
   it("scatters the same stars inside one repeat on every build", () => {
     const a = buildStars();
     const b = buildStars();
-    expect(a.length).toBe(STAR_COUNT * 4);
+    expect(a.length).toBe(STAR_COUNT * STAR_STRIDE);
     expect(Array.from(a)).toEqual(Array.from(b));
-    for (let i = 0; i < a.length; i += 4) {
-      for (let k = 0; k < 3; k++) {
-        expect(a[i + k]).toBeGreaterThanOrEqual(0);
-        expect(a[i + k]).toBeLessThan(PERIOD);
-      }
-      expect(a[i + 3]).toBeGreaterThanOrEqual(0);
-      expect(a[i + 3]).toBeLessThan(1);
+    // One assert per property: a per-value expect over every star runs past the test timeout.
+    let outOfRange = 0;
+    for (let i = 0; i < a.length; i += STAR_STRIDE) {
+      for (let k = 0; k < 3; k++) if (!(a[i + k] >= 0 && a[i + k] < PERIOD)) outOfRange++;
+      for (let k = 3; k < 6; k++) if (!(a[i + k] >= 0 && a[i + k] < 1)) outOfRange++;
     }
+    expect(outOfRange).toBe(0);
+  });
+
+  it("has no NaN in any star", () => {
+    expect(buildStars().some(Number.isNaN)).toBe(false);
   });
 });

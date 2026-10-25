@@ -7,8 +7,8 @@
  * Three draws: the march runs into an offscreen target no taller than
  * `GAS_HEIGHT` for the quality preset, a full-resolution pass scales it up
  * with its glare, and the stars go on top as points. The gas is soft enough
- * to scale up; the march at full Retina resolution measured 112 ms a frame
- * on an M1 Pro.
+ * to scale up, sharpened on the way (glsl.ts's OUT_BODY); the march at full
+ * Retina resolution measured 112 ms a frame on an M1 Pro.
  *
  * The look and the motion were measured from a silent Blender screensaver
  * (the `/ref` bundles `violet-filament` and `violet-loop`); nothing in it
@@ -42,8 +42,8 @@ import {
 } from "../../sceneCommon.ts";
 import { card, SETTINGS } from "./card.ts";
 import { advanceFlight, cameraUniforms, createFlight, hueWander, pathUniforms, type Flight } from "./flight.ts";
-import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OUT_BODY, T_MAX } from "./glsl.ts";
-import { buildStars, STAR_COUNT, STAR_FRAG, STAR_INSTANCES, starVert } from "./stars.ts";
+import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, T_MAX } from "./glsl.ts";
+import { buildStars, STAR_COUNT, STAR_FRAG, STAR_INSTANCES, STAR_STRIDE, starVert } from "./stars.ts";
 import { bakeVolume } from "./volume.ts";
 
 const ID = card.id;
@@ -87,6 +87,7 @@ function createNebulaScene(): Scene {
   let vao: WebGLVertexArrayObject | null = null;
   let starVao: WebGLVertexArrayObject | null = null;
   let starBuf: WebGLBuffer | null = null;
+  let maxPointSize = 64;
   let target: ColorTarget | null = null;
   // Baked once per mount; a bake that failed isn't retried every frame.
   let volume: WebGLTexture | null = null;
@@ -121,7 +122,7 @@ function createNebulaScene(): Scene {
       const { gl } = ctx;
       gasProg = createProgram(gl, fragSource(GAS_BODY));
       outProg = createProgram(gl, fragSource(OUT_BODY));
-      starProg = createProgram(gl, STAR_FRAG, starVert(FOV_TAN, T_MAX));
+      starProg = createProgram(gl, STAR_FRAG, starVert(FOV_TAN, T_MAX, OCCLUDE));
       vao = createFullscreenQuad(gl);
       starVao = gl.createVertexArray();
       starBuf = gl.createBuffer();
@@ -129,8 +130,11 @@ function createNebulaScene(): Scene {
       gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
       gl.bufferData(gl.ARRAY_BUFFER, buildStars(), gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribPointer(0, 4, gl.FLOAT, false, STAR_STRIDE * 4, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, STAR_STRIDE * 4, 16);
       gl.bindVertexArray(null);
+      maxPointSize = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1];
       flight = createFlight();
       baked = false;
     },
@@ -182,6 +186,7 @@ function createNebulaScene(): Scene {
         starProg.setV2("uResolution", gl.drawingBufferWidth, gl.drawingBufferHeight);
         starProg.setV4("uViewport", viewport.x, viewport.y, viewport.w, viewport.h);
         starProg.setF("uStars", setting("stars"));
+        starProg.setF("uMaxPt", maxPointSize);
         starProg.setI("uGasTex", 0);
         // Screen blend: a star brightens the gas under it without clipping it to white.
         gl.enable(gl.BLEND);

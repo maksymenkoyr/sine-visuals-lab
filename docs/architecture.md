@@ -68,17 +68,12 @@ scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 
 The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
 in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-the Setup view's Waveform row (Input check card) is fed by `src/audio/waveformAnalyser.ts`
-(math in `waveform.ts`), which reads time-domain samples straight off this
-device's own mic, entirely separate from
-`FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV" below —
-a viewer with no local mic doesn't get that row at all. The same card's Gate
-row reads `AnimFrame.gateDimmer`. Its LUFS row
-is the same kind of read as Waveform: BS.1770 LUFS
-from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
-this device's own capture, hidden on a mic-less renderer. (The Waveform row
-is not: there it draws the followed device's waveform, off the frame's wave
-tail in `src/net/protocol.ts`.)
+the Setup view's Input level row (Input check card) reads CLIP off
+`src/audio/waveformAnalyser.ts` (math in `waveform.ts`), time-domain samples
+straight off this device's own mic, separate from `FeatureFrame`/`AnimFrame`.
+A device following another one reads the followed device's clipping off the
+frame's wave tail in `src/net/protocol.ts` instead. The same card's Gate row
+reads `AnimFrame.gateDimmer`.
 
 `src/render/signals.ts` is the seam between those meters and a scene's own
 `settings`: a scene can mark a `SceneSetting` with `reads`, naming which of

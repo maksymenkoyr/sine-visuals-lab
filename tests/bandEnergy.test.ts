@@ -208,3 +208,62 @@ describe("band energy", () => {
     }
   });
 });
+
+describe("level rises on Bass and Treble", () => {
+  /** A second of steady levels with music on, so the rise threshold settles. */
+  function settled(level: Partial<EngineReading> = {}): ReturnType<typeof createBandEnergy> {
+    const energy = createBandEnergy();
+    for (let i = 0; i < 60; i++) energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.2, ...level }));
+    return energy;
+  }
+
+  it("a jump in the engine's high level fires Treble with no hat named", () => {
+    const energy = settled();
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.8, snare: 2 }));
+    expect([energy.lowOnset, energy.midOnset, energy.highOnset]).toEqual([false, true, true]);
+  });
+
+  it("a jump in the low level fires Bass; one in the mids never fires Mid", () => {
+    const energy = settled();
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.8, mid: 0.8, high: 0.2 }));
+    expect([energy.lowOnset, energy.midOnset, energy.highOnset]).toEqual([true, false, false]);
+  });
+
+  it("without music a jump fires nothing", () => {
+    const energy = settled({ music: false });
+    energy.advance(DT, frame({ low: 0.8, mid: 0.8, high: 0.8 }));
+    expect(energy.lowOnset || energy.midOnset || energy.highOnset).toBe(false);
+    expect(energy.highDiag.gated).toBe(false);
+  });
+
+  it("a rise and the engine's hit just after it count as one", () => {
+    const energy = settled();
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.8 }));
+    expect(energy.highOnset).toBe(true);
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.8, hat: 2 }));
+    expect(energy.highOnset).toBe(false);
+    for (let i = 0; i < 6; i++) energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.8 }));
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.8, hat: 2 }));
+    expect(energy.highOnset).toBe(true);
+  });
+
+  it("engine hits close together still each fire", () => {
+    const energy = settled();
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.2, kick: 2 }));
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.2, kick: 2 }));
+    expect(energy.lowOnset).toBe(true);
+  });
+
+  it("the silence gate shuts a rise like any hit", () => {
+    const energy = settled();
+    energy.advance(DT, frame({ music: true, confidence: 0.6, low: 0.2, mid: 0.2, high: 0.8 }), 1, 0);
+    expect(energy.highOnset).toBe(false);
+    expect(energy.highDiag.gated).toBe(true);
+  });
+
+  it("music held on a faint pulse fires no rises", () => {
+    const energy = settled({ confidence: 0.25 });
+    energy.advance(DT, frame({ music: true, confidence: 0.25, low: 0.8, mid: 0.2, high: 0.8 }));
+    expect(energy.lowOnset || energy.highOnset).toBe(false);
+  });
+});

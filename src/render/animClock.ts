@@ -59,19 +59,6 @@ export interface AnimFrame {
    *  ("Onset surge") reads this so a scene can lean into a build-up before
    *  the beat actually lands, not just react after. */
   beatRatio: number;
-  /** The raw mic waveform's peak |sample| this tick, peak-held — jumps to a
-   *  louder peak at once, then falls at WAVE_PEAK_FALL_PER_SEC times this
-   *  tick's smoothing rateScale (so Smoothing's Off stop, rateScale =
-   *  Infinity, makes it exactly the instantaneous peak, same as the Waveform
-   *  row's RAW reading). It's the one number the Input check card's Waveform
-   *  readout shows and the `anim.wavePeak` drive source (signals.ts) reads —
-   *  computed here once so both read the same thing. Linear amplitude [0,1]
-   *  of the raw capture (before auto-gain/sensitivity), not normalized. On a
-   *  device following another one's input, the capture is that device's, off
-   *  the frame's wave tail (src/net/protocol.ts; app.ts's waveSamples). 0
-   *  whenever `hit.wavePeak` is omitted/null (no mic and no wave from the
-   *  feed, previews). */
-  wavePeak: number;
   /** The engine's beat/bar clock (src/audio/engine/clock.ts), corrected by
    *  beatTrim.ts (a bar resync, a ×2/÷2 tracking-error fix, a small
    *  earlier/later nudge; see that file for why and the math). Never
@@ -248,9 +235,7 @@ export interface AnimClock {
    *  not something animClock does once for the whole scene; `onset`/
    *  `beatPulse` are the raw, ungridded hits and `beats` is the raw unwrapped
    *  count a `{ source: "beat", grid }` drive grids on its own.
-   *  `hit.wavePeak` is this tick's instantaneous waveform peak
-   *  (src/audio/waveform.ts's `peak()` over app.ts's lastMono) — solo/host
-   *  only, feeding AnimFrame.wavePeak's own peak-hold. `tapNowMs` is this
+   *  `tapNowMs` is this
    *  tick's performance.now(): given, this clock follows the tap-tempo
    *  store (tapTempo.ts — a tap seeds the beat clock and the metronome, and the
    *  raw bpm folds onto the tapped tempo while it guides); omitted, taps
@@ -261,7 +246,7 @@ export interface AnimClock {
     frame: FeatureFrame,
     smoothing?: number,
     gate?: SilenceGateMarks,
-    hit?: { shape: HitShape; wavePeak?: number | null },
+    hit?: { shape: HitShape },
     tapNowMs?: number,
   ): AnimFrame;
   /** Every Lock meaning's reading this tick, whichever one `tempoLock` hands on (for tests/tempoEval/run.ts). */
@@ -273,12 +258,6 @@ export interface AnimClock {
 // hand-duplicating it (its own header explains why: "read it from
 // animClock/bandEnergy; don't invent one").
 export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
-
-// AnimFrame.wavePeak's own fall rate — matches the meters' own peak-hold
-// fall (audioMeters.ts's PEAK_FALL_PER_SEC, spectrumStrip.ts's peak-hold
-// decay), so moving the hold in here (from audioMeters.ts's own local state)
-// doesn't change how the Input check card's Waveform readout looks or feels.
-export const WAVE_PEAK_FALL_PER_SEC = 1.2;
 
 /** The strongest lane hit that passed this tick: each passing lane's diag
  *  ratio is its hit's strength (bandEnergy.ts). */
@@ -326,8 +305,6 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   let lead = 0;
   let metronomePulse = 0;
   let metronomeBarPulse = 0;
-  // AnimFrame.wavePeak's own held state — see that field's own doc comment.
-  let wavePeak = 0;
   // The "Any hit" lane's last graded hit — mutated in place by
   // hitStrength() below, same reasoning as bandEnergy.ts's own per-lane
   // LaneState.hit: holds the previous hit's numbers between onsets rather
@@ -340,7 +317,7 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
       frame: FeatureFrame,
       smoothing = SMOOTHING_DEFAULT,
       gate?: SilenceGateMarks,
-      hit?: { shape: HitShape; wavePeak?: number | null },
+      hit?: { shape: HitShape },
       tapNowMs?: number,
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
@@ -351,15 +328,6 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         tailScales = pulseDecayScales(tailShape);
       }
       const hitTail = tailScales;
-      // AnimFrame.wavePeak's own peak-hold — see that field's own doc
-      // comment. `hit.wavePeak` omitted/null (no mic, no feed wave) holds nothing:
-      // it snaps straight to 0. Otherwise a
-      // finite `inst` minus a non-finite Infinity rateScale (Smoothing's Off
-      // stop) is exactly -Infinity (IEEE754), so Math.max against that lands
-      // on `inst` exactly — no separate smoothingOff branch needed, the same
-      // reasoning audioMeters.ts's own former peak-hold relied on.
-      const inst = hit?.wavePeak;
-      wavePeak = inst == null ? 0 : Math.max(inst, wavePeak - WAVE_PEAK_FALL_PER_SEC * rateScale * dtSec);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
       // A follower's hits carry the level of the frame they came in (EngineReading.hitLevel).
       const hitLevel = frame.engine?.hitLevel;
@@ -449,7 +417,6 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         beatPulse,
         onset,
         beatRatio,
-        wavePeak,
         beatPhase: trimmed.beatPhase,
         barPhase: trimmed.barPhase,
         tempoLock,

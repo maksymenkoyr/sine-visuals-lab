@@ -102,17 +102,15 @@ export type MeterCardId = "sound" | "setup-input" | "hits" | "beat" | "song";
  *  anchor for `anim.tempo`, whose jack mounts there. "bar" is the Beat card's
  *  bar ruler (audioMeters.ts's createBarRuler), the anchor for `anim.metronome`
  *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
- *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead. "waveform" is
- *  the Waveform row, first in the Input check card's body (audioMeters.ts's
- *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
- *  "wave" above (the beat/bar swing trace, a different row entirely).
- *  "level" is the Input level row beneath it — `feature.level`'s anchor.
+ *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
+ *  "level" is the Input level row, first in the Input check card's body —
+ *  `feature.level`'s anchor.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
  *  Treble rows; Lead and Hats point at the Mid and Treble rows they draw in.
  *  "centroid" is the Centroid row in the Setup view's Input check card,
  *  `anim.centroid`'s anchor. Each dial's own cell in the Song card's strip is
  *  its DialSignalId. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "waveform" | "level" | "energy" | "low" | "mid" | "high" | DialSignalId;
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "bar" | "level" | "energy" | "low" | "mid" | "high" | DialSignalId;
 
 /** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
@@ -142,7 +140,6 @@ export type SignalId =
   | "anim.energy"
   | "anim.sectionIntensity"
   | "anim.centroid"
-  | "anim.wavePeak"
   | "anim.beatWave"
   | "anim.barWave"
   | "anim.tempo"
@@ -383,16 +380,6 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) => anim.centroid,
     monitor: { card: "setup-input", row: "centroid" },
-  }),
-  "anim.wavePeak": signal({
-    id: "anim.wavePeak",
-    label: "Waveform",
-    description:
-      "The Waveform row's own reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the row shows as a percentage; raw amplitude before auto-gain, so unlike Level it gets bigger when the room actually gets louder. A phone, iPad or TV following another device reads that device's waveform; 0 when the feed has none.",
-    kind: "level",
-    read: (_frame, anim) => anim.wavePeak,
-    monitor: { card: "setup-input", row: "waveform" },
-    bandRange: "all",
   }),
   "anim.beatWave": signal({
     id: "anim.beatWave",

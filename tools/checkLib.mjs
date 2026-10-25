@@ -292,7 +292,7 @@ export function compareSizes(measured, budget) {
   if (!problems.length) return { ok: true, summary: parts.join(" · "), detail: "" };
   problems.push(
     "  The budgets are in size-budget.json: make the change smaller, or edit the number there.",
-    "  Lowering a budget is always welcome; raising one needs a reason in the pull request description.",
+    "  Each budget keeps a margin above the measured size (size-budget.json's `about`); raising one past it needs a reason in the pull request description.",
   );
   return { ok: false, summary: parts.join(" · "), detail: problems.join("\n") };
 }

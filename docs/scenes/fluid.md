@@ -157,6 +157,20 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   screen), and `STROBE_PATTERN`'s comment describes the strobe cut plainly.
   No change to the picture.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/fluid.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
+  audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
+  scene changed. Since #677 they had fired only on the hits the engine named
+  kicks and hats: on Billie Jean about half the old lanes' Bass hits and a
+  fifteenth of their Treble hits. `tools/tune-real.mjs fluid` on Billie Jean,
+  30 s from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before #677 | 46.07 | 58.98 | 1.07 | 2.43 |
+  | #683 | 3.16 | 15.90 | 1.10 | 1.66 |
+  | #682 | 50.17 | 58.33 | 1.16 | 1.87 |
+
+  On #683 the fluid barely moved between peaks. With the change it moves as it did on the old lanes, which it was tuned on. No hit fired on silence.
 
 ## Tuning notes
 
@@ -201,3 +215,4 @@ pivot above.
   Currents/neon-tone-map, and screen-space-lightning pivots described above.
 - #462 (draft, 2026-10-09): Rendering: the lightning bolt layer's render target (`fluidBolts.ts`) now comes from gl.ts's `createColorTarget`; no change to the look.
 - #533 (2026-10-15): the sim's passes (fluidSim.ts) look their uniforms up on first draw, and init() looks the display program's samplers up after every program is created, so a mount compiles all of the scene's programs at once. No change on screen. Measured headless (Metal, M1 Pro): a first mount 78 → 32 ms, a revisit 50 → 3 ms, and the longest frame gap after switching back to Fluid 25–43 → 10 ms.
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)

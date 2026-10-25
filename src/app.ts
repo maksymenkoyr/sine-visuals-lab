@@ -25,11 +25,9 @@ import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createStemSplitter, type StemRanges } from "./audio/stemSplit.ts";
 import { createStemGate, wiresReadStems, type StemGate } from "./render/stemReaders.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { minMax, peak, rms } from "./audio/waveform.ts";
-import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
+import { minMax, rms } from "./audio/waveform.ts";
 import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
 import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
-import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { createEngineSource, type EngineSource } from "./audio/engineSource.ts";
 import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "./audio/types.ts";
@@ -414,7 +412,6 @@ let stemGate: StemGate | null = null;
 /** Display-only waveform for the Setup view's Input check card; never feeds FeatureExtractor or
  *  the wire frame (see waveformAnalyser.ts header). */
 let waveformAnalyser: WaveformAnalyser | null = null;
-let lufsAnalyser: LufsAnalyser | null = null;
 let inputHealthTap: InputHealthTap | null = null;
 /** One long-lived instance with `reset()`, not one per capture (see inputHealth.ts header). */
 const inputHealth = createInputHealth();
@@ -575,7 +572,6 @@ let lastFluxRatio: number | null = null;
 // `fired` is the local frame's onset (not the jitter-buffered `lastVis`), so it
 // and `suppressed` describe the same tick's decision.
 let lastGate: SilenceGateReading | null = null;
-let lastLufs: LufsReading | null = null;
 /** Read by the Source row via the deviceMenu deps' getInputHealth, not
  *  DeviceMenu.update(): that row refreshes on its own slower timer. */
 let lastInputHealth: InputHealthReading | null = null;
@@ -1563,7 +1559,6 @@ function attachCapture(handle: CaptureHandle): void {
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   stemGate = createStemGate(createStemSplitter(bandAnalyser.binsDb.length, bandAnalyser.binHz));
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
-  lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
   inputHealthTap?.dispose();
   inputHealthTap = createInputHealthTap(handle.context, handle.sourceNode, handle.stream);
   inputHealth.reset();
@@ -1612,7 +1607,6 @@ function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   stemGate = null;
   waveformAnalyser = null;
   measureAnalyser = null;
-  lufsAnalyser = null;
   inputHealthTap?.dispose();
   inputHealthTap = null;
   inputHealth.reset();
@@ -2115,7 +2109,6 @@ function wireDeviceMenu(): void {
     getDriveReadout: (sceneId, spec) => getDriveReadout(sceneId, spec),
     onSetDriveReadout: (sceneId, spec, readout) => setDriveReadout(sceneId, spec, readout),
     setDriveLineStrength: (sceneId, spec, value) => setDriveLineStrength(sceneId, spec, value),
-    onLufsReset: () => lufsAnalyser?.reset(),
     onTap: (timeStamp) => tapTempo(timeStamp, false),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
@@ -3351,7 +3344,6 @@ function clearLocalReadings(): void {
   lastRawBands = null;
   lastMono = null;
   lastDeepMono = null;
-  lastLufs = null;
   lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
@@ -3398,7 +3390,6 @@ function readLocalCapture(
       ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
       : null;
   lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-  lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
   const gate = resolveSilenceGate();
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
   const engine = engineSource ? engineSource.read(now) : null;
@@ -3624,7 +3615,7 @@ function tick(): void {
     applyRenderQuality(true);
     applyPowerMode(powerMode);
   }
-  if (outputBridge && gained) outputBridge.pushFrame(gained, { wavePeak: wave ? peak(wave) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
@@ -3640,8 +3631,7 @@ function tick(): void {
   // post's meters (audioMeters.ts) read this tick's AnimFrame. Feature extraction
   // and the anim clock run on every rAF tick regardless of the render-rate cap;
   // only the GPU draw and panel drawing are capped (panelDraws).
-  // `wave`'s peak feeds AnimFrame.wavePeak (the Waveform readout
-  // and its drive jack). `nowRafMs` makes this the one clock that follows a tap
+  // `nowRafMs` makes this the one clock that follows a tap
   // tempo (tapTempo.ts); like the beat keys, a tap only reaches this window's clock.
   const anim = gained
     ? animClock.advance(
@@ -3649,10 +3639,7 @@ function tick(): void {
         gained,
         smoothing,
         resolveSilenceGate(),
-        {
-          shape: getHitShape(),
-          wavePeak: wave ? peak(wave) : null,
-        },
+        { shape: getHitShape() },
         nowRafMs,
       )
     : null;
@@ -3702,7 +3689,7 @@ function tick(): void {
   if (panelDraws) lastPanelDrawMs = nowRafMs;
   syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
   // Fed even when null (mic pending) so the strip shows its "waiting for audio" idle state.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastBeatDiag, lastGate, liveDrives, panelDraws);
   loadChip?.update(nowRafMs);
 
   if (!lastVis || !anim) {
@@ -3890,7 +3877,7 @@ function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): 
   tickAutoTune(dtSec);
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
-  outputBridge?.pushFrame(gained, { wavePeak: null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  outputBridge?.pushFrame(gained, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
   const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape() });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);
