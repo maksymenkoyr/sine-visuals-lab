@@ -1406,6 +1406,9 @@ export function createControlRow(spec: ControlRowSpec) {
     onlyChip.type = "button";
     onlyChip.textContent = "O";
     onlyChip.dataset.soloKey = `${sceneId}:${key}`;
+    // The hover tooltip (keyHints.ts), like the T chip's; no data-keycap, as
+    // O is not this chip's key.
+    onlyChip.dataset.key = "only";
     onlyChip.dataset.soloAccent = spec.accent;
     onlyChip.addEventListener("click", () => {
       const now = getDriveSolo();
@@ -2111,7 +2114,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   onDriveSoloChange(() => {
     for (const h of driveRowHandles) h.rebuildIfPinned();
     for (const chip of document.querySelectorAll<HTMLElement>("[data-solo-key]")) paintOnlyChip(chip);
+    paintDriveSoloDim();
   });
+
+  /** Greys out every Scene-setting row but the one "Only this" holds, the
+   *  same dim as `.vc-patching`; a rebuilt card is repainted from
+   *  renderSceneSettings(). */
+  function paintDriveSoloDim(): void {
+    const solo = getDriveSolo();
+    const key = solo ? `${solo.sceneId}:${solo.key}` : null;
+    for (const card of pinnableCards()) {
+      let soloRow: HTMLElement | null = null;
+      for (const chip of card.querySelectorAll<HTMLElement>("[data-solo-key]")) {
+        const hit = chip.dataset.soloKey === key;
+        const row = chip.closest<HTMLElement>(".vc-row");
+        row?.classList.toggle("vc-row-solo", hit);
+        if (hit) soloRow = row;
+      }
+      card.classList.toggle("vc-drive-solo-dim", soloRow !== null);
+    }
+  }
 
   // Heat (heat.ts) for the current scene's wired settings and each wire (keyed
   // by jackKey), recorded every tick by recordHeat, panel open or closed, and
@@ -5994,6 +6016,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // scene switch so a click can't pin a setting on the scene just left.
     if (lastPreview && lastPreview.sceneId !== sceneId) lastPreview = null;
     refreshPatchHighlight();
+    paintDriveSoloDim();
     // Rows were just rebuilt unmarked: re-hide around the solo.
     if (soloOn) applySolo();
   }
