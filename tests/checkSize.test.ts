@@ -52,7 +52,7 @@ describe("the size step", () => {
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("index.html loads 612.5 kB of gzipped JS before its first paint, 12.5 kB over its budget.");
     expect(v.detail).toContain("pinAsset() fetches 5100.0 kB after load, 100.0 kB over its budget.");
-    expect(v.detail).toContain("raising one needs a reason in the pull request description");
+    expect(v.detail).toContain("raising one past it needs a reason in the pull request description");
     expect(v.detail).not.toContain("tv.html");
   });
 

@@ -47,8 +47,9 @@
 //              before its first paint (its entry chunk and every chunk that
 //              one imports statically, from the build manifest), gzipped at
 //              level 9, and the raw bytes pinAsset() fetches after load
-//              (src/pinnedAssets.ts). Lowering a budget is always welcome;
-//              raising one needs a reason in the pull request.
+//              (src/pinnedAssets.ts). Each budget keeps a margin above the
+//              measured size, so a feature's few kB never fail it;
+//              size-budget.json's `about` says how much and when to reset it.
 //              Skipped in --changed runs, and wherever
 //              src/render/scenes/private/ is checked out: paid scenes would
 //              count, and CI measures the public tree on every pull request.
