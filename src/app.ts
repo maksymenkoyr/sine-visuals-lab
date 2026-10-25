@@ -108,7 +108,8 @@ import {
 } from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { createCompositor, type Compositor, type RenderOutcome } from "./render/compositor.ts";
+import { createSceneGuard } from "./render/sceneGuard.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import { createFrameMisses } from "./render/frameMisses.ts";
@@ -1151,7 +1152,8 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
 }
 
 /** Local picks and remote commands take this one path, so the roster reflects reality. */
-function applyScene(next: Scene): void {
+function applyScene(next: Scene, cut = false): void {
+  sceneGuard.forgive(next.id);
   if (!mainHost) return;
   const prev = scene;
   scene = next;
@@ -1159,12 +1161,31 @@ function applyScene(next: Scene): void {
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ while previewing.
   if (previewActive) applyRenderQuality();
-  if (!mountOrBail(next, prev, inViz)) return;
+  if (!mountOrBail(next, prev, inViz && !cut)) return;
   updateSceneVersionLabel(next);
   if (!quietScreen()) showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
 }
+
+/** A scene that throws while drawing is cut to the one before it (or Spectrum)
+ *  here, through the normal scene change, so a room's TVs follow it. */
+const sceneGuard = createSceneGuard({
+  switchTo: (next) => {
+    applyScene(next, true);
+    return scene === next;
+  },
+  dropOutgoing: () => compositor?.cancel(),
+  builtIn: () => getScene("spectrum"),
+  canRun: (s) => presetAllows(s, effectivePreset()),
+  notice: (failed, next, wasShown) =>
+    showHud(
+      wasShown
+        ? `${failed.name} stopped on this computer, so ${next.name} is back.`
+        : `${failed.name} stopped on this computer, so ${next.name} is showing instead.`,
+      true,
+    ),
+});
 
 function applyPalette(next: Palette): void {
   palette = next;
@@ -2593,6 +2614,8 @@ function setLaptopWaiting(waiting: boolean): void {
 }
 
 async function enterViz(next: Scene): Promise<void> {
+  // A route to a stopped scene is a pick: it retries (render/sceneGuard.ts).
+  sceneGuard.forgive(next.id);
   gallery?.hide();
   document.body.classList.remove("in-gallery");
   // Already in a scene (a link or back/forward changed the route): crossfade in;
@@ -3698,22 +3721,30 @@ function drawScene(
   if (picturePolled) pollPicture();
   // The timer query only runs while the panel is open to show it.
   resourceMeter?.beginGpu(deviceMenu?.isOpen() ?? false);
-  let governable = true;
+  let outcome: RenderOutcome | undefined;
   try {
-    governable = compositor!.render({
-      ctx: mainHost!.ctx,
-      scene,
-      frame: displayFrame,
-      viewport,
-      palette,
-      anim: latchedAnim,
-      drives,
-      drivesFor: (s) => engine.forScene(s.id, s.settings ?? [], latchedAnim),
-      nowMs: nowRafMs,
-    }).governable;
+    outcome = sceneGuard.draw(scene, () =>
+      compositor!.render({
+        ctx: mainHost!.ctx,
+        scene,
+        frame: displayFrame,
+        viewport,
+        palette,
+        anim: latchedAnim,
+        drives,
+        drivesFor: (s) => engine.forScene(s.id, s.settings ?? [], latchedAnim),
+        nowMs: nowRafMs,
+      }),
+    );
   } finally {
     resourceMeter?.endGpu();
   }
+  // A scene that threw drew nothing this frame; the guard has already cut the screen.
+  if (!outcome) {
+    frameMisses.restart();
+    return;
+  }
+  const governable = outcome.governable;
   // Right after the scene has drawn, and nowhere else: the default framebuffer
   // (preserveDrawingBuffer false, gl.ts) only holds this frame until the browser
   // composites it; pictureReadback.ts's header says why this must run in the same

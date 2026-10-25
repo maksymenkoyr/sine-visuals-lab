@@ -12,6 +12,7 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { createSceneGuard } from "./render/sceneGuard.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects.ts";
 import { RENDER_FPS_CAP_FLOOR, createRenderGate, targetFrameIntervalMs } from "./render/framePace.ts";
@@ -253,6 +254,22 @@ function mountScene(next: Scene, crossfade?: { lengthMs?: number }): void {
   }
 }
 
+/** The scene the main window last asked for. State messages are re-sent
+ *  constantly, so only a change of it counts as a new pick. */
+let askedScene = "";
+
+/** Cuts to the scene before a failed one (or Spectrum) on this window only; the
+ *  look the main window sent is left as it is (render/sceneGuard.ts). */
+const sceneGuard = createSceneGuard({
+  switchTo: (next) => {
+    mountScene(next);
+    return scene === next;
+  },
+  dropOutgoing: () => compositor?.cancel(),
+  builtIn: () => getScene("spectrum"),
+  canRun: (s) => presetAllows(s, quality.preset),
+});
+
 function applyState(state: OutputState, crossfadeMs?: number): void {
   current = state;
   paletteFade = null;
@@ -264,8 +281,11 @@ function applyState(state: OutputState, crossfadeMs?: number): void {
 
   const qualityChanged = syncQuality();
 
+  const fresh = state.scene !== askedScene;
+  askedScene = state.scene;
   const next = getScene(state.scene);
-  if (next && presetAllows(next, quality.preset) && (next !== scene || qualityChanged)) {
+  if (next && (fresh || qualityChanged)) sceneGuard.forgive(next.id);
+  if (next && presetAllows(next, quality.preset) && (next !== scene || qualityChanged) && !sceneGuard.hasFailed(next.id)) {
     // A quality change re-inits the scene too: geometry is sized at init.
     // A different scene crossfades in; a re-init of the same one does not.
     mountScene(next, next !== scene && !qualityChanged ? { lengthMs: crossfadeMs } : undefined);
@@ -438,17 +458,24 @@ async function main(): Promise<void> {
 
     const latchedAnim = renderLatch.consume(anim, nowMs);
     const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
-    const outcome = compositor!.render({
-      ctx: sceneCtx,
-      scene,
-      frame: displayFrame,
-      viewport: FULL_VIEWPORT,
-      palette: paletteFade?.paletteAt(nowMs) ?? palette,
-      anim: latchedAnim,
-      drives,
-      drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
-      nowMs,
-    });
+    const shown = scene;
+    const outcome = sceneGuard.draw(shown, () =>
+      compositor!.render({
+        ctx: sceneCtx,
+        scene: shown,
+        frame: displayFrame,
+        viewport: FULL_VIEWPORT,
+        palette: paletteFade?.paletteAt(nowMs) ?? palette,
+        anim: latchedAnim,
+        drives,
+        drivesFor: (s) => driveEngine.forScene(s.id, s.settings ?? [], latchedAnim),
+        nowMs,
+      }),
+    );
+    if (!outcome) {
+      frameMisses.restart();
+      return;
+    }
     overlay.draw();
     // The drawing buffer is only readable in the task that drew it, so the
     // thumbnail is taken here and not later in a separate tick.

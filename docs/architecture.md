@@ -193,7 +193,9 @@ reach the pop-out as their own `effects` message (`src/net/outputSync.ts`) —
 never part of the look, so Cue does not hold them, and a TV does not get them.
 A frame with two scenes in it is skipped by the quality governor. The
 compositor's header says how it captures a scene without redirecting its
-framebuffer.
+framebuffer. The three loops hand their draw to `src/render/sceneGuard.ts`. A scene
+that throws while drawing is logged once and its screen cuts to the last scene
+that still drew (or Spectrum). Main shows a notice; output and TVs leave the look alone.
 
 ## Text and logo over the picture
 
