@@ -5,7 +5,7 @@ import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
-import { INSTAGRAM_URL, SOURCE_URL } from "../brand.ts";
+import { INSTAGRAM_URL, SOURCE_URL, SUPPORT_EMAIL, SUPPORTED_BROWSERS } from "../brand.ts";
 import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
 import { sceneVersionOf } from "../render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./tooltip.ts";
@@ -238,7 +238,7 @@ const stylesheet = `
   gap: 8px 16px; letter-spacing: .1em;
   padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
 }
-.gal-foot-links { display: flex; gap: 16px; }
+.gal-foot-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
 /* The version reads as typed ("0.1.4 - beta"), not in the footer's capitals. */
 .gal-foot a.gal-ver { text-transform: none; }
@@ -604,11 +604,15 @@ export function createGallery(deps: GalleryDeps): Gallery {
   instagramLink.href = INSTAGRAM_URL;
   instagramLink.target = "_blank";
   instagramLink.rel = "noopener";
+  const supportLink = el("a", "", "Support");
+  supportLink.href = `mailto:${SUPPORT_EMAIL}`;
+  supportLink.title = SUPPORT_EMAIL;
   const footLinks = el("div", "gal-foot-links");
-  footLinks.append(sourceLink, instagramLink, licensesLink, privacyLink);
+  footLinks.append(sourceLink, instagramLink, supportLink, licensesLink, privacyLink);
   // A full row under the version and links: see ui/flashWarning.ts.
   const flashWarn = el("div", "gal-foot-warn", FLASH_WARNING);
-  foot.append(versionLink, footLinks, flashWarn);
+  const browsers = el("div", "gal-foot-warn", `Runs in ${SUPPORTED_BROWSERS}.`);
+  foot.append(versionLink, footLinks, browsers, flashWarn);
 
   page.append(mast, errorBanner, released, devSection, draftSection, foot);
   root.appendChild(page);
