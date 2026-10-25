@@ -26,7 +26,7 @@ import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL, type MusicDial } from "../render/musicProfile.ts";
 import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
 import { HIT_DEFAULTS, REFRACTORY_S } from "../audio/engine/onsets.ts";
-import { GROUP_TUNING } from "../render/bandEnergy.ts";
+import { GROUP_TUNING, RISE_K, RISE_WINDOW_S } from "../render/bandEnergy.ts";
 import {
   hitStandout,
   HIT_AMOUNT_DEFAULT,
@@ -1070,6 +1070,7 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
     "Faint tick on shaded ground: cleared it while the room was quiet.",
     `A hit: a peak in how fast the sound rises across all frequencies, over its last second's average + ${HIT_DEFAULTS.k}× its spread and at least ${HIT_DEFAULTS.min}, ≥${ms(REFRACTORY_S)} after the last one.`,
     "Each hit is a kick (Bass), snare (Mid) or hat (Treble) by where its rising sound sits; Any hit is any of the three.",
+    `While music with a clear beat plays, Bass and Treble also fire when their own level jumps within ${ms(RISE_WINDOW_S)} by more than its last second's average jump + ${RISE_K}× its spread, so a hat under a snare still reaches Treble.`,
     "Kick band: the one bass band that pulses most clearly right now; its Hz leads the Bass note, and the inner jack on that lane sends it.",
     "Surge: how close a hit is to firing, as a setting fed by Onset surge sees it; the line is where one fires.",
     gate,

@@ -106,6 +106,20 @@ has by design.
   many hearts, and every heart spinning (long violet streaks). Fixed by a
   darker ground, fewer hearts, softer edges with a brighter centre, and
   making most hearts rock while only a share (`SPIN_SHARE`) turn fully.
+- 2026-10-24 (#682) — The Bass and Treble lanes also fire on jumps in the
+  audio engine's band levels (`src/render/bandEnergy.ts`). No code in this
+  scene changed. Since #677 they had fired only on the hits the engine named
+  kicks and hats: on Billie Jean about half the old lanes' Bass hits and a
+  fifteenth of their Treble hits. `tools/tune-real.mjs ledhearts` on Billie Jean,
+  30 s from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before #677 | 19.32 | 22.83 | 7.99 | 9.24 |
+  | #683 | 15.62 | 21.41 | 7.99 | 9.23 |
+  | #682 | 19.17 | 22.83 | 7.95 | 9.27 |
+
+  Back to the old lanes' motion. No hit fired on silence.
 
 ## Tuning notes
 
@@ -148,3 +162,4 @@ has by design.
 ## History
 
 - #654: first pass (draft).
+- 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)
