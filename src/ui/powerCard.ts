@@ -21,14 +21,12 @@ import {
 } from "./controlsKit.ts";
 
 /**
- * The Power card (deviceMenu.ts). The main card is a plain card in the panel's
- * Setup view (audioMeters.ts's setupEl), opened by the footer's Setup button
- * or the load chip (loadChip.ts). The Output card keeps its own column,
- * sitting immediately left of the settings column on the right (the
- * Bands+meters column docks independently to the opposite screen edge; see
- * controlsTheme.ts's CABLE_GUTTER_PX comment for how the two sides are laid
- * out). Its content is a quality-preset override plus a 3-way Auto/On/Off
- * override for the quality governor (src/render/governor.ts, src/render/powerMode.ts),
+ * The Power card (deviceMenu.ts) — its own column, sitting immediately left
+ * of the settings column on the right (the Bands+meters column docks
+ * independently to the opposite screen edge; see controlsTheme.ts's
+ * CABLE_GUTTER_PX comment for how the two sides are laid out). A
+ * quality-preset override plus a 3-way Auto/On/Off override for
+ * the quality governor (src/render/governor.ts, src/render/powerMode.ts),
  * plus a status line and readouts explaining what the governor actually
  * decided this session and why — including the one state a frame-gap-only
  * governor can reach that isn't "GPU load": paced by something outside the
@@ -71,22 +69,21 @@ import {
  *
  * It starts folded (CardSpec.defaultFolded) until someone first opens it —
  * the quality governor runs on its own, and these readouts are diagnostics.
- * Folded, in the wide layout, the Output card is a small square
- * (POWER_SQUARE_PX) showing a power glyph in place of a title bar — it sits
- * directly against the settings column (deviceMenu.ts), so a plain
- * full-width folded bar would leave a wide empty strip between the two; a
- * square instead hugs the column it's next to. Unfolding animates the width
- * open first (growing leftward, away from the settings column, square ->
- * 200px) and only then the height open (growing downward) — the reverse on
- * folding — so the motion always reads as a clip opening/closing rather than the card
+ * Folded, in the wide layout, this card is a small square (POWER_SQUARE_PX)
+ * showing a power glyph in place of a title bar — it sits directly against
+ * the settings column (deviceMenu.ts), so a plain full-width folded bar
+ * would leave a wide empty strip between the two; a square instead hugs the
+ * column it's next to. Unfolding animates the width open first (growing
+ * leftward, away from the settings column, square -> 200px) and only then
+ * the height open (growing downward) — the reverse on folding — so the
+ * motion always reads as a clip opening/closing rather than the card
  * resizing in place. The card's content stays laid out at full width
  * throughout (never reflowing) and is simply clipped by the card's own
  * overflow: hidden (glassCardStyle), which is what makes that clip-opening
  * reading possible — see createPowerCard's foldTransition and
- * controlsTheme.ts's .vc-power-card rules. The main card has no square
- * (`square: false`), so it folds to a plain title bar at any width. Below
- * STACK_BELOW_PX the panel stacks into one column and the Output card folds
- * to a plain title bar the same way.
+ * controlsTheme.ts's .vc-power-card rules. Below STACK_BELOW_PX the panel
+ * stacks into one column and Power folds to a plain title bar like every
+ * other card, no square, no animation.
  */
 
 export interface PowerStatus {
@@ -161,8 +158,6 @@ export interface PowerCardOptions {
   foldId?: string;
   /** Names the folded square for assistive tech and its tooltip, like the title. */
   glyphLabel?: string;
-  /** False for a plain card: no folded square and no fold animation. Default true. */
-  square?: boolean;
 }
 
 export interface PowerCard {
@@ -174,9 +169,6 @@ export interface PowerCard {
   setTitle(text: string): void;
   /** Shows or hides the whole card. */
   setVisible(on: boolean): void;
-  isFolded(): boolean;
-  /** Opens the card if it is folded. */
-  unfold(): void;
 }
 
 const IDLE_DOT = "rgba(255,255,255,0.3)";
@@ -725,10 +717,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     for (const a of running) a.cancel();
     running = [];
   };
-  // cardEl and pad are assigned right after createCard returns, below; square
-  // only when hasSquare. foldTransition runs later, from a click, and is only
-  // passed to a card that has a square.
-  const hasSquare = opts.square !== false;
+  // cardEl/pad/square are assigned right after createCard returns, below —
+  // foldTransition itself only ever runs later, from a click.
   let cardEl!: HTMLDivElement;
   let pad!: HTMLElement;
   let square!: HTMLButtonElement;
@@ -747,7 +737,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   // the glyph arrives, or both at once.
   const FADE_MS = 180;
 
-  // Folded, in the wide layout, the Output card is a square that opens leftward
+  // Folded, in the wide layout, Power is a square that opens leftward
   // (width) before downward (height) — see this file's own header comment
   // for why. Folding reverses that. The stacked layout, reduced motion, and
   // very old browsers without Element.animate all skip straight to the
@@ -813,43 +803,35 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     }
   }
 
-  const card = createCard({
-    title,
-    accent: POWER_TEAL,
-    foldId,
-    defaultFolded: true,
-    foldTransition: hasSquare ? foldTransition : undefined,
-  });
+  const card = createCard({ title, accent: POWER_TEAL, foldId, defaultFolded: true, foldTransition });
   cardEl = card.el;
-  if (hasSquare) cardEl.classList.add("vc-power-card");
+  cardEl.classList.add("vc-power-card");
   pad = cardEl.querySelector<HTMLElement>(".vc-card-pad")!;
 
-  if (hasSquare) {
-    // The compact power glyph shown only while folded (controlsTheme.ts's
-    // .vc-power-card.vc-folded > .vc-power-square) — appended to the card
-    // element itself, not the pad, so it survives the pad's own
-    // visibility: hidden while folded (see this file's header comment).
-    square = document.createElement("button");
-    square.type = "button";
-    square.className = "vc-power-square";
-    square.setAttribute("aria-label", `Expand ${glyphLabel}`);
-    square.title = `Expand ${glyphLabel}`;
-    square.setAttribute("aria-controls", card.body.id);
-    square.innerHTML =
-      '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
-      '<path d="M5.2 3.9a5.2 5.2 0 1 0 5.6 0"/>' +
-      '<path d="M8 2v5.5"/>' +
-      "</svg>";
-    // stopPropagation: the header's own click-to-toggle listener (createCard)
-    // doesn't cover this button (it isn't inside the header), but it costs
-    // nothing to be explicit and it matches every other in-card control's
-    // click handling.
-    square.addEventListener("click", (e) => {
-      e.stopPropagation();
-      card.fold!.toggle();
-    });
-    cardEl.appendChild(square);
-  }
+  // The compact power glyph shown only while folded (controlsTheme.ts's
+  // .vc-power-card.vc-folded > .vc-power-square) — appended to the card
+  // element itself, not the pad, so it survives the pad's own
+  // visibility: hidden while folded (see this file's header comment).
+  square = document.createElement("button");
+  square.type = "button";
+  square.className = "vc-power-square";
+  square.setAttribute("aria-label", `Expand ${glyphLabel}`);
+  square.title = `Expand ${glyphLabel}`;
+  square.setAttribute("aria-controls", card.body.id);
+  square.innerHTML =
+    '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M5.2 3.9a5.2 5.2 0 1 0 5.6 0"/>' +
+    '<path d="M8 2v5.5"/>' +
+    "</svg>";
+  // stopPropagation: the header's own click-to-toggle listener (createCard)
+  // doesn't cover this button (it isn't inside the header), but it costs
+  // nothing to be explicit and it matches every other in-card control's
+  // click handling.
+  square.addEventListener("click", (e) => {
+    e.stopPropagation();
+    card.fold!.toggle();
+  });
+  cardEl.appendChild(square);
 
   const betaBadge = document.createElement("span");
   betaBadge.textContent = "Beta";
@@ -938,7 +920,6 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     if (node && node.nodeType === Node.TEXT_NODE) {
       if ((node as Text).data !== text) (node as Text).data = text;
     }
-    if (!hasSquare) return;
     const label = `Expand ${opts.glyphLabel ?? text}`;
     if (square.title !== label) {
       square.title = label;
@@ -950,13 +931,5 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     card.el.style.display = on ? "" : "none";
   }
 
-  function isFolded(): boolean {
-    return card.fold!.isFolded();
-  }
-
-  function unfold(): void {
-    if (card.fold!.isFolded()) card.fold!.toggle();
-  }
-
-  return { el: card.el, title: card.title, refresh, setTitle, setVisible, isFolded, unfold };
+  return { el: card.el, title: card.title, refresh, setTitle, setVisible };
 }

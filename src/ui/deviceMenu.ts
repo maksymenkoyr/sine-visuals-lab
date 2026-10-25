@@ -29,9 +29,7 @@ import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { BAND_SPLIT } from "../audio/bandSplit.ts";
 import type { SilenceGateMarks, SilenceGateReading } from "../audio/silenceGate.ts";
-import type { HitShape, HitShapePatch } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
-import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
 import {
   defaultDriveSetting,
@@ -74,8 +72,6 @@ import { installRowHints } from "./rowHints.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
-import { createBandFaders } from "./bandFaders.ts";
-import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createTraceStrip, type AudioMetersDeps } from "./audioMeters.ts";
 import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
@@ -100,12 +96,11 @@ import {
   type PictureMeasureKey,
   type PictureReading,
 } from "../render/pictureMeter.ts";
-import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import type { CastMode, PreviewSize } from "../render/outputPower.ts";
 import type { OutputRenderStatus } from "../net/outputSync.ts";
-import { isFolded, setFolded, METERS_COLUMN, SETUP_COLUMN } from "./panelFolds.ts";
+import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
@@ -145,7 +140,6 @@ import {
   createChipButton,
   createPickerRow,
   createSignalStrip,
-  createTraceLegend,
   digitsStyle,
   digitsTextStyle,
   groupHeading,
@@ -172,11 +166,9 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  *
  * Glass columns over the live scene, docked to opposite screen edges in the
  * wide layout (controlsTheme.ts) with the scene and the patch bay's own
- * cables (src/ui/cableLayer.ts) showing through the open middle: the Bands
- * card (scene name, audio source, and the live bars with the band faders
- * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
- * controls column anchored top-right alongside the Output power card (while an output is
- * open), whose cards run the
+ * cables (src/ui/cableLayer.ts) showing through the open middle: the meters
+ * column (scene name, audio source, then the meter cards) anchored top-left,
+ * and the controls column anchored top-right alongside Power, whose cards run the
  * Auto master bar → Input (the source picker) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
  * src/render/drives.ts) is the patch bay: its row grows an input port (a
@@ -215,7 +207,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
  * line per source (colour dot, name, weight 0–2×, a hit source's Height
  * Graded/Fixed/Loud, a grid source's division chips, the line source's
- * Strength + Clear reusing lineEditor.strengthRow, and under a catalogue
+ * Clear chip, and under a catalogue
  * wire its modifier: Window, Smoothness and Length, wireModControls.ts), a 4 s output graph off
  * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
@@ -227,8 +219,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
  * Every reactive meter row/lane — audioMeters.ts's own (Sound/Hits/Beat/
- * Song) plus this file's own Bands card's Frequencies corner
- * (mountBandsJack) — grows a jack (src/ui/jack.ts): a
+ * Song) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
  * pinned) setting, with tiny usage dots around the ring for how many of
  * this scene's settings use it. While a signal's row is lit (hover or
@@ -242,7 +233,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * row it already feeds (onJackHover, independent of the shown-setting highlight).
  * While a setting is shown, `refreshPatchHighlight` — called from every
  * place `pinned`/`preview`/a patch actually changes, never per frame —
- * dims the rest of the Bands+meters column (`.vc-patching`, controlsTheme.ts)
+ * dims the rest of the meters column (`.vc-patching`, controlsTheme.ts)
  * and dims the spectrum's own unheard bands (refreshSpectrumDriveHighlight).
  * A feeding row/lane's own glow (jack.ts's setRowFed) and the cables
  * themselves now distinguish *pinned* from *previewed* rather than
@@ -331,31 +322,22 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * `driveSourceDescription` map (the one place a source's plain-language
  * description lives, next to its colour/label).
  *
- * The Bands card lives in the Setup view (audioMeters.ts's addSetupCard places
- * it): the live bars with the band faders drawn
- * over them (src/ui/bandFaders.ts) — its knobs, *except* while the pinned
- * setting's patch has a source on Frequencies, when the strip swaps to that
- * line's drawing overlay (src/ui/bandLineEditor.ts, backed by
- * src/audio/bandLine.ts; refreshLineMode derives this from the pinned
- * patch, not from focus). Its readouts (bandFaders.ts's own `readouts`,
- * plus the fader hint) live in `eqLayer` under the strip, hover/focus/drag-
- * revealed rather than always on (refreshEqLayer below), so the card never
- * grows by default just to show them. Scene name and audio source live in one
+ * Scene name and audio source live in one
  * column head above the meters — a live dot, a status text, and the column's
  * single RAW chip (see that chip's own comment for what it drives) — in
  * `vc-bands-block`, a wrapper that carries the stacked layout's
  * `.vc-spectrum-card` class (controlsTheme.ts). Under it, the read-only
  * meters (audioMeters.ts, the Sound card first) scroll in their own strip. Below the breakpoint in
  * controlsTheme.ts everything stacks into one scrolling column with the
- * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
- * the whole point is to watch the scene react while you tune it, so it also
- * stays open across palette taps.
+ * meters last. It's corner-docked, not a modal: the whole point is to watch
+ * the scene react while you tune it, so it also stays open across palette
+ * taps.
  *
- * Every card in that left column — Power, Bands, and each meter card —
+ * Every card in that left column — Power and each meter card —
  * collapses to just its title bar (createCard's foldId, controlsKit.ts):
  * click the chevron or anywhere on the header outside a Reset-style chip.
- * The Bands+meters column can also go away at once — "Hide left" in the
- * footer strip, or M — which leaves the controls where they are
+ * The meters column can also go away at once — "Hide left" in the
+ * footer strip, or M — which leaves Power and the controls where they are
  * rather than reflowing anything. Solo (O, the footer's "Solo", or the
  * Solo eye just outside a pinned setting's left edge) goes further: only the
  * pinned setting stays — or, with
@@ -368,7 +350,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * left/Solo/Fullscreen/Keys — performing) every control it names
  * (wireKeysRow). That same module also owns the hover tooltip on any
  * `data-key`-tagged control and the hold-Shift-to-reveal keycaps — see its
- * own header. Separately, once every card in the Output power card and
+ * own header. Separately, once every card in Power and
  * that column is folded, there's nothing left to show but a stack of title
  * bars, so the pair collapses horizontally too, down to one small triangle
  * (columnsWrap's vc-cols-folded below) that reopens everything — driven by
@@ -421,14 +403,13 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
  * closes it, M hides/shows the meters column, O solos the pinned setting (or the Scene card), ?
  * lists the keys. Tab / Shift+Tab walk a ring over every
- * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
+ * .vc-slider/.vc-toggle/.vc-picker in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. That's the soft (preview) walk;
  * while a setting is pinned, Tab / Shift+Tab instead carry the pin itself
  * to the next/previous drive row, wrapping (moveTabPin) — skipping the
  * pinned row's own patch panel and every row that can't be pinned. On whichever control has focus, A
- * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
- * are its own, in bandFaders.ts). A focused
+ * toggles auto, R resets, T mutes/restores (see above). A focused
  * slider also takes Home/End to its min/max — the browser's own native
  * range-input behavior, left alone by onKeyDown below — plus z/x/c
  * (wireSliderQuickJump) to jump straight to the middle of the track, the
@@ -526,11 +507,8 @@ export interface DeviceMenuDeps {
   /** See src/ui/setCard.ts. */
   set: Omit<SetCardDeps, "sceneName">;
   overlay: OverlayCardDeps;
-  /** Real Hz edges once the analyser exists, the nominal ladder before mic access. Also labels the faders. */
+  /** Real Hz edges once the analyser exists, the nominal ladder before mic access. */
   getBandEdgesHz: () => Float32Array;
-  getBandGain: (sceneId: string, fader: number) => number;
-  onBandGainChange: (sceneId: string, fader: number, value: number) => void;
-  onBandGainsReset: (sceneId: string) => void;
   /** A drive setting's whole patch plus the store-level editing helpers below, mirroring driveStore.ts's exports. Keyed per (scene, setting): two settings on one scene keep independent patches and drawn lines. */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
   /** A catalogue wire's live modifier state (DriveEngine.wire): its input, output and window lines. */
@@ -606,9 +584,6 @@ export interface DeviceMenuDeps {
   };
   /** This tick's silence-gate marks (src/audio/silenceGate.ts), for the meters. */
   resolveSilenceGate: () => SilenceGateMarks;
-  /** Global per device, not per scene: how a hit's stand-out and loudness blend into pulse height is a taste about detection (src/audio/hitStrength.ts). */
-  getHitShape: () => HitShape;
-  setHitShape: (partial: HitShapePatch) => void;
   /** Device-wide (src/render/powerMode.ts). */
   getPowerMode: () => PowerMode;
   onPowerModeChange: (mode: PowerMode) => void;
@@ -643,8 +618,7 @@ export interface DeviceMenuDeps {
 export interface DeviceMenu {
   toggle(): void;
   close(): void;
-  /** Fed every frame while in a viz. Any may be null (frame/ungained/anim before audio is up; rawBands on a mic-less renderer, mono there too unless the feed sends its waveform).
-   *  `frame` has the band faders applied, `ungained` is the same before them (the ghost bars).
+  /** Fed every frame while in a viz. Any may be null (frame/anim before audio is up; rawBands on a mic-less renderer).
    *  `beatDiag`, `gate` and `drives` are null wherever this device runs no extractor of its own (renderer, synthetic feed).
    *  `rateScale` is app.ts's already-resolved smoothingRateScale; not re-resolved here because resolveSmoothing() slews its auto value and this runs every rAF tick.
    *  `drives` comes off the same un-latched AnimFrame as `anim`: row pills read uniformPair() and the Frequencies overlay reads excess(); neither calls fired(), so polling can't steal a grid setting's pending edge from the scene.
@@ -652,10 +626,7 @@ export interface DeviceMenu {
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
-    ungained: FeatureFrame | null,
-    pinnedBands: Uint8Array | null,
     anim: AnimFrame | null,
-    mono: Float32Array | null,
     rateScale: number,
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
@@ -666,8 +637,6 @@ export interface DeviceMenu {
   applyMidiCc(target: string, cc: number): void;
   /** Lets immersive fullscreen (src/ui/fullscreen.ts) skip idle-hiding the gear under an open panel. */
   isOpen(): boolean;
-  /** Opens the panel's Setup view on the Power card (the load chip, loadChip.ts). */
-  openPower(): void;
   /** The scene or palette changed from outside (Set pad, key, Autopilot): rebuilds what follows the scene. No-op while closed (open() does it). */
   sceneChanged(): void;
   /** app.ts samples the frame for the Picture block only while it is on screen (onScreen.ts says why that sample isn't free). */
@@ -726,15 +695,9 @@ const liveDotStyle = (on: boolean) =>
   `width: 4px; height: 4px; border-radius: 50%; background: ${on ? LIVE_DOT : "rgba(255,255,255,0.3)"};`;
 const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
 
-// Plain text, not .vc-hint: that class waits for hover/focus on an enclosing
-// .vc-row, and this line has none.
-const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
-const FADER_HINT_TEXT =
-  "Drag a knob up to boost a band, down to cut it. Pin an animation node to plug input nodes into it.";
-
 // See the build site near spectrumCol for why one chip drives two raw modes.
 const RAW_CHIP_TITLE =
-  "Raw: the spectrum before the adaptive envelope and Bands gain, and every meter reading below its pre-smoothing value.";
+  "Raw: the spectrum before the adaptive envelope, and every meter reading below its pre-smoothing value.";
 const HEAT_CHIP_TITLE =
   "Heat lens: every wired animation node and input node glows in its heat colour, brighter as it moves. Colder = barely moves, hotter = big moves on loud music. Also L.";
 
@@ -1089,8 +1052,7 @@ const HOVER_SELECT_DELAY_MS = 150;
 /** Focus on real pointer movement, so the keyboard agrees with the hover
  *  styling (controlsTheme.ts styles :hover and :focus-within alike).
  *  `preventScroll` is required: a bare focus() would scroll the `.vc-scroll`
- *  column and slide the row from under the cursor (as bandFaders.ts's
- *  hit.focus()). Never steals from a typing target: a typed readout's blur
+ *  column and slide the row from under the cursor. Never steals from a typing target: a typed readout's blur
  *  commits, and the check is on document.activeElement since the pointer is
  *  over this row, not the readout. */
 function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
@@ -1893,26 +1855,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
-  // Lives in the Setup view: appended to audioMeters.setupEl once that exists.
-  // A plain card (no folded square), so it isn't wired into the digit-block
-  // keyboard jump (renumberBlocks/markBlock). Its controls are chip buttons plus
-  // the Resolution slider, outside the Tab ring (ringElements() skips it).
-  const powerCard = createPowerCard(
-    {
-      getPowerMode: deps.getPowerMode,
-      onPowerModeChange: deps.onPowerModeChange,
-      getQualityChoice: deps.getQualityChoice,
-      onQualityChoiceChange: deps.onQualityChoiceChange,
-      getPowerStatus: deps.getPowerStatus,
-      isPreview: deps.isPreview,
-      canResizePreview: deps.canResizePreview,
-      getPreviewSize: deps.getPreviewSize,
-      onPreviewSizeChange: deps.onPreviewSizeChange,
-      getResolution: deps.getPreviewResolution,
-      onResolutionChange: deps.onPreviewResolutionChange,
-    },
-    { square: false },
-  );
+  // Leftmost; a compact card, so it isn't wired into the digit-block keyboard
+  // jump (renumberBlocks/markBlock). Its controls are chip buttons plus the
+  // Resolution slider, outside the Tab ring (ringElements() skips this column).
+  const powerCard = createPowerCard({
+    getPowerMode: deps.getPowerMode,
+    onPowerModeChange: deps.onPowerModeChange,
+    getQualityChoice: deps.getQualityChoice,
+    onQualityChoiceChange: deps.onQualityChoiceChange,
+    getPowerStatus: deps.getPowerStatus,
+    isPreview: deps.isPreview,
+    canResizePreview: deps.canResizePreview,
+    getPreviewSize: deps.getPreviewSize,
+    onPreviewSizeChange: deps.onPreviewSizeChange,
+    getResolution: deps.getPreviewResolution,
+    onResolutionChange: deps.onPreviewResolutionChange,
+  });
   // The pop-out output's own Power card, shown only while an output window is
   // open; its status is what the output reports (net/outputSync.ts's
   // OutputRenderStatus).
@@ -1954,16 +1912,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let outputPowerShown = false;
   const powerCol = document.createElement("div");
   powerCol.className = "vc-power-col";
-  powerCol.append(outputPowerCard.el);
+  powerCol.append(powerCard.el, outputPowerCard.el);
 
-  // One card for the live spectrum and the band gains: bandFaders.ts draws the
-  // faders over the bars, so what you tune and what you watch are the same
-  // pixels. Always mounted (unlike the Scene card); per-scene fader values are
-  // pushed in by refreshBandFaders on open() and after a Reset.
-  const bandFaders = createBandFaders({
-    onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
-  });
-  const spectrumStrip = bandFaders.strip;
   // The functions referenced below are hoisted declarations further down this
   // closure (patch-bay section); none is called until createDeviceMenu() has
   // finished, so referencing them early is safe.
@@ -1985,34 +1935,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     registerJack: (el, choice) => jackChoices.set(el, choice),
   };
   const audioMeters = createAudioMeters({
-    openSetup: () => setSetupShown(true),
     heatSettings: heatSettingRows,
     onTap: deps.onTap,
     getSilenceGate: () => deps.resolveSilenceGate(),
     getBandEdgesHz: () => deps.getBandEdgesHz(),
     stemsMeasured: () => deps.stemsMeasured(),
-    hitShape: {
-      get: () => deps.getHitShape(),
-      set: (partial) => deps.setHitShape(partial),
-    },
     patch: jackPatch,
   });
-  audioMeters.setupEl.append(powerCard.el);
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
-
-  const bandsResetChip = createChipButton("Reset", "Every fader back to 1×", () => {
-    deps.onBandGainsReset(deps.currentSceneId());
-    refreshBandFaders();
-  });
-  const bandsCard = createCard({
-    title: "Bands",
-    accent: BANDS_AMBER,
-    right: bandsResetChip,
-    foldId: "bands",
-  });
-  markBlock(bandsCard.title);
 
   const columnHead = document.createElement("div");
   columnHead.style.cssText = columnHeadStyle;
@@ -2024,16 +1956,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   statusLabel.style.cssText = statusTextStyle;
   spectrumStatus.append(liveDot, statusLabel);
   // One chip, two raw modes. Lit, the spectrum shows the raw mic signal: no
-  // adaptive envelope (features.ts), no Bands gain. Sensitivity/Expansion are
+  // adaptive envelope (features.ts). Sensitivity/Expansion are
   // not undone: they apply later, on the render path only (applySensitivity in
   // app.ts), after this strip is fed. The same click sets every meter row's raw
   // mode (audioMeters.ts's setRaw; its header says which rows change). The
   // halves differ: the spectrum's differs while Auto-gain pulls the bands (the
   // two sides normalize against different windows, features.ts's autoGain doc);
   // the meters' half shows each reading before its easing.
+  let rawOn = false;
   const rawChip = createChipButton("RAW", RAW_CHIP_TITLE, () => {
-    const on = !spectrumStrip.showRaw();
-    spectrumStrip.setShowRaw(on);
+    rawOn = !rawOn;
+    const on = rawOn;
     audioMeters.setRaw(on);
     rawChip.style.cssText = on ? chipBtnLitStyle : chipBtnStyle;
   });
@@ -2044,40 +1977,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   headChips.style.cssText = "display: flex; gap: 6px; align-items: center;";
   headChips.append(heatChip, rawChip);
   columnHead.append(spectrumStatus, headChips);
-
-  // In a .vc-row so it wakes (glow) on hover and focus-within like a slider row.
-  const fadersRow = document.createElement("div");
-  // vc-row-keep: opts out of .vc-patching's flat dim (controlsTheme.ts);
-  // refreshSpectrumDriveHighlight dims by band range instead.
-  fadersRow.className = "vc-row vc-row-keep";
-  fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
-  // Explains the sky-blue centroid marker spectrumStrip.ts's drawCentroidMarker
-  // draws (same AUTO_SKY, so the swatch can't drift); same signal as the
-  // Setup view's Centroid trace (audioMeters.ts).
-  const spectrumLegend = createTraceLegend([
-    { color: AUTO_SKY, label: "Centroid", note: "where the spectrum's energy balances" },
-  ]);
-  fadersRow.append(bandFaders.el, spectrumLegend.el);
-  // R/T on a focused fader, like every row; no A (faders have no auto weights).
-  bandFaders.faders.forEach((el, i) => {
-    wireRowKeys(el, {
-      reset: () => bandFaders.reset(i),
-      toggleOff: () => bandFaders.toggleOff(i),
-    });
-    wireHoverFocus(el, el);
-  });
-
-  // Hidden by default (in flow: the card grows while shown), revealed by
-  // hover/focus/drag over fadersRow (refreshEqLayer's wiring) and forced hidden
-  // while the pinned setting's patch has a Frequencies source (refreshLineMode).
-  // refreshEqLayer is the one writer of eqLayer.style.display, so the two
-  // conditions can't stomp each other.
-  const fadersHint = document.createElement("div");
-  fadersHint.style.cssText = eqHintStyle;
-  fadersHint.textContent = FADER_HINT_TEXT;
-  const eqLayer = document.createElement("div");
-  eqLayer.append(bandFaders.readouts, fadersHint);
-  eqLayer.style.display = "none";
 
   // ---- The patch bay (this file's header doc comment has the contract) ----
 
@@ -2103,11 +2002,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  the pointer leaving. A jack click with nothing pinned pins it and plugs
    *  in, rather than a bare toast. */
   let lastPreview: { sceneId: string; spec: SceneSetting } | null = null;
-  /** The Bands card's line-drawing mode, derived from `pinned`'s patch by
-   *  refreshLineMode() (only a pinned setting's panel can add/remove its line
-   *  source), not from focus. A variable so update()'s per-tick overlay refresh
-   *  knows which excess() to read without re-deriving. */
-  let lineMode: { sceneId: string; spec: SceneSetting } | null = null;
   /** The pinned setting's DriveSetting as of its panel's last build; update()'s
    *  refresh compares against it to notice an external change (a paired
    *  device's command) without rebuilding every tick (the click-loss rule).
@@ -2118,149 +2012,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return !!a && !!b && a.sceneId === b.sceneId && a.spec.key === b.spec.key;
   }
 
-  const lineEditor = createBandLineEditor({
-    onLineChange: (band, height) => {
-      if (lineMode) deps.setDriveLineBand(lineMode.sceneId, lineMode.spec, band, height);
-    },
-    onStrengthChange: (value) => {
-      if (lineMode) deps.setDriveLineStrength(lineMode.sceneId, lineMode.spec, value);
-    },
-  });
-  lineEditor.el.style.display = "none";
-  // Appended after the faders' hit divs, so it paints on top and captures every
-  // pointer event over the strip while visible; the faders' handlers need no
-  // suppression, only spectrumStrip.setShowFaders for the drawn markers.
-  bandFaders.el.appendChild(lineEditor.el);
   // Also used in the pinned row's patch panel (buildSourceLine) for its line source.
   const clearLineChip = createChipButton("Clear line", "Erase the drawn line — every band is ignored again.", () => {
-    if (!lineMode) return;
-    deps.resetDriveLine(lineMode.sceneId, lineMode.spec);
-    deps.setDriveLineStrength(lineMode.sceneId, lineMode.spec, LINE_STRENGTH_DEFAULT);
-    lineEditor.setLine(deps.getDriveLine(lineMode.sceneId, lineMode.spec));
-    lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
+    if (!pinned) return;
+    deps.resetDriveLine(pinned.sceneId, pinned.spec);
+    deps.setDriveLineStrength(pinned.sceneId, pinned.spec, LINE_STRENGTH_DEFAULT);
   });
   clearLineChip.dataset.hint = clearLineChip.title;
-  // Static, so set once here, not per buildSourceLine() rebuild; the panel's
-  // bottom hint line reads it off this element wherever it is appended.
-  lineEditor.strengthRow.title = "How hard the drawn line drives the setting when bars rise above it.";
-  lineEditor.strengthRow.dataset.hint = lineEditor.strengthRow.title;
-
-  /** Called after every pin change and patch edit (patchChanged), never per tick. */
-  function refreshLineMode(): void {
-    const setting = pinned ? deps.getDriveSetting(pinned.sceneId, pinned.spec) : "scene";
-    const hasLine = !!pinned && setting !== "scene" && setting.sources.some((s) => isLineSourceChoice(s.choice));
-    if (hasLine && pinned) {
-      const isNew = !samePair(lineMode, pinned);
-      lineMode = { sceneId: pinned.sceneId, spec: pinned.spec };
-      if (isNew) {
-        spectrumStrip.setShowFaders(false);
-        lineEditor.el.style.display = "";
-        refreshEqLayer();
-      }
-      lineEditor.setLine(deps.getDriveLine(lineMode.sceneId, lineMode.spec));
-      lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
-    } else if (lineMode) {
-      lineMode = null;
-      spectrumStrip.setShowFaders(true);
-      lineEditor.el.style.display = "none";
-      refreshEqLayer();
-    }
-  }
-
-  // ---- eqLayer's hover/focus/drag reveal (refreshEqLayer is the one writer of
-  // its display). Hiding waits EQ_HIDE_DELAY_MS so a pointer crossing a knob
-  // gap, or a quick refocus between faders, doesn't flash it off and on.
-  let eqHovering = false;
-  let eqFocused = false;
-  let eqDragging = false;
-  let eqHideTimer: ReturnType<typeof setTimeout> | null = null;
-  const EQ_HIDE_DELAY_MS = 400;
-  function refreshEqLayer(): void {
-    if (eqHideTimer !== null) {
-      clearTimeout(eqHideTimer);
-      eqHideTimer = null;
-    }
-    const wantShown = eqHovering || eqFocused || eqDragging;
-    if (!lineMode && wantShown) {
-      eqLayer.style.display = "";
-      return;
-    }
-    if (eqLayer.style.display === "none") return;
-    if (lineMode) {
-      // The drawing overlay needs the space now: hide at once.
-      eqLayer.style.display = "none";
-    } else {
-      eqHideTimer = setTimeout(() => {
-        eqHideTimer = null;
-        eqLayer.style.display = "none";
-      }, EQ_HIDE_DELAY_MS);
-    }
-  }
-  // A finger has no hover: a press already shows the readouts (eqDragging
-  // below), and showing them as the tap lands moved what was under it.
-  fadersRow.addEventListener("pointerenter", (e) => {
-    if (e.pointerType === "touch") return;
-    eqHovering = true;
-    refreshEqLayer();
-  });
-  fadersRow.addEventListener("pointerleave", () => {
-    eqHovering = false;
-    refreshEqLayer();
-  });
-  // Keyboard focus only: wireHoverFocus also focuses a fader on plain pointer
-  // movement, and that focus outlives the pointer; counting it would leave the
-  // readouts up. pointerFocusOriginated is true exactly during that focus().
-  fadersRow.addEventListener("focusin", () => {
-    eqFocused = !pointerFocusOriginated;
-    refreshEqLayer();
-  });
-  fadersRow.addEventListener("focusout", () => {
-    eqFocused = false;
-    refreshEqLayer();
-  });
-  fadersRow.addEventListener("pointerdown", (e) => {
-    // The Frequencies jack sits in this row, but pressing it isn't a fader
-    // drag: popping the readouts up under a tap cost the tap its click on
-    // iPad Safari.
-    if ((e.target as Element | null)?.closest(".vc-jack")) return;
-    eqDragging = true;
-    refreshEqLayer();
-    const stopDrag = (): void => {
-      eqDragging = false;
-      refreshEqLayer();
-      window.removeEventListener("pointerup", stopDrag);
-      window.removeEventListener("pointercancel", stopDrag);
-    };
-    window.addEventListener("pointerup", stopDrag);
-    window.addEventListener("pointercancel", stopDrag);
-  });
-
-  // ---- The Bands card's own jack: the Frequencies corner. Built here, not via
-  // audioMeters.ts's mountJack, because the Bands card lives in this file; it
-  // shares the hoisted onJackClick/onJackHover/jackIsShown with the meters'
-  // `patch` deps, so every jack answers to identical logic. bandsJackEls is
-  // this card's half of the cable layer's source-endpoint lookup
-  // (combinedJackElements).
-  const bandsJackEls = new Map<string, HTMLElement>();
-  function mountBandsJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
-    const jack = createJack(
-      driveSourceColor(choice),
-      () => onJackClick(choice),
-      (on) => onJackHover(choice, on),
-    );
-    jackChoices.set(jack.el, choice);
-    host.appendChild(jack.el);
-    bandsJacks.push({ choice, jack, feedEl });
-    bandsJackEls.set(jackKey(choice), jack.el);
-    return jack;
-  }
-  const bandsJacks: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
-
-  const lineJack = mountBandsJack({ source: "line" }, fadersRow, fadersRow);
-  lineJack.el.style.cssText += "position: absolute; top: 4px; right: 4px; z-index: 2;";
-
-  bandsCard.body.append(fadersRow, eqLayer);
-  audioMeters.addSetupCard(bandsCard.el);
 
   // One at a time: set by buildPatchPanel() when the pinned row builds an
   // output graph, cleared by togglePin()/patchChanged() when there's nothing to
@@ -3245,12 +3003,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
     if (isLineSourceChoice(src.choice)) {
-      lineEditor.strengthRow.style.flex = "1 1 160px";
-      ctrls.append(lineEditor.strengthRow, clearLineChip);
-      const drawHint = document.createElement("span");
-      drawHint.style.cssText = driveDrawHintStyle;
-      drawHint.textContent = "Draw on the spectrum.";
-      ctrls.appendChild(drawHint);
+      ctrls.appendChild(clearLineChip);
     } else {
       ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
     }
@@ -4096,7 +3849,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
     h?.refreshMeta();
     h?.rebuildIfPinned();
-    refreshLineMode();
     refreshPatchHighlight();
   }
 
@@ -4110,7 +3862,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
     h?.refreshMeta();
     h?.rebuildIfPinned();
-    refreshLineMode();
     refreshPatchHighlight();
   }
 
@@ -4128,7 +3879,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // refreshPin() never touches the preview tint; resync so another row isn't
     // left showing a stale one.
     for (const h of driveRowHandles) h.refreshPreviewLit();
-    refreshLineMode();
     refreshPatchHighlight();
     // Solo follows the pin.
     if (soloOn) applySolo();
@@ -4172,8 +3922,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // ---- Jacks (jack.ts) and cables (cableLayer.ts) ----
   // These predicates answer "does `choice` feed the shown (preview ?? pinned)
-  // setting" for both createAudioMeters's jacks and the Bands card's
-  // (mountBandsJack). jackKey (driveSources.ts) collapses every beat-grid
+  // setting" for createAudioMeters's jacks. jackKey (driveSources.ts) collapses every beat-grid
   // division to one key: a patch carries at most one, and the Grid jack means
   // whichever is there.
 
@@ -4256,7 +4005,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return (sel.spec.drive?.sceneSources ?? []).includes(choice);
   }
 
-  /** Something is shown: drives the Bands card's `.vc-patching` dim. */
+  /** Something is shown: drives the meters column's `.vc-patching` dim. */
   function isAnythingShown(): boolean {
     return shownSelection() !== null;
   }
@@ -4418,48 +4167,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  /** The Bands card's jacks: the same refresh as audioMeters.ts's
-   *  refreshPatchView, plus the row-level fed/dim (jack.ts's setRowFed). Glow
-   *  priority per shared row: active preview (soft), then pinned feed (full,
-   *  faint while another preview is live), then the scene-mix fallback
-   *  (jackIsSceneSource; a "scene" setting has no patch sources). */
-  function refreshBandsJacks(): void {
-    const ap = activePreview();
-    const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
-    for (const { choice, jack, feedEl } of bandsJacks) {
-      jack.setFilled(jackIsShown(choice));
-      jack.setPressed(jackIsPinned(choice));
-      jack.setUses(jackUsage(choice));
-      const { aria, title } = jackDescribe(choice);
-      jack.setLabel(aria, title);
-      let list = feedGroups.get(feedEl);
-      if (!list) {
-        list = [];
-        feedGroups.set(feedEl, list);
-      }
-      list.push(choice);
-    }
-    for (const [rowEl, choices] of feedGroups) {
-      // Mute-aware: a muted source keeps its jack filled but doesn't light the row.
-      const previewHit = ap ? choices.find((c) => jackFeedsPreviewActive(c)) : undefined;
-      const pinnedHit = pinned ? choices.find((c) => jackIsPinnedActive(c)) : undefined;
-      const sceneSoftHit = previewHit || pinnedHit ? undefined : choices.find((c) => jackIsSceneSource(c));
-      if (previewHit) {
-        setRowFed(rowEl, "soft", driveSourceColor(previewHit));
-      } else if (pinnedHit) {
-        setRowFed(rowEl, ap ? "faint" : "full", driveSourceColor(pinnedHit));
-      } else if (sceneSoftHit) {
-        setRowFed(rowEl, "soft", driveSourceColor(sceneSoftHit));
-      } else {
-        setRowFed(rowEl, "none", "");
-      }
-    }
-  }
-
-  /** Dims every band outside `range` on both spectra (the Bands card's and the Sound card's thin one); null clears. */
+  /** Dims every band outside `range` on the Sound card's spectrum; null clears. */
   function setSpectrumHighlight(range: { lo: number; hi: number } | null): void {
-    spectrumStrip.setHighlight(range);
-    spectrumStrip.redraw();
     audioMeters.soundSpectrum.setHighlight(range);
     audioMeters.soundSpectrum.redraw();
   }
@@ -4505,7 +4214,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function combinedJackElements(): ReadonlyMap<string, HTMLElement> {
     const merged = new Map(audioMeters.jackElements());
-    for (const [k, v] of bandsJackEls) merged.set(k, v);
     return merged;
   }
 
@@ -4585,7 +4293,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cableRecomputeQueued = true;
     requestAnimationFrame(() => {
       cableRecomputeQueued = false;
-      placeSetupColumn();
       positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
@@ -4742,7 +4449,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  scheduleCableRecompute() does the measuring. */
   function refreshPatchHighlight(): void {
     audioMeters.refreshPatchView();
-    refreshBandsJacks();
     refreshSpectrumDriveHighlight();
     spectrumCol.classList.toggle("vc-patching", isAnythingShown());
     refreshChain();
@@ -4793,61 +4499,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Input rows: only for an input focus — a setting's focus already marks the meters through .vc-patching.
     const litInputs = focus?.kind === "input";
     const rowLit = new Map<HTMLElement, boolean>();
-    // The Bands card's Frequencies jack sits in a row of its own (mountBandsJack's feedEl), not inside a .vc-row.
-    const bandsFeed = new Map<HTMLElement, HTMLElement>(bandsJacks.map((b) => [b.jack.el, b.feedEl]));
     for (const [key, el] of combinedJackElements()) {
-      const row = bandsFeed.get(el) ?? el.closest<HTMLElement>(".vc-row");
+      const row = el.closest<HTMLElement>(".vc-row");
       if (!row) continue;
       rowLit.set(row, (rowLit.get(row) ?? false) || (!!chain && chain.inputs.has(key)));
     }
     for (const [row, lit] of rowLit) row.classList.toggle("vc-chain-lit", litInputs && lit);
-  }
-
-  // The Setup column's place in the open gap (controlsTheme.ts's .vc-setup
-  // rules are only the fallback before the first placement).
-  const SETUP_COL_MIN_PX = 240;
-  const SETUP_COL_MAX_PX = 300;
-  const SETUP_COL_GAP_PX = 16;
-  /** Matches .vc-setup's CSS top (controlsTheme.ts). */
-  const SETUP_COL_TOP_PX = 60;
-  /** What .vc-setup's max-height leaves below its top (the CSS fallback's own subtraction). */
-  const SETUP_COL_BELOW_PX = 90;
-  const SETUP_COL_CLEAR = { left: "", top: "", width: "", maxHeight: "" };
-
-  /** Writes each inline value only when it differs, since this runs on every scroll's recompute. */
-  function setPlacement(el: HTMLElement, p: { left: string; top: string; width: string; maxHeight: string }): void {
-    const style = el.style;
-    if (style.left !== p.left) style.left = p.left;
-    if (style.top !== p.top) style.top = p.top;
-    if (style.width !== p.width) style.width = p.width;
-    if (style.maxHeight !== p.maxHeight) style.maxHeight = p.maxHeight;
-  }
-
-  /** Places the Setup column in the open gap between the meters and the settings side (controlsTheme.ts's .vc-setup sets the fallback). The gap's right end is the Output power card's left edge while that card shows; if that leaves less than SETUP_COL_MIN_PX, the column drops below the Output power card and runs to the settings column instead. */
-  function placeSetupColumn(): void {
-    if (narrowMQ.matches || spectrumCol.getClientRects().length === 0) {
-      setPlacement(audioMeters.setupEl, SETUP_COL_CLEAR);
-      return;
-    }
-    const meters = spectrumCol.getBoundingClientRect();
-    const settings = controlsCol.getBoundingClientRect();
-    const powerRect = powerCol.querySelector<HTMLElement>(".vc-power-card")?.getBoundingClientRect();
-    const power = powerRect && powerRect.width > 0 ? powerRect : null;
-    const left0 = meters.right + SETUP_COL_GAP_PX;
-    let right0 = (power ? power.left : settings.left) - SETUP_COL_GAP_PX;
-    let top = SETUP_COL_TOP_PX;
-    if (right0 - left0 < SETUP_COL_MIN_PX && power) {
-      right0 = settings.left - SETUP_COL_GAP_PX;
-      top = Math.max(SETUP_COL_TOP_PX, power.bottom + 8);
-    }
-    const width = Math.max(0, Math.min(SETUP_COL_MAX_PX, right0 - left0));
-    const left = left0 + (right0 - left0 - width) / 2;
-    setPlacement(audioMeters.setupEl, {
-      left: `${Math.round(left)}px`,
-      top: `${Math.round(top)}px`,
-      width: `${Math.round(width)}px`,
-      maxHeight: `calc(var(--vc-vh) - ${Math.round(top + SETUP_COL_BELOW_PX)}px)`,
-    });
   }
 
   // A hover-scheduled preview change not yet committed (wireHoverFocus's
@@ -4871,7 +4528,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   spectrumCol.append(bandsBlock, audioMeters.el);
 
-  // The Output power card travels with this column so the CSS (vc-cols-wrap, controlsTheme.ts)
+  // Power travels with this column so the CSS (vc-cols-wrap, controlsTheme.ts)
   // can hide both when everything is folded. columnsToggle stays visible then;
   // clicking it unfolds every folded card via its chevron.
   const columnsToggle = document.createElement("button");
@@ -4889,10 +4546,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   columnsWrap.append(columnsToggle, powerCol, spectrumCol);
 
   // Recomputed off each card's vc-folded class via the observer below. With
-  // "Hide left" active, Bands and the meter cards are excluded
+  // "Hide left" active, the meter cards are excluded
   // (isFolded(METERS_COLUMN), not an offsetParent probe: that forced a
   // synchronous layout per class mutation and stalled the panel), and so is
-  // the Output card, whose folded square (powerCard.ts) needs no "▸".
+  // Power, whose folded square (powerCard.ts) needs no "▸".
   function refreshColumnsFold(): void {
     const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")].filter((c) => c.style.display !== "none");
     columnsWrap.classList.toggle(
@@ -4919,28 +4576,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  const faderGains = new Float32Array(BAND_FADER_COUNT);
-  function refreshBandFaders(): void {
-    const sceneId = deps.currentSceneId();
-    for (let i = 0; i < BAND_FADER_COUNT; i++) faderGains[i] = deps.getBandGain(sceneId, i);
-    bandFaders.setGains(faderGains);
-    bandFaders.clearOff();
-  }
-
-
-  // The Hz edges depend on the analyser's sample rate, unknown until mic
-  // access is granted, so re-run on every open().
-  function refreshBandEdges(): void {
-    bandFaders.setEdgesHz(deps.getBandEdgesHz());
-  }
-
   // ---- controls column ----
   const controlsCol = document.createElement("div");
   controlsCol.className = "vc-controls-col vc-scroll";
   cableColumnsRO.observe(controlsCol);
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
-  cableColumnsRO.observe(audioMeters.setupEl);
-  audioMeters.setupEl.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
   // Global "Auto" master switch: toggles every auto-capable scene row (app.ts's
   // isSceneAuto).
@@ -6292,7 +5932,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // A jack click with nothing pinned reaches for lastPreview: drop it on a
     // scene switch so a click can't pin a setting on the scene just left.
     if (lastPreview && lastPreview.sceneId !== sceneId) lastPreview = null;
-    refreshLineMode();
     refreshPatchHighlight();
     // Rows were just rebuilt unmarked: re-hide around the solo.
     if (soloOn) applySolo();
@@ -6335,7 +5974,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   // Footer strip: view toggles and a way out, in the column that never hides
-  // (a chip above Bands needed its own row and pushed the column out of line
+  // (a chip above the column head needed its own row and pushed the column out of line
   // with Power and the Auto bar). The dock is sticky to the bottom (.vc-dock,
   // controlsTheme.ts): at the bottom of the scroll the buttons were out of
   // sight whenever the column overflowed.
@@ -6362,20 +6001,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const hideBtn = makeFooterBtn("hide", "H", () => close());
   hideBtn.textContent = "Hide UI  H";
   hideBtn.title = "Close the panel (H)";
-  // No shortcut yet (keyHints.ts): a key for Setup is the owner's call.
-  const setupBtn = document.createElement("button");
-  setupBtn.type = "button";
-  setupBtn.style.cssText = footerBtnStyle;
-  setupBtn.className = "vc-setup-btn";
-  setupBtn.textContent = "Setup";
-  setupBtn.title = "Check the input: waveform, input level, loudness, gate, hit shape, heat history and device load";
-  setupBtn.addEventListener("click", () => {
-    const open = !root.classList.contains("vc-setup-open");
-    // Setup hides with the left column (vc-meters-hidden), so opening it brings that back.
-    if (open && isFolded(METERS_COLUMN)) setMetersHidden(false);
-    setSetupShown(open);
-  });
-  footer.append(setupBtn, keysBtn, soloBtn, metersBtn, hideBtn);
+  footer.append(keysBtn, soloBtn, metersBtn, hideBtn);
 
   // The keys list behind "Keys": one row per keyHints.ts SHORTCUTS entry,
   // built here since a row is also this file's hover/click target. Hover
@@ -6462,18 +6088,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshColumnsFold();
   }
   setMetersHidden(isFolded(METERS_COLUMN));
-
-  let setupShown = false;
-  function setSetupShown(open: boolean): void {
-    setupShown = open;
-    setFolded(SETUP_COLUMN, !open, true);
-    root.classList.toggle("vc-setup-open", open);
-    audioMeters.setSetupOpen(open);
-    setupBtn.style.color = open ? "#fff" : "inherit";
-    placeSetupColumn();
-    scheduleCableRecompute();
-  }
-  setSetupShown(!isFolded(SETUP_COLUMN, true));
 
   // ---- solo ----
   /** The heat lens on or off (HEAT chip and L). Session-only view state, like Solo. */
@@ -6594,7 +6208,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     : null;
 
   controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, setCard.el, paletteCard.el, overlayCard.el, ...(midiCard ? [midiCard.el] : []), dock);
-  root.append(columnsWrap, controlsCol, audioMeters.setupEl);
+  root.append(columnsWrap, controlsCol);
   // Every card is built once and lives for the panel's lifetime: one pass covers them (cableColumnsRO).
   for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
   document.body.appendChild(root);
@@ -6625,12 +6239,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // controls with a layout box: folded card bodies are display:none, an
   // unpinned setting's patch panel is display:none, and lineEditor.strengthRow
   // is detached outside line mode; such a control would sit in the ring and
-  // fail to focus. The Power cards' Resolution sliders are left out, as their
-  // chips are: a folded Output card is only visibility:hidden (it keeps its
+  // fail to focus. The Power column's Resolution slider is left out, as its
+  // chips are: a folded Power card is only visibility:hidden (it keeps its
   // layout box), so Tab would dead-end on a hidden control.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
-      (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col") && !powerCard.el.contains(el),
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker")].filter(
+      (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col"),
     );
   }
 
@@ -6753,8 +6367,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // The panel may have been closed on another scene: renderSceneSettings()'s
     // tail unpins if so and rebuilds the pinned patch panel.
     renderSceneSettings();
-    refreshBandEdges();
-    refreshBandFaders();
     masterRow.sync(() => deps.getSceneMaster());
     masterExpansionRow.sync(() => deps.getSceneExpansion());
     masterShapeRow.sync();
@@ -6842,13 +6454,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
-    openPower() {
-      if (!isOpen) open();
-      if (isFolded(METERS_COLUMN)) setMetersHidden(false);
-      setSetupShown(true);
-      powerCard.unfold();
-      powerCard.el.scrollIntoView({ block: "nearest" });
-    },
     sceneChanged() {
       if (isOpen) syncToScene();
     },
@@ -6858,10 +6463,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,
-      ungained: FeatureFrame | null,
-      pinnedBands: Uint8Array | null,
       anim: AnimFrame | null,
-      mono: Float32Array | null,
       rateScale: number,
       beatDiag: OnsetDiag | null,
       gate: SilenceGateReading | null,
@@ -6879,7 +6481,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // tick. Open but not `draw`, it also records the drive graphs' peak-hold
       // (notePeaks) so a one-tick hit reaches the next drawn sparkline.
       if (!isOpen || !draw) {
-        audioMeters.update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, false);
+        audioMeters.update(frame, anim, rawBands, rateScale, beatDiag, gate, false);
         if (isOpen && drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) notePeaks(drives);
         return;
       }
@@ -6887,7 +6489,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // here, not at each scene-change call site, since this runs every tick
       // however the switch happened. Cheap when nothing changed.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, true);
+      audioMeters.update(frame, anim, rawBands, rateScale, beatDiag, gate, true);
       // Unthrottled: the live row's meter should track frame.level like any
       // other live meter, not the structural-refresh cadence.
       sourceRow.updateMeters(frame?.level ?? null);
@@ -6928,30 +6530,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
 
       // The processed feed is the render path's sensitivity+expansion pipeline
-      // (applySensitivity in app.ts); the raw feed shows the mic as-is. The
-      // ghost is the same pipeline over the pre-fader frame and goes first:
-      // applySensitivity returns one shared scratch buffer on its fast path, so
-      // the ghost must be copied into the strip before the second call
-      // overwrites it.
-      const bandsShown = setupShown && !bandsCard.fold?.isFolded();
-      const soundShown = audioMeters.soundSpectrumShown();
-      if (bandsShown) {
-        spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
-        spectrumStrip.setPinned(pinnedBands);
-      }
-      if (bandsShown || soundShown) {
+      // (applySensitivity in app.ts); the raw feed shows the mic as-is.
+      if (audioMeters.soundSpectrumShown()) {
         const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
-        if (bandsShown) spectrumStrip.update(rawBands, processedBands);
-        if (soundShown) audioMeters.soundSpectrum.update(rawBands, processedBands);
+        audioMeters.soundSpectrum.update(rawBands, processedBands);
       }
-      // The Frequencies overlay draws on this strip's own canvas
-      // (bandLineEditor.ts header) from this tick's live excess, unthrottled
-      // like the strip. Skipped without lineMode or with the Bands card
-      // folded or the Setup view closed.
       const nowMs = performance.now();
-      if (lineMode && bandsShown) {
-        lineEditor.update(drives?.excess(lineMode.spec.key) ?? null);
-      }
       // Sparklines: every drive row's valueOf() plus the pinned row's output
       // graph; canvas draws only. Skipped while the Scene card is folded or
       // nothing is readable.
@@ -7032,8 +6616,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       refreshSpectrumHeader();
       powerCard.setTitle(deps.isPreview() ? "Preview" : "Power");
-      // Its readouts are only written while Setup shows the card open.
-      if (setupShown && !powerCard.isFolded()) powerCard.refresh();
+      powerCard.refresh();
       const outputShown = deps.getOutputPowerStatus() !== null;
       if (outputShown !== outputPowerShown) {
         outputPowerShown = outputShown;

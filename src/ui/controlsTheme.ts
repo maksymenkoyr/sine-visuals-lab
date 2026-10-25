@@ -189,21 +189,6 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
-/* The Setup view (audioMeters.ts's setupEl) sits in the gap between the meters
- * and settings columns. deviceMenu.ts's placeSetupColumn overwrites
- * left/top/width/max-height inline on every recompute; left and width here are
- * only the fallback before the first one. */
-.vc-setup {
-  position: fixed; top: 60px; z-index: 30;
-  --vc-setup-gap: calc(100vw - 409px - 346px);
-  width: min(300px, var(--vc-setup-gap));
-  left: calc(409px + (var(--vc-setup-gap) - min(300px, var(--vc-setup-gap))) / 2);
-  max-height: calc(var(--vc-vh) - 150px); overflow-y: auto;
-  display: none;
-}
-.vc-root.vc-setup-open .vc-setup { display: flex; flex-direction: column; gap: 4px; }
-.vc-setup > * { flex-shrink: 0; }
-.vc-root.vc-meters-hidden .vc-setup { display: none; }
 /* Patch focus (refreshChain, patchChain.ts): while a chain is lit, the items on it glow.
  * Nothing off it dims: a faded row read as switched off. */
 .vc-root.vc-chain-on .vc-chain-lit:not(:hover):not(:focus-within) {
@@ -280,7 +265,6 @@ const stylesheet = `
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
-  .vc-setup { position: static; width: 100%; max-height: none; overflow: visible; order: 1; }
   /* The triangle-collapse only makes sense beside other columns: dissolve the
    * wrapper and undo vc-cols-folded's hiding. Wins by coming later at equal
    * specificity. */
@@ -561,18 +545,6 @@ body.vc-keys-reveal [data-keycap]::after {
   transform: translate(-50%, -50%); border-radius: 1px;
   background: var(--c, rgba(255, 255, 255, 0.85));
   box-shadow: 0 0 3px var(--c, rgba(255, 255, 255, 0.6));
-}
-
-/* Band fader hit area (bandFaders.ts): an invisible column over the spectrum canvas.
- * touch-action: none, unlike the slider's pan-y: a vertical drag moves the fader and
- * must never scroll the stacked panel. The focus ring is inset to stay inside the
- * card's overflow: hidden. */
-.vc-fader {
-  position: absolute; top: 0; touch-action: none; cursor: ns-resize;
-  outline: none; border-radius: 3px;
-}
-.vc-fader:focus-visible {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
 }
 
 .vc-toggle {

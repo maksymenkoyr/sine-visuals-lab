@@ -60,7 +60,7 @@ export default async function (ctx) {
 
   const colMax = `calc(${H / zoom}px - 76px)`;
   await ctx.css(`
-    .vc-power-col, #loadChip, #sceneVersion { visibility: hidden !important; }
+    .vc-power-col, #sceneVersion { visibility: hidden !important; }
     .vc-spectrum-col { max-height: ${colMax} !important; overflow-y: auto !important; scrollbar-width: none !important; }
     .vc-meters { overflow: visible !important; max-height: none !important; }
     .vc-controls-col { max-height: ${colMax} !important; scrollbar-width: none !important; }

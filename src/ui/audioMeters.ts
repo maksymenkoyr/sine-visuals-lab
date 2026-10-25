@@ -1,4 +1,4 @@
-import { BEAT_PULSE_DECAY_PER_SEC, type AnimFrame } from "../render/animClock.ts";
+import type { AnimFrame } from "../render/animClock.ts";
 import { getTapRun } from "../render/tapTempo.ts";
 import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId, type SignalId } from "../render/signals.ts";
 import { isStemSignal } from "../render/stemReaders.ts";
@@ -20,36 +20,12 @@ import {
 import { flashTo } from "./flashAnim.ts";
 import { bandCenterHz, formatHz } from "../audio/bandScale.ts";
 import { METRONOME_BEATS_PER_BAR } from "../render/metronome.ts";
-import { isClipping } from "../audio/waveform.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL, type MusicDial } from "../render/musicProfile.ts";
 import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
 import { HIT_DEFAULTS, REFRACTORY_S } from "../audio/engine/onsets.ts";
-import { GROUP_TUNING, RISE_K, RISE_WINDOW_S } from "../render/bandEnergy.ts";
-import {
-  hitStandout,
-  HIT_AMOUNT_DEFAULT,
-  HIT_AMOUNT_MAX,
-  HIT_AMOUNT_MIN,
-  HIT_FLOOR_DEFAULT,
-  HIT_FLOOR_MAX,
-  HIT_FLOOR_MIN,
-  HIT_KNEE_DEFAULT,
-  HIT_KNEE_MAX,
-  HIT_KNEE_MIN,
-  HIT_LOUDNESS_DEFAULT,
-  HIT_LOUDNESS_MAX,
-  HIT_LOUDNESS_MIN,
-  HIT_TAIL_DEFAULT,
-  HIT_TAIL_MAX,
-  HIT_TAIL_MIN,
-  HIT_LANES,
-  type HitLane,
-  type HitParts,
-  type HitShape,
-  type HitShapePatch,
-  type HitTails,
-} from "../audio/hitStrength.ts";
+import { RISE_K, RISE_WINDOW_S } from "../render/bandEnergy.ts";
+import type { HitParts } from "../audio/hitStrength.ts";
 import {
   AUTO_SKY,
   FONT_MONO,
@@ -62,16 +38,12 @@ import {
   withAlpha,
 } from "./controlsTheme.ts";
 import {
-  chipBtnLitStyle,
   chipBtnStyle,
   createCard,
   createChipButton,
   createTraceLegend,
   digitsStyle,
   digitsTextStyle,
-  groupHeading,
-  groupHeadingStyle,
-  percentReadout,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -79,9 +51,6 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
-// Circular with deviceMenu.ts (it imports createAudioMeters); safe because
-// neither calls across until both modules have loaded.
-import { createControlRow } from "./deviceMenu.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
 import { watchOnScreen } from "./onScreen.ts";
@@ -107,35 +76,13 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * what this device measures before any beat/tempo logic runs, Beat is
  * everything about *when*, Song is the slow trend over a whole track.
  *
- *  - Setup view (setupEl, opened from the panel footer): the rows checked
- *    once per set, in cards of their own: Input check, Hit shape, the Bands
- *    card (deviceMenu.ts builds it, addSetupCard places it) and the Heat
- *    history card; deviceMenu.ts appends the Power card last. The Sound card
- *    (foldId "sound") is first in the meters column.
- *  - Input check: everything this device's own mic measures, before any
- *    beat/tempo logic runs — Input level first: FeatureFrame.level (pre-AGC,
- *    absolute). Its bar and readout turn to CLIP for CLIP_HOLD_MS after any
- *    clipped sample in `mono`: this device's own mic samples
- *    (waveformAnalyser.ts), or on a phone or iPad following another device
- *    the feed's one min/max pair per wire frame (src/net/protocol.ts's wave
- *    tail). Then a Gate row: the
- *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
- *    much of a hit's strength the gate is currently letting through — with
- *    a trace beneath it, of Input level against the Input
- *    card's two marks (dashed guides, zoomed so the upper one sits
- *    mid-height); hits the gate actually stops show up as faint ticks on
- *    the Hits card rather than a series of their own here. Local-only like
- *    rawBands — a device with no FeatureExtractor of its own (a
- *    renderer, the synthetic feed) reads Gate idle too, same as the Hits
- *    card's own Beat lane. Last, Centroid: spectralCentroid.ts's fast,
- *    range-adapted reading traced over the card's span, the live signal the
- *    Song card's Tone dial summarises.
+ *  - Heat history: the last card, folded by default (its own span chip), a
+ *    strip per wired setting and per signal jack.
  *  - Sound: a thin live spectrum (spectrumStrip.ts's second instance, fed by
- *    deviceMenu.ts beside the Bands card's), then four trace rows, each a
+ *    deviceMenu.ts), then four trace rows, each a
  *    line over the card's span on one fixed scale that never rescales: Level
- *    (Input level's post-AGC sibling, the only way to see features.ts's
- *    adaptive floor/peak doing its job, since its whole point is to make that
- *    invisible downstream), Bass, Mid and Treble. Mid and Treble carry a
+ *    (the only way to see features.ts's adaptive floor/peak doing its
+ *    job, since its whole point is to make that invisible downstream), Bass, Mid and Treble. Mid and Treble carry a
  *    second, pale line, Lead and Hats (stemReaders.ts), each with its own
  *    jack; their stems are measured only on the device with the mic, and a
  *    gap is drawn where they weren't. Under Level's line a band along the
@@ -151,23 +98,8 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  *    not just an instant reading, so a tuning session can see *why* a hit
  *    did or didn't count, ground-shaded by how closed the silence gate was
  *    at the time. A fired tick's height is that hit's graded strength
- *    (src/audio/hitStrength.ts's HitParts) — exactly full height at
- *    Dimension 0, so nothing on screen changes until that slider actually
- *    moves. The Hit shape card in the Setup view (folded by default) holds
- *    two groups. Height: the sliders that shape a hit's
- *    strength (Dimension/Knee/Loudness mix/Floor) plus a Curve
- *    (hitStandout(ratio, knee) plotted live, a dot per lane at that lane's
- *    own last-hit ratio). Length: one row per lane for how long its pulse
- *    rings out (hitStrength.ts's `shape.tail`, shown as the ms it takes to
- *    fade), Linked by default so one drag moves every lane, under an
- *    Envelope monitor (createTailEnvelope) of each lane's fall over four
- *    beats, with Smoothing's stretch as its readout. While Hit shape is
- *    open, the hits history also marks each fired column's stand-out and
- *    loudness parts as two small dots, draws a dashed Floor guide, and
- *    shades each lane's own pulse under its ticks (its tail), so dragging
- *    any of those sliders shows exactly what it did to a real hit rather
- *    than just a number moving. The Bass lane also carries the Kick band's
- *    own jack and its Hz in the legend.
+ *    (src/audio/hitStrength.ts's HitParts). The Bass lane also carries the
+ *    Kick band's own jack and its Hz in the legend.
  *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
  *    follows tempoLock, so an unlocked guess reads as
@@ -203,8 +135,8 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * drawing and DOM writes — folding buys back the per-frame cost, not just
  * the screen space.
  *
- * Every time-axis trace (the Sound rows, Gate, Hits, Wave,
- * Centroid, Section) records into a time store (createColumnRing) on every tick,
+ * Every time-axis trace (the Sound rows, Hits, Wave,
+ * Section) records into a time store (createColumnRing) on every tick,
  * folded card or closed panel alike, so opening a card shows what it
  * missed. A span chip in each card's header (historySpan.ts) picks how
  * much of that the card's traces squeeze into its width, from
@@ -232,16 +164,14 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * it's open, not whether folding buys back that cost.
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
- * drive source can feed — Input level (Input check), Level, Bass, Mid + Lead and
+ * drive source can feed — Level, Bass, Mid + Lead and
  * Treble + Hats (Sound; createTraceRow mounts them), Section's own
  * Section+Drop pair and one per dial cell (Song, signals.ts's DIAL_SIGNALS),
- * the Centroid row's own (Input check), the BPM
- * block's own Tempo jack, Lock, the bar ruler's own Metronome+Metronome
+ * the BPM block's own Tempo jack, Lock, the bar ruler's own Metronome+Metronome
  * bar pair (createBarRuler) and Wave's Beat/Bar pair (Beat), and one per
  * hits-history lane, the Kick band's on the Bass lane, plus one for the
  * Surge lane under them, Onset surge's own (createHitsHistory's own
- * laneMounts, Hits)
- * — plus the Bands card's Frequencies corner, built directly in deviceMenu.ts.
+ * laneMounts, Hits).
  * Every jack's click/hover/fill/usage state is
  * `deps.patch` (AudioMetersDeps's own doc comment); this file only ever
  * mounts them and, on refreshPatchView(), reads that state back into a
@@ -259,7 +189,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * signal has no monitor. Each monitor row also carries its own heat strips,
  * one per signal jack on it, led by a dot in the signal's colour, on the same
  * span and refresh as the jack. The Heat history card (its own span chip,
- * folded by default, in the Setup view) draws one strip per wired setting, from
+ * folded by default, last in the column) draws one strip per wired setting, from
  * deps.heatSettings, and one per signal jack.
  *
  * Every one of those "un-eased" values is what its smoothed sibling is
@@ -276,24 +206,17 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
 
 export interface AudioMeters {
   el: HTMLElement;
-  /** The Setup view's column (Input check, Hit shape, the Bands card via addSetupCard, Heat history); deviceMenu.ts places it. */
-  setupEl: HTMLElement;
-  /** Tells the meters whether the Setup view is open; a closed one skips its draws and jack writes. */
-  setSetupOpen(open: boolean): void;
   /** Fed every frame, panel open or closed. `onScreen` false only records the
    *  traces: no draws or DOM writes, and peak fall, text cadence and flashes
    *  count from the last drawn tick. `frame`/`anim` null = audio not up yet.
-   *  `mono` is the local mic's samples, or on a following device the feed's
-   *  [min, max] (app.ts's waveSamples), read only for Input level's CLIP.
    *  `rawBands`, `beatDiag` and `gate` are null on a
    *  device without the matching local analyser, and the rows that read them
-   *  idle or hide (Gate's trace still plots `frame.level`). `rateScale` is
+   *  idle or hide. `rateScale` is
    *  sensitivity.ts's smoothingRateScale; non-finite (Smoothing Off) shows the
    *  raw BPM estimate, as `raw` does. */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
-    mono: Float32Array | null,
     rawBands: Float32Array | null,
     rateScale: number,
     beatDiag: OnsetDiag | null,
@@ -318,19 +241,15 @@ export interface AudioMeters {
   /** The heat line (heat.ts) for a jack's tooltip; null for a jack with no
    *  heat. */
   jackHeatText(choice: DriveSourceChoice): string | null;
-  /** The Sound card's thin spectrum; deviceMenu.ts feeds it beside the Bands strip. */
+  /** The Sound card's thin spectrum; deviceMenu.ts feeds it. */
   soundSpectrum: SpectrumStrip;
   /** The Sound card is unfolded and on screen, so its spectrum is worth feeding. */
   soundSpectrumShown(): boolean;
   /** The Sound card is unfolded and its Mid or Treble row is on screen: app.ts runs the stem split for it. */
   stemRowsOnScreen(): boolean;
-  /** Inserts a card into the Setup view, before Heat history. */
-  addSetupCard(el: HTMLElement): void;
 }
 
 export interface AudioMetersDeps {
-  /** Opens the Setup view, for revealRow. */
-  openSetup(): void;
   /** Wired settings and their heat tracks, for the Heat history card. */
   heatSettings(): readonly { label: string; track: HeatTrack }[];
   /** Tap chip: one tap at the pointerdown's timeStamp (same path as app.ts's Ctrl). */
@@ -344,10 +263,6 @@ export interface AudioMetersDeps {
   /** The band ladder in Hz (src/audio/bandScale.ts), for the Kick band's Hz on
    *  the Hits card's Bass lane. */
   getBandEdgesHz: () => ArrayLike<number>;
-  /** The Hit shape card's sliders (formula in src/audio/hitStrength.ts).
-   *  Global per device, not per scene: it's a taste about detection, not one
-   *  scene's look. */
-  hitShape: { get: () => HitShape; set: (partial: HitShapePatch) => void };
   /** Jack behaviour and live state (jack.ts header). Predicates are keyed by
    *  the DriveSourceChoice a jack stands for; driveSources.ts's jackKey merges
    *  every beat-grid division. deviceMenu.ts is the only implementation. */
@@ -392,8 +307,6 @@ const ONSET_METER_MAX = 2.5;
 /** Readings that feed no single system — same neutral as the Palette card. */
 const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
 const FADE_MS = 300;
-// Long enough to read: one clipped analyser buffer is ~40 ms.
-const CLIP_HOLD_MS = 1000;
 const FADE = `background-color ${FADE_MS}ms ease-out`;
 
 // At a slider's height so meter and slider rows line up.
@@ -443,9 +356,6 @@ const TEMPO_TITLE =
 // the beat, as with Ctrl in app.ts.
 const tapStatusStyle = `font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.7); white-space: nowrap;`;
 const tapRightStyle = `display: flex; align-items: center; gap: 8px;`;
-// The digits' settle rule lives in tempoSettle.ts (shared with metronome.ts);
-// RAW / Smoothing Off bypass it (see file header).
-const CENTROID_TRACE_HEIGHT_CSS_PX = 28;
 const SECTION_TRACE_HEIGHT_CSS_PX = 34;
 const DROP_MARK_COLOR = HOT_RED;
 const DROP_LABEL_FONT = `9px ${FONT_MONO}`;
@@ -453,7 +363,6 @@ const DROP_LABEL_FONT = `9px ${FONT_MONO}`;
 const DROP_LABEL_PX = 24;
 const DIAL_BAR_HEIGHT_CSS_PX = 44;
 const DIAL_BAR_WIDTH_CSS_PX = 10;
-const INPUT_LEVEL_COLOR = "rgba(255,255,255,0.85)";
 // The Sound card's rows. Level is a little taller so the gate floor under its
 // line has room beside the line.
 const SOUND_TRACE_HEIGHT_CSS_PX = 30;
@@ -473,26 +382,6 @@ const BEAT_TRACE_HEIGHT_CSS_PX = 28;
 // Predicted-grid colour (Wave's bar wave, the bar ruler's downbeat). Blue against
 // BEAT_COLOR's red keeps "predicted" and "detected" apart.
 const BEAT_GRID_COLOR = AUTO_SKY;
-// The Gate trace sits under a meter like Centroid does, so it gets more
-// height. GATE_DIMMER_COLOR is a dim reference line;
-// GATE_GUIDE_COLOR ties the dashed guides to the Input card that edits them.
-const GATE_HISTORY_HEIGHT_CSS_PX = 64;
-const GATE_DIMMER_COLOR = withAlpha(AUTO_SKY, 0.7);
-const GATE_GUIDE_COLOR = withAlpha(INPUT_GREEN, 0.5);
-// The Gate trace plots Level on a zoomed scale: the marks sit near the bottom
-// of level's range, so on the full scale they and Level's movement around
-// them would collapse into a few pixels. The strip's top is
-// GATE_LEVEL_TOP_PER_OPEN times the `open` mark (pinning it mid-height);
-// Level past it clamps. GATE_LEVEL_TOP_MIN stops the scale blowing up with
-// marks at the very bottom. Dimmer keeps its own 0..1 scale. Dragging a mark
-// rescales new columns only.
-const GATE_LEVEL_TOP_PER_OPEN = 2;
-const GATE_LEVEL_TOP_MIN = 0.1;
-
-function gateLevelTop(marks: SilenceGateMarks): number {
-  return Math.min(1, Math.max(GATE_LEVEL_TOP_MIN, marks.open * GATE_LEVEL_TOP_PER_OPEN));
-}
-
 /** A card's span chip as a trace reads it: what it shows now, and the most
  *  it can ever show (how long the trace keeps). */
 interface TraceSpan {
@@ -1043,13 +932,6 @@ function laneNote(ratio: number | null, fires: number, spanSec: number): string 
   return `${ratio === null ? "--" : ratio.toFixed(2)} · ${fires}/${formatHistorySpan(spanSec)}`;
 }
 
-/** A lane's last fired hit's three numbers. `anim.hitStrength.*` always holds
- *  a valid HitParts once `anim` exists, so "--" means no anim at all. */
-function hitStrengthNote(parts: HitParts | null): string {
-  if (!parts) return "--";
-  return `${parts.standout.toFixed(2)} · ${parts.loudness.toFixed(2)} → ${parts.strength.toFixed(2)}`;
-}
-
 /** Mounts a jack for `choice` into `host`, registered for the row-level fed
  *  glow against `feedEl` (jack.ts's setRowFed). A callback so
  *  createHitsHistory needn't know `deps.patch`'s shape. */
@@ -1058,8 +940,8 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
 /** The Hits card's history row. Beat reads `frame.onset` and `beatDiag`
  *  (device-local only: a null diag still lets fired/miss through, with no
  *  ratio trace and no gated/blocked). Bass/Mid/Treble read `anim` (bandEnergy.ts
- *  runs everywhere). Ground shading is `1 - anim.gateDimmer`, the Gate row's
- *  dimmer. The Bass lane also carries the Kick band's jack and Hz. */
+ *  runs everywhere). Ground shading is `1 - anim.gateDimmer`, the silence
+ *  gate's dimmer. The Bass lane also carries the Kick band's jack and Hz. */
 function createHitsHistory(
   getSilenceGate: () => SilenceGateMarks,
   getBandEdgesHz: () => ArrayLike<number>,
@@ -1070,7 +952,7 @@ function createHitsHistory(
     label: "Hits",
     accent: NEUTRAL_ACCENT,
     unit: "s",
-    description: `${hitsRuleHint(getSilenceGate)} A fired tick's height is its graded strength (Shape).`,
+    description: `${hitsRuleHint(getSilenceGate)} A fired tick's height is its graded strength.`,
   });
   // The lane names come from HITS_LANES, so the label can't drift from the lanes.
   const hitsNames = HITS_LANES.map((l) => l.label).join(", ");
@@ -1165,8 +1047,7 @@ function createHitsHistory(
     return laneYFrac(laneIdx, ratio / HITS_RATIO_MAX);
   }
 
-  /** `shapeOpen`/`floor` gate the Shape-only drawing (step 5). */
-  function draw(shapeOpen: boolean, floor: number): void {
+  function draw(): void {
     if (!ring.prepare()) return;
     const w = ring.width;
     const len = ring.length;
@@ -1256,22 +1137,6 @@ function createHitsHistory(
     }
     if (surgePen) closeSurge();
 
-    // 3c. Shape open: each lane's decaying pulse (the value a scene reads), so
-    // Length and Smoothing show as tails and overlap. Under the ticks.
-    if (shapeOpen) {
-      for (let li = 0; li < HITS_LANES.length; li++) {
-        const idx = hitsLaneIdx(li);
-        ctx.fillStyle = withAlpha(HITS_LANES[li].color, 0.22);
-        const bottom = laneTop(li) + HITS_LANE_HEIGHT_PX;
-        for (let x = 0; x <= len; x++) {
-          const v = x === len ? ring.live(idx.pulse) : ring.at(x, idx.pulse);
-          if (!(v > 0)) continue; // NaN or 0
-          const yTop = laneYFrac(li, v);
-          ctx.fillRect(x === len ? w - 1 : x, yTop, 1, bottom - yTop);
-        }
-      }
-    }
-
     // 4. Event tick: fired is a bar up to the hit's graded strength (exactly
     // full at Dimension 0); blocked and gated stay full-height dim/faint marks.
     for (let x = 0; x <= len; x++) {
@@ -1296,36 +1161,6 @@ function createHitsHistory(
       }
     }
 
-    // 5. Shape open: a dashed Floor guide per lane, and two dots per fired
-    // column (stand-out, loudness).
-    if (!shapeOpen) return;
-    if (floor > 0) {
-      for (let li = 0; li < HITS_LANES.length; li++) {
-        ctx.strokeStyle = withAlpha(HITS_LANES[li].color, 0.4);
-        ctx.lineWidth = 1;
-        ctx.setLineDash([2, 2]);
-        ctx.beginPath();
-        const y = Math.round(laneYFrac(li, floor)) - 0.5;
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-    for (let x = 0; x <= len; x++) {
-      const px = x === len ? w - 1 : x;
-      for (let li = 0; li < HITS_LANES.length; li++) {
-        const idx = hitsLaneIdx(li);
-        const code = x === len ? ring.live(idx.code) : ring.at(x, idx.code);
-        if (code < 2.5) continue;
-        const standout = x === len ? ring.live(idx.standout) : ring.at(x, idx.standout);
-        const loudness = x === len ? ring.live(idx.loudness) : ring.at(x, idx.loudness);
-        ctx.fillStyle = "rgba(255,255,255,0.55)";
-        ctx.fillRect(px, Math.round(laneYFrac(li, standout)) - 0.5, 1, 1);
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.fillRect(px, Math.round(laneYFrac(li, loudness)) - 0.5, 1, 1);
-      }
-    }
   }
 
   let lastHint = "";
@@ -1374,19 +1209,15 @@ function createHitsHistory(
         ring.push(new Array(HITS_SERIES_COUNT).fill(null), nowMs);
       }
     },
-    /** Only while on screen, after record(). `shapeOpen`/`floor` gate the
-     *  Shape-only drawing and switch the legend notes. The Curve is drawn
-     *  separately (createHitCurve). */
+    /** Only while on screen, after record(). */
     render(
       frame: FeatureFrame | null,
       anim: AnimFrame | null,
       beatDiag: OnsetDiag | null,
       nowMs: number,
       text: boolean,
-      shapeOpen: boolean,
-      floor: number,
     ): void {
-      draw(shapeOpen, floor);
+      draw();
 
       if (text) {
         legend.setNote(
@@ -1394,22 +1225,13 @@ function createHitsHistory(
           anim && frame && beatDiag ? `${Math.round(SIGNALS["feature.flux"].read(frame, anim) * 100)}%` : "--",
         );
         const kickHz = anim ? `${formatHz(bandCenterHz(getBandEdgesHz(), anim.kickBandIndex))} · ` : "";
-        if (shapeOpen) {
-          const parts = anim
-            ? [anim.hitStrength.beat, anim.hitStrength.low, anim.hitStrength.mid, anim.hitStrength.high]
-            : null;
-          for (let li = 0; li < HITS_LANES.length; li++) {
-            legend.setNote(li, (li === KICK_LANE ? kickHz : "") + hitStrengthNote(parts ? parts[li] : null));
-          }
-        } else {
-          const sec = span.sec();
-          legend.setNote(0, laneNote(beatDiag ? beatDiag.ratio : null, firesInSpan(0, nowMs), sec));
-          legend.setNote(1, kickHz + laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
-          legend.setNote(2, laneNote(anim ? anim.hits.mid.ratio : null, firesInSpan(2, nowMs), sec));
-          legend.setNote(3, laneNote(anim ? anim.hits.high.ratio : null, firesInSpan(3, nowMs), sec));
-        }
+        const sec = span.sec();
+        legend.setNote(0, laneNote(beatDiag ? beatDiag.ratio : null, firesInSpan(0, nowMs), sec));
+        legend.setNote(1, kickHz + laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
+        legend.setNote(2, laneNote(anim ? anim.hits.mid.ratio : null, firesInSpan(2, nowMs), sec));
+        legend.setNote(3, laneNote(anim ? anim.hits.high.ratio : null, firesInSpan(3, nowMs), sec));
         // The marks in the hint can move; touch the DOM only when it changed.
-        const hint = `${hitsRuleHint(getSilenceGate)} A fired tick's height is its graded strength (Shape).`;
+        const hint = hitsRuleHint(getSilenceGate);
         if (hint !== lastHint) {
           lastHint = hint;
           setHintText(row.el.querySelector<HTMLElement>(".vc-hint")!, hint);
@@ -1597,206 +1419,6 @@ function createDialCell(dial: MusicDial) {
   };
 }
 
-// ---- The Hit shape card: the Curve monitor ---------------
-
-const HIT_CURVE_HEIGHT_CSS_PX = 56;
-
-/** The knee curve, hitStandout(ratio, knee) for ratio in 1..ONSET_METER_MAX,
- *  plus a dot per lane at its last-hit ratio. A function plot redrawn from
- *  scratch each tick; cheap. */
-// ---- The Hit shape card's Length group ----
-
-// A row's ms is the time to fall to e^-3 (about 5%) of its height, 3 / rate:
-// round at the base rates, about where a pulse stops reading.
-const TAIL_FADE_TIME_CONSTANTS = 3;
-/** Each lane's base pulse decay rate per second, read from the modules that
- *  own them, never re-typed (as gateWindow.ts's stepHeightEnv does). */
-const LANE_DECAY_PER_SEC: Readonly<Record<HitLane, number>> = {
-  beat: BEAT_PULSE_DECAY_PER_SEC,
-  low: GROUP_TUNING.low.pulseDecayRate,
-  mid: GROUP_TUNING.mid.pulseDecayRate,
-  high: GROUP_TUNING.high.pulseDecayRate,
-};
-/** Ms for `lane`'s pulse to fade at tail multiple `tail`, before Smoothing. */
-function laneFadeMs(lane: HitLane, tail: number): number {
-  return ((TAIL_FADE_TIME_CONSTANTS / LANE_DECAY_PER_SEC[lane]) * 1000) * tail;
-}
-const TAIL_ROW_TAIL = "Right: longer, still fading when the next hit lands. Left: a short flick.";
-const TAIL_ROW_HINTS: Readonly<Record<HitLane, string>> = {
-  beat: `How long an Any hit pulse takes to fade — also the metronome's and a beat grid's pulses, and Any hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
-  low: `How long a Bass pulse takes to fade, and Bass hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
-  mid: `How long a Mid pulse takes to fade, and Mid hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
-  high: `How long a Treble pulse takes to fade, and Treble hit wired with a Fixed or Loud height. ${TAIL_ROW_TAIL}`,
-};
-
-// Whether the Length rows move together: a drag habit, not a look, so it stays
-// on this device (syncedStores.ts's PRIVATE_KEYS). Absent = linked.
-const TAILS_LINKED_KEY = "vibe.hitTailLinked";
-function loadTailsLinked(): boolean {
-  try {
-    return localStorage.getItem(TAILS_LINKED_KEY) !== "0";
-  } catch {
-    return true;
-  }
-}
-function saveTailsLinked(linked: boolean): void {
-  try {
-    if (linked) localStorage.removeItem(TAILS_LINKED_KEY);
-    else localStorage.setItem(TAILS_LINKED_KEY, "0");
-  } catch {
-    // Not fatal — the choice just won't persist across reloads.
-  }
-}
-
-const TAIL_ENVELOPE_HEIGHT_CSS_PX = 64;
-const TAIL_ENVELOPE_BEATS = 4;
-// No tempo yet (or none at all): draw the beat lines at this.
-const TAIL_ENVELOPE_FALLBACK_BPM = 120;
-
-/** The Length group's Envelope: each lane's pulse after a hit (e^(-rate·t))
- *  over TAIL_ENVELOPE_BEATS beats, with a hairline at the fade level the rows'
- *  ms count to. Redrawn every frame while Shape is open (the last-hit dots
- *  move). */
-function createTailEnvelope() {
-  const canvas = document.createElement("canvas");
-  nameGraph(canvas, "How each lane's pulse falls after a hit");
-  canvas.style.cssText = `display: block; width: 100%; height: ${TAIL_ENVELOPE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
-  const ctx = canvas.getContext("2d")!;
-  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: TAIL_ENVELOPE_HEIGHT_CSS_PX });
-  const h = TAIL_ENVELOPE_HEIGHT_CSS_PX;
-  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
-
-  function curve(w: number, spanSec: number, rate: number): void {
-    ctx.beginPath();
-    const STEPS = 64;
-    for (let i = 0; i <= STEPS; i++) {
-      const x = (i / STEPS) * (w - 1);
-      const y = yOf(Math.exp(-rate * (i / STEPS) * spanSec));
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-
-  return {
-    canvas,
-    /** `rateScale` is Smoothing's (non-finite at 0: nothing
-     *  plays, so only the as-set curves are drawn); `sinceHitSec[i]` is
-     *  HIT_LANES[i]'s time since its last hit, null before one. */
-    draw(tails: HitTails, rateScale: number, bpm: number, sinceHitSec: readonly (number | null)[]): void {
-      if (!sizer.ensure()) return;
-      const w = sizer.width;
-      ctx.clearRect(0, 0, w, h);
-      const beatSec = 60 / (bpm > 0 && Number.isFinite(bpm) ? bpm : TAIL_ENVELOPE_FALLBACK_BPM);
-      const spanSec = TAIL_ENVELOPE_BEATS * beatSec;
-
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fillRect(0, 0, 1, h);
-      ctx.fillRect(0, Math.round(yOf(Math.exp(-TAIL_FADE_TIME_CONSTANTS))) - 0.5, w, 1);
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 3]);
-      for (let b = 1; b <= TAIL_ENVELOPE_BEATS; b++) {
-        const x = Math.round((b / TAIL_ENVELOPE_BEATS) * (w - 1)) - 0.5;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-
-      const playing = Number.isFinite(rateScale);
-      const stretched = !playing || rateScale !== 1;
-      for (let li = 0; li < HIT_LANES.length; li++) {
-        const lane = HIT_LANES[li];
-        const color = HITS_LANES[li].color;
-        const setRate = LANE_DECAY_PER_SEC[lane] / tails[lane];
-        if (stretched) {
-          ctx.strokeStyle = withAlpha(color, 0.45);
-          ctx.lineWidth = 1;
-          ctx.setLineDash([2, 3]);
-          curve(w, spanSec, setRate);
-        }
-        if (!playing) continue;
-        ctx.setLineDash([]);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        const rate = setRate * rateScale;
-        curve(w, spanSec, rate);
-        const since = sinceHitSec[li];
-        if (since === null || since > spanSec) continue;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc((since / spanSec) * (w - 1), yOf(Math.exp(-rate * since)), 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.setLineDash([]);
-    },
-  };
-}
-
-function createHitCurve() {
-  const canvas = document.createElement("canvas");
-  nameGraph(canvas, "Curve: how strongly a hit stands out against how far it cleared the firing line");
-  canvas.style.cssText = `display: block; width: 100%; height: ${HIT_CURVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
-  const ctx = canvas.getContext("2d")!;
-
-  // A folded or closed panel has no width to draw at (canvasSizer.ts).
-  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: HIT_CURVE_HEIGHT_CSS_PX });
-
-  let lastKey = "";
-  const xOf = (ratio: number, w: number) => ((ratio - 1) / (ONSET_METER_MAX - 1)) * (w - 1);
-  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (HIT_CURVE_HEIGHT_CSS_PX - 2);
-
-  return {
-    canvas,
-    /** `laneRatios[i]` is HITS_LANES[i]'s last-hit ratio; null before it ever
-     *  fired, or with no local reading (the Beat lane on a renderer). */
-    draw(knee: number, laneRatios: readonly (number | null)[]): void {
-      // The curve changes only when Knee or a lane's last hit does, both rare,
-      // so a repeat call is a no-op. The size check stays first so a resize
-      // still repaints.
-      if (!sizer.ensure()) return;
-      // `sizer.version` stands in for the width: a resized backing store clears
-      // the plot.
-      const key = `${sizer.version}|${knee}|${laneRatios.join(",")}`;
-      if (key === lastKey) return;
-      lastKey = key;
-      const w = sizer.width;
-      const h = HIT_CURVE_HEIGHT_CSS_PX;
-      ctx.clearRect(0, 0, w, h);
-
-      // The firing line, at ratio == 1 (the left edge).
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fillRect(0, 0, 1, h);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      const STEPS = 48;
-      for (let i = 0; i <= STEPS; i++) {
-        const ratio = 1 + (i / STEPS) * (ONSET_METER_MAX - 1);
-        const x = xOf(ratio, w);
-        const y = yOf(hitStandout(ratio, knee));
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-
-      for (let li = 0; li < HITS_LANES.length; li++) {
-        const ratio = laneRatios[li];
-        if (ratio === null || !Number.isFinite(ratio)) continue;
-        const clamped = clamp(ratio, 1, ONSET_METER_MAX);
-        const x = xOf(clamped, w);
-        const y = yOf(hitStandout(clamped, knee));
-        ctx.fillStyle = HITS_LANES[li].color;
-        ctx.beginPath();
-        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    },
-  };
-}
-
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
 const meanOf = (v: Float32Array) => {
@@ -1932,28 +1554,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const hitsSpan = cardSpan("hits");
   const beatSpan = cardSpan("beat");
   const songSpan = cardSpan("song");
-  const setupInputSpan = cardSpan("setup-input");
-
-  // The Setup view (deviceMenu.ts's footer button): the rows checked once per
-  // set, in cards of their own beside the meters column.
-  const setupEl = document.createElement("div");
-  setupEl.className = "vc-setup vc-scroll";
-  let setupOpen = false;
-
-  // ---- Input check (Setup view): Input level, Gate, Centroid ----
-  const level = createMeterRow({
-    label: "Input level",
-    accent: INPUT_GREEN,
-    unit: "%",
-    description:
-      "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low. Turns red and reads CLIP for a moment when the sound clips.",
-  });
-  mountJack("feature.level", level.right, level.el);
 
   // ---- Sound: spectrum, Level, Bass, Mid, Treble ----
-  // The thin spectrum is fed by deviceMenu.ts beside the Bands strip.
-  const soundSpectrum = createSpectrumStrip({ plotHeightPx: SOUND_SPECTRUM_HEIGHT_CSS_PX, axis: false });
-  soundSpectrum.setShowFaders(false);
+  // The thin spectrum is fed by deviceMenu.ts.
+  const soundSpectrum = createSpectrumStrip({ plotHeightPx: SOUND_SPECTRUM_HEIGHT_CSS_PX });
   nameGraph(soundSpectrum.el, "Live spectrum, bass on the left");
   soundSpectrum.el.style.marginBottom = "4px";
   const soundLevel = createTraceRow({
@@ -1997,72 +1601,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const soundBassVals: (number | null)[] = [null];
   const soundMidVals: (number | null)[] = [null, null];
   const soundTrebleVals: (number | null)[] = [null, null];
-  // Input check's Gate row: the silence gate's reading (src/audio/silenceGate.ts).
-  // The meter (Dimmer) stays; a canvas goes under it before the hint.
-  const gateRow = createMeterRow({
-    label: "Gate",
-    accent: INPUT_GREEN,
-    unit: "%",
-    description:
-      "How much of a hit's strength the silence gate is currently letting through — full: beats are detected exactly as before; empty: the room is silent and nothing can fire. Below, Input level against the two Input-card marks (dashed, zoomed so the upper one sits mid-height) and the Dimmer itself over time. Hits the gate actually stops show up as faint ticks on the Hits card instead of a series here.",
-  });
-  // Paint order: Dimmer, then Level on top.
-  const gateHistoryStrip = createTraceStrip(
-    [
-      { color: GATE_DIMMER_COLOR, width: 1 },
-      { color: INPUT_LEVEL_COLOR, width: 1 },
-    ],
-    GATE_HISTORY_HEIGHT_CSS_PX,
-    {
-      label: "History of Level and the gate's Dimmer against the gate's two marks",
-      guides: () => {
-        const marks = deps.getSilenceGate();
-        const top = gateLevelTop(marks);
-        return [
-          { at: marks.closed / top, color: GATE_GUIDE_COLOR },
-          { at: marks.open / top, color: GATE_GUIDE_COLOR },
-        ];
-      },
-      span: setupInputSpan,
-    },
-  );
-  gateRow.el.insertBefore(gateHistoryStrip.canvas, gateRow.el.children[2]);
-  const gateLegend = createTraceLegend([
-    { color: INPUT_LEVEL_COLOR, label: "Input level" },
-    { color: GATE_DIMMER_COLOR, label: "Dimmer" },
-  ]);
-  gateHistoryStrip.canvas.after(gateLegend.el);
-  // Centroid: spectralCentroid.ts's fast, range-adapted reading, the live
-  // signal the Song card's Tone dial summarises.
-  const centroidRow = createMeterRow({
-    label: "Centroid",
-    accent: AUTO_SKY,
-    unit: "%",
-    description: "Where the sound's energy sits right now, from dark and low to bright and high, traced over the card's span. The Song card's Tone dial is its slow summary.",
-  });
-  // RAW briefly mixes raw and processed samples in this trace after a toggle until the span rolls them out; harmless.
-  const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX, {
-    label: "History of the live Centroid",
-    span: setupInputSpan,
-  });
-  centroidRow.el.children[1].replaceWith(centroidTrace.canvas);
-  mountJack("anim.centroid", centroidRow.right, centroidRow.el);
-  const inputCheckRight = document.createElement("div");
-  inputCheckRight.style.cssText = tapRightStyle;
-  inputCheckRight.append(createSpanChip("setup-input", () => {}));
-  const inputCheckCard = createCard({
-    title: "Input check",
-    accent: INPUT_GREEN,
-    foldId: "setup-input",
-    right: inputCheckRight,
-  });
-  inputCheckCard.body.append(
-    level.el,
-    spacer(),
-    gateRow.el,
-    spacer(),
-    centroidRow.el,
-  );
   const soundCard = createCard({
     title: "Sound",
     accent: INPUT_GREEN,
@@ -2079,176 +1617,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     spacer(),
     soundTreble.el,
   );
-  // Input level reads CLIP until this time (performance.now()).
-  let clipUntilMs = -Infinity;
-
   // ---- Hits ----
   const hitsHistory = createHitsHistory(deps.getSilenceGate, deps.getBandEdgesHz, mountJack, hitsSpan);
-  // Hit shape (Setup view): sliders that turn a fired tick's fixed height into
-  // a graded strength (hitStrength.ts), folded by default. Their effect shows
-  // in the Hits history's dashed Floor line and dots, and the Curve.
-  const hitShapeCard = createCard({ title: "Hit shape", accent: NEUTRAL_ACCENT, foldId: "setup-shape", defaultFolded: true });
-  const hitAmountRow = createControlRow({
-    label: "Dimension",
-    accent: NEUTRAL_ACCENT,
-    min: HIT_AMOUNT_MIN,
-    max: HIT_AMOUNT_MAX,
-    defaultValue: HIT_AMOUNT_DEFAULT,
-    mapping: "linear",
-    ...percentReadout,
-    description:
-      "How much a hit's size counts. Off: every hit lands at full strength, exactly as before. Full: a hit's pulse height on the hits history above is its own graded strength.",
-  });
-  hitAmountRow.onChange((v) => deps.hitShape.set({ amount: v }));
-  hitAmountRow.sync(() => deps.hitShape.get().amount);
-
-  const hitKneeRow = createControlRow({
-    label: "Knee",
-    accent: NEUTRAL_ACCENT,
-    min: HIT_KNEE_MIN,
-    max: HIT_KNEE_MAX,
-    defaultValue: HIT_KNEE_DEFAULT,
-    mapping: "linear",
-    format: (v) => v.toFixed(2),
-    description:
-      "How sharply stand-out saturates above the firing line — the Curve below plots exactly this. Small: even a hit just over the line reads as nearly full strength. Large: a hit has to clear the line by a lot before it counts as strong.",
-  });
-  hitKneeRow.onChange((v) => deps.hitShape.set({ knee: v }));
-  hitKneeRow.sync(() => deps.hitShape.get().knee);
-
-  const hitLoudnessRow = createControlRow({
-    label: "Loudness mix",
-    accent: NEUTRAL_ACCENT,
-    min: HIT_LOUDNESS_MIN,
-    max: HIT_LOUDNESS_MAX,
-    defaultValue: HIT_LOUDNESS_DEFAULT,
-    mapping: "linear",
-    ...percentReadout,
-    description:
-      "How much of a hit's strength comes from how loud it actually was, rather than how far it stood out from the recent average. 0: stand-out only. 100: loudness only.",
-  });
-  hitLoudnessRow.onChange((v) => deps.hitShape.set({ loudness: v }));
-  hitLoudnessRow.sync(() => deps.hitShape.get().loudness);
-
-  const hitFloorRow = createControlRow({
-    label: "Floor",
-    accent: NEUTRAL_ACCENT,
-    min: HIT_FLOOR_MIN,
-    max: HIT_FLOOR_MAX,
-    defaultValue: HIT_FLOOR_DEFAULT,
-    mapping: "linear",
-    ...percentReadout,
-    description:
-      "Hits graded weaker than this count as nothing; the rest are rescaled to fill 0 to 100. 0: nothing is discarded — the dashed line on the hits history above marks where it sits.",
-  });
-  hitFloorRow.onChange((v) => deps.hitShape.set({ floor: v }));
-  hitFloorRow.sync(() => deps.hitShape.get().floor);
-
-
-  const hitCurveRow = createMeterRow({
-    label: "Curve",
-    accent: NEUTRAL_ACCENT,
-    unit: "×",
-    description:
-      "Stand-out as a function of how far a hit's ratio cleared the firing line, at the current Knee. Dots mark each lane's most recent hit.",
-  });
-  const hitCurve = createHitCurve();
-  hitCurveRow.el.children[1].replaceWith(hitCurve.canvas);
-  hitCurveRow.setReadout(ONSET_METER_MAX.toFixed(1));
-
-  // Length (hitStrength.ts's `shape.tail`): stored as a multiple of the lane's
-  // own fall, shown as the time it comes to (laneFadeMs), so an untouched row
-  // stays exactly 1. Linked (default) moves every lane by the same ratio,
-  // keeping proportions; unlinked, each row is its own.
-  let tailsLinked = loadTailsLinked();
-  const tailLinkChip = createChipButton("", "Linked: dragging any lane moves all four together, keeping their proportions", () => {
-    tailsLinked = !tailsLinked;
-    saveTailsLinked(tailsLinked);
-    refreshTailLinkChip();
-  });
-  function refreshTailLinkChip(): void {
-    tailLinkChip.textContent = tailsLinked ? "Linked" : "Unlinked";
-    tailLinkChip.style.cssText = tailsLinked ? chipBtnLitStyle : chipBtnStyle;
-  }
-  refreshTailLinkChip();
-  const lengthHead = document.createElement("div");
-  lengthHead.style.cssText = `${groupHeadingStyle} display: flex; align-items: center; justify-content: space-between;`;
-  lengthHead.append("Length", tailLinkChip);
-
-  const tailEnvelopeRow = createMeterRow({
-    label: "Envelope",
-    accent: NEUTRAL_ACCENT,
-    unit: "×",
-    description:
-      "Each lane's pulse falling after a hit, over four beats at the current tempo (dashed lines). Dots ride down from each lane's last hit. Solid is what plays; when this scene's Smoothing stretches it, the dashed curve is what the rows alone set. The readout is Smoothing's stretch.",
-  });
-  const tailEnvelope = createTailEnvelope();
-  tailEnvelopeRow.el.children[1].replaceWith(tailEnvelope.canvas);
-
-  const tailRows = HIT_LANES.map((lane, li) => {
-    const baseMs = laneFadeMs(lane, HIT_TAIL_DEFAULT);
-    const row = createControlRow({
-      label: HITS_LANES[li].label,
-      accent: HITS_LANES[li].color,
-      min: laneFadeMs(lane, HIT_TAIL_MIN),
-      max: laneFadeMs(lane, HIT_TAIL_MAX),
-      defaultValue: baseMs,
-      mapping: "log",
-      unit: "ms",
-      format: (v) => String(Math.round(v)),
-      description: TAIL_ROW_HINTS[lane],
-    });
-    // ms / baseMs is exactly 1 when the row's own reset commits baseMs.
-    row.onChange((ms) => setTail(lane, ms / baseMs));
-    return { lane, row, baseMs };
-  });
-  function syncTailRows(): void {
-    const tails = deps.hitShape.get().tail;
-    for (const t of tailRows) t.row.sync(() => t.baseMs * tails[t.lane]);
-  }
-  function setTail(lane: HitLane, mult: number): void {
-    if (!tailsLinked) {
-      deps.hitShape.set({ tail: { [lane]: mult } });
-      return;
-    }
-    const cur = deps.hitShape.get().tail;
-    // One ratio for every lane, narrowed so none runs past its range; the
-    // dragged row snaps back if it would push another off its end.
-    let ratio = mult / cur[lane];
-    for (const l of HIT_LANES) ratio = Math.min(HIT_TAIL_MAX / cur[l], Math.max(HIT_TAIL_MIN / cur[l], ratio));
-    // Lanes level with the dragged one land on exactly its value, so a
-    // linked Reset of an untouched set returns every lane to exactly 1.
-    const unclamped = ratio === mult / cur[lane];
-    const next: Partial<Record<HitLane, number>> = {};
-    for (const l of HIT_LANES) next[l] = unclamped && cur[l] === cur[lane] ? mult : cur[l] * ratio;
-    deps.hitShape.set({ tail: next });
-    syncTailRows();
-  }
-
-  hitShapeCard.body.append(
-    groupHeading("Height", true),
-    hitAmountRow.el,
-    spacer(),
-    hitKneeRow.el,
-    spacer(),
-    hitLoudnessRow.el,
-    spacer(),
-    hitFloorRow.el,
-    spacer(),
-    hitCurveRow.el,
-    lengthHead,
-    tailEnvelopeRow.el,
-    ...tailRows.flatMap((t) => [spacer(), t.row.el]),
-  );
-  syncTailRows();
-
-  // Per-lane last-hit ratio for the Curve's dots, set only on the tick a lane
-  // fires, so a dot marks a real hit.
-  const lastHitRatio: (number | null)[] = [null, null, null, null];
-  // Per-lane last-hit time for the Envelope's dots, same rule.
-  const lastHitMs: (number | null)[] = [null, null, null, null];
-  const sinceHitSec: (number | null)[] = [null, null, null, null];
-
   const hitsCard = createCard({
     title: "Hits",
     accent: NEUTRAL_ACCENT,
@@ -2396,12 +1766,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const heatSignalStrips: { idx: number; el: HTMLElement; bg: string }[] = [];
   const heatCardTitles: Record<MeterCardId, string> = {
     sound: soundCard.title.textContent ?? "",
-    "setup-input": inputCheckCard.title.textContent ?? "",
     hits: hitsCard.title.textContent ?? "",
     beat: beatCard.title.textContent ?? "",
     song: songCard.title.textContent ?? "",
   };
-  for (const cardId of ["sound", "setup-input", "hits", "beat", "song"] as const) {
+  for (const cardId of ["sound", "hits", "beat", "song"] as const) {
     const seen = new Set<SignalId>();
     const jacks = heatJacks.filter((j) => {
       if (j.card !== cardId || seen.has(j.id)) return false;
@@ -2487,8 +1856,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   // Sound, Beat, Song, per the file header. Sound leads: it's the raw picture of
   // the sound, the first thing to check when the visuals seem off.
-  root.append(soundCard.el, hitsCard.el, beatCard.el, songCard.el);
-  setupEl.append(inputCheckCard.el, hitShapeCard.el, heatHistoryCard.el);
+  root.append(soundCard.el, hitsCard.el, beatCard.el, songCard.el, heatHistoryCard.el);
 
   // The last drawn tick (update() with onScreen true).
   let lastMs: number | null = null;
@@ -2503,7 +1871,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // highlights only that half.
   const cardElements: Record<MeterCardId, HTMLElement> = {
     sound: soundCard.el,
-    "setup-input": inputCheckCard.el,
     hits: hitsCard.el,
     beat: beatCard.el,
     song: songCard.el,
@@ -2512,12 +1879,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["section", section.el],
     ["tempo", tempo.el],
     ["hits", hitsHistory.el],
-    ["centroid", centroidRow.el],
     ...dialCells.map(({ dial, cell }): [MeterRowId, HTMLElement] => [dialSignalId(dial), cell.el]),
     ["wave", wave.el],
     ["lock", lock.el],
     ["bar", barRuler.el],
-    ["level", level.el],
     ["energy", soundLevel.el],
     ["low", soundBass.el],
     ["mid", soundMid.el],
@@ -2527,8 +1892,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // Each card's fold, for update()'s heat block.
   const meterCards: Record<MeterCardId, { fold?: { isFolded(): boolean } }> = {
     sound: soundCard,
-    // A closed Setup view counts as a folded card, so its jacks and strips skip their writes.
-    "setup-input": { fold: { isFolded: () => !setupOpen || (inputCheckCard.fold?.isFolded() ?? false) } },
     hits: hitsCard,
     beat: beatCard,
     song: songCard,
@@ -2539,19 +1902,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const soundOnScreen = watchOnScreen(soundCard.el);
   // The stem rows (Mid + Lead, Treble + Hats) are why app.ts runs the stem split.
   const stemRowsShown = [watchOnScreen(soundMid.el), watchOnScreen(soundTreble.el)];
-  const inputCheckOnScreen = watchOnScreen(inputCheckCard.el);
-  const hitShapeOnScreen = watchOnScreen(hitShapeCard.el);
+  const heatHistoryOnScreen = watchOnScreen(heatHistoryCard.el);
   const hitsOnScreen = watchOnScreen(hitsCard.el);
   const beatOnScreen = watchOnScreen(beatCard.el);
   const songOnScreen = watchOnScreen(songCard.el);
 
   return {
     el: root,
-    setupEl,
-    setSetupOpen(open): void {
-      setupOpen = open;
-    },
-    update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, onScreen): void {
+    update(frame, anim, rawBands, rateScale, beatDiag, gate, onScreen): void {
       const nowMs = performance.now();
       const raw = showRaw;
       // Smoothing at 0 (smoothingRateScale is Infinity) bypasses the BPM
@@ -2561,29 +1919,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // ---- Every trace records, every tick ----
       // On screen or not, so a card opens on what it missed. Recording is a few
       // compares per series; the drawing and DOM writes are the cost.
-      if (mono !== null && isClipping(mono)) clipUntilMs = nowMs + CLIP_HOLD_MS;
-      // Level plots off `frame` regardless of `gate` (no local extractor
-      // needed); Dimmer goes null wherever `gate` does.
-      if (frame || gate) {
-        gateHistoryStrip.push(
-          [gate ? gate.dimmer : null, frame ? frame.level / gateLevelTop(deps.getSilenceGate()) : null],
-          nowMs,
-        );
-      }
       hitsHistory.record(frame, anim, beatDiag, nowMs);
-      if (anim) {
-        // Each Curve dot tracks its lane's last-hit ratio, set only on the tick
-        // it fires: the live ratio wanders below the line between hits, where
-        // no hit landed.
-        if (frame?.onset) lastHitRatio[0] = beatDiag ? beatDiag.ratio : null;
-        if (anim.lowOnset) lastHitRatio[1] = anim.hits.low.ratio;
-        if (anim.midOnset) lastHitRatio[2] = anim.hits.mid.ratio;
-        if (anim.highOnset) lastHitRatio[3] = anim.hits.high.ratio;
-        if (frame?.onset) lastHitMs[0] = nowMs;
-        if (anim.lowOnset) lastHitMs[1] = nowMs;
-        if (anim.midOnset) lastHitMs[2] = nowMs;
-        if (anim.highOnset) lastHitMs[3] = nowMs;
-      }
       // Via SIGNALS[id].read(), not a copied formula, so this trace and a
       // setting driven by the signal agree.
       waveTrace.push(
@@ -2592,7 +1928,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           : [null, null],
         nowMs,
       );
-      centroidTrace.push([anim ? (raw ? anim.centroidRaw : anim.centroid) : null], nowMs);
       section.push(anim ? [raw ? anim.raw.sectionIntensity : anim.sectionIntensity, anim.dropOnset ? 1 : 0] : [null, null], nowMs);
       if (frame && anim) {
         const recordSec = nowMs / 1000;
@@ -2668,7 +2003,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           if (s.folded()) continue;
           paintHeatStrip(s, heatTracks[s.idx]!, getHistorySpan(s.card), heatSec);
         }
-        if (setupOpen && !heatHistoryCard.fold?.isFolded()) refreshHeatHistory(heatSec);
+        if (!heatHistoryCard.fold?.isFolded() && heatHistoryOnScreen()) refreshHeatHistory(heatSec);
       }
       if (heatLensOn) {
         for (const row of heatRows) row.brightest = -1;
@@ -2689,7 +2024,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
 
       // ---- Sound: Level, Bass, Mid, Treble ----
-      // Level's raw counterpart is rawBands (local-only like mono). The thin
+      // Level's raw counterpart is rawBands (local-only). The thin
       // spectrum is drawn by deviceMenu.ts's feed, not here.
       if (!soundCard.fold?.isFolded() && soundOnScreen()) {
         soundLevel.draw();
@@ -2708,46 +2043,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Input check (Setup view): Input level, Gate, Centroid ----
-      // Input level is already raw. Gate has no RAW branch: no pre-smoothing
-      // counterpart in AnimFrame.
-      if (setupOpen && !inputCheckCard.fold?.isFolded() && inputCheckOnScreen()) {
-        const clipping = nowMs < clipUntilMs;
-        level.setValue(frame ? frame.level : null, dtSec);
-        level.setFillColor(clipping ? HOT_RED : INPUT_GREEN);
-        if (text) {
-          if (clipping) level.setReadout("CLIP", { textual: true, color: HOT_RED, unit: "" });
-          else level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
-        }
-
-        gateRow.setValue(gate ? gate.dimmer : null, dtSec);
-        if (text) gateRow.setReadout(gate ? pct(gate.dimmer) : "--", gate ? {} : IDLE);
-        if (frame || gate) gateHistoryStrip.draw();
-        centroidTrace.draw();
-        if (text) centroidRow.setReadout(anim ? pct(raw ? anim.centroidRaw : anim.centroid) : "--", anim ? {} : IDLE);
-      }
-
       // ---- Hits ----
-      const shapeOpen = setupOpen && !(hitShapeCard.fold?.isFolded() ?? false);
       if (!hitsCard.fold?.isFolded() && hitsOnScreen()) {
-        // Read fresh every draw, so a slider drag moves the Floor line at once.
-        hitsHistory.render(frame, anim, beatDiag, nowMs, text, shapeOpen, deps.hitShape.get().floor);
-      }
-      // ---- Hit shape (Setup view): Curve and Envelope ----
-      // They aren't on the hits history's canvas, so draw them only while the
-      // card is open.
-      if (shapeOpen && hitShapeOnScreen()) {
-        const shape = deps.hitShape.get();
-        hitCurve.draw(shape.knee, lastHitRatio);
-        for (let li = 0; li < lastHitMs.length; li++) {
-          const at = lastHitMs[li];
-          sinceHitSec[li] = at === null ? null : (nowMs - at) / 1000;
-        }
-        tailEnvelope.draw(shape.tail, rateScale, anim ? anim.metronomeBpm : 0, sinceHitSec);
-        if (text) {
-          if (Number.isFinite(rateScale)) tailEnvelopeRow.setReadout((1 / rateScale).toFixed(2));
-          else tailEnvelopeRow.setReadout("Off", { textual: true, unit: "" });
-        }
+        hitsHistory.render(frame, anim, beatDiag, nowMs, text);
       }
 
       // ---- Beat ----
@@ -2798,7 +2096,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     },
     revealRow(card, row): void {
       const cardEl = cardElements[card];
-      if (!setupOpen && setupEl.contains(cardEl)) deps.openSetup();
       if (cardEl.classList.contains("vc-folded")) cardEl.querySelector<HTMLButtonElement>(".vc-fold")?.click();
       const rowEl = rowElements.get(row);
       if (!rowEl) return;
@@ -2889,8 +2186,5 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     soundSpectrum,
     soundSpectrumShown: () => !soundCard.fold?.isFolded() && soundOnScreen(),
     stemRowsOnScreen: () => !soundCard.fold?.isFolded() && (stemRowsShown[0]!() || stemRowsShown[1]!()),
-    addSetupCard(el): void {
-      setupEl.insertBefore(el, heatHistoryCard.el);
-    },
   };
 }

@@ -67,18 +67,12 @@ describe("scene settings (vibe.sceneSettings)", () => {
       [SCENE_SETTINGS_KEY]: JSON.stringify({ "scene-a": { focus: 0.4 }, "scene-b": { focus: 0.15 } }),
     });
     const { getSceneSetting } = await import("../src/render/sceneSettings.ts");
-    const { getBandGain } = await import("../src/audio/bandGains.ts");
     expect(getSceneSetting("scene-a", FOCUS)).toBe(0.4);
 
     for (const junk of ["{not json", "[0.4]", "null", "42", '"x"', '{"scene-a":']) {
-      synced.applySyncedStorage(
-        { [SCENE_SETTINGS_KEY]: junk, "vibe.bandFader.0": JSON.stringify({ "scene-a": 2.5 }) },
-        fake,
-      );
+      synced.applySyncedStorage({ [SCENE_SETTINGS_KEY]: junk }, fake);
       expect(getSceneSetting("scene-a", FOCUS), junk).toBe(0.4);
       expect(getSceneSetting("scene-b", FOCUS), junk).toBe(0.15);
-      // One unreadable key in a snapshot does not hold back the readable ones.
-      expect(getBandGain("scene-a", 0), junk).toBe(2.5);
     }
 
     synced.applySyncedStorage({ [SCENE_SETTINGS_KEY]: JSON.stringify({ "scene-a": { focus: 0.9 } }) }, fake);
@@ -163,22 +157,5 @@ describe("custom values (vibe.customValues)", () => {
 
     synced.applySyncedStorage({}, fake);
     expect(getCustomValue("scene-a", "amp")).toBeUndefined();
-  });
-});
-
-describe("hit shape (vibe.hitKnee, vibe.hitTailLow, …)", () => {
-  // Per field: the bad knee keeps 2.5 while the readable tail and floor apply.
-  // Break: the old reload sets knee to HIT_KNEE_DEFAULT; a version that skips
-  // the whole reload on any bad field leaves tail.low at 0.5.
-  it("keeps only the field that cannot be read, and applies the rest of the snapshot", async () => {
-    const { fake, synced } = await fresh({ "vibe.hitKnee": "2.5", "vibe.hitTailLow": "0.5" });
-    const { getHitShape } = await import("../src/audio/hitStrength.ts");
-    expect(getHitShape().knee).toBe(2.5);
-    expect(getHitShape().tail.low).toBe(0.5);
-
-    synced.applySyncedStorage({ "vibe.hitKnee": "zzz", "vibe.hitTailLow": "3", "vibe.hitFloor": "0.3" }, fake);
-    expect(getHitShape().knee).toBe(2.5);
-    expect(getHitShape().tail.low).toBe(3);
-    expect(getHitShape().floor).toBe(0.3);
   });
 });

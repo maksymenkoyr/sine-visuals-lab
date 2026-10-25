@@ -1,27 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   getHitShape,
-  setHitShape,
-  resetHitShape,
   hitStandout,
   hitStrength,
   HIT_AMOUNT_DEFAULT,
   HIT_KNEE_DEFAULT,
   HIT_LOUDNESS_DEFAULT,
   HIT_FLOOR_DEFAULT,
-  HIT_AMOUNT_MIN,
-  HIT_AMOUNT_MAX,
-  HIT_KNEE_MIN,
-  HIT_KNEE_MAX,
-  HIT_LOUDNESS_MIN,
-  HIT_LOUDNESS_MAX,
-  HIT_FLOOR_MIN,
-  HIT_TAIL_MAX,
-  HIT_TAIL_MIN,
   pulseDecayScale,
   pulseDecayScales,
   UNIT_TAILS,
-  HIT_FLOOR_MAX,
   type HitShape,
 } from "../src/audio/hitStrength.ts";
 
@@ -102,14 +90,14 @@ describe("hitStrength", () => {
   });
 
   it("a floor just under 1 stays finite for a graded value right at the top", () => {
-    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: HIT_FLOOR_MAX, tail: UNIT_TAILS };
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.95, tail: UNIT_TAILS };
     const parts = hitStrength(1000, 0, shape); // stand-out saturates near 1
     expect(Number.isFinite(parts.strength)).toBe(true);
     expect(parts.strength).toBeGreaterThanOrEqual(0);
     expect(parts.strength).toBeLessThanOrEqual(1);
   });
 
-  it("a floor of exactly 1 (outside what the store ever stores) still returns a finite result", () => {
+  it("a floor of exactly 1 (a pure fn a test can call directly) still returns a finite result", () => {
     const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 1, tail: UNIT_TAILS };
     expect(Number.isFinite(hitStrength(1000, 0, shape).strength)).toBe(true);
     expect(Number.isFinite(hitStrength(1, 0, shape).strength)).toBe(true);
@@ -140,49 +128,15 @@ describe("hitStrength", () => {
   });
 });
 
-// Single global value, like silenceGate/autoGain/bandSplit — every test
-// resets first so none of them can leak state into the next (vitest runs a
-// file's tests in one module instance, sharing the module-level cache).
-describe("hit shape persistence", () => {
-  beforeEach(() => {
-    resetHitShape();
-  });
-
-  it("defaults to the documented flat-1 shape", () => {
+describe("getHitShape", () => {
+  it("is the flat-1 shape, frozen so nothing can change it", () => {
     expect(getHitShape()).toEqual(FLAT);
-  });
-
-  it("round-trips a partial set, leaving the other fields untouched", () => {
-    setHitShape({ amount: 0.5 });
-    expect(getHitShape()).toEqual({ ...FLAT, amount: 0.5 });
-    setHitShape({ knee: 2, floor: 0.3, tail: { low: 2 } });
-    expect(getHitShape()).toEqual({ ...FLAT, amount: 0.5, knee: 2, floor: 0.3, tail: { ...UNIT_TAILS, low: 2 } });
-    setHitShape({ tail: { high: 0.5 } });
-    expect(getHitShape().tail).toEqual({ beat: 1, low: 2, mid: 1, high: 0.5 });
-  });
-
-  it("clamps out-of-range and non-finite values per field", () => {
-    const allTails = (v: number) => ({ beat: v, low: v, mid: v, high: v });
-    setHitShape({ amount: -1, knee: 100, loudness: 5, floor: -5, tail: allTails(100) });
-    expect(getHitShape()).toEqual({ amount: HIT_AMOUNT_MIN, knee: HIT_KNEE_MAX, loudness: HIT_LOUDNESS_MAX, floor: HIT_FLOOR_MIN, tail: allTails(HIT_TAIL_MAX) });
-
-    setHitShape({ amount: 5, knee: 0, loudness: -5, floor: 5, tail: allTails(0) });
-    expect(getHitShape()).toEqual({ amount: HIT_AMOUNT_MAX, knee: HIT_KNEE_MIN, loudness: HIT_LOUDNESS_MIN, floor: HIT_FLOOR_MAX, tail: allTails(HIT_TAIL_MIN) });
-
-    setHitShape({ amount: Number.NaN, knee: Number.NaN, loudness: Number.NaN, floor: Number.NaN, tail: allTails(Number.NaN) });
-    expect(getHitShape()).toEqual(FLAT);
-  });
-
-  it("getHitShape returns a snapshot the caller can't mutate", () => {
-    const shape = getHitShape();
     expect(() => {
-      (shape as { amount: number }).amount = 0.9;
+      (getHitShape() as { amount: number }).amount = 0.9;
     }).toThrow();
-    expect(getHitShape().amount).toBe(HIT_AMOUNT_DEFAULT);
     expect(() => {
-      (shape.tail as { low: number }).low = 3;
+      (getHitShape().tail as { low: number }).low = 3;
     }).toThrow();
-    expect(getHitShape().tail.low).toBe(1);
   });
 });
 
