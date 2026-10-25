@@ -19,7 +19,6 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     lead: 0,
     onset: false,
     beatRatio: 0,
-    wavePeak: 0,
     beatPhase: 0,
     barPhase: 0,
     tempoLock: 0,

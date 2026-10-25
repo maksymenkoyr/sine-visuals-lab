@@ -1,4 +1,3 @@
-import { biquad, type BiquadCoefficients } from "../../src/audio/lufs.ts";
 
 /**
  * Offline, dependency-free music synthesis for the tempo-tracker eval
@@ -46,8 +45,33 @@ export function makeRng(seed: number): () => number {
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
 }
 
-// ---- RBJ biquad design (Audio EQ Cookbook), reusing lufs.ts's own direct-
-// form filter (biquad()) to actually apply the coefficients over a buffer.
+// ---- RBJ biquad design (Audio EQ Cookbook), applied by a direct-form
+// filter over a whole buffer.
+interface BiquadCoefficients {
+  b: [number, number, number];
+  a: [number, number, number];
+}
+
+function biquad(samples: Float32Array, c: BiquadCoefficients): Float32Array {
+  const out = new Float32Array(samples.length);
+  const [b0, b1, b2] = c.b;
+  const [, a1, a2] = c.a;
+  let x1 = 0;
+  let x2 = 0;
+  let y1 = 0;
+  let y2 = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const x0 = samples[i];
+    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    out[i] = y0;
+    x2 = x1;
+    x1 = x0;
+    y2 = y1;
+    y1 = y0;
+  }
+  return out;
+}
+
 const Q_DEFAULT = Math.SQRT1_2; // Butterworth — used wherever the plan gives no Q
 
 function rbjBiquad(type: "lowpass" | "highpass" | "bandpass", freqHz: number, q: number, sr: number): BiquadCoefficients {

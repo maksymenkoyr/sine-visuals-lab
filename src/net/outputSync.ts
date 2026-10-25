@@ -49,7 +49,7 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *  - `frame`: one per main render tick — the band-gained feature frame (the
  *    same one the main scene sees before Sensitivity/Expansion), plus the
  *    live-only extras the output's anim clock can't recompute (the local
- *    extractor's broadband ratio, the waveform peak). `p` carries the
+ *    extractor's broadband ratio). `p` carries the
  *    main window's resolved Sensitivity/Expansion/Smoothing for its scene;
  *    it is left off unless the output shows the preview live (Cue held, or
  *    the two match), so a held look keeps the numbers it was sent with.
@@ -108,9 +108,6 @@ export interface OutputState {
 }
 
 export interface WireFrame extends FeatureFrame {
-  /** Waveform peak for AnimFrame.wavePeak: the local mic's, or a followed
-   *  feed's (app.ts's waveSamples); null with neither. */
-  wavePeak: number | null;
   /** See the header; absent while the output shows its own look, not the preview. */
   p?: OutputParams;
   /** The main window's resolved silence-gate marks (audio/silenceGate.ts's

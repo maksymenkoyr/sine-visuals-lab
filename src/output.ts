@@ -432,10 +432,7 @@ async function main(): Promise<void> {
     // The controller's resolved marks (its Auto room-floor tracker moves them,
     // and nothing in this window feeds that tracker); this window's own stored
     // marks only stand in for a controller that doesn't send any.
-    const anim = animClock.advance(dtSec, frame, p.smoothing, frame.gate ?? getSilenceGate(), {
-      shape: getHitShape(),
-      wavePeak: frame.wavePeak,
-    });
+    const anim = animClock.advance(dtSec, frame, p.smoothing, frame.gate ?? getSilenceGate(), { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
     const displayFrame = applySensitivity(frame, p.sens, p.exp);

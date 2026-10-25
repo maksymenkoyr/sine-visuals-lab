@@ -20,8 +20,7 @@ import {
 import { flashTo } from "./flashAnim.ts";
 import { bandCenterHz, formatHz } from "../audio/bandScale.ts";
 import { METRONOME_BEATS_PER_BAR } from "../render/metronome.ts";
-import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
-import type { LufsReading } from "../audio/lufs.ts";
+import { isClipping } from "../audio/waveform.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL, type MusicDial } from "../render/musicProfile.ts";
 import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
@@ -114,21 +113,12 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  *    history card; deviceMenu.ts appends the Power card last. The Sound card
  *    (foldId "sound") is first in the meters column.
  *  - Input check: everything this device's own mic measures, before any
- *    beat/tempo logic runs — Waveform leads it off: a rolling picture of the
- *    last few seconds with a clip warning, read straight off this device's
- *    mic by waveformAnalyser.ts. A phone or iPad following another device
- *    draws that device's waveform instead: the feed sends one min/max pair
- *    per wire frame (src/net/protocol.ts's wave tail), handed in here as a
- *    two-sample `mono`, so each column shows the frame covering it. With
- *    neither (a synthetic feed) the row hides itself. (No stereo
- *    width/balance: a phone or laptop mic is mono, so they'd read "mono"
- *    nearly always.) Then Input level: FeatureFrame.level (pre-AGC, absolute).
- *    LUFS next — the broadcast measurement, BS.1770 / EBU R128 LUFS
- *    from lufsAnalyser.ts (math in lufs.ts): Momentary on the bar with the
- *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
- *    with a Reset chip in the card's own header. Local-only like Waveform,
- *    since it needs this device's own samples; hidden on a mic-less
- *    renderer, the header's Reset chip along with it. Last, a Gate row: the
+ *    beat/tempo logic runs — Input level first: FeatureFrame.level (pre-AGC,
+ *    absolute). Its bar and readout turn to CLIP for CLIP_HOLD_MS after any
+ *    clipped sample in `mono`: this device's own mic samples
+ *    (waveformAnalyser.ts), or on a phone or iPad following another device
+ *    the feed's one min/max pair per wire frame (src/net/protocol.ts's wave
+ *    tail). Then a Gate row: the
  *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
  *    much of a hit's strength the gate is currently letting through — with
  *    a trace beneath it, of Input level against the Input
@@ -199,7 +189,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  *
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
- * can't read faster anyway). Only the waveform is a canvas. Flashes (a bar's
+ * can't read faster anyway). Flashes (a bar's
  * flash(), the BPM dot on each beat, revealRow's ring) run as Web Animations
  * through flashAnim.ts rather than as style writes, so they never force a
  * layout.
@@ -213,7 +203,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * drawing and DOM writes — folding buys back the per-frame cost, not just
  * the screen space.
  *
- * Every time-axis trace (Waveform, the Sound rows, Gate, Hits, Wave,
+ * Every time-axis trace (the Sound rows, Gate, Hits, Wave,
  * Centroid, Section) records into a time store (createColumnRing) on every tick,
  * folded card or closed panel alike, so opening a card shows what it
  * missed. A span chip in each card's header (historySpan.ts) picks how
@@ -228,9 +218,8 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * un-slewed target (anim.raw.sectionIntensity), the Song dials read
  * musicProfile's pre-ease targets (anim.raw.profile), Centroid reads its raw
  * reading (anim.centroidRaw), BPM shows the
- * estimator's raw candidate instead of tempoSettle.ts's settled reading,
- * and the waveform's readout shows this buffer's instant peak instead of
- * AnimFrame.wavePeak's held one (animClock.ts). Input level and the beat dot
+ * estimator's raw candidate instead of tempoSettle.ts's settled reading.
+ * Input level and the beat dot
  * are already raw and don't change. Level has no pre-envelope value threaded
  * through AnimFrame, so its readout is the mean of `rawBands` instead — the
  * same pre-AGC/pre-envelope feed app.ts's captureRawBands hands the spectrum
@@ -238,15 +227,12 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * too). The Sound traces keep recording the signals themselves, so a trace
  * and a wire read the same number; RAW only changes Level's readout. That
  * feed is local-only, so Level reads
- * idle under RAW on a mic-less renderer, same as the Waveform row hiding
- * itself. A folded card still skips its own work when RAW is on — the flag
- * only changes what a card computes while it's open, not whether folding
- * buys back that cost. The waveform's auto-zoom is NOT part of this: it's a
- * drawing choice (what range fills the card), not audio processing, so it
- * stays on in both modes.
+ * idle under RAW on a mic-less renderer. A folded card still skips its own
+ * work when RAW is on — the flag only changes what a card computes while
+ * it's open, not whether folding buys back that cost.
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
- * drive source can feed — Waveform (Input check), Level, Bass, Mid + Lead and
+ * drive source can feed — Input level (Input check), Level, Bass, Mid + Lead and
  * Treble + Hats (Sound; createTraceRow mounts them), Section's own
  * Section+Drop pair and one per dial cell (Song, signals.ts's DIAL_SIGNALS),
  * the Centroid row's own (Input check), the BPM
@@ -282,7 +268,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * sensitivity.ts's smoothingRateScale) is what actually closes the gap: at
  * the Smoothing row's Off stop it's Infinity, and every stage upstream of
  * this file (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
- * musicProfile.ts's eases, animClock.ts's own wavePeak hold) plus this
+ * musicProfile.ts's eases) plus this
  * file's own BPM settle snap straight to their targets — see sensitivity.ts's
  * header for the full account of why RAW is then a genuine no-op rather than
  * merely fast.
@@ -298,20 +284,18 @@ export interface AudioMeters {
    *  traces: no draws or DOM writes, and peak fall, text cadence and flashes
    *  count from the last drawn tick. `frame`/`anim` null = audio not up yet.
    *  `mono` is the local mic's samples, or on a following device the feed's
-   *  [min, max] (app.ts's waveSamples); null hides the Waveform row.
-   *  `rawBands`, `lufs`, `beatDiag` and `gate` are null on a
+   *  [min, max] (app.ts's waveSamples), read only for Input level's CLIP.
+   *  `rawBands`, `beatDiag` and `gate` are null on a
    *  device without the matching local analyser, and the rows that read them
    *  idle or hide (Gate's trace still plots `frame.level`). `rateScale` is
    *  sensitivity.ts's smoothingRateScale; non-finite (Smoothing Off) shows the
-   *  raw BPM estimate, as `raw` does. `anim.wavePeak` answers to the same stop
-   *  inside animClock.ts. */
+   *  raw BPM estimate, as `raw` does. */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
     rawBands: Float32Array | null,
     rateScale: number,
-    lufs: LufsReading | null,
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
     onScreen: boolean,
@@ -349,8 +333,6 @@ export interface AudioMetersDeps {
   openSetup(): void;
   /** Wired settings and their heat tracks, for the Heat history card. */
   heatSettings(): readonly { label: string; track: HeatTrack }[];
-  /** Reset chip: start the integrated loudness reading over. */
-  onLufsReset: () => void;
   /** Tap chip: one tap at the pointerdown's timeStamp (same path as app.ts's Ctrl). */
   onTap: (timeStamp: number) => void;
   /** Whether Hats and Lead were measured this tick (src/render/stemReaders.ts);
@@ -409,13 +391,9 @@ const TEXT_REFRESH_MS = 100;
 const ONSET_METER_MAX = 2.5;
 /** Readings that feed no single system — same neutral as the Palette card. */
 const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
-const WAVE_HEIGHT_CSS_PX = 64;
-// One analyser buffer is ~40ms (a single kick) and drew as a flat hairline at
-// speech level, so each column holds the min/max over its share of the card's
-// span. The range zooms to the loudest column, floored at WAVE_RANGE_FLOOR so
-// mic hiss isn't blown up into signal.
-const WAVE_RANGE_FLOOR = 0.05;
 const FADE_MS = 300;
+// Long enough to read: one clipped analyser buffer is ~40 ms.
+const CLIP_HOLD_MS = 1000;
 const FADE = `background-color ${FADE_MS}ms ease-out`;
 
 // At a slider's height so meter and slider rows line up.
@@ -432,8 +410,7 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 //
 // It hosts the anim.tempo jack (mountJack), absolutely
 // positioned: a jack row would grow the block and, through weldedRowStyle's
-// align-items: stretch, the Lock row. The same style welds the LUFS bar
-// beside its LUFS block.
+// align-items: stretch, the Lock row.
 const weldedRowStyle = `display: flex; gap: 12px; align-items: stretch;`;
 const tempoBlockStyle = (accent: string) => `
   width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
@@ -456,25 +433,10 @@ const tempoDotStyle = `
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-// LUFS row: the bar spans LUFS_SCALE_MIN..MAX with the two targets people
-// aim at marked (EBU R128 broadcast; what streaming services normalise to).
-// Past the streaming one the bar and digits go hot, since a louder mix gets
-// turned down on delivery. The block is Tempo's, wider for a signed decimal.
-const LUFS_SCALE_MIN = -60;
-const LUFS_SCALE_MAX = 0;
-const LUFS_TARGET_EBU = -23;
-const LUFS_TARGET_STREAMING = -14;
-const LUFS_HOT = LUFS_TARGET_STREAMING;
-const lufsFrac = (v: number) => (v - LUFS_SCALE_MIN) / (LUFS_SCALE_MAX - LUFS_SCALE_MIN);
-const lufsBlockStyle = (accent: string) => `${tempoBlockStyle(accent)} width: 96px;`;
-const lufsDigitsStyle = `${tempoDigitsStyle} font-size: 15px;`;
-const lufsSubStyle = `${tempoCaptionStyle} letter-spacing: 0.06em; white-space: nowrap;`;
 const tickLabelStyle = `
   position: absolute; top: 6px; transform: translateX(-50%);
   font: 400 8px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); white-space: nowrap;
 `;
-const LUFS_TITLE =
-  "Short-term loudness: the last 3 s, K-weighted like a broadcast meter. I is the gated average since Reset.";
 const TEMPO_TITLE =
   "Tempo. The dot flashes white on every metronome tick and settles back to its colour, brighter as the tracker gets sure. TAPPED under the number: you tapped this tempo, and the tracker follows the music from it.";
 // Tap tempo chip (src/render/tapTempo.ts): taps on pointerdown, the press is
@@ -558,9 +520,9 @@ function nameGraph(canvas: HTMLCanvasElement, label: string): void {
 }
 
 /** The canvas side of every trace strip: a columnStore.ts store drawn as one
- *  column per CSS pixel over `spanSec()`, so createHitsHistory and the
- *  Waveform share its timing. push() records whether or not anything is on
- *  screen; prepare() resamples and returns false while the canvas has no
+ *  column per CSS pixel over `spanSec()`, so every trace (createHitsHistory,
+ *  the Sound rows) shares its timing. push() records whether or not
+ *  anything is on screen; prepare() resamples and returns false while the canvas has no
  *  layout. A column stays NaN when never sampled (a null reading, or a stall,
  *  see columnStore.ts's header): read it as "lift the pen", not zero. */
 function createColumnRing(
@@ -1835,55 +1797,8 @@ function createHitCurve() {
   };
 }
 
-/** The LUFS welded block: Short-term as the big reading (toFixed's ASCII
- *  minus renders in DSEG7), "LUFS" under it, Integrated beneath. Digits go hot
- *  past LUFS_HOT. */
-function createLufsBlock(accent: string) {
-  const el = document.createElement("div");
-  el.style.cssText = lufsBlockStyle(accent);
-  el.title = LUFS_TITLE;
-  const inner = document.createElement("div");
-  const digits = document.createElement("div");
-  digits.style.cssText = lufsDigitsStyle;
-  digits.textContent = "--";
-  const caption = document.createElement("div");
-  caption.style.cssText = tempoCaptionStyle;
-  caption.textContent = "LUFS";
-  const sub = document.createElement("div");
-  sub.style.cssText = lufsSubStyle;
-  sub.textContent = "I --";
-  inner.append(digits, caption, sub);
-  el.appendChild(inner);
-
-  const fmt = (v: number) => (Number.isFinite(v) ? v.toFixed(1) : "--");
-  let lastKey = "";
-  return {
-    el,
-    set(reading: LufsReading): void {
-      const s = fmt(reading.shortTerm);
-      const i = fmt(reading.integrated);
-      const hot = reading.shortTerm > LUFS_HOT;
-      const key = `${s}|${i}|${hot ? 1 : 0}`;
-      if (key === lastKey) return;
-      lastKey = key;
-      digits.textContent = s;
-      digits.style.color = hot ? HOT_RED : "#fff";
-      sub.textContent = `I ${i}`;
-    },
-  };
-}
-
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
-/** Shows or hides a row that only exists with a local mic. Restores the
- *  element's own inline display rather than blanking it: a `display: flex` row
- *  (the welded LUFS row) would fall back to block and stack its LUFS block
- *  under the bar. */
-const shownDisplay = new WeakMap<HTMLElement, string>();
-function setShown(el: HTMLElement, on: boolean): void {
-  if (!shownDisplay.has(el)) shownDisplay.set(el, el.style.display);
-  el.style.display = on ? shownDisplay.get(el)! : "none";
-}
 const meanOf = (v: Float32Array) => {
   let sum = 0;
   for (let i = 0; i < v.length; i++) sum += v[i];
@@ -2025,64 +1940,15 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   setupEl.className = "vc-setup vc-scroll";
   let setupOpen = false;
 
-  // ---- Input check (Setup view): Waveform, Input level, LUFS, Gate ----
-  // The trace takes the meter's place under the head, like History/Gate.
-  const waveform = createMeterRow({
-    label: "Waveform",
-    accent: NEUTRAL_ACCENT,
-    unit: "%",
-  });
-  // Per column: the loudest positive and negative swing (both as heights
-  // above zero, so one max-hold serves both) and whether anything clipped.
-  const waveRing = createColumnRing(
-    3,
-    WAVE_HEIGHT_CSS_PX,
-    "Waveform of the incoming sound, with clipping marked",
-    setupInputSpan.sec,
-    setupInputSpan.max,
-  );
-  waveform.el.children[1].replaceWith(waveRing.canvas);
-  const waveCtx = waveRing.ctx;
-  mountJack("anim.wavePeak", waveform.right, waveform.el);
-  // Row + spacer, hidden together with no samples (mono === null).
-  const waveformSpacer = spacer();
-
+  // ---- Input check (Setup view): Input level, Gate, Centroid ----
   const level = createMeterRow({
     label: "Input level",
     accent: INPUT_GREEN,
     unit: "%",
     description:
-      "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low.",
+      "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low. Turns red and reads CLIP for a moment when the sound clips.",
   });
   mountJack("feature.level", level.right, level.el);
-
-  // LUFS (lufsAnalyser.ts, math in lufs.ts): the bar and row readout are
-  // Momentary (400 ms); the welded block is Short-term (3 s) over Integrated
-  // (gated average since Reset, via the header's Reset chip).
-  const lufsRow = createMeterRow({
-    label: "LUFS",
-    accent: NEUTRAL_ACCENT,
-    description:
-      "LUFS: loudness the way broadcast meters measure it (BS.1770, K-weighted). The bar and this number are the last 400 ms; the big number the last 3 s; I the gated average since Reset. −23 is the EBU R128 broadcast target; streaming services normalise to about −14, and the bar goes red above it.",
-    ticks: [
-      { at: lufsFrac(LUFS_TARGET_EBU), label: String(LUFS_TARGET_EBU) },
-      { at: lufsFrac(LUFS_TARGET_STREAMING), label: String(LUFS_TARGET_STREAMING) },
-    ],
-  });
-  lufsRow.el.style.flex = "1";
-  lufsRow.el.style.minWidth = "0";
-  const lufsBlock = createLufsBlock(NEUTRAL_ACCENT);
-  const lufsWelded = document.createElement("div");
-  lufsWelded.style.cssText = weldedRowStyle;
-  lufsWelded.append(lufsRow.el, lufsBlock.el);
-  // Row + spacer, hidden together (with the header's Reset chip) on a device
-  // with no local lufsAnalyser.
-  const loudnessSpacer = spacer();
-  const lufsResetChip = createChipButton(
-    "Reset I",
-    "Start the integrated loudness reading over",
-    deps.onLufsReset,
-  );
 
   // ---- Sound: spectrum, Level, Bass, Mid, Treble ----
   // The thin spectrum is fed by deviceMenu.ts beside the Bands strip.
@@ -2183,7 +2049,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   mountJack("anim.centroid", centroidRow.right, centroidRow.el);
   const inputCheckRight = document.createElement("div");
   inputCheckRight.style.cssText = tapRightStyle;
-  inputCheckRight.append(lufsResetChip, createSpanChip("setup-input", () => {}));
+  inputCheckRight.append(createSpanChip("setup-input", () => {}));
   const inputCheckCard = createCard({
     title: "Input check",
     accent: INPUT_GREEN,
@@ -2191,12 +2057,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     right: inputCheckRight,
   });
   inputCheckCard.body.append(
-    waveform.el,
-    waveformSpacer,
     level.el,
     spacer(),
-    lufsWelded,
-    loudnessSpacer,
     gateRow.el,
     spacer(),
     centroidRow.el,
@@ -2217,11 +2079,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     spacer(),
     soundTreble.el,
   );
-  // Row visibility is toggled in update(). null until the first unfolded tick
-  // applies the real state: rows are built visible, so a mic-less device must
-  // still get its first setShown(false) rather than compare false !== false.
-  let waveformShown: boolean | null = null;
-  let lufsShown: boolean | null = null;
+  // Input level reads CLIP until this time (performance.now()).
+  let clipUntilMs = -Infinity;
 
   // ---- Hits ----
   const hitsHistory = createHitsHistory(deps.getSilenceGate, deps.getBandEdgesHz, mountJack, hitsSpan);
@@ -2631,46 +2490,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   root.append(soundCard.el, hitsCard.el, beatCard.el, songCard.el);
   setupEl.append(inputCheckCard.el, hitShapeCard.el, heatHistoryCard.el);
 
-  function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
-    const { min, max } = downsampleForDisplay(mono, 1);
-    waveRing.push([Math.max(0, max[0]), Math.max(0, -min[0]), clipped ? 1 : 0], nowMs);
-  }
-
-  /** Zooms to the loudest column on screen. A drawing choice, not audio
-   *  processing, so unlike the rest of RAW it never changes with it. A column
-   *  nothing was sampled for rests at silence. */
-  function drawWave(): void {
-    if (!waveRing.prepare()) return;
-    const w = waveRing.width;
-    const h = WAVE_HEIGHT_CSS_PX;
-    const mid = h / 2;
-    const len = waveRing.length;
-    waveCtx.clearRect(0, 0, w, h);
-    const col = (x: number, s: number): number => {
-      const v = x === len ? waveRing.live(s) : waveRing.at(x, s);
-      return Number.isNaN(v) ? 0 : v;
-    };
-
-    let range = WAVE_RANGE_FLOOR;
-    for (let x = 0; x <= len; x++) range = Math.max(range, col(x, 0), col(x, 1));
-    const scale = (mid * 0.92) / range;
-
-    let lastClip = -1;
-    for (let x = 0; x <= len; x++) {
-      const clip = col(x, 2) > 0 ? 1 : 0;
-      if (clip !== lastClip) {
-        waveCtx.fillStyle = clip ? HOT_RED : "rgba(255,255,255,0.8)";
-        lastClip = clip;
-      }
-      const y0 = mid - col(x, 0) * scale;
-      const y1 = mid + col(x, 1) * scale;
-      waveCtx.fillRect(x === len ? w - 1 : x, y0, 1, Math.max(1, y1 - y0));
-    }
-
-    waveCtx.fillStyle = "rgba(255,255,255,0.18)";
-    waveCtx.fillRect(0, mid - 0.5, w, 1);
-  }
-
   // The last drawn tick (update() with onScreen true).
   let lastMs: number | null = null;
   let lastTextMs = 0;
@@ -2698,7 +2517,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["wave", wave.el],
     ["lock", lock.el],
     ["bar", barRuler.el],
-    ["waveform", waveform.el],
     ["level", level.el],
     ["energy", soundLevel.el],
     ["low", soundBass.el],
@@ -2733,7 +2551,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     setSetupOpen(open): void {
       setupOpen = open;
     },
-    update(frame, anim, mono, rawBands, rateScale, lufs, beatDiag, gate, onScreen): void {
+    update(frame, anim, mono, rawBands, rateScale, beatDiag, gate, onScreen): void {
       const nowMs = performance.now();
       const raw = showRaw;
       // Smoothing's Off stop (smoothingRateScale is Infinity) bypasses the BPM
@@ -2743,11 +2561,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // ---- Every trace records, every tick ----
       // On screen or not, so a card opens on what it missed. Recording is a few
       // compares per series; the drawing and DOM writes are the cost.
-      const clipped = mono !== null && isClipping(mono);
-      if (mono) pushWave(mono, clipped, nowMs);
-      // Nothing to sample: on mono's return the Waveform starts a fresh
-      // column instead of reading the gap as a stall's catch-up burst.
-      else waveRing.resetColumn();
+      if (mono !== null && isClipping(mono)) clipUntilMs = nowMs + CLIP_HOLD_MS;
       // Level plots off `frame` regardless of `gate` (no local extractor
       // needed); Dimmer goes null wherever `gate` does.
       if (frame || gate) {
@@ -2894,55 +2708,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Input check (Setup view): Waveform, Input level, LUFS, Gate, Centroid ----
+      // ---- Input check (Setup view): Input level, Gate, Centroid ----
       // Input level is already raw. Gate has no RAW branch: no pre-smoothing
       // counterpart in AnimFrame.
       if (setupOpen && !inputCheckCard.fold?.isFolded() && inputCheckOnScreen()) {
-        // Waveform: hidden (with its spacer) with no samples.
-        const showWaveform = mono !== null;
-        if (showWaveform !== waveformShown) {
-          waveformShown = showWaveform;
-          setShown(waveform.el, showWaveform);
-          setShown(waveformSpacer, showWaveform);
-        }
-        if (mono) {
-          drawWave();
-          const instPeak = peak(mono);
-          // The held reading is AnimFrame.wavePeak (animClock.ts), so this
-          // readout and the Waveform jack's `anim.wavePeak` read one number.
-          // instPeak covers a tick with no anim yet.
-          if (text) {
-            if (clipped)
-              waveform.setReadout("CLIP", {
-                textual: true,
-                color: HOT_RED,
-                unit: "",
-              });
-            else waveform.setReadout(pct(raw ? instPeak : anim ? anim.wavePeak : instPeak));
-          }
-        }
-
+        const clipping = nowMs < clipUntilMs;
         level.setValue(frame ? frame.level : null, dtSec);
-        if (text) level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
-
-        // LUFS: hidden (with its spacer and the header's Reset chip) with no
-        // local lufsAnalyser.
-        const showLufs = lufs !== null;
-        if (showLufs !== lufsShown) {
-          lufsShown = showLufs;
-          setShown(lufsWelded, showLufs);
-          setShown(loudnessSpacer, showLufs);
-          setShown(lufsResetChip, showLufs);
-        }
-        if (lufs) {
-          const m = lufs.momentary;
-          const live = Number.isFinite(m);
-          lufsRow.setValue(live ? lufsFrac(m) : 0, dtSec);
-          lufsRow.setFillColor(m > LUFS_HOT ? HOT_RED : NEUTRAL_ACCENT);
-          if (text) {
-            lufsRow.setReadout(live ? m.toFixed(1) : "--", live ? {} : IDLE);
-            lufsBlock.set(lufs);
-          }
+        level.setFillColor(clipping ? HOT_RED : INPUT_GREEN);
+        if (text) {
+          if (clipping) level.setReadout("CLIP", { textual: true, color: HOT_RED, unit: "" });
+          else level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
         }
 
         gateRow.setValue(gate ? gate.dimmer : null, dtSec);
