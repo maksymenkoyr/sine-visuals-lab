@@ -108,7 +108,8 @@ import {
 } from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { createCompositor, type Compositor } from "./render/compositor.ts";
+import { createCompositor, type Compositor, type RenderOutcome } from "./render/compositor.ts";
+import { createSceneGuard } from "./render/sceneGuard.ts";
 import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.ts";
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import { createFrameMisses } from "./render/frameMisses.ts";
@@ -409,7 +410,7 @@ let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Hats and Lead off the full FFT bins, computed only on ticks where stemsRead() says something reads them. */
 let stemGate: StemGate | null = null;
-/** Display-only waveform for the Dynamics card; never feeds FeatureExtractor or
+/** Display-only waveform for the Setup view's Input check card; never feeds FeatureExtractor or
  *  the wire frame (see waveformAnalyser.ts header). */
 let waveformAnalyser: WaveformAnalyser | null = null;
 let lufsAnalyser: LufsAnalyser | null = null;
@@ -560,9 +561,6 @@ function waveSamples(): Float32Array | null {
 }
 /** DEV only, off measureAnalyser. Same buffer every read: copy before crossing a page.evaluate boundary. */
 let lastDeepMono: Float32Array | null = null;
-// fixedEnergy off this device's own extractor: the Signal card's "auto-gain
-// fully off" reference. Null where no local extractor ran (renderer, synthetic).
-let lastFixedEnergy: number | null = null;
 // The Any hit lane's diag off this device's own engine reading, for the Hits
 // card's history. Read the same tick it's set (deviceMenu.update()), before the
 // next currentVisual() mutates it in place.
@@ -1154,7 +1152,8 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
 }
 
 /** Local picks and remote commands take this one path, so the roster reflects reality. */
-function applyScene(next: Scene): void {
+function applyScene(next: Scene, cut = false): void {
+  sceneGuard.forgive(next.id);
   if (!mainHost) return;
   const prev = scene;
   scene = next;
@@ -1162,12 +1161,31 @@ function applyScene(next: Scene): void {
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ while previewing.
   if (previewActive) applyRenderQuality();
-  if (!mountOrBail(next, prev, inViz)) return;
+  if (!mountOrBail(next, prev, inViz && !cut)) return;
   updateSceneVersionLabel(next);
   if (!quietScreen()) showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
 }
+
+/** A scene that throws while drawing is cut to the one before it (or Spectrum)
+ *  here, through the normal scene change, so a room's TVs follow it. */
+const sceneGuard = createSceneGuard({
+  switchTo: (next) => {
+    applyScene(next, true);
+    return scene === next;
+  },
+  dropOutgoing: () => compositor?.cancel(),
+  builtIn: () => getScene("spectrum"),
+  canRun: (s) => presetAllows(s, effectivePreset()),
+  notice: (failed, next, wasShown) =>
+    showHud(
+      wasShown
+        ? `${failed.name} stopped on this computer, so ${next.name} is back.`
+        : `${failed.name} stopped on this computer, so ${next.name} is showing instead.`,
+      true,
+    ),
+});
 
 function applyPalette(next: Palette): void {
   palette = next;
@@ -2596,6 +2614,8 @@ function setLaptopWaiting(waiting: boolean): void {
 }
 
 async function enterViz(next: Scene): Promise<void> {
+  // A route to a stopped scene is a pick: it retries (render/sceneGuard.ts).
+  sceneGuard.forgive(next.id);
   gallery?.hide();
   document.body.classList.remove("in-gallery");
   // Already in a scene (a link or back/forward changed the route): crossfade in;
@@ -3308,7 +3328,6 @@ function clearLocalReadings(): void {
   lastMono = null;
   lastDeepMono = null;
   lastLufs = null;
-  lastFixedEnergy = null;
   lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
@@ -3376,7 +3395,6 @@ function readLocalCapture(
       f.lead = stems.lead;
     }
   }
-  lastFixedEnergy = extractor.fixedEnergy;
   beatDiag.ratio = engine ? engine.surge : 0;
   beatDiag.gated = suppressed;
   beatDiag.blocked = engine ? engine.blocked : false;
@@ -3660,7 +3678,7 @@ function tick(): void {
   if (panelDraws) lastPanelDrawMs = nowRafMs;
   syncGlass(sceneDraws, (!!lastVis && !!anim) || idlePreviewActive());
   // Fed even when null (mic pending) so the strip shows its "waiting for audio" idle state.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, wave, rateScale, lastLufs, lastBeatDiag, lastGate, liveDrives, panelDraws);
   loadChip?.update(nowRafMs);
 
   if (!lastVis || !anim) {
@@ -3703,22 +3721,30 @@ function drawScene(
   if (picturePolled) pollPicture();
   // The timer query only runs while the panel is open to show it.
   resourceMeter?.beginGpu(deviceMenu?.isOpen() ?? false);
-  let governable = true;
+  let outcome: RenderOutcome | undefined;
   try {
-    governable = compositor!.render({
-      ctx: mainHost!.ctx,
-      scene,
-      frame: displayFrame,
-      viewport,
-      palette,
-      anim: latchedAnim,
-      drives,
-      drivesFor: (s) => engine.forScene(s.id, s.settings ?? [], latchedAnim),
-      nowMs: nowRafMs,
-    }).governable;
+    outcome = sceneGuard.draw(scene, () =>
+      compositor!.render({
+        ctx: mainHost!.ctx,
+        scene,
+        frame: displayFrame,
+        viewport,
+        palette,
+        anim: latchedAnim,
+        drives,
+        drivesFor: (s) => engine.forScene(s.id, s.settings ?? [], latchedAnim),
+        nowMs: nowRafMs,
+      }),
+    );
   } finally {
     resourceMeter?.endGpu();
   }
+  // A scene that threw drew nothing this frame; the guard has already cut the screen.
+  if (!outcome) {
+    frameMisses.restart();
+    return;
+  }
+  const governable = outcome.governable;
   // Right after the scene has drawn, and nowhere else: the default framebuffer
   // (preserveDrawingBuffer false, gl.ts) only holds this frame until the browser
   // composites it; pictureReadback.ts's header says why this must run in the same

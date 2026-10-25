@@ -9,6 +9,16 @@ const FONT_IMPORT_RE = /\.(?:woff2?|ttf|otf)\?url$/i;
 
 const IMPORT_RE = /import\s+(\w+)\s+from\s+["']([^"']+\?(?:worker&url|url))["']/g;
 
+/** An `import.meta.glob(` call, up to the `;` ending its statement: its options
+ *  object carries `query: "?url"` when it resolves files to hashed URLs. */
+const GLOB_CALL_RE = /import\.meta\.glob\b[^;]*;/g;
+const GLOB_URL_QUERY_RE = /query:\s*["']\?(?:worker&)?url(?:&no-inline)?["']/;
+
+/** Files whose `?url` glob is deliberately left unpinned, with the reason. */
+const UNPINNED_URL_GLOBS = new Map([
+  ["src/ui/galleryStills.ts", "a gallery still that 404s after a deploy just leaves its tile to the live preview"],
+]);
+
 describe("every ?url / ?worker&url import is pinned", () => {
   // src/render/scenes/private/ is a gitignored checkout of a separate,
   // private repo (src/render/scenes/privateScenes.ts) — not ours to scan or edit.
@@ -28,6 +38,24 @@ describe("every ?url / ?worker&url import is pinned", () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  it("pairs every ?url glob with a pinAsset(...) call, except the named unpinned ones", () => {
+    const failures: string[] = [];
+    for (const file of files) {
+      if (UNPINNED_URL_GLOBS.has(file)) continue;
+      const text = readFileSync(file, "utf8");
+      const hasUrlGlob = [...text.matchAll(GLOB_CALL_RE)].some((m) => GLOB_URL_QUERY_RE.test(m[0]));
+      if (hasUrlGlob && !/pinAsset\(/.test(text)) {
+        failures.push(`${file}: an import.meta.glob with query "?url" has no pinAsset() call in the file — see src/pinnedAssets.ts's header, or name the file in UNPINNED_URL_GLOBS with its reason.`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it("finds the gallery stills glob, so its UNPINNED_URL_GLOBS entry is doing something", () => {
+    const text = readFileSync("src/ui/galleryStills.ts", "utf8");
+    expect([...text.matchAll(GLOB_CALL_RE)].some((m) => GLOB_URL_QUERY_RE.test(m[0]))).toBe(true);
   });
 
   // A canary for the scanner itself: if this ever stops finding the known

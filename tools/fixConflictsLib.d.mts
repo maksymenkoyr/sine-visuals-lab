@@ -14,6 +14,5 @@ export interface PlainRun {
 export type Segment = Conflict | PlainRun;
 
 export function parseDiff3(text: string): Segment[];
-export function settle(conflict: Conflict): string[] | null;
 export function resolveSegments(segments: Segment[]): { text: string; settled: number; left: number };
 export function autoResolvable(path: string): boolean;

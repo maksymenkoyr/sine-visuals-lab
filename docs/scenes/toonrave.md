@@ -160,7 +160,7 @@ and are not recorded here yet.
   boost on All level held energy at the ¼x step, and the learned move kept
   learning the silence, so a stopped cast's pose drifted and then snapped
   flat. Now Clock on input node and Energy boost default to a new signal, Level
-  (the Dynamics card's Level row, the input's absolute loudness, never
+  (the Input check card's Input level row, the input's absolute loudness, never
   auto-gained: 0 on hiss, 0.32–0.67 on a real song through the fake mic); the
   run mark is 0.1 in Level units; and the move learns nothing while its beat
   holds. With a song that stops mid-groove, the clock holds on the same frame,

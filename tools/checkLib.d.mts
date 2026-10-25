@@ -28,9 +28,6 @@ export interface AddedLine {
   text: string;
 }
 
-export const PERMISSIVE: Set<string>;
-export const LICENSE_EXCEPTIONS: LicenseException[];
-
 export function isPermissive(expr: unknown): boolean;
 export function licenseProblems(
   lock: { packages?: Record<string, { version?: string; license?: unknown; link?: boolean }> },

@@ -68,16 +68,13 @@ scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
 
 The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
 in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-their Dynamics card's Waveform row is fed by `src/audio/waveformAnalyser.ts`
+the Setup view's Waveform row (Input check card) is fed by `src/audio/waveformAnalyser.ts`
 (math in `waveform.ts`), which reads time-domain samples straight off this
 device's own mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV" below —
-a viewer with no local mic doesn't get that row at all. The same card's
-History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
-diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field — its own Gate row right after it reads
-`AnimFrame.gateDimmer`. Its LUFS row
-is the same kind of read: BS.1770 LUFS
+a viewer with no local mic doesn't get that row at all. The same card's Gate
+row reads `AnimFrame.gateDimmer`. Its LUFS row
+is the same kind of read as Waveform: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer. (The Waveform row
 is not: there it draws the followed device's waveform, off the frame's wave
@@ -196,7 +193,9 @@ reach the pop-out as their own `effects` message (`src/net/outputSync.ts`) —
 never part of the look, so Cue does not hold them, and a TV does not get them.
 A frame with two scenes in it is skipped by the quality governor. The
 compositor's header says how it captures a scene without redirecting its
-framebuffer.
+framebuffer. The three loops hand their draw to `src/render/sceneGuard.ts`. A scene
+that throws while drawing is logged once and its screen cuts to the last scene
+that still drew (or Spectrum). Main shows a notice; output and TVs leave the look alone.
 
 ## Text and logo over the picture
 

@@ -5,7 +5,7 @@ import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
-import { INSTAGRAM_URL, SOURCE_URL } from "../brand.ts";
+import { INSTAGRAM_URL, SOURCE_URL, SUPPORT_EMAIL, SUPPORTED_BROWSERS } from "../brand.ts";
 import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
 import { sceneVersionOf } from "../render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./tooltip.ts";
@@ -18,6 +18,8 @@ import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedul
 import type { SceneStage } from "../render/scenes/index.ts";
 import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
 import { FLASH_WARNING } from "./flashWarning.ts";
+import { stillUrl } from "./galleryStills.ts";
+import { playingTile } from "./galleryPlay.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
@@ -196,13 +198,16 @@ const stylesheet = `
  * a grey, dimmed picture that comes back to colour under the pointer. */
 .gal-tile[data-stage="draft"] { border-color: rgba(255,255,255,.07); background: rgba(255,255,255,.015); }
 .gal-tile[data-stage="draft"]:hover, .gal-tile[data-stage="draft"]:focus-visible { border-color: rgba(255,255,255,.4); }
-.gal-tile[data-stage="draft"] .gal-canvas { filter: grayscale(1) brightness(.6); transition: filter .2s ease; }
-.gal-tile[data-stage="draft"]:hover .gal-canvas, .gal-tile[data-stage="draft"]:focus-visible .gal-canvas { filter: none; }
+.gal-tile[data-stage="draft"] .gal-canvas, .gal-tile[data-stage="draft"] .gal-still { filter: grayscale(1) brightness(.6); transition: filter .2s ease; }
+.gal-tile[data-stage="draft"]:hover .gal-canvas, .gal-tile[data-stage="draft"]:focus-visible .gal-canvas,
+.gal-tile[data-stage="draft"]:hover .gal-still, .gal-tile[data-stage="draft"]:focus-visible .gal-still { filter: none; }
 .gal-tile[data-stage="draft"] .gal-cap-name { color: rgba(255,255,255,.55); }
 .gal-tile[data-stage="draft"] .gal-tag { color: rgba(255,255,255,.45); border-color: rgba(255,255,255,.2); }
 .gal-tile[data-disabled] { opacity: .45; }
 .gal-shot { position: relative; aspect-ratio: 16 / 9; background: ${GROUND}; }
-.gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.gal-canvas, .gal-still { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.gal-still { object-fit: cover; }
+.gal-shot.is-live .gal-still { visibility: hidden; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 /* Name + this scene's own version (src/render/sceneVersions.ts), on one row:
@@ -238,7 +243,7 @@ const stylesheet = `
   gap: 8px 16px; letter-spacing: .1em;
   padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
 }
-.gal-foot-links { display: flex; gap: 16px; }
+.gal-foot-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
 /* The version reads as typed ("0.1.4 - beta"), not in the footer's capitals. */
 .gal-foot a.gal-ver { text-transform: none; }
@@ -301,15 +306,25 @@ function sceneVersionBadge(sceneId: string): HTMLElement | null {
   return badge;
 }
 
-
+// tools/gallery-stills.mjs shoots the stills at this size (its STILL_W and
+// STILL_H), so a tile swaps from still to live without a jump.
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
+
+// A tile with a still (galleryStills.ts) rests on it and plays live only
+// under the pointer or keyboard focus, or, with no hover on the device, as the
+// one tile nearest the middle of the screen (galleryPlay.ts). The still stays
+// up until that tile's first live frame has drawn, so a shader compile never
+// shows a black tile.
 
 // A thumbnail doesn't need fullscreen-viz quality — same per-pixel raymarch
 // cost as the real thing otherwise, across every scene, every tick.
 const PREVIEW_QUALITY_SCALE = 0.4;
 
-// Tiles don't all need to redraw at the same rate: rather than spreading one
+// A tile with no still (a paid scene, a scene added since the last
+// gallery-stills run, or a still that failed to load) plays whenever it is
+// visible, so those tiles share the per-tick draw budget — and they don't all
+// need to redraw at the same rate: rather than spreading one
 // shared frame rate thin across every visible tile (what used to happen —
 // see the round-robin this replaced), each tile gets its own target
 // interval by priority band, and previewSchedule.ts's overdue-first
@@ -410,6 +425,14 @@ interface Tile {
    *  under-decay/under-advance a tile drawn less often than every tick).
    *  0 = never drawn yet. */
   lastDrawMs: number;
+  /** The tile's still picture, or null when it has none (or it failed to load):
+   *  such a tile plays whenever it's visible, under the budget below. */
+  still: HTMLImageElement | null;
+  /** The `.gal-shot` holding the canvas and the still. */
+  shot: HTMLElement;
+  /** Whether a live frame has been drawn since this tile last started
+   *  playing — the still is hidden only from then on. */
+  live: boolean;
   /** Whether this device's GPU quality preset can run the scene fullscreen —
    *  mirrors GallerySceneEntry.enabled. A disabled tile always lands in the
    *  slow "far" priority band regardless of hover/scroll position, freeing
@@ -604,11 +627,15 @@ export function createGallery(deps: GalleryDeps): Gallery {
   instagramLink.href = INSTAGRAM_URL;
   instagramLink.target = "_blank";
   instagramLink.rel = "noopener";
+  const supportLink = el("a", "", "Support");
+  supportLink.href = `mailto:${SUPPORT_EMAIL}`;
+  supportLink.title = SUPPORT_EMAIL;
   const footLinks = el("div", "gal-foot-links");
-  footLinks.append(sourceLink, instagramLink, licensesLink, privacyLink);
+  footLinks.append(sourceLink, instagramLink, supportLink, licensesLink, privacyLink);
   // A full row under the version and links: see ui/flashWarning.ts.
   const flashWarn = el("div", "gal-foot-warn", FLASH_WARNING);
-  foot.append(versionLink, footLinks, flashWarn);
+  const browsers = el("div", "gal-foot-warn", `Runs in ${SUPPORTED_BROWSERS}.`);
+  foot.append(versionLink, footLinks, browsers, flashWarn);
 
   page.append(mast, errorBanner, released, devSection, draftSection, foot);
   root.appendChild(page);
@@ -633,10 +660,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // the comment on `preset` above for why it isn't just read live.
   let budgetController: PreviewBudgetController | null = null;
   // The tile currently under the pointer, if any — see the delegated
-  // pointerover/pointerleave listeners below. Falls back to "nearest the
-  // viewport center" in tick() when null (e.g. on a touch device, or the
-  // pointer is elsewhere on the page).
+  // pointerover/pointerleave listeners below.
   let hoveredTile: Tile | null = null;
+  // The tile holding keyboard focus; it counts as hovered for playing.
+  let focusedTile: Tile | null = null;
+  // Read once per show(): whether the device has a pointer that can hover.
+  let canHover = true;
 
   // Draft-section state. Rebuilt (along with everything else) on every show(),
   // so these describe the *current* build cycle, not something persisted
@@ -685,14 +714,24 @@ export function createGallery(deps: GalleryDeps): Gallery {
   root.addEventListener("pointerleave", () => {
     hoveredTile = null;
   });
+  // :focus-visible keeps a mouse click's focus from holding a tile playing
+  // after the pointer has left it.
+  root.addEventListener("focusin", (e) => {
+    const target = e.target as Element | null;
+    const btn = target?.closest("button") ?? null;
+    focusedTile = btn && target?.matches(":focus-visible") ? (tileByButton.get(btn) ?? null) : null;
+  });
+  root.addEventListener("focusout", () => {
+    focusedTile = null;
+  });
 
-  /** The one tile that gets drawn every tick regardless of the shared
-   *  budget — whichever the pointer is over, or, with no pointer involved
-   *  (touch, or the pointer is elsewhere on the page), whichever
-   *  eligible+enabled tile sits nearest the viewport's vertical center, on
-   *  the theory that's the one a phone user scrolling the gallery is most
-   *  likely looking at. Reads layout (getBoundingClientRect) only for the
-   *  already-small eligible set, and only once per tick. */
+  /** The one tile with no still that gets drawn every tick regardless of the
+   *  shared budget — whichever the pointer is over, or, with no pointer
+   *  involved (touch, or the pointer is elsewhere on the page), whichever
+   *  eligible+enabled tile sits nearest the viewport's vertical center. Tiles
+   *  with a still never reach it: playingTile() picks theirs. Reads layout
+   *  (getBoundingClientRect) only for the already-small eligible set, and
+   *  only once per tick. */
   function pickFocusedTile(eligible: Tile[]): Tile | null {
     if (hoveredTile !== null && eligible.includes(hoveredTile)) return hoveredTile;
 
@@ -725,6 +764,18 @@ export function createGallery(deps: GalleryDeps): Gallery {
     // set on the Tile object below) already covers the gap before the
     // IntersectionObserver's first callback — see the Tile field's comment.
     shot.appendChild(canvas);
+    const stillSrc = stillUrl(entry.scene.id);
+    let still: HTMLImageElement | null = null;
+    if (stillSrc) {
+      // Above the canvas, under the shade and the name. A still that fails to
+      // load (gone after a deploy) leaves the tile to play like one without.
+      still = el("img", "gal-still");
+      still.alt = "";
+      still.decoding = "async";
+      still.loading = "lazy";
+      still.src = stillSrc;
+      shot.appendChild(still);
+    }
 
     const reason = entry.enabled ? null : (entry.reason ?? "Unavailable");
     const verBadge = sceneVersionBadge(entry.scene.id);
@@ -765,8 +816,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
     // No mount here: init() compiles the scene's shaders and seeds its
     // buffers synchronously, and doing every released scene in the task that
     // builds the gallery blocked first paint. tick() mounts them lazily, one
-    // per tick, the first time each tile is due (drawTo mounts too, as a
-    // no-op once that has happened).
+    // per tick, the first time each tile is due to play — a tile with a still
+    // not until it is hovered, focused or nearest the middle (drawTo mounts
+    // too, as a no-op once that has happened).
 
     const tile: Tile = {
       scene: entry.scene,
@@ -776,12 +828,19 @@ export function createGallery(deps: GalleryDeps): Gallery {
       palette: GALLERY_PALETTES[i % GALLERY_PALETTES.length],
       anim: createAnimClock(),
       lastDrawMs: 0,
+      still,
+      shot,
+      live: false,
       enabled: entry.enabled,
       // Small tiles may be built below the fold or into a still-collapsed
       // (display: none) section — start at 0 so tick() never draws one in the
       // brief window before the IntersectionObserver's first callback can fire.
       visibleRatio: entry.stage === "released" ? 1 : 0,
     };
+    still?.addEventListener("error", () => {
+      still.remove();
+      tile.still = null;
+    });
     tiles.push(tile);
     tileByCanvas.set(canvas, tile);
     tileByButton.set(btn, tile);
@@ -889,6 +948,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   return {
     show(): void {
       preset = deps.quality().preset;
+      canHover = window.matchMedia("(hover: hover)").matches;
       preview ??= createPreviewRenderer(reducedPreviewQuality(deps.quality()));
       if (!preview) {
         errorBanner.textContent = "WebGL2 preview unavailable on this device.";
@@ -948,7 +1008,30 @@ export function createGallery(deps: GalleryDeps): Gallery {
       const timeSec = nowMs / 1000;
       const live = deps.liveFrame();
 
-      const eligible = tiles.filter((t) => t.sink && t.visibleRatio > MIN_VISIBLE_RATIO);
+      const visibleTiles = tiles.filter((t) => t.sink && t.visibleRatio > MIN_VISIBLE_RATIO);
+
+      // Of the tiles with a still, at most one plays (galleryPlay.ts); the
+      // rest are dropped from the draw rotation and fall back to their still.
+      const playing = playingTile({
+        canHover,
+        hovered: hoveredTile,
+        focused: focusedTile,
+        candidates: visibleTiles
+          .filter((t) => t.still && t.enabled)
+          .map((t) => {
+            if (canHover) return { tile: t, centerDist: 0 };
+            const rect = t.canvas.getBoundingClientRect();
+            return { tile: t, centerDist: Math.abs(rect.top + rect.height / 2 - window.innerHeight / 2) };
+          }),
+      });
+      for (const t of tiles) {
+        if (t.live && t !== playing) {
+          t.live = false;
+          t.lastDrawMs = 0;
+          t.shot.classList.remove("is-live");
+        }
+      }
+      const eligible = visibleTiles.filter((t) => !t.still || t === playing);
       if (eligible.length === 0) return;
 
       const ceiling = Math.min(BUDGET_CEILING_BY_PRESET[preset], eligible.length);
@@ -957,7 +1040,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // budget — skips banding (and the getBoundingClientRect reads in
       // pickFocusedTile) entirely: see targetIntervalMsFor's comment.
       const noContention = budget >= eligible.length;
-      const focused = noContention ? null : pickFocusedTile(eligible);
+      const focused = playing ?? (noContention ? null : pickFocusedTile(eligible));
       const candidates: ScheduleCandidate[] = eligible.map((t) => ({
         lastDrawMs: t.lastDrawMs,
         targetIntervalMs: targetIntervalMsFor(t, t === focused, intervalMs, noContention),
@@ -1008,6 +1091,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
         const frame = live ?? t.feed.frame(timeSec);
         const anim = t.anim.advance(tileDt, frame);
         preview.drawTo(t.sink!, t.scene, frame, t.palette, anim);
+        if (t === playing && !t.live) {
+          t.live = true;
+          t.shot.classList.add("is-live");
+        }
       }
       budgetController.recordTick(performance.now() - drawStartMs, toDraw.length);
     },

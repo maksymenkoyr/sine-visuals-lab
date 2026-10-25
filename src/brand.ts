@@ -1,6 +1,7 @@
 /**
  * The product's public identity — the single home for the name, the
- * source-repository URL and the social profile. Everything user-facing that states either one
+ * source-repository URL, the social profile, the support address and the
+ * browsers the site says it runs in. Everything user-facing that states one
  * (gallery masthead and footer, TV corner link, HTML <title>s) must trace back here.
  *
  * SOURCE_URL is not cosmetic: AGPL-3.0 §13 requires every page served to
@@ -26,3 +27,8 @@ export const PRODUCT_INITIALS = "SVL";
 /** The project's Instagram — linked from the gallery footer and listed in
  *  index.html's Organization `sameAs` (keep the two in step). */
 export const INSTAGRAM_URL = "https://www.instagram.com/sinevisualslab/";
+/** Where visitors write for help — the gallery footer's Support link. */
+export const SUPPORT_EMAIL = "support@sinevisualslab.com";
+/** The browsers the site states it runs in (gallery footer). A browser goes
+ *  on this list only once it has been tested on a real device (#634). */
+export const SUPPORTED_BROWSERS = "Chrome, Edge, Safari or Firefox on a computer, Safari on iPhone, Chrome on Android";

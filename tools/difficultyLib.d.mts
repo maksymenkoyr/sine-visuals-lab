@@ -6,14 +6,6 @@ export type Level = "low" | "mid" | "high";
 export type Verdict = "agree" | "under" | "over";
 export type Tok = "100K" | "1M" | "10M" | "10M+";
 
-export const LEVELS: readonly Level[];
-export const DIFFICULTY_LABELS: Record<Level, string>;
-export const HUMAN_LABEL: string;
-export const TOKEN_BUCKETS: readonly { tok: Tok; below: number; label: string }[];
-export const RECORD_MARKER: string;
-export const RECORD_VERSION: number;
-export const TRUSTED_ASSOCIATIONS: string[];
-
 export interface Labeled {
   dif: Level | null;
   tok?: Tok | null;
@@ -79,7 +71,6 @@ export function parseTokens(text: string): number;
 export function formatTokens(n: number): string;
 export function checkNewIssue(labels: string | string[]): { refuse: string } | { remind: string } | null;
 export function parseLevel(text: string): Level;
-export function verdictOf<T extends string>(predicted: T | null, actual: T | null, order?: readonly T[]): Verdict | null;
 export function buildRecord(args: {
   issue: number;
   predicted: Labeled;
