@@ -50,8 +50,8 @@ import { type ColorTarget, createColorTarget, createProgram, destroyTarget, type
  * or vertex array, depth, cull and scissor off, all colour channels written.
  * If a program or a target cannot be built here, draw() warns once and
  * returns false from then on, and the caller falls back to the browser's
- * blur. A lost context needs nothing here: the page reloads on restore
- * (gl.ts's watchContextLoss).
+ * blur. After a lost context app.ts disposes it and makes a new one
+ * (render/contextRecovery.ts).
  */
 
 /** How the glass looks: the numbers behind the CSS filter chain. */

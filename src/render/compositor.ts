@@ -47,8 +47,8 @@ import { SceneRenderError } from "./sceneGuard.ts";
  * the canvas size (the freeze texture keeps the size it was taken at). If our
  * own program or a texture cannot be built on this GPU, effects switch off and
  * a crossfade becomes a cut, instead of throwing into the render loop.
- * A lost GL context is handled by the page reload gl.ts's watchContextLoss
- * arranges, so nothing here tries to rebuild.
+ * After a lost GL context the page calls resetGL (render/contextRecovery.ts)
+ * and render() builds what it needs again.
  *
  * A throwing scene surfaces as `SceneRenderError`, so the caller can tell the
  * outgoing scene from the incoming one (see sceneGuard.ts).
@@ -88,6 +88,11 @@ export interface Compositor {
   transitioning(): boolean;
   render(f: CompositorFrame): RenderOutcome;
   dispose(): void;
+  /** After a GPU context loss: ends any crossfade (onOutgoingDone), frees and
+   *  forgets every GL object, and clears `broken`; render() builds them again.
+   *  Held effects stay; a held Freeze re-takes its picture from the remounted
+   *  scene. */
+  resetGL(): void;
 }
 
 export interface CompositorOptions {
@@ -361,6 +366,10 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
       program = null;
       if (vao) gl.deleteVertexArray(vao);
       vao = null;
+    },
+    resetGL() {
+      compositor.dispose();
+      broken = false;
     },
   };
   return compositor;

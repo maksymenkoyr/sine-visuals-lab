@@ -114,6 +114,7 @@ import { crossfadeOptions, getSceneTransition } from "./render/sceneTransition.t
 import { createResourceMeter, type ResourceMeter } from "./render/resourceMeter.ts";
 import { createFrameMisses } from "./render/frameMisses.ts";
 import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
+import { createContextRecovery } from "./render/contextRecovery.ts";
 import {
   clearOverlayLogo,
   getOverlay,
@@ -511,9 +512,15 @@ function renderScale(): number {
 }
 let mainHost: SceneHost | null = null;
 let overlayLayer: OverlayLayer | null = null;
-/** From `webglcontextlost` until the page reloads on restore (boot()): drawScene()
- *  draws nothing, and the picture readback isn't rebuilt on a dead context. */
+/** From `webglcontextlost` until contextRecovery.ts has rebuilt in place (a
+ *  fallback reload leaves it set). */
 let glLost = false;
+/** `isContextLost()` turns true before the loss event arrives, and nothing may
+ *  compile or be built lazily in between: pictureReadback's `gradientDisabled`,
+ *  `glassBroken` and the compositor's `broken` would stick. */
+function glDown(): boolean {
+  return glLost || (mainHost?.ctx.gl.isContextLost() ?? false);
+}
 
 /** Shared with tools/master-sweep.mjs. Created lazily at the first
  *  pictureWanted() sample, so a session that never opens the panel never
@@ -1124,6 +1131,12 @@ function mountOrBail(next: Scene, prev: Scene, crossfade = false): boolean {
   const host = mainHost!;
   // Mounting compiles shaders: the gap across it is not frames coming late.
   frameMisses.restart();
+  if (glDown()) {
+    // Nothing compiles while the context is down; the restore mounts `scene`.
+    compositor?.cancel();
+    host.unmountAll();
+    return true;
+  }
   compositor?.cancel();
   // The old scene stays mounted under the new one until the blend is done
   // (render/crossfade.ts, sceneTransition.ts). The floor preset always cuts: two
@@ -2749,16 +2762,42 @@ async function boot(): Promise<void> {
     fatalError("WebGL2 unsupported on this device");
     return;
   }
-  // A GPU reset or backgrounded phone can take the context; every scene's
-  // programs and buffers died with it, so the restore reloads the page (the route
-  // is in the hash, a granted mic restarts itself).
+  // A GPU reset or backgrounded phone takes every GL object; contextRecovery.ts
+  // rebuilds in place so capture and warm-up survive.
+  const recovery = createContextRecovery({
+    ready: () => mainHost !== null,
+    teardown: () => {
+      compositor?.cancel();
+      mainHost?.unmountAll();
+      compositor?.resetGL();
+      overlayLayer?.dispose();
+      pictureReadback?.dispose();
+      pictureReadback = null;
+      glassBackdrop?.dispose();
+      glassBackdrop = null;
+      glassBroken = false;
+    },
+    rebuild: () => {
+      resourceMeter = createResourceMeter(gl);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      frameMisses.restart();
+      if (inViz) mainHost!.mount(scene);
+    },
+    reload: () => location.reload(),
+  });
   watchContextLoss(
     canvas,
     () => {
       glLost = true;
-      showHud("graphics reset — reloading", true);
+      showHud("graphics reset — restoring", true);
+      recovery.lost();
     },
-    () => location.reload(),
+    () => {
+      if (recovery.restored()) {
+        glLost = false;
+        showHud("graphics restored");
+      }
+    },
   );
 
   const params = new URLSearchParams(location.search);
@@ -3702,7 +3741,7 @@ function drawScene(
   latch: RenderLatch,
   engine: DriveEngine,
 ): void {
-  if (glLost) return;
+  if (glDown()) return;
   const intervalMs = renderIntervalMs();
   if (!renderGate.pass(nowRafMs, intervalMs)) return;
   fpsMeter.frame(nowRafMs);
@@ -3778,7 +3817,7 @@ function syncGlass(sceneDraws: boolean, scenePlays: boolean): void {
   const drawn =
     getGlassMode() === "fast" &&
     !glassBroken &&
-    !glLost &&
+    !glDown() &&
     scenePlays &&
     (deviceMenu?.isOpen() ?? false) &&
     !(clipRecorder?.recording() ?? false);

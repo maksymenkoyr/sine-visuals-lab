@@ -18,7 +18,8 @@ import { NO_EFFECTS, parseEffects, type HeldEffects } from "./render/heldEffects
 import { RENDER_FPS_CAP_FLOOR, createRenderGate, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createFpsMeter } from "./render/fpsMeter.ts";
 import { createDriveEngine } from "./render/drives.ts";
-import { createOverlayLayer } from "./render/overlayLayer.ts";
+import { createOverlayLayer, type OverlayLayer } from "./render/overlayLayer.ts";
+import { createContextRecovery } from "./render/contextRecovery.ts";
 import { createFrameMisses } from "./render/frameMisses.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -75,9 +76,9 @@ const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const transport = createBroadcastTransport<ToMain, ToOutput>();
 const inbox = createFrameInbox();
 let haveState = false;
-/** Where the output parks the look it is showing across its own context-loss
- *  reload (main()'s watchContextLoss), so the main window's held program
- *  survives instead of the reloaded page being sent the editable preview. */
+/** Where the output parks the look it is showing across the fallback reload
+ *  (render/contextRecovery.ts), so the main window's held program survives
+ *  instead of the reloaded page being sent the editable preview. */
 const RESTORE_KEY = "svl-output-restore";
 let contextLost = false;
 let reloading = false;
@@ -116,7 +117,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 window.setInterval(hello, HEARTBEAT_MS);
-// Skipped when this page is reloading itself after a GPU context loss (below):
+// Skipped when this page is doing the fallback reload after a GPU context loss (reloadWithParkedLook):
 // the main window must keep seeing an output that is merely blinking, with its
 // Cue/Play program intact, rather than one that was closed.
 window.addEventListener("pagehide", () => {
@@ -146,6 +147,8 @@ const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ?
 let pinned = false;
 let host: SceneHost;
 let compositor: Compositor | null = null;
+/** Module scope so main()'s context-loss teardown can reach it; null until main() has a context. */
+let overlay: OverlayLayer | null = null;
 /** The held effects the main window last sent; kept for the moment before the
  *  compositor exists. */
 let heldEffects: HeldEffects = NO_EFFECTS;
@@ -232,6 +235,13 @@ function applyQuality(): void {
 function mountScene(next: Scene, crossfade?: { lengthMs?: number }): void {
   // Mounting compiles shaders: the gap across it is not frames coming late.
   frameMisses.restart();
+  if (contextLost) {
+    // Nothing compiles while the context is down; the restore mounts `scene`.
+    compositor?.cancel();
+    host.unmountAll();
+    scene = next;
+    return;
+  }
   const prev = scene;
   compositor?.cancel();
   const fade = crossfade !== undefined && prev !== null && prev !== next && !blank && host.isMounted(prev);
@@ -269,6 +279,16 @@ const sceneGuard = createSceneGuard({
   builtIn: () => getScene("spectrum"),
   canRun: (s) => presetAllows(s, quality.preset),
 });
+
+function reloadWithParkedLook(): void {
+  try {
+    if (current) sessionStorage.setItem(RESTORE_KEY, JSON.stringify(current));
+  } catch {
+    // Storage blocked: the main window re-sends its preview instead.
+  }
+  reloading = true;
+  location.reload();
+}
 
 function applyState(state: OutputState, crossfadeMs?: number): void {
   current = state;
@@ -341,21 +361,32 @@ async function main(): Promise<void> {
     console.error(err);
     return;
   }
-  // See gl.ts's watchContextLoss(): the loop idles while the context is gone,
-  // and on restore the page reloads, with the current look parked for itself.
+  // A GPU reset takes every GL object; contextRecovery.ts rebuilds in place and
+  // the loop idles meanwhile. Only a failed rebuild reloads, with the current
+  // look parked for itself.
+  const recovery = createContextRecovery({
+    ready: () => compositor !== null,
+    teardown: () => {
+      compositor?.cancel();
+      host.unmountAll();
+      compositor?.resetGL();
+      overlay?.dispose();
+    },
+    rebuild: () => {
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      frameMisses.restart();
+      if (scene) host.mount(scene);
+    },
+    reload: reloadWithParkedLook,
+  });
   watchContextLoss(
     canvas,
     () => {
       contextLost = true;
+      recovery.lost();
     },
     () => {
-      try {
-        if (current) sessionStorage.setItem(RESTORE_KEY, JSON.stringify(current));
-      } catch {
-        // Storage blocked: the main window re-sends its preview instead.
-      }
-      reloading = true;
-      location.reload();
+      if (recovery.restored()) contextLost = false;
     },
   );
   const devPin = import.meta.env.DEV ? parseQualityPreset(new URLSearchParams(location.search)) : null;
@@ -370,8 +401,8 @@ async function main(): Promise<void> {
   compositor.setEffects(heldEffects);
   // The text-and-logo overlay (render/overlayLayer.ts): its settings are a
   // synced store, so the main window's reach this window like any look.
-  const overlay = createOverlayLayer(gl);
-  // Back from a context-loss reload: take the parked look first, so the very
+  overlay = createOverlayLayer(gl);
+  // Back from the fallback reload after a context loss: take the parked look first, so the very
   // first hello says haveState and the main window keeps its program.
   try {
     const raw = sessionStorage.getItem(RESTORE_KEY);
@@ -476,7 +507,7 @@ async function main(): Promise<void> {
       frameMisses.restart();
       return;
     }
-    overlay.draw();
+    overlay?.draw();
     // The drawing buffer is only readable in the task that drew it, so the
     // thumbnail is taken here and not later in a separate tick.
     if (nowMs < thumbsUntilMs && !thumbBusy && nowMs - lastThumbMs >= 1000 / THUMB_FPS) {

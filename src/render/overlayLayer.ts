@@ -24,9 +24,9 @@ import { getOverlay } from "./overlayStore.ts";
  * Scenes assume default GL state, so draw() leaves the state a scene expects:
  * blending off with the default function, the default framebuffer, texture
  * unit 0 with nothing bound, no program or vertex array, depth/cull/scissor
- * off and the viewport the full canvas. A lost context needs nothing here:
- * the three pages reload on restore (gl.ts's watchContextLoss), and their
- * loops do not call draw() while it is down.
+ * off and the viewport the full canvas. On a context loss the pages call
+ * dispose() (render/contextRecovery.ts), and their loops do not call draw()
+ * while it is down.
  */
 
 const FONT_FAMILY = "'Chakra Petch', system-ui, sans-serif";
@@ -62,7 +62,7 @@ function fontSpec(px: number): string {
 export interface OverlayLayer {
   /** Draws the overlay, or returns at once when there is nothing to show. */
   draw(): void;
-  /** Frees the program and texture. */
+  /** Frees the program and texture; the layer stays usable, the next draw() rebuilds them. */
   dispose(): void;
 }
 
