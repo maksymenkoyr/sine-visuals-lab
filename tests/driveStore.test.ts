@@ -139,6 +139,14 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(sanitized).toEqual({ mix: "add", sources: [{ choice: "anim.mid", weight: 2 }] });
   });
 
+  it("reads a retired signal id as the signal that replaced it, bare or inside a patch", () => {
+    expect(sanitizeDriveSetting("anim.wavePeak")).toEqual(driveSettingFromChoice("feature.level"));
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.wavePeak", w: 0.5 }] })).toEqual({
+      mix: "add",
+      sources: [{ choice: "feature.level", weight: 0.5 }],
+    });
+  });
+
   // SIGNALS is a plain object, so an `in` check would let these through and
   // drives.ts would throw reading `.read` off the inherited function.
   it("rejects Object.prototype names as a signal id, bare or inside a patch", () => {

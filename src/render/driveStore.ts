@@ -2,7 +2,7 @@ import { NUM_BANDS } from "../audio/types.ts";
 import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { SIGNALS } from "./signals.ts";
+import { SIGNALS, type SignalId } from "./signals.ts";
 import { decodeWireMod, encodeWireMod, LEGACY_NODE_ID_RE, readLegacyNodes, type LegacyNode, type StoredWireMod, type WireMod } from "./wireMod.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import type { HitReadout } from "./standout.ts";
@@ -204,6 +204,17 @@ function isValidGridIndex(n: unknown): n is number {
   return typeof n === "number" && Number.isInteger(n) && n >= 0 && n < BEAT_GRIDS.length;
 }
 
+function hasOwn(o: object, key: string): boolean {
+  // biome-ignore lint/suspicious/noPrototypeBuiltins: Object.hasOwn is past the es2017 target
+  return Object.prototype.hasOwnProperty.call(o, key);
+}
+
+/** Signals taken out of the catalogue, each to the one that reads closest:
+ *  saved wires and Look links in the wild still name them. */
+const RETIRED_SIGNALS: Readonly<Record<string, SignalId>> = {
+  "anim.wavePeak": "feature.level",
+};
+
 /** `raw` sanitized into a real DriveChoice, or null if it doesn't match any
  *  of the shapes a choice can take (a stale/foreign localStorage value, or —
  *  another caller — a `DriveSource.choice` inside a patch, or an untrusted
@@ -219,7 +230,10 @@ function sanitizeChoice(raw: unknown): DriveChoice | null {
   // also pass "constructor"/"toString"/"__proto__" from a crafted Look link
   // or corrupt storage, and drives.ts would then throw reading `.read` off
   // the inherited function on every frame.
-  if (typeof raw === "string") return Object.prototype.hasOwnProperty.call(SIGNALS, raw) ? (raw as DriveChoice) : null;
+  if (typeof raw === "string") {
+    if (hasOwn(RETIRED_SIGNALS, raw)) return RETIRED_SIGNALS[raw];
+    return hasOwn(SIGNALS, raw) ? (raw as DriveChoice) : null;
+  }
   if (raw && typeof raw === "object") {
     const source = (raw as { source?: unknown }).source;
     if (source === "line") return { source: "line" };
