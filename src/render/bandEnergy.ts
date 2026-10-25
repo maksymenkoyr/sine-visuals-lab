@@ -1,6 +1,6 @@
 import type { EngineReading, FeatureFrame, HitKind } from "../audio/types.ts";
 import { HIT_STRENGTH_MAX, NUM_BANDS } from "../audio/types.ts";
-import { getBandSplit } from "../audio/bandSplit.ts";
+import { BAND_SPLIT } from "../audio/bandSplit.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { hitPasses } from "../audio/silenceGate.ts";
 import { hitStrength, pulseDecayScale, type HitShape, type HitParts } from "../audio/hitStrength.ts";
@@ -26,8 +26,7 @@ import { hitStrength, pulseDecayScale, type HitShape, type HitParts } from "../a
 // every hit.
 //
 // The band split (src/audio/bandSplit.ts) picks which of `frame.bands` the
-// loudness reads; the engine's own crossovers follow the same split
-// (src/audio/engineSource.ts's engineBandsFor). A null reading (no capture, a
+// loudness reads. A null reading (no capture, a
 // sender from before the engine) is nothing heard: levels ease out and
 // nothing fires.
 
@@ -37,7 +36,7 @@ const LEVEL_ATTACK_PER_SEC = 24;
 const LEVEL_RELEASE_PER_SEC = 10;
 
 // A zero or non-finite dtSec (a stalled clock, a test) would otherwise turn
-// the slews' rates into Infinity*0 = NaN at the Smoothing row's Off stop.
+// the slews' rates into Infinity*0 = NaN at Smoothing at 0.
 const MIN_DT_SEC = 1e-4;
 
 // Each lane's pulse fall rate, tied to the lane's role: a kick's pulse rings
@@ -86,7 +85,7 @@ function clampDt(dtSec: number): number {
 }
 
 /** One tick of a level slew: rises at LEVEL_ATTACK_PER_SEC, falls at
- *  LEVEL_RELEASE_PER_SEC, both times rateScale (the Smoothing row). Exported
+ *  LEVEL_RELEASE_PER_SEC, both times rateScale (Smoothing). Exported
  *  so animClock.ts eases its Hats and Lead levels the same way. */
 export function slewLevel(level: number, raw: number, dtSec: number, rateScale: number): number {
   const dt = clampDt(dtSec);
@@ -269,7 +268,7 @@ export function createBandEnergy(): BandEnergy {
     advance(dtSec: number, frame: FeatureFrame, rateScale = 1, dimmer = 1, shape?: HitShape): void {
       const dt = clampDt(dtSec);
       const engine = frame.engine;
-      const { lowMid, midHigh } = getBandSplit();
+      const { lowMid, midHigh } = BAND_SPLIT;
       const bands = frame.bands;
       advanceLane(low, "low", dt, engine, meanRange(bands, 0, lowMid), rateScale, dimmer, shape);
       advanceLane(mid, "mid", dt, engine, meanRange(bands, lowMid, midHigh), rateScale, dimmer, shape);

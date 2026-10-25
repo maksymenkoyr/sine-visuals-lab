@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   EXPANSION_DEFAULT,
   EXPANSION_MAX,
@@ -10,12 +10,6 @@ import {
   SMOOTHING_MAX,
   SMOOTHING_MIN,
   applySensitivity,
-  getExpansion,
-  getSensitivity,
-  getSmoothing,
-  setExpansion,
-  setSensitivity,
-  setSmoothing,
   shapeExpansion,
   shapeLevel,
   smoothingRateScale,
@@ -28,79 +22,12 @@ function frame(bands: number[], energy: number): FeatureFrame {
   return { time: 1.5, bands: arr, energy, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6, hats: 0, lead: 0, engine: null };
 }
 
-describe("sensitivity persistence", () => {
-  // vitest runs under environment: "node" (vitest.config.ts), so there is no
-  // localStorage global at all here — this also proves the module tolerates that.
-  it("returns the default for a scene that's never been set", () => {
-    expect(getSensitivity("nonexistent-scene")).toBe(SENSITIVITY_DEFAULT);
-  });
-
-  it("clamps out-of-range values on set", () => {
-    setSensitivity("clamp-test", 999);
-    expect(getSensitivity("clamp-test")).toBe(SENSITIVITY_MAX);
-    setSensitivity("clamp-test", -5);
-    expect(getSensitivity("clamp-test")).toBe(SENSITIVITY_MIN);
-  });
-});
-
-describe("expansion persistence", () => {
-  it("returns the default for a scene that's never been set", () => {
-    expect(getExpansion("nonexistent-scene")).toBe(EXPANSION_DEFAULT);
-  });
-
-  it("clamps out-of-range values on set", () => {
-    setExpansion("clamp-test-expansion", 999);
-    expect(getExpansion("clamp-test-expansion")).toBe(EXPANSION_MAX);
-    setExpansion("clamp-test-expansion", -5);
-    expect(getExpansion("clamp-test-expansion")).toBe(EXPANSION_MIN);
-  });
-
-  it("is independent of sensitivity's per-scene storage", () => {
-    setSensitivity("shared-scene", 2);
-    setExpansion("shared-scene", 3);
-    expect(getSensitivity("shared-scene")).toBe(2);
-    expect(getExpansion("shared-scene")).toBe(3);
-  });
-});
-
-describe("smoothing persistence", () => {
-  it("returns the default for a scene that's never been set", () => {
-    expect(getSmoothing("nonexistent-scene")).toBe(SMOOTHING_DEFAULT);
-  });
-
-  it("clamps out-of-range values on set — floored at 0, not SMOOTHING_MIN", () => {
-    setSmoothing("clamp-test-smoothing", 999);
-    expect(getSmoothing("clamp-test-smoothing")).toBe(SMOOTHING_MAX);
-    // Unlike sensitivity/expansion above, a negative value clamps to 0:
-    // the store's own floor (see sensitivity.ts's comment on smoothingStore),
-    // below SMOOTHING_MIN, so the Smoothing row's zeroAtMin Off stop
-    // (deviceMenu.ts) is reachable and holds exactly.
-    setSmoothing("clamp-test-smoothing", -5);
-    expect(getSmoothing("clamp-test-smoothing")).toBe(0);
-  });
-
-  it("holds exactly 0 (the Off stop) rather than snapping to SMOOTHING_MIN", () => {
-    setSmoothing("off-test-smoothing", 0);
-    expect(getSmoothing("off-test-smoothing")).toBe(0);
-    expect(smoothingRateScale(getSmoothing("off-test-smoothing"))).toBe(Infinity);
-  });
-
-  it("is independent of sensitivity's and expansion's per-scene storage", () => {
-    setSensitivity("shared-scene-2", 2);
-    setExpansion("shared-scene-2", 3);
-    setSmoothing("shared-scene-2", 0.5);
-    expect(getSensitivity("shared-scene-2")).toBe(2);
-    expect(getExpansion("shared-scene-2")).toBe(3);
-    expect(getSmoothing("shared-scene-2")).toBe(0.5);
-  });
-});
-
 describe("smoothingRateScale", () => {
   it("is the identity at the default (1x)", () => {
     expect(smoothingRateScale(SMOOTHING_DEFAULT)).toBeCloseTo(1);
   });
 
-  it("is linear on the slow half: the top of the slider gives 1 / SMOOTHING_MAX rate", () => {
+  it("is linear on the slow half: SMOOTHING_MAX gives 1 / SMOOTHING_MAX rate", () => {
     expect(smoothingRateScale(SMOOTHING_MAX)).toBeCloseTo(1 / SMOOTHING_MAX);
     expect(smoothingRateScale(4)).toBeCloseTo(0.25);
   });
@@ -263,72 +190,5 @@ describe("applySensitivity", () => {
     // musicProfile.ts), so shaping it here would feed the gain stage its
     // own output.
     expect(out.level).toBe(f.level);
-  });
-});
-
-describe("expansion store migration from the legacy vibe.dynamics key", () => {
-  // The per-scene stores are created once at module load, seeded from
-  // whatever localStorage holds at that moment — so exercising the
-  // legacyKey migration means installing a fake localStorage with
-  // "vibe.dynamics" data *before* a fresh import of the module, via
-  // vi.resetModules(). Every other describe block in this file imports the
-  // module statically and never touches localStorage, so this is isolated
-  // to its own block rather than mixed into "expansion persistence".
-  function makeFakeLocalStorage() {
-    const store = new Map<string, string>();
-    return {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => void store.set(key, value),
-      removeItem: (key: string) => void store.delete(key),
-      raw: store,
-    };
-  }
-
-  const originalLocalStorage = (globalThis as { localStorage?: unknown }).localStorage;
-
-  afterEach(() => {
-    (globalThis as { localStorage?: unknown }).localStorage = originalLocalStorage;
-    vi.resetModules();
-  });
-
-  it("migrates a legacy vibe.dynamics value to vibe.expansion and removes the old key", async () => {
-    const fake = makeFakeLocalStorage();
-    fake.setItem("vibe.dynamics", JSON.stringify({ "scene-a": 2.5 }));
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
-
-    vi.resetModules();
-    const fresh = await import("../src/audio/sensitivity.ts");
-
-    expect(fresh.getExpansion("scene-a")).toBe(2.5);
-    expect(fake.raw.has("vibe.dynamics")).toBe(false);
-    expect(JSON.parse(fake.raw.get("vibe.expansion")!)).toEqual({ "scene-a": 2.5 });
-  });
-
-  it("migrates the intermediate vibe.acceleration key, preferring it over an even older vibe.dynamics, and removes both", async () => {
-    const fake = makeFakeLocalStorage();
-    fake.setItem("vibe.dynamics", JSON.stringify({ "scene-a": 2.5 }));
-    fake.setItem("vibe.acceleration", JSON.stringify({ "scene-a": 3 }));
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
-
-    vi.resetModules();
-    const fresh = await import("../src/audio/sensitivity.ts");
-
-    expect(fresh.getExpansion("scene-a")).toBe(3);
-    expect(fake.raw.has("vibe.acceleration")).toBe(false);
-    expect(fake.raw.has("vibe.dynamics")).toBe(false);
-    expect(JSON.parse(fake.raw.get("vibe.expansion")!)).toEqual({ "scene-a": 3 });
-  });
-
-  it("prefers an existing vibe.expansion value over a legacy one, and leaves the legacy key alone", async () => {
-    const fake = makeFakeLocalStorage();
-    fake.setItem("vibe.dynamics", JSON.stringify({ "scene-a": 2.5 }));
-    fake.setItem("vibe.expansion", JSON.stringify({ "scene-a": 1.5 }));
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
-
-    vi.resetModules();
-    const fresh = await import("../src/audio/sensitivity.ts");
-
-    expect(fresh.getExpansion("scene-a")).toBe(1.5);
-    expect(fake.raw.has("vibe.dynamics")).toBe(true);
   });
 });

@@ -50,7 +50,7 @@ import { MAX_HZ_CAP } from "./bandScale.ts";
  * better.
  *
  * The ranges come from the caller each tick (app.ts hands in the Mid and
- * Treble ranges of the band split, src/audio/bandSplit.ts), so Lead and Hats
+ * Treble ranges of src/audio/bandSplit.ts's BAND_SPLIT), so Lead and Hats
  * cover the same frequencies as the Mid and Treble rows beside them. Store-
  * free, like features.ts: the caller resolves anything persisted.
  *

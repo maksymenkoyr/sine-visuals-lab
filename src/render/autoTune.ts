@@ -12,15 +12,12 @@ import {
   EXPANSION_DEFAULT,
   EXPANSION_MAX,
   EXPANSION_MIN,
-  getExpansion,
-  getSensitivity,
-  getSmoothing,
   SENSITIVITY_DEFAULT,
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
   shapeExpansion,
-  SMOOTHING_AUTO_MAX,
   SMOOTHING_DEFAULT,
+  SMOOTHING_MAX,
   SMOOTHING_MIN,
 } from "../audio/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
@@ -33,29 +30,13 @@ import { getCustomValue } from "./customValues.ts";
  * in MUSIC_DIALS this reads and the file header there for why "everything
  * neutral" must reproduce a setting's plain default.
  *
- * vibe.sceneAuto lists deviations from each key's own default, not simply
- * "the params currently on auto." A scene's own settings (caustics' focus,
- * mesh grid's density, …) default to manual, same as always. The Input
- * card's Sensitivity/Expansion/Smoothing pseudo-params (DEFAULT_AUTO_KEYS
- * below — see src/audio/micAuto.ts for why those three specifically) default
- * to auto instead. A key absent from the store — including every key on a
- * scene added after this feature shipped, and every key on a fresh profile —
- * resolves to whichever of those two defaults its own key has, until someone
- * explicitly switches it the other way (per-row chip, the scene's master
- * Auto button, or the Input card's own Auto button — src/audio/micAuto.ts).
- *
- * This module flipped once already, from an exceptions-store ("absent means
- * auto") design to "absent means manual"; old persisted data only ever
- * contained `false` values (the old "manual" marker), and those simply read
- * as absent-therefore-manual under that rule, so no migration was needed for
- * that flip. The mic-pseudo-params flip (this file's second one — absent now
- * means auto for exactly DEFAULT_AUTO_KEYS) reuses that same old `false`
- * marker for its new purpose: a `false` already stored against one of those
- * three keys meant "manual" before, and it still does now, so it's kept
- * as-is rather than migrated. loadAutoStore's pruneDefaultEntries drops any
- * entry that merely restates its own key's default (and the empty scope
- * objects that leaves behind) on load, so a stale entry doesn't sit in
- * storage forever.
+ * vibe.sceneAuto lists the scene settings switched to auto (per-row chip or
+ * the scene's master Auto button); every other one is manual, including
+ * every key on a fresh profile. Sensitivity, Expansion and Smoothing
+ * (SENSITIVITY_SPEC and friends below) are not settings and never in the
+ * store: resolveSensitivity and friends always take their auto target.
+ * loadAutoStore's pruneDefaultEntries drops anything else on load, so a
+ * stale entry doesn't sit in storage forever.
  *
  * A SceneSetting's `macro` field is the same displacement shape as `auto`,
  * aimed at another setting instead of the music profile: computeMacroTarget
@@ -68,7 +49,7 @@ import { getCustomValue } from "./customValues.ts";
  * This module is also where the device-wide scene master (sceneSettings.ts's
  * getSceneMaster) gets multiplied into every resolved value — see
  * resolveSceneSetting's own doc for the rules (scaled once, at the outermost
- * resolve; never on drives, enums/booleans, the Input card's gain stages, or
+ * resolve; never on drives, enums/booleans, Sensitivity/Expansion/Smoothing, or
  * a DEV pin/override).
  */
 
@@ -98,23 +79,13 @@ const DIAL_EXPAND = 2.5;
 
 const STORAGE_KEY_AUTO_ON = "vibe.sceneAuto";
 
-/** Reserved settings keys for the Sensitivity/Expansion/Smoothing pseudo-
- *  params — can't collide with a real SceneSetting.key, which must be a
- *  valid GLSL identifier tail. */
-export const SENSITIVITY_AUTO_KEY = "@sensitivity";
-export const EXPANSION_AUTO_KEY = "@expansion";
-export const SMOOTHING_AUTO_KEY = "@smoothing";
-
-// The Input card's "whole mic" pseudo-params (see src/audio/micAuto.ts) —
-// auto by default. Every real SceneSetting key stays manual by default; see
-// isAutoEnabled/setAutoEnabled below for how the store encodes that
-// per-key-different default as deviations only.
-const DEFAULT_AUTO_KEYS: ReadonlySet<string> = new Set([SENSITIVITY_AUTO_KEY, EXPANSION_AUTO_KEY, SMOOTHING_AUTO_KEY]);
-
-// The auto keys from this control's previous names — see the migration in
-// loadAutoStore() below, and the parallel legacyKeys migration for the
-// manual-value store in audio/sensitivity.ts.
-const LEGACY_EXPANSION_AUTO_KEYS = ["@acceleration", "@contrast"] as const;
+// Keys for the Sensitivity/Expansion/Smoothing specs' slews — can't collide
+// with a real SceneSetting.key, which must be a valid GLSL identifier tail.
+// The same '@' marks the auto store's entries an older version kept for them
+// (pruneDefaultEntries).
+const SENSITIVITY_AUTO_KEY = "@sensitivity";
+const EXPANSION_AUTO_KEY = "@expansion";
+const SMOOTHING_AUTO_KEY = "@smoothing";
 
 const SENSITIVITY_SPEC: SceneSetting = {
   key: SENSITIVITY_AUTO_KEY,
@@ -162,8 +133,7 @@ const SMOOTHING_SPEC: SceneSetting = {
   key: SMOOTHING_AUTO_KEY,
   label: "Smoothing",
   min: SMOOTHING_MIN,
-  // Auto's span, not the slider's: see SMOOTHING_AUTO_MAX in sensitivity.ts.
-  max: SMOOTHING_AUTO_MAX,
+  max: SMOOTHING_MAX,
   step: 0.05,
   default: SMOOTHING_DEFAULT,
   // Smoothing scales how fast the visuals chase the audio (bandEnergy.ts's
@@ -176,47 +146,16 @@ const SMOOTHING_SPEC: SceneSetting = {
 
 type AutoStore = Record<string, Record<string, boolean>>;
 
-// One-time rewrite of any LEGACY_EXPANSION_AUTO_KEYS auto-on key to
-// EXPANSION_AUTO_KEY, in place, on whatever shape loadAutoStore() handed
-// back. Skipping this would silently drop a scene's auto choice for the
-// control back to manual after the rename — the entry simply wouldn't be
-// found under its new key. Returns whether anything changed, so the caller
-// can persist the rewritten shape immediately rather than re-migrating (a
-// no-op, but wasted work) on every future load.
-function migrateLegacyExpansionKeys(store: AutoStore): boolean {
-  let changed = false;
-  for (const sceneId of Object.keys(store)) {
-    const sceneEntry = store[sceneId];
-    for (const legacyKey of LEGACY_EXPANSION_AUTO_KEYS) {
-      if (!(legacyKey in sceneEntry)) continue;
-      if (!(EXPANSION_AUTO_KEY in sceneEntry)) sceneEntry[EXPANSION_AUTO_KEY] = sceneEntry[legacyKey];
-      delete sceneEntry[legacyKey];
-      changed = true;
-    }
-  }
-  return changed;
-}
-
-// Drops any entry that just restates its own key's default (and any scope
-// object left empty by that) — deviations only, per this module's header.
-// For a key in DEFAULT_AUTO_KEYS (default auto) the deviation marker is
-// `false`, so anything else stored against it — a `true`, or any other
-// stray value — restates the default and gets dropped. For every other key
-// (default manual) the deviation marker is `true`, so anything else —
-// including a `false` written by the pre-flip "exceptions" scheme, back
-// when absent meant auto — restates the default and gets dropped. A
-// lingering `false` on one of DEFAULT_AUTO_KEYS from that same old scheme is
-// the one case NOT dropped: it meant "manual" under the old scheme too, and
-// it still does under the new one, so it's kept as-is rather than migrated.
-// Returns whether anything changed, so the caller only re-persists when
-// pruning actually did something.
+// Drops every entry but a scene setting switched to auto (`true` on a key
+// without the '@' of SENSITIVITY_AUTO_KEY and friends), and any scope object
+// left empty by that. Returns whether anything changed, so the caller only
+// re-persists when pruning actually did something.
 function pruneDefaultEntries(store: AutoStore): boolean {
   let changed = false;
   for (const sceneId of Object.keys(store)) {
     const sceneEntry = store[sceneId];
     for (const key of Object.keys(sceneEntry)) {
-      const restatesDefault = DEFAULT_AUTO_KEYS.has(key) ? sceneEntry[key] !== false : sceneEntry[key] !== true;
-      if (restatesDefault) {
+      if (sceneEntry[key] !== true || key.startsWith("@")) {
         delete sceneEntry[key];
         changed = true;
       }
@@ -231,8 +170,8 @@ function pruneDefaultEntries(store: AutoStore): boolean {
 
 // Strict: throws on text that is not a JSON object, so the reload hook keeps
 // what it had (net/syncedStores.ts's parseSyncedObject). Then the same tidy-up
-// the initial load has always run: drop bad scope entries, migrate, prune and
-// write back if anything changed.
+// the initial load has always run: drop bad scope entries, prune and write
+// back if anything changed.
 function readAutoStore(): AutoStore {
   const parsed = parseSyncedObject(localStorage.getItem(STORAGE_KEY_AUTO_ON)) as AutoStore | null;
   if (parsed === null) return {};
@@ -247,9 +186,8 @@ function readAutoStore(): AutoStore {
       dropped = true;
     }
   }
-  const migrated = migrateLegacyExpansionKeys(parsed);
   const pruned = pruneDefaultEntries(parsed);
-  if (dropped || migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
+  if (dropped || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
   return parsed;
 }
 
@@ -280,27 +218,17 @@ function persistAutoStore(): void {
   }
 }
 
-/** Whether this exact (scene, key) pair currently resolves to auto — either
- *  because it was explicitly switched to auto, or because nothing's been
- *  stored for it and its key defaults to auto (DEFAULT_AUTO_KEYS above).
- *  Keyed by sceneSettings.ts's settingScope, so a scene with a variant keeps
- *  one auto/manual state per variant option, like its values. */
+/** Whether this exact (scene, key) pair currently resolves to auto. Keyed by
+ *  sceneSettings.ts's settingScope, so a scene with a variant keeps one
+ *  auto/manual state per variant option, like its values. */
 export function isAutoEnabled(sceneId: string, key: string): boolean {
-  const stored = autoOn[settingScope(sceneId, key)]?.[key];
-  if (stored === undefined) return DEFAULT_AUTO_KEYS.has(key);
-  return stored === true;
+  return autoOn[settingScope(sceneId, key)]?.[key] === true;
 }
 
 export function setAutoEnabled(sceneId: string, key: string, on: boolean): void {
   const scope = settingScope(sceneId, key);
-  // The store holds only deviations from each key's own default (see this
-  // module's header): a DEFAULT_AUTO_KEYS key's default is auto, so writing
-  // `on` (true) is a no-op deviation-wise and just clears any stored
-  // manual override, while `off` (false) is the deviation and gets written.
-  // Every other key's default is manual, so it's the mirror image.
-  const deviatesFromDefault = DEFAULT_AUTO_KEYS.has(key) ? !on : on;
-  if (deviatesFromDefault) {
-    (autoOn[scope] ??= {})[key] = on;
+  if (on) {
+    (autoOn[scope] ??= {})[key] = true;
   } else {
     delete autoOn[scope]?.[key];
     if (autoOn[scope] && Object.keys(autoOn[scope]).length === 0) delete autoOn[scope];
@@ -310,9 +238,7 @@ export function setAutoEnabled(sceneId: string, key: string, on: boolean): void 
 
 /** Whether every auto-capable setting on this scene is currently auto —
  *  drives the scene's master toggle. Settings with neither an `auto` nor a
- *  `macro` field can't be toggled, so they don't count against it. Pass
- *  Sensitivity/Expansion/Smoothing specs alongside a scene's own settings
- *  if the master toggle should cover them too (see app.ts). */
+ *  `macro` field can't be toggled, so they don't count against it. */
 export function isSceneAuto(sceneId: string, specs: readonly SceneSetting[]): boolean {
   const relevant = specs.filter((s) => s.auto || s.macro);
   return relevant.length > 0 && relevant.every((s) => isAutoEnabled(sceneId, s.key));
@@ -405,7 +331,9 @@ export function tickAutoTune(dtSec: number): void {
   autoClock += Math.max(1e-4, dtSec);
 }
 
-function resolve(sceneId: string, spec: SceneSetting, manualValue: number): number {
+// `always`: Sensitivity/Expansion/Smoothing, which take their auto target
+// whatever the store says and have no custom value.
+function resolve(sceneId: string, spec: SceneSetting, manualValue: number, always = false): number {
   // Dev-only tuning override — see tuning/overrides.ts. Wrapped in DEV so a
   // prod build never pays for the check and the override module tree-shakes
   // out entirely (Vite replaces import.meta.env.DEV with a literal false).
@@ -418,11 +346,11 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
     const override = getOverride(sceneId, spec.key);
     if (override !== undefined) return override;
   }
-  const custom = getCustomValue(sceneId, spec.key);
+  const custom = always ? undefined : getCustomValue(sceneId, spec.key);
   if (custom !== undefined) return custom;
   if (import.meta.env.DEV && isAutoPinned()) return manualValue;
 
-  if ((!spec.auto && !spec.macro) || !isAutoEnabled(sceneId, spec.key)) return manualValue;
+  if (!always && ((!spec.auto && !spec.macro) || !isAutoEnabled(sceneId, spec.key))) return manualValue;
 
   // Already stepped this tick: hand back that step. Checked before the target
   // is computed, so a repeat read also skips the auto weights and, for a
@@ -520,19 +448,19 @@ export function resolveSceneSettingUnscaled(sceneId: string, spec: SceneSetting)
 // sceneSettings.ts's setVariantResolver.
 setVariantResolver(resolveSceneSetting);
 
-/** Same idea for the Sensitivity/Expansion/Smoothing pseudo-params, which
- *  live in their own store (audio/sensitivity.ts) rather than
- *  sceneSettings.ts. */
+/** Sensitivity, Expansion and Smoothing for a scene: always the auto target
+ *  of SENSITIVITY_SPEC and friends, gliding like any auto setting. A DEV
+ *  auto-pin holds each at its default. */
 export function resolveSensitivity(sceneId: string): number {
-  return resolve(sceneId, SENSITIVITY_SPEC, getSensitivity(sceneId));
+  return resolve(sceneId, SENSITIVITY_SPEC, SENSITIVITY_SPEC.default, true);
 }
 
 export function resolveExpansion(sceneId: string): number {
-  return resolve(sceneId, EXPANSION_SPEC, getExpansion(sceneId));
+  return resolve(sceneId, EXPANSION_SPEC, EXPANSION_SPEC.default, true);
 }
 
 export function resolveSmoothing(sceneId: string): number {
-  return resolve(sceneId, SMOOTHING_SPEC, getSmoothing(sceneId));
+  return resolve(sceneId, SMOOTHING_SPEC, SMOOTHING_SPEC.default, true);
 }
 
 /** Explicitly re-seeds a param's glide, e.g. when handing it back to auto —

@@ -67,11 +67,6 @@ export class AudioEngine implements OnsetSink {
     return st.music ? st.bpm : 0;
   }
 
-  /** Moves the band crossovers (bands.ts's BandMeter.retune). */
-  retune(bands: readonly BandSpec[]): void {
-    this.meter.retune(bands);
-  }
-
   /** The reading for a frame `dt` seconds after the previous one. The returned object is reused. */
   // @per-frame
   read(dt: number): EngineReading {

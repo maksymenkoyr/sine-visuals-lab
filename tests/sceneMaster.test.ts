@@ -20,9 +20,8 @@ import {
   resolveSceneSetting,
   resolveSensitivity,
   setAutoEnabled,
-  SENSITIVITY_AUTO_KEY,
 } from "../src/render/autoTune.ts";
-import { setSensitivity } from "../src/audio/sensitivity.ts";
+import { SENSITIVITY_DEFAULT } from "../src/audio/sensitivity.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { clearAllCustomValues, setCustomValue } from "../src/render/customValues.ts";
 
@@ -150,12 +149,11 @@ describe("resolveSceneSetting applies the master", () => {
     expect(resolveSceneSetting(sceneId, UNSCALED_SPEC)).toBe(-0.9);
   });
 
-  it("does not reach the Input card's Sensitivity/Expansion/Smoothing", () => {
+  it("does not reach Sensitivity/Expansion/Smoothing", () => {
     const sceneId = "master-sensitivity";
-    setAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY, false);
-    setSensitivity(sceneId, 1.5);
+    advanceAutoTune(1, NEUTRAL);
     setSceneMaster(2);
-    expect(resolveSensitivity(sceneId)).toBe(1.5);
+    expect(resolveSensitivity(sceneId)).toBe(SENSITIVITY_DEFAULT);
   });
 
   it("leaves a DEV pin untouched — an out-of-range typed value must survive", () => {

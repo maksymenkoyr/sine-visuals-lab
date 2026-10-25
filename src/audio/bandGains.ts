@@ -1,6 +1,6 @@
 import { NUM_BANDS, type EngineReading, type FeatureFrame } from "./types.ts";
-import { createPerSceneSetting } from "./sensitivity.ts";
-import { getBandSplit } from "./bandSplit.ts";
+import { parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
+import { BAND_SPLIT } from "./bandSplit.ts";
 
 /**
  * Per-scene band gain — a bank of BAND_FADER_COUNT faders across the band
@@ -8,11 +8,11 @@ import { getBandSplit } from "./bandSplit.ts";
  * says how hard they drive the visuals. Centre of the travel is 1× (band
  * passes through untouched), up boosts, down cuts, the very bottom is Off.
  * This is the DJ-mixer control the app wants — not "which frequencies count
- * as bass" (bandSplit.ts's fixed crossover, which only feeds the low/mid/
+ * as bass" (bandSplit.ts's crossover, which only feeds the low/mid/
  * high pulse groups in bandEnergy.ts and the strip's bar tints) but "how
  * much does this part of the spectrum matter to the picture".
  *
- * Per-scene like sensitivity.ts/expansion, not global like bandSplit.ts,
+ * Per-scene, not global per device,
  * since a gain is a preference for one scene's look, not a description of
  * the room. The UI is src/ui/bandFaders.ts, drawn over the spectrum strip
  * inside deviceMenu.ts's Bands card.
@@ -78,6 +78,71 @@ export function gainToFaderPos(gain: number): number {
 
 /** Where 1× sits on the travel — the centre line the faders rest on. */
 export const FADER_CENTER_POS = gainToFaderPos(BAND_GAIN_DEFAULT);
+
+// One per-scene float per key, in-memory over localStorage: the cache is the
+// source of truth within a session, so get/set stay correct where
+// localStorage is unavailable (node test env, Safari private mode). Each
+// store registers a net/syncedStores.ts hook, so a snapshot applied from
+// outside (the pop-out's Cue, a room look arriving on a TV) re-seeds the
+// cache in place; that is what makes every fader live on a second window or
+// screen.
+function createPerSceneSetting(storageKey: string, min: number, max: number, defaultValue: number) {
+  /** What localStorage holds under `storageKey`, as a plain record of finite
+   *  numbers. Throws on text that is not a JSON object, so the reload hook
+   *  keeps its cache. */
+  function readStoredStrict(): Record<string, number> {
+    const parsed = parseSyncedObject(localStorage.getItem(storageKey));
+    const out: Record<string, number> = {};
+    if (parsed === null) return out;
+    for (const k of Object.keys(parsed)) {
+      const v = parsed[k];
+      if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  }
+
+  function loadInitial(): Record<string, number> {
+    try {
+      return readStoredStrict();
+    } catch {
+      return {};
+    }
+  }
+
+  const cache: Record<string, number> = loadInitial();
+
+  // Reads before it clears, so unreadable text throws out of here and leaves
+  // the cache alone.
+  registerSyncedStore(storageKey, () => {
+    const stored = readStoredStrict();
+    for (const k of Object.keys(cache)) delete cache[k];
+    for (const k of Object.keys(stored)) cache[k] = stored[k];
+  });
+
+  function persist(): void {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(cache));
+    } catch {
+      // Not fatal — the setting just won't persist across reloads.
+    }
+  }
+
+  function clamp(value: number): number {
+    if (!Number.isFinite(value)) return defaultValue;
+    return Math.min(max, Math.max(min, value));
+  }
+
+  return {
+    get(sceneId: string): number {
+      const value = cache[sceneId];
+      return typeof value === "number" ? clamp(value) : defaultValue;
+    },
+    set(sceneId: string, value: number): void {
+      cache[sceneId] = clamp(value);
+      persist();
+    },
+  };
+}
 
 const stores = Array.from({ length: BAND_FADER_COUNT }, (_, i) =>
   createPerSceneSetting(`vibe.bandFader.${i}`, BAND_GAIN_MIN, BAND_GAIN_MAX, BAND_GAIN_DEFAULT),
@@ -192,8 +257,7 @@ function meanWeight(weights: Float32Array, lo: number, hi: number): number {
  *
  * The engine reading (types.ts's EngineReading) gets the same control per
  * lane: each of its low, mid and high is scaled by the mean weight over the
- * band split's range for it (bandSplit.ts, which also moves the engine's
- * crossovers onto those ranges — engineSource.ts), and so is that lane's hit
+ * band split's range for it (bandSplit.ts), and so is that lane's hit
  * strength (kick, snare, hat) and a surge nearest it, so a fader at Off stops
  * its range driving anything and a boost lets that range's hits through a
  * half-closed silence gate. energy/level/hats/lead/onset/pulseOnset/bpm/
@@ -218,7 +282,7 @@ export function applyBandGains(frame: FeatureFrame, gains: ArrayLike<number>): F
 
   let engine: EngineReading | null = null;
   if (frame.engine) {
-    const { lowMid, midHigh } = getBandSplit();
+    const { lowMid, midHigh } = BAND_SPLIT;
     const lane = {
       kick: meanWeight(scratchWeights, 0, lowMid),
       snare: meanWeight(scratchWeights, lowMid, midHigh),

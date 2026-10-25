@@ -163,10 +163,9 @@ function buildChain(s: BandSpec, sampleRate: number): Biquad[] {
 }
 
 export class BandMeter {
-  specs: readonly BandSpec[];
+  readonly specs: readonly BandSpec[];
   readonly options: RangeOptions;
-  private readonly sampleRate: number;
-  private chains: Biquad[][];
+  private readonly chains: Biquad[][];
   private readonly sums: Float64Array;
   private fullSum = 0;
   private count = 0;
@@ -177,7 +176,6 @@ export class BandMeter {
   private readonly reading: BandReading;
 
   constructor(sampleRate: number, specs: readonly BandSpec[] = DEFAULT_BANDS, options: Partial<RangeOptions> = {}) {
-    this.sampleRate = sampleRate;
     this.specs = specs;
     this.options = { ...RANGE_DEFAULTS, ...options };
     this.chains = specs.map((s) => buildChain(s, sampleRate));
@@ -185,17 +183,6 @@ export class BandMeter {
     this.power = new Float64Array(specs.length);
     this.ranges = specs.map(() => new Range());
     this.reading = { values: new Float32Array(specs.length), db: new Float32Array(specs.length), level: 0 };
-  }
-
-  /**
-   * Moves the crossovers (the band split, src/audio/bandSplit.ts). The bands'
-   * ranges are kept, so the levels carry on; the new filters start from rest,
-   * which reads as a frame or two of a lower level in a band that moved.
-   */
-  retune(specs: readonly BandSpec[]): void {
-    if (specs.length !== this.specs.length) throw new Error("retune keeps the number of bands");
-    this.specs = specs;
-    this.chains = specs.map((s) => buildChain(s, this.sampleRate));
   }
 
   // @per-frame

@@ -117,7 +117,7 @@ export interface MusicProfile extends DialValues {
    *  (today's behavior). The internal trackers (onsetRate, dynMean/dynMad,
    *  fluxFast/fluxSlow) stay at their own fixed rates regardless: they feed
    *  `targets`, which the meters panel's RAW chip already shows unsmoothed.
-   *  Non-finite (Smoothing's Off stop) makes every dial land exactly on its
+   *  Non-finite (Smoothing at 0) makes every dial land exactly on its
    *  target — see ease() below. */
   advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs, rateScale?: number): void;
 }
@@ -127,7 +127,7 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-// Non-finite scale (Smoothing's Off stop, see sensitivity.ts's
+// Non-finite scale (Smoothing at 0, see sensitivity.ts's
 // smoothingRateScale) assigns `target` directly rather than computing a
 // Math.min(1, rate*dt*scale) coefficient of 1 — `current + (target -
 // current) * 1` isn't always bit-identical to `target` in IEEE754, and the

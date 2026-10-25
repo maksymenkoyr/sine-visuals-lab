@@ -92,7 +92,7 @@ export interface SpectralCentroid {
   raw: number;
   /** rateScale multiplies the output slew only — see sensitivity.ts's
    *  smoothingRateScale. Defaults to 1 (today's behavior). Non-finite
-   *  (Smoothing's Off stop) makes `centroid` land exactly on the ranged
+   *  (Smoothing at 0) makes `centroid` land exactly on the ranged
    *  target, matching features.ts's own envelope handling at that stop. */
   advance(dtSec: number, bands: Float32Array, rateScale?: number): void;
 }

@@ -44,7 +44,7 @@
  * entry points) read getHitShape() and pass it in; every preview/gallery/
  * probe caller omits it and gets today's flat-1 pulses regardless of what
  * this device's shape is set to. Same in-memory-cache-over-localStorage
- * pattern as silenceGate.ts/bandSplit.ts: the cache is the source of truth
+ * pattern as src/render/powerMode.ts: the cache is the source of truth
  * for get/set within a session, seeded once from localStorage, so behavior
  * stays correct even where localStorage is unavailable (node test env,
  * Safari private mode).

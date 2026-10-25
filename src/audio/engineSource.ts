@@ -1,8 +1,5 @@
 import workletUrl from "./engineWorklet.ts?worker&url";
 import { pinAsset } from "../pinnedAssets.ts";
-import { nominalBandEdgesHz } from "./bandScale.ts";
-import { bandSplitVersion, getBandSplit, LOW_MID_DEFAULT, MID_HIGH_DEFAULT, type BandSplit } from "./bandSplit.ts";
-import { type BandSpec, DEFAULT_BANDS } from "./engine/bands.ts";
 import { AudioEngine } from "./engine/engine.ts";
 import type { EngineReading } from "./types.ts";
 
@@ -23,11 +20,6 @@ import type { EngineReading } from "./types.ts";
  * deprecated, but everywhere, and gapless, which a per-frame read of an
  * AnalyserNode is not. Its blocks arrive later than quanta do and are stamped
  * from the context clock at arrival, so beats sit a little late there.
- *
- * The band split (bandSplit.ts) moves the engine's crossovers: each of
- * engine/bands.ts's DEFAULT_BANDS edges is scaled by how far the split's edge
- * sits from its default, so the default split is exactly the measured
- * crossovers and a moved split still moves Bass, Mid and Treble.
  */
 export interface EngineSource {
   /** The reading for the frame at `now` (the capture's AudioContext clock). The object is reused. */
@@ -42,20 +34,6 @@ const SCRIPT_BLOCK = 1024;
 // Pinned (src/pinnedAssets.ts): addModule() runs when the mic first starts,
 // which can be long after load and after a deploy has replaced dist/.
 const engineWorklet = pinAsset(workletUrl);
-
-/** engine/bands.ts's DEFAULT_BANDS with their edges moved the way `split` moves the band ladder's. */
-function engineBandsFor(split: BandSplit): BandSpec[] {
-  const edges = nominalBandEdgesHz();
-  const low = edges[split.lowMid] / edges[LOW_MID_DEFAULT];
-  const high = edges[split.midHigh] / edges[MID_HIGH_DEFAULT];
-  const scaled = (hz: number | undefined, by: number) => (hz === undefined ? undefined : hz * by);
-  const [l, m, h] = DEFAULT_BANDS;
-  return [
-    { ...l, lowpassHz: scaled(l.lowpassHz, low) },
-    { ...m, highpassHz: scaled(m.highpassHz, low), lowpassHz: scaled(m.lowpassHz, high) },
-    { ...h, highpassHz: scaled(h.highpassHz, high) },
-  ];
-}
 
 /** Connects `node` into the graph through a silent sink; returns the teardown. */
 function attach(context: AudioContext, sourceNode: AudioNode, node: AudioNode): () => void {
@@ -111,18 +89,12 @@ function scriptTap(context: AudioContext, sourceNode: AudioNode, engine: AudioEn
 
 /** Starts feeding a fresh engine from `sourceNode`; null where neither tap can be built. */
 export async function createEngineSource(context: AudioContext, sourceNode: AudioNode): Promise<EngineSource | null> {
-  let splitVersion = bandSplitVersion();
-  const engine = new AudioEngine(context.sampleRate, engineBandsFor(getBandSplit()));
+  const engine = new AudioEngine(context.sampleRate);
   const detach = (await workletTap(context, sourceNode, engine)) ?? scriptTap(context, sourceNode, engine);
   if (!detach) return null;
   let last = context.currentTime;
   return {
     read(now: number): EngineReading {
-      const version = bandSplitVersion();
-      if (version !== splitVersion) {
-        splitVersion = version;
-        engine.retune(engineBandsFor(getBandSplit()));
-      }
       const dt = Math.max(1e-3, now - last);
       last = now;
       return engine.read(dt);

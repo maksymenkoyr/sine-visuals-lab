@@ -67,18 +67,18 @@ describe("scene settings (vibe.sceneSettings)", () => {
       [SCENE_SETTINGS_KEY]: JSON.stringify({ "scene-a": { focus: 0.4 }, "scene-b": { focus: 0.15 } }),
     });
     const { getSceneSetting } = await import("../src/render/sceneSettings.ts");
-    const { getSensitivity } = await import("../src/audio/sensitivity.ts");
+    const { getBandGain } = await import("../src/audio/bandGains.ts");
     expect(getSceneSetting("scene-a", FOCUS)).toBe(0.4);
 
     for (const junk of ["{not json", "[0.4]", "null", "42", '"x"', '{"scene-a":']) {
       synced.applySyncedStorage(
-        { [SCENE_SETTINGS_KEY]: junk, "vibe.sensitivity": JSON.stringify({ "scene-a": 2.5 }) },
+        { [SCENE_SETTINGS_KEY]: junk, "vibe.bandFader.0": JSON.stringify({ "scene-a": 2.5 }) },
         fake,
       );
       expect(getSceneSetting("scene-a", FOCUS), junk).toBe(0.4);
       expect(getSceneSetting("scene-b", FOCUS), junk).toBe(0.15);
       // One unreadable key in a snapshot does not hold back the readable ones.
-      expect(getSensitivity("scene-a"), junk).toBe(2.5);
+      expect(getBandGain("scene-a", 0), junk).toBe(2.5);
     }
 
     synced.applySyncedStorage({ [SCENE_SETTINGS_KEY]: JSON.stringify({ "scene-a": { focus: 0.9 } }) }, fake);
@@ -91,24 +91,19 @@ describe("scene settings (vibe.sceneSettings)", () => {
 });
 
 describe("auto-tune choices (vibe.sceneAuto)", () => {
-  // Real keys default to manual and pseudo-keys to auto, so the pair below
-  // covers both directions of the default. Break: the old hook gives false
-  // for "drift" and true for "@sensitivity" on "{oops".
-  it("keeps the choices on unreadable text, and resets to each key's default when absent", async () => {
+  // Break: the old hook gives false for "drift" on "{oops".
+  it("keeps the choices on unreadable text, and resets to manual when absent", async () => {
     const { fake, synced } = await fresh({
-      "vibe.sceneAuto": JSON.stringify({ "scene-a": { drift: true, "@sensitivity": false } }),
+      "vibe.sceneAuto": JSON.stringify({ "scene-a": { drift: true } }),
     });
     const { isAutoEnabled } = await import("../src/render/autoTune.ts");
     expect(isAutoEnabled("scene-a", "drift")).toBe(true);
-    expect(isAutoEnabled("scene-a", "@sensitivity")).toBe(false);
 
     synced.applySyncedStorage({ "vibe.sceneAuto": "{oops" }, fake);
     expect(isAutoEnabled("scene-a", "drift")).toBe(true);
-    expect(isAutoEnabled("scene-a", "@sensitivity")).toBe(false);
 
     synced.applySyncedStorage({}, fake);
     expect(isAutoEnabled("scene-a", "drift")).toBe(false);
-    expect(isAutoEnabled("scene-a", "@sensitivity")).toBe(true);
   });
 });
 
@@ -171,29 +166,6 @@ describe("custom values (vibe.customValues)", () => {
   });
 });
 
-describe("band split (vibe.bandSplit)", () => {
-  // Break: a hook that bumps the version before reading moves the version on "{x".
-  it("keeps the split and the version on unreadable text, and bumps the version once on a readable one", async () => {
-    const { fake, synced } = await fresh({ "vibe.bandSplit": JSON.stringify({ lowMid: 4, midHigh: 20 }) });
-    const { getBandSplit, bandSplitVersion, LOW_MID_DEFAULT, MID_HIGH_DEFAULT } = await import(
-      "../src/audio/bandSplit.ts"
-    );
-    expect(getBandSplit()).toEqual({ lowMid: 4, midHigh: 20 });
-    const before = bandSplitVersion();
-
-    synced.applySyncedStorage({ "vibe.bandSplit": "{x" }, fake);
-    expect(getBandSplit()).toEqual({ lowMid: 4, midHigh: 20 });
-    expect(bandSplitVersion()).toBe(before);
-
-    synced.applySyncedStorage({ "vibe.bandSplit": JSON.stringify({ lowMid: 3, midHigh: 10 }) }, fake);
-    expect(getBandSplit()).toEqual({ lowMid: 3, midHigh: 10 });
-    expect(bandSplitVersion()).toBe(before + 1);
-
-    synced.applySyncedStorage({}, fake);
-    expect(getBandSplit()).toEqual({ lowMid: LOW_MID_DEFAULT, midHigh: MID_HIGH_DEFAULT });
-  });
-});
-
 describe("hit shape (vibe.hitKnee, vibe.hitTailLow, …)", () => {
   // Per field: the bad knee keeps 2.5 while the readable tail and floor apply.
   // Break: the old reload sets knee to HIT_KNEE_DEFAULT; a version that skips
@@ -208,17 +180,5 @@ describe("hit shape (vibe.hitKnee, vibe.hitTailLow, …)", () => {
     expect(getHitShape().knee).toBe(2.5);
     expect(getHitShape().tail.low).toBe(3);
     expect(getHitShape().floor).toBe(0.3);
-  });
-});
-
-describe("silence gate marks (vibe.silenceGateClosed, vibe.silenceGateOpen)", () => {
-  // Break: the old reload gives closed = SILENCE_GATE_CLOSED_DEFAULT on "nan?".
-  it("keeps an unreadable mark and applies the other one", async () => {
-    const { fake, synced } = await fresh({ "vibe.silenceGateClosed": "0.2", "vibe.silenceGateOpen": "0.4" });
-    const { getSilenceGate } = await import("../src/audio/silenceGate.ts");
-    expect(getSilenceGate()).toEqual({ closed: 0.2, open: 0.4 });
-
-    synced.applySyncedStorage({ "vibe.silenceGateClosed": "nan?", "vibe.silenceGateOpen": "0.5" }, fake);
-    expect(getSilenceGate()).toEqual({ closed: 0.2, open: 0.5 });
   });
 });

@@ -13,7 +13,8 @@ prompt and the Input card's Source row, where `src/audio/inputDevice.ts` also pi
 which input device the mic means (e.g. a USB interface fed from a DJ mixer) — and
 hands back a raw stream.
 `src/audio/analyser.ts` runs the FFT and splits it into bands
-(`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). Beside it,
+(`src/audio/bandScale.ts` decides the band edges, `src/audio/bandSplit.ts` which
+of them are Bass, Mid and Treble). Beside it,
 `src/audio/engineSource.ts` taps the same capture and feeds the audio engine
 (`src/audio/engine/`), which makes everything rhythmic: the Bass, Mid and Treble
 levels, the kick, snare and hat hits, the tempo and whether music is playing.
@@ -25,12 +26,12 @@ the room's own loudness. That same adaptive shape is why `src/audio/
 silenceGate.ts` exists: its two marks weight the audio engine's hits
 (`src/audio/engine/`, gated in `src/render/bandEnergy.ts` via `src/render/animClock.ts`)
 against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
-so a quiet room's own hiss can't fire on its own. Both marks can also be handed
-to an auto mode (on by default) that tracks the room's own quiet level instead
-of a manual drag, fed each tick by `feedSilenceGateMeasurement` — mirroring
-`src/audio/autoGain.ts`'s own auto flag rather than resolving through
-`musicProfile.ts`'s dials. `src/audio/sensitivity.ts` applies the user's
-Sensitivity/Expansion/Smoothing controls on top of that. Beside the bands,
+so a quiet room's own hiss can't fire on its own. The marks track the room's own
+quiet level, fed each tick by `feedSilenceGateMeasurement`, as
+`src/audio/autoGain.ts`'s amount tracks the room's band span; neither resolves
+through `musicProfile.ts`'s dials, and neither is a setting.
+`src/audio/sensitivity.ts`'s Sensitivity/Expansion/Smoothing curves shape the
+bands on top of that, at values `src/render/autoTune.ts` picks from the music. Beside the bands,
 `src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
 would level held sound away), and splits them into a drum part and a held part
 for the Hats and Lead signals; `app.ts` writes both into the frame, so a TV gets

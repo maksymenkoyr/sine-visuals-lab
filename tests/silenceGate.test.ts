@@ -1,112 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  getSilenceGate,
-  setSilenceGateClosed,
-  setSilenceGateOpen,
-  resetSilenceGate,
   silenceGateDimmer,
   hitPasses,
-  isSilenceGateAuto,
-  setSilenceGateAuto,
+  resetSilenceGateTracker,
   resolveSilenceGate,
   feedSilenceGateMeasurement,
   silenceGateMarksForFloor,
   SILENCE_GATE_MIN,
-  SILENCE_GATE_MAX,
-  SILENCE_GATE_MIN_WIDTH,
-  SILENCE_GATE_CLOSED_DEFAULT,
-  SILENCE_GATE_OPEN_DEFAULT,
+  SILENCE_GATE_SEED,
 } from "../src/audio/silenceGate.ts";
 import { createSyntheticFeed } from "../src/audio/synthetic.ts";
 
-// Single global value, like autoGain/bandSplit — every test resets first so
-// none of them can leak state into the next (vitest runs a file's tests in
-// one module instance, sharing the module-level cache).
-describe("silence gate persistence", () => {
-  beforeEach(() => {
-    resetSilenceGate();
-  });
-
-  // vitest runs under environment: "node" (vitest.config.ts), so there is no
-  // localStorage global at all here — this also proves the module tolerates that.
-  it("defaults to the documented closed/open marks", () => {
-    expect(getSilenceGate()).toEqual({ closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT });
-  });
-
-  it("round-trips a set anywhere in range", () => {
-    setSilenceGateClosed(0.02);
-    setSilenceGateOpen(0.3);
-    expect(getSilenceGate()).toEqual({ closed: 0.02, open: 0.3 });
-  });
-
-  it("clamps out-of-range and non-finite values", () => {
-    setSilenceGateClosed(-1);
-    expect(getSilenceGate().closed).toBe(SILENCE_GATE_MIN);
-    setSilenceGateClosed(Number.NaN);
-    expect(getSilenceGate().closed).toBe(SILENCE_GATE_CLOSED_DEFAULT);
-
-    resetSilenceGate();
-    setSilenceGateOpen(99);
-    expect(getSilenceGate().open).toBe(SILENCE_GATE_MAX);
-    setSilenceGateOpen(Number.NaN);
-    expect(getSilenceGate().open).toBe(SILENCE_GATE_OPEN_DEFAULT);
-  });
-
-  it("getSilenceGate returns a snapshot the caller can't mutate", () => {
-    const marks = getSilenceGate();
-    expect(() => {
-      (marks as { closed: number }).closed = 0.9;
-    }).toThrow();
-    expect(getSilenceGate().closed).toBe(SILENCE_GATE_CLOSED_DEFAULT);
-  });
-
-  describe("the open >= closed + SILENCE_GATE_MIN_WIDTH invariant", () => {
-    it("pushing closed above open drags open up", () => {
-      setSilenceGateOpen(0.2);
-      setSilenceGateClosed(0.25);
-      const marks = getSilenceGate();
-      expect(marks.closed).toBeCloseTo(0.25);
-      expect(marks.open).toBeCloseTo(0.25 + SILENCE_GATE_MIN_WIDTH);
-    });
-
-    it("pushing open below closed drags closed down", () => {
-      setSilenceGateClosed(0.3);
-      setSilenceGateOpen(0.1);
-      const marks = getSilenceGate();
-      expect(marks.open).toBeCloseTo(0.1);
-      expect(marks.closed).toBeCloseTo(0.1 - SILENCE_GATE_MIN_WIDTH);
-    });
-
-    it("holds at the top end: closed can't push open past SILENCE_GATE_MAX", () => {
-      setSilenceGateClosed(SILENCE_GATE_MAX);
-      const marks = getSilenceGate();
-      expect(marks.open).toBe(SILENCE_GATE_MAX);
-      expect(marks.closed).toBeCloseTo(SILENCE_GATE_MAX - SILENCE_GATE_MIN_WIDTH);
-      expect(marks.open - marks.closed).toBeGreaterThanOrEqual(SILENCE_GATE_MIN_WIDTH - 1e-9);
-    });
-
-    it("holds at the bottom end: open can't push closed below SILENCE_GATE_MIN", () => {
-      setSilenceGateOpen(SILENCE_GATE_MIN);
-      const marks = getSilenceGate();
-      expect(marks.closed).toBe(SILENCE_GATE_MIN);
-      expect(marks.open).toBeCloseTo(SILENCE_GATE_MIN + SILENCE_GATE_MIN_WIDTH);
-      expect(marks.open - marks.closed).toBeGreaterThanOrEqual(SILENCE_GATE_MIN_WIDTH - 1e-9);
-    });
-
-    it("never violates the invariant across a sweep of both marks", () => {
-      for (let c = SILENCE_GATE_MIN; c <= SILENCE_GATE_MAX; c += 0.03) {
-        setSilenceGateClosed(c);
-        const marks = getSilenceGate();
-        expect(marks.open - marks.closed).toBeGreaterThanOrEqual(SILENCE_GATE_MIN_WIDTH - 1e-9);
-      }
-      for (let o = SILENCE_GATE_MAX; o >= SILENCE_GATE_MIN; o -= 0.03) {
-        setSilenceGateOpen(o);
-        const marks = getSilenceGate();
-        expect(marks.open - marks.closed).toBeGreaterThanOrEqual(SILENCE_GATE_MIN_WIDTH - 1e-9);
-      }
-    });
-  });
-});
+const SEED_GAP = SILENCE_GATE_SEED.open - SILENCE_GATE_SEED.closed;
 
 describe("silenceGateDimmer", () => {
   const marks = { closed: 0.1, open: 0.3 };
@@ -137,7 +42,7 @@ describe("silenceGateDimmer", () => {
     }
   });
 
-  it("is always 1 — the gate off — when closed sits at SILENCE_GATE_MIN", () => {
+  it("gates nothing when closed sits at SILENCE_GATE_MIN", () => {
     const off = { closed: SILENCE_GATE_MIN, open: 0.3 };
     expect(silenceGateDimmer(0, off)).toBe(1);
     expect(silenceGateDimmer(0.01, off)).toBe(1);
@@ -149,19 +54,17 @@ describe("silenceGateDimmer", () => {
     expect(silenceGateDimmer(Number.POSITIVE_INFINITY, marks)).toBe(1);
   });
 
-  // The default marks are placeholders picked so that src/audio/synthetic.ts's
+  // The seed marks are placeholders picked so that src/audio/synthetic.ts's
   // feed — every headless screenshot/tuning tool run with ?audio=synthetic —
-  // is never dimmed. Drive the real feed across a long span at the default
-  // marks and check every frame agrees, rather than trusting the arithmetic
-  // (SILENCE_GATE_OPEN_DEFAULT sitting at synthetic's own quietest `level`)
-  // by eye.
-  it("never dims the synthetic feed at the default marks", () => {
-    const defaults = { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT };
+  // is never dimmed. Drive the real feed across a long span at the seed and
+  // check every frame agrees, rather than trusting the arithmetic (the seed's
+  // `open` sitting at synthetic's own quietest `level`) by eye.
+  it("never dims the synthetic feed at the seed marks", () => {
     const feed = createSyntheticFeed();
     const dt = 1 / 60;
     for (let t = 0; t < 60; t += dt) {
       const frame = feed.frame(t);
-      expect(silenceGateDimmer(frame.level, defaults)).toBe(1);
+      expect(silenceGateDimmer(frame.level, SILENCE_GATE_SEED)).toBe(1);
     }
   });
 });
@@ -186,7 +89,6 @@ describe("hitPasses", () => {
   });
 
   it("the synthetic feed's hits all pass its own undimmed gate", () => {
-    const defaults = { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT };
     const feed = createSyntheticFeed();
     let hits = 0;
     for (let t = 0; t < 10; t += 1 / 60) {
@@ -195,7 +97,7 @@ describe("hitPasses", () => {
       const strongest = Math.max(e.kick, e.snare, e.hat);
       if (strongest === 0) continue;
       hits++;
-      expect(hitPasses(strongest, silenceGateDimmer(frame.level, defaults))).toBe(true);
+      expect(hitPasses(strongest, silenceGateDimmer(frame.level, SILENCE_GATE_SEED))).toBe(true);
     }
     expect(hits).toBeGreaterThan(30);
   });
@@ -203,14 +105,13 @@ describe("hitPasses", () => {
 
 // silenceGateMarksForFloor is the pure mapping the room-floor tracker leans
 // on — a higher floor should never ask for a lower `closed` than a quieter
-// one, and the gap between the two marks should track the shipped manual
-// defaults' own gap regardless of where `closed` lands.
+// one, and the gap between the two marks should stay the seed's own gap
+// regardless of where `closed` lands.
 describe("silenceGateMarksForFloor", () => {
-  it("keeps the same gap width as the shipped manual defaults, away from either clamp", () => {
-    const gap = SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT;
+  it("keeps the seed's gap width, away from either clamp", () => {
     for (const floor of [0.02, 0.1, 0.2]) {
       const marks = silenceGateMarksForFloor(floor);
-      expect(marks.open - marks.closed).toBeCloseTo(gap);
+      expect(marks.open - marks.closed).toBeCloseTo(SEED_GAP);
     }
   });
 
@@ -221,10 +122,10 @@ describe("silenceGateMarksForFloor", () => {
     }
   });
 
-  it("never returns closed anywhere near SILENCE_GATE_MAX even for a very high floor", () => {
+  it("never returns marks at the top of level's range even for a very high floor", () => {
     const marks = silenceGateMarksForFloor(100);
-    expect(marks.closed).toBeLessThan(SILENCE_GATE_MAX);
-    expect(marks.open).toBeLessThanOrEqual(SILENCE_GATE_MAX);
+    expect(marks.closed).toBeLessThan(1);
+    expect(marks.open).toBeLessThan(1);
   });
 
   it("is monotonically non-decreasing as the floor rises", () => {
@@ -243,66 +144,37 @@ describe("silenceGateMarksForFloor", () => {
   });
 });
 
-describe("silence gate auto mode", () => {
-  // Auto must be off before resetting the manual marks, or setSilenceGateAuto
-  // wouldn't be the thing seeding the tracker off a known baseline — same
-  // ordering autoGain.test.ts uses for its own auto-mode reset.
+describe("room-floor tracker", () => {
   beforeEach(() => {
-    setSilenceGateAuto(false);
-    resetSilenceGate();
+    resetSilenceGateTracker();
   });
 
-  it("resolveSilenceGate falls back to the manual marks while off", () => {
-    expect(isSilenceGateAuto()).toBe(false);
-    setSilenceGateClosed(0.02);
-    setSilenceGateOpen(0.3);
-    expect(resolveSilenceGate()).toEqual(getSilenceGate());
+  it("starts at SILENCE_GATE_SEED, before the room has been heard", () => {
+    const marks = resolveSilenceGate();
+    expect(marks.closed).toBeCloseTo(SILENCE_GATE_SEED.closed, 12);
+    expect(marks.open).toBeCloseTo(SILENCE_GATE_SEED.open, 12);
   });
 
-  it("is a no-op to feed measurements while off — resolveSilenceGate stays on the manual marks", () => {
-    setSilenceGateClosed(0.02);
-    setSilenceGateOpen(0.3);
-    feedSilenceGateMeasurement(0, 5);
-    expect(resolveSilenceGate()).toEqual(getSilenceGate());
-  });
-
-  it("toggling on seeds from the current manual marks — no jump on the chip click", () => {
-    // silenceGateMarksForFloor always reconstructs `open` as `closed` plus
-    // the *default* gap (see its own doc comment) rather than whatever gap
-    // the manual marks happened to have, so this uses a manual pair that
-    // already sits at the default gap width — the case where seeding really
-    // must reproduce both marks exactly, not just `closed`.
-    const gap = SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT;
-    setSilenceGateClosed(0.08);
-    setSilenceGateOpen(0.08 + gap);
-    setSilenceGateAuto(true);
-    const resolved = resolveSilenceGate();
-    expect(resolved.closed).toBeCloseTo(0.08);
-    expect(resolved.open).toBeCloseTo(0.08 + gap);
-  });
-
-  it("round-trips the flag", () => {
-    setSilenceGateAuto(true);
-    expect(isSilenceGateAuto()).toBe(true);
-    setSilenceGateAuto(false);
-    expect(isSilenceGateAuto()).toBe(false);
+  it("hands out a snapshot the caller can't mutate", () => {
+    const marks = resolveSilenceGate();
+    expect(() => {
+      (marks as { closed: number }).closed = 0.9;
+    }).toThrow();
+    expect(resolveSilenceGate().closed).toBeCloseTo(SILENCE_GATE_SEED.closed);
   });
 
   it("a steady low level pulls the marks to settle just above it", () => {
-    setSilenceGateAuto(true);
-    const quietLevel = 0.01; // below SILENCE_GATE_CLOSED_DEFAULT's own seed
+    const quietLevel = 0.01; // below the seed's own closed mark
     for (let i = 0; i < 60; i++) feedSilenceGateMeasurement(quietLevel, 1);
     const resolved = resolveSilenceGate();
-    // "Just above" — closer to the room's own quiet level than to the
-    // shipped default gap between the two marks, without pinning the exact
-    // margin (an unmeasured placeholder — see this module's header).
-    const gap = SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT;
+    // "Just above" — closer to the room's own quiet level than to the seed's
+    // gap between the two marks, without pinning the exact margin (an
+    // unmeasured placeholder — see this module's header).
     expect(resolved.closed).toBeGreaterThan(quietLevel);
-    expect(resolved.closed).toBeLessThan(quietLevel + gap);
+    expect(resolved.closed).toBeLessThan(quietLevel + SEED_GAP);
   });
 
   it("a fluctuating, music-like level never lets the floor rise", () => {
-    setSilenceGateAuto(true);
     const before = resolveSilenceGate();
     // Both levels sit above the seeded floor, so this only exercises the
     // steadiness gate, not the fast-drop path — a wide, constantly-moving
@@ -313,11 +185,10 @@ describe("silence gate auto mode", () => {
   });
 
   it("a level dropping below the floor pulls the marks down faster than an equally-distant rise", () => {
-    // Mid-range starting point, away from either auto clamp in both
-    // directions, so neither leg below saturates SILENCE_GATE_AUTO_CLOSED_
-    // FLOOR/CEIL and confounds the comparison.
-    setSilenceGateClosed(0.15);
-    setSilenceGateAuto(true); // seeds the floor from that manual value
+    // Mid-range starting point, away from either clamp in both directions,
+    // so neither leg below saturates SILENCE_GATE_AUTO_CLOSED_FLOOR/CEIL and
+    // confounds the comparison.
+    resetSilenceGateTracker(0.15);
     const before = resolveSilenceGate();
     feedSilenceGateMeasurement(before.closed - 0.1, 0.1);
     const afterDrop = resolveSilenceGate().closed;
@@ -326,9 +197,7 @@ describe("silence gate auto mode", () => {
     // first-ever reading needs only one sample (both envelope bounds start
     // unset), so this isolates the rate difference from any envelope
     // warm-up effect the first leg left behind.
-    setSilenceGateAuto(false);
-    setSilenceGateClosed(0.15);
-    setSilenceGateAuto(true);
+    resetSilenceGateTracker(0.15);
     const beforeRise = resolveSilenceGate();
     feedSilenceGateMeasurement(beforeRise.closed + 0.1, 0.1);
     const afterRise = resolveSilenceGate().closed;
@@ -337,37 +206,32 @@ describe("silence gate auto mode", () => {
     const riseDelta = afterRise - beforeRise.closed;
     expect(dropDelta).toBeGreaterThan(0);
     expect(riseDelta).toBeGreaterThan(0);
-    // FLOOR_DROP_RATE/FLOOR_RISE_RATE is 4x now (was 10x before
-    // FLOOR_RISE_RATE's own speedup) — and the two legs aren't symmetric
-    // around `floor` (SILENCE_GATE_AUTO_MARGIN puts `closed` 0.02 above it,
-    // so "closed - 0.1" and "closed + 0.1" aren't equally distant from
-    // `floor` itself), which narrows the ratio actually observed here.
-    // 2x keeps a comfortable margin below that either way.
+    // The two legs aren't symmetric around `floor` (SILENCE_GATE_AUTO_MARGIN
+    // puts `closed` above it), which narrows the FLOOR_DROP_RATE /
+    // FLOOR_RISE_RATE ratio actually observed here; 2x keeps a comfortable
+    // margin below it either way.
     expect(dropDelta).toBeGreaterThan(riseDelta * 2);
   });
 
-  it("auto closed never reaches SILENCE_GATE_MIN, even after a very long silence", () => {
-    setSilenceGateAuto(true);
+  it("closed never reaches SILENCE_GATE_MIN, even after a very long silence", () => {
     for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(0, 5);
     expect(resolveSilenceGate().closed).toBeGreaterThan(SILENCE_GATE_MIN);
   });
 
-  it("auto closed never approaches SILENCE_GATE_MAX, even after a very long, loud drone", () => {
-    setSilenceGateAuto(true);
-    for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(SILENCE_GATE_MAX, 5);
-    expect(resolveSilenceGate().closed).toBeLessThan(SILENCE_GATE_MAX);
+  it("closed stays under a very long, loud drone", () => {
+    const drone = 0.6;
+    for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(drone, 5);
+    expect(resolveSilenceGate().closed).toBeLessThan(drone);
   });
 
-  it("keeps the open >= closed + SILENCE_GATE_MIN_WIDTH invariant across a run with varied levels", () => {
-    setSilenceGateAuto(true);
+  it("keeps the seed's gap across a run with varied levels", () => {
     const levels = [0.5, 0.02, 0.4, 0.01, 0.6, 0, 0.3];
     for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(levels[i % levels.length], 1 / 30);
     const resolved = resolveSilenceGate();
-    expect(resolved.open - resolved.closed).toBeGreaterThanOrEqual(SILENCE_GATE_MIN_WIDTH - 1e-9);
+    expect(resolved.open - resolved.closed).toBeCloseTo(SEED_GAP);
   });
 
   it("ignores a non-finite level or dt outright, holding the last estimate", () => {
-    setSilenceGateAuto(true);
     feedSilenceGateMeasurement(0.02, 1); // establish a real reading first
     const before = resolveSilenceGate();
     feedSilenceGateMeasurement(Number.NaN, 1);
@@ -377,24 +241,9 @@ describe("silence gate auto mode", () => {
   });
 });
 
-// Module-load default: a fresh profile (no stored "vibe.silenceGateAuto" key
-// at all) must come up with auto ON, and — since setSilenceGateAuto(true)
-// never runs on that path — the tracker's `floor` must still seed from
-// whatever manual `closed` mark was stored, not the hardcoded shipped
-// default. This needs its own fake localStorage plus vi.resetModules() and a
-// fresh dynamic import, same pattern tests/autoTune.test.ts uses for its own
-// load-time store tests.
-describe("silence gate auto mode: default on module load", () => {
-  function makeFakeLocalStorage() {
-    const store = new Map<string, string>();
-    return {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => void store.set(key, value),
-      removeItem: (key: string) => void store.delete(key),
-      raw: store,
-    };
-  }
-
+// An older version stored manual marks and an Auto flag; a profile that still
+// holds them must come up on the tracker at the seed, like a fresh one.
+describe("silence gate on module load", () => {
   const originalLocalStorage = (globalThis as { localStorage?: unknown }).localStorage;
 
   afterEach(() => {
@@ -402,46 +251,21 @@ describe("silence gate auto mode: default on module load", () => {
     vi.resetModules();
   });
 
-  it("a missing key loads as auto on", async () => {
-    const fake = makeFakeLocalStorage();
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
+  it("ignores stored manual marks and Auto off", async () => {
+    const store = new Map<string, string>([
+      ["vibe.silenceGateClosed", "0.12"],
+      ["vibe.silenceGateOpen", "0.22"],
+      ["vibe.silenceGateAuto", "0"],
+    ]);
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    };
     vi.resetModules();
     const fresh = await import("../src/audio/silenceGate.ts");
-    expect(fresh.isSilenceGateAuto()).toBe(true);
-  });
-
-  it("a stored \"0\" loads as auto off", async () => {
-    const fake = makeFakeLocalStorage();
-    fake.setItem("vibe.silenceGateAuto", "0");
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
-    vi.resetModules();
-    const fresh = await import("../src/audio/silenceGate.ts");
-    expect(fresh.isSilenceGateAuto()).toBe(false);
-  });
-
-  it("a stored \"1\" loads as auto on", async () => {
-    const fake = makeFakeLocalStorage();
-    fake.setItem("vibe.silenceGateAuto", "1");
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
-    vi.resetModules();
-    const fresh = await import("../src/audio/silenceGate.ts");
-    expect(fresh.isSilenceGateAuto()).toBe(true);
-  });
-
-  it("with a stored manual closed mark and no auto key, resolveSilenceGate right after load honors it as the seed", async () => {
-    const fake = makeFakeLocalStorage();
-    const storedClosed = 0.12;
-    fake.setItem("vibe.silenceGateClosed", String(storedClosed));
-    fake.setItem("vibe.silenceGateOpen", String(storedClosed + 0.1));
-    (globalThis as { localStorage?: unknown }).localStorage = fake;
-    vi.resetModules();
-    const fresh = await import("../src/audio/silenceGate.ts");
-
-    expect(fresh.isSilenceGateAuto()).toBe(true); // no auto key stored -> on by default
-    const resolved = fresh.resolveSilenceGate();
-    // The tracker hasn't been fed a single measurement yet, so its `floor`
-    // is still exactly its seed — silenceGateMarksForFloor's own closed for
-    // that seed must equal the stored manual closed mark.
-    expect(resolved.closed).toBeCloseTo(storedClosed);
+    expect(fresh.resolveSilenceGate().closed).toBeCloseTo(fresh.SILENCE_GATE_SEED.closed, 12);
+    for (let i = 0; i < 60; i++) fresh.feedSilenceGateMeasurement(0.01, 1);
+    expect(fresh.resolveSilenceGate().closed).toBeLessThan(fresh.SILENCE_GATE_SEED.closed);
   });
 });

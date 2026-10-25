@@ -11,7 +11,7 @@ import { createSectionIntensity, type SectionIntensity } from "./sectionIntensit
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
 import { createBandPick, type BandPick } from "./bandPick.ts";
-import { getBandSplit } from "../audio/bandSplit.ts";
+import { BAND_SPLIT } from "../audio/bandSplit.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
 import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../audio/hitStrength.ts";
@@ -217,8 +217,8 @@ export interface AnimClock {
    *  driving the visuals this tick. `smoothing` defaults to 1x (today's
    *  behavior) — see sensitivity.ts's smoothingRateScale. Its derived
    *  rateScale now reaches bandEnergy, sectionIntensity's INTENSITY_SLEW and
-   *  musicProfile's eases alike, so `smoothing` at the Smoothing row's Off
-   *  stop (0 -> Infinity) makes sectionIntensity/profile land exactly on the
+   *  musicProfile's eases alike, so `smoothing` at 0
+   *  (0 -> Infinity) makes sectionIntensity/profile land exactly on the
    *  `raw` counterparts already exposed below — see the meters panel's RAW
    *  chip (src/ui/audioMeters.ts). `gate` (src/audio/silenceGate.ts), when
    *  given, is turned into this tick's dimmer from `frame.level` right here
@@ -334,7 +334,7 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
       const hitDimmer = gate && hitLevel !== undefined ? silenceGateDimmer(hitLevel, gate) : dimmer;
       const flowPhase = flow.advance(dtSec, frame.energy);
       bandEnergy.advance(dtSec, frame, rateScale, hitDimmer, hit?.shape);
-      kickBand.advance(dtSec, frame.bands, getBandSplit().lowMid);
+      kickBand.advance(dtSec, frame.bands, BAND_SPLIT.lowMid);
       hats = slewLevel(hats, frame.hats * dimmer, dtSec, rateScale);
       lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);
       const beatRatio = frame.engine?.surge ?? 0;

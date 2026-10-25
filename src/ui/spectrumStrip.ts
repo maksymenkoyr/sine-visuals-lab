@@ -1,6 +1,6 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { formatHz } from "../audio/bandScale.ts";
-import type { BandSplit } from "../audio/bandSplit.ts";
+import { BAND_SPLIT } from "../audio/bandSplit.ts";
 import { BAND_FADER_COUNT, BAND_GAIN_MIN, FADER_CENTER_POS, faderWeights, gainToFaderPos } from "../audio/bandGains.ts";
 import { bandIndexCentroid } from "../render/spectralCentroid.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
@@ -64,7 +64,6 @@ export interface SpectrumStrip {
   /** Real Hz edges for this ladder (length NUM_BANDS + 1), from the analyser
    *  once mic access exists, or the nominal ladder before that. */
   setEdgesHz(edges: Float32Array): void;
-  setSplit(split: BandSplit): void;
   /** "Listening post": true draws the raw mic feed, false (default) the
    *  processed feed the visuals actually see. */
   setShowRaw(on: boolean): void;
@@ -120,9 +119,9 @@ const CENTROID_FLAG_H = 6;
 
 const AXIS_TICKS_HZ = [100, 1000, 10000];
 
-function groupColor(index: number, split: BandSplit): string {
-  if (index < split.lowMid) return STRIP_LOW;
-  if (index < split.midHigh) return STRIP_MID;
+function groupColor(index: number): string {
+  if (index < BAND_SPLIT.lowMid) return STRIP_LOW;
+  if (index < BAND_SPLIT.midHigh) return STRIP_MID;
   return STRIP_HIGH;
 }
 
@@ -145,7 +144,6 @@ export function createSpectrumStrip(opts: SpectrumStripOptions = {}): SpectrumSt
   const ctx = canvas.getContext("2d")!;
 
   let edgesHz: Float32Array = new Float32Array(0);
-  let split: BandSplit = { lowMid: 6, midHigh: 16 };
   let lastDrawMs: number | null = null;
   let showRaw = false;
   let showFaders = true;
@@ -217,7 +215,7 @@ export function createSpectrumStrip(opts: SpectrumStripOptions = {}): SpectrumSt
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const x = xForEdgeIndex(b, width);
-      const groupCol = groupColor(b, split);
+      const groupCol = groupColor(b);
       // Outside a highlighted range, a band dims to its group tint at low
       // alpha regardless of level — "not one of the bands this control
       // listens to" reads the same whether that band is loud or silent.
@@ -396,9 +394,6 @@ export function createSpectrumStrip(opts: SpectrumStripOptions = {}): SpectrumSt
     el: canvas,
     setEdgesHz(edges: Float32Array): void {
       edgesHz = edges;
-    },
-    setSplit(next: BandSplit): void {
-      split = next;
     },
     setShowRaw(on: boolean): void {
       showRaw = on;

@@ -57,16 +57,7 @@ import { createFpsMeter } from "./render/fpsMeter.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, paletteRampHex, PALETTES, type Palette } from "./render/palette.ts";
-import {
-  applySensitivity,
-  getExpansion,
-  getSensitivity,
-  getSmoothing,
-  setExpansion,
-  setSensitivity,
-  setSmoothing,
-  smoothingRateScale,
-} from "./audio/sensitivity.ts";
+import { applySensitivity, smoothingRateScale } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { lockMeaningFromQuery } from "./render/lockMeaning.ts";
 import { getBeatTrim, requestBarResync, resetBeatTrim, stepTempoMultiplier, nudgeBeatOffset } from "./render/beatTrim.ts";
@@ -209,29 +200,16 @@ import {
   setCustomValue,
   stretchSlider,
 } from "./render/customValues.ts";
-import { getBandSplit } from "./audio/bandSplit.ts";
+import { BAND_SPLIT } from "./audio/bandSplit.ts";
+import { resolveAutoGain, feedAutoGainMeasurement } from "./audio/autoGain.ts";
 import {
-  getAutoGain,
-  setAutoGain,
-  resolveAutoGain,
-  feedAutoGainMeasurement,
-  isAutoGainAuto,
-  setAutoGainAuto,
-} from "./audio/autoGain.ts";
-import {
-  getSilenceGate,
-  setSilenceGateClosed,
-  setSilenceGateOpen,
   resolveSilenceGate,
   feedSilenceGateMeasurement,
-  isSilenceGateAuto,
-  setSilenceGateAuto,
   silenceGateDimmer,
   hitPasses,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
 import { getHitShape, setHitShape } from "./audio/hitStrength.ts";
-import { isMicAuto, setMicAuto } from "./audio/micAuto.ts";
 import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
@@ -269,9 +247,6 @@ import {
   resolveSensitivity,
   resolveExpansion,
   resolveSmoothing,
-  getSensitivitySpec,
-  getExpansionSpec,
-  getSmoothingSpec,
   isAutoEnabled,
   setAutoEnabled,
   isSceneAuto,
@@ -1861,37 +1836,10 @@ function startRendererDisconnectWatch(): void {
   }, 5000);
 }
 
-// Top-level so micAuto.ts's setMicAuto can reuse this seed-then-flip path for
-// the Sensitivity/Expansion/Smoothing pseudo-params (see micAutoMembers and
-// micAuto.ts header).
 function onSettingAutoToggle(sceneId: string, spec: SceneSetting, on: boolean): void {
-  if (on) {
-    // Pseudo-params live in their own store, not sceneSettings.ts: pick the
-    // manual-value getter by key.
-    const pseudoGetters: Record<string, (sceneId: string) => number> = {
-      [getSensitivitySpec().key]: getSensitivity,
-      [getExpansionSpec().key]: getExpansion,
-      [getSmoothingSpec().key]: getSmoothing,
-    };
-    const current = (pseudoGetters[spec.key] ?? ((id: string) => getSceneSetting(id, spec)))(sceneId);
-    seedAuto(sceneId, spec.key, current);
-  }
+  if (on) seedAuto(sceneId, spec.key, getSceneSetting(sceneId, spec));
   setAutoEnabled(sceneId, spec.key, on);
 }
-
-// The whole-mic membership lives in micAuto.ts; this wires its injected
-// getters/setters to this app's stores.
-const micAutoMembers = {
-  isAutoGainAuto,
-  setAutoGainAuto,
-  isSilenceGateAuto,
-  setSilenceGateAuto,
-  getSensitivitySpec,
-  getExpansionSpec,
-  getSmoothingSpec,
-  isSettingAutoEnabled: isAutoEnabled,
-  onSettingAutoToggle,
-};
 
 function powerStatus(): PowerStatus {
   return {
@@ -1971,21 +1919,6 @@ function wireDeviceMenu(): void {
       syncInputPreview(); // a hidden input's idle preview closes, a shown one opens
     },
     onPickPalette: (id) => applyPalette(getPalette(id)),
-    getSensitivity: (sceneId) => getSensitivity(sceneId),
-    onSensitivityChange: (sceneId, value) => {
-      setAutoEnabled(sceneId, getSensitivitySpec().key, false);
-      setSensitivity(sceneId, value);
-    },
-    getExpansion: (sceneId) => getExpansion(sceneId),
-    onExpansionChange: (sceneId, value) => {
-      setAutoEnabled(sceneId, getExpansionSpec().key, false);
-      setExpansion(sceneId, value);
-    },
-    getSmoothing: (sceneId) => getSmoothing(sceneId),
-    onSmoothingChange: (sceneId, value) => {
-      setAutoEnabled(sceneId, getSmoothingSpec().key, false);
-      setSmoothing(sceneId, value);
-    },
     getSceneSettings: (sceneId) => getScene(sceneId)?.settings ?? [],
     getScene: (sceneId) => getScene(sceneId),
     getSceneSettingValue: (sceneId, spec) => getSceneSetting(sceneId, spec),
@@ -2050,7 +1983,6 @@ function wireDeviceMenu(): void {
       },
       onRemoveLogo: clearOverlayLogo,
     },
-    getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
@@ -2090,25 +2022,10 @@ function wireDeviceMenu(): void {
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
-    resolveSmoothingValue: (sceneId) => resolveSmoothing(sceneId),
-    getSensitivitySpec: () => getSensitivitySpec(),
-    getExpansionSpec: () => getExpansionSpec(),
-    getSmoothingSpec: () => getSmoothingSpec(),
     isSettingAutoEnabled: (sceneId, key) => isAutoEnabled(sceneId, key),
     onSettingAutoToggle,
-    isSceneAuto: (sceneId) =>
-      isSceneAuto(sceneId, [
-        ...(getScene(sceneId)?.settings ?? []),
-        getSensitivitySpec(),
-        getExpansionSpec(),
-        getSmoothingSpec(),
-      ]),
-    onSceneAutoToggle: (sceneId, on) =>
-      setSceneAuto(
-        sceneId,
-        [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()],
-        on,
-      ),
+    isSceneAuto: (sceneId) => isSceneAuto(sceneId, getScene(sceneId)?.settings ?? []),
+    onSceneAutoToggle: (sceneId, on) => setSceneAuto(sceneId, getScene(sceneId)?.settings ?? [], on),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
     getSceneExpansion: () => getSceneExpansion(),
@@ -2119,32 +2036,9 @@ function wireDeviceMenu(): void {
     // gapped past PICTURE_GAP_RESET_MS plus however long the readback holds
     // thumbnails back to batch reads), not a frozen last reading.
     getPictureReading: () => freshPictureReading(),
-    getAutoGain: () => getAutoGain(),
-    onAutoGainChange: (value) => {
-      setAutoGainAuto(false);
-      setAutoGain(value);
-    },
-    isAutoGainAuto: () => isAutoGainAuto(),
-    onAutoGainAutoToggle: (on) => setAutoGainAuto(on),
-    resolveAutoGain: () => resolveAutoGain(),
-    getSilenceGate: () => getSilenceGate(),
-    // A drag hands the gate back to manual first, as onAutoGainChange does: else
-    // resolveSilenceGate() keeps serving the auto marks.
-    onSilenceGateClosedChange: (value) => {
-      setSilenceGateAuto(false);
-      setSilenceGateClosed(value);
-    },
-    onSilenceGateOpenChange: (value) => {
-      setSilenceGateAuto(false);
-      setSilenceGateOpen(value);
-    },
-    isSilenceGateAuto: () => isSilenceGateAuto(),
-    onSilenceGateAutoToggle: (on) => setSilenceGateAuto(on),
     resolveSilenceGate: () => resolveSilenceGate(),
     getHitShape: () => getHitShape(),
     setHitShape: (partial) => setHitShape(partial),
-    isMicAuto: (sceneId) => isMicAuto(sceneId, micAutoMembers),
-    onMicAutoToggle: (sceneId, on) => setMicAuto(sceneId, on, micAutoMembers),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -3330,7 +3224,7 @@ const stemRangesScratch: StemRanges = { hats: { lo: 0, hi: 0 }, lead: { lo: 0, h
 
 /** Lead covers the band split's Mid range and Hats its Treble range, matching the rows beside them. */
 function stemRanges(edgesHz: Float32Array): StemRanges {
-  const { lowMid, midHigh } = getBandSplit();
+  const { lowMid, midHigh } = BAND_SPLIT;
   stemRangesScratch.lead.lo = edgesHz[lowMid];
   stemRangesScratch.lead.hi = edgesHz[midHigh];
   stemRangesScratch.hats.lo = edgesHz[midHigh];
@@ -3407,7 +3301,7 @@ function readLocalCapture(
 /** @param rateScale smoothingRateScale(resolveSmoothing(scene.id)), computed once
  *  per tick by loop(): resolveSmoothing() slews its auto value, so a second call
  *  would double the slew. Forwarded to extractor.update() so a local capture's
- *  envelope honors the same Smoothing, including its Off stop. */
+ *  envelope honors the same Smoothing, including 0. */
 function currentVisual(rateScale: number): FeatureFrame | null {
   // Reset every tick: only sampleToVisual, on a page following a feed, sets it.
   lastFeedWave = null;
@@ -3845,7 +3739,7 @@ function idlePreviewActive(): boolean {
 
 /** One tick of the demo groove behind the start prompt: loop()'s pipeline on
  *  idlePreview's own state minus everything live-only (no auto-tune training,
- *  meters or host send). The scene's settings and the Input card still apply, so
+ *  meters or host send). The scene's settings, Sensitivity and Expansion still apply, so
  *  tweaking a look before picking a source shows the result. */
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
   // Clock only, no profile: the demo can't train it, but the auto

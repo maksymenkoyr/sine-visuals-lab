@@ -59,14 +59,11 @@ describe("describeRow", () => {
     expect(describeRow(removed, names)).toEqual({ name: "Density wires", from: "as LIVE", to: "default" });
   });
 
-  it("names the master and sensitivity keys, and strips vibe. from any other key", () => {
+  it("names the master keys, and strips vibe. from any other key", () => {
     const key = (storageKey: string, from: string | null, to: string | null): LookRow => ({ id: `k:${storageKey}`, kind: "key", storageKey, from, to });
     expect(describeRow(key("vibe.sceneMaster", "0.8", "1"), names).name).toBe("Master Scale");
     expect(describeRow(key("vibe.sceneExpansion", null, null), names).name).toBe("Master Expansion");
     expect(describeRow(key("vibe.sceneExpansionShape", null, null), names).name).toBe("Expansion shape");
-    expect(describeRow(key("vibe.sensitivity", null, null), names).name).toBe("Sensitivity");
-    expect(describeRow(key("vibe.expansion", null, null), names).name).toBe("Expansion");
-    expect(describeRow(key("vibe.smoothing", null, null), names).name).toBe("Smoothing");
     expect(describeRow(key("vibe.glowThing", null, null), names).name).toBe("glowThing");
   });
 

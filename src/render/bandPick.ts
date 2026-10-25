@@ -10,8 +10,8 @@ import { NUM_BANDS } from "../audio/types.ts";
  * wire it up by hand. This does the same search live, so the reading follows
  * the music without anyone looking at a spectrum.
  *
- * Candidates are only the bands below the Bands split (`lowMid` from
- * getBandSplit() in src/audio/bandSplit.ts), never mid or high bands.
+ * Candidates are only the bands below src/audio/bandSplit.ts's
+ * BAND_SPLIT.lowMid, never mid or high bands.
  *
  * The score for each candidate is its standard deviation over roughly
  * PICK_TAU_SEC, computed from an exponential mean of v and of v² per band.

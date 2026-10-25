@@ -8,14 +8,13 @@ import { getHitShape } from "../../src/audio/hitStrength.ts";
 import {
   feedSilenceGateMeasurement,
   hitPasses,
+  resetSilenceGateTracker,
   resolveSilenceGate,
-  setSilenceGateAuto,
   silenceGateDimmer,
-  SILENCE_GATE_CLOSED_DEFAULT,
-  SILENCE_GATE_OPEN_DEFAULT,
+  SILENCE_GATE_SEED,
   type SilenceGateMarks,
 } from "../../src/audio/silenceGate.ts";
-import { feedAutoGainMeasurement, resolveAutoGain, setAutoGainAuto } from "../../src/audio/autoGain.ts";
+import { feedAutoGainMeasurement, resetAutoGain, resolveAutoGain } from "../../src/audio/autoGain.ts";
 import { decodeFeatureFrame, encodeFeatureFrame, type WireEngine } from "../../src/net/protocol.ts";
 import { JitterBuffer } from "../../src/net/jitterBuffer.ts";
 import { RENDER_DELAY_MS } from "../../server/roomDevices.ts";
@@ -186,8 +185,7 @@ export interface EvalOptions {
    *  the conditions the app actually hears through a mic, rather than the
    *  track's own clean synthesized master. */
   mic?: boolean;
-  /** Pass { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT }
-   *  as the silence gate on the frame's hit flags and on the anim clock,
+  /** Pass SILENCE_GATE_SEED as the silence gate on the frame's hit flags and on the anim clock,
    *  exactly like app.ts does (see silenceGate.ts's header for what the gate
    *  does and why it must not starve tempo tracking; that's exactly what this
    *  option, combined with `mic`, is here to measure). */
@@ -247,13 +245,10 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   const mono = opts.mic ? micChain(track.mono, SR) : track.mono;
   const auto = opts.auto === true && opts.gate === true;
   if (auto) {
-    // Off then on re-seeds each tracker; the setters ignore a repeat of the same state.
-    setAutoGainAuto(false);
-    setAutoGainAuto(true);
-    setSilenceGateAuto(false);
-    setSilenceGateAuto(true);
+    resetAutoGain();
+    resetSilenceGateTracker();
   }
-  let gate: SilenceGateMarks | undefined = opts.gate ? { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT } : undefined;
+  let gate: SilenceGateMarks | undefined = opts.gate ? SILENCE_GATE_SEED : undefined;
   const dt = 1 / fps;
   const totalDurationSec = mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);

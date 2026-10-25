@@ -20,7 +20,7 @@ import { createFpsMeter } from "./render/fpsMeter.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { createOverlayLayer } from "./render/overlayLayer.ts";
 import { createFrameMisses } from "./render/frameMisses.ts";
-import { getSilenceGate } from "./audio/silenceGate.ts";
+import { SILENCE_GATE_SEED } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
@@ -432,7 +432,7 @@ async function main(): Promise<void> {
     // The controller's resolved marks (its Auto room-floor tracker moves them,
     // and nothing in this window feeds that tracker); this window's own stored
     // marks only stand in for a controller that doesn't send any.
-    const anim = animClock.advance(dtSec, frame, p.smoothing, frame.gate ?? getSilenceGate(), { shape: getHitShape() });
+    const anim = animClock.advance(dtSec, frame, p.smoothing, frame.gate ?? SILENCE_GATE_SEED, { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
     const displayFrame = applySensitivity(frame, p.sens, p.exp);
