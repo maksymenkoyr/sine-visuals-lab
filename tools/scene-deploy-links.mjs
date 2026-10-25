@@ -37,10 +37,11 @@ function changedScenePaths() {
 }
 
 // A changed file directly under scenes/ is its own entry module
-// (scenes/caustics.ts); a file inside a scene's own folder belongs to that
-// folder's index.ts (scenes/dancers/rig.ts -> scenes/dancers/index.ts), the
-// scene module (scenes/sceneModules.ts). A helper file exports no scene and
-// drops out below.
+// (scenes/caustics.ts, or its card scenes/caustics.card.ts: both name the same
+// scene, so the list keeps one per id); a file inside a scene's own folder
+// belongs to that folder's index.ts (scenes/dancers/rig.ts ->
+// scenes/dancers/index.ts), the scene's body (scenes/sceneModules.ts). A helper
+// file exports no scene and drops out below.
 function sceneEntryFor(path) {
   const rest = path.slice(SCENES_DIR.length);
   const slash = rest.indexOf("/");
@@ -54,10 +55,13 @@ if (entries.length === 0) {
   process.exit(0);
 }
 
+// Silent: the workflow reads stdout as the JSON line, and Vite's own notices
+// (a dependency re-optimise) would land ahead of it.
 const server = await createServer({
   configFile: false,
   server: { middlewareMode: true },
   appType: "custom",
+  logLevel: "silent",
 });
 
 try {
@@ -67,7 +71,7 @@ try {
     const scene = Object.values(mod).find(
       (v) => v && typeof v === "object" && typeof v.id === "string" && typeof v.name === "string",
     );
-    if (scene) scenes.push({ id: scene.id, name: scene.name });
+    if (scene && !scenes.some((s) => s.id === scene.id)) scenes.push({ id: scene.id, name: scene.name });
   }
   console.log(JSON.stringify(scenes));
 } finally {
