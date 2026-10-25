@@ -128,4 +128,10 @@ describe("hover badge", () => {
     over({ pointerType: "mouse", target: new FakeEl({ key: "cue" }, ["data-key-shown"]) });
     expect(tip.show).toHaveBeenCalledTimes(1);
   });
+
+  it("names a row's Only this chip without a key", async () => {
+    await load();
+    listeners.get("pointerover")!({ pointerType: "mouse", target: new FakeEl({ key: "only" }) });
+    expect(tip.show.mock.calls[0][2]).toEqual(["Only this"]);
+  });
 });

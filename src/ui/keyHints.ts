@@ -131,6 +131,8 @@ function hintLine(el: HTMLElement): string | null {
   }
   // The Set card's pads: each one answers to its own digit (setCard.ts).
   if (id === "pad") return el.dataset.padKey ? `Fire pad · ${el.dataset.padKey}` : null;
+  // A row's "Only this" chip (deviceMenu.ts): not a shortcut, so no key to name.
+  if (id === "only") return el.getAttribute("aria-pressed") === "true" ? "All back" : "Only this";
   const s = shortcutFor(id);
   // The gear turns into a close cross while the panel is open (index.html's
   // #menuBtn rules) — the hint follows it.

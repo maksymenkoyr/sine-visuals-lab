@@ -748,6 +748,8 @@ body.vc-keys-reveal [data-keycap]::after {
 /* .vc-row-keep (the Bands faders row) opts out: it is the primary display and gets
  * band-range dimming (spectrumStrip.ts setHighlight) instead of a flat opacity drop. */
 .vc-spectrum-col.vc-patching .vc-row:not(.vc-row-fed):not(.vc-row-fed-soft):not(.vc-row-fed-faint):not(.vc-row-keep) { opacity: 0.45; }
+/* "Only this" (driveSolo.ts): the soloed row stays at full strength, with the rows of its own open panel. */
+.vc-drive-solo-dim .vc-row:not(.vc-row-solo):not(.vc-row-solo .vc-row) { opacity: 0.45; }
 .vc-row-fed, .vc-row-fed-soft, .vc-row-fed-faint {
   box-shadow: inset 0 0 0 1px var(--vc-hl, transparent), 0 0 16px color-mix(in srgb, var(--vc-hl, transparent) 20%, transparent);
 }
