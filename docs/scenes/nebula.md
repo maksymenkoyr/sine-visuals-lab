@@ -5,7 +5,7 @@ whose edges burn white-blue with a red-orange fringe, fine veins inside
 them, and dark voids full of stars ahead. The music brightens the cloud
 (Glow), flares its edges white on hits (Flare) and speeds the flight up as a
 section builds (Surge); in silence it only drifts, and its colours wander
-round the wheel over most of an hour. In development, not on main yet.
+round the wheel over most of an hour. In development.
 
 ## Where the code is
 
@@ -157,6 +157,32 @@ vs ours.
 - Cost of the chosen scale-up, same bench, interleaved: 9.27 → 9.89 ms;
   Caustics 7.65 ms in both.
 
+2026-10-25, a leaner march.
+
+- A stats frame: 73% of the march's steps lie wholly in empty space (about
+  35 of a pixel's 48 on average), and no pixel reaches the step cap. The
+  march is bound by arithmetic, not by its texture reads.
+- `tools/gpu-bench.mjs` at 3024×1890 on the M1 Pro (high), prototype on a
+  quiet machine: 8.99–9.10 → 4.21–4.24 ms (skipping void steps alone 5.76,
+  the exp-form tanh alone 6.61–6.67); Caustics 7.62 ms throughout. This
+  build against main, loaded machine, two interleaved rounds: 16.62 / 15.44
+  → 8.14 / 8.50 ms, Caustics 11.8–15.9 ms.
+- Bench frames 30 and 150 against main: 122 and 373 of 5.7 M pixels differ,
+  by at most 2/255.
+- Tried and dropped, no gain: skipping the detail read in empty space,
+  ending rays at a lower transmittance, skipping the tunnel's exp far from
+  its axis. A per-frame table for the tunnel path saved 0.3 ms and moved
+  pixels by up to 9/255.
+- `tools/tune-real.mjs` (Levitating, 30 s from 4 s):
+
+  | source | change med | change p95 | hits/min | energy | fps |
+  |---|---|---|---|---|---|
+  | song | 4.81 | 6.51 | 330 | 0.66 | 119 |
+  | silence | 1.89 | 2.79 | 0 | 0.00 | 119 |
+
+  Song over silence at p95 2.3×, as before: the look and the reactions are
+  unchanged.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -223,6 +249,11 @@ vs ours.
   gas itself. Chosen: a Catmull-Rom scale-up plus an unsharp step against
   the target's first mip (`SHARPEN`), for 0.6 ms. Turning the glare off
   dimmed the picture more than it sharpened it, so it stays.
+- 2026-10-25 — The march skips the light and absorption of a step whose
+  both ends lie in empty space, and branches each erf to its clamp outside
+  its range; both are exact. Metal's built-in tanh was a quarter of the
+  march, so the erf spells it out through exp. Together they halve the
+  scene's GPU time.
 
 ## Tuning notes
 
@@ -246,8 +277,10 @@ vs ours.
 - The gas itself stays soft: a march at the screen's full height is only a
   little crisper than the sharpened scale-up. Finer detail would have to
   come from the volume (`VOLUME_SIZE`, the detail read), not the target.
-- 1.2× Caustics' GPU time at Retina size on high; lower presets shrink the
-  gas target and the step count.
+- About 0.55× Caustics' GPU time at Retina size on high; lower presets
+  shrink the gas target and the step count.
+- The first frame stalls on the volume bake (about 10 ms) and, most likely,
+  the gas shader compiling; pre-warming the program is untried.
 
 ## Materials
 
@@ -278,7 +311,10 @@ vs ours.
 
 ## History
 
-- First PR (#651, 2026-10-21): the scene as stacked noise planes, its
-  record and the flight test.
-- Second attempt (2026-10-24): the raymarched volume, measured against the
-  whole 200 s loop.
+- First PR (#651, 2026-10-21, closed unmerged): the scene as stacked noise
+  planes, its record and the flight test.
+- Second attempt (#681, 2026-10-24): the raymarched volume, measured
+  against the whole 200 s loop.
+- Realistic stars (#684, 2026-10-24).
+- A sharper scale-up (#701, 2026-10-25).
+- A leaner march (2026-10-25): half the GPU time, same picture.
