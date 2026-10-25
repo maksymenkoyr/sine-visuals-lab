@@ -36,7 +36,7 @@ import { PICTURE_MEASURES, type PictureMeasure, type PictureReading } from "../r
 
 export interface TuningDeps {
   getInput: () => ProbeInput;
-  /** The Master card's Picture block's own live state — see
+  /** The picture meter's live state — see
    *  src/render/pictureMeter.ts. Optional: absent whenever app.ts hasn't
    *  wired it (there's only ever one caller, but the shape stays optional so
    *  a `pictureForce`/`picture`/`pictureReset` call from a stale page fails

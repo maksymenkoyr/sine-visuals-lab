@@ -506,9 +506,8 @@ function strokeSeries(
  *  mid-height line with dashed lines at each `at` (0..1, the series' y scale),
  *  read fresh every draw() since a mark can move. `span` is the card's span
  *  chip; without it the strip uses HISTORY_SPAN_DEFAULT. `label` names the
- *  canvas (nameGraph) and has no default, so a strip can't ship unnamed.
- *  Exported for the Master card's Picture block. */
-export function createTraceStrip(
+ *  canvas (nameGraph) and has no default, so a strip can't ship unnamed. */
+function createTraceStrip(
   series: TraceStripSeries[],
   heightPx: number,
   opts: { label: string; guides?: () => TraceStripGuide[]; span?: TraceSpan },

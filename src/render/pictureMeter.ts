@@ -1,6 +1,6 @@
 /**
- * The Master card's "how intense is the picture" readout, and the numbers
- * `tools/master-sweep.mjs` averages across the Scale dial. Neither the Master
+ * How intense the picture is: what the desk's Map places a pad by, and the
+ * numbers `tools/master-sweep.mjs` averages across the Scale dial. Neither the Master
  * multiplier (`sceneSettings.ts`'s `getSceneMaster`) nor any scene setting
  * carries a direction ("this makes things more intense") — a scene can wire
  * a slider to grow *or* shrink brightness, motion, whatever it likes — so the
@@ -55,7 +55,7 @@
  * these after changing how a measure is computed.
  */
 
-export type PictureMeasureKey = "brightness" | "colour" | "motion" | "detail" | "flashes";
+type PictureMeasureKey = "brightness" | "colour" | "motion" | "detail" | "flashes";
 
 export interface PictureMeasure {
   key: PictureMeasureKey;
@@ -68,8 +68,7 @@ export interface PictureMeasure {
 }
 
 /** In display order —
- *  everything that renders these (the Master card's Picture block, the sweep
- *  report) walks this array rather than repeating the order by hand. */
+ *  everything that renders these (the sweep report) walks this array rather than repeating the order by hand. */
 export const PICTURE_MEASURES: readonly PictureMeasure[] = [
   {
     key: "brightness",
@@ -188,22 +187,6 @@ export function motionBetween(prev: Float32Array, cur: Float32Array, n: number):
 export function displayLevel(measure: PictureMeasure, raw: number | null): number | null {
   if (raw === null) return null;
   return Math.min(1, Math.max(0, raw / measure.fullScale));
-}
-
-/** The Master card's folded Picture block's one combined number — the plain
- *  mean of every measure's display level (displayLevel above), skipping the
- *  ones with no reading yet; null only when none has one. A plain mean
- *  because no measure outranks another in "how intense": a dark, busy frame
- *  and a bright, still one are both somewhere in the middle. */
-export function overallLevel(levels: readonly (number | null)[]): number | null {
-  let sum = 0;
-  let n = 0;
-  for (const v of levels) {
-    if (v === null) continue;
-    sum += v;
-    n++;
-  }
-  return n > 0 ? sum / n : null;
 }
 
 /** Feeds one thumbnail per call, in order, and keeps exactly the state the

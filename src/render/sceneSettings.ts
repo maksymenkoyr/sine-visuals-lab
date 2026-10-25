@@ -413,8 +413,8 @@ export function variantFirst(specs: readonly SceneSetting[]): SceneSetting[] {
 // resolveSceneSetting). 1 is identity; 0 collapses every numeric param to
 // its floor, which is what an honest raw multiply means. No setting carries
 // a sense of "more intense" for this to lean on, so to see what the master
-// actually does to the picture, look at the picture — the Master card's own
-// Picture block (src/ui/deviceMenu.ts), measured by src/render/pictureMeter.ts.
+// actually does to the picture, look at the picture — tools/master-sweep.mjs,
+// measured by src/render/pictureMeter.ts.
 export const SCENE_MASTER_MIN = 0;
 export const SCENE_MASTER_MAX = 2;
 export const SCENE_MASTER_DEFAULT = 1;

@@ -1242,7 +1242,9 @@ function stepSetAutopilot(anim: AnimFrame, nowMs: number): void {
   if (id) firePad(id, true);
 }
 
-/** The latest picture reading, or null when the meter has gone stale (see the panel's getPictureReading). */
+/** The latest picture reading, or null once sampling has gapped past
+ *  PICTURE_GAP_RESET_MS plus however long the readback holds thumbnails back
+ *  to batch reads: never a frozen last value. */
 function freshPictureReading(): ReturnType<typeof pictureMeter.latest> {
   return performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS + (pictureReadback?.holdMs() ?? 0) ? pictureMeter.latest() : null;
 }
@@ -2016,10 +2018,6 @@ function wireDeviceMenu(): void {
     onSceneExpansionChange: (value) => setSceneExpansion(value),
     getSceneExpansionShape: () => EXPANSION_SHAPES.indexOf(getSceneExpansionShape()),
     onSceneExpansionShapeChange: (index) => setSceneExpansionShape(EXPANSION_SHAPES[index] ?? EXPANSION_SHAPE_DEFAULT),
-    // Null when the meter has gone stale (the panel was just opened, or sampling
-    // gapped past PICTURE_GAP_RESET_MS plus however long the readback holds
-    // thumbnails back to batch reads), not a frozen last reading.
-    getPictureReading: () => freshPictureReading(),
     resolveSilenceGate: () => resolveSilenceGate(),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
@@ -3122,7 +3120,7 @@ async function boot(): Promise<void> {
         sampleRate: capture?.context.sampleRate ?? null,
         fluxRatio: lastFluxRatio,
       }),
-      // The Master card's Picture block, driven headlessly (tools/master-sweep.mjs).
+      // The picture meter, driven headlessly (tools/master-sweep.mjs).
       picture: {
         force: (on: boolean) => {
           pictureForced = on;
@@ -3604,10 +3602,9 @@ function drawScene(
   // Right after the scene has drawn, and nowhere else: the default framebuffer
   // (preserveDrawingBuffer false, gl.ts) only holds this frame until the browser
   // composites it; pictureReadback.ts's header says why this must run in the same
-  // task. Gated behind pictureWanted(): a few blits and a tiny readback are worth
-  // paying only while the Picture block is visible or a headless sweep asked.
+  // task. Gated behind pictureWanted(): the readback blocks the main thread.
   if (picturePolled) capturePicture(nowRafMs);
-  // After the picture capture, so the Picture block measures the scene alone.
+  // After the picture capture, so the reading measures the scene alone.
   // Drawn after the compositor so the overlay sits over crossfade and held
   // effects, staying visible over Freeze and Blackout.
   overlayLayer?.draw();
@@ -3662,13 +3659,11 @@ function sizeCanvas(): boolean {
   return true;
 }
 
-/** Whether anything wants a live picture reading: the Picture block while on
- *  screen (not merely while the panel is open: each sample ends in a synchronous
- *  getBufferSubData that waits behind the GPU backlog, ~15 ms a call under Panel
- *  blur on a heavy scene, 2026-10-04), or a headless driver forcing it
- *  (picture.force). */
+/** Whether anything wants a live picture reading: the desk's Map, or a
+ *  headless driver forcing it (picture.force). Each sample ends in a GPU
+ *  readback that blocks the main thread (pictureReadback.ts's header). */
 function pictureWanted(): boolean {
-  return pictureForced || (deviceMenu?.isPictureOnScreen() ?? false) || deskWantsPadReading();
+  return pictureForced || deskWantsPadReading();
 }
 
 /** The desk's Map places a pad by its picture: sample while the pad on NEXT has

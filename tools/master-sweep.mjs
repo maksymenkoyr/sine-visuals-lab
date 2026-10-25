@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Headless calibration sweep for the Master card's Picture block
+// Headless calibration sweep for the picture meter
 // (src/render/pictureMeter.ts) and the Scale dial it measures
 // (src/render/sceneSettings.ts's getSceneMaster): for every scene, at every
 // --values master amount, opens the scene on synthetic audio, lets it settle,
 // then averages the same five picture measures (Brightness/Colour/Motion/
-// Detail/Flashes) the live panel shows — the numbers this file exists to
+// Detail/Flashes) the meter takes — the numbers this file exists to
 // produce are what calibrates PICTURE_MEASURES' provisional `fullScale`
 // constants (pictureMeter.ts's own header names this file for exactly that).
 //
