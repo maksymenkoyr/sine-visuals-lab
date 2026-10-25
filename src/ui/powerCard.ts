@@ -237,9 +237,8 @@ const BLUR_OPTIONS: { mode: GlassMode; text: string; title: string }[] = [
   {
     mode: "fast",
     text: "Fast",
-    title: "Frosted glass drawn with the scene from a small copy of it: close to On for much less GPU",
+    title: "Frosted glass drawn with the scene from a small copy of it: the scene blurs behind the panels, light on the GPU",
   },
-  { mode: "on", text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
 ];
 
 /** Panel blur (glassPref.ts): the one row here that changes how the panel

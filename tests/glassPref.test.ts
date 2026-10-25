@@ -9,15 +9,15 @@ describe("glassPref", () => {
     const mod = await import("../src/ui/glassPref.ts");
     expect(mod.getGlassMode()).toBe(mod.GLASS_MODE_DEFAULT);
     expect(mod.GLASS_MODE_DEFAULT).toBe("fast");
-    for (const mode of ["off", "fast", "on"] as const) {
+    for (const mode of ["off", "fast"] as const) {
       mod.setGlassMode(mode);
       expect(mod.getGlassMode()).toBe(mode);
     }
   });
 
-  it("reads the values stored before Fast existed", async () => {
+  it("reads the removed On look's stored value as the default", async () => {
     const { parseGlassMode } = await import("../src/ui/glassPref.ts");
-    expect(parseGlassMode("1")).toBe("on");
+    expect(parseGlassMode("1")).toBe("fast");
     expect(parseGlassMode("0")).toBe("off");
     expect(parseGlassMode("fast")).toBe("fast");
     expect(parseGlassMode(null)).toBe("fast");
