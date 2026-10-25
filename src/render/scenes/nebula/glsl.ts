@@ -81,6 +81,14 @@ const SHELL_W = 0.005;
 const WRINKLE = 0.03;
 const VEIN_W = 0.02;
 const VEIN_GAIN = 0.45;
+/** The march's erf inputs are clamped to ±ERF_CLAMP; past these e values (band widths from the edge)
+ *  every band or shell input sits on that clamp. VOID_E must stay below -1, where fill, absorption
+ *  and the veins are zero too, for skipping a void step to stay exact. */
+const ERF_CLAMP = 4;
+const VOID_E = Math.min(...BAND_C.map((c, k) => c - ERF_CLAMP * BAND_S[k]));
+const BAND_TOP_E = Math.max(...BAND_C.map((c, k) => c + ERF_CLAMP * BAND_S[k]));
+const SHELL_LOW_E = Math.min(...SHELL_OFF.map((o) => (o - ERF_CLAMP * SHELL_W) / BAND));
+const SHELL_TOP_E = Math.max(...SHELL_OFF.map((o) => (o + ERF_CLAMP * SHELL_W) / BAND));
 /** How much of the tone map keeps each colour's hue (the rest bleaches toward white per channel). */
 const KEEP_HUE = 0.85;
 /** How far the warp bends the gas, in world units. */
@@ -178,9 +186,10 @@ ${pathGlsl("pathY", PATH_Y, ["uPath[0].z", "uPath[0].w"])}
 ${pathGlsl("pathR", PATH_R, ["uPath[1].x", "uPath[1].y"])}
 ${VIEW_RAY}
 
-// erf, near enough for a glow (tanh form, error under 1e-3); inputs are clamped to ±4.
-vec4 erfA(vec4 x) { return tanh(1.1283792 * x + 0.1009 * x * x * x); }
-float erfA(float x) { return tanh(1.1283792 * x + 0.1009 * x * x * x); }
+// erf, near enough for a glow (tanh form, error under 1e-3). tanh is spelled out through exp because
+// Metal's built-in tanh cost a quarter of the march (gpu-bench, docs/scenes/nebula.md).
+vec4 erfA(vec4 x) { return 1.0 - 2.0 / (exp(2.0 * (1.1283792 * x + 0.1009 * x * x * x)) + 1.0); }
+float erfA(float x) { return 1.0 - 2.0 / (exp(2.0 * (1.1283792 * x + 0.1009 * x * x * x)) + 1.0); }
 
 vec3 bodyColour(float w) {
   return mix(mix(BODY_BLUE, BODY_VIOLET, smoothstep(0.48, 0.54, w)), BODY_MAGENTA, smoothstep(0.57, 0.64, w));
@@ -216,6 +225,7 @@ void main() {
   vec4 erfSPrev = vec4(0.0);
   float fibPrev = 0.5;
   float erfVPrev = 0.0;
+  bool prevLive = false;
   float fillPrev = 0.0;
   float sigmaPrev = 0.0;
   int steps = min(int(uMaxSteps), ${MAX_STEPS});
@@ -237,16 +247,28 @@ void main() {
     dens -= carve * exp(-dot(rel.xy - axis, rel.xy - axis) / (rad * rad));
 
     float e = (dens - th) / ${f(BAND)};
-    vec4 x = clamp((e - BAND_C) / BAND_S, -4.0, 4.0);
-    vec4 erfX = erfA(x);
-    vec4 xs = clamp((e * ${f(BAND)} - SHELL_OFF) / ${f(SHELL_W)}, -4.0, 4.0);
-    vec4 erfS = erfA(xs);
-    float fill = smoothstep(0.5, 2.5, e);
+    // Most steps lie in empty space, where every erf below sits on its clamp; branching to the clamped
+    // value instead of evaluating it is exact and halves the march.
+    vec4 x = vec4(-4.0), xs = vec4(-4.0), erfX = vec4(-1.0), erfS = vec4(-1.0);
+    float fill = 0.0, sigma = 0.0;
+    if (e > ${f(VOID_E)}) {
+      x = clamp((e - BAND_C) / BAND_S, -4.0, 4.0);
+      erfX = e >= ${f(BAND_TOP_E)} ? vec4(1.0) : erfA(x);
+      xs = clamp((e * ${f(BAND)} - SHELL_OFF) / ${f(SHELL_W)}, -4.0, 4.0);
+      erfS = e <= ${f(SHELL_LOW_E)} ? vec4(-1.0) : (e >= ${f(SHELL_TOP_E)} ? vec4(1.0) : erfA(xs));
+      fill = smoothstep(0.5, 2.5, e);
+      sigma = ${f(ABSORB)} * smoothstep(-1.0, 1.5, e);
+    }
     float xv = clamp((fib - 0.5) / ${f(VEIN_W)}, -4.0, 4.0);
-    float erfV = erfA(xv);
-    float sigma = ${f(ABSORB)} * smoothstep(-1.0, 1.5, e);
+    // A step whose both ends are void adds no light and absorbs nothing, so it is skipped whole.
+    bool live = i > 0 && max(e, ePrev) > ${f(VOID_E)};
+    float erfV = 0.0;
+    if (live) {
+      erfV = erfA(xv);
+      if (!prevLive) erfVPrev = erfA(clamp((fibPrev - 0.5) / ${f(VEIN_W)}, -4.0, 4.0));
+    }
 
-    if (i > 0) {
+    if (live) {
       float de = e - ePrev;
       vec4 avg = abs(de) > 1e-3 ? 0.8862269 * BAND_S * (erfX - erfPrev) / de : exp(-x * x);
       float ds = de * ${f(BAND / SHELL_W)};
@@ -280,6 +302,7 @@ void main() {
     fillPrev = fill;
     sigmaPrev = sigma;
     tPrev = t;
+    prevLive = live;
     t += clamp(abs(dens - th) * ${f(STEP_K)}, ${f(DT_MIN)} * (1.0 + 0.2 * t), ${f(DT_MAX)});
   }
 
