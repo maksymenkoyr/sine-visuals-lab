@@ -75,6 +75,32 @@ describe("createAnimClock", () => {
     expect(anim.lead).toBe(0);
   });
 
+  /** Hats rising for 10 ticks then falling for 30, every frame carrying `engine`. */
+  function hatsBurst(clock: AnimClock, engine: FeatureFrame["engine"]): AnimFrame[] {
+    const out: AnimFrame[] = [];
+    for (let i = 0; i < 40; i++) out.push(clock.advance(DT, frame({ hats: i < 10 ? 1 : 0, engine })));
+    return out;
+  }
+
+  it("a Hats peak while the engine hears music is a hit, sized by the peak", () => {
+    const frames = hatsBurst(createAnimClock(), engineReading({ music: true }));
+    const hits = frames.filter((a) => a.hatsOnset);
+    expect(hits).toHaveLength(1);
+    const hit = hits[0]!;
+    expect(hit.hatsPulse).toBe(1);
+    expect(hit.hatsHit).toBe(hit.hatsPeak);
+    expect(hit.hatsPeak).toBeGreaterThan(0.3);
+    expect(frames.at(-1)!.hatsPulse).toBeLessThan(0.1);
+    expect(frames.at(-1)!.hatsHit).toBe(hit.hatsHit);
+  });
+
+  it("a Hats peak with no music heard is found but not counted", () => {
+    const frames = hatsBurst(createAnimClock(), engineReading({ music: false }));
+    expect(frames.some((a) => a.hatsPeak > 0)).toBe(true);
+    expect(frames.some((a) => a.hatsOnset)).toBe(false);
+    expect(frames.every((a) => a.hatsPulse === 0 && a.hatsHit === 0)).toBe(true);
+  });
+
   it("hits.low/mid/high mirror bandEnergy's own per-lane diagnostics", () => {
     const clock = createAnimClock();
     const anim = clock.advance(DT, frame({ engine: HIT({ kick: 2, snare: 1.5, hat: 1.2 }) }));

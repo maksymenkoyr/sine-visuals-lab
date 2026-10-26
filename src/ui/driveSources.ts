@@ -99,7 +99,7 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.low": "how loud the bass is right now, moving smoothly.",
   "anim.mid": "how loud the mids are right now, moving smoothly.",
   "anim.high": "how loud the treble is right now, moving smoothly.",
-  "anim.hats": "how loud the hi-hats and cymbals are, with held bright sounds left out. Measured on the device with the mic.",
+  "anim.hats": "each hi-hat and cymbal, even one that lands with a kick or a snare. Counted while music plays, measured on the device with the mic.",
   "anim.lead": "how loud the melody is — vocals, synths, guitar — with the drums left out. Measured on the device with the mic.",
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
@@ -249,7 +249,7 @@ export interface DriveAddGroup {
 
 /** Every "+ Add by name" group, in the order the patch panel lists them. */
 export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
-  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
+  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.hats", "anim.dropOnset"] },
   {
     label: "Levels",
     choices: [
@@ -261,7 +261,6 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
       "anim.high",
       "anim.kickBand",
       "anim.lead",
-      "anim.hats",
       "feature.flux",
       "anim.centroid",
     ],

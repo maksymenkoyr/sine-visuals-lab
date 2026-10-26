@@ -355,9 +355,10 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.hats",
     label: "Hats",
     description:
-      "The drum part of the treble range (AnimFrame.hats, src/audio/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
-    kind: "level",
-    read: (_frame, anim) => anim.hats,
+      "A hit on each hi-hat and cymbal: a peak of the sound above the treble's own floor (AnimFrame.hats, src/audio/stemSplit.ts), counted while the engine hears music. Unlike Treble hit, it also catches a hat that lands with a kick or a snare, which the engine names as that drum. The pulse is AnimFrame.hatsPulse; the edge, hatsOnset.",
+    kind: "edge",
+    read: (_frame, anim) => anim.hatsPulse,
+    edge: (anim) => anim.hatsOnset,
     monitor: { card: "stems", row: "hats" },
     bandRange: "high",
   }),

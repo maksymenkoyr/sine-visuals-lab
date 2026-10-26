@@ -1193,6 +1193,27 @@ describe("drives: hit heights (Fixed/Graded) on a patch source", () => {
     expect(landed(4)).toBeGreaterThan(landed(1.5));
   });
 
+  it("a Hats wire is a hit: Fixed lands at 1, Graded at the height of its peak", () => {
+    const landed = (height: "fixed" | "graded"): { drive: number; peak: number } => {
+      const clock = createAnimClock();
+      const engine = createDriveEngine();
+      const sceneId = `height-hats-${height}`;
+      const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.hats", weight: 1, height }] });
+      const music = engineReading({ music: true });
+      for (let i = 0; i < 40; i++) {
+        const f = frame({ hats: i < 10 ? 1 : 0, engine: music });
+        const anim = clock.advance(DT, f);
+        engine.accumulate(DT, f, 0, anim, sceneId, [spec]);
+        if (anim.hatsOnset) return { drive: engine.forScene(sceneId, [spec], anim).uniformPair("k").drive, peak: anim.hatsHit };
+      }
+      throw new Error("no Hats hit");
+    };
+    expect(landed("fixed").drive).toBe(1);
+    const graded = landed("graded");
+    expect(graded.drive).toBeCloseTo(graded.peak, 9);
+    expect(graded.drive).toBeLessThan(1);
+  });
+
   it("Graded on a bare trigger (the metronome) reads 1, like Fixed — it has no size to grade", () => {
     expect(hasHitStrength("anim.metronome")).toBe(false);
     expect(hasHitStrength("anim.lowOnset")).toBe(true);

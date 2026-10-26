@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLevelHits, LEVEL_HIT_MIN, LEVEL_HIT_REARM } from "../src/ui/levelHits.ts";
+import { createLevelHits, LEVEL_HIT_MIN, LEVEL_HIT_REARM } from "../src/render/levelHits.ts";
 
 /** The picker's answer for each tick of `levels`. */
 function run(levels: (number | null)[]): (number | null)[] {

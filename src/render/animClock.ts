@@ -6,7 +6,8 @@ import { LockMeter, type LockMeaning } from "./lockMeaning.ts";
 import { createMetronome, type Metronome } from "./metronome.ts";
 import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
 import { createTapGuide, type TapGuide } from "./tapTempo.ts";
-import { createBandEnergy, slewLevel, type BandEnergy } from "./bandEnergy.ts";
+import { createBandEnergy, GROUP_TUNING, slewLevel, type BandEnergy } from "./bandEnergy.ts";
+import { createLevelHits } from "./levelHits.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
@@ -95,6 +96,17 @@ export interface AnimFrame {
    *  the split's own scale is relative and has no idea what silence is. */
   hats: number;
   lead: number;
+  /** Hats as a hit: a peak of `hats` (levelHits.ts, found a tick after it),
+   *  counted only while the engine hears music: talking opens the silence
+   *  gate, and its "s" sounds peak like hats (20 in 10 s through the panel
+   *  before this gate, none after, at the same F against Demucs's hats on
+   *  real songs). `hatsPulse` rings out like the Treble lane's
+   *  pulse; `hatsHit` is the last counted peak, kept for Graded; `hatsPeak`
+   *  is this tick's peak, counted or not, else 0. */
+  hatsOnset: boolean;
+  hatsPulse: number;
+  hatsHit: number;
+  hatsPeak: number;
   /** One-shot edges, true only on the tick each group's onset fired. JS-side
    *  only (not uploaded as uniforms) — for scenes that want to trigger a
    *  discrete JS-side effect (e.g. a ripple) rather than read a continuous
@@ -301,6 +313,9 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   const centroid: SpectralCentroid = createSpectralCentroid();
   let beatPulse = 0;
   let hats = 0;
+  const hatsHits = createLevelHits();
+  let hatsPulse = 0;
+  let hatsHit = 0;
   let lead = 0;
   let metronomePulse = 0;
   let metronomeBarPulse = 0;
@@ -335,6 +350,13 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
       bandEnergy.advance(dtSec, frame, rateScale, hitDimmer, hit?.shape);
       kickBand.advance(dtSec, frame.bands, BAND_SPLIT.lowMid);
       hats = slewLevel(hats, frame.hats * dimmer, dtSec, rateScale);
+      const hatsPeak = hatsHits.update(hats) ?? 0;
+      const hatsOnset = hatsPeak > 0 && !!frame.engine?.music;
+      hatsPulse *= Math.exp(-dtSec * GROUP_TUNING.high.pulseDecayRate * rateScale * hitTail.high);
+      if (hatsOnset) {
+        hatsPulse = 1;
+        hatsHit = hatsPeak;
+      }
       lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);
       const beatRatio = frame.engine?.surge ?? 0;
       // Tap tempo (tapTempo.ts's header). The seed lands before either
@@ -429,6 +451,10 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         highPulse: bandEnergy.highPulse,
         hats,
         lead,
+        hatsOnset,
+        hatsPulse,
+        hatsHit,
+        hatsPeak,
         lowOnset: bandEnergy.lowOnset,
         midOnset: bandEnergy.midOnset,
         highOnset: bandEnergy.highOnset,
