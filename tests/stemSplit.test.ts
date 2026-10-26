@@ -6,7 +6,6 @@ import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { createStemGate, wiresReadStems } from "../src/render/stemReaders.ts";
 import { MAX_HZ_CAP, bandEdgesHz } from "../src/audio/bandScale.ts";
 import { BAND_SPLIT } from "../src/audio/bandSplit.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
 import { readBinsDb } from "./tempoEval/bands.ts";
 import { SR } from "./tempoEval/synth.ts";
 
@@ -18,7 +17,6 @@ const BIN_HZ = SR / 2 / BIN_COUNT;
 const EDGES = bandEdgesHz(Math.min(MAX_HZ_CAP, SR / 2 - BIN_HZ));
 const RANGES: StemRanges = {
   lead: { lo: EDGES[BAND_SPLIT.lowMid]!, hi: EDGES[BAND_SPLIT.midHigh]! },
-  hats: { lo: EDGES[BAND_SPLIT.midHigh]!, hi: EDGES[NUM_BANDS]! },
 };
 
 function rng(seed: number): () => number {
@@ -41,6 +39,19 @@ function song(seconds: number, toneUntilSec: number, clicks: boolean, room = 0):
     let x = i < toneUntilSec * SR ? 0.3 * Math.sin((2 * Math.PI * 440 * i) / SR) : 0;
     if (clicks && i % every < clickLen) x += 0.6 * noise();
     out[i] = x + room * noise();
+  }
+  return out;
+}
+
+/** A `hz` tone from `fromSec` on, or, with `burstSec`, Hann-shaped bursts that
+ *  long every quarter second (smooth edges, so no splash into other bands). */
+function tone(seconds: number, hz: number, fromSec: number, burstSec = 0): Float32Array {
+  const out = new Float32Array(Math.round(seconds * SR));
+  const every = Math.round(0.25 * SR);
+  const len = Math.round(burstSec * SR);
+  for (let i = Math.round(fromSec * SR); i < out.length; i++) {
+    const env = burstSec > 0 ? (i % every < len ? Math.sin((Math.PI * (i % every)) / len) ** 2 : 0) : 1;
+    out[i] = 0.3 * env * Math.sin((2 * Math.PI * hz * i) / SR);
   }
   return out;
 }
@@ -86,6 +97,31 @@ describe("stemSplit", () => {
     // clicks keep up, so that leftover never fills it.
     expect(max(between(rows, 5, 8, 2))).toBeLessThan(0.3);
     expect(max(between(rows, 5, 8, 1))).toBeGreaterThan(0.8);
+  });
+
+  it("falls back to 0 between hats, over a hiss", () => {
+    const rows = run(song(3, 0, true, 0.05), 60);
+    // Each click starts on a quarter second; its sound is gone well before the next.
+    const on = rows.filter(([t]) => t >= 1 && t % 0.25 < 0.05).map((r) => r[1]);
+    const off = rows.filter(([t]) => t >= 1 && t % 0.25 >= 0.12 && t % 0.25 < 0.24).map((r) => r[1]);
+    expect(max(on)).toBeGreaterThan(0.8);
+    expect(mean(off)).toBeLessThan(0.1);
+  });
+
+  it("keeps a steady hiss near 0", () => {
+    const rows = run(song(3, 0, false, 0.05), 60);
+    expect(mean(between(rows, 0.5, 3, 1))).toBeLessThan(0.15);
+    expect(max(between(rows, 0.5, 3, 1))).toBeLessThan(0.4);
+  });
+
+  it("lets a held bright tone go once it holds", () => {
+    const rows = run(tone(2, 10000, 0.5), 60);
+    expect(max(between(rows, 0.8, 2, 1))).toBeLessThan(0.05);
+  });
+
+  it("leaves a burst below the hat band out of Hats", () => {
+    const rows = run(tone(2, 3000, 0, 0.04), 60);
+    expect(max(between(rows, 0.5, 2, 1))).toBeLessThan(0.05);
   });
 
   it("reads silence as 0", () => {
