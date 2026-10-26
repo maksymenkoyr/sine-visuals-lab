@@ -346,7 +346,7 @@ const steps = {
   },
 
   async size() {
-    if (changedMode) return { skipped: "not in --changed runs; a push and CI run it" };
+    if (changedMode) return { skipped: "not in --changed runs; CI and a plain npm run check run it" };
     // Paid scenes join the bundle where they are checked out. Skip without
     // naming them: CI measures the public tree.
     if (existsSync(join(ROOT, "src/render/scenes/private"))) {
