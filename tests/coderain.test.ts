@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ATLAS_COLS, ATLAS_PX, GLYPH_COUNT, GLYPHS, MIRRORED_COUNT, TILE_PX, buildGlyphAtlas, glyphDistance } from "../src/render/scenes/coderain/glyphs.ts";
 import { buildColumns } from "../src/render/scenes/coderain/index.ts";
 import { createFigure, FIGURE_CAPSULES, FIGURE_HEIGHT } from "../src/render/scenes/coderain/figure.ts";
+import { createExplorer } from "../src/render/scenes/coderain/explorer.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 
 function tile(atlas: Uint8Array, g: number): Uint8Array {
@@ -109,5 +110,65 @@ describe("coderain figure", () => {
       }
       expect(f.skull[1] + f.skull[2]).toBeLessThanOrEqual(FIGURE_HEIGHT);
     }
+  });
+});
+
+describe("coderain explorer", () => {
+  const seeded = (seed: number): (() => number) => {
+    let a = seed;
+    return () => {
+      a = (Math.imul(a, 1664525) + 1013904223) >>> 0;
+      return a / 4294967296;
+    };
+  };
+  const walk = (seconds: number, dt: number, seed = 7) => {
+    const ex = createExplorer(seeded(seed));
+    const poses = [];
+    for (let t = 0; t < seconds; t += dt) poses.push({ ...ex.step(dt) });
+    return poses;
+  };
+
+  const deg = Math.PI / 180;
+
+  it("walks at full pace, stops to look round, and walks on", () => {
+    const poses = walk(240, 1 / 60);
+    expect(poses[0].pace).toBeGreaterThan(0.5);
+    expect(poses.some((p) => p.pace > 0.99)).toBe(true);
+    const stops = poses.filter((p) => p.pace === 0).length / poses.length;
+    expect(stops).toBeGreaterThan(0.08);
+    expect(stops).toBeLessThan(0.5);
+  });
+
+  it("looks well away from where it walks, high into the rain and down below", () => {
+    const poses = walk(240, 1 / 60);
+    expect(Math.max(...poses.map((p) => Math.abs(p.gaze - p.body)))).toBeGreaterThan(60 * deg);
+    expect(Math.max(...poses.map((p) => p.pitch))).toBeGreaterThan(30 * deg);
+    expect(Math.min(...poses.map((p) => p.pitch))).toBeLessThan(-12 * deg);
+  });
+
+  it("rises and sinks through the columns", () => {
+    const ys = walk(240, 1 / 60).map((p) => p.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(4);
+  });
+
+  it("never jerks the head, and only turns its body while standing", () => {
+    const poses = walk(240, 1 / 60);
+    for (let i = 1; i < poses.length; i++) {
+      expect(Math.abs(poses[i].gaze - poses[i - 1].gaze)).toBeLessThan(0.07);
+      expect(Math.abs(poses[i].pitch - poses[i - 1].pitch)).toBeLessThan(0.07);
+      if (poses[i - 1].pace > 0) expect(Math.abs(poses[i].body - poses[i - 1].body)).toBeLessThan(0.01);
+    }
+  });
+
+  it("stays steady on long frames at top Speed", () => {
+    for (const p of walk(600, 0.75)) {
+      expect(Math.abs(p.pitch)).toBeLessThan(70 * deg);
+      expect(Math.abs(p.roll)).toBeLessThan(10 * deg);
+      expect(Math.abs(p.gaze - p.body)).toBeLessThan(160 * deg);
+    }
+  });
+
+  it("walks the same path for the same seed", () => {
+    expect(walk(30, 1 / 60, 3).at(-1)).toEqual(walk(30, 1 / 60, 3).at(-1));
   });
 });
