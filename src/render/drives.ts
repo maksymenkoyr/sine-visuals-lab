@@ -307,7 +307,8 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * hit/beat-grid) separately, because they're deliberately different frames —
  * see sceneCommon.ts's `uploadCommonUniforms` and app.ts's `loop()` for the
  * exact pipeline each one matches. The "Input level" source reads `gainedFrame`'s
- * own `level`, which neither frame's gain or sensitivity ever shapes.
+ * own `level`, which neither frame's gain or sensitivity ever shapes, and a
+ * single-band source (signals.ts's BAND_SIGNALS) its own `bands`.
  *
  * **Reading.** `forScene(sceneId, settings, anim)` returns a `SceneDrives`
  * view (each call builds a fresh view object and its closures; the key -> spec
@@ -1062,6 +1063,7 @@ export function createDriveEngine(): DriveEngine {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
       driveFrameScratch.level = gainedFrame.level;
+      driveFrameScratch.bands.set(gainedFrame.bands);
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();
       for (const spec of settings) {

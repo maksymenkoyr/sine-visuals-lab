@@ -1,7 +1,22 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { sourceSlot, type DriveSourceChoice, type HitHeight } from "../render/drives.ts";
-import { DIAL_SIGNALS, type DialSignalId, type SignalId } from "../render/signals.ts";
-import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
+import { bandCenterHz, formatHz, nominalBandEdgesHz } from "../audio/bandScale.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, SIGNALS, type BandSignalId, type DialSignalId, type SignalId } from "../render/signals.ts";
+import {
+  AUTO_SKY,
+  BAND_COLORS,
+  BANDS_AMBER,
+  HOT_RED,
+  HOT_YELLOW,
+  INPUT_GREEN,
+  KICK_GREEN,
+  POWER_TEAL,
+  STEM_HATS,
+  STEM_LEAD,
+  STRIP_HIGH,
+  STRIP_LOW,
+  STRIP_MID,
+} from "./controlsTheme.ts";
 
 /**
  * One place naming every drive source's colour and panel label (the patch
@@ -31,6 +46,11 @@ const DIAL_SOURCE_LABEL: Record<DialSignalId, string> = {
   "dial.loudness": "Room loudness",
 };
 
+/** Written out per id: SignalId's `band.${number}` member lets the records
+ *  below miss a band entry without a type error (tests/driveSources.test.ts
+ *  checks every one is there). */
+const BAND_SOURCE_LABEL = Object.fromEntries(BAND_SIGNALS.map((id) => [id, SIGNALS[id].label])) as Record<BandSignalId, string>;
+
 const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "feature.onset": "Any hit",
   "feature.flux": "Onset surge",
@@ -55,6 +75,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.metronome": "Metronome",
   "anim.metronomeBar": "Metronome bar",
   ...DIAL_SOURCE_LABEL,
+  ...BAND_SOURCE_LABEL,
 };
 
 /** Plain-language descriptions for every source a jack can plug in — the
@@ -96,7 +117,18 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "dial.dynamics": "flat and even to big swings between quiet and loud, judged over a long stretch of the track.",
   "dial.attack": "soft swells to sharp hits, settling over several seconds.",
   "dial.loudness": "how loud the room is, following the input level over a few seconds and keeping its last reading through silence.",
+  ...bandDescriptions(),
 };
+
+function bandDescriptions(): Record<BandSignalId, string> {
+  const edges = nominalBandEdgesHz();
+  return Object.fromEntries(
+    BAND_SIGNALS.map((id, n) => [
+      id,
+      `how loud one band around ${formatHz(bandCenterHz(edges, n))} is on its own — a bar you picked on the Sound card's spectrum.`,
+    ]),
+  ) as Record<BandSignalId, string>;
+}
 
 const GRID_SOURCE_DESCRIPTION = "the tracker's beat when it's sure of the tempo; the raw hits while it isn't.";
 const LINE_SOURCE_DESCRIPTION = "your own curve on the spectrum — bars that rise above it drive the setting.";
@@ -110,15 +142,15 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "feature.flux": DRIVE_WHITE,
   "feature.level": INPUT_GREEN,
   "anim.lowOnset": STRIP_LOW,
-  "anim.kickBand": STRIP_LOW,
+  "anim.kickBand": KICK_GREEN,
   "anim.midOnset": STRIP_MID,
   "anim.highOnset": STRIP_HIGH,
   "anim.dropOnset": HOT_YELLOW,
   "anim.low": STRIP_LOW,
   "anim.mid": STRIP_MID,
   "anim.high": STRIP_HIGH,
-  "anim.hats": STRIP_HIGH,
-  "anim.lead": STRIP_MID,
+  "anim.hats": STEM_HATS,
+  "anim.lead": STEM_LEAD,
   "anim.energy": INPUT_GREEN,
   "anim.sectionIntensity": POWER_TEAL,
   "anim.centroid": AUTO_SKY,
@@ -129,6 +161,7 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.metronome": DRIVE_WHITE,
   "anim.metronomeBar": DRIVE_WHITE,
   ...(Object.fromEntries(DIAL_SIGNALS.map((id) => [id, AUTO_SKY])) as Record<DialSignalId, string>),
+  ...(Object.fromEntries(BAND_SIGNALS.map((id, n) => [id, BAND_COLORS[n % BAND_COLORS.length]])) as Record<BandSignalId, string>),
 };
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: number } {
@@ -216,7 +249,7 @@ export interface DriveAddGroup {
 
 /** Every "+ Add by name" group, in the order the patch panel lists them. */
 export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
-  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.kickBand", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
+  { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
     choices: [
@@ -226,6 +259,7 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
       "anim.low",
       "anim.mid",
       "anim.high",
+      "anim.kickBand",
       "anim.lead",
       "anim.hats",
       "feature.flux",

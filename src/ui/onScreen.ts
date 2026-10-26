@@ -15,8 +15,8 @@
  *   no card has folded it away (an IntersectionObserver). The answer arrives
  *   a frame or so after a change — an element just scrolled into view reads
  *   false for that long — which is fine for work that only matters while
- *   someone can see it. The Sound card's Mid and Treble rows are one: while either is on screen the stem split runs for the
- *   Lead and Hats lines they draw (src/render/stemReaders.ts).
+ *   someone can see it. The Stems card is one: while it is on screen the stem
+ *   split runs for its Lead and Hats rows (src/render/stemReaders.ts).
  *   `disconnect()` stops watching, for an element a rebuild throws away (a
  *   Scene-card widget calls it from its dispose).
  * - `watchSize`: the element's CSS content size, rounded to whole pixels like

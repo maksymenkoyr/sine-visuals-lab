@@ -29,8 +29,14 @@ import { AUTO_SKY, FONT_MONO, STRIP_HIGH, STRIP_LOW, STRIP_MID, withAlpha } from
  * Plain 2D canvas, not WebGL — the gallery's preview tiles already spend a GL
  * context each; a bar chart doesn't need one. The canvas is transparent: the
  * glass card around it supplies the background. It redraws only when told to
- * (update() each audio tick, or redraw() after a highlight change) — there's
- * no rAF loop of its own.
+ * (update() each audio tick, or redraw() after a highlight or marks change,
+ * or its own hover) — there's no rAF loop of its own.
+ *
+ * With `onBandClick` the bars are pickable: a click names the band under the
+ * pointer (the Sound card toggles that band's own row, bandPicks.ts), hover
+ * brightens it, and setMarks paints chosen bands in their row's colour with
+ * a tick under the bar. The ticks get their own strip at the plot's bottom
+ * only on a pickable strip, so a plain one draws exactly as before.
  */
 
 export interface SpectrumStrip {
@@ -45,6 +51,10 @@ export interface SpectrumStrip {
    *  state — call redraw() after to actually repaint, since a hover/hotkey
    *  doesn't come with a new audio tick. */
   setHighlight(range: { lo: number; hi: number } | null): void;
+  /** Bands drawn in their own colour at full opacity with a tick under the
+   *  bar, replacing any earlier marks. Held state like setHighlight: call
+   *  redraw() after when no audio tick follows. */
+  setMarks(marks: readonly { band: number; color: string }[]): void;
   /** Called every tick with both feeds; either may be null (raw: no local
    *  analyser yet, e.g. mic pending or a mic-less renderer device; processed:
    *  audio not yet flowing at all). An idle "waiting for audio" state shows
@@ -61,6 +71,10 @@ const PEAK_FALL_PER_SEC = 1.2; // slow decay so a transient kick is still visibl
 const DIM_ALPHA = 0.22; // a band outside the current highlight range
 const CENTROID_FLAG_W = 8;
 const CENTROID_FLAG_H = 6;
+const MARK_TICK_H = 2;
+const MARK_STRIP_PX = 4; // the tick plus a gap above it
+const HOVER_COLUMN = "rgba(255, 255, 255, 0.07)";
+const HOVER_LIFT = "rgba(255, 255, 255, 0.35)";
 
 function groupColor(index: number): string {
   if (index < BAND_SPLIT.lowMid) return STRIP_LOW;
@@ -71,6 +85,8 @@ function groupColor(index: number): string {
 interface SpectrumStripOptions {
   /** Plot height in CSS px. */
   plotHeightPx: number;
+  /** Makes the bars pickable — see this file's header. */
+  onBandClick?: (band: number) => void;
 }
 
 export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
@@ -93,6 +109,10 @@ export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
   const peaksProcessed = new Float32Array(NUM_BANDS);
 
   let highlight: { lo: number; hi: number } | null = null;
+  const markColor: (string | null)[] = new Array<string | null>(NUM_BANDS).fill(null);
+  let hoverBand = -1;
+  const pickable = !!opts.onBandClick;
+  const barsHeight = pickable ? plotHeight - MARK_STRIP_PX : plotHeight;
 
   // devicePixelRatio-scaled backing store, resized whenever the card's
   // layout width changes. ensure() is false while the canvas has no layout
@@ -134,6 +154,10 @@ export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
     }
 
     const barWidth = Math.max(1, width / NUM_BANDS - BAR_GAP_PX);
+    if (hoverBand >= 0) {
+      ctx.fillStyle = HOVER_COLUMN;
+      ctx.fillRect(xForEdgeIndex(hoverBand, width), 0, barWidth, barsHeight);
+    }
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const x = xForEdgeIndex(b, width);
@@ -142,17 +166,32 @@ export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
       // alpha regardless of level — "not one of the bands this control
       // listens to" reads the same whether that band is loud or silent.
       const inHighlight = !highlight || (b >= highlight.lo && b < highlight.hi);
-      const color = inHighlight ? groupCol : withAlpha(groupCol, DIM_ALPHA);
+      const mark = markColor[b];
+      const color = mark ?? (inHighlight ? groupCol : withAlpha(groupCol, DIM_ALPHA));
 
       const v = Math.min(1, Math.max(0, bands[b]));
       peaks[b] = Math.max(v, peaks[b] - PEAK_FALL_PER_SEC * dtSec);
-      const barH = v * plotHeight;
+      const barH = v * barsHeight;
       ctx.fillStyle = color;
-      fillBar(x, plotHeight - barH, barWidth, barH);
+      fillBar(x, barsHeight - barH, barWidth, barH);
+      if (b === hoverBand) {
+        ctx.fillStyle = HOVER_LIFT;
+        fillBar(x, barsHeight - barH, barWidth, barH);
+      }
 
-      const peakY = plotHeight - peaks[b] * plotHeight;
+      const peakY = barsHeight - peaks[b] * barsHeight;
       ctx.fillStyle = color;
       ctx.fillRect(x, peakY, barWidth, 1.5);
+    }
+  }
+
+  function drawMarkTicks(width: number): void {
+    const barWidth = Math.max(1, width / NUM_BANDS - BAR_GAP_PX);
+    for (let b = 0; b < NUM_BANDS; b++) {
+      const mark = markColor[b];
+      if (!mark) continue;
+      ctx.fillStyle = mark;
+      ctx.fillRect(xForEdgeIndex(b, width), plotHeight - MARK_TICK_H, barWidth, MARK_TICK_H);
     }
   }
 
@@ -177,7 +216,7 @@ export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, plotHeight);
+    ctx.lineTo(x, barsHeight);
     ctx.stroke();
 
     ctx.fillStyle = AUTO_SKY;
@@ -199,11 +238,42 @@ export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
 
     drawBars(width, dtSec);
     drawCentroidMarker(width);
+    drawMarkTicks(width);
   }
 
   function requestRedraw(): void {
     if (!canvas.isConnected) return;
     draw(performance.now());
+  }
+
+  // Same slots as xForEdgeIndex, as a fraction of the drawn width so a CSS
+  // transform on the panel (its slide-in) can't skew the pick.
+  function bandAt(e: PointerEvent | MouseEvent): number {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0) return -1;
+    const t = (e.clientX - rect.left) / rect.width;
+    return Math.min(NUM_BANDS - 1, Math.max(0, Math.floor(t * NUM_BANDS)));
+  }
+
+  if (opts.onBandClick) {
+    const onBandClick = opts.onBandClick;
+    canvas.style.cursor = "pointer";
+    canvas.title = "Click a band to give it its own row; click again to drop it";
+    canvas.addEventListener("pointermove", (e) => {
+      const b = bandAt(e);
+      if (b === hoverBand) return;
+      hoverBand = b;
+      requestRedraw();
+    });
+    canvas.addEventListener("pointerleave", () => {
+      if (hoverBand < 0) return;
+      hoverBand = -1;
+      requestRedraw();
+    });
+    canvas.addEventListener("click", (e) => {
+      const b = bandAt(e);
+      if (b >= 0) onBandClick(b);
+    });
   }
 
   return {
@@ -214,6 +284,10 @@ export function createSpectrumStrip(opts: SpectrumStripOptions): SpectrumStrip {
     },
     setHighlight(range: { lo: number; hi: number } | null): void {
       highlight = range;
+    },
+    setMarks(marks: readonly { band: number; color: string }[]): void {
+      markColor.fill(null);
+      for (const m of marks) if (m.band >= 0 && m.band < NUM_BANDS) markColor[m.band] = m.color;
     },
     update(raw: Float32Array | null, processed: Float32Array | null): void {
       hasRaw = !!raw;
