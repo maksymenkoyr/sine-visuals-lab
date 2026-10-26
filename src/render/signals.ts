@@ -109,11 +109,10 @@ export type MeterCardId = "sound" | "stems" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
- *  BPM-digits/beat-dot block (audioMeters.ts's own createTempoBlock), the
- *  anchor for `anim.tempo`, whose jack mounts there. "bar" is the Beat card's
- *  bar ruler (audioMeters.ts's createBarRuler), the anchor for `anim.metronome`
- *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
- *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
+ *  Beat card's BPM row with its Lock ring (audioMeters.ts's createTempoRow),
+ *  the anchor for `anim.tempo` and `anim.tempoLock`. "bar" is the Beat card's
+ *  bar ruler (audioMeters.ts's createBarRuler), the anchor for
+ *  `anim.metronome`, `anim.metronomeBar`, `anim.beatWave` and `anim.barWave`.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
  *  Treble rows; "hitAny", "hitLow", "hitMid", "hitHigh" and "surge" are the
  *  tracks of its Hits drum roll (audioMeters.ts's HIT_TRACKS). "lead", "hats"
@@ -127,8 +126,6 @@ export type MeterRowId =
   | "hitMid"
   | "hitHigh"
   | "surge"
-  | "wave"
-  | "lock"
   | "bar"
   | "energy"
   | "low"
@@ -424,7 +421,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "A smooth swing at the metronome's own tempo, once per beat (AnimFrame.metronomeLevel times a cosine over AnimFrame.metronomePhase) — 1 on every metronome beat, 0 halfway between, fading out on its own once the metronome stops (metronome.ts) rather than needing a separate gate.",
     kind: "level",
     read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomePhase)),
-    monitor: { card: "beat", row: "wave" },
+    monitor: { card: "beat", row: "bar" },
   }),
   "anim.barWave": signal({
     id: "anim.barWave",
@@ -432,7 +429,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.metronomeBarPhase).",
     kind: "level",
     read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomeBarPhase)),
-    monitor: { card: "beat", row: "wave" },
+    monitor: { card: "beat", row: "bar" },
   }),
   "anim.tempo": signal({
     id: "anim.tempo",
@@ -451,7 +448,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "How confidently the beat clock has locked onto the tempo — the same number the tempo dot brightens with.",
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
-    monitor: { card: "beat", row: "lock" },
+    monitor: { card: "beat", row: "tempo" },
   }),
   "anim.metronome": signal({
     id: "anim.metronome",

@@ -113,17 +113,18 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    anim.kickBand). Lead and Hats are measured only on the device with the mic, and a gap is drawn
  *    where they weren't; app.ts runs the split while this card is unfolded
  *    and on screen (stemRowsOnScreen).
- *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
- *    beside the BPM block — bpm under a beat dot whose resting tint
- *    follows tempoLock, so an unlocked guess reads as
- *    unconfident rather than as a confident wrong number, and the BPM
- *    digits dim the same way. Beneath that, the bar ruler (createBarRuler):
- *    one cell per beat of the metronome's bar, the current one lit and the
- *    downbeat in its own colour, with the Metronome (every beat) and
- *    Metronome bar (once a bar) jacks on it. Last, Wave: beatWave/barWave's
- *    own smooth swing, for a setting that wants to sway in time rather than
- *    pulse on a hit. The header carries tap tempo's Tap chip and how many
- *    taps it still needs (tapStatusStyle's comment).
+ *  - Beat: two rows in a line row's columns (createBeatRow), each signal's
+ *    heat stacked in its row's floor. Tempo (createTempoRow): the BPM, with
+ *    Lock (how sure the tracker is of the tempo) drawn as a ring around a
+ *    beat dot whose resting tint follows it too, so an unlocked guess reads
+ *    as unconfident rather than as a confident wrong number, and the BPM
+ *    digits dim the same way; the Tempo and Lock jacks. Bar, the bar ruler
+ *    (createBarRuler): one cell per beat of the metronome's bar, the current
+ *    one lit and the downbeat in its own colour, with beatWave/barWave's
+ *    smooth swing swept over the cells by bar position; the Metronome,
+ *    Metronome bar, Beat wave and Bar wave jacks. The header carries tap
+ *    tempo's Tap chip and how many taps it still needs (tapStatusStyle's
+ *    comment).
  *  - Song: first, Section: sectionIntensity traced over the card's span
  *    (createSectionTrace), with a red mark and DROP where a drop fired, the
  *    phrase-level trend. Then one strip of every entry in MUSIC_DIALS (never a
@@ -141,19 +142,20 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *
  * Every graph canvas here is role="img" with a name set by nameGraph, the
  * same way leashGauge.ts names its gauge. The label is a required argument of
- * createColumnRing and createTraceStrip, so a new trace can't ship unnamed.
+ * createColumnRing, so a new trace can't ship unnamed.
  *
  * Each card is independently collapsible (controlsKit.ts's createCard
  * foldId, remembered in panelFolds.ts) and update() skips a folded card's
  * drawing and DOM writes — folding buys back the per-frame cost, not just
  * the screen space.
  *
- * Every time-axis trace (the Sound and Stems rows, the Hits tracks, Wave,
+ * Every time-axis trace (the Sound and Stems rows, the Hits tracks,
  * Section) records into a time store (createColumnRing) on every tick,
  * folded card or closed panel alike, so opening a card shows what it
- * missed. A span chip in each card's header (historySpan.ts) picks how
- * much of that the card's traces squeeze into its width, from
- * HISTORY_SPANS, remembered per card.
+ * missed; the Bar row's sweep records every tick the same way. A span chip
+ * in each card's header (historySpan.ts) picks how much of that the card's
+ * traces and heat squeeze into its width, from HISTORY_SPANS, remembered
+ * per card.
  *
  * setRaw (called by deviceMenu.ts's one merged RAW chip, in the column head
  * above the Sound card — see that file's own comment for why one chip drives this
@@ -181,9 +183,9 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  * Treble and every band row, Stems' Lead, Hats and Kick band; createLineRow
  * mounts them) and one per Hits track (createHitTrack),
  * Section's own Section+Drop pair and one per dial cell (Song, signals.ts's
- * DIAL_SIGNALS), the BPM block's own Tempo jack, Lock, the bar ruler's own
- * Metronome+Metronome bar pair (createBarRuler) and Wave's Beat/Bar pair
- * (Beat). Every jack's click/hover/fill/usage state is
+ * DIAL_SIGNALS), the Tempo row's Tempo+Lock pair and the Bar row's
+ * Metronome, Metronome bar, Beat wave and Bar wave (Beat). Every jack's
+ * click/hover/fill/usage state is
  * `deps.patch` (AudioMetersDeps's own doc comment); this file only ever
  * mounts them and, on refreshPatchView(), reads that state back into a
  * jack's own visuals and its row's fed glow (jack.ts's setRowFed) —
@@ -311,7 +313,6 @@ export interface AudioMetersDeps {
   };
 }
 
-const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
 const TEXT_REFRESH_MS = 100;
 /** Readings that feed no single system — same neutral as the Palette card. */
 const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
@@ -323,44 +324,32 @@ const meterWrapStyle = `display: flex; align-items: center; height: 22px; margin
 const trackStyle = `position: relative; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.18);`;
 const fillStyle = (accent: string) =>
   `position: absolute; top: 0; left: 0; height: 100%; width: 0; border-radius: 2px; background-color: ${accent}; transition: ${FADE};`;
-const capStyle = `position: absolute; top: -1px; bottom: -1px; width: 1.5px; left: 0; background: #fff; visibility: hidden;`;
 const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,0.55);`;
-// Tempo block, welded beside the Lock row and framed like a woken .vc-row
-// (controlsTheme.ts's hover ring and tint, 6px past the content). Its right
-// margin reaches 8px into the card padding like a .vc-row's ring, so card edge
-// -> ring, ring -> block and block -> card edge are all 4px.
-//
-// It hosts the anim.tempo jack (mountJack), absolutely
-// positioned: a jack row would grow the block and, through weldedRowStyle's
-// align-items: stretch, the Lock row.
-const weldedRowStyle = `display: flex; gap: 12px; align-items: stretch;`;
-const tempoBlockStyle = (accent: string) => `
-  width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
-  margin: -6px -8px -6px 0; border-radius: 4px; position: relative;
-  background-color: color-mix(in srgb, ${accent} 6%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent);
-`;
-const tempoJackHostStyle = `
-  position: absolute; top: 50%; left: 3px; right: 3px; transform: translateY(-50%);
-  display: flex; justify-content: space-between;
-`;
+// The Beat card's two rows (createTempoRow, createBarRuler) share a line row's
+// columns, so their lanes line up with Sound's and Stems'.
 const BEAT_COLOR = HOT_RED;
 // The beat's lit look and fade are a Web Animation (flashTo); this transition
 // only eases a change of resting tint.
 const DOT_FADE_MS = 550;
+const TEMPO_RING_PX = 20;
+// Lock in steps, so the ring and the resting tint aren't rewritten every frame.
+const LOCK_STEPS = 20;
+const tempoBodyStyle = `display: flex; align-items: center; gap: 6px; height: ${TEMPO_RING_PX + 2}px;`;
+const tempoRingStyle = `position: relative; flex: none; width: ${TEMPO_RING_PX}px; height: ${TEMPO_RING_PX}px;`;
 const tempoDotStyle = `
-  width: 6px; height: 6px; border-radius: 50%; margin: 5px auto 0;
+  position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
   background-color: ${withAlpha(BEAT_COLOR, 0.25)}; box-shadow: 0 0 0 0 transparent;
   transition: background-color ${DOT_FADE_MS}ms ease-out;
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
-const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
+const tempoCaptionStyle = `font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4);`;
+const tempoLockStyle = `font: 400 9.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.55); white-space: nowrap;`;
 const tickLabelStyle = `
   position: absolute; top: 6px; transform: translateX(-50%);
   font: 400 8px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); white-space: nowrap;
 `;
-const TEMPO_TITLE =
-  "Tempo. The dot flashes white on every metronome tick and settles back to its colour, brighter as the tracker gets sure. TAPPED under the number: you tapped this tempo, and the tracker follows the music from it.";
+const TEMPO_HINT =
+  "Tempo. The ring is Lock, how sure the tracker is about the beat: full while hits keep landing where it expects them, short on loose or beatless music. The dot inside flashes on every metronome tick and, like the digits, brightens as the tracker gets sure. TAPPED beside the number: you tapped this tempo, and the tracker follows the music from it. The heat under it is Tempo's, then Lock's.";
 // Tap tempo chip (src/render/tapTempo.ts): taps on pointerdown, the press is
 // the beat, as with Ctrl in app.ts.
 const tapStatusStyle = `font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.7); white-space: nowrap;`;
@@ -398,8 +387,7 @@ const lineDigitsTextStyle = `font: 400 10px/1 ${FONT_MONO};`;
 const lineUnitStyle = `font: 400 9px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
 // The Sound card's "Bands" caption: the card title's small caps, a step down.
 const bandsLabelStyle = `font: 400 9px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin: 8px 0 2px;`;
-const BEAT_TRACE_HEIGHT_CSS_PX = 28;
-// Predicted-grid colour (Wave's bar wave, the bar ruler's downbeat). Blue against
+// Predicted-grid colour (the bar wave, the bar ruler's downbeat). Blue against
 // BEAT_COLOR's red keeps "predicted" and "detected" apart.
 const BEAT_GRID_COLOR = AUTO_SKY;
 /** A card's span chip as a trace reads it: what it shows now, and the most
@@ -407,17 +395,6 @@ const BEAT_GRID_COLOR = AUTO_SKY;
 interface TraceSpan {
   sec: () => number;
   max: number;
-}
-
-interface TraceStripSeries {
-  color: string;
-  width: number;
-}
-
-interface TraceStripGuide {
-  /** 0..1 on the same y scale as the series. */
-  at: number;
-  color: string;
 }
 
 /** A graph canvas is role="img" with a name, the way leashGauge.ts names its
@@ -522,53 +499,6 @@ function strokeSeries(
   ctx.stroke();
 }
 
-/** A rolling line trace over createColumnRing. `guides` replaces the fixed
- *  mid-height line with dashed lines at each `at` (0..1, the series' y scale),
- *  read fresh every draw() since a mark can move. `span` is the card's span
- *  chip; without it the strip uses HISTORY_SPAN_DEFAULT. `label` names the
- *  canvas (nameGraph) and has no default, so a strip can't ship unnamed. */
-function createTraceStrip(
-  series: TraceStripSeries[],
-  heightPx: number,
-  opts: { label: string; guides?: () => TraceStripGuide[]; span?: TraceSpan },
-) {
-  const { guides, span, label } = opts;
-  const ring = createColumnRing(series.length, heightPx, label, span?.sec, span?.max);
-  const { canvas, ctx } = ring;
-  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (heightPx - 2);
-
-  return {
-    canvas,
-    push: ring.push,
-    /** Redraws every series in order; the last lands on top. `guides` replace
-     *  the mid-height line, which would read as an unlabeled third mark. */
-    draw(): void {
-      if (!ring.prepare()) return;
-      const w = ring.width;
-      const h = heightPx;
-      ctx.clearRect(0, 0, w, h);
-      if (guides) {
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        for (const g of guides()) {
-          const y = yOf(g.at);
-          ctx.strokeStyle = g.color;
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(w, y);
-          ctx.stroke();
-        }
-        ctx.setLineDash([]);
-      } else {
-        ctx.fillStyle = "rgba(255,255,255,0.18)";
-        ctx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
-      }
-      for (let i = 0; i < series.length; i++) strokeSeries(ring, ctx, i, series[i].color, series[i].width, yOf);
-    },
-    resetColumn: ring.resetColumn,
-  };
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
@@ -660,9 +590,6 @@ function createMeterRow(spec: MeterRowSpec) {
   }
   // Labels hang below the track, past the meter's fixed height.
   if (labelled) meter.style.marginBottom = "8px";
-  const cap = document.createElement("div");
-  cap.style.cssText = capStyle;
-  track.appendChild(cap);
   meter.appendChild(track);
 
   const hint = document.createElement("div");
@@ -672,7 +599,6 @@ function createMeterRow(spec: MeterRowSpec) {
 
   el.append(head, meter, hint);
 
-  let peakFrac = 0;
   let flashAnim: Animation | null = null;
   let lastReadoutKey = "";
   // What the fill settles to after a flash, unless setFillColor moved it.
@@ -682,20 +608,6 @@ function createMeterRow(spec: MeterRowSpec) {
     el,
     /** The head's right slot: a caller mounts a jack beside the readout here. */
     right,
-    /** Fraction of the track (null empties it). `dtSec` drives the peak cap's fall. */
-    setValue(value: number | null, dtSec: number): void {
-      if (value === null) {
-        fill.style.width = "0";
-        cap.style.visibility = "hidden";
-        peakFrac = 0;
-        return;
-      }
-      const v = clamp(value, 0, 1);
-      fill.style.width = `${v * 100}%`;
-      peakFrac = Math.max(v, peakFrac - PEAK_FALL_PER_SEC * dtSec);
-      cap.style.left = `${peakFrac * 100}%`;
-      cap.style.visibility = "visible";
-    },
     setReadout(text: string, opts: ReadoutOpts = {}): void {
       const u = opts.unit ?? spec.unit ?? "";
       const key = `${text}|${u}|${opts.textual ? 1 : 0}|${opts.color ?? ""}`;
@@ -846,44 +758,117 @@ function createLineRow(opts: {
 
 type LineRow = ReturnType<typeof createLineRow>;
 
-function createTempoBlock(accent: string) {
+/** A Beat card row in a line row's columns: name | `body` over the heat floor |
+ *  `readout` | jacks. Several signals share each row, so their heat strips
+ *  stack in the floor (.vc-beat-floor), one per jack in mount order. */
+function createBeatRow(
+  label: string,
+  hint: string,
+  body: HTMLElement,
+  readout: HTMLElement,
+  hintColors?: Readonly<Record<string, string>>,
+) {
   const el = document.createElement("div");
-  el.style.cssText = tempoBlockStyle(accent);
-  el.title = TEMPO_TITLE;
-  const jackHost = document.createElement("div");
-  jackHost.style.cssText = tempoJackHostStyle;
-  const inner = document.createElement("div");
+  el.className = "vc-row";
+  el.tabIndex = 0;
+  el.style.cssText = lineRowStyle;
+  el.style.setProperty("--vc-accent", NEUTRAL_ACCENT);
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "vc-label";
+  labelEl.style.cssText = lineLabelStyle;
+  labelEl.textContent = label;
+
+  const lane = document.createElement("div");
+  lane.style.cssText = lineLaneStyle;
+  const floor = document.createElement("div");
+  floor.className = "vc-beat-floor";
+  lane.append(body, floor);
+
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+
+  const hintEl = document.createElement("div");
+  hintEl.className = "vc-hint";
+  setHintText(hintEl, hint, hintColors);
+
+  el.append(labelEl, lane, readout, right, hintEl);
+  return { el, floor, right };
+}
+
+/** The Beat card's first row: the BPM with Lock drawn as a ring around the
+ *  beat dot. The anim.tempo and anim.tempoLock jacks mount on `right`. */
+function createTempoRow() {
+  const body = document.createElement("div");
+  body.style.cssText = tempoBodyStyle;
+
+  const ringBox = document.createElement("div");
+  ringBox.style.cssText = tempoRingStyle;
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNs, "svg");
+  const c = TEMPO_RING_PX / 2;
+  svg.setAttribute("viewBox", `0 0 ${TEMPO_RING_PX} ${TEMPO_RING_PX}`);
+  svg.setAttribute("width", String(TEMPO_RING_PX));
+  svg.setAttribute("height", String(TEMPO_RING_PX));
+  svg.setAttribute("role", "img");
+  const ringArc = (stroke: string) => {
+    const circle = document.createElementNS(svgNs, "circle");
+    circle.setAttribute("cx", String(c));
+    circle.setAttribute("cy", String(c));
+    circle.setAttribute("r", String(c - 1.5));
+    circle.setAttribute("fill", "none");
+    circle.setAttribute("stroke", stroke);
+    circle.setAttribute("stroke-width", "2");
+    svg.append(circle);
+    return circle;
+  };
+  ringArc("rgba(255,255,255,0.12)");
+  const lockArc = ringArc(withAlpha(driveSourceColor("anim.tempoLock"), 0.85));
+  lockArc.setAttribute("pathLength", "1");
+  lockArc.setAttribute("stroke-dasharray", "0 1");
+  lockArc.setAttribute("transform", `rotate(-90 ${c} ${c})`);
   const dot = document.createElement("div");
   dot.style.cssText = tempoDotStyle;
-  const digits = document.createElement("div");
+  ringBox.append(svg, dot);
+
+  const digits = document.createElement("span");
   digits.style.cssText = tempoDigitsStyle;
-  const caption = document.createElement("div");
+  const caption = document.createElement("span");
   caption.style.cssText = tempoCaptionStyle;
   caption.textContent = "BPM";
-  inner.append(digits, caption, dot);
-  el.append(jackHost, inner);
+  const lockText = document.createElement("span");
+  lockText.style.cssText = tempoLockStyle;
+  body.append(ringBox, digits, caption, lockText);
+
+  // Lock reads in the body, beside the BPM it qualifies; the empty readout
+  // column keeps the jacks where the line rows' are.
+  const readout = document.createElement("div");
+  readout.style.cssText = lineReadoutStyle;
+  const row = createBeatRow("Tempo", TEMPO_HINT, body, readout);
 
   let restColor = withAlpha(BEAT_COLOR, 0.25);
   let dotAnim: Animation | null = null;
   let lastLockStep = -1;
   let shownBpm = 0;
   let shownCaption = caption.textContent;
+  let shownLock = "";
   digits.textContent = "--";
+  svg.setAttribute("aria-label", "Tempo lock: none");
 
   return {
-    el,
-    /** The anim.tempo jack mounts here (see tempoBlockStyle). */
-    jackHost,
-    /** Per frame. `lock` (0..1) sets the resting tint; `beat` is
+    ...row,
+    /** Per frame. `lock` (0..1) sets the ring and the resting tint; `beat` is
      *  anim.metronomeBeat, not a raw hit. */
     update(lock: number, beat: boolean): void {
-      // Quantised so the resting tint isn't rewritten every frame.
-      const step = Math.round(lock * 20);
+      const step = Math.round(clamp(lock, 0, 1) * LOCK_STEPS);
       if (step !== lastLockStep) {
         lastLockStep = step;
-        restColor = withAlpha(BEAT_COLOR, 0.25 + 0.6 * (step / 20));
-        digits.style.color = `rgba(255,255,255,${(0.45 + 0.55 * (step / 20)).toFixed(3)})`;
+        const f = step / LOCK_STEPS;
+        restColor = withAlpha(BEAT_COLOR, 0.25 + 0.6 * f);
+        digits.style.color = `rgba(255,255,255,${(0.45 + 0.55 * f).toFixed(3)})`;
         dot.style.backgroundColor = restColor;
+        lockArc.setAttribute("stroke-dasharray", `${f} 1`);
+        svg.setAttribute("aria-label", `Tempo lock: ${Math.round(f * 100)}%`);
       }
       if (beat) {
         // Lit look -> current resting tint as a Web Animation, cancelled by the
@@ -912,6 +897,13 @@ function createTempoBlock(accent: string) {
       if (next === shownCaption) return;
       shownCaption = next;
       caption.textContent = next;
+    },
+    /** Text tick: anim.tempoLock as a percentage, or null for none. */
+    setLock(lock: number | null): void {
+      const next = lock === null ? "lock --" : `lock ${pct(lock)}%`;
+      if (next === shownLock) return;
+      shownLock = next;
+      lockText.textContent = next;
     },
   };
 }
@@ -1333,56 +1325,118 @@ function createHitsRoll(getSilenceGate: () => SilenceGateMarks, mountJack: Mount
 }
 
 // The Beat card's bar ruler: one cell per beat of the metronome's bar, the
-// current one lit and fading over its beat, the downbeat in the Wave row's
-// bar colour (both metronome jacks are white), and a playhead at the exact
-// bar position. It has no history, so it
-// records nothing between draws.
-const BAR_RULER_HEIGHT_CSS_PX = 16;
+// current one lit and fading over its beat, the downbeat in the bar wave's
+// colour (both metronome jacks are white), and a playhead at the exact bar
+// position. Over the cells, the beat and bar waves as a sweep: each reading
+// lands at the bar position it was taken at, so their peaks sit on the cell
+// edges and the trace ahead of the playhead is the last bar's.
 const BAR_RULER_UNLIT = "rgba(255,255,255,0.08)";
+// Kept under the waves' lines, so a lit cell never hides them.
+const BAR_RULER_LIT_ALPHA = 0.45;
+// Sweep resolution per bar; drawn stretched to the lane's width.
+const BAR_SWEEP_CELLS = 96;
+// The ticks over the waves, two jacks wide like the Tempo row's pair, so both
+// Beat lanes end at the same x.
+const barJacksStyle = `display: grid; grid-template-columns: repeat(2, auto); gap: 3px 7px; flex-shrink: 0;`;
 
 function createBarRuler() {
-  const row = createMeterRow({
-    label: "Bar",
-    accent: NEUTRAL_ACCENT,
-    description:
-      "Where the metronome is in the bar: one cell per beat, the current beat lit, the first beat of the bar in its own colour, and the thin line is the exact spot. Plug Metronome (every beat) or Metronome bar (once a bar) into a setting to pulse it in time.",
-  });
+  const h = LINE_TRACE_HEIGHT_PX;
   const canvas = document.createElement("canvas");
-  nameGraph(canvas, "Where the metronome is in the bar, one cell per beat");
-  canvas.style.cssText = `display: block; width: 100%; height: ${BAR_RULER_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+  nameGraph(canvas, "Where the metronome is in the bar, one cell per beat, with the beat and bar waves over it");
+  canvas.style.cssText = `display: block; width: 100%; height: ${h}px;`;
   const ctx = canvas.getContext("2d")!;
-  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: BAR_RULER_HEIGHT_CSS_PX });
-  row.el.children[1].replaceWith(canvas);
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: h });
+  const readout = createLineReadout();
+  const row = createBeatRow(
+    "Bar",
+    "Where the metronome is in the bar: one cell per beat, the current beat lit, the first beat of the bar in blue, and the thin line is the exact spot. Over it, Beat wave (red) and Bar wave (blue): a smooth swing that peaks on every beat, or once a bar, fading out with the metronome rather than the live tempo lock. Plug Metronome or Metronome bar into a setting to pulse it in time, or a wave to make it sway. The heat under it is Metronome's, Metronome bar's, Beat wave's, then Bar wave's.",
+    canvas,
+    readout.el,
+    { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
+  );
+  row.right.style.cssText = barJacksStyle;
   const beatColor = driveSourceColor("anim.metronome");
   const barColor = BEAT_GRID_COLOR;
+  const sweep = [new Float32Array(BAR_SWEEP_CELLS).fill(Number.NaN), new Float32Array(BAR_SWEEP_CELLS).fill(Number.NaN)];
+  let lastCell = -1;
+  let lastMs = -Infinity;
+  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
+
+  function strokeSweep(s: Float32Array, color: string, w: number): void {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let pen = false;
+    for (let i = 0; i < BAR_SWEEP_CELLS; i++) {
+      const v = s[i]!;
+      if (Number.isNaN(v)) {
+        pen = false;
+        continue;
+      }
+      const x = ((i + 0.5) / BAR_SWEEP_CELLS) * w;
+      if (pen) ctx.lineTo(x, yOf(v));
+      else ctx.moveTo(x, yOf(v));
+      pen = true;
+    }
+    ctx.stroke();
+  }
 
   return {
     el: row.el,
-    /** The anim.metronome/anim.metronomeBar jacks mount here. */
+    floor: row.floor,
+    /** The metronome and wave jacks mount here. */
     right: row.right,
+    /** Every tick, on screen or not, so the sweep is whole when the card opens.
+     *  Fills the cells the playhead crossed since the last tick, or empties
+     *  them after a stall (columnStore.ts's CARRY_MS: a flat line across it
+     *  would be made up); a jump back (a re-lock) writes only where it
+     *  landed. */
+    record(anim: AnimFrame | null, beatWave: number, barWave: number, nowMs: number): void {
+      if (!anim || !anim.metronomeOn) {
+        if (lastCell >= 0) {
+          sweep[0]!.fill(Number.NaN);
+          sweep[1]!.fill(Number.NaN);
+          lastCell = -1;
+        }
+        return;
+      }
+      const cell = Math.min(BAR_SWEEP_CELLS - 1, Math.floor(anim.metronomeBarPhase * BAR_SWEEP_CELLS));
+      const ahead = lastCell < 0 ? 0 : (cell - lastCell + BAR_SWEEP_CELLS) % BAR_SWEEP_CELLS;
+      const crossed = ahead <= BAR_SWEEP_CELLS / 2 ? ahead : 0;
+      const stalled = nowMs - lastMs > CARRY_MS;
+      lastMs = nowMs;
+      for (let k = Math.max(0, crossed - 1); k >= 0; k--) {
+        const i = (cell - k + BAR_SWEEP_CELLS) % BAR_SWEEP_CELLS;
+        const fill = k === 0 || !stalled;
+        sweep[0]![i] = fill ? beatWave : Number.NaN;
+        sweep[1]![i] = fill ? barWave : Number.NaN;
+      }
+      lastCell = cell;
+    },
     /** Only while on screen. */
     draw(anim: AnimFrame | null, text: boolean): void {
       const on = !!anim && anim.metronomeOn;
       const beat = on ? barBeat(anim) : -1;
-      if (text) row.setReadout(on ? String(beat + 1) : "--", on ? {} : IDLE);
+      if (text) readout.set(on ? String(beat + 1) : "--", on ? { unit: `/${METRONOME_BEATS_PER_BAR}` } : IDLE);
       if (!sizer.ensure()) return;
       const w = sizer.width;
-      const h = BAR_RULER_HEIGHT_CSS_PX;
       ctx.clearRect(0, 0, w, h);
       const cw = w / METRONOME_BEATS_PER_BAR;
       for (let i = 0; i < METRONOME_BEATS_PER_BAR; i++) {
         const x0 = Math.round(i * cw) + 1;
         const x1 = Math.round((i + 1) * cw) - 1;
         if (i === beat && anim) {
-          ctx.globalAlpha = 0.35 + 0.65 * (1 - anim.metronomePhase);
+          ctx.globalAlpha = BAR_RULER_LIT_ALPHA * (0.35 + 0.65 * (1 - anim.metronomePhase));
           ctx.fillStyle = i === 0 ? barColor : beatColor;
         } else {
           ctx.globalAlpha = 1;
           ctx.fillStyle = BAR_RULER_UNLIT;
         }
-        ctx.fillRect(x0, 2, x1 - x0, h - 4);
+        ctx.fillRect(x0, 0, x1 - x0, h);
       }
       ctx.globalAlpha = 1;
+      strokeSweep(sweep[1]!, BEAT_GRID_COLOR, w);
+      strokeSweep(sweep[0]!, BEAT_COLOR, w);
       if (on) {
         ctx.fillStyle = "rgba(255,255,255,0.85)";
         ctx.fillRect(Math.min(w - 1, Math.round(anim.metronomeBarPhase * w)), 0, 1, h);
@@ -1531,7 +1585,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   root.className = "vc-meters vc-scroll";
 
   // Every jack this card mounts (jack.ts header). `feedEl` groups jacks that
-  // share a row (Section's Song+Drop, Wave's Beat+Bar) so refreshPatchView
+  // share a row (Section's Song+Drop, both Beat rows) so refreshPatchView
   // writes that row's fed state once.
   const jackRegistry: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
   const jackElementsMap = new Map<string, HTMLElement>();
@@ -1586,7 +1640,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   /** Builds one jack, wires it to `deps.patch` and registers it for
    *  refreshPatchView's row-level glow/dim. `host` is where the element mounts;
    *  `feedEl` is the row that glows, the same unless the jack sits in a
-   *  sub-wrapper (the Tempo block's jackHost). `heatCard` is the card whose
+   *  sub-wrapper. `heatCard` is the card whose
    *  span chip a signal jack's heat reads; it defaults to the signal's
    *  `monitor` card, then Sound. */
   function mountJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement, heatCard?: MeterCardId): JackHandle {
@@ -1633,7 +1687,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   }
   const soundSpan = cardSpan("sound");
   const stemsSpan = cardSpan("stems");
-  const beatSpan = cardSpan("beat");
   const songSpan = cardSpan("song");
 
   // Each line row's heat floor, keyed by the row its jack feeds:
@@ -1745,50 +1798,17 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const oneVal: (number | null)[] = [null];
 
   // ---- Beat ----
-  const tempo = createTempoBlock(NEUTRAL_ACCENT);
-  // Mounts here, not on a row of its own: the BPM is anim.tempo's number
-  // (signals.ts's MeterRowId).
-  mountJack("anim.tempo", tempo.jackHost, tempo.el);
-  const lock = createMeterRow({
-    label: "Lock",
-    accent: NEUTRAL_ACCENT,
-    unit: "%",
-    description:
-      "How sure the tracker is about the beat: high while hits keep landing where it expects them, low on loose or beatless music. The BPM beside it (digits and dot) brightens with the same reading.",
-  });
-  lock.el.style.flex = "1";
-  lock.el.style.minWidth = "0";
-  mountJack("anim.tempoLock", lock.right, lock.el);
-  const tempoWelded = document.createElement("div");
-  tempoWelded.style.cssText = weldedRowStyle;
-  tempoWelded.append(lock.el, tempo.el);
+  const tempo = createTempoRow();
+  mountJack("anim.tempo", tempo.right, tempo.el);
+  mountJack("anim.tempoLock", tempo.right, tempo.el);
+  heatFloorHosts.set(tempo.el, tempo.floor);
 
   const barRuler = createBarRuler();
   mountJack("anim.metronome", barRuler.right, barRuler.el);
   mountJack("anim.metronomeBar", barRuler.right, barRuler.el);
-
-  // The two beat-shape drives off the metronome (a smooth swing, not a hit),
-  // on one shared row.
-  const wave = createMeterRow({
-    label: "Wave",
-    accent: NEUTRAL_ACCENT,
-    unit: "s",
-    description:
-      "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out with the metronome rather than the live tempo lock. Plug either into a setting to make it sway in time.",
-    hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
-  });
-  const waveTrace = createTraceStrip(
-    [
-      { color: BEAT_COLOR, width: 1.5 },
-      { color: BEAT_GRID_COLOR, width: 1.5 },
-    ],
-    BEAT_TRACE_HEIGHT_CSS_PX,
-    { label: "History of the beat wave and the bar wave", span: beatSpan },
-  );
-  wave.el.children[1].replaceWith(waveTrace.canvas);
-  wave.setReadout(String(beatSpan.sec()));
-  mountJack("anim.beatWave", wave.right, wave.el);
-  mountJack("anim.barWave", wave.right, wave.el);
+  mountJack("anim.beatWave", barRuler.right, barRuler.el);
+  mountJack("anim.barWave", barRuler.right, barRuler.el);
+  heatFloorHosts.set(barRuler.el, barRuler.floor);
 
   // See tapStatusStyle. Built by hand: it taps on pointerdown, not click, and
   // its hover hint is keyHints.ts's (data-key), not a title.
@@ -1811,11 +1831,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   tapRight.append(
     tapStatus,
     tapChip,
-    createSpanChip("beat", () => wave.setReadout(String(beatSpan.sec()))),
+    createSpanChip("beat", () => {}),
   );
   let shownTapStatus = "";
   const beatCard = createCard({ title: "Beat", accent: NEUTRAL_ACCENT, foldId: "beat", right: tapRight });
-  beatCard.body.append(tempoWelded, spacer(), barRuler.el, spacer(), wave.el);
+  beatCard.body.append(tempo.el, barRuler.el);
 
   // ---- Song ----
   const section = createSectionTrace(songSpan);
@@ -1908,8 +1928,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // A line row's heat is the floor of its own trace lane (heatFloorHosts).
   // Every other monitor's heat strips sit under the row a signal jack feeds,
   // one per signal in mount order, led by a dot in the signal's colour. Above
-  // the row's hint, so under its trace and legend. The Tempo block is a narrow
-  // box welded beside Lock, so its strips join Lock's.
+  // the row's hint, so under its trace and legend.
   const heatMonitorStrips: { idx: number; card: MeterCardId; folded: () => boolean; el: HTMLElement; bg: string }[] = [];
   const heatMonitorHosts = new Map<HTMLElement, { host: HTMLElement; ids: Set<SignalId> }>();
   function addHeatMonitorStrip(j: HeatJack, rowEl: HTMLElement): void {
@@ -1940,7 +1959,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     }
     heatMonitorStrips.push({ idx: j.idx, card: j.card, folded: j.folded, el: strip, bg: "" });
   }
-  for (const j of heatJacks) addHeatMonitorStrip(j, j.feedEl === tempo.el ? lock.el : j.feedEl);
+  for (const j of heatJacks) addHeatMonitorStrip(j, j.feedEl);
 
   /** Repaints a heat strip over the last `span` seconds; writes style only on change. */
   function paintHeatStrip(s: { el: HTMLElement; bg: string }, track: HeatTrack, span: number, nowSec: number): void {
@@ -1996,9 +2015,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   let beatAtMs = -Infinity;
 
   // signals.ts's monitor anchors, populated on demand as a SignalSpec points at
-  // a card/row (see MeterCardId/MeterRowId). section.el, tempo.el and lock.el
-  // are the flash/scroll targets, not their welded wrapper, so a jump
-  // highlights only that half.
+  // a card/row (see MeterCardId/MeterRowId).
   const cardElements: Record<MeterCardId, HTMLElement> = {
     sound: soundCard.el,
     stems: stemsCard.el,
@@ -2010,8 +2027,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["tempo", tempo.el],
     ...hitsRoll.tracks.map((t): [MeterRowId, HTMLElement] => [t.spec.row, t.el]),
     ...dialCells.map(({ dial, cell }): [MeterRowId, HTMLElement] => [dialSignalId(dial), cell.el]),
-    ["wave", wave.el],
-    ["lock", lock.el],
     ["bar", barRuler.el],
     ["energy", soundLevel.el],
     ["low", soundBass.el],
@@ -2102,12 +2117,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       hitsRoll.record(frame, anim, beatDiag, nowMs);
       // Via SIGNALS[id].read(), not a copied formula, so this trace and a
       // setting driven by the signal agree.
-      waveTrace.push(
-        frame && anim
-          ? [SIGNALS["anim.beatWave"].read(frame, anim), SIGNALS["anim.barWave"].read(frame, anim)]
-          : [null, null],
-        nowMs,
-      );
+      if (frame && anim) {
+        barRuler.record(anim, SIGNALS["anim.beatWave"].read(frame, anim), SIGNALS["anim.barWave"].read(frame, anim), nowMs);
+      } else {
+        barRuler.record(null, 0, 0, nowMs);
+      }
       section.push(anim ? [raw ? anim.raw.sectionIntensity : anim.sectionIntensity, anim.dropOnset ? 1 : 0] : [null, null], nowMs);
       if (frame && anim) {
         const recordSec = nowMs / 1000;
@@ -2148,12 +2162,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       if (!onScreen) return;
 
       // ---- Drawn ticks only from here ----
-      // onScreen false ticks aren't drawn, so peak fall and text cadence count
-      // from the last drawn tick, and a beat on a tick between still flashes
+      // onScreen false ticks aren't drawn, so text cadence counts from the
+      // last drawn tick, and a beat on a tick between still flashes
       // now. An edge older than CARRY_MS (panel closed, rAF paused) is stale.
       const sinceDrawMs = lastMs === null ? 1000 / 60 : nowMs - lastMs;
       lastMs = nowMs;
-      const dtSec = Math.max(1e-4, sinceDrawMs / 1000);
       const edgeWindowMs = Math.min(sinceDrawMs, CARRY_MS);
       const beat = nowMs - beatAtMs < edgeWindowMs;
       const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
@@ -2258,24 +2271,17 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       }
       if (!beatCard.fold?.isFolded() && beatOnScreen()) {
         // The dot flashes on the metronome's tick, not a raw hit; dot and digits
-        // share tempoSettle.ts's reading.
-        tempo.update(anim?.tempoLock ?? 0, beat);
+        // share tempoSettle.ts's reading. Lock via SIGNALS[id].read(), so the
+        // ring and a driven setting agree.
+        const lockNow = frame && anim ? SIGNALS["anim.tempoLock"].read(frame, anim) : null;
+        tempo.update(lockNow ?? 0, beat);
         if (text) {
           // RAW / Smoothing Off show the unsettled raw estimate.
           tempo.setBpm(raw || smoothingOff ? (frame?.bpm ?? 0) : (anim?.metronomeBpm ?? 0));
           tempo.setTapped(!raw && !smoothingOff && !!anim?.tapGuided);
-        }
-        // Via SIGNALS[id].read(), so this row and a driven setting agree.
-        if (frame && anim) {
-          lock.setValue(SIGNALS["anim.tempoLock"].read(frame, anim), dtSec);
-        } else {
-          lock.setValue(null, dtSec);
-        }
-        if (text) {
-          lock.setReadout(anim ? pct(anim.tempoLock) : "--", anim ? {} : IDLE);
+          tempo.setLock(lockNow);
         }
         barRuler.draw(anim, text);
-        waveTrace.draw();
       }
 
       // ---- Song ----
