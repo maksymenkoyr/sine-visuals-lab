@@ -91,6 +91,9 @@ export const FOLDED_BAR_PX = 32;
 /** The heat floor under a Hits drum-roll track's lane (audioMeters.ts): thinner
  *  than a line row's, so the touching tracks keep room for their notes. */
 export const HIT_TRACK_FLOOR_PX = 2;
+/** One strip of a Beat row's heat floor (audioMeters.ts): the Bar row stacks
+ *  four signals' heat, so each is thinner than a line row's. */
+const BEAT_FLOOR_PX = 2;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -737,6 +740,8 @@ body.vc-keys-reveal [data-keycap]::after {
 /* A one-line row's heat (audioMeters.ts's createLineRow): the floor of its trace lane, no dot. */
 .vc-heat-floor { height: 3px; border-radius: 1px; background: rgba(255,255,255,0.06); }
 .vc-hit-track .vc-heat-floor { height: ${HIT_TRACK_FLOOR_PX}px; border-radius: 0; }
+.vc-beat-floor { display: grid; gap: 1px; }
+.vc-beat-floor .vc-heat-floor { height: ${BEAT_FLOOR_PX}px; }
 .vc-heat-hist { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 8px; align-items: center; }
 .vc-heat-hist-label { font: 400 11px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-heat-hist-strip { height: 5px; border-radius: 1px; background: rgba(255,255,255,0.06); }
