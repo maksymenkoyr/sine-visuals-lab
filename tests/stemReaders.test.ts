@@ -56,7 +56,7 @@ describe("wiresReadStems", () => {
 });
 
 describe("createStemGate", () => {
-  const RANGES: StemRanges = { hats: { lo: 4000, hi: 16000 }, lead: { lo: 250, hi: 4000 } };
+  const RANGES: StemRanges = { lead: { lo: 250, hi: 4000 } };
   const BINS = new Float32Array(8);
 
   function spy(): StemSplitter & { updates: number; resets: number } {

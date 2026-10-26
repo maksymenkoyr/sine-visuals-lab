@@ -1,12 +1,11 @@
 import { MAX_HZ_CAP } from "./bandScale.ts";
 
 /**
- * Splits the live spectrum into a drum part and a held part, the way a stem
- * splitter separates drums from melody, and reads two levels off it: Hats
- * (the drum part of the treble range) and Lead (the held part of the mid
- * range: vocals, synths, guitar together).
+ * Reads two levels off the live spectrum, the way a stem splitter separates
+ * drums from melody: Hats (how hard the hi-hats and cymbals hit) and Lead (the
+ * held part of the mid range: vocals, synths, guitar together).
  *
- * The idea in plain words. Picture the spectrum scrolling over time. A drum
+ * Lead in plain words. Picture the spectrum scrolling over time. A drum
  * hit is a vertical streak: many neighbouring frequencies light up at once,
  * for an instant. A held note is a horizontal streak: one frequency stays lit.
  * So for every FFT bin, each tick, two medians:
@@ -30,7 +29,7 @@ import { MAX_HZ_CAP } from "./bandScale.ts";
  * out flat for exactly this reason). So the two levels are measured here and
  * travel to followers inside the feature frame (src/net/protocol.ts).
  *
- * Each level is the part's power in its range, in dB, against the recent peak
+ * Lead is the held part's power in its range, in dB, against the recent peak
  * of all sound in that range: the peak jumps up with a loud moment and falls
  * back at PEAK_FALL_PER_SEC, and the level reads 1 at the peak and 0 at
  * NORM_SPAN_DB below it. That keeps a quiet mic and a hot line feed on the
@@ -38,20 +37,47 @@ import { MAX_HZ_CAP } from "./bandScale.ts";
  * whole range, not the part itself, so a drum break with no melody keeps
  * Lead low: against its own peak, Lead's leftovers would climb back to full
  * within seconds of the melody stopping. In a silent room the peak sinks to
- * the mic's own hiss, so it never falls below PEAK_FLOOR_DB, and
+ * the mic's own hiss, so it never falls below PEAK_FLOOR_DB.
+ *
+ * Hats in plain words. Hi-hats and cymbals are the part of a mix that still
+ * hits hard above HATS_LO_HZ; a snare, a voice or a synth puts most of its
+ * sound lower. So Hats sums the power above that edge and keeps what jumps
+ * out of the band's own floor: the quietest moments (HATS_FLOOR_SHARE) of the
+ * last HATS_FLOOR_SEC. A hit jumps out at once, while a steady hiss, a held
+ * bright tone or the long wash of a cymbal becomes the floor. The band is
+ * summed before the floor is taken: a single bin of steady noise swings by
+ * about its own size from tick to tick, so taken bin by bin, a hiss would
+ * read as a stream of hits. (The median split above can't make Hats: noise
+ * in the treble lights neighbouring bins too, so it counts as half drum
+ * whether hats play or not.)
+ *
+ * Hats is the hit's amplitude, not its dB, against the loudest recent hit,
+ * which falls back at HATS_REF_FALL_PER_SEC: on a dB scale the stretch
+ * between two hats still reads most of the way up. The reference never sinks
+ * below HATS_SELF_FLOOR times the band's floor, so only a hit that stands
+ * well clear of what the band was already doing reads high, and a hiss's
+ * small swings or a sound that barely lifts the band stay low. Nor does it
+ * sink more than HATS_BELOW_ALL_DB under the peak of all the sound (which
+ * follows a quieter stretch at ALL_PEAK_FALL_PER_SEC), so a break without
+ * hats stays near 0. Those and HATS_LO_HZ were picked by how closely Hats
+ * followed the bright part of Demucs's drum stem on real songs, through a tab
+ * share and through a laptop mic.
+ *
  * src/render/animClock.ts multiplies both levels by the silence gate's dimmer
  * (src/audio/silenceGate.ts), as it already does for hits.
  *
  * What it cannot do: tell instruments apart. It sorts by shape, so a piano
- * or guitar attack counts as drums for an instant and a long cymbal wash
- * leaks into the held part. A Kick level was tried the same way and left
+ * or guitar attack counts as drums for an instant, a long cymbal wash leaks
+ * into the held part, and a noise sweep, a sung "s" or a bright snare above
+ * HATS_LO_HZ reads as Hats. A Kick level was tried the same way and left
  * out: in the low range a bass note's attack looks like a kick to this
  * split, and today's Bass hit (src/render/bandEnergy.ts) told the two apart
  * better.
  *
- * The ranges come from the caller each tick (app.ts hands in the Mid and
- * Treble ranges of src/audio/bandSplit.ts's BAND_SPLIT), so Lead and Hats
- * cover the same frequencies as the Mid and Treble rows beside them. Store-
+ * Lead's range comes from the caller each tick (app.ts hands in the Mid range
+ * of src/audio/bandSplit.ts's BAND_SPLIT), so it covers the same frequencies
+ * as the Mid row beside it. Hats has its own band rather than the Treble
+ * row's: that row starts low enough to be mostly voices and synths. Store-
  * free, like features.ts: the caller resolves anything persisted.
  *
  * The caller runs it only on ticks where something reads Hats or Lead
@@ -78,6 +104,21 @@ const NORM_SPAN_DB = 30;
 const PEAK_FALL_PER_SEC = 1.5;
 /** The lowest a level's peak may sink in silence — see the header. */
 const PEAK_FLOOR_DB = -90;
+/** Hats listens from here to MAX_HZ_CAP — see the header. */
+const HATS_LO_HZ = 7000;
+/** How far back the hat band's floor looks. Short, so a bright sound that
+ *  swells and holds (a noise sweep, a sung "s") counts only while it rises. */
+const HATS_FLOOR_SEC = 0.1;
+/** The floor is this share of the way up that stretch's sorted levels. */
+const HATS_FLOOR_SHARE = 0.2;
+/** How fast the loudest recent hit, Hats' reference, relaxes (1/tau, per second). */
+const HATS_REF_FALL_PER_SEC = 1;
+/** Hats' reference is never under this many times the hat band's floor... */
+const HATS_SELF_FLOOR = 8;
+/** ...nor more than this many dB under the peak of all the sound. */
+const HATS_BELOW_ALL_DB = 30;
+/** How fast the peak of all the sound follows a quieter stretch (1/tau, per second). */
+const ALL_PEAK_FALL_PER_SEC = 0.1;
 const MAX_DT_SEC = 1;
 
 /** A frequency range in Hz, low edge inclusive, high edge exclusive. */
@@ -87,7 +128,6 @@ interface HzRange {
 }
 
 export interface StemRanges {
-  hats: HzRange;
   lead: HzRange;
 }
 
@@ -175,15 +215,35 @@ export function createStemSplitter(binCount: number, binHz: number): StemSplitte
   let lastSec: number | null = null;
   const power = new Float64Array(bins);
   const across = new Float64Array(2 * spread + 1);
-  const hatsPeak: PeakState = { peak: PEAK_FLOOR_DB };
   const leadPeak: PeakState = { peak: PEAK_FLOOR_DB };
   const out: StemLevels = { hats: 0, lead: 0 };
+
+  const hatsLo = Math.ceil(HATS_LO_HZ / binHz);
+  const hatsHi = Math.min(bins, Math.ceil(MAX_HZ_CAP / binHz));
+  // The hat band's summed power at each snapshot over the last
+  // HATS_FLOOR_SEC, in arrival order and sorted.
+  const bandCutoff = HATS_FLOOR_SEC + SNAPSHOT_SEC / 2;
+  const bandCap = Math.ceil(bandCutoff / SNAPSHOT_GAP_SEC) + 1;
+  const bandValues = new Float64Array(bandCap);
+  const bandTimes = new Float64Array(bandCap);
+  const bandSorted = new Float64Array(bandCap);
+  let bandOldest = 0;
+  let bandCount = 0;
+  let hatsRef = 0;
+  let allPeak = 0;
+  const belowAll = Math.pow(10, -HATS_BELOW_ALL_DB / 10);
 
   function dropOldest(): void {
     const row = oldest * bins;
     for (let k = 0; k < bins; k++) sortedRemove(held, k * cap, count, history[row + k]);
     count--;
     oldest = (oldest + 1) % cap;
+  }
+
+  function dropOldestBand(): void {
+    sortedRemove(bandSorted, 0, bandCount, bandValues[bandOldest]);
+    bandCount--;
+    bandOldest = (bandOldest + 1) % bandCap;
   }
 
   return {
@@ -193,7 +253,10 @@ export function createStemSplitter(binCount: number, binHz: number): StemSplitte
       count = 0;
       lastSnapSec = -Infinity;
       lastSec = null;
-      hatsPeak.peak = PEAK_FLOOR_DB;
+      bandOldest = 0;
+      bandCount = 0;
+      hatsRef = 0;
+      allPeak = 0;
       leadPeak.peak = PEAK_FLOOR_DB;
       out.hats = 0;
       out.lead = 0;
@@ -201,18 +264,21 @@ export function createStemSplitter(binCount: number, binHz: number): StemSplitte
     update(binsDb, nowSec, ranges) {
       const dt = lastSec === null ? 0 : Math.min(MAX_DT_SEC, Math.max(0, nowSec - lastSec));
       lastSec = nowSec;
+      let all = 0;
       for (let k = 0; k < bins; k++) {
         const db = binsDb[k];
         const p = Number.isFinite(db) ? Math.pow(10, db / 10) : 0;
         power[k] = Number.isFinite(p) ? p : 0;
+        all += power[k];
       }
 
       // The time medians: age out what left the window, then add this
       // spectrum. On a tick too soon after the last snapshot (a fast
       // display), the window goes without it.
+      const snap = nowSec - lastSnapSec >= SNAPSHOT_GAP_SEC;
       const cutoff = HELD_WINDOW_SEC - SNAPSHOT_SEC / 2;
       while (count > 0 && nowSec - snapTimes[oldest] >= cutoff) dropOldest();
-      if (nowSec - lastSnapSec >= SNAPSHOT_GAP_SEC) {
+      if (snap) {
         if (count === cap) dropOldest();
         const slot = (oldest + count) % cap;
         history.set(power, slot * bins);
@@ -222,15 +288,13 @@ export function createStemSplitter(binCount: number, binHz: number): StemSplitte
         lastSnapSec = nowSec;
       }
 
-      const lo = Math.max(0, Math.ceil(Math.min(ranges.hats.lo, ranges.lead.lo) / binHz));
-      const hi = Math.min(bins - spread - 1, Math.ceil(Math.max(ranges.hats.hi, ranges.lead.hi) / binHz));
+      const lo = Math.max(0, Math.ceil(ranges.lead.lo / binHz));
+      const hi = Math.min(bins - spread - 1, Math.ceil(ranges.lead.hi / binHz));
       // The across-frequency window, slid one bin at a time: seeded as bin
       // lo-1's window minus its top bin, so the first step below completes it.
       let n = 0;
       for (let j = Math.max(0, lo - spread - 1); j < lo + spread; j++) sortedInsert(across, 0, n++, power[j]);
-      let hatsPow = 0;
       let leadPow = 0;
-      let treblePow = 0;
       let midPow = 0;
       for (let k = lo; k < hi; k++) {
         if (k - spread - 1 >= 0) sortedRemove(across, 0, n--, power[k - spread - 1]);
@@ -242,18 +306,31 @@ export function createStemSplitter(binCount: number, binHz: number): StemSplitte
         const drum = s2 + h2 > 0 ? s2 / (s2 + h2) : 0;
         const p = power[k];
         const hz = k * binHz;
-        if (hz >= ranges.hats.lo && hz < ranges.hats.hi) {
-          hatsPow += p * drum;
-          treblePow += p;
-        }
         if (hz >= ranges.lead.lo && hz < ranges.lead.hi) {
           leadPow += p * (1 - drum);
           midPow += p;
         }
       }
-
-      out.hats = normalize(hatsPeak, hatsPow, treblePow, dt);
       out.lead = normalize(leadPeak, leadPow, midPow, dt);
+
+      let band = 0;
+      for (let k = hatsLo; k < hatsHi; k++) band += power[k];
+      while (bandCount > 0 && nowSec - bandTimes[bandOldest] >= bandCutoff) dropOldestBand();
+      // Read against the floor before joining it, so a hit can't raise its own floor.
+      const floor = bandCount > 0 ? bandSorted[Math.floor(HATS_FLOOR_SHARE * bandCount)] : band;
+      const hit = Math.max(0, band - floor);
+      if (snap) {
+        if (bandCount === bandCap) dropOldestBand();
+        const slot = (bandOldest + bandCount) % bandCap;
+        bandValues[slot] = band;
+        bandTimes[slot] = nowSec;
+        sortedInsert(bandSorted, 0, bandCount, band);
+        bandCount++;
+      }
+      allPeak = all > allPeak ? all : allPeak + (all - allPeak) * (1 - Math.exp(-ALL_PEAK_FALL_PER_SEC * dt));
+      hatsRef = Math.max(hit, hatsRef * Math.exp(-HATS_REF_FALL_PER_SEC * dt));
+      const ref = Math.max(hatsRef, HATS_SELF_FLOOR * floor, allPeak * belowAll);
+      out.hats = ref > 0 ? Math.min(1, Math.sqrt(hit / ref)) : 0;
       return out;
     },
   };
