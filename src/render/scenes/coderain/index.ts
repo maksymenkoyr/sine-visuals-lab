@@ -90,6 +90,8 @@ const TURN_SPREAD = (60 * Math.PI) / 180;
 const TURN_TAU = 1.4;
 /** Tilt 1 looks this far up. */
 const TILT_MAX = (35 * Math.PI) / 180;
+/** Tilt plus the explorer's own pitch stops here, or the view flips over. */
+const PITCH_MAX = (80 * Math.PI) / 180;
 /** The depth fade, world units: columns fade in from NEAR_FADE[0] to [1]
  *  (so none passes through the camera), are full from there out to
  *  FAR_FADE[0], and gone by FAR_FADE[1] (inside FIELD / 2, so the wrap never
@@ -188,6 +190,8 @@ function createCodeRainScene(): Scene {
   let figYaw = 0;
   let fallClock = 0;
   const rng = mulberry32(SEED ^ 0x9e3779b9);
+  const right = new Float32Array(3);
+  const up = new Float32Array(3);
   let explorer: Explorer = createExplorer(mulberry32(SEED ^ 0x85ebca6b));
 
   // The burst ring: per slot (fall clock at start, share, id, start time).
@@ -338,18 +342,24 @@ function createCodeRainScene(): Scene {
       const walkDt = dt * speed;
       const pose = explorer.step(walkDt);
       const heading = yaw + pose.gaze;
-      const pitch = tilt * TILT_MAX + pose.pitch;
+      const pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, tilt * TILT_MAX + pose.pitch));
       const walkHeading = yaw + pose.body;
       figYaw += (walkHeading - figYaw) * (1 - Math.exp(-walkDt / FIG_FOLLOW_TAU));
 
       const cp = Math.cos(pitch);
       const fwd = [Math.sin(heading) * cp, Math.sin(pitch), -Math.cos(heading) * cp];
-      const right = [Math.cos(heading), 0, Math.sin(heading)];
-      const up = [
-        right[1] * fwd[2] - right[2] * fwd[1],
-        right[2] * fwd[0] - right[0] * fwd[2],
-        right[0] * fwd[1] - right[1] * fwd[0],
+      const flatRight = [Math.cos(heading), 0, Math.sin(heading)];
+      const flatUp = [
+        flatRight[1] * fwd[2] - flatRight[2] * fwd[1],
+        flatRight[2] * fwd[0] - flatRight[0] * fwd[2],
+        flatRight[0] * fwd[1] - flatRight[1] * fwd[0],
       ];
+      const cr = Math.cos(pose.roll);
+      const sr = Math.sin(pose.roll);
+      for (let i = 0; i < 3; i++) {
+        right[i] = flatRight[i] * cr - flatUp[i] * sr;
+        up[i] = flatUp[i] * cr + flatRight[i] * sr;
+      }
       camX += Math.sin(walkHeading) * WALK_PACE * pose.pace * walkDt;
       camZ += -Math.cos(walkHeading) * WALK_PACE * pose.pace * walkDt;
       const camY = pose.y;

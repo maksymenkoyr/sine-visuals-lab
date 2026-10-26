@@ -128,26 +128,43 @@ describe("coderain explorer", () => {
     return poses;
   };
 
+  const deg = Math.PI / 180;
+
   it("walks at full pace, stops to look round, and walks on", () => {
-    const poses = walk(120, 1 / 60);
+    const poses = walk(240, 1 / 60);
     expect(poses[0].pace).toBeGreaterThan(0.5);
     expect(poses.some((p) => p.pace > 0.99)).toBe(true);
     const stops = poses.filter((p) => p.pace === 0).length / poses.length;
-    expect(stops).toBeGreaterThan(0.15);
-    expect(stops).toBeLessThan(0.6);
+    expect(stops).toBeGreaterThan(0.08);
+    expect(stops).toBeLessThan(0.5);
   });
 
-  it("looks well away from where it walks, and up into the rain", () => {
-    const poses = walk(120, 1 / 60);
-    expect(Math.max(...poses.map((p) => Math.abs(p.gaze - p.body)))).toBeGreaterThan((40 * Math.PI) / 180);
-    expect(Math.max(...poses.map((p) => p.pitch))).toBeGreaterThan((8 * Math.PI) / 180);
+  it("looks well away from where it walks, high into the rain and down below", () => {
+    const poses = walk(240, 1 / 60);
+    expect(Math.max(...poses.map((p) => Math.abs(p.gaze - p.body)))).toBeGreaterThan(60 * deg);
+    expect(Math.max(...poses.map((p) => p.pitch))).toBeGreaterThan(30 * deg);
+    expect(Math.min(...poses.map((p) => p.pitch))).toBeLessThan(-12 * deg);
   });
 
-  it("never jerks the gaze, and only turns its body while standing", () => {
-    const poses = walk(120, 1 / 60);
+  it("rises and sinks through the columns", () => {
+    const ys = walk(240, 1 / 60).map((p) => p.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(4);
+  });
+
+  it("never jerks the head, and only turns its body while standing", () => {
+    const poses = walk(240, 1 / 60);
     for (let i = 1; i < poses.length; i++) {
-      expect(Math.abs(poses[i].gaze - poses[i - 1].gaze)).toBeLessThan(0.05);
+      expect(Math.abs(poses[i].gaze - poses[i - 1].gaze)).toBeLessThan(0.07);
+      expect(Math.abs(poses[i].pitch - poses[i - 1].pitch)).toBeLessThan(0.07);
       if (poses[i - 1].pace > 0) expect(Math.abs(poses[i].body - poses[i - 1].body)).toBeLessThan(0.01);
+    }
+  });
+
+  it("stays steady on long frames at top Speed", () => {
+    for (const p of walk(600, 0.75)) {
+      expect(Math.abs(p.pitch)).toBeLessThan(70 * deg);
+      expect(Math.abs(p.roll)).toBeLessThan(10 * deg);
+      expect(Math.abs(p.gaze - p.body)).toBeLessThan(160 * deg);
     }
   });
 

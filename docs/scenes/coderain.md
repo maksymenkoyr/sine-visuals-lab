@@ -1,7 +1,8 @@
 # Code Rain (`coderain`)
 
 A 3D field of falling glyph columns that the camera explores on foot —
-walking, stopping to look round and up into the rain, walking on — with a
+walking over low hills, stopping to look round, high into the rain and down
+below, floating up or sinking through the columns, walking on — with a
 dancer drawn in tiny raining glyphs among them. Bass hits start fresh heads
 from the top of the view and flare the heads; the overall level speeds the
 fall; a drop swings the camera to a new heading. Speed runs the walk and the
@@ -16,7 +17,7 @@ fall faster or slower together. In development, in the gallery's development sec
   clock, the hit-burst ring (`BURST_SLOTS`), the draws.
 - `glyphs.ts` — the hand-drawn stroke glyph set and `buildGlyphAtlas`.
 - `figure.ts` — the dancer: the Dancers scene's choreographer and rig, flattened to 2D capsules.
-- `explorer.ts` — the camera's scripted walk: walk legs and look-round legs from a seeded generator.
+- `explorer.ts` — the camera's scripted walk: walk, look-round and rise legs from a seeded generator, and the head's gaze points.
 - `glsl.ts` — `RAIN_VERT`/`RAIN_FRAG` (instanced columns) and `FIGURE_VERT`/`FIGURE_FRAG`; hashes via `noiseHash.ts`'s `uhash` on integers only.
 - `tests/coderain.test.ts`.
 
@@ -61,6 +62,7 @@ hear run but ~106.7 on the ref-shoot run.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/coderain/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
 - 2026-10-26 — The straight glide became an explorer on foot (`explorer.ts`): it walks a gently curving path with a step bob, eases to a stop, looks one way, the other and up into the rain, then walks off where it last looked. The dancer stays ahead of where it walks, so a look round sweeps off the dancer and back. One new setting, Speed, scales the explorer's clock and the fall clock together; Glide is gone (an old look's `glide` is ignored). `tools/tune-real.mjs`, Around the World then silence, 30 s, change med / p95: main 2.60 / 3.40 song, 1.62 / 2.11 silence (1.6x); explorer 3.96 / 5.10 song, 2.92 / 3.88 silence (1.3x); hits/min unchanged (406 vs 402, 0 in silence). The walk adds steady motion under both, so the music's share of the motion is smaller.
+- 2026-10-26 — User: head movement "a bit more interesting", "more verticality". The head now turns to a gaze point, holds it, and turns to the next (a critically damped spring with a capped turn rate) instead of smooth sine sweeps; it tips its roll now and then and sways with each step. Look rounds reach high into the rain and down below; a new rise leg floats up or sinks through the columns while gazing that way, and walks roll over low hills. Tilt plus the explorer's pitch is capped (`PITCH_MAX`). `tools/tune-real.mjs`, same song and length: 3.73 / 4.89 song, 3.09 / 4.22 silence (1.2x); hits/min 408, 0 in silence.
 
 ## Known issues and next steps
 
