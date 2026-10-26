@@ -4,8 +4,9 @@ A slow flight through a glowing gas cloud: violet, blue and magenta masses
 whose edges burn white-blue with a red-orange fringe, fine veins inside
 them, and dark voids full of stars ahead. The music brightens the cloud
 (Glow), flares its edges white on hits (Flare) and speeds the flight up as a
-section builds (Surge); in silence it only drifts, and its colours wander
-round the wheel over most of an hour. In development.
+section builds (Surge); in silence it only drifts, the gas streaming past
+and slowly changing shape (Gas drift), and its colours wander round the
+wheel over most of an hour. In development.
 
 ## Where the code is
 
@@ -24,7 +25,8 @@ round the wheel over most of an hour. In development.
   shell, tunnel and colour constants sit at the top.
 - `src/render/scenes/nebula/flight.ts` — the camera on the JS side: the
   weaving path (`PATH_X`, `PATH_Y`, tunnel radius `PATH_R`), the roll
-  (`ROLL`), the colour wander (`HUE_WANDER`) and the repeats every sampled
+  (`ROLL`), the colour wander (`HUE_WANDER`), the gas's own churn and flow
+  (`CHURN_RATE`, `FLOW`, scaled by Gas drift) and the repeats every sampled
   field shares (`PERIOD`, `PERIOD_Z`). Nothing that grows reaches the GPU
   (noiseHash.ts's header says why).
 - `src/render/scenes/nebula/stars.ts` — the stars as GL points: a field,
@@ -186,6 +188,18 @@ vs ours.
   Song over silence at p95 2.3×, as before: the look and the reactions are
   unchanged.
 
+2026-10-26, Gas drift.
+
+- `tools/tune-real.mjs` (Levitating, 30 s from 4 s, Gas drift 1):
+
+  | source | change med | change p95 | hits/min | energy | fps |
+  |---|---|---|---|---|---|
+  | song | 4.77 | 6.40 | 326 | 0.66 | 119 |
+  | silence | 1.93 | 2.97 | 0 | 0.00 | 120 |
+
+  Song over silence at p95 2.2×. Silence alone, 20 s from 4 s, by Gas
+  drift: 0 1.74 / 2.36, 1 1.93 / 2.97, 8 3.07 / 3.64.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -259,6 +273,15 @@ vs ours.
   march, so the erf spells it out through exp. Together they halve the
   scene's GPU time.
 
+- 2026-10-26 — The owner asked for gas drift, meaning both motions: the
+  cloud streaming across the flight like wind and the shapes reshaping in
+  place. One setting, Gas drift, scales both: the flow offsets where the gas
+  is sampled (kept within one period), and the churn clock that was a fixed
+  rate. The tunnel stays on the camera's path, so the flow never fills it;
+  the stars don't flow, so the gas slides across them. On by default at a
+  gentle pace under the flight's own; my call, not yet confirmed by the
+  owner.
+
 ## Tuning notes
 
 - Judge the look at rest (ref-shoot on the silent bundle) against the
@@ -267,7 +290,8 @@ vs ours.
   ones): compare side by side, then check the numbers.
 - Gas sets how much of the view is cloud; Roll how far the view swings;
   Colour turn rotates every colour about the grey axis (0 is the
-  reference's violet); Colour drift sets how fast the wander runs.
+  reference's violet); Colour drift sets how fast the wander runs; Gas drift how fast the
+  gas streams past and reshapes on its own (0 holds it still).
 
 ## Known issues and next steps
 

@@ -49,8 +49,6 @@ import { bakeVolume } from "./volume.ts";
 const ID = card.id;
 /** World units per second at Flight speed 1, matched to the reference's frame-to-frame change (docs/scenes/nebula.md). */
 const BASE_SPEED = 0.22;
-/** How fast the gas churns on its own, in radians per second of its churn clock. */
-const CHURN_RATE = 0.05;
 /** How much faster the flight runs at full drive at Surge 1. */
 const SURGE_GAIN = 2.5;
 /** The longest frame step that counts as flight; a stalled tab's gap is clamped to this. */
@@ -150,7 +148,7 @@ function createNebulaScene(): Scene {
       gasProg.use();
       uploadCommonUniforms(gasProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       const surge = 1 + SURGE_GAIN * setting("surge") * drives.value("surge", anim.sectionIntensity);
-      advanceFlight(flight, dt, BASE_SPEED * setting("speed") * surge, setting("drift"), CHURN_RATE);
+      advanceFlight(flight, dt, BASE_SPEED * setting("speed") * surge, setting("drift"), setting("gasDrift"));
       cameraUniforms(flight, setting("spin"), cam);
       pathUniforms(flight, path);
       const hueDrift = hueWander(flight);
@@ -163,6 +161,7 @@ function createNebulaScene(): Scene {
       gasProg.setV4v("uPath", path);
       gasProg.setF("uHueDrift", hueDrift);
       gasProg.setF("uChurn", flight.churn);
+      gasProg.setV2("uFlow", flight.flowX, flight.flowY);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_3D, volume);
       gasProg.setI("uVol", 0);

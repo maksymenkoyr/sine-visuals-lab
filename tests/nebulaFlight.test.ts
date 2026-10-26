@@ -82,11 +82,15 @@ describe("Nebula flight", () => {
     const f = createFlight();
     expect(hueWander(f)).toBeCloseTo(0, 6);
     for (let i = 0; i < 2000; i++) {
-      advanceFlight(f, 0.25, 1, 50, 0.05);
+      advanceFlight(f, 0.25, 1, 50, 8);
       expect(Math.abs(hueWander(f))).toBeLessThanOrEqual(180);
     }
     expect(f.churn).toBeGreaterThanOrEqual(0);
     expect(f.churn).toBeLessThan(Math.PI * 2);
+    for (const v of [f.flowX, f.flowY]) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(PERIOD);
+    }
     expect(f.travel).toBeCloseTo(500, 6);
   });
 });

@@ -58,6 +58,16 @@ export const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.sectionIntensity" },
   },
   {
+    key: "gasDrift",
+    label: "Gas drift",
+    group: "Motion",
+    min: 0,
+    max: 8,
+    step: 0.1,
+    default: 1,
+    description: "How fast the clouds stream past and change shape on their own. 0 holds them still.",
+  },
+  {
     key: "glow",
     label: "Glow",
     group: "Look",
