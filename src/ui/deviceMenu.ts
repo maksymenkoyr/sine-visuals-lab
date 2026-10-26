@@ -4545,11 +4545,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   // Not for a finger: a tap is no hover, and drawing a wired jack's cables
   // as the tap lands cost the tap its click on iPad Safari.
+  // The pinned row's hover also lifts its cables, beside the row's own glow
+  // (controlsTheme.ts's `.vc-row.vc-drive-pinned:hover`).
   root.addEventListener("pointerover", (e) => {
     if (e.pointerType === "touch") return;
     setLitJackRows(jackRowOf(e.target), focusJackRow);
+    cableLayer.setLift(e.target instanceof Element && e.target.closest(".vc-drive-pinned") !== null);
   });
-  root.addEventListener("pointerleave", () => setLitJackRows(null, focusJackRow));
+  root.addEventListener("pointerleave", () => {
+    setLitJackRows(null, focusJackRow);
+    cableLayer.setLift(false);
+  });
   root.addEventListener("focusin", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.target)));
   root.addEventListener("focusout", (e) => setLitJackRows(hoverJackRow, jackRowOf(e.relatedTarget)));
 

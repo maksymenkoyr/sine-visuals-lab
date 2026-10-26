@@ -51,7 +51,8 @@
  * `color` so the bloom's currentColor resolves per cable.
  * deviceMenu.ts only ever sets onPress on the pinned group's real patch
  * sources: a preview cable and a display-only scene mix are decoration,
- * not something a press should edit.
+ * not something a press should edit. setLift gives every pinned cable that
+ * lift at once, for deviceMenu.ts while the pointer is on the pinned row.
  *
  * Resting the pointer on a pressable cable — still, for REVEAL_REST_MS —
  * scrolls its two ends into view (revealEnds): the signal's jack in the
@@ -184,6 +185,9 @@ export interface CableLayer {
    *  prefers-reduced-motion. */
   tick(dtSec: number): void;
   setVisible(v: boolean): void;
+  /** Every pinned cable takes the hover lift, as if the pointer were on it
+   *  (controlsTheme.ts's `.vc-cables-lift`). Survives recompute(). */
+  setLift(on: boolean): void;
   /** The cable a jack drag pulls (deviceMenu.ts): from `from`'s jack to the pointer at (x, y), dashed, drawn over every other cable; null removes it. Survives recompute(). */
   setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void;
   /** The knot layer (cableKnots.ts), its own element for `document.body`. */
@@ -715,6 +719,9 @@ export function createCableLayer(): CableLayer {
         offsets.set(f.key, next);
         f.el.setAttribute("stroke-dashoffset", next.toFixed(2));
       }
+    },
+    setLift(on) {
+      svg.classList.toggle("vc-cables-lift", on);
     },
     setVisible(v) {
       svg.style.display = v ? "" : "none";
