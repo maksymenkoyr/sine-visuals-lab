@@ -39,12 +39,14 @@
  * is what makes a thin cable easy to hit) and a plug at each end (plugEl,
  * bindPlug), on the stub just out from the jack and the port. A click on the
  * stroke opens the cable's knot (a cable without one does nothing), and a
- * click on a plug unplugs. A pull unplugs from anywhere on the cable once it
- * goes PULL_OUT_PX from where it was pressed; a shorter pull puts it back. A
- * pulled plug follows the pointer and the rest of the cable stays put; a
- * cable pulled by its stroke bends through the pointer with both ends still
- * in, and lets go of the end nearer the press, on a split cable the pulled
- * half's (drawPull, pulledPathD). A mouse or pen press on the stroke is read
+ * click on a plug unplugs. A pull unplugs from anywhere on the cable, its
+ * knot included, once it goes PULL_OUT_PX from where it was pressed; a
+ * shorter pull puts it back. A pulled plug follows the pointer and the rest
+ * of the cable stays put; a cable pulled by its stroke bends through the
+ * pointer with both ends still in, and lets go of the end nearer the press,
+ * on a split cable the pulled half's (drawPull, pulledPathD); pulled by its
+ * knot, the knot follows the pointer and both halves with it (showPull,
+ * cableKnots.ts's drag). A mouse or pen press on the stroke is read
  * on its pointerup rather than its click, since it may turn into a pull
  * (attachHit). deviceMenu.ts wires onUnplug to the same patch toggle the
  * source line's × button takes. The hit stroke answers only in the open gap
@@ -714,18 +716,23 @@ export function createCableLayer(): CableLayer {
   // offset.
   const offsets = new Map<string, number>();
   const reveal: RevealState = { timer: 0, x: 0, y: 0 };
-  const knots = createCableKnotLayer();
+  // A knot sits on its cable, so a press on it pulls the cable as a press on
+  // the stroke does, the knot following the pointer (cableKnots.ts's drag).
+  const knots = createCableKnotLayer((key, e) => {
+    const w = wires.get(key);
+    if (w) startPull(w, nearerEnd(w.pt, w.portPt, e.clientX), "knot", e);
+  });
   let splits: Split[] = [];
   /** The pinned group's pressable cables, by CableSourceSpec key. */
   const wires = new Map<string, Wire>();
   /** The cable under the pointer (see this file's header); `timer` is a pending disarm. */
   let armed: { wire: Wire; timer: number } | null = null;
-  /** A press on a cable (`byStroke`) or a plug: a pull once it `moved`, last
-   *  drawn at `at`; `end` is what it lets go of. */
+  /** A press on a cable's plug, stroke or knot (`by`): a pull once it
+   *  `moved`, last drawn at `at`; `end` is what it lets go of. */
   let pull: {
     wire: Wire;
     end: CableEnd;
-    byStroke: boolean;
+    by: "plug" | "stroke" | "knot";
     pointerId: number;
     x0: number;
     y0: number;
@@ -813,6 +820,14 @@ export function createCableLayer(): CableLayer {
     placePlugs(w, at);
   }
 
+  /** Shows a held pull at `at`, or the cable back as it was for null: a
+   *  knot's pull moves the knot, whose halves follow it, anything else
+   *  redraws the cable. */
+  function showPull(p: NonNullable<typeof pull>, at: PullAt | null): void {
+    if (p.by === "knot") knots.drag(p.wire.key, at);
+    else drawPull(p.wire, at);
+  }
+
   /** A plug's press target: arms its cable, says what it does, and starts a pull. */
   function bindPlug(w: Wire, end: CableEnd): void {
     const hit = rectEl("vc-cable-plug-hit", PLUG_HIT_IN_PX + PLUG_HIT_OUT_PX, PLUG_HIT_CROSS_PX, "transparent");
@@ -824,15 +839,16 @@ export function createCableLayer(): CableLayer {
       tip = showTooltipAt(p.x, p.y - PLUG_HIT_CROSS_PX / 2, w.src.color, [w.src.label ? `Click or pull to unplug ${w.src.label}` : "Click or pull to unplug"]);
     });
     hit.addEventListener("pointerleave", () => disarmSoon(w));
-    hit.addEventListener("pointerdown", (e) => startPull(w, end, false, e));
+    hit.addEventListener("pointerdown", (e) => startPull(w, end, "plug", e));
     w.plugs[end].append(hit);
   }
 
-  function startPull(w: Wire, end: CableEnd, byStroke: boolean, e: PointerEvent): void {
+  function startPull(w: Wire, end: CableEnd, by: "plug" | "stroke" | "knot", e: PointerEvent): void {
     if (e.button !== 0 || e.pointerType === "touch" || pull) return;
-    // As the hit stroke's mousedown: a press on a cable never moves focus.
+    // As the hit stroke's mousedown: a press on a cable never moves focus,
+    // and a pull across the page never selects its text.
     e.preventDefault();
-    pull = { wire: w, end, byStroke, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, at: null };
+    pull = { wire: w, end, by, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, at: null };
     window.addEventListener("pointermove", onPullMove);
     window.addEventListener("pointerup", onPullUp);
     window.addEventListener("pointercancel", onPullCancel);
@@ -848,10 +864,13 @@ export function createCableLayer(): CableLayer {
       p.moved = true;
       document.body.classList.add("vc-cable-pulling");
       hideTooltipIfShowing(tip);
+      // Pressed on its knot, the cable wasn't armed by a hover; light it now
+      // the press is a pull, never on a plain click that opens the knot.
+      if (p.by === "knot") arm(p.wire);
     }
-    p.at = { end: p.end, x: e.clientX, y: e.clientY, via: p.byStroke };
+    p.at = { end: p.end, x: e.clientX, y: e.clientY, via: p.by !== "plug" };
     p.wire.g.classList.toggle("vc-cable-loose", pullRelease(dx, dy, true) === "unplug");
-    drawPull(p.wire, p.at);
+    showPull(p, p.at);
   }
 
   function onPullUp(e: PointerEvent): void {
@@ -859,12 +878,13 @@ export function createCableLayer(): CableLayer {
     if (!p || e.pointerId !== p.pointerId) return;
     const outcome = pullRelease(e.clientX - p.x0, e.clientY - p.y0, p.moved);
     endPull();
-    if (outcome === "click" && p.byStroke) {
-      if (p.wire.split) knots.open(p.wire.key);
+    // A click on the stroke opens the knot here; a knot's own click opens it.
+    if (outcome === "click" && p.by !== "plug") {
+      if (p.by === "stroke" && p.wire.split) knots.open(p.wire.key);
       return;
     }
     if (outcome === "back") {
-      drawPull(p.wire, null);
+      showPull(p, null);
       settleArm(p.wire, e.clientX, e.clientY);
       return;
     }
@@ -893,7 +913,7 @@ export function createCableLayer(): CableLayer {
     const p = pull;
     if (!p) return;
     endPull();
-    drawPull(p.wire, null);
+    showPull(p, null);
     const last = p.at ?? { x: p.x0, y: p.y0 };
     settleArm(p.wire, last.x, last.y);
   }
@@ -1037,7 +1057,7 @@ export function createCableLayer(): CableLayer {
         /** A split cable's half pulls its own end; an unsplit cable the end
          *  nearer the press. */
         const on = (half: CableEnd | null): HitHandlers => ({
-          press: (e) => startPull(w, half ?? nearerEnd(pt, portPt, e.clientX), true, e),
+          press: (e) => startPull(w, half ?? nearerEnd(pt, portPt, e.clientX), "stroke", e),
           click: () => {
             if (w.split) knots.open(w.key);
           },
@@ -1103,11 +1123,13 @@ export function createCableLayer(): CableLayer {
         disarmNow();
       } else {
         pull.wire = w;
-        if (armed) armed.wire = w;
-        w.g.classList.add("vc-cable-armed");
+        if (armed) {
+          armed.wire = w;
+          w.g.classList.add("vc-cable-armed");
+        }
         if (pull.at) {
           w.g.classList.toggle("vc-cable-loose", pullRelease(pull.at.x - pull.x0, pull.at.y - pull.y0, true) === "unplug");
-          drawPull(w, pull.at);
+          showPull(pull, pull.at);
         }
       }
     }

@@ -11,6 +11,12 @@
  *    (deviceMenu.ts: the wire's Height, weight, modifier and Unplug).
  * One knot opens at a time; the others dim while it is open.
  *
+ * A closed knot sits on its cable, so a press on it can pull the cable too:
+ * the press goes to the layer's `onPress` (cableLayer.ts's startPull), and
+ * while that pull is held drag() keeps the knot at the pointer, at rest size,
+ * with the cable's halves following it. A press that moved never opens the
+ * knot.
+ *
  * HTML over the SVG, not SVG, because an open knot holds real controls. It
  * lives on `<body>`, outside `.vc-root`, for the same reason the cable layer
  * does: every card clips its overflow, and a knot sits over the gap between
@@ -80,6 +86,9 @@ export interface CableKnotLayer {
   setVisible(v: boolean): void;
   /** The knot's current (animated) geometry, or null when it has none. */
   geometry(key: string): CableKnotGeometry | null;
+  /** Holds a knot at `at` while its cable is pulled by it (see this file's
+   *  header); null lets it spring back onto its cable. */
+  drag(key: string, at: { x: number; y: number } | null): void;
 }
 
 const REST_PX = 18;
@@ -171,6 +180,10 @@ interface Knot {
   hoverPeek: boolean;
   cablePeek: boolean;
   focusPeek: boolean;
+  /** Where a pull by this knot holds it (drag), or null. */
+  dragAt: { x: number; y: number } | null;
+  /** The last press dragged the knot, so the click that ends it isn't an open. */
+  dragged: boolean;
   inRing: Float32Array;
   outRing: Float32Array;
   ringHead: number;
@@ -191,14 +204,16 @@ function glyphD(curve: readonly number[]): string {
   return d;
 }
 
-export function createCableKnotLayer(): CableKnotLayer {
+/** `onPress` gets a press on a closed knot, by the knot's key (see this
+ *  file's header). */
+export function createCableKnotLayer(onPress?: (key: string, e: PointerEvent) => void): CableKnotLayer {
   const layer = document.createElement("div");
   layer.className = "vc-knot-layer";
   const knots = new Map<string, Knot>();
   let openKey: string | null = null;
   let viewport = { w: window.innerWidth, h: window.innerHeight };
 
-  const isPeek = (k: Knot): boolean => openKey === null && (k.hoverPeek || k.cablePeek || k.focusPeek);
+  const isPeek = (k: Knot): boolean => openKey === null && !k.dragAt && (k.hoverPeek || k.cablePeek || k.focusPeek);
   const stateOf = (k: Knot): "rest" | "peek" | "open" => (openKey === k.key ? "open" : isPeek(k) ? "peek" : "rest");
 
   function openX(k: Knot): number {
@@ -220,8 +235,8 @@ export function createCableKnotLayer(): CableKnotLayer {
       k.h.to = k.openH;
       return;
     }
-    k.x.to = k.anchor.x;
-    k.y.to = k.anchor.y;
+    k.x.to = k.dragAt?.x ?? k.anchor.x;
+    k.y.to = k.dragAt?.y ?? k.anchor.y;
     k.w.to = st === "peek" ? PEEK_W_PX : REST_PX;
     k.h.to = st === "peek" ? PEEK_H_PX : REST_PX;
   }
@@ -279,6 +294,8 @@ export function createCableKnotLayer(): CableKnotLayer {
       hoverPeek: false,
       cablePeek: false,
       focusPeek: false,
+      dragAt: null,
+      dragged: false,
       inRing: new Float32Array(PEEK_RING),
       outRing: new Float32Array(PEEK_RING),
       ringHead: 0,
@@ -297,8 +314,8 @@ export function createCableKnotLayer(): CableKnotLayer {
       aim(k);
     });
     el.addEventListener("focus", () => {
-      // Keyboard focus only: a click focuses the knot too, and a click's
-      // peek should end when the pointer leaves, not on blur.
+      // Keyboard focus only: a tap focuses the knot too, and a tap's peek
+      // should end when the pointer leaves, not on blur.
       k.focusPeek = el.matches(":focus-visible");
       aim(k);
     });
@@ -306,8 +323,12 @@ export function createCableKnotLayer(): CableKnotLayer {
       k.focusPeek = false;
       aim(k);
     });
+    el.addEventListener("pointerdown", (e) => {
+      k.dragged = false;
+      if (openKey !== k.key) onPress?.(k.key, e);
+    });
     el.addEventListener("click", () => {
-      if (openKey !== k.key) open(k.key);
+      if (!k.dragged && openKey !== k.key) open(k.key);
     });
     el.addEventListener("keydown", (e) => {
       if (e.target === el && (e.key === "Enter" || e.key === " ") && openKey !== k.key) {
@@ -414,8 +435,8 @@ export function createCableKnotLayer(): CableKnotLayer {
         if (gapMoved) k.x.to = openX(k);
       } else {
         // A scroll moves the cable's middle: a knot at rest follows at once
-        // rather than springing after it.
-        if (settled(k.x) && settled(k.y)) {
+        // rather than springing after it. A dragged knot stays at the pointer.
+        if (!k.dragAt && settled(k.x) && settled(k.y)) {
           k.x = spring(p.anchor.x);
           k.y = spring(p.anchor.y);
           k.snapped = true;
@@ -544,6 +565,13 @@ export function createCableKnotLayer(): CableKnotLayer {
       const top = k.y.v - k.h.v / 2;
       const half = k.cableW.v / 2;
       return { cx: k.x.v, entryY: top + Math.min(k.h.v / 2, k.entryOff), left: k.x.v - half, right: k.x.v + half };
+    },
+    drag(key, at) {
+      const k = knots.get(key);
+      if (!k) return;
+      if (at) k.dragged = true;
+      k.dragAt = at ? { x: at.x, y: at.y } : null;
+      aim(k);
     },
   };
 }
