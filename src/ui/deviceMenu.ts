@@ -70,7 +70,7 @@ import {
 } from "./driveSources.ts";
 import { freshWireMod, wireModCurve, wireModIsIdle, type WireMod, type WireModState } from "../render/wireMod.ts";
 import { createWireModControls, type WireModControls } from "./wireModControls.ts";
-import { installRowHints } from "./rowHints.ts";
+import { focusWithoutHint, installRowHints } from "./rowHints.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
@@ -6531,7 +6531,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Keyboard users reach the panel with S: move into it (the first Tab-ring
     // control, where Tab would land), without scrolling the column. Read after
     // vc-open and syncToScene(), since ringElements() needs the laid-out rows.
-    ringElements()[0]?.focus({ preventScroll: true });
+    const first = ringElements()[0];
+    if (first) focusWithoutHint(first);
   }
 
   function close() {
