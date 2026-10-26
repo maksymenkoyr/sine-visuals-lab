@@ -5818,6 +5818,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const spec = specs[i];
       if (spec.item && claimedFamilies.has(spec.item.family)) continue;
       if (claimedKeys.has(spec.key)) continue;
+      if (spec.dev && !import.meta.env.DEV) continue;
       const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
       if (groupChanged) {
         hasGroups = true;
@@ -5833,7 +5834,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         if (!advancedBody) {
           if (!groupChanged && !first) sceneRows.appendChild(spacer());
           let count = 1;
-          for (let j = i + 1; j < specs.length && specs[j].advanced; j++) count++;
+          for (let j = i + 1; j < specs.length && specs[j].advanced; j++) if (!specs[j].dev || import.meta.env.DEV) count++;
           const noun = count === 1 ? "control" : "controls";
           const section = createAdvancedSection(
             `scene:${sceneId}:${spec.group ?? ""}:advanced`,

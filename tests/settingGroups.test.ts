@@ -121,4 +121,14 @@ describe("scene setting groups", () => {
       }
     }
   });
+
+  it("a dev setting is also advanced", () => {
+    // The dev server renders a dev row only through the advanced disclosure
+    // (SceneSetting.dev), so a dev row without `advanced` would sit inline.
+    for (const scene of listScenes()) {
+      for (const spec of scene.settings ?? []) {
+        if (spec.dev) expect(spec.advanced, `${scene.id}'s ${spec.key} is dev but not advanced`).toBe(true);
+      }
+    }
+  });
 });

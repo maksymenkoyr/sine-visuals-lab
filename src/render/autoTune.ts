@@ -389,6 +389,11 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number, alway
  *  public resolveSceneSetting below scales, and the macro recursion inside
  *  resolve() reads drivers through here so a param is never scaled twice. */
 function resolveUnscaled(sceneId: string, spec: SceneSetting): number {
+  if (!import.meta.env.DEV && spec.dev) {
+    const rest = settingDefault(sceneId, spec);
+    if (!spec.macro) return rest;
+    return computeMacroTarget(spec, resolveUnscaled(sceneId, spec.macro.driver), rest, settingDefault(sceneId, spec.macro.driver));
+  }
   return resolve(sceneId, spec, getSceneSetting(sceneId, spec));
 }
 

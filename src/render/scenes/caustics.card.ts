@@ -1,23 +1,23 @@
 // Caustics' card: what every page needs before the scene's code loads (src/render/lazyScene.ts).
-import type { PanelSection, Scene, SceneCard } from "../scene.ts";
+import type { Scene, SceneCard } from "../scene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../standout.ts";
-import { EFFECT_GRAIN, SHAPE_PLUCK, SPARKLE_EFFECTS, SPARKLE_PANEL_KEYS, SPARKLE_SHAPES } from "./causticsSparkle.ts";
+import { EFFECT_GRAIN, MODE_BASIC, SHAPE_PLUCK, SPARKLE_EFFECTS, SPARKLE_MODES, SPARKLE_SHAPES } from "./causticsSparkle.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "released", added: "2026-08-27" } as const;
 
-// The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
-// further down (density, brightness ceiling, grain, warp, spread, sustain —
-// all `advanced`, in the Look group) can name it directly as their `macro`
-// driver: a spec reference costs nothing extra to resolve and can't drift
-// out of sync with a key string. See their own leading comment further down
-// for what each sub-param actually does; this one just carries the auto
-// weights and stays the everyday slider.
+// The master sparkle knob. Defined outside SETTINGS so the sub-params
+// further down (the dev-only fine constants at the end of the Look group,
+// and Grain size) can name it directly as their `macro` driver: a spec
+// reference costs nothing extra to resolve and can't drift out of sync with
+// a key string. See their own leading comment further down for what each
+// sub-param actually does; this one just carries the auto weights and stays
+// the everyday slider.
 const SPARKLE: SceneSetting = {
   key: "sparkle",
-  label: "Treble sparkle",
-  description: "How strongly hats and cymbals act on the pool, through the sparkle effect picked above",
+  label: "Sparkle",
+  description: "How strongly hats and cymbals act on the pool, through the sparkle effect picked below",
   group: "Look",
   min: 0,
   max: 1,
@@ -30,10 +30,10 @@ const SPARKLE: SceneSetting = {
   // is Scene — see the sparkle block in extraUniforms. Used to have its own
   // continuous "Sparkle from line" dial blending toward the sensitivity
   // line; that's now Frequencies, a discrete alternative source on this
-  // same picker. Each edge starts the picked shape (causticsSparkle.ts).
+  // same picker. Each edge starts a hit, Basic or Adaptive (causticsSparkle.ts).
   // Not a hit driver: no standout detector, so its graph has no reach line,
-  // reaction dots or Reaction row. The built-in treble hit is still sized by
-  // the graded treble pulse, so a soft hat sparkles less than a hard one.
+  // reaction dots or Reaction row. Under Adaptive the built-in treble hit is
+  // sized by its stand-out, so a soft hat sparkles less than a hard one.
   drive: {
     default: "scene",
     sceneLabel: "Scene: treble hits + sustain wash",
@@ -310,10 +310,10 @@ const SETTINGS: SceneSetting[] = [
     label: "Fog",
     description: "How hazy and soft the ridges sit at rest, between beats",
     group: "Look",
-    // Fog and Fog pulse together own "the haze": one sets how hazy the
-    // ridges sit at rest, the other how much haze a beat adds on top — so
-    // they render in one shared colour family (see sceneSettings.ts's
-    // `family`).
+    // Fog, Fog pulse and Tighten all set the ridges' sharpness: how hazy
+    // they sit at rest, how much haze a beat adds on top, and how thin a hat
+    // snaps them — so they render in one shared colour family (see
+    // sceneSettings.ts's `family`).
     family: "Fog",
     min: 0,
     max: 1,
@@ -349,6 +349,21 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "feature.onset" },
   },
   {
+    key: "tighten",
+    label: "Tighten",
+    description: "How sharp and thin the filaments snap on each hat or cymbal hit, then relax",
+    group: "Look",
+    // The ridge sharpness Fog and Fog pulse set (FRAG's `sharp`), pushed the
+    // other way: a beat hazes it softer, a hat snaps it thinner.
+    family: "Fog",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0, // keeps the default look
+    // Taste, so no auto table (same reasoning as causticDensity).
+    drive: { default: "anim.highOnset" },
+  },
+  {
     key: "flash",
     label: "Beat flash",
     description: "Overall brightness punch on each beat — pick Level instead of Any hit for a long loud stretch to stay lit rather than flashing once",
@@ -364,6 +379,18 @@ const SETTINGS: SceneSetting[] = [
     // now a discrete alternative source (Level) on this same picker
     // instead of a second setting.
     drive: { default: "feature.onset" },
+  },
+  {
+    key: "flare",
+    label: "Flare",
+    description: "How hard the brightest crests burn white on each hat or cymbal hit; dim water stays dim",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0, // keeps the default look
+    // Taste, so no auto table (same reasoning as causticDensity).
+    drive: { default: "anim.highOnset" },
   },
   {
     key: "levelGlow",
@@ -410,28 +437,55 @@ const SETTINGS: SceneSetting[] = [
     options: ["Shades", "Shades + accent", "Rainbow"],
   },
   SPARKLE,
-  // The two picks and their own dials (causticsSparkle.ts's header). The
-  // panel's Sparkle section (PANEL below) shows these with a preview of the
-  // shape, mounting only the rows the picked effect and shape use, so they
-  // never appear in the flat list. Time and count dials opt out of the
-  // Master card's Scale: it would stretch a hit's length or change how fast
-  // a Bell trembles, not how much sparkle there is.
   {
-    key: "sparkleEffect",
+    key: "sparkleFx",
     label: "Sparkle effect",
-    description: "What a treble hit does to the pool: Grain, Rings and Bloom add light on top, the rest change the filaments themselves",
+    description: "What a treble hit does to the pool: Grain glints on the crests, Prism splits the filaments into colour, Run sends light along them",
     group: "Look",
     min: 0,
     max: SPARKLE_EFFECTS.length - 1,
     step: 1,
     default: EFFECT_GRAIN, // the glints this scene always had
     type: "enum",
+    // A new key, not "sparkleEffect": that one's saved indexes pointed into
+    // a longer list, and an old Prism would land on another effect.
     options: SPARKLE_EFFECTS,
   },
   {
-    key: "sparkleShape",
+    key: "sparkleGrain",
+    label: "Grain size",
+    description: "How coarse each Grain glint is; Prism and Run don't use it",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.11, // 0.5 on this dial was the old fixed noise scale of 38.0
+    // Left off the master: glint size reads as a taste choice, not an
+    // intensity one, and tying it to SPARKLE would make "stronger" also
+    // silently resize every glint.
+    macro: { driver: SPARKLE, weight: 0 },
+  },
+  {
+    key: "sparkleAdapt",
     label: "Sparkle shape",
-    description: "How the effect moves over time after each hit — the preview draws it",
+    description:
+      "Basic: every hit flashes and fades the same way. Adaptive: the music shapes each hit — busy hats strobe, sparse ones glow on, accents flare and ghost notes fade, and treble that holds on (a cymbal wash, a held synth) trembles",
+    group: "Look",
+    min: 0,
+    max: SPARKLE_MODES.length - 1,
+    step: 1,
+    default: MODE_BASIC,
+    type: "enum",
+    options: SPARKLE_MODES,
+  },
+  // Dev-only from here (SceneSetting.dev): the Basic shape's pick and dials,
+  // then the fine constants under the Sparkle knob. Time and count dials opt
+  // out of the Master card's Scale: it would stretch a hit's length or
+  // change how fast a Bell trembles, not how much sparkle there is.
+  {
+    key: "sparkleShape",
+    label: "Basic shape",
+    description: "The curve every hit plays while Sparkle shape is Basic",
     group: "Look",
     min: 0,
     max: SPARKLE_SHAPES.length - 1,
@@ -439,11 +493,13 @@ const SETTINGS: SceneSetting[] = [
     default: SHAPE_PLUCK,
     type: "enum",
     options: SPARKLE_SHAPES,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleLength",
     label: "Length",
-    description: "How long each hit's effect lasts, in seconds",
+    description: "How long each Basic hit lasts, in seconds",
     group: "Look",
     min: 0.15,
     max: 2.5,
@@ -452,27 +508,33 @@ const SETTINGS: SceneSetting[] = [
     // ride (PLUCK_TAU's comment), so the default look stays as it was.
     default: 0.6,
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleVibration",
     label: "Vibration",
-    description: "How strongly a Bell hit trembles",
+    description: "How strongly a Bell hit, or an Adaptive ringing hit, trembles",
     group: "Look",
     min: 0,
     max: 1,
     step: 0.01,
     default: 0.5,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleSpeed",
     label: "Speed",
-    description: "How many times a second a Bell hit trembles. A 60 Hz screen shows at most 30; faster reads as a strobe",
+    description: "How many times a second a Bell or Adaptive tremble shakes. A 60 Hz screen shows at most 30; faster reads as a strobe",
     group: "Look",
     min: 12,
     max: 60,
     step: 1,
     default: 39,
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleVibDecay",
@@ -484,6 +546,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.01,
     default: 0.5,
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleBounces",
@@ -495,6 +559,8 @@ const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 4,
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleAttack",
@@ -506,6 +572,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.01,
     default: 0, // at once, as the shapes were first built
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleDecay",
@@ -517,6 +585,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.01,
     default: 0.5, // each shape's own fade (causticsSparkle.ts's SparkleShapeParams.decay)
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleRise",
@@ -528,6 +598,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.01,
     default: 0.75,
     masterScale: false,
+    advanced: true,
+    dev: true,
   },
   {
     key: "sparkleRelease",
@@ -539,35 +611,15 @@ const SETTINGS: SceneSetting[] = [
     step: 0.01,
     default: 0.5, // the cut Swell was first built with
     masterScale: false,
-  },
-  {
-    key: "sparkleRingWidth",
-    label: "Sparkle ring width",
-    description: "How thick each ring Rings strikes is, against Spot size",
-    group: "Look",
-    min: 0.04,
-    max: 0.4,
-    step: 0.01,
-    default: 0.12,
-  },
-  {
-    key: "sparkleSize",
-    label: "Spot size",
-    description: "How far each spot Rings or Bloom strikes spreads",
-    group: "Look",
-    min: 0.03,
-    max: 0.2,
-    step: 0.005,
-    default: 0.08,
+    advanced: true,
+    dev: true,
   },
   // The constants that used to be hardcoded on the sparkle line in FRAG —
-  // how bright, how many, how fine, how far the glints spread, and whether
+  // how bright, how many, how far the glints spread, how warped, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
   // Each tracks SPARKLE as a macro: dragging the master knob moves them all
   // together, and each snaps to manual (stops following) the moment it's
-  // touched directly, same as any auto-capable setting. Kept `advanced` —
-  // real, but not worth doubling the Look group's row count for settings
-  // most people will only ever move via the master.
+  // touched directly, same as any auto-capable setting.
   {
     key: "sparkleBright",
     label: "Sparkle brightness",
@@ -578,6 +630,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1, // 0.5 on this dial was the old fixed 1.5x gain (see the *3.0 in FRAG)
     advanced: true,
+    dev: true,
     macro: { driver: SPARKLE, weight: 0.5 },
   },
   {
@@ -590,22 +643,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.52, // 0.5 on this dial was the old fixed pow() exponent of 8.0
     advanced: true,
+    dev: true,
     macro: { driver: SPARKLE, weight: 0.35 },
-  },
-  {
-    key: "sparkleGrain",
-    label: "Sparkle grain",
-    description: "How coarse each glint is",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.11, // 0.5 on this dial was the old fixed noise scale of 38.0
-    advanced: true,
-    // Left off the master: glint size reads as a taste choice, not an
-    // intensity one, and tying it to SPARKLE would make "stronger" also
-    // silently resize every glint.
-    macro: { driver: SPARKLE, weight: 0 },
   },
   {
     key: "sparkleWarp",
@@ -617,6 +656,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0, // -> no extra warp: bit-for-bit the old glint sampling until touched
     advanced: true,
+    dev: true,
     // Same reasoning as sparkleGrain: a shape choice, not an intensity one.
     macro: { driver: SPARKLE, weight: 0 },
   },
@@ -630,6 +670,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.73, // 0.4 on this dial was the old fixed crest-gate smoothstep(0.15, 0.6, acc)
     advanced: true,
+    dev: true,
     macro: { driver: SPARKLE, weight: 0.2 },
   },
   {
@@ -642,19 +683,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.03, // 0 on this dial is glints following only the onset pulse — the behavior before this dial existed
     advanced: true,
+    dev: true,
     macro: { driver: SPARKLE, weight: 0.3 },
-  },
-];
-
-// The Scene card's Sparkle section (src/ui/widgets/causticsSparkle.ts): the
-// effect and shape picks, a preview of the shape, Treble sparkle, and the
-// rows the picks use.
-const PANEL: readonly PanelSection[] = [
-  {
-    widget: "causticsSparkle",
-    title: "Sparkle",
-    hint: "What a treble hit does to the pool, and how that moves after the hit. The preview plays one hit on loop.",
-    settings: SPARKLE_PANEL_KEYS,
   },
 ];
 
@@ -662,7 +692,6 @@ export const card: SceneCard = {
   id: "caustics",
   name: "Caustics",
   settings: SETTINGS,
-  panel: PANEL,
 };
 
 export const loadBody = (): Promise<Scene> => import("./caustics.ts").then((m) => m.causticsScene);

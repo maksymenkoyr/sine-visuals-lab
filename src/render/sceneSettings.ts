@@ -114,6 +114,13 @@ export interface SceneSetting {
    *  where doubling every group's slider count would drown out the settings
    *  people actually reach for. */
   advanced?: boolean;
+  /** Only on the dev server (`import.meta.env.DEV`): there it renders in
+   *  the advanced disclosure, so set `advanced` too (tests/settingGroups.test.ts
+   *  checks). A production build shows no row and resolves the setting as if
+   *  it was never touched (autoTune.ts's resolveUnscaled), so a value stored
+   *  on the dev server, or before the row went dev-only, can't stick where
+   *  there is no control to change it. */
+  dev?: boolean;
   /** The live signals this setting's effect is driven by — see
    *  src/render/signals.ts (SignalLink's own doc comment there covers the
    *  `activeWhen` shape). Purely descriptive: the device menu uses it to

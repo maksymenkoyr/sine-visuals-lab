@@ -1,0 +1,95 @@
+<title>Sparkle Basic vs Adaptive</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Two takes of the same song, Basic left and Adaptive right, played in step. Dark only, like the app. */
+:root {
+  color-scheme: dark;
+  --bg: #0e0c14;
+  --panel: #18151f;
+  --line: #2e2939;
+  --fg: #ebe7f2;
+  --dim: #a39cb2;
+  --violet: #c3a5f9;
+  --sky: #59bbfb;
+  --f-label: 'Chakra Petch', system-ui, sans-serif;
+  --f-mono: 'Share Tech Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 var(--f-label);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+main { max-width: 1400px; margin: 0 auto; display: grid; gap: 16px; }
+h1 { margin: 0; font-size: 24px; font-weight: 600; }
+p { margin: 0; color: var(--dim); max-width: 75ch; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 700px) { .pair { grid-template-columns: 1fr; } }
+figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
+figcaption { font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; }
+figcaption.basic { color: var(--violet); }
+figcaption.adaptive { color: var(--sky); }
+video { width: 100%; max-width: 100%; aspect-ratio: 16 / 9; display: block; background: #000; border-radius: 8px; border: 1px solid var(--line); }
+.bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+button {
+  font: 600 14px var(--f-label); color: var(--bg); background: var(--violet);
+  border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer;
+}
+button:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.t { font-family: var(--f-mono); color: var(--dim); font-variant-numeric: tabular-nums; }
+table { border-collapse: collapse; font-family: var(--f-mono); font-size: 14px; }
+td, th { padding: 4px 14px 4px 0; text-align: left; border-bottom: 1px solid var(--line); }
+th { color: var(--dim); font-weight: 400; }
+.scroll { overflow-x: auto; }
+</style>
+
+<main>
+  <h1>Sparkle: Basic vs Adaptive</h1>
+  <p>Caustics on Billie Jean through the mic, Sparkle at 1, everything else at its default. Left, Basic: every treble hit plays the same 0.6 s flash. Right, Adaptive: hits that stand out flare bigger and last longer, quiet ones barely glint, and held treble trembles.</p>
+  <div class="bar">
+    <button type="button" id="play">Play both</button>
+    <span class="t" id="time">0.0 s</span>
+  </div>
+  <div class="pair">
+    <figure><figcaption class="basic">Basic</figcaption><video id="a" src="basic.webm" muted playsinline preload="auto"></video></figure>
+    <figure><figcaption class="adaptive">Adaptive</figcaption><video id="b" src="adaptive.webm" muted playsinline preload="auto"></video></figure>
+  </div>
+  <div class="scroll">
+    <table>
+      <tr><th>Measured on the same song, other reactions off</th><th>Basic</th><th>Adaptive</th></tr>
+      <tr><td>Glint detail, average</td><td>3.86</td><td>3.33</td></tr>
+      <tr><td>Weakest flashes (p10)</td><td>5.3</td><td>2.0</td></tr>
+      <tr><td>Strongest flashes (p90)</td><td>6.7</td><td>8.1</td></tr>
+      <tr><td>Flash-to-flash spread</td><td>0.09</td><td>0.45</td></tr>
+    </table>
+  </div>
+</main>
+
+<script>
+(() => {
+  // Each take's mic started this many seconds into its video; both start here once settled.
+  const MIC_AT = { a: 1.23, b: 1.11 };
+  const SETTLE = 6;
+  const a = document.getElementById("a");
+  const b = document.getElementById("b");
+  const time = document.getElementById("time");
+  const seekStart = () => {
+    a.currentTime = MIC_AT.a + SETTLE;
+    b.currentTime = MIC_AT.b + SETTLE;
+  };
+  for (const v of [a, b]) v.addEventListener("loadedmetadata", seekStart, { once: true });
+  document.getElementById("play").addEventListener("click", () => {
+    seekStart();
+    Promise.all([a.play(), b.play()]).catch(() => {});
+  });
+  a.addEventListener("timeupdate", () => {
+    time.textContent = `${Math.max(0, a.currentTime - MIC_AT.a).toFixed(1)} s`;
+    if (Math.abs(a.currentTime - MIC_AT.a - (b.currentTime - MIC_AT.b)) > 0.08) b.currentTime = a.currentTime - MIC_AT.a + MIC_AT.b;
+  });
+  a.addEventListener("ended", () => b.pause());
+})();
+</script>

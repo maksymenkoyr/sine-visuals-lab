@@ -1,0 +1,456 @@
+<title>Laconic Sparkle</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Chakra+Petch:wght@500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: one reading column; a before/after pair of panel cards, then a live three-lane strip. Dark only, like the app panel it mocks. */
+:root {
+  color-scheme: dark;
+  --bg: #0e0c14;
+  --glass: #18151f;
+  --glass-2: #201c2a;
+  --line: #2e2939;
+  --fg: #ebe7f2;
+  --dim: #a39cb2;
+  --faint: #6d6680;
+  --violet: #c3a5f9;
+  --amber: #f9b96c;
+  --sky: #59bbfb;
+  --teal: #4dd4c0;
+  --red: #f08a8a;
+  --fogfam: #8ea2ff;
+  --f-label: 'Chakra Petch', system-ui, sans-serif;
+  --f-mono: 'Share Tech Mono', ui-monospace, monospace;
+  --f-body: 'Atkinson Hyperlegible', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+main { max-width: 1040px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--f-label); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: 0.01em; }
+h1 { font-size: 30px; }
+h2 { font-size: 21px; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--dim); font-weight: 500; }
+p { margin: 0; max-width: 66ch; }
+.lede { color: var(--dim); }
+header { display: grid; gap: 8px; }
+section { display: grid; gap: 16px; }
+a { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+
+/* Before / after */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+@media (max-width: 760px) { .pair { grid-template-columns: 1fr; } }
+.col { display: grid; gap: 10px; min-width: 0; }
+.colhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.count { font-family: var(--f-mono); color: var(--dim); font-size: 14px; }
+.count b { color: var(--fg); font-weight: 400; font-size: 18px; }
+.card {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px 14px;
+  display: grid;
+  gap: 2px;
+}
+.card .title {
+  font-family: var(--f-label); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--violet); padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 6px;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(84px, 9.5em) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 3px 0;
+}
+.row .lab { font-family: var(--f-label); font-size: 13px; color: var(--fg); min-width: 0; }
+.row .ctl { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.track { flex: 1; height: 4px; border-radius: 2px; background: var(--line); position: relative; min-width: 40px; }
+.track i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--violet); }
+.track.fog i { background: var(--fogfam); }
+.val { font-family: var(--f-mono); font-size: 13px; color: var(--dim); width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  font-family: var(--f-label); font-size: 11.5px; padding: 2px 7px; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--dim); background: var(--glass-2);
+}
+.chip.on { color: var(--bg); background: var(--violet); border-color: var(--violet); }
+.chip.cut { text-decoration: line-through; color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+.chip.out { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 50%, transparent); }
+.pill { font-family: var(--f-mono); font-size: 11px; color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: 999px; padding: 0 7px; white-space: nowrap; }
+.tag { font-family: var(--f-label); font-size: 10.5px; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 3px; white-space: nowrap; justify-self: end; }
+.t-keep { color: var(--violet); background: color-mix(in srgb, var(--violet) 14%, transparent); }
+.t-auto { color: var(--sky); background: color-mix(in srgb, var(--sky) 14%, transparent); }
+.t-fold { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.t-gone { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.t-out { color: var(--teal); background: color-mix(in srgb, var(--teal) 14%, transparent); }
+.t-new { color: var(--teal); background: color-mix(in srgb, var(--teal) 14%, transparent); }
+.row.gone .lab { color: var(--faint); text-decoration: line-through; }
+.preview {
+  grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px;
+  padding: 6px 0;
+}
+.preview svg { width: 100%; height: 46px; display: block; background: var(--glass-2); border-radius: 6px; }
+.hint { grid-column: 1 / -1; font-size: 12.5px; color: var(--faint); padding: 2px 0 6px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.fold { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.fold .sub { font-family: var(--f-label); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); padding: 2px 0 2px; }
+.others { font-size: 13px; color: var(--dim); line-height: 1.6; }
+.others .tag { margin-left: 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--dim); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.famline { display: flex; align-items: center; gap: 8px; }
+.fam { width: 3px; align-self: stretch; border-radius: 2px; background: var(--fogfam); }
+.newbadge { font-family: var(--f-label); font-size: 10px; color: var(--teal); letter-spacing: 0.08em; }
+
+/* Demo */
+.demo { background: var(--glass); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button {
+  font: 500 13px var(--f-label); color: var(--dim); background: var(--glass-2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { color: var(--bg); background: var(--violet); border-color: var(--violet); }
+.seg button:hover { border-color: var(--violet); }
+.lane { display: grid; grid-template-columns: 9.5em 1fr 56px; gap: 12px; align-items: center; }
+@media (max-width: 560px) { .lane { grid-template-columns: 1fr 48px; } .lane .lanelab { grid-column: 1 / -1; } }
+.lanelab { font-family: var(--f-label); font-size: 13px; display: grid; gap: 1px; }
+.lanelab small { font-family: var(--f-mono); font-size: 11.5px; color: var(--dim); }
+.lane canvas { width: 100%; height: 74px; display: block; background: var(--glass-2); border-radius: 6px; min-width: 0; }
+.glow { width: 100%; aspect-ratio: 1; border-radius: 8px; background: #08070c; position: relative; overflow: hidden; max-width: 100%; }
+.glow i { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, #fff 0, var(--violet) 22%, transparent 68%); opacity: 0; }
+.glowcap { font-size: 11px; color: var(--faint); text-align: center; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font-family: var(--f-mono); font-size: 13px; color: var(--dim); }
+.readout b { color: var(--fg); font-weight: 400; }
+.rule { display: grid; gap: 10px; }
+.rule ol { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; max-width: 70ch; }
+.rule li::marker { font-family: var(--f-mono); color: var(--sky); }
+.note { font-size: 13.5px; color: var(--dim); max-width: 70ch; }
+
+/* Calls */
+.calls { background: var(--glass); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; }
+.calls ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; max-width: 72ch; }
+.calls li::marker { font-family: var(--f-mono); color: var(--violet); }
+code { font-family: var(--f-mono); font-size: 0.92em; color: var(--fg); background: var(--glass-2); padding: 0 4px; border-radius: 3px; }
+</style>
+
+<main>
+  <header>
+    <h1>Laconic Sparkle</h1>
+    <p class="lede">An idea for Caustics' Sparkle section, on top of the cleanup in issue #713. On the left is today's section, each row tagged with what happens to it. On the right is the slim version. Below that is how the scene would pick each hit's shape, running live.</p>
+  </header>
+
+  <section aria-labelledby="h-panel">
+    <h2 id="h-panel">The section, before and after</h2>
+    <div class="legend" aria-label="What the tags mean">
+      <span><span class="tag t-keep">stays</span> kept as is</span>
+      <span><span class="tag t-auto">scene picks</span> decided for each hit</span>
+      <span><span class="tag t-fold">follows Sparkle</span> the row goes, Sparkle drives it</span>
+      <span><span class="tag t-out">own slider</span> moves out, #713</span>
+      <span><span class="tag t-gone">goes</span> removed</span>
+    </div>
+    <div class="pair">
+      <div class="col">
+        <div class="colhead"><h3>Today, Grain + Pluck picked</h3><span class="count"><b>20</b> settings</span></div>
+        <div class="card" aria-label="Today's Sparkle section">
+          <div class="title">Sparkle</div>
+          <div class="row"><span class="lab">Sparkle effect</span>
+            <span class="ctl chips">
+              <span class="chip on">Grain</span><span class="chip cut">Rings</span><span class="chip cut">Bloom</span><span class="chip out">Flare</span><span class="chip out">Tighten</span><span class="chip cut">Shimmer</span><span class="chip">Prism</span><span class="chip">Run</span>
+            </span><span class="tag t-keep">3 left</span></div>
+          <div class="row"><span class="lab">Sparkle shape</span>
+            <span class="ctl chips"><span class="chip on">Pluck</span><span class="chip">Bell</span><span class="chip">Swell</span><span class="chip">Bounce</span></span>
+            <span class="tag t-auto">scene picks</span></div>
+          <div class="preview">
+            <svg viewBox="0 0 300 46" preserveAspectRatio="none" aria-label="Pluck curve preview">
+              <path id="pv" fill="none" stroke="#c3a5f9" stroke-width="1.6" d=""></path>
+            </svg>
+            <span class="tag t-gone">preview goes</span>
+          </div>
+          <div class="row"><span class="lab">Length</span><span class="ctl"><span class="track"><i style="width:19%"></i></span><span class="val">0.60</span></span><span class="tag t-auto">scene picks</span></div>
+          <div class="row"><span class="lab">Attack</span><span class="ctl"><span class="track"><i style="width:0%"></i></span><span class="val">0.00</span></span><span class="tag t-auto">scene picks</span></div>
+          <div class="row"><span class="lab">Hit decay</span><span class="ctl"><span class="track"><i style="width:50%"></i></span><span class="val">0.50</span></span><span class="tag t-auto">scene picks</span></div>
+          <div class="hint"><span>Grain: A fine grain flashes on the bright ridges. Pluck: Instant hit, exponential fade.</span><span class="tag t-gone">goes</span></div>
+          <div class="row"><span class="lab">Treble sparkle</span><span class="ctl"><span class="track"><i style="width:41%"></i></span><span class="val">0.41</span></span><span class="tag t-keep">named Sparkle</span></div>
+          <div class="row"><span class="lab">Sparkle density</span><span class="ctl"><span class="track"><i style="width:52%"></i></span><span class="val">0.52</span></span><span class="tag t-fold">follows Sparkle</span></div>
+          <div class="row"><span class="lab">Sparkle grain</span><span class="ctl"><span class="track"><i style="width:11%"></i></span><span class="val">0.11</span></span><span class="tag t-keep">named Grain size</span></div>
+          <div class="row"><span class="lab">Sparkle brightness</span><span class="ctl"><span class="track"><i style="width:100%"></i></span><span class="val">1.00</span></span><span class="tag t-fold">follows Sparkle</span></div>
+          <div class="fold">
+            <div class="sub">Advanced, in the card's list</div>
+            <div class="row gone"><span class="lab">Sparkle distortion</span><span class="ctl"><span class="track"><i style="width:0%"></i></span><span class="val">0.00</span></span><span class="tag t-gone">goes</span></div>
+            <div class="row"><span class="lab">Sparkle spread</span><span class="ctl"><span class="track"><i style="width:73%"></i></span><span class="val">0.73</span></span><span class="tag t-fold">follows Sparkle</span></div>
+            <div class="row"><span class="lab">Sparkle sustain</span><span class="ctl"><span class="track"><i style="width:3%"></i></span><span class="val">0.03</span></span><span class="tag t-fold">follows Sparkle</span></div>
+          </div>
+        </div>
+        <p class="others">Shown only for other picks: Vibration, Speed and Vibration decay (Bell), Bounces (Bounce), Rise and Release (Swell)<span class="tag t-auto">scene picks</span> · Spot size and Ring width (Rings, Bloom)<span class="tag t-gone">goes</span></p>
+      </div>
+
+      <div class="col">
+        <div class="colhead"><h3>The idea</h3><span class="count"><b>5</b> settings</span></div>
+        <div class="card" aria-label="Slim Sparkle section">
+          <div class="title">Sparkle</div>
+          <div class="row"><span class="lab">Sparkle</span><span class="ctl"><span class="track"><i style="width:41%"></i></span><span class="val">0.41</span></span><span class="pill">treble hits + wash</span></div>
+          <div class="row"><span class="lab">Effect</span><span class="ctl chips"><span class="chip on">Grain</span><span class="chip">Prism</span><span class="chip">Run</span></span><span></span></div>
+          <div class="row"><span class="lab">Grain size</span><span class="ctl"><span class="track"><i style="width:11%"></i></span><span class="val">0.11</span></span><span class="tag t-keep">Grain only</span></div>
+        </div>
+        <div class="card" aria-label="Where Flare and Tighten sit">
+          <div class="title">Elsewhere in the Scene card</div>
+          <div class="famline"><span class="fam" aria-hidden="true"></span>
+            <div style="flex:1;min-width:0">
+              <div class="row"><span class="lab">Fog</span><span class="ctl"><span class="track fog"><i style="width:57%"></i></span><span class="val">0.57</span></span><span></span></div>
+              <div class="row"><span class="lab">Fog pulse</span><span class="ctl"><span class="track fog"><i style="width:86%"></i></span><span class="val">0.86</span></span><span class="pill">beat</span></div>
+              <div class="row"><span class="lab">Tighten <span class="newbadge">NEW</span></span><span class="ctl"><span class="track fog"><i style="width:0%"></i></span><span class="val">0.00</span></span><span class="pill">treble hits</span></div>
+            </div>
+          </div>
+          <div class="row"><span class="lab">Beat flash</span><span class="ctl"><span class="track"><i style="width:75%"></i></span><span class="val">0.75</span></span><span class="pill">beat</span></div>
+          <div class="row"><span class="lab">Flare <span class="newbadge">NEW</span></span><span class="ctl"><span class="track"><i style="width:0%"></i></span><span class="val">0.00</span></span><span class="pill">treble hits</span></div>
+        </div>
+        <p class="note">Tighten sits in the Fog family because it moves the same ridge sharpness Fog pulse does. Fog pulse softens the lines on the beat, and Tighten thins them on a hat. Flare sits under Beat flash: both brighten, but Flare lifts only the brightest crests, on treble. Both start at 0, so the default look stays as it is.</p>
+        <p class="note">The section is plain rows. The custom Sparkle widget and its preview go, since with no shape left to choose there is no curve to preview.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-shape">
+    <h2 id="h-shape">How the scene picks the shape</h2>
+    <div class="rule">
+      <ol>
+        <li><b>Every hit starts as a Pluck</b>: it lands at once, then fades.</li>
+        <li><b>The length follows the gap between hats</b>: about 2.5 gaps, kept between 0.2 s and 0.6 s (today's default). Busy hats then stay separate flashes and don't smear into a steady glow.</li>
+        <li><b>A hit that rings on trembles like a Bell.</b> If the treble is still up 0.12 s after the hit, which happens with an open hat, a ride or a crash, the hit gets Bell's fast vibration. It trembles while the cymbal rings, and stops when the ring dies or the next hit lands.</li>
+        <li><b>Swell and Bounce are never picked.</b> Swell grows after the hit, so its peak lands late: the scene can't hear what's coming. Bounce repeats each hit like an echo, the look #508 already turned down.</li>
+      </ol>
+    </div>
+
+    <div class="demo">
+      <div class="seg" role="group" aria-label="Music">
+        <button type="button" id="s0" data-s="0" aria-pressed="true">Busy hats</button>
+        <button type="button" id="s1" data-s="1" aria-pressed="false">Sparse hats</button>
+        <button type="button" id="s2" data-s="2" aria-pressed="false">Ride + crash</button>
+        <button type="button" id="cyc" aria-pressed="true">Cycle</button>
+      </div>
+      <div class="lane">
+        <div class="lanelab">Treble<small id="pat">16ths, 124 BPM</small></div>
+        <canvas id="cTreble" aria-label="Treble level and hits"></canvas>
+        <div></div>
+      </div>
+      <div class="lane">
+        <div class="lanelab">Today<small>Pluck, 0.60 s, always</small></div>
+        <canvas id="cToday" aria-label="Today's sparkle curve"></canvas>
+        <div><div class="glow"><i id="gToday"></i></div><div class="glowcap">glints</div></div>
+      </div>
+      <div class="lane">
+        <div class="lanelab">Scene picks<small id="autoNow">Pluck, 0.30 s</small></div>
+        <canvas id="cAuto" aria-label="Sparkle curve with the scene's pick"></canvas>
+        <div><div class="glow"><i id="gAuto"></i></div><div class="glowcap">glints</div></div>
+      </div>
+      <div class="readout">
+        <span>Dims between hits: today <b id="dToday">–</b>, scene picks <b id="dAuto">–</b></span>
+        <span>100% means each hit flashes and goes fully dark again</span>
+      </div>
+    </div>
+    <p class="note">The music here is made up: hats on a 124 BPM grid, with a treble level that dies fast after a closed hat and rings on after a ride or crash. The curves use the scene's own Pluck and Bell maths. Still to measure on real songs before building: whether the treble level alone tells a ringing hit from a closed hat played over a ride.</p>
+  </section>
+
+  <section aria-labelledby="h-calls">
+    <div class="calls">
+      <h2 id="h-calls">Your calls</h2>
+      <p class="note">#713 already holds the rename, the three removals, and Flare and Tighten as sliders. These are new:</p>
+      <ol>
+        <li>The scene picks the shape by the rule above: Pluck, a length that follows the hats, and a Bell tremble on ringing hits. Swell and Bounce go.</li>
+        <li>Brightness, Density, Spread and Sustain lose their rows and follow Sparkle. They already move with it today, so the default look doesn't change.</li>
+        <li>Distortion goes. It is 0 by default and draws nothing until it's touched.</li>
+        <li>The section becomes plain rows: the custom widget and its preview go.</li>
+      </ol>
+      <p class="note">Answer with the numbers you want. They go into #713 as steps.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const BPM = 124, STEP = 60 / BPM / 4;
+  const PLUCK_TAU = 0.28, ATTACK_SEC = 0.008, END_FADE_FROM = 0.85;
+  const TODAY_LEN = 0.6;
+  // The proposed rule's numbers, as the page shows them in its list.
+  const GAPS_PER_LEN = 2.5, MIN_LEN = 0.2, MAX_LEN = 0.6, GAP_EMA = 0.35;
+  const RING_CHECK = 0.12, RING_HOLD = 0.6, RING_MAX = 1.5;
+  const VIB = 0.5, VIB_HZ = 39, VIB_IN = 0.015;
+  const WINDOW = 2.5, CYCLE_SEC = 7;
+  const SIT = [
+    { name: "16ths, 124 BPM", hit(k) { const a = [0.55, 0.7, 1.0, 0.7][k % 4]; return { size: a, tau: 0.04 }; } },
+    { name: "offbeat 8ths, 124 BPM", hit(k) { return k % 4 === 2 ? { size: 0.9, tau: 0.05 } : null; } },
+    { name: "ride on the beat, crash every 2 bars", hit(k) {
+        if (k % 4 !== 0) return null;
+        return k % 32 === 0 ? { size: 1.0, tau: 1.4 } : { size: 0.75, tau: 0.5 };
+      } },
+  ];
+
+  const smooth = (e0, e1, x) => { const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1); return t * t * (3 - 2 * t); };
+  const softCap = (s) => { const a = Math.abs(s); return a <= 1 ? s : Math.sign(s) * (1 + 0.5 * Math.tanh(a - 1)); };
+  function pluck(u, L) {
+    if (!(u >= 0) || u > L) return 0;
+    return (1 - Math.exp(-u / ATTACK_SEC)) * Math.exp(-u / (PLUCK_TAU * L)) * (1 - smooth(END_FADE_FROM * L, L, u));
+  }
+
+  let sit = 0, cycling = true, sitSince = 0;
+  let now = 0, nextStep = 0, gapEma = 0.5, lastHit = -1;
+  let hits = [];
+
+  function level(t) {
+    let m = 0;
+    for (const h of hits) { if (h.t > t) break; const v = h.size * Math.exp(-(t - h.t) / h.tau); if (v > m) m = v; }
+    return m;
+  }
+  // A hat that lands before the check takes over from this hit, so this one doesn't ring.
+  function rings(h) {
+    if (h.rings === undefined) {
+      if (h.next !== undefined && h.next <= h.t + RING_CHECK) h.rings = false;
+      else if (now >= h.t + RING_CHECK) h.rings = level(h.t + RING_CHECK) >= RING_HOLD * level(h.t);
+    }
+    return h.rings === true;
+  }
+  const cutAt = (h, t) => (h.next === undefined ? 1 : 1 - smooth(h.next, h.next + 0.03, t));
+  function todayAt(t) {
+    let s = 0;
+    for (const h of hits) { if (h.t > t) break; s += h.size * pluck(t - h.t, TODAY_LEN); }
+    return softCap(s);
+  }
+  function autoAt(t) {
+    let s = 0;
+    for (const h of hits) {
+      if (h.t > t) break;
+      const u = t - h.t;
+      s += h.size * pluck(u, h.len);
+      if (u > RING_CHECK && u < RING_MAX && rings(h) && cutAt(h, t) > 0) {
+        const v = u - RING_CHECK;
+        const still = Math.min(1, level(t) / Math.max(level(h.t), 1e-6));
+        s += h.size * VIB * still * Math.sin(2 * Math.PI * VIB_HZ * v) * (1 - Math.exp(-v / VIB_IN)) * (1 - smooth(0.85 * RING_MAX, RING_MAX, u)) * cutAt(h, t);
+      }
+    }
+    return softCap(s);
+  }
+
+  function advance(dt) {
+    now += dt;
+    if (cycling && now - sitSince > CYCLE_SEC) setSit((sit + 1) % SIT.length, true);
+    while (nextStep * STEP <= now) {
+      const k = nextStep++;
+      const spec = SIT[sit].hit(k);
+      if (!spec) continue;
+      const t = k * STEP;
+      if (lastHit >= 0) gapEma += GAP_EMA * (Math.min(t - lastHit, 1.0) - gapEma);
+      lastHit = t;
+      if (hits.length) hits[hits.length - 1].next = t;
+      hits.push({ t, size: spec.size, tau: spec.tau, len: Math.min(MAX_LEN, Math.max(MIN_LEN, GAPS_PER_LEN * gapEma)) });
+    }
+    const keep = now - WINDOW - RING_MAX - 0.5;
+    while (hits.length && hits[0].t < keep) hits.shift();
+  }
+
+  const canv = { treble: document.getElementById("cTreble"), today: document.getElementById("cToday"), auto: document.getElementById("cAuto") };
+  function fit(c) {
+    const r = c.getBoundingClientRect(), d = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    return { w, h, d };
+  }
+  const css = getComputedStyle(document.documentElement);
+  const col = (n) => css.getPropertyValue(n).trim();
+
+  function drawLane(c, fn, lo, hi, stroke, fill, marks) {
+    const { w, h, d } = fit(c);
+    const g = c.getContext("2d");
+    g.clearRect(0, 0, w, h);
+    const y = (v) => h - ((v - lo) / (hi - lo)) * h;
+    g.strokeStyle = col("--line"); g.lineWidth = 1 * d;
+    g.beginPath(); g.moveTo(0, y(0)); g.lineTo(w, y(0)); g.stroke();
+    g.setLineDash([3 * d, 4 * d]);
+    g.beginPath(); g.moveTo(0, y(1)); g.lineTo(w, y(1)); g.stroke();
+    g.setLineDash([]);
+    const t0 = now - WINDOW;
+    g.beginPath(); g.moveTo(0, y(0));
+    for (let x = 0; x <= w; x++) g.lineTo(x, y(fn(t0 + (x / w) * WINDOW)));
+    g.lineTo(w, y(0)); g.closePath();
+    g.fillStyle = fill; g.fill();
+    g.beginPath();
+    for (let x = 0; x <= w; x++) { const yy = y(fn(t0 + (x / w) * WINDOW)); x ? g.lineTo(x, yy) : g.moveTo(x, yy); }
+    g.strokeStyle = stroke; g.lineWidth = 1.4 * d; g.stroke();
+    if (marks) marks(g, w, h, d, t0);
+  }
+
+  function hitTicks(g, w, h, d, t0) {
+    g.fillStyle = col("--amber");
+    for (const hh of hits) { if (hh.t < t0) continue; const x = ((hh.t - t0) / WINDOW) * w; g.fillRect(x - d, h - 7 * d * hh.size, 2 * d, 7 * d * hh.size); }
+  }
+  function bellMarks(g, w, h, d, t0) {
+    g.font = `${10 * d}px 'Share Tech Mono', monospace`;
+    g.fillStyle = col("--sky");
+    for (const hh of hits) { if (hh.t < t0 || !rings(hh)) continue; const x = ((hh.t - t0) / WINDOW) * w; g.fillText("Bell", x + 3 * d, 12 * d); }
+  }
+
+  function depth(fn) {
+    const v = [];
+    for (let i = 0; i < 400; i++) v.push(Math.max(0, fn(now - 2 + (i / 400) * 2)));
+    v.sort((a, b) => a - b);
+    const p10 = v[40], p90 = v[360];
+    return p90 > 0.02 ? Math.round(((p90 - p10) / p90) * 100) + "%" : "–";
+  }
+
+  const vio = col("--violet"), sky = col("--sky"), amb = col("--amber");
+  const alpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+  let lastRead = -1;
+  function draw() {
+    drawLane(canv.treble, level, 0, 1.1, amb, alpha(amb, 0.18), hitTicks);
+    drawLane(canv.today, todayAt, -0.6, 1.5, vio, alpha(vio, 0.2));
+    drawLane(canv.auto, autoAt, -0.6, 1.5, sky, alpha(sky, 0.2), bellMarks);
+    document.getElementById("gToday").style.opacity = Math.min(1, Math.max(0, todayAt(now)) / 1.2).toFixed(3);
+    document.getElementById("gAuto").style.opacity = Math.min(1, Math.max(0, autoAt(now)) / 1.2).toFixed(3);
+    if (now - lastRead > 0.3 || lastRead < 0) {
+      lastRead = now;
+      document.getElementById("dToday").textContent = depth(todayAt);
+      document.getElementById("dAuto").textContent = depth(autoAt);
+      const last = hits[hits.length - 1];
+      const ringing = hits.some((h) => now - h.t < RING_MAX && rings(h) && cutAt(h, now) > 0 && level(now) > 0.15 * level(h.t));
+      if (last) document.getElementById("autoNow").textContent = `${ringing ? "Pluck + Bell" : "Pluck"}, ${last.len.toFixed(2)} s`;
+    }
+  }
+
+  function setSit(i, fromCycle) {
+    sit = i; sitSince = now;
+    document.getElementById("pat").textContent = SIT[i].name;
+    for (const b of document.querySelectorAll(".seg button[data-s]")) b.setAttribute("aria-pressed", String(Number(b.dataset.s) === i));
+    if (!fromCycle) { cycling = false; document.getElementById("cyc").setAttribute("aria-pressed", "false"); }
+    if (reduced) { prime(); draw(); }
+  }
+  function prime() { now = 0; nextStep = 0; gapEma = 0.5; lastHit = -1; hits = []; sitSince = 0; for (let i = 0; i < 180; i++) advance(1 / 60); lastRead = -1; }
+
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  for (const b of document.querySelectorAll(".seg button[data-s]")) b.addEventListener("click", () => setSit(Number(b.dataset.s), false));
+  document.getElementById("cyc").addEventListener("click", (e) => {
+    cycling = !cycling; e.currentTarget.setAttribute("aria-pressed", String(cycling)); sitSince = now;
+  });
+
+  const pv = document.getElementById("pv");
+  let dPath = "";
+  for (let x = 0; x <= 300; x += 2) { const t = (x / 300) * 0.8; dPath += `${x ? "L" : "M"}${x},${(42 - 36 * pluck(t, TODAY_LEN)).toFixed(1)}`; }
+  pv.setAttribute("d", dPath);
+
+  prime();
+  draw();
+  if (!reduced) {
+    let prev = performance.now();
+    const loop = (ts) => { advance(Math.min(0.05, (ts - prev) / 1000)); prev = ts; draw(); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+  new ResizeObserver(() => draw()).observe(canv.auto);
+})();
+</script>
