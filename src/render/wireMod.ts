@@ -22,7 +22,7 @@
  * `legacyNodeFrom` reads such a node, and driveStore.ts's
  * sanitizeDriveSetting does the conversion for both.
  */
-import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, windowReading, type GateFormula, type GateTrackerState } from "./gateWindow.ts";
+import { GATE_FORMULA_DEFAULT, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, windowReading, type GateFormula, type GateTrackerState } from "./gateWindow.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 
 /** Length's right end: the longest fall a wire's output can take, in seconds. */
@@ -208,4 +208,17 @@ export function stepWireMod(st: WireModState, mod: WireMod, dtSec: number, input
   }
   st.output = clamp01(y);
   return st.output;
+}
+
+/** The modifier's static transfer at input `x`, the input's peak taken as 1:
+ *  what the wire sends on for a held input once the peak has settled. Length
+ *  only shapes the fall over time, so it leaves the curve alone. */
+export function wireModCurve(mod: WireMod, x: number): number {
+  if (!mod.windowOn) return clamp01(x);
+  const s = mod.smoothOn ? mod.smoothness : 0;
+  // A first step at input 1 seeds the tracker's peak at 1 and sets its Min
+  // and Max lines from the modifier, the way stepWireMod's tracker sets them.
+  const tr = createGateTracker();
+  advanceGateTracker(tr, 0, 1, mod.min, mod.max, GATE_FORMULA_DEFAULT, s);
+  return clamp01(windowReading(tr, x, s, GATE_FORMULA_DEFAULT));
 }

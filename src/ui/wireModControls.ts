@@ -1,8 +1,9 @@
 /**
- * A wire's modifier controls in the wire panel (deviceMenu.ts's
- * buildSourceLine): a small graph of the wire's input and output, then
+ * A wire's modifier controls, in the wire panel (deviceMenu.ts's
+ * buildSourceLine) or in the open knot on its cable (buildKnotBody, in
+ * cableKnots.ts's layer): a small graph of the wire's input and output, then
  * Window (On/Off, Min and Max), Smoothness (On/Off) and Length, the fields of
- * src/render/wireMod.ts. The wire's Height stays on the wire's own line.
+ * src/render/wireMod.ts. The wire's Height is built beside them by the caller, not here.
  *
  * Every edit hands the whole modifier to `onChange` without a rebuild, since
  * a rebuild would tear out the slider being dragged. The graph keeps one
