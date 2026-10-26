@@ -645,6 +645,17 @@ body.vc-keys-reveal [data-keycap]::after {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
 }
+/* Hovering the pinned row glows it; deviceMenu.ts lifts its cables too (cableLayer.ts setLift).
+ * Mostly an inset glow: the card's overflow: hidden clips an outer one to a sliver. */
+@media (hover: hover) {
+  .vc-row.vc-drive-pinned:hover {
+    background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 11%, transparent);
+    box-shadow:
+      0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET}),
+      inset 0 0 22px color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 35%, transparent),
+      0 0 12px color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 50%, transparent);
+  }
+}
 /* Solo's eye (positionSoloEye): fixed on <body> just outside the pinned row's left
  * edge, in the pin's colour. The lids draw back (--open) while this setting is the
  * only thing shown. Click only; very dim at rest so it doesn't compete with the row. */
@@ -837,21 +848,22 @@ body.vc-keys-reveal [data-keycap]::after {
  * flow would vanish exactly while the cable is looked at). The bead lift is
  * motion-only: reduced motion draws the flow as a solid line, which whitening would
  * just recolour. Preview/scene-mix cables never grow a hit stroke, so they never
- * light up like this. */
+ * light up like this. .vc-cables-lift (cableLayer.ts setLift) lifts every pinned
+ * cable at once, while the pointer is on the pinned row. */
 .vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
 .vc-cable-g { transition: filter 0.15s ease; }
 .vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
 .vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-flow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-muted { transition: opacity 0.12s ease; }
-.vc-cable-g:hover { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
-.vc-cable-g:hover .vc-cable-core { stroke-width: 3; opacity: 1; }
-.vc-cable-g:hover .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
-.vc-cable-g:hover .vc-cable-flow { opacity: 1; }
+.vc-cable-g:hover, .vc-cables-lift .vc-cable-g { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
+.vc-cable-g:hover .vc-cable-core, .vc-cables-lift .vc-cable-g .vc-cable-core { stroke-width: 3; opacity: 1; }
+.vc-cable-g:hover .vc-cable-glow, .vc-cables-lift .vc-cable-g .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
+.vc-cable-g:hover .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .vc-cable-g:hover .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
+  .vc-cable-g:hover .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
 }
-.vc-cable-g:hover .vc-cable-muted { opacity: 0.8; }
+.vc-cable-g:hover .vc-cable-muted, .vc-cables-lift .vc-cable-g .vc-cable-muted { opacity: 0.8; }
 /* A pinned wire's knot (cableKnots.ts): just over the cables, under tooltips. Its
  * place and size are springs written inline per frame; only the fades are CSS. */
 .vc-knot-layer { position: fixed; inset: 0; pointer-events: none; z-index: 32; }
