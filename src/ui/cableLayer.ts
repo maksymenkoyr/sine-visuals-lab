@@ -36,29 +36,29 @@
  * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke over
  * it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
  * pointer-events:none, so only that stroke answers the pointer, and its width
- * is what makes a thin cable easy to hit) and a plug at each end (plugEl,
- * bindPlug), on the stub just out from the jack and the port. A click on the
- * stroke opens the cable's knot (a cable without one does nothing), and a
- * click on a plug unplugs. A pull unplugs from anywhere on the cable, its
- * knot included, once it goes PULL_OUT_PX from where it was pressed; a
- * shorter pull puts it back. A pulled plug follows the pointer and the rest
- * of the cable stays put; a cable pulled by its stroke bends through the
- * pointer with both ends still in, and lets go of the end nearer the press,
- * on a split cable the pulled half's (drawPull, pulledPathD); pulled by its
- * knot, the knot follows the pointer and both halves with it (showPull,
- * cableKnots.ts's drag). A mouse or pen press on the stroke is read
- * on its pointerup rather than its click, since it may turn into a pull
+ * is what makes a thin cable easy to hit) and a round × at each end (xEl,
+ * bindX), X_OUT_PX out from the jack's or the port's centre toward the other
+ * end and X_UP_PX above its row (xPoint). A click on the stroke opens the
+ * cable's knot (a cable without one does nothing), and a click on an ×
+ * unplugs that end. A pull unplugs from anywhere on the cable, its knot
+ * included, once it goes PULL_OUT_PX from where it was pressed; a shorter
+ * pull puts it back. A cable pulled by its stroke bends through the pointer
+ * with both ends still in, and lets go of the end nearer the press, on a
+ * split cable the pulled half's (drawPull, pulledPathD); pulled by its knot,
+ * the knot follows the pointer and both halves with it (showPull,
+ * cableKnots.ts's drag). A mouse or pen press on the stroke is read on its
+ * pointerup rather than its click, since it may turn into a pull
  * (attachHit). deviceMenu.ts wires onUnplug to the same patch toggle the
  * source line's × button takes. The hit stroke answers only in the open gap
  * between the cable's jack card and its port card (pressBandFor; a
  * `<clipPath>` per cable): the layer paints over every card, so a cable
  * crossing a card (Bass level's runs straight over Mid and Treble) would
  * otherwise take a press meant for the jack, fader or slider under it. The
- * plugs sit over those cards' edges, so they answer only while their cable
- * is armed.
+ * ×s sit over those cards' edges, so they show and answer only while their
+ * cable is armed, or lingering.
  *
  * Hovering a pressable cable arms it (arm, disarmSoon): its group takes
- * `.vc-cable-armed`, which shows and enables its plugs and carries the hover
+ * `.vc-cable-armed`, which shows and enables its ×s and carries the hover
  * lift (controlsTheme.ts — a neon-ish bloom in the cable's own colour, a
  * thicker core, a brighter glow, and the flow beads lightened so the signal
  * still visibly runs inside it), and the shared tooltip (tooltip.ts) says what
@@ -67,21 +67,25 @@
  * armed, every other cable's stroke stops answering (`.vc-cable-has-armed`):
  * a setting's cables all meet at its port and run within a few pixels of
  * each other for the last stretch before it, where whichever was drawn last
- * would otherwise take the pointer, and with it the port plug, from the cable
- * followed in. A leave disarms after ARM_GRACE_MS, so the pointer can cross
- * from the stroke to a plug that doesn't quite touch it. A touch never arms
- * or pulls: a tap on the stroke still opens the knot, and the knot's Unplug
- * unplugs.
+ * would otherwise take the pointer from the cable followed in. A leave
+ * disarms after ARM_GRACE_MS. The × floats above the cable, so the way to it
+ * from the middle of the cable crosses open space for far longer than that
+ * grace: a disarmed cable keeps its ×s drawn and pressable for X_LINGER_MS
+ * (`.vc-cable-x-linger`, one timer per layer that the next arm clears), and
+ * reaching one arms the cable again. With the pointer on an ×, the cable
+ * turns dashed (`.vc-cable-x-preview`), a preview of the unplug. A touch
+ * never arms or pulls, so it never shows an ×: a tap on the stroke still
+ * opens the knot, and the knot's Unplug unplugs.
  * deviceMenu.ts only ever sets onUnplug on the pinned group's real patch
  * sources: a preview cable and a display-only scene mix are decoration, not
  * something a press should edit.
  *
  * An unplug plays a short retract (playUnplug): a copy of the cable's core
- * runs back from the unplugged end into the other, a spark rings the socket
- * it left and the plug pops out. The copy lives in `ghosts`, which
- * recompute() never clears: the unplug's own rebuild lands a frame later,
- * and a rebuilt copy would restart its animation. deviceMenu.ts plays it for
- * every unplug of a drawn cable (its jack, the line's ×, the knot's Unplug).
+ * runs back from the unplugged end into the other, and a spark rings the
+ * socket it left. The copy lives in `ghosts`, which recompute() never
+ * clears: the unplug's own rebuild lands a frame later, and a rebuilt copy
+ * would restart its animation. deviceMenu.ts plays it for every unplug of a
+ * drawn cable (its jack, the line's ×, the knot's Unplug).
  * Reduced motion skips it.
  *
  * Resting the pointer on a pressable cable — still, for REVEAL_REST_MS —
@@ -185,9 +189,9 @@ export interface CableSourceSpec {
   /** Read every tick — flow speed rides this source's own live value.
    *  Unused for a preview cable (it never animates). */
   getValue: () => number;
-  /** Unplugs the source: a click or a pull on either of the cable's plugs
-   *  (see this file's header). When set, the cable is wrapped in a
-   *  `.vc-cable-g` group with a `.vc-cable-hit` stroke and two plugs that
+  /** Unplugs the source: a pull on the cable or a click on the × at either
+   *  end (see this file's header). When set, the cable is wrapped in a
+   *  `.vc-cable-g` group with a `.vc-cable-hit` stroke and two ×s that
    *  answer the pointer; when absent the paths stay plain and
    *  click-transparent. deviceMenu.ts's cableGroupFor only ever sets it on
    *  the pinned group's real patch sources. */
@@ -238,9 +242,9 @@ export interface CableLayer {
    *  CableSourceSpec key, from `end`; nothing for a cable not drawn. Call it
    *  before the patch edit that removes the cable. */
   playUnplug(sourceKey: string, end: CableEnd): void;
-  /** A plug is held, pulled or not yet (see this file's header). */
+  /** A cable is held, pulled or not yet (see this file's header). */
   pulling(): boolean;
-  /** Puts a held plug back, as letting go of a short pull does. */
+  /** Puts a held cable back, as letting go of a short pull does. */
   cancelPull(): void;
 }
 
@@ -265,24 +269,23 @@ const REVEAL_STILL_PX = 3;
  *  port lands clear of the edge rather than flush against it. */
 const REVEAL_MARGIN_PX = 40;
 
-/** How far out along its stub a plug's centre sits from its jack's or
- *  port's centre: clear of the jack's ring, so a plug never covers a jack. */
-const PLUG_INSET_PX = 14;
-/** The drawn sleeve, and its press target: the target reaches only a little
- *  back toward the socket, so it stays off the jack's ring, and further on
- *  along the cable; tall across it for an easy grab. */
-const PLUG_LEN_PX = 10;
-const PLUG_THICK_PX = 7;
-const PLUG_HIT_IN_PX = 6;
-const PLUG_HIT_OUT_PX = 12;
-const PLUG_HIT_CROSS_PX = 20;
-const PLUG_POP_PX = 8;
+/** Where an end's × sits (xPoint): out from its socket's centre toward the
+ *  other end, clear of the jack's ring, and up off the cable's row. */
+const X_OUT_PX = 14;
+const X_UP_PX = 15;
+/** The drawn ×, and its press target, wider for an easy click. */
+const X_R_PX = 7.5;
+const X_ARM_PX = 2.6;
+const X_HIT_R_PX = 12;
+/** How long a disarmed cable keeps its ×s (see this file's header): without
+ *  it, the × vanished mid-reach in the prototype. */
+const X_LINGER_MS = 450;
 const SPARK_R_PX = 6;
-/** Movement that turns a press on a plug into a pull, and how far a pull
+/** Movement that turns a press on a cable into a pull, and how far a pull
  *  must go to unplug when let go. */
 const PULL_START_PX = 4;
 const PULL_OUT_PX = 24;
-/** Room to cross from a cable's stroke to a plug that doesn't quite touch it. */
+/** Room to cross from one of a cable's strokes to the next, e.g. its knot. */
 const ARM_GRACE_MS = 120;
 /** When an unplug's retract is removed: well after controlsTheme.ts's
  *  .vc-cable-ghost animations have ended. */
@@ -426,11 +429,11 @@ function awayFromSocket(jack: { x: number }, port: { x: number }, end: CableEnd)
   return (port.x >= jack.x ? 1 : -1) * (end === "jack" ? 1 : -1);
 }
 
-/** Where a plug rests on the cable from `jack` to `port`: on the stub at
- *  `end`, out from its socket toward the other end. */
-export function plugPoint(jack: { x: number; y: number }, port: { x: number; y: number }, end: CableEnd): { x: number; y: number } {
+/** Where the × at `end` of the cable from `jack` to `port` sits: out from
+ *  its socket toward the other end, and above the socket's row. */
+export function xPoint(jack: { x: number; y: number }, port: { x: number; y: number }, end: CableEnd): { x: number; y: number } {
   const socket = end === "jack" ? jack : port;
-  return { x: socket.x + awayFromSocket(jack, port, end) * PLUG_INSET_PX, y: socket.y };
+  return { x: socket.x + awayFromSocket(jack, port, end) * X_OUT_PX, y: socket.y - X_UP_PX };
 }
 
 /** Which end a pull by the stroke of an unsplit cable lets go of: the one
@@ -440,7 +443,7 @@ export function nearerEnd(jack: { x: number }, port: { x: number }, x: number): 
 }
 
 /** The cable from `a` to `b` as `at` leaves it (see this file's header): a
- *  pulled plug ends at the pointer instead of in its socket, a pull by the
+ *  pulled end follows the pointer instead of staying in its socket, a pull by the
  *  stroke bends through the pointer, and no pull is the plain cable. Power's
  *  detour is for a port end in its socket, so only that keeps `avoidBand`. */
 export function pulledPathD(
@@ -454,13 +457,13 @@ export function pulledPathD(
   return at.end === "jack" ? cablePathD(at, b, avoidBand) : cablePathD(a, at, null);
 }
 
-/** A press on a cable or its plug becomes a pull once it moves this far
+/** A press on a cable becomes a pull once it moves this far
  *  from the press. */
 export function pullStarts(dx: number, dy: number): boolean {
   return Math.hypot(dx, dy) > PULL_START_PX;
 }
 
-/** What letting go of a pressed cable or plug does, from how far it is from
+/** What letting go of a pressed cable does, from how far it is from
  *  the press: a press that never became a pull is a click, and a pull
  *  unplugs only once it went PULL_OUT_PX. */
 export function pullRelease(dx: number, dy: number, moved: boolean): "click" | "unplug" | "back" {
@@ -487,7 +490,7 @@ function pathEl(cls: string, d: string, color: string): SVGPathElement {
 
 /** One drawn cable's own wrapper group — see this file's header. Holds
  *  the glow/core/flow (or flat) paths and, for a pressable source, the
- *  hit stroke and plugs that answer the pointer; `.vc-cable-armed` on it
+ *  hit stroke and ×s that answer the pointer; `.vc-cable-armed` on it
  *  (arm) carries the hover lift. The cable's own colour also rides the
  *  group as CSS `color`, so the hover bloom's currentColor drop-shadow
  *  (controlsTheme.ts) resolves per cable without that rule ever naming
@@ -499,26 +502,28 @@ function groupEl(color: string): SVGGElement {
   return g;
 }
 
-/** A `w` × `h` rect centred on its group's origin. */
-function rectEl(cls: string, w: number, h: number, fill: string): SVGRectElement {
-  const r = document.createElementNS(NS, "rect");
-  r.setAttribute("class", cls);
-  r.setAttribute("x", String(-w / 2));
-  r.setAttribute("y", String(-h / 2));
-  r.setAttribute("width", String(w));
-  r.setAttribute("height", String(h));
-  r.setAttribute("rx", "2");
-  r.setAttribute("fill", fill);
-  return r;
-}
-
-/** One end's plug: a group at the plug's centre, so a pull moves it with
- *  one write, holding the drawn sleeve (bindPlug adds the press target). */
-function plugEl(color: string): SVGGElement {
+/** One end's ×, drawn at the origin (bindX places it and adds its
+ *  handlers): the circle and its two strokes inside `.vc-cable-x-in`, which
+ *  scales in, and a wider transparent press target over both. Its colour is
+ *  the group's CSS `color` (groupEl). */
+function xEl(): { el: SVGGElement; hit: SVGCircleElement } {
   const el = document.createElementNS(NS, "g");
-  el.setAttribute("class", "vc-cable-end");
-  el.append(rectEl("vc-cable-plug", PLUG_LEN_PX, PLUG_THICK_PX, color));
-  return el;
+  el.setAttribute("class", "vc-cable-x");
+  const inner = document.createElementNS(NS, "g");
+  inner.setAttribute("class", "vc-cable-x-in");
+  const bg = document.createElementNS(NS, "circle");
+  bg.setAttribute("class", "vc-cable-x-bg");
+  bg.setAttribute("r", String(X_R_PX));
+  const mark = document.createElementNS(NS, "path");
+  mark.setAttribute("class", "vc-cable-x-mark");
+  const a = X_ARM_PX;
+  mark.setAttribute("d", `M${-a} ${-a}L${a} ${a}M${a} ${-a}L${-a} ${a}`);
+  inner.append(bg, mark);
+  const hit = document.createElementNS(NS, "circle");
+  hit.setAttribute("class", "vc-cable-x-hit");
+  hit.setAttribute("r", String(X_HIT_R_PX));
+  el.append(inner, hit);
+  return { el, hit };
 }
 
 /** Scrolls one cable end (a jack or a port) into its column's visible band
@@ -630,8 +635,8 @@ export interface PullAt {
   end: CableEnd;
   x: number;
   y: number;
-  /** Pulled by the cable's stroke, not its plug: the cable bends through
-   *  the pointer with both ends still in. */
+  /** The cable bends through the pointer with both ends still in, rather
+   *  than its pulled end following the pointer. */
   via: boolean;
 }
 
@@ -662,7 +667,6 @@ interface Wire {
   avoidBand: { top: number; bottom: number } | null;
   whole: SVGPathElement[];
   split: Split | null;
-  plugs: Record<CableEnd, SVGGElement>;
 }
 
 interface Resolved {
@@ -730,12 +734,14 @@ export function createCableLayer(): CableLayer {
   const wires = new Map<string, Wire>();
   /** The cable under the pointer (see this file's header); `timer` is a pending disarm. */
   let armed: { wire: Wire; timer: number } | null = null;
-  /** A press on a cable's plug, stroke or knot (`by`): a pull once it
-   *  `moved`, last drawn at `at`; `end` is what it lets go of. */
+  /** A just-disarmed cable whose ×s still show (see this file's header). */
+  let linger: { key: string; g: SVGGElement; timer: number } | null = null;
+  /** A press on a cable's stroke or knot (`by`): a pull once it `moved`,
+   *  last drawn at `at`; `end` is what it lets go of. */
   let pull: {
     wire: Wire;
     end: CableEnd;
-    by: "plug" | "stroke" | "knot";
+    by: "stroke" | "knot";
     pointerId: number;
     x0: number;
     y0: number;
@@ -764,8 +770,16 @@ export function createCableLayer(): CableLayer {
     for (const p of sp.b) p.setAttribute("d", dB);
   }
 
+  function endLinger(): void {
+    if (!linger) return;
+    window.clearTimeout(linger.timer);
+    linger.g.classList.remove("vc-cable-x-linger");
+    linger = null;
+  }
+
   function arm(w: Wire): void {
     if (armed && armed.wire !== w) disarmNow();
+    endLinger();
     if (armed) {
       window.clearTimeout(armed.timer);
       armed.timer = 0;
@@ -787,26 +801,21 @@ export function createCableLayer(): CableLayer {
   function disarmNow(): void {
     if (!armed) return;
     window.clearTimeout(armed.timer);
-    armed.wire.g.classList.remove("vc-cable-armed");
+    const { key, g } = armed.wire;
+    g.classList.remove("vc-cable-armed");
     svg.classList.remove("vc-cable-has-armed");
     armed = null;
+    endLinger();
+    g.classList.add("vc-cable-x-linger");
+    linger = { key, g, timer: window.setTimeout(endLinger, X_LINGER_MS) };
     hideTooltipIfShowing(tip);
   }
 
   function bodyHint(w: Wire): string[] {
     const lines = w.src.label ? [w.src.label] : [];
     if (w.split) lines.push("Click to open its Height and modifier");
-    lines.push("Pull to unplug, or click an end");
+    lines.push("Pull to unplug, or click an ×");
     return lines;
-  }
-
-  /** Puts a cable's plugs where `at` leaves them: a pulled plug at the
-   *  pointer, the others on their stubs. Writes only. */
-  function placePlugs(w: Wire, at: PullAt | null): void {
-    for (const end of CABLE_ENDS) {
-      const p = at && !at.via && at.end === end ? at : plugPoint(w.pt, w.portPt, end);
-      w.plugs[end].setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
-    }
   }
 
   /** Redraws a cable for a pull at `at`, or back in its sockets for null.
@@ -820,7 +829,6 @@ export function createCableLayer(): CableLayer {
       const d = pulledPathD(w.pt, w.portPt, w.avoidBand, at);
       for (const p of w.whole) p.setAttribute("d", d);
     }
-    placePlugs(w, at);
   }
 
   /** Shows a held pull at `at`, or the cable back as it was for null: a
@@ -831,22 +839,32 @@ export function createCableLayer(): CableLayer {
     else drawPull(p.wire, at);
   }
 
-  /** A plug's press target: arms its cable, says what it does, and starts a pull. */
-  function bindPlug(w: Wire, end: CableEnd): void {
-    const hit = rectEl("vc-cable-plug-hit", PLUG_HIT_IN_PX + PLUG_HIT_OUT_PX, PLUG_HIT_CROSS_PX, "transparent");
-    hit.setAttribute("x", String(awayFromSocket(w.pt, w.portPt, end) > 0 ? -PLUG_HIT_IN_PX : -PLUG_HIT_OUT_PX));
+  /** The × at `end` of a cable, placed: hovering it arms the cable and
+   *  previews the unplug, and a click unplugs that end. */
+  function bindX(w: Wire, end: CableEnd): SVGGElement {
+    const { el, hit } = xEl();
+    const p = xPoint(w.pt, w.portPt, end);
+    el.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
     hit.addEventListener("pointerenter", (e) => {
       if (e.pointerType === "touch" || pull) return;
       arm(w);
-      const p = plugPoint(w.pt, w.portPt, end);
-      tip = showTooltipAt(p.x, p.y - PLUG_HIT_CROSS_PX / 2, w.src.color, [w.src.label ? `Click or pull to unplug ${w.src.label}` : "Click or pull to unplug"]);
+      w.g.classList.add("vc-cable-x-preview");
     });
-    hit.addEventListener("pointerleave", () => disarmSoon(w));
-    hit.addEventListener("pointerdown", (e) => startPull(w, end, "plug", e));
-    w.plugs[end].append(hit);
+    hit.addEventListener("pointerleave", () => {
+      w.g.classList.remove("vc-cable-x-preview");
+      disarmSoon(w);
+    });
+    // As attachHit's: a press never moves focus.
+    hit.addEventListener("mousedown", (e) => e.preventDefault());
+    hit.addEventListener("click", (e) => {
+      e.stopPropagation();
+      playUnplug(w.key, end);
+      w.src.onUnplug?.();
+    });
+    return el;
   }
 
-  function startPull(w: Wire, end: CableEnd, by: "plug" | "stroke" | "knot", e: PointerEvent): void {
+  function startPull(w: Wire, end: CableEnd, by: "stroke" | "knot", e: PointerEvent): void {
     if (e.button !== 0 || e.pointerType === "touch" || pull) return;
     // As the hit stroke's mousedown: a press on a cable never moves focus,
     // and a pull across the page never selects its text.
@@ -871,7 +889,7 @@ export function createCableLayer(): CableLayer {
       // the press is a pull, never on a plain click that opens the knot.
       if (p.by === "knot") arm(p.wire);
     }
-    p.at = { end: p.end, x: e.clientX, y: e.clientY, via: p.by !== "plug" };
+    p.at = { end: p.end, x: e.clientX, y: e.clientY, via: true };
     p.wire.g.classList.toggle("vc-cable-loose", pullRelease(dx, dy, true) === "unplug");
     showPull(p, p.at);
   }
@@ -882,7 +900,7 @@ export function createCableLayer(): CableLayer {
     const outcome = pullRelease(e.clientX - p.x0, e.clientY - p.y0, p.moved);
     endPull();
     // A click on the stroke opens the knot here; a knot's own click opens it.
-    if (outcome === "click" && p.by !== "plug") {
+    if (outcome === "click") {
       if (p.by === "stroke" && p.wire.split) knots.open(p.wire.key);
       return;
     }
@@ -900,7 +918,7 @@ export function createCableLayer(): CableLayer {
     if (pull && e.pointerId === pull.pointerId) cancelPull();
   }
 
-  /** Lets go of a held cable or plug, leaving the cable as it is drawn. */
+  /** Lets go of a held cable, leaving the cable as it is drawn. */
   function endPull(): void {
     const p = pull;
     if (!p) return;
@@ -946,11 +964,7 @@ export function createCableLayer(): CableLayer {
     spark.setAttribute("cy", socket.y.toFixed(1));
     spark.setAttribute("r", String(SPARK_R_PX));
     spark.setAttribute("stroke", w.src.color);
-    const plug = plugEl(w.src.color);
-    plug.classList.add("vc-cable-end-pop");
-    plug.setAttribute("transform", w.plugs[end].getAttribute("transform") ?? "");
-    plug.style.setProperty("--pop", `${awayFromSocket(w.pt, w.portPt, end) * PLUG_POP_PX}px`);
-    ghost.append(spark, plug);
+    ghost.append(spark);
     ghosts.append(ghost);
     window.setTimeout(() => ghost.remove(), GHOST_MAX_MS);
   }
@@ -1055,7 +1069,7 @@ export function createCableLayer(): CableLayer {
           continue;
         }
         const clipId = pressClip(pressBand);
-        const w: Wire = { key: src.key, src, g, pt, portPt, avoidBand, whole: [], split: null, plugs: { jack: plugEl(src.color), port: plugEl(src.color) } };
+        const w: Wire = { key: src.key, src, g, pt, portPt, avoidBand, whole: [], split: null };
         wires.set(src.key, w);
         /** A split cable's half pulls its own end; an unsplit cable the end
          *  nearer the press. */
@@ -1095,9 +1109,7 @@ export function createCableLayer(): CableLayer {
           split.a.push(attachHit(g, "", ends(src), reveal, clipId, on("jack")));
           split.b.push(attachHit(g, "", ends(src), reveal, clipId, on("port")));
         }
-        for (const end of CABLE_ENDS) bindPlug(w, end);
-        g.append(w.plugs.jack, w.plugs.port);
-        placePlugs(w, null);
+        for (const end of CABLE_ENDS) g.append(bindX(w, end));
         cables.append(g);
       }
     }
@@ -1117,6 +1129,17 @@ export function createCableLayer(): CableLayer {
     // Forget any source's carried offset that no longer has a cable —
     // otherwise a long session leaks one Map entry per source ever shown.
     for (const k of [...offsets.keys()]) if (!liveKeys.has(k)) offsets.delete(k);
+    // The way to a jack's × crosses its row, and lighting that row draws its
+    // fan, a rebuild: the linger (and so the ×) carries over to the rebuilt
+    // cable. An armed cable rebuilt under the pointer lingers too, until the
+    // pointer's next move arms it again.
+    if (linger) {
+      const w = wires.get(linger.key);
+      if (w) {
+        linger.g = w.g;
+        w.g.classList.add("vc-cable-x-linger");
+      } else endLinger();
+    }
     // A rebuild mid-pull (a scroll, a card resizing): the held cable carries
     // on as the rebuilt one, or lets go if that cable is gone.
     if (pull) {
