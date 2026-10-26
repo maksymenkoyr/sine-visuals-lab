@@ -58,6 +58,7 @@ import {
   unitStyle,
 } from "./controlsKit.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { createLevelHits, LEVEL_HIT_MIN } from "./levelHits.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
 import { watchOnScreen } from "./onScreen.ts";
 import {
@@ -108,11 +109,13 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    wherever Any fired, every track a faint line on each metronome beat, and
  *    the Surge track Onset surge's trace instead of notes. Its readouts count
  *    hits over the card's span.
- *  - Stems: Lead and Hats (stemReaders.ts) as line rows of their own, then
- *    the Kick row (the one band the app picks by itself, signals.ts's
- *    anim.kickBand). Lead and Hats are measured only on the device with the mic, and a gap is drawn
- *    where they weren't; app.ts runs the split while this card is unfolded
- *    and on screen (stemRowsOnScreen).
+ *  - Stems: Lead (stemReaders.ts) as a line row, Hats as a Hits track (it
+ *    ticks on each hit and falls back between them, so levelHits.ts puts a
+ *    note at each of its peaks, brighter the higher it went), then the Kick
+ *    row (the one band the app picks by itself, signals.ts's anim.kickBand).
+ *    Lead and Hats are measured only on the device with the mic: Lead draws a
+ *    gap where they weren't, Hats no notes. app.ts runs the split while this
+ *    card is unfolded and on screen (stemRowsOnScreen).
  *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
  *    follows tempoLock, so an unlocked guess reads as
@@ -178,8 +181,8 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
  * drive source can feed — one per line row (Sound's Level, Bass, Mid,
- * Treble and every band row, Stems' Lead, Hats and Kick band; createLineRow
- * mounts them) and one per Hits track (createHitTrack),
+ * Treble and every band row, Stems' Lead and Kick band; createLineRow
+ * mounts them) and one per Hits track and Stems' Hats (createHitTrack),
  * Section's own Section+Drop pair and one per dial cell (Song, signals.ts's
  * DIAL_SIGNALS), the BPM block's own Tempo jack, Lock, the bar ruler's own
  * Metronome+Metronome bar pair (createBarRuler) and Wave's Beat/Bar pair
@@ -935,11 +938,13 @@ interface HitTrackSpec {
   name: string;
   choice: SignalId;
   row: MeterRowId;
-  /** Which detector's hits it draws; null for Surge, a reading with no hits. */
-  lane: HitLane | null;
+  /** Which detector's hits it draws; "level" for notes picked off a level
+   *  (levelHits.ts, the Stems card's Hats); null for Surge, a reading with no hits. */
+  lane: HitLane | "level" | null;
 }
+type RollTrackSpec = HitTrackSpec & { lane: HitLane | null };
 // Any first, then the bands in the Sound rows' order: the owner's call (#715).
-const HIT_TRACKS: readonly HitTrackSpec[] = [
+const HIT_TRACKS: readonly RollTrackSpec[] = [
   { name: "Any", choice: "feature.onset", row: "hitAny", lane: "beat" },
   { name: "Bass", choice: "anim.lowOnset", row: "hitLow", lane: "low" },
   { name: "Mid", choice: "anim.midOnset", row: "hitMid", lane: "mid" },
@@ -969,6 +974,18 @@ const hitsCaptionStyle = `${bandsLabelStyle} padding: 2px 8px; margin: 6px -8px 
 function barBeat(anim: AnimFrame): number {
   if (!anim.metronomeOn) return -1;
   return Math.min(METRONOME_BEATS_PER_BAR - 1, Math.floor(anim.metronomeBarPhase * METRONOME_BEATS_PER_BAR));
+}
+
+/** A track's HT_BEAT value per tick: 2 on the tick a bar's first beat starts,
+ *  1 on any other beat's, null between. */
+function createBeatMarks(): (anim: AnimFrame | null) => number | null {
+  let lastBeat = -1;
+  return (anim) => {
+    const beat = anim ? barBeat(anim) : -1;
+    if (beat === lastBeat) return null;
+    lastBeat = beat;
+    return beat < 0 ? null : beat === 0 ? 2 : 1;
+  };
 }
 
 /** The exact hit rule, built from the live constants (the engine's onsets.ts,
@@ -1031,7 +1048,7 @@ function colAt(ring: ColumnRing, x: number, s: number): number {
 
 /** One drum-roll track. `index` alternates its background so touching tracks
  *  stay apart. */
-function createHitTrack(spec: HitTrackSpec, index: number, mountJack: MountJack, span: TraceSpan) {
+function createHitTrack<S extends HitTrackSpec>(spec: S, index: number, mountJack: MountJack, span: TraceSpan) {
   const color = driveSourceColor(spec.choice);
   const el = document.createElement("div");
   el.className = "vc-row vc-hit-track";
@@ -1149,7 +1166,7 @@ function createHitTrack(spec: HitTrackSpec, index: number, mountJack: MountJack,
       drawSurge();
       return;
     }
-    if (spec.lane !== "beat") {
+    if (spec.lane !== "beat" && spec.lane !== "level") {
       ctx.fillStyle = anyGuide;
       for (let x = 0; x <= len; x++) if (colAt(ring, x, HT_ANY) >= 2.5) ctx.fillRect(x, 0, 1, h);
     }
@@ -1221,6 +1238,28 @@ function createHitTrack(spec: HitTrackSpec, index: number, mountJack: MountJack,
 
 type HitTrack = ReturnType<typeof createHitTrack>;
 
+/** A "level" track's hint: its signal, then its notes over the span. */
+function levelTrackHint(t: HitTrack, nowMs: number, spanSec: number): string {
+  const parts = [
+    `${driveSourceLabel(t.spec.choice)}: ${driveSourceDescription(t.spec.choice)}`,
+    `A note at each peak that reached ${pct(LEVEL_HIT_MIN)}%, brighter the higher it went.`,
+    `In the last ${formatHistorySpan(spanSec)}: ${t.counted.countSince(nowMs, spanSec)}.`,
+  ];
+  if (t.lastStandout !== null) parts.push(`The last one reached ${pct(t.lastStandout)}%.`);
+  return parts.join(" ");
+}
+
+/** Draws `t`, flashing its newest counted note and lighting its name and
+ *  jack once per note. */
+function drawHitTrack(t: HitTrack, nowMs: number): void {
+  const age = nowMs - t.lastFireMs;
+  if (age < HIT_FLASH_MS && t.lastFireMs !== t.flashedMs) {
+    t.flashedMs = t.lastFireMs;
+    t.flash();
+  }
+  t.draw(age < HIT_FLASH_MS ? 1 - age / HIT_FLASH_MS : 0);
+}
+
 function hitTrackHint(t: HitTrack, nowMs: number, spanSec: number, ratio: number | null): string {
   const parts = [
     `${driveSourceLabel(t.spec.choice)}: ${driveSourceDescription(t.spec.choice)}`,
@@ -1256,18 +1295,13 @@ function createHitsRoll(getSilenceGate: () => SilenceGateMarks, mountJack: Mount
   let lastRuleHint = hitsRuleHint(getSilenceGate);
   setHintText(captionHint, lastRuleHint, hintColors);
 
-  let lastBeat = -1;
+  const beatMarks = createBeatMarks();
   return {
     el,
     tracks,
     /** Every tick, on screen or not. */
     record(frame: FeatureFrame | null, anim: AnimFrame | null, beatDiag: OnsetDiag | null, nowMs: number): void {
-      const beat = anim ? barBeat(anim) : -1;
-      let beatMark: number | null = null;
-      if (beat !== lastBeat) {
-        if (beat >= 0) beatMark = beat === 0 ? 2 : 1;
-        lastBeat = beat;
-      }
+      const beatMark = beatMarks(anim);
       if (!anim) {
         for (const t of tracks) t.push(null, null, null, null, nowMs);
         return;
@@ -1301,14 +1335,7 @@ function createHitsRoll(getSilenceGate: () => SilenceGateMarks, mountJack: Mount
     },
     /** Only while Sound is unfolded and on screen, after record(). */
     render(frame: FeatureFrame | null, anim: AnimFrame | null, beatDiag: OnsetDiag | null, nowMs: number, text: boolean): void {
-      for (const t of tracks) {
-        const age = nowMs - t.lastFireMs;
-        if (age < HIT_FLASH_MS && t.lastFireMs !== t.flashedMs) {
-          t.flashedMs = t.lastFireMs;
-          t.flash();
-        }
-        t.draw(age < HIT_FLASH_MS ? 1 - age / HIT_FLASH_MS : 0);
-      }
+      for (const t of tracks) drawHitTrack(t, nowMs);
       if (!text) return;
       const sec = span.sec();
       const unit = `/${formatHistorySpan(sec)}`;
@@ -1714,12 +1741,29 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     choice: "anim.lead",
     span: stemsSpan,
   });
-  const stemHats = lineRow({
-    label: driveSourceLabel("anim.hats"),
-    description: capitalise(driveSourceDescription("anim.hats")),
-    choice: "anim.hats",
-    span: stemsSpan,
-  });
+  // Hats ticks on each hit and falls back between them (stemSplit.ts), so it
+  // is drawn as a Hits track: a note at each of its peaks.
+  const stemHats = createHitTrack(
+    { name: driveSourceLabel("anim.hats"), choice: "anim.hats", row: "hats", lane: "level" },
+    0,
+    mountJack,
+    stemsSpan,
+  );
+  heatFloorHosts.set(stemHats.el, stemHats.floor);
+  stemHats.setHint(levelTrackHint(stemHats, 0, stemsSpan.sec()));
+  const hatsHits = createLevelHits();
+  const hatsBeatMarks = createBeatMarks();
+  /** Every tick, on screen or not. A stem not measured this tick draws no note. */
+  function recordHats(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
+    const beatMark = hatsBeatMarks(anim);
+    const level = frame && anim && deps.stemsMeasured() ? SIGNALS["anim.hats"].read(frame, anim) : null;
+    const peak = hatsHits.update(level);
+    stemHats.push(level === null ? null : peak === null ? 0 : CODE_OF_VERDICT.fired, peak, beatMark, null, nowMs);
+    if (peak === null) return;
+    stemHats.counted.add(nowMs);
+    stemHats.lastFireMs = nowMs;
+    stemHats.lastStandout = peak;
+  }
   const stemKick = lineRow({
     label: driveSourceLabel("anim.kickBand"),
     description: capitalise(driveSourceDescription("anim.kickBand")),
@@ -1730,7 +1774,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // reads whether or not the split is measured.
   const stemRows: readonly { row: LineRow; id: SignalId; needsSplit: boolean }[] = [
     { row: stemLead, id: "anim.lead", needsSplit: true },
-    { row: stemHats, id: "anim.hats", needsSplit: true },
     { row: stemKick, id: "anim.kickBand", needsSplit: false },
   ];
   const stemsCard = createCard({
@@ -2100,6 +2143,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // On screen or not, so a card opens on what it missed. Recording is a few
       // compares per series; the drawing and DOM writes are the cost.
       hitsRoll.record(frame, anim, beatDiag, nowMs);
+      recordHats(frame, anim, nowMs);
       // Via SIGNALS[id].read(), not a copied formula, so this trace and a
       // setting driven by the signal agree.
       waveTrace.push(
@@ -2238,12 +2282,19 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // ---- Stems: Lead, Hats, Kick band ----
       if (!stemsCard.fold?.isFolded() && stemsOnScreen()) {
         for (const { row } of stemRows) row.draw();
+        drawHitTrack(stemHats, nowMs);
         if (text) {
           const measured = deps.stemsMeasured();
           for (const { row, id, needsSplit } of stemRows) {
             const v = frame && anim && (measured || !needsSplit) ? SIGNALS[id].read(frame, anim) : null;
             row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
-          }        }
+          }
+          const sec = stemsSpan.sec();
+          if (frame && anim && measured) {
+            stemHats.setReadout(String(stemHats.counted.countSince(nowMs, sec)), { unit: `/${formatHistorySpan(sec)}` });
+          } else stemHats.setReadout("--", IDLE);
+          stemHats.setHint(levelTrackHint(stemHats, nowMs, sec));
+        }
       }
 
       // ---- Beat ----

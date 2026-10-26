@@ -3207,15 +3207,13 @@ function clearLocalReadings(): void {
   lastInputHealth = null;
 }
 
-const stemRangesScratch: StemRanges = { hats: { lo: 0, hi: 0 }, lead: { lo: 0, hi: 0 } };
+const stemRangesScratch: StemRanges = { lead: { lo: 0, hi: 0 } };
 
-/** Lead covers the band split's Mid range and Hats its Treble range, matching the rows beside them. */
+/** Lead covers the band split's Mid range, matching the row beside it. */
 function stemRanges(edgesHz: Float32Array): StemRanges {
   const { lowMid, midHigh } = BAND_SPLIT;
   stemRangesScratch.lead.lo = edgesHz[lowMid];
   stemRangesScratch.lead.hi = edgesHz[midHigh];
-  stemRangesScratch.hats.lo = edgesHz[midHigh];
-  stemRangesScratch.hats.hi = edgesHz[NUM_BANDS];
   return stemRangesScratch;
 }
 
