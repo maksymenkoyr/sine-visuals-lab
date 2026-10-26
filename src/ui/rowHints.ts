@@ -134,6 +134,8 @@ let focusRow: HTMLElement | null = null;
 let focusByMouse = false;
 /** "mouse" (a mouse or pen), "touch" or "keyboard": whichever was used last. */
 let lastInput = "mouse";
+/** True only during focusWithoutHint's focus(). */
+let quietFocus = false;
 let shownHint: HTMLElement | null = null;
 let shownRow: HTMLElement | null = null;
 
@@ -286,6 +288,18 @@ function update(): void {
   place(true);
 }
 
+/** Moves focus without raising the row's hint: the panel's opening focus lands
+ *  on its first control, and a hint beside the panel the moment it opens
+ *  answers nothing the user asked. */
+export function focusWithoutHint(el: HTMLElement): void {
+  quietFocus = true;
+  try {
+    el.focus({ preventScroll: true });
+  } finally {
+    quietFocus = false;
+  }
+}
+
 /** Starts the floating row hints for the whole page; later calls do
  *  nothing. deviceMenu.ts calls it when it builds the panel. */
 export function installRowHints(): void {
@@ -326,6 +340,7 @@ export function installRowHints(): void {
     true,
   );
   document.addEventListener("focusin", (e) => {
+    if (quietFocus) return;
     focusRow = rowOf(e.target);
     focusByMouse = lastInput === "mouse";
     update();
