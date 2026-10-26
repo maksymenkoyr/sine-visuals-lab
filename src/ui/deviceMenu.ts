@@ -263,8 +263,9 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * `stroke-dashoffset` written per tick, on the pinned group alone
  * (cableLayer.tick, flow speed off each source's own live value). A
  * pinned cable is also pressable: cableGroupFor gives its real patch
- * sources an onPress, and cableLayer.ts draws a hit stroke over the
- * group for it, so pressing a cable unplugs that source — the same
+ * sources an onUnplug, and cableLayer.ts draws a hit stroke and two plugs
+ * for it, so a click on the cable opens its knot, and a click on either
+ * plug or a pull anywhere on the cable unplugs that source — the same
  * toggle as the source line's own × button. A preview cable and a
  * display-only scene-mix cable stay decoration (no per-source press).
  *
@@ -2999,8 +3000,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  on whether a line has one. Styled like `.vc-toggle` (controlsTheme.ts) at a
    *  compact size (`.vc-mute-switch`) without reusing the class: `.vc-toggle` is
    *  the Tab ring's selector (ringElements()), and a mute switch isn't meant to
-   *  join it. */
-  function buildMuteSwitch(sceneId: string, spec: SceneSetting, index: number, src: DriveSource): HTMLElement {
+   *  join it. `after` runs once the patch has changed: a knot rebuilds its
+   *  body there. */
+  function buildMuteSwitch(sceneId: string, spec: SceneSetting, index: number, src: DriveSource, after?: () => void): HTMLElement {
     const muted = !!src.off;
     const btn = document.createElement("button");
     btn.type = "button";
@@ -3013,6 +3015,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     btn.addEventListener("click", () => {
       deps.onSetSourceMuted(sceneId, spec, index, !muted);
       patchChanged(sceneId, spec);
+      after?.();
     });
     return btn;
   }
@@ -3080,6 +3083,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     removeBtn.setAttribute("aria-label", `Unplug ${driveSourceLabel(src.choice)}`);
     setHint(removeBtn, "Unplug this wire.");
     removeBtn.addEventListener("click", () => {
+      if (samePair(pinned, { sceneId, spec })) cableLayer.playUnplug(wireKey, "port");
       deps.onTogglePatchSource(sceneId, spec, src.choice);
       patchChanged(sceneId, spec);
     });
@@ -3139,10 +3143,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return chip;
   }
 
-  /** An open knot's body (cableKnots.ts): a catalogue wire's Height, weight,
-   *  modifier and Unplug. The builders are the line's own, so they keep
-   *  lastPinnedSetting in step and the per-frame external-change check never
-   *  rebuilds mid-drag. */
+  /** An open knot's body (cableKnots.ts): a catalogue wire's on/off switch,
+   *  Height, weight, modifier and Unplug. The builders are the line's own, so
+   *  they keep lastPinnedSetting in step and the per-frame external-change
+   *  check never rebuilds mid-drag. */
   function buildKnotBody(
     sceneId: string,
     spec: SceneSetting,
@@ -3171,7 +3175,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     x.textContent = "×";
     x.setAttribute("aria-label", "Close");
     x.addEventListener("click", () => ctx.close());
+    // By index, read now: an unplug since the knot was built shifts it.
+    const setting = deps.getDriveSetting(sceneId, spec);
+    const index = setting === "scene" ? -1 : setting.sources.findIndex((s) => s.choice === choice);
+    if (index >= 0) head.appendChild(buildMuteSwitch(sceneId, spec, index, src, ctx.rebuild));
     head.append(dot, title, to, x);
+    el.classList.toggle("vc-knot-muted", !!src.off);
     el.appendChild(head);
 
     const row = document.createElement("div");
@@ -3191,6 +3200,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     unplug.style.cssText = knotUnplugStyle;
     unplug.textContent = `Unplug ${name}`;
     unplug.addEventListener("click", () => {
+      cableLayer.playUnplug(jackKey(choice), "port");
       deps.onTogglePatchSource(sceneId, spec, choice);
       patchChanged(sceneId, spec);
     });
@@ -4249,9 +4259,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       showToast("Pick a setting first");
       return;
     }
+    // Only the pinned setting's cables are drawn, so only its unplug can play.
+    const drawn = samePair(pinned, target);
     pinSetting(target.sceneId, target.spec);
     const existed = jackFeeds(target, choice);
     justAddedKey = existed ? null : jackKey(choice);
+    if (existed && drawn) cableLayer.playUnplug(jackKey(choice), "jack");
     deps.onTogglePatchSource(target.sceneId, target.spec, choice);
     patchChanged(target.sceneId, target.spec);
   }
@@ -4417,9 +4430,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let lastAnim: AnimFrame | null = null;
 
   /** One cable group (cableLayer.ts's CableGroupSpec) for `pinned` or
-   *  activePreview(). `interactive` marks the pinned group: pressing a real
-   *  source's cable unplugs it, like the source line's × button. A preview
-   *  isn't a committed patch, and display-only sceneSources have no per-source
+   *  activePreview(). `interactive` marks the pinned group: a real source's
+   *  cable opens its knot on a click and unplugs from a click on either plug
+   *  or a pull anywhere, like the source line's × button. A preview isn't a
+   *  committed patch, and display-only sceneSources have no per-source
    *  unplug (the row's Unplug owns that). */
   function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null, interactive: boolean): CableGroupSpec {
     if (!sel) return { sources: [], portEl: null };
@@ -4453,6 +4467,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         sources.push({
           key,
           color: driveSourceColor(src.choice),
+          label: driveSourceLabel(src.choice),
           soft: false,
           cond: conditionIdxs.includes(idx),
           muted: !!src.off,
@@ -4460,7 +4475,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
           isNew: key === justAddedKey,
           knot: interactive && typeof src.choice === "string" ? knotSpecFor(target, src as DriveSource & { choice: SignalId }) : undefined,
-          onPress: interactive
+          onUnplug: interactive
             ? () => {
                 justAddedKey = null;
                 deps.onTogglePatchSource(target.sceneId, target.spec, src.choice);
@@ -6350,8 +6365,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
     // The cable layer sits on <body> outside root (cableLayer.ts header), but
-    // pressing a cable is a patch edit like a jack click: without this clause
-    // it would unpin the setting it just unplugged from.
+    // a press on a cable or its plug edits the patch like a jack click: without
+    // this clause it would unpin the setting it was editing.
     if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t) || cableLayer.knotEl.contains(t)))
       return;
     const active = document.activeElement;
@@ -6431,6 +6446,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (isTypingTarget(e.target)) return;
     if (e.key === "Escape" && jackDrag?.moved) {
       clearJackDrag();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape" && cableLayer.pulling()) {
+      cableLayer.cancelPull();
       e.preventDefault();
       return;
     }
