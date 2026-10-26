@@ -1,9 +1,13 @@
-// The cable plugs' resting place and what letting go of one does
-// (src/ui/cableLayer.ts header); the pointer wiring is checked in a browser.
+// The cable plugs' resting place, how a pull draws the cable and which end it
+// lets go of, and what letting go does (src/ui/cableLayer.ts header); the
+// pointer wiring is checked in a browser.
 import { describe, expect, it } from "vitest";
-import { plugPoint, pullRelease, pullStarts, type CableEnd } from "../src/ui/cableLayer.ts";
+import { nearerEnd, plugPoint, pulledPathD, pullRelease, pullStarts, type CableEnd, type PullAt } from "../src/ui/cableLayer.ts";
 
 const ENDS: CableEnd[] = ["jack", "port"];
+const first = (d: string): string => d.split(" ")[0]!;
+const last = (d: string): string => d.trim().split(" ").pop()!;
+const cubics = (d: string): number => d.split("C").length - 1;
 
 describe("plugPoint", () => {
   const jack = { x: 100, y: 40 };
@@ -54,5 +58,55 @@ describe("pullStarts", () => {
     expect(pullStarts(0, 0)).toBe(false);
     expect(pullStarts(1, 1)).toBe(false);
     expect(pullStarts(0, 40)).toBe(true);
+  });
+});
+
+describe("nearerEnd", () => {
+  it("lets go of the end nearer the press", () => {
+    expect(nearerEnd({ x: 100 }, { x: 900 }, 300)).toBe("jack");
+    expect(nearerEnd({ x: 100 }, { x: 900 }, 700)).toBe("port");
+  });
+
+  it("goes by distance, not side, when the port sits left of the jack", () => {
+    expect(nearerEnd({ x: 900 }, { x: 100 }, 300)).toBe("port");
+    expect(nearerEnd({ x: 900 }, { x: 100 }, 700)).toBe("jack");
+  });
+});
+
+describe("pulledPathD", () => {
+  const jack = { x: 100, y: 40 };
+  const port = { x: 900, y: 300 };
+
+  it("draws the plain cable, one bend between its sockets, when nothing pulls it", () => {
+    const d = pulledPathD(jack, port, null, null);
+    expect(first(d)).toBe("M100,40");
+    expect(last(d)).toBe("H900");
+    expect(cubics(d)).toBe(1);
+  });
+
+  it("bends a cable pulled by its stroke through the pointer, both ends still in", () => {
+    for (const end of ENDS) {
+      const at: PullAt = { end, x: 400, y: 600, via: true };
+      const d = pulledPathD(jack, port, null, at);
+      expect(first(d)).toBe("M100,40");
+      expect(last(d)).toBe("H900");
+      expect(d).toContain(" 400,600 C");
+    }
+  });
+
+  it("ends a pulled plug at the pointer, the other end still in its socket", () => {
+    const portOut = pulledPathD(jack, port, null, { end: "port", x: 500, y: 700, via: false });
+    expect(first(portOut)).toBe("M100,40");
+    expect(last(portOut)).toBe("H500");
+    const jackOut = pulledPathD(jack, port, null, { end: "jack", x: 300, y: 500, via: false });
+    expect(first(jackOut)).toBe("M300,500");
+    expect(last(jackOut)).toBe("H900");
+  });
+
+  it("detours under Power only while the port end is in its socket", () => {
+    const power = { top: 250, bottom: 350 };
+    expect(cubics(pulledPathD(jack, port, power, null))).toBe(2);
+    expect(cubics(pulledPathD(jack, port, power, { end: "jack", x: 300, y: 500, via: false }))).toBe(2);
+    expect(cubics(pulledPathD(jack, port, power, { end: "port", x: 500, y: 700, via: false }))).toBe(1);
   });
 });

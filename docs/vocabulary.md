@@ -37,7 +37,7 @@ that reshapes an input node's value on its way to that one setting.
 |---|---|
 | **pin** / **unpin** | Opening and closing a setting's wire panel (click its label or port; Esc unpins). |
 | **lock** / **let go** | Chladni's Mode ladder: holding the plate on one figure whatever the music does. Not **pin**, which opens a wire panel. |
-| **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, or drag it onto a setting's row, a "+ Add by name" chip, or Unplug. To unplug, also click or pull either end of the wire's cable. |
+| **plug in** / **unplug** | Adding or removing a wire: click an input node's jack, or drag it onto a setting's row, a "+ Add by name" chip, or Unplug. To unplug, also pull the wire's cable from anywhere on it, or click either end. |
 | **switch off** / **switch on** | Muting a wire without unplugging it, with the switch on its line or at the top of its knot; its weight, height and role are kept. |
 | **only this** / **all back** | The **O** chip on a reactive setting's row (beside A and T), and a button in its wire panel, that switch off every other setting's reaction so only this one moves, then bring them back; a preview on this screen, the wires are kept. |
 | **receive** | What a setting does with its wires: "what this setting receives". |

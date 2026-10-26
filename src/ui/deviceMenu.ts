@@ -262,10 +262,10 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * (cableLayer.tick, flow speed off each source's own live value). A
  * pinned cable is also pressable: cableGroupFor gives its real patch
  * sources an onUnplug, and cableLayer.ts draws a hit stroke and two plugs
- * for it, so a click on the cable opens its knot and a click or pull on
- * either plug unplugs that source — the same toggle as the source line's
- * own × button. A preview cable and a display-only scene-mix cable stay
- * decoration (no per-source press).
+ * for it, so a click on the cable opens its knot, and a click on either
+ * plug or a pull anywhere on the cable unplugs that source — the same
+ * toggle as the source line's own × button. A preview cable and a
+ * display-only scene-mix cable stay decoration (no per-source press).
  *
  * In Only when mode, a source's *role* (drives.ts's `DriveSource.when`) is
  * its own, independent flag — several lines can be marked "Only when" at
@@ -4429,10 +4429,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   /** One cable group (cableLayer.ts's CableGroupSpec) for `pinned` or
    *  activePreview(). `interactive` marks the pinned group: a real source's
-   *  cable opens its knot on a click and unplugs from either plug, like the
-   *  source line's × button. A preview isn't a committed patch, and
-   *  display-only sceneSources have no per-source unplug (the row's Unplug
-   *  owns that). */
+   *  cable opens its knot on a click and unplugs from a click on either plug
+   *  or a pull anywhere, like the source line's × button. A preview isn't a
+   *  committed patch, and display-only sceneSources have no per-source
+   *  unplug (the row's Unplug owns that). */
   function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null, interactive: boolean): CableGroupSpec {
     if (!sel) return { sources: [], portEl: null };
     const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);

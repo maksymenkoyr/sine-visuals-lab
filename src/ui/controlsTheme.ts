@@ -836,18 +836,18 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
 /* A pinned cable answers the pointer through its transparent hit stroke (the layer
  * itself is pointer-events: none) and its two plugs (cableLayer.ts header: a click on
- * the stroke opens the cable's knot, a click or pull on a plug unplugs). The stroke's
- * width, not the core's, makes a thin cable easy to hit. Hovering arms the cable
- * (.vc-cable-armed), which carries the lift: a drop-shadow in the group's CSS color
- * (via currentColor), a thicker core, a brighter glow, and flow beads lifted toward
- * white and wider (at resting width they'd sink into the thicker core and the flow
- * would vanish exactly while the cable is looked at). The bead lift is motion-only:
- * reduced motion draws the flow as a solid line, which whitening would just recolour.
+ * the stroke opens the cable's knot, a click on a plug unplugs, and so does a pull
+ * anywhere on it). The stroke's width, not the core's, makes a thin cable easy to
+ * hit. Hovering arms the cable (.vc-cable-armed), which carries the lift: a
+ * drop-shadow in the group's CSS color (via currentColor), a thicker core, a brighter
+ * glow, and flow beads lifted toward white and wider (at resting width they'd sink
+ * into the thicker core and the flow would vanish exactly while the cable is looked
+ * at). The bead lift is motion-only: reduced motion draws the flow as a solid line,
+ * which whitening would just recolour.
  * While one cable is armed the others' strokes stop answering (.vc-cable-has-armed),
  * so the cable followed in keeps the pointer where a setting's cables meet at its
  * port. Preview/scene-mix cables never grow a hit stroke, so they never arm. */
-.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: default; }
-.vc-cable-g.vc-cable-knotted .vc-cable-hit { cursor: pointer; }
+.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: grab; }
 .vc-cable-has-armed .vc-cable-g:not(.vc-cable-armed) .vc-cable-hit { pointer-events: none; }
 .vc-cable-g { transition: filter 0.15s ease, opacity 0.12s ease; }
 .vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
