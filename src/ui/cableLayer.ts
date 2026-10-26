@@ -69,8 +69,8 @@
  * cable's bend (cablePointAt), one setting's knots spread along their cables
  * (KNOT_SPREAD_T) since those cables all meet at one port and would stack
  * their knots at the middle; it is HTML in its own layer (knotEl), so
- * it can grow into a panel; as it springs between sizes, tick() rewrites the
- * halves' `d` to follow its sides. The first half's flow rides the wire's
+ * it can grow into a panel; as it springs open and shut, tick() rewrites the
+ * halves' `d` to follow its sides. A peek leaves the halves where they are. The first half's flow rides the wire's
  * input, the second's its output, so the knot visibly changes the signal.
  * Both halves keep the press stroke: a press still unplugs, and hovering
  * either half peeks the knot (setPeek). A knot opens from its own click or
