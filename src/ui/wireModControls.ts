@@ -2,8 +2,8 @@
  * A wire's modifier controls, in the wire panel (deviceMenu.ts's
  * buildSourceLine) or in the open knot on its cable (buildKnotBody, in
  * cableKnots.ts's layer): a small graph of the wire's input and output, then
- * Window (On/Off, Min and Max), Smoothness (On/Off) and Length, the fields of
- * src/render/wireMod.ts. The wire's Height is built beside them by the caller, not here.
+ * Window (On/Off, Min and Max), Smoothness (On/Off, works with Window off too)
+ * and Length, the fields of src/render/wireMod.ts. The wire's Height is built beside them by the caller, not here.
  *
  * Every edit hands the whole modifier to `onChange` without a rebuild, since
  * a rebuild would tear out the slider being dragged. The graph keeps one
@@ -14,7 +14,7 @@ import { createCanvasSizer } from "./canvasSizer.ts";
 import { FONT_LABEL, FONT_MONO } from "./controlsTheme.ts";
 import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
 import type { GateFormula } from "../render/gateWindow.ts";
-import { WIRE_LENGTH_MAX_SEC, type WireMod, type WireModState } from "../render/wireMod.ts";
+import { WIRE_LENGTH_MAX_SEC, wireModIsIdle, type WireMod, type WireModState } from "../render/wireMod.ts";
 
 export interface WireModControlsOpts {
   /** The wire's label, for the controls' aria labels. */
@@ -139,7 +139,7 @@ function text(t: string): HTMLSpanElement {
 const WINDOW_HINT =
   "Which stretch of this input, from nothing up to its own peak, moves the setting: under Min it reads 0, over Max it reads full, so Min 0 and Max 1 pass it through as it is. The peak is learned from the music, so the window holds from one song to the next.";
 const SMOOTHNESS_HINT =
-  "How gently the window starts and ends. Left: exactly at Min and Max. Right: a softer rise toward nothing and toward the peak, while silence still gives nothing and the peak still gives full.";
+  "How gently this wire moves. With Window on, left is exactly at Min and Max and right is a softer rise toward nothing and toward the peak, while silence still gives nothing and the peak still gives full. With Window off, right makes the wire slow to follow its input, up and down alike.";
 const LENGTH_HINT = "How long this wire takes to fall after each rise. Off: it falls as fast as the input does.";
 
 export function createWireModControls(opts: WireModControlsOpts): WireModControls {
@@ -235,7 +235,7 @@ export function createWireModControls(opts: WireModControlsOpts): WireModControl
   });
   const smoothEl = document.createElement("div");
   smoothEl.style.cssText = controlStyle;
-  smoothEl.append(head([smoothSwitch, text("Smoothness")], smoothValue), smoothInput, ends("Exact", "Soft edges"));
+  smoothEl.append(head([smoothSwitch, text("Smoothness")], smoothValue), smoothInput, ends("Exact", "Soft"));
 
   const lengthText = (v: number): string => (v === 0 ? "Off" : `${v.toFixed(2)} s`);
   const lengthValue = document.createElement("output");
@@ -280,8 +280,8 @@ export function createWireModControls(opts: WireModControlsOpts): WireModControl
     el,
     update(reading, onScreen) {
       inRing[ringHead] = reading?.input ?? 0;
-      // The plain wire passes its input on until Window or Length is on.
-      outRing[ringHead] = reading ? (mod.windowOn || mod.length > 0 ? reading.output : reading.input) : 0;
+      // The plain wire passes its input on until a modifier acts.
+      outRing[ringHead] = reading ? (wireModIsIdle(mod) ? reading.input : reading.output) : 0;
       lineRing[ringHead] = reading?.line ?? 0;
       topRing[ringHead] = reading?.top ?? 0;
       ringHead = (ringHead + 1) % RING_LEN;

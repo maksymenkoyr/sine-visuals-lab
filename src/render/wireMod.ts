@@ -5,7 +5,8 @@
  * Fixed or Loud envelope when one is picked. Window picks the stretch of the
  * input, between 0 and its own learned peak, that moves the output (Min and
  * Max, with an On/Off), reusing the generic gate in gateWindow.ts so its math
- * is never copied; Smoothness softens it; Length is a straight fall after
+ * is never copied; Smoothness softens it, or with Window off eases the input
+ * over time; Length is a straight fall after
  * each rise, in seconds, off at 0.
  *
  * A modifier belongs to its wire alone: two settings on the same input each
@@ -22,7 +23,7 @@
  * `legacyNodeFrom` reads such a node, and driveStore.ts's
  * sanitizeDriveSetting does the conversion for both.
  */
-import { GATE_FORMULA_DEFAULT, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, windowReading, type GateFormula, type GateTrackerState } from "./gateWindow.ts";
+import { GATE_FORMULA_DEFAULT, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, glideSmoothness, glideStep, windowReading, type GateFormula, type GateTrackerState } from "./gateWindow.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 
 /** Length's right end: the longest fall a wire's output can take, in seconds. */
@@ -68,9 +69,10 @@ export function sameWireMod(a: WireMod | undefined, b: WireMod | undefined): boo
   );
 }
 
-/** Whether the modifier changes nothing the wire reads (Window and Length off). */
+/** Whether the modifier changes nothing the wire reads: Window and Length off,
+ *  and no Smoothness above its resting value (glideSmoothness). */
 export function wireModIsIdle(mod: WireMod | undefined): boolean {
-  return !mod || (!mod.windowOn && mod.length <= 0);
+  return !mod || (!mod.windowOn && mod.length <= 0 && !(mod.smoothOn && glideSmoothness(mod.smoothness) > 0));
 }
 
 function clampTo(v: number, lo: number, hi: number): number {
@@ -173,10 +175,12 @@ export interface WireModState {
   tracker: GateTrackerState;
   /** Length's falling envelope. */
   env: number;
+  /** Smoothness's eased input while Window is off; NaN until its first step. */
+  glide: number;
 }
 
 export function createWireModState(): WireModState {
-  return { input: 0, output: 0, line: 0, top: 0, tracker: createGateTracker(), env: 0 };
+  return { input: 0, output: 0, line: 0, top: 0, tracker: createGateTracker(), env: 0, glide: Number.NaN };
 }
 
 function clamp01(x: number): number {
@@ -199,6 +203,10 @@ export function stepWireMod(st: WireModState, mod: WireMod, dtSec: number, input
   } else {
     st.line = 0;
     st.top = 0;
+    // With no window to soften, Smoothness eases the input itself. The glide
+    // keeps following the input while it is off, so switching it on never jumps.
+    st.glide = glideStep(st.glide, input, mod.smoothOn ? glideSmoothness(mod.smoothness) : 0, dtSec);
+    y = st.glide;
   }
   if (mod.length > 0) {
     st.env = Math.max(y, st.env - dtSec / mod.length);

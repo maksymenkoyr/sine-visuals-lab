@@ -39,6 +39,22 @@ describe("stepWireMod", () => {
     }
   });
 
+  it("Window off: Smoothness eases the input, rising and falling alike; its resting value or Off changes nothing", () => {
+    const run = (m: WireMod): number[] => {
+      const st = createWireModState();
+      return [0, 1, 1, 1, 0, 0, 0].map((v) => stepWireMod(st, m, DT, v, GATE_FORMULA_DEFAULT));
+    };
+    expect(run(mod())).toEqual([0, 1, 1, 1, 0, 0, 0]);
+    expect(run(mod({ smoothOn: false, smoothness: 1 }))).toEqual([0, 1, 1, 1, 0, 0, 0]);
+    const soft = run(mod({ smoothness: 0.8 }));
+    expect(soft[1]).toBeGreaterThan(0);
+    expect(soft[1]).toBeLessThan(1);
+    expect(soft[4]).toBeGreaterThan(0);
+    expect(soft[4]).toBeLessThan(soft[3]!);
+    const softer = run(mod({ smoothness: 1 }));
+    expect(softer[1]).toBeLessThan(soft[1]!);
+  });
+
   it("Length: after a rise to 1 and a fall to 0, the output is max(0, 1 - k*DT/length)", () => {
     const m = mod({ length: 0.5 });
     const st = createWireModState();
@@ -54,6 +70,8 @@ describe("wire modifier values", () => {
     expect(sameWireMod(undefined, freshWireMod())).toBe(true);
     expect(wireModIsIdle(mod({ windowOn: true }))).toBe(false);
     expect(wireModIsIdle(mod({ length: 0.1 }))).toBe(false);
+    expect(wireModIsIdle(mod({ smoothness: 0.5 }))).toBe(false);
+    expect(wireModIsIdle(mod({ smoothness: 0.5, smoothOn: false }))).toBe(true);
     expect(sameWireMod(undefined, mod({ min: 0.5 }))).toBe(false);
   });
 
