@@ -1,6 +1,15 @@
 import type { AnimFrame } from "../render/animClock.ts";
 import { getTapRun } from "../render/tapTempo.ts";
-import { SIGNALS, dialSignalId, surgeAtThreshold, type MeterCardId, type MeterRowId, type SignalId } from "../render/signals.ts";
+import {
+  BAND_SIGNALS,
+  SIGNALS,
+  dialSignalId,
+  surgeAtThreshold,
+  type BandSignalId,
+  type MeterCardId,
+  type MeterRowId,
+  type SignalId,
+} from "../render/signals.ts";
 import { isStemSignal } from "../render/stemReaders.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
@@ -28,10 +37,12 @@ import { RISE_K, RISE_WINDOW_S } from "../render/bandEnergy.ts";
 import type { HitParts } from "../audio/hitStrength.ts";
 import {
   AUTO_SKY,
+  FONT_LABEL,
   FONT_MONO,
   HOT_RED,
   INPUT_GREEN,
   LANE_JACK_GUTTER_PX,
+  STEM_LEAD,
   STRIP_HIGH,
   STRIP_LOW,
   STRIP_MID,
@@ -64,6 +75,7 @@ import {
 } from "./historySpan.ts";
 import { CARRY_MS, createColumnStore } from "./columnStore.ts";
 import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
+import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -79,18 +91,26 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  *  - Heat history: the last card, folded by default (its own span chip), a
  *    strip per wired setting and per signal jack.
  *  - Sound: a thin live spectrum (spectrumStrip.ts's second instance, fed by
- *    deviceMenu.ts), then four trace rows, each a
- *    line over the card's span on one fixed scale that never rescales: Level
- *    (the only way to see features.ts's adaptive floor/peak doing its
- *    job, since its whole point is to make that invisible downstream), Bass, Mid and Treble. Mid and Treble carry a
- *    second, pale line, Lead and Hats (stemReaders.ts), each with its own
- *    jack; their stems are measured only on the device with the mic, and a
- *    gap is drawn where they weren't. Under Level's line a band along the
- *    bottom is shaded per column by how closed the silence gate was
- *    (1 - Dimmer), not by a line at the gate's marks: those sit on Input
- *    level's scale and Level is auto-gained, so a mark line would lie. No
- *    gate reading (the synthetic feed) draws no shade. The post-bandEnergy
- *    pulses live in the Hits card's own hits history instead — see below.
+ *    deviceMenu.ts), then one-line rows (createLineRow: name, a trace over
+ *    the card's span on one fixed scale that never rescales, readout, jack):
+ *    Level (the only way to see features.ts's adaptive floor/peak doing its
+ *    job, since its whole point is to make that invisible downstream), Bass,
+ *    Mid and Treble. Under them a Bands block of line rows for single bands:
+ *    first the Kick band row, labelled with the Hz of the band the app picks
+ *    by itself, then a row per band (signals.ts's BAND_SIGNALS, all mounted
+ *    hidden at build) that shows while it's picked by a click on the
+ *    spectrum (bandPicks.ts) or wired in this scene, so a wired band never
+ *    hides. The spectrum marks the Kick band's bar and every shown band's
+ *    bar in that row's colour. Under Level's line a band along the bottom is shaded
+ *    per column by how closed the silence gate was (1 - Dimmer), not by a
+ *    line at the gate's marks: those sit on Input level's scale and Level is
+ *    auto-gained, so a mark line would lie. No gate reading (the synthetic
+ *    feed) draws no shade. The post-bandEnergy pulses live in the Hits
+ *    card's own hits history instead — see below.
+ *  - Stems: Lead and Hats (stemReaders.ts) as line rows of their own. The
+ *    stems are measured only on the device with the mic, and a gap is drawn
+ *    where they weren't; app.ts runs the split while this card is unfolded
+ *    and on screen (stemRowsOnScreen).
  *  - Hits: one lane each for Any hit (the broadband detector) and
  *    bandEnergy.ts's Bass/Mid/Treble (createHitsHistory), tracing each one's
  *    ratio against its firing threshold plus a tick for every
@@ -98,8 +118,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  *    not just an instant reading, so a tuning session can see *why* a hit
  *    did or didn't count, ground-shaded by how closed the silence gate was
  *    at the time. A fired tick's height is that hit's graded strength
- *    (src/audio/hitStrength.ts's HitParts). The Bass lane also carries the
- *    Kick band's own jack and its Hz in the legend.
+ *    (src/audio/hitStrength.ts's HitParts).
  *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
  *    follows tempoLock, so an unlocked guess reads as
@@ -135,7 +154,7 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * drawing and DOM writes — folding buys back the per-frame cost, not just
  * the screen space.
  *
- * Every time-axis trace (the Sound rows, Hits, Wave,
+ * Every time-axis trace (the Sound and Stems rows, Hits, Wave,
  * Section) records into a time store (createColumnRing) on every tick,
  * folded card or closed panel alike, so opening a card shows what it
  * missed. A span chip in each card's header (historySpan.ts) picks how
@@ -164,14 +183,14 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * it's open, not whether folding buys back that cost.
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
- * drive source can feed — Level, Bass, Mid + Lead and
- * Treble + Hats (Sound; createTraceRow mounts them), Section's own
- * Section+Drop pair and one per dial cell (Song, signals.ts's DIAL_SIGNALS),
- * the BPM block's own Tempo jack, Lock, the bar ruler's own Metronome+Metronome
- * bar pair (createBarRuler) and Wave's Beat/Bar pair (Beat), and one per
- * hits-history lane, the Kick band's on the Bass lane, plus one for the
- * Surge lane under them, Onset surge's own (createHitsHistory's own
- * laneMounts, Hits).
+ * drive source can feed — one per line row (Sound's Level, Bass, Mid,
+ * Treble, Kick band and every band row, Stems' Lead and Hats; createLineRow
+ * mounts them),
+ * Section's own Section+Drop pair and one per dial cell (Song, signals.ts's
+ * DIAL_SIGNALS), the BPM block's own Tempo jack, Lock, the bar ruler's own
+ * Metronome+Metronome bar pair (createBarRuler) and Wave's Beat/Bar pair
+ * (Beat), and one per hits-history lane, plus one for the Surge lane under
+ * them, Onset surge's own (createHitsHistory's own laneMounts, Hits).
  * Every jack's click/hover/fill/usage state is
  * `deps.patch` (AudioMetersDeps's own doc comment); this file only ever
  * mounts them and, on refreshPatchView(), reads that state back into a
@@ -186,9 +205,10 @@ import { createSpectrumStrip, type SpectrumStrip } from "./spectrumStrip.ts";
  * HEAT_REFRESH_MS, and only on an unfolded card; while the heat lens is on,
  * the jack glows, brighter as its reading moves. A jack reads its signal's
  * own card's span chip (`monitor.card`), or the card it's mounted on when the
- * signal has no monitor. Each monitor row also carries its own heat strips,
- * one per signal jack on it, led by a dot in the signal's colour, on the same
- * span and refresh as the jack. The Heat history card (its own span chip,
+ * signal has no monitor. Each monitor row also carries its signal's heat on
+ * the same span and refresh as the jack: a line row as the floor of its trace
+ * lane, any other row as strips under it, one per signal jack on it, led by a
+ * dot in the signal's colour. The Heat history card (its own span chip,
  * folded by default, last in the column) draws one strip per wired setting, from
  * deps.heatSettings, and one per signal jack.
  *
@@ -245,7 +265,7 @@ export interface AudioMeters {
   soundSpectrum: SpectrumStrip;
   /** The Sound card is unfolded and on screen, so its spectrum is worth feeding. */
   soundSpectrumShown(): boolean;
-  /** The Sound card is unfolded and its Mid or Treble row is on screen: app.ts runs the stem split for it. */
+  /** The Stems card is unfolded and on screen: app.ts runs the stem split for it. */
   stemRowsOnScreen(): boolean;
 }
 
@@ -260,8 +280,8 @@ export interface AudioMetersDeps {
   /** The Input card's two gate marks, read fresh every draw/text tick so a drag
    *  moves the Gate guides and the hits hint live. */
   getSilenceGate: () => SilenceGateMarks;
-  /** The band ladder in Hz (src/audio/bandScale.ts), for the Kick band's Hz on
-   *  the Hits card's Bass lane. */
+  /** The band ladder in Hz (src/audio/bandScale.ts), for the Kick band row's
+   *  Hz in the Sound card's Bands block. */
   getBandEdgesHz: () => ArrayLike<number>;
   /** Jack behaviour and live state (jack.ts header). Predicates are keyed by
    *  the DriveSourceChoice a jack stands for; driveSources.ts's jackKey merges
@@ -363,21 +383,33 @@ const DROP_LABEL_FONT = `9px ${FONT_MONO}`;
 const DROP_LABEL_PX = 24;
 const DIAL_BAR_HEIGHT_CSS_PX = 44;
 const DIAL_BAR_WIDTH_CSS_PX = 10;
-// The Sound card's rows. Level is a little taller so the gate floor under its
-// line has room beside the line.
-const SOUND_TRACE_HEIGHT_CSS_PX = 30;
-const SOUND_LEVEL_TRACE_HEIGHT_CSS_PX = 34;
 const SOUND_SPECTRUM_HEIGHT_CSS_PX = 30;
+// A one-line row (createLineRow): name column, trace, readout, jacks. The
+// heat floor (.vc-heat-floor) sits under the trace inside the same lane.
+const LINE_LABEL_WIDTH_PX = 66;
+const LINE_TRACE_HEIGHT_PX = 19;
+const LINE_READOUT_WIDTH_PX = 38;
 // The gate floor: the share of Level's height the shade takes, and its alpha at
 // a fully closed gate.
 const SOUND_GATE_FLOOR_FRAC = 0.15;
 const SOUND_GATE_FLOOR_ALPHA = 0.22;
-// Faint enough that the heat strip under the row stays the louder cue.
+// Faint enough that the heat floor stays the louder cue.
 const SOUND_FILL_ALPHA = 0.13;
-// Lead's and Hats' own colours equal Mid's and Treble's, so the second line
-// can't borrow them.
-const SOUND_SECOND_LINE_COLOR = "rgba(255,255,255,0.75)";
-const rowSubStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); margin-left: 6px;`;
+// Vertical padding without .vc-row's negative vertical margin, so stacked line
+// rows don't overlap and need no spacer.
+const lineRowStyle = `display: flex; align-items: center; gap: 6px; padding: 2px 8px; margin: 0 -8px;`;
+const lineLabelStyle = `
+  font: 300 13px/1.2 ${FONT_LABEL}; flex: none; width: ${LINE_LABEL_WIDTH_PX}px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+`;
+const lineLaneStyle = `position: relative; flex: 1; min-width: 0;`;
+const lineReadoutStyle = `${readoutStyle} flex: none; width: ${LINE_READOUT_WIDTH_PX}px; justify-content: flex-end; gap: 2px;`;
+const lineDigitsStyle = `${digitsStyle} font-size: 10px;`;
+const lineDigitsTextStyle = `font: 400 10px/1 ${FONT_MONO};`;
+const lineUnitStyle = `font: 400 9px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
+const rowSubStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); margin-left: 4px;`;
+// The Sound card's "Bands" caption: the card title's small caps, a step down.
+const bandsLabelStyle = `font: 400 9px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin: 8px 0 2px;`;
 const BEAT_TRACE_HEIGHT_CSS_PX = 28;
 // Predicted-grid colour (Wave's bar wave, the bar ruler's downbeat). Blue against
 // BEAT_COLOR's red keeps "predicted" and "detected" apart.
@@ -701,52 +733,76 @@ function createMeterRow(spec: MeterRowSpec) {
   };
 }
 
-/** A Sound-card row: the head of a meter row, a rolling trace of `choices[0]`
- *  where the bar would be, and `choices[1]` as a second, pale line. The scale
- *  is fixed 0..1 and never rescales. `gateFloor` adds one more series, 0..1
- *  for how closed the silence gate was, shaded along the bottom. Each choice
- *  mounts its jack through `mountJack`, which is also what gives the row its
- *  heat strips. */
-function createTraceRow(opts: {
+/** A one-line row (Sound, Stems): name | trace | % readout | jack, with the
+ *  trace on a fixed 0..1 scale that never rescales. `gateFloor` adds a second
+ *  series, 0..1 for how closed the silence gate was, shaded along the bottom.
+ *  The jack mounts through `mountJack`; `floor` is the strip under the trace
+ *  where the caller puts the signal's heat (addHeatMonitorStrip). */
+function createLineRow(opts: {
   label: string;
-  /** Small mono suffix after the label ("+ Lead"). */
+  /** Small mono suffix after the label ("kick"). */
   sub?: string;
   description: string;
-  choices: readonly SignalId[];
-  heightPx: number;
+  choice: SignalId;
   span: TraceSpan;
   gateFloor?: boolean;
   mountJack: MountJack;
 }) {
-  const { label, sub, description, choices, heightPx, span, gateFloor, mountJack } = opts;
-  const color0 = driveSourceColor(choices[0]!);
-  const row = createMeterRow({ label, accent: color0, unit: "%", description });
+  const { label, sub, description, choice, span, gateFloor, mountJack } = opts;
+  const color = driveSourceColor(choice);
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.tabIndex = 0;
+  el.style.cssText = lineRowStyle;
+  el.style.setProperty("--vc-accent", color);
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "vc-label";
+  labelEl.style.cssText = lineLabelStyle;
+  const labelText = document.createElement("span");
+  labelText.textContent = label;
+  labelEl.append(labelText);
   if (sub) {
     const subEl = document.createElement("span");
     subEl.textContent = sub;
     subEl.style.cssText = rowSubStyle;
-    row.el.querySelector(".vc-label")?.append(subEl);
+    labelEl.append(subEl);
   }
-  const gateSeries = choices.length;
-  const ring = createColumnRing(
-    choices.length + (gateFloor ? 1 : 0),
-    heightPx,
-    `${label} over the card's span`,
-    span.sec,
-    span.max,
-  );
-  row.el.children[1]!.replaceWith(ring.canvas);
-  for (const c of choices) mountJack(c, row.right, row.el);
 
-  const fill0 = withAlpha(color0, SOUND_FILL_ALPHA);
-  const floorH = heightPx * SOUND_GATE_FLOOR_FRAC;
-  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (heightPx - 2);
+  const lane = document.createElement("div");
+  lane.style.cssText = lineLaneStyle;
+  const h = LINE_TRACE_HEIGHT_PX;
+  const ring = createColumnRing(gateFloor ? 2 : 1, h, `${driveSourceLabel(choice)} over the card's span`, span.sec, span.max);
+  ring.canvas.style.marginTop = "0";
+  const floor = document.createElement("div");
+  lane.append(ring.canvas, floor);
+
+  const readout = document.createElement("div");
+  readout.style.cssText = lineReadoutStyle;
+  const digits = document.createElement("span");
+  digits.style.cssText = lineDigitsStyle;
+  const unit = document.createElement("span");
+  unit.style.cssText = lineUnitStyle;
+  readout.append(digits, unit);
+
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  setHintText(hint, description);
+
+  el.append(labelEl, lane, readout, right, hint);
+  mountJack(choice, right, el);
+
+  const fill = withAlpha(color, SOUND_FILL_ALPHA);
+  const floorH = h * SOUND_GATE_FLOOR_FRAC;
+  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
 
   function draw(): void {
     if (!ring.prepare()) return;
     const { ctx } = ring;
     const w = ring.width;
-    const h = heightPx;
     const len = ring.length;
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = "rgba(255,255,255,0.18)";
@@ -754,26 +810,51 @@ function createTraceRow(opts: {
     if (gateFloor) {
       ctx.fillStyle = "#fff";
       for (let x = 0; x <= len; x++) {
-        const a = x === len ? ring.live(gateSeries) : ring.at(x, gateSeries);
+        const a = x === len ? ring.live(1) : ring.at(x, 1);
         if (Number.isNaN(a) || a <= 0) continue;
         ctx.globalAlpha = SOUND_GATE_FLOOR_ALPHA * a;
         ctx.fillRect(x === len ? w - 1 : x, h - floorH, 1, floorH);
       }
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = fill0;
+    ctx.fillStyle = fill;
     for (let x = 0; x <= len; x++) {
       const v = x === len ? ring.live(0) : ring.at(x, 0);
       if (Number.isNaN(v)) continue;
       const y = yOf(v);
       ctx.fillRect(x === len ? w - 1 : x, y, 1, h - y);
     }
-    strokeSeries(ring, ctx, 0, color0, 1.5, yOf);
-    if (choices.length > 1) strokeSeries(ring, ctx, 1, SOUND_SECOND_LINE_COLOR, 1, yOf);
+    strokeSeries(ring, ctx, 0, color, 1.5, yOf);
   }
 
-  return { el: row.el, setReadout: row.setReadout, push: ring.push, resetColumn: ring.resetColumn, draw };
+  let lastReadoutKey = "";
+  let shownLabel = label;
+  return {
+    el,
+    floor,
+    setReadout(text: string, o: ReadoutOpts = {}): void {
+      const u = o.unit ?? "%";
+      const key = `${text}|${u}|${o.textual ? 1 : 0}`;
+      if (key === lastReadoutKey) return;
+      lastReadoutKey = key;
+      digits.textContent = text;
+      digits.style.cssText = o.textual ? lineDigitsTextStyle : lineDigitsStyle;
+      unit.textContent = u;
+      unit.style.display = u ? "" : "none";
+    },
+    push: ring.push,
+    resetColumn: ring.resetColumn,
+    draw,
+    /** Keyed, so a per-tick call is free. */
+    setLabel(text: string): void {
+      if (text === shownLabel) return;
+      shownLabel = text;
+      labelText.textContent = text;
+    },
+  };
 }
+
+type LineRow = ReturnType<typeof createLineRow>;
 
 function createTempoBlock(accent: string) {
   const el = document.createElement("div");
@@ -848,7 +929,7 @@ function createTempoBlock(accent: string) {
 // The Hits card's history: lanes for Any hit and Bass/Mid/Treble, one canvas, one
 // column per CSS pixel over the card's span. A trace-only Surge lane (signals.ts's
 // "feature.flux") sits under them; it's not part of HITS_LANES, having no hits
-// of its own. The Bass lane also carries the Kick band's jack and Hz.
+// of its own.
 const HITS_LANE_HEIGHT_PX = 16;
 const HITS_LANE_COUNT = 5; // Any, Bass, Mid, Treble, Surge
 const HITS_HEIGHT_PX = HITS_LANE_HEIGHT_PX * HITS_LANE_COUNT;
@@ -874,10 +955,6 @@ const HITS_LANES: readonly HitsLane[] = [
 // (SURGE_CHOICE).
 const HITS_LANE_CHOICES: readonly DriveSourceChoice[] = ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"];
 const SURGE_CHOICE: DriveSourceChoice = "feature.flux";
-// The Kick band's jack sits beside the Bass lane's own, one jack further in.
-const KICK_CHOICE: DriveSourceChoice = "anim.kickBand";
-const KICK_LANE = 1; // the Bass lane in HITS_LANES
-const KICK_JACK_STEP_PX = 15; // a 13px jack plus a 2px gap
 const HITS_FIELDS_PER_LANE = 6; // ratio, code, strength, standout, loudness, pulse
 
 /** Where lane `li`'s fields sit in the ring's per-column series. */
@@ -921,7 +998,6 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
     `A hit: a peak in how fast the sound rises across all frequencies, over its last second's average + ${HIT_DEFAULTS.k}× its spread and at least ${HIT_DEFAULTS.min}, ≥${ms(REFRACTORY_S)} after the last one.`,
     "Each hit is a kick (Bass), snare (Mid) or hat (Treble) by where its rising sound sits; Any hit is any of the three.",
     `While music with a clear beat plays, Bass and Treble also fire when their own level jumps within ${ms(RISE_WINDOW_S)} by more than its last second's average jump + ${RISE_K}× its spread, so a hat under a snare still reaches Treble.`,
-    "Kick band: the one bass band that pulses most clearly right now; its Hz leads the Bass note, and the inner jack on that lane sends it.",
     "Surge: how close a hit is to firing, as a setting fed by Onset surge sees it; the line is where one fires.",
     gate,
   ].join(" ");
@@ -940,10 +1016,9 @@ type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElem
  *  (device-local only: a null diag still lets fired/miss through, with no
  *  ratio trace and no gated/blocked). Bass/Mid/Treble read `anim` (bandEnergy.ts
  *  runs everywhere). Ground shading is `1 - anim.gateDimmer`, the silence
- *  gate's dimmer. The Bass lane also carries the Kick band's jack and Hz. */
+ *  gate's dimmer. */
 function createHitsHistory(
   getSilenceGate: () => SilenceGateMarks,
-  getBandEdgesHz: () => ArrayLike<number>,
   mountJack: MountJack,
   span: TraceSpan,
 ) {
@@ -963,7 +1038,7 @@ function createHitsHistory(
   // canvas's. Its right padding (LANE_JACK_GUTTER_PX) ends the canvas short of
   // the jacks, so no trace runs on under one.
   const vizWrap = document.createElement("div");
-  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX + KICK_JACK_STEP_PX}px;`;
+  vizWrap.style.cssText = `position: relative; margin-top: 4px; padding-right: ${LANE_JACK_GUTTER_PX}px;`;
   ring.canvas.style.marginTop = "0";
   vizWrap.appendChild(ring.canvas);
   row.el.children[1].replaceWith(vizWrap);
@@ -1005,12 +1080,6 @@ function createHitsHistory(
   surgeGlow.style.setProperty("--c", surgeColor);
   vizWrap.appendChild(surgeGlow);
   laneMounts.push({ choice: SURGE_CHOICE, glowEl: surgeGlow });
-  // Inner jack on the Bass lane; the two share that lane's glow.
-  const kickJack = mountJack(KICK_CHOICE, vizWrap, row.el);
-  kickJack.el.style.position = "absolute";
-  kickJack.el.style.right = `${2 + KICK_JACK_STEP_PX}px`;
-  kickJack.el.style.top = `${KICK_LANE * HITS_LANE_HEIGHT_PX + (HITS_LANE_HEIGHT_PX - 13) / 2}px`;
-  laneMounts.push({ choice: KICK_CHOICE, glowEl: laneMounts[KICK_LANE]!.glowEl });
 
   // Fire times per lane for the legend's count: kept for span.max, counted over
   // the shown span. Pruned on logging too: the only reader (the legend) is
@@ -1223,10 +1292,9 @@ function createHitsHistory(
           HITS_SURGE_LANE,
           anim && frame && beatDiag ? `${Math.round(SIGNALS["feature.flux"].read(frame, anim) * 100)}%` : "--",
         );
-        const kickHz = anim ? `${formatHz(bandCenterHz(getBandEdgesHz(), anim.kickBandIndex))} · ` : "";
         const sec = span.sec();
         legend.setNote(0, laneNote(beatDiag ? beatDiag.ratio : null, firesInSpan(0, nowMs), sec));
-        legend.setNote(1, kickHz + laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
+        legend.setNote(1, laneNote(anim ? anim.hits.low.ratio : null, firesInSpan(1, nowMs), sec));
         legend.setNote(2, laneNote(anim ? anim.hits.mid.ratio : null, firesInSpan(2, nowMs), sec));
         legend.setNote(3, laneNote(anim ? anim.hits.high.ratio : null, firesInSpan(3, nowMs), sec));
         // The marks in the hint can move; touch the DOM only when it changed.
@@ -1438,12 +1506,6 @@ const dialLabelStyle = `font: 400 9px/1 ${FONT_MONO}; text-transform: uppercase;
 
 const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
-/** Hint for a Sound row with a second line: the main signal's description,
- *  then which line the pale one is. */
-function soundPairDescription(main: SignalId, second: SignalId): string {
-  return `${capitalise(driveSourceDescription(main))} The pale line is ${driveSourceLabel(second)}: ${driveSourceDescription(second)}`;
-}
-
 export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const root = document.createElement("div");
   root.className = "vc-meters vc-scroll";
@@ -1550,74 +1612,120 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     return chip;
   }
   const soundSpan = cardSpan("sound");
+  const stemsSpan = cardSpan("stems");
   const hitsSpan = cardSpan("hits");
   const beatSpan = cardSpan("beat");
   const songSpan = cardSpan("song");
 
-  // ---- Sound: spectrum, Level, Bass, Mid, Treble ----
+  // Each line row's heat floor, keyed by the row its jack feeds:
+  // addHeatMonitorStrip draws the row's heat there instead of under the row.
+  const heatFloorHosts = new Map<HTMLElement, HTMLElement>();
+  function lineRow(spec: Omit<Parameters<typeof createLineRow>[0], "mountJack">): LineRow {
+    const row = createLineRow({ ...spec, mountJack });
+    heatFloorHosts.set(row.el, row.floor);
+    return row;
+  }
+  const bandLabel = (id: SignalId) => driveSourceLabel(id).replace(/ level$/, "");
+
+  // ---- Sound: spectrum, Level, Bass, Mid, Treble, then Bands ----
   // The thin spectrum is fed by deviceMenu.ts.
-  const soundSpectrum = createSpectrumStrip({ plotHeightPx: SOUND_SPECTRUM_HEIGHT_CSS_PX });
+  const soundSpectrum = createSpectrumStrip({
+    plotHeightPx: SOUND_SPECTRUM_HEIGHT_CSS_PX,
+    onBandClick: (n) => {
+      toggleBandPick(n);
+      refreshBandRows();
+    },
+  });
   nameGraph(soundSpectrum.el, "Live spectrum, bass on the left");
   soundSpectrum.el.style.marginBottom = "4px";
-  const soundLevel = createTraceRow({
+  const soundLevel = lineRow({
     label: driveSourceLabel("anim.energy"),
     description:
       "The sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene reacts to. The shaded floor shows when the silence gate was closing: darker, fewer hits get through.",
-    choices: ["anim.energy"],
-    heightPx: SOUND_LEVEL_TRACE_HEIGHT_CSS_PX,
+    choice: "anim.energy",
     span: soundSpan,
     gateFloor: true,
-    mountJack,
   });
-  const soundBass = createTraceRow({
-    label: driveSourceLabel("anim.low").replace(/ level$/, ""),
-    description: capitalise(driveSourceDescription("anim.low")),
-    choices: ["anim.low"],
-    heightPx: SOUND_TRACE_HEIGHT_CSS_PX,
+  const soundBand = (choice: SignalId): LineRow =>
+    lineRow({ label: bandLabel(choice), description: capitalise(driveSourceDescription(choice)), choice, span: soundSpan });
+  const soundBass = soundBand("anim.low");
+  const soundMid = soundBand("anim.mid");
+  const soundTreble = soundBand("anim.high");
+  // Its label is the picked band's Hz, written on the text tick.
+  const soundKick = lineRow({
+    label: "--",
+    sub: "kick",
+    description: capitalise(driveSourceDescription("anim.kickBand")),
+    choice: "anim.kickBand",
     span: soundSpan,
-    mountJack,
   });
-  const soundMid = createTraceRow({
-    label: driveSourceLabel("anim.mid").replace(/ level$/, ""),
-    sub: "+ " + driveSourceLabel("anim.lead"),
-    description: soundPairDescription("anim.mid", "anim.lead"),
-    choices: ["anim.mid", "anim.lead"],
-    heightPx: SOUND_TRACE_HEIGHT_CSS_PX,
-    span: soundSpan,
-    mountJack,
+  const bandsLabel = document.createElement("div");
+  bandsLabel.style.cssText = bandsLabelStyle;
+  bandsLabel.textContent = "Bands · click the spectrum to pick one";
+  const bandsBlock = document.createElement("div");
+  bandsBlock.append(soundKick.el);
+  // Labels start on the nominal ladder; the text tick rewrites them from the
+  // live edge table, which only exists once there's an AudioContext.
+  const bandRows: { row: LineRow; id: BandSignalId; n: number; shown: boolean; display: string }[] = BAND_SIGNALS.map((id, n) => {
+    const row = lineRow({
+      label: formatHz(bandCenterHz(deps.getBandEdgesHz(), n)),
+      description: capitalise(driveSourceDescription(id)),
+      choice: id,
+      span: soundSpan,
+    });
+    // The row's own display is in its inline style, so showing it again
+    // restores that rather than clearing to "".
+    const display = row.el.style.display;
+    row.el.style.display = "none";
+    bandsBlock.append(row.el);
+    return { row, id, n, shown: false, display };
   });
-  const soundTreble = createTraceRow({
-    label: driveSourceLabel("anim.high").replace(/ level$/, ""),
-    sub: "+ " + driveSourceLabel("anim.hats"),
-    description: soundPairDescription("anim.high", "anim.hats"),
-    choices: ["anim.high", "anim.hats"],
-    heightPx: SOUND_TRACE_HEIGHT_CSS_PX,
-    span: soundSpan,
-    mountJack,
-  });
-  // Preallocated: update() records every tick.
-  const soundLevelVals: (number | null)[] = [null, null];
-  const soundBassVals: (number | null)[] = [null];
-  const soundMidVals: (number | null)[] = [null, null];
-  const soundTrebleVals: (number | null)[] = [null, null];
+  const bandRowIds: ReadonlySet<SignalId> = new Set(BAND_SIGNALS);
+  // Single-series rows, recorded and drawn the same way every tick.
+  const soundRows: readonly { row: LineRow; id: SignalId }[] = [
+    { row: soundBass, id: "anim.low" },
+    { row: soundMid, id: "anim.mid" },
+    { row: soundTreble, id: "anim.high" },
+    { row: soundKick, id: "anim.kickBand" },
+  ];
   const soundCard = createCard({
     title: "Sound",
     accent: INPUT_GREEN,
     foldId: "sound",
     right: createSpanChip("sound", () => {}),
   });
-  soundCard.body.append(
-    soundSpectrum.el,
-    soundLevel.el,
-    spacer(),
-    soundBass.el,
-    spacer(),
-    soundMid.el,
-    spacer(),
-    soundTreble.el,
-  );
+  soundCard.body.append(soundSpectrum.el, soundLevel.el, soundBass.el, soundMid.el, soundTreble.el, bandsLabel, bandsBlock);
+
+  // ---- Stems: Lead, Hats ----
+  const stemLead = lineRow({
+    label: driveSourceLabel("anim.lead"),
+    description: capitalise(driveSourceDescription("anim.lead")),
+    choice: "anim.lead",
+    span: stemsSpan,
+  });
+  const stemHats = lineRow({
+    label: driveSourceLabel("anim.hats"),
+    description: capitalise(driveSourceDescription("anim.hats")),
+    choice: "anim.hats",
+    span: stemsSpan,
+  });
+  const stemRows: readonly { row: LineRow; id: SignalId }[] = [
+    { row: stemLead, id: "anim.lead" },
+    { row: stemHats, id: "anim.hats" },
+  ];
+  const stemsCard = createCard({
+    title: "Stems",
+    accent: STEM_LEAD,
+    foldId: "stems",
+    right: createSpanChip("stems", () => {}),
+  });
+  stemsCard.body.append(stemLead.el, stemHats.el);
+  // Preallocated: update() records every tick.
+  const soundLevelVals: (number | null)[] = [null, null];
+  const oneVal: (number | null)[] = [null];
+
   // ---- Hits ----
-  const hitsHistory = createHitsHistory(deps.getSilenceGate, deps.getBandEdgesHz, mountJack, hitsSpan);
+  const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack, hitsSpan);
   const hitsCard = createCard({
     title: "Hits",
     accent: NEUTRAL_ACCENT,
@@ -1750,7 +1858,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     group.textContent = text;
     grid.append(group);
   }
-  function heatHistRow(grid: HTMLElement, label: string): HTMLElement {
+  function heatHistRow(grid: HTMLElement, label: string): { name: HTMLElement; strip: HTMLElement } {
     const name = document.createElement("span");
     name.className = "vc-heat-hist-label";
     name.textContent = label;
@@ -1758,18 +1866,21 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     const strip = document.createElement("div");
     strip.className = "vc-heat-hist-strip";
     grid.append(name, strip);
-    return strip;
+    return { name, strip };
   }
 
   // The Signals group is built once; every jack is mounted by now.
   const heatSignalStrips: { idx: number; el: HTMLElement; bg: string }[] = [];
+  // A band's two cells, hidden with its row (refreshBandRows).
+  const bandHeatCells = new Map<SignalId, { name: HTMLElement; strip: HTMLElement }>();
   const heatCardTitles: Record<MeterCardId, string> = {
     sound: soundCard.title.textContent ?? "",
+    stems: stemsCard.title.textContent ?? "",
     hits: hitsCard.title.textContent ?? "",
     beat: beatCard.title.textContent ?? "",
     song: songCard.title.textContent ?? "",
   };
-  for (const cardId of ["sound", "hits", "beat", "song"] as const) {
+  for (const cardId of ["sound", "stems", "hits", "beat", "song"] as const) {
     const seen = new Set<SignalId>();
     const jacks = heatJacks.filter((j) => {
       if (j.card !== cardId || seen.has(j.id)) return false;
@@ -1779,34 +1890,45 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     if (!jacks.length) continue;
     heatHistGroup(heatSignalsGrid, heatCardTitles[cardId]);
     for (const j of jacks) {
-      heatSignalStrips.push({ idx: j.idx, el: heatHistRow(heatSignalsGrid, driveSourceLabel(j.id)), bg: "" });
+      const cells = heatHistRow(heatSignalsGrid, driveSourceLabel(j.id));
+      heatSignalStrips.push({ idx: j.idx, el: cells.strip, bg: "" });
+      if (bandRowIds.has(j.id)) bandHeatCells.set(j.id, cells);
     }
   }
 
-  // Each monitor's heat strips sit under the row a signal jack feeds, one per
-  // signal in mount order, led by a dot in the signal's colour. Above the row's
-  // hint, so under its trace and legend. The Tempo block is a narrow box welded
-  // beside Lock, so its strips join Lock's.
+  // A line row's heat is the floor of its own trace lane (heatFloorHosts).
+  // Every other monitor's heat strips sit under the row a signal jack feeds,
+  // one per signal in mount order, led by a dot in the signal's colour. Above
+  // the row's hint, so under its trace and legend. The Tempo block is a narrow
+  // box welded beside Lock, so its strips join Lock's.
   const heatMonitorStrips: { idx: number; card: MeterCardId; folded: () => boolean; el: HTMLElement; bg: string }[] = [];
   const heatMonitorHosts = new Map<HTMLElement, { host: HTMLElement; ids: Set<SignalId> }>();
   function addHeatMonitorStrip(j: HeatJack, rowEl: HTMLElement): void {
+    const floor = heatFloorHosts.get(rowEl);
     let m = heatMonitorHosts.get(rowEl);
     if (!m) {
-      const host = document.createElement("div");
-      host.className = "vc-heat-monitor";
-      rowEl.insertBefore(host, rowEl.querySelector(":scope > .vc-hint"));
+      const host = floor ?? document.createElement("div");
+      if (!floor) {
+        host.className = "vc-heat-monitor";
+        rowEl.insertBefore(host, rowEl.querySelector(":scope > .vc-hint"));
+      }
       m = { host, ids: new Set() };
       heatMonitorHosts.set(rowEl, m);
     }
     if (m.ids.has(j.id)) return;
     m.ids.add(j.id);
-    const line = document.createElement("div");
-    line.className = "vc-heat-monitor-line";
-    line.style.setProperty("--c", driveSourceColor(j.id));
     const strip = document.createElement("div");
-    strip.className = "vc-heat-strip";
-    line.append(strip);
-    m.host.append(line);
+    if (floor) {
+      strip.className = "vc-heat-floor";
+      m.host.append(strip);
+    } else {
+      const line = document.createElement("div");
+      line.className = "vc-heat-monitor-line";
+      line.style.setProperty("--c", driveSourceColor(j.id));
+      strip.className = "vc-heat-strip";
+      line.append(strip);
+      m.host.append(line);
+    }
     heatMonitorStrips.push({ idx: j.idx, card: j.card, folded: j.folded, el: strip, bg: "" });
   }
   for (const j of heatJacks) addHeatMonitorStrip(j, j.feedEl === tempo.el ? lock.el : j.feedEl);
@@ -1838,7 +1960,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         none.textContent = "No wired settings in this scene.";
         heatSettingsGrid.append(none);
       }
-      for (const r of rows) heatSettingStrips.push({ track: r.track, el: heatHistRow(heatSettingsGrid, r.label), bg: "" });
+      for (const r of rows) heatSettingStrips.push({ track: r.track, el: heatHistRow(heatSettingsGrid, r.label).strip, bg: "" });
     }
     rows.forEach((r, i) => {
       heatSettingStrips[i]!.track = r.track;
@@ -1853,9 +1975,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     for (const s of heatSignalStrips) paintHeatStrip(s, heatTracks[s.idx]!, span, nowSec);
   }
 
-  // Sound, Beat, Song, per the file header. Sound leads: it's the raw picture of
-  // the sound, the first thing to check when the visuals seem off.
-  root.append(soundCard.el, hitsCard.el, beatCard.el, songCard.el, heatHistoryCard.el);
+  // Per the file header. Sound leads: it's the raw picture of the sound, the
+  // first thing to check when the visuals seem off.
+  root.append(soundCard.el, stemsCard.el, hitsCard.el, beatCard.el, songCard.el, heatHistoryCard.el);
 
   // The last drawn tick (update() with onScreen true).
   let lastMs: number | null = null;
@@ -1870,6 +1992,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // highlights only that half.
   const cardElements: Record<MeterCardId, HTMLElement> = {
     sound: soundCard.el,
+    stems: stemsCard.el,
     hits: hitsCard.el,
     beat: beatCard.el,
     song: songCard.el,
@@ -1886,11 +2009,64 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["low", soundBass.el],
     ["mid", soundMid.el],
     ["high", soundTreble.el],
+    ["kick", soundKick.el],
+    ["lead", stemLead.el],
+    ["hats", stemHats.el],
+    ...bandRows.map(({ id, row }): [MeterRowId, HTMLElement] => [id, row.el]),
   ]);
+
+  // Reused by every marks refresh: the Kick band's mark, then one per shown
+  // band row, drawn in that order so the Kick mark wins a shared bar.
+  const markPool = Array.from({ length: BAND_SIGNALS.length + 1 }, () => ({ band: 0, color: "" }));
+  const marks: { band: number; color: string }[] = [];
+  let markedKickBand = -1;
+  function refreshMarks(kickBand: number): void {
+    markedKickBand = kickBand;
+    marks.length = 0;
+    for (const b of bandRows) {
+      if (!b.shown) continue;
+      const m = markPool[marks.length]!;
+      m.band = b.n;
+      m.color = driveSourceColor(b.id);
+      marks.push(m);
+    }
+    if (kickBand >= 0) {
+      const m = markPool[marks.length]!;
+      m.band = kickBand;
+      m.color = driveSourceColor("anim.kickBand");
+      marks.push(m);
+    }
+    soundSpectrum.setMarks(marks);
+    soundSpectrum.redraw();
+  }
+  function refreshBandRows(): void {
+    for (const b of bandRows) {
+      const shown = isBandPicked(b.n) || deps.patch.usage(b.id) > 0;
+      if (shown === b.shown) continue;
+      b.shown = shown;
+      b.row.el.style.display = shown ? b.display : "none";
+      const display = shown ? "" : "none";
+      const cells = bandHeatCells.get(b.id);
+      if (cells) {
+        cells.name.style.display = display;
+        cells.strip.style.display = display;
+      }
+    }
+    refreshMarks(markedKickBand);
+  }
+  for (const b of bandRows) {
+    const cells = bandHeatCells.get(b.id);
+    if (cells) {
+      cells.name.style.display = "none";
+      cells.strip.style.display = "none";
+    }
+  }
+  refreshBandRows();
 
   // Each card's fold, for update()'s heat block.
   const meterCards: Record<MeterCardId, { fold?: { isFolded(): boolean } }> = {
     sound: soundCard,
+    stems: stemsCard,
     hits: hitsCard,
     beat: beatCard,
     song: songCard,
@@ -1899,8 +2075,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // or under a closed panel skips draws and DOM writes like a folded one; its
   // traces keep recording.
   const soundOnScreen = watchOnScreen(soundCard.el);
-  // The stem rows (Mid + Lead, Treble + Hats) are why app.ts runs the stem split.
-  const stemRowsShown = [watchOnScreen(soundMid.el), watchOnScreen(soundTreble.el)];
+  const stemsOnScreen = watchOnScreen(stemsCard.el);
   const heatHistoryOnScreen = watchOnScreen(heatHistoryCard.el);
   const hitsOnScreen = watchOnScreen(hitsCard.el);
   const beatOnScreen = watchOnScreen(beatCard.el);
@@ -1931,16 +2106,24 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       if (frame && anim) {
         const recordSec = nowMs / 1000;
         const stemsOff = !deps.stemsMeasured();
-        // Via SIGNALS[id].read() like the Wave trace, so a Sound line and a
+        // Via SIGNALS[id].read() like the Wave trace, so a line row and a
         // wire driven by the signal agree. A stem not measured this tick is a
         // gap, as in its heat track.
         soundLevelVals[0] = SIGNALS["anim.energy"].read(frame, anim);
         soundLevelVals[1] = gate ? 1 - gate.dimmer : null;
-        soundBassVals[0] = SIGNALS["anim.low"].read(frame, anim);
-        soundMidVals[0] = SIGNALS["anim.mid"].read(frame, anim);
-        soundMidVals[1] = stemsOff ? null : SIGNALS["anim.lead"].read(frame, anim);
-        soundTrebleVals[0] = SIGNALS["anim.high"].read(frame, anim);
-        soundTrebleVals[1] = stemsOff ? null : SIGNALS["anim.hats"].read(frame, anim);
+        for (const { row, id } of soundRows) {
+          oneVal[0] = SIGNALS[id].read(frame, anim);
+          row.push(oneVal, nowMs);
+        }
+        // Hidden rows too, so a row opens on what it missed.
+        for (const { row, id } of bandRows) {
+          oneVal[0] = SIGNALS[id].read(frame, anim);
+          row.push(oneVal, nowMs);
+        }
+        for (const { row, id } of stemRows) {
+          oneVal[0] = stemsOff ? null : SIGNALS[id].read(frame, anim);
+          row.push(oneVal, nowMs);
+        }
         for (let i = 0; i < heatIds.length; i++) {
           const x = SIGNALS[heatIds[i]!].read(frame, anim);
           heatLive[i] = x;
@@ -1949,14 +2132,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       } else {
         soundLevelVals.fill(null);
-        soundBassVals.fill(null);
-        soundMidVals.fill(null);
-        soundTrebleVals.fill(null);
+        oneVal[0] = null;
+        for (const { row } of soundRows) row.push(oneVal, nowMs);
+        for (const { row } of bandRows) row.push(oneVal, nowMs);
+        for (const { row } of stemRows) row.push(oneVal, nowMs);
       }
       soundLevel.push(soundLevelVals, nowMs);
-      soundBass.push(soundBassVals, nowMs);
-      soundMid.push(soundMidVals, nowMs);
-      soundTreble.push(soundTrebleVals, nowMs);
       if (anim?.metronomeBeat) beatAtMs = nowMs;
       if (!onScreen) return;
 
@@ -2022,23 +2203,41 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Sound: Level, Bass, Mid, Treble ----
+      if (text && anim && anim.kickBandIndex !== markedKickBand) refreshMarks(anim.kickBandIndex);
+
+      // ---- Sound: Level, Bass, Mid, Treble, Kick band, band rows ----
       // Level's raw counterpart is rawBands (local-only). The thin
       // spectrum is drawn by deviceMenu.ts's feed, not here.
       if (!soundCard.fold?.isFolded() && soundOnScreen()) {
         soundLevel.draw();
-        soundBass.draw();
-        soundMid.draw();
-        soundTreble.draw();
+        for (const { row } of soundRows) row.draw();
+        for (const b of bandRows) if (b.shown) b.row.draw();
         if (text) {
           const levelVal = raw ? (rawBands ? meanOf(rawBands) : null) : frame ? frame.energy : null;
           soundLevel.setReadout(levelVal === null ? "--" : pct(levelVal), levelVal === null ? IDLE : {});
-          const bass = anim ? anim.low : null;
-          const mid = anim ? anim.mid : null;
-          const treble = anim ? anim.high : null;
-          soundBass.setReadout(bass === null ? "--" : pct(bass), bass === null ? IDLE : {});
-          soundMid.setReadout(mid === null ? "--" : pct(mid), mid === null ? IDLE : {});
-          soundTreble.setReadout(treble === null ? "--" : pct(treble), treble === null ? IDLE : {});
+          for (const { row, id } of soundRows) {
+            const v = frame && anim ? SIGNALS[id].read(frame, anim) : null;
+            row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
+          }
+          soundKick.setLabel(anim ? formatHz(bandCenterHz(deps.getBandEdgesHz(), anim.kickBandIndex)) : "--");
+          for (const b of bandRows) {
+            if (!b.shown) continue;
+            const v = frame && anim ? SIGNALS[b.id].read(frame, anim) : null;
+            b.row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
+            b.row.setLabel(formatHz(bandCenterHz(deps.getBandEdgesHz(), b.n)));
+          }
+        }
+      }
+
+      // ---- Stems: Lead, Hats ----
+      if (!stemsCard.fold?.isFolded() && stemsOnScreen()) {
+        for (const { row } of stemRows) row.draw();
+        if (text) {
+          const measured = deps.stemsMeasured();
+          for (const { row, id } of stemRows) {
+            const v = frame && anim && measured ? SIGNALS[id].read(frame, anim) : null;
+            row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
+          }
         }
       }
 
@@ -2102,6 +2301,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       flashRow(rowEl);
     },
     refreshPatchView(): void {
+      refreshBandRows();
       const previewOn = deps.patch.previewIsActive();
       // Grouped by feedEl so a row shared by several jacks is written once.
       const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
@@ -2184,6 +2384,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     },
     soundSpectrum,
     soundSpectrumShown: () => !soundCard.fold?.isFolded() && soundOnScreen(),
-    stemRowsOnScreen: () => !soundCard.fold?.isFolded() && (stemRowsShown[0]!() || stemRowsShown[1]!()),
+    stemRowsOnScreen: () => !stemsCard.fold?.isFolded() && stemsOnScreen(),
   };
 }

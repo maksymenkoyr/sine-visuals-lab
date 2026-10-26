@@ -1,6 +1,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "./animClock.ts";
-import { MIN_BPM as BPM_MIN, MAX_BPM as BPM_MAX } from "../audio/types.ts";
+import { MIN_BPM as BPM_MIN, MAX_BPM as BPM_MAX, NUM_BANDS } from "../audio/types.ts";
+import { bandCenterHz, formatHz, nominalBandEdgesHz } from "../audio/bandScale.ts";
 import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /**
@@ -71,8 +72,8 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  *
  * "Level" (`anim.energy`) and "Input level" (`feature.level`) are the two
  * entries whose `read()` actually uses its `frame` argument (`frame.energy`
- * and `frame.level`, not anything off `anim`) — every other entry ignores
- * `frame` entirely. drives.ts feeds them the sensitivity-applied frame
+ * and `frame.level`, not anything off `anim`) — every other entry but the
+ * band entries below ignores `frame` entirely. drives.ts feeds them the sensitivity-applied frame
  * (matching what a scene's own `uEnergy` sees — see that file's header), so
  * a setting driven by "Level" and a scene's plain `uEnergy` uniform read
  * the identical number. Called elsewhere (a setting row's live pill) with
@@ -88,12 +89,23 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * resolves against (musicProfile.ts) — so a wire on one moves over seconds,
  * not per hit, and does what its dial does through silence: rests at
  * NEUTRAL, except `dial.loudness`, which keeps its last reading.
+ *
+ * The `band.<n>` entries (BAND_SIGNALS) are one per analyser band, all of
+ * them static rather than added when one is picked: heat tracks, jacks and
+ * saved-wire validation are all built once from SIGNALS. Each reads that
+ * band's auto-gained level (FeatureFrame.bands, what the spectrum strip
+ * draws) dimmed by the silence gate the way Kick band is. The id is the
+ * band number, not its Hz: the ladder's ceiling is capped below Nyquist at
+ * the usual sample rates (bandScale.ts's MAX_HZ_CAP), so band n is the same
+ * Hz everywhere and the Hz is only its label. The Sound card shows a band's
+ * row once it's picked on the spectrum or wired (audioMeters.ts).
  */
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. "sound" is the first meter, the Sound card. */
-export type MeterCardId = "sound" | "hits" | "beat" | "song";
+ *  actually points at that card. "sound" is the first meter, the Sound card;
+ *  "stems" follows it with Lead and Hats. */
+export type MeterCardId = "sound" | "stems" | "hits" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -103,10 +115,25 @@ export type MeterCardId = "sound" | "hits" | "beat" | "song";
  *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
  *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
- *  Treble rows; Lead and Hats point at the Mid and Treble rows they draw in.
- *  Each dial's own cell in the Song card's strip is
- *  its DialSignalId. */
-export type MeterRowId = "section" | "tempo" | "hits" | "wave" | "lock" | "bar" | "energy" | "low" | "mid" | "high" | DialSignalId;
+ *  Treble rows, and "kick" the Kick band row in its Bands block. "lead" and
+ *  "hats" are the Stems card's own rows. Each dial's own cell in the Song
+ *  card's strip is its DialSignalId. */
+export type MeterRowId =
+  | "section"
+  | "tempo"
+  | "hits"
+  | "wave"
+  | "lock"
+  | "bar"
+  | "energy"
+  | "low"
+  | "mid"
+  | "high"
+  | "kick"
+  | "lead"
+  | "hats"
+  | DialSignalId
+  | BandSignalId;
 
 /** One dial as a signal — see this file's header. */
 export type DialSignalId = `dial.${MusicDial}`;
@@ -118,8 +145,19 @@ export function dialSignalId(dial: MusicDial): DialSignalId {
 /** Every dial signal, in MUSIC_DIALS order. */
 export const DIAL_SIGNALS: readonly DialSignalId[] = MUSIC_DIALS.map(dialSignalId);
 
+/** One analyser band as a signal — see this file's header. */
+export type BandSignalId = `band.${number}`;
+
+export function bandSignalId(band: number): BandSignalId {
+  return `band.${band}`;
+}
+
+/** Every band signal, in band order. */
+export const BAND_SIGNALS: readonly BandSignalId[] = Array.from({ length: NUM_BANDS }, (_, n) => bandSignalId(n));
+
 export type SignalId =
   | DialSignalId
+  | BandSignalId
   | "feature.onset"
   | "feature.flux"
   | "feature.level"
@@ -256,7 +294,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The level of the single low band (below the Bands split) that has gone up and down the most over the last few seconds (AnimFrame.kickBand, bandPick.ts) — one narrow band, re-picked by itself when the music changes, unlike Bass level's average over the whole low group.",
     kind: "level",
     read: (_frame, anim) => anim.kickBand,
-    monitor: { card: "hits", row: "hits" },
+    monitor: { card: "sound", row: "kick" },
     bandRange: "low",
   }),
   "anim.midOnset": signal({
@@ -315,7 +353,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The drum part of the treble range (AnimFrame.hats, src/audio/stemSplit.ts) — hi-hats and cymbals with held bright sounds taken out, against all the treble's recent peak, unlike Treble level, which re-levels within seconds.",
     kind: "level",
     read: (_frame, anim) => anim.hats,
-    monitor: { card: "sound", row: "high" },
+    monitor: { card: "stems", row: "hats" },
     bandRange: "high",
   }),
   "anim.lead": signal({
@@ -325,7 +363,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The held part of the mid range (AnimFrame.lead, src/audio/stemSplit.ts) — vocals, synths and guitar with the drums taken out, so it doesn't jump on a snare the way Mid level does.",
     kind: "level",
     read: (_frame, anim) => anim.lead,
-    monitor: { card: "sound", row: "mid" },
+    monitor: { card: "stems", row: "lead" },
     bandRange: "mid",
   }),
   "anim.energy": signal({
@@ -430,6 +468,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     monitor: { card: "beat", row: "bar" },
   }),
   ...dialSignals(),
+  ...bandSignals(),
 };
 
 function dialSignals(): Record<DialSignalId, SignalSpec> {
@@ -445,5 +484,22 @@ function dialSignals(): Record<DialSignalId, SignalSpec> {
       monitor: { card: "song", row: id },
     });
   }
+  return out;
+}
+
+function bandSignals(): Record<BandSignalId, SignalSpec> {
+  const out = {} as Record<BandSignalId, SignalSpec>;
+  const edges = nominalBandEdgesHz();
+  BAND_SIGNALS.forEach((id, n) => {
+    out[id] = signal({
+      id,
+      label: `Band ${formatHz(bandCenterHz(edges, n))}`,
+      description:
+        "One analyser band on its own (FeatureFrame.bands, the same auto-gained bands the spectrum strip draws), dimmed by the silence gate like Kick band — its row shows once picked on the Sound card's spectrum.",
+      kind: "level",
+      read: (frame, anim) => (frame.bands[n] ?? 0) * anim.gateDimmer,
+      monitor: { card: "sound", row: id },
+    });
+  });
   return out;
 }

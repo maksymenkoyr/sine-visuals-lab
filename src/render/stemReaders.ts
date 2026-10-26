@@ -16,8 +16,7 @@ import type { SignalId } from "./signals.ts";
  *    reads AnimFrame.hats or .lead must list them there.
  *  - a crossfade is running: the outgoing scene still reads its own wires
  *    (compositor.ts's `drivesFor`) until the blend ends.
- *  - the panel's Sound card has its Mid or Treble row on screen (they draw
- *    Lead and Hats).
+ *  - the panel's Stems card (Lead and Hats) is unfolded and on screen.
  *  - a screen fed by this window may show a look other than this window's:
  *    the pop-out holding an earlier Play (the cue controller in
  *    net/outputSync.ts says it differs), or any other device online in the

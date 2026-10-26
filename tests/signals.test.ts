@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { DIAL_SIGNALS, SIGNALS, dialSignalId, type SignalId } from "../src/render/signals.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, SIGNALS, bandSignalId, dialSignalId, type SignalId } from "../src/render/signals.ts";
+import { NUM_BANDS } from "../src/audio/types.ts";
 import { MUSIC_DIALS } from "../src/render/musicProfile.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import { listScenes } from "../src/render/scene.ts";
@@ -25,8 +26,24 @@ describe("signals registry", () => {
     // small sets signals.ts's own MeterCardId/MeterRowId comments describe,
     // and fails loudly if they ever drift — the two are meant to change
     // together, rarely, both by hand.
-    const knownCards = new Set(["sound", "hits", "beat", "song"]);
-    const knownRows = new Set(["section", "tempo", "hits", "wave", "lock", "bar", "energy", "low", "mid", "high", ...DIAL_SIGNALS]);
+    const knownCards = new Set(["sound", "stems", "hits", "beat", "song"]);
+    const knownRows = new Set([
+      "section",
+      "tempo",
+      "hits",
+      "wave",
+      "lock",
+      "bar",
+      "energy",
+      "low",
+      "mid",
+      "high",
+      "kick",
+      "lead",
+      "hats",
+      ...DIAL_SIGNALS,
+      ...BAND_SIGNALS,
+    ]);
     for (const spec of Object.values(SIGNALS)) {
       if (!spec.monitor) continue;
       expect(knownCards.has(spec.monitor.card)).toBe(true);
@@ -43,6 +60,20 @@ describe("signals registry", () => {
       const profile = Object.fromEntries(MUSIC_DIALS.map((d, j) => [d, j / 10]));
       const anim = { profile } as unknown as AnimFrame;
       expect(spec.read({} as never, anim)).toBe(i / 10);
+    }
+  });
+
+  it("every band is a level signal reading its own gate-dimmed band, anchored to its own Sound row", () => {
+    expect(BAND_SIGNALS.length).toBe(NUM_BANDS);
+    const bands = Float32Array.from({ length: NUM_BANDS }, (_, n) => n / 100);
+    const anim = { gateDimmer: 0.5 } as unknown as AnimFrame;
+    for (let n = 0; n < NUM_BANDS; n++) {
+      const id = bandSignalId(n);
+      expect(BAND_SIGNALS[n]).toBe(id);
+      const spec = SIGNALS[id];
+      expect(spec.kind).toBe("level");
+      expect(spec.monitor).toEqual({ card: "sound", row: id });
+      expect(spec.read({ bands } as never, anim)).toBeCloseTo((n / 100) * 0.5, 6);
     }
   });
 

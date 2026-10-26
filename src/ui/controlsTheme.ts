@@ -47,6 +47,20 @@ export const FAMILY_ACCENTS = ["#8ea2ff", "#f28bd0", "#c9e26b"] as const;
 export const STRIP_LOW = "#89e29d";
 export const STRIP_MID = "#c0a2f5";
 export const STRIP_HIGH = "#f6b15b";
+/** The Stems card's rows and the Kick band row (audioMeters.ts): their own
+ *  colours, so they don't read as Mid, Treble or Bass. Picked for the widest
+ *  CIELAB distance from every card accent, FAMILY_ACCENTS entry and
+ *  drive-source colour (all ≥ 39 ΔE on 2026-10-25); re-measure before adding
+ *  a colour near them. */
+export const STEM_LEAD = "#eb64f7";
+export const STEM_HATS = "#6464f7";
+export const KICK_GREEN = "#64f764";
+/** A picked band's row (audioMeters.ts), cycled by band number so neighbouring
+ *  bands differ. Picked for the widest CIELAB distance from every card accent,
+ *  FAMILY_ACCENTS entry and drive-source colour, the stem and Kick colours
+ *  above included (all ≥ 26 ΔE on 2026-10-25); re-measure before adding a
+ *  colour near them. */
+export const BAND_COLORS = ["#f4eeaf", "#fac3a8", "#86e5f9"] as const;
 export const LIVE_DOT = "#83dc97";
 /** Warning ramp: the Input level wash near clipping and the meters' clip/drop
  *  flashes (audioMeters.ts). */
@@ -710,6 +724,8 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-heat-monitor-line { display: flex; align-items: center; gap: 5px; }
 .vc-heat-monitor-line::before { content: ""; flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--c); }
 .vc-heat-monitor-line .vc-heat-strip { flex: 1; margin-top: 0; }
+/* A one-line row's heat (audioMeters.ts's createLineRow): the floor of its trace lane, no dot. */
+.vc-heat-floor { height: 3px; border-radius: 1px; background: rgba(255,255,255,0.06); }
 .vc-heat-hist { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 8px; align-items: center; }
 .vc-heat-hist-label { font: 400 11px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-heat-hist-strip { height: 5px; border-radius: 1px; background: rgba(255,255,255,0.06); }
