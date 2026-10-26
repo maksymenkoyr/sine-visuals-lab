@@ -19,8 +19,10 @@
  * Knots are kept by key across sync() calls, since a scroll recomputes every
  * cable and must never tear out the open knot's body (or a slider in it
  * mid-drag). The motion (centre, width, height) is a spring stepped in tick(),
- * so the cable's halves can follow the knot's edges every frame: tick() only
- * writes styles, never reads layout. The fades (body, peek graph, glyph,
+ * so the cable's halves can follow an open knot's edges every frame: tick()
+ * only writes styles, never reads layout. A peek's pill sits over a still
+ * cable instead (`Knot.cableW`): a cable reshaped under the pointer slides out
+ * from under it, ends the peek, and springs back under it again. The fades (body, peek graph, glyph,
  * dimming) are CSS transitions (controlsTheme.ts's `.vc-knot` rules).
  *
  * The graphs keep the panel's convention: newest sample at the right, a fixed
@@ -60,7 +62,7 @@ export interface CableKnotPlacement {
 
 export interface CableKnotGeometry {
   cx: number;
-  /** Where both cable halves meet the knot's sides. */
+  /** Where both cable halves meet the knot: its sides when open, its rest bead's otherwise. */
   entryY: number;
   left: number;
   right: number;
@@ -162,6 +164,8 @@ interface Knot {
   y: Spring;
   w: Spring;
   h: Spring;
+  /** The width the cable's halves end at: the open width when open, else the rest bead's, never the peek's. */
+  cableW: Spring;
   hoverPeek: boolean;
   cablePeek: boolean;
   focusPeek: boolean;
@@ -208,6 +212,7 @@ export function createCableKnotLayer(): CableKnotLayer {
   /** Sets each spring's target for the knot's current state. */
   function aim(k: Knot): void {
     const st = stateOf(k);
+    k.cableW.to = st === "open" ? OPEN_W_PX : REST_PX;
     if (st === "open") {
       k.w.to = OPEN_W_PX;
       k.h.to = k.openH;
@@ -267,6 +272,7 @@ export function createCableKnotLayer(): CableKnotLayer {
       y: spring(p.anchor.y),
       w: spring(REST_PX),
       h: spring(REST_PX),
+      cableW: spring(REST_PX),
       hoverPeek: false,
       cablePeek: false,
       focusPeek: false,
@@ -482,6 +488,7 @@ export function createCableKnotLayer(): CableKnotLayer {
       moved = stepSpring(k.y, dtSec, snap) || moved;
       moved = stepSpring(k.w, dtSec, snap) || moved;
       moved = stepSpring(k.h, dtSec, snap) || moved;
+      stepSpring(k.cableW, dtSec, snap);
       if (moved || k.el.style.width === "") {
         const s = k.el.style;
         s.left = `${(k.x.v - k.w.v / 2).toFixed(1)}px`;
@@ -530,7 +537,8 @@ export function createCableKnotLayer(): CableKnotLayer {
       const k = knots.get(key);
       if (!k) return null;
       const top = k.y.v - k.h.v / 2;
-      return { cx: k.x.v, entryY: top + Math.min(k.h.v / 2, k.entryOff), left: k.x.v - k.w.v / 2, right: k.x.v + k.w.v / 2 };
+      const half = k.cableW.v / 2;
+      return { cx: k.x.v, entryY: top + Math.min(k.h.v / 2, k.entryOff), left: k.x.v - half, right: k.x.v + half };
     },
   };
 }
