@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  ADAPT_MAX_LENGTH,
+  ADAPT_RING_CHECK_SEC,
+  adaptiveLength,
   advanceSparkleHits,
   createSparkleHits,
   PLUCK_TAU,
@@ -7,13 +10,9 @@ import {
   SHAPE_BOUNCE,
   SHAPE_PLUCK,
   SHAPE_SWELL,
-  SPARKLE_EFFECT_HINTS,
-  SPARKLE_EFFECT_ROWS,
   SPARKLE_EFFECTS,
   SPARKLE_HITS,
-  SPARKLE_PANEL_KEYS,
-  SPARKLE_SHAPE_HINTS,
-  SPARKLE_SHAPE_ROWS,
+  SPARKLE_MODES,
   SPARKLE_SHAPES,
   sparkleEnvelope,
   sparkleSoftCap,
@@ -163,13 +162,13 @@ describe("advanceSparkleHits", () => {
     expect(st.age.every((a) => a < 0)).toBe(true);
   });
 
-  it("sums hits in flight and gives each hit its own seed", () => {
+  it("sums hits in flight, each at the length it landed with", () => {
     const st = createSparkleHits();
     advanceSparkleHits(st, 0.01, true, 1, BASE);
-    advanceSparkleHits(st, 0.01, true, 1, BASE);
+    advanceSparkleHits(st, 0.01, true, 1, { ...BASE, length: 0.3 });
     const both = advanceSparkleHits(st, 0.01, false, 1, BASE);
-    expect(both).toBeCloseTo(sparkleSoftCap(sparkleEnvelope(0.02, BASE) + sparkleEnvelope(0.01, BASE)), 5);
-    expect(new Set(Array.from(st.seed.slice(0, 2))).size).toBe(2);
+    expect(both).toBeCloseTo(sparkleSoftCap(sparkleEnvelope(0.02, BASE) + sparkleEnvelope(0.01, BASE, 0.3)), 5);
+    expect(Array.from(st.length.slice(0, 2))).toEqual([Math.fround(0.6), Math.fround(0.3)]);
   });
 
   it("overwrites the oldest slot once every slot is playing", () => {
@@ -181,24 +180,136 @@ describe("advanceSparkleHits", () => {
   });
 });
 
-describe("the Sparkle panel's tables", () => {
-  const keys = new Set((causticsScene.settings ?? []).map((s) => s.key));
+describe("the scene's Sparkle settings", () => {
+  const find = (key: string) => (causticsScene.settings ?? []).find((s) => s.key === key);
 
-  it("has a hint and a row list per option", () => {
-    expect(SPARKLE_EFFECT_HINTS.length).toBe(SPARKLE_EFFECTS.length);
-    expect(SPARKLE_EFFECT_ROWS.length).toBe(SPARKLE_EFFECTS.length);
-    expect(SPARKLE_SHAPE_HINTS.length).toBe(SPARKLE_SHAPES.length);
-    expect(SPARKLE_SHAPE_ROWS.length).toBe(SPARKLE_SHAPES.length);
-  });
-
-  it("names only real caustics settings", () => {
-    for (const key of SPARKLE_PANEL_KEYS) expect(keys.has(key), key).toBe(true);
-  });
-
-  it("the scene's enum settings offer exactly these options", () => {
-    const find = (key: string) => (causticsScene.settings ?? []).find((s) => s.key === key);
-    expect(find("sparkleEffect")?.options).toEqual(SPARKLE_EFFECTS);
+  it("offer exactly these options", () => {
+    expect(find("sparkleFx")?.options).toEqual(SPARKLE_EFFECTS);
     expect(find("sparkleShape")?.options).toEqual(SPARKLE_SHAPES);
-    expect(causticsScene.panel?.[0]?.settings).toEqual(SPARKLE_PANEL_KEYS);
+    expect(find("sparkleAdapt")?.options).toEqual(SPARKLE_MODES);
+  });
+
+  it("start on Basic Pluck, with Flare and Tighten off, so the default look stays", () => {
+    expect(find("sparkleAdapt")?.default).toBe(0);
+    expect(find("sparkleShape")?.default).toBe(SHAPE_PLUCK);
+    expect(find("flare")?.default).toBe(0);
+    expect(find("tighten")?.default).toBe(0);
+  });
+
+  it("keep the old fine dials on the dev server only", () => {
+    for (const key of ["sparkleShape", "sparkleLength", "sparkleBright", "sparkleDensity", "sparkleSpread", "sparkleSustain", "sparkleWarp"]) {
+      expect(find(key)?.dev, key).toBe(true);
+    }
+    for (const key of ["sparkle", "sparkleFx", "sparkleGrain", "sparkleAdapt", "flare", "tighten"]) expect(find(key)?.dev, key).toBeUndefined();
+  });
+});
+
+// Made-up treble: hits every `gap` seconds, standing out by `standouts` in
+// turn, each with a treble level that falls with time constant `levelTau`
+// after it (short for a closed hat, long for held treble). Every hit is size
+// 1, as the scene's flat treble pulse plays it. Returns the sparkle reading
+// every frame.
+function play(adaptive: boolean, gap: number, standouts: number[], levelTau: number, seconds = 6): { t: number; v: number }[] {
+  const st = createSparkleHits();
+  const dt = 1 / 120;
+  const out: { t: number; v: number }[] = [];
+  let lastHit = -Infinity;
+  let k = 0;
+  for (let t = 0; t < seconds; t += dt) {
+    const fired = t >= k * gap;
+    const standout = fired ? standouts[k % standouts.length] : -1;
+    if (fired) {
+      lastHit = t;
+      k++;
+    }
+    const level = 0.8 * Math.exp(-(t - lastHit) / levelTau);
+    out.push({ t, v: advanceSparkleHits(st, dt, fired, 1, BASE, adaptive, level, standout) });
+  }
+  return out;
+}
+
+/** How far the glints dim between hits over the last two seconds: 1 is a
+ *  full flash and back to dark. */
+function dims(samples: { t: number; v: number }[]): number {
+  const end = samples[samples.length - 1].t;
+  const v = samples
+    .filter((s) => s.t > end - 2)
+    .map((s) => Math.max(0, s.v))
+    .sort((a, b) => a - b);
+  const p10 = v[Math.floor(v.length * 0.1)];
+  const p90 = v[Math.floor(v.length * 0.9)];
+  return (p90 - p10) / p90;
+}
+
+// The owner asked for Adaptive to change the picture visibly, not to be a
+// fine adjustment (2026-10-26): each case pins a clear gap against Basic.
+describe("Adaptive against Basic", () => {
+  const SIXTEENTH = 60 / 124 / 4;
+  const OFFBEAT = 60 / 124;
+
+  it("busy hats strobe as separate flashes instead of a steady glow", () => {
+    const basic = dims(play(false, SIXTEENTH, [0.45], 0.04));
+    const adaptive = dims(play(true, SIXTEENTH, [0.45], 0.04));
+    expect(basic).toBeLessThan(0.45);
+    expect(adaptive - basic).toBeGreaterThan(0.3);
+  });
+
+  it("sparse hats glow on through the gap", () => {
+    const area = (adaptive: boolean): number => play(adaptive, OFFBEAT, [0.45], 0.05).reduce((s, x) => s + Math.max(0, x.v), 0);
+    expect(area(true)).toBeGreaterThan(1.5 * area(false));
+    expect(adaptiveLength(OFFBEAT, 0)).toBeLessThanOrEqual(ADAPT_MAX_LENGTH);
+  });
+
+  it("accents flare and ghost notes fade, where Basic plays every hit the same", () => {
+    // Each hit's jump: the reading 20 ms after it, less the reading just
+    // before it — the flash the eye sees, whatever tail it lands on.
+    const jumps = (adaptive: boolean): [number, number] => {
+      const s = play(adaptive, OFFBEAT, [0.8, 0.3], 0.05);
+      const at = (t: number): number => s.reduce((best, x) => (Math.abs(x.t - t) < Math.abs(best.t - t) ? x : best)).v;
+      const jump = (k: number): number => at(k * OFFBEAT + 0.02) - at(k * OFFBEAT - 0.005);
+      return [jump(10), jump(11)];
+    };
+    const [basicLoud, basicSoft] = jumps(false);
+    const [loud, soft] = jumps(true);
+    expect(basicLoud / basicSoft).toBeLessThan(1.3);
+    expect(loud / soft).toBeGreaterThan(3);
+  });
+
+  it("a wire's edge, with no stand-out, plays at full size", () => {
+    const st = createSparkleHits();
+    advanceSparkleHits(st, 1 / 120, true, 1, BASE, true, 0, -1);
+    expect(st.size[0]).toBe(1);
+  });
+
+  it("held treble trembles, a closed hat doesn't, and Basic Pluck never does", () => {
+    // Flickers between one hit and the next: reversals of at least 0.1.
+    const flickers = (s: { t: number; v: number }[]): number => {
+      const gap = s.filter((x) => x.t > 10 * OFFBEAT + 0.15 && x.t < 11 * OFFBEAT - 0.01).map((x) => x.v);
+      let n = 0;
+      let extreme = gap[0];
+      let rising = gap[1] > gap[0];
+      for (const v of gap) {
+        if (rising ? v > extreme : v < extreme) extreme = v;
+        else if (Math.abs(v - extreme) >= 0.1) {
+          n++;
+          rising = !rising;
+          extreme = v;
+        }
+      }
+      return n;
+    };
+    expect(flickers(play(true, OFFBEAT, [0.8], 1.5))).toBeGreaterThan(10);
+    expect(flickers(play(true, OFFBEAT, [0.8], 0.04))).toBe(0);
+    expect(flickers(play(false, OFFBEAT, [0.8], 1.5))).toBe(0);
+  });
+
+  it("the next hit cuts a tremble short", () => {
+    const st = createSparkleHits();
+    const dt = 1 / 120;
+    advanceSparkleHits(st, dt, true, 1, BASE, true, 1);
+    for (let t = 0; t < ADAPT_RING_CHECK_SEC + 0.05; t += dt) advanceSparkleHits(st, dt, false, 1, BASE, true, 1);
+    expect(st.ring).toBe(1);
+    advanceSparkleHits(st, dt, true, 1, BASE, true, 1);
+    expect(st.ring).toBe(-1);
   });
 });

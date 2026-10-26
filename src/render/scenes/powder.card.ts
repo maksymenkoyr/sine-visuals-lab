@@ -158,7 +158,7 @@ export const SETTINGS: SceneSetting[] = [
     // Bright, snappy material is what has hats worth twinkling on.
     auto: { brightness: 0.4, attack: 0.15 },
     // Two signals across two layers (a treble hit, or the sustained treble
-    // level too), not one — same reasoning as caustics' Treble sparkle —
+    // level too), not one — same reasoning as caustics' Sparkle —
     // so the default is Scene.
     drive: { default: "scene", sceneLabel: "Scene: treble level + hits", sceneSources: ["anim.high", "anim.highOnset"] },
   },

@@ -1,106 +1,61 @@
 /**
- * Caustics' Treble sparkle as two picks: an Effect (what a treble hit does
- * to the pool) and a Shape (how that effect moves over time after the hit).
- * Pure, no GL and no DOM: caustics.ts runs the hits through this every frame
- * and uploads the result, and the panel's Sparkle widget
- * (src/ui/widgets/causticsSparkle.ts) draws the same curve in its preview,
- * so the two can't disagree about a shape.
+ * Caustics' Sparkle: what a treble hit does to the pool (the Effect) and how
+ * that moves over time after the hit (the shape). Pure, no GL and no DOM:
+ * caustics.ts runs the hits through this every frame and uploads the sum.
  *
- * **Effects.** `SPARKLE_EFFECTS` is the option list of the "sparkleEffect"
- * enum setting, in stored-value order — append only, since saved Looks and
- * share codes hold the index. The first few add light on top of the pool
- * (Grain is the scene's original glint field; Rings and Bloom are struck
- * spots bent by the water); the rest change the pool itself (its brightest
- * crests, its sharpness, its coordinate, its colour, a band of light
- * running along it). caustics.ts's FRAG is where each one is drawn.
+ * **Effects.** `SPARKLE_EFFECTS` is the option list of the "sparkleFx" enum
+ * setting, in stored-value order — append only, since saved Looks and share
+ * codes hold the index. Grain is the scene's original glint field on the
+ * crests; Prism and Run change the filaments themselves. caustics.ts's FRAG
+ * draws each one. Flare and Tighten used to be picks here and are now their
+ * own sliders, read straight from their drives in FRAG.
+ *
+ * **Modes.** "Sparkle shape" picks between `SPARKLE_MODES`. Basic plays one
+ * fixed curve per hit: the dev-only Basic shape pick (`SPARKLE_SHAPES`,
+ * Pluck unless the dev server changed it) and its dials. Adaptive decides
+ * each hit from the music, `ADAPT_*` below:
+ * - its size comes from how far the hit stood out (the treble lane's
+ *   stand-out, hitStrength.ts) against the recent hits', so accents flare
+ *   and ghost notes almost vanish, where Basic plays every hit the same;
+ * - its length follows the gap between hits, so every flash ends before the
+ *   next lands, and a bigger hit lasts longer;
+ * - a hit whose treble holds on `ADAPT_RING_CHECK_SEC` after it (a cymbal
+ *   wash, a held synth or piano) trembles with Bell's vibration while it
+ *   holds, until the next hit cuts it.
+ * Swell and Bounce are never chosen: Swell peaks after the hit, late with
+ * no way to hear ahead, and Bounce's repeats read as the echo look #508
+ * turned down.
  *
  * **Shapes.** `sparkleEnvelope` is one hit's strength `t` seconds after it,
- * signed: Bell's vibration and nothing else swings below 0, and an effect
- * that has a direction (Tighten loosens, Shimmer pushes the other way,
- * Prism swaps its fringes) reads the sign. Every shape lasts exactly
- * `length` seconds and fades to 0 over its last stretch, so a hit older
- * than that can be dropped. `SPARKLE_SHAPE_HINTS` says what each shape
- * looks like and `SparkleShapeParams` what each dial bends; every dial's
- * middle (or Attack 0) draws the shape as first built. Bell is a hit that
- * fades faster than Pluck's, plus a vibration at `speedHz` that starts with
- * it and fades on its own time constant (`vibDecay`, a fraction of
- * `length`), which is the trembling that rings on after the hit.
+ * signed: Bell's vibration and nothing else swings below 0, and only Prism
+ * reads the sign (it swaps its fringes). Every shape lasts exactly `length`
+ * seconds and fades to 0 over its last stretch, so a hit older than that
+ * can be dropped. `SparkleShapeParams` says what each dial bends; every
+ * dial's middle (or Attack 0) draws the shape as first built. Bell is a hit
+ * that fades faster than Pluck's, plus a vibration at `speedHz` that starts
+ * with it and fades on its own time constant (`vibDecay`, a fraction of
+ * `length`).
  *
  * **Hits.** `advanceSparkleHits` keeps the last `SPARKLE_HITS` hits in a
- * ring buffer (age, size, a per-hit seed) and sums their envelopes into one
- * reading with a soft cap, so fast hats stack without blowing out. Rings
- * and Bloom read the buffer itself (each hit strikes its own spots); every
- * other effect reads only the sum.
+ * ring buffer (age, size, own length) and sums their envelopes into one
+ * reading with a soft cap, so fast hats stack without blowing out.
  */
 
-export const SPARKLE_EFFECTS = ["Grain", "Rings", "Bloom", "Flare", "Tighten", "Shimmer", "Prism", "Run"] as const;
+export const SPARKLE_EFFECTS = ["Grain", "Prism", "Run"] as const;
 export const SPARKLE_SHAPES = ["Pluck", "Bell", "Swell", "Bounce"] as const;
+export const SPARKLE_MODES = ["Basic", "Adaptive"] as const;
 
 export const EFFECT_GRAIN = 0;
-export const EFFECT_RINGS = 1;
-export const EFFECT_BLOOM = 2;
-export const EFFECT_FLARE = 3;
-export const EFFECT_TIGHTEN = 4;
-export const EFFECT_SHIMMER = 5;
-export const EFFECT_PRISM = 6;
-export const EFFECT_RUN = 7;
+export const EFFECT_PRISM = 1;
+export const EFFECT_RUN = 2;
 
 export const SHAPE_PLUCK = 0;
 export const SHAPE_BELL = 1;
 export const SHAPE_SWELL = 2;
 export const SHAPE_BOUNCE = 3;
 
-/** One plain sentence per effect and per shape, in option order — the
- *  panel shows the picked pair under its preview. */
-export const SPARKLE_EFFECT_HINTS: readonly string[] = [
-  "A fine grain flashes on the bright ridges.",
-  "Each hit strikes a few spots. A ring spreads from each one, bent by the water and showing only on lit filaments.",
-  "Each hit lights a soft, uneven patch of filaments that swells and dissolves.",
-  "The brightest crests ignite and burn white. Dim water stays dim.",
-  "Every filament snaps thin and sharp, then relaxes. A swing below zero softens them past rest.",
-  "The filaments quiver like heat haze, breaking into fine trembling lines.",
-  "Each filament splits into colour fringes, like light through a prism.",
-  "Light runs along the filaments in travelling bands. Each hit pushes the bands forward.",
-];
-export const SPARKLE_SHAPE_HINTS: readonly string[] = [
-  "Instant hit, exponential fade.",
-  "Hard hit and exponential fade, with a fast vibration that trembles through it and rings on after the hit fades.",
-  "Grows exponentially after the hit, then cuts off, like a reversed cymbal.",
-  "Hits again and again, each bounce lower.",
-];
-
-/** The settings each pick adds to the panel's Sparkle section, by key, in
- *  option order — the widget mounts the picked effect's and shape's rows
- *  under the always-shown ones. Every key here must be a caustics setting
- *  (tests/causticsSparkle.test.ts checks). */
-export const SPARKLE_EFFECT_ROWS: readonly (readonly string[])[] = [
-  ["sparkleDensity", "sparkleGrain", "sparkleBright"],
-  ["sparkleDensity", "sparkleSize", "sparkleRingWidth"],
-  ["sparkleDensity", "sparkleSize"],
-  [],
-  [],
-  [],
-  [],
-  [],
-];
-export const SPARKLE_SHAPE_ROWS: readonly (readonly string[])[] = [
-  ["sparkleLength", "sparkleAttack", "sparkleDecay"],
-  ["sparkleLength", "sparkleAttack", "sparkleDecay", "sparkleVibration", "sparkleSpeed", "sparkleVibDecay"],
-  ["sparkleLength", "sparkleRise", "sparkleRelease"],
-  ["sparkleLength", "sparkleAttack", "sparkleDecay", "sparkleBounces"],
-];
-
-/** The two picks and the amount, shown above the preview and the picked
- *  rows. */
-export const SPARKLE_EFFECT_KEY = "sparkleEffect";
-export const SPARKLE_SHAPE_KEY = "sparkleShape";
-export const SPARKLE_AMOUNT_KEY = "sparkle";
-
-/** Every setting the panel's Sparkle section renders itself, so the Scene
- *  card's flat list leaves them out (PanelSection.settings). */
-export const SPARKLE_PANEL_KEYS: readonly string[] = [
-  ...new Set([SPARKLE_EFFECT_KEY, SPARKLE_SHAPE_KEY, SPARKLE_AMOUNT_KEY, ...SPARKLE_EFFECT_ROWS.flat(), ...SPARKLE_SHAPE_ROWS.flat()]),
-];
+export const MODE_BASIC = 0;
+export const MODE_ADAPTIVE = 1;
 
 export interface SparkleShapeParams {
   /** SHAPE_* index. */
@@ -115,9 +70,9 @@ export interface SparkleShapeParams {
    *  Bounce). 0.5 is each shape's own fade; the ends are
    *  DECAY_SPAN_OCTAVES apart. */
   decay: number;
-  /** Bell: the vibration's height against the hit's (0..1). */
+  /** Bell, and Adaptive's tremble: the vibration's height against the hit's (0..1). */
   vibration: number;
-  /** Bell: vibrations per second. */
+  /** Bell, and Adaptive's tremble: vibrations per second. */
   speedHz: number;
   /** Bell: the vibration's fade time constant, as a fraction of `length`. */
   vibDecay: number;
@@ -156,6 +111,69 @@ const RELEASE_SPAN_OCTAVES = 4;
  *  `length` itself. */
 const END_FADE_FROM = 0.85;
 
+// Adaptive. Each value was picked for a visible change against Basic's
+// 0.6 s Pluck, not a fine adjustment (the owner's ask, 2026-10-26), by
+// replaying five recorded songs' treble hits through both. Against Basic
+// these values keep about nine tenths of the average sparkle, make the hits'
+// peaks 5 to 16 times more varied, and differ by a third to four fifths
+// frame by frame; lengthening alone, the first try, differed by a tenth to
+// a quarter. tests/causticsSparkle.test.ts pins how far apart the two read.
+/** A hit lasts this many gaps between hits, within the two bounds below,
+ *  then scaled by its size (ADAPT_LENGTH_AT_0 at size 0, rising
+ *  ADAPT_LENGTH_PER_SIZE per unit of size up to ADAPT_LENGTH_SIZE_CAP). */
+export const ADAPT_GAPS_PER_LENGTH = 1.5;
+export const ADAPT_MIN_LENGTH = 0.15;
+export const ADAPT_MAX_LENGTH = 1.2;
+const ADAPT_LENGTH_AT_0 = 0.6;
+const ADAPT_LENGTH_PER_SIZE = 0.4;
+const ADAPT_LENGTH_SIZE_CAP = 1.5;
+/** How fast the gap estimate follows the hits, per hit. A gap longer than
+ *  ADAPT_GAP_MAX_SEC (a break) counts as that, so one pause can't stretch
+ *  the next hits out. */
+const ADAPT_GAP_FOLLOW = 0.35;
+const ADAPT_GAP_MAX_SEC = 1.5;
+const ADAPT_GAP_START_SEC = 0.5;
+/** Each hit's size is ADAPT_GAIN × (stand-out / recent mean stand-out) to
+ *  ADAPT_ACCENT, up to ADAPT_SIZE_MAX: a hit standing out twice as far as
+ *  usual plays about four times as big. Stand-out runs from about 0.1 to
+ *  0.8 on real songs. ADAPT_GAIN gives back the light the quiet hits lose. */
+export const ADAPT_ACCENT = 2;
+const ADAPT_GAIN = 1.4;
+const ADAPT_SIZE_MAX = 2;
+const ADAPT_MEAN_FOLLOW = 0.15;
+/** The ring test: the treble level's peak over the first ADAPT_PEAK_SEC
+ *  after a hit, against its level ADAPT_RING_CHECK_SEC after it. It can't
+ *  tell a cymbal from other held treble: on real songs (2026-10-26, the
+ *  engine's treble lane) every hit kept at least a fifth of its peak, in
+ *  one spread with no gap between closed and open hats, and the Hats stem
+ *  held on longer still. ADAPT_RING_HOLD was picked from that spread: it
+ *  trembled 0% of hits on Around the World, 13% on Billie Jean, about a
+ *  third on Levitating and Tarantula, and half on Still D.R.E.'s piano. */
+export const ADAPT_RING_CHECK_SEC = 0.12;
+export const ADAPT_RING_HOLD = 0.85;
+const ADAPT_PEAK_SEC = 0.05;
+/** The tremble ends once the level falls below this fraction of its peak,
+ *  or ADAPT_RING_MAX_SEC after the hit. */
+const ADAPT_RING_STOP = 0.15;
+const ADAPT_RING_MAX_SEC = 1.5;
+/** The tremble's height is Bell's Vibration dial times this, so Adaptive
+ *  shakes harder than a Basic Bell at the same dial. */
+const ADAPT_VIB_GAIN = 1.6;
+
+/** Every adaptive hit plays a Pluck at its own length. */
+const ADAPT_PLUCK: SparkleShapeParams = {
+  shape: SHAPE_PLUCK,
+  length: 0.6,
+  attack: 0,
+  decay: 0.5,
+  vibration: 0,
+  speedHz: 0,
+  vibDecay: 0.5,
+  bounces: 1,
+  rise: 0.5,
+  release: 0.5,
+};
+
 function smoothstep(e0: number, e1: number, x: number): number {
   const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
   return t * t * (3 - 2 * t);
@@ -165,9 +183,10 @@ function swellUp(x: number): number {
   return (Math.exp(SWELL_CURVE * x) - 1) / (Math.exp(SWELL_CURVE) - 1);
 }
 
-/** One hit's signed strength `t` seconds after it (0 outside [0, length]). */
-export function sparkleEnvelope(t: number, p: SparkleShapeParams): number {
-  const L = p.length;
+/** One hit's signed strength `t` seconds after it (0 outside [0, length]).
+ *  `length` overrides `p.length` for a hit that carries its own. */
+export function sparkleEnvelope(t: number, p: SparkleShapeParams, length = p.length): number {
+  const L = length;
   if (!(t >= 0) || t > L || L <= 0) return 0;
   const endFade = 1 - smoothstep(END_FADE_FROM * L, L, t);
   if (p.shape === SHAPE_SWELL) {
@@ -211,64 +230,116 @@ export function sparkleSoftCap(sum: number): number {
   return a <= 1 ? sum : Math.sign(sum) * (1 + 0.5 * Math.tanh(a - 1));
 }
 
-/** How many hits the ring buffer keeps — the uniform arrays' length too.
- *  When hits come faster than this many per `length`, the oldest one still
- *  playing is overwritten; by then the newer hits stacked on top hide it. */
+/** How many hits the ring buffer keeps. When hits come faster than this
+ *  many per length, the oldest one still playing is overwritten; by then
+ *  the newer hits stacked on top hide it. */
 export const SPARKLE_HITS = 12;
 
 export interface SparkleHits {
   /** Seconds since each hit, -1 for an empty slot. */
   age: Float32Array;
-  /** Each hit's own size (0..1), times its envelope this frame — what
-   *  Rings and Bloom draw each hit's spots with. */
-  env: Float32Array;
-  /** A per-hit seed (the hit's serial number, wrapped), so each hit strikes
-   *  different spots. */
-  seed: Float32Array;
   size: Float32Array;
+  /** Each hit's own length, fixed when it lands. */
+  length: Float32Array;
   next: number;
-  serial: number;
+  /** Seconds since the last hit, -1 before the first. Tracked in both
+   *  modes, so switching to Adaptive mid-song starts already adapted. */
+  sinceHit: number;
+  gapSec: number;
+  meanStandout: number;
+  /** The last hit's treble peak and size, and whether it rings: -1 not
+   *  decided yet, 0 no, 1 trembling. */
+  levelPeak: number;
+  lastSize: number;
+  ring: number;
 }
 
 export function createSparkleHits(): SparkleHits {
   return {
     age: new Float32Array(SPARKLE_HITS).fill(-1),
-    env: new Float32Array(SPARKLE_HITS),
-    seed: new Float32Array(SPARKLE_HITS),
     size: new Float32Array(SPARKLE_HITS),
+    length: new Float32Array(SPARKLE_HITS),
     next: 0,
-    serial: 0,
+    sinceHit: -1,
+    gapSec: ADAPT_GAP_START_SEC,
+    meanStandout: 0,
+    levelPeak: 0,
+    lastSize: 0,
+    ring: 0,
   };
 }
 
-/** Seeds wrap here so they stay exact as floats in the shader. */
-const SEED_WRAP = 4096;
+/** Adaptive's length for a hit of Adaptive `size`, from the gap estimate. */
+export function adaptiveLength(gapSec: number, size: number): number {
+  const fromGap = Math.min(ADAPT_MAX_LENGTH, Math.max(ADAPT_MIN_LENGTH, ADAPT_GAPS_PER_LENGTH * gapSec));
+  return fromGap * (ADAPT_LENGTH_AT_0 + ADAPT_LENGTH_PER_SIZE * Math.min(size, ADAPT_LENGTH_SIZE_CAP));
+}
+
+/** Adaptive's size for a hit that stood out `standout` against the recent
+ *  mean; 1 with no reading (a negative `standout`, a wire's edge). */
+export function adaptiveSize(standout: number, meanStandout: number): number {
+  if (!(standout >= 0) || !(meanStandout > 0)) return 1;
+  return Math.min(ADAPT_SIZE_MAX, ADAPT_GAIN * (standout / meanStandout) ** ADAPT_ACCENT);
+}
 
 /** One frame: ages every hit by `dtSec`, records a new hit of `size` when
- *  `fired`, refreshes each hit's envelope, and returns their soft-capped
- *  sum. A hit past `length` is cleared, so it can't come back if the length
- *  is raised later. */
-export function advanceSparkleHits(st: SparkleHits, dtSec: number, fired: boolean, size: number, p: SparkleShapeParams): number {
+ *  `fired`, and returns the hits' soft-capped sum. `adaptive` plays the hit
+ *  as Adaptive decides (this file's header) instead of `p`, reading
+ *  `level`, the treble level the sparkle listens to, for the ring test, and
+ *  `standout`, the hit's stand-out (negative for none), for its size. */
+export function advanceSparkleHits(
+  st: SparkleHits,
+  dtSec: number,
+  fired: boolean,
+  size: number,
+  p: SparkleShapeParams,
+  adaptive = false,
+  level = 0,
+  standout = -1,
+): number {
   for (let i = 0; i < SPARKLE_HITS; i++) {
     if (st.age[i] < 0) continue;
     st.age[i] += dtSec;
-    if (st.age[i] > p.length) {
-      st.age[i] = -1;
-      st.env[i] = 0;
-    }
+    if (st.age[i] > st.length[i]) st.age[i] = -1;
   }
+  if (st.sinceHit >= 0) st.sinceHit += dtSec;
   if (fired) {
+    if (st.sinceHit >= 0) st.gapSec += ADAPT_GAP_FOLLOW * (Math.min(st.sinceHit, ADAPT_GAP_MAX_SEC) - st.gapSec);
+    const accent = adaptiveSize(standout, st.meanStandout);
+    const played = adaptive ? size * accent : size;
+    if (standout >= 0) st.meanStandout = st.meanStandout > 0 ? st.meanStandout + ADAPT_MEAN_FOLLOW * (standout - st.meanStandout) : standout;
     const i = st.next;
     st.age[i] = 0;
-    st.size[i] = size;
-    st.seed[i] = st.serial % SEED_WRAP;
-    st.serial++;
+    st.size[i] = played;
+    st.length[i] = adaptive ? adaptiveLength(st.gapSec, accent) : p.length;
     st.next = (i + 1) % SPARKLE_HITS;
+    st.sinceHit = 0;
+    st.levelPeak = level;
+    st.lastSize = played;
+    st.ring = -1;
   }
+
   let sum = 0;
   for (let i = 0; i < SPARKLE_HITS; i++) {
-    st.env[i] = st.age[i] < 0 ? 0 : st.size[i] * sparkleEnvelope(st.age[i], p);
-    sum += st.env[i];
+    if (st.age[i] < 0) continue;
+    sum += st.size[i] * sparkleEnvelope(st.age[i], adaptive ? ADAPT_PLUCK : p, st.length[i]);
+  }
+
+  if (st.sinceHit >= 0 && st.sinceHit <= ADAPT_PEAK_SEC) st.levelPeak = Math.max(st.levelPeak, level);
+  if (st.ring === -1 && st.sinceHit >= ADAPT_RING_CHECK_SEC) st.ring = st.levelPeak > 0 && level >= ADAPT_RING_HOLD * st.levelPeak ? 1 : 0;
+  if (st.ring === 1) {
+    const still = st.levelPeak > 0 ? Math.min(1, level / st.levelPeak) : 0;
+    if (still < ADAPT_RING_STOP || st.sinceHit > ADAPT_RING_MAX_SEC) st.ring = 0;
+    else if (adaptive) {
+      const v = st.sinceHit - ADAPT_RING_CHECK_SEC;
+      sum +=
+        ADAPT_VIB_GAIN *
+        p.vibration *
+        st.lastSize *
+        still *
+        Math.sin(2 * Math.PI * p.speedHz * v) *
+        (1 - Math.exp(-v / BELL_VIB_IN_SEC));
+    }
   }
   return sparkleSoftCap(sum);
 }

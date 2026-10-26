@@ -1,8 +1,8 @@
 # Caustics (`caustics`)
 
 The bright wandering filaments you see on the floor of a sunlit pool — domain-warped
-value noise sharpened into thin ridges, with a beat ripple and treble sparkle
-riding on top. Ships from the initial commit and is on main
+value noise sharpened into thin ridges, with a beat ripple and a sparkle on
+treble hits riding on top. Ships from the initial commit and is on main
 (not a draft).
 
 ## Page
@@ -16,9 +16,11 @@ Put it on a big screen at a party or behind a DJ set and let it run: it keeps fo
 ## Where the code is
 
 - `src/render/scenes/caustics.card.ts` — the scene's card, loaded with the page: id,
-  name, `SETTINGS` (with the master `SPARKLE` setting they macro to), `PANEL` (the
-  Sparkle section), the `gallery` record and `loadBody`. The body passes the card's
-  settings and panel on, so the registered settings are the body's own objects.
+  name, `SETTINGS` (with the master `SPARKLE` setting they macro to), the
+  `gallery` record and `loadBody`. The body passes the card's settings on, so the
+  registered settings are the body's own objects. Sparkle's old fine dials sit
+  at the end of the Look group as dev-only rows (`SceneSetting.dev`): in the
+  Look fold on the dev server, absent from a production build.
 - `src/render/scenes/caustics.ts` — the body, loaded after first paint
   (`createFullscreenScene`, the `FRAG` template, and an `extraUniforms` closure that advances the
   drift phase, Speed pump's own accumulator, loudness calibration for Speed
@@ -28,15 +30,12 @@ Put it on a big screen at a party or behind a DJ set and let it run: it keeps fo
   `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
   `advancePump`, `driftFlows`, `advanceDensityFlow` (Caustic
   density's own glide — see Decisions), and the `sparkle*` helpers.
-- `src/render/scenes/causticsSparkle.ts` — Treble sparkle's two picks: the
-  effect list, the shape curves (`sparkleEnvelope`), the hit ring buffer
-  (`advanceSparkleHits`) and which rows each pick shows. Pure;
-  `tests/causticsSparkle.test.ts` pins it. FRAG draws the effects.
-- `src/ui/widgets/causticsSparkle.ts` — the Scene card's Sparkle section
-  (`PANEL` in caustics.ts): the two picks, a preview (the shape's curve plus a
-  small WebGL2 sketch of the effect, not the scene's own shader), then
-  Treble sparkle and the picked rows. `createFullscreenScene` passes `panel`
-  through for it.
+- `src/render/scenes/causticsSparkle.ts` — Sparkle's effect list, its two
+  modes (Basic and Adaptive, with Adaptive's rules as `ADAPT_*`), the shape
+  curves (`sparkleEnvelope`) and the hit ring buffer (`advanceSparkleHits`).
+  Pure; `tests/causticsSparkle.test.ts` pins it, Adaptive's distance from
+  Basic included. FRAG draws the effects, and Flare and Tighten straight from
+  their own drives.
 - `src/render/standout.ts` — the shared standout detector:
   `advanceStandoutAmount` conditions the driver's own rise each frame into a
   launched ring amount, sized by how far it stands out from the everyday
@@ -818,6 +817,96 @@ reference-measurement workflow used by later scenes.
   the picture's p95 change stayed between the two older builds. How much sparkle
   looks right is the owner's call, from stills at the same moments of Billie
   Jean before #677, at #683 and with this change (#682's PR).
+- 2026-10-26 (#713) — Sparkle cleaned up, with an Adaptive shape. The owner's
+  calls, in order:
+  - "first name just sparkle": Treble sparkle is Sparkle.
+  - "lets remove rings, bloom" and "remove shimmer": the effect pick keeps
+    Grain, Prism and Run.
+  - "flare and tightening i would export in independant slider": Flare and
+    Tighten are their own sliders, default 0, listening to treble hits.
+    Asked whether that overlaps Fog pulse: Tighten does. Both move FRAG's
+    `sharp`: Fog pulse softens the ridges on the beat, Tighten thins them on
+    a hat. So Tighten sits after Fog pulse in the Fog family, and Flare
+    after Beat flash.
+  - The shape is not a production pick any more. Sparkle shape is Basic, "the
+    most basic bulletproof shape" (Pluck, 0.6 s, as before), or Adaptive,
+    which the owner said must make "a visable effect so it can't be mellow or
+    jsut fine tunning option".
+  - "leave all those setting we had as sub setting that u can expand and
+    collapsed and they are present only on dev": the Basic shape pick, its
+    dials and the five fine constants are dev rows (`SceneSetting.dev`). In a
+    production build they have no row and resolve as if never touched.
+  - The Sparkle widget and its preview went, so the section is plain rows,
+    per the idea the owner approved (Materials).
+
+  The pick moved to a new key, `sparkleFx`. Saved Looks hold `sparkleEffect`
+  as an index into the old list, so an old code opens as Grain.
+
+  The first Adaptive (length 2 gaps between hits, size from the treble
+  pulse) changed nothing visible. The treble pulse is a flat 1 on every hit,
+  because hitStrength.ts's shape is flat. On real songs the treble lane fires
+  about every quarter second, so 2 gaps lands near Basic's 0.6 s. Five songs
+  were recorded off the probe (`caustics/scripts/sparkle-record.mjs`, 40 s
+  from 6 s) and replayed through both. That build differed from Basic by 9–23%
+  frame by frame on four of them.
+
+  Adaptive as built:
+  - each hit is sized by its stand-out against the recent hits' mean (squared,
+    times 1.4);
+  - it lasts 1.5 gaps, longer for a bigger hit;
+  - held treble trembles.
+
+  Replayed (`caustics/scripts/sparkle-replay.mjs`):
+
+  | song | Basic mean | Adaptive mean | flash spread, Basic → Adaptive | differs frame by frame | trembling |
+  |---|---:|---:|---:|---:|---:|
+  | Around the World | 0.62 | 0.58 | 0.02 → 0.32 | 33% | 0% |
+  | Billie Jean | 0.54 | 0.50 | 0.06 → 0.49 | 53% | 8% |
+  | Levitating | 0.14 | 0.22 | 0.11 → 0.40 | 94% | 10% |
+  | Still D.R.E. | 0.52 | 0.52 | 0.08 → 0.45 | 61% | 32% |
+  | Tarantula | 0.54 | 0.47 | 0.09 → 0.54 | 58% | 30% |
+
+  In the picture, on Billie Jean with every other reaction off and Sparkle 1,
+  the canvas's fine detail (`caustics/scripts/sparkle-glint-probe.mjs`) per
+  treble flash:
+
+  | | average | weakest flashes (p10) | strongest (p90) | flash spread |
+  |---|---:|---:|---:|---:|
+  | Sparkle off | 0.70 | | | |
+  | Basic | 3.86 | 5.3 | 6.7 | 0.09 |
+  | Adaptive | 3.33 | 2.0 | 8.1 | 0.45 |
+
+  tune-real's 64×36 change metric can't see the glint layer. With every
+  other reaction off it read Basic 5.51 / 8.99 against Adaptive 5.46 / 8.62.
+
+  The ring test can't tell a cymbal from other held treble
+  (`caustics/scripts/sparkle-ring-probe.mjs`). On every song each treble hit
+  kept at least a fifth of its level 0.12 s later, in one spread with no gap
+  between closed and open hats. The Hats stem was held on longer still, and no
+  hit stood out from the last eight by 1.3× or more. Share of hits that would
+  tremble, by hold:
+
+  | hold | Around the World | Billie Jean | Levitating | Tarantula | Still D.R.E. |
+  |---|---:|---:|---:|---:|---:|
+  | 0.6 | 46% | 54% | 61% | 55% | 87% |
+  | 0.7 | 12% | 31% | 48% | 46% | 70% |
+  | 0.85 (picked) | 0% | 13% | 29% | 34% | 52% |
+
+  So Adaptive trembles on held treble (a cymbal wash, a held synth, Still
+  D.R.E.'s piano), and says so.
+
+  `tools/tune-real.mjs caustics` on Billie Jean, 30 s from 6 s:
+
+  | build | change med | change p95 | hits/min | Bass | Mid | Treble |
+  |---|---:|---:|---:|---:|---:|---:|
+  | defaults (Basic) | 17.51 | 30.69 | 428 | 190 | 88 | 222 |
+  | Sparkle shape Adaptive | 18.29 | 32.22 | 418 | 182 | 88 | 218 |
+  | Flare and Tighten 0.5 | 16.21 | 31.59 | 402 | 194 | 72 | 220 |
+  | silence, each run | 1.64–1.66 | 1.92–1.95 | 0 | 0 | 0 | 0 |
+
+  Flare and Tighten at 0.5 lower the median, since Tighten thins the lines Fog
+  pulse widens. Glint detail shows them reacting to hats: with Sparkle off and
+  both at 1, the detail per treble flash goes from 0.73 to 3.1.
 
 ## Tuning notes
 
@@ -881,12 +970,15 @@ reference-measurement workflow used by later scenes.
 
 ## Known issues and next steps
 
-- The sparkle effects and shapes (2026-10-13) have only been seen on the
-  synthetic feed and in the prototype; judge them live with real music.
-  Bell's Speed above 30 Hz can't be shown as such on a 60 Hz screen and
-  reads as a slower strobe. Prism roughly doubles the frame's GPU cost
-  while it is picked. The panel's preview patch is a sketch, so a pool on
-  another palette or Fog won't match it exactly.
+- Adaptive (2026-10-26) is measured on five recorded songs and in a
+  side-by-side clip (Materials), not yet watched live by the owner. Its
+  tremble fires on any held treble, not only cymbals: nothing the lanes
+  give tells them apart (Decisions). It borrows Bell's Speed, which above
+  30 Hz can't be shown as such on a 60 Hz screen and reads as a slower
+  strobe. Prism roughly doubles the frame's GPU cost while it is picked.
+- The treble pulse is a flat 1 on every hit while hitStrength.ts's shape is
+  flat, so Basic plays every treble hit the same size. Adaptive reads the
+  hit's stand-out instead.
 
 - Nothing in this file hand-rolls trigger/hold/decay logic any more: Kick
   surge and Beat churn were removed on main (Speed pump replaced them), and
@@ -941,6 +1033,8 @@ reference-measurement workflow used by later scenes.
 - Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceStandoutAmount` (`src/render/standout.ts`; `advanceEmission` in `rippleEmitter.ts` until 2026-10-06) or its tracker constants (the old `SALIENCE_*`) change, the copy in that page has to change with them.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - Artifact: [Caustics Sparkle Shapes](https://claude.ai/artifact/FqAHd9xEBS8cYJzhwoXqUR). Source saved as `caustics/artifacts/caustics-sparkle-shapes.html` (its last version, v6). The prototype the 2026-10-13 sparkle rebuild was chosen in: a live pool with fake hats, the Effect and Shape picks, and the preview window. Its effects are a sketch in its own shader; the scene's are in FRAG.
+- Artifact: [Laconic Sparkle](https://claude.ai/artifact/QbuQ31QaQZDCXfHP63mkaC). Source saved as `caustics/artifacts/laconic-sparkle.html`. The idea the 2026-10-26 cleanup was built from: today's Sparkle section beside a slim one, each row tagged with its fate, and a live sketch of the scene picking a shape. Its sketch rule (Pluck sized by hat spacing, Bell on a ringing hit) predates the measurements in Decisions, which changed it.
+- Artifact: [Sparkle: Basic vs Adaptive](https://claude.ai/artifact/PMqbtZJqw7oPqw4xFUk9uX). Page source saved as `caustics/artifacts/sparkle-basic-vs-adaptive.html`. The two clips it plays (Billie Jean through the mic, Sparkle 1, recorded headless) live only in the artifact.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 - `caustics/scripts/colour-shot.mjs` and `colour-sheet.py` — the 2026-10-15
   colour work: shoots the scene under each palette at each Colour option from
@@ -1019,3 +1113,4 @@ reference-measurement workflow used by later scenes.
 - 2026-10-20 — Beat ripple: Rings start, Center or Random spot (see Decisions)
 - 2026-10-22 — Labels only (#656): the Beat flash and Level glow hints name the inputs as the panel now does (Level, Any hit); no setting, default or wire changed
 - 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; sparkles return on real songs (see Decisions)
+- #713 (2026-10-26) — Sparkle: one name, Grain/Prism/Run, Flare and Tighten as sliders, a Basic or Adaptive shape, the old dials dev-only (see Decisions)

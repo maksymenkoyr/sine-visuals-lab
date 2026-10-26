@@ -29,19 +29,7 @@ import { advanceStandout, advanceStandoutAmount, createStandoutState, standoutLi
 import { publishSettingMarks } from "../settingMarks.ts";
 import type { SceneContext } from "../scene.ts";
 import type { GLProgram } from "../gl.ts";
-import {
-  advanceSparkleHits,
-  createSparkleHits,
-  EFFECT_BLOOM,
-  EFFECT_FLARE,
-  EFFECT_GRAIN,
-  EFFECT_PRISM,
-  EFFECT_RINGS,
-  EFFECT_RUN,
-  EFFECT_SHIMMER,
-  EFFECT_TIGHTEN,
-  SPARKLE_HITS,
-} from "./causticsSparkle.ts";
+import { advanceSparkleHits, createSparkleHits, EFFECT_GRAIN, EFFECT_PRISM, EFFECT_RUN, MODE_ADAPTIVE } from "./causticsSparkle.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Motion comes from
@@ -383,22 +371,17 @@ export function sparkleBrightGain(sparkleBright: number): number {
   return sparkleBright * SPARKLE_BRIGHT_GAIN;
 }
 
-// The sparkle effects (causticsSparkle.ts). Each reads sparkleE in FRAG:
-// Treble sparkle times the hits' summed, signed shape (uSparkleEnv). The
-// distances are in FRAG's p units, where the frame is 3 tall.
-//
-// Flare: how much hotter a crest burns at sparkleE 1, on top of its own
-// brightness raised to FLARE_CURVE, so the brightest crests gain the most.
+// Flare and Tighten, at a full slider and a full reading of their drives.
+// Flare: how much hotter a crest burns, on top of its own brightness raised
+// to FLARE_CURVE, so the brightest crests gain the most.
 const FLARE_GAIN = 0.7;
 const FLARE_CURVE = 1.8;
-// Tighten: the ridge exponent is multiplied by exp(TIGHTEN_GAIN * sparkleE),
-// so a swing below 0 loosens the filaments as much as a hit sharpens them.
+// Tighten: the ridge exponent is multiplied by exp(TIGHTEN_GAIN * reading).
 const TIGHTEN_GAIN = 1.25;
-// Shimmer: a fine jitter field (SHIMMER_FREQ cycles per p unit, scrolling at
-// SHIMMER_RATE) pushes p by up to SHIMMER_REACH at sparkleE 1.
-const SHIMMER_FREQ = 40.0;
-const SHIMMER_RATE = 31.0;
-const SHIMMER_REACH = 0.022;
+// The sparkle effects (causticsSparkle.ts). Each reads sparkleE in FRAG:
+// Sparkle times the hits' summed, signed shape (uSparkleEnv). The distances
+// are in FRAG's p units, where the frame is 3 tall.
+//
 // Prism: the red and blue copies of the ridges are sampled this far either
 // side of the pixel at sparkleE 1, and their fringes drawn at PRISM_GAIN.
 const PRISM_REACH = 0.022;
@@ -415,25 +398,6 @@ const RUN_IDLE_RATE = 0.6;
 const RUN_PUSH_RATE = 9.0;
 const RUN_BASE = 0.35;
 const RUN_GAIN = 2.2;
-// Rings / Bloom: each struck spot sits in its own cell of SPOT_CELL × Spot
-// size (wide enough that a spot never reaches past the 3x3 cells FRAG
-// visits), and fires on a hit with a chance set by Sparkle density, scaled
-// by the cell's area against SPOT_AREA_REF so density means the same spots
-// per screen at any Spot size. Each spot is bent by the water's own flow: a
-// noise field SPOT_BEND_FREQ cycles per p unit, so a quarter cycle or so
-// crosses a spot at the default size, pushing its edge by up to SPOT_BEND
-// × Spot size. SPOT_GROW_TAU is how fast a spot spreads, as a fraction of
-// Length. Overlapping spots saturate toward SPOT_KNEE instead of stacking.
-const SPOT_CELL = 1.6;
-const SPOT_AREA_REF = 0.11 * 0.11;
-const SPOT_MAX_CHANCE = 0.95;
-const SPOT_BEND_FREQ = 3.0;
-const SPOT_BEND = 1.6;
-const SPOT_KNEE = 2.0;
-const SPOT_GROW_TAU = 0.3;
-const RING_GAIN = 3.0;
-const BLOOM_GAIN = 1.2;
-
 // The ridge loop's octave count, and the flow multipliers FRAG applies per
 // use of the drift phase — named here because driftFlows has to reproduce
 // exactly the offsets the shader adds, one wrapped entry each. FLOW_X/FLOW_Y
@@ -729,7 +693,7 @@ float ridgeField(inout vec2 q, int iterations, float sharp, float ridgeGain, flo
       // crisp resting look (uFog low). Fog pulse only ever lowers sharp, so
       // it widens lines and never triggers this; the cap stays for the
       // resting case, for any drive patch that might push sharp up, and for
-      // the Tighten sparkle effect, which does. Capping
+      // Tighten, which does. Capping
       // the exponent used here (never the uniform "sharp" itself, so
       // ridgeGain's brightness still tracks the real value) keeps the
       // rendered line at least ~1px wide regardless of how sharp moves.
@@ -768,19 +732,11 @@ void main() {
   // point — every filament near the middle gets dragged into a pinch.
   p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
-  // Treble sparkle (causticsSparkle.ts): the picked effect, driven by
-  // sparkleE — Treble sparkle times the hits' summed, signed shape. Shimmer
-  // acts here, on the coordinate everything below samples; the others act on
-  // the ridges further down.
-  int sparkleFx = int(uSparkleEffect + 0.5);
+  // Sparkle (causticsSparkle.ts): the picked effect, driven by sparkleE —
+  // Sparkle times the hits' summed, signed shape. Each acts on the ridges
+  // further down.
+  int sparkleFx = int(uSparkleFx + 0.5);
   float sparkleE = uSparkle * uSparkleEnv;
-  if (sparkleFx == ${EFFECT_SHIMMER} && sparkleE != 0.0) {
-    vec2 jitter = vec2(
-      noise(p * ${SHIMMER_FREQ.toFixed(1)} + vec2(uSparkleShimmer, 0.0)),
-      noise(p * ${SHIMMER_FREQ.toFixed(1)} + vec2(17.0, -uSparkleShimmer))
-    ) - 0.5;
-    p += jitter * ${SHIMMER_REACH.toFixed(3)} * sparkleE;
-  }
 
   // uDensityLive scales only the ridge noise's sampling frequency — more
   // filaments at higher values, laid over the same warp field. It is the
@@ -873,9 +829,7 @@ void main() {
   float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
   float sharp = (sharpRest / (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}))
     * (1.0 - bassBulge * 0.25);
-  // Tighten (causticsSparkle.ts): a hit sharpens every filament; a swing
-  // below 0 (Bell's vibration) softens them past rest.
-  if (sparkleFx == ${EFFECT_TIGHTEN}) sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * sparkleE);
+  sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * uTighten * tightenDrive(uHighPulse));
   float ridgeGain = sqrt(sharp / 4.0); // a wider ridge is proportionally dimmed, so Fog pulse eases intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
@@ -918,58 +872,16 @@ void main() {
     prismB = max(ridgeField(qB, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack) - acc, 0.0);
   }
 
-  // The sparkle effects that act on the finished ridges (causticsSparkle.ts;
-  // Shimmer and Tighten acted above, Prism's fringes are added to the colour
-  // below). Each reads sparkleE, so at Treble sparkle 0 or between hits
-  // they leave the pool exactly as it is.
-  if (sparkleFx == ${EFFECT_FLARE}) {
-    // The brightest crests gain the most; dim water stays dim.
-    acc += ${FLARE_GAIN.toFixed(2)} * sparkleE * pow(max(acc, 0.0), ${FLARE_CURVE.toFixed(2)}) * smoothstep(0.45, 1.0, acc);
-  } else if (sparkleFx == ${EFFECT_RUN}) {
+  // Flare: the brightest crests gain the most; dim water stays dim.
+  acc += ${FLARE_GAIN.toFixed(2)} * uFlare * flareDrive(uHighPulse) * pow(max(acc, 0.0), ${FLARE_CURVE.toFixed(2)}) * smoothstep(0.45, 1.0, acc);
+  // Run acts on the finished ridges here; Prism's fringes are added to the
+  // colour below. Both read sparkleE, so at Sparkle 0 or between hits they
+  // leave the pool exactly as it is.
+  if (sparkleFx == ${EFFECT_RUN}) {
     // Bands of light slide along the warped filaments (q), pushed forward
     // by each hit (uSparkleRun's rate, JS-side) and glowing brighter on one.
     float bands = pow(0.5 + 0.5 * sin(q.x * ${RUN_FREQ_X.toFixed(2)} + q.y * ${RUN_FREQ_Y.toFixed(2)} - uSparkleRun), ${RUN_SHARP.toFixed(1)});
     acc += acc * smoothstep(0.25, 0.8, acc) * bands * uSparkle * (${RUN_BASE.toFixed(2)} + ${RUN_GAIN.toFixed(2)} * abs(uSparkleEnv));
-  } else if ((sparkleFx == ${EFFECT_RINGS} || sparkleFx == ${EFFECT_BLOOM}) && uSparkle > 0.0) {
-    // Struck spots: each hit in the ring buffer (uSparkleHit*) fires a few
-    // cells of a SPOT_CELL × Spot size grid (Sparkle density sets the
-    // chance), and each fired cell draws a ring or a bloom around its own
-    // jittered spot. The spot's shape is bent by the water's own flow (q)
-    // and shows only where the filaments are lit, so it reads as light
-    // moving through the pool rather than a circle laid over it.
-    float lit = smoothstep(0.25, 0.85, acc);
-    vec2 bend = (vec2(noise(q * ${SPOT_BEND_FREQ.toFixed(1)} + 3.0), noise(q * ${SPOT_BEND_FREQ.toFixed(1)} + 9.0)) - 0.5) * uSparkleSize * ${SPOT_BEND.toFixed(2)};
-    float cell = uSparkleSize * ${SPOT_CELL.toFixed(2)};
-    vec2 baseCell = floor(p / cell);
-    float chance = min(uSparkleDensity * uSparkleDensity * cell * cell / ${SPOT_AREA_REF.toFixed(4)}, ${SPOT_MAX_CHANCE.toFixed(2)});
-    float spots = 0.0;
-    for (int cx = -1; cx <= 1; cx++) {
-      for (int cy = -1; cy <= 1; cy++) {
-        vec2 cellId = baseCell + vec2(float(cx), float(cy));
-        vec2 spot = (cellId + 0.2 + 0.6 * hash2Cell(cellId, ${NOISE_MASK}, 11u)) * cell;
-        float dist = length(p - spot + bend);
-        // Past a grown ring plus three of its widths, nothing of this spot
-        // shows here, whichever hit struck it.
-        if (dist > uSparkleSize * (1.0 + 3.0 * uSparkleRingWidth) + 0.009) continue;
-        for (int k = 0; k < ${SPARKLE_HITS}; k++) {
-          float age = uSparkleHitAge[k];
-          if (age < 0.0) continue;
-          if (hashCell(cellId, ${NOISE_MASK}, 100u + uint(uSparkleHitSeed[k])) > chance) continue;
-          float grow = 1.0 - exp(-age / (${SPOT_GROW_TAU.toFixed(2)} * uSparkleLength));
-          if (sparkleFx == ${EFFECT_RINGS}) {
-            float dr = (dist - uSparkleSize * grow) / (uSparkleRingWidth * uSparkleSize + 0.003);
-            spots += abs(uSparkleHitEnv[k]) * exp(-dr * dr) * (0.25 + 0.75 * lit) * ${RING_GAIN.toFixed(2)};
-          } else {
-            float rad = uSparkleSize * (0.35 + 0.65 * grow);
-            spots += uSparkleHitEnv[k] * (1.0 - smoothstep(rad * 0.3, rad, dist)) * lit * ${BLOOM_GAIN.toFixed(2)};
-          }
-        }
-      }
-    }
-    // Overlapping hits saturate rather than stack into a white-out, and an
-    // already-bright pixel gains at most what a fully lit one does.
-    spots *= ${SPOT_KNEE.toFixed(1)} / (${SPOT_KNEE.toFixed(1)} + abs(spots));
-    acc += uSparkle * spots * (0.6 + min(acc, 1.0));
   }
 
   // Grain: fine glints gated to where the pattern is already bright (ridge
@@ -1139,16 +1051,14 @@ export const causticsScene = createFullscreenScene(
       prog.setI("uRippleSpotTex", 0);
     }
 
-    // Treble sparkle's hits (causticsSparkle.ts) and the two phases its
-    // Shimmer and Run effects scroll by — own clocks, advanced here and
-    // wrapped before upload, like the drift (this file's header).
+    // Sparkle's hits (causticsSparkle.ts) and the phase its Run effect
+    // scrolls by — its own clock, advanced here and wrapped before upload,
+    // like the drift (this file's header).
     const sparkleHits = createSparkleHits();
-    let shimmerClock = 0;
     let runPhase = 0;
 
     return {
       settings: card.settings,
-      panel: card.panel,
       extraUniformDecls: `
 uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 // The glided, drive-scaled Caustic density (advanceDensityFlow) — see
@@ -1158,16 +1068,10 @@ uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
 uniform vec4 uRippleSpot[${RIPPLE_SPOTS}];
 uniform sampler2D uRippleSpotTex;
-// Treble sparkle (causticsSparkle.ts): the hits' summed, signed shape plus
-// Sparkle sustain's wash; Shimmer's jitter scroll and Run's band phase,
-// both wrapped JS-side; and the hit ring buffer Rings and Bloom strike from
-// (age -1 = empty slot).
+// Sparkle (causticsSparkle.ts): the hits' summed, signed shape plus
+// Sparkle sustain's wash, and Run's band phase, wrapped JS-side.
 uniform float uSparkleEnv;
-uniform float uSparkleShimmer;
 uniform float uSparkleRun;
-uniform float uSparkleHitAge[${SPARKLE_HITS}];
-uniform float uSparkleHitEnv[${SPARKLE_HITS}];
-uniform float uSparkleHitSeed[${SPARKLE_HITS}];
 // Linear interpolation into a profile array built by rippleEmitter.ts's
 // buildProfile — see FRAG's own comment above the Beat ripple block for how
 // these two feed the display.
@@ -1294,14 +1198,18 @@ float softCeil(float x, float knee, float ceil) {
           buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
         }
 
-        // Treble sparkle: each edge of the sparkle drive starts the picked
-        // shape (the "sparkle" setting's own comment). A treble onset plays
-        // at the graded pulse's height, so a soft hat is a smaller hit; a
-        // wire's edge plays at full size. Sparkle sustain's wash is a floor
-        // under the shape, as it was under the pulse, and keeps a below-zero
-        // swing's direction.
+        // Sparkle: each edge of the sparkle drive starts a hit (the
+        // "sparkle" setting's own comment), played Basic or Adaptive. A
+        // treble onset plays at the treble pulse's height (a flat 1 while
+        // hitStrength.ts's shape is flat) and hands Adaptive its stand-out;
+        // a wire's edge plays at full size with none. The drive's level is
+        // both Adaptive's ring test and Sparkle sustain's wash, a floor under
+        // the shape that keeps a below-zero swing's direction.
         const sparkleFired = drives.fired("sparkle", anim.highOnset);
         const sparkleSize = anim.highOnset ? anim.highPulse : 1;
+        const sparkleStandout = anim.highOnset ? anim.hitStrength.high.standout : -1;
+        const sparkleLevel = drives.value("sparkle", anim.high);
+        const adaptive = Math.round(getSetting("sparkleAdapt")) === MODE_ADAPTIVE;
         const shapeEnv = advanceSparkleHits(sparkleHits, anim.dtSec, sparkleFired, sparkleSize, {
           shape: Math.round(getSetting("sparkleShape")),
           length: getSetting("sparkleLength"),
@@ -1313,19 +1221,14 @@ float softCeil(float x, float knee, float ceil) {
           decay: getSetting("sparkleDecay"),
           rise: getSetting("sparkleRise"),
           release: getSetting("sparkleRelease"),
-        });
-        const wash = getSetting("sparkleSustain") * drives.value("sparkle", anim.high);
+        }, adaptive, sparkleLevel, sparkleStandout);
+        const wash = getSetting("sparkleSustain") * sparkleLevel;
         const sparkleEnv = shapeEnv >= 0 ? Math.max(shapeEnv, wash) : shapeEnv + wash;
-        shimmerClock += anim.dtSec;
         runPhase = (runPhase + anim.dtSec * (RUN_IDLE_RATE + RUN_PUSH_RATE * Math.abs(sparkleEnv) * getSetting("sparkle"))) % (2 * Math.PI);
 
         return {
           uSparkleEnv: sparkleEnv,
-          uSparkleShimmer: wrapFlow(shimmerClock * SHIMMER_RATE),
           uSparkleRun: runPhase,
-          uSparkleHitAge: sparkleHits.age,
-          uSparkleHitEnv: sparkleHits.env,
-          uSparkleHitSeed: sparkleHits.seed,
           uDriftFlow: driftFlows(densityFlow.phase, densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
           uRippleCrest: crestBuf,
