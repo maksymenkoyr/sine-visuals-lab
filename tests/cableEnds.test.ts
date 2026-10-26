@@ -1,25 +1,27 @@
-// The cable plugs' resting place, how a pull draws the cable and which end it
+// Where a cable's ×s sit, how a pull draws the cable and which end it
 // lets go of, and what letting go does (src/ui/cableLayer.ts header); the
 // pointer wiring is checked in a browser.
 import { describe, expect, it } from "vitest";
-import { nearerEnd, plugPoint, pulledPathD, pullRelease, pullStarts, type CableEnd, type PullAt } from "../src/ui/cableLayer.ts";
+import { nearerEnd, pulledPathD, pullRelease, pullStarts, xPoint, type CableEnd, type PullAt } from "../src/ui/cableLayer.ts";
 
 const ENDS: CableEnd[] = ["jack", "port"];
 const first = (d: string): string => d.split(" ")[0]!;
 const last = (d: string): string => d.trim().split(" ").pop()!;
 const cubics = (d: string): number => d.split("C").length - 1;
 
-describe("plugPoint", () => {
+describe("xPoint", () => {
   const jack = { x: 100, y: 40 };
   const port = { x: 900, y: 300 };
 
-  it("rests each plug on its own socket's row", () => {
-    for (const end of ENDS) expect(plugPoint(jack, port, end).y).toBe(end === "jack" ? jack.y : port.y);
+  it("sits each × the same height above its own socket's row", () => {
+    const up = jack.y - xPoint(jack, port, "jack").y;
+    expect(up).toBeGreaterThan(0);
+    expect(port.y - xPoint(jack, port, "port").y).toBe(up);
   });
 
-  it("rests each plug just out from its socket, toward the other end, the same distance at both ends", () => {
-    const j = plugPoint(jack, port, "jack");
-    const p = plugPoint(jack, port, "port");
+  it("sits each × just out from its socket, toward the other end, the same distance at both ends", () => {
+    const j = xPoint(jack, port, "jack");
+    const p = xPoint(jack, port, "port");
     expect(j.x).toBeGreaterThan(jack.x);
     expect(p.x).toBeLessThan(port.x);
     expect(j.x - jack.x).toBe(port.x - p.x);
@@ -29,8 +31,8 @@ describe("plugPoint", () => {
   it("mirrors when the port sits left of the jack", () => {
     const right = { x: 900, y: 40 };
     const left = { x: 100, y: 300 };
-    expect(plugPoint(right, left, "jack").x).toBeLessThan(right.x);
-    expect(plugPoint(right, left, "port").x).toBeGreaterThan(left.x);
+    expect(xPoint(right, left, "jack").x).toBeLessThan(right.x);
+    expect(xPoint(right, left, "port").x).toBeGreaterThan(left.x);
   });
 });
 

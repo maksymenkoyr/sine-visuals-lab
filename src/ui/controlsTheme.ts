@@ -829,8 +829,8 @@ body.vc-keys-reveal [data-keycap]::after {
  * (cableLayer.ts skips them), with a longer dash than the others. */
 .vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
 /* A pinned cable answers the pointer through its transparent hit stroke (the layer
- * itself is pointer-events: none) and its two plugs (cableLayer.ts header: a click on
- * the stroke opens the cable's knot, a click on a plug unplugs, and so does a pull
+ * itself is pointer-events: none) and the × at each end (cableLayer.ts header: a click
+ * on the stroke opens the cable's knot, a click on an × unplugs, and so does a pull
  * anywhere on it). The stroke's width, not the core's, makes a thin cable easy to
  * hit. Hovering arms the cable (.vc-cable-armed), which carries the lift: a
  * drop-shadow in the group's CSS color (via currentColor), a thicker core, a brighter
@@ -856,28 +856,37 @@ body.vc-keys-reveal [data-keycap]::after {
   .vc-cable-g.vc-cable-armed .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
 }
 .vc-cable-g.vc-cable-armed .vc-cable-muted { opacity: 0.8; }
-/* A cable's plugs (cableLayer.ts plugEl, bindPlug): drawn and pressable only while
- * the cable is armed, since they sit over the jack's and the port's own cards. A pull
- * gone far enough to unplug loosens the cable (.vc-cable-loose), so letting go reads
- * as unplugging. */
-.vc-cable-plug { stroke: rgba(255, 255, 255, 0.85); stroke-width: 1; opacity: 0; transition: opacity 0.12s ease, transform 0.12s ease; }
-.vc-cable-plug-hit { pointer-events: none; cursor: grab; }
-.vc-cable-g.vc-cable-armed .vc-cable-plug { opacity: 1; }
-.vc-cable-g.vc-cable-armed .vc-cable-plug-hit { pointer-events: all; }
-.vc-cable-end:hover .vc-cable-plug { transform: scale(1.3); }
+/* A cable's ×s (cableLayer.ts xEl, bindX): drawn and pressable only while the cable is
+ * armed or lingering, since they sit over the jack's and the port's own cards. With
+ * the pointer on one, the cable previews its unplug dashed and without its bloom. A
+ * pull gone far enough to unplug loosens the cable (.vc-cable-loose), so letting go
+ * reads as unplugging. */
+.vc-cable-x { opacity: 0; transition: opacity 0.12s ease; }
+.vc-cable-x-in { transform-box: fill-box; transform-origin: center; transform: scale(0.6); transition: transform 0.14s ease; }
+.vc-cable-x-bg { fill: rgba(20, 19, 26, 0.94); stroke: currentColor; stroke-width: 1.2; }
+.vc-cable-x-mark { fill: none; stroke: #fff; stroke-width: 1.5; stroke-linecap: round; }
+.vc-cable-x-hit { fill: transparent; pointer-events: none; cursor: pointer; }
+.vc-cable-g.vc-cable-armed .vc-cable-x, .vc-cable-g.vc-cable-x-linger .vc-cable-x { opacity: 1; }
+.vc-cable-g.vc-cable-x-linger:not(.vc-cable-armed) .vc-cable-x { opacity: 0.6; }
+.vc-cable-g.vc-cable-armed .vc-cable-x-in, .vc-cable-g.vc-cable-x-linger .vc-cable-x-in { transform: scale(1); }
+.vc-cable-g.vc-cable-armed .vc-cable-x-hit, .vc-cable-g.vc-cable-x-linger .vc-cable-x-hit { pointer-events: all; }
+.vc-cable-x:hover .vc-cable-x-bg { fill: currentColor; }
+.vc-cable-x:hover .vc-cable-x-mark { stroke: #0b0a0f; }
+.vc-cable-g.vc-cable-x-preview { filter: none; }
+.vc-cable-g.vc-cable-x-preview .vc-cable-core { stroke-dasharray: 4 3; opacity: 0.6; stroke-width: 1.5; }
+.vc-cable-g.vc-cable-x-preview .vc-cable-glow { opacity: 0.06; }
+.vc-cable-g.vc-cable-x-preview .vc-cable-flow { opacity: 0; }
 .vc-cable-g.vc-cable-loose { opacity: 0.55; }
 body.vc-cable-pulling, body.vc-cable-pulling * { cursor: grabbing !important; }
 /* The unplug retract (cableLayer.ts playUnplug): the cable's core runs back from the
- * unplugged end (the copy's pathLength makes one dash the whole path), a spark rings
- * the socket it left, and the plug pops out. Never played under reduced motion. */
+ * unplugged end (the copy's pathLength makes one dash the whole path), and a spark
+ * rings the socket it left. Never played under reduced motion. */
 .vc-cable-ghost { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 100 100; animation: vc-cable-retract 0.26s ease-in forwards; }
 .vc-cable-ghost-rev .vc-cable-ghost { animation-name: vc-cable-retract-rev; }
 @keyframes vc-cable-retract { from { stroke-dashoffset: 0; opacity: 0.9; } to { stroke-dashoffset: 100; opacity: 0; } }
 @keyframes vc-cable-retract-rev { from { stroke-dashoffset: 0; opacity: 0.9; } to { stroke-dashoffset: -100; opacity: 0; } }
 .vc-cable-spark { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: vc-cable-spark 0.3s ease-out forwards; }
 @keyframes vc-cable-spark { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
-.vc-cable-end-pop .vc-cable-plug { opacity: 1; animation: vc-plug-pop 0.26s ease-out forwards; }
-@keyframes vc-plug-pop { to { transform: translateX(var(--pop)); opacity: 0; } }
 /* A pinned wire's knot (cableKnots.ts): just over the cables, under tooltips. Its
  * place and size are springs written inline per frame; only the fades are CSS. */
 .vc-knot-layer { position: fixed; inset: 0; pointer-events: none; z-index: 32; }
@@ -906,7 +915,7 @@ body.vc-cable-pulling, body.vc-cable-pulling * { cursor: grabbing !important; }
 .vc-knot-open .vc-knot-body { opacity: 1; pointer-events: auto; transition: opacity 0.22s 0.2s; }
 @media (prefers-reduced-motion: reduce) { .vc-knot, .vc-knot-glyph, .vc-knot-peek, .vc-knot-body { transition: none !important; } }
 @media (prefers-reduced-motion: reduce) {
-  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted, .vc-cable-plug { transition: none; }
+  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted, .vc-cable-x, .vc-cable-x-in { transition: none; }
 }
 
 /* "Pick a setting first": a jack clicked with nothing pinned or previewed (showToast). */
