@@ -1,6 +1,7 @@
 /**
  * Nebula's camera, on the JS side: where it is in the gas, which way it
- * looks, how far the view has rolled, and how far the colours have wandered.
+ * looks, how far the view has rolled, how far the colours have wandered,
+ * and how far the gas has drifted on its own.
  *
  * The gas is a volume texture that repeats every `PERIOD` world units
  * across the flight and every `PERIOD_Z` along it (volume.ts, glsl.ts).
@@ -68,6 +69,12 @@ const HUE_WANDER: readonly PathSine[] = [
   { amp: 80, wavelength: 6100, phase: 0.0 },
 ];
 
+// The gas's own motion at Gas drift 1: its churn clock in radians per second, and how far the whole
+// cloud streams across the flight in world units per second (x, y). The flow stays well under the
+// flight's own pace (index.ts's BASE_SPEED) so at the default the reference's fly-through still leads.
+const CHURN_RATE = 0.05;
+const FLOW: readonly [number, number] = [0.04, 0.015];
+
 const TAU = Math.PI * 2;
 
 export interface Flight {
@@ -77,19 +84,24 @@ export interface Flight {
   hueClock: number;
   /** A slow clock for the gas's own churn, in radians, kept in [0, 2π). */
   churn: number;
+  /** How far the whole cloud has streamed across the flight, x and y, kept in [0, PERIOD). */
+  flowX: number;
+  flowY: number;
 }
 
 export function createFlight(): Flight {
-  return { travel: 0, hueClock: 0, churn: 0 };
+  return { travel: 0, hueClock: 0, churn: 0, flowX: 0, flowY: 0 };
 }
 
 /** Moves the camera on by one frame: `speed` world units per second along
- *  the path, the colour clock by `hueRate` seconds per second, and the
- *  churn clock by `churnRate` radians per second. */
-export function advanceFlight(f: Flight, dtSec: number, speed: number, hueRate: number, churnRate: number): void {
+ *  the path, the colour clock by `hueRate` seconds per second, and the gas's
+ *  churn and flow by `gasDrift` times their rates at Gas drift 1. */
+export function advanceFlight(f: Flight, dtSec: number, speed: number, hueRate: number, gasDrift: number): void {
   f.travel += dtSec * speed;
   f.hueClock += dtSec * hueRate;
-  f.churn = (f.churn + dtSec * churnRate) % TAU;
+  f.churn = (f.churn + dtSec * CHURN_RATE * gasDrift) % TAU;
+  f.flowX = wrap(f.flowX + dtSec * FLOW[0] * gasDrift, PERIOD);
+  f.flowY = wrap(f.flowY + dtSec * FLOW[1] * gasDrift, PERIOD);
 }
 
 function wrap(x: number, period: number): number {

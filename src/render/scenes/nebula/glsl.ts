@@ -146,6 +146,7 @@ uniform vec4 uCam[4];
 uniform vec4 uPath[2];
 uniform float uHueDrift;
 uniform float uChurn;
+uniform vec2 uFlow;
 `;
 
 const VIEW_RAY = `
@@ -204,7 +205,8 @@ vec3 hueTurn(vec3 c, float deg) {
 void main() {
   vec2 p;
   vec3 dir = viewRay(p);
-  vec3 cam = uCam[0].xyz;
+  // The gas streams by uFlow while the tunnel stays on the camera's path, so the flow never fills it.
+  vec3 cam = uCam[0].xyz - vec3(uFlow, 0.0);
   vec2 here = vec2(pathX(0.0), pathY(0.0));
 
   float th = mix(0.69, 0.55, uGas);
