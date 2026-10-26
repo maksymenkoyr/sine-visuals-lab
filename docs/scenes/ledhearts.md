@@ -1,6 +1,6 @@
 # LED Hearts (`ledhearts`)
 
-Draft. Glowing magenta hearts on a wall of round LEDs, zooming out from the
+In development, on main. Glowing magenta hearts on a wall of round LEDs, zooming out from the
 centre forever. Most hearts face the viewer and rock; a few turn all the way
 round and show violet edge-on. Near hearts swell, soften to dim red and fade.
 The music speeds the zoom and lifts the glow with its level, kicks push the
