@@ -96,8 +96,7 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    Level (the only way to see features.ts's adaptive floor/peak doing its
  *    job, since its whole point is to make that invisible downstream), Bass,
  *    Mid and Treble. Under them a Bands block of line rows for single bands:
- *    first the Kick band row, labelled with the Hz of the band the app picks
- *    by itself, then a row per band (signals.ts's BAND_SIGNALS, all mounted
+ *    a row per band (signals.ts's BAND_SIGNALS, all mounted
  *    hidden at build) that shows while it's picked by a click on the
  *    spectrum (bandPicks.ts) or wired in this scene, so a wired band never
  *    hides. The spectrum marks the Kick band's bar and every shown band's
@@ -107,8 +106,9 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    auto-gained, so a mark line would lie. No gate reading (the synthetic
  *    feed) draws no shade. The post-bandEnergy pulses live in the Hits
  *    card's own hits history instead — see below.
- *  - Stems: Lead and Hats (stemReaders.ts) as line rows of their own. The
- *    stems are measured only on the device with the mic, and a gap is drawn
+ *  - Stems: Lead and Hats (stemReaders.ts) as line rows of their own, then
+ *    the Kick row (the one band the app picks by itself, signals.ts's
+ *    anim.kickBand). Lead and Hats are measured only on the device with the mic, and a gap is drawn
  *    where they weren't; app.ts runs the split while this card is unfolded
  *    and on screen (stemRowsOnScreen).
  *  - Hits: one lane each for Any hit (the broadband detector) and
@@ -184,7 +184,7 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
  * drive source can feed — one per line row (Sound's Level, Bass, Mid,
- * Treble, Kick band and every band row, Stems' Lead and Hats; createLineRow
+ * Treble and every band row, Stems' Lead, Hats and Kick band; createLineRow
  * mounts them),
  * Section's own Section+Drop pair and one per dial cell (Song, signals.ts's
  * DIAL_SIGNALS), the BPM block's own Tempo jack, Lock, the bar ruler's own
@@ -280,7 +280,7 @@ export interface AudioMetersDeps {
   /** The Input card's two gate marks, read fresh every draw/text tick so a drag
    *  moves the Gate guides and the hits hint live. */
   getSilenceGate: () => SilenceGateMarks;
-  /** The band ladder in Hz (src/audio/bandScale.ts), for the Kick band row's
+  /** The band ladder in Hz (src/audio/bandScale.ts), for the band rows'
    *  Hz in the Sound card's Bands block. */
   getBandEdgesHz: () => ArrayLike<number>;
   /** Jack behaviour and live state (jack.ts header). Predicates are keyed by
@@ -407,7 +407,6 @@ const lineReadoutStyle = `${readoutStyle} flex: none; width: ${LINE_READOUT_WIDT
 const lineDigitsStyle = `${digitsStyle} font-size: 10px;`;
 const lineDigitsTextStyle = `font: 400 10px/1 ${FONT_MONO};`;
 const lineUnitStyle = `font: 400 9px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
-const rowSubStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); margin-left: 4px;`;
 // The Sound card's "Bands" caption: the card title's small caps, a step down.
 const bandsLabelStyle = `font: 400 9px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin: 8px 0 2px;`;
 const BEAT_TRACE_HEIGHT_CSS_PX = 28;
@@ -740,15 +739,13 @@ function createMeterRow(spec: MeterRowSpec) {
  *  where the caller puts the signal's heat (addHeatMonitorStrip). */
 function createLineRow(opts: {
   label: string;
-  /** Small mono suffix after the label ("kick"). */
-  sub?: string;
   description: string;
   choice: SignalId;
   span: TraceSpan;
   gateFloor?: boolean;
   mountJack: MountJack;
 }) {
-  const { label, sub, description, choice, span, gateFloor, mountJack } = opts;
+  const { label, description, choice, span, gateFloor, mountJack } = opts;
   const color = driveSourceColor(choice);
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -762,12 +759,6 @@ function createLineRow(opts: {
   const labelText = document.createElement("span");
   labelText.textContent = label;
   labelEl.append(labelText);
-  if (sub) {
-    const subEl = document.createElement("span");
-    subEl.textContent = sub;
-    subEl.style.cssText = rowSubStyle;
-    labelEl.append(subEl);
-  }
 
   const lane = document.createElement("div");
   lane.style.cssText = lineLaneStyle;
@@ -1651,19 +1642,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const soundBass = soundBand("anim.low");
   const soundMid = soundBand("anim.mid");
   const soundTreble = soundBand("anim.high");
-  // Its label is the picked band's Hz, written on the text tick.
-  const soundKick = lineRow({
-    label: "--",
-    sub: "kick",
-    description: capitalise(driveSourceDescription("anim.kickBand")),
-    choice: "anim.kickBand",
-    span: soundSpan,
-  });
   const bandsLabel = document.createElement("div");
   bandsLabel.style.cssText = bandsLabelStyle;
   bandsLabel.textContent = "Bands · click the spectrum to pick one";
   const bandsBlock = document.createElement("div");
-  bandsBlock.append(soundKick.el);
   // Labels start on the nominal ladder; the text tick rewrites them from the
   // live edge table, which only exists once there's an AudioContext.
   const bandRows: { row: LineRow; id: BandSignalId; n: number; shown: boolean; display: string }[] = BAND_SIGNALS.map((id, n) => {
@@ -1686,7 +1668,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { row: soundBass, id: "anim.low" },
     { row: soundMid, id: "anim.mid" },
     { row: soundTreble, id: "anim.high" },
-    { row: soundKick, id: "anim.kickBand" },
   ];
   const soundCard = createCard({
     title: "Sound",
@@ -1696,7 +1677,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   soundCard.body.append(soundSpectrum.el, soundLevel.el, soundBass.el, soundMid.el, soundTreble.el, bandsLabel, bandsBlock);
 
-  // ---- Stems: Lead, Hats ----
+  // ---- Stems: Lead, Hats, Kick band ----
   const stemLead = lineRow({
     label: driveSourceLabel("anim.lead"),
     description: capitalise(driveSourceDescription("anim.lead")),
@@ -1709,9 +1690,18 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     choice: "anim.hats",
     span: stemsSpan,
   });
-  const stemRows: readonly { row: LineRow; id: SignalId }[] = [
-    { row: stemLead, id: "anim.lead" },
-    { row: stemHats, id: "anim.hats" },
+  const stemKick = lineRow({
+    label: driveSourceLabel("anim.kickBand"),
+    description: capitalise(driveSourceDescription("anim.kickBand")),
+    choice: "anim.kickBand",
+    span: stemsSpan,
+  });
+  // The Kick band comes from the spectrum bands, not the stem split, so it
+  // reads whether or not the split is measured.
+  const stemRows: readonly { row: LineRow; id: SignalId; needsSplit: boolean }[] = [
+    { row: stemLead, id: "anim.lead", needsSplit: true },
+    { row: stemHats, id: "anim.hats", needsSplit: true },
+    { row: stemKick, id: "anim.kickBand", needsSplit: false },
   ];
   const stemsCard = createCard({
     title: "Stems",
@@ -1719,7 +1709,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     foldId: "stems",
     right: createSpanChip("stems", () => {}),
   });
-  stemsCard.body.append(stemLead.el, stemHats.el);
+  stemsCard.body.append(stemLead.el, stemHats.el, stemKick.el);
   // Preallocated: update() records every tick.
   const soundLevelVals: (number | null)[] = [null, null];
   const oneVal: (number | null)[] = [null];
@@ -2009,7 +1999,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["low", soundBass.el],
     ["mid", soundMid.el],
     ["high", soundTreble.el],
-    ["kick", soundKick.el],
+    ["kick", stemKick.el],
     ["lead", stemLead.el],
     ["hats", stemHats.el],
     ...bandRows.map(({ id, row }): [MeterRowId, HTMLElement] => [id, row.el]),
@@ -2120,8 +2110,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           oneVal[0] = SIGNALS[id].read(frame, anim);
           row.push(oneVal, nowMs);
         }
-        for (const { row, id } of stemRows) {
-          oneVal[0] = stemsOff ? null : SIGNALS[id].read(frame, anim);
+        for (const { row, id, needsSplit } of stemRows) {
+          oneVal[0] = stemsOff && needsSplit ? null : SIGNALS[id].read(frame, anim);
           row.push(oneVal, nowMs);
         }
         for (let i = 0; i < heatIds.length; i++) {
@@ -2205,7 +2195,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
       if (text && anim && anim.kickBandIndex !== markedKickBand) refreshMarks(anim.kickBandIndex);
 
-      // ---- Sound: Level, Bass, Mid, Treble, Kick band, band rows ----
+      // ---- Sound: Level, Bass, Mid, Treble, band rows ----
       // Level's raw counterpart is rawBands (local-only). The thin
       // spectrum is drawn by deviceMenu.ts's feed, not here.
       if (!soundCard.fold?.isFolded() && soundOnScreen()) {
@@ -2219,7 +2209,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             const v = frame && anim ? SIGNALS[id].read(frame, anim) : null;
             row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
           }
-          soundKick.setLabel(anim ? formatHz(bandCenterHz(deps.getBandEdgesHz(), anim.kickBandIndex)) : "--");
           for (const b of bandRows) {
             if (!b.shown) continue;
             const v = frame && anim ? SIGNALS[b.id].read(frame, anim) : null;
@@ -2229,16 +2218,15 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Stems: Lead, Hats ----
+      // ---- Stems: Lead, Hats, Kick band ----
       if (!stemsCard.fold?.isFolded() && stemsOnScreen()) {
         for (const { row } of stemRows) row.draw();
         if (text) {
           const measured = deps.stemsMeasured();
-          for (const { row, id } of stemRows) {
-            const v = frame && anim && measured ? SIGNALS[id].read(frame, anim) : null;
+          for (const { row, id, needsSplit } of stemRows) {
+            const v = frame && anim && (measured || !needsSplit) ? SIGNALS[id].read(frame, anim) : null;
             row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
-          }
-        }
+          }        }
       }
 
       // ---- Hits ----

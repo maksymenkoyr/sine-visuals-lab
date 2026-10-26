@@ -63,13 +63,13 @@ that reshapes an input node's value on its way to that one setting.
 - **Built-in, not scene mix.** "Mix" is the control right next to it; two different things can't share the word.
 - **Sound card.** The first meter: what you hear before any beat logic. A thin
   live spectrum over Level, Bass, Mid and Treble, then **Bands**: rows for
-  single bands, each named by its Hz, starting with the Kick band. Click a bar
+  single bands, each named by its Hz. Click a bar
   on the spectrum to give that band its own row and click it again to drop
   it; a band wired to a setting always shows its row. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
   over.
 - **Stems card.** Right after Sound: Lead and Hats, the held and the drum part
-  of the sound, each its own row with its own colour and jack. Measured only
-  on the device with the mic.
+  of the sound, then Kick, each its own row with its own colour and
+  jack. Lead and Hats are measured only on the device with the mic.
 
 ## Writing new copy
 

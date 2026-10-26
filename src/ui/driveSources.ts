@@ -56,7 +56,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "feature.flux": "Onset surge",
   "feature.level": "Input level",
   "anim.lowOnset": "Bass hit",
-  "anim.kickBand": "Kick band",
+  "anim.kickBand": "Kick",
   "anim.midOnset": "Mid hit",
   "anim.highOnset": "Treble hit",
   "anim.dropOnset": "Drop",
