@@ -127,11 +127,14 @@ jobs:
 
       # Opens every free, non-draft scene in headless Chromium against the built dist/
       # (tools/scene-smoke.mjs header). GitHub runners have no GPU: Chromium's
-      # software WebGL (SwiftShader) renders it.
+      # software WebGL (SwiftShader) renders it. No `--with-deps`: the runner
+      # image already carries Chrome's libraries, and that apt step stalled on
+      # the Azure Ubuntu mirror for minutes at a time while the browser
+      # download itself takes seconds.
       - name: Install Chromium for the scene smoke test
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "0"
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Smoke-test every free scene
         timeout-minutes: 15
