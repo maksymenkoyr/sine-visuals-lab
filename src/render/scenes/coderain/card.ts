@@ -49,9 +49,19 @@ export const SETTINGS: SceneSetting[] = [
   },
   // Motion
   {
+    key: "speed",
+    label: "Speed",
+    description: "How fast everything moves — the camera walks and looks round faster, and the rain falls faster",
+    group: "Motion",
+    min: 0.1,
+    max: 3,
+    step: 0.05,
+    default: 1,
+  },
+  {
     key: "fall",
     label: "Fall speed",
-    description: "How fast the heads fall down the columns",
+    description: "How fast the heads fall down the columns, against the Speed",
     group: "Motion",
     min: 0.1,
     max: 2.5,
@@ -125,16 +135,6 @@ export const SETTINGS: SceneSetting[] = [
     default: 0,
   },
   // Camera
-  {
-    key: "glide",
-    label: "Glide",
-    description: "How fast the camera drifts forward through the columns",
-    group: "Camera",
-    min: 0,
-    max: 3,
-    step: 0.05,
-    default: 1,
-  },
   {
     key: "turn",
     label: "Turn",

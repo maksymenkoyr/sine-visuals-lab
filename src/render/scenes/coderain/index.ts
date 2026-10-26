@@ -23,7 +23,9 @@
 // - Hit glow: the heads flare on a bass hit.
 // - Turn: on a drop, the camera swings to a new heading, smoothly (the
 //   reference has no hard cuts; neither does this).
-// The glide forward and a slow wander of the heading run on time.
+// The camera is an explorer on foot (explorer.ts): it walks, stops, looks
+// round and walks on, on time. Speed scales the explorer's clock and the
+// fall clock together.
 //
 // Time: this scene's own delta of anim.timeSec -- the gallery preview hands
 // render() an un-latched anim, so anim.dtSec is not used (as swarm, coil).
@@ -38,6 +40,7 @@ import { sceneMedia } from "../../../pinnedAssets.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { ATLAS_PX, buildGlyphAtlas } from "./glyphs.ts";
 import { createFigure, FIGURE_HEIGHT, type Figure } from "./figure.ts";
+import { createExplorer, WALK_PACE, type Explorer } from "./explorer.ts";
 import { BURST_SLOTS, FIGURE_FRAG, FIGURE_VERT, RAIN_FRAG, RAIN_VERT } from "./glsl.ts";
 import { card, SETTINGS } from "./card.ts";
 
@@ -81,15 +84,10 @@ const DOWNPOUR_SHARE = 0.3;
 const BURST_MIN_GAP_SEC = 0.15;
 /** Head brightness lift at Hit glow 1 on a full hit: x (1 + this). */
 const HEAD_LIFT = 1.6;
-/** Glide speed at Glide 1, world units/s (~3 glyph widths a second). */
-const GLIDE_BASE = 0.9;
 /** A drop turns the heading by this much at Turn 1, plus up to TURN_SPREAD. */
 const TURN_MIN = (60 * Math.PI) / 180;
 const TURN_SPREAD = (60 * Math.PI) / 180;
 const TURN_TAU = 1.4;
-/** The slow wander of the heading and the pitch, radians, and its periods. */
-const WANDER_YAW = (10 * Math.PI) / 180;
-const WANDER_PITCH = (4 * Math.PI) / 180;
 /** Tilt 1 looks this far up. */
 const TILT_MAX = (35 * Math.PI) / 180;
 /** The depth fade, world units: columns fade in from NEAR_FADE[0] to [1]
@@ -101,7 +99,9 @@ const TILT_MAX = (35 * Math.PI) / 180;
 const NEAR_FADE = [1.4, 2.6] as const;
 const FAR_FADE = [20, 36] as const;
 /** The figure: how far ahead of the camera, how many world units per rig
- *  metre, how slowly it follows the camera's turns, and its glyph cell. */
+ *  metre, how slowly it follows the walk's turns, and its glyph cell. It
+ *  follows where the explorer walks, not where it looks, so a look round
+ *  sweeps off the dancer and back. */
 const FIG_DIST = 7;
 const FIG_SCALE = 2.5;
 const FIG_FOLLOW_TAU = 2.6;
@@ -187,8 +187,8 @@ function createCodeRainScene(): Scene {
   let yawTarget = 0;
   let figYaw = 0;
   let fallClock = 0;
-  let wanderTime = 0;
   const rng = mulberry32(SEED ^ 0x9e3779b9);
+  let explorer: Explorer = createExplorer(mulberry32(SEED ^ 0x85ebca6b));
 
   // The burst ring: per slot (fall clock at start, share, id, start time).
   const bursts = new Float32Array(BURST_SLOTS * 4);
@@ -247,6 +247,7 @@ function createCodeRainScene(): Scene {
       buildAtlas(gl);
       freeGeometry(gl);
       figure = createFigure();
+      explorer = createExplorer(mulberry32(SEED ^ 0x85ebca6b));
       // The clip library arrives asynchronously after the first mount; until
       // it does (or if it can't) the dancer sways. A later mount (context
       // loss, the gallery tile and then the full view) makes a new figure,
@@ -288,6 +289,7 @@ function createCodeRainScene(): Scene {
       const glyphSize = resolveSceneSetting(ID, settingFor("glyphSize"));
       const trailLen = resolveSceneSetting(ID, settingFor("trail"));
       const figureGain = resolveSceneSetting(ID, settingFor("figure"));
+      const speed = resolveSceneSetting(ID, settingFor("speed"));
       const fall = resolveSceneSetting(ID, settingFor("fall"));
       const rush = resolveSceneSetting(ID, settingFor("rush"));
       const downpour = resolveSceneSetting(ID, settingFor("downpour"));
@@ -295,14 +297,12 @@ function createCodeRainScene(): Scene {
       const brightness = resolveSceneSetting(ID, settingFor("brightness"));
       const hitGlow = resolveSceneSetting(ID, settingFor("hitGlow"));
       const colour = Math.round(resolveSceneSetting(ID, settingFor("colour")));
-      const glide = resolveSceneSetting(ID, settingFor("glide"));
       const turn = resolveSceneSetting(ID, settingFor("turn"));
       const tilt = resolveSceneSetting(ID, settingFor("tilt"));
 
       // The fall clock, in rows at speed factor 1.
       const level = rush > 0.001 ? drives.value("rush", frame.energy, 0.5) : 0.5;
-      const speed = FALL_BASE * fall * Math.max(0.25, 1 + RUSH_GAIN * rush * (level - 0.5));
-      fallClock += speed * dt;
+      fallClock += FALL_BASE * speed * fall * Math.max(0.25, 1 + RUSH_GAIN * rush * (level - 0.5)) * dt;
 
       // Bursts: a hit starts fresh heads at the top of the view.
       const downpourFired = drives.fired("downpour", anim.lowOnset);
@@ -328,17 +328,19 @@ function createCodeRainScene(): Scene {
       }
       const headLift = 1 + HEAD_LIFT * hitGlow * clamp01(drives.value("hitGlow", anim.lowPulse));
 
-      // The camera: glide forward along the heading; a drop swings it.
+      // The camera: the explorer walks and looks; a drop swings it all.
       const turnFired = drives.fired("turn", anim.dropOnset);
       if (turn > 0.001 && turnFired) {
         const amount = turn * Math.max(0.4, clamp01(drives.value("turn", anim.dropPulse))) * drives.hitSize("turn");
         yawTarget += (rng() < 0.5 ? -1 : 1) * (TURN_MIN + TURN_SPREAD * rng()) * amount;
       }
       yaw += (yawTarget - yaw) * (1 - Math.exp(-dt / TURN_TAU));
-      wanderTime += dt;
-      const heading = yaw + WANDER_YAW * (0.6 * Math.sin((wanderTime * 2 * Math.PI) / 23) + 0.4 * Math.sin((wanderTime * 2 * Math.PI) / 37));
-      const pitch = tilt * TILT_MAX + WANDER_PITCH * Math.sin((wanderTime * 2 * Math.PI) / 29);
-      figYaw += (heading - figYaw) * (1 - Math.exp(-dt / FIG_FOLLOW_TAU));
+      const walkDt = dt * speed;
+      const pose = explorer.step(walkDt);
+      const heading = yaw + pose.gaze;
+      const pitch = tilt * TILT_MAX + pose.pitch;
+      const walkHeading = yaw + pose.body;
+      figYaw += (walkHeading - figYaw) * (1 - Math.exp(-walkDt / FIG_FOLLOW_TAU));
 
       const cp = Math.cos(pitch);
       const fwd = [Math.sin(heading) * cp, Math.sin(pitch), -Math.cos(heading) * cp];
@@ -348,10 +350,11 @@ function createCodeRainScene(): Scene {
         right[2] * fwd[0] - right[0] * fwd[2],
         right[0] * fwd[1] - right[1] * fwd[0],
       ];
-      camX += Math.sin(heading) * GLIDE_BASE * glide * dt;
-      camZ += -Math.cos(heading) * GLIDE_BASE * glide * dt;
+      camX += Math.sin(walkHeading) * WALK_PACE * pose.pace * walkDt;
+      camZ += -Math.cos(walkHeading) * WALK_PACE * pose.pace * walkDt;
+      const camY = pose.y;
       // The grid is periodic in FIELD, so the camera can be too: keeps the
-      // fp32 uploads small however long the glide runs.
+      // fp32 uploads small however long the walk runs.
       camX -= Math.floor(camX / FIELD) * FIELD;
       camZ -= Math.floor(camZ / FIELD) * FIELD;
 
@@ -387,7 +390,7 @@ function createCodeRainScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, atlas);
 
       const camera = (prog: GLProgram): void => {
-        prog.setV3v("uCamPos", [camX, 0, camZ]);
+        prog.setV3v("uCamPos", [camX, camY, camZ]);
         prog.setV3v("uRight", right);
         prog.setV3v("uUp", up);
         prog.setV3v("uFwd", fwd);
@@ -404,7 +407,7 @@ function createCodeRainScene(): Scene {
       if (figureGain > 0.001) {
         const f = figure.advance(anim, frame.bpm, dt, 1);
         const figH = FIGURE_HEIGHT * FIG_SCALE;
-        const centreY = FIG_DIST * Math.tan(pitch);
+        const centreY = camY + FIG_DIST * Math.tan(tilt * TILT_MAX);
         figProg.use();
         camera(figProg);
         figProg.setV3v("uFigOrigin", [camX + Math.sin(figYaw) * FIG_DIST, centreY - figH * 0.5, camZ - Math.cos(figYaw) * FIG_DIST]);
