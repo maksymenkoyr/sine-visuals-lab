@@ -4,7 +4,7 @@ import type { SceneSetting } from "../../sceneSettings.ts";
 import type { SolidId } from "./solids.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-10-05" } as const;
+export const gallery = { stage: "development", added: "2026-10-05" } as const;
 
 /** What each Shape chip draws, in chip order: a flat outline by corner
  *  count (0 is a circle), or a 3D/4D figure from solids.ts. New entries go

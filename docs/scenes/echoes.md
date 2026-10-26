@@ -11,7 +11,7 @@ down the fan) and spreads the echoes further apart as the mids get louder. A
 bass hit also sends a bright ring down the fan (Shockwave), Mirror folds a
 flat shape's flow into a kaleidoscope, and Age tint colours each echo by how
 far down the fan it is.
-Draft, not yet on main.
+In development, on main.
 
 ## Where the code is
 

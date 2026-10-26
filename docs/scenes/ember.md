@@ -5,7 +5,7 @@ an upward push by a row of burners along the bottom, so the fire rolls over
 itself, curls and sheds mushroom-capped blobs; the dye fades as it climbs,
 which leaves the black above. Over a few bars the fire swells up the screen
 and sinks back. Kicks surge the burners and flare the glow, the bass heats
-it, louder sections churn the fluid harder. Draft, added 2026-10-21; not yet
+it, louder sections churn the fluid harder. In development, added 2026-10-21;
 on main.
 
 ## Where the code is

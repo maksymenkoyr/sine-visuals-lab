@@ -4,7 +4,7 @@ A glossy green liquid surface drawn as tight contour ribbons that wrap into
 eddies, with dark creases between the ribbons and cyan glints on their
 flanks, boiling in place rather than scrolling. Loudness speeds the boil,
 bass twists the ribbons into deeper eddies, and hits flash the glints.
-Draft.
+In development, on main.
 
 ## Where the code is
 

@@ -3,7 +3,7 @@ import type { Scene, SceneCard } from "../../scene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
-export const gallery = { stage: "draft", added: "2026-10-21" } as const;
+export const gallery = { stage: "development", added: "2026-10-21" } as const;
 
 const SETTINGS: SceneSetting[] = [
   {
