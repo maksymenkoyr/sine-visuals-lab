@@ -6,7 +6,7 @@ import { SIGNALS, type SignalId } from "./signals.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
-import { advanceGateTracker, createGateTracker, stepHeightEnv, windowReading, type GateTrackerState } from "./gateWindow.ts";
+import { HIT_HEIGHT_DEFAULT, advanceGateTracker, createGateTracker, hasHitStrength, stepHeightEnv, windowReading, type GateTrackerState, type HitHeight } from "./gateWindow.ts";
 import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
 import { getGateFormula, getWireGateFormula } from "./gateFormulas.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
@@ -121,30 +121,26 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * `fired()`'s gate check, but never to an edge itself or to
  * `sourceValues()`'s per-source traces.
  *
- * **Heights.** A hit-kind source (an edge-kind catalogue entry, or a beat
- * grid — never a level-kind entry or the drawn line, which ignore `height`
- * entirely) can read three ways:
+ * **Heights.** A hit-kind source can read two ways, and only a catalogue
+ * hit that measures how far it cleared its firing line (`hasHitStrength` in
+ * gateWindow.ts: Bass/Mid/High hit and Any hit) has a choice; every other
+ * source ignores `height`:
  *
- *   - **Graded** (the default, and the only height that existed before
- *     patches) — exactly today's reading: the catalogue's own decaying
- *     pulse (already shaped by src/audio/hitStrength.ts when a device has
- *     Dimension raised — see that module's header), or the grid's own pulse.
- *   - **Fixed** — a flat 1 on the source's own edge, decaying at that same
- *     source's own rate. "This hit is binary: it either lands or it
- *     doesn't", independent of how hard it hit or how loud the room is.
- *   - **Loud** — the source's own *band group's level* on its edge (bass/
- *     mid/high's slewed level for a band onset, the sensitivity-applied
- *     broadband level for Any hit/beat-grid, src/render/sectionIntensity.ts's
- *     own trend for Drop), decaying the same way. "This hit is exactly as
- *     tall as the room was loud when it landed" — a hit gate on a sustained
- *     reading, useful under `max`/`gate` against a Level source.
+ *   - **Fixed** (the default, and the only height that existed before
+ *     patches) — the catalogue's own decaying pulse, a flat 1 on every hit,
+ *     or the grid's own pulse. "This hit is binary: it either lands or it
+ *     doesn't", however hard it hit.
+ *   - **Graded** — the engine's own size for that hit: how far it stood
+ *     clear of its firing line (hitStrength.ts's `hitStandout`), decaying at
+ *     the source's own pulse-decay rate. A whisper lands short, a slam lands
+ *     tall. The envelope itself is stepHeightEnv in gateWindow.ts.
  *
- *   Fixed/Loud decay at *that source's own* existing pulse-decay rate —
- *   src/render/animClock.ts's BEAT_PULSE_DECAY_PER_SEC for Any hit/beat-grid,
+ *   Graded decays at *that source's own* existing pulse-decay rate —
+ *   src/render/animClock.ts's BEAT_PULSE_DECAY_PER_SEC for Any hit,
  *   src/render/bandEnergy.ts's own GROUP_TUNING for a band onset — reused
- *   directly (never re-typed by hand) so a Fixed pulse decays exactly as
- *   fast as the Graded pulse it replaces, just with a different height. The
- *   envelope itself is stepHeightEnv in gateWindow.ts.
+ *   directly (never re-typed by hand) so a Graded pulse decays exactly as
+ *   fast as the Fixed pulse it replaces, just with a different height.
+ *   A saved wire that says "loud" (a retired height) loads as Graded.
  *
  * **Wire modifiers.** A catalogue source can carry a modifier
  * (`DriveSource.mod`, src/render/wireMod.ts): Window, Smoothness and Length
@@ -289,7 +285,7 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * `drive.noStandout` (with its reason) instead of `drive.hit`, and its edges
  * pass through the generic gate as before hit drivers existed.
  *
- * **Advancing.** Grid pulses, line peak-holds and Fixed/Loud height
+ * **Advancing.** Grid pulses, line peak-holds and Graded height
  * envelopes are per-tick state that has to see every rAF tick, not just the
  * ticks that end up rendering — a fast grid stop (1/8 at a high tempo) can
  * cross a boundary between two renders under framePace.ts's render cap, and
@@ -303,8 +299,8 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * scene's own `uEnergy` sees this tick; app.ts's displayFrame is where that
  * shaping happens, computed once per tick just for this rather than only at
  * render time, since accumulate() itself needs it on every tick, both for
- * the "Level" catalogue source and as Loud height's own level for Any
- * hit/beat-grid) separately, because they're deliberately different frames —
+ * the "Level" catalogue source. It keeps it and the gained frame
+ * separate, because they're deliberately different frames —
  * see sceneCommon.ts's `uploadCommonUniforms` and app.ts's `loop()` for the
  * exact pipeline each one matches. The "Input level" source reads `gainedFrame`'s
  * own `level`, which neither frame's gain or sensitivity ever shapes, and a
@@ -365,10 +361,7 @@ export type DriveSourceChoice = SignalId | { source: "beat"; grid: BeatGridIndex
  *  patch. */
 export type DriveChoice = DriveSourceChoice | "scene";
 
-/** Fixed/Loud apply only to a hit-kind source (an edge-kind catalogue entry or
- *  a beat grid); level-kind entries and the drawn line ignore it. Absent means
- *  Graded. */
-export type HitHeight = "graded" | "fixed" | "loud";
+export { HIT_HEIGHT_DEFAULT, parseHitHeight, type HitHeight } from "./gateWindow.ts";
 
 /** Beats per swing for Beat wave's divider (DriveSource.every): multiples of a
  *  beat grid division. */
@@ -483,8 +476,7 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
 // source, so it reads its rest. Never stored.
 const SOLO_SILENCED: DrivePatch = { mix: "add", sources: [{ choice: "feature.level", weight: 1, off: true }] };
 
-// Imported so grid pulses and Any-hit/beat-grid Fixed/Loud heights release like
-// the beat pulse they stand in for.
+// Imported so grid pulses release like the beat pulse they stand in for.
 const GRID_PULSE_DECAY_PER_SEC = BEAT_PULSE_DECAY_PER_SEC;
 const LINE_DRIVE_RELEASE_PER_SEC = 6; // the line drive's release from the start: changing it changes how every Line wire feels
 
@@ -657,7 +649,7 @@ export function sameDriveSetting(a: DriveSetting, b: DriveSetting): boolean {
     const sb = b.sources[i]!;
     if (!sameDriveChoice(sa.choice, sb.choice)) return false;
     if (sa.weight !== sb.weight) return false;
-    if ((sa.height ?? "graded") !== (sb.height ?? "graded")) return false;
+    if ((sa.height ?? HIT_HEIGHT_DEFAULT) !== (sb.height ?? HIT_HEIGHT_DEFAULT)) return false;
     if (!!sa.when !== !!sb.when) return false;
     if (!!sa.off !== !!sb.off) return false;
     if ((sa.every ?? 1) !== (sb.every ?? 1)) return false;
@@ -706,7 +698,7 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     if (seen.has(key)) continue;
     seen.add(key);
     const source: DriveSource = { choice: src.choice, weight: clampWeight(src.weight) };
-    if (src.height !== undefined && src.height !== "graded") source.height = src.height;
+    if (src.height === "graded") source.height = "graded";
     if (src.when === true) source.when = true;
     if (src.off === true) source.off = true;
     // Only a plain Beat wave source, and only a listed value.
@@ -846,7 +838,7 @@ interface SourceState {
   gridFiredPending: boolean;
   linePulse: number;
   lineExcess: Float32Array;
-  /** Fixed/Loud envelope; stays 0 for other sources. */
+  /** Graded envelope; stays 0 for other sources. */
   heightEnv: number;
   /** Schmitt state for a level-kind or line source's `fired()` edge
    *  (valueTrigger.ts). */
@@ -1021,11 +1013,7 @@ export function createDriveEngine(): DriveEngine {
   // A source's reading before its modifier.
   function plainRawImpl(sceneId: string, key: string, src: DriveSource, anim: AnimFrame): number {
     const choice = src.choice;
-    const wantsHeight = src.height === "fixed" || src.height === "loud";
-    if (isGridChoice(choice)) {
-      const st = stateFor(sceneId, key, sourceKey(choice));
-      return wantsHeight ? st.heightEnv : st.gridPulse;
-    }
+    if (isGridChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).gridPulse;
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
     // Beat wave every-N-beats. every=1 falls through to the catalogue read
     // below, kept bit-identical rather than routed through this formula
@@ -1034,7 +1022,7 @@ export function createDriveEngine(): DriveEngine {
       return anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(anim.metronomeBeats / src.every)));
     }
     const catalogue = SIGNALS[choice];
-    if (catalogue.kind === "edge" && wantsHeight) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;
+    if (src.height === "graded" && hasHitStrength(choice)) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;
     return catalogue.read(driveFrameScratch, anim);
   }
 
@@ -1074,7 +1062,6 @@ export function createDriveEngine(): DriveEngine {
         for (const src of setting.sources) {
           const choice = src.choice;
           const st = stateFor(sceneId, spec.key, sourceKey(choice));
-          const wantsHeight = src.height === "fixed" || src.height === "loud";
 
           if (isGridChoice(choice)) {
             if (!st.grid) st.grid = createGridPulse();
@@ -1083,10 +1070,6 @@ export function createDriveEngine(): DriveEngine {
             st.gridPulse *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail.beat);
             if (fired) st.gridPulse = 1;
             st.gridFiredPending ||= fired;
-            if (wantsHeight) {
-              st.heightEnv *= Math.exp(-dtSec * GRID_PULSE_DECAY_PER_SEC * anim.hitTail.beat);
-              if (fired) st.heightEnv = Math.max(st.heightEnv, src.height === "fixed" ? 1 : driveEnergy);
-            }
           } else if (isLineChoice(choice)) {
             const heights = getDriveLine(sceneId, spec);
             const strength = getDriveLineStrength(sceneId, spec);
@@ -1095,8 +1078,8 @@ export function createDriveEngine(): DriveEngine {
             if (result.drive > st.linePulse) st.linePulse = result.drive;
             st.lineExcess.set(result.excess);
           } else {
-            if (SIGNALS[choice].kind === "edge" && wantsHeight) {
-              st.heightEnv = stepHeightEnv(st.heightEnv, choice, src.height as "fixed" | "loud", dtSec, anim, driveEnergy);
+            if (src.height === "graded" && hasHitStrength(choice)) {
+              st.heightEnv = stepHeightEnv(st.heightEnv, choice, dtSec, anim);
             }
             // Every catalogue wire's modifier steps, switched on or not: the
             // panel draws a wire's input before its Window is on.

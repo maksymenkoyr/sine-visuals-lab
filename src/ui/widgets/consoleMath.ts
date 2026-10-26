@@ -1,3 +1,4 @@
+import { hasHitStrength } from "../../render/gateWindow.ts";
 import { DIAL_SIGNALS, SIGNALS, type SignalId } from "../../render/signals.ts";
 import { DRIVE_EVERY_VALUES, type DriveMix, type DrivePatch, type DriveSource, type HitHeight } from "../../render/drives.ts";
 
@@ -115,7 +116,7 @@ export const RANDOM_SECOND_WIRE = 0.4;
 export const RANDOM_WEIGHT_MIN = 0.4;
 export const RANDOM_WEIGHT_MAX = 1.6;
 const RANDOM_WEIGHT_STEP = 0.05;
-const HEIGHTS: readonly HitHeight[] = ["graded", "fixed", "loud"];
+const HEIGHTS: readonly HitHeight[] = ["fixed", "graded"];
 const MIXES: readonly DriveMix[] = ["add", "max", "gate"];
 
 function pick<T>(list: readonly T[], rnd: () => number): T {
@@ -127,7 +128,7 @@ function pick<T>(list: readonly T[], rnd: () => number): T {
 function randomSource(signal: SignalId, rnd: () => number): DriveSource {
   const w = RANDOM_WEIGHT_MIN + rnd() * (RANDOM_WEIGHT_MAX - RANDOM_WEIGHT_MIN);
   const src: DriveSource = { choice: signal, weight: Number((Math.round(w / RANDOM_WEIGHT_STEP) * RANDOM_WEIGHT_STEP).toFixed(2)) };
-  if (SIGNALS[signal].kind === "edge") src.height = pick(HEIGHTS, rnd);
+  if (hasHitStrength(signal)) src.height = pick(HEIGHTS, rnd);
   if (signal === "anim.beatWave") src.every = pick(DRIVE_EVERY_VALUES, rnd);
   return src;
 }

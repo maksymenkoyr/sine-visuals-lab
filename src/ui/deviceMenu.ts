@@ -48,9 +48,11 @@ import {
   type DriveSource,
   type DriveSourceChoice,
   type HitHeight,
+  HIT_HEIGHT_DEFAULT,
   type SceneDrives,
 } from "../render/drives.ts";
 import type { DriveThresholdState } from "../render/driveStore.ts";
+import { hasHitStrength } from "../render/gateWindow.ts";
 import { clearDriveSolo, getDriveSolo, onDriveSoloChange, setDriveSolo } from "../render/driveSolo.ts";
 import type { HitReadout } from "../render/standout.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
@@ -200,7 +202,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * periodic refresh, matching the click-loss lesson in this file's carried
  * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
  * line per source (colour dot, name, weight 0–2×, a hit source's Height
- * Graded/Fixed/Loud, a grid source's division chips, the line source's
+ * Fixed/Graded, a grid source's division chips, the line source's
  * Clear chip, and under a catalogue
  * wire its modifier: Window, Smoothness and Length, wireModControls.ts;
  * while cables show, a catalogue wire's Height, weight and modifier move
@@ -2534,7 +2536,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     seg.style.cssText = driveMiniSegStyle;
     seg.setAttribute("role", "group");
     seg.setAttribute("aria-label", "Height");
-    const current = src.height ?? "graded";
+    const current = src.height ?? HIT_HEIGHT_DEFAULT;
     for (const opt of HEIGHT_OPTIONS) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -3085,9 +3087,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const ctrls = document.createElement("div");
     ctrls.style.cssText = driveSrcCtrlsStyle;
     if (isGate) ctrls.appendChild(buildRoleToggle(sceneId, spec, patch, i));
-    // Fixed/Loud height only mean something for a hit-kind source: an
-    // edge-kind catalogue entry or a beat grid (drives.ts's header).
-    const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
+    // Graded height only means something for a hit that measures its own
+    // size (drives.ts's header).
+    const isHitKind = typeof src.choice === "string" && hasHitStrength(src.choice);
     // With cables shown, a catalogue wire's Height, weight and modifier live
     // in its knot instead (buildKnotBody), so only one copy is ever live.
     const knotted = typeof src.choice === "string" && cablesShown();
@@ -3117,7 +3119,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function buildKnotChip(src: DriveSource, isHitKind: boolean): HTMLElement {
     const mod = src.mod;
     const parts: string[] = [];
-    if (isHitKind) parts.push(HEIGHT_OPTIONS.find((o) => o.h === (src.height ?? "graded"))?.label ?? "");
+    if (isHitKind) parts.push(HEIGHT_OPTIONS.find((o) => o.h === (src.height ?? HIT_HEIGHT_DEFAULT))?.label ?? "");
     parts.push(`${src.weight.toFixed(2)}×`);
     const modParts: string[] = [];
     if (mod?.windowOn) modParts.push("Window");
@@ -3174,7 +3176,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     const row = document.createElement("div");
     row.style.cssText = knotRowStyle;
-    if (SIGNALS[choice].kind === "edge") row.appendChild(buildHeightSeg(sceneId, spec, src, ctx.rebuild));
+    if (hasHitStrength(choice)) row.appendChild(buildHeightSeg(sceneId, spec, src, ctx.rebuild));
     row.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
     el.appendChild(row);
 

@@ -153,7 +153,7 @@ describe("encodeLook / decodeLook", () => {
     const patch: DriveSetting = {
       mix: "gate",
       sources: [
-        { choice: "anim.lowOnset", weight: 1.5, height: "fixed" },
+        { choice: "anim.lowOnset", weight: 1.5, height: "graded" },
         { choice: "anim.mid", weight: 0.7 },
       ],
     };
@@ -163,7 +163,7 @@ describe("encodeLook / decodeLook", () => {
     expect(wire.d.flash).toEqual({
       m: "gate",
       s: [
-        { c: "anim.lowOnset", w: 1.5, h: "fixed" },
+        { c: "anim.lowOnset", w: 1.5, h: "graded" },
         { c: "anim.mid", w: 0.7 },
       ],
     });
@@ -395,7 +395,7 @@ describe("wire modifiers in a Look", () => {
   it("a code from when modifiers were cards decodes to wires carrying them (h)", () => {
     const node = { src: "anim.low", windowOn: false, min: 0.4, max: 0.9, smoothOn: false, smoothness: 0.02, height: "loud", length: 0.5 };
     const look = decodeLook(wireJson({ v: 1, n: "x", s: "caustics", m: {}, d: { flash: { m: "add", s: [{ c: { source: "shaped", id: "n4" } }, { c: "anim.high" }] } }, h: { n4: node } }));
-    expect(look?.drives?.flash).toEqual({ mix: "add", sources: [{ choice: "anim.low", weight: 1, height: "loud", mod: MOD }, { choice: "anim.high", weight: 1 }] });
+    expect(look?.drives?.flash).toEqual({ mix: "add", sources: [{ choice: "anim.low", weight: 1, height: "graded", mod: MOD }, { choice: "anim.high", weight: 1 }] });
   });
 
   it("decode rejects a bad h key or value", () => {

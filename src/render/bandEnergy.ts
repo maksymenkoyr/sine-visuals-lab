@@ -41,7 +41,7 @@ const MIN_DT_SEC = 1e-4;
 
 // Each lane's pulse fall rate, tied to the lane's role: a kick's pulse rings
 // longest, a hat's is a flick. Exported because scenes (alien, sweep),
-// gateWindow.ts, drives.ts's Fixed/Loud heights and the meters time things
+// gateWindow.ts, drives.ts's Graded heights and the meters time things
 // against exactly these falls.
 // riseRefractorySec spaces a lane's rise hits after any of its hits, and an
 // engine hit after a rise hit, so the two count once; null = no rise hits.
