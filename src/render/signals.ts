@@ -104,7 +104,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
  *  actually points at that card. "sound" is the first meter, the Sound card;
- *  "stems" follows it with Lead and Hats. */
+ *  "stems" follows it with Lead, Hats and the Kick band. */
 export type MeterCardId = "sound" | "stems" | "hits" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
@@ -115,8 +115,8 @@ export type MeterCardId = "sound" | "stems" | "hits" | "beat" | "song";
  *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
  *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
- *  Treble rows, and "kick" the Kick band row in its Bands block. "lead" and
- *  "hats" are the Stems card's own rows. Each dial's own cell in the Song
+ *  Treble rows. "lead", "hats" and "kick" (the Kick band) are the Stems
+ *  card's own rows. Each dial's own cell in the Song
  *  card's strip is its DialSignalId. */
 export type MeterRowId =
   | "section"
@@ -294,7 +294,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "The level of the single low band (below the Bands split) that has gone up and down the most over the last few seconds (AnimFrame.kickBand, bandPick.ts) — one narrow band, re-picked by itself when the music changes, unlike Bass level's average over the whole low group.",
     kind: "level",
     read: (_frame, anim) => anim.kickBand,
-    monitor: { card: "sound", row: "kick" },
+    monitor: { card: "stems", row: "kick" },
     bandRange: "low",
   }),
   "anim.midOnset": signal({
