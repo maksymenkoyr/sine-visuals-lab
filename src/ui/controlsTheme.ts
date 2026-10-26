@@ -213,9 +213,9 @@ const stylesheet = `
   /* The card's border eats into its box, so the pad is that much narrower.
    * flex: none so it never shrinks to less than its written width. */
   .vc-power-card > .vc-card-pad { flex: none; width: 198px; box-sizing: border-box; }
-  .vc-power-card.vc-folded { width: ${POWER_FOLDED_W_PX}px; height: ${POWER_SQUARE_PX}px; }
+  .vc-power-card.vc-folded, .vc-root:not(.vc-open) .vc-power-card { width: ${POWER_FOLDED_W_PX}px; height: ${POWER_SQUARE_PX}px; }
   /* Hidden, not removed: the pad stays laid out at full width so unfolding doesn't reflow. */
-  .vc-power-card.vc-folded > .vc-card-pad { visibility: hidden; }
+  .vc-power-card.vc-folded > .vc-card-pad, .vc-root:not(.vc-open) .vc-power-card > .vc-card-pad { visibility: hidden; }
   /* Pinned at the square's inner size (inside the border), not inset: 0, so the
    * glyph stays put while the card opens (powerCard.ts's foldTransition). */
   .vc-power-square {
@@ -225,7 +225,14 @@ const stylesheet = `
     color: ${POWER_TEAL}; opacity: 0; visibility: hidden; pointer-events: none;
     transition: color 0.15s ease;
   }
-  .vc-power-card.vc-folded > .vc-power-square { opacity: 1; visibility: visible; pointer-events: auto; }
+  .vc-power-card.vc-folded > .vc-power-square, .vc-root:not(.vc-open) .vc-power-card > .vc-power-square { opacity: 1; visibility: visible; pointer-events: auto; }
+  /* Panel closed: the root stays up for the Power strip alone, however the card was folded
+   * (deviceMenu.ts opens the panel from a click on it). */
+  .vc-root:not(.vc-open) { display: flex; }
+  .vc-root:not(.vc-open) > :not(.vc-cols-wrap),
+  .vc-root:not(.vc-open) .vc-cols-wrap > :not(.vc-power-col),
+  .vc-root:not(.vc-open) .vc-power-col > :nth-child(n+2) { display: none; }
+  .vc-root:not(.vc-open) .vc-cols-wrap > .vc-power-col { display: flex; }
   .vc-power-square:hover, .vc-power-square:focus-visible { color: #fff; }
   .vc-power-square:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
 }
