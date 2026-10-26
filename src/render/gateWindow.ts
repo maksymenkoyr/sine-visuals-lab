@@ -1,5 +1,5 @@
 /**
- * The generic gate window, and the Fixed/Loud height envelope for a catalogue
+ * The generic gate window, and the Graded height envelope for a catalogue
  * hit. Two users share this one copy: a setting's own generic gate (drives.ts
  * accumulate() and forScene()) and a wire's modifier (wireMod.ts). It holds
  * the gate tracker (a peak that jumps up and eases back down toward a floor
@@ -9,7 +9,7 @@
  * (GATE_FORMULAS: a dev build can pick one per setting while PR #544 picks
  * the one to keep, gateFormulas.ts), the generic defaults for Min, Max and
  * Smoothness, and stepHeightEnv, the
- * Fixed/Loud envelope a hit-kind catalogue entry gets, with the lane and decay
+ * Graded envelope a hit-kind catalogue entry gets, with the lane and decay
  * rate each entry borrows from its own pulse.
  *
  * It is its own module because driveStore.ts and wireMod.ts read it at load,
@@ -18,7 +18,7 @@
  */
 import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
-import type { HitLane } from "../audio/hitStrength.ts";
+import { HIT_KNEE_DEFAULT, hitStandout, type HitLane } from "../audio/hitStrength.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 
 /** The generic engine gate's own threshold default (drives.ts's header's
@@ -224,7 +224,7 @@ function ease(y: number, target: number, tau: number, dtSec: number): number {
 }
 
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
- *  Fixed/Loud release — the lane whose pulse edgeDecayPerSec below borrows
+ *  Graded release — the lane whose pulse edgeDecayPerSec below borrows
  *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
  *  section swell, not a hit's ring-out, so no Length row stretches it. */
 function edgeTailLane(id: SignalId): HitLane | null {
@@ -242,7 +242,7 @@ function edgeTailLane(id: SignalId): HitLane | null {
   }
 }
 
-/** Fixed/Loud's own release rate for a hit-kind catalogue entry — reused
+/** Graded's own release rate for a hit-kind catalogue entry — reused
  *  directly from the module that owns the Graded pulse it stands in for
  *  (drives.ts's header). Only ever called for an edge-kind catalogue entry. */
 function edgeDecayPerSec(id: SignalId): number {
@@ -265,39 +265,59 @@ function edgeDecayPerSec(id: SignalId): number {
   }
 }
 
-/** Loud height's own target on a hit-kind catalogue entry's edge — "that band
- *  group's level" (drives.ts's header): the group's own slewed level for a
- *  band onset, sectionIntensity's trend for Drop (its own composite
- *  "loudness" — Drop has no group level of its own to read), and the
- *  sensitivity-applied broadband level (`driveEnergy`, matching Level
- *  exactly) for Any hit and the metronome (Metronome/Metronome bar), since
- *  none of those is band-specific. */
-function edgeLoudLevel(id: SignalId, anim: AnimFrame, driveEnergy: number): number {
+/** Graded applies only to a catalogue hit that measures its own size
+ *  (hasHitStrength below); every other source ignores it. Absent means
+ *  Fixed, HIT_HEIGHT_DEFAULT. */
+export type HitHeight = "fixed" | "graded";
+export const HIT_HEIGHT_DEFAULT: HitHeight = "fixed";
+
+/** A stored or shared height as a HitHeight, or null when it names none.
+ *  "loud", the retired third height, loads as the nearest one that varies. */
+export function parseHitHeight(raw: unknown): HitHeight | null {
+  if (raw === "fixed" || raw === "graded") return raw;
+  return raw === "loud" ? "graded" : null;
+}
+
+/** Hits whose detector reads how far the hit cleared its firing line, so a
+ *  Graded height has something to grade; every other hit-kind entry (the
+ *  metronome, Drop) is a bare trigger and Graded would only repeat Fixed. */
+const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"]);
+
+export function hasHitStrength(id: SignalId): boolean {
+  return GRADED_EDGES.has(id);
+}
+
+/** Graded height's target on a hit-kind entry's edge: the stand-out of the
+ *  hit that just fired (hitStrength.ts's hitStandout on the engine's ratio),
+ *  the strongest of the lanes that fired for Any hit. A bare trigger reads 1. */
+function edgeGradedLevel(id: SignalId, anim: AnimFrame): number {
   switch (id) {
     case "anim.lowOnset":
-      return anim.low;
+      return hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT);
     case "anim.midOnset":
-      return anim.mid;
+      return hitStandout(anim.hits.mid.ratio, HIT_KNEE_DEFAULT);
     case "anim.highOnset":
-      return anim.high;
-    case "anim.dropOnset":
-      return anim.sectionIntensity;
-    case "anim.metronome":
-    case "anim.metronomeBar":
-      return driveEnergy; // same broadband level as "feature.onset" (Any hit)
+      return hitStandout(anim.hits.high.ratio, HIT_KNEE_DEFAULT);
+    case "feature.onset": {
+      let best = 0;
+      if (anim.lowOnset) best = Math.max(best, hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT));
+      if (anim.midOnset) best = Math.max(best, hitStandout(anim.hits.mid.ratio, HIT_KNEE_DEFAULT));
+      if (anim.highOnset) best = Math.max(best, hitStandout(anim.hits.high.ratio, HIT_KNEE_DEFAULT));
+      return best;
+    }
     default:
-      return driveEnergy; // "feature.onset" (Any hit) and unreached edge cases
+      return 1;
   }
 }
 
-/** One step of a hit-kind catalogue entry's height envelope (drives.ts's
+/** One step of a hit-kind catalogue entry's Graded envelope (drives.ts's
  *  header, "Heights"): decays `env` at the entry's own pulse rate, stretched by
- *  its Length row, and on an edge lifts it to 1 (Fixed) or to the entry's
- *  Loud level. Returns the new envelope. */
-export function stepHeightEnv(env: number, id: SignalId, height: "fixed" | "loud", dtSec: number, anim: AnimFrame, driveEnergy: number): number {
+ *  its Length row, and on an edge lifts it to that hit's stand-out. Returns
+ *  the new envelope. */
+export function stepHeightEnv(env: number, id: SignalId, dtSec: number, anim: AnimFrame): number {
   const lane = edgeTailLane(id);
   const rate = edgeDecayPerSec(id) * (lane === null ? 1 : anim.hitTail[lane]);
   let out = env * Math.exp(-dtSec * rate);
-  if (SIGNALS[id].edge!(anim)) out = Math.max(out, height === "fixed" ? 1 : edgeLoudLevel(id, anim, driveEnergy));
+  if (SIGNALS[id].edge!(anim)) out = Math.max(out, edgeGradedLevel(id, anim));
   return out;
 }

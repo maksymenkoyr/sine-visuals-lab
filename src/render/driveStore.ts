@@ -27,7 +27,7 @@ import {
   type DriveSourceChoice,
   type HitHeight,
 } from "./drives.ts";
-import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "./gateWindow.ts";
+import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, parseHitHeight } from "./gateWindow.ts";
 
 /**
  * Storage for `SceneSetting.drive` — the patch (src/render/drives.ts's
@@ -263,7 +263,6 @@ function sanitizeSourceChoice(raw: unknown): DriveSourceChoice | null {
   return choice === null || choice === "scene" ? null : choice;
 }
 
-const HIT_HEIGHTS: readonly HitHeight[] = ["graded", "fixed", "loud"];
 const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
 
 /** `raw` sanitized into a real DriveSetting, or null if it doesn't match
@@ -341,14 +340,14 @@ export function sanitizeDriveSetting(raw: unknown, nodes: ReadonlyMap<string, Le
     const rawHeight = (item as { h?: unknown }).h;
     let height: HitHeight | undefined;
     if (rawHeight !== undefined) {
-      if (typeof rawHeight !== "string" || !(HIT_HEIGHTS as readonly string[]).includes(rawHeight)) return null;
-      height = rawHeight as HitHeight;
+      height = parseHitHeight(rawHeight) ?? undefined;
+      if (height === undefined) return null;
     }
 
     const source: DriveSource = { choice, weight };
     if (node) {
       // A node owned its input's Height; the wire through it had none.
-      if (node.height !== "graded") source.height = node.height;
+      if (node.height === "graded") source.height = "graded";
       source.mod = node.mod;
     } else if (height !== undefined) {
       source.height = height;
@@ -415,7 +414,7 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
     const only = setting.sources[0]!;
     if (
       only.weight === 1 &&
-      (only.height === undefined || only.height === "graded") &&
+      only.height === undefined &&
       !only.when &&
       !only.off &&
       (only.every === undefined || only.every === 1) &&
@@ -429,7 +428,7 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
     s: setting.sources.map((src) => {
       const entry: StoredDriveSource = { c: src.choice };
       if (src.weight !== 1) entry.w = src.weight;
-      if (src.height !== undefined && src.height !== "graded") entry.h = src.height;
+      if (src.height === "graded") entry.h = "graded";
       if (src.when) entry.g = 1;
       if (src.off) entry.o = 1;
       if (src.every !== undefined && src.every !== 1) entry.e = src.every;

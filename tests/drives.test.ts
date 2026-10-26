@@ -1,4 +1,4 @@
-import { UNIT_TAILS } from "../src/audio/hitStrength.ts";
+import { HIT_KNEE_DEFAULT, hitStandout, UNIT_TAILS } from "../src/audio/hitStrength.ts";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   createDriveEngine,
@@ -29,21 +29,21 @@ import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import { NUM_BANDS, type EngineReading, type FeatureFrame } from "../src/audio/types.ts";
-import { engineReading } from "./engineReading.ts";
+import { engineReading, ratioForStandout } from "./engineReading.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
-import { GATE_FORMULA_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../src/render/gateWindow.ts";
+import { GATE_FORMULA_DEFAULT, GENERIC_THRESHOLD_DEFAULT, hasHitStrength } from "../src/render/gateWindow.ts";
 
 const DT = 1 / 60;
 
 /** The engine reading behind a frame whose every band reads `level`, with a
  *  hit of each kind when `hit`. */
-function heard(level: number, hit: boolean): EngineReading {
-  const strength = hit ? 2 : 0;
+function heard(level: number, hit: boolean, ratio = 2): EngineReading {
+  const strength = hit ? ratio : 0;
   return engineReading({ low: level, mid: level, high: level, kick: strength, snare: strength, hat: strength });
 }
 
@@ -1134,11 +1134,11 @@ function tickToOnset(
   return anim;
 }
 
-describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
-  it("Graded (the default) is untouched — exactly the catalogue's own pulse", () => {
+describe("drives: hit heights (Fixed/Graded) on a patch source", () => {
+  it("Fixed (the default) is untouched — exactly the catalogue's own pulse", () => {
     const clock = createAnimClock();
     const engine = createDriveEngine();
-    const sceneId = "height-graded";
+    const sceneId = "height-default";
     const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1 }] });
     const anim = tickToOnset(clock, engine, sceneId, [spec]);
     expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.lowPulse);
@@ -1165,24 +1165,37 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
     expect(after).toBeCloseTo(Math.exp(-DT * GROUP_TUNING.low.pulseDecayRate), 6);
   });
 
-  it("Loud jumps to the source's own band-group level on the edge — anim.low for Bass hit", () => {
+  it("Graded jumps to the hit's own stand-out on the edge — a Bass hit's ratio through hitStandout", () => {
     const clock = createAnimClock();
     const engine = createDriveEngine();
-    const sceneId = "height-loud";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "loud" }] });
+    const sceneId = "height-graded";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "graded" }] });
     const anim = tickToOnset(clock, engine, sceneId, [spec]);
     expect(anim.lowOnset).toBe(true);
-    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.low);
+    const drive = engine.forScene(sceneId, [spec], anim).uniformPair("k").drive;
+    expect(drive).toBeCloseTo(hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT), 9);
+    expect(drive).toBeLessThan(1);
   });
 
-  it("Loud on Any hit (broadband) uses driveEnergy, since it isn't band-specific", () => {
-    const clock = createAnimClock();
-    const engine = createDriveEngine();
-    const sceneId = "height-loud-broadband";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
-    const anim = tickToOnset(clock, engine, sceneId, [spec], 0.77);
-    expect(anim.onset).toBe(true);
-    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(0.77);
+  it("Graded on Any hit takes the strongest lane that fired, so a harder hit lands taller", () => {
+    const landed = (ratio: number): number => {
+      const clock = createAnimClock();
+      const engine = createDriveEngine();
+      const sceneId = `height-graded-any-${ratio}`;
+      const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "graded" }] });
+      const held = new Float32Array(NUM_BANDS).fill(0.9);
+      const anim = clock.advance(DT, frame({ bands: held, onset: true, engine: heard(0.9, true, ratio) }));
+      engine.accumulate(DT, frame({ bands: held }), 0.9, anim, sceneId, [spec]);
+      expect(anim.onset).toBe(true);
+      return engine.forScene(sceneId, [spec], anim).uniformPair("k").drive;
+    };
+    expect(landed(1.5)).toBeCloseTo(hitStandout(1.5, HIT_KNEE_DEFAULT), 9);
+    expect(landed(4)).toBeGreaterThan(landed(1.5));
+  });
+
+  it("Graded on a bare trigger (the metronome) reads 1, like Fixed — it has no size to grade", () => {
+    expect(hasHitStrength("anim.metronome")).toBe(false);
+    expect(hasHitStrength("anim.lowOnset")).toBe(true);
   });
 
   it("Fixed on Any hit decays at animClock's own BEAT_PULSE_DECAY_PER_SEC, the same rate its Graded pulse uses", () => {
@@ -1232,7 +1245,7 @@ describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
 
   it("the drawn line ignores height entirely, even if one is stored", () => {
     const sceneId = "height-ignored-line";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "line" }, weight: 1, height: "loud" }] });
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "line" }, weight: 1, height: "graded" }] });
     setDriveLine(sceneId, spec, new Float32Array(NUM_BANDS).fill(0)); // flat-0: full headroom
     setDriveLineStrength(sceneId, spec, 1);
     const bands = Float32Array.from({ length: NUM_BANDS }, (_, i) => (i % 5) / 10);
@@ -1372,7 +1385,7 @@ describe("drives: sceneSources — display-only scene-mix metadata", () => {
 // catalogue entry driven directly by accumulate()'s own `driveEnergy`
 // argument) makes the tracker's own floor/peak fully controllable from a
 // test without needing a real onset; the fired()-blocked case below instead
-// uses an edge-kind source ("feature.onset") with height "loud", so a hit's
+// uses an edge-kind source ("feature.onset") with height "graded", so a hit's
 // own combined value is controllable the same way while still going through
 // fired()'s real edge machinery.
 describe("drives: the generic engine gate — every drive setting without its own scene-handled threshold", () => {
@@ -1531,22 +1544,22 @@ describe("drives: the generic engine gate — every drive setting without its ow
 
   it("on: fired() blocks an edge whose own combined value falls under the line", () => {
     const sceneId = "gate-on-fired";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "graded" }] });
     setDriveThresholdOn(sceneId, spec, true);
     setDriveThreshold(sceneId, spec, 0.5);
-    setDriveSmoothnessOn(sceneId, spec, false); // exact window: the loud hit reads the peak itself
+    setDriveSmoothnessOn(sceneId, spec, false); // exact window: the strong hit reads the peak itself
     const clock = createAnimClock();
     const engine = createDriveEngine();
 
     function tick(onset: boolean, e: number) {
-      const anim = clock.advance(DT, frame({ onset, engine: heard(0, onset) }));
+      const anim = clock.advance(DT, frame({ onset, engine: heard(0, onset, ratioForStandout(e)) }));
       engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
       return engine.forScene(sceneId, [spec], anim);
     }
 
-    // Train the trackers with alternating loud (1.0) and quiet (0.1) hits —
-    // Loud height reads driveEnergy straight off the hit, so each hit's own
-    // combined value is exactly the energy it was given. Read fired()/value()
+    // Train the trackers with alternating strong (1.0) and weak (0.1) hits —
+    // Graded height reads the hit's stand-out, so each hit's own combined
+    // value is exactly the `e` its ratio was built from. Read fired()/value()
     // the instant each hit lands: the SceneDrives view is live, not a
     // snapshot, and a source's own heightEnv keeps decaying underneath it on
     // every later tick, so a reading has to be taken there and then.
@@ -2048,12 +2061,12 @@ describe("drives: wire modifiers (wireMod.ts)", () => {
 
   it("a modified hit wire fires on the hit's own edge only while its output is up", () => {
     const sceneId = "wiremod-edge";
-    // Loud height: each hit is as tall as the room. A loud hit teaches the
-    // window its peak, so a later quiet hit lands under Min and reads 0.
-    const plain = patchSetting(sceneId, "plain", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    // Graded height: each hit is as tall as it was hard. A strong hit teaches
+    // the window its peak, so a later weak hit lands under Min and reads 0.
+    const plain = patchSetting(sceneId, "plain", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "graded" }] });
     const shut = patchSetting(sceneId, "shut", {
       mix: "add",
-      sources: [{ choice: "feature.onset", weight: 1, height: "loud", mod: mod({ windowOn: true, min: 0.9, max: 1, smoothOn: false }) }],
+      sources: [{ choice: "feature.onset", weight: 1, height: "graded", mod: mod({ windowOn: true, min: 0.9, max: 1, smoothOn: false }) }],
     });
     const specs = [plain, shut];
     const engine = createDriveEngine();
@@ -2063,10 +2076,10 @@ describe("drives: wire modifiers (wireMod.ts)", () => {
       engine.accumulate(DT, f, energy, anim, sceneId, specs);
       return engine.forScene(sceneId, specs, anim);
     };
-    const loud = step(frame({ onset: true, engine: heard(0, true) }), 1);
+    const loud = step(frame({ onset: true, engine: heard(0, true, ratioForStandout(1)) }), 1);
     expect(loud.fired("shut", false)).toBe(true);
     for (let i = 0; i < 30; i++) step(frame(), 0);
-    const quiet = step(frame({ onset: true, engine: heard(0, true) }), 0.1);
+    const quiet = step(frame({ onset: true, engine: heard(0, true, ratioForStandout(0.1)) }), 0.1);
     expect(quiet.fired("plain", false)).toBe(true);
     expect(quiet.value("shut", -1)).toBe(0);
     expect(quiet.fired("shut", false)).toBe(false);
