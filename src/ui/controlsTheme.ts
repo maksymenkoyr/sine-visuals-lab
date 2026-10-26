@@ -88,9 +88,9 @@ export const POWER_SQUARE_PX = 26;
 export const POWER_FOLDED_W_PX = 70;
 /** A folded card's title-bar height; the Auto master bar (deviceMenu.ts) matches it. */
 export const FOLDED_BAR_PX = 32;
-/** Right-edge room the Hits strip (audioMeters.ts) keeps free for
- *  lane jacks, so no trace runs under a jack or its usage dots. */
-export const LANE_JACK_GUTTER_PX = 20;
+/** The heat floor under a Hits drum-roll track's lane (audioMeters.ts): thinner
+ *  than a line row's, so the touching tracks keep room for their notes. */
+export const HIT_TRACK_FLOOR_PX = 2;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -694,7 +694,7 @@ body.vc-keys-reveal [data-keycap]::after {
   .vc-custom-glow { animation: none; }
 }
 
-/* Jacks (jack.ts): a ring a meter row or hits lane mounts, in its source's colour
+/* Jacks (jack.ts): a ring a meter row mounts, in its source's colour
  * (driveSources.ts). Solid when it feeds the shown (preview ?? pinned) setting; the
  * usage dots count this scene's settings using it, always on. jack.ts's header has
  * the split between this file and deviceMenu.ts. */
@@ -736,6 +736,7 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-heat-monitor-line .vc-heat-strip { flex: 1; margin-top: 0; }
 /* A one-line row's heat (audioMeters.ts's createLineRow): the floor of its trace lane, no dot. */
 .vc-heat-floor { height: 3px; border-radius: 1px; background: rgba(255,255,255,0.06); }
+.vc-hit-track .vc-heat-floor { height: ${HIT_TRACK_FLOOR_PX}px; border-radius: 0; }
 .vc-heat-hist { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 8px; align-items: center; }
 .vc-heat-hist-label { font: 400 11px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-heat-hist-strip { height: 5px; border-radius: 1px; background: rgba(255,255,255,0.06); }
@@ -768,9 +769,7 @@ body.vc-keys-reveal [data-keycap]::after {
  *  - .vc-row-fed: feeds the pinned setting, nothing else previewed. Strong glow.
  *  - .vc-row-fed-soft: feeds the previewed setting (wins over a pinned feed on the
  *    same row) or is named in a "scene" setting's display-only sceneSources (drives.ts).
- *  - .vc-row-fed-faint: feeds the pinned setting while a different one is previewed.
- * A hit lane also gets its own glow bar (audioMeters.ts), since each lane can feed
- * a different setting. */
+ *  - .vc-row-fed-faint: feeds the pinned setting while a different one is previewed. */
 /* .vc-row-keep (the Bands faders row) opts out: it is the primary display and gets
  * band-range dimming (spectrumStrip.ts setHighlight) instead of a flat opacity drop. */
 .vc-spectrum-col.vc-patching .vc-row:not(.vc-row-fed):not(.vc-row-fed-soft):not(.vc-row-fed-faint):not(.vc-row-keep) { opacity: 0.45; }
@@ -781,11 +780,6 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-row-fed-soft { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 45%, transparent); }
 .vc-row-fed-faint { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 25%, transparent); }
-.vc-lane-glow {
-  position: absolute; left: 0; right: ${LANE_JACK_GUTTER_PX}px; pointer-events: none; border-radius: 2px;
-  background: color-mix(in srgb, var(--c) 22%, transparent); opacity: 0; transition: opacity 0.15s ease;
-}
-.vc-lane-glow.on { opacity: 1; }
 
 /* Hovering a jack highlights every scene row it feeds: a transient echo of
  * .vc-row-fed, keyed to the jack (onJackHover). */

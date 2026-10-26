@@ -103,9 +103,9 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. "sound" is the first meter, the Sound card;
- *  "stems" follows it with Lead, Hats and the Kick band. */
-export type MeterCardId = "sound" | "stems" | "hits" | "beat" | "song";
+ *  actually points at that card. "sound" is the first meter, the Sound card,
+ *  hits included; "stems" follows it with Lead, Hats and the Kick band. */
+export type MeterCardId = "sound" | "stems" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -115,13 +115,18 @@ export type MeterCardId = "sound" | "stems" | "hits" | "beat" | "song";
  *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
  *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
- *  Treble rows. "lead", "hats" and "kick" (the Kick band) are the Stems
- *  card's own rows. Each dial's own cell in the Song
- *  card's strip is its DialSignalId. */
+ *  Treble rows; "hitAny", "hitLow", "hitMid", "hitHigh" and "surge" are the
+ *  tracks of its Hits drum roll (audioMeters.ts's HIT_TRACKS). "lead", "hats"
+ *  and "kick" (the Kick band) are the Stems card's own rows. Each dial's own
+ *  cell in the Song card's strip is its DialSignalId. */
 export type MeterRowId =
   | "section"
   | "tempo"
-  | "hits"
+  | "hitAny"
+  | "hitLow"
+  | "hitMid"
+  | "hitHigh"
+  | "surge"
   | "wave"
   | "lock"
   | "bar"
@@ -263,7 +268,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.beatPulse,
     edge: (anim) => anim.onset,
-    monitor: { card: "hits", row: "hits" },
+    monitor: { card: "sound", row: "hitAny" },
     bandRange: "all",
   }),
   "feature.flux": signal({
@@ -273,7 +278,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "How close the broadband onset detector is to firing right now (AnimFrame.beatRatio, features.ts's own unclamped fluxRatio), rescaled so 0.6 (a clear near-miss) reads 0 and 2.0 reads 1 — the same flux 'Beat' fires on, read continuously instead of as a one-shot, so a scene can lean into an approaching hit rather than only ever react after it lands.",
     kind: "level",
     read: (_frame, anim) => clamp01((anim.beatRatio - SURGE_RATIO_FLOOR) / (SURGE_RATIO_CEIL - SURGE_RATIO_FLOOR)),
-    monitor: { card: "hits", row: "hits" },
+    monitor: { card: "sound", row: "surge" },
     bandRange: "all",
   }),
   "anim.lowOnset": signal({
@@ -284,7 +289,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.lowPulse,
     edge: (anim) => anim.lowOnset,
-    monitor: { card: "hits", row: "hits" },
+    monitor: { card: "sound", row: "hitLow" },
     bandRange: "low",
   }),
   "anim.kickBand": signal({
@@ -305,7 +310,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.midPulse,
     edge: (anim) => anim.midOnset,
-    monitor: { card: "hits", row: "hits" },
+    monitor: { card: "sound", row: "hitMid" },
     bandRange: "mid",
   }),
   "anim.highOnset": signal({
@@ -316,7 +321,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.highPulse,
     edge: (anim) => anim.highOnset,
-    monitor: { card: "hits", row: "hits" },
+    monitor: { card: "sound", row: "hitHigh" },
     bandRange: "high",
   }),
   "anim.low": signal({

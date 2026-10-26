@@ -360,8 +360,8 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * which goes through DeviceMenuDeps, this doesn't, since nothing outside
  * src/ui/ ever needs to know which card is folded.
  *
- * Row grammar (createControlRow, exported for audioMeters.ts's Hits card's
- * Shape section to reuse directly rather than duplicate; most meter rows instead
+ * Row grammar (createControlRow, exported for overlayCard.ts to reuse
+ * directly rather than duplicate; most meter rows instead
  * follow the same grammar with a meter in the slider's place — the shared
  * pieces live in controlsKit.ts): label · seven-segment readout + unit ·
  * "A" chip · "T" chip · ↺. The A chip *is* the auto indicator — filled when
@@ -903,7 +903,7 @@ function unmarkBlock(heading: HTMLElement): void {
   heading.querySelector(".vc-block-n")?.remove();
 }
 
-// Exported for audioMeters.ts's Hits card Shape section (hitStrength.ts).
+// Exported with createControlRow (overlayCard.ts).
 export interface ControlRowSpec {
   label: string;
   accent: string;
@@ -4997,8 +4997,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const sourceHiddenLineStyle = `align-self: flex-start; margin-top: 2px; padding: 2px 0; background: none; border: 0; cursor: pointer; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.4); text-decoration: underline dotted rgba(255,255,255,0.25); text-underline-offset: 3px;`;
   const sourceScreenCaptionStyle = `margin-top: 10px; font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.35);`;
   // Always visible while Screen is active, not a .vc-hint: on touch a hint
-  // shows only after the tap that already opened the picker (as
-  // createTraceLegend in controlsKit.ts).
+  // shows only after the tap that already opened the picker.
   const sourceGuideStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
   // Always on too: it answers "which is picked and is it listening". No
   // inline color: the .vc-src-status class (controlsTheme.ts) owns it so its

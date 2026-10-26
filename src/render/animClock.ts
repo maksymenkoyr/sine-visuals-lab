@@ -185,10 +185,9 @@ export interface AnimFrame {
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
-   *  a fully open room, down toward 0 the quieter the room reads. The Hits
-   *  card's hits history reads this to shade the ground (alpha
-   *  proportional to `1 - gateDimmer`, so a half-open gate reads lighter
-   *  than a shut one); a BeatListener's "bass"/"mid"/"high" sources are
+   *  a fully open room, down toward 0 the quieter the room reads. The band
+   *  signals (signals.ts's BAND_SIGNALS) scale by it; a BeatListener's
+   *  "bass"/"mid"/"high" sources are
    *  gated by construction (lowOnset/midOnset/highOnset are already false
    *  while this sits near 0). */
   gateDimmer: number;
@@ -196,7 +195,7 @@ export interface AnimFrame {
    *  — JS-only like `raw`, per-tick readings, NOT edges: unlike
    *  lowOnset/midOnset/highOnset above, these are not folded into
    *  renderLatch.ts's one-shot latch, so a scene must not read them as
-   *  triggers — only the meters panel's hit history does, on its own
+   *  triggers — only the meters panel's Hits drum roll does, on its own
    *  every-rAF-tick update ahead of the render cap. A fresh snapshot each
    *  frame (unlike bandEnergy's own lowDiag/midDiag/highDiag, which alias
    *  their mutated source) so a caller holding an old AnimFrame never sees
@@ -206,7 +205,7 @@ export interface AnimFrame {
    *  the `hit` param below. Copies, same reasoning as `hits` above copying
    *  bandEnergy's own diags: these hold the *last fired hit's* numbers
    *  (they only change on that detector's own onset), which is exactly what
-   *  the Hits card's own Shape section (audioMeters.ts) wants to watch
+   *  the Hits drum roll (audioMeters.ts) draws a note's brightness from,
    *  without an old AnimFrame changing under it later. */
   hitStrength: { beat: HitParts; low: HitParts; mid: HitParts; high: HitParts };
 }

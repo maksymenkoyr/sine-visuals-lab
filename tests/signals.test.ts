@@ -26,11 +26,15 @@ describe("signals registry", () => {
     // small sets signals.ts's own MeterCardId/MeterRowId comments describe,
     // and fails loudly if they ever drift — the two are meant to change
     // together, rarely, both by hand.
-    const knownCards = new Set(["sound", "stems", "hits", "beat", "song"]);
+    const knownCards = new Set(["sound", "stems", "beat", "song"]);
     const knownRows = new Set([
       "section",
       "tempo",
-      "hits",
+      "hitAny",
+      "hitLow",
+      "hitMid",
+      "hitHigh",
+      "surge",
       "wave",
       "lock",
       "bar",
