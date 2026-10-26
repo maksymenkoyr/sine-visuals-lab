@@ -2,20 +2,18 @@ import type { GlassLook } from "../render/glassBackdrop.ts";
 
 /**
  * Panel blur: how the controls panel's glass shows the scene behind it.
- * Global per device, like src/render/qualityPref.ts. Three looks:
+ * Global per device, like src/render/qualityPref.ts. Two looks:
  *
- * - On: the browser blurs, with a CSS backdrop-filter. The browser re-filters
- *   the WebGL canvas behind every glass surface every frame (the canvas
- *   changes every frame) at full device resolution. That is a real GPU cost —
- *   measured 2026-09-29 at roughly 1 ms/frame on a light scene and 5+ ms on
- *   Caustics, and in #551 (2026-10-16) as most of what the open panel costs
- *   the GPU process. It is no longer the default, but "On" stays one click
- *   away in the Power card, and the quality governor (src/render/governor.ts)
- *   absorbs the cost on a scene that runs out of budget.
- * - Fast: the same glass drawn by the renderer (render/glassBackdrop.ts) from
- *   a small copy of the finished frame, under the surfaces that sit straight
- *   on the scene (ui/glassPanes.ts says which, and why the rest keep the
- *   browser's blur). The default.
+ * - Fast: the glass drawn by the renderer (render/glassBackdrop.ts) from a
+ *   small copy of the finished frame, under the surfaces that sit straight on
+ *   the scene (ui/glassPanes.ts says which, and why the rest keep the
+ *   browser's blur). The default. There is no pick for the browser's blur
+ *   alone: a CSS backdrop-filter re-filters the WebGL canvas behind every
+ *   glass surface every frame at full device resolution, measured 2026-09-29
+ *   at roughly 1 ms/frame on a light scene and 5+ ms on Caustics, and in #551
+ *   (2026-10-16) as most of what the open panel costs the GPU process. It
+ *   stays only as the fallback below; the quality governor
+ *   (src/render/governor.ts) absorbs its cost on a scene out of budget.
  * - Off: a darker flat tint rather than the lighter one the blur needs, to
  *   keep the text readable without it.
  *
@@ -27,7 +25,7 @@ import type { GlassLook } from "../render/glassBackdrop.ts";
  * under the cards, cost as much again just for the cross-context copy. A
  * blur inside the renderer needs no copy: the frame is already on the GPU.
  *
- * Fast against On (2026-10-16, #561: production build, the panel open with
+ * Fast against the browser's blur, "On" (2026-10-16, #561: production build, the panel open with
  * its default cards, M1 Pro at dpr 2, the three looks interleaved over six
  * rounds, medians). GPU-process CPU per drawn frame, headless: Caustics Off
  * 3.3 ms, On 4.7, Fast 3.3; Physarum 2 Off 3.6, On 5.8, Fast 4.2, where On
@@ -43,21 +41,21 @@ import type { GlassLook } from "../render/glassBackdrop.ts";
  * controlsTheme.ts's GLASS_BG / GLASS_FILTER): every glass surface reads
  * `var(--vc-glass-bg)` / `var(--vc-glass-filter)` from its inline style, so
  * flipping this is a class toggle, not a restyle of each card. Fast keeps
- * On's classes and adds `vc-glass-drawn` only while the renderer is actually
+ * the blur classes and adds `vc-glass-drawn` only while the renderer is actually
  * drawing (setGlassDrawn, from app.ts each frame), which drops the
  * backdrop-filter on the surfaces it draws under; whenever it can't (the
  * panel closed, a clip recording the canvas, a GPU that can't build its
  * passes) those surfaces fall back to the browser's blur.
  *
- * Same in-memory-cache-over-localStorage pattern as qualityPref.ts. On and
- * Off keep the stored values they had before Fast existed.
+ * Same in-memory-cache-over-localStorage pattern as qualityPref.ts. The stored
+ * value of the removed "On" look ("1") reads as the default.
  */
 
-export type GlassMode = "off" | "fast" | "on";
+export type GlassMode = "off" | "fast";
 
 const STORAGE_KEY = "vibe.panelBlur";
 export const GLASS_MODE_DEFAULT: GlassMode = "fast";
-const STORED: Record<GlassMode, string> = { off: "0", fast: "fast", on: "1" };
+const STORED: Record<GlassMode, string> = { off: "0", fast: "fast" };
 
 /** The glass's blur and colour, for both the CSS filter (glassFilterCss) and
  *  the renderer's copy of it. */
@@ -109,7 +107,7 @@ export function setGlassDrawn(next: boolean): void {
 
 /** Mirrors the preference onto <html> as the classes controlsTheme.ts's
  *  stylesheet keys the looks off: `vc-glass-blur` for the lighter, blurred
- *  glass (On and Fast), `vc-glass-drawn` while the renderer draws it. Safe to
+ *  glass (Fast), `vc-glass-drawn` while the renderer draws it. Safe to
  *  call any time; a no-op where there is no document (the node test env). */
 export function applyGlassBlur(): void {
   if (typeof document === "undefined") return;
