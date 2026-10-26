@@ -5,7 +5,7 @@
 // the same things with the same messages.
 //
 //   npm run check                       # everything, the whole test suite
-//   npm run check -- --changed          # the Stop hook's run: only the tests related to changed files
+//   npm run check -- --changed          # the Stop and pre-push hooks' run: only the tests related to changed files
 //   npm run check -- --only rules,lint  # some steps (names below)
 //   npm run check -- --prune-baseline   # drop baseline entries that no longer occur
 //   npm run check -- --accept-baseline  # record every current finding as known (a person's call, never an agent's)
@@ -346,7 +346,7 @@ const steps = {
   },
 
   async size() {
-    if (changedMode) return { skipped: "not in --changed runs; a push and CI run it" };
+    if (changedMode) return { skipped: "not in --changed runs; CI and a plain npm run check run it" };
     // Paid scenes join the bundle where they are checked out. Skip without
     // naming them: CI measures the public tree.
     if (existsSync(join(ROOT, "src/render/scenes/private"))) {
