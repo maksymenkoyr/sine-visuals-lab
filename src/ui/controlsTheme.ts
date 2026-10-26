@@ -832,6 +832,30 @@ body.vc-keys-reveal [data-keycap]::after {
   .vc-cable-g:hover .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
 }
 .vc-cable-g:hover .vc-cable-muted { opacity: 0.8; }
+/* A pinned wire's knot (cableKnots.ts): just over the cables, under tooltips. Its
+ * place and size are springs written inline per frame; only the fades are CSS. */
+.vc-knot-layer { position: fixed; inset: 0; pointer-events: none; z-index: 32; }
+.vc-knot {
+  position: fixed; box-sizing: border-box; pointer-events: auto; overflow: hidden; cursor: pointer;
+  background: #17131c; border: 1.5px solid var(--c); border-radius: 12px; color: rgba(255,255,255,0.88);
+  font: 400 12px/1.3 ${FONT_LABEL}; transition: opacity 0.25s ease, background-color 0.2s ease, border-radius 0.3s ease;
+}
+.vc-knot.vc-knot-rest { border-radius: 9px; }
+.vc-knot.vc-knot-rest.vc-knot-mod { background: var(--c); }
+.vc-knot.vc-knot-peeking { z-index: 1; }
+.vc-knot.vc-knot-open { cursor: default; z-index: 2; }
+.vc-knot.vc-knot-dim { opacity: 0.3; }
+.vc-knot:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
+.vc-knot-glyph { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; transition: opacity 0.12s; }
+.vc-knot:not(.vc-knot-rest) .vc-knot-glyph { opacity: 0; }
+.vc-knot-peek { position: absolute; left: 3px; top: 3px; width: calc(100% - 6px); height: calc(100% - 6px); pointer-events: none; opacity: 0; transition: opacity 0.15s; }
+.vc-knot-peeking .vc-knot-peek { opacity: 1; transition-delay: 0.14s; }
+.vc-knot-body {
+  position: absolute; left: 0; top: 0; box-sizing: border-box; padding: 12px;
+  display: flex; flex-direction: column; gap: 8px; opacity: 0; pointer-events: none; transition: opacity 0.12s;
+}
+.vc-knot-open .vc-knot-body { opacity: 1; pointer-events: auto; transition: opacity 0.22s 0.2s; }
+@media (prefers-reduced-motion: reduce) { .vc-knot, .vc-knot-glyph, .vc-knot-peek, .vc-knot-body { transition: none !important; } }
 @media (prefers-reduced-motion: reduce) {
   .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted { transition: none; }
 }

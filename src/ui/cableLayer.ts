@@ -62,6 +62,21 @@
  * the elements, because the scroll's own recompute() rebuilds every path —
  * including the one under the pointer.
  *
+ * A pinned source with a knot (CableSourceSpec.knot, cableKnots.ts) and a
+ * press band is drawn in two halves: jack to the knot's left edge, and the
+ * knot's right edge to the port, each through cablePathD so each keeps its
+ * stubs (and the second its detour under Power). The knot rests on the whole
+ * cable's bend (cablePointAt), one setting's knots spread along their cables
+ * (KNOT_SPREAD_T) since those cables all meet at one port and would stack
+ * their knots at the middle; it is HTML in its own layer (knotEl), so
+ * it can grow into a panel; as it springs between sizes, tick() rewrites the
+ * halves' `d` to follow its sides. The first half's flow rides the wire's
+ * input, the second's its output, so the knot visibly changes the signal.
+ * Both halves keep the press stroke: a press still unplugs, and hovering
+ * either half peeks the knot (setPeek). A knot opens from its own click or
+ * from deviceMenu.ts's summary chip (openKnot). A source without a knot draws
+ * as one path.
+ *
  * Every cable leaves its jack and enters its port through a short straight
  * CABLE_STUB_PX run before the bezier takes over (cablePathD) — a real
  * patch cable doesn't leave a socket at an angle. The bezier's own travel
@@ -91,9 +106,10 @@
  * called by deviceMenu.ts on a selection/patch change and on its own list
  * of layout triggers (scroll, resize, fold, ResizeObserver, a Scene-card
  * rebuild) — never per frame. Each call is one batch of reads (endpointFor)
- * then one batch of writes (the `<path>` elements it builds). tick() is the
- * only per-frame entry point, and it only ever writes `stroke-dashoffset` on
- * the pinned group's own flow paths — no reads, so it can run every rAF
+ * then one batch of writes (the `<path>` elements it builds, and the knots'
+ * sync()). tick() is the only per-frame entry point, and it only ever writes
+ * — the pinned group's `stroke-dashoffset`, the knots' styles, a split
+ * cable's `d` when its knot moved — never reads, so it can run every rAF
  * tick for free; the preview group never animates, so it never needs a tick
  * write either.
  *
@@ -101,6 +117,8 @@
  * dashed `.vc-cable-drag` path from its own jack to the pointer (setDrag).
  * It belongs to no group, so recompute() re-appends it after its rebuild.
  */
+
+import { createCableKnotLayer, type CableKnotGeometry, type CableKnotPlacement, type CableKnotSpec } from "./cableKnots.ts";
 
 export interface CableSourceSpec {
   /** Unique per cable within one recompute() call — carries a flowing
@@ -142,6 +160,9 @@ export interface CableSourceSpec {
    *  (controlsTheme.ts's vc-cable-new rule) instead of appearing instantly.
    *  Only ever true on the pinned group — a preview is never mid-edit. */
   isNew?: boolean;
+  /** A knot in this cable (cableKnots.ts) — see this file's header. Only
+   *  drawn for a pinned source that also has a press band. */
+  knot?: CableKnotSpec;
 }
 
 /** One end of a cable group: its sources and the port they all point at.
@@ -165,6 +186,12 @@ export interface CableLayer {
   setVisible(v: boolean): void;
   /** The cable a jack drag pulls (deviceMenu.ts): from `from`'s jack to the pointer at (x, y), dashed, drawn over every other cable; null removes it. Survives recompute(). */
   setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void;
+  /** The knot layer (cableKnots.ts), its own element for `document.body`. */
+  knotEl: HTMLElement;
+  /** Opens the knot in a pinned source's cable, by its CableSourceSpec key. */
+  openKnot(sourceKey: string): void;
+  closeKnot(): void;
+  knotOpen(): boolean;
 }
 
 const NS = "http://www.w3.org/2000/svg";
@@ -277,6 +304,49 @@ function cablePathD(
   return `M${pt.x},${pt.y} H${jackStubX} C${cp1x},${pt.y} ${cp2x},${port.y} ${portStubX},${port.y} H${port.x}`;
 }
 
+/** The point at `t` along the cubic from (x0, y0) to (x3, y3) whose control
+ *  points share the ends' y, as every cubic in cablePathD does. */
+function flatCubicAt(x0: number, y0: number, x1: number, x2: number, x3: number, y3: number, t: number): { x: number; y: number } {
+  const u = 1 - t;
+  const x = u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3;
+  return { x, y: y0 + (y3 - y0) * t * t * (3 - 2 * t) };
+}
+
+/** The point at `t` (0..1) along cablePathD's own bend, its stubs left out:
+ *  one cubic, or the two halves of the detour under Power. A knot's rest
+ *  point. */
+function cablePointAt(
+  pt: { x: number; y: number },
+  port: { x: number; y: number },
+  avoidBand: { top: number; bottom: number } | null,
+  t: number,
+): { x: number; y: number } {
+  const dir = port.x >= pt.x ? 1 : -1;
+  const jackStubX = pt.x + dir * CABLE_STUB_PX;
+  const portStubX = port.x - dir * CABLE_STUB_PX;
+  if (avoidBand && port.y >= avoidBand.top && port.y <= avoidBand.bottom) {
+    const wpX = (jackStubX + portStubX) / 2;
+    const wpY = avoidBand.bottom;
+    if (t < 0.5) {
+      const dx1 = Math.max(30, Math.abs(wpX - jackStubX) * 0.6);
+      return flatCubicAt(jackStubX, pt.y, jackStubX + dir * dx1, wpX - dir * dx1, wpX, wpY, t * 2);
+    }
+    const dx2 = Math.max(30, Math.abs(portStubX - wpX) * 0.6);
+    return flatCubicAt(wpX, wpY, wpX + dir * dx2, portStubX - dir * dx2, portStubX, port.y, t * 2 - 1);
+  }
+  const dx = Math.max(40, Math.abs(portStubX - jackStubX) * 0.55);
+  return flatCubicAt(jackStubX, pt.y, jackStubX + dir * dx, portStubX - dir * dx, portStubX, port.y, t);
+}
+
+/** How far apart, along their cables, one setting's knots rest. Its cables
+ *  all meet at one port, so at the same `t` the knots of neighbouring jacks
+ *  would stack; spread along the cables they sit apart. */
+const KNOT_SPREAD_T = 0.12;
+const KNOT_T_MIN = 0.25;
+const KNOT_T_MAX = 0.75;
+/** Room kept between a resting knot and the gap's edge. */
+const KNOT_GAP_INSET_PX = 16;
+
 function pathEl(cls: string, d: string, color: string): SVGPathElement {
   const p = document.createElementNS(NS, "path");
   p.setAttribute("class", cls);
@@ -344,9 +414,16 @@ function attachPress(
   ends: { jackEl: HTMLElement; portEl: HTMLElement },
   reveal: RevealState,
   clipId: string | null,
-): void {
-  if (!onPress || clipId === null) return;
+  onHover?: (on: boolean) => void,
+): SVGPathElement | null {
+  if (!onPress || clipId === null) return null;
   const hit = pathEl("vc-cable-hit", d, "transparent");
+  if (onHover) {
+    hit.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "touch") onHover(true);
+    });
+    hit.addEventListener("pointerleave", () => onHover(false));
+  }
   hit.addEventListener("mousedown", (e) => e.preventDefault());
   hit.setAttribute("clip-path", `url(#${clipId})`);
   hit.addEventListener("click", (e) => {
@@ -378,6 +455,20 @@ function attachPress(
     }
   });
   g.append(hit);
+  return hit;
+}
+
+/** A pinned cable drawn in two halves around its knot: the paths of each
+ *  half (strands and hit stroke) and the knot geometry they were last
+ *  written for. */
+interface Split {
+  key: string;
+  pt: { x: number; y: number };
+  portPt: { x: number; y: number };
+  avoidBand: { top: number; bottom: number } | null;
+  a: SVGPathElement[];
+  b: SVGPathElement[];
+  geom: CableKnotGeometry | null;
 }
 
 interface Resolved {
@@ -431,6 +522,24 @@ export function createCableLayer(): CableLayer {
   // offset.
   const offsets = new Map<string, number>();
   const reveal: RevealState = { timer: 0, x: 0, y: 0 };
+  const knots = createCableKnotLayer();
+  let splits: Split[] = [];
+
+  /** Rewrites a split cable's two halves to the knot's current sides, only
+   *  when they moved since the last write. Writes only. */
+  function writeSplit(sp: Split): void {
+    const g = knots.geometry(sp.key);
+    if (!g) return;
+    const last = sp.geom;
+    if (last && last.left === g.left && last.right === g.right && last.entryY === g.entryY) return;
+    sp.geom = g;
+    // The first half ends at the knot, which sits in the open gap, so only
+    // the second half can need the detour under Power.
+    const dA = cablePathD(sp.pt, { x: g.left, y: g.entryY }, null);
+    const dB = cablePathD({ x: g.right, y: g.entryY }, sp.portPt, sp.avoidBand);
+    for (const p of sp.a) p.setAttribute("d", dA);
+    for (const p of sp.b) p.setAttribute("d", dB);
+  }
 
   function recompute(pinnedGroup: CableGroupSpec, previewGroup: CableGroupSpec, fanGroups: readonly CableGroupSpec[] = []): void {
     // Pass 1 — every getBoundingClientRect() read (resolveGroup,
@@ -441,11 +550,13 @@ export function createCableLayer(): CableLayer {
     const previewResolved = resolveGroup(previewGroup);
     const fanResolved = fanGroups.map(resolveGroup).filter((g) => g !== null);
     const avoidBand = pinnedResolved || previewResolved || fanResolved.length ? powerAvoidBand() : null;
+    const viewport = { w: window.innerWidth, h: window.innerHeight };
 
     // Pass 2 — every write: clear the old cables, build and append the new
     // ones, forget any carried flow offset nothing still uses.
     svg.textContent = "";
     flows = [];
+    splits = [];
     const defs = document.createElementNS(NS, "defs");
     svg.append(defs);
     let clipCount = 0;
@@ -477,25 +588,23 @@ export function createCableLayer(): CableLayer {
     // competes with the cable that's actually being previewed right now —
     // see controlsTheme.ts's .vc-cable-dimmed.
     const dimmed = pinnedResolved !== null && previewResolved !== null;
+    const knotPlacements: CableKnotPlacement[] = [];
     if (pinnedResolved) {
       const { portPt, resolved } = pinnedResolved;
       // resolveGroup only resolves a group that has a port.
       const portEl = pinnedGroup.portEl!;
-      for (const { src, pt, pressBand } of resolved) {
-        const key = `pinned:${src.key}`;
-        liveKeys.add(key);
-        const d = cablePathD(pt, portPt, avoidBand);
-        const clipId = pressBand ? pressClip(pressBand) : null;
-        // A muted source draws once, flat — no glow/flow layer, no offset
-        // to carry — overriding cond/soft outright (this file's own
-        // CableSourceSpec.muted doc).
+      const ends = (src: CableSourceSpec) => ({ jackEl: src.jackEl, portEl });
+      /** One cable's (or one half's) strands into `g`: flat for a muted
+       *  source — no glow/flow layer, no offset to carry, overriding
+       *  cond/soft outright (CableSourceSpec.muted) — else glow/core/flow,
+       *  the flow carrying its offset under `key`. */
+      const strands = (g: SVGGElement, src: CableSourceSpec, d: string, key: string, getValue: () => number): SVGPathElement[] => {
         if (src.muted) {
-          const g = groupEl(src.color);
-          g.append(pathEl("vc-cable-muted", d, src.color));
-          attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal, clipId);
-          svg.append(g);
-          continue;
+          const p = pathEl("vc-cable-muted", d, src.color);
+          g.append(p);
+          return [p];
         }
+        liveKeys.add(key);
         const soft = src.soft ? " vc-cable-soft" : "";
         const cond = src.cond ? " vc-cable-cond" : "";
         const dimCls = dimmed ? " vc-cable-dimmed" : "";
@@ -509,15 +618,48 @@ export function createCableLayer(): CableLayer {
           glow.style.setProperty("--o", "0.13");
           flow.style.setProperty("--o", src.soft ? "0.4" : "0.9");
         }
-        const off = offsets.get(key) ?? 0;
-        flow.setAttribute("stroke-dashoffset", off.toFixed(2));
-        const g = groupEl(src.color);
+        flow.setAttribute("stroke-dashoffset", (offsets.get(key) ?? 0).toFixed(2));
         g.append(glow, core, flow);
-        attachPress(g, src.onPress, d, { jackEl: src.jackEl, portEl }, reveal, clipId);
+        flows.push({ el: flow, key, getValue });
+        return [glow, core, flow];
+      };
+      // Top jack first, so the spread runs the same way down the meters.
+      const knotted = resolved.filter((r) => r.src.knot && r.pressBand).sort((a, b) => a.pt.y - b.pt.y);
+      const knotT = new Map(
+        knotted.map((r, i) => [r.src.key, Math.min(KNOT_T_MAX, Math.max(KNOT_T_MIN, 0.5 + (i - (knotted.length - 1) / 2) * KNOT_SPREAD_T))]),
+      );
+      for (const { src, pt, pressBand } of resolved) {
+        const key = `pinned:${src.key}`;
+        const clipId = pressBand ? pressClip(pressBand) : null;
+        const g = groupEl(src.color);
+        const knot = src.knot;
+        if (!knot || !pressBand) {
+          const d = cablePathD(pt, portPt, avoidBand);
+          strands(g, src, d, key, src.getValue);
+          attachPress(g, src.onPress, d, ends(src), reveal, clipId);
+          svg.append(g);
+          continue;
+        }
+        const rest = cablePointAt(pt, portPt, avoidBand, knotT.get(src.key) ?? 0.5);
+        const restX = Math.min(pressBand.right - KNOT_GAP_INSET_PX, Math.max(pressBand.left + KNOT_GAP_INSET_PX, rest.x));
+        knotPlacements.push({ key: src.key, color: src.color, anchor: { x: restX, y: rest.y }, gap: pressBand, spec: knot });
+        // The halves' `d` waits for the knot's geometry, which sync() below
+        // settles; writeSplit fills it in.
+        const split: Split = { key: src.key, pt, portPt, avoidBand, a: [], b: [], geom: null };
+        splits.push(split);
+        const hover = (on: boolean) => knots.setPeek(src.key, on);
+        split.a = strands(g, src, "", `${key}:a`, () => knot.read()?.input ?? src.getValue());
+        split.b = strands(g, src, "", `${key}:b`, () => knot.read()?.output ?? src.getValue());
+        const hitA = attachPress(g, src.onPress, "", ends(src), reveal, clipId, hover);
+        const hitB = attachPress(g, src.onPress, "", ends(src), reveal, clipId, hover);
+        if (hitA) split.a.push(hitA);
+        if (hitB) split.b.push(hitB);
         svg.append(g);
-        flows.push({ el: flow, key, getValue: src.getValue });
       }
     }
+    // Runs even with nothing pinned, so a knot whose cable went away goes too.
+    knots.sync(knotPlacements, viewport);
+    for (const sp of splits) writeSplit(sp);
     // The preview group: one flat, static path per source — see this
     // file's header for why it carries no glow/flow layer of its own.
     if (previewResolved) {
@@ -564,6 +706,8 @@ export function createCableLayer(): CableLayer {
     el: svg,
     recompute,
     tick(dtSec) {
+      knots.tick(dtSec);
+      for (const sp of splits) writeSplit(sp);
       if (!flows.length || reduceMotion()) return;
       for (const f of flows) {
         const v = Math.max(0, Math.min(1.5, f.getValue()));
@@ -574,7 +718,12 @@ export function createCableLayer(): CableLayer {
     },
     setVisible(v) {
       svg.style.display = v ? "" : "none";
+      knots.setVisible(v);
     },
     setDrag,
+    knotEl: knots.el,
+    openKnot: (sourceKey) => knots.open(sourceKey),
+    closeKnot: () => knots.close(),
+    knotOpen: () => knots.openKey() !== null,
   };
 }

@@ -10,6 +10,7 @@ import {
   sameWireMod,
   stepWireMod,
   WIRE_LENGTH_MAX_SEC,
+  wireModCurve,
   wireModIsIdle,
   type WireMod,
 } from "../src/render/wireMod.ts";
@@ -72,5 +73,30 @@ describe("wire modifier values", () => {
     expect(legacyNodeFrom({ ...raw, src: "toString" })).toBeNull();
     expect(legacyNodeFrom({ ...raw, height: "tall" })).toBeNull();
     expect(legacyNodeFrom({ ...raw, min: "0.2" })).toBeNull();
+  });
+});
+
+describe("wireModCurve", () => {
+  const xs = Array.from({ length: 21 }, (_, i) => i / 20);
+
+  it("Window off: identity, whatever Length is", () => {
+    for (const x of xs) expect(wireModCurve(mod({ length: 0.8 }), x)).toBe(x);
+  });
+
+  it("Window on matches windowReading fed a tracker at peak 1", () => {
+    for (const m of [mod({ windowOn: true, min: 0.3, max: 0.8, smoothness: 0.4 }), mod({ windowOn: true, min: 0.2, max: 0.6, smoothOn: false, smoothness: 0.9 })]) {
+      const s = m.smoothOn ? m.smoothness : 0;
+      const tr = createGateTracker();
+      tr.init = true;
+      tr.peak = 1;
+      tr.line = m.min;
+      tr.top = m.max;
+      for (const x of xs) expect(wireModCurve(m, x)).toBeCloseTo(windowReading(tr, x, s, GATE_FORMULA_DEFAULT), 12);
+    }
+  });
+
+  it("is monotone non-decreasing", () => {
+    const m = mod({ windowOn: true, min: 0.4, max: 0.5, smoothness: 0.7 });
+    for (let i = 1; i < xs.length; i++) expect(wireModCurve(m, xs[i]!)).toBeGreaterThanOrEqual(wireModCurve(m, xs[i - 1]!));
   });
 });

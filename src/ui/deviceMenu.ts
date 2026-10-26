@@ -66,7 +66,7 @@ import {
   isLineSourceChoice,
   jackKey,
 } from "./driveSources.ts";
-import { freshWireMod, type WireMod, type WireModState } from "../render/wireMod.ts";
+import { freshWireMod, wireModCurve, wireModIsIdle, type WireMod, type WireModState } from "../render/wireMod.ts";
 import { createWireModControls, type WireModControls } from "./wireModControls.ts";
 import { installRowHints } from "./rowHints.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
@@ -89,6 +89,7 @@ import {
   type HeatTrack,
 } from "./heat.ts";
 import { getHistorySpan } from "./historySpan.ts";
+import type { CableKnotBody, CableKnotSpec } from "./cableKnots.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import type { CastMode, PreviewSize } from "../render/outputPower.ts";
@@ -201,7 +202,10 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * line per source (colour dot, name, weight 0–2×, a hit source's Height
  * Graded/Fixed/Loud, a grid source's division chips, the line source's
  * Clear chip, and under a catalogue
- * wire its modifier: Window, Smoothness and Length, wireModControls.ts), a 4 s output graph off
+ * wire its modifier: Window, Smoothness and Length, wireModControls.ts;
+ * while cables show, a catalogue wire's Height, weight and modifier move
+ * into its knot on the cable, cableKnots.ts, and its line keeps one summary
+ * chip that opens it), a 4 s output graph off
  * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
@@ -756,6 +760,19 @@ const driveWeightWrapStyle = `display: flex; align-items: center; gap: 7px; flex
 const driveWeightRangeStyle = `flex: 1;`;
 const driveWeightOutStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.6); min-width: 34px; text-align: right;`;
 const driveDrawHintStyle = `font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255,255,255,0.5);`;
+
+// An open knot's body (buildKnotBody); cableKnots.ts's layer gives it its width and padding.
+const knotBodyStyle = `display: flex; flex-direction: column; gap: 8px;`;
+const knotHeadStyle = `display: flex; align-items: center; gap: 7px; height: 22px; white-space: nowrap; font: 500 13px/1 ${FONT_LABEL}; color: #fff;`;
+const knotToStyle = `font: 400 12px/1 ${FONT_LABEL}; color: rgba(255,255,255,0.5); overflow: hidden; text-overflow: ellipsis; min-width: 0;`;
+const knotRowStyle = `display: flex; align-items: center; gap: 9px; flex-wrap: wrap;`;
+const knotUnplugStyle = `
+  align-self: flex-start; background: none; border: none; padding: 0;
+  font: 500 11px/1 ${FONT_LABEL}; letter-spacing: 0.06em; color: rgba(255,255,255,0.55);
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+`;
+/** Points of a modifier's transfer curve in a knot's rest glyph. */
+const KNOT_CURVE_SAMPLES = 9;
 
 // Too long for a plugged-in source line, which shows buildSourceLine's short
 // drawHint instead.
@@ -2512,7 +2529,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return seg;
   }
 
-  function buildHeightSeg(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+  function buildHeightSeg(sceneId: string, spec: SceneSetting, src: DriveSource, after?: () => void): HTMLElement {
     const seg = document.createElement("div");
     seg.style.cssText = driveMiniSegStyle;
     seg.setAttribute("role", "group");
@@ -2529,6 +2546,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         if (current === opt.h) return;
         deps.onSetSourceHeight(sceneId, spec, src.choice, opt.h);
         patchChanged(sceneId, spec);
+        after?.();
       });
       seg.appendChild(btn);
     }
@@ -3070,16 +3088,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // Fixed/Loud height only mean something for a hit-kind source: an
     // edge-kind catalogue entry or a beat grid (drives.ts's header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
-    if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    // With cables shown, a catalogue wire's Height, weight and modifier live
+    // in its knot instead (buildKnotBody), so only one copy is ever live.
+    const knotted = typeof src.choice === "string" && cablesShown();
+    if (isHitKind && !knotted) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
     // Every-N-beats only means something for a plain Beat wave (DriveSource.every).
     if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
-    if (isLineSourceChoice(src.choice)) {
+    if (knotted) {
+      ctrls.appendChild(buildKnotChip(src, isHitKind));
+    } else if (isLineSourceChoice(src.choice)) {
       ctrls.appendChild(clearLineChip);
     } else {
       ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
     }
-    if (typeof src.choice === "string") {
+    if (typeof src.choice === "string" && !knotted) {
       const controls = buildWireMod(sceneId, spec, src as DriveSource & { choice: SignalId }, onLiveEdit);
       wireMods.push({ choice: src.choice, controls });
       ctrls.appendChild(controls.el);
@@ -3087,6 +3110,101 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     line.append(gutter, muteBtn, dot, name, removeBtn, ctrls);
     return line;
+  }
+
+  /** The wide layout's stand-in for a catalogue wire's Height, weight and
+   *  modifier: one chip summing them up that opens the wire's knot. */
+  function buildKnotChip(src: DriveSource, isHitKind: boolean): HTMLElement {
+    const mod = src.mod;
+    const parts: string[] = [];
+    if (isHitKind) parts.push(HEIGHT_OPTIONS.find((o) => o.h === (src.height ?? "graded"))?.label ?? "");
+    parts.push(`${src.weight.toFixed(2)}×`);
+    const modParts: string[] = [];
+    if (mod?.windowOn) modParts.push("Window");
+    if (mod?.windowOn && mod.smoothOn) modParts.push("Smoothness");
+    if (mod && mod.length > 0) modParts.push("Length");
+    if (modParts.length) parts.push(modParts.join(", "));
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.style.cssText = driveChipStyle;
+    chip.textContent = parts.join(" · ");
+    chip.setAttribute("aria-label", `${driveSourceLabel(src.choice)}: ${chip.textContent}. Open its Height and modifier.`);
+    setHint(chip, "Open this wire's Height and modifier on its cable.");
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cableLayer.openKnot(jackKey(src.choice));
+    });
+    return chip;
+  }
+
+  /** An open knot's body (cableKnots.ts): a catalogue wire's Height, weight,
+   *  modifier and Unplug. The builders are the line's own, so they keep
+   *  lastPinnedSetting in step and the per-frame external-change check never
+   *  rebuilds mid-drag. */
+  function buildKnotBody(
+    sceneId: string,
+    spec: SceneSetting,
+    src: DriveSource & { choice: SignalId },
+    ctx: { close(): void; rebuild(): void },
+  ): CableKnotBody {
+    const choice: SignalId = src.choice;
+    const name = driveSourceLabel(choice);
+    const handle = () => driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
+    const onLiveEdit = (): void => handle()?.refreshMeta();
+    const el = document.createElement("div");
+    el.style.cssText = knotBodyStyle;
+
+    const head = document.createElement("div");
+    head.style.cssText = knotHeadStyle;
+    const dot = document.createElement("span");
+    dot.style.cssText = driveSrcDotStyle(driveSourceColor(choice));
+    const title = document.createElement("span");
+    title.textContent = name;
+    const to = document.createElement("span");
+    to.style.cssText = knotToStyle;
+    to.textContent = `→ ${spec.label}`;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.style.cssText = `${driveSrcRemoveStyle} margin-left: auto;`;
+    x.textContent = "×";
+    x.setAttribute("aria-label", "Close");
+    x.addEventListener("click", () => ctx.close());
+    head.append(dot, title, to, x);
+    el.appendChild(head);
+
+    const row = document.createElement("div");
+    row.style.cssText = knotRowStyle;
+    if (SIGNALS[choice].kind === "edge") row.appendChild(buildHeightSeg(sceneId, spec, src, ctx.rebuild));
+    row.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
+    el.appendChild(row);
+
+    const controls = buildWireMod(sceneId, spec, src, onLiveEdit);
+    // The line's indent rule means nothing inside the knot's own border.
+    controls.el.style.borderLeft = "none";
+    controls.el.style.paddingLeft = "0";
+    el.appendChild(controls.el);
+
+    const unplug = document.createElement("button");
+    unplug.type = "button";
+    unplug.style.cssText = knotUnplugStyle;
+    unplug.textContent = `Unplug ${name}`;
+    unplug.addEventListener("click", () => {
+      deps.onTogglePatchSource(sceneId, spec, choice);
+      patchChanged(sceneId, spec);
+    });
+    el.appendChild(unplug);
+
+    return {
+      el,
+      entryEl: (controls.el.firstElementChild as HTMLElement | null) ?? undefined,
+      update: () => controls.update(deps.getWireReading(sceneId, spec.key, choice), true),
+      dispose: () => {
+        const h = handle();
+        h?.refreshMeta();
+        h?.rebuildIfPinned();
+        scheduleCableRecompute();
+      },
+    };
   }
 
   function buildAddChips(sceneId: string, spec: SceneSetting, patch: DrivePatch): HTMLElement {
@@ -4281,6 +4399,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // ---- Cables ----
   const cableLayer = createCableLayer();
   document.body.appendChild(cableLayer.el);
+  document.body.appendChild(cableLayer.knotEl);
   let lastCableTickMs = performance.now();
   const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
 
@@ -4338,6 +4457,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           jackEl,
           getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
           isNew: key === justAddedKey,
+          knot: interactive && typeof src.choice === "string" ? knotSpecFor(target, src as DriveSource & { choice: SignalId }) : undefined,
           onPress: interactive
             ? () => {
                 justAddedKey = null;
@@ -4349,6 +4469,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       });
     }
     return { sources, portEl: handle.portEl };
+  }
+
+  /** The pinned setting's current source for `choice`: the snapshot, so a
+   *  live edit in an open knot shows at once. */
+  function pinnedSourceOf(sel: { sceneId: string; spec: SceneSetting }, choice: SignalId): DriveSource | undefined {
+    const setting = samePair(pinned, sel) && lastPinnedSetting ? lastPinnedSetting : deps.getDriveSetting(sel.sceneId, sel.spec);
+    return setting === "scene" ? undefined : setting.sources.find((s) => s.choice === choice);
+  }
+
+  /** A pinned catalogue wire's knot (cableKnots.ts). */
+  function knotSpecFor(sel: { sceneId: string; spec: SceneSetting }, src: DriveSource & { choice: SignalId }): CableKnotSpec {
+    const choice = src.choice;
+    const mod = src.mod;
+    return {
+      label: driveSourceLabel(choice),
+      curve: mod && !wireModIsIdle(mod) ? Array.from({ length: KNOT_CURVE_SAMPLES }, (_, i) => wireModCurve(mod, i / (KNOT_CURVE_SAMPLES - 1))) : null,
+      read: () => {
+        const r = deps.getWireReading(sel.sceneId, sel.spec.key, choice);
+        if (!r) return null;
+        // The plain wire passes its input on, as wireModControls.ts's graph draws it.
+        return { input: r.input, output: wireModIsIdle(pinnedSourceOf(sel, choice)?.mod) ? r.input : r.output };
+      },
+      buildBody: (ctx) => {
+        const cur = pinnedSourceOf(sel, choice) ?? src;
+        return buildKnotBody(sel.sceneId, sel.spec, { ...cur, choice }, ctx);
+      },
+    };
   }
 
   /** Both groups of cableLayer.ts's two-path-group recompute; independent, see activePreview(). */
@@ -4434,9 +4581,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     return groups;
   }
+  /** Soloed, the meters column is hidden: cables would run to jacks off screen. */
+  function cablesShown(): boolean {
+    return isOpen && !narrowMQ.matches && !soloOn;
+  }
+  let lastCablesShown = false;
   function refreshCableVisibility(): void {
-    // Soloed, the meters column is hidden: cables would run to jacks off screen.
-    cableLayer.setVisible(isOpen && !narrowMQ.matches && !soloOn);
+    const shown = cablesShown();
+    cableLayer.setVisible(shown);
+    // The pinned wire lines swap between their full controls and the knot
+    // chip (buildSourceLine).
+    if (shown !== lastCablesShown) {
+      lastCablesShown = shown;
+      for (const h of driveRowHandles) h.rebuildIfPinned();
+    }
   }
   narrowMQ.addEventListener("change", () => {
     refreshCableVisibility();
@@ -6182,7 +6340,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // The cable layer sits on <body> outside root (cableLayer.ts header), but
     // pressing a cable is a patch edit like a jack click: without this clause
     // it would unpin the setting it just unplugged from.
-    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t)))
+    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t) || cableLayer.knotEl.contains(t)))
       return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && root.contains(active)) active.blur();
@@ -6261,6 +6419,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (isTypingTarget(e.target)) return;
     if (e.key === "Escape" && jackDrag?.moved) {
       clearJackDrag();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape" && cableLayer.knotOpen()) {
+      cableLayer.closeKnot();
       e.preventDefault();
       return;
     }
