@@ -907,6 +907,29 @@ reference-measurement workflow used by later scenes.
   Flare and Tighten at 0.5 lower the median, since Tighten thins the lines Fog
   pulse widens. Glint detail shows them reacting to hats: with Sparkle off and
   both at 1, the detail per treble flash goes from 0.73 to 3.1.
+- 2026-10-26 (#453) — Caustic density split in two, on the owner's ask: "rn
+  caustic density slider is unclear. on either its caustics level or how input
+  affects its. lets split into two". Caustic density is now a plain slider (no
+  jack), and the new Density reach (`densityReach`, Form group) carries the
+  wire, Section by default. `densityTargetFor` takes the reach in place of the
+  fixed `DENSITY_DRIVE_LIFT`, and Density reach's default is that old lift, so
+  existing looks are unchanged. At reach 0 the density holds still, which is
+  what #453 asked for. A custom wire saved on Caustic density isn't carried
+  over; Density reach starts on its default.
+
+  `tools/tune-real.mjs caustics` on Billie Jean, 30 s from 6 s:
+
+  | build | change med | change p95 | hits/min | Bass | Mid | Treble |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Density reach default | 18.38 | 34.43 | 414 | 192 | 78 | 218 |
+  | Density reach 0 | 18.74 | 34.08 | 410 | 182 | 96 | 212 |
+  | Density reach 1 | 3.44 | 15.04 | 422 | 196 | 76 | 218 |
+  | silence, each run | 1.65–1.66 | 1.93–1.95 | 0 | 0 | 0 | 0 |
+
+  At reach 1 the song's sections push the mesh to its finest, where the
+  filaments are too thin for the 64×36 change thumbnails and, on the contact
+  sheet, the pool reads as a flat wash. The top of the slider is that extreme
+  on purpose for now; the owner hasn't judged it live yet.
 
 ## Tuning notes
 
@@ -997,7 +1020,7 @@ reference-measurement workflow used by later scenes.
   untuned first guesses, and its GPU cost hasn't been measured with
   `tools/gpu-bench.mjs` yet.
 - Caustic density's glide (`DENSITY_GLIDE_SEC`) was picked for slider drags;
-  nobody has yet watched a real source patched onto density with real music,
+  nobody has yet watched a hit source patched onto Density reach with real music,
   so whether a hit source reads as too soft under the glide is still open.
 - Only the synthetic audio feed has been used to check the sparkle/flash tuning
   above; there has been no measured real-music pass. The ring emitter's own
@@ -1114,3 +1137,4 @@ reference-measurement workflow used by later scenes.
 - 2026-10-22 — Labels only (#656): the Beat flash and Level glow hints name the inputs as the panel now does (Level, Any hit); no setting, default or wire changed
 - 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; sparkles return on real songs (see Decisions)
 - #713 (2026-10-26) — Sparkle: one name, Grain/Prism/Run, Flare and Tighten as sliders, a Basic or Adaptive shape, the old dials dev-only (see Decisions)
+- #453 (2026-10-26) — Caustic density split into Caustic density (no jack) and Density reach (the wire) (see Decisions)
