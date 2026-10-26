@@ -107,8 +107,8 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    feed) draws no shade. The post-bandEnergy pulses live in the Hits
  *    card's own hits history instead — see below.
  *  - Stems: Lead and Hats (stemReaders.ts) as line rows of their own, then
- *    the Kick band row, labelled with the Hz of the band the app picks by
- *    itself. Lead and Hats are measured only on the device with the mic, and a gap is drawn
+ *    the Kick row (the one band the app picks by itself, signals.ts's
+ *    anim.kickBand). Lead and Hats are measured only on the device with the mic, and a gap is drawn
  *    where they weren't; app.ts runs the split while this card is unfolded
  *    and on screen (stemRowsOnScreen).
  *  - Hits: one lane each for Any hit (the broadband detector) and
@@ -280,7 +280,7 @@ export interface AudioMetersDeps {
   /** The Input card's two gate marks, read fresh every draw/text tick so a drag
    *  moves the Gate guides and the hits hint live. */
   getSilenceGate: () => SilenceGateMarks;
-  /** The band ladder in Hz (src/audio/bandScale.ts), for the Kick band row's
+  /** The band ladder in Hz (src/audio/bandScale.ts), for the band rows'
    *  Hz in the Sound card's Bands block. */
   getBandEdgesHz: () => ArrayLike<number>;
   /** Jack behaviour and live state (jack.ts header). Predicates are keyed by
@@ -407,7 +407,6 @@ const lineReadoutStyle = `${readoutStyle} flex: none; width: ${LINE_READOUT_WIDT
 const lineDigitsStyle = `${digitsStyle} font-size: 10px;`;
 const lineDigitsTextStyle = `font: 400 10px/1 ${FONT_MONO};`;
 const lineUnitStyle = `font: 400 9px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
-const rowSubStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); margin-left: 4px;`;
 // The Sound card's "Bands" caption: the card title's small caps, a step down.
 const bandsLabelStyle = `font: 400 9px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin: 8px 0 2px;`;
 const BEAT_TRACE_HEIGHT_CSS_PX = 28;
@@ -740,15 +739,13 @@ function createMeterRow(spec: MeterRowSpec) {
  *  where the caller puts the signal's heat (addHeatMonitorStrip). */
 function createLineRow(opts: {
   label: string;
-  /** Small mono suffix after the label ("kick"). */
-  sub?: string;
   description: string;
   choice: SignalId;
   span: TraceSpan;
   gateFloor?: boolean;
   mountJack: MountJack;
 }) {
-  const { label, sub, description, choice, span, gateFloor, mountJack } = opts;
+  const { label, description, choice, span, gateFloor, mountJack } = opts;
   const color = driveSourceColor(choice);
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -762,12 +759,6 @@ function createLineRow(opts: {
   const labelText = document.createElement("span");
   labelText.textContent = label;
   labelEl.append(labelText);
-  if (sub) {
-    const subEl = document.createElement("span");
-    subEl.textContent = sub;
-    subEl.style.cssText = rowSubStyle;
-    labelEl.append(subEl);
-  }
 
   const lane = document.createElement("div");
   lane.style.cssText = lineLaneStyle;
@@ -1699,10 +1690,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     choice: "anim.hats",
     span: stemsSpan,
   });
-  // Its label is the picked band's Hz, written on the text tick.
   const stemKick = lineRow({
-    label: "--",
-    sub: "kick",
+    label: driveSourceLabel("anim.kickBand"),
     description: capitalise(driveSourceDescription("anim.kickBand")),
     choice: "anim.kickBand",
     span: stemsSpan,
@@ -2237,9 +2226,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           for (const { row, id, needsSplit } of stemRows) {
             const v = frame && anim && (measured || !needsSplit) ? SIGNALS[id].read(frame, anim) : null;
             row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
-          }
-          stemKick.setLabel(anim ? formatHz(bandCenterHz(deps.getBandEdgesHz(), anim.kickBandIndex)) : "--");
-        }
+          }        }
       }
 
       // ---- Hits ----

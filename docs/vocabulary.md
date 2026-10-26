@@ -68,7 +68,7 @@ that reshapes an input node's value on its way to that one setting.
   it; a band wired to a setting always shows its row. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
   over.
 - **Stems card.** Right after Sound: Lead and Hats, the held and the drum part
-  of the sound, then the Kick band, each its own row with its own colour and
+  of the sound, then Kick, each its own row with its own colour and
   jack. Lead and Hats are measured only on the device with the mic.
 
 ## Writing new copy

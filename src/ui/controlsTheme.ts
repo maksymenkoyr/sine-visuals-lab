@@ -47,7 +47,7 @@ export const FAMILY_ACCENTS = ["#8ea2ff", "#f28bd0", "#c9e26b"] as const;
 export const STRIP_LOW = "#89e29d";
 export const STRIP_MID = "#c0a2f5";
 export const STRIP_HIGH = "#f6b15b";
-/** The Stems card's rows and the Kick band row (audioMeters.ts): their own
+/** The Stems card's rows (audioMeters.ts): their own
  *  colours, so they don't read as Mid, Treble or Bass. Picked for the widest
  *  CIELAB distance from every card accent, FAMILY_ACCENTS entry and
  *  drive-source colour (all ≥ 39 ΔE on 2026-10-25); re-measure before adding
