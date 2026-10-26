@@ -1,10 +1,11 @@
 // Code Rain's explorer: the scripted walk the camera takes through the rain.
 // Legs follow each other from a seeded generator, so a mount always walks
-// the same way: a walk (eases in, curves, rolls over low hills, steps with a
-// bob and a sway, eases to a stop), a look round (standing, gazing from point
-// to point all round, high into the rain and down below), and a rise (floating
-// up or sinking through the columns, gazing the way it goes). After a look
-// round the next walk sets off towards the last point it gazed at.
+// the same way: a walk (curves, rolls over low hills, steps with a bob and a
+// sway), a look round (strolling on, gazing from point to point all round,
+// high into the rain and down below, then ahead again), and a rise (floating
+// up or sinking through the columns, gazing the way it goes). It never stops:
+// each leg has its own pace and the walk glides from one to the next
+// (PACE_TAU), so it only ever speeds up or slows down.
 //
 // The head works like a person's: it picks a gaze point, turns to it briskly
 // and holds it, then picks the next (each leg's list of `Glance`s). A
@@ -36,10 +37,14 @@ const RISE_SHARE = 0.4;
  *  height inside HEIGHT_BAND (where the columns stay dense round it). */
 const RISE_BY = [3, 7] as const;
 const HEIGHT_BAND = [-5, 9] as const;
-/** Pace while rising: a slow drift, so the climb reads as floating on. */
-const RISE_PACE = 0.3;
-/** Pace eases in and out over this long at each end of a walk. */
-const EASE_SEC = 1.6;
+/** Each leg's pace, a share of WALK_PACE: [slowest, fastest]. A look round
+ *  strolls and a rise drifts, so they read as slowing down to look; the low
+ *  ends stay well clear of 0, since the walk must never read as a stop. */
+const WALK_SPEED = [0.85, 1.15] as const;
+const LOOK_SPEED = [0.45, 0.6] as const;
+const RISE_SPEED = [0.35, 0.5] as const;
+/** How long the pace takes to settle on a new leg's, explorer seconds. */
+const PACE_TAU = 1.8;
 /** A walk's curve: peak turn rate, radians per explorer second. */
 const CURL_MAX = 0.22;
 /** Head spring stiffness, rad/s: a 90-degree turn settles in ~1 s. Its
@@ -62,7 +67,7 @@ interface ExplorerPose {
   pitch: number;
   /** Head roll, radians (+ tips the view clockwise). */
   roll: number;
-  /** Horizontal speed: 0 standing, 1 at full walking pace. */
+  /** Horizontal speed, a share of WALK_PACE; never 0. */
   pace: number;
 }
 
@@ -85,6 +90,7 @@ interface Leg {
   dur: number;
   /** Walk: turn rate at the leg's middle. */
   curl: number;
+  pace: number;
   /** Rise: height at the start and the climb (+ up). */
   from: number;
   climb: number;
@@ -113,12 +119,14 @@ function springTo(s: Spring, target: number, dt: number): void {
 }
 
 export function createExplorer(rng: () => number): Explorer {
-  const pose: ExplorerPose = { y: 0, body: 0, gaze: 0, pitch: 0, roll: 0, pace: 0 };
+  const pose: ExplorerPose = { y: 0, body: 0, gaze: 0, pitch: 0, roll: 0, pace: 1 };
   const yaw: Spring = { x: 0, v: 0 };
   const pitch: Spring = { x: 0, v: 0 };
   const roll: Spring = { x: 0, v: 0 };
   let height = 0;
   let walked = 0;
+  /** 1 while stepping, 0 while floating; glides, so the bob fades in and out. */
+  let stepping = 1;
   let stepPhase = 0;
   let legTime = 0;
   let glance = 0;
@@ -143,7 +151,7 @@ export function createExplorer(rng: () => number): Explorer {
       }
     } else if (kind === "look") {
       // Points all round, alternating sides, often high into the rain; the
-      // last is where the next walk leaves.
+      // last is back ahead, where it walks on.
       const count = 3 + Math.floor(rng() * 3);
       let s = side();
       for (let i = 0; i < count - 1; i++) {
@@ -156,7 +164,7 @@ export function createExplorer(rng: () => number): Explorer {
         });
         if (rng() < 0.75) s = -s;
       }
-      out.push({ yaw: side() * between([20, 90]) * DEG, pitch: between([-3, 5]) * DEG, roll: 0, hold: between([1, 1.8]) });
+      out.push({ yaw: side() * between([0, 6]) * DEG, pitch: between([-3, 5]) * DEG, roll: 0, hold: between([1, 1.8]) });
     } else {
       // Gaze the way it goes: up through the rain or down past its feet.
       const dir = climb > 0 ? 1 : -1;
@@ -190,15 +198,14 @@ export function createExplorer(rng: () => number): Explorer {
       kind,
       dur,
       curl: kind === "walk" ? side() * CURL_MAX * (0.25 + 0.75 * rng()) : 0,
+      pace: between(kind === "walk" ? WALK_SPEED : kind === "look" ? LOOK_SPEED : RISE_SPEED),
       from: height,
       climb,
       glances: glancesFor(kind, dur, climb),
     };
   }
 
-  // A mount starts mid-walk, already at pace, so the first frame moves.
   let leg = nextLeg("walk");
-  legTime = EASE_SEC;
 
   return {
     step(dt: number): ExplorerPose {
@@ -206,12 +213,6 @@ export function createExplorer(rng: () => number): Explorer {
       glanceTime += dt;
       if (legTime >= leg.dur) {
         legTime -= leg.dur;
-        if (leg.kind === "look") {
-          // Walk off where it last looked; the head's offset moves with it.
-          const leave = leg.glances[leg.glances.length - 1].yaw;
-          pose.body += leave;
-          yaw.x -= leave;
-        }
         if (leg.kind === "rise") height = leg.from + leg.climb;
         leg = nextLeg(leg.kind !== "walk" ? "walk" : rng() < RISE_SHARE ? "rise" : "look");
         glance = 0;
@@ -224,17 +225,12 @@ export function createExplorer(rng: () => number): Explorer {
       const g = leg.glances[glance];
 
       const u = legTime / leg.dur;
-      let stride = 0;
-      if (leg.kind === "walk") {
-        stride = smoothstep(legTime / EASE_SEC) * smoothstep((leg.dur - legTime) / EASE_SEC);
-        pose.pace = stride;
-        pose.body += leg.curl * Math.sin(Math.PI * u) * pose.pace * dt;
-      } else if (leg.kind === "rise") {
-        pose.pace = RISE_PACE * Math.sin(Math.PI * u);
-        height = leg.from + leg.climb * smoothstep(u);
-      } else {
-        pose.pace = 0;
-      }
+      const settle = 1 - Math.exp(-dt / PACE_TAU);
+      pose.pace += (leg.pace - pose.pace) * settle;
+      stepping += ((leg.kind === "rise" ? 0 : 1) - stepping) * settle;
+      const stride = stepping * pose.pace;
+      if (leg.kind === "walk") pose.body += leg.curl * Math.sin(Math.PI * u) * pose.pace * dt;
+      if (leg.kind === "rise") height = leg.from + leg.climb * smoothstep(u);
       walked += WALK_PACE * pose.pace * dt;
 
       springTo(yaw, g.yaw, dt);

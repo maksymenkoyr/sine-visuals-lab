@@ -130,13 +130,12 @@ describe("coderain explorer", () => {
 
   const deg = Math.PI / 180;
 
-  it("walks at full pace, stops to look round, and walks on", () => {
+  it("never stops: it only speeds up and slows down, smoothly", () => {
     const poses = walk(240, 1 / 60);
-    expect(poses[0].pace).toBeGreaterThan(0.5);
-    expect(poses.some((p) => p.pace > 0.99)).toBe(true);
-    const stops = poses.filter((p) => p.pace === 0).length / poses.length;
-    expect(stops).toBeGreaterThan(0.08);
-    expect(stops).toBeLessThan(0.5);
+    expect(poses[0].pace).toBeGreaterThan(0.8);
+    expect(Math.min(...poses.map((p) => p.pace))).toBeGreaterThan(0.3);
+    expect(Math.max(...poses.map((p) => p.pace))).toBeGreaterThan(0.95);
+    for (let i = 1; i < poses.length; i++) expect(Math.abs(poses[i].pace - poses[i - 1].pace)).toBeLessThan(0.01);
   });
 
   it("looks well away from where it walks, high into the rain and down below", () => {
@@ -151,12 +150,12 @@ describe("coderain explorer", () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(4);
   });
 
-  it("never jerks the head, and only turns its body while standing", () => {
+  it("never jerks the head or snaps its heading", () => {
     const poses = walk(240, 1 / 60);
     for (let i = 1; i < poses.length; i++) {
       expect(Math.abs(poses[i].gaze - poses[i - 1].gaze)).toBeLessThan(0.07);
       expect(Math.abs(poses[i].pitch - poses[i - 1].pitch)).toBeLessThan(0.07);
-      if (poses[i - 1].pace > 0) expect(Math.abs(poses[i].body - poses[i - 1].body)).toBeLessThan(0.01);
+      expect(Math.abs(poses[i].body - poses[i - 1].body)).toBeLessThan(0.01);
     }
   });
 

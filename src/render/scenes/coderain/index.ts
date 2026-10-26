@@ -23,8 +23,8 @@
 // - Hit glow: the heads flare on a bass hit.
 // - Turn: on a drop, the camera swings to a new heading, smoothly (the
 //   reference has no hard cuts; neither does this).
-// The camera is an explorer on foot (explorer.ts): it walks, stops, looks
-// round and walks on, on time. Speed scales the explorer's clock and the
+// The camera is an explorer on foot (explorer.ts): it walks on without
+// stopping, slowing to look round, on time. Speed scales the explorer's clock and the
 // fall clock together.
 //
 // Time: this scene's own delta of anim.timeSec -- the gallery preview hands
