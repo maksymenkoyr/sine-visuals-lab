@@ -34,10 +34,10 @@ const CORS_HEADERS = {
 };
 
 // Best-effort per-address throttles, keyed by `rateLimitKey`
-// (server/rateLimit.ts says why they are only best-effort: the real backstop
-// for a public URL is a Cloudflare WAF rate-limiting rule). Room creation, TV
-// adopt and room connections each get their own, so a phone retrying an adopt
-// can't use up the laptop's room creation. Connections are the most generous:
+// (server/rateLimit.ts says why they are only best-effort, and describes the
+// Cloudflare WAF rule in front of /api/ that stops a flood before it reaches
+// the Worker). Room creation, TV adopt and room connections each get their
+// own, so a phone retrying an adopt can't use up the laptop's room creation. Connections are the most generous:
 // everyone at a party shares the venue's one IP (or IPv6 /64), and after a
 // Wi-Fi drop each device redials on its backoff (src/net/reconnect.ts) until
 // the room answers.
