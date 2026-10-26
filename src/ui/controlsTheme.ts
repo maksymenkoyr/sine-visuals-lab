@@ -83,6 +83,9 @@ export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 /** The folded Power card's side (powerCard.ts); a notch under FOLDED_BAR_PX so
  *  it reads as a button, not a card. */
 export const POWER_SQUARE_PX = 26;
+/** The folded Power card's width: the square's height plus room for the live
+ *  status dot and FPS beside the glyph. */
+export const POWER_FOLDED_W_PX = 70;
 /** A folded card's title-bar height; the Auto master bar (deviceMenu.ts) matches it. */
 export const FOLDED_BAR_PX = 32;
 /** Right-edge room the Hits strip (audioMeters.ts) keeps free for
@@ -166,7 +169,7 @@ const stylesheet = `
 .vc-root.vc-open { display: flex; }
 .vc-root > * { pointer-events: auto; }
 /* Power (powerCard.ts). Folded, the wide-layout media query below shrinks the
- * card to a POWER_SQUARE_PX square and the column hugs it (width: auto there). */
+ * card to a POWER_FOLDED_W_PX by POWER_SQUARE_PX strip and the column hugs it (width: auto there). */
 .vc-power-col {
   width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(var(--vc-vh) - 74px);
@@ -224,19 +227,26 @@ const stylesheet = `
   /* The card's border eats into its box, so the pad is that much narrower.
    * flex: none so it never shrinks to less than its written width. */
   .vc-power-card > .vc-card-pad { flex: none; width: 198px; box-sizing: border-box; }
-  .vc-power-card.vc-folded { width: ${POWER_SQUARE_PX}px; height: ${POWER_SQUARE_PX}px; }
+  .vc-power-card.vc-folded, .vc-root:not(.vc-open) .vc-power-card { width: ${POWER_FOLDED_W_PX}px; height: ${POWER_SQUARE_PX}px; }
   /* Hidden, not removed: the pad stays laid out at full width so unfolding doesn't reflow. */
-  .vc-power-card.vc-folded > .vc-card-pad { visibility: hidden; }
+  .vc-power-card.vc-folded > .vc-card-pad, .vc-root:not(.vc-open) .vc-power-card > .vc-card-pad { visibility: hidden; }
   /* Pinned at the square's inner size (inside the border), not inset: 0, so the
    * glyph stays put while the card opens (powerCard.ts's foldTransition). */
   .vc-power-square {
-    display: grid; place-items: center; position: absolute; z-index: 1;
-    top: 0; right: 0; width: ${POWER_SQUARE_PX - 2}px; height: ${POWER_SQUARE_PX - 2}px;
-    padding: 0; margin: 0; background: transparent; border: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: flex-end; gap: 6px; position: absolute; z-index: 1;
+    top: 0; right: 0; width: ${POWER_FOLDED_W_PX - 2}px; height: ${POWER_SQUARE_PX - 2}px;
+    padding: 0 6px 0 0; margin: 0; background: transparent; border: 0; cursor: pointer;
     color: ${POWER_TEAL}; opacity: 0; visibility: hidden; pointer-events: none;
     transition: color 0.15s ease;
   }
-  .vc-power-card.vc-folded > .vc-power-square { opacity: 1; visibility: visible; pointer-events: auto; }
+  .vc-power-card.vc-folded > .vc-power-square, .vc-root:not(.vc-open) .vc-power-card > .vc-power-square { opacity: 1; visibility: visible; pointer-events: auto; }
+  /* Panel closed: the root stays up for the Power strip alone, however the card was folded
+   * (deviceMenu.ts opens the panel from a click on it). */
+  .vc-root:not(.vc-open) { display: flex; }
+  .vc-root:not(.vc-open) > :not(.vc-cols-wrap),
+  .vc-root:not(.vc-open) .vc-cols-wrap > :not(.vc-power-col),
+  .vc-root:not(.vc-open) .vc-power-col > :nth-child(n+2) { display: none; }
+  .vc-root:not(.vc-open) .vc-cols-wrap > .vc-power-col { display: flex; }
   .vc-power-square:hover, .vc-power-square:focus-visible { color: #fff; }
   .vc-power-square:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
 }

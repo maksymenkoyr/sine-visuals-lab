@@ -4774,6 +4774,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const columnsWrap = document.createElement("div");
   columnsWrap.className = "vc-cols-wrap";
   columnsWrap.append(columnsToggle, powerCol, spectrumCol);
+  // Closed, the Power strip is all that shows (controlsTheme.ts); a click on it opens the panel.
+  powerCol.addEventListener(
+    "click",
+    (e) => {
+      if (isOpen || !(e.target as Element).closest(".vc-power-square")) return;
+      e.stopPropagation();
+      open();
+    },
+    true,
+  );
 
   // Recomputed off each card's vc-folded class via the observer below. With
   // "Hide left" active, the meter cards are excluded

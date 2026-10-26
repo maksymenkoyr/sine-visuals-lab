@@ -2,7 +2,7 @@ import type { PowerMode } from "../render/powerMode.ts";
 import { PRESET_LABEL, QUALITY_OPTIONS, type QualityChoice } from "../render/qualityPref.ts";
 import { RESOLUTION_MAX, RESOLUTION_MIN, type CastMode, type PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
-import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
+import { AUTO_SKY, FONT_MONO, POWER_FOLDED_W_PX, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { applyGlassBlur, getGlassMode, type GlassMode, setGlassMode } from "./glassPref.ts";
 import { MISS_WINDOW_MS } from "../render/frameMisses.ts";
@@ -69,12 +69,12 @@ import {
  *
  * It starts folded (CardSpec.defaultFolded) until someone first opens it —
  * the quality governor runs on its own, and these readouts are diagnostics.
- * Folded, in the wide layout, this card is a small square (POWER_SQUARE_PX)
- * showing a power glyph in place of a title bar — it sits directly against
+ * Folded, in the wide layout, this card is a small strip (POWER_FOLDED_W_PX by
+ * POWER_SQUARE_PX) showing the status dot, FPS and a power glyph in place of a title bar — it sits directly against
  * the settings column (deviceMenu.ts), so a plain full-width folded bar
  * would leave a wide empty strip between the two; a square instead hugs the
  * column it's next to. Unfolding animates the width open first (growing
- * leftward, away from the settings column, square -> 200px) and only then
+ * leftward, away from the settings column, strip -> 200px) and only then
  * the height open (growing downward) — the reverse on folding — so the
  * motion always reads as a clip opening/closing rather than the card
  * resizing in place. The card's content stays laid out at full width
@@ -631,7 +631,7 @@ function createStatusRow(accent: string) {
   let lastDot: string | null = null;
   return {
     el,
-    refresh(status: PowerStatus): void {
+    refresh(status: PowerStatus): string {
       const described = describeStatus(status, accent);
       if (described.text !== lastText) {
         lastText = described.text;
@@ -646,6 +646,7 @@ function createStatusRow(accent: string) {
         lastDot = described.dot;
         dot.style.backgroundColor = described.dot;
       }
+      return described.dot;
     },
   };
 }
@@ -721,6 +722,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   let cardEl!: HTMLDivElement;
   let pad!: HTMLElement;
   let square!: HTMLButtonElement;
+  let squareDot!: HTMLElement;
+  let squareFps!: HTMLElement;
 
   // Width and height are two eased moves, not one keyframe list with a
   // corner in it: that version came to a dead stop between the two phases
@@ -775,10 +778,10 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
       // moves finish; until then `fill` holds each end state.
       const upMs = phase(from.height, POWER_SQUARE_PX);
       const rightAt = secondDelay(upMs);
-      const rightMs = phase(from.width, POWER_SQUARE_PX);
+      const rightMs = phase(from.width, POWER_FOLDED_W_PX);
       const fadeAt = Math.max(0, rightAt + rightMs - FADE_MS);
       const up = move("height", from.height, POWER_SQUARE_PX, 0, upMs, "forwards");
-      const right = move("width", from.width, POWER_SQUARE_PX, rightAt, rightMs, "both");
+      const right = move("width", from.width, POWER_FOLDED_W_PX, rightAt, rightMs, "both");
       running = [up, right, fade(pad, padFrom, 0, fadeAt, "both"), fade(square, glyphFrom, 1, fadeAt, "both")];
       Promise.all([up.finished, right.finished]).then(
         () => {
@@ -817,11 +820,18 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   square.setAttribute("aria-label", `Expand ${glyphLabel}`);
   square.title = `Expand ${glyphLabel}`;
   square.setAttribute("aria-controls", card.body.id);
-  square.innerHTML =
+  squareDot = document.createElement("span");
+  squareDot.style.cssText = statusDotStyle(IDLE_DOT);
+  squareFps = document.createElement("span");
+  squareFps.style.cssText = `${digitsStyle} font-size: 11px;`;
+  const glyph = document.createElement("span");
+  glyph.style.display = "grid";
+  glyph.innerHTML =
     '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
     '<path d="M5.2 3.9a5.2 5.2 0 1 0 5.6 0"/>' +
     '<path d="M8 2v5.5"/>' +
     "</svg>";
+  square.append(squareDot, squareFps, glyph);
   // stopPropagation: the header's own click-to-toggle listener (createCard)
   // doesn't cover this button (it isn't inside the header), but it costs
   // nothing to be explicit and it matches every other in-card control's
@@ -890,7 +900,10 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
 
   function refresh(): void {
     const status = deps.getPowerStatus();
-    statusRow.refresh(status);
+    const dotColor = statusRow.refresh(status);
+    if (squareDot.style.backgroundColor !== dotColor) squareDot.style.backgroundColor = dotColor;
+    const fpsText = status.fps > 0 ? String(Math.round(status.fps)) : "--";
+    if (squareFps.textContent !== fpsText) squareFps.textContent = fpsText;
     qualityRow.refresh(status.choice, status.recommended);
     const preview = deps.isPreview?.() ?? false;
     const sizeShown = preview && (deps.canResizePreview?.() ?? true);
