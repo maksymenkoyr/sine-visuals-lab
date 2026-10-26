@@ -86,7 +86,8 @@ jobs:
       - run: npm ci
 
       # Every gate CONTRIBUTING.md names, in one command, the same one the Stop hook and the
-      # pre-push hook run (tools/check.mjs header): typecheck (both
+      # pre-push hook run with --changed (tools/check.mjs header), so this is
+      # the only place the whole suite runs before merge: typecheck (both
       # tsconfigs, so the Worker source is checked before it ships), the
       # repo's code rules, lint, unused code, licenses, secrets and the whole
       # test suite. It gates every deploy this workflow makes (Insiders and

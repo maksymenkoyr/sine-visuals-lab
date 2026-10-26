@@ -11,7 +11,8 @@ Finish the change on this branch:
 2. **Gates.** `npm run check` passes (the `tools/check.mjs` header lists its
    steps and how to fix each kind of finding). CI runs the same command on
    every PR and before every deploy (channels and releasing: the
-   `src/version.ts` header), and the pre-push hook runs it before the push.
+   `src/version.ts` header). The pre-push hook runs only its `--changed`
+   form, so run the whole command here.
 
 3. **Screenshots.** Any visualization or UI change: headless Playwright
    screenshots from before and after, with their paths in your summary. Put

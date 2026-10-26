@@ -1,8 +1,11 @@
 #!/bin/sh
-# git pre-push hook: the whole `npm run check` (tools/check.mjs header) before
-# anything leaves this machine, so a push fails on what the pull request's CI
-# would fail on. `npm install` points git here (package.json's `prepare`
-# script sets core.hooksPath). `git push --no-verify` skips it.
+# git pre-push hook: `npm run check -- --changed` (tools/check.mjs header)
+# before anything leaves this machine: every step, but only the tests related
+# to what this branch changed, and no size build. The pull request's CI runs
+# the whole suite and the size budget, so a break in an untouched test shows
+# up there; the full local run only repeated it while parallel agents loaded
+# the machine. `npm install` points git here (package.json's `prepare` script
+# sets core.hooksPath). `git push --no-verify` skips it.
 top=$(git rev-parse --show-toplevel) || exit 0
 cd "$top" || exit 0
 [ -f tools/check.mjs ] || exit 0
@@ -10,5 +13,5 @@ if [ ! -d node_modules ]; then
   echo "pre-push: no node_modules in $top, so npm run check can't run here. Run npm ci; CI still checks the pull request." >&2
   exit 0
 fi
-echo "pre-push: npm run check" >&2
-node tools/check.mjs
+echo "pre-push: npm run check -- --changed" >&2
+node tools/check.mjs --changed
