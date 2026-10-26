@@ -104,7 +104,7 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
-  "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",
+  "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), or a flip or a random jump on each one instead, fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
   "anim.tempo": "how fast the BPM is, from slow to fast.",
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",

@@ -1,6 +1,7 @@
 import { HIT_KNEE_DEFAULT, hitStandout, UNIT_TAILS } from "../src/audio/hitStrength.ts";
 import { describe, it, expect, afterEach } from "vitest";
 import {
+  beatWaveReading,
   createDriveEngine,
   gateConditionIndices,
   GATE_OPEN_HIGH,
@@ -14,6 +15,7 @@ import {
   setSourceMod,
   setSourceMuted,
   setSourceRole,
+  setSourceShape,
   smoothstep,
   specMapFor,
   togglePatchSource,
@@ -1773,6 +1775,90 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
     const one = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 1 as const }] };
     const normOne = normalizeDriveSetting(one);
     if (normOne !== "scene") expect(normOne.sources[0]!.every).toBeUndefined();
+  });
+});
+
+describe("drives: Beat wave's shape (DriveSource.shape)", () => {
+  // The metronome fields Beat wave reads, phase kept = frac(beats) as the
+  // every-N-beats tests above do.
+  function shaped(sceneId: string, shape: "flip" | "random", every?: 2 | 4) {
+    const base = createAnimClock().advance(DT, frame());
+    const engine = createDriveEngine();
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, shape, ...(every ? { every } : {}) }] });
+    return (beats: number, level = 1) =>
+      engine.forScene(sceneId, [spec], { ...base, metronomeBeats: beats, metronomePhase: beats - Math.floor(beats), metronomeLevel: level }).value("k", -999);
+  }
+
+  it("flip turns on at the first beat, then holds and alternates once each hop has landed", () => {
+    const at = shaped("beatwave-flip", "flip");
+    expect(at(0)).toBeCloseTo(0, 6);
+    for (const b of [0.5, 0.9, 2.5, 4.5]) expect(at(b)).toBeCloseTo(1, 6);
+    for (const b of [1.5, 1.9, 3.5]) expect(at(b)).toBeCloseTo(0, 6);
+  });
+
+  it("flip eases onto its new value early in the swing instead of cutting", () => {
+    const at = shaped("beatwave-flip-ease", "flip");
+    const steps = [1, 1.02, 1.05, 1.1, 1.15, 1.2, 1.3];
+    const values = steps.map((b) => at(b));
+    expect(values[0]).toBeCloseTo(1, 6);
+    expect(values[values.length - 1]).toBeCloseTo(0, 6);
+    for (let i = 1; i < values.length; i++) expect(values[i]!).toBeLessThanOrEqual(values[i - 1]!);
+    expect(values.some((v) => v > 0.05 && v < 0.95)).toBe(true);
+  });
+
+  it("flip with every=4 holds for four beats", () => {
+    const at = shaped("beatwave-flip-4", "flip", 4);
+    for (const b of [1, 2, 3.9]) expect(at(b)).toBeCloseTo(1, 6);
+    for (const b of [5, 6, 7.9]) expect(at(b)).toBeCloseTo(0, 6);
+  });
+
+  it("random holds one value per swing in [0, 1), the same for every reader, and moves between swings", () => {
+    const at = shaped("beatwave-random", "random");
+    const again = shaped("beatwave-random-2", "random");
+    const perSwing = [3, 4, 5, 6, 7, 8, 9, 10].map((n) => at(n + 0.6));
+    for (const [i, v] of perSwing.entries()) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(1);
+      expect(at(i + 3 + 0.95)).toBeCloseTo(v, 9);
+      expect(again(i + 3 + 0.6)).toBe(v);
+    }
+    expect(new Set(perSwing.map((v) => v.toFixed(3))).size).toBe(perSwing.length);
+  });
+
+  it("random with every=2 shares one value across both beats of a swing", () => {
+    const at = shaped("beatwave-random-2beats", "random", 2);
+    expect(at(5.5)).toBeCloseTo(at(4.5), 9);
+    expect(at(7.5)).toBeCloseTo(at(6.5), 9);
+  });
+
+  it("both fade out with the metronome, like the swing", () => {
+    expect(shaped("beatwave-flip-fade", "flip")(2.5, 0)).toBe(0);
+    expect(shaped("beatwave-random-fade", "random")(2.5, 0)).toBe(0);
+    expect(beatWaveReading({ metronomeBeats: 2.5, metronomeLevel: 0.5 }, 1, "flip")).toBeCloseTo(0.5, 6);
+  });
+
+  it("the swing through beatWaveReading is the plain catalogue reading", () => {
+    const base = createAnimClock().advance(DT, frame());
+    const anim = { ...base, metronomeBeats: 5.25, metronomePhase: 0.25, metronomeLevel: 0.8 };
+    expect(beatWaveReading(anim, 1, "swing")).toBeCloseTo(SIGNALS["anim.beatWave"].read(frame(), anim), 12);
+  });
+
+  it("normalizeDriveSetting keeps flip and random on Beat wave only, and stores the swing as no shape", () => {
+    const keep = normalizeDriveSetting({ mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, shape: "random" }] });
+    if (keep !== "scene") expect(keep.sources[0]!.shape).toBe("random");
+    const elsewhere = normalizeDriveSetting({ mix: "add", sources: [{ choice: "anim.mid", weight: 1, shape: "flip" }] });
+    if (elsewhere !== "scene") expect(elsewhere.sources[0]!.shape).toBeUndefined();
+    const swing = normalizeDriveSetting({ mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, shape: "swing" as unknown as "flip" }] });
+    if (swing !== "scene") expect(swing.sources[0]!.shape).toBeUndefined();
+  });
+
+  it("setSourceShape sets and clears a wire's shape; sameDriveSetting tells shapes apart", () => {
+    const plain: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4 }] };
+    const flipped = setSourceShape(plain, "anim.beatWave", "flip");
+    expect(flipped).toEqual({ mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4, shape: "flip" }] });
+    expect(sameDriveSetting(flipped, plain)).toBe(false);
+    expect(sameDriveSetting(setSourceShape(flipped, "anim.beatWave", "swing"), plain)).toBe(true);
+    expect(setSourceShape("scene", "anim.beatWave", "flip")).toBe("scene");
   });
 });
 

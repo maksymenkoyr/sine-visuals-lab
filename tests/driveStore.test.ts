@@ -249,6 +249,27 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", e: "four" }] })).toBeNull();
     expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", e: 3 }] })).toBeNull();
   });
+
+  it("encodes/sanitizes a Beat wave source's shape as `f`, round-tripping beside `e`", () => {
+    const patch: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4, shape: "random" }] };
+    const encoded = encodeDriveSetting(patch);
+    expect(encoded).toEqual({ m: "add", s: [{ c: "anim.beatWave", e: 4, f: "random" }] });
+    expect(sanitizeDriveSetting(encoded)).toEqual(patch);
+    expect(sanitizeDriveSetting(encodeDriveSetting({ mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, shape: "flip" }] }))).toEqual({
+      mix: "add",
+      sources: [{ choice: "anim.beatWave", weight: 1, shape: "flip" }],
+    });
+  });
+
+  it("reads `f: \"swing\"` as the plain wave, and drops `f` from a source that isn't Beat wave", () => {
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", f: "swing" }] })).toEqual(driveSettingFromChoice("anim.beatWave"));
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.mid", f: "flip" }] })).toEqual(driveSettingFromChoice("anim.mid"));
+  });
+
+  it("rejects an `f` of the wrong type or an unknown shape", () => {
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", f: 1 }] })).toBeNull();
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", f: "bounce" }] })).toBeNull();
+  });
 });
 
 describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight, setSourceHeight, setSourceGrid, setPatchMix)", () => {

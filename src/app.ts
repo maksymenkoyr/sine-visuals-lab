@@ -93,6 +93,7 @@ import {
   setSourceMod,
   setSourceMuted,
   setSourceRole,
+  setSourceShape,
   setSourceWeight,
   togglePatchSource,
 } from "./render/driveStore.ts";
@@ -1983,6 +1984,7 @@ function wireDeviceMenu(): void {
     onSetSourceHeight: (sceneId, spec, choice, height) => setSourceHeight(sceneId, spec, choice, height),
     onSetSourceMod: (sceneId, spec, choice, mod) => setSourceMod(sceneId, spec, choice, mod),
     onSetSourceEvery: (sceneId, spec, choice, every) => setSourceEvery(sceneId, spec, choice, every),
+    onSetSourceShape: (sceneId, spec, choice, shape) => setSourceShape(sceneId, spec, choice, shape),
     onSetSourceGrid: (sceneId, spec, grid) => setSourceGrid(sceneId, spec, grid),
     onSetPatchMix: (sceneId, spec, mix) => setPatchMix(sceneId, spec, mix),
     onSetSourceRole: (sceneId, spec, index, role) => setSourceRole(sceneId, spec, index, role),

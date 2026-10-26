@@ -42,6 +42,7 @@ import {
   sameDriveSetting,
   smoothstep,
   sourceKey,
+  type BeatWaveShape,
   type DriveMix,
   type DrivePatch,
   type DriveSetting,
@@ -524,6 +525,8 @@ export interface DeviceMenuDeps {
   onSetSourceMod: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, mod: WireMod | null) => void;
   /** Only on a plain Beat wave source line (drives.ts's setSourceEvery). */
   onSetSourceEvery: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number) => void;
+  /** Only on a plain Beat wave source line (drives.ts's setSourceShape). */
+  onSetSourceShape: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, shape: BeatWaveShape) => void;
   onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
   onSetPatchMix: (sceneId: string, spec: SceneSetting, mix: DriveMix) => void;
   onSetSourceRole: (sceneId: string, spec: SceneSetting, index: number, role: "plays" | "when") => void;
@@ -2486,6 +2489,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // ignore DriveSource.every (drives.ts).
   const EVERY_OPTIONS: readonly number[] = [1, 2, 4, 8, 16];
   const EVERY_HINT = "How many beats one swing takes: 1 = every beat, 4 = once a bar.";
+  const SHAPE_OPTIONS: { shape: BeatWaveShape; label: string; hint: string }[] = [
+    { shape: "swing", label: "Swing", hint: "Sway up and down: highest as each swing starts, lowest halfway through." },
+    { shape: "flip", label: "Flip", hint: "Switch between low and high on each beat (or each Every), and hold there." },
+    { shape: "random", label: "Random", hint: "Jump to a new random height on each beat (or each Every), and hold there." },
+  ];
 
   const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
     { role: "plays", label: "Plays", hint: "This wire makes the setting move." },
@@ -2586,6 +2594,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     wrap.append(label, seg);
     return wrap;
+  }
+
+  /** A row of SHAPE_OPTIONS chips; the words say what they do, so unlike
+   *  Every they need no label. Only for a plain Beat wave source line. */
+  function buildShapeSeg(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "What each swing does");
+    const current = src.shape ?? "swing";
+    for (const opt of SHAPE_OPTIONS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      setHint(btn, opt.hint);
+      btn.setAttribute("aria-pressed", String(current === opt.shape));
+      btn.style.cssText = current === opt.shape ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      btn.addEventListener("click", () => {
+        if (current === opt.shape) return;
+        deps.onSetSourceShape(sceneId, spec, src.choice, opt.shape);
+        patchChanged(sceneId, spec);
+      });
+      seg.appendChild(btn);
+    }
+    return seg;
   }
 
   /** The Only when role toggle (drives.ts's setSourceRole), on every source
@@ -3094,8 +3127,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // in its knot instead (buildKnotBody), so only one copy is ever live.
     const knotted = typeof src.choice === "string" && cablesShown();
     if (isHitKind && !knotted) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
-    // Every-N-beats only means something for a plain Beat wave (DriveSource.every).
-    if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
+    // Every-N-beats and the shape only mean something for a plain Beat wave
+    // (DriveSource.every, DriveSource.shape).
+    if (src.choice === "anim.beatWave") ctrls.append(buildEverySeg(sceneId, spec, src), buildShapeSeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
     if (knotted) {
       ctrls.appendChild(buildKnotChip(src, isHitKind));

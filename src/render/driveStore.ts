@@ -7,6 +7,7 @@ import { decodeWireMod, encodeWireMod, LEGACY_NODE_ID_RE, readLegacyNodes, type 
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import type { HitReadout } from "./standout.ts";
 import {
+  BEAT_WAVE_SHAPES,
   defaultDriveSetting,
   driveSettingFromChoice,
   DRIVE_EVERY_VALUES,
@@ -18,8 +19,10 @@ import {
   setSourceMod as pureSetSourceMod,
   setSourceMuted as pureSetSourceMuted,
   setSourceRole as pureSetSourceRole,
+  setSourceShape as pureSetSourceShape,
   setSourceWeight as pureSetSourceWeight,
   togglePatchSource as pureTogglePatchSource,
+  type BeatWaveShape,
   type DriveChoice,
   type DriveMix,
   type DriveSetting,
@@ -272,7 +275,7 @@ const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
  *  round-trips through this form, both in localStorage and in a Look's `d`
  *  — see sceneLooks.ts's own header) or a compact patch
  *  `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight, g?: 1,
- *  o?: 1, e?: number, x?: StoredWireMod}, …]}`. `x` is a catalogue wire's
+ *  o?: 1, e?: number, f?: string, x?: StoredWireMod}, …]}`. `x` is a catalogue wire's
  *  modifier (wireMod.ts's encodeWireMod). A source's own `g`/`o` (present only when
  *  `true`) are `DriveSource.when`/`.off` — drives.ts's header covers what
  *  each does; `g` for "gate condition", `o` for "off", one letter each to
@@ -281,10 +284,13 @@ const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
  *  before this field existed simply lacks it, and `normalizeDriveSetting`
  *  strips it right back out on any source it isn't `anim.beatWave`'s own, so
  *  an old app reading a new source it doesn't otherwise recognise the `e` on
- *  is unaffected (it never gets this far). A source's `w`/`h`/`e`, if
- *  present, must already be a well-shaped value — out-of-range weight is
- *  clamped (`normalizeDriveSetting`), but a wrong *type* or an `e` outside
- *  DRIVE_EVERY_VALUES anywhere fails the whole entry rather than silently
+ *  is unaffected (it never gets this far). `f` is `DriveSource.shape`, the
+ *  same wire's flip or random (`s` already names the patch's sources); an
+ *  app from before it ignores the key and reads the plain swing. A source's
+ *  `w`/`h`/`e`/`f`, if present, must already be a well-shaped value —
+ *  out-of-range weight is clamped (`normalizeDriveSetting`), but a wrong
+ *  *type*, an `e` outside DRIVE_EVERY_VALUES or an `f` outside
+ *  BEAT_WAVE_SHAPES anywhere fails the whole entry rather than silently
  *  dropping one source, so a garbage entry can't quietly resolve to a
  *  half-built patch.
  *
@@ -368,6 +374,11 @@ export function sanitizeDriveSetting(raw: unknown, nodes: ReadonlyMap<string, Le
       if (typeof rawEvery !== "number" || !(DRIVE_EVERY_VALUES as readonly number[]).includes(rawEvery)) return null;
       source.every = rawEvery as DriveSource["every"];
     }
+    const rawShape = (item as { f?: unknown }).f;
+    if (rawShape !== undefined) {
+      if (typeof rawShape !== "string" || !(BEAT_WAVE_SHAPES as readonly string[]).includes(rawShape)) return null;
+      if (rawShape !== "swing") source.shape = rawShape as DriveSource["shape"];
+    }
     const rawMod = (item as { x?: unknown }).x;
     if (rawMod !== undefined) {
       const mod = decodeWireMod(rawMod);
@@ -395,16 +406,16 @@ export function sanitizeDriveSetting(raw: unknown, nodes: ReadonlyMap<string, Le
  *  (sceneLooks.ts) are one of these, never a bare `DriveSetting` — see this
  *  file's header for why one canonical shape serves both boundaries. */
 export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: StoredDriveSource[] };
-type StoredDriveSource = { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number; x?: StoredWireMod };
+type StoredDriveSource = { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number; f?: BeatWaveShape; x?: StoredWireMod };
 
 /** `setting` written the way `sanitizeDriveSetting` reads it back: a
- *  one-source, weight-1, Graded, unconditioned, unmuted, every-1 `add` patch
- *  (and `"scene"`) as the bare `DriveChoice` it's identical to — the same
- *  shape this store/a Look used before patches existed, so an untouched
- *  setting keeps costing no more than it always did and an old app can still
- *  make sense of it — anything else as the compact `{m,s}` form, a source's
- *  own role/mute as its own `g`/`o` and (a Beat wave source's own) every-N-
- *  beats divider as `e` (never a top-level field any more — see
+ *  one-source, weight-1, Graded, unconditioned, unmuted, every-1, swinging
+ *  `add` patch (and `"scene"`) as the bare `DriveChoice` it's identical to —
+ *  the same shape this store/a Look used before patches existed, so an
+ *  untouched setting keeps costing no more than it always did and an old app
+ *  can still make sense of it — anything else as the compact `{m,s}` form, a
+ *  source's own role/mute as its own `g`/`o` and (a Beat wave source's own)
+ *  every-N-beats divider and shape as `e` and `f` (never a top-level field any more — see
  *  sanitizeDriveSetting's own header for the legacy top-level `w` this still
  *  reads, just never writes). sceneLooks.ts reuses this directly rather than
  *  re-deriving the same compaction. */
@@ -418,6 +429,7 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
       !only.when &&
       !only.off &&
       (only.every === undefined || only.every === 1) &&
+      only.shape === undefined &&
       only.mod === undefined
     ) {
       return only.choice;
@@ -432,6 +444,7 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
       if (src.when) entry.g = 1;
       if (src.off) entry.o = 1;
       if (src.every !== undefined && src.every !== 1) entry.e = src.every;
+      if (src.shape) entry.f = src.shape;
       if (src.mod) entry.x = encodeWireMod(src.mod);
       return entry;
     }),
@@ -556,6 +569,12 @@ export function setSourceMod(sceneId: string, spec: SceneSetting, choice: DriveS
  *  drives.ts's setSourceEvery. */
 export function setSourceEvery(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number): void {
   setDriveSetting(sceneId, spec, pureSetSourceEvery(getDriveSetting(sceneId, spec), choice, every));
+}
+
+/** Beat wave's own Swing/Flip/Random (deviceMenu.ts's shape chips) —
+ *  drives.ts's setSourceShape. */
+export function setSourceShape(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, shape: BeatWaveShape): void {
+  setDriveSetting(sceneId, spec, pureSetSourceShape(getDriveSetting(sceneId, spec), choice, shape));
 }
 
 export function setSourceGrid(sceneId: string, spec: SceneSetting, grid: BeatGridIndex): void {

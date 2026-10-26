@@ -32,8 +32,9 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * more `DriveSource`s (each a plain `DriveChoice` — a src/render/signals.ts
  * `SignalId`, `{source:"beat", grid}`, or `{source:"line"}` — never
  * `"scene"`, plus a `weight`, for a hit-kind source a `height`, and for a
- * plain `"anim.beatWave"` source an `every` — see DriveSource.every's own
- * doc) combined by the patch's own `mix`:
+ * plain `"anim.beatWave"` source an `every` and a `shape` — see
+ * DriveSource.every's and DriveSource.shape's own docs) combined by the
+ * patch's own `mix`:
  *
  *   - **add** — Σ weight·value. The everyday case: two hits reinforcing
  *     each other, or a hit layered under a sustained level.
@@ -78,8 +79,8 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  *     it: `combine()`/`fired()` treat it as absent (contributes nothing,
  *     either as a "plays" term or a condition), but it keeps its own
  *     position, weight, height, role and (on a Beat wave source) its every-N-
- *     beats divider, so switching it back on restores exactly what it was
- *     doing. `sourceValues()` below reports a muted
+ *     beats divider and shape, so switching it back on restores exactly what
+ *     it was doing. `sourceValues()` below reports a muted
  *     source's own slot as 0 (still in patch order — the panel's per-source
  *     trace just goes flat rather than disappearing and shifting every
  *     later trace over). If *every* source in a patch is muted,
@@ -368,6 +369,12 @@ export { HIT_HEIGHT_DEFAULT, parseHitHeight, type HitHeight } from "./gateWindow
 export const DRIVE_EVERY_VALUES = [1, 2, 4, 8, 16] as const;
 export type DriveEvery = (typeof DRIVE_EVERY_VALUES)[number];
 
+/** What a Beat wave wire does on each swing (DriveSource.shape): sway (the
+ *  plain wave), flip between 0 and 1, or hop to a new random value. The first
+ *  is the default. */
+export const BEAT_WAVE_SHAPES = ["swing", "flip", "random"] as const;
+export type BeatWaveShape = (typeof BEAT_WAVE_SHAPES)[number];
+
 /** One tap into a patch; `weight` is clamped to 0..2 by `clampWeight`. */
 export interface DriveSource {
   choice: DriveSourceChoice;
@@ -381,9 +388,12 @@ export interface DriveSource {
    *  reports 0 for the slot. */
   off?: true;
   /** Beat wave only: beats per swing. `normalizeDriveSetting` strips it
-   *  elsewhere. Absent or 1 is the plain reading; `sourceRawImpl` branches only
-   *  above 1. */
+   *  elsewhere. Absent or 1, with no `shape`, is the plain reading;
+   *  `plainRawImpl` branches only otherwise. */
   every?: DriveEvery;
+  /** Beat wave only, like `every`: flip or random instead of the swing
+   *  (`beatWaveReading`). Absent is the swing, never stored as `"swing"`. */
+  shape?: Exclude<BeatWaveShape, "swing">;
   /** Catalogue sources only: this wire's own Window, Smoothness and Length
    *  (wireMod.ts). Absent reads as `freshWireMod()`, the plain wire. */
   mod?: WireMod;
@@ -595,6 +605,37 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** Beats a flip or a random hop takes to land, however many beats its swing
+ *  spans: long enough not to read as a cut, short enough to land on the beat. */
+const BEAT_HOP_BEATS = 0.25;
+
+/** A Beat wave wire's reading with its `every` and `shape` (DriveSource):
+ *  swing `n` counts its swings on the metronome's beat count, and a flip or
+ *  random hop eases from swing n-1's value to swing n's over BEAT_HOP_BEATS
+ *  from its start. Random hashes the swing's number rather than drawing, so
+ *  a read is pure and every reader of the same frame agrees. Scaled by
+ *  metronomeLevel like the plain wave, so all three fade out with the
+ *  metronome. */
+export function beatWaveReading(anim: Pick<AnimFrame, "metronomeBeats" | "metronomeLevel">, every: number, shape: BeatWaveShape): number {
+  const swings = anim.metronomeBeats / every;
+  if (shape === "swing") return anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(swings)));
+  const n = Math.floor(swings);
+  const t = smoothstep(0, Math.min(1, BEAT_HOP_BEATS / every), swings - n);
+  const from = hopValue(shape, n - 1);
+  return anim.metronomeLevel * (from + (hopValue(shape, n) - from) * t);
+}
+
+// A flip lands on 1 on even swings, so the metronome's first beat turns it on.
+function hopValue(shape: "flip" | "random", n: number): number {
+  if (shape === "flip") return (n & 1) === 0 ? 1 : 0;
+  // Seeded so swing 0 isn't the hash's fixed point at 0.
+  let h = Math.imul(n ^ 0x2545f491, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 16), 0x21f0aaad);
+  h = Math.imul(h ^ (h >>> 15), 0x735a2d97);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
 /** Indices of sources marked `when`, in patch order, whatever the `mix`
  *  (callers check `mix === "gate"`) and including muted ones. */
 export function gateConditionIndices(patch: DrivePatch): number[] {
@@ -653,6 +694,7 @@ export function sameDriveSetting(a: DriveSetting, b: DriveSetting): boolean {
     if (!!sa.when !== !!sb.when) return false;
     if (!!sa.off !== !!sb.off) return false;
     if ((sa.every ?? 1) !== (sb.every ?? 1)) return false;
+    if (sa.shape !== sb.shape) return false;
     if (!sameWireMod(sa.mod, sb.mod)) return false;
   }
   return true;
@@ -705,6 +747,7 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     if (src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1 && (DRIVE_EVERY_VALUES as readonly number[]).includes(src.every)) {
       source.every = src.every;
     }
+    if (src.choice === "anim.beatWave" && (src.shape === "flip" || src.shape === "random")) source.shape = src.shape;
     // Only a catalogue wire, and only one that differs from the plain wire.
     if (src.mod !== undefined && typeof src.choice === "string") {
       const mod = clampWireMod(src.mod);
@@ -778,6 +821,15 @@ export function setSourceEvery(setting: DriveSetting, choice: DriveSourceChoice,
   if (setting === "scene") return setting;
   const key = sourceKey(choice);
   const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, every: every as DriveEvery } : s));
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
+/** `normalizeDriveSetting` keeps it on anim.beatWave only, and stores the
+ *  swing as no shape at all. */
+export function setSourceShape(setting: DriveSetting, choice: DriveSourceChoice, shape: BeatWaveShape): DriveSetting {
+  if (setting === "scene") return setting;
+  const key = sourceKey(choice);
+  const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, shape: shape === "swing" ? undefined : shape } : s));
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
@@ -1015,11 +1067,11 @@ export function createDriveEngine(): DriveEngine {
     const choice = src.choice;
     if (isGridChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).gridPulse;
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
-    // Beat wave every-N-beats. every=1 falls through to the catalogue read
-    // below, kept bit-identical rather than routed through this formula
+    // A plain swing every beat falls through to the catalogue read below, kept
+    // bit-identical rather than routed through beatWaveReading
     // (metronomePhase is the fractional part of metronomeBeats, animClock.ts).
-    if (choice === "anim.beatWave" && src.every !== undefined && src.every !== 1) {
-      return anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(anim.metronomeBeats / src.every)));
+    if (choice === "anim.beatWave" && ((src.every !== undefined && src.every !== 1) || src.shape !== undefined)) {
+      return beatWaveReading(anim, src.every ?? 1, src.shape ?? "swing");
     }
     const catalogue = SIGNALS[choice];
     if (src.height === "graded" && hasHitStrength(choice)) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;

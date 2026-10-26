@@ -28,6 +28,7 @@ that reshapes an input node's value on its way to that one setting.
 | **mix** | How a setting's wires combine — one of `MIX_OPTIONS` (`src/ui/deviceMenu.ts`). Reserved for this; never reuse it for the built-in reaction. | combine, blend mode | `DriveMix` |
 | **reaction** | What a setting that acts once per hit does on each hit: a burst, a jump, a cut. Its graph draws a dot per reaction. The **Reaction** row under the graph picks **Flat** (every reaction full size) or **Sized** (as big as its hit stood out); a setting whose reaction has no size shows Sized greyed out. | trigger, event, fire | `SceneSetting.drive.hit`, `HitReadout` (`src/render/standout.ts`) |
 | **condition** | Under the gate mix ("Only when"), a wire whose input node opens the gate rather than moving the setting. The others **play**. | gate source, trigger | `DriveSource.when` |
+| **swing** / **flip** / **random** | What a Beat wave wire does on each swing, picked by chips beside its **Every**: sway up and down (the default), switch between low and high and hold, or jump to a new random height and hold. A swing is one beat, or as many as Every says. | toggle, shuffle, on beat | `DriveSource.shape`, `BEAT_WAVE_SHAPES` (`src/render/drives.ts`) |
 | **meters** | The left column of cards that *show* the sound. A meter is a display; the input nodes in it are what you wire. | — | `METERS_COLUMN`, `src/ui/audioMeters.ts` |
 | **sound source** | The microphone, line input or shared tab the sound comes from. The only thing in the panel called a source. | — | `AudioSource` |
 
