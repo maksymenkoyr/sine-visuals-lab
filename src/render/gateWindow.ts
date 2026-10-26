@@ -223,6 +223,20 @@ function ease(y: number, target: number, tau: number, dtSec: number): number {
   return tau <= 0 ? target : y + (target - y) * (1 - Math.exp(-dtSec / tau));
 }
 
+/** The Smoothness that counts as an edit when there is no window to soften:
+ *  what the slider holds above its resting value, GENERIC_SMOOTHNESS_DEFAULT,
+ *  so a wire nobody touched still reads its plain value. */
+export function glideSmoothness(smoothness: number): number {
+  return Math.max(0, smoothness - GENERIC_SMOOTHNESS_DEFAULT);
+}
+
+/** One step of a window-less wire's Smoothness: `y` eases toward `target`,
+ *  rising and falling alike, over up to GLIDE_TAU_MAX_SEC at full `s`
+ *  (glideSmoothness). */
+export function glideStep(y: number, target: number, s: number, dtSec: number): number {
+  return Number.isFinite(y) ? ease(y, target, s * GLIDE_TAU_MAX_SEC, dtSec) : target;
+}
+
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
  *  Fixed/Loud release — the lane whose pulse edgeDecayPerSec below borrows
  *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
