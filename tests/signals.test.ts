@@ -35,8 +35,6 @@ describe("signals registry", () => {
       "hitMid",
       "hitHigh",
       "surge",
-      "wave",
-      "lock",
       "bar",
       "energy",
       "low",
