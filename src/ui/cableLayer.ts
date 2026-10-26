@@ -32,27 +32,49 @@
  * preview (`.vc-cable-fan`, solid where a preview is dashed), so it costs
  * the tick loop nothing.
  *
- * A source carrying its own onPress (CableSourceSpec below) is pressable:
- * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke
- * over it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
- * pointer-events:none, so only that stroke answers the pointer, and its
- * width is what makes a thin cable easy to press), and a click on the
- * stroke calls onPress — deviceMenu.ts wires it to the same patch toggle
- * the source line's own × button takes, so pressing a cable unplugs it.
- * The hit stroke answers only in the open gap between the cable's jack card
- * and its port card (pressBandFor; a `<clipPath>` per cable): the layer
- * paints over every card, so a cable crossing a card (Bass level's runs
- * straight over Mid and Treble) would otherwise take a press meant for the
- * jack, fader or slider under it and unplug itself instead.
- * The group also carries the hover lift (controlsTheme.ts's
- * .vc-cable-g:hover rules — a neon-ish bloom in the cable's own colour,
- * a thicker core, a brighter glow, and the flow beads lightened so the
- * signal still visibly runs inside it) and holds that colour as its CSS
- * `color` so the bloom's currentColor resolves per cable.
- * deviceMenu.ts only ever sets onPress on the pinned group's real patch
- * sources: a preview cable and a display-only scene mix are decoration,
- * not something a press should edit. setLift gives every pinned cable that
- * lift at once, for deviceMenu.ts while the pointer is on the pinned row.
+ * A source carrying its own onUnplug (CableSourceSpec below) is pressable:
+ * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke over
+ * it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
+ * pointer-events:none, so only that stroke answers the pointer, and its width
+ * is what makes a thin cable easy to hit) and a plug at each end (plugEl,
+ * bindPlug), on the stub just out from the jack and the port. A click on the
+ * stroke opens the cable's knot; a cable without one does nothing. A click on
+ * a plug unplugs, and so does a pull that takes it PULL_OUT_PX from where it
+ * was pressed; a shorter pull puts it back. While held, the pulled end
+ * follows the pointer and the rest of the cable stays put (drawPull).
+ * deviceMenu.ts wires onUnplug to the same patch toggle the source line's ×
+ * button takes. The hit stroke answers only in the open gap between the
+ * cable's jack card and its port card (pressBandFor; a `<clipPath>` per cable):
+ * the layer paints over every card, so a cable crossing a card (Bass level's
+ * runs straight over Mid and Treble) would otherwise take a press meant for the
+ * jack, fader or slider under it. The plugs sit over those cards' edges, so
+ * they answer only while their cable is armed.
+ *
+ * Hovering a pressable cable arms it (arm, disarmSoon): its group takes
+ * `.vc-cable-armed`, which shows and enables its plugs and carries the hover
+ * lift (controlsTheme.ts — a neon-ish bloom in the cable's own colour, a
+ * thicker core, a brighter glow, and the flow beads lightened so the signal
+ * still visibly runs inside it), and the shared tooltip (tooltip.ts) says what
+ * a click and a pull do. The group holds the cable's colour as its CSS
+ * `color` so the bloom's currentColor resolves per cable. While one cable is
+ * armed, every other cable's stroke stops answering (`.vc-cable-has-armed`):
+ * a setting's cables all meet at its port and run within a few pixels of
+ * each other for the last stretch before it, where whichever was drawn last
+ * would otherwise take the pointer, and with it the port plug, from the cable
+ * followed in. A leave disarms after ARM_GRACE_MS, so the pointer can cross
+ * from the stroke to a plug that doesn't quite touch it. A touch never arms:
+ * a tap on the stroke still opens the knot, and the knot's Unplug unplugs.
+ * deviceMenu.ts only ever sets onUnplug on the pinned group's real patch
+ * sources: a preview cable and a display-only scene mix are decoration, not
+ * something a press should edit.
+ *
+ * An unplug plays a short retract (playUnplug): a copy of the cable's core
+ * runs back from the unplugged end into the other, a spark rings the socket
+ * it left and the plug pops out. The copy lives in `ghosts`, which
+ * recompute() never clears: the unplug's own rebuild lands a frame later,
+ * and a rebuilt copy would restart its animation. deviceMenu.ts plays it for
+ * every unplug of a drawn cable (its jack, the line's ×, the knot's Unplug).
+ * Reduced motion skips it.
  *
  * Resting the pointer on a pressable cable — still, for REVEAL_REST_MS —
  * scrolls its two ends into view (revealEnds): the signal's jack in the
@@ -73,10 +95,10 @@
  * it can grow into a panel; as it springs open and shut, tick() rewrites the
  * halves' `d` to follow its sides. A peek leaves the halves where they are. The first half's flow rides the wire's
  * input, the second's its output, so the knot visibly changes the signal.
- * Both halves keep the press stroke: a press still unplugs, and hovering
- * either half peeks the knot (setPeek). A knot opens from its own click or
- * from deviceMenu.ts's summary chip (openKnot). A source without a knot draws
- * as one path.
+ * Both halves keep the hit stroke: a click on either opens the knot and
+ * hovering either peeks it (setPeek). The knot also opens from its own click
+ * or from deviceMenu.ts's summary chip (openKnot). A source without a knot
+ * draws as one path.
  *
  * Every cable leaves its jack and enters its port through a short straight
  * CABLE_STUB_PX run before the bezier takes over (cablePathD) — a real
@@ -112,14 +134,19 @@
  * — the pinned group's `stroke-dashoffset`, the knots' styles, a split
  * cable's `d` when its knot moved — never reads, so it can run every rAF
  * tick for free; the preview group never animates, so it never needs a tick
- * write either.
+ * write either. A pull's pointermove only writes too (drawPull).
  *
  * A jack being dragged (deviceMenu.ts's jack drag) draws one temporary
  * dashed `.vc-cable-drag` path from its own jack to the pointer (setDrag).
- * It belongs to no group, so recompute() re-appends it after its rebuild.
+ * It sits outside `cables`, the group recompute() rebuilds, so a rebuild
+ * leaves it in place.
  */
 
 import { createCableKnotLayer, type CableKnotGeometry, type CableKnotPlacement, type CableKnotSpec } from "./cableKnots.ts";
+import { hideTooltipIfShowing, showTooltipAt } from "./tooltip.ts";
+
+/** Which end of a cable: the jack it leaves or the port it enters. */
+export type CableEnd = "jack" | "port";
 
 export interface CableSourceSpec {
   /** Unique per cable within one recompute() call — carries a flowing
@@ -150,19 +177,22 @@ export interface CableSourceSpec {
   /** Read every tick — flow speed rides this source's own live value.
    *  Unused for a preview cable (it never animates). */
   getValue: () => number;
-  /** Pressing this cable's hit stroke unplugs the source — see this
-   *  file's header. When set, the cable is wrapped in a `.vc-cable-g`
-   *  group with a `.vc-cable-hit` stroke over it that answers the
-   *  pointer; when absent the paths stay plain and click-transparent.
-   *  deviceMenu.ts's cableGroupFor only ever sets it on the pinned
-   *  group's real patch sources. */
-  onPress?: () => void;
+  /** Unplugs the source: a click or a pull on either of the cable's plugs
+   *  (see this file's header). When set, the cable is wrapped in a
+   *  `.vc-cable-g` group with a `.vc-cable-hit` stroke and two plugs that
+   *  answer the pointer; when absent the paths stay plain and
+   *  click-transparent. deviceMenu.ts's cableGroupFor only ever sets it on
+   *  the pinned group's real patch sources. */
+  onUnplug?: () => void;
+  /** The wire's name, for the hint a pressable cable shows. */
+  label?: string;
   /** This source was just toggled on — draws on over ~250ms
    *  (controlsTheme.ts's vc-cable-new rule) instead of appearing instantly.
    *  Only ever true on the pinned group — a preview is never mid-edit. */
   isNew?: boolean;
   /** A knot in this cable (cableKnots.ts) — see this file's header. Only
-   *  drawn for a pinned source that also has a press band. */
+   *  drawn for a pressable source with a press band; a click on the cable
+   *  opens it. */
   knot?: CableKnotSpec;
 }
 
@@ -196,6 +226,14 @@ export interface CableLayer {
   openKnot(sourceKey: string): void;
   closeKnot(): void;
   knotOpen(): boolean;
+  /** The unplug retract (see this file's header) for a pinned cable, by its
+   *  CableSourceSpec key, from `end`; nothing for a cable not drawn. Call it
+   *  before the patch edit that removes the cable. */
+  playUnplug(sourceKey: string, end: CableEnd): void;
+  /** A plug is held, pulled or not yet (see this file's header). */
+  pulling(): boolean;
+  /** Puts a held plug back, as letting go of a short pull does. */
+  cancelPull(): void;
 }
 
 const NS = "http://www.w3.org/2000/svg";
@@ -218,6 +256,28 @@ const REVEAL_STILL_PX = 3;
 /** Room kept between a revealed end and its column's edge, so the jack or
  *  port lands clear of the edge rather than flush against it. */
 const REVEAL_MARGIN_PX = 40;
+
+/** How far out along its stub a plug's centre sits from its jack's or
+ *  port's centre: clear of the jack's ring, so a plug never covers a jack. */
+const PLUG_INSET_PX = 14;
+/** The drawn sleeve, and its press target: short along the stub so it stays
+ *  off the jack's ring, tall across it for an easy grab. */
+const PLUG_LEN_PX = 9;
+const PLUG_THICK_PX = 6;
+const PLUG_HIT_LEN_PX = 12;
+const PLUG_HIT_CROSS_PX = 16;
+const PLUG_POP_PX = 8;
+const SPARK_R_PX = 6;
+/** Movement that turns a press on a plug into a pull, and how far a pull
+ *  must go to unplug when let go. */
+const PULL_START_PX = 4;
+const PULL_OUT_PX = 24;
+/** Room to cross from a cable's stroke to a plug that doesn't quite touch it. */
+const ARM_GRACE_MS = 120;
+/** When an unplug's retract is removed: well after controlsTheme.ts's
+ *  .vc-cable-ghost animations have ended. */
+const GHOST_MAX_MS = 600;
+const CABLE_ENDS: readonly CableEnd[] = ["jack", "port"];
 
 /** Extra clearance kept above/below Power's own card before a port counts
  *  as "in its band" (cablePathD's own detour) — enough that the detoured
@@ -342,6 +402,26 @@ function cablePointAt(
   return flatCubicAt(jackStubX, pt.y, jackStubX + dir * dx, portStubX - dir * dx, portStubX, port.y, t);
 }
 
+/** Where a plug rests on the cable from `jack` to `port`: on the stub at
+ *  `end`, out from its socket toward the other end. */
+export function plugPoint(jack: { x: number; y: number }, port: { x: number; y: number }, end: CableEnd): { x: number; y: number } {
+  const dir = port.x >= jack.x ? 1 : -1;
+  return end === "jack" ? { x: jack.x + dir * PLUG_INSET_PX, y: jack.y } : { x: port.x - dir * PLUG_INSET_PX, y: port.y };
+}
+
+/** A press on a plug becomes a pull once it moves this far from the press. */
+export function pullStarts(dx: number, dy: number): boolean {
+  return Math.hypot(dx, dy) > PULL_START_PX;
+}
+
+/** What letting go of a pressed plug does, from how far it is from the
+ *  press: a press that never became a pull is a click, and a pull unplugs
+ *  only once it went PULL_OUT_PX. */
+export function pullRelease(dx: number, dy: number, moved: boolean): "click" | "unplug" | "back" {
+  if (!moved) return "click";
+  return Math.hypot(dx, dy) >= PULL_OUT_PX ? "unplug" : "back";
+}
+
 /** How far apart, along their cables, one setting's knots rest. Its cables
  *  all meet at one port, so at the same `t` the knots of neighbouring jacks
  *  would stack; spread along the cables they sit apart. */
@@ -361,9 +441,8 @@ function pathEl(cls: string, d: string, color: string): SVGPathElement {
 
 /** One drawn cable's own wrapper group — see this file's header. Holds
  *  the glow/core/flow (or flat) paths and, for a pressable source, the
- *  hit stroke that answers the pointer; `.vc-cable-g:hover` (the hover
- *  lift) keys off the group being hovered, which the hit stroke's own
- *  hit-testing propagates to. The cable's own colour also rides the
+ *  hit stroke and plugs that answer the pointer; `.vc-cable-armed` on it
+ *  (arm) carries the hover lift. The cable's own colour also rides the
  *  group as CSS `color`, so the hover bloom's currentColor drop-shadow
  *  (controlsTheme.ts) resolves per cable without that rule ever naming
  *  a colour. */
@@ -372,6 +451,28 @@ function groupEl(color: string): SVGGElement {
   g.setAttribute("class", "vc-cable-g");
   g.style.color = color;
   return g;
+}
+
+/** A `w` × `h` rect centred on its group's origin. */
+function rectEl(cls: string, w: number, h: number, fill: string): SVGRectElement {
+  const r = document.createElementNS(NS, "rect");
+  r.setAttribute("class", cls);
+  r.setAttribute("x", String(-w / 2));
+  r.setAttribute("y", String(-h / 2));
+  r.setAttribute("width", String(w));
+  r.setAttribute("height", String(h));
+  r.setAttribute("rx", "2");
+  r.setAttribute("fill", fill);
+  return r;
+}
+
+/** One end's plug: a group at the plug's centre, so a pull moves it with
+ *  one write, holding the drawn sleeve (bindPlug adds the press target). */
+function plugEl(color: string): SVGGElement {
+  const el = document.createElementNS(NS, "g");
+  el.setAttribute("class", "vc-cable-end");
+  el.append(rectEl("vc-cable-plug", PLUG_LEN_PX, PLUG_THICK_PX, color));
+  return el;
 }
 
 /** Scrolls one cable end (a jack or a port) into its column's visible band
@@ -405,34 +506,37 @@ interface RevealState {
   y: number;
 }
 
+/** What a pressable cable's hit stroke does (attachHit). */
+interface HitHandlers {
+  click(): void;
+  enter(e: PointerEvent): void;
+  leave(): void;
+}
+
 /** The transparent press target over one pressable cable — see this
  *  file's header. mousedown is dropped like jack.ts does its own, so a
  *  press never moves focus off whatever row was focused (focus opening/
  *  closing a row's hint would slide the port out from under the held
  *  button); Tab still never reaches the layer (aria-hidden). Resting on
  *  it scrolls the cable's ends into view (revealEnd). */
-function attachPress(
+function attachHit(
   g: SVGGElement,
-  onPress: (() => void) | undefined,
   d: string,
   ends: { jackEl: HTMLElement; portEl: HTMLElement },
   reveal: RevealState,
-  clipId: string | null,
-  onHover?: (on: boolean) => void,
-): SVGPathElement | null {
-  if (!onPress || clipId === null) return null;
+  clipId: string,
+  on: HitHandlers,
+): SVGPathElement {
   const hit = pathEl("vc-cable-hit", d, "transparent");
-  if (onHover) {
-    hit.addEventListener("pointerenter", (e) => {
-      if (e.pointerType !== "touch") onHover(true);
-    });
-    hit.addEventListener("pointerleave", () => onHover(false));
-  }
+  hit.addEventListener("pointerenter", (e) => {
+    if (e.pointerType !== "touch") on.enter(e);
+  });
+  hit.addEventListener("pointerleave", () => on.leave());
   hit.addEventListener("mousedown", (e) => e.preventDefault());
   hit.setAttribute("clip-path", `url(#${clipId})`);
   hit.addEventListener("click", (e) => {
     e.stopPropagation();
-    onPress();
+    on.click();
   });
   const rest = (e: PointerEvent): void => {
     if (e.pointerType === "touch") return;
@@ -462,6 +566,13 @@ function attachPress(
   return hit;
 }
 
+/** A pulled end, at the pointer. */
+interface PullAt {
+  end: CableEnd;
+  x: number;
+  y: number;
+}
+
 /** A pinned cable drawn in two halves around its knot: the paths of each
  *  half (strands and hit stroke) and the knot geometry they were last
  *  written for. */
@@ -473,6 +584,22 @@ interface Split {
   a: SVGPathElement[];
   b: SVGPathElement[];
   geom: CableKnotGeometry | null;
+  /** The pulled end, drawn at the pointer instead of in its socket. */
+  pull: PullAt | null;
+}
+
+/** A pressable pinned cable: what arming, a pull and playUnplug need of it.
+ *  Its paths are `whole`'s, or `split`'s halves around a knot. */
+interface Wire {
+  key: string;
+  src: CableSourceSpec;
+  g: SVGGElement;
+  pt: { x: number; y: number };
+  portPt: { x: number; y: number };
+  avoidBand: { top: number; bottom: number } | null;
+  whole: SVGPathElement[];
+  split: Split | null;
+  plugs: Record<CableEnd, SVGGElement>;
 }
 
 interface Resolved {
@@ -505,7 +632,7 @@ function resolveGroup(group: CableGroupSpec): { portPt: { x: number; y: number }
   for (const src of group.sources) {
     const pt = endpointFor(src.jackEl);
     if (!pt) continue;
-    resolved.push({ src, pt, pressBand: src.onPress ? pressBandFor(src.jackEl, portEl) : null });
+    resolved.push({ src, pt, pressBand: src.onUnplug ? pressBandFor(src.jackEl, portEl) : null });
   }
   return { portPt, resolved };
 }
@@ -514,12 +641,15 @@ export function createCableLayer(): CableLayer {
   const svg = document.createElementNS(NS, "svg") as unknown as SVGSVGElement;
   svg.setAttribute("class", "vc-cable-layer");
   svg.setAttribute("aria-hidden", "true");
+  // recompute() rebuilds `cables` alone: an unplug's retract in `ghosts`
+  // outlives the rebuild that unplug causes (see this file's header).
+  const cables = document.createElementNS(NS, "g");
+  const ghosts = document.createElementNS(NS, "g");
+  svg.append(cables, ghosts);
 
   let flows: { el: SVGPathElement; key: string; getValue: () => number }[] = [];
-  // The jack drag's own cable (setDrag) — kept across recompute(), which
-  // clears every child of svg, so the path is re-appended after each rebuild.
+  // The jack drag's own cable (setDrag), kept on top of both groups.
   let dragPath: SVGPathElement | null = null;
-  let dragSpec: { from: HTMLElement; x: number; y: number; color: string } | null = null;
   // Keyed by source key (namespaced per group — see this file's header) so
   // a rebuild (a patch edit, a scroll) doesn't snap a still-connected
   // cable's flow back to 0 — only a cable that stops existing loses its
@@ -528,6 +658,16 @@ export function createCableLayer(): CableLayer {
   const reveal: RevealState = { timer: 0, x: 0, y: 0 };
   const knots = createCableKnotLayer();
   let splits: Split[] = [];
+  /** The pinned group's pressable cables, by CableSourceSpec key. */
+  const wires = new Map<string, Wire>();
+  /** The cable under the pointer (see this file's header); `timer` is a pending disarm. */
+  let armed: { wire: Wire; timer: number } | null = null;
+  /** A press on a plug: a pull once it `moved`, last drawn at `at`. */
+  let pull: { wire: Wire; end: CableEnd; pointerId: number; x0: number; y0: number; moved: boolean; at: PullAt | null } | null = null;
+  /** The id of the hint this layer showed last (tooltip.ts): a disarm comes
+   *  a grace after the leave, by when the pointer may be on a jack whose own
+   *  tooltip must stay. */
+  let tip = 0;
 
   /** Rewrites a split cable's two halves to the knot's current sides, only
    *  when they moved since the last write. Writes only. */
@@ -537,12 +677,181 @@ export function createCableLayer(): CableLayer {
     const last = sp.geom;
     if (last && last.left === g.left && last.right === g.right && last.entryY === g.entryY) return;
     sp.geom = g;
+    const a = sp.pull?.end === "jack" ? sp.pull : sp.pt;
+    const b = sp.pull?.end === "port" ? sp.pull : sp.portPt;
     // The first half ends at the knot, which sits in the open gap, so only
-    // the second half can need the detour under Power.
-    const dA = cablePathD(sp.pt, { x: g.left, y: g.entryY }, null);
-    const dB = cablePathD({ x: g.right, y: g.entryY }, sp.portPt, sp.avoidBand);
+    // the second half can need the detour under Power, and only while it
+    // still ends in the port.
+    const dA = cablePathD(a, { x: g.left, y: g.entryY }, null);
+    const dB = cablePathD({ x: g.right, y: g.entryY }, b, sp.pull?.end === "port" ? null : sp.avoidBand);
     for (const p of sp.a) p.setAttribute("d", dA);
     for (const p of sp.b) p.setAttribute("d", dB);
+  }
+
+  function arm(w: Wire): void {
+    if (armed && armed.wire !== w) disarmNow();
+    if (armed) {
+      window.clearTimeout(armed.timer);
+      armed.timer = 0;
+      return;
+    }
+    armed = { wire: w, timer: 0 };
+    w.g.classList.add("vc-cable-armed");
+    svg.classList.add("vc-cable-has-armed");
+  }
+
+  function disarmSoon(w: Wire): void {
+    if (armed?.wire !== w || pull) return;
+    window.clearTimeout(armed.timer);
+    armed.timer = window.setTimeout(() => {
+      if (armed?.wire === w) disarmNow();
+    }, ARM_GRACE_MS);
+  }
+
+  function disarmNow(): void {
+    if (!armed) return;
+    window.clearTimeout(armed.timer);
+    armed.wire.g.classList.remove("vc-cable-armed");
+    svg.classList.remove("vc-cable-has-armed");
+    armed = null;
+    hideTooltipIfShowing(tip);
+  }
+
+  function bodyHint(w: Wire): string[] {
+    const lines = w.src.label ? [w.src.label] : [];
+    if (w.split) lines.push("Click to open its Height and modifier");
+    lines.push("Click or pull an end to unplug");
+    return lines;
+  }
+
+  /** Puts a cable's plugs where `at` leaves them: the pulled one at the
+   *  pointer, the other on its stub. Writes only. */
+  function placePlugs(w: Wire, at: PullAt | null): void {
+    for (const end of CABLE_ENDS) {
+      const p = at && at.end === end ? at : plugPoint(w.pt, w.portPt, end);
+      w.plugs[end].setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+    }
+  }
+
+  /** Redraws a cable for a pull at `at`, or back in its sockets for null.
+   *  Writes only. */
+  function drawPull(w: Wire, at: PullAt | null): void {
+    if (w.split) {
+      w.split.pull = at;
+      w.split.geom = null;
+      writeSplit(w.split);
+    } else {
+      const a = at?.end === "jack" ? at : w.pt;
+      const b = at?.end === "port" ? at : w.portPt;
+      const d = cablePathD(a, b, at?.end === "port" ? null : w.avoidBand);
+      for (const p of w.whole) p.setAttribute("d", d);
+    }
+    placePlugs(w, at);
+  }
+
+  /** A plug's press target: arms its cable, says what it does, and starts a pull. */
+  function bindPlug(w: Wire, end: CableEnd): void {
+    const hit = rectEl("vc-cable-plug-hit", PLUG_HIT_LEN_PX, PLUG_HIT_CROSS_PX, "transparent");
+    hit.addEventListener("pointerenter", (e) => {
+      if (e.pointerType === "touch" || pull) return;
+      arm(w);
+      const p = plugPoint(w.pt, w.portPt, end);
+      tip = showTooltipAt(p.x, p.y - PLUG_HIT_CROSS_PX / 2, w.src.color, [w.src.label ? `Click or pull to unplug ${w.src.label}` : "Click or pull to unplug"]);
+    });
+    hit.addEventListener("pointerleave", () => disarmSoon(w));
+    hit.addEventListener("pointerdown", (e) => startPull(w, end, e));
+    w.plugs[end].append(hit);
+  }
+
+  function startPull(w: Wire, end: CableEnd, e: PointerEvent): void {
+    if (e.button !== 0 || e.pointerType === "touch" || pull) return;
+    // As the hit stroke's mousedown: a press on a plug never moves focus.
+    e.preventDefault();
+    pull = { wire: w, end, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, at: null };
+    window.addEventListener("pointermove", onPullMove);
+    window.addEventListener("pointerup", onPullUp);
+    window.addEventListener("pointercancel", onPullCancel);
+  }
+
+  function onPullMove(e: PointerEvent): void {
+    const p = pull;
+    if (!p || e.pointerId !== p.pointerId) return;
+    const dx = e.clientX - p.x0;
+    const dy = e.clientY - p.y0;
+    if (!p.moved) {
+      if (!pullStarts(dx, dy)) return;
+      p.moved = true;
+      document.body.classList.add("vc-cable-pulling");
+      hideTooltipIfShowing(tip);
+    }
+    p.at = { end: p.end, x: e.clientX, y: e.clientY };
+    p.wire.g.classList.toggle("vc-cable-loose", pullRelease(dx, dy, true) === "unplug");
+    drawPull(p.wire, p.at);
+  }
+
+  function onPullUp(e: PointerEvent): void {
+    const p = pull;
+    if (!p || e.pointerId !== p.pointerId) return;
+    const outcome = pullRelease(e.clientX - p.x0, e.clientY - p.y0, p.moved);
+    endPull();
+    if (outcome === "back") {
+      drawPull(p.wire, null);
+      return;
+    }
+    playUnplug(p.wire.key, p.end);
+    p.wire.src.onUnplug?.();
+  }
+
+  function onPullCancel(e: PointerEvent): void {
+    if (pull && e.pointerId === pull.pointerId) cancelPull();
+  }
+
+  /** Lets go of a held plug, leaving the cable as it is drawn. */
+  function endPull(): void {
+    const p = pull;
+    if (!p) return;
+    pull = null;
+    window.removeEventListener("pointermove", onPullMove);
+    window.removeEventListener("pointerup", onPullUp);
+    window.removeEventListener("pointercancel", onPullCancel);
+    document.body.classList.remove("vc-cable-pulling");
+    p.wire.g.classList.remove("vc-cable-loose");
+    disarmNow();
+  }
+
+  function cancelPull(): void {
+    const p = pull;
+    if (!p) return;
+    endPull();
+    drawPull(p.wire, null);
+  }
+
+  function playUnplug(sourceKey: string, end: CableEnd): void {
+    const w = wires.get(sourceKey);
+    if (!w || reduceMotion()) return;
+    const ghost = document.createElementNS(NS, "g");
+    ghost.setAttribute("class", end === "jack" ? "vc-cable-ghost-g vc-cable-ghost-rev" : "vc-cable-ghost-g");
+    for (const p of w.g.querySelectorAll<SVGPathElement>(".vc-cable-core, .vc-cable-muted")) {
+      const copy = pathEl("vc-cable-ghost", p.getAttribute("d") ?? "", w.src.color);
+      copy.setAttribute("pathLength", "100");
+      ghost.append(copy);
+    }
+    const socket = end === "jack" ? w.pt : w.portPt;
+    const spark = document.createElementNS(NS, "circle");
+    spark.setAttribute("class", "vc-cable-spark");
+    spark.setAttribute("cx", socket.x.toFixed(1));
+    spark.setAttribute("cy", socket.y.toFixed(1));
+    spark.setAttribute("r", String(SPARK_R_PX));
+    spark.setAttribute("stroke", w.src.color);
+    const plug = plugEl(w.src.color);
+    plug.classList.add("vc-cable-end-pop");
+    plug.setAttribute("transform", w.plugs[end].getAttribute("transform") ?? "");
+    // Out of the socket: along the stub, away from it.
+    const out = (w.portPt.x >= w.pt.x ? 1 : -1) * (end === "jack" ? 1 : -1);
+    plug.style.setProperty("--pop", `${out * PLUG_POP_PX}px`);
+    ghost.append(spark, plug);
+    ghosts.append(ghost);
+    window.setTimeout(() => ghost.remove(), GHOST_MAX_MS);
   }
 
   function recompute(pinnedGroup: CableGroupSpec, previewGroup: CableGroupSpec, fanGroups: readonly CableGroupSpec[] = []): void {
@@ -558,13 +867,17 @@ export function createCableLayer(): CableLayer {
 
     // Pass 2 — every write: clear the old cables, build and append the new
     // ones, forget any carried flow offset nothing still uses.
-    svg.textContent = "";
+    // A rebuilt cable is an element the pointer hasn't entered; a held pull
+    // carries over to its rebuilt cable at the end.
+    if (!pull) disarmNow();
+    cables.textContent = "";
+    wires.clear();
     flows = [];
     splits = [];
     const defs = document.createElementNS(NS, "defs");
-    svg.append(defs);
+    cables.append(defs);
     let clipCount = 0;
-    /** One cable's press band as a clip for its hit stroke (attachPress):
+    /** One cable's press band as a clip for its hit stroke (attachHit):
      *  the band's full height, so only x limits where it answers. */
     const pressClip = (band: { left: number; right: number }): string => {
       const id = `vc-cable-press-${clipCount++}`;
@@ -585,7 +898,7 @@ export function createCableLayer(): CableLayer {
     // The lit signal's fan first, so the pinned/preview cables it may
     // share a jack and port with draw over it — see this file's header.
     for (const { portPt, resolved } of fanResolved) {
-      for (const { src, pt } of resolved) svg.append(pathEl("vc-cable-fan", cablePathD(pt, portPt, avoidBand), src.color));
+      for (const { src, pt } of resolved) cables.append(pathEl("vc-cable-fan", cablePathD(pt, portPt, avoidBand), src.color));
     }
 
     // The pinned group dims once a preview is also on screen, so it never
@@ -628,37 +941,60 @@ export function createCableLayer(): CableLayer {
         return [glow, core, flow];
       };
       // Top jack first, so the spread runs the same way down the meters.
-      const knotted = resolved.filter((r) => r.src.knot && r.pressBand).sort((a, b) => a.pt.y - b.pt.y);
+      const knotted = resolved.filter((r) => r.src.knot && r.src.onUnplug && r.pressBand).sort((a, b) => a.pt.y - b.pt.y);
       const knotT = new Map(
         knotted.map((r, i) => [r.src.key, Math.min(KNOT_T_MAX, Math.max(KNOT_T_MIN, 0.5 + (i - (knotted.length - 1) / 2) * KNOT_SPREAD_T))]),
       );
       for (const { src, pt, pressBand } of resolved) {
         const key = `pinned:${src.key}`;
-        const clipId = pressBand ? pressClip(pressBand) : null;
         const g = groupEl(src.color);
-        const knot = src.knot;
-        if (!knot || !pressBand) {
-          const d = cablePathD(pt, portPt, avoidBand);
-          strands(g, src, d, key, src.getValue);
-          attachPress(g, src.onPress, d, ends(src), reveal, clipId);
-          svg.append(g);
+        if (!src.onUnplug || !pressBand) {
+          strands(g, src, cablePathD(pt, portPt, avoidBand), key, src.getValue);
+          cables.append(g);
           continue;
         }
-        const rest = cablePointAt(pt, portPt, avoidBand, knotT.get(src.key) ?? 0.5);
-        const restX = Math.min(pressBand.right - KNOT_GAP_INSET_PX, Math.max(pressBand.left + KNOT_GAP_INSET_PX, rest.x));
-        knotPlacements.push({ key: src.key, color: src.color, anchor: { x: restX, y: rest.y }, gap: pressBand, spec: knot });
-        // The halves' `d` waits for the knot's geometry, which sync() below
-        // settles; writeSplit fills it in.
-        const split: Split = { key: src.key, pt, portPt, avoidBand, a: [], b: [], geom: null };
-        splits.push(split);
-        const hover = (on: boolean) => knots.setPeek(src.key, on);
-        split.a = strands(g, src, "", `${key}:a`, () => knot.read()?.input ?? src.getValue());
-        split.b = strands(g, src, "", `${key}:b`, () => knot.read()?.output ?? src.getValue());
-        const hitA = attachPress(g, src.onPress, "", ends(src), reveal, clipId, hover);
-        const hitB = attachPress(g, src.onPress, "", ends(src), reveal, clipId, hover);
-        if (hitA) split.a.push(hitA);
-        if (hitB) split.b.push(hitB);
-        svg.append(g);
+        const clipId = pressClip(pressBand);
+        const w: Wire = { key: src.key, src, g, pt, portPt, avoidBand, whole: [], split: null, plugs: { jack: plugEl(src.color), port: plugEl(src.color) } };
+        wires.set(src.key, w);
+        const on: HitHandlers = {
+          click: () => {
+            if (w.split) knots.open(w.key);
+          },
+          enter: (e) => {
+            if (pull) return;
+            arm(w);
+            tip = showTooltipAt(e.clientX, e.clientY, src.color, bodyHint(w));
+            if (w.split) knots.setPeek(w.key, true);
+          },
+          leave: () => {
+            disarmSoon(w);
+            if (w.split) knots.setPeek(w.key, false);
+          },
+        };
+        const knot = src.knot;
+        if (!knot) {
+          const d = cablePathD(pt, portPt, avoidBand);
+          w.whole = strands(g, src, d, key, src.getValue);
+          w.whole.push(attachHit(g, d, ends(src), reveal, clipId, on));
+        } else {
+          g.classList.add("vc-cable-knotted");
+          const rest = cablePointAt(pt, portPt, avoidBand, knotT.get(src.key) ?? 0.5);
+          const restX = Math.min(pressBand.right - KNOT_GAP_INSET_PX, Math.max(pressBand.left + KNOT_GAP_INSET_PX, rest.x));
+          knotPlacements.push({ key: src.key, color: src.color, anchor: { x: restX, y: rest.y }, gap: pressBand, spec: knot });
+          // The halves' `d` waits for the knot's geometry, which sync() below
+          // settles; writeSplit fills it in.
+          const split: Split = { key: src.key, pt, portPt, avoidBand, a: [], b: [], geom: null, pull: null };
+          splits.push(split);
+          w.split = split;
+          split.a = strands(g, src, "", `${key}:a`, () => knot.read()?.input ?? src.getValue());
+          split.b = strands(g, src, "", `${key}:b`, () => knot.read()?.output ?? src.getValue());
+          split.a.push(attachHit(g, "", ends(src), reveal, clipId, on));
+          split.b.push(attachHit(g, "", ends(src), reveal, clipId, on));
+        }
+        for (const end of CABLE_ENDS) bindPlug(w, end);
+        g.append(w.plugs.jack, w.plugs.port);
+        placePlugs(w, null);
+        cables.append(g);
       }
     }
     // Runs even with nothing pinned, so a knot whose cable went away goes too.
@@ -671,27 +1007,33 @@ export function createCableLayer(): CableLayer {
       for (const { src, pt } of resolved) {
         liveKeys.add(`preview:${src.key}`);
         const d = cablePathD(pt, portPt, avoidBand);
-        svg.append(pathEl("vc-cable-preview", d, src.color));
+        cables.append(pathEl("vc-cable-preview", d, src.color));
       }
     }
     // Forget any source's carried offset that no longer has a cable —
     // otherwise a long session leaks one Map entry per source ever shown.
     for (const k of [...offsets.keys()]) if (!liveKeys.has(k)) offsets.delete(k);
-    // recompute() cleared svg's children, drag cable included — put it back
-    // on top, where setDrag keeps it.
-    if (dragSpec && dragPath) svg.append(dragPath);
+    // A rebuild mid-pull (a scroll, a card resizing): the held plug carries
+    // on with the rebuilt cable, or lets go if that cable is gone.
+    if (pull) {
+      const w = wires.get(pull.wire.key);
+      if (!w) {
+        endPull();
+      } else {
+        pull.wire = w;
+        if (armed) armed.wire = w;
+        w.g.classList.add("vc-cable-armed");
+        if (pull.at) {
+          w.g.classList.toggle("vc-cable-loose", pullRelease(pull.at.x - pull.x0, pull.at.y - pull.y0, true) === "unplug");
+          drawPull(w, pull.at);
+        }
+      }
+    }
   }
 
   function setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void {
-    if (!drag) {
-      dragPath?.remove();
-      dragPath = null;
-      dragSpec = null;
-      return;
-    }
-    dragSpec = drag;
-    const pt = endpointFor(drag.from);
-    if (!pt) {
+    const pt = drag ? endpointFor(drag.from) : null;
+    if (!drag || !pt) {
       dragPath?.remove();
       dragPath = null;
       return;
@@ -726,11 +1068,18 @@ export function createCableLayer(): CableLayer {
     setVisible(v) {
       svg.style.display = v ? "" : "none";
       knots.setVisible(v);
+      if (!v) {
+        cancelPull();
+        disarmNow();
+      }
     },
     setDrag,
     knotEl: knots.el,
     openKnot: (sourceKey) => knots.open(sourceKey),
     closeKnot: () => knots.close(),
     knotOpen: () => knots.openKey() !== null,
+    playUnplug,
+    pulling: () => pull !== null,
+    cancelPull,
   };
 }
