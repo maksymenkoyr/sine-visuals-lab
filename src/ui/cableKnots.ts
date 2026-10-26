@@ -160,6 +160,8 @@ interface Knot {
   openH: number;
   /** The cable's entry height within the open body; Infinity until first measured. */
   entryOff: number;
+  /** The springs were replaced by a snap, so the element's left/top are stale though nothing is moving. */
+  snapped: boolean;
   x: Spring;
   y: Spring;
   w: Spring;
@@ -268,6 +270,7 @@ export function createCableKnotLayer(): CableKnotLayer {
       body: null,
       openH: REST_PX,
       entryOff: Number.POSITIVE_INFINITY,
+      snapped: false,
       x: spring(p.anchor.x),
       y: spring(p.anchor.y),
       w: spring(REST_PX),
@@ -415,6 +418,7 @@ export function createCableKnotLayer(): CableKnotLayer {
         if (settled(k.x) && settled(k.y)) {
           k.x = spring(p.anchor.x);
           k.y = spring(p.anchor.y);
+          k.snapped = true;
         }
         aim(k);
       }
@@ -489,7 +493,8 @@ export function createCableKnotLayer(): CableKnotLayer {
       moved = stepSpring(k.w, dtSec, snap) || moved;
       moved = stepSpring(k.h, dtSec, snap) || moved;
       stepSpring(k.cableW, dtSec, snap);
-      if (moved || k.el.style.width === "") {
+      if (moved || k.snapped || k.el.style.width === "") {
+        k.snapped = false;
         const s = k.el.style;
         s.left = `${(k.x.v - k.w.v / 2).toFixed(1)}px`;
         s.top = `${(k.y.v - k.h.v / 2).toFixed(1)}px`;
