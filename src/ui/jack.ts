@@ -1,10 +1,10 @@
 /**
  * The patch bay's jack (src/ui/deviceMenu.ts's own plan doc): a small round
- * button mounted beside a meter row or a hits lane that a live signal can
+ * button mounted beside a meter row that a live signal can
  * feed into a pinned setting. One module because the identical button
- * mounts wherever a reactive row/lane lives — the Bands card's Frequencies
+ * mounts wherever a reactive row lives — the Bands card's Frequencies
  * corner (deviceMenu.ts), and every meter row audioMeters.ts owns
- * (Sound/Hits/Beat/Song) — and every one of them
+ * (Sound/Stems/Beat/Song) — and every one of them
  * needs to look and behave the same way.
  *
  * This file only ever draws visual state; it never touches a DriveSetting.
@@ -120,7 +120,7 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
   };
 }
 
-/** Toggles a meter row's (or a hit lane's shared row's) fed glow — `kind`/
+/** Toggles a meter row's fed glow — `kind`/
  *  `color` are already resolved by the caller (deviceMenu.ts's
  *  refreshBandsJacks, audioMeters.ts's refreshPatchView), this only writes
  *  the DOM:

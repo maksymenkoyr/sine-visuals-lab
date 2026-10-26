@@ -62,10 +62,14 @@ that reshapes an input node's value on its way to that one setting.
   source. A wire is the one thing drawn between a jack and a port.
 - **Built-in, not scene mix.** "Mix" is the control right next to it; two different things can't share the word.
 - **Sound card.** The first meter: what you hear before any beat logic. A thin
-  live spectrum over Level, Bass, Mid and Treble, then **Bands**: rows for
+  live spectrum over Bass, Mid and Treble, then **Bands**: rows for
   single bands, each named by its Hz. Click a bar
   on the spectrum to give that band its own row and click it again to drop
-  it; a band wired to a setting always shows its row. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
+  it; a band wired to a setting always shows its row. Then Level, then
+  **Hits**: a drum roll with a track and a jack for Any, Bass, Mid, Treble
+  and Onset surge. A **note** is one reading that cleared its line: filled
+  when it counted, hollow when it came too soon after the last, faint white
+  when the room was too quiet. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
   over.
 - **Stems card.** Right after Sound: Lead and Hats, the held and the drum part
   of the sound, then Kick, each its own row with its own colour and

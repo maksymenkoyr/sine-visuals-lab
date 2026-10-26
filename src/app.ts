@@ -514,8 +514,8 @@ let lastRawBands: Float32Array | null = null;
 let lastMono: Float32Array | null = null;
 /** DEV only, off measureAnalyser. Same buffer every read: copy before crossing a page.evaluate boundary. */
 let lastDeepMono: Float32Array | null = null;
-// The Any hit lane's diag off this device's own engine reading, for the Hits
-// card's history. Read the same tick it's set (deviceMenu.update()), before the
+// The Any hit's diag off this device's own engine reading, for the Sound
+// card's Hits drum roll. Read the same tick it's set (deviceMenu.update()), before the
 // next currentVisual() mutates it in place.
 let lastBeatDiag: OnsetDiag | null = null;
 const beatDiag: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };

@@ -232,7 +232,7 @@ the gate read as quiet.
 Besides hits, the onset detector reports each hop's rise against the hit
 threshold, and which kind that rise is nearest. It is the naming rule without
 moving a cluster centre, since only a hit may move one. The largest rise since
-the last frame is the reading's `surge`, with `surgeKind`. The Hits card's lanes
+the last frame is the reading's `surge`, with `surgeKind`. The Hits drum roll
 and the Onset surge signal read it, so a scene can lean into a build-up before
 the hit lands. `blocked` marks a rise that peaked inside the refractory: a hit
 that was blocked rather than missed.

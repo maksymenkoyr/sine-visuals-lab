@@ -84,8 +84,8 @@ export interface FeatureFrame {
   /** True on the frame the engine heard a hit of any kind, after this
    *  sender's silence gate (src/audio/silenceGate.ts). A follower builds its
    *  own hits from `engine` with its own gate; this flag is what a follower
-   *  that predates `engine` reacts to, and what the Hits card's Beat lane
-   *  reads on the device that hears the sound. */
+   *  that predates `engine` reacts to, and what the Hits drum roll's Any
+   *  track reads on the device that hears the sound. */
   onset: boolean;
   /** The same hit before the silence gate. Kept for followers that predate
    *  `engine`: their beat clock votes on it. */
