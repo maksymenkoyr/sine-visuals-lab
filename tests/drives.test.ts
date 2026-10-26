@@ -557,15 +557,16 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
   });
 
   // Neither was ever a real composite — breathe read a bare 0 (no reaction at
-  // all), causticDensity a bare 1 (an unfiltered pass-through) — so per
+  // all), Caustic density's a bare 1 (an unfiltered pass-through) — so per
   // drives.ts's header's "Nothing plugged in" paragraph they now each carry a
   // real catalogue default instead of "scene".
-  it("breathe defaults to Bar wave and causticDensity to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
+  it("breathe defaults to Bar wave and densityReach to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.8), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    expect(byKey("causticDensity").drive!.default).toBe("anim.sectionIntensity");
-    expect(drives.value("causticDensity", -1)).toBe(anim.sectionIntensity);
+    expect(byKey("causticDensity").drive).toBeUndefined();
+    expect(byKey("densityReach").drive!.default).toBe("anim.sectionIntensity");
+    expect(drives.value("densityReach", -1)).toBe(anim.sectionIntensity);
     expect(byKey("breathe").drive!.default).toBe("anim.barWave");
     expect(drives.uniformPair("breathe")).toEqual({ drive: SIGNALS["anim.barWave"].read(frame(), anim), custom: 1 });
   });

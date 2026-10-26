@@ -47,7 +47,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description:
-      "How many filaments the pattern resolves into — fewer at low values, more at high, each keeping its width. Whatever is wired in pushes it finer (a chorus, by default); a change — from the slider or a wire — eases in rather than snapping.",
+      "How many filaments the pattern resolves into with nothing pushing it — fewer at low values, more at high, each keeping its width. A change eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -56,11 +56,26 @@ const SETTINGS: SceneSetting[] = [
     // Pure framing geometry the user tunes to taste, same reasoning as
     // sparkleGrain's weight: 0 — not something the music profile should
     // silently redecide underneath a chosen look (no `auto` table).
-    // Wirable, on Section by default: the pool resolves into a finer mesh as
-    // the song builds, lifted on top of the slider (densityTargetFor), so an
-    // unplugged jack leaves exactly the slider's own density. The result is
-    // only a target — advanceDensityFlow glides the drawn density toward it,
-    // so neither a drag nor a source can snap the field.
+    // Not wirable: the music's share is densityReach below, so this holds
+    // still at any reach of 0 (#453).
+  },
+  {
+    key: "densityReach",
+    label: "Density reach",
+    description:
+      "How far whatever is wired in pushes the pattern finer than Caustic density (a chorus, by default). At 0 the density holds still.",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    // The share of the remaining way to the finest mesh a full reading
+    // covers (densityTargetFor); the default is the fixed lift this scene
+    // had before the split, so existing looks are unchanged.
+    default: 0.15,
+    // Taste, so no auto table (same reasoning as causticDensity).
+    // Section by default: the pool resolves into a finer mesh as the song
+    // builds. The result is only a target — advanceDensityFlow glides the
+    // drawn density toward it, so a source can't snap the field either.
     drive: { default: "anim.sectionIntensity" },
   },
   {

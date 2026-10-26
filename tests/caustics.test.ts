@@ -392,19 +392,24 @@ describe("caustics caustic density", () => {
   });
 
   // drives.ts's header's "Nothing plugged in" paragraph: an unplugged jack
-  // (drive 0) leaves exactly the slider, never the coarsest cells.
-  it("densityTargetFor is the slider at drive 0, rises with the drive, and stays in 0..1", () => {
+  // (drive 0) leaves exactly the slider, never the coarsest cells; and #453:
+  // Density reach 0 holds the slider at any reading.
+  it("densityTargetFor is the slider at drive 0 or reach 0, rises with both, and stays in 0..1", () => {
     for (const slider of [0, 0.35, 0.7, 1]) {
-      expect(densityTargetFor(slider, 0)).toBeCloseTo(slider, 10);
-      let prev = densityTargetFor(slider, 0);
-      for (const drive of [0.25, 0.5, 1, 2]) {
-        const t = densityTargetFor(slider, drive);
-        expect(t).toBeGreaterThanOrEqual(prev);
-        expect(t).toBeLessThanOrEqual(1);
-        prev = t;
+      for (const reach of [0, 0.15, 0.5, 1]) {
+        expect(densityTargetFor(slider, reach, 0)).toBeCloseTo(slider, 10);
+        let prev = densityTargetFor(slider, reach, 0);
+        for (const drive of [0.25, 0.5, 1, 2]) {
+          const t = densityTargetFor(slider, reach, drive);
+          expect(t).toBeGreaterThanOrEqual(prev);
+          expect(t).toBeLessThanOrEqual(1);
+          if (reach === 0) expect(t).toBeCloseTo(slider, 10);
+          prev = t;
+        }
       }
+      expect(densityTargetFor(slider, 0.5, 1)).toBeGreaterThanOrEqual(densityTargetFor(slider, 0.15, 1));
     }
-    expect(densityTargetFor(0.35, NaN)).toBeCloseTo(0.35, 10);
+    expect(densityTargetFor(0.35, 0.15, NaN)).toBeCloseTo(0.35, 10);
   });
 });
 

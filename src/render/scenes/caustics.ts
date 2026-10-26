@@ -53,8 +53,8 @@ import { advanceSparkleHits, createSparkleHits, EFFECT_GRAIN, EFFECT_PRISM, EFFE
 // file's git history),
 // Caustic density scales how many filaments the ridge noise resolves into,
 // at the same filament width and over the same warp (it is not a zoom; 0.5 is
-// exactly the old fixed frequency) — wirable
-// (its source lifts the slider toward a finer mesh, Section by default), and
+// exactly the old fixed frequency); Density reach is how far its own source
+// lifts that toward a finer mesh (Section by default), and the result is
 // eased in by advanceDensityFlow rather than applied on the frame it changes,
 // uBreathe is the depth of a zoom its own source moves — Bar wave by
 // default, once per bar (breatheDrive in FRAG) — uRipple drives a continuous ring emitter (rippleEmitter.ts) seated
@@ -115,9 +115,7 @@ import { advanceSparkleHits, createSparkleHits, EFFECT_GRAIN, EFFECT_PRISM, EFFE
 // / whichever sparkle effect is picked — crest glints by default; each
 // treble hit plays the picked shape, causticsSparkle.ts's header). Every
 // music-driven term is a slider times its drive, so
-// with the sliders at 0 the picture only drifts on its own clock. The
-// exception is Caustic density, whose source still lifts the slider
-// (densityTargetFor, #453).
+// with the sliders at 0 the picture only drifts on its own clock.
 //
 // Precision, or why nothing the shader hashes ever grows with session
 // length: the drift phase only ever accumulates (advanceDensityFlow's
@@ -203,26 +201,21 @@ const BREATHE_ZOOM = 0.10;
 // clamp and no ceiling to saturate against.
 const FOCUS_SNAP_RATIO = 1.3;
 
-// Caustic density's reach (causticDensityScale below): 0.5 is exactly today's old fixed
+// Caustic density's span (causticDensityScale below): 0.5 is exactly today's old fixed
 // noise-sampling frequency (densScale = 1); the endpoints sit half the span
 // either side of that in octaves. Widened once (#454) when density stopped
 // zooming: with the filament width held, a wide range reads as a sparse web
 // at one end and a dense mesh at the other, still this scene's own look.
 const DENSITY_SPAN_OCTAVES = 3.2;
-// How far Caustic density's own source lifts the slider toward the finest
-// mesh at a full reading. A lift, identity at drive 0 (drives.ts's header's
-// "Nothing plugged in" paragraph), so an unplugged jack leaves the slider's
-// own density; kept well under a full push because the field spans
-// DENSITY_SPAN_OCTAVES and a chorus shouldn't re-scale the whole pool.
-const DENSITY_DRIVE_LIFT = 0.15;
 
 /** Caustic density's target (advanceDensityFlow glides toward it): the
- *  slider lifted toward 1 by its drive's reading — the slider exactly at
- *  drive 0, never outside 0..1 (a patched source's weight can exceed 1). */
-export function densityTargetFor(slider: number, drive: number): number {
+ *  slider lifted toward 1 by `reach` (Density reach) times its drive's
+ *  reading — the slider exactly at reach 0 or drive 0, never outside 0..1
+ *  (a patched source's weight can exceed 1). */
+export function densityTargetFor(slider: number, reach: number, drive: number): number {
   const s = Math.min(1, Math.max(0, slider));
   const d = Number.isFinite(drive) ? drive : 0;
-  return Math.min(1, Math.max(0, s + (1 - s) * DENSITY_DRIVE_LIFT * d));
+  return Math.min(1, Math.max(0, s + (1 - s) * reach * d));
 }
 
 /** uFog (0..1) -> the sharpness the ridges sit at with no beat driving them.
@@ -1118,12 +1111,10 @@ float softCeil(float x, float knee, float ceil) {
           levelValue,
           pumpVel: pump.vel,
         });
-        // Caustic density: the slider lifted toward a finer mesh by its own
-        // source (densityTargetFor — the slider exactly when nothing is
-        // plugged in). advanceDensityFlow glides toward it and folds the live
+        // advanceDensityFlow glides toward the target and folds the live
         // value into the drift phase. The sceneDefault is the reading the
         // default (Section) equals, for a stale stored "scene".
-        const densityTarget = densityTargetFor(getSetting("causticDensity"), drives.value("causticDensity", anim.sectionIntensity));
+        const densityTarget = densityTargetFor(getSetting("causticDensity"), getSetting("densityReach"), drives.value("densityReach", anim.sectionIntensity));
         advanceDensityFlow(densityFlow, anim.dtSec, densityTarget, phaseStep);
 
         // Beat ripple: age every ring already in flight first, so a ring
