@@ -2,7 +2,7 @@
  * A wire's modifier: Window, Smoothness and Length on one wire from an input
  * to a scene setting (drives.ts's `DriveSource.mod`). Height is the wire's own
  * `DriveSource.height`, read before the modifier, so the window sees the
- * Fixed or Loud envelope when one is picked. Window picks the stretch of the
+ * Graded envelope when one is picked. Window picks the stretch of the
  * input, between 0 and its own learned peak, that moves the output (Min and
  * Max, with an On/Off), reusing the generic gate in gateWindow.ts so its math
  * is never copied; Smoothness softens it, or with Window off eases the input
@@ -23,7 +23,7 @@
  * `legacyNodeFrom` reads such a node, and driveStore.ts's
  * sanitizeDriveSetting does the conversion for both.
  */
-import { GATE_FORMULA_DEFAULT, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, glideSmoothness, glideStep, windowReading, type GateFormula, type GateTrackerState } from "./gateWindow.ts";
+import { GATE_FORMULA_DEFAULT, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, glideSmoothness, glideStep, parseHitHeight, windowReading, type GateFormula, type GateTrackerState, type HitHeight } from "./gateWindow.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 
 /** Length's right end: the longest fall a wire's output can take, in seconds. */
@@ -115,7 +115,7 @@ export function decodeWireMod(raw: unknown): WireMod | null {
  *  Height and its modifier fields. */
 export interface LegacyNode {
   src: SignalId;
-  height: "graded" | "fixed" | "loud";
+  height: HitHeight;
   mod: WireMod;
 }
 
@@ -123,7 +123,6 @@ export interface LegacyNode {
 // would also accept "toString" or "__proto__" from corrupt storage or a
 // crafted Look.
 const SIGNAL_IDS: ReadonlySet<string> = new Set(Object.keys(SIGNALS));
-const HEIGHTS: ReadonlySet<string> = new Set(["graded", "fixed", "loud"]);
 
 /** One node of the retired `vibe.shapingNodes` store or a Look's `h` field,
  *  or null when any field has the wrong type. */
@@ -134,10 +133,12 @@ export function legacyNodeFrom(raw: unknown): LegacyNode | null {
   if (typeof src !== "string" || !SIGNAL_IDS.has(src)) return null;
   if (typeof windowOn !== "boolean" || typeof smoothOn !== "boolean") return null;
   for (const n of [min, max, smoothness, length]) if (typeof n !== "number" || !Number.isFinite(n)) return null;
-  if (typeof height !== "string" || !HEIGHTS.has(height)) return null;
+  // A node saved "graded" meant the plain pulse, which is Fixed now.
+  const legacyHeight = height === "graded" ? "fixed" : parseHitHeight(height);
+  if (legacyHeight === null) return null;
   return {
     src: src as SignalId,
-    height: height as LegacyNode["height"],
+    height: legacyHeight,
     mod: clampWireMod({ windowOn, min: min as number, max: max as number, smoothOn, smoothness: smoothness as number, length: length as number }),
   };
 }

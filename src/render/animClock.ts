@@ -179,7 +179,7 @@ export interface AnimFrame {
   metronomeBarPulse: number;
   /** Each lane's pulseDecayScale for this tick's HitShape (all 1 when none
    *  was passed): the factor that lane's pulse decay rate carries, here so
-   *  drives.ts's Fixed/Loud heights and grid pulses can fall at the same
+   *  drives.ts's Graded heights and grid pulses can fall at the same
    *  stretched rate as the pulses they stand in for. */
   hitTail: HitTails;
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
@@ -253,7 +253,7 @@ export interface AnimClock {
   lockReadings(): Readonly<Record<LockMeaning, number>>;
 }
 
-// Exported so src/render/drives.ts's Fixed/Loud hit heights can decay a
+// Exported so src/render/drives.ts's Graded hit heights can decay a
 // broadband ("Any hit") source at exactly this same rate rather than
 // hand-duplicating it (its own header explains why: "read it from
 // animClock/bandEnergy; don't invent one").

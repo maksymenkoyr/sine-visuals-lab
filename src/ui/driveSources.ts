@@ -284,9 +284,8 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
   { label: "Line", choices: [{ source: "line" }] },
 ];
 
-/** The Fixed/Loud/Graded height choices a hit-kind wire takes. */
+/** The Fixed/Graded height choices a hit wire takes. */
 export const HEIGHT_OPTIONS: readonly { h: HitHeight; label: string; hint: string }[] = [
-  { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by the Shape sliders." },
   { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
-  { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
+  { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit: a whisper lands short, a slam lands tall." },
 ];

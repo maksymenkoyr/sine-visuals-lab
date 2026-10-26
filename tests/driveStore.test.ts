@@ -112,7 +112,7 @@ describe("driveStore: getDriveSetting/setDriveSetting — the patch API", () => 
     const patch: DrivePatch = {
       mix: "gate",
       sources: [
-        { choice: "anim.lowOnset", weight: 1.5, height: "fixed" },
+        { choice: "anim.lowOnset", weight: 1.5, height: "graded" },
         { choice: "anim.mid", weight: 0.6 },
       ],
     };
@@ -165,11 +165,16 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(sanitizeDriveSetting(null)).toBeNull();
   });
 
+  it("a saved wire's retired \"loud\" height loads as Graded, and Fixed is the omitted default", () => {
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.lowOnset", h: "loud" }] })).toEqual({ mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "graded" }] });
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.lowOnset", h: "fixed" }] })).toEqual(driveSettingFromChoice("anim.lowOnset"));
+  });
+
   it("encodeDriveSetting/sanitizeDriveSetting round-trip through the compact wire shape", () => {
     const patch: DrivePatch = {
       mix: "max",
       sources: [
-        { choice: "anim.lowOnset", weight: 0.5, height: "loud" },
+        { choice: "anim.lowOnset", weight: 0.5, height: "graded" },
         { choice: { source: "beat", grid: 2 }, weight: 1 },
       ],
     };
@@ -337,8 +342,8 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     const sceneId = "patch-helper-2";
     togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
     setSourceWeight(sceneId, SPARKLE, "anim.lowOnset", 1.5);
-    setSourceHeight(sceneId, SPARKLE, "anim.lowOnset", "fixed");
-    expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1.5, height: "fixed" }] });
+    setSourceHeight(sceneId, SPARKLE, "anim.lowOnset", "graded");
+    expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1.5, height: "graded" }] });
   });
 
   it("setSourceGrid re-grids the patch's own grid source", () => {
@@ -646,7 +651,7 @@ describe("driveStore with a stubbed localStorage", () => {
 
 describe("wire modifiers in the drive store", () => {
   const MOD = { ...freshWireMod(), windowOn: true, min: 0.3, max: 0.8, length: 0.4 };
-  const NODE: LegacyNode = { src: "anim.low", height: "fixed", mod: MOD };
+  const NODE: LegacyNode = { src: "anim.low", height: "graded", mod: MOD };
 
   it("encode then sanitize round-trips a modifier, and a one-wire patch with one is not written as a bare choice", () => {
     const one = normalizeDriveSetting({ mix: "add", sources: [{ choice: "anim.low", weight: 1, mod: MOD }] });
@@ -665,7 +670,7 @@ describe("wire modifiers in the drive store", () => {
 
   it("a retired modifier wire becomes the plain wire on its node's input, with the node's Height and modifier", () => {
     const nodes = new Map([["n3", NODE]]);
-    const expected = { mix: "add", sources: [{ choice: "anim.low", weight: 1, height: "fixed", mod: MOD }] };
+    const expected = { mix: "add", sources: [{ choice: "anim.low", weight: 1, height: "graded", mod: MOD }] };
     expect(sanitizeDriveSetting({ source: "shaped", id: "n3" }, nodes)).toEqual(expected);
     expect(sanitizeDriveSetting({ m: "add", s: [{ c: { source: "shaped", id: "n3" } }] }, nodes)).toEqual(expected);
   });

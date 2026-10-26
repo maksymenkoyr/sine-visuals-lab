@@ -16,7 +16,7 @@ import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import type { SceneCard } from "../src/render/scene.ts";
 import { isScene } from "../src/render/scenes/privateScenes.ts";
 import { fileClosure, SCENES_DIR, sceneEntries } from "../tools/sceneVersionLib.mjs";
-import { engineReading } from "./engineReading.ts";
+import { engineReading, ratioForStandout } from "./engineReading.ts";
 
 const DT = 1 / 60;
 
@@ -24,11 +24,12 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
   return { time: 0, bands: new Float32Array(NUM_BANDS), energy: 0, level: 1, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, engine: null, ...overrides };
 }
 
-/** A hit driver on a one-source Loud-height Beat patch: each hit's pulse is
- *  exactly the driveEnergy it lands with, so a test sets every hit's height. */
+/** A hit driver on a one-source Graded-height Beat patch: each hit's pulse is
+ *  the stand-out of the ratio it lands with (rig's `height`), so a test sets
+ *  every hit's height. */
 function hitSpec(sceneId: string, hit: NonNullable<NonNullable<SceneSetting["drive"]>["hit"]> = {}): SceneSetting {
   const spec: SceneSetting = { key: "k", label: "k", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "feature.onset", hit } };
-  const patch: DrivePatch = { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] };
+  const patch: DrivePatch = { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "graded" }] };
   setDriveSetting(sceneId, spec, patch);
   return spec;
 }
@@ -39,7 +40,7 @@ function rig(sceneId: string, spec: SceneSetting) {
   const clock = createAnimClock();
   const engine = createDriveEngine();
   return (onset: boolean, height: number) => {
-    const anim = clock.advance(DT, frame({ engine: engineReading({ kick: onset ? 2 : 0 }) }));
+    const anim = clock.advance(DT, frame({ engine: engineReading({ kick: onset ? ratioForStandout(height) : 0 }) }));
     engine.accumulate(DT, frame(), height, anim, sceneId, [spec]);
     const drives = engine.forScene(sceneId, [spec], anim);
     const fired = drives.fired("k", false);
@@ -75,7 +76,7 @@ describe("hit drivers: what the engine does", () => {
   it("untouched (threshold Off, Flat): fires on exactly the edges a plain setting does, at size 1", () => {
     const plain: SceneSetting = { key: "k", label: "k", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "feature.onset" } };
     const hit = hitSpec("hit-identity");
-    setDriveSetting("hit-identity-plain", plain, { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    setDriveSetting("hit-identity-plain", plain, { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "graded" }] });
     const a = rig("hit-identity", hit);
     const b = rig("hit-identity-plain", plain);
     for (let i = 0; i < 300; i++) {

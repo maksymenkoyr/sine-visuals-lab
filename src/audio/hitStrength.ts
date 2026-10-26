@@ -92,7 +92,7 @@ export function getHitShape(): HitShape {
  *  never get one) or a non-finite or non-positive tail reads as 1, same
  *  fallback rule as the other fields. Applied wherever a hit's decaying pulse
  *  is built: animClock.ts (beatPulse, the metronome pulses), bandEnergy.ts
- *  (each band group's pulse) and drives.ts's grid pulses and Fixed/Loud
+ *  (each band group's pulse) and drives.ts's grid pulses and Graded
  *  heights, which read it back off AnimFrame.hitTail so they fall like the
  *  pulses they stand in for. */
 export function pulseDecayScale(shape: HitShape | undefined, lane: HitLane): number {

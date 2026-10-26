@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { DIAL_SIGNALS, SIGNALS, type SignalId } from "../src/render/signals.ts";
+import { DIAL_SIGNALS, type SignalId } from "../src/render/signals.ts";
+import { hasHitStrength } from "../src/render/gateWindow.ts";
 import {
   applyEdit,
   arrowStep,
@@ -153,12 +154,12 @@ describe("randomPatch (the console's Random wiring)", () => {
     for (const id of DIAL_SIGNALS) expect(RANDOM_WIRE_SIGNALS).not.toContain(id);
   });
 
-  it("gives a hit its height and Beat wave its beats per swing, and nothing else either", () => {
+  it("gives a hit with a size its height and Beat wave its beats per swing, and nothing else either", () => {
     const rnd = seeded(11);
     for (let i = 0; i < 400; i++) {
       for (const s of randomPatch(rnd).sources) {
         const id = s.choice as SignalId;
-        expect(s.height !== undefined).toBe(SIGNALS[id].kind === "edge");
+        expect(s.height !== undefined).toBe(hasHitStrength(id));
         expect(s.every !== undefined).toBe(id === "anim.beatWave");
       }
     }
