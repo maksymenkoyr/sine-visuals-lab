@@ -851,7 +851,9 @@ body.vc-keys-reveal [data-keycap]::after {
  * which whitening would just recolour.
  * While one cable is armed the others' strokes stop answering (.vc-cable-has-armed),
  * so the cable followed in keeps the pointer where a setting's cables meet at its
- * port. Preview/scene-mix cables never grow a hit stroke, so they never arm. */
+ * port. Preview/scene-mix cables never grow a hit stroke, so they never arm.
+ * .vc-cables-lift (cableLayer.ts setLift) lifts every pinned cable at once, while the
+ * pointer is on the pinned row. */
 .vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: grab; }
 .vc-cable-has-armed .vc-cable-g:not(.vc-cable-armed) .vc-cable-hit { pointer-events: none; }
 .vc-cable-g { transition: filter 0.15s ease, opacity 0.12s ease; }
@@ -859,14 +861,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-flow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-muted { transition: opacity 0.12s ease; }
-.vc-cable-g.vc-cable-armed { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
-.vc-cable-g.vc-cable-armed .vc-cable-core { stroke-width: 3; opacity: 1; }
-.vc-cable-g.vc-cable-armed .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
-.vc-cable-g.vc-cable-armed .vc-cable-flow { opacity: 1; }
+.vc-cable-g.vc-cable-armed, .vc-cables-lift .vc-cable-g { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
+.vc-cable-g.vc-cable-armed .vc-cable-core, .vc-cables-lift .vc-cable-g .vc-cable-core { stroke-width: 3; opacity: 1; }
+.vc-cable-g.vc-cable-armed .vc-cable-glow, .vc-cables-lift .vc-cable-g .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
+.vc-cable-g.vc-cable-armed .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .vc-cable-g.vc-cable-armed .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
+  .vc-cable-g.vc-cable-armed .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
 }
-.vc-cable-g.vc-cable-armed .vc-cable-muted { opacity: 0.8; }
+.vc-cable-g.vc-cable-armed .vc-cable-muted, .vc-cables-lift .vc-cable-g .vc-cable-muted { opacity: 0.8; }
 /* A cable's ×s (cableLayer.ts xEl, bindX): drawn and pressable only while the cable is
  * armed or lingering, since they sit over the jack's and the port's own cards. With
  * the pointer on one, the cable previews its unplug dashed and without its bloom. A

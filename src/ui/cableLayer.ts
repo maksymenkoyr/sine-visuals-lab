@@ -78,7 +78,8 @@
  * opens the knot, and the knot's Unplug unplugs.
  * deviceMenu.ts only ever sets onUnplug on the pinned group's real patch
  * sources: a preview cable and a display-only scene mix are decoration, not
- * something a press should edit.
+ * something a press should edit. setLift gives every pinned cable the hover
+ * lift at once, for deviceMenu.ts while the pointer is on the pinned row.
  *
  * An unplug plays a short retract (playUnplug): a copy of the cable's core
  * runs back from the unplugged end into the other, and a spark rings the
