@@ -1,0 +1,1301 @@
+<title>Caustics Effects, Round Two</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: a pool-side monitor wall. One big live pool with its notes beside it,
+   the six ideas as live tiles under it, a hit strip on top that shows what fired.
+   One deliberate dark look: the pool's own ground is the page. */
+:root {
+  color-scheme: dark;
+  --ink: #07050f;
+  --deck: #100c1e;
+  --deck-2: #171229;
+  --rule: #2b2446;
+  --text: #ece8f7;
+  --dim: #a299bf;
+  --faint: #6f6790;
+  --cyan: #00f0ff;
+  --pink: #f92368;
+  --amber: #ffb547;
+  --font-display: "Chakra Petch", "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+html, body { background: var(--ink); color: var(--text); }
+body {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 56px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--deck); }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; display: block; }
+.wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; display: grid; gap: 28px; }
+
+.eyebrow { font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin: 0; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(28px, 4.2vw, 44px); line-height: 1.08; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 600; line-height: 1.15; }
+.head { display: grid; gap: 10px; padding-top: 32px; max-width: 760px; }
+.lede { margin: 0; color: var(--dim); font-size: 16px; max-width: 64ch; }
+.lede b { color: var(--text); font-weight: 500; }
+.lede a { color: var(--cyan); overflow-wrap: anywhere; }
+
+/* the music deck */
+.deck { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--deck); border: 1px solid var(--rule); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; }
+.deck-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: var(--deck-2); }
+.chip { font: 500 13px/1 var(--font-body); color: var(--dim); background: var(--deck-2); border: 1px solid var(--rule); border-radius: 7px; padding: 8px 11px; cursor: pointer; white-space: nowrap; }
+.seg .chip { border-color: transparent; background: transparent; }
+.chip:hover { color: var(--text); }
+.chip[aria-pressed="true"], .chip.on { color: var(--ink); background: var(--cyan); border-color: var(--cyan); }
+.chip:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.where { margin-left: auto; font-family: var(--font-mono); font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+#strip { width: 100%; height: 60px; display: block; border-radius: 7px; background: var(--ink); }
+
+/* the stage */
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.view { position: relative; aspect-ratio: 16 / 9; width: 100%; max-width: 100%; border-radius: 12px; }
+.stage-view { box-shadow: 0 0 0 1px var(--rule); }
+/* No fill: the Today view inside it is drawn by the canvas behind the page. */
+.card { background: transparent; border: 1px solid var(--rule); border-radius: 12px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.card h2 { font-size: 30px; }
+.listen { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-mono); font-size: 13px; color: var(--text); }
+.listen .k { color: var(--faint); }
+.led { width: 9px; height: 9px; border-radius: 50%; background: var(--pink); opacity: 0.25; flex: none; }
+.led.l1 { background: var(--amber); }
+.led.l2 { background: var(--cyan); }
+.led.lx { background: #d7ccff; }
+.what { margin: 0; }
+.adds { margin: 0; color: var(--dim); font-size: 14px; }
+.adds b { color: var(--text); font-weight: 600; }
+.slider { display: grid; grid-template-columns: auto 1fr 3.2em; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
+.slider input { width: 100%; accent-color: var(--cyan); }
+.slider output { font-family: var(--font-mono); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { font: 600 14px/1 var(--font-body); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--rule); background: var(--deck-2); color: var(--text); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+.btn:hover { border-color: var(--dim); }
+.btn.primary { background: var(--pink); border-color: var(--pink); color: #fff; }
+.btn[aria-pressed="true"] { background: var(--text); color: var(--ink); }
+.mini { margin: 0; display: grid; gap: 6px; }
+.mini .view { border-radius: 8px; box-shadow: 0 0 0 1px var(--rule); }
+.mini figcaption { font-size: 12px; color: var(--faint); font-family: var(--font-mono); }
+
+/* the tiles */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.tile { position: relative; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; border-radius: 10px; box-shadow: 0 0 0 1px var(--rule); }
+.tile .view { border-radius: 10px; }
+.tile[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--cyan); }
+.tile .label { position: absolute; inset: auto 0 0 0; padding: 26px 10px 8px; border-radius: 0 0 10px 10px; background: linear-gradient(to bottom, rgba(7, 5, 15, 0), rgba(7, 5, 15, 0.86)); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tile .name { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
+.tile .num { font-family: var(--font-mono); font-size: 12px; color: var(--dim); margin-right: 6px; }
+.tile .listen { font-size: 12px; color: var(--dim); }
+.tile .listen span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the notes */
+.notes { display: grid; gap: 14px; }
+.notes p { margin: 0; max-width: 72ch; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--deck); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+td:first-child { font-family: var(--font-display); font-weight: 600; white-space: nowrap; }
+.skip { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.skip li { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 12px; padding: 10px 12px; background: var(--deck); border: 1px solid var(--rule); border-radius: 10px; }
+.skip b { font-family: var(--font-display); font-weight: 600; }
+.skip span { color: var(--dim); }
+.pick { background: var(--deck); border: 1px solid var(--rule); border-left: 0; border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; }
+.foot { color: var(--faint); font-size: 13px; }
+.foot a { color: var(--dim); }
+#glerr { background: var(--deck); border: 1px solid var(--pink); border-radius: 10px; padding: 12px 14px; margin: 0; }
+
+@media (max-width: 860px) {
+  .stage { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .where { margin-left: 0; flex-basis: 100%; }
+}
+@media (max-width: 460px) {
+  .tile .listen { display: none; }
+  .skip li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+</style>
+
+<canvas id="gl" aria-hidden="true"></canvas>
+<div class="wrap">
+  <header class="head">
+    <p class="eyebrow">Caustics · effect ideas, round two · 27 Oct 2026</p>
+    <h1>Six more effects, none of them from round one</h1>
+    <p class="lede">Round one changed order, spin, direction, cracks, depth and the drift's rhythm. These six change <b>distance, local colour, a path, where the water is, tone</b> and <b>which way time runs</b>. They all run live on the same music, over the scene's default look. Pick one to see it big; hold <b>Space</b> to compare it with today.</p>
+    <p class="lede">Round one, still waiting on your pick:</p>
+    <p class="lede"><a href="https://claude.ai/artifact/URQWmfUZnQvtBQBGMerXBC">https://claude.ai/artifact/URQWmfUZnQvtBQBGMerXBC</a></p>
+  </header>
+
+  <section class="deck" aria-label="Music">
+    <div class="deck-row">
+      <div class="seg" role="group" aria-label="Music source">
+        <button id="m-loop" class="chip" aria-pressed="true" type="button">Beat loop</button>
+        <button id="m-song" class="chip" aria-pressed="false" type="button">Song file…</button>
+      </div>
+      <input id="file" type="file" accept="audio/*" hidden>
+      <button id="sound" class="chip" aria-pressed="false" type="button">Sound</button>
+      <button id="slow" class="chip" aria-pressed="false" type="button">¼ speed</button>
+      <button id="others" class="chip" aria-pressed="true" type="button">Other reactions</button>
+      <button id="pause" class="chip" aria-pressed="false" type="button">Pause</button>
+      <span id="where" class="where">loop · intro</span>
+    </div>
+    <canvas id="strip" aria-label="Bass, snare and hat hits over the last four seconds"></canvas>
+  </section>
+
+  <p id="glerr" hidden></p>
+
+  <section class="stage" aria-label="Selected idea">
+    <div class="view stage-view" id="stageView" role="img" aria-label="The selected idea, live"></div>
+    <aside class="card" aria-live="polite">
+      <p class="eyebrow">Idea <span id="s-num">1</span> of 6</p>
+      <h2 id="s-name">Dive</h2>
+      <p class="listen"><span class="led" id="s-led"></span><span class="k">listens to</span><span id="s-listen">Bass hits</span></p>
+      <p class="what" id="s-what"></p>
+      <p class="adds"><b id="s-adds-k"></b> <span id="s-adds"></span></p>
+      <label class="slider" for="s-amt">Strength <input id="s-amt" type="range" min="0" max="1" step="0.01" value="0.85"><output id="s-amt-out" for="s-amt">85%</output></label>
+      <div class="btns">
+        <button class="btn primary" id="s-hit" type="button">Hit now</button>
+        <button class="btn" id="s-hold" type="button" aria-pressed="false">Hold for today</button>
+      </div>
+      <figure class="mini">
+        <div class="view" id="todayView" role="img" aria-label="Today's Caustics on the same music"></div>
+        <figcaption>Today, same music</figcaption>
+      </figure>
+    </aside>
+  </section>
+
+  <section class="tiles" id="tiles" aria-label="All six ideas"></section>
+
+  <section class="notes">
+    <h2>How each would ship</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Idea</th><th>Wired to, by default</th><th>Its slider</th><th>Extra GPU work per pixel</th></tr></thead>
+        <tbody>
+          <tr><td>Dive</td><td>Bass hits; a big hit through the stand-out detector Beat ripple already uses</td><td>How far a kick dives</td><td>One rotation and a divide, before the ridge loop</td></tr>
+          <tr><td>Dye</td><td>Bass hits, at most one drop a bar or so</td><td>How strong the colour is</td><td>One noise and a few multiplies per drop, after the ridge loop</td></tr>
+          <tr><td>Wake</td><td>Bass hits for strokes, the bar for a new swimmer</td><td>How hard the water churns</td><td>A few exponentials per swimmer, plus two noises in the first two octaves inside the wake</td></tr>
+          <tr><td>Tide</td><td>Level, with a lap on Bass hits</td><td>How far the water drains</td><td>Three noises and a sine for the shoreline and the sand</td></tr>
+          <tr><td>Contour</td><td>Mid hits (snares, claps)</td><td>How hard the light snaps to steps</td><td>A floor, a fract and a screen-space width</td></tr>
+          <tr><td>Scratch</td><td>Mid hits, and fills (three in under a second)</td><td>How far a snare winds the water back</td><td>None: it changes the drift phase on the CPU</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot">Every idea is one new row with its own jack, so its source can be rewired like any other setting. None of them adds another pass of the ridges, which is most of the scene's frame.</p>
+
+    <h2>Also considered</h2>
+    <ul class="skip">
+      <li><b>Low sun</b><span>Breakdowns lower the sun and stretch the light into long bands. Round one's Gust already streaks it.</span></li>
+      <li><b>Second sun</b><span>A second light comes in on the drop and every line doubles into a crossing pair. It needs a second pass of the ridges, which would roughly double the frame.</span></li>
+      <li><b>Fish shadows</b><span>Dark shapes swim across the floor. They are shapes on top of the picture, which you turned down for Sparkle; Wake is the same idea done through the water.</span></li>
+      <li><b>Freeze</b><span>A stand-out hit freezes the pool to frost. Round one's Shatter and Stop-motion already cover the hard stop.</span></li>
+    </ul>
+
+    <h2>My pick</h2>
+    <div class="pick" id="pick">
+      <p><b>Contour</b>, with <b>Dye</b> as the runner-up.</p>
+      <p>Contour turns the soft light into something no other scene draws: flat terraces with a bright line on each step. It is the bell shape you asked for on Sparkle, a hard snap that melts away, it transforms the picture rather than adding to it, and it is the cheapest idea here. Dye is the most new to look at: it is the only idea that puts colour in one place. In the app its drops would take the palette's accent colours, not these fixed three.</p>
+    </div>
+    <p class="foot">The pools here run a copy of the scene's shader at its defaults (Neon, Shades + accent), with Beat ripple, Bass swell, Fog pulse, Beat flash, Level glow and Grain sparkle approximated in this page. Wake and Tide unfold over bars; give them a few seconds. A song file is analysed here in three bands; the app's own hit detection will differ.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const TAU = Math.PI * 2;
+
+  // ---------------------------------------------------------------- palette
+  // Neon's roles from palette.ts, baked to nine stops in OKLab the way the
+  // app bakes them, so this pool takes the scene's colours.
+  const NEON = { ground: "#07040f", ramp: ["#160a3a", "#5828fd", "#ca01b6", "#f92368", "#ffb3d0", "#fff0f6"], accent: "#00f0ff" };
+  const hexRgb = (h) => { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
+  const toLin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const toSrgb = (c) => { c = clamp(c, 0, 1); return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; };
+  function oklab(rgb) {
+    const [r, g, b] = rgb.map(toLin);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+  }
+  function fromOklab([L, A, B]) {
+    const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+    const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+    const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s].map(toSrgb);
+  }
+  const RAMP = new Float32Array(27);
+  {
+    const labs = NEON.ramp.map((h) => oklab(hexRgb(h)));
+    for (let i = 0; i < 9; i++) {
+      const u = (i / 8) * (labs.length - 1);
+      const k = Math.min(Math.floor(u), labs.length - 2), f = u - k;
+      RAMP.set(fromOklab(labs[k].map((v, j) => v + (labs[k + 1][j] - v) * f)), i * 3);
+    }
+  }
+
+  // ---------------------------------------------------------------- drift
+  // The scene's drift offsets (driftFlows in caustics.ts), wrapped on the CPU
+  // so the GPU hash never sees a large phase.
+  const PERIOD = 256;
+  const wrap = (x) => { const w = x - Math.floor(x / PERIOD) * PERIOD; return Math.fround(w) >= PERIOD ? 0 : w; };
+  const FLOWS_LEN = 17;
+  function driftFlows(phase, ridgePhase, out) {
+    const fx = phase * 0.15, fy = phase * -0.09;
+    out[0] = wrap(fx); out[1] = wrap(fy); out[2] = wrap(-fx); out[3] = wrap(-fy);
+    const rx = ridgePhase * 0.15, ry = ridgePhase * -0.09;
+    for (let i = 0; i < 6; i++) {
+      const k = 1 + i * 0.2;
+      out[4 + 2 * i] = wrap(rx * k);
+      out[5 + 2 * i] = wrap(ry * k);
+    }
+    out[16] = wrap(phase * 2.0);
+    return out;
+  }
+  const densScale = (d) => Math.pow(2, (d - 0.5) * 3.2);
+
+  // ---------------------------------------------------------------- music
+  const BPM = 124, BEAT = 60 / BPM, STEP = BEAT / 4, BAR = BEAT * 4;
+  const SECTIONS = [
+    { name: "intro", bars: 4, level: 0.42, inten: 0.3 },
+    { name: "build", bars: 4, level: 0.55, inten: 0.65 },
+    { name: "drop", bars: 8, level: 0.7, inten: 1 },
+    { name: "break", bars: 4, level: 0.22, inten: 0.12 },
+  ];
+  const LOOP_BARS = SECTIONS.reduce((s, x) => s + x.bars, 0);
+  function sectionAt(bar) {
+    let b = ((bar % LOOP_BARS) + LOOP_BARS) % LOOP_BARS;
+    for (let k = 0; k < SECTIONS.length; k++) {
+      if (b < SECTIONS[k].bars) return { k, barIn: b, sec: SECTIONS[k] };
+      b -= SECTIONS[k].bars;
+    }
+    return { k: 0, barIn: 0, sec: SECTIONS[0] };
+  }
+  // A kick after the break and the first kick of every four drop bars stand
+  // out, the way a real song's returning kick stands out from the last few.
+  function stepHits(n) {
+    const bar = Math.floor(n / 16), s16 = n % 16, beatPos = s16 % 4;
+    const { k, barIn } = sectionAt(bar);
+    const h = { kick: 0, big: false, snare: 0, hat: 0, open: false, pad: false };
+    if (k === 0) {
+      if (beatPos === 0) { h.kick = 0.72; h.big = barIn === 0 && s16 === 0; }
+      if (beatPos === 2) { h.hat = 0.5; h.open = true; }
+    } else if (k === 1) {
+      if (beatPos === 0) h.kick = 0.8;
+      if (s16 === 4 || s16 === 12) h.snare = 0.7;
+      h.hat = 0.24 + 0.1 * barIn + (beatPos === 2 ? 0.2 : 0);
+      if (barIn === 3 && s16 >= 8) h.snare = 0.45 + 0.075 * (s16 - 8);
+    } else if (k === 2) {
+      if (beatPos === 0) { h.kick = 1; h.big = s16 === 0 && barIn % 4 === 0; }
+      if (s16 === 4 || s16 === 12) h.snare = 0.9;
+      h.hat = beatPos === 2 ? 0.85 : 0.42;
+      h.open = beatPos === 2;
+    } else {
+      if (beatPos === 0) h.hat = s16 === 0 ? 0.5 : 0.3;
+      h.pad = s16 === 0;
+    }
+    return h;
+  }
+
+  const M = {
+    mode: "loop", t: 0, step: -1, level: 0.45, inten: 0.3, centroid: 0.5,
+    bar: 0, barPhase: 0, where: "",
+    bands: new Float32Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+    events: [],
+  };
+
+  // ---- sound for the loop
+  let actx = null, master = null, noiseBuf = null, soundOn = false;
+  function audio() {
+    if (!actx) {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain();
+      master.gain.value = 0;
+      master.connect(actx.destination);
+      noiseBuf = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.5), actx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (actx.state === "suspended" && !paused) actx.resume();
+    return actx;
+  }
+  function noiseHit(type, freq, q, gain, len) {
+    const a = actx, t = a.currentTime;
+    const src = a.createBufferSource(); src.buffer = noiseBuf;
+    const f = a.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = a.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + len / speed());
+    src.connect(f).connect(g).connect(master);
+    src.start(t); src.stop(t + len / speed() + 0.05);
+  }
+  function playLane(lane, s, open) {
+    if (!actx || !soundOn || M.mode !== "loop") return;
+    const a = actx, t = a.currentTime, sp = speed();
+    if (lane === 0) {
+      const o = a.createOscillator(), g = a.createGain();
+      o.frequency.setValueAtTime(130 * sp + 20, t);
+      o.frequency.exponentialRampToValueAtTime(42, t + 0.14 / sp);
+      g.gain.setValueAtTime(0.7 * s, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22 / sp);
+      o.connect(g).connect(master); o.start(t); o.stop(t + 0.25 / sp);
+    } else if (lane === 1) {
+      noiseHit("bandpass", 1700, 0.8, 0.5 * s, 0.16);
+    } else {
+      noiseHit("highpass", 7500, 0.7, 0.22 * s, open ? 0.24 : 0.045);
+    }
+  }
+  function playPad() {
+    if (!actx || !soundOn || M.mode !== "loop") return;
+    const a = actx, t = a.currentTime, len = BAR / speed();
+    const g = a.createGain();
+    const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.06, t + 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    f.connect(g).connect(master);
+    for (const hz of [220, 261.6, 329.6, 221.3]) {
+      const o = a.createOscillator(); o.type = "sawtooth"; o.frequency.value = hz * speed();
+      o.connect(f); o.start(t); o.stop(t + len + 0.05);
+    }
+  }
+
+  function advanceLoop(dt) {
+    M.t += dt;
+    const target = Math.floor(M.t / STEP);
+    while (M.step < target) {
+      M.step++;
+      const h = stepHits(M.step);
+      if (h.kick) fire(0, h.kick, h.big);
+      if (h.snare) fire(1, h.snare, false);
+      if (h.hat) fire(2, h.hat, false, h.open);
+      if (h.pad) playPad();
+    }
+    const barF = M.t / BAR;
+    M.bar = Math.floor(barF);
+    M.barPhase = barF - M.bar;
+    const { sec, barIn } = sectionAt(M.bar);
+    let lvl = sec.level, inten = sec.inten;
+    if (sec.name === "build") { const f = (barIn + M.barPhase) / 4; lvl = 0.5 + 0.15 * f; inten = 0.5 + 0.35 * f; }
+    M.level += (lvl - M.level) * (1 - Math.exp(-dt / 0.35));
+    M.inten += (inten - M.inten) * (1 - Math.exp(-dt / 0.8));
+    M.centroid += ((sec.name === "drop" ? 0.62 : sec.name === "break" ? 0.38 : 0.5) + 0.25 * base.high - M.centroid) * (1 - Math.exp(-dt / 0.3));
+    for (let i = 0; i < 6; i++) {
+      const t = 0.32 + 0.45 * M.level + (i < 2 ? 0.45 * base.low : 0) + (i === 2 || i === 3 ? 0.25 * base.beat : 0) + (i > 3 ? 0.4 * base.high : 0);
+      M.bands[i] = clamp(t, 0, 1);
+    }
+    M.where = `loop · ${sec.name} · bar ${barIn + 1} of ${sec.bars}`;
+  }
+
+  // ---- a song file: hits from the rise of three bands, frame by frame
+  const S = { buf: null, name: "", src: null, an: null, freq: null, time: null, rate: 1,
+    prev: [0, 0, 0], m: [0, 0, 0], d: [0.01, 0.01, 0.01], last: [-9, -9, -9], pk: [0, 0, 0],
+    kickFlux: [], lastBig: -9, ioi: [], lastKick: -9, beats: 0, period: BEAT,
+    peak: 0.05, slow: 0.4, bandPeak: new Float32Array([1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9]) };
+  async function loadSong(file) {
+    const a = audio();
+    $("#where").textContent = "song · decoding…";
+    try {
+      const buf = await a.decodeAudioData(await file.arrayBuffer());
+      S.buf = buf; S.name = file.name;
+      setSound(true);
+      setMode("song");
+    } catch (e) {
+      $("#where").textContent = "That file couldn't be read as audio. Try an MP3, WAV or M4A.";
+    }
+  }
+  function startSong() {
+    stopSong();
+    if (!S.buf) return;
+    const a = audio();
+    S.an = a.createAnalyser(); S.an.fftSize = 2048; S.an.smoothingTimeConstant = 0;
+    S.freq = new Float32Array(S.an.frequencyBinCount);
+    S.time = new Float32Array(S.an.fftSize);
+    S.src = a.createBufferSource(); S.src.buffer = S.buf; S.src.loop = true;
+    S.rate = speed(); S.src.playbackRate.value = S.rate;
+    S.src.connect(S.an); S.an.connect(master);
+    S.src.start();
+    M.t = 0; S.last = [-9, -9, -9]; S.pk = [0, 0, 0]; S.lastKick = -9; S.lastBig = -9; S.kickFlux = []; S.ioi = []; S.beats = 0;
+  }
+  function stopSong() {
+    if (S.src) { try { S.src.stop(); } catch (e) { /* already stopped */ } S.src.disconnect(); S.src = null; }
+    if (S.an) { S.an.disconnect(); S.an = null; }
+  }
+  function bandPow(lo, hi) {
+    const binHz = actx.sampleRate / S.an.fftSize;
+    const i0 = Math.max(1, Math.floor((lo * S.rate) / binHz)), i1 = Math.min(S.freq.length - 1, Math.ceil((hi * S.rate) / binHz));
+    let s = 0;
+    for (let i = i0; i <= i1; i++) s += Math.pow(10, S.freq[i] / 10);
+    return s / (i1 - i0 + 1) + 1e-12;
+  }
+  // The snare lane listens to the crack, above where vocals and the bass
+  // line sit, with a higher bar: a wider band fired on every vocal onset.
+  const SONG_LANES = [[40, 140], [1500, 5000], [6000, 16000]];
+  const SONG_GATE = [0.15, 0.14, 0.12];
+  const SONG_OVER = [2.6, 3.4, 2.4];
+  const SONG_GAP = [0.2, 0.3, 0.065];
+  // A hit must also reach this share of its lane's recent peak; an adaptive
+  // bar alone fires on any above-average rise, which in the snare band is
+  // most vocal onsets.
+  const SONG_PEAK_SHARE = [0.25, 0.8, 0];
+  const BAND_EDGES = [40, 120, 350, 1000, 2800, 7000, 16000];
+  function advanceSong(dt) {
+    if (!S.an) return;
+    M.t += dt;
+    S.an.getFloatFrequencyData(S.freq);
+    S.an.getFloatTimeDomainData(S.time);
+    const fa = 1 - Math.exp(-dt / 0.6);
+    for (let i = 0; i < 3; i++) {
+      const p = Math.log10(bandPow(SONG_LANES[i][0], SONG_LANES[i][1]));
+      const f = Math.max(0, p - S.prev[i]);
+      S.prev[i] = p;
+      S.pk[i] = Math.max(f, S.pk[i] * Math.exp(-dt / 2));
+      if (f > S.m[i] + SONG_OVER[i] * S.d[i] && f > SONG_GATE[i] && f >= SONG_PEAK_SHARE[i] * S.pk[i] && M.t - S.last[i] > SONG_GAP[i]) {
+        S.last[i] = M.t;
+        const s = clamp((f - S.m[i]) / (5 * S.d[i] + 1e-6), 0.3, 1);
+        let big = false;
+        if (i === 0) {
+          const mean = S.kickFlux.length ? S.kickFlux.reduce((a, b) => a + b, 0) / S.kickFlux.length : f;
+          // Stands out from the last few kicks, or returns after a gap; never
+          // closer than a few seconds, so the rare reactions stay rare.
+          big = M.t - S.lastBig > 3.5 && (f > 1.6 * mean || M.t - S.lastKick > 1.6);
+          if (big) S.lastBig = M.t;
+          S.kickFlux.push(f); if (S.kickFlux.length > 8) S.kickFlux.shift();
+          let ioi = M.t - S.lastKick;
+          if (ioi > 0.25 && ioi < 1.6) {
+            while (ioi > 0.72) ioi /= 2;
+            while (ioi < 0.36) ioi *= 2;
+            S.ioi.push(ioi); if (S.ioi.length > 12) S.ioi.shift();
+            const sorted = [...S.ioi].sort((a, b) => a - b);
+            S.period = sorted[Math.floor(sorted.length / 2)];
+          }
+          S.lastKick = M.t;
+          S.beats += (Math.round(S.beats) - S.beats) * 0.4;
+        }
+        fire(i, s, big);
+      }
+      S.m[i] += (f - S.m[i]) * fa;
+      S.d[i] += (Math.abs(f - S.m[i]) - S.d[i]) * fa;
+    }
+    S.beats += dt / S.period;
+    const barF = S.beats / 4;
+    M.bar = Math.floor(barF);
+    M.barPhase = barF - M.bar;
+    let rms = 0;
+    for (let i = 0; i < S.time.length; i++) rms += S.time[i] * S.time[i];
+    rms = Math.sqrt(rms / S.time.length);
+    S.peak = Math.max(rms, S.peak * Math.exp(-dt / 8));
+    M.level += (clamp(rms / S.peak, 0, 1) - M.level) * (1 - Math.exp(-dt / 0.3));
+    S.slow += (M.level - S.slow) * (1 - Math.exp(-dt / 6));
+    M.inten = clamp((S.slow - 0.3) / 0.5, 0, 1);
+    let num = 0, den = 0;
+    for (let b = 0; b < 6; b++) {
+      const p = bandPow(BAND_EDGES[b], BAND_EDGES[b + 1]);
+      S.bandPeak[b] = Math.max(p, S.bandPeak[b] * Math.exp(-dt / 6));
+      M.bands[b] = clamp(Math.pow(p / S.bandPeak[b], 0.35), 0, 1);
+      const mid = Math.sqrt(BAND_EDGES[b] * BAND_EDGES[b + 1]);
+      num += p * Math.log2(mid); den += p;
+    }
+    const c = den > 0 ? clamp((num / den - Math.log2(200)) / (Math.log2(8000) - Math.log2(200)), 0, 1) : 0.5;
+    M.centroid += (c - M.centroid) * (1 - Math.exp(-dt / 0.3));
+    const secs = Math.floor(M.t);
+    M.where = `song · ${S.name} · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  }
+
+  let quiet = false;
+  function fire(lane, s, big, open) {
+    if (quiet) return;
+    M.events.push({ t: M.t, lane, s, big });
+    if (M.events.length > 600) M.events.splice(0, 200);
+    base.onHit(lane, s, big);
+    for (const idea of IDEAS) idea.event(lane, s, big);
+    playLane(lane, s, open);
+  }
+
+  // ---------------------------------------------------------------- today's pool
+  // Beat ripple, Bass swell, Fog pulse, Beat flash, Level glow, Grain sparkle,
+  // Speed boost/pump and Section density, approximated at the scene's defaults.
+  const RING_SPEED = 1.149, RING_DECAY = 0.465;
+  const ringEnv = (age) => (age <= 0 ? 0 : (1 - Math.exp(-age / 0.06)) * Math.exp(-age * RING_DECAY));
+  let others = true;
+  const base = {
+    phase: 0, scaled: 0, step: 0, scaledStep: 0, densLive: null, pump: 0,
+    beat: 0, low: 0, high: 0, glint: 0, rings: [],
+    flows: new Float32Array(FLOWS_LEN),
+    onHit(lane, s, big) {
+      if (lane === 0) {
+        this.low = Math.max(this.low, s);
+        this.beat = Math.max(this.beat, s);
+        this.ring(big ? 1.6 : 0.5 + 0.45 * s);
+      } else if (lane === 1) {
+        this.beat = Math.max(this.beat, 0.8 * s);
+        this.ring(0.28 * s);
+      } else {
+        this.high = Math.max(this.high, s);
+        this.glint = Math.max(this.glint, s);
+      }
+    },
+    ring(amp) {
+      this.rings.push({ age: 0, amp });
+      if (this.rings.length > 10) this.rings.shift();
+    },
+    tick(dt) {
+      const k = Math.exp(-6 * dt);
+      this.beat *= k; this.low *= k; this.high *= k;
+      this.glint *= Math.exp(-dt / 0.16);
+      for (const r of this.rings) r.age += dt;
+      this.rings = this.rings.filter((r) => r.age < 0.2 || r.amp * ringEnv(r.age) > 1e-3);
+      this.pump += 6 * 0.35 * (others ? this.low : 0) * dt;
+      this.pump = Math.min(this.pump * Math.exp(-dt / 1.5), 8);
+      const rate = Math.min(20, 2 * 0.44 + (others ? 3 * 0.4 * M.level : 0) + this.pump);
+      const target = 0.35 + 0.65 * 0.15 * (others ? M.inten : 0);
+      this.densLive = this.densLive === null ? target : this.densLive + (target - this.densLive) * (1 - Math.exp(-dt / 0.6));
+      this.step = rate * dt;
+      this.scaledStep = this.step * densScale(this.densLive);
+      this.phase += this.step;
+      this.scaled += this.scaledStep;
+      driftFlows(this.phase, this.scaled, this.flows);
+    },
+  };
+
+  // Half the 16:9 view, in pool units.
+  const HALF_W = 1.5 * 16 / 9, HALF_H = 1.5;
+  const reachAlong = (ang) => HALF_W * Math.abs(Math.cos(ang)) + HALF_H * Math.abs(Math.sin(ang));
+  // A stiff spring, stepped finely so a slow frame can't blow it up.
+  function spring(st, x, v, target, k, c, dt) {
+    const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
+    for (let i = 0; i < n; i++) { st[v] += (-k * (st[x] - target) - c * st[v]) * h; st[x] += st[v] * h; }
+  }
+
+  // ---------------------------------------------------------------- the ideas
+  // Each idea keeps its own state, reacts to the hits it listens to, and fills
+  // its uniforms for a view at a given strength (0 draws today's pool).
+  const IDEAS = [
+    {
+      key: "dive", fx: 1, name: "Dive", lane: 0, listens: "Bass hits", amount: 0.85,
+      what: "Each kick pushes the camera a step closer to the pool floor, so the web of light swells and thickens. A big hit plunges it in with a twist, and between hits it floats back up.",
+      addsK: "Distance.", adds: "Today the camera never moves; the pool's scale only creeps with the song's sections.",
+      st: { z: 0, zv: 0, target: 0, tw: 0, twv: 0 },
+      event(lane, s, big) {
+        if (lane !== 0) return;
+        const st = this.st;
+        if (big) { st.target = Math.max(st.target, 0) + 0.75; st.twv += 3.2 * (Math.random() < 0.5 ? -1 : 1); }
+        else st.target += 0.16 * s;
+        st.target = Math.min(1.1, st.target);
+        this.led = 1;
+      },
+      tick(dt) {
+        const st = this.st;
+        // Floats back up, so a sparse part surfaces again.
+        st.target *= Math.exp(-dt / 2.2);
+        spring(st, "z", "zv", st.target, 260, 26, dt);
+        spring(st, "tw", "twv", 0, 30, 6, dt);
+      },
+      uni(u, amt) { u.fxA[0] = Math.exp(this.st.z * amt); u.fxA[1] = this.st.tw * amt; },
+    },
+    {
+      key: "dye", fx: 2, name: "Dye", lane: 0, listens: "Bass hits", amount: 0.9,
+      what: "A kick drops a cloud of colour into the water. The current pulls it into threads, and only the light inside it takes the colour. Each drop is the next colour; a big hit drops one in the middle.",
+      addsK: "Colour in one place.", adds: "Today the whole pool shares one palette at a time.",
+      st: { d: [0, 1, 2].map(() => ({ x: 0, y: 0, age: 99, s: 0, size: 1, col: 0 })), n: 0, last: -9 },
+      event(lane, s, big) {
+        if (lane !== 0) return;
+        const st = this.st;
+        // Every kick would blot the whole pool; one drop a bar or so keeps the colours apart.
+        if (!big && M.t - st.last < 1.6) return;
+        st.last = M.t;
+        st.n++;
+        const d = st.d[st.n % 3];
+        d.x = big ? 0 : (Math.random() * 2 - 1) * 1.9;
+        d.y = big ? 0 : (Math.random() * 2 - 1) * 0.85;
+        d.age = 0;
+        d.s = big ? 1.2 : 0.8 + 0.3 * s;
+        d.size = big ? 1.45 : 1;
+        d.col = st.n % 3;
+        this.led = 1;
+      },
+      tick(dt) {
+        // Carried with the ridges: the ridge noise scrolls by the scaled drift.
+        const k = base.scaledStep / (2.3 * densScale(base.densLive ?? 0.35));
+        for (const d of this.st.d) { d.age += dt; d.x -= 0.15 * k; d.y += 0.09 * k; }
+      },
+      uni(u, amt) {
+        this.st.d.forEach((d, k) => {
+          const r = (0.35 + 0.75 * Math.sqrt(d.age)) * d.size;
+          const s = d.s * Math.min(1, d.age / 0.06) * Math.exp(-d.age / 3.2) * amt;
+          u.fxC.set([d.x, d.y, r, s], k * 4);
+          u.fxB[k] = d.col;
+        });
+      },
+    },
+    {
+      key: "wake", fx: 3, name: "Wake", lane: 0, listens: "Bass hits, and the bar", amount: 0.9,
+      what: "Something unseen swims across the pool, and its V-shaped wake bends the light behind it. Each kick is a stroke that sends a fresh pulse down the wake; a new swimmer sets off every two bars.",
+      addsK: "Something passing through.", adds: "Every reaction today happens everywhere at once or spreads from a point. This one travels a path.",
+      st: { sw: [0, 1].map(() => ({ x: 0, y: 0, h: 0, dist: 0, end: 0, on: false, strokes: [] })), cur: 0, lastBar: -9, heading: 0.25 },
+      launch() {
+        const st = this.st;
+        st.cur ^= 1;
+        const w = st.sw[st.cur];
+        st.heading += Math.PI + (Math.random() * 2 - 1) * 0.7;
+        w.h = st.heading;
+        const reach = reachAlong(w.h) + 0.2;
+        const side = (Math.random() * 2 - 1) * 0.6;
+        w.x = -Math.cos(w.h) * reach - Math.sin(w.h) * side;
+        w.y = -Math.sin(w.h) * reach + Math.cos(w.h) * side;
+        w.dist = 0;
+        // Off when its wake's tail has left the frame too.
+        w.end = 2 * reach + 6;
+        w.on = true;
+        w.strokes = [];
+      },
+      event(lane, s, big) {
+        if (lane !== 0) return;
+        if (big && !this.st.sw.some((w) => w.on && w.dist < 2 * reachAlong(w.h))) this.launch();
+        for (const w of this.st.sw) if (w.on) { w.strokes.push({ at: w.dist, s }); if (w.strokes.length > 4) w.strokes.shift(); }
+        this.led = 1;
+      },
+      tick(dt) {
+        const st = this.st;
+        if (M.bar !== st.lastBar && M.bar % 2 === 0) { st.lastBar = M.bar; this.launch(); }
+        const v = 2.0 + 1.0 * M.inten;
+        for (const w of st.sw) {
+          if (!w.on) continue;
+          w.x += Math.cos(w.h) * v * dt; w.y += Math.sin(w.h) * v * dt; w.dist += v * dt;
+          if (w.dist > w.end) w.on = false;
+        }
+      },
+      uni(u, amt) {
+        this.st.sw.forEach((w, k) => {
+          if (!w.on) return;
+          u.fxD.set([w.x, w.y, w.h, amt * Math.min(1, w.dist / 0.4) * Math.min(1, (w.end - w.dist) / 1.5)], k * 12);
+          for (let j = 0; j < 4; j++) {
+            const sk = w.strokes[j];
+            u.fxD[k * 12 + 4 + j] = sk ? w.dist - sk.at : -9;
+            u.fxD[k * 12 + 8 + j] = sk ? sk.s : 0;
+          }
+        });
+      },
+    },
+    {
+      key: "tide", fx: 4, name: "Tide", lane: 0, listens: "Level, and bass hits", amount: 1,
+      what: "In quiet parts the water drains off one side of the floor and leaves it dry. Loud music floods it back in a rush, and each kick laps the shoreline forward.",
+      addsK: "Where the water is.", adds: "Today the light always fills the frame; quiet only dims it.",
+      st: { wet: 0.5, lap: 0, lapV: 0, ang: 0.45, lev: 0.5 },
+      event(lane, s) {
+        if (lane !== 0) return;
+        this.st.lapV += 2.4 * s;
+        this.led = 1;
+      },
+      tick(dt) {
+        const st = this.st;
+        st.lev += (M.level - st.lev) * (1 - Math.exp(-dt / 0.5));
+        const target = 0.22 + 0.78 * clamp((st.lev - 0.3) / 0.35, 0, 1);
+        // Floods fast, drains slowly: a returning drop should hit as a wave.
+        const tau = target > st.wet ? 0.5 : 3.5;
+        st.wet += (target - st.wet) * (1 - Math.exp(-dt / tau));
+        spring(st, "lap", "lapV", 0, 30, 6, dt);
+        st.ang += dt * 0.02;
+      },
+      uni(u, amt) {
+        const st = this.st, reach = reachAlong(st.ang);
+        const w = 1 - amt * (1 - st.wet);
+        u.fxA[0] = st.ang;
+        u.fxA[1] = -reach - 0.5 + (2 * reach + 1.1) * w + 0.3 * st.lap * amt;
+      },
+    },
+    {
+      key: "contour", fx: 5, name: "Contour", lane: 1, listens: "Snares and claps", amount: 0.9,
+      what: "A snare snaps the soft light into flat terraces with a bright line along each step, like a contour map of the light. Then it melts back into water before the next one.",
+      addsK: "Hard tone.", adds: "Today every brightness blends smoothly into the next.",
+      st: { a0: 0, age: 9, steps: 5 },
+      event(lane, s, big) {
+        if (lane !== 1) return;
+        const st = this.st;
+        st.a0 = 0.65 + 0.35 * s;
+        st.age = 0;
+        st.steps = big ? 3 : 5;
+        this.led = 1;
+      },
+      tick(dt) { this.st.age += dt; },
+      uni(u, amt) {
+        const st = this.st, t = st.age;
+        u.fxA[0] = amt * st.a0 * Math.min(1, t / 0.015) * (t < 0.12 ? 1 : Math.exp(-(t - 0.12) / 0.28));
+        u.fxA[1] = st.steps;
+      },
+    },
+    {
+      key: "scratch", fx: 6, name: "Scratch", lane: 1, listens: "Snares, and fills", amount: 1,
+      what: "Each snare scratches the pool like a record: the water jerks back, then forward. A fill winds it back much further before letting it run again.",
+      addsK: "Time running backwards.", adds: "Today the water only ever flows forward.",
+      st: { cur: null, snares: [], off: 0, mix: 0, mixScaled: 0, flows: new Float32Array(FLOWS_LEN) },
+      event(lane, s, big) {
+        if (lane !== 1) return;
+        const st = this.st;
+        st.snares = st.snares.filter((t) => M.t - t < 0.8);
+        st.snares.push(M.t);
+        const fill = big || st.snares.length >= 3;
+        if (fill) {
+          if (st.cur && st.cur.fill && st.cur.age < 0.5) return;
+          st.cur = { age: 0, A: 4.5, T: 1.1, fill: true };
+        } else {
+          if (st.cur && st.cur.fill && st.cur.age < st.cur.T) return;
+          st.cur = { age: 0, A: 1.5 * s, T: 0.3, fill: false };
+        }
+        this.led = 1;
+      },
+      tick(dt) {
+        const st = this.st;
+        let off = 0;
+        if (st.cur) {
+          const c = st.cur;
+          c.age += dt;
+          let u = c.age / c.T;
+          if (u >= 1) st.cur = null;
+          else {
+            // A fill's wind-back takes a third of it, the run-out the rest.
+            if (c.fill) u = u < 0.33 ? (u / 0.33) * 0.5 : 0.5 + ((u - 0.33) / 0.67) * 0.5;
+            off = -c.A * Math.pow(Math.sin(Math.PI * u), 2);
+          }
+        }
+        const step = (off - st.off) * this.amount;
+        st.off = off;
+        st.mix += base.step + step;
+        st.mixScaled += base.scaledStep + step * densScale(base.densLive ?? 0.35);
+        driftFlows(st.mix, st.mixScaled, st.flows);
+      },
+      uni(u, amt) { if (amt > 0) u.flows = this.st.flows; },
+    },
+  ];
+  for (const idea of IDEAS) idea.led = 0;
+
+  // ---------------------------------------------------------------- WebGL
+  const canvas = $("#gl");
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: true, premultipliedAlpha: true });
+  function fail(msg) { const e = $("#glerr"); e.hidden = false; e.textContent = msg; window.__fxError = msg; }
+  if (!gl) { fail("These pools need WebGL2, which this browser doesn't offer. Try a current Chrome, Edge, Firefox or Safari."); return; }
+
+  const VS = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+  const FS = `#version 300 es
+precision highp float;
+precision highp int;
+out vec4 outColor;
+
+uniform vec4 uRect;
+uniform float uRadius;
+uniform float uFlows[17];
+uniform float uDens;
+uniform float uSharp;
+uniform float uBand[6];
+uniform float uBright;
+uniform float uFloor;
+uniform float uRipple;
+uniform vec2 uRings[10];
+uniform float uBulge;
+uniform float uGlint;
+uniform float uBreathe;
+uniform float uHue;
+uniform vec3 uRamp[9];
+uniform vec3 uGround;
+uniform vec3 uAccent;
+uniform int uFx;
+uniform vec4 uFxA;
+uniform vec4 uFxB;
+uniform vec4 uFxC[3];
+uniform vec4 uFxD[6];
+
+// The scene's lattice hash (noiseHash.ts).
+uint uhash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+uint cellBits(vec2 cell, int mask, uint seed) {
+  ivec2 c = ivec2(cell) & ivec2(mask);
+  return uhash(uint(c.x) ^ (uint(c.y) << 16u) ^ (seed * 0x9e3779b9u));
+}
+float hashCell(vec2 cell, int mask, uint seed) {
+  return float(cellBits(cell, mask, seed) >> 8u) * (1.0 / 16777216.0);
+}
+vec2 hash2Cell(vec2 cell, int mask, uint seed) {
+  uint h = cellBits(cell, mask, seed);
+  return vec2(float(h >> 8u), float(uhash(h) >> 8u)) * (1.0 / 16777216.0);
+}
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = hashCell(i, 255, 0u);
+  float b = hashCell(i + vec2(1.0, 0.0), 255, 0u);
+  float c = hashCell(i + vec2(0.0, 1.0), 255, 0u);
+  float d = hashCell(i + vec2(1.0, 1.0), 255, 0u);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+vec2 rot(vec2 v, float a) {
+  float c = cos(a);
+  float s = sin(a);
+  return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+}
+float softCeil(float x, float knee, float ceil) {
+  float m = abs(x);
+  float c = m <= knee ? m : knee + (ceil - knee) * tanh((m - knee) / (ceil - knee));
+  return sign(x) * c;
+}
+vec3 palRamp(float t) {
+  float x = clamp(t, 0.0, 1.0) * 8.0;
+  int i = int(min(floor(x), 7.0));
+  return mix(uRamp[i], uRamp[i + 1], x - float(i));
+}
+
+vec3 dyeColour(float k) {
+  return k < 0.5 ? vec3(0.0, 0.94, 1.0) : (k < 1.5 ? vec3(1.0, 0.71, 0.28) : vec3(0.55, 1.0, 0.35));
+}
+
+float gChurn = 0.0;
+
+float ridgeField(inout vec2 q, float sharp) {
+  float acc = 0.0;
+  float amp = 1.0;
+  float ridgeGain = sqrt(sharp / 4.0);
+  vec2 ffwd = vec2(uFlows[0], uFlows[1]);
+  vec2 fback = vec2(uFlows[2], uFlows[3]);
+  for (int i = 0; i < 6; i++) {
+    float fi = float(i);
+    q += vec2(noise(q * 1.7 + ffwd + fi), noise(q * 1.7 + fback + fi * 1.3)) * 0.45;
+    vec2 rf = vec2(uFlows[4 + 2 * i], uFlows[5 + 2 * i]);
+    // A bounded local warp: scaling the noise inside the wake instead sheared its edges into streaks.
+    if (i < 2 && gChurn > 0.001) q += (vec2(noise(q * 5.0 + ffwd * 3.0), noise(q * 5.0 + fback * 3.0 + 9.0)) - 0.5) * 0.8 * gChurn;
+    float v = noise(q * 2.3 * uDens + rf);
+    float ridge = 1.0 - abs(v * 2.0 - 1.0);
+    float aaSharp = min(sharp / uDens, 0.3 / max(fwidth(v), 1e-4));
+    acc += amp * (0.5 + uBand[i] * 0.8) * pow(ridge, aaSharp) * ridgeGain;
+    amp *= 0.6;
+  }
+  return acc;
+}
+
+void main() {
+  vec2 fc = gl_FragCoord.xy - uRect.xy;
+  vec2 hs = uRect.zw * 0.5;
+  vec2 dd = abs(fc - hs) - (hs - vec2(uRadius));
+  float mask = 1.0 - smoothstep(-0.75, 0.75, length(max(dd, 0.0)) - uRadius);
+
+  vec2 local = fc / uRect.zw;
+  vec2 p = (local - 0.5) * vec2(uRect.z / uRect.w, 1.0) * 3.0;
+  float sharp = uSharp;
+  float wet = 1.0;
+  float shore = 0.0;
+  float wakeH = 0.0;
+  float churn = 0.0;
+
+  if (uFx == 1) {
+    // Dive: the camera nears the floor by uFxA.x and turns by uFxA.y.
+    p = rot(p, uFxA.y) / uFxA.x;
+  } else if (uFx == 3) {
+    vec2 push = vec2(0.0);
+    for (int k = 0; k < 2; k++) {
+      vec4 sw = uFxD[3 * k];
+      if (sw.w < 1e-3) continue;
+      vec2 d = vec2(cos(sw.z), sin(sw.z));
+      vec2 n = vec2(-d.y, d.x);
+      vec2 r = p - sw.xy;
+      float al = -dot(r, d);
+      float ac = dot(r, n);
+      float a = abs(ac);
+      vec2 kp = r * exp(-dot(r, r) / 0.05) * 0.6;
+      if (al > 0.0) {
+        float env = smoothstep(0.0, 0.3, al) * exp(-al / 2.4);
+        vec4 sd = uFxD[3 * k + 1];
+        vec4 sa = uFxD[3 * k + 2];
+        float stroke = 0.8;
+        for (int j = 0; j < 4; j++) { float e = al - sd[j]; stroke += 1.4 * sa[j] * exp(-e * e / 0.06); }
+        // Kelvin's wake: any boat's V opens at the same 19.5 degrees, tan 0.354.
+        float inside = 1.0 - smoothstep(0.3 * al, 0.36 * al + 0.06, a);
+        float arm = exp(-pow(a - 0.33 * al, 2.0) / (0.015 + 0.02 * al));
+        vec2 gd = normalize(-0.35 * d + 0.94 * (ac / sqrt(ac * ac + 0.01)) * n);
+        float ph = 15.0 * (0.35 * al + 0.94 * a);
+        float e2 = env * stroke * sw.w;
+        churn = max(churn, (1.0 - smoothstep(0.15 * al, 0.42 * al + 0.2, a)) * smoothstep(0.0, 0.5, al) * exp(-al / 3.5) * sw.w);
+        kp += (gd * sin(ph) * (arm + 0.3 * inside) + d * sin(11.0 * al) * 0.45 * inside) * e2 * 0.13;
+        // Like Beat ripple, the crests focus the light and the troughs spread it.
+        wakeH += (cos(ph) * (arm + 0.3 * inside) + cos(11.0 * al) * 0.45 * inside) * e2;
+      }
+      push += kp * sw.w;
+    }
+    p += push;
+    // The water a swimmer has just passed through is churned: finer, tighter light.
+    gChurn = churn;
+    sharp *= 1.0 + 0.6 * churn;
+  } else if (uFx == 4) {
+    vec2 d = vec2(cos(uFxA.x), sin(uFxA.x));
+    shore = dot(p, d) - uFxA.y + 0.35 * (noise(p * 1.1 + vec2(uFlows[0], 0.0)) - 0.5) + 0.12 * (noise(p * 3.7) - 0.5);
+    wet = 1.0 - smoothstep(-0.025, 0.025, shore);
+    // Shallow water near the shore focuses the light tighter.
+    sharp *= 1.0 + 1.2 * exp(min(shore, 0.0) / 0.5) * wet;
+  }
+
+  // Today's reactions, after the idea has moved the water.
+  p *= 1.0 + uBreathe;
+  float pLen0 = length(p);
+  vec2 dir0 = pLen0 > 1e-4 ? p / pLen0 : vec2(1.0, 0.0);
+  p += dir0 * uBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
+  float r = length(p);
+  float crest = 0.0;
+  float slope = 0.0;
+  for (int k = 0; k < 10; k++) {
+    vec2 rg = uRings[k];
+    if (rg.y < 1e-3) continue;
+    float dO = r - rg.x;
+    float dI = r + rg.x;
+    float gO = exp(-dO * dO * 4.243);
+    float gI = exp(-dI * dI * 4.243);
+    crest += rg.y * (gO + gI);
+    slope += rg.y * (dO * gO + dI * gI) * 4.803;
+  }
+  crest = softCeil(crest, 1.0, 1.5);
+  slope = softCeil(slope, 1.0, 1.5);
+  vec2 radialDir = r > 1e-4 ? p / r : vec2(1.0, 0.0);
+  float ring = uRipple * max(crest, 0.0);
+  vec2 q = p + radialDir * uRipple * slope * 0.3;
+  vec2 q0 = q;
+
+  sharp *= 1.0 - uBulge * 0.25;
+  float acc = ridgeField(q, sharp);
+  float crestGate = smoothstep(0.058, 0.508, acc);
+  acc += uGlint * crestGate * pow(noise(q * 81.86 + vec2(uFlows[16])), 7.8) * 3.0;
+  acc += uBulge * exp(-pLen0 * 1.5) * 0.6;
+  acc *= uBright + ring * 0.8;
+  if (uFx == 3) acc *= 1.0 + 1.4 * max(wakeH, 0.0) - 0.55 * min(max(-wakeH, 0.0), 1.0);
+  acc = max(0.0, acc - uFloor);
+  if (uFx == 4) {
+    // Dry floor: a dim sand grain the light can't reach, darker where just wet.
+    vec2 sp = rot(p, uFxA.x);
+    float ripple = sin(sp.x * 22.0 + 2.5 * noise(p * 1.6) + 1.5 * noise(p * 4.1));
+    float sand = (0.045 + 0.02 * ripple + 0.015 * noise(p * 9.0)) * (0.5 + 0.5 * smoothstep(0.0, 0.3, shore));
+    acc = mix(sand, acc, wet) + 0.35 * exp(-shore * shore / 0.0012);
+  }
+
+  float x = acc * 2.0;
+  float t = x / (1.0 + x);
+  t = clamp(t + uHue * t * (1.0 - t), 0.0, 1.0);
+  float rim = 0.0;
+  if (uFx == 5 && uFxA.x > 0.001) {
+    float tn = t * uFxA.y;
+    float f = fract(tn);
+    float w = fwidth(tn);
+    rim = (1.0 - smoothstep(w * 0.7, w * 2.0, min(f, 1.0 - f))) * step(0.7, tn) * uFxA.x;
+    t = mix(t, min(floor(tn) / (uFxA.y - 1.0), 1.0), uFxA.x);
+  }
+  vec3 col = mix(uGround, palRamp(t), smoothstep(0.0, 0.25, t));
+  float band = smoothstep(0.55, 0.75, t) * (1.0 - smoothstep(0.86, 0.98, t));
+  col = mix(col, uAccent, band * 0.75);
+  col = mix(col, vec3(1.0), rim * 0.85);
+  if (uFx == 2) {
+    // The warp's own mean is a constant shift; what's left is the current's shape.
+    vec2 pd = p + 1.6 * (q - q0 - vec2(1.35));
+    for (int k = 0; k < 3; k++) {
+      vec4 dy = uFxC[k];
+      if (dy.w < 1e-3) continue;
+      float rr = length(pd - dy.xy) / dy.z + 0.4 * (noise(pd * 2.6 + float(k) * 7.0) - 0.5);
+      float m = (1.0 - smoothstep(0.55, 1.0, rr)) * min(dy.w, 1.0);
+      // Only the light takes the dye; dark water stays dark.
+      vec3 lit = dyeColour(uFxB[k]) * (0.25 + 1.5 * t) + vec3(smoothstep(0.8, 1.0, t) * 0.5);
+      col = mix(col, lit, m * smoothstep(0.02, 0.3, t));
+    }
+  }
+  outColor = vec4(col * mask, mask);
+}`;
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh) || "shader compile failed");
+    return sh;
+  }
+  let prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || "link failed");
+  } catch (e) {
+    fail("The pool's shader didn't compile on this device: " + e.message);
+    return;
+  }
+  gl.useProgram(prog);
+  gl.bindVertexArray(gl.createVertexArray());
+  const L = {};
+  for (const n of ["uRect", "uRadius", "uFlows", "uDens", "uSharp", "uBand", "uBright", "uFloor", "uRipple", "uRings", "uBulge", "uGlint", "uBreathe", "uHue", "uRamp", "uGround", "uAccent", "uFx", "uFxA", "uFxB", "uFxC", "uFxD"]) {
+    L[n] = gl.getUniformLocation(prog, n);
+  }
+  gl.uniform3fv(L.uRamp, RAMP);
+  gl.uniform3fv(L.uGround, hexRgb(NEON.ground));
+  gl.uniform3fv(L.uAccent, hexRgb(NEON.accent));
+
+  const RINGS = new Float32Array(20);
+  const FLAT_BANDS = new Float32Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+  function setCommon() {
+    const sharpRest = 14 - 12 * 0.57;
+    gl.uniform1f(L.uSharp, others ? sharpRest / (1 + 0.86 * base.beat * 1.3) : sharpRest);
+    gl.uniform1f(L.uBright, 0.35 + 0.7 * Math.pow(others ? M.level : 0.55, 1.5) + (others ? 1.125 * base.beat : 0));
+    gl.uniform1f(L.uFloor, 0.13 * (1 - 0.57));
+    gl.uniform1f(L.uDens, densScale(base.densLive ?? 0.35));
+    gl.uniform1fv(L.uBand, others ? M.bands : FLAT_BANDS);
+    gl.uniform1f(L.uRipple, others ? 0.21 : 0);
+    RINGS.fill(0);
+    base.rings.forEach((r, i) => { RINGS[2 * i] = r.age * RING_SPEED; RINGS[2 * i + 1] = r.amp * ringEnv(r.age); });
+    gl.uniform2fv(L.uRings, RINGS);
+    gl.uniform1f(L.uBulge, others ? base.low : 0);
+    gl.uniform1f(L.uGlint, others ? 0.41 * base.glint + 0.03 * base.high : 0);
+    gl.uniform1f(L.uBreathe, others ? 0.011 * Math.cos(TAU * M.barPhase) : 0);
+    gl.uniform1f(L.uHue, others ? (M.centroid - 0.5) * 0.68 * 0.6 : 0);
+  }
+
+  const U = { fxA: new Float32Array(4), fxB: new Float32Array(4), fxC: new Float32Array(12), fxD: new Float32Array(24), flows: null };
+  let cRect = canvas.getBoundingClientRect(), sx = 1, sy = 1;
+  function drawView(el, idea, amt, radius) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4 || r.bottom < cRect.top || r.top > cRect.bottom) return;
+    const x = Math.round((r.left - cRect.left) * sx), y = Math.round((cRect.bottom - r.bottom) * sy);
+    const w = Math.round(r.width * sx), h = Math.round(r.height * sy);
+    const x0 = clamp(x, 0, canvas.width), y0 = clamp(y, 0, canvas.height);
+    const x1 = clamp(x + w, 0, canvas.width), y1 = clamp(y + h, 0, canvas.height);
+    if (x1 <= x0 || y1 <= y0) return;
+    gl.viewport(x, y, w, h);
+    gl.scissor(x0, y0, x1 - x0, y1 - y0);
+    U.fxA.fill(0); U.fxB.fill(0); U.fxC.fill(0); U.fxD.fill(0); U.flows = null;
+    if (idea) idea.uni(U, amt);
+    gl.uniform4f(L.uRect, x, y, w, h);
+    gl.uniform1f(L.uRadius, radius * sx);
+    gl.uniform1i(L.uFx, idea && amt > 0 ? idea.fx : 0);
+    gl.uniform4fv(L.uFxA, U.fxA);
+    gl.uniform4fv(L.uFxB, U.fxB);
+    gl.uniform4fv(L.uFxC, U.fxC);
+    gl.uniform4fv(L.uFxD, U.fxD);
+    gl.uniform1fv(L.uFlows, U.flows || base.flows);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  // ---------------------------------------------------------------- page
+  const tilesEl = $("#tiles");
+  const LANE_CLASS = ["", "l1", "l2", "lx"];
+  IDEAS.forEach((idea, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tile";
+    b.setAttribute("aria-pressed", "false");
+    b.setAttribute("aria-label", `${idea.name}: ${idea.what}`);
+    b.innerHTML = `<div class="view"></div><div class="label"><span><span class="num">${i + 1}</span><span class="name">${idea.name}</span></span><span class="listen"><span class="led ${LANE_CLASS[idea.lane < 0 ? 3 : idea.lane]}"></span><span>${idea.listens}</span></span></div>`;
+    b.addEventListener("click", () => select(i));
+    tilesEl.appendChild(b);
+    idea.tile = b;
+    idea.view = b.querySelector(".view");
+    idea.ledEl = b.querySelector(".led");
+  });
+
+  let sel = 0, hold = false, paused = false, slow = false;
+  const speed = () => (slow ? 0.25 : 1);
+  const stageView = $("#stageView"), todayView = $("#todayView");
+  const amtIn = $("#s-amt"), amtOut = $("#s-amt-out"), sLed = $("#s-led");
+  function select(i) {
+    sel = i;
+    const idea = IDEAS[i];
+    $("#s-num").textContent = String(i + 1);
+    $("#s-name").textContent = idea.name;
+    $("#s-listen").textContent = idea.listens;
+    $("#s-what").textContent = idea.what;
+    $("#s-adds-k").textContent = idea.addsK;
+    $("#s-adds").textContent = idea.adds;
+    sLed.className = "led " + LANE_CLASS[idea.lane < 0 ? 3 : idea.lane];
+    amtIn.value = String(idea.amount);
+    amtOut.textContent = Math.round(idea.amount * 100) + "%";
+    IDEAS.forEach((d, k) => d.tile.setAttribute("aria-pressed", k === i ? "true" : "false"));
+  }
+  amtIn.addEventListener("input", () => {
+    IDEAS[sel].amount = Number(amtIn.value);
+    amtOut.textContent = Math.round(IDEAS[sel].amount * 100) + "%";
+  });
+  function hitNow() {
+    const idea = IDEAS[sel];
+    idea.event(idea.lane < 0 ? 0 : idea.lane, 1, true);
+  }
+  $("#s-hit").addEventListener("click", hitNow);
+  const holdBtn = $("#s-hold");
+  const setHold = (on) => { hold = on; holdBtn.setAttribute("aria-pressed", on ? "true" : "false"); };
+  holdBtn.addEventListener("pointerdown", (e) => { setHold(true); try { holdBtn.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ } });
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) holdBtn.addEventListener(ev, () => setHold(false));
+  holdBtn.addEventListener("keydown", (e) => { if (e.key === "Enter") setHold(true); });
+  holdBtn.addEventListener("keyup", (e) => { if (e.key === "Enter") setHold(false); });
+  addEventListener("keydown", (e) => {
+    if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === "Space") { e.preventDefault(); setHold(true); }
+    else if (e.key === "h" || e.key === "H") hitNow();
+    else if (/^[1-6]$/.test(e.key)) select(Number(e.key) - 1);
+  });
+  addEventListener("keyup", (e) => { if (e.code === "Space") setHold(false); });
+  addEventListener("blur", () => setHold(false));
+
+  function setPressed(id, on) { $(id).setAttribute("aria-pressed", on ? "true" : "false"); }
+  function setMode(m) {
+    M.mode = m;
+    M.events.length = 0;
+    setPressed("#m-loop", m === "loop");
+    setPressed("#m-song", m === "song");
+    if (m === "song") startSong();
+    else { stopSong(); M.t = 0; M.step = -1; }
+  }
+  function setSound(on) {
+    soundOn = on;
+    if (on) audio();
+    if (master) master.gain.setTargetAtTime(on ? 0.8 : 0, actx.currentTime, 0.02);
+    setPressed("#sound", on);
+  }
+  function setPaused(p) {
+    paused = p;
+    setPressed("#pause", p);
+    $("#pause").textContent = p ? "Play" : "Pause";
+    if (actx) { if (p) actx.suspend(); else actx.resume(); }
+  }
+  $("#m-loop").addEventListener("click", () => setMode("loop"));
+  $("#m-song").addEventListener("click", () => { audio(); $("#file").click(); });
+  $("#file").addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; if (f) loadSong(f); e.target.value = ""; });
+  $("#sound").addEventListener("click", () => setSound(!soundOn));
+  $("#slow").addEventListener("click", () => {
+    slow = !slow;
+    setPressed("#slow", slow);
+    if (S.src) { S.rate = speed(); S.src.playbackRate.value = S.rate; }
+  });
+  $("#others").addEventListener("click", () => { others = !others; setPressed("#others", others); });
+  $("#pause").addEventListener("click", () => setPaused(!paused));
+
+  // ---- the hit strip
+  const strip = $("#strip"), sctx = strip.getContext("2d");
+  const LANE_COLOURS = ["#f92368", "#ffb547", "#00f0ff"];
+  const LANE_NAMES = ["BASS", "SNARE", "HATS"];
+  const STRIP_SEC = 4;
+  function drawStrip() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(strip.clientWidth * dpr)), h = Math.max(1, Math.round(strip.clientHeight * dpr));
+    if (strip.width !== w || strip.height !== h) { strip.width = w; strip.height = h; }
+    sctx.clearRect(0, 0, w, h);
+    const labelW = 58 * dpr, laneH = h / 3, plotW = w - labelW - 6 * dpr;
+    sctx.font = `${10 * dpr}px "Share Tech Mono", ui-monospace, monospace`;
+    sctx.textBaseline = "middle";
+    for (let l = 0; l < 3; l++) {
+      sctx.fillStyle = "rgba(236,232,247,0.05)";
+      sctx.fillRect(labelW, l * laneH + 1, plotW, laneH - 2);
+      sctx.fillStyle = LANE_COLOURS[l];
+      sctx.globalAlpha = 0.85;
+      sctx.fillText(LANE_NAMES[l], 8 * dpr, l * laneH + laneH / 2);
+      sctx.globalAlpha = 1;
+    }
+    for (const e of M.events) {
+      const age = M.t - e.t;
+      if (age < 0 || age > STRIP_SEC) continue;
+      const x = labelW + plotW * (1 - age / STRIP_SEC);
+      const top = e.lane * laneH, hh = (laneH - 4 * dpr) * clamp(e.s, 0.15, 1);
+      sctx.fillStyle = LANE_COLOURS[e.lane];
+      sctx.globalAlpha = 0.35 + 0.65 * Math.exp(-age * 1.2);
+      sctx.fillRect(x - dpr, top + laneH - 2 * dpr - hh, 2.2 * dpr, hh);
+      if (e.big) {
+        sctx.beginPath();
+        sctx.arc(x, top + laneH / 2, 4.5 * dpr, 0, TAU);
+        sctx.lineWidth = 1.5 * dpr;
+        sctx.strokeStyle = "#ffffff";
+        sctx.stroke();
+      }
+    }
+    sctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- frame loop
+  let last = performance.now(), dprScale = Math.min(devicePixelRatio || 1, 1.5);
+  const DPR_MAX = dprScale;
+  let slowFrames = 0, fastFrames = 0, ema = 16;
+  let lastWhere = "";
+  function resize() {
+    cRect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.round(cRect.width * dprScale)), h = Math.max(1, Math.round(cRect.height * dprScale));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    sx = canvas.width / cRect.width;
+    sy = canvas.height / cRect.height;
+  }
+  function stepSim(dt) {
+    if (M.mode === "loop") advanceLoop(dt); else advanceSong(dt);
+    base.tick(dt);
+    for (const idea of IDEAS) idea.tick(dt);
+  }
+  function frame(now) {
+    const realDt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    ema += (realDt * 1000 - ema) * 0.05;
+    // Lower the canvas resolution while frames run long; raise it back slowly.
+    if (ema > 24) { slowFrames++; fastFrames = 0; } else if (ema < 13) { fastFrames++; slowFrames = 0; } else { slowFrames = fastFrames = 0; }
+    if (slowFrames > 40 && dprScale > 0.6) { dprScale *= 0.85; slowFrames = 0; }
+    if (fastFrames > 180 && dprScale < DPR_MAX) { dprScale = Math.min(DPR_MAX, dprScale * 1.1); fastFrames = 0; }
+
+    const dt = paused ? 0 : Math.min(realDt, 0.05) * speed();
+    if (dt > 0) stepSim(dt);
+    for (const idea of IDEAS) {
+      idea.led *= Math.exp(-realDt * 7);
+      idea.ledEl.style.opacity = String(0.25 + 0.75 * idea.led);
+    }
+    sLed.style.opacity = String(0.25 + 0.75 * IDEAS[sel].led);
+    if (M.where !== lastWhere) { $("#where").textContent = M.where; lastWhere = M.where; }
+
+    resize();
+    gl.disable(gl.SCISSOR_TEST);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.SCISSOR_TEST);
+    setCommon();
+    const cur = IDEAS[sel];
+    drawView(stageView, cur, hold ? 0 : cur.amount, 12);
+    drawView(todayView, null, 0, 8);
+    for (const idea of IDEAS) drawView(idea.view, idea, idea.amount, 10);
+    drawStrip();
+    requestAnimationFrame(frame);
+  }
+
+  select(0);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) setPaused(true);
+  requestAnimationFrame(frame);
+
+  // For headless checks: pick, fire and read state without the mouse.
+  window.__fx = {
+    select, hitNow, setPaused, idea: (k) => IDEAS[k], setOthers: (on) => { others = on; setPressed("#others", on); },
+    fire: (lane, s, big) => fire(lane, s, big),
+    quiet: (on) => { quiet = on; },
+    lanes: (sec = 10) => {
+      const n = [0, 0, 0], big = [0, 0, 0];
+      for (const e of M.events) if (M.t - e.t <= sec) { n[e.lane]++; if (e.big) big[e.lane]++; }
+      return { bass: n[0], snare: n[1], hats: n[2], bigBass: big[0], beatSec: S.period };
+    },
+    advance: (sec) => { for (let left = sec; left > 1e-6; left -= 1 / 120) stepSim(Math.min(1 / 120, left)); },
+    state: () => ({ t: M.t, mode: M.mode, level: M.level, dpr: dprScale, ema, where: M.where, events: M.events.length, scratchPhase: IDEAS[5].st.mix, basePhase: base.phase }),
+  };
+})();
+</script>

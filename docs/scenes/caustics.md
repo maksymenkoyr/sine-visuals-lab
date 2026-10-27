@@ -9,7 +9,7 @@ treble hits riding on top. Ships from the initial commit and is on main
 
 The shifting lines of light on the floor of a sunlit pool, drawn live and moved by your music: free, in your browser, nothing to install.
 
-Each beat sends a ripple ring through the water that bends the light as it passes. High sounds, like hi-hats and cymbals, make the ridges sparkle, and the pool drifts faster as the music gets louder.
+Each beat sends a ripple ring through the water that bends the light as it passes. High sounds, like hi-hats and cymbals, make the ridges sparkle. Each snare or clap snaps the light into flat steps with a bright line along every edge, like a contour map, before it melts back into water. The pool drifts faster as the music gets louder.
 
 Put it on a big screen at a party or behind a DJ set and let it run: it keeps following the music with nobody at the controls.
 
@@ -930,6 +930,35 @@ reference-measurement workflow used by later scenes.
   filaments are too thin for the 64×36 change thumbnails and, on the contact
   sheet, the pool reads as a flat wash. The top of the slider is that extreme
   on purpose for now; the owner hasn't judged it live yet.
+- 2026-10-27 — Contour added, on the owner's ask for "some distinct effect to
+  caustics". Two idea pages of six live prototypes each came first (Materials);
+  from the second the owner picked Contour alone: "lets add contour 5. just
+  this one rest meh". `contour` (Look group) is the slider, wired to Mid hit
+  by default. FRAG steps the Shades tone into `CONTOUR_STEPS` flat levels and
+  maps it back to light, so Rainbow, whose hue rides the light, steps its
+  colours too. A white line runs along every step's edge except the lowest,
+  which would outline every speck of dark water. The shape over time is the
+  Mid hit drive's own pulse. The prototype held each snap for 120 ms first;
+  the scene does not.
+
+  `tools/tune-real.mjs caustics`, 30 s from 6 s:
+
+  | song, Contour | change med | change p95 | hits/min | Bass | Mid | Treble |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Billie Jean, 0 | 18.00 | 34.36 | 426 | 196 | 76 | 218 |
+  | Billie Jean, 0.6 | 19.30 | 33.97 | 408 | 194 | 80 | 218 |
+  | Billie Jean, 0.8 (default) | 18.56 | 32.58 | 404 | 192 | 82 | 214 |
+  | Levitating, 0.8 (default) | 18.01 | 36.63 | 336 | 114 | 168 | 70 |
+  | silence, each run | 1.66–1.67 | 1.94–1.97 | 0 | 0 | 0 | 0 |
+
+  The steps change tone in place, which the 64×36 change thumbnails barely
+  register. Stills taken 50 ms after a Mid hit on Billie Jean
+  (`caustics/scripts/contour-mid-shots.mjs`) show it plainly: flat terraces
+  with white edges at Contour 1, a smooth wash at 0. On a song as busy in the
+  mids as Levitating it fires about three times a second. On synthetic audio
+  (`?audio=synthetic`) 16 stills over 2.5 s showed no steps at all. Not timed with
+  `tools/gpu-bench.mjs`: the work is a few operations per pixel, and only
+  while a hit is sounding.
 
 ## Tuning notes
 
@@ -1057,6 +1086,7 @@ reference-measurement workflow used by later scenes.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - Artifact: [Caustics Sparkle Shapes](https://claude.ai/artifact/FqAHd9xEBS8cYJzhwoXqUR). Source saved as `caustics/artifacts/caustics-sparkle-shapes.html` (its last version, v6). The prototype the 2026-10-13 sparkle rebuild was chosen in: a live pool with fake hats, the Effect and Shape picks, and the preview window. Its effects are a sketch in its own shader; the scene's are in FRAG.
 - Artifact: [Laconic Sparkle](https://claude.ai/artifact/QbuQ31QaQZDCXfHP63mkaC). Source saved as `caustics/artifacts/laconic-sparkle.html`. The idea the 2026-10-26 cleanup was built from: today's Sparkle section beside a slim one, each row tagged with its fate, and a live sketch of the scene picking a shape. Its sketch rule (Pluck sized by hat spacing, Bell on a ringing hit) predates the measurements in Decisions, which changed it.
+- Artifact: [Caustics Effects, Round Two](https://claude.ai/artifact/RHkiHYE9T9Wi4Bvcmz1bMA). Source saved as `caustics/artifacts/caustics-effects-round-two.html`. Six live effect prototypes over a copy of FRAG at its defaults, on a beat loop or a song file: Dive, Dye, Wake, Tide, Contour and Scratch. Contour was picked and built (2026-10-27 Decisions); its terraces there are drawn on the page's own copy of the tone. Round one (Standing wave, Whirlpool, Gust, Shatter, Tilt, Stop-motion) is [Caustics Effect Ideas](https://claude.ai/artifact/URQWmfUZnQvtBQBGMerXBC); none of it was built.
 - Artifact: [Sparkle: Basic vs Adaptive](https://claude.ai/artifact/PMqbtZJqw7oPqw4xFUk9uX). Page source saved as `caustics/artifacts/sparkle-basic-vs-adaptive.html`. The two clips it plays (Billie Jean through the mic, Sparkle 1, recorded headless) live only in the artifact.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 - `caustics/scripts/colour-shot.mjs` and `colour-sheet.py` — the 2026-10-15
@@ -1138,3 +1168,4 @@ reference-measurement workflow used by later scenes.
 - 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; sparkles return on real songs (see Decisions)
 - #713 (2026-10-26) — Sparkle: one name, Grain/Prism/Run, Flare and Tighten as sliders, a Basic or Adaptive shape, the old dials dev-only (see Decisions)
 - #453 (2026-10-26) — Caustic density split into Caustic density (no jack) and Density reach (the wire) (see Decisions)
+- 2026-10-27 — Contour: snares and claps snap the light into steps (see Decisions)

@@ -408,6 +408,18 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.highOnset" },
   },
   {
+    key: "contour",
+    label: "Contour",
+    description: "On each snare or clap the light snaps into flat steps with a bright line along each edge, like a contour map, then melts back",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.8,
+    // Taste, so no auto table (same reasoning as causticDensity).
+    drive: { default: "anim.midOnset" },
+  },
+  {
     key: "levelGlow",
     label: "Level glow",
     description: "The whole pool brightens with whatever is wired in, Level by default; 0 = loudness no longer brightens it",
