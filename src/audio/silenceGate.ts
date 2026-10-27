@@ -39,7 +39,7 @@
  * frame (net/outputSync.ts's `gate`), and a paired TV and the synthetic feed
  * hold SILENCE_GATE_SEED.
  *
- * SILENCE_GATE_SEED is a placeholder, not measured against a real mic in a
+ * SILENCE_GATE_SEED is off (see resolveSilenceGate). SILENCE_GATE_TRACKER_SEED is a placeholder, not measured against a real mic in a
  * real room: `closed` is low because the room that prompted this feature read
  * Level as zero, and `open` sits at or under the quietest level
  * src/audio/synthetic.ts's `level` line ever emits, so the synthetic feed —
@@ -78,7 +78,10 @@ export const SILENCE_GATE_MIN = 0;
 
 /** The marks before this room has been heard holding still, and for good on
  *  a device that never hears it (this file's header). */
-export const SILENCE_GATE_SEED: SilenceGateMarks = Object.freeze({ closed: 0.05, open: 0.15 });
+export const SILENCE_GATE_SEED: SilenceGateMarks = Object.freeze({ closed: SILENCE_GATE_MIN, open: 0.15 });
+
+/** Where the parked floor tracker starts, and the gap it keeps. */
+export const SILENCE_GATE_TRACKER_SEED: SilenceGateMarks = Object.freeze({ closed: 0.05, open: 0.15 });
 
 /** One tick's gate reading, off one device's own capture — not the marks
  *  (SilenceGateMarks), but what the gate actually did this tick.
@@ -97,7 +100,7 @@ export interface SilenceGateReading {
 }
 
 // Placeholders, not measured against a real mic in a real room — same
-// caveat as SILENCE_GATE_SEED above.
+// caveat as SILENCE_GATE_TRACKER_SEED above.
 //
 // SILENCE_GATE_AUTO_MARGIN is how far above the tracked floor `closed`
 // sits once the room settles: wide enough that the floor estimate's own
@@ -139,21 +142,21 @@ const FLOOR_DROP_RATE = 1;
 
 /** Pure — this tracker's floor estimate to the two gate marks that follow
  *  from it. Exported for tests; feedSilenceGateMeasurement is the only real
- *  caller. Keeps SILENCE_GATE_SEED's gap, so the tracker moves where the two
+ *  caller. Keeps SILENCE_GATE_TRACKER_SEED's gap, so the tracker moves where the two
  *  marks sit, not how wide the smoothstep between them is. */
 export function silenceGateMarksForFloor(floor: number): SilenceGateMarks {
-  const safeFloor = Number.isFinite(floor) ? floor : SILENCE_GATE_SEED.closed;
+  const safeFloor = Number.isFinite(floor) ? floor : SILENCE_GATE_TRACKER_SEED.closed;
   const closed = Math.min(
     SILENCE_GATE_AUTO_CLOSED_CEIL,
     Math.max(SILENCE_GATE_AUTO_CLOSED_FLOOR, safeFloor + SILENCE_GATE_AUTO_MARGIN),
   );
-  return { closed, open: closed + (SILENCE_GATE_SEED.open - SILENCE_GATE_SEED.closed) };
+  return { closed, open: closed + (SILENCE_GATE_TRACKER_SEED.open - SILENCE_GATE_TRACKER_SEED.closed) };
 }
 
 // Never persisted: re-derived from the room fresh every session. `floor` is
 // backed out of the seed through the margin, so the first marks are exactly
-// SILENCE_GATE_SEED.
-let floor = SILENCE_GATE_SEED.closed - SILENCE_GATE_AUTO_MARGIN;
+// SILENCE_GATE_TRACKER_SEED.
+let floor = SILENCE_GATE_TRACKER_SEED.closed - SILENCE_GATE_AUTO_MARGIN;
 let envelopeMin = Infinity;
 let envelopeMax = -Infinity;
 
@@ -163,8 +166,17 @@ let envelopeMax = -Infinity;
 const SNAPSHOT_EPS = 1e-4;
 let snapshot: SilenceGateMarks | null = null;
 
-/** The marks app.ts's extractor/animClock should use this tick. */
+/** The marks app.ts's extractor/animClock should use this tick. The gate is
+ *  off (SILENCE_GATE_SEED sits on SILENCE_GATE_MIN): the floor tracker read
+ *  steady stretches of a clean digital source (screen share, a held note) as
+ *  the room's floor and shut real music out with no way to tell (#578). */
 export function resolveSilenceGate(): SilenceGateMarks {
+  return SILENCE_GATE_SEED;
+}
+
+/** What the floor tracker would have the marks be. Kept running so the gate
+ *  can come back once it can tell a quiet room from a quiet song. */
+export function trackedSilenceGate(): SilenceGateMarks {
   const marks = silenceGateMarksForFloor(floor);
   if (
     snapshot === null ||
@@ -176,9 +188,9 @@ export function resolveSilenceGate(): SilenceGateMarks {
   return snapshot;
 }
 
-/** A fresh envelope with `closed` at the given mark (SILENCE_GATE_SEED's by
+/** A fresh envelope with `closed` at the given mark (SILENCE_GATE_TRACKER_SEED's by
  *  default), for tests and the tempo eval. */
-export function resetSilenceGateTracker(closed = SILENCE_GATE_SEED.closed): void {
+export function resetSilenceGateTracker(closed = SILENCE_GATE_TRACKER_SEED.closed): void {
   floor = closed - SILENCE_GATE_AUTO_MARGIN;
   envelopeMin = Infinity;
   envelopeMax = -Infinity;

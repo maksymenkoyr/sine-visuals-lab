@@ -4,14 +4,16 @@ import {
   hitPasses,
   resetSilenceGateTracker,
   resolveSilenceGate,
+  trackedSilenceGate,
   feedSilenceGateMeasurement,
   silenceGateMarksForFloor,
   SILENCE_GATE_MIN,
   SILENCE_GATE_SEED,
+  SILENCE_GATE_TRACKER_SEED,
 } from "../src/audio/silenceGate.ts";
 import { createSyntheticFeed } from "../src/audio/synthetic.ts";
 
-const SEED_GAP = SILENCE_GATE_SEED.open - SILENCE_GATE_SEED.closed;
+const SEED_GAP = SILENCE_GATE_TRACKER_SEED.open - SILENCE_GATE_TRACKER_SEED.closed;
 
 describe("silenceGateDimmer", () => {
   const marks = { closed: 0.1, open: 0.3 };
@@ -149,24 +151,24 @@ describe("room-floor tracker", () => {
     resetSilenceGateTracker();
   });
 
-  it("starts at SILENCE_GATE_SEED, before the room has been heard", () => {
-    const marks = resolveSilenceGate();
-    expect(marks.closed).toBeCloseTo(SILENCE_GATE_SEED.closed, 12);
-    expect(marks.open).toBeCloseTo(SILENCE_GATE_SEED.open, 12);
+  it("starts at SILENCE_GATE_TRACKER_SEED, before the room has been heard", () => {
+    const marks = trackedSilenceGate();
+    expect(marks.closed).toBeCloseTo(SILENCE_GATE_TRACKER_SEED.closed, 12);
+    expect(marks.open).toBeCloseTo(SILENCE_GATE_TRACKER_SEED.open, 12);
   });
 
   it("hands out a snapshot the caller can't mutate", () => {
-    const marks = resolveSilenceGate();
+    const marks = trackedSilenceGate();
     expect(() => {
       (marks as { closed: number }).closed = 0.9;
     }).toThrow();
-    expect(resolveSilenceGate().closed).toBeCloseTo(SILENCE_GATE_SEED.closed);
+    expect(trackedSilenceGate().closed).toBeCloseTo(SILENCE_GATE_TRACKER_SEED.closed);
   });
 
   it("a steady low level pulls the marks to settle just above it", () => {
     const quietLevel = 0.01; // below the seed's own closed mark
     for (let i = 0; i < 60; i++) feedSilenceGateMeasurement(quietLevel, 1);
-    const resolved = resolveSilenceGate();
+    const resolved = trackedSilenceGate();
     // "Just above" — closer to the room's own quiet level than to the seed's
     // gap between the two marks, without pinning the exact margin (an
     // unmeasured placeholder — see this module's header).
@@ -175,12 +177,12 @@ describe("room-floor tracker", () => {
   });
 
   it("a fluctuating, music-like level never lets the floor rise", () => {
-    const before = resolveSilenceGate();
+    const before = trackedSilenceGate();
     // Both levels sit above the seeded floor, so this only exercises the
     // steadiness gate, not the fast-drop path — a wide, constantly-moving
     // window should never read as "the room went quiet."
     for (let i = 0; i < 400; i++) feedSilenceGateMeasurement(i % 2 === 0 ? 0.4 : 0.15, 1 / 20);
-    const after = resolveSilenceGate();
+    const after = trackedSilenceGate();
     expect(after.closed).toBeCloseTo(before.closed);
   });
 
@@ -189,18 +191,18 @@ describe("room-floor tracker", () => {
     // so neither leg below saturates SILENCE_GATE_AUTO_CLOSED_FLOOR/CEIL and
     // confounds the comparison.
     resetSilenceGateTracker(0.15);
-    const before = resolveSilenceGate();
+    const before = trackedSilenceGate();
     feedSilenceGateMeasurement(before.closed - 0.1, 0.1);
-    const afterDrop = resolveSilenceGate().closed;
+    const afterDrop = trackedSilenceGate().closed;
 
     // Fresh seed + fresh envelope for a clean second comparison — a
     // first-ever reading needs only one sample (both envelope bounds start
     // unset), so this isolates the rate difference from any envelope
     // warm-up effect the first leg left behind.
     resetSilenceGateTracker(0.15);
-    const beforeRise = resolveSilenceGate();
+    const beforeRise = trackedSilenceGate();
     feedSilenceGateMeasurement(beforeRise.closed + 0.1, 0.1);
-    const afterRise = resolveSilenceGate().closed;
+    const afterRise = trackedSilenceGate().closed;
 
     const dropDelta = before.closed - afterDrop;
     const riseDelta = afterRise - beforeRise.closed;
@@ -215,29 +217,29 @@ describe("room-floor tracker", () => {
 
   it("closed never reaches SILENCE_GATE_MIN, even after a very long silence", () => {
     for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(0, 5);
-    expect(resolveSilenceGate().closed).toBeGreaterThan(SILENCE_GATE_MIN);
+    expect(trackedSilenceGate().closed).toBeGreaterThan(SILENCE_GATE_MIN);
   });
 
   it("closed stays under a very long, loud drone", () => {
     const drone = 0.6;
     for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(drone, 5);
-    expect(resolveSilenceGate().closed).toBeLessThan(drone);
+    expect(trackedSilenceGate().closed).toBeLessThan(drone);
   });
 
   it("keeps the seed's gap across a run with varied levels", () => {
     const levels = [0.5, 0.02, 0.4, 0.01, 0.6, 0, 0.3];
     for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(levels[i % levels.length], 1 / 30);
-    const resolved = resolveSilenceGate();
+    const resolved = trackedSilenceGate();
     expect(resolved.open - resolved.closed).toBeCloseTo(SEED_GAP);
   });
 
   it("ignores a non-finite level or dt outright, holding the last estimate", () => {
     feedSilenceGateMeasurement(0.02, 1); // establish a real reading first
-    const before = resolveSilenceGate();
+    const before = trackedSilenceGate();
     feedSilenceGateMeasurement(Number.NaN, 1);
     feedSilenceGateMeasurement(0.02, Number.NaN);
     feedSilenceGateMeasurement(Number.POSITIVE_INFINITY, 1);
-    expect(resolveSilenceGate()).toEqual(before);
+    expect(trackedSilenceGate()).toEqual(before);
   });
 });
 
@@ -264,8 +266,15 @@ describe("silence gate on module load", () => {
     };
     vi.resetModules();
     const fresh = await import("../src/audio/silenceGate.ts");
-    expect(fresh.resolveSilenceGate().closed).toBeCloseTo(fresh.SILENCE_GATE_SEED.closed, 12);
+    expect(fresh.trackedSilenceGate().closed).toBeCloseTo(fresh.SILENCE_GATE_TRACKER_SEED.closed, 12);
     for (let i = 0; i < 60; i++) fresh.feedSilenceGateMeasurement(0.01, 1);
-    expect(fresh.resolveSilenceGate().closed).toBeLessThan(fresh.SILENCE_GATE_SEED.closed);
+    expect(fresh.trackedSilenceGate().closed).toBeLessThan(fresh.SILENCE_GATE_TRACKER_SEED.closed);
+  });
+});
+
+describe("resolveSilenceGate", () => {
+  it("is off: it gates nothing, whatever the tracker has heard", () => {
+    for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(0.2, 5);
+    expect(silenceGateDimmer(0.001, resolveSilenceGate())).toBe(1);
   });
 });
