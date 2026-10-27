@@ -52,7 +52,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.35, // 0.5 on this dial was the scene's old fixed noise-sampling frequency
+    default: 0.35,
     // Pure framing geometry the user tunes to taste, same reasoning as
     // sparkleGrain's weight: 0 — not something the music profile should
     // silently redecide underneath a chosen look (no `auto` table).
@@ -712,6 +712,18 @@ const SETTINGS: SceneSetting[] = [
     advanced: true,
     dev: true,
     macro: { driver: SPARKLE, weight: 0.3 },
+  },
+  {
+    key: "zoom",
+    label: "Zoom",
+    description: "How close the view sits to the pool — left shows more of it, right magnifies the filaments",
+    group: "Camera",
+    min: 0.5,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    // Framing, not an amount: the Master card's Scale would move the camera.
+    masterScale: false,
   },
 ];
 

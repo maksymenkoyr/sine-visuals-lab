@@ -201,12 +201,15 @@ const BREATHE_ZOOM = 0.10;
 // clamp and no ceiling to saturate against.
 const FOCUS_SNAP_RATIO = 1.3;
 
-// Caustic density's span (causticDensityScale below): 0.5 is exactly today's old fixed
-// noise-sampling frequency (densScale = 1); the endpoints sit half the span
-// either side of that in octaves. Widened once (#454) when density stopped
+// Caustic density's span (causticDensityScale below): the endpoints sit half
+// the span either side of the dial's middle in octaves. Widened once (#454) when density stopped
 // zooming: with the filament width held, a wide range reads as a sparse web
 // at one end and a dense mesh at the other, still this scene's own look.
 const DENSITY_SPAN_OCTAVES = 3.2;
+// Every Caustic density position resolves this share of the filaments the
+// span alone gives — halved on the owner's ask that the slider read sparser
+// (2026-10-27).
+const DENSITY_FILAMENTS = 0.5;
 
 /** Caustic density's target (advanceDensityFlow glides toward it): the
  *  slider lifted toward 1 by `reach` (Density reach) times its drive's
@@ -245,11 +248,10 @@ export function focusSharp(fog: number, focus: number, beatPulse: number): numbe
 }
 
 /** Caustic density (0..1) -> the ridge noise's sampling frequency multiplier,
- *  i.e. how many filaments there are relative to the default. 0.5 -> 1.0, the
- *  old fixed frequency exactly. FRAG computes the same curve from
- *  uDensityLive. */
+ *  i.e. how many filaments there are relative to the scene's original fixed
+ *  frequency. FRAG computes the same curve from uDensityLive. */
 export function causticDensityScale(density: number): number {
-  return Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
+  return DENSITY_FILAMENTS * Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
 }
 
 // Level glow (the "levelGlow" setting, #449): how far the whole pool's
@@ -708,7 +710,7 @@ float ridgeField(inout vec2 q, int iterations, float sharp, float ridgeGain, flo
 void main() {
   vec2 uv = roomUv(vUv);
   vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
-  vec2 p = (uv - 0.5) * aspectFix * 3.0;
+  vec2 p = (uv - 0.5) * aspectFix * 3.0 / uZoom;
 
   // Breathe: the pool zooms on whatever source is patched onto the breathe
   // setting, at BREATHE_ZOOM depth scaled by uBreathe — Bar wave by default,
@@ -748,7 +750,7 @@ void main() {
   // of them. The ridge drift offsets in uDriftFlow carry the factor, folded
   // in per tick JS-side (advanceDensityFlow), so a denser pattern doesn't
   // also drift faster on screen.
-  float densScale = pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
+  float densScale = ${DENSITY_FILAMENTS.toFixed(2)} * pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
 
   // This scene's own drift (uDriftFlow, uploaded by extraUniforms below)
   // replaces the shared uFlowPhase so drift speed is dialable. It arrives

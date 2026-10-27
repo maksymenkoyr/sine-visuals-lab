@@ -376,13 +376,13 @@ describe("caustics Fog pulse / fog", () => {
 });
 
 describe("caustics caustic density", () => {
-  it("the default (0.5) reproduces the old fixed noise-sampling frequency exactly (scale = 1)", () => {
-    expect(causticDensityScale(0.5)).toBeCloseTo(1, 10);
+  it("the dial's middle (0.5) resolves half the old fixed noise-sampling frequency", () => {
+    expect(causticDensityScale(0.5)).toBeCloseTo(0.5, 10);
   });
 
-  it("the endpoints span roughly a 0.33x..3x range, monotone across it", () => {
-    expect(causticDensityScale(0)).toBeCloseTo(0.330, 2);
-    expect(causticDensityScale(1)).toBeCloseTo(3.031, 2);
+  it("the endpoints span roughly a 0.17x..1.5x range, monotone across it", () => {
+    expect(causticDensityScale(0)).toBeCloseTo(0.165, 2);
+    expect(causticDensityScale(1)).toBeCloseTo(1.516, 2);
     let prev = causticDensityScale(0);
     for (let d = 0.1; d <= 1; d += 0.1) {
       const s = causticDensityScale(d);
