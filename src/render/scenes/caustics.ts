@@ -371,6 +371,12 @@ const FLARE_GAIN = 0.7;
 const FLARE_CURVE = 1.8;
 // Tighten: the ridge exponent is multiplied by exp(TIGHTEN_GAIN * reading).
 const TIGHTEN_GAIN = 1.25;
+// Contour: the light snaps to CONTOUR_STEPS flat levels of the Shades tone,
+// with a white line of CONTOUR_RIM_MIX along each step's edge. The top level
+// stops at CONTOUR_TOP because the tone only reaches 1 at infinite light.
+const CONTOUR_STEPS = 5;
+const CONTOUR_RIM_MIX = 0.85;
+const CONTOUR_TOP = 0.97;
 // The sparkle effects (causticsSparkle.ts). Each reads sparkleE in FRAG:
 // Sparkle times the hits' summed, signed shape (uSparkleEnv). The distances
 // are in FRAG's p units, where the frame is 3 tall.
@@ -926,6 +932,21 @@ void main() {
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
   acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
+  // Contour steps the Shades tone and maps it back to light, so Rainbow,
+  // whose hue rides the light, steps its colours too. The lowest edge gets
+  // no line, or every speck of dark water would be outlined.
+  float contourAmt = clamp(uContour * contourDrive(uMidPulse), 0.0, 1.0);
+  float contourRim = 0.0;
+  if (contourAmt > 0.001) {
+    float cx = acc * ${SHADE_GAIN.toFixed(2)};
+    float ct = cx / (1.0 + cx);
+    float tn = ct * ${CONTOUR_STEPS.toFixed(1)};
+    float tf = fract(tn);
+    float tw = fwidth(tn);
+    contourRim = (1.0 - smoothstep(tw * 0.7, tw * 2.0, min(tf, 1.0 - tf))) * step(0.7, tn) * contourAmt;
+    ct = mix(ct, min(floor(tn) / ${(CONTOUR_STEPS - 1).toFixed(1)}, ${CONTOUR_TOP.toFixed(2)}), contourAmt);
+    acc = ct / (1.0 - ct) / ${SHADE_GAIN.toFixed(2)};
+  }
   // Prism's fringes (prismR/prismB above), lit like the ridges they split
   // off and in fixed prism colours rather than the palette's.
   vec3 prism = (vec3(1.0, 0.25, 0.45) * prismR + vec3(0.35, 0.45, 1.0) * prismB) * ${PRISM_GAIN.toFixed(2)} * brightMul;
@@ -947,6 +968,7 @@ void main() {
     }
     // Screen the fringes over the shade: col is already in 0..1.
     col = 1.0 - (1.0 - col) * (1.0 - prism / (1.0 + prism));
+    col = mix(col, vec3(1.0), contourRim * ${CONTOUR_RIM_MIX.toFixed(2)});
     outColor = vec4(col, 1.0);
     return;
   }
@@ -981,6 +1003,7 @@ void main() {
   vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
   col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc + prism;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
+  col = mix(col, vec3(1.0), contourRim * ${CONTOUR_RIM_MIX.toFixed(2)});
 
   outColor = vec4(col, 1.0);
 }
