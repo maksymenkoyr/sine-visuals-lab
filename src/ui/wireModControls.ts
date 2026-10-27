@@ -3,7 +3,7 @@
  * buildSourceLine) or in the open knot on its cable (buildKnotBody, in
  * cableKnots.ts's layer): a small graph of the wire's input and output, then
  * Window (On/Off, Min and Max), Smoothness (On/Off, works with Window off too)
- * and Length, the fields of src/render/wireMod.ts. The wire's Height is built beside them by the caller, not here.
+ * Length and Invert, the fields of src/render/wireMod.ts. The wire's Height is built beside them by the caller, not here.
  *
  * Every edit hands the whole modifier to `onChange` without a rebuild, since
  * a rebuild would tear out the slider being dragged. The graph keeps one
@@ -141,6 +141,7 @@ const WINDOW_HINT =
 const SMOOTHNESS_HINT =
   "How gently this wire moves. With Window on, left is exactly at Min and Max and right is a softer rise toward nothing and toward the peak, while silence still gives nothing and the peak still gives full. With Window off, right makes the wire slow to follow its input, up and down alike.";
 const LENGTH_HINT = "How long this wire takes to fall after each rise. Off: it falls as fast as the input does.";
+const INVERT_HINT = "Turns this wire upside down: the setting is full when the input is quiet and falls as it rises, so a hit dips instead of flashing.";
 
 export function createWireModControls(opts: WireModControlsOpts): WireModControls {
   const { label, accent } = opts;
@@ -252,9 +253,17 @@ export function createWireModControls(opts: WireModControlsOpts): WireModControl
   lengthEl.style.cssText = controlStyle;
   lengthEl.append(head([text("Length")], lengthValue), lengthInput, ends("Off", "Long tail"));
 
+  const invertSwitch = onOffSwitch(`${label} invert on/off`, accent, INVERT_HINT, mod.invert, (on) => {
+    mod.invert = on;
+    changed();
+  });
+  const invertEl = document.createElement("div");
+  invertEl.style.cssText = controlStyle;
+  invertEl.append(head([invertSwitch, text("Invert")], document.createElement("span")));
+
   el.append(canvas, windowEl, smoothEl);
   if (opts.formula) el.append(buildGateFormulaPicker(opts.formula.current, opts.formula.onPick));
-  el.append(lengthEl);
+  el.append(lengthEl, invertEl);
 
   function draw(): void {
     if (!sizer.ensure()) return;

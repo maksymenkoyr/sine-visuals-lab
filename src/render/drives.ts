@@ -143,7 +143,7 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  *   A saved wire that says "loud" (a retired height) loads as Graded.
  *
  * **Wire modifiers.** A catalogue source can carry a modifier
- * (`DriveSource.mod`, src/render/wireMod.ts): Window, Smoothness and Length
+ * (`DriveSource.mod`, src/render/wireMod.ts): Window, Smoothness, Length and Invert
  * on that one wire, after its Height. `accumulate()` steps every catalogue
  * wire's modifier state each tick, with or without a modifier, so the
  * panel can draw any wire's input before its Window is switched on; the
@@ -384,7 +384,7 @@ export interface DriveSource {
    *  elsewhere. Absent or 1 is the plain reading; `sourceRawImpl` branches only
    *  above 1. */
   every?: DriveEvery;
-  /** Catalogue sources only: this wire's own Window, Smoothness and Length
+  /** Catalogue sources only: this wire's own Window, Smoothness, Length and Invert
    *  (wireMod.ts). Absent reads as `freshWireMod()`, the plain wire. */
   mod?: WireMod;
 }

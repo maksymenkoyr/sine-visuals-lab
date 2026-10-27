@@ -204,7 +204,7 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * line per source (colour dot, name, weight 0–2×, a hit source's Height
  * Fixed/Graded, a grid source's division chips, the line source's
  * Clear chip, and under a catalogue
- * wire its modifier: Window, Smoothness and Length, wireModControls.ts;
+ * wire its modifier: Window, Smoothness, Length and Invert, wireModControls.ts;
  * while cables show, a catalogue wire's Height, weight and modifier move
  * into its knot on the cable, cableKnots.ts, and its line keeps one summary
  * chip that opens it), a 4 s output graph off
@@ -3129,6 +3129,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (mod?.windowOn) modParts.push("Window");
     if (mod?.windowOn && mod.smoothOn) modParts.push("Smoothness");
     if (mod && mod.length > 0) modParts.push("Length");
+    if (mod?.invert) modParts.push("Inverted");
     if (modParts.length) parts.push(modParts.join(", "));
     const chip = document.createElement("button");
     chip.type = "button";
