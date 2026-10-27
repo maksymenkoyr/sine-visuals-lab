@@ -636,7 +636,7 @@ body.vc-keys-reveal [data-keycap]::after {
  * the row grammar in this file's header for why a click expands the patch panel). */
 .vc-drive-port {
   position: absolute; left: 6px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
-  padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
+  padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 .vc-drive-port:hover { transform: scale(1.25); }
 .vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -713,7 +713,7 @@ body.vc-keys-reveal [data-keycap]::after {
   position: relative; width: 13px; height: 13px; border-radius: 50%; padding: 0;
   border: 1.5px solid var(--c); flex-shrink: 0; cursor: pointer;
   background: radial-gradient(circle, rgba(5, 4, 8, 0.9) 0 34%, color-mix(in srgb, var(--c) 18%, transparent) 36%);
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
 }
 .vc-jack:hover { transform: scale(1.2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent); }
 .vc-jack-filled {
@@ -839,44 +839,95 @@ body.vc-keys-reveal [data-keycap]::after {
 /* A muted source's cable (DriveSource.off): one flat path, no glow/flow layer
  * (cableLayer.ts skips them), with a longer dash than the others. */
 .vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
-/* Pressing a cable unplugs it (cableLayer.ts onPress, wired by deviceMenu.ts
- * cableGroupFor). The layer is pointer-events: none, so this transparent hit stroke is
- * the only part that answers; its width, not the core's, makes a thin cable easy to
- * press. The same stroke carries the hover lift: a drop-shadow in the group's CSS
- * color (via currentColor), a thicker core, a brighter glow, and flow beads lifted
- * toward white and wider (at resting width they'd sink into the thicker core and the
- * flow would vanish exactly while the cable is looked at). The bead lift is
- * motion-only: reduced motion draws the flow as a solid line, which whitening would
- * just recolour. Preview/scene-mix cables never grow a hit stroke, so they never
- * light up like this. .vc-cables-lift (cableLayer.ts setLift) lifts every pinned
- * cable at once, while the pointer is on the pinned row. */
-.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
-.vc-cable-g { transition: filter 0.15s ease; }
+/* A pinned cable answers the pointer through its transparent hit stroke (the layer
+ * itself is pointer-events: none) and the × at each end (cableLayer.ts header: a click
+ * on the stroke opens the cable's knot, a click on an × unplugs, and so does a pull
+ * anywhere on it). The stroke's width, not the core's, makes a thin cable easy to
+ * hit. Hovering arms the cable (.vc-cable-armed), which carries the lift: a
+ * drop-shadow in the group's CSS color (via currentColor), a thicker core, a brighter
+ * glow, and flow beads lifted toward white and wider (at resting width they'd sink
+ * into the thicker core and the flow would vanish exactly while the cable is looked
+ * at). The bead lift is motion-only: reduced motion draws the flow as a solid line,
+ * which whitening would just recolour.
+ * While one cable is armed the others' strokes stop answering (.vc-cable-has-armed),
+ * so the cable followed in keeps the pointer where a setting's cables meet at its
+ * port. Preview/scene-mix cables never grow a hit stroke, so they never arm.
+ * .vc-cables-lift (cableLayer.ts setLift) lifts every pinned cable at once, while the
+ * pointer is on the pinned row. */
+.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: grab; }
+.vc-cable-has-armed .vc-cable-g:not(.vc-cable-armed) .vc-cable-hit { pointer-events: none; }
+.vc-cable-g { transition: filter 0.15s ease, opacity 0.12s ease; }
 .vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
 .vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-flow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-muted { transition: opacity 0.12s ease; }
-.vc-cable-g:hover, .vc-cables-lift .vc-cable-g { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
-.vc-cable-g:hover .vc-cable-core, .vc-cables-lift .vc-cable-g .vc-cable-core { stroke-width: 3; opacity: 1; }
-.vc-cable-g:hover .vc-cable-glow, .vc-cables-lift .vc-cable-g .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
-.vc-cable-g:hover .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { opacity: 1; }
+.vc-cable-g.vc-cable-armed, .vc-cables-lift .vc-cable-g { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
+.vc-cable-g.vc-cable-armed .vc-cable-core, .vc-cables-lift .vc-cable-g .vc-cable-core { stroke-width: 3; opacity: 1; }
+.vc-cable-g.vc-cable-armed .vc-cable-glow, .vc-cables-lift .vc-cable-g .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
+.vc-cable-g.vc-cable-armed .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .vc-cable-g:hover .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
+  .vc-cable-g.vc-cable-armed .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
 }
-.vc-cable-g:hover .vc-cable-muted, .vc-cables-lift .vc-cable-g .vc-cable-muted { opacity: 0.8; }
+.vc-cable-g.vc-cable-armed .vc-cable-muted, .vc-cables-lift .vc-cable-g .vc-cable-muted { opacity: 0.8; }
+/* A lit cable's jack and port (cableLayer.ts syncLit) take its bloom in its colour, so
+ * the focus carries into what it plugs into. A filter, because the port's own
+ * box-shadow is written inline. */
+.vc-jack[data-cable-lit], .vc-drive-port[data-cable-lit] {
+  transform: scale(1.3);
+  filter: drop-shadow(0 0 2px var(--vc-lit)) drop-shadow(0 0 6px var(--vc-lit));
+}
+/* A cable's ×s (cableLayer.ts xEl, bindX): drawn and pressable only while the cable is
+ * armed or lingering, since they sit over the jack's and the port's own cards. With
+ * the pointer on one, the cable previews its unplug dashed and without its bloom. A
+ * pull gone far enough to unplug loosens the cable (.vc-cable-loose), so letting go
+ * reads as unplugging. */
+.vc-cable-x { opacity: 0; transition: opacity 0.12s ease; }
+.vc-cable-x-in { transform-box: fill-box; transform-origin: center; transform: scale(0.6); transition: transform 0.14s ease; }
+.vc-cable-x-bg { fill: rgba(20, 19, 26, 0.94); stroke: currentColor; stroke-width: 1.2; }
+.vc-cable-x-mark { fill: none; stroke: #fff; stroke-width: 1.5; stroke-linecap: round; }
+.vc-cable-x-hit { fill: transparent; pointer-events: none; cursor: pointer; }
+.vc-cable-g.vc-cable-armed .vc-cable-x, .vc-cable-g.vc-cable-x-linger .vc-cable-x { opacity: 1; }
+.vc-cable-g.vc-cable-x-linger:not(.vc-cable-armed) .vc-cable-x { opacity: 0.6; }
+.vc-cable-g.vc-cable-armed .vc-cable-x-in, .vc-cable-g.vc-cable-x-linger .vc-cable-x-in { transform: scale(1); }
+.vc-cable-g.vc-cable-armed .vc-cable-x-hit, .vc-cable-g.vc-cable-x-linger .vc-cable-x-hit { pointer-events: all; }
+.vc-cable-x:hover .vc-cable-x-bg { fill: currentColor; }
+.vc-cable-x:hover .vc-cable-x-mark { stroke: #0b0a0f; }
+.vc-cable-g.vc-cable-x-preview { filter: none; }
+.vc-cable-g.vc-cable-x-preview .vc-cable-core { stroke-dasharray: 4 3; opacity: 0.6; stroke-width: 1.5; }
+.vc-cable-g.vc-cable-x-preview .vc-cable-glow { opacity: 0.06; }
+.vc-cable-g.vc-cable-x-preview .vc-cable-flow { opacity: 0; }
+.vc-cable-g.vc-cable-loose { opacity: 0.55; }
+body.vc-cable-pulling, body.vc-cable-pulling * { cursor: grabbing !important; }
+/* The unplug retract (cableLayer.ts playUnplug): the cable's core runs back from the
+ * unplugged end (the copy's pathLength makes one dash the whole path), and a spark
+ * rings the socket it left. Never played under reduced motion. */
+.vc-cable-ghost { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 100 100; animation: vc-cable-retract 0.26s ease-in forwards; }
+.vc-cable-ghost-rev .vc-cable-ghost { animation-name: vc-cable-retract-rev; }
+@keyframes vc-cable-retract { from { stroke-dashoffset: 0; opacity: 0.9; } to { stroke-dashoffset: 100; opacity: 0; } }
+@keyframes vc-cable-retract-rev { from { stroke-dashoffset: 0; opacity: 0.9; } to { stroke-dashoffset: -100; opacity: 0; } }
+.vc-cable-spark { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: vc-cable-spark 0.3s ease-out forwards; }
+@keyframes vc-cable-spark { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
 /* A pinned wire's knot (cableKnots.ts): just over the cables, under tooltips. Its
  * place and size are springs written inline per frame; only the fades are CSS. */
 .vc-knot-layer { position: fixed; inset: 0; pointer-events: none; z-index: 32; }
 .vc-knot {
   position: fixed; box-sizing: border-box; pointer-events: auto; overflow: hidden; cursor: pointer;
   background: #17131c; border: 1.5px solid var(--c); border-radius: 12px; color: rgba(255,255,255,0.88);
-  font: 400 12px/1.3 ${FONT_LABEL}; transition: opacity 0.25s ease, background-color 0.2s ease, border-radius 0.3s ease;
+  font: 400 12px/1.3 ${FONT_LABEL}; transition: opacity 0.25s ease, background-color 0.2s ease, border-radius 0.3s ease, filter 0.15s ease;
 }
 .vc-knot.vc-knot-rest { border-radius: 9px; }
 .vc-knot.vc-knot-rest.vc-knot-mod { background: var(--c); }
 .vc-knot.vc-knot-peeking { z-index: 1; }
 .vc-knot.vc-knot-open { cursor: default; z-index: 2; }
 .vc-knot.vc-knot-dim { opacity: 0.3; }
+/* Its cable lit (cableKnots.ts setLit): the cable's bloom, as a filter since tick()
+ * writes the box-shadow, and a hollow bead tinted so it no longer reads as a hole in the
+ * lit cable. An open knot is a panel by then, and keeps its plain border. */
+.vc-knot.vc-knot-lit:not(.vc-knot-open) { filter: drop-shadow(0 0 3px var(--c)) drop-shadow(0 0 9px var(--c)); }
+.vc-knot.vc-knot-lit:not(.vc-knot-open):not(.vc-knot-mod) { background: color-mix(in srgb, var(--c) 30%, #17131c); }
+/* A switched-off wire's knot (deviceMenu.ts buildKnotBody) dims below its header, as a
+ * switched-off line does, so the switch reads as what brings it back. */
+.vc-knot-muted > :not(:first-child) { opacity: 0.45; }
 .vc-knot:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
 .vc-knot-glyph { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; transition: opacity 0.12s; }
 .vc-knot:not(.vc-knot-rest) .vc-knot-glyph { opacity: 0; }
@@ -889,7 +940,7 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-knot-open .vc-knot-body { opacity: 1; pointer-events: auto; transition: opacity 0.22s 0.2s; }
 @media (prefers-reduced-motion: reduce) { .vc-knot, .vc-knot-glyph, .vc-knot-peek, .vc-knot-body { transition: none !important; } }
 @media (prefers-reduced-motion: reduce) {
-  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted { transition: none; }
+  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted, .vc-cable-x, .vc-cable-x-in { transition: none; }
 }
 
 /* "Pick a setting first": a jack clicked with nothing pinned or previewed (showToast). */
