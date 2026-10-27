@@ -1,5 +1,5 @@
 /**
- * A wire's modifier: Window, Smoothness and Length on one wire from an input
+ * A wire's modifier: Window, Smoothness, Length and Invert on one wire from an input
  * to a scene setting (drives.ts's `DriveSource.mod`). Height is the wire's own
  * `DriveSource.height`, read before the modifier, so the window sees the
  * Graded envelope when one is picked. Window picks the stretch of the
@@ -7,7 +7,8 @@
  * Max, with an On/Off), reusing the generic gate in gateWindow.ts so its math
  * is never copied; Smoothness softens it, or with Window off eases the input
  * over time; Length is a straight fall after
- * each rise, in seconds, off at 0.
+ * each rise, in seconds, off at 0; Invert, last, sends 1 − the value on, so
+ * the setting falls as the input rises (issue #446).
  *
  * A modifier belongs to its wire alone: two settings on the same input each
  * keep their own, and unplugging the wire drops it. Only a catalogue wire (a
@@ -39,6 +40,8 @@ export interface WireMod {
   smoothness: number;
   /** Seconds the output takes to fall from 1 to 0 after a rise; 0 = off. */
   length: number;
+  /** Sends 1 − the value on: silence reads full, a hit dips. */
+  invert: boolean;
 }
 
 /** A wire's modifier before anyone touched it: it reads what the plain wire reads. */
@@ -50,6 +53,7 @@ export function freshWireMod(): WireMod {
     smoothOn: true,
     smoothness: GENERIC_SMOOTHNESS_DEFAULT,
     length: 0,
+    invert: false,
   };
 }
 
@@ -65,14 +69,15 @@ export function sameWireMod(a: WireMod | undefined, b: WireMod | undefined): boo
     x.max === y.max &&
     x.smoothOn === y.smoothOn &&
     x.smoothness === y.smoothness &&
-    x.length === y.length
+    x.length === y.length &&
+    x.invert === y.invert
   );
 }
 
-/** Whether the modifier changes nothing the wire reads: Window and Length off,
- *  and no Smoothness above its resting value (glideSmoothness). */
+/** Whether the modifier changes nothing the wire reads: Window, Length and
+ *  Invert off, and no Smoothness above its resting value (glideSmoothness). */
 export function wireModIsIdle(mod: WireMod | undefined): boolean {
-  return !mod || (!mod.windowOn && mod.length <= 0 && !(mod.smoothOn && glideSmoothness(mod.smoothness) > 0));
+  return !mod || (!mod.windowOn && mod.length <= 0 && !mod.invert && !(mod.smoothOn && glideSmoothness(mod.smoothness) > 0));
 }
 
 function clampTo(v: number, lo: number, hi: number): number {
@@ -89,26 +94,29 @@ export function clampWireMod(mod: WireMod): WireMod {
     smoothOn: mod.smoothOn,
     smoothness: clampTo(mod.smoothness, 0, 1),
     length: clampTo(mod.length, 0, WIRE_LENGTH_MAX_SEC),
+    invert: mod.invert,
   };
 }
 
 /** The compact stored form, one array per wire: `[windowOn, min, max,
- *  smoothOn, smoothness, length]`, the switches as 0/1. A share link carries
- *  it, so the order never changes. */
-export type StoredWireMod = [number, number, number, number, number, number];
+ *  smoothOn, smoothness, length, invert?]`, the switches as 0/1. A share link
+ *  carries it, so the order never changes. Invert is written only when on, so
+ *  every other wire stays the six slots a build from before Invert reads. */
+export type StoredWireMod = [number, number, number, number, number, number] | [number, number, number, number, number, number, number];
 
 export function encodeWireMod(mod: WireMod): StoredWireMod {
-  return [mod.windowOn ? 1 : 0, mod.min, mod.max, mod.smoothOn ? 1 : 0, mod.smoothness, mod.length];
+  const six: [number, number, number, number, number, number] = [mod.windowOn ? 1 : 0, mod.min, mod.max, mod.smoothOn ? 1 : 0, mod.smoothness, mod.length];
+  return mod.invert ? [...six, 1] : six;
 }
 
 /** `raw` as a WireMod, or null when it is not the stored form. Numbers are
  *  clamped rather than rejected. */
 export function decodeWireMod(raw: unknown): WireMod | null {
-  if (!Array.isArray(raw) || raw.length !== 6) return null;
+  if (!Array.isArray(raw) || (raw.length !== 6 && raw.length !== 7)) return null;
   if (!raw.every((v) => typeof v === "number" && Number.isFinite(v))) return null;
-  const [w, min, max, s, smoothness, length] = raw as number[];
-  if ((w !== 0 && w !== 1) || (s !== 0 && s !== 1)) return null;
-  return clampWireMod({ windowOn: w === 1, min: min!, max: max!, smoothOn: s === 1, smoothness: smoothness!, length: length! });
+  const [w, min, max, s, smoothness, length, inv = 0] = raw as number[];
+  if ((w !== 0 && w !== 1) || (s !== 0 && s !== 1) || (inv !== 0 && inv !== 1)) return null;
+  return clampWireMod({ windowOn: w === 1, min: min!, max: max!, smoothOn: s === 1, smoothness: smoothness!, length: length!, invert: inv === 1 });
 }
 
 /** A modifier card from before modifiers moved onto wires: its input, its
@@ -139,7 +147,7 @@ export function legacyNodeFrom(raw: unknown): LegacyNode | null {
   return {
     src: src as SignalId,
     height: legacyHeight,
-    mod: clampWireMod({ windowOn, min: min as number, max: max as number, smoothOn, smoothness: smoothness as number, length: length as number }),
+    mod: clampWireMod({ windowOn, min: min as number, max: max as number, smoothOn, smoothness: smoothness as number, length: length as number, invert: false }),
   };
 }
 
@@ -215,7 +223,7 @@ export function stepWireMod(st: WireModState, mod: WireMod, dtSec: number, input
   } else {
     st.env = y;
   }
-  st.output = clamp01(y);
+  st.output = mod.invert ? 1 - clamp01(y) : clamp01(y);
   return st.output;
 }
 
@@ -223,6 +231,11 @@ export function stepWireMod(st: WireModState, mod: WireMod, dtSec: number, input
  *  what the wire sends on for a held input once the peak has settled. Length
  *  only shapes the fall over time, so it leaves the curve alone. */
 export function wireModCurve(mod: WireMod, x: number): number {
+  const y = windowCurve(mod, x);
+  return mod.invert ? 1 - y : y;
+}
+
+function windowCurve(mod: WireMod, x: number): number {
   if (!mod.windowOn) return clamp01(x);
   const s = mod.smoothOn ? mod.smoothness : 0;
   // A first step at input 1 seeds the tracker's peak at 1 and sets its Min

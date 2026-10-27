@@ -118,3 +118,25 @@ describe("wireModCurve", () => {
     for (let i = 1; i < xs.length; i++) expect(wireModCurve(m, xs[i]!)).toBeGreaterThanOrEqual(wireModCurve(m, xs[i - 1]!));
   });
 });
+
+describe("Invert", () => {
+  it("sends 1 − what the wire would send, after Length", () => {
+    const plain = createWireModState();
+    const inv = createWireModState();
+    for (const v of [0, 1, 0.4, 0, 0, 1.3]) {
+      const y = stepWireMod(plain, mod({ length: 0.2 }), DT, v, GATE_FORMULA_DEFAULT);
+      expect(stepWireMod(inv, mod({ length: 0.2, invert: true }), DT, v, GATE_FORMULA_DEFAULT)).toBeCloseTo(1 - y, 12);
+    }
+  });
+
+  it("is not idle, flips the curve, and is stored as a seventh slot only when on", () => {
+    const m = mod({ windowOn: true, min: 0.2, max: 0.6, invert: true });
+    expect(wireModIsIdle(mod({ invert: true }))).toBe(false);
+    expect(sameWireMod(undefined, mod({ invert: true }))).toBe(false);
+    expect(wireModCurve(mod({ invert: true }), 0.3)).toBeCloseTo(0.7, 12);
+    expect(encodeWireMod(m)).toHaveLength(7);
+    expect(encodeWireMod(mod())).toHaveLength(6);
+    expect(decodeWireMod(encodeWireMod(m))).toEqual(m);
+    expect(decodeWireMod([1, 0, 1, 1, 0, 0, 2])).toBeNull();
+  });
+});
