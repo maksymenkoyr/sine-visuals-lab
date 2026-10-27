@@ -1,4 +1,4 @@
-import { createFullscreenScene } from "../fullscreenScene.ts";
+import { createFullscreenScene, sceneUniformsGlsl } from "../fullscreenScene.ts";
 import { card } from "./caustics.card.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
 import {
@@ -27,9 +27,18 @@ import {
 } from "./causticsRippleSpots.ts";
 import { advanceStandout, advanceStandoutAmount, createStandoutState, standoutLine } from "../standout.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
-import type { SceneContext } from "../scene.ts";
+import type { SceneContext, Viewport } from "../scene.ts";
 import type { GLProgram } from "../gl.ts";
-import { advanceSparkleHits, createSparkleHits, EFFECT_GRAIN, EFFECT_PRISM, EFFECT_RUN, MODE_ADAPTIVE } from "./causticsSparkle.ts";
+import {
+  advanceSparkleHits,
+  createSparkleHits,
+  EFFECT_DROPLETS,
+  EFFECT_GRAIN,
+  EFFECT_PRISM,
+  EFFECT_RUN,
+  MODE_ADAPTIVE,
+} from "./causticsSparkle.ts";
+import { createDroplets, holeStrength, openChance, type DropletFrame } from "./causticsDroplets.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Motion comes from
@@ -646,9 +655,13 @@ export function driftRatePerSec(s: DriftInputs): number {
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
 
-/** The assembled fragment shader, exported so tests/caustics.test.ts can pin the
- *  brightness line to brightnessGain's constants. */
-export const FRAG = `
+/** The pool's field in GLSL: the noise, the ridge loop and `poolAt`. FRAG
+ *  draws with it, and Droplets' update pass (causticsDroplets.ts) calls the
+ *  same functions, so a hole opens on a line where FRAG draws one. A shader
+ *  that includes it first defines POOL_FWIDTH: fwidth in a fragment shader,
+ *  0.0 in a vertex shader, which has no derivatives (the ridges then skip
+ *  their anti-aliasing cap). */
+export const POOL_GLSL = `
 // The integer lattice hash (hashCell / hash2Cell) — see the file header's
 // precision paragraph and noiseHash.ts for why nothing here uses fract() of
 // a large product.
@@ -698,18 +711,35 @@ float ridgeField(inout vec2 q, int iterations, float sharp, float ridgeGain, flo
       // rendered line at least ~1px wide regardless of how sharp moves.
       // sharp / densScale: v changes densScale times faster across the screen,
       // so the same exponent would thin every filament by that factor.
-      float aaSharp = min(sharp / densScale, 0.3 / max(fwidth(v), 1e-4));
+      float aaSharp = min(sharp / densScale, 0.3 / max(POOL_FWIDTH(v), 1e-4));
       acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
       amp *= 0.6;
     }
   return acc;
 }
 
-void main() {
-  vec2 uv = roomUv(vUv);
-  vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
-  vec2 p = (uv - 0.5) * aspectFix * 3.0;
+// Where the ridge loop starts for the point p (p units: the frame is 3 tall)
+// and with what. Breathe's zoom, the bass bulge and Beat ripple's refraction
+// move the point; Fog, Fog pulse, Tighten, Caustic density, Mid turbulence
+// and Detail set the loop. main() reads the bass bloom and the ring's
+// brightening off the same struct.
+struct PoolAt {
+  vec2 q;
+  float pLen0;
+  float bassBulge;
+  float ring;
+  float sharp;
+  float ridgeGain;
+  float densScale;
+  float warpAmt;
+  int iterations;
+  vec2 flowFwd;
+  vec2 flowBack;
+};
 
+PoolAt poolAt(vec2 p) {
+  PoolAt pool;
+  vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
   // Breathe: the pool zooms on whatever source is patched onto the breathe
   // setting, at BREATHE_ZOOM depth scaled by uBreathe — Bar wave by default,
   // the once-per-bar swing the old bar-locked cosine this line replaced used
@@ -723,19 +753,13 @@ void main() {
   // Bass swell: a sustained radial bulge near center, strongest right on a
   // low-band onset and fading outward — distinct from the beat ripple, which
   // is a one-shot ring rather than a standing bulge.
-  float pLen0 = length(p);
-  vec2 dir0 = pLen0 > 1e-4 ? p / pLen0 : vec2(1.0, 0.0);
-  float bassBulge = uBass * bassDrive(uLowPulse);
+  pool.pLen0 = length(p);
+  vec2 dir0 = pool.pLen0 > 1e-4 ? p / pool.pLen0 : vec2(1.0, 0.0);
+  pool.bassBulge = uBass * bassDrive(uLowPulse);
   // Faded to zero at the origin: dir0 flips sign across the center, so a
   // displacement that's still nonzero there tears the field at a single
   // point — every filament near the middle gets dragged into a pinch.
-  p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
-
-  // Sparkle (causticsSparkle.ts): the picked effect, driven by sparkleE —
-  // Sparkle times the hits' summed, signed shape. Each acts on the ridges
-  // further down.
-  int sparkleFx = int(uSparkleFx + 0.5);
-  float sparkleE = uSparkle * uSparkleEnv;
+  p += dir0 * pool.bassBulge * 0.22 * exp(-pool.pLen0 * 0.8) * smoothstep(0.0, 0.4, pool.pLen0);
 
   // uDensityLive scales only the ridge noise's sampling frequency — more
   // filaments at higher values, laid over the same warp field. It is the
@@ -748,16 +772,15 @@ void main() {
   // of them. The ridge drift offsets in uDriftFlow carry the factor, folded
   // in per tick JS-side (advanceDensityFlow), so a denser pattern doesn't
   // also drift faster on screen.
-  float densScale = pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
+  pool.densScale = pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
 
   // This scene's own drift (uDriftFlow, uploaded by extraUniforms below)
   // replaces the shared uFlowPhase so drift speed is dialable. It arrives
   // as one already-wrapped offset per use (see driftFlows and the file
   // header's precision paragraph) rather than as a raw phase to multiply
   // here — the multiply is exactly what used to push the hash past fp32.
-  vec2 flowFwd = vec2(uDriftFlow[${FLOW_FWD}], uDriftFlow[${FLOW_FWD + 1}]);
-  vec2 flowBack = vec2(uDriftFlow[${FLOW_BACK}], uDriftFlow[${FLOW_BACK + 1}]);
-  vec2 sparkleFlow = vec2(uDriftFlow[${FLOW_SPARKLE}]);
+  pool.flowFwd = vec2(uDriftFlow[${FLOW_FWD}], uDriftFlow[${FLOW_FWD + 1}]);
+  pool.flowBack = vec2(uDriftFlow[${FLOW_BACK}], uDriftFlow[${FLOW_BACK + 1}]);
 
   // Beat ripple: rippleEmitter.ts's continuous ring emitter, built on the
   // CPU each frame into a 1D radial crest/slope profile (uRippleCrest/
@@ -811,10 +834,10 @@ void main() {
   // (its trough dips below the resting level), and a trough shouldn't darken
   // the picture below its own resting look — only a crest brightens it. The
   // refraction term below reads ringSlope directly, signed, unaffected.
-  float ring = uRipple * max(ringCrest, 0.0);
-  vec2 q = p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)};
+  pool.ring = uRipple * max(ringCrest, 0.0);
+  pool.q = p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)};
 
-  int iterations = int(mix(3.0, 6.0, uDetail));
+  pool.iterations = int(mix(3.0, 6.0, uDetail));
   // uFog sets the resting sharpness (sharpRest); uFocus is a pure divisor
   // on it, driven by uBeatPulse, so uFocus=0 always holds sharp exactly at
   // sharpRest (no pulse, at any beatPulse) and sharpRest itself never moves
@@ -826,10 +849,10 @@ void main() {
   // Fog's soft end, so sharp <= sharpRest always — no ceiling to clamp
   // against (the old FOCUS_SHARP_MAX) and never a non-positive exponent.
   float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
-  float sharp = (sharpRest / (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}))
-    * (1.0 - bassBulge * 0.25);
-  sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * uTighten * tightenDrive(uHighPulse));
-  float ridgeGain = sqrt(sharp / 4.0); // a wider ridge is proportionally dimmed, so Fog pulse eases intensity too, not just width
+  pool.sharp = (sharpRest / (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}))
+    * (1.0 - pool.bassBulge * 0.25);
+  pool.sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * uTighten * tightenDrive(uHighPulse));
+  pool.ridgeGain = sqrt(pool.sharp / 4.0); // a wider ridge is proportionally dimmed, so Fog pulse eases intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
   // no antialiasing trick fixes that after the fact. Ordinarily this stays
@@ -854,9 +877,154 @@ void main() {
   // this file's git history). aaSharp below still bounds the pixel-ladder
   // artifact independent of warpAmt; a maxed Mid turbulence against the
   // crispest Fog is the case to eyeball for it.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2);
+  pool.warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2);
+  return pool;
+}
+`;
+
+// poolFlow's guards, from the Droplet Grain prototype (16MDY55AqFA1Qypib6yxKa,
+// pool.js). Near a fold of the warp the map from screen to an octave's noise
+// texture is close to singular and that octave's velocity runs away, so an
+// octave steps aside as its Jacobian's determinant (over s², s being the
+// octave's frequency) falls from FLOW_FOLD_LO + FLOW_FOLD_SPAN to
+// FLOW_FOLD_LO, and none moves faster than FLOW_OCTAVE_MAX per unit phase.
+// FLOW_LINE_FLOOR keeps an octave with no line at the point from dropping
+// out of the blend entirely.
+const FLOW_FOLD_LO = 0.02;
+const FLOW_FOLD_SPAN = 0.2;
+const FLOW_OCTAVE_MAX = 2.5;
+const FLOW_LINE_FLOOR = 0.03;
+
+/** The pool's motion in GLSL, for Droplets (causticsDroplets.ts). Each ridge
+ *  octave is a fixed noise texture sampled through a warp that scrolls too,
+ *  so carrying the warp's derivatives forward through the octaves gives, per
+ *  octave, where a point of its texture goes next. The octaves blend by how
+ *  bright each one's line is at the point: the motion the eye follows. It is
+ *  per unit of drift phase, so the caller's phase rate makes the current
+ *  surge with Speed pump when the lines do. With `pin` 0 or more it is that
+ *  octave's motion instead (the blend only where the octave nears a fold),
+ *  so a drop sprayed from one octave's line keeps its place beside that
+ *  line. Also hands back one octave's noise value and screen gradient (the
+ *  brightest octave here, or `pin`): that octave's line has its middle where
+ *  the value is 0.5, which is how a hole lands on the middle of a line and
+ *  aims its jet across it. The motion of Breathe, the bass bulge and the
+ *  ripple isn't in it: they bend the light, they don't carry the water.
+ *  Needs POOL_GLSL before it. */
+export const POOL_FLOW_GLSL = `
+float noiseGrad(vec2 p, out vec2 g) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = hashCell(i, ${NOISE_MASK}, 0u);
+  float b = hashCell(i + vec2(1.0, 0.0), ${NOISE_MASK}, 0u);
+  float c = hashCell(i + vec2(0.0, 1.0), ${NOISE_MASK}, 0u);
+  float d = hashCell(i + vec2(1.0, 1.0), ${NOISE_MASK}, 0u);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float k1 = b - a;
+  float k2 = c - a;
+  float k3 = a - b - c + d;
+  g = vec2(k1 + k3 * u.y, k2 + k3 * u.x) * 6.0 * f * (1.0 - f);
+  return a + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
+}
+
+struct PoolFlow {
+  vec2 vel;
+  float v;
+  vec2 grad;
+  int octave;
+};
+
+PoolFlow poolFlow(PoolAt pool, int pin) {
+  vec2 flow = vec2(${FLOW_X.toFixed(2)}, ${FLOW_Y.toFixed(2)});
+  vec2 q = pool.q;
+  mat2 J = mat2(1.0);
+  vec2 qt = vec2(0.0);
+  float s = 2.3 * pool.densScale;
+  float lineExp = pool.sharp / pool.densScale;
+  float amp = 1.0;
+  vec2 vel = vec2(0.0);
+  float wsum = 0.0;
+  vec2 pinVel = vec2(0.0);
+  float pinFold = 0.0;
+  float best = -1.0;
+  PoolFlow res;
+  res.v = 0.5;
+  res.grad = vec2(1.0, 0.0);
+  res.octave = 0;
+  for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
+    if (i >= pool.iterations) break;
+    float fi = float(i);
+    vec2 g1;
+    vec2 g2;
+    float n1 = noiseGrad(q * 1.7 + pool.flowFwd + fi, g1);
+    float n2 = noiseGrad(q * 1.7 + pool.flowBack + fi * 1.3, g2);
+    // Per unit phase the forward warp sample scrolls by +flow, the backward by -flow.
+    float t1 = dot(g1, 1.7 * qt + flow);
+    float t2 = dot(g2, 1.7 * qt - flow);
+    vec2 d1 = 1.7 * vec2(dot(g1, J[0]), dot(g1, J[1]));
+    vec2 d2 = 1.7 * vec2(dot(g2, J[0]), dot(g2, J[1]));
+    q += vec2(n1, n2) * pool.warpAmt;
+    J[0] += pool.warpAmt * vec2(d1.x, d2.x);
+    J[1] += pool.warpAmt * vec2(d1.y, d2.y);
+    qt += pool.warpAmt * vec2(t1, t2);
+    vec2 ridgeFlow = vec2(uDriftFlow[${FLOW_RIDGE} + 2 * i], uDriftFlow[${FLOW_RIDGE + 1} + 2 * i]);
+    vec2 gv;
+    float v = noiseGrad(q * s + ridgeFlow, gv);
+    // The octave's texture point is s·q plus its ridge flow, which scrolls at
+    // the live density times the octave's own speed-up (driftFlows).
+    vec2 zt = s * qt + pool.densScale * flow * (1.0 + ${FLOW_OCTAVE_STEP.toFixed(2)} * fi);
+    mat2 Z = s * J;
+    float lit = pow(1.0 - abs(v * 2.0 - 1.0), lineExp);
+    float fold = clamp((abs(determinant(Z)) / (s * s) - ${FLOW_FOLD_LO.toFixed(2)}) / ${FLOW_FOLD_SPAN.toFixed(2)}, 0.0, 1.0);
+    if (fold > 0.0) {
+      vec2 ou = -(inverse(Z) * zt);
+      float m = length(ou);
+      if (m > ${FLOW_OCTAVE_MAX.toFixed(2)}) ou *= ${FLOW_OCTAVE_MAX.toFixed(2)} / m;
+      float w = amp * fold * (${FLOW_LINE_FLOOR.toFixed(2)} + lit);
+      vel += w * ou;
+      wsum += w;
+      if (i == pin) {
+        pinVel = ou;
+        pinFold = fold;
+      }
+    }
+    float line = amp * (0.5 + sampleBands(fi / ${RIDGE_OCTAVES}.0) * 0.8) * lit;
+    if (pin < 0 ? line > best : i == pin) {
+      best = line;
+      res.v = v;
+      res.grad = transpose(Z) * gv;
+      res.octave = i;
+    }
+    amp *= 0.6;
+  }
+  res.vel = mix(wsum > 1e-6 ? vel / wsum : vec2(0.0), pinVel, pinFold);
+  return res;
+}
+`;
+
+/** The assembled fragment shader, exported so tests/caustics.test.ts can pin the
+ *  brightness line to brightnessGain's constants. */
+export const FRAG = `
+#define POOL_FWIDTH(x) fwidth(x)
+${POOL_GLSL}
+
+void main() {
+  vec2 uv = roomUv(vUv);
+  vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
+  vec2 p = (uv - 0.5) * aspectFix * 3.0;
+  PoolAt pool = poolAt(p);
+
+  // Sparkle (causticsSparkle.ts): the picked effect, driven by sparkleE —
+  // Sparkle times the hits' summed, signed shape. Each acts on the ridges
+  // further down.
+  int sparkleFx = int(uSparkleFx + 0.5);
+  float sparkleE = uSparkle * uSparkleEnv;
+  vec2 sparkleFlow = vec2(uDriftFlow[${FLOW_SPARKLE}]);
+  // Droplets: the light of the drops causticsDroplets.ts splatted this frame.
+  float mist = sparkleFx == ${EFFECT_DROPLETS} ? textureLod(uDropTex, vUv, 0.0).r * uDropScale : 0.0;
+
+  vec2 q = pool.q;
   vec2 qRidges = q;
-  float acc = ridgeField(q, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack);
+  float acc = ridgeField(q, pool.iterations, pool.sharp, pool.ridgeGain, pool.densScale, pool.warpAmt, pool.flowFwd, pool.flowBack);
   // Prism: red and blue copies of the ridges, sampled either side of this
   // pixel; where a copy is brighter than the ridge here, its colour shows
   // as a fringe (added after the palette below). Costs two more passes of
@@ -867,8 +1035,8 @@ void main() {
     vec2 prismOff = vec2(0.8, 0.6) * ${PRISM_REACH.toFixed(3)} * sparkleE;
     vec2 qR = qRidges + prismOff;
     vec2 qB = qRidges - prismOff;
-    prismR = max(ridgeField(qR, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack) - acc, 0.0);
-    prismB = max(ridgeField(qB, iterations, sharp, ridgeGain, densScale, warpAmt, flowFwd, flowBack) - acc, 0.0);
+    prismR = max(ridgeField(qR, pool.iterations, pool.sharp, pool.ridgeGain, pool.densScale, pool.warpAmt, pool.flowFwd, pool.flowBack) - acc, 0.0);
+    prismB = max(ridgeField(qB, pool.iterations, pool.sharp, pool.ridgeGain, pool.densScale, pool.warpAmt, pool.flowFwd, pool.flowBack) - acc, 0.0);
   }
 
   // Flare: the brightest crests gain the most; dim water stays dim.
@@ -904,8 +1072,8 @@ void main() {
   vec2 sparkleQ = q;
   if (uSparkleWarp > 0.0) {
     vec2 sparkleWarpOffset = vec2(
-      noise(q * 0.8 + flowFwd + 11.0),
-      noise(q * 0.8 + flowBack + 23.0)
+      noise(q * 0.8 + pool.flowFwd + 11.0),
+      noise(q * 0.8 + pool.flowBack + 23.0)
     ) - 0.5;
     sparkleQ += sparkleWarpOffset * uSparkleWarp * ${SPARKLE_WARP_GAIN.toFixed(2)};
   }
@@ -918,7 +1086,7 @@ void main() {
   }
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
-  acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
+  acc += pool.bassBulge * exp(-pool.pLen0 * 1.5) * 0.6;
 
   // Level glow, Beat flash and the ripple crest: each is its slider times what
   // it reads (brightnessGain above), so with those sliders at 0 brightness
@@ -926,7 +1094,7 @@ void main() {
   float brightMul = ${BRIGHT_BASE.toFixed(2)}
     + uLevelGlow * ${LEVEL_GLOW_GAIN.toFixed(2)} * pow(max(levelGlowDrive(uEnergy), 0.0), ${LEVEL_GLOW_EXP.toFixed(2)})
     + uFlash * flashDrive(uBeatPulse) * ${FLASH_GAIN.toFixed(2)}
-    + ring * ${RING_BRIGHT_GAIN.toFixed(2)};
+    + pool.ring * ${RING_BRIGHT_GAIN.toFixed(2)};
   acc *= brightMul;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
@@ -969,6 +1137,9 @@ void main() {
     // Screen the fringes over the shade: col is already in 0..1.
     col = 1.0 - (1.0 - col) * (1.0 - prism / (1.0 + prism));
     col = mix(col, vec3(1.0), contourRim * ${CONTOUR_RIM_MIX.toFixed(2)});
+    // Drops are light in the palette's brightest colour, piling up to solid
+    // where the spray is thick.
+    if (mist > 0.0) col = mix(col, palRamp(1.0), 1.0 - exp(-mist));
     outColor = vec4(col, 1.0);
     return;
   }
@@ -997,17 +1168,60 @@ void main() {
   // fastest channel wraps sooner than a shared scalar constant can account
   // for. fwidth/exp are componentwise on vec3 in GLSL ES 3.00, so each
   // channel damps on its own actual wrap rate.
-  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15
+  float huePhase = acc * 0.3 + uTime * 0.02 - pool.bassBulge * 0.15
     + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_HUE_GAIN.toFixed(2)};
   vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
   vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
   col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc + prism;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
   col = mix(col, vec3(1.0), contourRim * ${CONTOUR_RIM_MIX.toFixed(2)});
+  if (mist > 0.0) col = mix(col, palRamp(1.0), 1.0 - exp(-mist));
 
   outColor = vec4(col, 1.0);
 }
 `;
+
+// The scene's own uniforms and helpers beside the common ones; Droplets' step
+// pass declares the same, so it can take every value FRAG gets.
+const EXTRA_UNIFORM_DECLS = `
+uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
+// The glided, drive-scaled Caustic density (advanceDensityFlow) — see
+// densScale in FRAG.
+uniform float uDensityLive;
+uniform float uRippleCrest[${PROFILE_SAMPLES}];
+uniform float uRippleSlope[${PROFILE_SAMPLES}];
+uniform vec4 uRippleSpot[${RIPPLE_SPOTS}];
+uniform sampler2D uRippleSpotTex;
+// Sparkle (causticsSparkle.ts): the hits' summed, signed shape plus
+// Sparkle sustain's wash, and Run's band phase, wrapped JS-side.
+uniform float uSparkleEnv;
+uniform float uSparkleRun;
+// Droplets: the drops' light (causticsDroplets.ts) and the scale it is read at.
+uniform sampler2D uDropTex;
+uniform float uDropScale;
+// Linear interpolation into a profile array built by rippleEmitter.ts's
+// buildProfile — see FRAG's own comment above the Beat ripple block for how
+// these two feed the display.
+float rippleSampleCrest(float r) {
+  float t = clamp(r / ${PROFILE_MAX_RADIUS.toFixed(2)}, 0.0, 1.0) * ${(PROFILE_SAMPLES - 1).toFixed(1)};
+  int i0 = int(t);
+  int i1 = min(i0 + 1, ${PROFILE_SAMPLES - 1});
+  return mix(uRippleCrest[i0], uRippleCrest[i1], fract(t));
+}
+float rippleSampleSlope(float r) {
+  float t = clamp(r / ${PROFILE_MAX_RADIUS.toFixed(2)}, 0.0, 1.0) * ${(PROFILE_SAMPLES - 1).toFixed(1)};
+  int i0 = int(t);
+  int i1 = min(i0 + 1, ${PROFILE_SAMPLES - 1});
+  return mix(uRippleSlope[i0], uRippleSlope[i1], fract(t));
+}
+// A soft knee, not a hard clamp — see RIPPLE_CEIL_KNEE/RIPPLE_CEIL_MAX's own
+// comment in caustics.ts. Signed, so a slope's own push/pull direction
+// survives the ceiling.
+float softCeil(float x, float knee, float ceil) {
+  float m = abs(x);
+  float c = m <= knee ? m : knee + (ceil - knee) * tanh((m - knee) / (ceil - knee));
+  return sign(x) * c;
+}`;
 
 export const causticsScene = createFullscreenScene(
   card.id,
@@ -1054,7 +1268,7 @@ export const causticsScene = createFullscreenScene(
       return spotTex;
     }
 
-    function beforeDraw(ctx: SceneContext, prog: GLProgram): void {
+    function beforeDraw(ctx: SceneContext, prog: GLProgram, viewport: Viewport, upload: (other: GLProgram) => void): void {
       const { gl } = ctx;
       const tex = ensureSpotTex(gl);
       if (!tex) return;
@@ -1065,6 +1279,16 @@ export const causticsScene = createFullscreenScene(
         spotsDirty = false;
       }
       prog.setI("uRippleSpotTex", 0);
+      // Droplets steps its drops (reading the spot texture just bound) and
+      // hands FRAG their light on unit 1; unit 0 is the spot texture's.
+      const drops = dropsOn ? droplets.draw(ctx, prog, viewport, upload, dropFrame) : null;
+      prog.setI("uDropTex", 1);
+      prog.setF("uDropScale", drops ? drops.scale : 0);
+      if (drops) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, drops.tex);
+        gl.activeTexture(gl.TEXTURE0);
+      }
     }
 
     // Sparkle's hits (causticsSparkle.ts) and the phase its Run effect
@@ -1073,44 +1297,19 @@ export const causticsScene = createFullscreenScene(
     const sparkleHits = createSparkleHits();
     let runPhase = 0;
 
+    // Droplets (causticsDroplets.ts): its step pass reads the pool through
+    // the same GLSL FRAG draws it with, so holes open on the drawn lines.
+    const droplets = createDroplets(`#define POOL_FWIDTH(x) 0.0
+#define POOL_OCTAVES ${RIDGE_OCTAVES}
+${sceneUniformsGlsl(card.settings ?? [], EXTRA_UNIFORM_DECLS)}
+${POOL_GLSL}
+${POOL_FLOW_GLSL}`);
+    let dropsOn = false;
+    const dropFrame: DropletFrame = { dtSec: 0, rate: 0, open: 0, strength: 0, size: 0, throwAmt: 0, fan: 0, weight: 0, life: 0, glow: 0 };
+
     return {
       settings: card.settings,
-      extraUniformDecls: `
-uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
-// The glided, drive-scaled Caustic density (advanceDensityFlow) — see
-// densScale in FRAG.
-uniform float uDensityLive;
-uniform float uRippleCrest[${PROFILE_SAMPLES}];
-uniform float uRippleSlope[${PROFILE_SAMPLES}];
-uniform vec4 uRippleSpot[${RIPPLE_SPOTS}];
-uniform sampler2D uRippleSpotTex;
-// Sparkle (causticsSparkle.ts): the hits' summed, signed shape plus
-// Sparkle sustain's wash, and Run's band phase, wrapped JS-side.
-uniform float uSparkleEnv;
-uniform float uSparkleRun;
-// Linear interpolation into a profile array built by rippleEmitter.ts's
-// buildProfile — see FRAG's own comment above the Beat ripple block for how
-// these two feed the display.
-float rippleSampleCrest(float r) {
-  float t = clamp(r / ${PROFILE_MAX_RADIUS.toFixed(2)}, 0.0, 1.0) * ${(PROFILE_SAMPLES - 1).toFixed(1)};
-  int i0 = int(t);
-  int i1 = min(i0 + 1, ${PROFILE_SAMPLES - 1});
-  return mix(uRippleCrest[i0], uRippleCrest[i1], fract(t));
-}
-float rippleSampleSlope(float r) {
-  float t = clamp(r / ${PROFILE_MAX_RADIUS.toFixed(2)}, 0.0, 1.0) * ${(PROFILE_SAMPLES - 1).toFixed(1)};
-  int i0 = int(t);
-  int i1 = min(i0 + 1, ${PROFILE_SAMPLES - 1});
-  return mix(uRippleSlope[i0], uRippleSlope[i1], fract(t));
-}
-// A soft knee, not a hard clamp — see RIPPLE_CEIL_KNEE/RIPPLE_CEIL_MAX's own
-// comment in caustics.ts. Signed, so a slope's own push/pull direction
-// survives the ceiling.
-float softCeil(float x, float knee, float ceil) {
-  float m = abs(x);
-  float c = m <= knee ? m : knee + (ceil - knee) * tanh((m - knee) / (ceil - knee));
-  return sign(x) * c;
-}`,
+      extraUniformDecls: EXTRA_UNIFORM_DECLS,
 
       extraUniforms: (frame, anim, getSetting, drives) => {
         const driftLevel = getSetting("driftLevel");
@@ -1128,12 +1327,13 @@ float softCeil(float x, float knee, float ceil) {
         // Bass hit's own decaying envelope at driftPump's Beat-hit default —
         // see the "driftPump" SceneSetting's own comment.
         advancePump(pump, anim.dtSec, drives.value("driftPump", anim.lowPulse), getSetting("driftPump"));
-        const phaseStep = anim.dtSec * driftRatePerSec({
+        const driftRate = driftRatePerSec({
           drift: getSetting("drift"),
           driftLevel,
           levelValue,
           pumpVel: pump.vel,
         });
+        const phaseStep = anim.dtSec * driftRate;
         // advanceDensityFlow glides toward the target and folds the live
         // value into the drift phase. The sceneDefault is the reading the
         // default (Section) equals, for a stale stored "scene".
@@ -1240,6 +1440,24 @@ float softCeil(float x, float knee, float ceil) {
         const sparkleEnv = shapeEnv >= 0 ? Math.max(shapeEnv, wash) : shapeEnv + wash;
         runPhase = (runPhase + anim.dtSec * (RUN_IDLE_RATE + RUN_PUSH_RATE * Math.abs(sparkleEnv) * getSetting("sparkle"))) % (2 * Math.PI);
 
+        // Droplets: the hits' shape is the hoses' pressure. It opens holes
+        // (with Sparkle and Amount) and sets how hard they shoot.
+        dropsOn = Math.round(getSetting("sparkleFx")) === EFFECT_DROPLETS;
+        if (dropsOn) {
+          dropFrame.dtSec = anim.dtSec;
+          dropFrame.rate = driftRate;
+          dropFrame.open = openChance(anim.dtSec, sparkleEnv, getSetting("dropAmount"), getSetting("sparkle"));
+          dropFrame.strength = holeStrength(sparkleEnv);
+          dropFrame.size = getSetting("dropSize");
+          dropFrame.throwAmt = getSetting("dropThrow");
+          dropFrame.fan = getSetting("dropFan");
+          dropFrame.weight = getSetting("dropWeight");
+          dropFrame.life = getSetting("dropLife");
+          dropFrame.glow = getSetting("dropGlow");
+        } else {
+          droplets.pause();
+        }
+
         return {
           uSparkleEnv: sparkleEnv,
           uSparkleRun: runPhase,
@@ -1255,6 +1473,7 @@ float softCeil(float x, float knee, float ceil) {
         if (spotTex) ctx.gl.deleteTexture(spotTex);
         spotTex = null;
         spotGl = null;
+        droplets.dispose(ctx.gl);
       },
     };
   })(),

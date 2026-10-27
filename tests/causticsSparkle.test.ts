@@ -5,6 +5,8 @@ import {
   adaptiveLength,
   advanceSparkleHits,
   createSparkleHits,
+  EFFECT_DROPLETS,
+  EFFECT_GRAIN,
   PLUCK_TAU,
   SHAPE_BELL,
   SHAPE_BOUNCE,
@@ -189,6 +191,12 @@ describe("the scene's Sparkle settings", () => {
     expect(find("sparkleAdapt")?.options).toEqual(SPARKLE_MODES);
   });
 
+  it("append Droplets after the effects saved Looks already name, and keep Grain the default", () => {
+    expect(SPARKLE_EFFECTS.slice(0, 3)).toEqual(["Grain", "Prism", "Run"]);
+    expect(SPARKLE_EFFECTS[EFFECT_DROPLETS]).toBe("Droplets");
+    expect(find("sparkleFx")?.default).toBe(EFFECT_GRAIN);
+  });
+
   it("start on Basic Pluck, with Flare and Tighten off, so the default look stays", () => {
     expect(find("sparkleAdapt")?.default).toBe(0);
     expect(find("sparkleShape")?.default).toBe(SHAPE_PLUCK);
@@ -196,11 +204,12 @@ describe("the scene's Sparkle settings", () => {
     expect(find("tighten")?.default).toBe(0);
   });
 
-  it("keep the old fine dials on the dev server only", () => {
+  it("keep the old fine dials, and Droplets' own, on the dev server only", () => {
     for (const key of ["sparkleShape", "sparkleLength", "sparkleBright", "sparkleDensity", "sparkleSpread", "sparkleSustain", "sparkleWarp"]) {
       expect(find(key)?.dev, key).toBe(true);
     }
-    for (const key of ["sparkle", "sparkleFx", "sparkleGrain", "sparkleAdapt", "flare", "tighten"]) expect(find(key)?.dev, key).toBeUndefined();
+    for (const key of ["dropAmount", "dropThrow", "dropFan", "dropWeight", "dropLife", "dropGlow"]) expect(find(key)?.dev, key).toBe(true);
+    for (const key of ["sparkle", "sparkleFx", "sparkleGrain", "dropSize", "sparkleAdapt", "flare", "tighten"]) expect(find(key)?.dev, key).toBeUndefined();
   });
 });
 

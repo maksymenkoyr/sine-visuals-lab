@@ -262,7 +262,6 @@
     "lint | suspicious/noPrototypeBuiltins | tests/roomMessages.test.ts | expect(Object.prototype.hasOwnProperty.call(stored, \"constructor\")).toBe(false);",
     "lint | suspicious/noSelfCompare | src/render/scenes/alien/body.ts | if (exact[i] !== exact[i]) exact[i] = partDistance(parts[i], frames, x, y, z);",
     "lint | suspicious/noTemplateCurlyInString | tests/es2017Apis.test.ts | \"const t = `x.at(0) ${s}`;\",",
-    "rules | no-per-frame-alloc | src/render/fullscreenScene.ts | for (const [name, value] of Object.entries(extras)) {",
     "rules | no-per-frame-alloc | src/render/scenes/coderain/index.ts | figCol = [...vecs.accent].map((c) => 0.5 + 0.5 * c);",
     "rules | no-per-frame-alloc | src/render/scenes/coderain/index.ts | head = [...vecs.accent].map((c) => 0.35 + 0.65 * c);",
     "rules | no-per-frame-alloc | src/render/scenes/gates/index.ts | const arcPrimary = [0, 1, 2].map(",

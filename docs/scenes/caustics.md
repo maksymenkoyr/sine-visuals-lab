@@ -36,6 +36,17 @@ Put it on a big screen at a party or behind a DJ set and let it run: it keeps fo
   Pure; `tests/causticsSparkle.test.ts` pins it, Adaptive's distance from
   Basic included. FRAG draws the effects, and Flare and Tighten straight from
   their own drives.
+- `src/render/scenes/causticsDroplets.ts` — the Droplets effect: drops on the
+  GPU, stepped by a transform-feedback pass and splatted into the scene's own
+  target, which FRAG reads (`createDroplets`; its header explains the
+  passes). Its pure helpers (`dropCap`, `openChance`, `relativeSpeed`, the
+  dial maps) are pinned by `tests/causticsDroplets.test.ts`. The step pass
+  reads the pool through `POOL_GLSL` (noise, `ridgeField` and `poolAt`,
+  FRAG's own pool setup) and `POOL_FLOW_GLSL` (`poolFlow`, the pool's motion)
+  in `caustics.ts`. It declares and receives FRAG's uniforms through
+  `sceneUniformsGlsl` and beforeDraw's `upload` (`src/render/fullscreenScene.ts`),
+  and links its outputs through `createProgram`'s `varyings`
+  (`src/render/programCache.ts`).
 - `src/render/standout.ts` — the shared standout detector:
   `advanceStandoutAmount` conditions the driver's own rise each frame into a
   launched ring amount, sized by how far it stands out from the everyday
@@ -959,6 +970,86 @@ reference-measurement workflow used by later scenes.
   (`?audio=synthetic`) 16 stills over 2.5 s showed no steps at all. Not timed with
   `tools/gpu-bench.mjs`: the work is a few operations per pixel, and only
   while a hit is sounding.
+- 2026-10-27 (#760, #762) — Droplets, a fourth Sparkle effect. The owner
+  asked to make Grain "kind of simulation. they should be injected from the
+  lines in causics in both sides … like droplets if some liquid that dousn't
+  mix and is more dense and kind of like spraying". Four rounds in a
+  prototype (Materials: Droplet Grain) ended with mist cones from 1–4 crests
+  per hit around a liquid core. Picking it up, the owner changed the look:
+  "i want droplets to be just bright. i want them to be "spreyed out" for the
+  caustic lines like they are robber pipes with tiny holes and as bigger
+  density as more get spreyed out. and it should be through whole lines".
+  What was built from that:
+  - The drops are plain points of light in the palette's brightest colour
+    (`palRamp(1.0)`). The prototype's liquid core (beads with a lens and a
+    rim, #763) is not built.
+  - Hits' summed Sparkle shape (`uSparkleEnv`: Basic or Adaptive, with
+    Sparkle sustain's wash) is the hoses' pressure. It opens holes, with the
+    Sparkle knob and Drop holes, and sets how hard they shoot.
+  - A hole opens where a random point of the frame passes a test on the
+    ridge light there, so a brighter line gets more holes. That is this
+    build's reading of "as bigger density as more get spreyed out"; #760
+    keeps the other one (a hole-density control) open. The test measures the
+    light against a first-octave line's peak at this frame's Fog and average
+    band level. A fixed reference let a loud passage pass most of the pool,
+    and the first octave's own band (the bass) let every kick move it.
+  - Each hole is moved onto the middle of its line in up to `SNAP_STEPS`
+    Newton steps on that line's octave, so a point that passed on the haze of
+    a line Fog pulse widened still sprays from the middle. Its
+    `DROPS_PER_HOLE` drops leave as one thin jet out of one side; each hole
+    picks its side at random.
+  - The water stops a drop within about a quarter second, smaller ones
+    sooner. The drop then rides the motion of the octave whose line sprayed
+    it (`POOL_FLOW_GLSL`, the prototype's exact current moved to GLSL), so
+    it keeps its place beside that line. Its light fades on its own clock,
+    faster once it has stopped.
+  - It runs on the GPU, where the prototype ran on the CPU and #761 planned
+    a CPU copy of the field. Holes along whole lines need the field at many
+    points per hit; the shader already computes it, and a CPU sample costs
+    about 1 µs. A transform-feedback pass steps the drops, and its shader
+    calls FRAG's own `poolAt` and `ridgeField` (`POOL_GLSL`), so holes open
+    on the drawn lines with the ripple, bulge and Breathe in place. A second
+    pass splats the drops into a one-channel target (R16F, or R8 where half
+    floats don't render) that FRAG blends toward the ramp's brightest colour.
+  - Grain stays the default. Drop size is a panel row, and the other dials
+    (Drop holes, throw, fan, weight, life, glow) are dev-only until the owner
+    says which belong on the panel.
+
+  Measured headless on Metal (M1 Pro), synthetic feed at 120 bpm unless said:
+  - Grain, Run, Random spot rings and Rainbow render pixel-identical to main
+    at frames 30 and 75 of `tools/gpu-bench.mjs`'s page
+    (`caustics/scripts/settings-bench-dump.mjs`), so FRAG's pool setup moved
+    into `POOL_GLSL` without changing a pixel. Prism is checked only by its
+    shader compiling with the same arguments: the bench page's feed never
+    sounds a treble hit.
+  - Where holes open (`caustics/scripts/droplets-shots.mjs` with Drop throw
+    0, Beat flash and Level glow 0, scored by `droplets-place.py`): 97.4% of
+    drop pixels sit beside the brightest tenth of the pool on a frozen pool,
+    97.9% on one drifting at the default speed.
+  - Whether drops ride the current (`droplets-old.mjs`: drops at least 0.7 s
+    old, Drop life 1): 63.6% beside the brightest tenth riding their own
+    octave's motion, 31.9% riding the blend of every octave (the prototype's
+    current), 3.9% with no current, and 99% on a frozen pool.
+  - At the defaults about 26–28k drops are alive of the high preset's 65,536
+    (`dropCap`: a third of the preset's particle budget), 13–16k of them lit,
+    from about 1,000–1,800 holes per hat.
+  - Cost at 3024×1890 (`caustics/scripts/settings-app-timing.mjs`, with
+    other sessions holding the load average at 8–10): the step pass 0.8–1.0
+    ms p50 and 3.4–3.6 ms p90, the splat 0.5–0.9 ms p50 and 3.4–3.9 ms p90,
+    FRAG unchanged at 12–15 ms. The frame rate fell to 80–86 rAF/s from
+    Grain's 92–114 in the same session.
+
+  `tools/tune-real.mjs caustics` on Billie Jean, 30 s from 4 s:
+
+  | Sparkle effect | change med | change p95 | hits/min | Bass | Mid | Treble |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Grain (default) | 18.54 | 35.05 | 412 | 200 | 78 | 216 |
+  | Droplets | 19.83 | 34.42 | 422 | 196 | 92 | 218 |
+  | silence, each run | 1.62–1.63 | 1.91–1.94 | 0 | 0 | 0 | 0 |
+
+  The drops add steady motion on the song and nothing in silence. They are
+  too small for the 64×36 change thumbnails and the contact sheet; full-size
+  stills show them. Not yet judged by the owner.
 
 ## Tuning notes
 
@@ -1031,6 +1122,18 @@ reference-measurement workflow used by later scenes.
 - The treble pulse is a flat 1 on every hit while hitStrength.ts's shape is
   flat, so Basic plays every treble hit the same size. Adaptive reads the
   hit's stand-out instead.
+- Droplets (2026-10-27) is checked headless only; the owner hasn't watched
+  it. In loud passages Level glow and widened lines turn most of the pool
+  the ramp's top colours, close to the drops' own, so the drops show less
+  there. How many holes, how long the jets, how bright, and which dials go on
+  the panel are the owner's calls (#760's open questions).
+- Droplets' step pass declares the scene's whole uniform set, the ripple
+  profiles' arrays included, in a vertex shader. A GPU whose vertex-uniform
+  limit is below that can't compile it; Droplets then draws nothing there and
+  logs why once. The first pick of Droplets compiles that shader on the spot,
+  a one-off hitch.
+- The drops ride the drift's current only: Breathe's zoom, the bass bulge
+  and the ripple bend the lines without carrying the drops along.
 
 - Nothing in this file hand-rolls trigger/hold/decay logic any more: Kick
   surge and Beat churn were removed on main (Speed pump replaced them), and
@@ -1088,7 +1191,10 @@ reference-measurement workflow used by later scenes.
 - Artifact: [Laconic Sparkle](https://claude.ai/artifact/QbuQ31QaQZDCXfHP63mkaC). Source saved as `caustics/artifacts/laconic-sparkle.html`. The idea the 2026-10-26 cleanup was built from: today's Sparkle section beside a slim one, each row tagged with its fate, and a live sketch of the scene picking a shape. Its sketch rule (Pluck sized by hat spacing, Bell on a ringing hit) predates the measurements in Decisions, which changed it.
 - Artifact: [Caustics Effects, Round Two](https://claude.ai/artifact/RHkiHYE9T9Wi4Bvcmz1bMA). Source saved as `caustics/artifacts/caustics-effects-round-two.html`. Six live effect prototypes over a copy of FRAG at its defaults, on a beat loop or a song file: Dive, Dye, Wake, Tide, Contour and Scratch. Contour was picked and built (2026-10-27 Decisions); its terraces there are drawn on the page's own copy of the tone. Round one (Standing wave, Whirlpool, Gust, Shatter, Tilt, Stop-motion) is [Caustics Effect Ideas](https://claude.ai/artifact/URQWmfUZnQvtBQBGMerXBC); none of it was built.
 - Artifact: [Sparkle: Basic vs Adaptive](https://claude.ai/artifact/PMqbtZJqw7oPqw4xFUk9uX). Page source saved as `caustics/artifacts/sparkle-basic-vs-adaptive.html`. The two clips it plays (Billie Jean through the mic, Sparkle 1, recorded headless) live only in the artifact.
+- Artifact: [Droplet Grain](https://claude.ai/artifact/16MDY55AqFA1Qypib6yxKa). The prototype Droplets grew from, over four rounds with the owner (2026-10-26/27): a copy of the pool's ridge field in GLSL beside a CPU particle simulation of the spray, with a liquid core from v2 to v4 (our own implementation of double density relaxation, after Clavet, Beaudoin and Poulin 2005, "Particle-based Viscoelastic Fluid Simulation", studied as a reference) and mist cones in v4. Its sources and checks are gitignored, in the main checkout's `tools/.cache/droplet-grain/v2/` (v1 one folder up). The scene builds none of the liquid; the 2026-10-27 Decisions entry says what it kept.
+- The reference the owner gave for the spray: a photo of a fine mist fanning out of a nozzle on black, with a dense white core at the nozzle, a cone about 30° wide thinning with distance, and thousands of sub-pixel drops, each a short streak along its flight. Described here only; it is not in the repo.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+- `caustics/scripts/droplets-shots.mjs`, `droplets-old.mjs` and `droplets-place.py` — the 2026-10-27 Droplets checks: stills with settings applied, stills of drops at least a given age, and where drop pixels sit against the pool's brightest. `settings-bench-dump.mjs` and `settings-app-timing.mjs` run `tools/gpu-bench.mjs`'s pixel dump and in-app timing with Caustics' settings seeded first.
 - `caustics/scripts/colour-shot.mjs` and `colour-sheet.py` — the 2026-10-15
   colour work: shoots the scene under each palette at each Colour option from
   one page, then tiles the shots into a contact sheet (palettes as rows,
@@ -1127,6 +1233,11 @@ reference-measurement workflow used by later scenes.
   (a baseline interleaved, since GPU clocks drift) — the Spray loop went
   unnoticed at 60% of the frame for weeks. A change meant to be invisible can
   be proved so with `caustics/scripts/shader-bisect.py --pixdiff <ref>`.
+- Droplets in a headless page: `window.__viz.setParams({ scene: "caustics",
+  autoPin: true, settings: { sparkleFx: 3 } })`, sent at least 1.5 s after
+  `__viz` appears. Sent sooner, the dev tuning bus's startup fetch of
+  `tuning/params.json` lands after it and clears it. The checks are
+  `caustics/scripts/droplets-*` (the 2026-10-27 entry has their numbers).
 - Audio-coupling work against this scene can arrive in several places at once
   (hit strength, line sources, the patch bay); check each one's merge state
   before trusting a description of "current" behavior against it.
@@ -1169,3 +1280,4 @@ reference-measurement workflow used by later scenes.
 - #713 (2026-10-26) — Sparkle: one name, Grain/Prism/Run, Flare and Tighten as sliders, a Basic or Adaptive shape, the old dials dev-only (see Decisions)
 - #453 (2026-10-26) — Caustic density split into Caustic density (no jack) and Density reach (the wire) (see Decisions)
 - 2026-10-27 — Contour: snares and claps snap the light into steps (see Decisions)
+- 2026-10-27 (#762) — Droplets: treble hits spray bright drops out of tiny holes along every lit line (see Decisions)

@@ -15,7 +15,7 @@ const C = {
   FLOAT: 0x1406, FLOAT_VEC4: 0x8b52, FLOAT_MAT4: 0x8b5c, SAMPLER_2D: 0x8b5e,
 };
 interface Shader { type: number; source: string }
-interface Program { shaders: Shader[]; linked: boolean }
+interface Program { shaders: Shader[]; linked: boolean; varyings?: string[]; varyingsBeforeLink?: boolean }
 interface Uniform { name: string; type: number; size: number }
 
 function fakeGL(uniforms: Uniform[] = []) {
@@ -39,6 +39,11 @@ function fakeGL(uniforms: Uniform[] = []) {
     deleteShader: () => {},
     createProgram: (): Program => ({ shaders: [], linked: false }),
     attachShader: (p: Program, s: Shader) => { p.shaders.push(s); },
+    INTERLEAVED_ATTRIBS: 0x8c8c,
+    transformFeedbackVaryings: (p: Program, names: string[], mode: number) => {
+      p.varyings = mode === 0x8c8c ? [...names] : [];
+      p.varyingsBeforeLink = !p.linked;
+    },
     linkProgram: (p: Program) => { log.links++; p.linked = p.shaders.every((s) => compiles(s) && !s.source.includes("BAD_LINK")); },
     getProgramParameter: (p: Program, pname: number) => {
       if (pname === C.DELETE_STATUS) return deleted.has(p) ? null : false;
@@ -143,6 +148,18 @@ describe("acquireProgram", () => {
     for (const l of lent) l.release();
     expect(log.deleted).toEqual([lent[0]!.program]);
     expect(acquireProgram(gl, VERT, frag(MAX_IDLE_PROGRAMS)).program).toBe(lent[MAX_IDLE_PROGRAMS]!.program);
+  });
+
+  it("links a transform-feedback pass's varyings, interleaved, and pools it apart from the same sources without them", () => {
+    const { gl } = fakeGL();
+    const tf = acquireProgram(gl, VERT, FRAG, ["vPosVel", "vLife"]);
+    const program = tf.program as unknown as Program;
+    expect(program.varyings).toEqual(["vPosVel", "vLife"]);
+    expect(program.varyingsBeforeLink).toBe(true);
+    tf.release();
+    expect(acquireProgram(gl, VERT, FRAG).program).not.toBe(tf.program);
+    expect(acquireProgram(gl, VERT, FRAG, ["vLife", "vPosVel"]).program).not.toBe(tf.program);
+    expect(acquireProgram(gl, VERT, FRAG, ["vPosVel", "vLife"]).program).toBe(tf.program);
   });
 
   it("checks at once outside deferProgramChecks, as createProgram always did", () => {

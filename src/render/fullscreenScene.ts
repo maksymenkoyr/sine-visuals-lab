@@ -1,7 +1,7 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "./gl.ts";
-import { PALETTE_GLSL } from "./palette.ts";
+import { PALETTE_GLSL, type Palette } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
 import type { Scene, SceneContext, Viewport } from "./scene.ts";
@@ -19,6 +19,33 @@ import {
 /** What a scene's `extraUniforms` may return per name — see the option's
  *  doc comment for which GL upload each shape maps to. */
 export type ExtraUniformValue = number | Float32Array | { vec4: Float32Array };
+
+/** Every declaration a fullscreen scene's fragment body can rely on: the
+ *  common uniforms, one per setting, each drive setting's pair and helper,
+ *  the scene's own `extraUniformDecls`, and the palette, room-UV and band
+ *  helpers. Exported so a scene's second pass, a vertex shader included,
+ *  declares exactly what the scene's program sees and takes the same values
+ *  through beforeDraw's `upload`. */
+export function sceneUniformsGlsl(settings: readonly SceneSetting[], extraUniformDecls = ""): string {
+  const settingsUniformsGlsl = settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+  return `${COMMON_UNIFORMS_GLSL}
+${settingsUniformsGlsl}
+${DRIVE_GLSL(settings)}
+${extraUniformDecls}
+${PALETTE_GLSL}
+${ROOM_UV_GLSL}
+${SAMPLE_BANDS_GLSL}`;
+}
+
+// @per-frame
+function setExtras(prog: GLProgram, extras: Record<string, ExtraUniformValue>): void {
+  for (const name in extras) {
+    const value = extras[name];
+    if (value instanceof Float32Array) prog.setFv(name, value);
+    else if (typeof value === "number") prog.setF(name, value);
+    else prog.setV4v(name, value.vec4);
+  }
+}
 
 /**
  * Builds a Scene from just a fragment shader body. The body must assign
@@ -66,8 +93,13 @@ export function createFullscreenScene(
     /** Called after every uniform is uploaded and just before the draw,
      *  with the program in use — for what a uniform can't carry, such as a
      *  data texture the scene fills itself (bind it here, creating it on the
-     *  first call; scenes/chaikin/index.ts's seed texture is the example). */
-    beforeDraw?: (ctx: SceneContext, prog: GLProgram, viewport: Viewport) => void;
+     *  first call; scenes/chaikin/index.ts's seed texture is the example).
+     *  `upload(other)` puts `other` in use and sets on it every uniform this
+     *  draw set on `prog`, this frame's extras included, for a pass of the
+     *  scene's own declared with sceneUniformsGlsl. A beforeDraw that calls
+     *  it, or draws anything else, must put `prog` back in use (and any GL
+     *  state it changed back as it was) before it returns. */
+    beforeDraw?: (ctx: SceneContext, prog: GLProgram, viewport: Viewport, upload: (other: GLProgram) => void) => void;
     /** Called from dispose(), before the program is freed — release what
      *  beforeDraw created. */
     onDispose?: (ctx: SceneContext) => void;
@@ -79,26 +111,33 @@ export function createFullscreenScene(
   const settings = opts.settings ?? [];
   const settingsByKey = new Map(settings.map((s) => [s.key, s]));
 
-  const settingsUniformsGlsl = settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
-  const driveUniformsGlsl = DRIVE_GLSL(settings);
-
   const fragSrc = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 outColor;
-${COMMON_UNIFORMS_GLSL}
-${settingsUniformsGlsl}
-${driveUniformsGlsl}
-${opts.extraUniformDecls ?? ""}
-${PALETTE_GLSL}
-${ROOM_UV_GLSL}
-${SAMPLE_BANDS_GLSL}
+${sceneUniformsGlsl(settings, opts.extraUniformDecls)}
 ${fragBody}
 `;
 
   const getSetting = (key: string): number => {
     const spec = settingsByKey.get(key);
     return spec ? resolveSceneSetting(id, spec) : 0;
+  };
+
+  // The draw in progress, for beforeDraw's `upload`: made once here, so a
+  // frame doesn't build a closure over its own arguments.
+  let drawCtx: SceneContext | null = null;
+  let drawFrame: FeatureFrame | null = null;
+  let drawViewport: Viewport | null = null;
+  let drawPalette: Palette | null = null;
+  let drawAnim: AnimFrame | null = null;
+  let drawDrives: SceneDrives = PASSTHROUGH_DRIVES;
+  let drawExtras: Record<string, ExtraUniformValue> | null = null;
+  const upload = (other: GLProgram): void => {
+    if (!drawCtx || !drawFrame || !drawViewport || !drawPalette || !drawAnim) return;
+    other.use();
+    uploadCommonUniforms(other, drawCtx, drawFrame, drawViewport, drawPalette, drawAnim, id, settings, bandsBuf, drawDrives);
+    if (drawExtras) setExtras(other, drawExtras);
   };
 
   return {
@@ -119,15 +158,18 @@ ${fragBody}
       const { gl } = ctx;
       prog.use();
       uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, id, settings, bandsBuf, drives);
-      if (opts.extraUniforms) {
-        const extras = opts.extraUniforms(frame, anim, getSetting, drives);
-        for (const [name, value] of Object.entries(extras)) {
-          if (value instanceof Float32Array) prog.setFv(name, value);
-          else if (typeof value === "number") prog.setF(name, value);
-          else prog.setV4v(name, value.vec4);
-        }
+      const extras = opts.extraUniforms ? opts.extraUniforms(frame, anim, getSetting, drives) : null;
+      if (extras) setExtras(prog, extras);
+      if (opts.beforeDraw) {
+        drawCtx = ctx;
+        drawFrame = frame;
+        drawViewport = viewport;
+        drawPalette = palette;
+        drawAnim = anim;
+        drawDrives = drives;
+        drawExtras = extras;
+        opts.beforeDraw(ctx, prog, viewport, upload);
       }
-      opts.beforeDraw?.(ctx, prog, viewport);
       drawFullscreenQuad(gl, vao);
     },
 

@@ -467,7 +467,8 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleFx",
     label: "Sparkle effect",
-    description: "What a treble hit does to the pool: Grain glints on the crests, Prism splits the filaments into colour, Run sends light along them",
+    description:
+      "What a treble hit does to the pool: Grain glints on the crests, Prism splits the filaments into colour, Run sends light along them, Droplets sprays fine drops out of every lit line",
     group: "Look",
     min: 0,
     max: SPARKLE_EFFECTS.length - 1,
@@ -491,6 +492,18 @@ const SETTINGS: SceneSetting[] = [
     // intensity one, and tying it to SPARKLE would make "stronger" also
     // silently resize every glint.
     macro: { driver: SPARKLE, weight: 0 },
+  },
+  {
+    key: "dropSize",
+    label: "Drop size",
+    description: "How big each Droplets drop is; the other effects don't use it",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    // The prototype's pick after "they should be much smaller. give slider
+    // for size" (#760): about 0.6 px radius on a 1000 px tall frame.
+    default: 0.3,
   },
   {
     key: "sparkleAdapt",
@@ -712,6 +725,82 @@ const SETTINGS: SceneSetting[] = [
     advanced: true,
     dev: true,
     macro: { driver: SPARKLE, weight: 0.3 },
+  },
+  // Droplets' dials (causticsDroplets.ts), dev-only until the owner says which
+  // belong on the panel (#760's open question).
+  {
+    key: "dropAmount",
+    label: "Drop holes",
+    description: "How many holes open along the lines on each hit (Droplets)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    advanced: true,
+    dev: true,
+  },
+  {
+    key: "dropThrow",
+    label: "Drop throw",
+    description: "How hard each hole shoots its drops out (Droplets)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.2,
+    advanced: true,
+    dev: true,
+  },
+  {
+    key: "dropFan",
+    label: "Drop fan",
+    description: "How far the jets lean off straight across their line (Droplets)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.15,
+    advanced: true,
+    dev: true,
+  },
+  {
+    key: "dropWeight",
+    label: "Drop weight",
+    description: "How long the water takes to stop a drop: light ones stop at once, heavy ones carry their push further (Droplets)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+    advanced: true,
+    dev: true,
+  },
+  {
+    key: "dropLife",
+    label: "Drop life",
+    description: "How long a drop's light lasts (Droplets)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.15,
+    // A time: the Master card's Scale would stretch it, not add drops.
+    masterScale: false,
+    advanced: true,
+    dev: true,
+  },
+  {
+    key: "dropGlow",
+    label: "Drop glow",
+    description: "How bright the drops are (Droplets)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.55,
+    advanced: true,
+    dev: true,
   },
 ];
 

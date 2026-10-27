@@ -112,12 +112,15 @@ export interface GLProgram {
   dispose(): void;
 }
 
+/** `varyings`: for a transform-feedback pass, the vertex outputs it captures,
+ *  interleaved in this order into the one bound buffer. */
 export function createProgram(
   gl: WebGL2RenderingContext,
   fragSrc: string,
   vertSrc: string = FULLSCREEN_VERT,
+  varyings?: readonly string[],
 ): GLProgram {
-  const { program, release } = acquireProgram(gl, vertSrc, fragSrc);
+  const { program, release } = acquireProgram(gl, vertSrc, fragSrc, varyings);
 
   const locations = new Map<string, WebGLUniformLocation | null>();
   const loc = (name: string) => {

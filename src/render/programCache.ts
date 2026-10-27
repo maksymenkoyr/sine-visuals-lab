@@ -21,7 +21,8 @@
 // browser has it.
 //
 // Kept for the next mount. Each GL context has its own pool of idle programs,
-// keyed by the two shader sources (all createProgram compiles from). A
+// keyed by the two shader sources and any transform-feedback varyings (all
+// createProgram links from: the varyings are fixed at link time). A
 // released program joins its context's pool, and the next request for the
 // same sources there takes it instead of compiling: a revisited scene, or one
 // coming back to the gallery's preview context, skips its compile. A program
@@ -94,10 +95,17 @@ function poolFor(gl: WebGL2RenderingContext): ContextPool {
 
 /** A program for these sources on `gl`: an idle one from the pool with its
  *  uniforms zeroed, or a newly submitted one, checked at once unless a
- *  deferProgramChecks is open. Throws a check's error. */
-export function acquireProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): ProgramCheckout {
+ *  deferProgramChecks is open. Throws a check's error. `varyings` names the
+ *  vertex outputs a transform-feedback pass captures, interleaved into one
+ *  buffer. */
+export function acquireProgram(
+  gl: WebGL2RenderingContext,
+  vertSrc: string,
+  fragSrc: string,
+  varyings: readonly string[] = [],
+): ProgramCheckout {
   const pool = poolFor(gl);
-  const key = `${vertSrc}\u0000${fragSrc}`;
+  const key = varyings.length ? `${vertSrc}\u0000${fragSrc}\u0000${varyings.join("\u0000")}` : `${vertSrc}\u0000${fragSrc}`;
   const base = { gl, key, vertSrc, fragSrc, released: false, generation: pool.generation };
   const reused = takeIdle(gl, pool, key);
   if (reused) {
@@ -110,6 +118,7 @@ export function acquireProgram(gl: WebGL2RenderingContext, vertSrc: string, frag
   if (!program) throw new Error("createProgram failed");
   gl.attachShader(program, vs);
   gl.attachShader(program, fs);
+  if (varyings.length) gl.transformFeedbackVaryings(program, varyings as string[], gl.INTERLEAVED_ATTRIBS);
   gl.linkProgram(program);
   const entry: Entry = { ...base, program, vs, fs, status: "pending" };
   if (pending) pending.push(entry);

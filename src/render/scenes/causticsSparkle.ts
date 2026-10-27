@@ -7,7 +7,9 @@
  * setting, in stored-value order — append only, since saved Looks and share
  * codes hold the index. Grain is the scene's original glint field on the
  * crests; Prism and Run change the filaments themselves. caustics.ts's FRAG
- * draws each one. Flare and Tighten used to be picks here and are now their
+ * draws each one. Droplets sprays drops out of the lines, a simulation with
+ * its own GPU passes (causticsDroplets.ts) that takes the hits' summed shape
+ * as its pressure. Flare and Tighten used to be picks here and are now their
  * own sliders, read straight from their drives in FRAG.
  *
  * **Modes.** "Sparkle shape" picks between `SPARKLE_MODES`. Basic plays one
@@ -41,13 +43,14 @@
  * reading with a soft cap, so fast hats stack without blowing out.
  */
 
-export const SPARKLE_EFFECTS = ["Grain", "Prism", "Run"] as const;
+export const SPARKLE_EFFECTS = ["Grain", "Prism", "Run", "Droplets"] as const;
 export const SPARKLE_SHAPES = ["Pluck", "Bell", "Swell", "Bounce"] as const;
 export const SPARKLE_MODES = ["Basic", "Adaptive"] as const;
 
 export const EFFECT_GRAIN = 0;
 export const EFFECT_PRISM = 1;
 export const EFFECT_RUN = 2;
+export const EFFECT_DROPLETS = 3;
 
 export const SHAPE_PLUCK = 0;
 export const SHAPE_BELL = 1;
