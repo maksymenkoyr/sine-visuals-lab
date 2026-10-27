@@ -964,8 +964,8 @@ reference-measurement workflow used by later scenes.
   filaments at every slider position: `causticDensityScale` and FRAG's
   `densScale` take the `DENSITY_FILAMENTS` factor. The span and the default
   slider value are unchanged, so a saved look comes back sparser. The old
-  default's density now sits near 0.66 on the slider. Zoom (`zoom`, Camera
-  group) divides the pool coordinates before everything else, so ripples,
+  default's density now sits near 0.66 on the slider. Zoom (`zoom`, the card's first row, in Form
+  because `SETTING_GROUPS` renders Camera after Look) divides the pool coordinates before everything else, so ripples,
   the bulge and Breathe's swing magnify with the pattern. It opts out of
   Master Scale because it is framing, not an amount.
 

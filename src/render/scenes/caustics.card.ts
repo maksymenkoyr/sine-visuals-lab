@@ -44,6 +44,19 @@ const SPARKLE: SceneSetting = {
 
 const SETTINGS: SceneSetting[] = [
   {
+    key: "zoom",
+    label: "Zoom",
+    description: "How close the view sits to the pool — left shows more of it, right magnifies the filaments",
+    group: "Form",
+    min: 0.5,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    // Form, not Camera, so it can head the card: SETTING_GROUPS renders
+    // Camera after Look. Framing, not an amount, so Master Scale stays off.
+    masterScale: false,
+  },
+  {
     key: "causticDensity",
     label: "Caustic density",
     description:
@@ -712,18 +725,6 @@ const SETTINGS: SceneSetting[] = [
     advanced: true,
     dev: true,
     macro: { driver: SPARKLE, weight: 0.3 },
-  },
-  {
-    key: "zoom",
-    label: "Zoom",
-    description: "How close the view sits to the pool — left shows more of it, right magnifies the filaments",
-    group: "Camera",
-    min: 0.5,
-    max: 2,
-    step: 0.05,
-    default: 1,
-    // Framing, not an amount: the Master card's Scale would move the camera.
-    masterScale: false,
   },
 ];
 
