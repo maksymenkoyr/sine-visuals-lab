@@ -350,5 +350,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   loops (about 4.3 MB), and so does a 1920×1080 gallery, where its tile mounts.
 - #753 (2026-10-27, closed): three rounds of design pictures; the owner
   picked B's body, their own head picture and its squeeze, and Blender.
-- #772 (2026-10-27): the new model built in Blender by script, round 1 of its
-  renders sent to the owner.
+- #778 (draft, 2026-10-27, for #772): the new model built in Blender by
+  script, round 1 of its renders sent to the owner.
