@@ -81,6 +81,16 @@
  * something a press should edit. setLift gives every pinned cable the hover
  * lift at once, for deviceMenu.ts while the pointer is on the pinned row.
  *
+ * A lit cable (armed, or every pinned one under setLift) lights what it plugs
+ * into too (syncLit), so the focus never stops at the cable's ends: its jack
+ * and its port take `data-cable-lit` with the cable's colour as `--vc-lit`,
+ * and its knot takes `.vc-knot-lit`. The ends get an attribute, not a class:
+ * deviceMenu.ts rebuilds every cable on any class change in its columns
+ * (refreshColumnsFold), and that rebuild disarms the very cable that lit
+ * them. Hovering a closed knot arms its cable (cableKnots.ts's
+ * onHover): without it the cable went dark under the pointer once it moved
+ * onto the knot, the next thing a hover reaches for.
+ *
  * An unplug plays a short retract (playUnplug): a copy of the cable's core
  * runs back from the unplugged end into the other, and a spark rings the
  * socket it left. The copy lives in `ghosts`, which recompute() never
@@ -663,6 +673,7 @@ interface Wire {
   key: string;
   src: CableSourceSpec;
   g: SVGGElement;
+  portEl: HTMLElement;
   pt: { x: number; y: number };
   portPt: { x: number; y: number };
   avoidBand: { top: number; bottom: number } | null;
@@ -726,10 +737,18 @@ export function createCableLayer(): CableLayer {
   const reveal: RevealState = { timer: 0, x: 0, y: 0 };
   // A knot sits on its cable, so a press on it pulls the cable as a press on
   // the stroke does, the knot following the pointer (cableKnots.ts's drag).
-  const knots = createCableKnotLayer((key, e) => {
-    const w = wires.get(key);
-    if (w) startPull(w, nearerEnd(w.pt, w.portPt, e.clientX), "knot", e);
-  });
+  const knots = createCableKnotLayer(
+    (key, e) => {
+      const w = wires.get(key);
+      if (w) startPull(w, nearerEnd(w.pt, w.portPt, e.clientX), "knot", e);
+    },
+    (key, on) => {
+      const w = wires.get(key);
+      if (!w || pull) return;
+      if (on) arm(w);
+      else disarmSoon(w);
+    },
+  );
   let splits: Split[] = [];
   /** The pinned group's pressable cables, by CableSourceSpec key. */
   const wires = new Map<string, Wire>();
@@ -753,6 +772,32 @@ export function createCableLayer(): CableLayer {
    *  a grace after the leave, by when the pointer may be on a jack whose own
    *  tooltip must stay. */
   let tip = 0;
+  let lifted = false;
+  /** The jacks and ports syncLit marked last, to unmark on its next pass. */
+  let litEnds = new Set<HTMLElement>();
+
+  /** Lights the lit cables' jacks, ports and knots, and only theirs (see
+   *  this file's header). */
+  function syncLit(): void {
+    const lit = lifted ? [...wires.values()] : armed ? [armed.wire] : [];
+    const next = new Set<HTMLElement>();
+    for (const w of lit) {
+      for (const el of [w.src.jackEl, w.portEl]) {
+        // Under a lift every cable shares the port; it keeps the first's colour.
+        if (next.has(el)) continue;
+        next.add(el);
+        el.setAttribute("data-cable-lit", "");
+        el.style.setProperty("--vc-lit", w.src.color);
+      }
+    }
+    for (const el of litEnds) {
+      if (next.has(el)) continue;
+      el.removeAttribute("data-cable-lit");
+      el.style.removeProperty("--vc-lit");
+    }
+    litEnds = next;
+    knots.setLit(new Set(lit.map((w) => w.key)));
+  }
 
   /** Rewrites a split cable's two halves to the knot's current sides, only
    *  when they moved since the last write. Writes only. */
@@ -789,6 +834,7 @@ export function createCableLayer(): CableLayer {
     armed = { wire: w, timer: 0 };
     w.g.classList.add("vc-cable-armed");
     svg.classList.add("vc-cable-has-armed");
+    syncLit();
   }
 
   function disarmSoon(w: Wire): void {
@@ -810,6 +856,7 @@ export function createCableLayer(): CableLayer {
     g.classList.add("vc-cable-x-linger");
     linger = { key, g, timer: window.setTimeout(endLinger, X_LINGER_MS) };
     hideTooltipIfShowing(tip);
+    syncLit();
   }
 
   function bodyHint(w: Wire): string[] {
@@ -1070,7 +1117,7 @@ export function createCableLayer(): CableLayer {
           continue;
         }
         const clipId = pressClip(pressBand);
-        const w: Wire = { key: src.key, src, g, pt, portPt, avoidBand, whole: [], split: null };
+        const w: Wire = { key: src.key, src, g, portEl, pt, portPt, avoidBand, whole: [], split: null };
         wires.set(src.key, w);
         /** A split cable's half pulls its own end; an unsplit cable the end
          *  nearer the press. */
@@ -1160,6 +1207,7 @@ export function createCableLayer(): CableLayer {
         }
       }
     }
+    syncLit();
   }
 
   function setDrag(drag: { from: HTMLElement; x: number; y: number; color: string } | null): void {
@@ -1195,6 +1243,8 @@ export function createCableLayer(): CableLayer {
     },
     setLift(on) {
       svg.classList.toggle("vc-cables-lift", on);
+      lifted = on;
+      syncLit();
     },
     setVisible(v) {
       svg.style.display = v ? "" : "none";

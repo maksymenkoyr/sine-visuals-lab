@@ -17,6 +17,11 @@
  * with the cable's halves following it. A press that moved never opens the
  * knot.
  *
+ * Lit (setLit, `.vc-knot-lit`) is apart from the three states: its cable is
+ * lit (cableLayer.ts's syncLit), so the knot takes the cable's bloom. The
+ * pointer entering or leaving a closed knot goes to the layer's `onHover`,
+ * which arms the cable, so the knot never sits lit-less under the pointer.
+ *
  * HTML over the SVG, not SVG, because an open knot holds real controls. It
  * lives on `<body>`, outside `.vc-root`, for the same reason the cable layer
  * does: every card clips its overflow, and a knot sits over the gap between
@@ -80,6 +85,8 @@ export interface CableKnotLayer {
   sync(knots: readonly CableKnotPlacement[], viewport: { w: number; h: number }): void;
   tick(dtSec: number): void;
   setPeek(key: string, on: boolean): void;
+  /** Lights exactly the knots keyed in `keys` (see this file's header). */
+  setLit(keys: ReadonlySet<string>): void;
   open(key: string): void;
   close(): void;
   openKey(): string | null;
@@ -204,9 +211,12 @@ function glyphD(curve: readonly number[]): string {
   return d;
 }
 
-/** `onPress` gets a press on a closed knot, by the knot's key (see this
- *  file's header). */
-export function createCableKnotLayer(onPress?: (key: string, e: PointerEvent) => void): CableKnotLayer {
+/** `onPress` gets a press on a closed knot, and `onHover` the pointer
+ *  entering or leaving one, by the knot's key (see this file's header). */
+export function createCableKnotLayer(
+  onPress?: (key: string, e: PointerEvent) => void,
+  onHover?: (key: string, on: boolean) => void,
+): CableKnotLayer {
   const layer = document.createElement("div");
   layer.className = "vc-knot-layer";
   const knots = new Map<string, Knot>();
@@ -308,10 +318,12 @@ export function createCableKnotLayer(onPress?: (key: string, e: PointerEvent) =>
       if (e.pointerType === "touch") return;
       k.hoverPeek = true;
       aim(k);
+      if (openKey !== k.key) onHover?.(k.key, true);
     });
     el.addEventListener("pointerleave", () => {
       k.hoverPeek = false;
       aim(k);
+      onHover?.(k.key, false);
     });
     el.addEventListener("focus", () => {
       // Keyboard focus only: a tap focuses the knot too, and a tap's peek
@@ -549,6 +561,9 @@ export function createCableKnotLayer(onPress?: (key: string, e: PointerEvent) =>
       if (!k || k.cablePeek === on) return;
       k.cablePeek = on;
       aim(k);
+    },
+    setLit(keys) {
+      for (const k of knots.values()) k.el.classList.toggle("vc-knot-lit", keys.has(k.key));
     },
     open,
     close() {

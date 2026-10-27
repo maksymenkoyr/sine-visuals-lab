@@ -636,7 +636,7 @@ body.vc-keys-reveal [data-keycap]::after {
  * the row grammar in this file's header for why a click expands the patch panel). */
 .vc-drive-port {
   position: absolute; left: 6px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
-  padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
+  padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 .vc-drive-port:hover { transform: scale(1.25); }
 .vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -713,7 +713,7 @@ body.vc-keys-reveal [data-keycap]::after {
   position: relative; width: 13px; height: 13px; border-radius: 50%; padding: 0;
   border: 1.5px solid var(--c); flex-shrink: 0; cursor: pointer;
   background: radial-gradient(circle, rgba(5, 4, 8, 0.9) 0 34%, color-mix(in srgb, var(--c) 18%, transparent) 36%);
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
 }
 .vc-jack:hover { transform: scale(1.2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent); }
 .vc-jack-filled {
@@ -869,6 +869,13 @@ body.vc-keys-reveal [data-keycap]::after {
   .vc-cable-g.vc-cable-armed .vc-cable-flow, .vc-cables-lift .vc-cable-g .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
 }
 .vc-cable-g.vc-cable-armed .vc-cable-muted, .vc-cables-lift .vc-cable-g .vc-cable-muted { opacity: 0.8; }
+/* A lit cable's jack and port (cableLayer.ts syncLit) take its bloom in its colour, so
+ * the focus carries into what it plugs into. A filter, because the port's own
+ * box-shadow is written inline. */
+.vc-jack[data-cable-lit], .vc-drive-port[data-cable-lit] {
+  transform: scale(1.3);
+  filter: drop-shadow(0 0 2px var(--vc-lit)) drop-shadow(0 0 6px var(--vc-lit));
+}
 /* A cable's ×s (cableLayer.ts xEl, bindX): drawn and pressable only while the cable is
  * armed or lingering, since they sit over the jack's and the port's own cards. With
  * the pointer on one, the cable previews its unplug dashed and without its bloom. A
@@ -906,13 +913,18 @@ body.vc-cable-pulling, body.vc-cable-pulling * { cursor: grabbing !important; }
 .vc-knot {
   position: fixed; box-sizing: border-box; pointer-events: auto; overflow: hidden; cursor: pointer;
   background: #17131c; border: 1.5px solid var(--c); border-radius: 12px; color: rgba(255,255,255,0.88);
-  font: 400 12px/1.3 ${FONT_LABEL}; transition: opacity 0.25s ease, background-color 0.2s ease, border-radius 0.3s ease;
+  font: 400 12px/1.3 ${FONT_LABEL}; transition: opacity 0.25s ease, background-color 0.2s ease, border-radius 0.3s ease, filter 0.15s ease;
 }
 .vc-knot.vc-knot-rest { border-radius: 9px; }
 .vc-knot.vc-knot-rest.vc-knot-mod { background: var(--c); }
 .vc-knot.vc-knot-peeking { z-index: 1; }
 .vc-knot.vc-knot-open { cursor: default; z-index: 2; }
 .vc-knot.vc-knot-dim { opacity: 0.3; }
+/* Its cable lit (cableKnots.ts setLit): the cable's bloom, as a filter since tick()
+ * writes the box-shadow, and a hollow bead tinted so it no longer reads as a hole in the
+ * lit cable. An open knot is a panel by then, and keeps its plain border. */
+.vc-knot.vc-knot-lit:not(.vc-knot-open) { filter: drop-shadow(0 0 3px var(--c)) drop-shadow(0 0 9px var(--c)); }
+.vc-knot.vc-knot-lit:not(.vc-knot-open):not(.vc-knot-mod) { background: color-mix(in srgb, var(--c) 30%, #17131c); }
 /* A switched-off wire's knot (deviceMenu.ts buildKnotBody) dims below its header, as a
  * switched-off line does, so the switch reads as what brings it back. */
 .vc-knot-muted > :not(:first-child) { opacity: 0.45; }
