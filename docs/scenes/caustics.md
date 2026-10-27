@@ -959,6 +959,22 @@ reference-measurement workflow used by later scenes.
   (`?audio=synthetic`) 16 stills over 2.5 s showed no steps at all. Not timed with
   `tools/gpu-bench.mjs`: the work is a few operations per pixel, and only
   while a hit is sounding.
+- 2026-10-27 — Caustic density halved and Zoom added, on the owner's ask:
+  "make caustic density 50% less slider. add zoom". Read as half the
+  filaments at every slider position: `causticDensityScale` and FRAG's
+  `densScale` take the `DENSITY_FILAMENTS` factor. The span and the default
+  slider value are unchanged, so a saved look comes back sparser. The old
+  default's density now sits near 0.66 on the slider. Zoom (`zoom`, Camera
+  group) divides the pool coordinates before everything else, so ripples,
+  the bulge and Breathe's swing magnify with the pattern. It opts out of
+  Master Scale because it is framing, not an amount.
+
+  `tools/tune-real.mjs caustics` on Billie Jean, 30 s from 6 s, at the defaults:
+
+  | source | change med | change p95 | hits/min | Bass | Mid | Treble |
+  |---|---:|---:|---:|---:|---:|---:|
+  | song | 20.87 | 34.71 | 420 | 182 | 94 | 218 |
+  | silence | 0.73 | 0.99 | 0 | 0 | 0 | 0 |
 
 ## Tuning notes
 
