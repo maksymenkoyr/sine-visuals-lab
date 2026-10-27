@@ -1,17 +1,16 @@
 /**
  * The patch bay's instant tooltip (the "cover everything with hints" pass):
- * a small floating label for a jack, a row's own input port, a row's own
- * sparkline, or a pinned cable and its plugs (cableLayer.ts) — the
- * affordances that live *outside* the pinned patch panel, which gets its
- * own bottom hint line instead (deviceMenu.ts's buildPatchPanel). One
- * singleton element, lazily created and reused for every caller
- * (deviceMenu.ts's onJackHover, buildDriveRow's port/sparkline, cableLayer.ts's
- * cables) rather than one per control, since only one can ever be shown at
- * a time. Shown with no delay and hidden the instant the pointer leaves or
- * focus moves on — never rebuilt on a timer, matching this panel's own
- * carried rule against per-tick DOM work: `show`/`hide` only ever run from a
- * pointerenter/focus/pointerleave/blur handler or a cable pull's first move,
- * never from update() or the ~10 Hz refreshAuto pass.
+ * a small floating label for a jack, a row's own input port, or a row's
+ * own sparkline — the three affordances that live *outside* the pinned
+ * patch panel, which gets its own bottom hint line instead
+ * (deviceMenu.ts's buildPatchPanel). One singleton element, lazily created
+ * and reused for every caller (deviceMenu.ts's onJackHover, buildDriveRow's
+ * port/sparkline) rather than one per control, since only one can ever be
+ * shown at a time. Shown with no delay and hidden the instant the pointer
+ * leaves or focus moves on — never rebuilt on a timer, matching this
+ * panel's own carried rule against per-tick DOM work: `show`/`hide` only
+ * ever run from a pointerenter/focus/pointerleave/blur handler, never from
+ * update() or the ~10 Hz refreshAuto pass.
  *
  * Positioning reads the target's own `getBoundingClientRect()` — a
  * one-shot read on the hover/focus event that triggered it, not a per-tick
@@ -28,8 +27,6 @@ export interface Tooltip {
    *  "<Source> — <description>" / "Click to plug into <X>" shape, or a
    *  single line elsewhere (a row port, a row's own sparkline). */
   show(target: HTMLElement, color: string, lines: readonly string[]): void;
-  /** show() for a point rather than an element (showTooltipAt). */
-  showAt(x: number, y: number, color: string, lines: readonly string[]): void;
   hide(): void;
 }
 
@@ -39,7 +36,7 @@ function createTooltipEl(): Tooltip {
   el.setAttribute("role", "tooltip");
   el.style.display = "none";
 
-  function place(r: { left: number; top: number; bottom: number; width: number }, color: string, lines: readonly string[]): void {
+  function show(target: HTMLElement, color: string, lines: readonly string[]): void {
     el.style.setProperty("--c", color);
     el.replaceChildren(
       ...lines.map((line) => {
@@ -54,6 +51,7 @@ function createTooltipEl(): Tooltip {
     el.style.left = "0px";
     el.style.top = "0px";
     el.style.display = "block";
+    const r = target.getBoundingClientRect();
     const tw = el.offsetWidth;
     const th = el.offsetHeight;
     let left = r.left + r.width / 2 - tw / 2;
@@ -68,18 +66,10 @@ function createTooltipEl(): Tooltip {
     el.style.display = "none";
   }
 
-  return {
-    el,
-    show: (target, color, lines) => place(target.getBoundingClientRect(), color, lines),
-    showAt: (x, y, color, lines) => place({ left: x, top: y, bottom: y, width: 0 }, color, lines),
-    hide,
-  };
+  return { el, show, hide };
 }
 
 let singleton: Tooltip | null = null;
-/** Every show so far, so a late hide can tell whether the tooltip still
- *  holds its own lines (hideTooltipIfShowing). */
-let shows = 0;
 function tooltip(): Tooltip {
   if (!singleton) {
     singleton = createTooltipEl();
@@ -91,27 +81,11 @@ function tooltip(): Tooltip {
 /** Shows the shared tooltip near `target` — see this file's header. Safe to
  *  call from any module; there's only ever one tooltip on screen. */
 export function showTooltip(target: HTMLElement, color: string, lines: readonly string[]): void {
-  shows++;
   tooltip().show(target, color, lines);
-}
-
-/** showTooltip at a point: for what has no element of its own to anchor
- *  to, like the stretch of a cable under the pointer (cableLayer.ts).
- *  Returns this show's id for hideTooltipIfShowing. */
-export function showTooltipAt(x: number, y: number, color: string, lines: readonly string[]): number {
-  tooltip().showAt(x, y, color, lines);
-  return ++shows;
 }
 
 export function hideTooltip(): void {
   singleton?.hide();
-}
-
-/** Hides the tooltip only while show `id` is still the latest: a hide that
- *  comes late (a cable's disarm, after its grace) must not take down the
- *  tooltip a jack or a port has shown since. */
-export function hideTooltipIfShowing(id: number): void {
-  if (id === shows) hideTooltip();
 }
 
 /**
