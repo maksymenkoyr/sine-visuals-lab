@@ -42,6 +42,11 @@ ones (the dotted line on its graph). In development, on main since #374.
 - `src/ui/widgets/alienPlay.ts`: the Move readout under the Move row: speed,
   frames bought per second, the loop on screen, and the loop as a strip of
   its frames with the playhead. Fed by the scene's `probe()`.
+- `tools/alien-model/`: the new alien, built headless in Blender (#772) and not
+  yet drawn by the scene (#773 puts it in). `exportRig.ts` writes the rig's bind
+  pose for Blender, `build.py` builds the model and writes `alien.bin` and the
+  renders, `check.ts` reads `alien.bin` beside today's mesh. `build.py`'s header
+  has the method and the file layout.
 - Reused, not copied: the dancers' rig, clip format and clip library
   (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
   the Level signal (`feature.level`, #368); the standout detector
@@ -115,6 +120,23 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     cuts, 2.06–2.89 s apart. The minimum shot still sets the pace; within
     it, not every hit is a standout. Learned floor about 0.14, peak 0.67.
   - Bass hit, Cut threshold 0.75: 3 cuts in the 45 s.
+
+- 2026-10-27, the new model from `tools/alien-model/` (Blender 5.2.3, the
+  owner's Mac), measured by `check.ts`:
+  - 10,002 vertices and 20,000 triangles (today's mesh: 20,304), indexed;
+    `alien.bin` is 520,092 bytes before compression.
+  - 2.442 m tall and ±1.079 m across the arms (today: 2.148 m and ±1.006 m).
+    The rig's bones are unchanged; the height is B's big head.
+  - The squeeze moves 2,572 vertices, the crown by up to 30.3 cm; nothing
+    below the neck's middle moves.
+  - 2 triangles face against their normals (today: 5), 3 are slivers under
+    4°. At a 2 mm field Blender's symmetric decimate folded 533 of them and
+    they drew as specks; at 3 mm about 10, and a relax onto the surface
+    leaves 2.
+  - Mean triangle edge after decimating: skull 34 mm, face 9, torso 20,
+    legs 19, hands 9, feet 13.
+  - The build takes about 16 s to `alien.bin`, 30 s with the renders, and a
+    rerun writes the same file.
 
 ## Decisions and pivots
 
@@ -196,6 +218,29 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   greyed out with that hint. The reel is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/alien/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-26, the owner on the polish (#750): "core things like animation.
+  next thing is 3d model", and of today's model: "i want it to be just better
+  this is quite meh". Then: "ok so blender it is".
+- 2026-10-27, the owner on the new model, after three rounds of design
+  pictures (#753):
+  - the body: "i want him to have a typical body of this type of alian we
+    have alraedy", then "body from B" (round 1's B);
+  - the head: "i want his head to look like this [a classic green alien
+    head] kind of stupid", then "head should look as close to this as
+    possible";
+  - on the music: "i want there to be an option for them to react to music
+    by shrinking their head to this [a small round head with puffy eye
+    rims]", then "more squize too";
+  - the route: "lets try to build in blender using my two reference images +
+    B's body. cos this is now what i need".
+- 2026-10-27, built that way in `tools/alien-model/` (#772). My calls, not
+  asked:
+  - B's head height on the rig, with the owner's picture's proportions, so
+    the figure is about 29 cm taller than today's;
+  - the squeezed head is the normal head deformed into a ball, not a second
+    model, so it is a shape key on the same mesh. Projecting onto a second
+    modelled head folded the triangles round the eyes;
+  - the jaw bone deforms nothing, as before: nothing drives it for the alien.
 
 ## Tuning notes
 
@@ -231,6 +276,11 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
 - About 5 of the mesh's triangles face inward at creases and are culled.
+- The new model (#772) waits for the owner's verdict on its renders. Once in
+  the scene (#773), its extra height needs the loops' cameras reframed: they
+  frame today's 2.15 m alien.
+- In the new model's arms-down check the shoulders go a little square, the
+  usual cost of automatic weights from a T-pose.
 
 ## Materials
 
@@ -244,6 +294,18 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `playcheck.mjs` checks playback in Chromium or WebKit, optionally with
   play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
+- The new model (#772): `tools/alien-model/exportRig.ts`, `build.py` and
+  `check.ts`, run as in Resume here. It is original work, modelled by script
+  from shapes and measurements. Inspiration, all local and never in this
+  repo:
+  - the owner's two web pictures, a green alien head and the same kind of
+    head squeezed, in `tools/.cache/alien-design/owner-refs/`;
+  - round 1's B, our own design picture (#753), in
+    `tools/.cache/alien-design/round1/b-sleepy.png`, and round 2's side view
+    for the skull's depth.
+
+  The outputs go to `tools/.cache/alien-model/`: `rig.json`, `alien.bin`,
+  `alien.blend` and `renders/`.
 
 ## Resume here
 
@@ -259,6 +321,14 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   audio always reads loud, so it can't test silence.
 - Gotcha: `__viz.probe()` doesn't carry drive readings. Read
   `window.__alien.last` instead.
+- Rebuild the new model: `node --experimental-strip-types
+  tools/alien-model/exportRig.ts`, then
+  `/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P
+  tools/alien-model/build.py` (Blender is not on PATH; add `-- --quick` for a
+  rough 4 mm draft, `-- --no-render` to skip the renders), then
+  `node --experimental-strip-types tools/alien-model/check.ts`. The
+  references live under the main checkout's `tools/.cache/`; a worktree needs
+  that folder linked in.
 
 ## History
 
@@ -278,3 +348,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Measured headless, cache off: a 1280×800 gallery visit fetched 5351 KB
   before and 735 KB after; a deep link to Alien still fetches its three
   loops (about 4.3 MB), and so does a 1920×1080 gallery, where its tile mounts.
+- #753 (2026-10-27, closed): three rounds of design pictures; the owner
+  picked B's body, their own head picture and its squeeze, and Blender.
+- #772 (2026-10-27): the new model built in Blender by script, round 1 of its
+  renders sent to the owner.

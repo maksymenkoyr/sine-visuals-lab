@@ -44,7 +44,6 @@
     "knip | exports | src/render/scenes/alien/glsl.ts | NEAR",
     "knip | exports | src/render/scenes/alien/mesh.ts | SET_CELLS",
     "knip | exports | src/render/scenes/alien/mesh.ts | SKIN_SOFTNESS",
-    "knip | exports | src/render/scenes/alien/mesh.ts | bindPose",
     "knip | exports | src/render/scenes/alien/reel.ts | SPEED_EASE_SEC",
     "knip | exports | src/render/scenes/alien/renderer.ts | cameraBasis",
     "knip | exports | src/render/scenes/chaikin/launch.ts | KICK_MIN_GAP_SEC",
