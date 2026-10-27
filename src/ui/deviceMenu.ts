@@ -263,10 +263,9 @@ import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
  * `stroke-dashoffset` written per tick, on the pinned group alone
  * (cableLayer.tick, flow speed off each source's own live value). A
  * pinned cable is also pressable: cableGroupFor gives its real patch
- * sources an onUnplug, and cableLayer.ts draws a hit stroke and two plugs
- * for it, so a click on the cable opens its knot, and a click on either
- * plug or a pull anywhere on the cable unplugs that source — the same
- * toggle as the source line's own × button. A preview cable and a
+ * sources an onUnplug, and cableLayer.ts draws a hit stroke for it, so a
+ * click on the cable unplugs that source — the same toggle as the source
+ * line's own × button. A preview cable and a
  * display-only scene-mix cable stay decoration (no per-source press).
  *
  * In Only when mode, a source's *role* (drives.ts's `DriveSource.when`) is
@@ -4431,9 +4430,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let lastAnim: AnimFrame | null = null;
 
   /** One cable group (cableLayer.ts's CableGroupSpec) for `pinned` or
-   *  activePreview(). `interactive` marks the pinned group: a real source's
-   *  cable opens its knot on a click and unplugs from a click on either plug
-   *  or a pull anywhere, like the source line's × button. A preview isn't a
+   *  activePreview(). `interactive` marks the pinned group: a click on a real
+   *  source's cable unplugs it, like the source line's × button. A preview isn't a
    *  committed patch, and display-only sceneSources have no per-source
    *  unplug (the row's Unplug owns that). */
   function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null, interactive: boolean): CableGroupSpec {
@@ -4468,7 +4466,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         sources.push({
           key,
           color: driveSourceColor(src.choice),
-          label: driveSourceLabel(src.choice),
           soft: false,
           cond: conditionIdxs.includes(idx),
           muted: !!src.off,
@@ -6371,7 +6368,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
     // The cable layer sits on <body> outside root (cableLayer.ts header), but
-    // a press on a cable or its plug edits the patch like a jack click: without
+    // a click on a cable edits the patch like a jack click: without
     // this clause it would unpin the setting it was editing.
     if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t) || cableLayer.knotEl.contains(t)))
       return;
@@ -6452,11 +6449,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (isTypingTarget(e.target)) return;
     if (e.key === "Escape" && jackDrag?.moved) {
       clearJackDrag();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === "Escape" && cableLayer.pulling()) {
-      cableLayer.cancelPull();
       e.preventDefault();
       return;
     }
