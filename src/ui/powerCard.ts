@@ -1,6 +1,7 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import { PRESET_LABEL, QUALITY_OPTIONS, type QualityChoice } from "../render/qualityPref.ts";
 import { RESOLUTION_MAX, RESOLUTION_MIN, type CastMode, type PreviewSize } from "../render/outputPower.ts";
+import { GRADE_COLOUR_MAX, GRADE_FLOOR_MAX, GRADE_MIDS_MAX, NEUTRAL_GRADE, type PictureGrade } from "../render/pictureGrade.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_FOLDED_W_PX, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
@@ -44,8 +45,9 @@ import {
  * a coloured dot, hover/tap for the long explanation), then the controls —
  * Quality (src/render/qualityPref.ts), Resolution and Energy saving; the
  * chip rows are in the panel's grammar with a chip group where a slider
- * would sit, and Resolution is the one real slider — then a "Readouts"
- * group of diagnostics. Those are deliberately not rows: a row's
+ * would sit, and Resolution is the one real slider — then, on the Output
+ * card only, a "Projector" group of three more sliders (the grade,
+ * render/pictureGrade.ts), then a "Readouts" group of diagnostics. Those are deliberately not rows: a row's
  * 14.5px label is for something you act on, and four of them made this card
  * read as a settings form. They're a small mono caption beside a
  * seven-segment value, the same register as the band captions under the
@@ -148,6 +150,9 @@ export interface PowerCardDeps {
    *  Output card: how that window is drawn while it is being cast. */
   getCastMode?: () => CastMode;
   onCastModeChange?: (mode: CastMode) => void;
+  /** The Projector group, given only to the Output card: that window's grade. */
+  getGrade?: () => PictureGrade;
+  onGradeChange?: (grade: PictureGrade) => void;
 }
 
 /** What tells one Power card from another: the main window's (defaults) and
@@ -398,14 +403,24 @@ function createSizeRow(deps: PowerCardDeps, accent: string) {
 
 const RESOLUTION_HINT =
   "Pixels drawn, as a share of the full count: 50% draws a quarter of them. Applies on top of Quality, and the Resolution readout below shows the result";
-const resolutionOutStyle = `${readoutStyle} min-width: 38px; justify-content: flex-end;`;
+const sliderOutStyle = `${readoutStyle} min-width: 38px; justify-content: flex-end;`;
 
-/** The Resolution row: label and a seven-segment percentage over a plain
- *  slider, where the other rows have chips — it is a continuous scale, not a
- *  pick. Right = more pixels, up to the full count at the right end. The row
- *  commits on every drag frame (no rebuild, so the slider being dragged is
- *  never torn out). */
-function createResolutionRow(deps: PowerCardDeps, accent: string) {
+interface SliderSpec {
+  label: string;
+  unit: string;
+  /** The ends, step and double-click value, in the unit the readout shows. */
+  min: number;
+  max: number;
+  step: number;
+  reset?: number;
+  hint: string;
+}
+
+/** A row with a label and a seven-segment readout over a plain slider, where
+ *  the other rows have chips — a continuous scale, not a pick. The row commits
+ *  on every drag frame (no rebuild, so the slider being dragged is never torn
+ *  out). */
+function createSliderRow(spec: SliderSpec, accent: string, onInput: (value: number) => void) {
   const el = document.createElement("div");
   el.className = "vc-row";
   el.style.setProperty("--vc-accent", accent);
@@ -413,15 +428,15 @@ function createResolutionRow(deps: PowerCardDeps, accent: string) {
   const head = document.createElement("div");
   head.style.cssText = rowHeadStyle;
   const label = document.createElement("div");
-  label.textContent = "Resolution";
+  label.textContent = spec.label;
   label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
   const out = document.createElement("div");
-  out.style.cssText = resolutionOutStyle;
+  out.style.cssText = sliderOutStyle;
   const outDigits = document.createElement("span");
   outDigits.style.cssText = digitsStyle;
   const outUnit = document.createElement("span");
-  outUnit.textContent = "%";
+  outUnit.textContent = spec.unit;
   outUnit.style.cssText = unitStyle;
   out.append(outDigits, outUnit);
   head.append(label, out);
@@ -429,34 +444,95 @@ function createResolutionRow(deps: PowerCardDeps, accent: string) {
   const slider = document.createElement("input");
   slider.type = "range";
   slider.className = "vc-slider";
-  slider.min = String(Math.round(RESOLUTION_MIN * 100));
-  slider.max = String(Math.round(RESOLUTION_MAX * 100));
-  slider.step = "5";
-  slider.setAttribute("aria-label", "Resolution");
-  slider.setAttribute("aria-description", RESOLUTION_HINT);
+  slider.min = String(spec.min);
+  slider.max = String(spec.max);
+  slider.step = String(spec.step);
+  slider.setAttribute("aria-label", spec.label);
+  slider.setAttribute("aria-description", spec.hint);
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
-  setHintText(hint, RESOLUTION_HINT);
+  setHintText(hint, spec.hint);
 
   el.append(head, slider, hint);
 
-  const show = (fraction: number): void => {
-    const pct = Math.round(fraction * 100);
-    slider.value = String(pct);
-    const lo = Number(slider.min);
-    slider.style.setProperty("--vc-fill", `${((pct - lo) / (Number(slider.max) - lo)) * 100}%`);
-    outDigits.textContent = String(pct);
+  const show = (value: number): void => {
+    const v = Math.round(value);
+    slider.value = String(v);
+    slider.style.setProperty("--vc-fill", `${((v - spec.min) / (spec.max - spec.min)) * 100}%`);
+    outDigits.textContent = String(v);
     // The same text the readout shows, so a screen reader says "85%", not "85".
-    slider.setAttribute("aria-valuetext", `${pct}%`);
+    slider.setAttribute("aria-valuetext", `${v}${spec.unit}`);
   };
-  slider.addEventListener("input", () => {
-    const fraction = Number(slider.value) / 100;
-    show(fraction);
-    deps.onResolutionChange?.(fraction);
-  });
+  const commit = (value: number): void => {
+    show(value);
+    onInput(value);
+  };
+  slider.addEventListener("input", () => commit(Number(slider.value)));
+  const reset = spec.reset;
+  if (reset !== undefined) slider.addEventListener("dblclick", () => commit(reset));
 
   return { el, refresh: show };
+}
+
+/** Right = more pixels, up to the full count at the right end. */
+function createResolutionRow(deps: PowerCardDeps, accent: string) {
+  const row = createSliderRow(
+    {
+      label: "Resolution",
+      unit: "%",
+      min: Math.round(RESOLUTION_MIN * 100),
+      max: Math.round(RESOLUTION_MAX * 100),
+      step: 5,
+      hint: RESOLUTION_HINT,
+    },
+    accent,
+    (pct) => deps.onResolutionChange?.(pct / 100),
+  );
+  return { el: row.el, refresh: (fraction: number) => row.refresh(fraction * 100) };
+}
+
+const FLOOR_HINT =
+  "Turns the darkest greys black and stretches the rest back up to white. A cheap projector spreads a scene's dim haze over the whole wall as a grey sheet. Double-click for off";
+const MIDS_HINT =
+  "Left darkens the greys between black and white, right brightens them; black and white stay. A dim projector sinks them into the room's light. Double-click for 0";
+const COLOUR_HINT = "Below 100% greyer, above it richer. Room light and a weak lamp wash colour out. Double-click for 100%";
+
+/** The Projector group: each field of the window's grade as a slider in
+ *  percent, committed whole through onGradeChange. */
+function createGradeGroup(deps: PowerCardDeps, accent: string) {
+  const heading = document.createElement("div");
+  heading.textContent = "Projector";
+  heading.style.cssText = groupHeadingStyle;
+  const change = (patch: Partial<PictureGrade>): void => {
+    if (deps.getGrade && deps.onGradeChange) deps.onGradeChange({ ...deps.getGrade(), ...patch });
+  };
+  const pct = (v: number): number => Math.round(v * 100);
+  const floor = createSliderRow(
+    { label: "Black floor", unit: "%", min: 0, max: pct(GRADE_FLOOR_MAX), step: 1, reset: pct(NEUTRAL_GRADE.floor), hint: FLOOR_HINT },
+    accent,
+    (v) => change({ floor: v / 100 }),
+  );
+  const mids = createSliderRow(
+    { label: "Midtones", unit: "", min: -pct(GRADE_MIDS_MAX), max: pct(GRADE_MIDS_MAX), step: 5, reset: pct(NEUTRAL_GRADE.mids), hint: MIDS_HINT },
+    accent,
+    (v) => change({ mids: v / 100 }),
+  );
+  const colour = createSliderRow(
+    { label: "Colour", unit: "%", min: 0, max: pct(GRADE_COLOUR_MAX), step: 5, reset: pct(NEUTRAL_GRADE.colour), hint: COLOUR_HINT },
+    accent,
+    (v) => change({ colour: v / 100 }),
+  );
+  const el = document.createElement("div");
+  el.append(heading, floor.el, mids.el, colour.el);
+  return {
+    el,
+    refresh(g: PictureGrade): void {
+      floor.refresh(g.floor * 100);
+      mids.refresh(g.mids * 100);
+      colour.refresh(g.colour * 100);
+    },
+  };
 }
 
 // Quality row's chip group wraps rather than squeezing five chips onto one
@@ -857,6 +933,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   resolutionRow.el.style.display = "none";
   const castRow = createCastRow(deps, POWER_TEAL);
   castRow.el.style.display = deps.getCastMode ? "" : "none";
+  const gradeGroup = deps.getGrade ? createGradeGroup(deps, POWER_TEAL) : null;
 
   const readoutsHeading = document.createElement("div");
   readoutsHeading.textContent = "Readouts";
@@ -894,6 +971,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     castRow.el,
     spacer(),
     blurRow.el,
+    ...(gradeGroup ? [gradeGroup.el] : []),
     readoutsHeading,
     readouts,
   );
@@ -916,6 +994,7 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     if (resolutionShown) resolutionRow.refresh(deps.getResolution!());
     modeRow.refresh(status.mode);
     if (deps.getCastMode) castRow.refresh(deps.getCastMode());
+    if (gradeGroup && deps.getGrade) gradeGroup.refresh(deps.getGrade());
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
     detail.set(status.level === null ? [text("--")] : [digits(String(Math.round(status.fraction * 100))), join("%")]);

@@ -1,3 +1,4 @@
+import { clampGrade, NEUTRAL_GRADE, type PictureGrade } from "./pictureGrade.ts";
 import { isPowerMode, type PowerMode } from "./powerMode.ts";
 import { isQualityChoice, type QualityChoice } from "./qualityPref.ts";
 
@@ -41,6 +42,8 @@ import { isQualityChoice, type QualityChoice } from "./qualityPref.ts";
  *   fine high-frequency detail is what an encoder spends its bits on and
  *   smears. This does nothing about the encode-and-network delay, which only
  *   a Cast receiver page would remove.
+ * - output grade (default NEUTRAL_GRADE): the projector corrections
+ *   (render/pictureGrade.ts), stored as one JSON object.
  *
  * None of them is mirrored to the output (net/syncedStores.ts's
  * PRIVATE_KEYS): each window's quality and power belong to that window, and
@@ -95,6 +98,7 @@ const PREVIEW_QUALITY_KEY = "vibe.preview.quality";
 const PREVIEW_SIZE_KEY = "vibe.preview.size";
 const OUTPUT_RESOLUTION_KEY = "vibe.output.resolution";
 const PREVIEW_RESOLUTION_KEY = "vibe.preview.resolution";
+const OUTPUT_GRADE_KEY = "vibe.output.grade";
 
 function isCastMode(value: string): value is CastMode {
   return value === "off" || value === "on" || value === "soft";
@@ -122,6 +126,15 @@ function loadResolution(key: string): number {
   }
 }
 
+function loadGrade(): PictureGrade {
+  try {
+    const raw = localStorage.getItem(OUTPUT_GRADE_KEY);
+    return raw === null ? NEUTRAL_GRADE : clampGrade(JSON.parse(raw));
+  } catch {
+    return NEUTRAL_GRADE;
+  }
+}
+
 function persist(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
@@ -137,6 +150,7 @@ let previewQuality: QualityChoice = load(PREVIEW_QUALITY_KEY, isQualityChoice, P
 let previewSize: PreviewSize = load(PREVIEW_SIZE_KEY, isPreviewSize, PREVIEW_SIZE_DEFAULT);
 let outputResolution = loadResolution(OUTPUT_RESOLUTION_KEY);
 let previewResolution = loadResolution(PREVIEW_RESOLUTION_KEY);
+let outputGrade = loadGrade();
 
 export function getOutputQualityChoice(): QualityChoice {
   return outputQuality;
@@ -199,4 +213,13 @@ export function getPreviewResolution(): number {
 export function setPreviewResolution(next: number): void {
   previewResolution = clampResolution(next);
   persist(PREVIEW_RESOLUTION_KEY, String(previewResolution));
+}
+
+export function getOutputGrade(): PictureGrade {
+  return outputGrade;
+}
+
+export function setOutputGrade(next: PictureGrade): void {
+  outputGrade = clampGrade(next);
+  persist(OUTPUT_GRADE_KEY, JSON.stringify(outputGrade));
 }

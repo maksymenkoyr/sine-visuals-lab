@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   clampResolution,
   getOutputCastMode,
+  getOutputGrade,
   getOutputPowerMode,
   getOutputQualityChoice,
   getOutputResolution,
@@ -18,6 +19,7 @@ import {
   RESOLUTION_MAX,
   RESOLUTION_MIN,
   setOutputCastMode,
+  setOutputGrade,
   setOutputPowerMode,
   setOutputQualityChoice,
   setOutputResolution,
@@ -25,6 +27,7 @@ import {
   setPreviewResolution,
   setPreviewSize,
 } from "../src/render/outputPower.ts";
+import { GRADE_FLOOR_MAX, NEUTRAL_GRADE } from "../src/render/pictureGrade.ts";
 
 // Same shape as the other store tests: vitest runs under environment "node"
 // (no localStorage), so the first group also proves the module tolerates
@@ -44,6 +47,7 @@ describe("output/preview settings", () => {
     expect(getPreviewSize()).toBe("half");
     expect(getOutputResolution()).toBe(RESOLUTION_DEFAULT);
     expect(getPreviewResolution()).toBe(RESOLUTION_DEFAULT);
+    expect(getOutputGrade()).toEqual(NEUTRAL_GRADE);
   });
 
   it("round-trips a set", () => {
@@ -76,6 +80,14 @@ describe("output/preview settings", () => {
     expect(getOutputResolution()).toBe(RESOLUTION_MIN);
     setPreviewResolution(4);
     expect(getPreviewResolution()).toBe(RESOLUTION_MAX);
+  });
+
+  it("round-trips a grade and clamps it into range", () => {
+    setOutputGrade({ floor: 0.1, mids: 0.4, colour: 1.3 });
+    expect(getOutputGrade()).toEqual({ floor: 0.1, mids: 0.4, colour: 1.3 });
+    setOutputGrade({ floor: 5, mids: 0, colour: 1 });
+    expect(getOutputGrade().floor).toBe(GRADE_FLOOR_MAX);
+    setOutputGrade(NEUTRAL_GRADE);
   });
 
   it("treats a non-number resolution as the default", () => {
@@ -115,6 +127,7 @@ describe("seeding from localStorage", () => {
       "vibe.preview.size": "full",
       "vibe.output.resolution": "0.5",
       "vibe.preview.resolution": "0.35",
+      "vibe.output.grade": '{"floor":0.08,"mids":-0.25,"colour":1.5}',
     };
     vi.stubGlobal("localStorage", { getItem: (k: string) => data[k] ?? null, setItem: () => undefined });
     vi.resetModules();
@@ -126,6 +139,7 @@ describe("seeding from localStorage", () => {
     expect(fresh.getPreviewSize()).toBe("full");
     expect(fresh.getOutputResolution()).toBe(0.5);
     expect(fresh.getPreviewResolution()).toBe(0.35);
+    expect(fresh.getOutputGrade()).toEqual({ floor: 0.08, mids: -0.25, colour: 1.5 });
   });
 
   it("falls back to the defaults on junk", async () => {
@@ -137,6 +151,7 @@ describe("seeding from localStorage", () => {
       "vibe.preview.size": "huge",
       "vibe.output.resolution": "sharp",
       "vibe.preview.resolution": "0.01",
+      "vibe.output.grade": "{not json",
     };
     vi.stubGlobal("localStorage", { getItem: (k: string) => data[k] ?? null, setItem: () => undefined });
     vi.resetModules();
@@ -149,5 +164,6 @@ describe("seeding from localStorage", () => {
     expect(fresh.getOutputResolution()).toBe(RESOLUTION_DEFAULT);
     // Out of range clamps rather than falls back: the stored number was a real choice.
     expect(fresh.getPreviewResolution()).toBe(RESOLUTION_MIN);
+    expect(fresh.getOutputGrade()).toEqual(NEUTRAL_GRADE);
   });
 });

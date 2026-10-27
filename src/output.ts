@@ -38,6 +38,7 @@ import {
   type ToOutput,
 } from "./net/outputSync.ts";
 import { CAST_BUFFER_HEIGHT, CAST_FPS, CAST_SOFT_BLUR_PX, clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
+import { clampGrade, NEUTRAL_GRADE } from "./render/pictureGrade.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 
@@ -135,10 +136,11 @@ let quality: QualitySettings = qualitySettings("mid");
 /** What detectQuality() found on this window; used only while the output's
  *  Quality choice is Auto (or a dev pin, which stands in for it). */
 let detectedPreset: QualityPreset = "mid";
-/** The output's own Quality, Energy saving and Resolution (render/outputPower.ts),
- *  as the main window's Output Power card last sent them. The defaults are the
- *  stores' own, for the moment before the first `power` message arrives. */
-let power: OutputPower = { quality: "high", mode: "off", resolution: RESOLUTION_DEFAULT, cast: "off" };
+/** The output's own Quality, Energy saving, Resolution and grade
+ *  (render/outputPower.ts), as the main window's Output Power card last sent
+ *  them. The defaults are the stores' own, for the moment before the first
+ *  `power` message arrives. */
+let power: OutputPower = { quality: "high", mode: "off", resolution: RESOLUTION_DEFAULT, cast: "off", grade: NEUTRAL_GRADE };
 /** A dev pin wins over the choice so headless `?quality=` captures stay
  *  reproducible; otherwise Auto falls back to this window's benchmark. */
 const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ? detectedPreset : power.quality);
@@ -322,6 +324,7 @@ transport.onMessage((m) => {
   } else if (m.t === "power") {
     power = m.power;
     canvas.style.filter = power.cast === "soft" ? `blur(${CAST_SOFT_BLUR_PX}px)` : "";
+    compositor?.setGrade(clampGrade(power.grade));
     if (host) applyQuality();
   } else if (m.t === "effects") {
     heldEffects = parseEffects(m.effects);
@@ -374,6 +377,7 @@ async function main(): Promise<void> {
   sceneCtx = host.ctx;
   compositor = createCompositor(gl, { onOutgoingDone: (outgoing) => host.unmount(outgoing) });
   compositor.setEffects(heldEffects);
+  compositor.setGrade(clampGrade(power.grade));
   // The text-and-logo overlay (render/overlayLayer.ts): its settings are a
   // synced store, so the main window's reach this window like any look.
   const overlay = createOverlayLayer(gl);

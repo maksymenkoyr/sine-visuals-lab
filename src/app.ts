@@ -216,6 +216,7 @@ import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.t
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import {
   getOutputCastMode,
+  getOutputGrade,
   getOutputPowerMode,
   getOutputQualityChoice,
   getOutputResolution,
@@ -224,6 +225,7 @@ import {
   getPreviewSize,
   PREVIEW_SIZE_FRACTION,
   setOutputCastMode,
+  setOutputGrade,
   setOutputPowerMode,
   setOutputQualityChoice,
   setOutputResolution,
@@ -434,6 +436,7 @@ let outputPower: OutputPower = {
   mode: getOutputPowerMode(),
   resolution: getOutputResolution(),
   cast: getOutputCastMode(),
+  grade: getOutputGrade(),
 };
 /** An output window is open and a scene is showing; recomputed every tick. A
  *  remote controller previews whatever it shows; a screen (`fillsScreen`) never
@@ -2077,6 +2080,12 @@ function wireDeviceMenu(): void {
     onOutputCastModeChange: (cast) => {
       setOutputCastMode(cast);
       outputPower = { ...outputPower, cast };
+      outputBridge?.sendPower();
+    },
+    getOutputGrade,
+    onOutputGradeChange: (grade) => {
+      setOutputGrade(grade);
+      outputPower = { ...outputPower, grade: getOutputGrade() };
       outputBridge?.sendPower();
     },
     getPowerStatus: () => ({
