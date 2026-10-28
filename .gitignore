@@ -10,6 +10,8 @@ docs/.obsidian/
 .claude/settings.local.json
 .claude/RESUME.md
 .claude/worktrees/
+# PR screenshots go into the PR body via `npm run pr-shots`, not the repo
+.claude/shots-*/
 tools/.cache/
 __pycache__/
 # Paid scenes: a local checkout of the private scenes repo, never committed
