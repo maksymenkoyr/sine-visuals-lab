@@ -20,7 +20,8 @@ surfaces do. Blender then decimates it by curvature, a density group
 keeping the face, hands and feet fine; skins it with automatic weights;
 and adds the squeeze, whose own field the head's vertices are warped onto
 (landmark to landmark), then projected and relaxed, so the shape key keeps
-the mesh's own topology.
+the mesh's own topology. Last, the head and its squeeze shrink together
+about the chin by HEAD_SCALE.
 
 Blender is Z-up: rig (x, y, z) is Blender (x, -z, y).
 
@@ -424,6 +425,19 @@ HEAD_H = 0.643
 HEAD_ASPECT = 1.43
 HEAD_HALF_W = HEAD_H / HEAD_ASPECT / 2
 HEAD_TOP_Y = HEAD_CHIN_Y + HEAD_H
+# The eye: a leaf tilted up at the outer corner. EYE_H makes the tilted outline as tall
+# for the head's width as the owner's picture's eyes (round 1's was too short).
+EYE_L, EYE_H, EYE_TILT = 0.07, 0.042, 28
+# The socket, and how far below the face the lens's front sits. That step, with almost
+# no blend, is what the wire draws as the eye's bright outline; round 1's lens sat
+# nearly flush and the eyes read as faint dense patches.
+EYE_SOCKET, EYE_SET = 0.03, 0.012
+# The crease between the lens and the socket's wall.
+EYE_GAP = 0.002
+# The head is modelled at B's size, where every part was measured, and shrunk about the
+# chin once the squeeze is built (shrink_head). B's head is this big for B's body, so
+# the shrink is a look call; the scene scales the whole figure to its frame anyway.
+HEAD_SCALE = float(ARGS[ARGS.index("--head-scale") + 1]) if "--head-scale" in ARGS else 0.88
 
 
 def head_y(u):
@@ -555,11 +569,12 @@ def head_ops():
     # Eyes: narrow leaves tilted up at the outer corner, inset in smooth skin; the
     # picture has no lids standing proud of the face.
     pe, ne = on_head(0.227 * W, 0.453)
-    Re = eye_frame(pe, ne, 28, 1)
-    left.append(Op("socket", Leaf(pe, Re, 0.07, 0.031), 0.01, depth=0.019))
+    Re = eye_frame(pe, ne, EYE_TILT, 1)
+    left.append(Op("socket", Leaf(pe, Re, EYE_L, EYE_H), 0.006, depth=EYE_SOCKET))
     # The eye fills its socket, a glossy convex lens.
-    lens = Ellipsoid(pe - ne * 0.031, [0.082, 0.038, 0.024], Re)
-    left.append(Op("add", Both(Leaf(pe, Re, 0.068, 0.0295), lens), 0.004))
+    lens_depth = 0.024
+    lens = Ellipsoid(pe - ne * (EYE_SET + lens_depth), [EYE_L * 1.2, EYE_H * 1.25, lens_depth], Re)
+    left.append(Op("add", Both(Leaf(pe, Re, EYE_L - EYE_GAP, EYE_H - EYE_GAP), lens), 0.004))
     ops += left + [op.mirrored() for op in left]
 
     # The broad flat ridge from mid-forehead down between the eyes into the nose: a
@@ -704,6 +719,12 @@ def vertex_normals(V, F):
     return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
 
 
+def folded(V, F):
+    """Triangles facing against their vertices' normals, as check.ts counts them."""
+    fn = np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]])
+    return np.einsum("ij,ij->i", fn, vertex_normals(V, F)[F].sum(axis=1)) < 0
+
+
 # ---- Blender side ---------------------------------------------------------------
 
 
@@ -797,10 +818,14 @@ def density(V, lm):
         dist = np.linalg.norm(V - c, axis=1)
         return val * smoothstep(1.0, 0.0, dist / r)
 
-    for s in (-1, 1):
-        w = np.maximum(w, bump(MIRROR @ lm["eye"] if s < 0 else lm["eye"], 0.11, 0.45))
-    w = np.maximum(w, bump(lm["bulb"], 0.06, 0.6))
-    w = np.maximum(w, bump(lm["mouth"], 0.075, 0.7))
+    # The eyes keep small triangles on the socket's rim only: a lens full of them drew
+    # as a bright disc where the picture has a dark eye.
+    for e, R in ((lm["eye"], lm["eye_R"]), (MIRROR @ lm["eye"], MIRROR @ lm["eye_R"])):
+        rel = V - e
+        rho = np.hypot((rel @ R[:, 0]) / EYE_L, (rel @ R[:, 1]) / EYE_H)
+        w = np.maximum(w, 0.45 * np.exp(-(((rho - 1) / 0.25) ** 2)) * (np.abs(rel @ R[:, 2]) < 0.06))
+    w = np.maximum(w, bump(lm["bulb"], 0.045, 0.5))
+    w = np.maximum(w, bump(lm["mouth"], 0.055, 0.55))
     w = np.maximum(w, bump(lm["chin"], 0.06, 0.35))
     w = np.maximum(w, bump(lm["brow"], 0.08, 0.35))
     w = np.maximum(w, 0.35 * smoothstep(0.74, 0.8, np.abs(V[:, 0])) * (V[:, 1] > 1.45))
@@ -867,6 +892,25 @@ def laplacian_smooth(D, F, movable, iters, lam=0.5):
 # so the fade sits under them: a fade across the warp drew a ledge at the throat.
 SQUEEZE_FROM_Y = 1.6
 SQUEEZE_FULL_Y = 1.69
+# The head's shrink eases in up the neck, clear of the squeeze's pinned rings.
+SHRINK_FROM_Y = 1.66
+SHRINK_FULL_Y = 1.76
+
+
+def near_neck(V):
+    """1 on the neck, 0 out on the shoulders: low on the neck only the neck itself may
+    move, or a change to the head drags the shoulders along; above the trapezius's top
+    everything is head or neck."""
+    return 1 - smoothstep(0.075, 0.11, np.hypot(V[:, 0], V[:, 2] - 0.01))
+
+
+def shrink_head(V, S):
+    """V and the squeezed S with the head scaled by HEAD_SCALE about the chin, each
+    vertex by its bind height, so the squeezed head shrinks with the head it came from."""
+    k = 1 + (HEAD_SCALE - 1) * smoothstep(SHRINK_FROM_Y, SHRINK_FULL_Y, V[:, 1]) * np.maximum(
+        near_neck(V), smoothstep(1.71, SHRINK_FULL_Y, V[:, 1]))
+    c = np.array([0.0, HEAD_CHIN_Y, 0.0])
+    return c + (V - c) * k[:, None], c + (S - c) * k[:, None]
 
 
 def squeeze_positions(V, F, lm, bare_ops):
@@ -875,10 +919,7 @@ def squeeze_positions(V, F, lm, bare_ops):
     skull are pulled onto the ball, and the squeezed face is drawn on it as smooth bumps
     along the normals: sunken round eyes in rims, wrinkles, a small nose, a pursed mouth."""
     head = lm["head"]
-    # Low on the neck only the neck itself moves, or the warp's overall shrink drags the
-    # shoulders along; above the trapezius's top everything is head or neck.
-    near_neck = 1 - smoothstep(0.075, 0.11, np.hypot(V[:, 0], V[:, 2] - 0.01))
-    m = smoothstep(SQUEEZE_FROM_Y, SQUEEZE_FULL_Y, V[:, 1]) * np.maximum(near_neck, smoothstep(1.66, 1.71, V[:, 1]))
+    m = smoothstep(SQUEEZE_FROM_Y, SQUEEZE_FULL_Y, V[:, 1]) * np.maximum(near_neck(V), smoothstep(1.66, 1.71, V[:, 1]))
     mov = m > 0
     Bv = V.copy()
 
@@ -923,10 +964,10 @@ def squeeze_positions(V, F, lm, bare_ops):
         ([0, head_y(0.79), -0.115], [0, 1.88, -0.122]),
     ]
     sided = [
-        (pe + Re[:, 0] * 0.068, se + Rs[:, 0] * SQ_EYE_L),
-        (pe - Re[:, 0] * 0.068, se - Rs[:, 0] * SQ_EYE_L),
-        (pe + Re[:, 1] * 0.0295, se + Rs[:, 1] * SQ_EYE_H),
-        (pe - Re[:, 1] * 0.0295, se - Rs[:, 1] * SQ_EYE_H),
+        (pe + Re[:, 0] * (EYE_L - EYE_GAP), se + Rs[:, 0] * SQ_EYE_L),
+        (pe - Re[:, 0] * (EYE_L - EYE_GAP), se - Rs[:, 0] * SQ_EYE_L),
+        (pe + Re[:, 1] * (EYE_H - EYE_GAP), se + Rs[:, 1] * SQ_EYE_H),
+        (pe - Re[:, 1] * (EYE_H - EYE_GAP), se - Rs[:, 1] * SQ_EYE_H),
         (on_head(0.04, 0.82), on_ball(0.02, SQ_MOUTH_Y)[0]),
         (head_side(0.9), [0.072, 1.862, 0.0]),
         (head_side(0.97), [0.05, 1.838, 0.005]),
@@ -1185,15 +1226,15 @@ def render_all(scene, obj, arm, quick):
     obj.data.materials.append(wire)
     key = obj.data.shape_keys.key_blocks["Squeeze"] if obj.data.shape_keys else None
     body_c = [0.0, 1.22, 0.0]
-    head_c = [0.0, HEAD_CHIN_Y + HEAD_H * 0.45, 0.02]
+    head_c = [0.0, HEAD_CHIN_Y + HEAD_H * HEAD_SCALE * 0.45, 0.02]
     views = [("front", 0.0), ("side", 90.0), ("three-quarter", 38.0)]
     res_body, res_head = ((600, 600), (500, 500)) if quick else ((1100, 1100), (900, 900))
     shots = []
     for vname, yaw in views:
         o = None if vname == "three-quarter" else 2.75
         shots.append(("body", vname, camera(scene, f"body-{vname}", yaw, body_c, 9.0 if o else 4.9, ortho=o, lens=55, pitch_deg=4 if o is None else 0), res_body))
-        oh = None if vname == "three-quarter" else 0.82
-        shots.append(("head", vname, camera(scene, f"head-{vname}", yaw, head_c, 4.0 if oh else 2.5, ortho=oh, lens=110, pitch_deg=4 if oh is None else 0), res_head))
+        oh = None if vname == "three-quarter" else 0.82 * HEAD_SCALE
+        shots.append(("head", vname, camera(scene, f"head-{vname}", yaw, head_c, 4.0 if oh else 2.5 * HEAD_SCALE, ortho=oh, lens=110, pitch_deg=4 if oh is None else 0), res_head))
     for look in ("solid", "wire"):
         (setup_solid if look == "solid" else setup_wire)(scene)
         for part, vname, cam, res in shots:
@@ -1288,17 +1329,38 @@ def main():
     log(f"decimated: {len(V)} vertices, {len(F)} triangles")
     # Decimation leaves a few folded triangles and slivers, bright specks in the wire:
     # relax gently, each round snapped back onto the field's surface.
+    def onto_field(V, mov):
+        for _ in range(2):
+            g = gradient(ops, V[mov])
+            V[mov] -= np.clip(eval_points(ops, V[mov]) / np.maximum((g * g).sum(axis=1), 1e-6), -0.01, 0.01)[:, None] * g
+
     everyone = np.ones(len(V), bool)
     for _ in range(3):
         V = laplacian_smooth(V, F, everyone, 1, lam=0.3)
-        for _ in range(2):
-            g = gradient(ops, V)
-            V -= np.clip(eval_points(ops, V) / np.maximum((g * g).sum(axis=1), 1e-6), -0.01, 0.01)[:, None] * g
+        onto_field(V, everyone)
+    # A few small triangles stay turned over among big ones (one on the skull drew a
+    # speck): relax just those and their neighbours harder. In the mouth's slit the
+    # surface itself folds them back, so the last rounds stay off it (by about 2 mm).
+    for i in range(6):
+        bad = folded(V, F)
+        if not bad.any():
+            break
+        near = np.zeros(len(V), bool)
+        near[F[bad].ravel()] = True
+        near[F[near[F].any(axis=1)].ravel()] = True
+        V = laplacian_smooth(V, F, near, 3, lam=0.5)
+        if i < 3:
+            onto_field(V, near)
+    log(f"folded triangles left: {folded(V, F).sum()}")
     obj.data.vertices.foreach_set("co", to_bl(V).astype(np.float32).ravel())
     obj.data.update()
     edge_report(V, F, head_lm)
 
     S = squeeze_positions(V, F, head_lm, body + [hops[0]])
+    V, S = shrink_head(V, S)
+    obj.data.vertices.foreach_set("co", to_bl(V).astype(np.float32).ravel())
+    obj.data.update()
+    log(f"head x{HEAD_SCALE}: {V[:, 1].max():.3f} m tall")
     obj.shape_key_add(name="Basis")
     key = obj.shape_key_add(name="Squeeze")
     key.data.foreach_set("co", to_bl(S).astype(np.float32).ravel())

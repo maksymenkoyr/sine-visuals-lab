@@ -137,6 +137,20 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     legs 19, hands 9, feet 13.
   - The build takes about 16 s to `alien.bin`, 30 s with the renders, and a
     rerun writes the same file.
+- 2026-10-28, round 2 of the model (the owner on round 1: "its pretty good"),
+  by `check.ts`:
+  - 2.365 m tall: the head shrunk 0.88× about the chin. Same vertex and
+    triangle counts and file size.
+  - 0 triangles face against their normals and 0 are slivers: the fold on
+    the skull's side, a speck in round 1, is relaxed out with the others.
+  - The squeeze moves 2,515 vertices, up to 26.6 cm after the shrink.
+  - Mean triangle edge: face 10 mm (round 1: 9); the skull, body, hands
+    and feet as before.
+  - Measured from the owner's head picture, the eye along its own axis is
+    0.31 of the head's width long and 0.19 wide, tilted 29°. Round 1's eye
+    was as long but only 0.14 wide.
+  - B's head is 0.36 of B's height below the chin; round 1's was the same
+    on the rig, so the head was not too big for B, only for today's framing.
 
 ## Decisions and pivots
 
@@ -241,6 +255,18 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     model, so it is a shape key on the same mesh. Projecting onto a second
     modelled head folded the triangles round the eyes;
   - the jaw bone deforms nothing, as before: nothing drives it for the alien.
+- 2026-10-28, the owner on round 1: "its pretty good. would we polish it?",
+  then "proceed" on my list: the eyes, the face's dense patches, a smaller
+  head. My calls on it:
+  - the eyes keep their length and get the picture's width, in a deeper
+    socket with the lens set back from the face: that step is what the
+    wire draws as an outline, the way today's alien's eyes read;
+  - the dense triangles ring the socket instead of filling the lens, and
+    the nose and mouth patches are tighter;
+  - the head shrinks to `HEAD_SCALE`, not to today's height: that would
+    take a head about half as tall, no longer B's. The scene scales the
+    whole figure to its frame (#773), so the height in metres matters only
+    for proportion. `--head-scale 1` rebuilds round 1's size.
 
 ## Tuning notes
 
@@ -276,11 +302,13 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
 - About 5 of the mesh's triangles face inward at creases and are culled.
-- The new model (#772) waits for the owner's verdict on its renders. Once in
-  the scene (#773), its extra height needs the loops' cameras reframed: they
-  frame today's 2.15 m alien.
+- The new model (#772) waits for the owner's verdict on round 2. Once in the
+  scene (#773), its extra height needs the loops' cameras reframed, or the
+  figure scaled: they frame today's 2.15 m alien.
 - In the new model's arms-down check the shoulders go a little square, the
   usual cost of automatic weights from a T-pose.
+- Where the skull's fold was relaxed out, a small knot of tiny triangles
+  is left among the big ones; it shows in the side close-up.
 
 ## Materials
 
