@@ -4,7 +4,7 @@
  * tools/alien-bake/index.html on the dev server — the app never imports it.
  *
  * `window.__bake`:
- *   - `ready`: resolves once the clip library is in, with each loop's clip,
+ *   - `ready`: resolves once the clip library and the model are in, with each loop's clip,
  *     captured length in seconds, and `pivot` — where the floor under the
  *     alien lands in the frame (0..1, y up), averaged over the loop: the
  *     point the scene's Bounce squashes toward;
@@ -15,8 +15,9 @@
 import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { createPose } from "../dancers/rig.ts";
 import { FULL_VIEWPORT } from "../../scene.ts";
-import { createAlienRenderer, floorPivot, NO_SQUASH, projectToFrame } from "./renderer.ts";
+import { createAlienRenderer, floorPivot, NO_SQUASH, projectToFrame, type AlienRenderer } from "./renderer.ts";
 import { clipSeconds, LOOPS } from "./reel.ts";
+import { decodeAlienMesh, MESH_URL } from "./meshFile.ts";
 
 const BLOOM_PASSES = 2;
 
@@ -29,7 +30,7 @@ canvas.height = height;
 document.body.appendChild(canvas);
 const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true, antialias: false });
 if (!gl) throw new Error("bake: no WebGL2");
-const renderer = createAlienRenderer(gl);
+let renderer: AlienRenderer | null = null;
 const pose = createPose();
 let library: ClipLibrary | null = null;
 
@@ -45,10 +46,11 @@ function pivotFor(loop: number): [number, number] {
   return projectToFrame(LOOPS[loop].camera, width / height, [x, 0, z]);
 }
 
-const ready = fetch(CLIP_LIBRARY_URL)
-  .then((res) => res.arrayBuffer())
-  .then((buf) => {
-    library = decodeClipLibrary(buf);
+const bytes = (url: string): Promise<ArrayBuffer> => fetch(url).then((res) => res.arrayBuffer());
+const ready = Promise.all([bytes(CLIP_LIBRARY_URL), bytes(MESH_URL)])
+  .then(([clips, mesh]) => {
+    library = decodeClipLibrary(clips);
+    renderer = createAlienRenderer(gl, decodeAlienMesh(mesh));
     return {
       width,
       height,
@@ -60,6 +62,7 @@ const ready = fetch(CLIP_LIBRARY_URL)
   ready,
   frame(loop: number, phase: number): string {
     sampleClip(clipFor(loop), phase, pose);
+    if (!renderer) throw new Error("bake: frame() before ready");
     renderer.draw(pose, LOOPS[loop].camera, BLOOM_PASSES, FULL_VIEWPORT, NO_SQUASH);
     return canvas.toDataURL("image/png");
   },

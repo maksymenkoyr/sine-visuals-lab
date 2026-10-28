@@ -2,8 +2,8 @@
  * The alien's picture: a neon wireframe over a dark body, after the green
  * glowing mesh of the reference VJ loop (the scene record has the link).
  *
- * MESH_VERT skins every vertex of mesh.ts's bind-pose mesh to the rig: each
- * bone's skin transform is a rotation (uSkin[2b]) and a translation
+ * MESH_VERT skins every vertex of the model's bind-pose mesh (meshFile.ts)
+ * to the rig: each bone's skin transform is a rotation (uSkin[2b]) and a translation
  * (uSkin[2b+1].xyz) taking a bind-pose point to where that bone carries it
  * now, and a vertex is the weighted sum over its MAX_INFLUENCES bones. Bounce
  * then squashes the skinned figure toward the floor point under him (uSquash:
@@ -13,13 +13,14 @@
  * depth test and perspective-correct interpolation still work).
  *
  * MESH_FRAG draws each triangle's own three edges from a barycentric derived
- * from gl_VertexID (mesh.ts de-indexes the mesh for this), LINE_HALF_PX wide
+ * from gl_VertexID (meshFile.ts de-indexes the mesh for this), LINE_HALF_PX wide
  * whatever the distance, over a fill that is near-black facing the camera
  * and glows toward the silhouette (a fresnel term). Wires brighten toward
  * the silhouette too, and where the mesh turns away the triangles crowd
  * into a solid glowing rim on their own — the look the reference has.
  * Colour runs from WIRE_NEAR to WIRE_FAR over the figure's depth, the
- * reference's green-to-teal.
+ * reference's green-to-teal. The eyeballs draw black, wire and all, as the
+ * owner's picture has them; the socket's wall around each draws its outline.
  *
  * The bloom is BLUR_FRAG on two smaller targets; COMPOSITE_FRAG adds them
  * to the sharp picture through a soft knee (renderer.ts owns the passes).
@@ -60,6 +61,7 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec4 aBones;
 layout(location = 3) in vec4 aWeights;
+layout(location = 4) in float aEye;
 uniform vec2 uResolution;
 uniform vec4 uViewport; // x,y,w,h slice of the shared room-space canvas (sceneCommon.ts)
 uniform vec4 uSkin[${BONE_COUNT * 2}];
@@ -74,6 +76,7 @@ out vec3 vNormal;
 out vec3 vToEye;
 out vec3 vBary;
 out float vDepth;
+out float vEye;
 
 vec3 qrot(vec4 q, vec3 v) {
   vec3 t = 2.0 * cross(q.xyz, v);
@@ -110,6 +113,7 @@ void main() {
   vNormal = n;
   vToEye = uEye - p;
   vDepth = clamp((w - uDepthMid) / ${f(DEPTH_SPAN)} + 0.5, 0.0, 1.0);
+  vEye = aEye;
   int corner = gl_VertexID % 3;
   vBary = vec3(corner == 0 ? 1.0 : 0.0, corner == 1 ? 1.0 : 0.0, corner == 2 ? 1.0 : 0.0);
 }
@@ -121,6 +125,7 @@ in vec3 vNormal;
 in vec3 vToEye;
 in vec3 vBary;
 in float vDepth;
+in float vEye;
 out vec4 outColor;
 
 void main() {
@@ -146,7 +151,7 @@ void main() {
   vec3 wireCol = mix(${v3(WIRE_NEAR)}, ${v3(WIRE_FAR)}, vDepth);
   vec3 col = ${v3(RIM)} * (0.008 + 0.3 * rim + 1.1 * outline * outline) * mix(1.0, 0.7, vDepth);
   col += wireCol * wire * sparse * (0.62 + 0.8 * rim);
-  outColor = vec4(col, 1.0);
+  outColor = vec4(col * (1.0 - vEye), 1.0);
 }
 `;
 

@@ -16,19 +16,24 @@ ones (the dotted line on its graph). In development, on main since #374.
   record and `loadBody`. The body spreads the card, so the registered settings
   are the body's own objects.
 - `src/render/scenes/alien/index.ts`: the body, loaded after first paint. It
-  loads the dancers' clip library (`sceneMedia`, fetched on the first mount;
-  black until it lands), keeps each loop's place in its clip, samples the pose
-  and has `renderer.ts` draw it. Also the `?loop=<n>` DEV pin and the
+  loads the model and the dancers' clip library (`sceneMedia`, both fetched
+  on the first mount and decoded once per page; black until both land), keeps
+  each loop's place in its clip, samples the pose and has `renderer.ts` draw
+  it. Also the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, each loop's place).
-- `renderer.ts`: the alien drawn live (mesh pass, bloom, composite) through a
+- `meshFile.ts`: `MESH_URL`, the model the scene draws
+  (`public/media/alien/mesh-v1.bin`, ALM1 from `tools/alien-model/build.py`),
+  and `decodeAlienMesh()`, which de-indexes it into an `AlienModel`: mesh.ts's
+  `AlienMesh` plus each vertex's eye flag and the squeeze shape key (#774).
+- `renderer.ts`: the model drawn live (mesh pass, bloom, composite) through a
   loop's camera, into this device's slice of the room, with Bounce's squash;
   `floorPivot()` finds the floor point the squash pulls toward.
 - `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
   `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
   `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
-  the barycentric wireframe, the fresnel rim and outline, the blur and
-  composite.
+  the barycentric wireframe, the fresnel rim and outline, the eyeballs drawn
+  black, the blur and composite.
 - The old baked videos, `public/media/alien/loop{0,1,2}-v1.mp4`, are no longer
   played. They stay for tabs on an older build (`src/pinnedAssets.ts`'s
   header, "Scene media"). `loops/manifest.ts` (`BAKED`) lists them, and the
@@ -36,20 +41,21 @@ ones (the dotted line on its graph). In development, on main since #374.
   `tools/alien-bake/index.html` on the dev server) draws any frame of any
   loop, and `tools/alien-bake.mjs` saves every frame and encodes each loop
   with ffmpeg.
-- `body.ts`: the alien's shape as data (`PARTS`, each part on a rig bone, in
-  that bone's frame) and its distance field, `compileSet()`, with per-part
-  bounding-sphere pruning.
-- `mesh.ts`: the shape turned into a skinned triangle mesh (`alienMesh()`):
-  surface nets per set on the grids in `SET_CELLS`, relaxation, normals,
-  skin weights, de-indexing.
+- `body.ts` and `mesh.ts`: the alien drawn until #773, no longer drawn.
+  `body.ts` is his shape as data (`PARTS`, each part on a rig bone) and its
+  distance field; `mesh.ts` turns it into a skinned triangle mesh
+  (`buildAlienMesh()`). The scene still takes `bindPose()`, `MAX_INFLUENCES`
+  and the `AlienMesh` type from `mesh.ts`, and the tests,
+  `tools/alien-model/check.ts` and `exportRig.ts` use both files. Whether
+  they stay is the owner's call.
 - `src/ui/widgets/alienPlay.ts`: the Move readout under the Move row: speed,
   frames bought per second, the loop on screen, and the loop as a strip of
   its frames with the playhead. Fed by the scene's `probe()`.
-- `tools/alien-model/`: the new alien, built headless in Blender (#772) and not
-  yet drawn by the scene (#773 puts it in). `exportRig.ts` writes the rig's bind
-  pose for Blender, `build.py` builds the model and writes `alien.bin` and the
-  renders, `check.ts` reads `alien.bin` beside today's mesh. `build.py`'s header
-  has the method and the file layout.
+- `tools/alien-model/`: the alien the scene draws, built headless in Blender
+  (#772). `exportRig.ts` writes the rig's bind pose for Blender, `build.py`
+  builds the model and writes `alien.bin` and the renders, `check.ts` reads
+  `alien.bin` beside the old mesh. `build.py`'s header has the method and the
+  file layout. `alien.bin` is committed as `public/media/alien/mesh-v1.bin`.
 - Reused, not copied: the dancers' rig, clip format and clip library
   (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
   the Level signal (`feature.level`, #368); the standout detector
@@ -63,8 +69,9 @@ ones (the dotted line on its graph). In development, on main since #374.
   https://youtu.be/W78QGQtrS5k. Studied for the look only: the first 45 s
   (a crowd of grey aliens drawn as green triangle wireframes with bright
   outlines on black, a cyan tint toward the back, a close front hero framing).
-  Our alien is an original model built from simple shapes; nothing of the
-  video's mesh, motion or frames is used.
+  Our alien is an original model, built by script in Blender
+  (`tools/alien-model/`); nothing of the video's mesh, motion or frames is
+  used.
 - The video's audio is a silence encode (−91 dB through the slice), so it
   shows nothing about music sync. Move, Cut and Bounce come from the user's
   brief, not from the video.
@@ -214,6 +221,48 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   - The Move readout, song then silence: speed 0.71–0.81×, buying 23–26
     fr/s, the frame climbing through the clip's 128; in silence 0.00×,
     0 fr/s, "held", the strip grey.
+- 2026-10-28, the Blender model in the scene (#773), headless Chromium on
+  Metal on the owner's M1 Pro, main (the old mesh) served beside the branch:
+  - `mesh-v1.bin` is `check.ts`'s round-4 build, rebuilt byte for byte from
+    `build.py` on main: 10,246 vertices, 20,480 triangles (the eyeballs 480),
+    532,732 bytes. The old mesh was 20,304 triangles.
+  - Decoding it in the page (`scripts/loadcheck.mjs`, 14 decodes over two
+    page loads) took 1.7–3.0 ms in 12 of them, and 6.5 and 22.9 ms in the
+    other two; building the old mesh took 160–173 ms on the first mount.
+  - Opening Alien, deep-linked or from the gallery, fetches
+    `/media/alien/mesh-v1.bin` and `/media/dancers/clips-v1.bin` once each,
+    and no `.mp4`. The gallery alone (1512×945) fetches nothing.
+  - With the old mesh passed to the renderer, the bake page's
+    `frame(0, 0.25)` is the same PNG byte for byte as main's, with and
+    without the eye attribute (every flag 0).
+  - GPU per frame at 3024×1890, quality high, by `gpu-bench --scenes alien`
+    (the bench page waiting 1.5 s after `init`, a local edit as in #751),
+    eight rounds alternating: main 1.69–4.85 ms (median about 2.8), the new
+    model 2.33–4.07 ms (about 3.4). Another load on the GPU swung both 2–3×
+    within minutes, so the two can't be told apart. In-app per-draw
+    (`--app --dpr 2`), two rounds each: the mesh pass 1.15 and 1.39 ms on
+    main, 0.94 and 1.51 ms new, all passes at the same 120/60 draws per
+    second. The weak-laptop run #556 asks for has still not been made.
+  - Framing, the lit pixels along the top row of each bake frame (1920×1080,
+    phases 0.1, 0.35, 0.6, 0.85): main touches the top in 4 of 12 frames
+    (loop 0 three, loop 1 one), the new model with the same cameras in 11 of
+    12, loop 2 included. With each camera's eye and target scaled about the
+    floor by the height ratio, 2.365 / 2.148, the new model sits in the frame
+    as the old one did.
+  - Loop 0's deepest nod, 56° between head and neck at phase 0.1
+    (`scripts/nodcheck.ts`), seen from behind his left shoulder: the old
+    neck stands apart from the skull; the new one runs into it.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s:
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song, old mesh | 1.29 | 2.23 | 452 | 0.49 | 120 |
+    | song, new model | 1.77 | 2.48 | 450 | 0.48 | 119 |
+    | silence, old mesh | 0.00 | 0.00 | 0 | 0.00 | 120 |
+    | silence, new model | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence, both times: "the picture holds still". The bigger figure covers
+    more of the frame, so more of the picture changes on the song.
 
 ## Decisions and pivots
 
@@ -379,6 +428,21 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     readout says "held".
   - The quality preset's bloom passes now apply: high and mid draw both blur
     levels, as the bake did; low draws one, the floor quality none.
+- 2026-10-28, the owner on the review page's two looks (at DPR 2 the live
+  wire is crisper and stands out more than the stretched video did; Bounce
+  squashes the 3D figure): "good". Both kept as built.
+- 2026-10-28, the Blender model in the scene (#773). The owner merged #778
+  after round 4's renders without further words; that merge is taken as the
+  approval #773 waits for. My calls in putting it in:
+  - The eyeballs draw black, wire and all, as round 3 and 4's renders drew
+    them in the wire look. The socket's wall draws each eye's outline.
+  - The model loads as scene media, decoded once per page, instead of being
+    built: 533 kB fetched once, about 2 ms to read.
+  - The cameras stay as they are until the owner picks: today his head runs
+    off the top in every loop. The review page shows each loop three ways,
+    old, new and new with the camera pulled back by the height ratio:
+
+    https://claude.ai/artifact/MvAMT5riBQ29A98F6waM91
 
 ## Tuning notes
 
@@ -397,23 +461,16 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 ## Known issues and next steps
 
-- The first mount builds the mesh on the main thread: about 0.17 s on the
-  M1 Pro, longer on a weak laptop, once per page. A gallery visit where the
-  tile mounts pays it too. #773 swaps in the Blender model, loaded rather
-  than built.
-- At DPR 2 the live wire is crisper and stands out more than the stretched
-  video did; the owner hasn't yet said whether that is the look.
 - In the close-up the floor is far below the frame, so a squash reads as
   him dipping.
-- A head nod can push the neck's top through the back of the skull: the
-  neck and head are separate surfaces.
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
-- About 5 of the mesh's triangles face inward at creases and are culled.
-- The new model (#772) waits for the owner's verdict on round 4. Once in the
-  scene (#773), its extra height needs the loops' cameras reframed, or the
-  figure scaled: they frame today's 2.15 m alien.
-- In the new model's arms-down check the shoulders go a little square, the
+- He is 2.37 m tall against the old 2.15 m, and the loops' cameras still
+  frame the old height, so his head runs off the top in every loop. The
+  owner's call on pulling them back is open (Decisions).
+- The model has 7 slivers under 4°, 6 of them at the eyeballs' corners,
+  which draw black.
+- In the model's arms-down check the shoulders go a little square, the
   usual cost of automatic weights from a T-pose.
 - Where the skull's fold was relaxed out, a small knot of tiny triangles
   is left among the big ones; it shows in the side close-up.
@@ -428,12 +485,17 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `cutsum.py` (Cut: cut times, hit peaks, the dotted line) read the logs. `meshcheck.ts` and `clipcheck.ts` run under
   `node --experimental-strip-types`, and `tile.py` makes contact sheets.
   `glide.mjs` logs the dance's place on every render at a low Move and
-  `readout.mjs` reads the Move readout (Resume here has both). `playcheck.mjs`
+  `readout.mjs` reads the Move readout (Resume here has both).
+  `bakeframes.mjs` saves the bake page's frames at given loops and phases,
+  for before and after pictures of the same moment; `loadcheck.mjs` logs what
+  opening the scene fetches, times the model's decode, and shoots the scene
+  at a DPR; `nodcheck.ts` finds each loop's deepest nod. `playcheck.mjs`
   checked the old video player in Chromium or WebKit, optionally with
   play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
-- The new model (#772): `tools/alien-model/exportRig.ts`, `build.py` and
-  `check.ts`, run as in Resume here. It is original work, modelled by script
+- The model (#772): `tools/alien-model/exportRig.ts`, `build.py` and
+  `check.ts`, run as in Resume here. `public/media/alien/mesh-v1.bin` is
+  `build.py`'s `alien.bin`. It is original work, modelled by script
   from shapes and measurements. Inspiration, all local and never in this
   repo:
   - the owner's two web pictures, a green alien head and the same kind of
@@ -461,7 +523,11 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   audio always reads loud, so it can't test silence.
 - Gotcha: `__viz.probe()` doesn't carry drive readings. Read
   `window.__alien.last` instead.
-- Rebuild the new model: `node --experimental-strip-types
+- A changed model is a new file: rebuild as below, copy `alien.bin` to
+  `public/media/alien/mesh-v2.bin`, point `MESH_URL` at it, and add the line
+  `npx vitest run tests/sceneMedia.test.ts` prints to
+  `tests/mediaManifest.ts`. `mesh-v1.bin` stays for open tabs.
+- Rebuild the model: `node --experimental-strip-types
   tools/alien-model/exportRig.ts`, then
   `/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P
   tools/alien-model/build.py` (Blender is not on PATH; add `-- --quick` for a
@@ -494,3 +560,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   script, round 1 of its renders sent to the owner.
 - #782 (draft, 2026-10-28, for #751): the scene draws the alien live, Bounce
   squashes the figure itself, and the videos stay only for older tabs.
+- #778 and #782 (merged 2026-10-28).
+- #784 (draft, 2026-10-28, for #773): the scene draws the Blender model,
+  loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.

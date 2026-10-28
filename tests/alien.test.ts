@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, statSync } from "node:fs";
-import { buildAlienMesh, MAX_INFLUENCES } from "../src/render/scenes/alien/mesh.ts";
+import { bindPose, buildAlienMesh, MAX_INFLUENCES } from "../src/render/scenes/alien/mesh.ts";
+import { decodeAlienMesh, MESH_URL } from "../src/render/scenes/alien/meshFile.ts";
 import { PARTS, compileSet, partDistance } from "../src/render/scenes/alien/body.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import {
@@ -245,6 +246,79 @@ describe("alien reel", () => {
     expect(smooth.deepest).toBeCloseTo(snappy.deepest, 2);
     expect(smooth.deepestAt).toBeGreaterThan(snappy.deepestAt * 1.5);
     expect(smooth.tallest).toBeGreaterThan(-1e-4);
+  });
+});
+
+/** An ALM1 file (tools/alien-model/build.py's header) of `nv` vertices, each
+ *  filled from its index, and the given triangles. Vertex 3 is an eyeball. */
+function alm1(nv: number, index: number[]): ArrayBuffer {
+  const nt = index.length / 3;
+  const buf = new ArrayBuffer(12 + nv * 40 + nt * 6);
+  const view = new DataView(buf);
+  new Uint8Array(buf, 0, 4).set([..."ALM1"].map((ch) => ch.charCodeAt(0)));
+  view.setUint32(4, nv, true);
+  view.setUint32(8, nt, true);
+  let o = 12;
+  for (let v = 0; v < nv; v++, o += 12) [v, 10 + v, 20 + v].forEach((x, k) => view.setFloat32(o + k * 4, x, true));
+  for (let v = 0; v < nv; v++, o += 4) [0, 127, 0, v === 3 ? 127 : 0].forEach((x, k) => view.setInt8(o + k, x));
+  for (let v = 0; v < nv; v++, o += 4) view.setUint8(o, v);
+  for (let v = 0; v < nv; v++, o += 4) [200, 55].forEach((x, k) => view.setUint8(o + k, x));
+  for (let v = 0; v < nv; v++, o += 12) view.setFloat32(o + 4, v / 100, true);
+  for (let v = 0; v < nv; v++, o += 4) [-127, 0, 0, v === 3 ? 127 : 0].forEach((x, k) => view.setInt8(o + k, x));
+  for (const i of index) {
+    view.setUint16(o, i, true);
+    o += 2;
+  }
+  return buf;
+}
+
+describe("alien mesh file", () => {
+  it("de-indexes a hand-made two-triangle file, corner by corner", () => {
+    const m = decodeAlienMesh(alm1(4, [0, 1, 2, 0, 2, 3]));
+    const corners = [0, 1, 2, 0, 2, 3];
+    expect(m.triCount).toBe(2);
+    expect(Array.from(m.position)).toEqual(corners.flatMap((v) => [v, 10 + v, 20 + v]));
+    expect(Array.from(m.normal)).toEqual(corners.flatMap(() => [0, 1, 0]));
+    expect(Array.from(m.bones)).toEqual(corners.flatMap((v) => [v, 0, 0, 0]));
+    expect(Array.from(m.weights)).toEqual(corners.flatMap(() => [200, 55, 0, 0]));
+    expect(Array.from(m.eye)).toEqual([0, 0, 0, 0, 0, 1]);
+    expect(Array.from(m.squeeze)).toEqual(corners.flatMap((v) => [0, Math.fround(v / 100), 0]));
+    expect(Array.from(m.squeezeNormal)).toEqual(corners.flatMap(() => [-1, 0, 0]));
+    expect(m.bind.pos).toEqual(bindPose().pos);
+  });
+
+  it("refuses a file that isn't ALM1, is cut short, or indexes past its vertices", () => {
+    const good = alm1(4, [0, 1, 2]);
+    const bad = good.slice(0);
+    new Uint8Array(bad)[0] = 0;
+    expect(() => decodeAlienMesh(bad)).toThrow(/not an ALM1/);
+    expect(() => decodeAlienMesh(good.slice(0, good.byteLength - 2))).toThrow(/layout reads/);
+    expect(() => decodeAlienMesh(alm1(4, [0, 1, 4]))).toThrow(/past 4 vertices/);
+  });
+
+  it("decodes the scene's model: #772's triangle count, real bones, whole eyeballs", () => {
+    const bin = readFileSync(new URL(`../public${MESH_URL}`, import.meta.url));
+    const m = decodeAlienMesh(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
+    expect(m.triCount).toBe(20_480);
+    let badSums = 0, badBones = 0, eyeTris = 0, mixedTris = 0;
+    for (let c = 0; c < m.triCount * 3; c++) {
+      let sum = 0;
+      for (let k = 0; k < MAX_INFLUENCES; k++) {
+        sum += m.weights[c * MAX_INFLUENCES + k];
+        if (m.weights[c * MAX_INFLUENCES + k] > 0 && m.bones[c * MAX_INFLUENCES + k] >= BONE_COUNT) badBones++;
+      }
+      if (sum !== 255) badSums++;
+    }
+    for (let t = 0; t < m.triCount; t++) {
+      const flags = m.eye[t * 3] + m.eye[t * 3 + 1] + m.eye[t * 3 + 2];
+      if (flags === 3) eyeTris++;
+      else if (flags > 0) mixedTris++;
+    }
+    expect(badSums).toBe(0);
+    expect(badBones).toBe(0);
+    // The eyeballs are shells of their own: a triangle is all eye or all skin.
+    expect(eyeTris).toBe(480);
+    expect(mixedTris).toBe(0);
   });
 });
 
