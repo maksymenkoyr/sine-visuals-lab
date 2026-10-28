@@ -7,7 +7,9 @@ fast the dance on screen plays, and silence holds him still. Bounce squashes him
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A loop repeats
 until the Cut setting's wire makes a hit that stands out from its everyday
-ones (the dotted line on its graph). In development, on main since #374.
+ones (the dotted line on its graph). Dance holds one dance, and Cut then
+waits; View shows every dance through one loop's camera. In development, on
+main since #374.
 
 ## Where the code is
 
@@ -28,7 +30,9 @@ ones (the dotted line on its graph). In development, on main since #374.
 - `renderer.ts`: the model drawn live (mesh pass, bloom, composite) through a
   loop's camera, into this device's slice of the room, with Bounce's squash;
   `floorPivot()` finds the floor point the squash pulls toward.
-- `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
+- `reel.ts`: the `LOOPS` table (per loop: clip, camera, and the names its
+  Dance and View chips show), `chipLoop()` (which loop a Dance or View chip
+  holds) and the rules:
   `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
   `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
@@ -291,6 +295,25 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     taken; he covers less of the frame there than in loop 0's close-up, so
     less of the picture changes. The rules for Move, Bounce and Cut are
     unchanged.
+- 2026-10-28, the Dance and View rows, headless Chromium on Metal on the
+  owner's M1 Pro, synthetic audio at 128 bpm, chips pressed with real mouse
+  presses:
+  - Dance on Moonwalk, then Russian: the scene shows that loop at once (the
+    readout says "loop 6 of 13 · moonwalk", then "loop 7").
+  - View on Close front shows Moonwalk through loop 0's close-up; on Side,
+    Russian through Moonwalk's side camera.
+  - Cut wired to Bass hit: 4 cuts in 10 s on Any, none in 10 s with Salsa
+    held.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, with Dance
+    on Any and View on Own (the defaults):
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song | 0.54 | 0.84 | 444 | 0.49 | 120 |
+    | silence | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still". The defaults play as before; the
+    song's numbers move with whichever dance the cuts land on.
 
 ## Decisions and pivots
 
@@ -488,6 +511,21 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
     https://claude.ai/artifact/A2YaDxiZPZWxEi6uEPwXq3
 
+- 2026-10-28, the owner: "i wanna polish moves. can u expose some control
+  to manually switch moves. also expose different camera views". My calls,
+  not asked:
+  - **Dance**, a row of chips: Any (the default, Cut picks as before) or
+    one dance, which he keeps doing while Cut waits. It sits at the end of
+    the Motion section, under Bounce smoothness, and is named Dance because
+    Move already names the speed.
+  - **View**, a row of chips in Camera above Cut: Own (the default, each
+    dance through its own camera) or one loop's camera for every dance. The
+    views are the loops' cameras, each named for where it stands; no new
+    camera was added. Cut still changes only the dance.
+  - Neither row is wired to the music.
+  - Saved looks keep a chip by its place in the row, so a new loop goes at
+    the end of `LOOPS`.
+
 ## Tuning notes
 
 - Move's slider multiplies the wire: 1 plays a loud song at about captured
@@ -502,6 +540,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Cut threshold thins those out (see Measurements).
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
+- To polish one dance, hold it on Dance and step through View; the strip's
+  arrow keys move chip by chip.
 
 ## Known issues and next steps
 
@@ -615,5 +655,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #778 and #782 (merged 2026-10-28).
 - #784 (draft, 2026-10-28, for #773): the scene draws the Blender model,
   loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.
-- Draft (2026-10-28): ten more dances from the clip library, each with its
-  own camera framed for the new model.
+- #785 (merged 2026-10-28): ten more dances from the clip library, each
+  with its own camera framed for the new model.
+- Draft (2026-10-28): the Dance and View rows.

@@ -10,7 +10,9 @@
  *   - Bounce: its wire (Bass hit by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
- *     wobble into an ease and a glide.
+ *     wobble into an ease and a glide;
+ *   - Dance and View, not wired to the music: hold one dance (Cut then
+ *     waits) or one loop's camera for every dance.
  * reel.ts owns those rules and the LOOPS table; under the Move row a readout
  * shows what the music is buying (src/ui/widgets/alienPlay.ts, fed by
  * probe()).
@@ -39,7 +41,7 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLi
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, chipLoop, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 
 // Scene media (src/pinnedAssets.ts's header): sceneMedia keys by path, so the
@@ -170,9 +172,11 @@ export const alienScene: Scene = (() => {
       last.speed = speed;
       last.rate = speed < HELD_BELOW ? 0 : Math.min(MAX_RATE, speed);
       last.cutSignal = drives.value("cut", anim.dropPulse, 0);
+      const heldDance = chipLoop(get("dance"));
+      if (heldDance !== null) reel.loop = heldDance;
       const cut = stepCut(reel, {
         dtSec: dt,
-        cutOn: pinnedLoop === null && get("cut") >= 0.5,
+        cutOn: pinnedLoop === null && heldDance === null && get("cut") >= 0.5,
         cutSignal: last.cutSignal,
         cutThreshold: standoutThreshold(drives, "cut"),
       });
@@ -197,7 +201,7 @@ export const alienScene: Scene = (() => {
       squash.x = live.pivot[0];
       squash.z = live.pivot[1];
       squash.squash = last.squash;
-      renderer.draw(pose, LOOPS[reel.loop].camera, ctx.quality.bloomPasses, viewport, squash);
+      renderer.draw(pose, LOOPS[chipLoop(get("view")) ?? reel.loop].camera, ctx.quality.bloomPasses, viewport, squash);
     },
 
     dispose() {

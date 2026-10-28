@@ -2,6 +2,7 @@
 import type { PanelSection, Scene, SceneCard } from "../../scene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../../standout.ts";
+import { LOOPS } from "./reel.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "development", added: "2026-10-05" } as const;
@@ -48,11 +49,35 @@ export const SETTINGS: SceneSetting[] = [
     default: 0,
   },
   {
+    key: "dance",
+    label: "Dance",
+    description: "Any: each cut picks another dance. A dance: he keeps doing that one and Cut waits",
+    group: "Motion",
+    type: "enum",
+    options: ["Any", ...LOOPS.map((l) => l.dance)],
+    min: 0,
+    max: LOOPS.length,
+    step: 1,
+    default: 0,
+  },
+  {
+    key: "view",
+    label: "View",
+    description: "Own: each dance through the camera it was framed for. A view: every dance through that camera",
+    group: "Camera",
+    type: "enum",
+    options: ["Own", ...LOOPS.map((l) => l.view)],
+    min: 0,
+    max: LOOPS.length,
+    step: 1,
+    default: 0,
+  },
+  {
     key: "cut",
     label: "Cut",
     description:
       "On: the loop repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
-      "then cuts to another dance, each seen from its own angle (never twice within a couple of seconds). Off: the loop on screen repeats",
+      "then cuts to another dance (never twice within a couple of seconds). Off, or while Dance holds one, the dance on screen repeats",
     group: "Camera",
     type: "boolean",
     min: 0,
@@ -75,9 +100,9 @@ export const SETTINGS: SceneSetting[] = [
 ];
 
 /** The Motion group as one section: the Move row with a live readout under
- *  it (speed, frames bought per second, the loop's playhead), then Bounce
- *  and its smoothness. */
-const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth"] }];
+ *  it (speed, frames bought per second, the loop's playhead), then Bounce,
+ *  its smoothness and Dance. */
+const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth", "dance"] }];
 
 export const card: SceneCard = {
   id: "alien",

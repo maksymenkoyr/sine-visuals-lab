@@ -7,6 +7,7 @@ import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import {
   BOUNCE_MAX,
   bounceSpring,
+  chipLoop,
   clipSeconds,
   createBounce,
   createReel,
@@ -19,6 +20,7 @@ import {
   type CutInput,
 } from "../src/render/scenes/alien/reel.ts";
 import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
+import { SETTINGS } from "../src/render/scenes/alien/card.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
@@ -329,6 +331,25 @@ describe("alien loops", () => {
   it("plays a clip the library has, each a different dance", () => {
     for (const loop of LOOPS) expect(library.byName.get(loop.clip), loop.clip).toBeDefined();
     expect(new Set(LOOPS.map((l) => l.clip)).size).toBe(LOOPS.length);
+  });
+
+  it("gives the Dance and View rows one chip per loop after Any and Own, each named once", () => {
+    for (const [key, first, names] of [
+      ["dance", "Any", LOOPS.map((l) => l.dance)],
+      ["view", "Own", LOOPS.map((l) => l.view)],
+    ] as const) {
+      const spec = SETTINGS.find((s) => s.key === key)!;
+      expect(spec.options).toEqual([first, ...names]);
+      expect(spec.max).toBe(spec.options!.length - 1);
+      expect(new Set(names).size, key).toBe(LOOPS.length);
+    }
+  });
+
+  it("holds the loop under a Dance or View chip, and none on the first chip", () => {
+    expect(chipLoop(0)).toBeNull();
+    expect(chipLoop(1)).toBe(0);
+    expect(chipLoop(LOOPS.length)).toBe(LOOPS.length - 1);
+    expect(chipLoop(LOOPS.length + 1)).toBeNull();
   });
 });
 
