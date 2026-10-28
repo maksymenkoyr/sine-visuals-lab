@@ -657,4 +657,4 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.
 - #785 (merged 2026-10-28): ten more dances from the clip library, each
   with its own camera framed for the new model.
-- Draft (2026-10-28): the Dance and View rows.
+- #786 (draft, 2026-10-28): the Dance and View rows.
