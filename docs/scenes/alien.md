@@ -1,6 +1,6 @@
 # Alien (`alien`)
 
-One grey alien dancing as a glowing green wireframe on black, in three short
+One grey alien dancing as a glowing green wireframe on black, in short
 loops: each loop is one captured dance seen from its own angle, drawn live
 every frame. The music pays for the frames: the Move setting's wire sets how
 fast the dance on screen plays, and silence holds him still. Bounce squashes him toward
@@ -263,6 +263,34 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
     Silence, both times: "the picture holds still". The bigger figure covers
     more of the frame, so more of the picture changes on the song.
+- 2026-10-28, ten more moves, headless Chromium on Metal on the owner's M1
+  Pro:
+  - How much each library clip moves (`energy`, the joints per beat) and
+    reaches (`bigness`, the hands from the body), both relative to the
+    library: twist 1.00 / 0.87, russian 0.83 / 1.00, toprock2 0.60 / 0.76,
+    toprock3 0.50 / 0.58, charleston2 0.45 / 0.28, charleston 0.43 / 0.42,
+    salsa 0.29 / 0.50, expressive 0.29 / 0.35, salsa2 0.27 / 0.49, chicken
+    0.16 / 0.78, lambada 0.12 / 0.96, moonwalk 0.12 / 0.22, armup 0.08 /
+    0.70, macarena 0.06 / 0.69, toprock 0.06 / 0.00, armshigh 0.00 / 0.03.
+  - Every clip dances in place: `clipcheck.ts` puts the root within 0.36 m
+    of the origin in all of them, so a fixed camera keeps each in frame.
+  - Framing, `framecheck.py` on `bakeframes.mjs` frames at 1280×720, eight
+    phases a loop: none of the ten new loops touches the top in any frame.
+    Macarena and lambada are cut at the knees in all eight frames, chicken
+    in four. On the first try, moonwalk touched the
+    top in 2 of 8 frames and lambada in 1, before their cameras moved.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s:
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song | 0.61 | 0.84 | 462 | 0.48 | 120 |
+    | silence | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still". On the song the reel had cut to
+    salsa, a full-body shot from further back, before its contact sheet was
+    taken; he covers less of the frame there than in loop 0's close-up, so
+    less of the picture changes. The rules for Move, Bounce and Cut are
+    unchanged.
 
 ## Decisions and pivots
 
@@ -444,6 +472,22 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
     https://claude.ai/artifact/MvAMT5riBQ29A98F6waM91
 
+- 2026-10-28, the owner: "can we add more moves for alien?". I read
+  "moves" as dances, not new reactions to the music, and didn't ask. Ten
+  more loops, all from the dancers' clip library the scene already
+  fetches, so nothing new downloads. My calls:
+  - Left out: armshigh (the stillest clip in the library), toprock (a
+    4-beat cut of toprock2, already in) and salsa2 (nearly salsa).
+  - Each new loop has its own camera, framed for the Blender model's height,
+    and most are full body, since these dances are mostly in the legs.
+    Moonwalk is seen side on, the only angle where its glide reads.
+  - Cut still picks at random among all the other loops.
+  - The baked videos stay the first loops; nothing rebakes.
+  - The review page plays one full loop of each new move, for the owner to
+    drop moves or change cameras:
+
+    https://claude.ai/artifact/A2YaDxiZPZWxEi6uEPwXq3
+
 ## Tuning notes
 
 - Move's slider multiplies the wire: 1 plays a loud song at about captured
@@ -465,9 +509,14 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   him dipping.
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
-- He is 2.37 m tall against the old 2.15 m, and the loops' cameras still
-  frame the old height, so his head runs off the top in every loop. The
-  owner's call on pulling them back is open (Decisions).
+- He is 2.37 m tall against the old 2.15 m, and the first loops' cameras
+  (those with baked videos) still frame the old height, so his head runs
+  off the top in each of them. The owner's call on pulling them back is open
+  (Decisions). The loops added after them frame the new height.
+- Most of the added loops are full-body shots, so he is smaller on screen
+  there than in loop 0's close-up, and less of the picture changes
+  (Measurements). Which moves and cameras stay is the owner's call
+  (Decisions).
 - The model has 7 slivers under 4°, 6 of them at the eyeballs' corners,
   which draw black.
 - In the model's arms-down check the shoulders go a little square, the
@@ -489,7 +538,10 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `bakeframes.mjs` saves the bake page's frames at given loops and phases,
   for before and after pictures of the same moment; `loadcheck.mjs` logs what
   opening the scene fetches, times the model's decode, and shoots the scene
-  at a DPR; `nodcheck.ts` finds each loop's deepest nod. `playcheck.mjs`
+  at a DPR; `nodcheck.ts` finds each loop's deepest nod. `framecheck.py`
+  reads `bakeframes.mjs`'s frames and counts the ones where he touches an
+  edge. `loopframes.mjs` saves one full loop of each loop in a range, and
+  `loopwebp.py` turns those into the animations on the moves' review page. `playcheck.mjs`
   checked the old video player in Chromium or WebKit, optionally with
   play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
@@ -563,3 +615,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #778 and #782 (merged 2026-10-28).
 - #784 (draft, 2026-10-28, for #773): the scene draws the Blender model,
   loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.
+- Draft (2026-10-28): ten more dances from the clip library, each with its
+  own camera framed for the new model.
